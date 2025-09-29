@@ -26,23 +26,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-// IndexedRule represents a rule with metadata for management
-type IndexedRule struct {
-	ID          string     // unique: "crd-name/rule-name" or "hardcoded/rule-name"
-	Rule        *AuditRule // parsed rule
-	SourceCRD   string     // which CRD it came from (empty for hardcoded)
-	SourceType  string     // "hardcoded" or "crd"
-	Priority    int        // for ordering
-	LastUpdated time.Time  // when it was last updated
-}
-
-// RuleChangeSet represents changes to be applied to the kernel
-type RuleChangeSet struct {
-	ToAdd    []*IndexedRule
-	ToRemove []*IndexedRule
-	ToUpdate []*IndexedRule
-}
-
 // AuditManagerV1 implements the AuditManagerClient interface using go-libaudit
 type AuditManagerV1 struct {
 	// Configuration
@@ -71,8 +54,6 @@ type AuditManagerV1 struct {
 
 	// CRD-based rule management
 	crdRules      map[string]*crd.LinuxAuditRule // CRD name -> LinuxAuditRule CRD
-	ruleIndex     map[string]*IndexedRule        // rule_id -> rule with metadata
-	rulesBySource map[string][]string            // CRD name -> list of rule IDs
 	ruleConverter *crd.RuleConverter             // Converts structured rules to auditctl
 
 	// State management
@@ -107,8 +88,6 @@ func NewAuditManagerV1(config *config.Config, exporter *exporters.ExporterBus) (
 		pidToMntnsCache:     pidToMntnsCache,
 		ruleKeyToTags:       make(map[string][]string),
 		crdRules:            make(map[string]*crd.LinuxAuditRule),
-		ruleIndex:           make(map[string]*IndexedRule),
-		rulesBySource:       make(map[string][]string),
 		ruleConverter:       crd.NewRuleConverter(),
 		loadedRules:         nil, // Don't use hardcoded rules
 		stats: auditmanager.AuditManagerStatus{
@@ -359,6 +338,11 @@ func (am *AuditManagerV1) Start(ctx context.Context) error {
 	// Populate tag mappings for any existing CRD rules
 	am.populateInitialTagMappings()
 
+	// Load all rules at startup
+	if err := am.loadAllRules(); err != nil {
+		logger.L().Warning("failed to load initial rules at startup", helpers.Error(err))
+	}
+
 	// Start event processing goroutine
 	am.wg.Add(1)
 	go am.eventProcessingLoop()
@@ -508,7 +492,7 @@ func (am *AuditManagerV1) initializeAuditClient() error {
 }
 
 // loadRuleIntoKernel loads a single audit rule into the kernel using go-libaudit
-func (am *AuditManagerV1) loadRuleIntoKernel(auditRule *AuditRule) error {
+func (am *AuditManagerV1) loadRuleIntoKernel(auditRule *AuditRule, auditClient *libaudit.AuditClient) error {
 	ruleStr := auditRule.RawRule
 	logger.L().Debug("adding audit rule to kernel", helpers.String("rule", ruleStr))
 
@@ -529,7 +513,7 @@ func (am *AuditManagerV1) loadRuleIntoKernel(auditRule *AuditRule) error {
 	}
 
 	// Add the rule to the kernel using the audit client
-	err = am.auditClient.AddRule(wireFormat)
+	err = auditClient.AddRule(wireFormat)
 	if err != nil {
 		return fmt.Errorf("failed to add audit rule to kernel '%s': %w", ruleStr, err)
 	}
@@ -539,106 +523,6 @@ func (am *AuditManagerV1) loadRuleIntoKernel(auditRule *AuditRule) error {
 		helpers.String("description", auditRule.GetRuleDescription()))
 
 	return nil
-}
-
-// parseAuditMessage parses a raw audit message into an AuditEvent
-func (am *AuditManagerV1) parseAuditMessage(rawMessage *libaudit.RawAuditMessage) (*auditmanager.AuditEvent, error) {
-	// Parse the audit message using go-libaudit's auparse
-	msg, err := auparse.Parse(rawMessage.Type, string(rawMessage.Data))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse audit message: %w", err)
-	}
-
-	// Get parsed data
-	data, err := msg.Data()
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract audit message data: %w", err)
-	}
-
-	// Create event with header information
-	event := &auditmanager.AuditEvent{
-		AuditID:    uint64(msg.Sequence),
-		Type:       msg.RecordType,
-		Timestamp:  types.Time(msg.Timestamp.UnixNano()),
-		Sequence:   msg.Sequence,
-		RawMessage: msg.RawData,
-		Data:       data,
-	}
-
-	// Extract fields based on message type
-	switch event.Type {
-	case auparse.AUDIT_SYSCALL:
-		// System call records contain process and syscall information
-		am.extractProcessInfo(event, data)
-		am.extractSyscallInfo(event, data)
-		am.extractSecurityInfo(event, data)
-
-	case auparse.AUDIT_PATH:
-		// Path records contain file information
-		am.extractFileInfo(event, data)
-		am.extractSecurityInfo(event, data)
-
-	case auparse.AUDIT_EXECVE:
-		// Execve records contain command arguments
-		am.extractProcessInfo(event, data)
-		am.extractCommandInfo(event, data)
-		am.extractSecurityInfo(event, data)
-
-	case auparse.AUDIT_CWD:
-		// Current working directory records
-		event.CWD = data["cwd"]
-		am.extractSecurityInfo(event, data)
-
-	case auparse.AUDIT_SOCKADDR:
-		// Socket address records contain network information
-		am.extractNetworkInfo(event, data)
-		am.extractSecurityInfo(event, data)
-
-	case auparse.AUDIT_PROCTITLE:
-		// Process title records
-		am.extractProcessInfo(event, data)
-		am.extractSecurityInfo(event, data)
-
-	default:
-		// For other types, extract what's available
-		am.extractCommonFields(event, data)
-	}
-
-	// Set rule type based on message type
-	switch event.Type {
-	case auparse.AUDIT_PATH:
-		event.RuleType = "file_watch"
-	case auparse.AUDIT_SYSCALL:
-		event.RuleType = "syscall"
-	case auparse.AUDIT_SOCKADDR, auparse.AUDIT_SOCKETCALL:
-		event.RuleType = "network"
-	case auparse.AUDIT_EXECVE, auparse.AUDIT_PROCTITLE:
-		event.RuleType = "process"
-	case auparse.AUDIT_USER_CMD, auparse.AUDIT_USER_TTY:
-		event.RuleType = "user"
-	case auparse.AUDIT_NETFILTER_PKT, auparse.AUDIT_NETFILTER_CFG:
-		event.RuleType = "netfilter"
-	case auparse.AUDIT_MAC_STATUS, auparse.AUDIT_MAC_POLICY_LOAD:
-		event.RuleType = "mac"
-	case auparse.AUDIT_SECCOMP:
-		event.RuleType = "seccomp"
-	case auparse.AUDIT_KERNEL_OTHER:
-		event.RuleType = "kernel"
-	case auparse.AUDIT_CONFIG_CHANGE:
-		event.RuleType = "config"
-	case auparse.AUDIT_IPC:
-		event.RuleType = "ipc"
-	default:
-		event.RuleType = fmt.Sprintf("%d", event.Type)
-	}
-
-	// Get any rule tags
-	if tags, err := msg.Tags(); err == nil && len(tags) > 0 {
-		event.Tags = tags   // Store all tags
-		event.Key = tags[0] // Use first tag as key for backward compatibility
-	}
-
-	return event, nil
 }
 
 // extractProcessInfo extracts process-related information from audit data
@@ -796,27 +680,6 @@ func (am *AuditManagerV1) extractSecurityInfo(event *auditmanager.AuditEvent, da
 	event.Capabilities = data["cap_fp"]      // Process capabilities
 }
 
-// extractCommonFields extracts commonly available fields for unknown record types
-func (am *AuditManagerV1) extractCommonFields(event *auditmanager.AuditEvent, data map[string]string) {
-	// Extract basic process info if available
-	if data["pid"] != "" {
-		am.extractProcessInfo(event, data)
-	}
-
-	// Extract file info if available
-	if data["name"] != "" {
-		am.extractFileInfo(event, data)
-	}
-
-	// Extract network info if available
-	if data["saddr"] != "" {
-		am.extractNetworkInfo(event, data)
-	}
-
-	// Always extract security info
-	am.extractSecurityInfo(event, data)
-}
-
 // auditEventListener listens for audit events from the kernel
 func (am *AuditManagerV1) auditEventListener() {
 	defer am.wg.Done()
@@ -868,8 +731,6 @@ func (am *AuditManagerV1) auditEventListener() {
 				am.stats.EventsErrors++
 				continue
 			}
-
-			// Note: Event processing now happens in AuditStream.ReassemblyComplete callback
 		}
 	}
 }
@@ -891,8 +752,6 @@ func (am *AuditManagerV1) statsLogger() {
 		}
 	}
 }
-
-// Note: simulateAuditEvents removed - now using real kernel audit events
 
 // eventProcessingLoop processes audit events from the event channel
 func (am *AuditManagerV1) eventProcessingLoop() {
@@ -989,26 +848,21 @@ func (am *AuditManagerV1) UpdateRules(ctx context.Context, crdName string, crdRu
 		helpers.String("crdName", crdName),
 		helpers.Int("ruleCount", len(auditRule.Spec.Rules)))
 
-	// CRITICAL FIX: Update internal state first, then reload kernel rules
-	// This ensures disabled rules are properly removed from the audit subsystem
-	// The bug was that incremental changes were calculated before updating the index
+	// Store the CRD
 	am.crdRules[crdName] = auditRule
-	am.updateRuleIndex(crdName, auditRule)
 
 	// Update rule key to tags mapping for tag enrichment
 	am.updateRuleKeyToTagsMapping(auditRule)
 
-	// Always reload kernel rules to ensure synchronization with current rule index
-	// This fixes the bug where disabling a rule doesn't remove it from kernel
-	if err := am.reloadAllRules(); err != nil {
-		logger.L().Error("failed to reload kernel rules after CRD update", helpers.Error(err))
-		return fmt.Errorf("failed to reload kernel rules: %w", err)
+	// Always do a full reload - simple and eventually consistent
+	if err := am.loadAllRules(); err != nil {
+		logger.L().Error("failed to load all rules after CRD update", helpers.Error(err))
+		return fmt.Errorf("failed to load all rules: %w", err)
 	}
 
 	logger.L().Info("successfully updated audit rules from CRD",
 		helpers.String("crdName", crdName),
-		helpers.Int("totalRules", len(auditRule.Spec.Rules)),
-		helpers.Int("enabledRules", len(am.rulesBySource[crdName])))
+		helpers.Int("totalRules", len(auditRule.Spec.Rules)))
 
 	return nil
 }
@@ -1028,21 +882,14 @@ func (am *AuditManagerV1) RemoveRules(ctx context.Context, crdName string) error
 	// Remove from CRD cache
 	delete(am.crdRules, crdName)
 
-	// Remove from rule index and get rules to remove
-	rulesToRemove := am.removeRulesBySource(crdName)
-
-	// Apply removal to kernel
-	if len(rulesToRemove) > 0 {
-		changeSet := &RuleChangeSet{ToRemove: rulesToRemove}
-		if err := am.applyIncrementalChanges(changeSet); err != nil {
-			logger.L().Warning("incremental removal failed, falling back to full reload", helpers.Error(err))
-			return am.reloadAllRules()
-		}
+	// Always do a full reload - simple and eventually consistent
+	if err := am.loadAllRules(); err != nil {
+		logger.L().Error("failed to load all rules after CRD removal", helpers.Error(err))
+		return fmt.Errorf("failed to load all rules: %w", err)
 	}
 
 	logger.L().Info("successfully removed audit rules",
-		helpers.String("crdName", crdName),
-		helpers.Int("removedCount", len(rulesToRemove)))
+		helpers.String("crdName", crdName))
 
 	return nil
 }
@@ -1054,27 +901,53 @@ func (am *AuditManagerV1) ListActiveRules() []auditmanager.ActiveRule {
 
 	var activeRules []auditmanager.ActiveRule
 
-	// Only list CRD rules
-	for _, indexedRule := range am.ruleIndex {
-		source := "crd"
-		if indexedRule.SourceCRD != "" {
-			source = fmt.Sprintf("crd:%s", indexedRule.SourceCRD)
-		}
+	// Collect all rules from all CRDs
+	for crdName, auditRule := range am.crdRules {
+		for _, ruleDef := range auditRule.Spec.Rules {
+			if !ruleDef.Enabled {
+				continue
+			}
 
-		activeRule := auditmanager.ActiveRule{
-			ID:          indexedRule.ID,
-			Name:        indexedRule.Rule.GetRuleDescription(),
-			Source:      source,
-			SourceCRD:   indexedRule.SourceCRD,
-			Status:      "active",
-			RuleType:    indexedRule.Rule.RuleType,
-			Priority:    indexedRule.Priority,
-			Key:         indexedRule.Rule.Key,
-			Description: indexedRule.Rule.GetRuleDescription(),
-			LastUpdated: indexedRule.LastUpdated,
-			ErrorMsg:    "",
+			// Convert to auditctl format to get the rule description
+			auditctlRules, err := am.ruleConverter.ConvertRule(ruleDef)
+			if err != nil {
+				logger.L().Warning("failed to convert rule for listing",
+					helpers.Error(err),
+					helpers.String("crdName", crdName),
+					helpers.String("ruleName", ruleDef.Name))
+				continue
+			}
+
+			for i, auditctlRule := range auditctlRules {
+				parsedRule, err := parseAuditRule(auditctlRule)
+				if err != nil {
+					logger.L().Warning("failed to parse rule for listing",
+						helpers.Error(err),
+						helpers.String("auditctlRule", auditctlRule))
+					continue
+				}
+
+				ruleID := fmt.Sprintf("%s/%s", crdName, ruleDef.Name)
+				if len(auditctlRules) > 1 {
+					ruleID = fmt.Sprintf("%s/%s[%d]", crdName, ruleDef.Name, i)
+				}
+
+				activeRule := auditmanager.ActiveRule{
+					ID:          ruleID,
+					Name:        parsedRule.GetRuleDescription(),
+					Source:      fmt.Sprintf("crd:%s", crdName),
+					SourceCRD:   crdName,
+					Status:      "active",
+					RuleType:    parsedRule.RuleType,
+					Priority:    ruleDef.Priority,
+					Key:         parsedRule.Key,
+					Description: parsedRule.GetRuleDescription(),
+					LastUpdated: time.Now(),
+					ErrorMsg:    "",
+				}
+				activeRules = append(activeRules, activeRule)
+			}
 		}
-		activeRules = append(activeRules, activeRule)
 	}
 
 	return activeRules
@@ -1109,238 +982,129 @@ func (am *AuditManagerV1) ValidateRules(crdRules interface{}) []auditmanager.Rul
 	return errors
 }
 
-// calculateRuleChanges determines what rules need to be added, removed, or updated
-func (am *AuditManagerV1) calculateRuleChanges(crdName string, newCRD *crd.LinuxAuditRule) *RuleChangeSet {
-	changeSet := &RuleChangeSet{}
+// loadAllRules is the simplified rule loading process
+// This function:
+// 1. Deletes all current rules in the kernel
+// 2. Gets all rules from all CRDs (that are enabled)
+// 3. Orders them by priority (those without priority go to the end)
+// 4. Loads the rules to the kernel in order
+func (am *AuditManagerV1) loadAllRules() error {
+	logger.L().Info("starting loadAllRules process")
 
-	oldCRD, exists := am.crdRules[crdName]
-	if !exists {
-		// New CRD - all rules are additions
-		for _, ruleDef := range newCRD.Spec.Rules {
+	auditClient, err := libaudit.NewAuditClient(nil)
+	if err != nil || auditClient == nil {
+		return fmt.Errorf("failed to create audit client in loadAllRules: %w", err)
+	}
+	defer auditClient.Close()
+
+	// Step 1: Delete all current rules in the kernel
+	deletedCount, err := auditClient.DeleteRules()
+	if err != nil {
+		logger.L().Warning("failed to clear existing audit rules", helpers.Error(err))
+	} else {
+		logger.L().Info("cleared existing audit rules", helpers.Int("deletedCount", deletedCount))
+	}
+
+	// Step 2: Collect all enabled rules from all CRDs
+	type RuleWithPriority struct {
+		Rule     *AuditRule
+		Priority int
+		CRDName  string
+		RuleName string
+	}
+
+	var allRules []RuleWithPriority
+
+	for crdName, auditRule := range am.crdRules {
+		for _, ruleDef := range auditRule.Spec.Rules {
 			if !ruleDef.Enabled {
 				continue
 			}
-			// Use convertCRDRules to handle multiple paths
-			if indexedRules, err := am.convertCRDRules(crdName, ruleDef); err == nil {
-				changeSet.ToAdd = append(changeSet.ToAdd, indexedRules...)
+
+			// Convert CRD rule to auditctl format
+			auditctlRules, err := am.ruleConverter.ConvertRule(ruleDef)
+			if err != nil {
+				logger.L().Warning("failed to convert CRD rule",
+					helpers.Error(err),
+					helpers.String("crdName", crdName),
+					helpers.String("ruleName", ruleDef.Name))
+				continue
 			}
-		}
-		return changeSet
-	}
 
-	// Create maps for comparison
-	oldRules := make(map[string]crd.AuditRuleDefinition)
-	newRules := make(map[string]crd.AuditRuleDefinition)
-
-	for _, rule := range oldCRD.Spec.Rules {
-		oldRules[rule.Name] = rule
-	}
-	for _, rule := range newCRD.Spec.Rules {
-		newRules[rule.Name] = rule
-	}
-
-	// Find additions and modifications
-	for name, newRule := range newRules {
-		if oldRule, exists := oldRules[name]; exists {
-			// Check if rule changed
-			if !am.rulesEqual(oldRule, newRule) {
-				// Only update if the rule is enabled
-				if newRule.Enabled {
-					if indexedRules, err := am.convertCRDRules(crdName, newRule); err == nil {
-						changeSet.ToUpdate = append(changeSet.ToUpdate, indexedRules...)
-					}
-				} else {
-					// Rule was disabled, treat it as a removal
-					if indexedRules, err := am.convertCRDRules(crdName, oldRule); err == nil {
-						changeSet.ToRemove = append(changeSet.ToRemove, indexedRules...)
-					}
+			// Parse each generated auditctl rule
+			for _, auditctlRule := range auditctlRules {
+				parsedRule, err := parseAuditRule(auditctlRule)
+				if err != nil {
+					logger.L().Warning("failed to parse generated auditctl rule",
+						helpers.Error(err),
+						helpers.String("auditctlRule", auditctlRule),
+						helpers.String("crdName", crdName),
+						helpers.String("ruleName", ruleDef.Name))
+					continue
 				}
-			}
-		} else {
-			// New rule
-			if newRule.Enabled {
-				if indexedRules, err := am.convertCRDRules(crdName, newRule); err == nil {
-					changeSet.ToAdd = append(changeSet.ToAdd, indexedRules...)
-				}
-			}
-		}
-	}
 
-	// Find deletions
-	for name, oldRule := range oldRules {
-		if _, exists := newRules[name]; !exists {
-			if indexedRules, err := am.convertCRDRules(crdName, oldRule); err == nil {
-				changeSet.ToRemove = append(changeSet.ToRemove, indexedRules...)
+				allRules = append(allRules, RuleWithPriority{
+					Rule:     parsedRule,
+					Priority: ruleDef.Priority,
+					CRDName:  crdName,
+					RuleName: ruleDef.Name,
+				})
 			}
 		}
 	}
 
-	return changeSet
-}
+	// Step 3: Order rules by priority (those without priority go to the end)
+	sort.Slice(allRules, func(i, j int) bool {
+		// Rules with priority 0 are treated as "no priority" and go to the end
+		priI := allRules[i].Priority
+		priJ := allRules[j].Priority
 
-// applyIncrementalChanges applies rule changes to the kernel
-func (am *AuditManagerV1) applyIncrementalChanges(changeSet *RuleChangeSet) error {
-	// For now, we'll do a full reload since individual rule removal is complex
-	// In a full implementation, you'd track kernel rule IDs and remove them individually
-	if len(changeSet.ToRemove) > 0 || len(changeSet.ToUpdate) > 0 {
-		return am.reloadAllRules()
-	}
-
-	// Add new rules
-	for _, rule := range changeSet.ToAdd {
-		if err := am.loadRuleIntoKernel(rule.Rule); err != nil {
-			return fmt.Errorf("failed to add rule %s: %w", rule.ID, err)
+		// If both have no priority (0), sort by CRD name and rule name
+		if priI == 0 && priJ == 0 {
+			if allRules[i].CRDName == allRules[j].CRDName {
+				return allRules[i].RuleName < allRules[j].RuleName
+			}
+			return allRules[i].CRDName < allRules[j].CRDName
 		}
-	}
 
-	return nil
-}
-
-// reloadAllRules clears all kernel rules and reloads everything
-func (am *AuditManagerV1) reloadAllRules() error {
-	// Clear existing kernel rules
-	if am.auditClient != nil {
-		if _, err := am.auditClient.DeleteRules(); err != nil {
-			logger.L().Warning("failed to clear existing audit rules", helpers.Error(err))
+		// If only one has no priority, the one with priority comes first
+		if priI == 0 {
+			return false
 		}
-	}
-
-	// Skip hardcoded rules, only reload CRD rules (sorted by priority)
-	var allIndexedRules []*IndexedRule
-	for _, indexedRule := range am.ruleIndex {
-		allIndexedRules = append(allIndexedRules, indexedRule)
-	}
-
-	// Sort by priority
-	sort.Slice(allIndexedRules, func(i, j int) bool {
-		if allIndexedRules[i].Priority == allIndexedRules[j].Priority {
-			return allIndexedRules[i].ID < allIndexedRules[j].ID
+		if priJ == 0 {
+			return true
 		}
-		return allIndexedRules[i].Priority < allIndexedRules[j].Priority
+
+		// Both have priority, sort by priority, then by CRD name and rule name
+		if priI == priJ {
+			if allRules[i].CRDName == allRules[j].CRDName {
+				return allRules[i].RuleName < allRules[j].RuleName
+			}
+			return allRules[i].CRDName < allRules[j].CRDName
+		}
+		return priI < priJ
 	})
 
-	// Load CRD rules into kernel
-	for _, indexedRule := range allIndexedRules {
-		if err := am.loadRuleIntoKernel(indexedRule.Rule); err != nil {
-			logger.L().Warning("failed to load CRD rule into kernel",
+	// Step 4: Load rules to the kernel in order
+	successCount := 0
+	for _, ruleWithPriority := range allRules {
+		if err := am.loadRuleIntoKernel(ruleWithPriority.Rule, auditClient); err != nil {
+			logger.L().Warning("failed to load rule into kernel",
 				helpers.Error(err),
-				helpers.String("ruleID", indexedRule.ID))
+				helpers.String("crdName", ruleWithPriority.CRDName),
+				helpers.String("ruleName", ruleWithPriority.RuleName),
+				helpers.String("rule", ruleWithPriority.Rule.RawRule))
+		} else {
+			successCount++
 		}
 	}
 
-	totalRules := len(am.loadedRules) + len(allIndexedRules)
-	logger.L().Info("reloaded all audit rules into kernel", helpers.Int("count", totalRules))
+	logger.L().Info("completed loadAllRules process",
+		helpers.Int("totalRules", len(allRules)),
+		helpers.Int("successCount", successCount),
+		helpers.Int("failedCount", len(allRules)-successCount))
+
 	return nil
-}
-
-// updateRuleIndex updates the rule index with rules from a CRD
-func (am *AuditManagerV1) updateRuleIndex(crdName string, auditRule *crd.LinuxAuditRule) {
-	// Remove old rules for this CRD
-	am.removeRulesBySource(crdName)
-
-	// Add new rules (only enabled ones)
-	var ruleIDs []string
-	for _, ruleDef := range auditRule.Spec.Rules {
-		if !ruleDef.Enabled {
-			continue
-		}
-
-		// Use convertCRDRules to handle multiple paths in file watch rules
-		indexedRules, err := am.convertCRDRules(crdName, ruleDef)
-		if err != nil {
-			logger.L().Warning("failed to convert CRD rule",
-				helpers.Error(err),
-				helpers.String("crdName", crdName),
-				helpers.String("ruleName", ruleDef.Name))
-			continue
-		}
-
-		// Add all generated indexed rules to the index
-		for _, indexedRule := range indexedRules {
-			am.ruleIndex[indexedRule.ID] = indexedRule
-			ruleIDs = append(ruleIDs, indexedRule.ID)
-		}
-	}
-
-	am.rulesBySource[crdName] = ruleIDs
-}
-
-// removeRulesBySource removes rules from the index by source CRD
-func (am *AuditManagerV1) removeRulesBySource(crdName string) []*IndexedRule {
-	var removedRules []*IndexedRule
-
-	if ruleIDs, exists := am.rulesBySource[crdName]; exists {
-		for _, ruleID := range ruleIDs {
-			if indexedRule, exists := am.ruleIndex[ruleID]; exists {
-				removedRules = append(removedRules, indexedRule)
-				delete(am.ruleIndex, ruleID)
-			}
-		}
-		delete(am.rulesBySource, crdName)
-	}
-
-	return removedRules
-}
-
-// convertCRDRule converts a CRD rule definition to an IndexedRule
-// This function maintains backward compatibility by returning the first rule
-func (am *AuditManagerV1) convertCRDRule(crdName string, ruleDef crd.AuditRuleDefinition) (*IndexedRule, error) {
-	indexedRules, err := am.convertCRDRules(crdName, ruleDef)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(indexedRules) == 0 {
-		return nil, fmt.Errorf("no indexed rules generated for rule %s", ruleDef.Name)
-	}
-
-	// Return the first rule for backward compatibility
-	return indexedRules[0], nil
-}
-
-// convertCRDRules converts a CRD rule definition to multiple IndexedRules
-// This handles file watch rules with multiple paths by creating separate IndexedRule for each path
-func (am *AuditManagerV1) convertCRDRules(crdName string, ruleDef crd.AuditRuleDefinition) ([]*IndexedRule, error) {
-	// Convert structured rule to auditctl format
-	auditctlRules, err := am.ruleConverter.ConvertRule(ruleDef)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert rule %s: %w", ruleDef.Name, err)
-	}
-
-	if len(auditctlRules) == 0 {
-		return nil, fmt.Errorf("no auditctl rules generated for rule %s", ruleDef.Name)
-	}
-
-	var indexedRules []*IndexedRule
-
-	// Handle multiple auditctl rules (e.g., file watch rules with multiple paths)
-	for i, auditctlRule := range auditctlRules {
-		// Parse the auditctl rule
-		auditRule, err := parseAuditRule(auditctlRule)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse generated auditctl rule %d for %s: %w", i, ruleDef.Name, err)
-		}
-
-		// Create unique ID for each rule (append index for multiple rules)
-		ruleID := fmt.Sprintf("%s/%s", crdName, ruleDef.Name)
-		if len(auditctlRules) > 1 {
-			ruleID = fmt.Sprintf("%s/%s[%d]", crdName, ruleDef.Name, i)
-		}
-
-		// Create indexed rule
-		indexedRule := &IndexedRule{
-			ID:          ruleID,
-			Rule:        auditRule,
-			SourceCRD:   crdName,
-			SourceType:  "crd",
-			Priority:    ruleDef.Priority,
-			LastUpdated: time.Now(),
-		}
-
-		indexedRules = append(indexedRules, indexedRule)
-	}
-
-	return indexedRules, nil
 }
 
 // getMountNamespaceForPID gets the mount namespace ID for a given PID with caching
@@ -1407,30 +1171,6 @@ func (am *AuditManagerV1) enrichWithKubernetesContext(event *auditmanager.AuditE
 		helpers.String("pod", event.Pod),
 		helpers.String("namespace", event.Namespace),
 		helpers.String("containerID", event.ContainerID))
-}
-
-// rulesEqual compares two rule definitions for equality
-func (am *AuditManagerV1) rulesEqual(rule1, rule2 crd.AuditRuleDefinition) bool {
-	// This is a simplified comparison - in a full implementation you'd do deep comparison
-	return rule1.Name == rule2.Name &&
-		rule1.Description == rule2.Description &&
-		rule1.Enabled == rule2.Enabled &&
-		rule1.Priority == rule2.Priority &&
-		rule1.RawRule == rule2.RawRule &&
-		am.slicesEqual(rule1.Tags, rule2.Tags)
-}
-
-// slicesEqual compares two string slices for equality
-func (am *AuditManagerV1) slicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i, v := range a {
-		if v != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // updateRuleKeyToTagsMapping updates the key-to-tags mapping for a CRD rule

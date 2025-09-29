@@ -5,7 +5,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/elastic/go-libaudit/v2/auparse"
 	"github.com/kubescape/node-agent/pkg/auditmanager"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -81,58 +83,9 @@ func TestHardcodedRulesLoading(t *testing.T) {
 	assert.True(t, foundExecRule, "Should have exec syscall rule")
 }
 
-func TestAuditEventCreation(t *testing.T) {
-	event := NewAuditEvent(12345, "PATH")
+// Note: Removed TestAuditEventCreation - NewAuditEvent function no longer exists
 
-	assert.Equal(t, uint64(12345), event.AuditID)
-	assert.Equal(t, "PATH", event.MessageType)
-	assert.True(t, event.Success) // Default value
-	assert.NotZero(t, event.Timestamp)
-}
-
-func TestAuditMessageParsing(t *testing.T) {
-	// Create a mock audit manager for testing parsing
-	am := &AuditManagerV1{}
-
-	tests := []struct {
-		name         string
-		rawMessage   string
-		expectedType string
-		expectedPath string
-		expectedComm string
-	}{
-		{
-			name:         "PATH message",
-			rawMessage:   `type=PATH msg=audit(1234567890.123:12345): item=0 name="/etc/passwd" comm="cat"`,
-			expectedType: "PATH",
-			expectedPath: "/etc/passwd",
-			expectedComm: "cat",
-		},
-		{
-			name:         "SYSCALL message",
-			rawMessage:   `type=SYSCALL msg=audit(1234567890.123:12345): arch=c000003e syscall=2 comm="cat" pid=1234`,
-			expectedType: "SYSCALL",
-			expectedComm: "cat",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			event, err := am.parseAuditMessage([]byte(tt.rawMessage))
-			require.NoError(t, err)
-			require.NotNil(t, event)
-
-			assert.Equal(t, tt.expectedType, event.MessageType)
-			if tt.expectedPath != "" {
-				assert.Equal(t, tt.expectedPath, event.Path)
-			}
-			if tt.expectedComm != "" {
-				assert.Equal(t, tt.expectedComm, event.Comm)
-			}
-			assert.Equal(t, tt.rawMessage, event.RawMessage)
-		})
-	}
-}
+// Note: Removed TestAuditMessageParsing - parseAuditMessage function no longer exists
 
 // TestAuditManagerCreation tests the basic creation of audit manager
 func TestAuditManagerCreation(t *testing.T) {
@@ -143,7 +96,11 @@ func TestAuditManagerCreation(t *testing.T) {
 		t.Skip("Skipping audit manager creation test - requires root privileges")
 	}
 
-	am, err := NewAuditManagerV1(mockExporter)
+	// Create a minimal config for testing
+	testConfig := &config.Config{}
+	testConfig.AuditDetection.EventFilter.IncludeTypes = []auparse.AuditMessageType{auparse.AUDIT_SYSCALL, auparse.AUDIT_PATH}
+
+	am, err := NewAuditManagerV1(testConfig, mockExporter)
 	if err != nil {
 		// If we can't create due to audit subsystem being unavailable, skip
 		t.Skipf("Skipping audit manager test - audit subsystem not available: %v", err)
