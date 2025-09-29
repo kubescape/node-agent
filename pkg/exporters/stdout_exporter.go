@@ -3,6 +3,7 @@ package exporters
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/auditmanager"
@@ -97,7 +98,7 @@ func (exporter *StdoutExporter) SendAuditAlert(auditResult auditmanager.AuditRes
 		"audit_id":      auditEvent.AuditID,
 		"message_type":  auditEvent.Type.String(),
 		"rule_type":     auditEvent.RuleType,
-		"key":           auditEvent.Key,
+		"keys":          strings.Join(auditEvent.Keys, ","),
 		"pid":           auditEvent.PID,
 		"uid":           auditEvent.UID,
 		"comm":          auditEvent.Comm,
@@ -116,5 +117,5 @@ func (exporter *StdoutExporter) SendAuditAlert(auditResult auditmanager.AuditRes
 		"sock_addr":     auditEvent.SockAddr,
 		"sock_family":   auditEvent.SockFamily,
 		"sock_port":     auditEvent.SockPort,
-	}).Info(fmt.Sprintf("Audit Event: %s", auditEvent.Key))
+	}).Info(fmt.Sprintf("Audit Event: %s", strings.Join(auditEvent.Keys, ",")))
 }

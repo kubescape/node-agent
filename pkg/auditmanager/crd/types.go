@@ -68,9 +68,6 @@ type AuditRuleDefinition struct {
 	// +kubebuilder:default=100
 	Priority int `json:"priority,omitempty"`
 
-	// Tags provide metadata for organizing and filtering rules
-	Tags []string `json:"tags,omitempty"`
-
 	// Structured rule definitions (exactly one must be specified)
 	FileWatch *FileWatchRule `json:"fileWatch,omitempty"`
 	Syscall   *SyscallRule   `json:"syscall,omitempty"`
@@ -97,7 +94,7 @@ type FileWatchRule struct {
 	Exclude []string `json:"exclude,omitempty"`
 
 	// Key for identifying events from this rule
-	Key string `json:"key"`
+	Keys []string `json:"keys"`
 }
 
 // SyscallRule defines system call monitoring rules
@@ -120,7 +117,7 @@ type SyscallRule struct {
 	List string `json:"list,omitempty"`
 
 	// Key for identifying events from this rule (optional for some rule types)
-	Key string `json:"key,omitempty"`
+	Keys []string `json:"keys,omitempty"`
 }
 
 // SyscallFilter defines filters for syscall rules
@@ -150,7 +147,7 @@ type NetworkRule struct {
 	Direction string `json:"direction,omitempty"`
 
 	// Key for identifying events from this rule
-	Key string `json:"key"`
+	Keys []string `json:"keys"`
 }
 
 // ProcessRule defines process monitoring rules
@@ -171,7 +168,7 @@ type ProcessRule struct {
 	Filters []SyscallFilter `json:"filters,omitempty"`
 
 	// Key for identifying events from this rule
-	Key string `json:"key"`
+	Keys []string `json:"keys"`
 }
 
 // RateLimit defines rate limiting configuration

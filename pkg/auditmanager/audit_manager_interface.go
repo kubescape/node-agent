@@ -58,7 +58,7 @@ type ActiveRule struct {
 	Status      string    // Status: "active", "failed", "disabled"
 	RuleType    string    // Type: "file_watch", "syscall", "network", "process"
 	Priority    int       // Rule priority for ordering
-	Key         string    // Audit key for event identification
+	Keys        []string  // Audit keys for event identification
 	Description string    // Human-readable description
 	LastUpdated time.Time // When the rule was last updated
 	ErrorMsg    string    // Error message if status is "failed"

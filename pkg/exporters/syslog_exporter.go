@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/syslog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/auditmanager"
@@ -200,7 +201,7 @@ func (se *SyslogExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
 		Timestamp: time.Now(),
 		Hostname:  "kubescape-node-agent",
 		AppName:   "kubescape-node-agent",
-		Message:   []byte(fmt.Sprintf("Audit event '%s' detected: type=%s path=%s pid=%d comm=%s", auditEvent.Key, auditEvent.Type.String(), auditEvent.Path, auditEvent.PID, auditEvent.Comm)),
+		Message:   []byte(fmt.Sprintf("Audit event '%s' detected: type=%s path=%s pid=%d comm=%s", strings.Join(auditEvent.Keys, ","), auditEvent.Type.String(), auditEvent.Path, auditEvent.PID, auditEvent.Comm)),
 	}
 
 	_, err := message.WriteTo(se.writer)

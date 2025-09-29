@@ -46,18 +46,13 @@ spec:
                       minimum: 1
                       maximum: 1000
                       description: "Priority for rule ordering (lower = higher priority)"
-                    tags:
-                      type: array
-                      description: "Tags for organizing and filtering rules"
-                      items:
-                        type: string
                     fileWatch:
                       type: object
                       description: "File system monitoring rule"
                       required:
                       - paths
                       - permissions
-                      - key
+                      - keys
                       properties:
                         paths:
                           type: array
@@ -81,9 +76,12 @@ spec:
                           description: "Exclude patterns (basic glob patterns)"
                           items:
                             type: string
-                        key:
-                          type: string
-                          description: "Key for identifying events from this rule"
+                        keys:
+                          type: array
+                          description: "Keys for identifying events from this rule (generates multiple -k flags)"
+                          items:
+                            type: string
+                          minItems: 1
                     syscall:
                       type: object
                       description: "System call monitoring rule"
@@ -134,14 +132,17 @@ spec:
                           default: "exit"
                           enum: ["task", "exit", "user", "exclude"]
                           description: "Audit list type"
-                        key:
-                          type: string
-                          description: "Key for identifying events from this rule"
+                        keys:
+                          type: array
+                          description: "Keys for identifying events from this rule (generates multiple -k flags)"
+                          items:
+                            type: string
+                          minItems: 1
                     network:
                       type: object
                       description: "Network monitoring rule (future extension)"
                       required:
-                      - key
+                      - keys
                       properties:
                         addresses:
                           type: array
@@ -165,14 +166,17 @@ spec:
                           type: string
                           enum: ["inbound", "outbound", "both"]
                           description: "Traffic direction"
-                        key:
-                          type: string
-                          description: "Key for identifying events from this rule"
+                        keys:
+                          type: array
+                          description: "Keys for identifying events from this rule (generates multiple -k flags)"
+                          items:
+                            type: string
+                          minItems: 1
                     process:
                       type: object
                       description: "Process monitoring rule"
                       required:
-                      - key
+                      - keys
                       properties:
                         executables:
                           type: array
@@ -214,9 +218,12 @@ spec:
                               value:
                                 type: string
                                 description: "Value to compare against"
-                        key:
-                          type: string
-                          description: "Key for identifying events from this rule"
+                        keys:
+                          type: array
+                          description: "Keys for identifying events from this rule (generates multiple -k flags)"
+                          items:
+                            type: string
+                          minItems: 1
                     rawRule:
                       type: string
                       description: "Raw auditctl format rule (fallback for complex rules)"

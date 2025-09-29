@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -179,22 +180,22 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 
 func (ame *AlertManagerExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
 	auditEvent := auditResult.GetAuditEvent()
-	summary := fmt.Sprintf("Audit event '%s' detected in namespace '%s' pod '%s'", auditEvent.Key, auditEvent.Namespace, auditEvent.Pod)
+	summary := fmt.Sprintf("Audit event '%s' detected in namespace '%s' pod '%s'", strings.Join(auditEvent.Keys, ","), auditEvent.Namespace, auditEvent.Pod)
 
 	myAlert := models.PostableAlert{
 		StartsAt: strfmt.DateTime(time.Now()),
 		EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
 		Annotations: map[string]string{
-			"title":       fmt.Sprintf("Audit Event: %s", auditEvent.Key),
+			"title":       fmt.Sprintf("Audit Event: %s", strings.Join(auditEvent.Keys, ",")),
 			"summary":     summary,
-			"message":     fmt.Sprintf("Audit rule '%s' triggered", auditEvent.Key),
+			"message":     fmt.Sprintf("Audit rule '%s' triggered", strings.Join(auditEvent.Keys, ",")),
 			"description": fmt.Sprintf("Audit event of type '%s' detected", auditEvent.Type.String()),
 		},
 		Alert: models.Alert{
 			GeneratorURL: strfmt.URI("https://armosec.github.io/kubecop/alertviewer/"),
 			Labels: map[string]string{
 				"alertname":    "KubescapeAuditEvent",
-				"audit_key":    auditEvent.Key,
+				"audit_key":    strings.Join(auditEvent.Keys, ","),
 				"message_type": auditEvent.Type.String(),
 				"rule_type":    auditEvent.RuleType,
 				"container_id": auditEvent.ContainerID,

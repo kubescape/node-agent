@@ -2,6 +2,7 @@ package v1
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/elastic/go-libaudit/v2/rule"
 )
@@ -27,7 +28,7 @@ var HardcodedRules = []string{
 type AuditRule struct {
 	RawRule    string
 	RuleType   string // "file_watch" or "syscall"
-	Key        string
+	Keys       []string
 	WatchPath  string   // for single path file watch rules (backward compatibility)
 	WatchPaths []string // for multiple path file watch rules
 	Syscalls   []string // for syscall rules
@@ -80,7 +81,7 @@ func parseAuditRule(ruleStr string) (*AuditRule, error) {
 				}
 			case "-k":
 				if i+1 < len(parts) {
-					auditRule.Key = parts[i+1]
+					auditRule.Keys = append(auditRule.Keys, parts[i+1])
 				}
 			}
 		}
@@ -98,7 +99,7 @@ func parseAuditRule(ruleStr string) (*AuditRule, error) {
 				}
 			case "-k":
 				if i+1 < len(parts) {
-					auditRule.Key = parts[i+1]
+					auditRule.Keys = append(auditRule.Keys, parts[i+1])
 				}
 			case "-F":
 				if i+1 < len(parts) {
@@ -169,15 +170,17 @@ func (ar *AuditRule) GetRuleDescription() string {
 			paths = []string{ar.WatchPath}
 		}
 
+		keysStr := strings.Join(ar.Keys, ", ")
 		if len(paths) == 1 {
-			return fmt.Sprintf("File watch on %s (key: %s)", paths[0], ar.Key)
+			return fmt.Sprintf("File watch on %s (keys: %s)", paths[0], keysStr)
 		} else if len(paths) > 1 {
-			return fmt.Sprintf("File watch on %d paths: %v (key: %s)", len(paths), paths, ar.Key)
+			return fmt.Sprintf("File watch on %d paths: %v (keys: %s)", len(paths), paths, keysStr)
 		} else {
-			return fmt.Sprintf("File watch rule (key: %s)", ar.Key)
+			return fmt.Sprintf("File watch rule (keys: %s)", keysStr)
 		}
 	} else if ar.RuleType == "syscall" {
-		return fmt.Sprintf("Syscall monitoring for %v (key: %s)", ar.Syscalls, ar.Key)
+		keysStr := strings.Join(ar.Keys, ", ")
+		return fmt.Sprintf("Syscall monitoring for %v (keys: %s)", ar.Syscalls, keysStr)
 	}
 	return fmt.Sprintf("Unknown rule type: %s", ar.RuleType)
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
@@ -171,7 +172,7 @@ func (csvExporter *CsvExporter) SendAuditAlert(auditResult auditmanager.AuditRes
 	// For now, just log audit events to stdout since CSV export for audit events needs more design
 	auditEvent := auditResult.GetAuditEvent()
 	logrus.WithFields(logrus.Fields{
-		"audit_key":    auditEvent.Key,
+		"audit_key":    strings.Join(auditEvent.Keys, ","),
 		"message_type": auditEvent.Type.String(),
 		"rule_type":    auditEvent.RuleType,
 		"pid":          auditEvent.PID,

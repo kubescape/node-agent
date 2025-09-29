@@ -56,7 +56,7 @@ type AuditEvent struct {
 	SockPort   uint32            // Socket port number
 
 	// Security information
-	Key             string
+	Keys            []string // Multiple keys/tags from the audit rule
 	Tags            []string // All audit rule tags
 	RuleType        string
 	SELinuxContext  string // SELinux security context

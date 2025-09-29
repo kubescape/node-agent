@@ -37,8 +37,8 @@ type AuditEvent struct {
 	Operation string `json:"operation,omitempty"` // read, write, attribute, etc.
 
 	// Audit rule information
-	Key      string `json:"key,omitempty"`      // The -k key from audit rule
-	RuleType string `json:"ruleType,omitempty"` // "file_watch" or "syscall"
+	Keys     []string `json:"keys,omitempty"`     // The -k keys from audit rule (multiple tags)
+	RuleType string   `json:"ruleType,omitempty"` // "file_watch" or "syscall"
 
 	// Kubernetes context (will be enriched)
 	Pod         string `json:"pod,omitempty"`

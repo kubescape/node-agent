@@ -43,9 +43,6 @@ type AuditManagerV1 struct {
 	containerCollection *containercollection.ContainerCollection
 	pidToMntnsCache     *expirable.LRU[uint32, uint64] // PID -> mount namespace ID cache
 
-	// Rule metadata mapping
-	ruleKeyToTags map[string][]string // Maps rule keys to their tags
-
 	// Message reassembly
 	reassembler *libaudit.Reassembler // Aggregates related audit messages
 
@@ -86,7 +83,6 @@ func NewAuditManagerV1(config *config.Config, exporter *exporters.ExporterBus) (
 		exporter:            exporter,
 		containerCollection: nil, // Will be set later via SetContainerCollection
 		pidToMntnsCache:     pidToMntnsCache,
-		ruleKeyToTags:       make(map[string][]string),
 		crdRules:            make(map[string]*crd.LinuxAuditRule),
 		ruleConverter:       crd.NewRuleConverter(),
 		loadedRules:         nil, // Don't use hardcoded rules
@@ -194,8 +190,8 @@ func (am *AuditManagerV1) parseAggregatedAuditMessages(msgs []*auparse.AuditMess
 		Sequence:  primaryMsg.Sequence,
 	}
 
-	// Extract key from the message sequence (prioritize SYSCALL messages)
-	event.Key = am.extractKeyFromMessageSequence(msgs)
+	// Extract keys from the message sequence (prioritize SYSCALL messages)
+	event.Keys = am.extractKeysFromMessageSequence(msgs)
 
 	// Merge data from all messages in the sequence
 	allData := make(map[string]string)
@@ -222,27 +218,15 @@ func (am *AuditManagerV1) parseAggregatedAuditMessages(msgs []*auparse.AuditMess
 	// Store raw message from primary message for debugging
 	event.RawMessage = primaryMsg.RawData
 
-	// Lookup tags from rule metadata if we have a key
-	if event.Key != "" {
-		if ruleTags, exists := am.ruleKeyToTags[event.Key]; exists {
-			event.Tags = ruleTags
-			logger.L().Debug("found tags for rule key",
-				helpers.String("key", event.Key),
-				helpers.Interface("tags", ruleTags))
-		} else {
-			logger.L().Debug("no tags found for rule key",
-				helpers.String("key", event.Key),
-				helpers.Int("totalMappings", len(am.ruleKeyToTags)))
-		}
-	} else {
-		logger.L().Debug("no rule key available for tag lookup")
-	}
+	// Tags are now the same as keys - they come directly from the audit rule
+	// No need for separate lookup since keys in rules become tags in events
+	event.Tags = event.Keys
 
 	// Enrich with Kubernetes context
 	am.enrichWithKubernetesContext(event)
 
 	logger.L().Debug("parseAggregatedAuditMessages: successfully created event",
-		helpers.String("key", event.Key),
+		helpers.Interface("keys", event.Keys),
 		helpers.String("type", event.Type.String()),
 		helpers.String("path", event.Path),
 		helpers.Interface("tags", event.Tags))
@@ -250,13 +234,14 @@ func (am *AuditManagerV1) parseAggregatedAuditMessages(msgs []*auparse.AuditMess
 	return event
 }
 
-// extractKeyFromMessageSequence extracts the audit rule key from a sequence of messages
-func (am *AuditManagerV1) extractKeyFromMessageSequence(msgs []*auparse.AuditMessage) string {
+// extractKeysFromMessageSequence extracts all audit rule keys/tags from a sequence of messages
+func (am *AuditManagerV1) extractKeysFromMessageSequence(msgs []*auparse.AuditMessage) []string {
 	// Priority 1: SYSCALL message (most reliable for keys)
 	for _, msg := range msgs {
 		if msg.RecordType == auparse.AUDIT_SYSCALL {
+			// Use the proper Tags() method to get all keys
 			if tags, err := msg.Tags(); err == nil && len(tags) > 0 {
-				return tags[0]
+				return tags
 			}
 		}
 	}
@@ -264,20 +249,22 @@ func (am *AuditManagerV1) extractKeyFromMessageSequence(msgs []*auparse.AuditMes
 	// Priority 2: PATH message (for file watch rules)
 	for _, msg := range msgs {
 		if msg.RecordType == auparse.AUDIT_PATH {
+			// Use the proper Tags() method to get all keys
 			if tags, err := msg.Tags(); err == nil && len(tags) > 0 {
-				return tags[0]
+				return tags
 			}
 		}
 	}
 
-	// Priority 3: Any message with a key
+	// Priority 3: Any message with keys
 	for _, msg := range msgs {
+		// Use the proper Tags() method to get all keys
 		if tags, err := msg.Tags(); err == nil && len(tags) > 0 {
-			return tags[0]
+			return tags
 		}
 	}
 
-	return ""
+	return []string{}
 }
 
 // setRuleType sets the rule type based on the audit event type
@@ -334,9 +321,6 @@ func (am *AuditManagerV1) Start(ctx context.Context) error {
 
 	// Skip loading hardcoded rules, only use CRD rules
 	logger.L().Info("skipping hardcoded rules, using CRD rules only")
-
-	// Populate tag mappings for any existing CRD rules
-	am.populateInitialTagMappings()
 
 	// Load all rules at startup
 	if err := am.loadAllRules(); err != nil {
@@ -674,7 +658,7 @@ func isHexString(s string) bool {
 
 // extractSecurityInfo extracts security-related information from audit data
 func (am *AuditManagerV1) extractSecurityInfo(event *auditmanager.AuditEvent, data map[string]string) {
-	event.Key = data["key"]
+	// Keys are now extracted via extractKeysFromMessageSequence, not from data["key"]
 	event.SELinuxContext = data["subj"]      // SELinux subject context
 	event.AppArmorProfile = data["apparmor"] // AppArmor profile
 	event.Capabilities = data["cap_fp"]      // Process capabilities
@@ -775,8 +759,8 @@ func (am *AuditManagerV1) eventProcessingLoop() {
 
 // shouldExportEvent determines if an event should be exported based on configuration
 func (am *AuditManagerV1) shouldExportEvent(event *auditmanager.AuditEvent) bool {
-	// Always export rule-based events (events with a key)
-	if event.Key != "" {
+	// Always export rule-based events (events with keys)
+	if len(event.Keys) > 0 {
 		return true
 	}
 
@@ -821,7 +805,7 @@ func (am *AuditManagerV1) processAuditEvent(event *auditmanager.AuditEvent) {
 		Path:        event.Path,
 		Mode:        event.Mode,
 		Operation:   event.Operation,
-		Key:         event.Key,
+		Keys:        event.Keys,
 		RuleType:    event.RuleType,
 		Pod:         event.Pod,
 		Namespace:   event.Namespace,
@@ -851,9 +835,6 @@ func (am *AuditManagerV1) UpdateRules(ctx context.Context, crdName string, crdRu
 	// Store the CRD
 	am.crdRules[crdName] = auditRule
 
-	// Update rule key to tags mapping for tag enrichment
-	am.updateRuleKeyToTagsMapping(auditRule)
-
 	// Always do a full reload - simple and eventually consistent
 	if err := am.loadAllRules(); err != nil {
 		logger.L().Error("failed to load all rules after CRD update", helpers.Error(err))
@@ -873,11 +854,6 @@ func (am *AuditManagerV1) RemoveRules(ctx context.Context, crdName string) error
 	defer am.mutex.Unlock()
 
 	logger.L().Info("removing audit rules", helpers.String("crdName", crdName))
-
-	// Remove tag mappings before removing the CRD
-	if auditRule, exists := am.crdRules[crdName]; exists {
-		am.removeRuleKeyToTagsMapping(auditRule)
-	}
 
 	// Remove from CRD cache
 	delete(am.crdRules, crdName)
@@ -940,7 +916,7 @@ func (am *AuditManagerV1) ListActiveRules() []auditmanager.ActiveRule {
 					Status:      "active",
 					RuleType:    parsedRule.RuleType,
 					Priority:    ruleDef.Priority,
-					Key:         parsedRule.Key,
+					Keys:        parsedRule.Keys,
 					Description: parsedRule.GetRuleDescription(),
 					LastUpdated: time.Now(),
 					ErrorMsg:    "",
@@ -1171,69 +1147,4 @@ func (am *AuditManagerV1) enrichWithKubernetesContext(event *auditmanager.AuditE
 		helpers.String("pod", event.Pod),
 		helpers.String("namespace", event.Namespace),
 		helpers.String("containerID", event.ContainerID))
-}
-
-// updateRuleKeyToTagsMapping updates the key-to-tags mapping for a CRD rule
-func (am *AuditManagerV1) updateRuleKeyToTagsMapping(auditRule *crd.LinuxAuditRule) {
-	for _, rule := range auditRule.Spec.Rules {
-		if !rule.Enabled {
-			continue // Skip disabled rules
-		}
-
-		var key string
-		var tags []string = rule.Tags // Get tags from rule definition
-
-		// Extract the key based on rule type
-		if rule.FileWatch != nil {
-			key = rule.FileWatch.Key
-		} else if rule.Syscall != nil {
-			key = rule.Syscall.Key
-		} else if rule.Network != nil {
-			key = rule.Network.Key
-		} else if rule.Process != nil {
-			key = rule.Process.Key
-		}
-
-		// Update the mapping if we have a key
-		if key != "" {
-			am.ruleKeyToTags[key] = tags
-			logger.L().Debug("updated rule key to tags mapping",
-				helpers.String("key", key),
-				helpers.Interface("tags", tags))
-		}
-	}
-}
-
-// removeRuleKeyToTagsMapping removes key-to-tags mappings for a CRD rule
-func (am *AuditManagerV1) removeRuleKeyToTagsMapping(auditRule *crd.LinuxAuditRule) {
-	for _, rule := range auditRule.Spec.Rules {
-		var key string
-
-		// Extract the key based on rule type
-		if rule.FileWatch != nil {
-			key = rule.FileWatch.Key
-		} else if rule.Syscall != nil {
-			key = rule.Syscall.Key
-		} else if rule.Network != nil {
-			key = rule.Network.Key
-		} else if rule.Process != nil {
-			key = rule.Process.Key
-		}
-
-		// Remove the mapping if we have a key
-		if key != "" {
-			delete(am.ruleKeyToTags, key)
-			logger.L().Debug("removed rule key to tags mapping",
-				helpers.String("key", key))
-		}
-	}
-}
-
-// populateInitialTagMappings populates tag mappings for any CRD rules already loaded at startup
-func (am *AuditManagerV1) populateInitialTagMappings() {
-	for _, auditRule := range am.crdRules {
-		am.updateRuleKeyToTagsMapping(auditRule)
-	}
-	logger.L().Info("populated initial tag mappings",
-		helpers.Int("mappingCount", len(am.ruleKeyToTags)))
 }

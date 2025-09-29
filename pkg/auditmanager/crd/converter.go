@@ -89,8 +89,8 @@ func (rc *RuleConverter) convertFileWatchRule(fw *FileWatchRule) ([]string, erro
 	if len(fw.Permissions) == 0 {
 		return nil, fmt.Errorf("file watch rule must specify at least one permission")
 	}
-	if fw.Key == "" {
-		return nil, fmt.Errorf("file watch rule must specify a key")
+	if len(fw.Keys) == 0 {
+		return nil, fmt.Errorf("file watch rule must specify at least one key")
 	}
 
 	// Map permissions to auditctl format
@@ -127,7 +127,12 @@ func (rc *RuleConverter) convertFileWatchRule(fw *FileWatchRule) ([]string, erro
 		}
 
 		if !excluded {
-			rule := fmt.Sprintf("-w %s -p %s -k %s", path, permStr, fw.Key)
+			// Build key flags for all keys
+			var keyFlags []string
+			for _, key := range fw.Keys {
+				keyFlags = append(keyFlags, fmt.Sprintf("-k %s", key))
+			}
+			rule := fmt.Sprintf("-w %s -p %s %s", path, permStr, strings.Join(keyFlags, " "))
 			rules = append(rules, rule)
 		}
 	}
@@ -192,8 +197,10 @@ func (rc *RuleConverter) convertSyscallRule(sc *SyscallRule) ([]string, error) {
 	parts = append(parts, archFilters...)
 	parts = append(parts, fieldFilters...)
 	parts = append(parts, fmt.Sprintf("-S %s", syscallList))
-	if sc.Key != "" {
-		parts = append(parts, fmt.Sprintf("-k %s", sc.Key))
+
+	// Add key flags for all keys
+	for _, key := range sc.Keys {
+		parts = append(parts, fmt.Sprintf("-k %s", key))
 	}
 
 	rule := strings.Join(parts, " ")
@@ -209,8 +216,8 @@ func (rc *RuleConverter) convertNetworkRule(nr *NetworkRule) ([]string, error) {
 
 // convertProcessRule converts ProcessRule to auditctl format
 func (rc *RuleConverter) convertProcessRule(pr *ProcessRule) ([]string, error) {
-	if pr.Key == "" {
-		return nil, fmt.Errorf("process rule must specify a key")
+	if len(pr.Keys) == 0 {
+		return nil, fmt.Errorf("process rule must specify at least one key")
 	}
 
 	// Process rules are typically implemented as execve syscall rules with filters
@@ -263,8 +270,10 @@ func (rc *RuleConverter) convertProcessRule(pr *ProcessRule) ([]string, error) {
 		parts = append(parts, fmt.Sprintf("-F %s%s%s", filter.Field, filter.Operator, filter.Value))
 	}
 
-	// Add key
-	parts = append(parts, fmt.Sprintf("-k %s", pr.Key))
+	// Add keys
+	for _, key := range pr.Keys {
+		parts = append(parts, fmt.Sprintf("-k %s", key))
+	}
 
 	rule := strings.Join(parts, " ")
 	rules = append(rules, rule)
