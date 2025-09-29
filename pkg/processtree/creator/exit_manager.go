@@ -125,6 +125,11 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 }
 
 func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
+
+	// Delete container ID for the process
+	pt.processIDToContainerIDMap.Delete(pid)
+
+	// Delete process from process map
 	proc, ok := pt.processMap.Load(pid)
 	if !ok {
 		delete(pt.pendingExits, pid)

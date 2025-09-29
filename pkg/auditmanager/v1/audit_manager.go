@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/auditmanager/crd"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -38,6 +39,9 @@ type AuditManagerV1 struct {
 	// Event processing
 	eventChan chan *auditmanager.AuditEvent
 	exporter  *exporters.ExporterBus // Direct connection to exporters
+
+	// For kubernetes enrichment
+	processTreeManager processtree.ProcessTreeManager
 
 	// Kubernetes enrichment
 	containerCollection *containercollection.ContainerCollection
@@ -65,7 +69,7 @@ type AuditManagerV1 struct {
 }
 
 // NewAuditManagerV1 creates a new audit manager instance
-func NewAuditManagerV1(config *config.Config, exporter *exporters.ExporterBus) (*AuditManagerV1, error) {
+func NewAuditManagerV1(config *config.Config, exporter *exporters.ExporterBus, processTreeManager processtree.ProcessTreeManager) (*AuditManagerV1, error) {
 	if exporter == nil {
 		return nil, fmt.Errorf("exporter cannot be nil")
 	}
@@ -81,6 +85,7 @@ func NewAuditManagerV1(config *config.Config, exporter *exporters.ExporterBus) (
 		config:              config,
 		eventChan:           make(chan *auditmanager.AuditEvent, 1000), // Buffered channel for events
 		exporter:            exporter,
+		processTreeManager:  processTreeManager,
 		containerCollection: nil, // Will be set later via SetContainerCollection
 		pidToMntnsCache:     pidToMntnsCache,
 		crdRules:            make(map[string]*crd.LinuxAuditRule),
@@ -217,10 +222,6 @@ func (am *AuditManagerV1) parseAggregatedAuditMessages(msgs []*auparse.AuditMess
 
 	// Store raw message from primary message for debugging
 	event.RawMessage = primaryMsg.RawData
-
-	// Tags are now the same as keys - they come directly from the audit rule
-	// No need for separate lookup since keys in rules become tags in events
-	event.Tags = event.Keys
 
 	// Enrich with Kubernetes context
 	am.enrichWithKubernetesContext(event)
@@ -1111,27 +1112,27 @@ func (am *AuditManagerV1) getMountNamespaceForPID(pid uint32) (uint64, error) {
 
 // enrichWithKubernetesContext enriches audit events with Kubernetes context information
 func (am *AuditManagerV1) enrichWithKubernetesContext(event *auditmanager.AuditEvent) {
-	// Skip if no PID or no container collection available
-	if event.PID == 0 || am.containerCollection == nil {
-		logger.L().Debug("skipping Kubernetes enrichment",
-			helpers.String("reason", "no PID or no container collection"),
-			helpers.Int("pid", int(event.PID)),
-			helpers.String("containerCollectionNil", fmt.Sprintf("%v", am.containerCollection == nil)))
-		return
-	}
 
-	// Get mount namespace for the process
-	mntns, err := am.getMountNamespaceForPID(event.PID)
+	// Get container ID from process tree manager
+	containerID, err := am.processTreeManager.GetContainerIDForPid(event.PID)
 	if err != nil {
-		// Process might have exited or be inaccessible - this is normal
-		logger.L().Debug("failed to get mount namespace for PID",
+		logger.L().Debug("failed to get container ID from process tree manager",
 			helpers.Int("pid", int(event.PID)),
 			helpers.Error(err))
 		return
 	}
 
+	// Skip if no PID or no container collection available
+	if event.PID == 0 || containerID == "" {
+		logger.L().Debug("skipping Kubernetes enrichment",
+			helpers.String("reason", "no PID or no container ID"),
+			helpers.Int("pid", int(event.PID)),
+			helpers.String("containerID", containerID))
+		return
+	}
+
 	// Lookup container by mount namespace
-	container := am.containerCollection.LookupContainerByMntns(mntns)
+	container := am.containerCollection.GetContainer(containerID)
 	if container == nil {
 		// Process is not in a tracked container - this is normal for host processes
 		return
@@ -1141,10 +1142,4 @@ func (am *AuditManagerV1) enrichWithKubernetesContext(event *auditmanager.AuditE
 	event.Pod = container.K8s.PodName
 	event.Namespace = container.K8s.Namespace
 	event.ContainerID = container.Runtime.ContainerID
-
-	logger.L().Debug("enriched audit event with Kubernetes context",
-		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-		helpers.String("pod", event.Pod),
-		helpers.String("namespace", event.Namespace),
-		helpers.String("containerID", event.ContainerID))
 }

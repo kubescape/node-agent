@@ -364,7 +364,7 @@ func main() {
 		// Create dedicated exporter for audit events with separate configuration
 		auditExporter := exporters.InitExporters(cfg.AuditDetection.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
 
-		auditManager, err = auditmanagerv1.NewAuditManagerV1(&cfg, auditExporter)
+		auditManager, err = auditmanagerv1.NewAuditManagerV1(&cfg, auditExporter, processTreeManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating AuditManager", helpers.Error(err))
 		}
@@ -400,6 +400,7 @@ func main() {
 
 	// Set container collection for audit manager Kubernetes enrichment
 	if auditManagerV1, ok := auditManager.(*auditmanagerv1.AuditManagerV1); ok && cfg.EnableAuditDetection {
+		logger.L().Info("setting container collection for audit manager Kubernetes enrichment")
 		auditManagerV1.SetContainerCollection(mainHandler.GetContainerCollection())
 	}
 

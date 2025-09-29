@@ -15,11 +15,12 @@ import (
 )
 
 type processTreeCreatorImpl struct {
-	processMap            maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
-	containerTree         containerprocesstree.ContainerProcessTree
-	reparentingStrategies reparenting.ReparentingStrategies
-	mutex                 sync.RWMutex // Protects process tree modifications
-	config                config.Config
+	processMap                maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
+	processIDToContainerIDMap maps.SafeMap[uint32, string]            // PID -> ContainerID
+	containerTree             containerprocesstree.ContainerProcessTree
+	reparentingStrategies     reparenting.ReparentingStrategies
+	mutex                     sync.RWMutex // Protects process tree modifications
+	config                    config.Config
 
 	// Exit manager fields
 	pendingExits        map[uint32]*pendingExit // PID -> pending exit
@@ -35,11 +36,12 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 	}
 
 	creator := &processTreeCreatorImpl{
-		processMap:            maps.SafeMap[uint32, *apitypes.Process]{},
-		reparentingStrategies: reparentingLogic,
-		containerTree:         containerTree,
-		pendingExits:          make(map[uint32]*pendingExit),
-		config:                config,
+		processMap:                maps.SafeMap[uint32, *apitypes.Process]{},
+		processIDToContainerIDMap: maps.SafeMap[uint32, string]{},
+		reparentingStrategies:     reparentingLogic,
+		containerTree:             containerTree,
+		pendingExits:              make(map[uint32]*pendingExit),
+		config:                    config,
 	}
 
 	return creator
@@ -85,6 +87,14 @@ func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
 
 func (pt *processTreeCreatorImpl) GetProcessMap() *maps.SafeMap[uint32, *apitypes.Process] {
 	return &pt.processMap
+}
+
+func (pt *processTreeCreatorImpl) GetContainerIDForPid(pid uint32) (string, error) {
+	containerID, ok := pt.processIDToContainerIDMap.Load(pid)
+	if !ok {
+		return "", fmt.Errorf("container ID for PID %d not found", pid)
+	}
+	return containerID, nil
 }
 
 func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, error) {
@@ -144,6 +154,10 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
+	// Handling container ID for the process
+	pt.processIDToContainerIDMap.Set(event.PID, event.ContainerID)
+
+	// Handling process tree
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
 		proc = pt.getOrCreateProcess(event.PID)
@@ -218,6 +232,10 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
+	// Handling container ID for the process
+	pt.processIDToContainerIDMap.Set(event.PID, event.ContainerID)
+
+	// Handling process tree
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
 		proc = pt.getOrCreateProcess(event.PID)
