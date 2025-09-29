@@ -174,8 +174,8 @@ func TestLoadConfig(t *testing.T) {
 func TestIgnoreContainer(t *testing.T) {
 	config := Config{
 		NamespaceName: "test-namespace",
-		ExcludeLabels: map[string]string{
-			"app.kubernetes.io/name": "test-app",
+		ExcludeLabels: map[string][]string{
+			"app.kubernetes.io/name": {"test-app"},
 		},
 		ExcludeNamespaces: []string{"excluded-namespace"},
 	}

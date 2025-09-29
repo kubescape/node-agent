@@ -42,7 +42,7 @@ type Config struct {
 	EnableFIM                      bool                                     `mapstructure:"fimEnabled"`
 	NodeProfileInterval            time.Duration                            `mapstructure:"nodeProfileInterval"`
 	EnableSeccomp                  bool                                     `mapstructure:"seccompServiceEnabled"`
-	ExcludeLabels                  map[string]string                        `mapstructure:"excludeLabels"`
+	ExcludeLabels                  map[string][]string                      `mapstructure:"excludeLabels"`
 	ExcludeNamespaces              []string                                 `mapstructure:"excludeNamespaces"`
 	IncludeNamespaces              []string                                 `mapstructure:"includeNamespaces"`
 	EnableSbomGeneration           bool                                     `mapstructure:"sbomGenerationEnabled"`
@@ -173,7 +173,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("fim::periodicConfig::followSymlinks", false)
 	viper.SetDefault("fim::exporters::stdoutExporter", false)
 
-  viper.AutomaticEnv()
+	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
 	if err != nil {
@@ -201,10 +201,12 @@ func (c *Config) IgnoreContainer(ns, podName string, labels map[string]string) b
 		return true
 	}
 	// check if config excludes the pod labels
-	for k, v := range c.ExcludeLabels {
+	for k, values := range c.ExcludeLabels {
 		if labelValue, ok := labels[k]; ok {
-			if strings.EqualFold(labelValue, v) {
-				return true
+			for _, v := range values {
+				if strings.EqualFold(labelValue, v) {
+					return true
+				}
 			}
 		}
 	}
