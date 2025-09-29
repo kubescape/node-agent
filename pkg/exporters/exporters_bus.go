@@ -14,12 +14,13 @@ import (
 )
 
 type ExportersConfig struct {
-	StdoutExporter           *bool               `mapstructure:"stdoutExporter"`
-	HTTPExporterConfig       *HTTPExporterConfig `mapstructure:"httpExporterConfig"`
-	SyslogExporter           string              `mapstructure:"syslogExporterURL"`
-	CsvRuleExporterPath      string              `mapstructure:"CsvRuleExporterPath"`
-	CsvMalwareExporterPath   string              `mapstructure:"CsvMalwareExporterPath"`
-	AlertManagerExporterUrls []string            `mapstructure:"alertManagerExporterUrls"`
+	StdoutExporter           *bool                    `mapstructure:"stdoutExporter"`
+	HTTPExporterConfig       *HTTPExporterConfig      `mapstructure:"httpExporterConfig"`
+	AuditbeatExporterConfig  *AuditbeatExporterConfig `mapstructure:"auditbeatExporterConfig"`
+	SyslogExporter           string                   `mapstructure:"syslogExporterURL"`
+	CsvRuleExporterPath      string                   `mapstructure:"CsvRuleExporterPath"`
+	CsvMalwareExporterPath   string                   `mapstructure:"CsvMalwareExporterPath"`
+	AlertManagerExporterUrls []string                 `mapstructure:"alertManagerExporterUrls"`
 }
 
 // This file will contain the single point of contact for all exporters,
@@ -62,6 +63,22 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 			exporters = append(exporters, httpExporter)
 		} else {
 			logger.L().Warning("InitExporters - failed to initialize http exporter", helpers.Error(err))
+		}
+	}
+
+	// Initialize auditbeat exporter
+	if exportersConfig.AuditbeatExporterConfig == nil {
+		if auditbeatURL := os.Getenv("AUDITBEAT_ENDPOINT_URL"); auditbeatURL != "" {
+			exportersConfig.AuditbeatExporterConfig = &AuditbeatExporterConfig{}
+			exportersConfig.AuditbeatExporterConfig.URL = auditbeatURL
+		}
+	}
+	if exportersConfig.AuditbeatExporterConfig != nil {
+		auditbeatExporter, err := NewAuditbeatExporter(*exportersConfig.AuditbeatExporterConfig, clusterName, nodeName, cloudMetadata)
+		if err == nil {
+			exporters = append(exporters, auditbeatExporter)
+		} else {
+			logger.L().Warning("InitExporters - failed to initialize auditbeat exporter", helpers.Error(err))
 		}
 	}
 

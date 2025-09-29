@@ -226,12 +226,6 @@ func (am *AuditManagerV1) parseAggregatedAuditMessages(msgs []*auparse.AuditMess
 	// Enrich with Kubernetes context
 	am.enrichWithKubernetesContext(event)
 
-	logger.L().Debug("parseAggregatedAuditMessages: successfully created event",
-		helpers.Interface("keys", event.Keys),
-		helpers.String("type", event.Type.String()),
-		helpers.String("path", event.Path),
-		helpers.Interface("tags", event.Tags))
-
 	return event
 }
 
