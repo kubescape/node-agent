@@ -17,9 +17,10 @@ type AuditEvent struct {
 	// Process information
 	PID       uint32
 	PPID      uint32
-	UID       uint32
+	AUID      uint32 // Audit User ID (original user who logged in)
+	UID       uint32 // Real User ID (who owns the process)
 	GID       uint32
-	EUID      uint32
+	EUID      uint32 // Effective User ID (current privileges)
 	EGID      uint32
 	SUID      uint32 // Saved UID
 	SGID      uint32 // Saved GID
@@ -117,8 +118,8 @@ func NewAuditResult(event *AuditEvent) *AuditResultImpl {
 				PPID: uint32(event.PPID),
 				Comm: event.Comm,
 				Path: event.Exe,
-				Uid:  &event.UID,
-				Gid:  &event.GID,
+				Uid:  &event.EUID,
+				Gid:  &event.EGID,
 			},
 		},
 		k8sDetails: apitypes.RuntimeAlertK8sDetails{
@@ -162,7 +163,7 @@ func (ae *AuditEvent) IsFileWatchEvent() bool {
 // determineSeverity determines the severity based on audit event characteristics
 func determineSeverity(event *AuditEvent) int {
 	// Higher severity for privileged operations
-	if event.UID == 0 { // root user
+	if event.EUID == 0 { // root user
 		return 8 // High severity
 	}
 

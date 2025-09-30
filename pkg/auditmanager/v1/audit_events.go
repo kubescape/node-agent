@@ -18,9 +18,10 @@ type AuditEvent struct {
 	// Process information
 	PID  uint32 `json:"pid"`
 	PPID uint32 `json:"ppid"`
-	UID  uint32 `json:"uid"`
+	AUID uint32 `json:"auid"` // Audit User ID (original user who logged in)
+	UID  uint32 `json:"uid"`  // Real User ID (who owns the process)
 	GID  uint32 `json:"gid"`
-	EUID uint32 `json:"euid"`
+	EUID uint32 `json:"euid"` // Effective User ID (current privileges)
 	EGID uint32 `json:"egid"`
 	Comm string `json:"comm"`
 	Exe  string `json:"exe"`
@@ -74,6 +75,7 @@ func (ae *AuditEvent) GetProcessInfo() ProcessInfo {
 	return ProcessInfo{
 		PID:  ae.PID,
 		PPID: ae.PPID,
+		AUID: ae.AUID,
 		UID:  ae.UID,
 		GID:  ae.GID,
 		EUID: ae.EUID,
@@ -87,9 +89,10 @@ func (ae *AuditEvent) GetProcessInfo() ProcessInfo {
 type ProcessInfo struct {
 	PID  uint32 `json:"pid"`
 	PPID uint32 `json:"ppid"`
-	UID  uint32 `json:"uid"`
+	AUID uint32 `json:"auid"` // Audit User ID (original user who logged in)
+	UID  uint32 `json:"uid"`  // Real User ID (who owns the process)
 	GID  uint32 `json:"gid"`
-	EUID uint32 `json:"euid"`
+	EUID uint32 `json:"euid"` // Effective User ID (current privileges)
 	EGID uint32 `json:"egid"`
 	Comm string `json:"comm"`
 	Exe  string `json:"exe"`

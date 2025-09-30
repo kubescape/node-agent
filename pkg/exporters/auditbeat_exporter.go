@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -204,8 +205,11 @@ func (e *AuditbeatExporter) convertToAuditbeatEvent(auditResult auditmanager.Aud
 		eventOutcome = "failure"
 	}
 
+	// Convert types.Time (nanoseconds) to time.Time
+	eventTime := time.Unix(0, int64(auditEvent.Timestamp))
+
 	out := AuditbeatEvent{
-		timestamp:    time.Unix(0, int64(auditEvent.Timestamp)),
+		timestamp:    eventTime,
 		rootFields:   make(map[string]interface{}),
 		moduleFields: make(map[string]interface{}),
 	}
@@ -280,30 +284,37 @@ func (e *AuditbeatExporter) createAuditdData(data map[string]string) map[string]
 
 // addUser adds user information to the event (mimics addUser from audit_linux.go)
 func (e *AuditbeatExporter) addUser(auditEvent *auditmanager.AuditEvent, root map[string]interface{}) {
-	if auditEvent.UID == 0 && auditEvent.EUID == 0 {
+	// Skip only if both AUID and EUID are unset (not 0, which is root)
+	if auditEvent.AUID == 4294967295 && auditEvent.EUID == 4294967295 {
 		return
 	}
 
 	user := make(map[string]interface{})
 	root["user"] = user
 
-	// Primary user ID
-	if auditEvent.UID != 0 {
-		user["id"] = strconv.FormatUint(uint64(auditEvent.UID), 10)
+	// Primary user ID (AUID - original user who logged in)
+	const UIDUnset = uint32(4294967295)
+	if auditEvent.AUID != UIDUnset {
+		user["id"] = strconv.FormatUint(uint64(auditEvent.AUID), 10)
+	}
+
+	// Real user ID (UID - who owns the process)
+	if auditEvent.UID != UIDUnset {
+		user["real.id"] = strconv.FormatUint(uint64(auditEvent.UID), 10)
 	}
 
 	// Group ID
-	if auditEvent.GID != 0 {
+	if auditEvent.GID != UIDUnset {
 		user["group.id"] = strconv.FormatUint(uint64(auditEvent.GID), 10)
 	}
 
-	// Effective user ID
-	if auditEvent.EUID != 0 && auditEvent.EUID != auditEvent.UID {
+	// Effective user ID (EUID - current privileges)
+	if auditEvent.EUID != UIDUnset && auditEvent.EUID != auditEvent.AUID {
 		user["effective.id"] = strconv.FormatUint(uint64(auditEvent.EUID), 10)
 	}
 
 	// Effective group ID
-	if auditEvent.EGID != 0 && auditEvent.EGID != auditEvent.GID {
+	if auditEvent.EGID != UIDUnset && auditEvent.EGID != auditEvent.GID {
 		user["effective.group.id"] = strconv.FormatUint(uint64(auditEvent.EGID), 10)
 	}
 
@@ -399,8 +410,8 @@ func (e *AuditbeatExporter) addFile(auditEvent *auditmanager.AuditEvent, root ma
 		file["mode"] = fmt.Sprintf("%04o", auditEvent.Mode)
 	}
 
-	if auditEvent.UID != 0 {
-		file["uid"] = strconv.FormatUint(uint64(auditEvent.UID), 10)
+	if auditEvent.AUID != 0 {
+		file["auid"] = strconv.FormatUint(uint64(auditEvent.AUID), 10)
 	}
 
 	if auditEvent.GID != 0 {
@@ -463,11 +474,33 @@ func (e *AuditbeatExporter) addHost(auditEvent *auditmanager.AuditEvent, root ma
 	}
 }
 
+// getBuildVersion returns the version from build info
+func (e *AuditbeatExporter) getBuildVersion() string {
+	bi, ok := debug.ReadBuildInfo()
+	if ok {
+		// First try to get the main module version
+		if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			return bi.Main.Version
+		}
+		// If main version is not available, try to get from build settings
+		for _, setting := range bi.Settings {
+			if setting.Key == "vcs.revision" {
+				// Return first 8 characters of commit hash
+				if len(setting.Value) >= 8 {
+					return setting.Value[:8]
+				}
+				return setting.Value
+			}
+		}
+	}
+	return "unknown"
+}
+
 // addAgent adds agent information to the event
 func (e *AuditbeatExporter) addAgent(auditEvent *auditmanager.AuditEvent, root map[string]interface{}) {
 	agent := map[string]interface{}{
 		"type":    "kubescape-node-agent",
-		"version": "1.0.0", // TODO: Get from build info
+		"version": e.getBuildVersion(),
 	}
 	root["agent"] = agent
 }
@@ -476,17 +509,24 @@ func (e *AuditbeatExporter) addAgent(auditEvent *auditmanager.AuditEvent, root m
 func (e *AuditbeatExporter) addSummary(auditEvent *auditmanager.AuditEvent, module map[string]interface{}) {
 	summary := make(map[string]interface{})
 
-	// Actor information
-	if auditEvent.Comm != "" || auditEvent.UID != 0 {
-		actor := make(map[string]interface{})
-		if auditEvent.Comm != "" {
-			actor["primary"] = auditEvent.Comm
-		}
-		if auditEvent.UID == 0 {
-			actor["secondary"] = "root"
-		}
-		summary["actor"] = actor
+	// Actor information - primary should be auid (LoginUID), secondary should be euid (EUID)
+	actor := make(map[string]interface{})
+
+	// Primary actor: auid (LoginUID) - the user who originally logged in
+	if auditEvent.AUID != 4294967295 {
+		actor["primary"] = strconv.FormatUint(uint64(auditEvent.AUID), 10)
+	} else {
+		actor["primary"] = "unset"
 	}
+
+	// Secondary actor: euid (EUID) - the effective user ID
+	if auditEvent.EUID != 4294967295 {
+		actor["secondary"] = strconv.FormatUint(uint64(auditEvent.EUID), 10)
+	} else {
+		actor["secondary"] = "unset"
+	}
+
+	summary["actor"] = actor
 
 	// Object information
 	if auditEvent.Path != "" {

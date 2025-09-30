@@ -193,6 +193,7 @@ func (am *AuditManagerV1) parseAggregatedAuditMessages(msgs []*auparse.AuditMess
 		Type:      primaryMsg.RecordType,
 		Timestamp: types.Time(primaryMsg.Timestamp.UnixNano()),
 		Sequence:  primaryMsg.Sequence,
+		Success:   true, // Default to success, will be overridden if "success" field is present
 	}
 
 	// Extract keys from the message sequence (prioritize SYSCALL messages)
@@ -513,6 +514,9 @@ func (am *AuditManagerV1) extractProcessInfo(event *auditmanager.AuditEvent, dat
 	if ppid, err := strconv.ParseUint(data["ppid"], 10, 32); err == nil {
 		event.PPID = uint32(ppid)
 	}
+	if uid, err := strconv.ParseUint(data["auid"], 10, 32); err == nil {
+		event.AUID = uint32(uid)
+	}
 	if uid, err := strconv.ParseUint(data["uid"], 10, 32); err == nil {
 		event.UID = uint32(uid)
 	}
@@ -576,9 +580,9 @@ func (am *AuditManagerV1) extractSyscallInfo(event *auditmanager.AuditEvent, dat
 	event.Arch = data["arch"]
 	event.ErrorCode = data["exit"] // Already enriched by auparse
 
-	// Parse success field - audit uses "yes"/"no" not "true"/"false"
-	if successStr := data["success"]; successStr != "" {
-		event.Success = (successStr == "yes")
+	// Parse success field - auparse transforms "success=yes/no" to "result=success/fail"
+	if resultStr := data["result"]; resultStr != "" {
+		event.Success = (resultStr == "success")
 	}
 
 	if exit, err := strconv.ParseInt(data["exit"], 10, 32); err == nil {
@@ -783,29 +787,70 @@ func (am *AuditManagerV1) processAuditEvent(event *auditmanager.AuditEvent) {
 
 	// Convert v1.AuditEvent to auditmanager.AuditEvent and send directly to exporters (bypassing rule manager)
 	auditEvent := &auditmanager.AuditEvent{
-		AuditID:     event.AuditID,
-		Type:        event.Type,
-		PID:         event.PID,
-		PPID:        event.PPID,
-		UID:         event.UID,
-		GID:         event.GID,
-		EUID:        event.EUID,
-		EGID:        event.EGID,
-		Comm:        event.Comm,
-		Exe:         event.Exe,
-		Syscall:     event.Syscall,
-		Args:        event.Args,
-		Success:     event.Success,
-		Exit:        event.Exit,
-		Path:        event.Path,
-		Mode:        event.Mode,
-		Operation:   event.Operation,
-		Keys:        event.Keys,
-		RuleType:    event.RuleType,
+		// Header information
+		AuditID:   event.AuditID,
+		Timestamp: event.Timestamp, // FIXED: Copy the timestamp!
+		Sequence:  event.Sequence,
+		Type:      event.Type,
+
+		// Process information
+		PID:       event.PID,
+		PPID:      event.PPID,
+		AUID:      event.AUID,
+		UID:       event.UID,
+		GID:       event.GID,
+		EUID:      event.EUID,
+		EGID:      event.EGID,
+		SUID:      event.SUID,
+		SGID:      event.SGID,
+		FSUID:     event.FSUID,
+		FSGID:     event.FSGID,
+		Comm:      event.Comm,
+		Exe:       event.Exe,
+		CWD:       event.CWD,
+		TTY:       event.TTY,
+		ProcTitle: event.ProcTitle,
+		SessionID: event.SessionID,
+		LoginUID:  event.LoginUID,
+
+		// Syscall information
+		Syscall:    event.Syscall,
+		SyscallNum: event.SyscallNum,
+		Arch:       event.Arch,
+		Args:       event.Args,
+		Success:    event.Success,
+		Exit:       event.Exit,
+		ErrorCode:  event.ErrorCode,
+
+		// File information
+		Path:      event.Path,
+		Mode:      event.Mode,
+		DevMajor:  event.DevMajor,
+		DevMinor:  event.DevMinor,
+		Inode:     event.Inode,
+		Operation: event.Operation,
+
+		// Network information
+		SockAddr:   event.SockAddr,
+		SockFamily: event.SockFamily,
+		SockPort:   event.SockPort,
+
+		// Security information
+		Keys:            event.Keys,
+		Tags:            event.Tags,
+		RuleType:        event.RuleType,
+		SELinuxContext:  event.SELinuxContext,
+		AppArmorProfile: event.AppArmorProfile,
+		Capabilities:    event.Capabilities,
+
+		// Kubernetes context
 		Pod:         event.Pod,
 		Namespace:   event.Namespace,
 		ContainerID: event.ContainerID,
-		RawMessage:  event.RawMessage,
+
+		// Raw data
+		RawMessage: event.RawMessage,
+		Data:       event.Data,
 	}
 	auditResult := auditmanager.NewAuditResult(auditEvent)
 	am.exporter.SendAuditAlert(auditResult)

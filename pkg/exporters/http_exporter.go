@@ -40,11 +40,6 @@ const (
 	AlertTypeLimitReached AlertType = "AlertLimitReached"
 )
 
-type HTTPKeyValues struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
-
 type HTTPExporterConfig struct {
 	URL                string          `json:"url"`
 	Path               *string         `json:"path,omitempty"`
