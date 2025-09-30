@@ -204,24 +204,25 @@ linuxAudit:
 
 # Node agent configuration
 nodeAgent:
-  auditDetection:
-    enabled: true
-    exporters:
-      stdoutExporter: true
-      httpExporterConfig:
-        url: "http://your-siem-endpoint/audit-events"
-        timeoutSeconds: 10
-      auditbeatExporterConfig:
-        url: "http://elasticsearch:9200/auditbeat-events"
-        timeoutSeconds: 5
-        maxEventsPerMinute: 1000
-        batchSize: 10
-        enableBatching: true
-        resolveIds: true
-        warnings: true
-        rawMessage: false
-    eventFilter:
-      includeTypes: []  # Empty means only rule-based events
+  config:
+    auditDetection:
+        enabled: true
+        exporters:
+        stdoutExporter: true
+        httpExporterConfig:
+            url: "http://your-siem-endpoint/audit-events"
+            timeoutSeconds: 10
+        auditbeatExporterConfig:
+            url: "http://elasticsearch:9200/auditbeat-events"
+            timeoutSeconds: 5
+            maxEventsPerMinute: 1000
+            batchSize: 10
+            enableBatching: true
+            resolveIds: true
+            warnings: true
+            rawMessage: false
+        eventFilter:
+        includeTypes: []  # Empty means only rule-based events
 ```
 
 Install with custom values:
