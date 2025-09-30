@@ -246,7 +246,7 @@ func main() {
 	// Start the process tree manager to activate the exit cleanup manager
 	processTreeManager.Start()
 
-	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
+	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection || cfg.EnableAuditDetection {
 		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("error getting cloud metadata", helpers.Error(err))

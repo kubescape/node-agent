@@ -472,6 +472,11 @@ func (e *AuditbeatExporter) addHost(auditEvent *auditmanager.AuditEvent, root ma
 	if e.nodeName != "" {
 		root["host.name"] = e.nodeName
 	}
+
+	// Add cloud metadata if available
+	if e.cloudMetadata != nil {
+		root["cloud"] = e.cloudMetadata
+	}
 }
 
 // getBuildVersion returns the version from build info
