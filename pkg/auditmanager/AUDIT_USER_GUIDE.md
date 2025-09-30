@@ -2,6 +2,46 @@
 
 This comprehensive guide will walk you through setting up and using the node-agent audit feature, which provides real-time Linux audit event monitoring and analysis in Kubernetes environments.
 
+## TL;DR - Quick Start
+
+For immediate testing and evaluation:
+
+```bash
+# 1. Add Kubescape Helm repository
+helm repo add kubescape https://kubescape.github.io/helm-charts/
+helm repo update
+
+# 2. Install with Linux audit enabled
+helm install kubescape-operator kubescape/kubescape-operator \
+  --namespace kubescape \
+  --create-namespace \
+  --set linuxAudit.enabled=true
+
+# 3. Create a test audit rule
+kubectl apply -f - <<EOF
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+  name: test-file-monitoring
+  namespace: kubescape
+spec:
+  enabled: true
+  rules:
+  - name: test-rule
+    description: "Monitor /tmp directory"
+    fileWatch:
+      paths: ["/tmp"]
+      permissions: [read, write]
+      keys: ["test_monitoring"]
+EOF
+
+# 4. Test the rule
+kubectl exec -n kubescape -l app=kubescape-operator -- touch /tmp/test-file
+
+# 5. Check logs for audit events
+kubectl logs -n kubescape -l app=kubescape-operator | grep "audit event"
+```
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -114,173 +154,160 @@ The node-agent requires the following capabilities:
 
 ## Installation
 
-### Step 1: Install the CRD
+### Step 1: Install Kubescape Operator with Linux Audit
 
-First, install the `LinuxAuditRule` Custom Resource Definition:
-
-```bash
-# Apply the CRD
-kubectl apply -f manifests/crd-auditrule.yaml
-
-# Verify the CRD is installed
-kubectl get crd linuxauditrules.kubescape.io
-```
-
-### Step 2: Deploy Node-Agent with Audit Feature
-
-Deploy the node-agent using the Helm chart with audit detection enabled:
+The Kubescape Operator Helm chart includes the Linux audit feature as an optional capability. Install it with audit monitoring enabled:
 
 ```bash
 # Add the Kubescape Helm repository
 helm repo add kubescape https://kubescape.github.io/helm-charts/
 helm repo update
 
-# Install node-agent with audit capabilities
-helm install node-agent kubescape/node-agent \
+# Install Kubescape Operator with Linux audit enabled
+helm install kubescape-operator kubescape/kubescape-operator \
   --namespace kubescape \
   --create-namespace \
-  --set auditDetectionEnabled=true \
-  --set securityContext.capabilities.add[0]=AUDIT_CONTROL \
-  --set securityContext.capabilities.add[1]=AUDIT_READ \
-  --set securityContext.capabilities.add[2]=SYS_ADMIN
+  --set linuxAudit.enabled=true
 ```
 
-#### Required Capabilities for Audit Feature
+### Step 2: Verify Installation
 
-The audit feature requires additional Linux capabilities beyond the default node-agent configuration:
+Check that the installation was successful:
 
-- **`AUDIT_CONTROL`** - Required to manage audit rules and configuration
+```bash
+# Verify the CRD is installed
+kubectl get crd linuxauditrules.kubescape.io
+
+# Check that the operator is running
+kubectl get pods -n kubescape -l app=kubescape-operator
+
+# Verify the node-agent daemonset is running
+kubectl get daemonset -n kubescape
+```
+
+### Step 3: Configure Audit Detection
+
+The Helm chart automatically configures the node-agent with the required capabilities and settings when `linuxAudit.enabled=true`. The following capabilities are automatically added:
+
 - **`AUDIT_READ`** - Required to read audit events from the kernel
-- **`SYS_ADMIN`** - Required for container context enrichment and process information gathering
+- **`AUDIT_WRITE`** - Required to write audit events
+- **`AUDIT_CONTROL`** - Required to manage audit rules and configuration
 
-#### Custom Values File
+#### Custom Configuration
 
-For more complex configurations, create a custom values file:
+For advanced configurations, create a custom values file:
 
 ```yaml
-# node-agent-audit-values.yaml
-auditDetectionEnabled: true
+# kubescape-audit-values.yaml
+linuxAudit:
+  enabled: true
 
-securityContext:
-  capabilities:
-    add:
-    - AUDIT_CONTROL
-    - AUDIT_READ
-    - SYS_ADMIN
-
-# Optional: Configure audit detection settings
-auditDetection:
-  exporters:
-    stdoutExporter: true
-    httpExporterConfig:
-      url: "http://your-siem-endpoint/audit-events"
-      timeoutSeconds: 10
+# Node agent configuration
+nodeAgent:
+  auditDetection:
+    enabled: true
+    exporters:
+      stdoutExporter: true
+      httpExporterConfig:
+        url: "http://your-siem-endpoint/audit-events"
+        timeoutSeconds: 10
+      auditbeatExporterConfig:
+        url: "http://elasticsearch:9200/auditbeat-events"
+        timeoutSeconds: 5
+        maxEventsPerMinute: 1000
+        batchSize: 10
+        enableBatching: true
+        resolveIds: true
+        warnings: true
+        rawMessage: false
+    eventFilter:
+      includeTypes: []  # Empty means only rule-based events
 ```
 
-Then install with the custom values:
+Install with custom values:
 
 ```bash
-helm install node-agent kubescape/node-agent \
+helm install kubescape-operator kubescape/kubescape-operator \
   --namespace kubescape \
   --create-namespace \
-  --values node-agent-audit-values.yaml
-```
-
-### Step 3: Verify RBAC Configuration
-
-The Helm chart automatically creates the necessary ServiceAccount and RBAC resources. The node-agent requires the following permissions:
-
-- **`linuxauditrules`** - Get, list, and watch `LinuxAuditRule` custom resources
-- **`pods`** - Get, list, and watch pods for container context enrichment
-- **`nodes`** - Get, list, and watch nodes for node information
-
-You can verify the RBAC configuration:
-
-```bash
-# Check ServiceAccount
-kubectl get serviceaccount node-agent -n kubescape
-
-# Check ClusterRole
-kubectl get clusterrole node-agent
-
-# Check ClusterRoleBinding
-kubectl get clusterrolebinding node-agent
-
-# View detailed permissions
-kubectl describe clusterrole node-agent
-```
-
-If you need to customize RBAC, you can override the default configuration in your values file:
-
-```yaml
-# custom-rbac-values.yaml
-rbac:
-  create: true
-  rules:
-  - apiGroups: ["kubescape.io"]
-    resources: ["linuxauditrules"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods", "nodes"]
-    verbs: ["get", "list", "watch"]
+  --values kubescape-audit-values.yaml
 ```
 
 ## Configuration
 
-### Enable Audit Detection
+### Helm Chart Configuration
 
-Configure the node-agent to enable audit detection:
+The Linux audit feature is configured through the Kubescape Operator Helm chart. The configuration is managed via the `linuxAudit` and `nodeAgent` sections in the values file.
+
+#### Basic Configuration
+
+Enable Linux audit monitoring:
 
 ```yaml
-# config.yaml
-auditDetectionEnabled: true
-
-auditDetection:
-  exporters:
-    # Enable stdout exporter for debugging
-    stdoutExporter: true
-
-    # Configure HTTP exporter
-    httpExporterConfig:
-      url: "http://your-siem-endpoint/audit-events"
-      timeoutSeconds: 10
-      headers:
-        - key: "Authorization"
-          value: "Bearer your-token"
-        - key: "Content-Type"
-          value: "application/json"
-
-    # Configure auditbeat exporter
-    auditbeatExporterConfig:
-      url: "http://elasticsearch:9200/auditbeat-events"
-      timeoutSeconds: 5
-      maxEventsPerMinute: 1000
-      batchSize: 10
-      enableBatching: true
-      resolveIds: true
-      warnings: true
-      rawMessage: false
-
-  # Event filtering
-  eventFilter:
-    # Include specific event types (optional)
-    # Empty list means only export rule-based events
-    includeTypes: []  # e.g., [1300, 1302] for SYSCALL and PATH events
+# values.yaml
+linuxAudit:
+  enabled: true
 ```
 
-### Environment Variables
+#### Advanced Configuration
 
-You can also configure exporters via environment variables:
+For detailed configuration of audit detection and exporters:
+
+```yaml
+# values.yaml
+linuxAudit:
+  enabled: true
+
+nodeAgent:
+  auditDetection:
+    enabled: true
+    exporters:
+      # Enable stdout exporter for debugging
+      stdoutExporter: true
+
+      # Configure HTTP exporter
+      httpExporterConfig:
+        url: "http://your-siem-endpoint/audit-events"
+        timeoutSeconds: 10
+        headers:
+          - key: "Authorization"
+            value: "Bearer your-token"
+          - key: "Content-Type"
+            value: "application/json"
+
+      # Configure auditbeat exporter
+      auditbeatExporterConfig:
+        url: "http://elasticsearch:9200/auditbeat-events"
+        timeoutSeconds: 5
+        maxEventsPerMinute: 1000
+        batchSize: 10
+        enableBatching: true
+        resolveIds: true
+        warnings: true
+        rawMessage: false
+
+    # Event filtering
+    eventFilter:
+      # Include specific event types (optional)
+      # Empty list means only export rule-based events
+      includeTypes: []  # e.g., [1300, 1302] for SYSCALL and PATH events
+```
+
+### Updating Configuration
+
+To update the configuration after installation:
 
 ```bash
-# HTTP Exporter
-export HTTP_EXPORTER_URL="http://your-siem-endpoint/audit-events"
-export HTTP_EXPORTER_TIMEOUT="10"
+# Update with new values
+helm upgrade kubescape-operator kubescape/kubescape-operator \
+  --namespace kubescape \
+  --values your-updated-values.yaml
 
-# Auditbeat Exporter
-export AUDITBEAT_ENDPOINT_URL="http://elasticsearch:9200/auditbeat-events"
-export AUDITBEAT_TIMEOUT="5"
-export AUDITBEAT_MAX_EVENTS_PER_MINUTE="1000"
+# Or update specific values
+helm upgrade kubescape-operator kubescape/kubescape-operator \
+  --namespace kubescape \
+  --set linuxAudit.enabled=true \
+  --set nodeAgent.auditDetection.exporters.stdoutExporter=true
 ```
 
 ## Adding Audit Rules
@@ -527,61 +554,159 @@ spec:
 
 ## Exporters
 
+The Kubescape Operator supports multiple exporters for audit events. Configure them through the Helm chart values.
+
 ### Stdout Exporter
 
-The stdout exporter outputs audit events to the container logs:
+The stdout exporter outputs audit events to the container logs for debugging:
 
 ```yaml
-auditDetection:
-  exporters:
-    stdoutExporter: true
+# values.yaml
+nodeAgent:
+  auditDetection:
+    exporters:
+      stdoutExporter: true
 ```
 
 ### HTTP Exporter
 
-Send events to HTTP endpoints:
+Send events to HTTP endpoints (SIEM systems, webhooks, etc.):
 
 ```yaml
-auditDetection:
-  exporters:
-    httpExporterConfig:
-      url: "http://your-siem-endpoint/audit-events"
-      method: "POST"
-      timeoutSeconds: 10
-      headers:
-        - key: "Authorization"
-          value: "Bearer your-token"
-        - key: "Content-Type"
-          value: "application/json"
-      queryParams:
-        - key: "source"
-          value: "node-agent"
-        - key: "cluster"
-          value: "production"
-      maxEventsPerMinute: 1000
-      batchSize: 10
-      enableBatching: true
+# values.yaml
+nodeAgent:
+  auditDetection:
+    exporters:
+      httpExporterConfig:
+        url: "http://your-siem-endpoint/audit-events"
+        method: "POST"
+        timeoutSeconds: 10
+        headers:
+          - key: "Authorization"
+            value: "Bearer your-token"
+          - key: "Content-Type"
+            value: "application/json"
+        queryParams:
+          - key: "source"
+            value: "node-agent"
+          - key: "cluster"
+            value: "production"
+        maxEventsPerMinute: 1000
+        batchSize: 10
+        enableBatching: true
 ```
 
 ### Auditbeat Exporter
 
-Send events in auditbeat-compatible format:
+The auditbeat exporter sends events in auditbeat-compatible format, making it easy to integrate with Elasticsearch and other systems that expect auditbeat data.
+
+#### Basic Auditbeat Configuration
 
 ```yaml
-auditDetection:
-  exporters:
-    auditbeatExporterConfig:
-      url: "http://elasticsearch:9200/auditbeat-events"
-      timeoutSeconds: 5
-      maxEventsPerMinute: 2000
-      batchSize: 20
-      enableBatching: true
-      resolveIds: true
-      warnings: true
-      rawMessage: false
-      headers:
-        - key: "Content-Type"
-          value: "application/json"
+# values.yaml
+nodeAgent:
+  auditDetection:
+    exporters:
+      auditbeatExporterConfig:
+        url: "http://elasticsearch:9200/auditbeat-events"
+        timeoutSeconds: 5
+        maxEventsPerMinute: 2000
+        batchSize: 20
+        enableBatching: true
+        resolveIds: true
+        warnings: true
+        rawMessage: false
+```
+
+#### Advanced Auditbeat Configuration
+
+```yaml
+# values.yaml
+nodeAgent:
+  auditDetection:
+    exporters:
+      auditbeatExporterConfig:
+        url: "http://elasticsearch:9200/auditbeat-events"
+        timeoutSeconds: 5
+        maxEventsPerMinute: 2000
+        batchSize: 20
+        enableBatching: true
+        resolveIds: true
+        warnings: true
+        rawMessage: false
+        headers:
+          - key: "Content-Type"
+            value: "application/json"
+          - key: "Authorization"
+            value: "Bearer your-elasticsearch-token"
+        retryAttempts: 3
+        retryDelay: "1s"
+```
+
+#### Auditbeat Configuration Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `url` | Elasticsearch endpoint URL | Required |
+| `timeoutSeconds` | HTTP request timeout | 5 |
+| `maxEventsPerMinute` | Rate limiting for events | 2000 |
+| `batchSize` | Number of events per batch | 20 |
+| `enableBatching` | Enable event batching | true |
+| `resolveIds` | Resolve user/group IDs to names | true |
+| `warnings` | Include warning messages | true |
+| `rawMessage` | Include raw audit messages | false |
+| `headers` | Custom HTTP headers | [] |
+| `retryAttempts` | Number of retry attempts | 3 |
+| `retryDelay` | Delay between retries | "1s" |
+
+#### Example: Elasticsearch Integration
+
+For Elasticsearch integration, create an index template and configure the auditbeat exporter:
+
+```yaml
+# elasticsearch-auditbeat-values.yaml
+nodeAgent:
+  auditDetection:
+    exporters:
+      auditbeatExporterConfig:
+        url: "http://elasticsearch:9200/auditbeat-7.17.0"
+        timeoutSeconds: 10
+        maxEventsPerMinute: 5000
+        batchSize: 50
+        enableBatching: true
+        resolveIds: true
+        warnings: true
+        rawMessage: false
+        headers:
+          - key: "Content-Type"
+            value: "application/json"
+          - key: "Authorization"
+            value: "Bearer ${ELASTICSEARCH_TOKEN}"
+```
+
+#### Example: Splunk Integration
+
+For Splunk integration via HTTP Event Collector (HEC):
+
+```yaml
+# splunk-auditbeat-values.yaml
+nodeAgent:
+  auditDetection:
+    exporters:
+      auditbeatExporterConfig:
+        url: "https://splunk:8088/services/collector/event"
+        timeoutSeconds: 10
+        maxEventsPerMinute: 1000
+        batchSize: 10
+        enableBatching: true
+        resolveIds: true
+        warnings: false
+        rawMessage: false
+        headers:
+          - key: "Content-Type"
+            value: "application/json"
+          - key: "Authorization"
+            value: "Splunk ${SPLUNK_HEC_TOKEN}"
 ```
 
 ### Syslog Exporter
@@ -589,9 +714,11 @@ auditDetection:
 Send events to syslog:
 
 ```yaml
-auditDetection:
-  exporters:
-    syslogExporterURL: "udp://syslog-server:514"
+# values.yaml
+nodeAgent:
+  auditDetection:
+    exporters:
+      syslogExporterURL: "udp://syslog-server:514"
 ```
 
 ## Monitoring and Troubleshooting
@@ -609,13 +736,19 @@ kubectl describe linuxauditrule sensitive-files-monitoring -n kubescape
 kubectl get linuxauditrule sensitive-files-monitoring -n kubescape -o yaml
 ```
 
-### View Node-Agent Logs
+### View Operator and Node-Agent Logs
 
 ```bash
-# Get node-agent pods
+# Get kubescape-operator pods
+kubectl get pods -n kubescape -l app=kubescape-operator
+
+# View operator logs
+kubectl logs -n kubescape -l app=kubescape-operator -f
+
+# Get node-agent daemonset pods
 kubectl get pods -n kubescape -l app=node-agent
 
-# View logs
+# View node-agent logs
 kubectl logs -n kubescape -l app=node-agent -f
 
 # View logs from a specific node
@@ -787,6 +920,9 @@ spec:
 # Check rule status
 kubectl describe linuxauditrule your-rule-name -n kubescape
 
+# Check operator logs
+kubectl logs -n kubescape -l app=kubescape-operator | grep -i error
+
 # Check node-agent logs
 kubectl logs -n kubescape -l app=node-agent | grep -i error
 
@@ -828,21 +964,37 @@ kubectl patch linuxauditrule your-rule-name -n kubescape --type='merge' -p='{"sp
 # Check exporter configuration
 kubectl logs -n kubescape -l app=node-agent | grep -i exporter
 
+# Check Helm values
+helm get values kubescape-operator -n kubescape
+
 # Test HTTP endpoint
 curl -X POST http://your-endpoint/audit-events -H "Content-Type: application/json" -d '{"test":"data"}'
 
-# Check network connectivity
+# Check network connectivity from node-agent pod
 kubectl exec -n kubescape -l app=node-agent -- curl -I http://your-endpoint
+
+# Check auditbeat exporter specifically
+kubectl logs -n kubescape -l app=node-agent | grep -i auditbeat
 ```
 
 ### Debug Mode
 
-Enable debug logging:
+Enable debug logging through Helm values:
 
 ```yaml
-# config.yaml
-logLevel: debug
-auditDetectionEnabled: true
+# values.yaml
+nodeAgent:
+  logLevel: debug
+  auditDetection:
+    enabled: true
+```
+
+Or update existing installation:
+
+```bash
+helm upgrade kubescape-operator kubescape/kubescape-operator \
+  --namespace kubescape \
+  --set nodeAgent.logLevel=debug
 ```
 
 ### Support
