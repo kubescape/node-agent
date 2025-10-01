@@ -29,7 +29,7 @@ func TestCRDToAuditctlConversion(t *testing.T) {
 				Name: "execve-monitor",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "exec_monitor",
+					Keys:         []string{"exec_monitor"},
 					Architecture: []string{"b64"},
 				},
 			},
@@ -44,7 +44,7 @@ func TestCRDToAuditctlConversion(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/passwd"},
 					Permissions: []string{"write", "attribute"},
-					Key:         "identity_changes",
+					Keys:        []string{"identity_changes"},
 				},
 			},
 			expectedAuditctl: "-w /etc/passwd -p wa -k identity_changes",
@@ -57,7 +57,7 @@ func TestCRDToAuditctlConversion(t *testing.T) {
 				Name: "complex-syscall",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"open", "openat"},
-					Key:          "file_access",
+					Keys:         []string{"file_access"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "auid", Operator: ">=", Value: "500"},
@@ -86,7 +86,7 @@ func TestCRDToAuditctlConversion(t *testing.T) {
 				Name: "process-executable",
 				Process: &ProcessRule{
 					Executables: []string{"/bin/su"},
-					Key:         "su_execution",
+					Keys:        []string{"su_execution"},
 				},
 			},
 			expectedAuditctl: "-a always,exit -F arch=b64 -S execve -F exe=/bin/su -k su_execution",
@@ -99,7 +99,7 @@ func TestCRDToAuditctlConversion(t *testing.T) {
 				Name: "syscall-args",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"ptrace"},
-					Key:          "ptrace_monitor",
+					Keys:         []string{"ptrace_monitor"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "a0", Operator: "=", Value: "0x10"},
@@ -157,7 +157,7 @@ func TestRuleParsingValidation(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/passwd"},
 					Permissions: []string{"write"},
-					Key:         "basic_watch",
+					Keys:        []string{"basic_watch"},
 				},
 			},
 			description: "Basic file watch should parse",
@@ -168,7 +168,7 @@ func TestRuleParsingValidation(t *testing.T) {
 				Name: "syscall-no-filters",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "execve_monitor",
+					Keys:     []string{"execve_monitor"},
 				},
 			},
 			description: "Syscall without filters should parse",
@@ -179,7 +179,7 @@ func TestRuleParsingValidation(t *testing.T) {
 				Name: "syscall-arch-only",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "execve_arch",
+					Keys:         []string{"execve_arch"},
 					Architecture: []string{"b64"},
 				},
 			},
@@ -232,7 +232,7 @@ func TestProblematicRules(t *testing.T) {
 				Name: "comm-filter-test",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "comm_test",
+					Keys:     []string{"comm_test"},
 					Filters: []SyscallFilter{
 						{Field: "comm", Operator: "=", Value: "apt"},
 					},
@@ -247,7 +247,7 @@ func TestProblematicRules(t *testing.T) {
 				Name: "exe-filter-test",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "exe_test",
+					Keys:     []string{"exe_test"},
 					Filters: []SyscallFilter{
 						{Field: "exe", Operator: "=", Value: "/usr/bin/apt"},
 					},
@@ -262,7 +262,7 @@ func TestProblematicRules(t *testing.T) {
 				Name: "path-filter-test",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"all"},
-					Key:      "path_test",
+					Keys:     []string{"path_test"},
 					Filters: []SyscallFilter{
 						{Field: "path", Operator: "=", Value: "/bin/su"},
 					},
@@ -314,7 +314,7 @@ func TestRuleConversionAccuracy(t *testing.T) {
 				Name: "apt-install-detection",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "apt_install_key",
+					Keys:         []string{"apt_install_key"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "comm", Operator: "=", Value: "apt"},
@@ -330,7 +330,7 @@ func TestRuleConversionAccuracy(t *testing.T) {
 				Name: "package-manager-monitoring",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "package_manager_key",
+					Keys:         []string{"package_manager_key"},
 					Architecture: []string{"b64"},
 					// No filters
 				},
@@ -370,7 +370,7 @@ func TestMultipleRulesConversion(t *testing.T) {
 					Name: "rule-1",
 					Syscall: &SyscallRule{
 						Syscalls: []string{"execve"},
-						Key:      "rule_1_key",
+						Keys:     []string{"rule_1_key"},
 					},
 				},
 				{
@@ -378,7 +378,7 @@ func TestMultipleRulesConversion(t *testing.T) {
 					FileWatch: &FileWatchRule{
 						Paths:       []string{"/etc/passwd"},
 						Permissions: []string{"write"},
-						Key:         "rule_2_key",
+						Keys:        []string{"rule_2_key"},
 					},
 				},
 				{
@@ -435,7 +435,7 @@ func TestRuleValidationPipeline(t *testing.T) {
 				Name: "valid-syscall",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "valid_key",
+					Keys:     []string{"valid_key"},
 				},
 			},
 			shouldPass:  true,
@@ -447,7 +447,7 @@ func TestRuleValidationPipeline(t *testing.T) {
 				Name: "no-key-syscall",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "", // No key - now allowed
+					Keys:     nil, // No key - now allowed
 				},
 			},
 			shouldPass:  true,
@@ -459,7 +459,7 @@ func TestRuleValidationPipeline(t *testing.T) {
 				Name: "invalid-syscall",
 				Syscall: &SyscallRule{
 					Syscalls: []string{}, // Empty syscalls
-					Key:      "invalid_key",
+					Keys:     []string{"invalid_key"},
 				},
 			},
 			shouldPass:  false,

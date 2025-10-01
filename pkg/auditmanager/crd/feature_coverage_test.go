@@ -26,7 +26,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 				Name: "execve-auid-filter",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "audit_users_exe",
+					Keys:         []string{"audit_users_exe"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "auid", Operator: "!=", Value: "4294967295"},
@@ -43,7 +43,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 				Syscall: &SyscallRule{
 					Syscalls: []string{"all"},
 					Action:   "never",
-					Key:      "exclude_dir",
+					Keys:     []string{"exclude_dir"},
 					Filters: []SyscallFilter{
 						{Field: "dir", Operator: "=", Value: "/hostfs/var/run/containers"},
 					},
@@ -58,7 +58,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 				Name: "path-perm-filters",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"chmod", "fchmod", "fchmodat"},
-					Key:          "perm_mod",
+					Keys:         []string{"perm_mod"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "auid", Operator: ">=", Value: "500"},
@@ -75,7 +75,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 				Name: "exit-code-filters",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"creat", "open", "openat", "truncate", "ftruncate"},
-					Key:          "file_access_denied",
+					Keys:         []string{"file_access_denied"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "exit", Operator: "=", Value: "-EACCES"},
@@ -94,7 +94,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 				Name: "syscall-args-hex",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"ptrace"},
-					Key:          "audit_ptrace_attach",
+					Keys:         []string{"audit_ptrace_attach"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "auid", Operator: "!=", Value: "-1"},
@@ -112,7 +112,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 				Name: "path-perm-execution",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"all"},
-					Key:      "sensitive_file_access",
+					Keys:     []string{"sensitive_file_access"},
 					Filters: []SyscallFilter{
 						{Field: "path", Operator: "=", Value: "/etc/sensitive/config"},
 						{Field: "perm", Operator: "=", Value: "r"},
@@ -132,7 +132,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 					Syscalls:     []string{"sethostname", "setdomainname"},
 					Action:       "always",
 					List:         "exit",
-					Key:          "system-locale",
+					Keys:         []string{"system-locale"},
 					Architecture: []string{"b64"},
 				},
 			},
@@ -145,7 +145,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 				Name: "file-operations",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"unlink", "unlinkat", "rename", "renameat"},
-					Key:          "delete",
+					Keys:         []string{"delete"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "auid", Operator: ">=", Value: "500"},
@@ -163,7 +163,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 				Name: "kernel-modules",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"init_module", "delete_module"},
-					Key:          "modules",
+					Keys:         []string{"modules"},
 					Architecture: []string{"b64"},
 				},
 			},
@@ -176,7 +176,7 @@ func TestSyscallRuleFeatures(t *testing.T) {
 				Name: "mount-operations",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"mount"},
-					Key:          "mounts",
+					Keys:         []string{"mounts"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "auid", Operator: ">=", Value: "500"},
@@ -216,7 +216,7 @@ func TestFileWatchRuleFeatures(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/issue"},
 					Permissions: []string{"write", "attribute"},
-					Key:         "system-locale",
+					Keys:        []string{"system-locale"},
 				},
 			},
 			expectedRule: "-w /etc/issue -p wa -k system-locale",
@@ -229,7 +229,7 @@ func TestFileWatchRuleFeatures(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/sbin/insmod"},
 					Permissions: []string{"execute"},
-					Key:         "modules",
+					Keys:        []string{"modules"},
 				},
 			},
 			expectedRule: "-w /sbin/insmod -p x -k modules",
@@ -242,7 +242,7 @@ func TestFileWatchRuleFeatures(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/var/log/faillog", "/var/log/lastlog", "/var/log/tallylog"},
 					Permissions: []string{"write", "attribute"},
-					Key:         "logins",
+					Keys:        []string{"logins"},
 				},
 			},
 			expectedRule: "\n-w /var/log/faillog -p wa -k logins\n-w /var/log/lastlog -p wa -k logins\n-w /var/log/tallylog -p wa -k logins",
@@ -255,7 +255,7 @@ func TestFileWatchRuleFeatures(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/sudoers"},
 					Permissions: []string{"read", "write", "attribute", "execute"},
-					Key:         "scope",
+					Keys:        []string{"scope"},
 				},
 			},
 			expectedRule: "-w /etc/sudoers -p rwax -k scope",
@@ -268,7 +268,7 @@ func TestFileWatchRuleFeatures(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/selinux/"},
 					Permissions: []string{"write", "attribute"},
-					Key:         "MAC-policy",
+					Keys:        []string{"MAC-policy"},
 				},
 			},
 			expectedRule: "-w /etc/selinux/ -p wa -k MAC-policy",
@@ -386,7 +386,7 @@ func TestFilterOperatorCoverage(t *testing.T) {
 				Name: "operator-test-" + op.operator,
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "operator_test",
+					Keys:     []string{"operator_test"},
 					Filters: []SyscallFilter{
 						{Field: "auid", Operator: op.operator, Value: op.value},
 					},
@@ -437,7 +437,7 @@ func TestFieldCoverage(t *testing.T) {
 				Name: "field-test-" + field.field,
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "field_test",
+					Keys:     []string{"field_test"},
 					Filters: []SyscallFilter{
 						{Field: field.field, Operator: "=", Value: field.value},
 					},
@@ -484,7 +484,7 @@ func TestSyscallCoverage(t *testing.T) {
 				Name: "syscall-test-" + sys.syscalls[0],
 				Syscall: &SyscallRule{
 					Syscalls: sys.syscalls,
-					Key:      "syscall_test",
+					Keys:     []string{"syscall_test"},
 				},
 			}
 
@@ -530,7 +530,7 @@ func TestConversionAccuracy(t *testing.T) {
 				Name: "execve-users",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "audit_users_exe",
+					Keys:         []string{"audit_users_exe"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "auid", Operator: "!=", Value: "4294967295"},
@@ -547,7 +547,7 @@ func TestConversionAccuracy(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/sudoers"},
 					Permissions: []string{"write", "attribute"},
-					Key:         "scope",
+					Keys:        []string{"scope"},
 				},
 			},
 			expectedCmd: "-w /etc/sudoers -p wa -k scope",
@@ -559,7 +559,7 @@ func TestConversionAccuracy(t *testing.T) {
 				Name: "file-access-denied",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"creat", "open", "openat", "truncate", "ftruncate"},
-					Key:          "file_access_denied",
+					Keys:         []string{"file_access_denied"},
 					Architecture: []string{"b64"},
 					Filters: []SyscallFilter{
 						{Field: "exit", Operator: "=", Value: "-EACCES"},

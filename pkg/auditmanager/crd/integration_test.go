@@ -21,10 +21,9 @@ func TestConvertFullCRD(t *testing.T) {
 					Description: "Monitor apt install commands to detect package installations",
 					Enabled:     true,
 					Priority:    100,
-					Tags:        []string{"security", "package-management", "apt-install", "system-changes"},
 					Syscall: &SyscallRule{
 						Syscalls:     []string{"execve"},
-						Key:          "apt_install_key",
+						Keys:         []string{"apt_install_key"},
 						Action:       "always",
 						List:         "exit",
 						Architecture: []string{"b64"},
@@ -39,10 +38,9 @@ func TestConvertFullCRD(t *testing.T) {
 					Description: "Monitor dpkg calls during package installation",
 					Enabled:     true,
 					Priority:    101,
-					Tags:        []string{"security", "package-management", "dpkg", "system-changes"},
 					Syscall: &SyscallRule{
 						Syscalls:     []string{"execve"},
-						Key:          "dpkg_install_key",
+						Keys:         []string{"dpkg_install_key"},
 						Action:       "always",
 						List:         "exit",
 						Architecture: []string{"b64"},
@@ -57,10 +55,9 @@ func TestConvertFullCRD(t *testing.T) {
 					Description: "Monitor common package manager commands",
 					Enabled:     true,
 					Priority:    102,
-					Tags:        []string{"security", "package-management", "package-managers"},
 					Syscall: &SyscallRule{
 						Syscalls:     []string{"execve"},
-						Key:          "package_manager_key",
+						Keys:         []string{"package_manager_key"},
 						Action:       "always",
 						List:         "exit",
 						Architecture: []string{"b64"},
@@ -72,7 +69,6 @@ func TestConvertFullCRD(t *testing.T) {
 					Description: "Monitor package managers using raw audit rule",
 					Enabled:     true,
 					Priority:    103,
-					Tags:        []string{"security", "package-management", "raw-rule"},
 					RawRule:     "-a always,exit -F arch=b64 -S execve -F comm=apt -F comm=apt-get -F comm=dpkg -F comm=yum -F comm=dnf -k package_manager_raw",
 				},
 			},
@@ -134,7 +130,7 @@ func TestConvertEnabledRulesOnly(t *testing.T) {
 					Enabled: true,
 					Syscall: &SyscallRule{
 						Syscalls: []string{"execve"},
-						Key:      "enabled_key",
+						Keys:     []string{"enabled_key"},
 					},
 				},
 				{
@@ -142,7 +138,7 @@ func TestConvertEnabledRulesOnly(t *testing.T) {
 					Enabled: false, // Disabled
 					Syscall: &SyscallRule{
 						Syscalls: []string{"open"},
-						Key:      "disabled_key",
+						Keys:     []string{"disabled_key"},
 					},
 				},
 				{
@@ -150,7 +146,7 @@ func TestConvertEnabledRulesOnly(t *testing.T) {
 					Enabled: true,
 					Syscall: &SyscallRule{
 						Syscalls: []string{"close"},
-						Key:      "another_enabled_key",
+						Keys:     []string{"another_enabled_key"},
 					},
 				},
 			},
@@ -188,7 +184,7 @@ func TestConvertRuleWithDifferentTypes(t *testing.T) {
 					Name: "syscall-rule",
 					Syscall: &SyscallRule{
 						Syscalls: []string{"execve"},
-						Key:      "syscall_key",
+						Keys:     []string{"syscall_key"},
 					},
 				},
 				{
@@ -196,7 +192,7 @@ func TestConvertRuleWithDifferentTypes(t *testing.T) {
 					FileWatch: &FileWatchRule{
 						Paths:       []string{"/etc/passwd"},
 						Permissions: []string{"write"},
-						Key:         "filewatch_key",
+						Keys:        []string{"filewatch_key"},
 					},
 				},
 				{
@@ -207,7 +203,7 @@ func TestConvertRuleWithDifferentTypes(t *testing.T) {
 					Name: "process-rule",
 					Process: &ProcessRule{
 						Executables: []string{"/bin/bash"},
-						Key:         "process_key",
+						Keys:        []string{"process_key"},
 					},
 				},
 			},
@@ -249,21 +245,21 @@ func TestRuleKeyUniqueness(t *testing.T) {
 					Name: "rule-1",
 					Syscall: &SyscallRule{
 						Syscalls: []string{"execve"},
-						Key:      "key_1",
+						Keys:     []string{"key_1"},
 					},
 				},
 				{
 					Name: "rule-2",
 					Syscall: &SyscallRule{
 						Syscalls: []string{"open"},
-						Key:      "key_2",
+						Keys:     []string{"key_2"},
 					},
 				},
 				{
 					Name: "rule-3",
 					Syscall: &SyscallRule{
 						Syscalls: []string{"close"},
-						Key:      "key_3",
+						Keys:     []string{"key_3"},
 					},
 				},
 			},
@@ -278,7 +274,9 @@ func TestRuleKeyUniqueness(t *testing.T) {
 
 		// Extract key from rule definition
 		if ruleDef.Syscall != nil {
-			ruleKeys[ruleDef.Syscall.Key] = true
+			for _, key := range ruleDef.Syscall.Keys {
+				ruleKeys[key] = true
+			}
 		}
 	}
 

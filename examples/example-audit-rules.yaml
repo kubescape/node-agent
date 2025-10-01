@@ -21,21 +21,21 @@ spec:
     file_watch:
       path: /etc/passwd
       permissions: ["write", "attribute"]
-      key: passwd_changes
+      keys: ["passwd_changes"]
   - name: shadow-monitoring
     description: "Monitor access to password shadow file"
     type: file_watch
     file_watch:
       path: /etc/shadow
       permissions: ["read", "write", "attribute"]
-      key: shadow_access
+      keys: ["shadow_access"]
   - name: hosts-monitoring
     description: "Monitor changes to hosts file"
     type: file_watch
     file_watch:
       path: /etc/hosts
       permissions: ["write", "attribute"]
-      key: hosts_changes
+      keys: ["hosts_changes"]
   rateLimit:
     maxEventsPerSecond: 100
     burstSize: 200
@@ -63,7 +63,7 @@ spec:
       architecture: "b64"
       action: "always"
       list_type: "exit"
-      key: process_execution
+      keys: ["process_execution"]
   - name: suspicious-commands
     description: "Monitor execution of potentially suspicious commands"
     type: syscall
@@ -82,7 +82,7 @@ spec:
         - field: "exe"
           operator: "="
           value: "/usr/bin/curl"
-      key: suspicious_exec
+      keys: ["suspicious_exec"]
   rateLimit:
     maxEventsPerSecond: 50
     burstSize: 100
@@ -110,7 +110,7 @@ spec:
       architecture: "b64"
       action: "always"
       list_type: "exit"
-      key: network_activity
+      keys: ["network_activity"]
   - name: socket-creation
     description: "Monitor socket creation"
     type: syscall
@@ -123,7 +123,7 @@ spec:
         - field: "a0"
           operator: "="
           value: "2"  # AF_INET
-      key: socket_creation
+      keys: ["socket_creation"]
   rateLimit:
     maxEventsPerSecond: 200
     burstSize: 400
@@ -155,14 +155,14 @@ spec:
         - field: "dir"
           operator: "="
           value: "/etc"
-      key: file_deletions
+      keys: ["file_deletions"]
   - name: directory-watch
     description: "Monitor access to /var/log directory"
     type: file_watch
     file_watch:
       path: /var/log
       permissions: ["read", "write", "execute", "attribute"]
-      key: log_directory_access
+      keys: ["log_directory_access"]
   rateLimit:
     maxEventsPerSecond: 150
     burstSize: 300
@@ -188,7 +188,7 @@ spec:
     file_watch:
       path: /tmp/audit-test
       permissions: ["write"]
-      key: simple_test
+      keys: ["simple_test"]
   rateLimit:
     maxEventsPerSecond: 10
     burstSize: 20

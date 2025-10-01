@@ -23,7 +23,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "apt-install-detection",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "apt_install_key",
+					Keys:         []string{"apt_install_key"},
 					Action:       "always",
 					List:         "exit",
 					Architecture: []string{"b64"},
@@ -44,7 +44,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "dpkg-installation-monitoring",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "dpkg_install_key",
+					Keys:         []string{"dpkg_install_key"},
 					Action:       "always",
 					List:         "exit",
 					Architecture: []string{"b64"},
@@ -65,7 +65,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "package-manager-monitoring",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "package_manager_key",
+					Keys:         []string{"package_manager_key"},
 					Action:       "always",
 					List:         "exit",
 					Architecture: []string{"b64"},
@@ -83,7 +83,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "multi-syscall-rule",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"open", "openat"},
-					Key:          "file_access_key",
+					Keys:         []string{"file_access_key"},
 					Action:       "always",
 					List:         "exit",
 					Architecture: []string{"b64"},
@@ -103,7 +103,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "default-values-rule",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "default_key",
+					Keys:     []string{"default_key"},
 					// Action defaults to "always", List defaults to "exit"
 				},
 			},
@@ -118,7 +118,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "multi-arch-rule",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "multi_arch_key",
+					Keys:         []string{"multi_arch_key"},
 					Architecture: []string{"b64", "b32"},
 					Filters: []SyscallFilter{
 						{Field: "pid", Operator: "=", Value: "1234"},
@@ -136,7 +136,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "invalid-arch-rule",
 				Syscall: &SyscallRule{
 					Syscalls:     []string{"execve"},
-					Key:          "invalid_arch_key",
+					Keys:         []string{"invalid_arch_key"},
 					Architecture: []string{"invalid"},
 				},
 			},
@@ -149,7 +149,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "invalid-action-rule",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "invalid_action_key",
+					Keys:     []string{"invalid_action_key"},
 					Action:   "invalid",
 				},
 			},
@@ -162,7 +162,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "invalid-list-rule",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "invalid_list_key",
+					Keys:     []string{"invalid_list_key"},
 					List:     "invalid",
 				},
 			},
@@ -175,7 +175,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "missing-syscalls-rule",
 				Syscall: &SyscallRule{
 					Syscalls: []string{}, // Empty syscalls
-					Key:      "missing_syscalls_key",
+					Keys:     []string{"missing_syscalls_key"},
 				},
 			},
 			expectedError: true,
@@ -187,7 +187,7 @@ func TestConvertSyscallRule(t *testing.T) {
 				Name: "missing-key-rule",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "", // Empty key - now allowed
+					Keys:     nil, // Empty key - now allowed
 				},
 			},
 			expectedRules: []string{"-a always,exit -S execve"},
@@ -232,7 +232,7 @@ func TestConvertFileWatchRule(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/passwd"},
 					Permissions: []string{"write", "attribute"},
-					Key:         "passwd_changes",
+					Keys:        []string{"passwd_changes"},
 				},
 			},
 			expectedRules: []string{
@@ -247,7 +247,7 @@ func TestConvertFileWatchRule(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/passwd", "/etc/shadow", "/etc/group"},
 					Permissions: []string{"read", "write"},
-					Key:         "identity_files",
+					Keys:        []string{"identity_files"},
 				},
 			},
 			expectedRules: []string{
@@ -264,7 +264,7 @@ func TestConvertFileWatchRule(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/var/log"},
 					Permissions: []string{"read", "write", "execute", "attribute"},
-					Key:         "log_directory_access",
+					Keys:        []string{"log_directory_access"},
 				},
 			},
 			expectedRules: []string{
@@ -279,7 +279,7 @@ func TestConvertFileWatchRule(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/tmp", "/tmp/exclude"},
 					Permissions: []string{"write"},
-					Key:         "tmp_monitoring",
+					Keys:        []string{"tmp_monitoring"},
 					Exclude:     []string{"/tmp/exclude"},
 				},
 			},
@@ -296,7 +296,7 @@ func TestConvertFileWatchRule(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/passwd"},
 					Permissions: []string{"invalid"},
-					Key:         "invalid_permission_key",
+					Keys:        []string{"invalid_permission_key"},
 				},
 			},
 			expectedError: true,
@@ -309,7 +309,7 @@ func TestConvertFileWatchRule(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{}, // Empty paths
 					Permissions: []string{"write"},
-					Key:         "missing_paths_key",
+					Keys:        []string{"missing_paths_key"},
 				},
 			},
 			expectedError: true,
@@ -322,7 +322,7 @@ func TestConvertFileWatchRule(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/passwd"},
 					Permissions: []string{}, // Empty permissions
-					Key:         "missing_permissions_key",
+					Keys:        []string{"missing_permissions_key"},
 				},
 			},
 			expectedError: true,
@@ -335,7 +335,7 @@ func TestConvertFileWatchRule(t *testing.T) {
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/passwd"},
 					Permissions: []string{"write"},
-					Key:         "", // Empty key
+					Keys:        nil, // Empty key
 				},
 			},
 			expectedError: true,
@@ -455,7 +455,7 @@ func TestConvertProcessRule(t *testing.T) {
 				Name: "suspicious-commands",
 				Process: &ProcessRule{
 					Executables: []string{"/bin/nc", "/usr/bin/wget", "/usr/bin/curl"},
-					Key:         "suspicious_exec",
+					Keys:        []string{"suspicious_exec"},
 				},
 			},
 			expectedRules: []string{
@@ -469,7 +469,7 @@ func TestConvertProcessRule(t *testing.T) {
 				Name: "user-specific-process",
 				Process: &ProcessRule{
 					Users: []string{"root", "admin"},
-					Key:   "privileged_user_exec",
+					Keys:  []string{"privileged_user_exec"},
 				},
 			},
 			expectedRules: []string{
@@ -483,7 +483,7 @@ func TestConvertProcessRule(t *testing.T) {
 				Name: "group-specific-process",
 				Process: &ProcessRule{
 					Groups: []string{"wheel", "sudo"},
-					Key:    "privileged_group_exec",
+					Keys:   []string{"privileged_group_exec"},
 				},
 			},
 			expectedRules: []string{
@@ -497,7 +497,7 @@ func TestConvertProcessRule(t *testing.T) {
 				Name: "filtered-process",
 				Process: &ProcessRule{
 					Executables: []string{"/bin/bash"},
-					Key:         "bash_exec",
+					Keys:        []string{"bash_exec"},
 					Filters: []SyscallFilter{
 						{Field: "pid", Operator: "=", Value: "1234"},
 						{Field: "uid", Operator: "!=", Value: "1000"},
@@ -516,7 +516,7 @@ func TestConvertProcessRule(t *testing.T) {
 				Process: &ProcessRule{
 					Executables: []string{"/bin/rm"},
 					Arguments:   []string{"-rf", "/"},
-					Key:         "dangerous_rm",
+					Keys:        []string{"dangerous_rm"},
 				},
 			},
 			expectedRules: []string{
@@ -532,7 +532,7 @@ func TestConvertProcessRule(t *testing.T) {
 				Name: "missing-key-process",
 				Process: &ProcessRule{
 					Executables: []string{"/bin/bash"},
-					Key:         "", // Empty key
+					Keys:        nil, // Empty key
 				},
 			},
 			expectedError: true,
@@ -584,12 +584,12 @@ func TestConvertRuleValidation(t *testing.T) {
 				Name: "multiple-rules",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "syscall_key",
+					Keys:     []string{"syscall_key"},
 				},
 				FileWatch: &FileWatchRule{
 					Paths:       []string{"/etc/passwd"},
 					Permissions: []string{"write"},
-					Key:         "filewatch_key",
+					Keys:        []string{"filewatch_key"},
 				},
 			},
 			expectedError: true,
@@ -601,7 +601,7 @@ func TestConvertRuleValidation(t *testing.T) {
 				Name: "invalid-filter-rule",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "invalid_filter_key",
+					Keys:     []string{"invalid_filter_key"},
 					Filters: []SyscallFilter{
 						{Field: "pid", Operator: "invalid", Value: "1234"},
 					},
@@ -616,7 +616,7 @@ func TestConvertRuleValidation(t *testing.T) {
 				Name: "empty-filter-field",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "empty_field_key",
+					Keys:     []string{"empty_field_key"},
 					Filters: []SyscallFilter{
 						{Field: "", Operator: "=", Value: "1234"},
 					},
@@ -654,7 +654,7 @@ func TestValidateRuleDefinition(t *testing.T) {
 				Name: "valid-rule",
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "valid_key",
+					Keys:     []string{"valid_key"},
 				},
 			},
 			expectedErrors: []string{},
@@ -665,7 +665,7 @@ func TestValidateRuleDefinition(t *testing.T) {
 				Name: "", // Empty name
 				Syscall: &SyscallRule{
 					Syscalls: []string{"execve"},
-					Key:      "empty_name_key",
+					Keys:     []string{"empty_name_key"},
 				},
 			},
 			expectedErrors: []string{"rule name cannot be empty"},
@@ -676,7 +676,7 @@ func TestValidateRuleDefinition(t *testing.T) {
 				Name: "invalid-rule",
 				Syscall: &SyscallRule{
 					Syscalls: []string{}, // Empty syscalls
-					Key:      "invalid_key",
+					Keys:     []string{"invalid_key"},
 				},
 			},
 			expectedErrors: []string{"syscall rule must specify at least one syscall"},

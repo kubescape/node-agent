@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestExtractKeyFromMessageSequence(t *testing.T) {
+func TestExtractKeysFromMessageSequence(t *testing.T) {
 	// Create a mock audit manager for testing
 	am := &AuditManagerV1{}
 
@@ -88,7 +88,7 @@ func TestExtractKeyFromMessageSequence(t *testing.T) {
 			}
 
 			// Test the key extraction
-			result := am.extractKeyFromMessageSequence(msgs)
+			result := am.extractKeysFromMessageSequence(msgs)
 
 			assert.Equal(t, tt.expectedKey, result, tt.description)
 		})
@@ -99,7 +99,7 @@ func TestExtractKeyFromMessageSequence(t *testing.T) {
 // This test is kept for reference but should not be used
 
 // Benchmark test to ensure performance is acceptable
-func BenchmarkExtractKeyFromMessageSequence(b *testing.B) {
+func BenchmarkExtractKeysFromMessageSequence(b *testing.B) {
 	am := &AuditManagerV1{}
 
 	// Create test messages
@@ -117,7 +117,7 @@ func BenchmarkExtractKeyFromMessageSequence(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		am.extractKeyFromMessageSequence(msgs)
+		am.extractKeysFromMessageSequence(msgs)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestKeyExtractionBug(t *testing.T) {
 
 	// Test that our sequence extraction works with the fallback
 	msgs := []*auparse.AuditMessage{msg}
-	result := am.extractKeyFromMessageSequence(msgs)
+	result := am.extractKeysFromMessageSequence(msgs)
 	assert.Equal(t, "password_file_access", result, "Sequence extraction with fallback should work")
 }
 
