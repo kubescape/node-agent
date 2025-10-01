@@ -9,6 +9,7 @@ type ProcessTreeManager interface {
 	Start()
 	Stop()
 	GetContainerProcessTree(containerID string, pid uint32, useCache bool) (apitypes.Process, error)
+	GetContainerIDForPid(pid uint32) (string, error)
 	ReportEvent(eventType utils.EventType, event utils.K8sEvent) error
 	GetPidList() []uint32
 }

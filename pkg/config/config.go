@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elastic/go-libaudit/v2/auparse"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
@@ -83,6 +84,26 @@ type Config struct {
 	DSymlink                       bool                                     `mapstructure:"dSymlink"`
 	DTop                           bool                                     `mapstructure:"dTop"`
 	FIM                            FIMConfig                                `mapstructure:"fim"`
+	// Audit subsystem configuration
+	EnableAuditDetection bool `mapstructure:"auditDetectionEnabled"`
+
+	// Audit detection configuration including exporters and filtering
+	AuditDetection AuditDetection `mapstructure:"auditDetection"`
+}
+
+type AuditDetection struct {
+	// Exporter configuration
+	Exporters exporters.ExportersConfig `mapstructure:"exporters"`
+
+	// Event filtering configuration
+	EventFilter EventFilter `mapstructure:"eventFilter"`
+}
+
+type EventFilter struct {
+	// List of event types to export in addition to rule-based events
+	// Uses numeric types from linux/audit.h (e.g. 1300 for SYSCALL, 1302 for PATH)
+	// Empty list means only export rule-based events
+	IncludeTypes []auparse.AuditMessageType `mapstructure:"includeTypes"`
 }
 
 // FIMConfig defines the configuration for File Integrity Monitoring
@@ -158,6 +179,9 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
 	viper.SetDefault("dnsCacheSize", 50000)
+	viper.SetDefault("auditDetectionEnabled", false)
+	viper.SetDefault("auditDetection::exporters", nil)
+	viper.SetDefault("auditDetection::eventFilter::includeTypes", []string{})
 	// FIM defaults
 	viper.SetDefault("fim::backendConfig::backendType", "fanotify") // This will be parsed as a string and converted to FimBackendType
 	viper.SetDefault("fim::batchConfig::maxBatchSize", 1000)
@@ -172,7 +196,6 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("fim::periodicConfig::maxFileSize", int64(100*1024*1024))
 	viper.SetDefault("fim::periodicConfig::followSymlinks", false)
 	viper.SetDefault("fim::exporters::stdoutExporter", false)
-
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()

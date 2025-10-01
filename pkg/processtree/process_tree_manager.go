@@ -64,6 +64,10 @@ func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event 
 	return nil
 }
 
+func (ptm *ProcessTreeManagerImpl) GetContainerIDForPid(pid uint32) (string, error) {
+	return ptm.creator.GetContainerIDForPid(uint32(pid))
+}
+
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32, useCache bool) (apitypes.Process, error) {
 	cacheKey := fmt.Sprintf("%s:%d", containerID, pid)
 	if cached, exists := ptm.containerProcessTreeCache.Get(cacheKey); exists && useCache {

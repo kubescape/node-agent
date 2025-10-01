@@ -95,5 +95,27 @@
         "exporters": {
           "stdoutExporter": true
         }
+      },
+      "auditDetectionEnabled": true,
+      "auditDetection": {
+        "exporters": {
+          "stdoutExporter": "true"
+        },
+        "eventFilter": {
+          "includeTypes": [
+            1300,
+            1302,
+            1309,
+            1307,
+            1317,
+            1007,
+            1327,
+            1303,
+            1324,
+            1306,
+            1404,
+            1326
+          ]
+        }
       }
     }

@@ -1,0 +1,162 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+name: kubescape
+labels:
+  name: kubescape
+---
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+name: security-monitoring
+namespace: kubescape
+labels:
+  category: security
+  environment: production
+spec:
+enabled: true
+nodeSelector:
+  kubernetes.io/os: linux
+  # Uncomment to target specific nodes:
+  # kubernetes.io/hostname: "worker-node-1"
+  # node-type: "security"
+rateLimit:
+  eventsPerSecond: 100
+  burstSize: 200
+rules:
+- name: passwd-watch
+  description: "Monitor critical system files for unauthorized changes"
+  enabled: true
+  priority: 100
+  tags: ["security", "identity", "critical"]
+  fileWatch:
+    paths:
+      - "/etc/passwd"
+      - "/etc/shadow"
+      - "/etc/group"
+      - "/etc/gshadow"
+    permissions: ["write", "attr"]
+    key: "identity_files"
+
+- name: sudoers-watch
+  description: "Monitor sudo configuration changes"
+  enabled: true
+  priority: 110
+  tags: ["security", "privilege", "sudo"]
+  fileWatch:
+    paths: ["/etc/sudoers", "/etc/sudoers.d"]
+    permissions: ["write", "attr"]
+    key: "sudo_config"
+
+- name: ssh-config-watch
+  description: "Monitor SSH configuration changes"
+  enabled: true
+  priority: 120
+  tags: ["security", "ssh", "config"]
+  fileWatch:
+    paths: ["/host/etc/ssh/sshd_config", "/host/etc/ssh/ssh_config"]
+    permissions: ["write", "attr"]
+    key: "ssh_config"
+
+- name: sudo-execution
+  description: "Monitor processes running with elevated privileges"
+  enabled: true
+  priority: 200
+  tags: ["security", "privilege-escalation", "execution"]
+  syscall:
+    syscalls: ["execve"]
+    architecture: ["b64"]
+    action: "always"
+    list: "exit"
+    filters:
+    - field: "euid"
+      operator: "="
+      value: "0"
+    - field: "auid"
+      operator: ">="
+      value: "1000"
+    key: "privileged_exec"
+
+- name: file-access-monitoring
+  description: "Monitor file access patterns"
+  enabled: true
+  priority: 300
+  tags: ["security", "file-access", "monitoring"]
+  syscall:
+    syscalls: ["open", "openat", "creat"]
+    architecture: ["b64"]
+    action: "always"
+    list: "exit"
+    filters:
+    - field: "success"
+      operator: "="
+      value: "1"
+    key: "file_access"
+
+- name: network-connections
+  description: "Monitor network connection attempts"
+  enabled: true
+  priority: 400
+  tags: ["security", "network", "connections"]
+  syscall:
+    syscalls: ["connect", "bind"]
+    architecture: ["b64"]
+    action: "always"
+    list: "exit"
+    key: "network_activity"
+
+- name: mount-operations
+  description: "Monitor filesystem mount operations"
+  enabled: true
+  priority: 500
+  tags: ["security", "filesystem", "mount"]
+  rawRule: "-a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=4294967295 -k mount_ops"
+
+- name: process-creation
+  description: "Monitor process creation by specific users"
+  enabled: true
+  priority: 600
+  tags: ["security", "process", "monitoring"]
+  process:
+    users: ["root", "admin"]
+    filters:
+    - field: "auid"
+      operator: ">="
+      value: "1000"
+    key: "process_creation"
+---
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+name: development-monitoring
+namespace: kubescape
+labels:
+  category: development
+  environment: dev
+spec:
+enabled: false  # Disabled by default for development
+nodeSelector:
+  environment: development
+rateLimit:
+  eventsPerSecond: 50
+  burstSize: 100
+rules:
+- name: dev-file-watch
+  description: "Monitor development files"
+  enabled: true
+  priority: 100
+  tags: ["development", "files"]
+  fileWatch:
+    paths: ["/home/*/dev", "/opt/development"]
+    permissions: ["write"]
+    exclude: ["*.tmp", "*.log"]
+    key: "dev_files"
+
+- name: compiler-execution
+  description: "Monitor compiler usage"
+  enabled: true
+  priority: 200
+  tags: ["development", "compilation"]
+  process:
+    executables: ["/usr/bin/gcc", "/usr/bin/g++", "/usr/bin/clang"]
+    key: "compiler_usage"

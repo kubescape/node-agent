@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log/syslog"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -189,4 +191,21 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 func (se *SyslogExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	// TODO: Implement FIM alerts sending logic
 	logger.L().Debug("SyslogExporter.SendFimAlerts - stub implementation", helpers.Int("events", len(fimEvents)))
+}
+
+func (se *SyslogExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	auditEvent := auditResult.GetAuditEvent()
+
+	message := &rfc5424.Message{
+		Priority:  rfc5424.Daemon | rfc5424.Info,
+		Timestamp: time.Now(),
+		Hostname:  "kubescape-node-agent",
+		AppName:   "kubescape-node-agent",
+		Message:   []byte(fmt.Sprintf("Audit event '%s' detected: type=%s path=%s pid=%d comm=%s", strings.Join(auditEvent.Keys, ","), auditEvent.Type.String(), auditEvent.Path, auditEvent.PID, auditEvent.Comm)),
+	}
+
+	_, err := message.WriteTo(se.writer)
+	if err != nil {
+		logger.L().Warning("SyslogExporter - failed to send audit alert to syslog", helpers.Error(err))
+	}
 }
