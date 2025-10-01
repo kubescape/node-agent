@@ -88,18 +88,22 @@ type Config struct {
 	EnableAuditDetection bool `mapstructure:"auditDetectionEnabled"`
 
 	// Audit detection configuration including exporters and filtering
-	AuditDetection struct {
-		// Exporter configuration
-		Exporters exporters.ExportersConfig `mapstructure:"exporters"`
+	AuditDetection AuditDetection `mapstructure:"auditDetection"`
+}
 
-		// Event filtering configuration
-		EventFilter struct {
-			// List of event types to export in addition to rule-based events
-			// Uses numeric types from linux/audit.h (e.g. 1300 for SYSCALL, 1302 for PATH)
-			// Empty list means only export rule-based events
-			IncludeTypes []auparse.AuditMessageType `mapstructure:"includeTypes"`
-		} `mapstructure:"eventFilter"`
-	} `mapstructure:"auditDetection"`
+type AuditDetection struct {
+	// Exporter configuration
+	Exporters exporters.ExportersConfig `mapstructure:"exporters"`
+
+	// Event filtering configuration
+	EventFilter EventFilter `mapstructure:"eventFilter"`
+}
+
+type EventFilter struct {
+	// List of event types to export in addition to rule-based events
+	// Uses numeric types from linux/audit.h (e.g. 1300 for SYSCALL, 1302 for PATH)
+	// Empty list means only export rule-based events
+	IncludeTypes []auparse.AuditMessageType `mapstructure:"includeTypes"`
 }
 
 // FIMConfig defines the configuration for File Integrity Monitoring

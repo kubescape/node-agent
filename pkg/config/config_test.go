@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elastic/go-libaudit/v2/auparse"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	hostfimsensor "github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/ptr"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -58,7 +60,7 @@ func TestLoadConfig(t *testing.T) {
 				EnablePartialProfileGeneration: true,
 				Exporters: exporters.ExportersConfig{
 					SyslogExporter: "http://syslog.kubescape.svc.cluster.local:514",
-					StdoutExporter: &b,
+					StdoutExporter: ptr.To(false),
 					AlertManagerExporterUrls: []string{
 						"http://alertmanager.kubescape.svc.cluster.local:9093",
 						"http://alertmanager.kubescape.svc.cluster.local:9095",
@@ -152,6 +154,29 @@ func TestLoadConfig(t *testing.T) {
 					},
 					Exporters: FIMExportersConfig{
 						StdoutExporter: &fimStdout,
+					},
+				},
+				DNSCacheSize:         50000,
+				EnableAuditDetection: true,
+				AuditDetection: AuditDetection{
+					Exporters: exporters.ExportersConfig{
+						StdoutExporter: ptr.To(true),
+					},
+					EventFilter: EventFilter{
+						IncludeTypes: []auparse.AuditMessageType{
+							auparse.AUDIT_SYSCALL,
+							auparse.AUDIT_PATH,
+							auparse.AUDIT_EXECVE,
+							auparse.AUDIT_CWD,
+							auparse.AUDIT_FD_PAIR,
+							auparse.AUDIT_WATCH_INS,
+							auparse.AUDIT_PROCTITLE,
+							auparse.AUDIT_IPC,
+							auparse.AUDIT_NETFILTER_PKT,
+							auparse.AUDIT_SOCKADDR,
+							auparse.AUDIT_MAC_STATUS,
+							auparse.AUDIT_SECCOMP,
+						},
 					},
 				},
 			},
