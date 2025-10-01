@@ -36,7 +36,7 @@ type AuditEvent struct {
 
 	// Syscall information
 	Syscall    string
-	SyscallNum int32  // Raw syscall numbe																																																																												r
+	SyscallNum int32  // Raw syscall number
 	Arch       string // Architecture (e.g., b64)
 	Args       []string
 	Success    bool
@@ -108,14 +108,14 @@ func NewAuditResult(event *AuditEvent) *AuditResultImpl {
 		auditEvent: event,
 		baseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:      "Linux Audit Event",
-			InfectedPID:    uint32(event.PID),
+			InfectedPID:    event.PID,
 			FixSuggestions: "Review audit event details and investigate if this activity is expected",
 			Severity:       determineSeverity(event),
 		},
 		runtimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
-				PID:  uint32(event.PID),
-				PPID: uint32(event.PPID),
+				PID:  event.PID,
+				PPID: event.PPID,
 				Comm: event.Comm,
 				Path: event.Exe,
 				Uid:  &event.EUID,

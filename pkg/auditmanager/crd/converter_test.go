@@ -339,7 +339,7 @@ func TestConvertFileWatchRule(t *testing.T) {
 				},
 			},
 			expectedError: true,
-			errorContains: "file watch rule must specify a key",
+			errorContains: "file watch rule must specify at least one key",
 		},
 	}
 
@@ -536,7 +536,7 @@ func TestConvertProcessRule(t *testing.T) {
 				},
 			},
 			expectedError: true,
-			errorContains: "process rule must specify a key",
+			errorContains: "process rule must specify at least one key",
 		},
 	}
 

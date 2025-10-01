@@ -1,13 +1,13 @@
 package v1
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/elastic/go-libaudit/v2/auparse"
 	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -27,13 +27,7 @@ func TestRawAuditMessageParsing(t *testing.T) {
 
 	// Create audit manager with mock exporter
 	// Create a custom ExporterBus with our mock exporter
-	exporterBus := &exporters.ExporterBus{}
-	// We need to access the internal exporters slice to add our mock
-	// This is a bit hacky but necessary for testing
-	exportersField := reflect.ValueOf(exporterBus).Elem().FieldByName("exporters")
-	if exportersField.IsValid() && exportersField.CanSet() {
-		exportersField.Set(reflect.ValueOf([]exporters.Exporter{mockExporter}))
-	}
+	exporterBus := exporters.NewExporterBus(([]exporters.Exporter{mockExporter}))
 
 	// Use the existing mock from processtree package
 	mockProcessTreeManager := &processtree.ProcessTreeManagerMock{}
@@ -139,6 +133,11 @@ type MockExporter struct {
 	SendAuditAlertFunc   func(auditmanager.AuditResult)
 	SendMalwareAlertFunc func(malwaremanager.MalwareResult)
 	SendRuleAlertFunc    func(ruleengine.RuleFailure)
+}
+
+func (m *MockExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (m *MockExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {

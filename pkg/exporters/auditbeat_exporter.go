@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/auditmanager"
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -95,6 +96,11 @@ type AuditbeatExporter struct {
 	cloudMetadata *apitypes.CloudMetadata
 	batchBuffer   []AuditbeatEvent
 	batchMutex    sync.Mutex
+}
+
+func (e *AuditbeatExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
+	//TODO implement me
+	panic("implement me")
 }
 
 type eventMetrics struct {

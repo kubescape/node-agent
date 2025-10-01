@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	fimtypes "github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -20,6 +21,11 @@ import (
 type mockExporter struct {
 	mu        sync.Mutex
 	fimEvents []fimtypes.FimEvent
+}
+
+func (m *mockExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (m *mockExporter) SendRuleAlert(_ ruleengine.RuleFailure)          {}

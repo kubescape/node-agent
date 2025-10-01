@@ -30,6 +30,13 @@ type ExporterBus struct {
 	exporters []Exporter
 }
 
+// NewExporterBus creates a new ExporterBus with the given exporters. This can be used for testing purposes.
+func NewExporterBus(exporters []Exporter) *ExporterBus {
+	return &ExporterBus{
+		exporters: exporters,
+	}
+}
+
 // InitExporters initializes all exporters.
 func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string, cloudMetadata *armotypes.CloudMetadata) *ExporterBus {
 	var exporters []Exporter

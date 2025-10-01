@@ -13,10 +13,10 @@ func TestExtractKeysFromMessageSequence(t *testing.T) {
 	am := &AuditManagerV1{}
 
 	tests := []struct {
-		name        string
-		rawMessages []string
-		expectedKey string
-		description string
+		name         string
+		rawMessages  []string
+		expectedKeys []string
+		description  string
 	}{
 		{
 			name: "password_file_access_key",
@@ -25,32 +25,32 @@ func TestExtractKeysFromMessageSequence(t *testing.T) {
 				`audit(1759147830.285:2599216): cwd="/root"`,
 				`audit(1759147830.285:2599216): item=0 name="/etc/passwd" inode=917754 dev=00:150 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0`,
 			},
-			expectedKey: "password_file_access",
-			description: "Should extract key from SYSCALL message with quoted key",
+			expectedKeys: []string{"password_file_access"},
+			description:  "Should extract key from SYSCALL message with quoted key",
 		},
 		{
 			name: "null_key",
 			rawMessages: []string{
 				`audit(1759147877.609:2599305): arch=c000003e syscall=54 success=yes exit=0 a0=4 a1=0 a2=40 a3=55f29df2db70 items=0 ppid=1820 pid=260121 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 fsgid=0 tty=(none) ses=4294967295 comm="iptables" exe="/usr/sbin/xtables-legacy-multi" subj=unconfined key=(null)`,
 			},
-			expectedKey: "",
-			description: "Should return empty string for null key",
+			expectedKeys: []string{},
+			description:  "Should return empty string for null key",
 		},
 		{
 			name: "unquoted_key",
 			rawMessages: []string{
 				`audit(1759147877.609:2599305): arch=c000003e syscall=54 success=yes exit=0 a0=4 a1=0 a2=40 a3=55f29df2db70 items=0 ppid=1820 pid=260121 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="iptables" exe="/usr/sbin/xtables-legacy-multi" subj=unconfined key=some_key`,
 			},
-			expectedKey: "some_key",
-			description: "Should extract unquoted key",
+			expectedKeys: []string{"some_key"},
+			description:  "Should extract unquoted key",
 		},
 		{
 			name: "no_key_field",
 			rawMessages: []string{
 				`audit(1759147877.609:2599305): arch=c000003e syscall=54 success=yes exit=0 a0=4 a1=0 a2=40 a3=55f29df2db70 items=0 ppid=1820 pid=260121 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="iptables" exe="/usr/sbin/xtables-legacy-multi" subj=unconfined`,
 			},
-			expectedKey: "",
-			description: "Should return empty string when no key field exists",
+			expectedKeys: []string{},
+			description:  "Should return empty string when no key field exists",
 		},
 		{
 			name: "multiple_messages_key_in_path",
@@ -58,16 +58,16 @@ func TestExtractKeysFromMessageSequence(t *testing.T) {
 				`audit(1759147830.285:2599216): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=7f885070f320 a2=80000 a3=0 items=1 ppid=259844 pid=259958 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=4294967295 comm="bash" exe="/usr/bin/bash" subj=unconfined`,
 				`audit(1759147830.285:2599216): item=0 name="/etc/passwd" inode=917754 dev=00:150 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0 key="file_watch_key"`,
 			},
-			expectedKey: "file_watch_key",
-			description: "Should extract key from PATH message when SYSCALL has no key",
+			expectedKeys: []string{"file_watch_key"},
+			description:  "Should extract key from PATH message when SYSCALL has no key",
 		},
 		{
 			name: "xattr_operations_key",
 			rawMessages: []string{
 				`audit(1759147830.285:2599216): arch=c000003e syscall=190 success=yes exit=0 a0=7fffffff a1=7f885070f320 a2=15 a3=0 items=0 ppid=259844 pid=259958 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=4294967295 comm="setfattr" exe="/usr/bin/setfattr" subj=unconfined key="xattr_operations"`,
 			},
-			expectedKey: "xattr_operations",
-			description: "Should extract key from xattr syscall message",
+			expectedKeys: []string{"xattr_operations"},
+			description:  "Should extract key from xattr syscall message",
 		},
 	}
 
@@ -90,7 +90,7 @@ func TestExtractKeysFromMessageSequence(t *testing.T) {
 			// Test the key extraction
 			result := am.extractKeysFromMessageSequence(msgs)
 
-			assert.Equal(t, tt.expectedKey, result, tt.description)
+			assert.Equal(t, tt.expectedKeys, result, tt.description)
 		})
 	}
 }
@@ -154,7 +154,7 @@ func TestKeyExtractionBug(t *testing.T) {
 	// Test that our sequence extraction works with the fallback
 	msgs := []*auparse.AuditMessage{msg}
 	result := am.extractKeysFromMessageSequence(msgs)
-	assert.Equal(t, "password_file_access", result, "Sequence extraction with fallback should work")
+	assert.Equal(t, []string{"password_file_access"}, result, "Sequence extraction with fallback should work")
 }
 
 // Test to understand how Tags() method works

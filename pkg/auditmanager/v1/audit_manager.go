@@ -587,6 +587,8 @@ func (am *AuditManagerV1) extractSyscallInfo(event *auditmanager.AuditEvent, dat
 
 	if exit, err := strconv.ParseInt(data["exit"], 10, 32); err == nil {
 		event.Exit = int32(exit)
+	} else {
+		event.Exit = -1 // FIXME: in case of non-numeric exit codes, such as "EACCES" or "EPERM" should we map them to numeric values?
 	}
 }
 

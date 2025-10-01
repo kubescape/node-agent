@@ -18,7 +18,6 @@ import (
 )
 
 func TestLoadConfig(t *testing.T) {
-	b := false
 	fimStdout := true
 	tests := []struct {
 		name    string
@@ -156,7 +155,6 @@ func TestLoadConfig(t *testing.T) {
 						StdoutExporter: &fimStdout,
 					},
 				},
-				DNSCacheSize:         50000,
 				EnableAuditDetection: true,
 				AuditDetection: AuditDetection{
 					Exporters: exporters.ExportersConfig{
