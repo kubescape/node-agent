@@ -35,7 +35,7 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 
 	// Initialize socket enricher for network tracers
 	if cw.cfg.EnableNetworkTracing || cw.cfg.EnableRuntimeDetection {
-		socketEnricher, err := socketenricher.NewSocketEnricher()
+		socketEnricher, err := socketenricher.NewSocketEnricher(socketenricher.Config{})
 		if err != nil {
 			logger.L().Error("ContainerWatcher - error creating socket enricher", helpers.Error(err))
 			return fmt.Errorf("creating socket enricher: %w", err)

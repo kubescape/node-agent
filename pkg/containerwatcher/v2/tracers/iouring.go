@@ -58,7 +58,7 @@ func (it *IoUringTracer) Start(_ context.Context) error {
 
 	tracerIouring, err := traceriouring.NewTracer(
 		&traceriouring.Config{MountnsMap: iouringMountnsmap},
-		it.containerCollection,
+		//it.containerCollection,
 		it.iouringEventCallback,
 	)
 	if err != nil {
@@ -113,9 +113,9 @@ func (it *IoUringTracer) iouringEventCallback(event *traceriouringtype.Event) {
 
 	if it.eventCallback != nil {
 		// Extract container ID and process ID from the IoUring event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
-
-		it.eventCallback(event, containerID, processID)
+		//containerID := event.Runtime.ContainerID
+		//processID := event.Pid
+		//
+		//it.eventCallback(event, containerID, processID)
 	}
 }

@@ -93,15 +93,15 @@ func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
 
 	// Test reading info for PID 1 (init/systemd process)
 	// This process is guaranteed to exist on any Linux system.
-	pid1_event, err := feeder.readProcessInfo(1)
+	pid1Event, err := feeder.readProcessInfo(1)
 	assert.NoError(t, err)
-	assert.Equal(t, conversion.ProcfsEvent, pid1_event.Type)
-	assert.Equal(t, uint32(1), pid1_event.PID)
-	assert.NotEmpty(t, pid1_event.Comm, "Comm for PID 1 should not be empty")
+	assert.Equal(t, conversion.ProcfsEvent, pid1Event.Type)
+	assert.Equal(t, uint32(1), pid1Event.PID)
+	assert.NotEmpty(t, pid1Event.Comm, "Comm for PID 1 should not be empty")
 	// On modern systems, PPID for PID 1 is 0.
-	assert.Zero(t, pid1_event.PPID, "PPID for PID 1 should be 0")
+	assert.Zero(t, pid1Event.PPID, "PPID for PID 1 should be 0")
 	// Note: readProcessInfo does NOT populate Pcomm. This is handled by scanProcfs.
-	assert.Empty(t, pid1_event.Pcomm, "Pcomm should be empty from readProcessInfo")
+	assert.Empty(t, pid1Event.Pcomm, "Pcomm should be empty from readProcessInfo")
 
 	// Test reading info for a non-existent PID
 	_, err = feeder.readProcessInfo(999999)

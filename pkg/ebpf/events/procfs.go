@@ -1,7 +1,7 @@
 package events
 
 import (
-	types "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 // ProcfsEvent represents a procfs event that can be processed by the ordered event queue

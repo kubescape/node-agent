@@ -17,7 +17,7 @@ import (
 
 // containerCallback handles container events synchronously
 func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
-	logger.L().Info("ContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
+	logger.L().Debug("ContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
 	if notif.Container == nil || notif.Container.Runtime.ContainerID == "" {
 		logger.L().Info("ContainerWatcher.containerCallback - container is nil or has empty ContainerID")
 		return

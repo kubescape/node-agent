@@ -605,20 +605,20 @@ func TestShallowCopyProcess(t *testing.T) {
 	original.ChildrenMap[key] = child
 
 	// Create shallow copy
-	copy := impl.shallowCopyProcess(original)
+	copyProcess := impl.shallowCopyProcess(original)
 
 	// Verify copy
-	assert.NotNil(t, copy)
-	assert.Equal(t, original.PID, copy.PID)
-	assert.Equal(t, original.PPID, copy.PPID)
-	assert.Equal(t, original.Comm, copy.Comm)
-	assert.Equal(t, original.Cmdline, copy.Cmdline)
+	assert.NotNil(t, copyProcess)
+	assert.Equal(t, original.PID, copyProcess.PID)
+	assert.Equal(t, original.PPID, copyProcess.PPID)
+	assert.Equal(t, original.Comm, copyProcess.Comm)
+	assert.Equal(t, original.Cmdline, copyProcess.Cmdline)
 
 	// Verify it's a different instance (different pointer addresses)
-	assert.NotSame(t, original, copy)
+	assert.NotSame(t, original, copyProcess)
 
 	// Verify children map is shared reference (shallow copy)
-	assert.Equal(t, original.ChildrenMap, copy.ChildrenMap)
+	assert.Equal(t, original.ChildrenMap, copyProcess.ChildrenMap)
 
 	// Test nil input
 	nilCopy := impl.shallowCopyProcess(nil)
