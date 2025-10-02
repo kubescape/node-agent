@@ -77,6 +77,7 @@ type WatchedContainerData struct {
 	SeriesID                string
 	PreviousReportTimestamp time.Time
 	CurrentReportTimestamp  time.Time
+	UserDefinedProfile      string
 }
 
 type ContainerInfo struct {
@@ -136,6 +137,17 @@ func (watchedContainer *WatchedContainerData) SetCompletionStatus(newStatus Watc
 }
 
 func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) error {
+	labels := wl.GetPodLabels()
+	// check for user defined profile
+	if userDefinedProfile, ok := labels[helpersv1.UserDefinedProfileMetadataKey]; ok {
+		if userDefinedProfile != "" {
+			logger.L().Info("container has a user defined profile",
+				helpers.String("profile", userDefinedProfile),
+				helpers.String("container", containerName),
+				helpers.String("workload", wl.GetName()))
+			watchedContainer.UserDefinedProfile = userDefinedProfile
+		}
+	}
 	podSpec, err := wl.GetPodSpec()
 	if err != nil {
 		return fmt.Errorf("failed to get pod spec: %w", err)
