@@ -25,9 +25,7 @@ import (
 )
 
 var (
-	resourcePod                 = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	resourceNetworkNeighborhood = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "networkneighborhoods"}
-	resourceApplicationProfile  = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "applicationprofiles"}
+	resourcePod = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 )
 
 func init() {
@@ -208,111 +206,9 @@ func getKey(obj runtime.Object) string {
 func TestStart_1(t *testing.T) {
 	tt := []testObj{
 		{
-			name:              "list ApplicationProfiles",
-			resources:         []schema.GroupVersionResource{resourceApplicationProfile},
-			preCreatedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindAP, mocks.TestCollection)},
-		},
-		{
-			name:              "list NetworkNeighborhoods",
-			resources:         []schema.GroupVersionResource{resourceNetworkNeighborhood},
-			preCreatedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection)},
-		},
-		{
 			name:          "watch Pods",
 			resources:     []schema.GroupVersionResource{resourcePod},
 			createObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection)},
-		},
-		{
-			name:          "watch ApplicationProfiles",
-			resources:     []schema.GroupVersionResource{resourceApplicationProfile},
-			createObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindAP, mocks.TestCollection)},
-		},
-		{
-			name:          "watch NetworkNeighborhoods",
-			resources:     []schema.GroupVersionResource{resourceNetworkNeighborhood},
-			createObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection)},
-		},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.name, func(t *testing.T) {
-			startTest(t, tc)
-		})
-	}
-}
-
-func TestStart_2(t *testing.T) {
-	tt := []testObj{
-		{
-			name:              "list and modify",
-			resources:         []schema.GroupVersionResource{resourceApplicationProfile},
-			preCreatedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-			modifiedObjects:   []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-		},
-		{
-			name:            "watch and modify",
-			resources:       []schema.GroupVersionResource{resourceApplicationProfile},
-			createObjects:   []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-			modifiedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-		},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.name, func(t *testing.T) {
-			startTest(t, tc)
-		})
-	}
-}
-
-func TestStart_3(t *testing.T) {
-	tt := []testObj{
-
-		{
-			name:              "list and watch",
-			resources:         []schema.GroupVersionResource{resourceApplicationProfile},
-			preCreatedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestCollection)},
-			createObjects:     []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-		},
-		{
-			name:              "list and delete",
-			resources:         []schema.GroupVersionResource{resourceApplicationProfile},
-			preCreatedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-			deleteObjects:     []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-		},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.name, func(t *testing.T) {
-			startTest(t, tc)
-		})
-	}
-}
-func TestStart_4(t *testing.T) {
-	tt := []testObj{
-		{
-			name:            "watch, modify, and delete",
-			resources:       []schema.GroupVersionResource{resourceApplicationProfile},
-			createObjects:   []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-			modifiedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-			deleteObjects:   []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx)},
-		},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.name, func(t *testing.T) {
-			startTest(t, tc)
-		})
-	}
-}
-
-func TestStart_5(t *testing.T) {
-	tt := []testObj{
-		{
-			name:            "multi watch, modify, and delete",
-			resources:       []schema.GroupVersionResource{resourceApplicationProfile, resourceNetworkNeighborhood, resourcePod},
-			createObjects:   []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindAP, mocks.TestCollection), mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection), mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection)},
-			modifiedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindAP, mocks.TestCollection), mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection), mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection)},
-			deleteObjects:   []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindAP, mocks.TestCollection), mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection), mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection)},
 		},
 	}
 

@@ -134,12 +134,6 @@ func (wh *WatchHandler) Stop(_ context.Context) {
 
 func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts metav1.ListOptions) (watch.Interface, error) {
 	switch res.Resource {
-	case "applicationprofiles":
-		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
-		return wh.storageClient.ApplicationProfiles("").Watch(context.Background(), opts)
-	case "networkneighborhoods":
-		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
-		return wh.storageClient.NetworkNeighborhoods("").Watch(context.Background(), opts)
 	case "pods":
 		return wh.k8sClient.GetKubernetesClient().CoreV1().Pods("").Watch(context.Background(), opts)
 	case "runtimerulealertbindings":
@@ -152,7 +146,7 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 	default:
 		// Make sure the resource version is not our storage, if so we panic.
 		if res.Group == kubescapeCustomResourceGroup {
-			return nil, fmt.Errorf("resource must use the storage client %s: %w", res.Resource, errNotImplemented)
+			return nil, fmt.Errorf("watch is not implemented by the kubescape storage client %s: %w", res.Resource, errNotImplemented)
 		}
 
 		return wh.k8sClient.GetDynamicClient().Resource(res).Watch(context.Background(), opts)
