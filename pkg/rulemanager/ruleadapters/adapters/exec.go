@@ -28,7 +28,7 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	failure.SetExtra(execEvent.GetExtra())
 
 	execPath := execEvent.GetExecPathFromEvent()
-	execFullPath := GetExecFullPathFromEvent(execEvent)
+	execFullPath := execEvent.GetExecFullPathFromEvent()
 	upperLayer := execEvent.GetUpperLayer() || execEvent.GetPupperLayer()
 
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
@@ -75,13 +75,6 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 		PodLabels: execEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
-}
-
-func GetExecFullPathFromEvent(execEvent *utils.DatasourceEvent) string {
-	if path := execEvent.GetExePath(); path != "" {
-		return path
-	}
-	return execEvent.GetExecPathFromEvent()
 }
 
 func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {

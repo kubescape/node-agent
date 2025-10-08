@@ -7,12 +7,15 @@ import (
 	"strings"
 	"time"
 
+	celtypes "github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/syscalls"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/picatz/xcel"
 )
 
 type DNSPktType string
@@ -32,6 +35,264 @@ type DatasourceEvent struct {
 var _ EnrichEvent = (*DatasourceEvent)(nil)
 var _ DNSEvent = (*DatasourceEvent)(nil)
 var _ ContainerEvent = (*DatasourceEvent)(nil)
+
+var DatasourceFields = map[string]*celtypes.FieldType{
+	"args": {
+		Type: celtypes.ListType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil || x.Raw.EventType != ExecveEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetArgs(), nil
+		}),
+	},
+	"capName": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil || x.Raw.EventType != CapabilitiesEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetCapability(), nil
+		}),
+	},
+	"comm": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetComm(), nil
+		}),
+	},
+	"dst.addr": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil || x.Raw.EventType != NetworkEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetDstEndpoint().Addr, nil
+		}),
+	},
+	"exepath": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil || x.Raw.EventType != ExecveEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetExePath(), nil
+		}),
+	},
+	"fullPath": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil || x.Raw.EventType != ExecveEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetExecFullPathFromEvent(), nil
+		}),
+	},
+	"k8s.containerName": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetContainer(), nil
+		}),
+	},
+	"name": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil || x.Raw.EventType != DnsEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetDNSName(), nil
+		}),
+	},
+	"pcomm": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetPcomm(), nil
+		}),
+	},
+	"pid": {
+		Type: celtypes.UintType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetPID(), nil
+		}),
+	},
+	"ppid": {
+		Type: celtypes.UintType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetPpid(), nil
+		}),
+	},
+	"port": {
+		Type: celtypes.UintType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil || x.Raw.EventType != NetworkEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetPort(), nil
+		}),
+	},
+	"proto": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil || x.Raw.EventType != NetworkEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetProto(), nil
+		}),
+	},
+	"runtime.containerId": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetContainerID(), nil
+		}),
+	},
+	"syscallName": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil || x.Raw.EventType != CapabilitiesEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[*DatasourceEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetSyscall(), nil
+		}),
+	},
+}
 
 func (e *DatasourceEvent) GetAddresses() []string {
 	// TODO: implement for DNS events
@@ -127,8 +388,13 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 }
 
 func (e *DatasourceEvent) GetDstPort() uint16 {
-	port, _ := e.Datasource.GetField("dst.port").Uint16(e.Data)
-	return port
+	switch e.EventType {
+	case NetworkEventType:
+		port, _ := e.Datasource.GetField("dst.port").Uint16(e.Data)
+		return port
+	default:
+		return 0
+	}
 }
 
 func (e *DatasourceEvent) GetError() int64 {
@@ -142,6 +408,13 @@ func (e *DatasourceEvent) GetExecArgsFromEvent() []string {
 		return args[1:]
 	}
 	return []string{}
+}
+
+func (e *DatasourceEvent) GetExecFullPathFromEvent() string {
+	if path := e.GetExePath(); path != "" {
+		return path
+	}
+	return e.GetExecPathFromEvent()
 }
 
 func (e *DatasourceEvent) GetExePath() string {
@@ -262,8 +535,13 @@ func (e *DatasourceEvent) GetPodLabels() map[string]string {
 }
 
 func (e *DatasourceEvent) GetPort() uint16 {
-	port, _ := e.Datasource.GetField("src.port").Uint16(e.Data)
-	return port
+	switch e.EventType {
+	case NetworkEventType:
+		port, _ := e.Datasource.GetField("src.port").Uint16(e.Data)
+		return port
+	default:
+		return 0
+	}
 }
 
 func (e *DatasourceEvent) GetPpid() uint32 {
@@ -272,9 +550,14 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 }
 
 func (e *DatasourceEvent) GetProto() string {
-	// TODO fix proto raw to string mapping
-	proto, _ := e.Datasource.GetField("dst.proto_raw").String(e.Data)
-	return proto
+	switch e.EventType {
+	case NetworkEventType:
+		// TODO fix proto raw to string mapping
+		proto, _ := e.Datasource.GetField("dst.proto_raw").String(e.Data)
+		return proto
+	default:
+		return ""
+	}
 }
 
 func (e *DatasourceEvent) GetPupperLayer() bool {

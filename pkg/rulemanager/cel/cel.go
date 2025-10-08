@@ -43,12 +43,6 @@ type CEL struct {
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	ta, tp := xcel.NewTypeAdapter(), xcel.NewTypeProvider()
-	//capaObj, capaTyp := xcel.NewObject(&tracercapabilitiestype.Event{})
-	//xcel.RegisterObject(ta, tp, capaObj, capaTyp, xcel.NewFields(capaObj))
-	//dnsObj, dnsTyp := xcel.NewObject(&events.IGDnsEvent{})
-	//xcel.RegisterObject(ta, tp, dnsObj, dnsTyp, xcel.NewFields(dnsObj))
-	//execObj, execTyp := xcel.NewObject(&events.ExecEvent{})
-	//xcel.RegisterObject(ta, tp, execObj, execTyp, xcel.NewFields(execObj))
 	//exitObj, exitTyp := xcel.NewObject(&tracerexectype.Event{})
 	//xcel.RegisterObject(ta, tp, exitObj, exitTyp, xcel.NewFields(exitObj))
 	forkObj, forkTyp := xcel.NewObject(&tracerforktype.Event{})
@@ -57,10 +51,8 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	xcel.RegisterObject(ta, tp, hardlinkObj, hardlinkTyp, xcel.NewFields(hardlinkObj))
 	iouringObj, iouringTyp := xcel.NewObject(&traceriouringtype.Event{})
 	xcel.RegisterObject(ta, tp, iouringObj, iouringTyp, xcel.NewFields(iouringObj))
-	//netObj, netTyp := xcel.NewObject(&datasource.Data{})
-	//xcel.RegisterObject(ta, tp, netObj, netTyp, xcel.NewFields(netObj))
-	//openObj, openTyp := xcel.NewObject(&events.OpenEvent{})
-	//xcel.RegisterObject(ta, tp, openObj, openTyp, xcel.NewFields(openObj))
+	datasourceObj, datasourceTyp := xcel.NewObject(&utils.DatasourceEvent{})
+	xcel.RegisterObject(ta, tp, datasourceObj, datasourceTyp, utils.DatasourceFields)
 	procObj, procTyp := xcel.NewObject(&events.ProcfsEvent{})
 	xcel.RegisterObject(ta, tp, procObj, procTyp, xcel.NewFields(procObj))
 	ptraceObj, ptraceTyp := xcel.NewObject(&tracerptracetype.Event{})
@@ -75,15 +67,15 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	xcel.RegisterObject(ta, tp, syscallObj, syscallTyp, xcel.NewFields(syscallObj))
 	envOptions := []cel.EnvOption{
 		cel.Variable("event_type", cel.StringType),
-		//cel.Variable(string(utils.CapabilitiesEventType), capaTyp),
-		//cel.Variable(string(utils.DnsEventType), dnsTyp),
-		//cel.Variable(string(utils.ExecveEventType), execTyp),
+		cel.Variable(string(utils.CapabilitiesEventType), datasourceTyp),
+		cel.Variable(string(utils.DnsEventType), datasourceTyp),
+		cel.Variable(string(utils.ExecveEventType), datasourceTyp),
 		//cel.Variable(string(utils.ExitEventType), exitTyp),
 		cel.Variable(string(utils.ForkEventType), forkTyp),
 		cel.Variable(string(utils.HardlinkEventType), hardlinkTyp),
 		cel.Variable(string(utils.IoUringEventType), iouringTyp),
-		//cel.Variable(string(utils.NetworkEventType), netTyp),
-		//cel.Variable(string(utils.OpenEventType), openTyp),
+		cel.Variable(string(utils.NetworkEventType), datasourceTyp),
+		cel.Variable(string(utils.OpenEventType), datasourceTyp),
 		cel.Variable(string(utils.ProcfsEventType), procTyp),
 		cel.Variable(string(utils.PtraceEventType), ptraceTyp),
 		cel.Variable(string(utils.RandomXEventType), randTyp),
