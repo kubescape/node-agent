@@ -3,7 +3,6 @@ package types
 import (
 	"net/http"
 
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
@@ -42,8 +41,8 @@ type HTTPPacket interface {
 }
 
 type Event struct {
-	eventtypes.Event
-	eventtypes.WithMountNsID
+	//eventtypes.Event
+	//eventtypes.WithMountNsID
 	Pid       uint32                  `json:"pid,omitempty" column:"pid,template:pid"`
 	Uid       uint32                  `json:"uid,omitempty" column:"uid,template:uid"`
 	Gid       uint32                  `json:"gid,omitempty" column:"gid,template:gid"`
@@ -53,9 +52,4 @@ type Event struct {
 	Direction consts.NetworkDirection `json:"direction,omitempty" column:"direction,template:direction"`
 	Request   *http.Request
 	Response  *http.Response
-}
-
-// GetTimestamp returns the event timestamp
-func (event *Event) GetTimestamp() eventtypes.Time {
-	return event.Timestamp
 }

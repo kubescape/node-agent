@@ -14,7 +14,6 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
@@ -146,14 +145,14 @@ func (t *Tracer) run() {
 				return
 			}
 
-			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
-			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			//msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
+			//t.eventCallback(types.Base(eventtypes.Err(msg)))
 			continue
 		}
 
 		if record.LostSamples > 0 {
-			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
-			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			//msg := fmt.Sprintf("lost %d samples", record.LostSamples)
+			//t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			// Return record to the pool before continuing.
 			t.recordPool.Put(record)
 			continue
@@ -223,13 +222,13 @@ func (t *Tracer) transmitOrphenRequests() {
 		keys := t.eventsMap.Keys()
 		for _, key := range keys {
 			if event, ok := t.eventsMap.Peek(key); ok {
-				if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
-					//if t.enricher != nil {
-					//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-					//}
-					t.eventCallback(event)
-					t.eventsMap.Remove(key)
-				}
+				//if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
+				//if t.enricher != nil {
+				//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+				//}
+				t.eventCallback(event)
+				t.eventsMap.Remove(key)
+				//}
 			}
 		}
 	}

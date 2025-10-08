@@ -6,7 +6,6 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerptrace "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer"
@@ -97,9 +96,9 @@ func (pt *PtraceTracer) IsEnabled(cfg config.Config) bool {
 
 // ptraceEventCallback handles ptrace events from the tracer
 func (pt *PtraceTracer) ptraceEventCallback(event *tracerptracetype.Event) {
-	if event.Type != types.NORMAL {
-		return
-	}
+	//if event.Type != types.NORMAL {
+	//	return
+	//}
 
 	if pt.eventCallback != nil {
 		// Extract container ID and process ID from the ptrace event

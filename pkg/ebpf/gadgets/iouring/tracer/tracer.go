@@ -11,7 +11,6 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	kernel "github.com/kubescape/node-agent/pkg/validator/ebpf"
@@ -135,14 +134,14 @@ func (t *Tracer) run() {
 				return
 			}
 
-			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
-			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			//msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
+			//t.eventCallback(types.Base(eventtypes.Err(msg)))
 			return
 		}
 
 		if record.LostSamples > 0 {
-			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
-			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			//msg := fmt.Sprintf("lost %d samples", record.LostSamples)
+			//t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			t.recordPool.Put(record)
 			continue
 		}
@@ -181,19 +180,19 @@ func (t *Tracer) SetEventHandler(handler any) {
 
 func (t *Tracer) parseEvent(bpfEvent *iouringEvent) *types.Event {
 	return &types.Event{
-		Event: eventtypes.Event{
-			Type:      eventtypes.NORMAL,
-			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-		},
-		WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-		Pid:           bpfEvent.Pid,
-		Tid:           bpfEvent.Tid,
-		Uid:           bpfEvent.Uid,
-		Gid:           bpfEvent.Gid,
-		Opcode:        bpfEvent.Opcode,
-		Flags:         bpfEvent.Flags,
-		Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
-		Identifier:    fmt.Sprintf("%s-%d", gadgets.FromCString(bpfEvent.Comm[:]), bpfEvent.Opcode),
+		//Event: eventtypes.Event{
+		//	Type:      eventtypes.NORMAL,
+		//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+		//},
+		//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+		Pid:        bpfEvent.Pid,
+		Tid:        bpfEvent.Tid,
+		Uid:        bpfEvent.Uid,
+		Gid:        bpfEvent.Gid,
+		Opcode:     bpfEvent.Opcode,
+		Flags:      bpfEvent.Flags,
+		Comm:       gadgets.FromCString(bpfEvent.Comm[:]),
+		Identifier: fmt.Sprintf("%s-%d", gadgets.FromCString(bpfEvent.Comm[:]), bpfEvent.Opcode),
 	}
 }
 

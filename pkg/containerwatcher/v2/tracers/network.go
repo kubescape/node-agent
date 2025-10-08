@@ -63,7 +63,7 @@ func (nt *NetworkTracer) Start(ctx context.Context) error {
 	nt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/trace_tcp:v0.44.1",
+		"ghcr.io/inspektor-gadget/gadget/trace_tcp:v0.45.0",
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			nt.kubeIPResolver,

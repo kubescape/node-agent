@@ -1,13 +1,8 @@
 package types
 
-import (
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-)
-
 type SyscallEvent struct {
-	eventtypes.Event
-	eventtypes.WithMountNsID
-
+	//eventtypes.Event
+	//eventtypes.WithMountNsID
 	Pid  uint32 `json:"pid,omitempty" column:"pid,template:pid"`
 	Comm string `json:"comm,omitempty" column:"comm,template:comm"`
 	Uid  uint32 `json:"uid" column:"uid,template:uid,hide"`
@@ -18,13 +13,4 @@ type SyscallEvent struct {
 
 type Enricher interface {
 	EnrichRuleFailure(rule RuleFailure) error
-}
-
-func (e SyscallEvent) GetNamespace() string {
-	return e.Event.K8s.Namespace
-}
-
-// GetTimestamp returns the event timestamp
-func (e SyscallEvent) GetTimestamp() eventtypes.Time {
-	return e.Timestamp
 }

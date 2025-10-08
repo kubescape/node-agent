@@ -51,7 +51,7 @@ func (st *SyscallTracer) Start(ctx context.Context) error {
 	st.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.44.1",
+		"ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.45.0",
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			st.kubeManager,

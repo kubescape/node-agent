@@ -70,13 +70,13 @@ func convertExecEvent(execEvent *utils.DatasourceEvent) ProcessEvent {
 // convertForkEvent converts a ForkEvent to ProcessEvent
 func convertForkEvent(forkEvent *tracerforktype.Event) ProcessEvent {
 	event := ProcessEvent{
-		Type:        ForkEvent,
-		Timestamp:   time.Now(),
-		PID:         forkEvent.Pid,
-		PPID:        forkEvent.PPid,
-		Comm:        forkEvent.Comm,
-		Path:        forkEvent.ExePath,
-		StartTimeNs: uint64(forkEvent.Timestamp), // Use event timestamp for consistency
+		Type:      ForkEvent,
+		Timestamp: time.Now(),
+		PID:       forkEvent.Pid,
+		PPID:      forkEvent.PPid,
+		Comm:      forkEvent.Comm,
+		Path:      forkEvent.ExePath,
+		//StartTimeNs: uint64(forkEvent.Timestamp), // Use event timestamp for consistency
 	}
 
 	// Set UID and GID if available
@@ -90,9 +90,9 @@ func convertForkEvent(forkEvent *tracerforktype.Event) ProcessEvent {
 	}
 
 	// Set container context if available
-	if forkEvent.Runtime.ContainerID != "" {
-		event.ContainerID = forkEvent.Runtime.ContainerID
-	}
+	//if forkEvent.Runtime.ContainerID != "" {
+	//	event.ContainerID = forkEvent.Runtime.ContainerID
+	//}
 
 	return event
 }
@@ -100,12 +100,12 @@ func convertForkEvent(forkEvent *tracerforktype.Event) ProcessEvent {
 // convertExitEvent converts an ExitEvent to ProcessEvent
 func convertExitEvent(exitEvent *tracerexittype.Event) ProcessEvent {
 	event := ProcessEvent{
-		Type:        ExitEvent,
-		Timestamp:   time.Now(),
-		PID:         exitEvent.Pid,
-		PPID:        exitEvent.PPid,
-		Comm:        exitEvent.Comm,
-		StartTimeNs: uint64(exitEvent.Timestamp), // Use event timestamp for consistency
+		Type:      ExitEvent,
+		Timestamp: time.Now(),
+		PID:       exitEvent.Pid,
+		PPID:      exitEvent.PPid,
+		Comm:      exitEvent.Comm,
+		//StartTimeNs: uint64(exitEvent.Timestamp), // Use event timestamp for consistency
 	}
 
 	// Set UID and GID if available
@@ -119,9 +119,9 @@ func convertExitEvent(exitEvent *tracerexittype.Event) ProcessEvent {
 	}
 
 	// Set container context if available
-	if exitEvent.Runtime.ContainerID != "" {
-		event.ContainerID = exitEvent.Runtime.ContainerID
-	}
+	//if exitEvent.Runtime.ContainerID != "" {
+	//	event.ContainerID = exitEvent.Runtime.ContainerID
+	//}
 
 	return event
 }

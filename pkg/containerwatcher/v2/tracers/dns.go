@@ -59,7 +59,7 @@ func (dt *DNSTracer) Start(ctx context.Context) error {
 	dt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/trace_dns:v0.44.1",
+		"ghcr.io/inspektor-gadget/gadget/trace_dns:v0.45.0",
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			dt.kubeManager,

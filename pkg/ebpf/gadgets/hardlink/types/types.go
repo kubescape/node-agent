@@ -2,15 +2,12 @@ package types
 
 import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 type Event struct {
-	eventtypes.Event
-	datasource.Data
-	eventtypes.WithMountNsID
-
+	//eventtypes.Event
+	//eventtypes.WithMountNsID
 	Pid        uint32 `json:"pid,omitempty" column:"pid,template:pid"`
 	Tid        uint32 `json:"tid,omitempty" column:"tid,template:tid"`
 	PPid       uint32 `json:"ppid,omitempty" column:"ppid,template:ppid"`
@@ -28,12 +25,6 @@ func GetColumns() *columns.Columns[Event] {
 	hardlinkColumns := columns.MustCreateColumns[Event]()
 
 	return hardlinkColumns
-}
-
-func Base(ev eventtypes.Event) *Event {
-	return &Event{
-		//Event: ev,
-	}
 }
 
 func (event *Event) SetExtra(extra interface{}) {

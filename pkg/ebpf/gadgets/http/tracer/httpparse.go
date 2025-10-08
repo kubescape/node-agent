@@ -32,19 +32,19 @@ func CreateEventFromRequest(bpfEvent *http_snifferHttpevent) (*tracerhttptype.Ev
 	}
 
 	event := tracerhttptype.Event{
-		Event: eventtypes.Event{
-			Type:      eventtypes.NORMAL,
-			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-		},
-		WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-		Pid:           bpfEvent.Pid,
-		Uid:           bpfEvent.Uid,
-		Gid:           bpfEvent.Gid,
-		OtherPort:     bpfEvent.OtherPort,
-		OtherIp:       ip.String(),
-		Request:       request,
-		Internal:      tracerhttptype.IsInternal(ip.String()),
-		Direction:     direction,
+		//Event: eventtypes.Event{
+		//	Type:      eventtypes.NORMAL,
+		//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+		//},
+		//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+		Pid:       bpfEvent.Pid,
+		Uid:       bpfEvent.Uid,
+		Gid:       bpfEvent.Gid,
+		OtherPort: bpfEvent.OtherPort,
+		OtherIp:   ip.String(),
+		Request:   request,
+		Internal:  tracerhttptype.IsInternal(ip.String()),
+		Direction: direction,
 	}
 
 	return &event, nil

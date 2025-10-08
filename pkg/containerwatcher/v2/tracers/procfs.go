@@ -13,7 +13,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
@@ -132,15 +131,15 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conv
 }
 
 func (pt *ProcfsTracer) handleExitEvent(event conversion.ProcessEvent) {
-	exitEvent := &tracerexittype.Event{
-		Pid:  event.PID,
-		PPid: event.PPID,
-		Comm: "exit",
-	}
+	//exitEvent := &tracerexittype.Event{
+	//	Pid:  event.PID,
+	//	PPid: event.PPID,
+	//	Comm: "exit",
+	//}
 
-	exitEvent.Event.Timestamp = types.Time(event.Timestamp.UnixNano())
+	//exitEvent.Event.Timestamp = types.Time(event.Timestamp.UnixNano())
 
-	pt.exitEventCallback(exitEvent, event.ContainerID, event.PID)
+	//pt.exitEventCallback(exitEvent, event.ContainerID, event.PID)
 }
 
 // handleProcfsEvent handles a single procfs event

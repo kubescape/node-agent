@@ -13,7 +13,6 @@ import (
 	"github.com/cilium/ebpf/perf"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
@@ -124,14 +123,14 @@ func (t *Tracer) run() {
 				return
 			}
 
-			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
-			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			//msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
+			//t.eventCallback(types.Base(eventtypes.Err(msg)))
 			return
 		}
 
 		if record.LostSamples > 0 {
-			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
-			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			//msg := fmt.Sprintf("lost %d samples", record.LostSamples)
+			//t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			t.recordPool.Put(record)
 			continue
 		}
@@ -144,17 +143,17 @@ func (t *Tracer) run() {
 			//	Type:      eventtypes.NORMAL,
 			//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
 			//},
-			WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-			Pid:           bpfEvent.Pid,
-			Tid:           bpfEvent.Tid,
-			PPid:          bpfEvent.Ppid,
-			Uid:           bpfEvent.Uid,
-			Gid:           bpfEvent.Gid,
-			UpperLayer:    bpfEvent.UpperLayer,
-			Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
-			ExePath:       gadgets.FromCString(bpfEvent.Exepath[:]),
-			OldPath:       gadgets.FromCString(bpfEvent.Oldpath[:]),
-			NewPath:       gadgets.FromCString(bpfEvent.Newpath[:]),
+			//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+			Pid:        bpfEvent.Pid,
+			Tid:        bpfEvent.Tid,
+			PPid:       bpfEvent.Ppid,
+			Uid:        bpfEvent.Uid,
+			Gid:        bpfEvent.Gid,
+			UpperLayer: bpfEvent.UpperLayer,
+			Comm:       gadgets.FromCString(bpfEvent.Comm[:]),
+			ExePath:    gadgets.FromCString(bpfEvent.Exepath[:]),
+			OldPath:    gadgets.FromCString(bpfEvent.Oldpath[:]),
+			NewPath:    gadgets.FromCString(bpfEvent.Newpath[:]),
 		}
 
 		//if t.enricher != nil {

@@ -14,7 +14,6 @@ import (
 	"github.com/cilium/ebpf/perf"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
@@ -126,14 +125,14 @@ func (t *Tracer) run() {
 				return
 			}
 
-			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
-			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			//msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
+			//t.eventCallback(types.Base(eventtypes.Err(msg)))
 			return
 		}
 
 		if record.LostSamples > 0 {
-			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
-			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			//msg := fmt.Sprintf("lost %d samples", record.LostSamples)
+			//t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			t.recordPool.Put(record)
 			continue
 		}
@@ -176,18 +175,18 @@ func (t *Tracer) run() {
 		// Check if we have seen enough events for this mntns
 		if t.mntnsToEventCount[bpfEvent.MntnsId].EventsCount > TargetRandomxEventsCount && !t.mntnsToEventCount[bpfEvent.MntnsId].Alerted {
 			event := types.Event{
-				Event: eventtypes.Event{
-					Type:      eventtypes.NORMAL,
-					Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-				},
-				WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-				Pid:           bpfEvent.Pid,
-				PPid:          bpfEvent.Ppid,
-				Uid:           bpfEvent.Uid,
-				Gid:           bpfEvent.Gid,
-				UpperLayer:    bpfEvent.UpperLayer,
-				Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
-				ExePath:       gadgets.FromCString(bpfEvent.Exepath[:]),
+				//Event: eventtypes.Event{
+				//	Type:      eventtypes.NORMAL,
+				//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+				//},
+				//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+				Pid:        bpfEvent.Pid,
+				PPid:       bpfEvent.Ppid,
+				Uid:        bpfEvent.Uid,
+				Gid:        bpfEvent.Gid,
+				UpperLayer: bpfEvent.UpperLayer,
+				Comm:       gadgets.FromCString(bpfEvent.Comm[:]),
+				ExePath:    gadgets.FromCString(bpfEvent.Exepath[:]),
 			}
 
 			//if t.enricher != nil {

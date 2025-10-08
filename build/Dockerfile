@@ -9,15 +9,15 @@ RUN --mount=target=. \
     --mount=type=cache,target=/go/pkg \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/node-agent -ldflags="-s -w" ./cmd/main.go
 
-FROM --platform=$BUILDPLATFORM ghcr.io/inspektor-gadget/ig:v0.44.1 AS ig
+FROM --platform=$BUILDPLATFORM ghcr.io/inspektor-gadget/ig:v0.45.0 AS ig
 
-RUN ["ig", "image", "pull", "trace_tcp:v0.44.1"]
-RUN ["ig", "image", "pull", "advise_seccomp:v0.44.1"]
-RUN ["ig", "image", "pull", "trace_capabilities:v0.44.1"]
-RUN ["ig", "image", "pull", "trace_dns:v0.44.1"]
-RUN ["ig", "image", "pull", "trace_exec:v0.44.1"]
-RUN ["ig", "image", "pull", "trace_open:v0.44.1"]
-RUN ["ig", "image", "export", "trace_tcp:v0.44.1", "advise_seccomp:v0.44.1", "trace_capabilities:v0.44.1", "trace_dns:v0.44.1", "trace_exec:v0.44.1", "trace_open:v0.44.1", "/tmp/tracers.tar"]
+RUN ["ig", "image", "pull", "trace_tcp:v0.45.0"]
+RUN ["ig", "image", "pull", "advise_seccomp:v0.45.0"]
+RUN ["ig", "image", "pull", "trace_capabilities:v0.45.0"]
+RUN ["ig", "image", "pull", "trace_dns:v0.45.0"]
+RUN ["ig", "image", "pull", "trace_exec:v0.45.0"]
+RUN ["ig", "image", "pull", "trace_open:v0.45.0"]
+RUN ["ig", "image", "export", "trace_tcp:v0.45.0", "advise_seccomp:v0.45.0", "trace_capabilities:v0.45.0", "trace_dns:v0.45.0", "trace_exec:v0.45.0", "trace_open:v0.45.0", "/tmp/tracers.tar"]
 
 FROM gcr.io/distroless/static-debian12:latest
 

@@ -6,7 +6,6 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -100,16 +99,16 @@ func (it *IoUringTracer) IsEnabled(cfg config.Config) bool {
 
 // iouringEventCallback handles io_uring events from the tracer
 func (it *IoUringTracer) iouringEventCallback(event *traceriouringtype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
-
-	if isDroppedEvent(event.Type, event.Message) {
-		logger.L().Warning("io_uring tracer got drop events - we may miss some realtime data",
-			helpers.Interface("event", event),
-			helpers.String("error", event.Message))
-		return
-	}
+	//if event.Type == types.DEBUG {
+	//	return
+	//}
+	//
+	//if isDroppedEvent(event.Type, event.Message) {
+	//	logger.L().Warning("io_uring tracer got drop events - we may miss some realtime data",
+	//		helpers.Interface("event", event),
+	//		helpers.String("error", event.Message))
+	//	return
+	//}
 
 	if it.eventCallback != nil {
 		// Extract container ID and process ID from the IoUring event

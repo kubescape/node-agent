@@ -6,9 +6,6 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
@@ -103,14 +100,14 @@ func (ht *HTTPTracer) IsEnabled(cfg config.Config) bool {
 
 // httpEventCallback handles HTTP events from the tracer
 func (ht *HTTPTracer) httpEventCallback(event *tracerhttptype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
-
-	if isDroppedEvent(event.Type, event.Message) {
-		logger.L().Warning("http tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
-	}
+	//if event.Type == types.DEBUG {
+	//	return
+	//}
+	//
+	//if isDroppedEvent(event.Type, event.Message) {
+	//	logger.L().Warning("http tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+	//	return
+	//}
 
 	if event.Response != nil {
 		if event.Response.StatusCode < StatusOK || event.Response.StatusCode >= StatusBadRequest {

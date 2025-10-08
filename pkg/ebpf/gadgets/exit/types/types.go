@@ -2,14 +2,11 @@ package types
 
 import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type Event struct {
-	eventtypes.Event
-	eventtypes.WithMountNsID
-
+	//eventtypes.Event
+	//eventtypes.WithMountNsID
 	Pid        uint32 `json:"pid,omitempty" column:"pid,template:pid"`
 	Tid        uint32 `json:"tid,omitempty" column:"tid,template:tid"`
 	PPid       uint32 `json:"ppid,omitempty" column:"ppid,template:ppid"`
@@ -21,28 +18,6 @@ type Event struct {
 	ExitCode   uint32 `json:"exit_code,omitempty" column:"exit_code,template:exit_code"`
 	ExitSignal uint32 `json:"exit_signal,omitempty" column:"exit_signal,template:exit_signal"`
 	extra      interface{}
-}
-
-var _ utils.K8sEvent = (*Event)(nil)
-
-func (event *Event) GetContainerID() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (event *Event) GetContainerImage() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (event *Event) GetContainerImageDigest() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (event *Event) GetHostNetwork() bool {
-	//TODO implement me
-	panic("implement me")
 }
 
 func (event *Event) SetExtra(extra interface{}) {
@@ -61,15 +36,4 @@ func GetColumns() *columns.Columns[Event] {
 	exitColumns := columns.MustCreateColumns[Event]()
 
 	return exitColumns
-}
-
-func Base(ev eventtypes.Event) *Event {
-	return &Event{
-		Event: ev,
-	}
-}
-
-// GetTimestamp returns the event timestamp
-func (event *Event) GetTimestamp() eventtypes.Time {
-	return event.Timestamp
 }

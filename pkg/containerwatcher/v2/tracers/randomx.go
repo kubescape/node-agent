@@ -7,7 +7,6 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -106,14 +105,14 @@ func (rt *RandomXTracer) IsEnabled(cfg config.Config) bool {
 
 // randomxEventCallback handles RandomX events from the tracer
 func (rt *RandomXTracer) randomxEventCallback(event *tracerandomxtype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
-
-	if isDroppedEvent(event.Type, event.Message) {
-		logger.L().Warning("randomx tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
-	}
+	//if event.Type == types.DEBUG {
+	//	return
+	//}
+	//
+	//if isDroppedEvent(event.Type, event.Message) {
+	//	logger.L().Warning("randomx tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+	//	return
+	//}
 
 	if rt.eventCallback != nil {
 		// Extract container ID and process ID from the RandomX event
