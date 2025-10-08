@@ -12,13 +12,13 @@ RUN --mount=target=. \
 
 FROM --platform=$BUILDPLATFORM ghcr.io/inspektor-gadget/ig:v0.45.0 AS ig
 
-RUN ["ig", "image", "pull", "trace_tcp:v0.45.0"]
+RUN ["ig", "image", "pull", "tcpdump:v0.45.0"]
 RUN ["ig", "image", "pull", "advise_seccomp:v0.45.0"]
 RUN ["ig", "image", "pull", "trace_capabilities:v0.45.0"]
 RUN ["ig", "image", "pull", "trace_dns:v0.45.0"]
 RUN ["ig", "image", "pull", "trace_exec:v0.45.0"]
 RUN ["ig", "image", "pull", "trace_open:v0.45.0"]
-RUN ["ig", "image", "export", "trace_tcp:v0.45.0", "advise_seccomp:v0.45.0", "trace_capabilities:v0.45.0", "trace_dns:v0.45.0", "trace_exec:v0.45.0", "trace_open:v0.45.0", "/tmp/tracers.tar"]
+RUN ["ig", "image", "export", "tcpdump:v0.45.0", "advise_seccomp:v0.45.0", "trace_capabilities:v0.45.0", "trace_dns:v0.45.0", "trace_exec:v0.45.0", "trace_open:v0.45.0", "/tmp/tracers.tar"]
 
 FROM gcr.io/distroless/static-debian12:debug
 

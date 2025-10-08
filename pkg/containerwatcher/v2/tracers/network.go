@@ -11,6 +11,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -34,6 +35,7 @@ type NetworkTracer struct {
 	kubeNameResolver   *kubenameresolver.KubeNameResolver
 	ociStore           *orasoci.ReadOnlyStore
 	runtime            runtime.Runtime
+	socketEnricherOp   *socketenricher.SocketEnricher
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
@@ -46,6 +48,7 @@ func NewNetworkTracer(
 	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
+	socketEnricherOp *socketenricher.SocketEnricher,
 ) *NetworkTracer {
 	return &NetworkTracer{
 		eventCallback:      eventCallback,
@@ -55,6 +58,7 @@ func NewNetworkTracer(
 		ociStore:           ociStore,
 		runtime:            runtime,
 		thirdPartyEnricher: thirdPartyEnricher,
+		socketEnricherOp:   socketEnricherOp,
 	}
 }
 
@@ -63,13 +67,14 @@ func (nt *NetworkTracer) Start(ctx context.Context) error {
 	nt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/trace_tcp:v0.45.0",
+		"ghcr.io/inspektor-gadget/gadget/tcpdump:v0.45.0",
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			nt.kubeIPResolver,
 			nt.kubeManager,
 			nt.kubeNameResolver,
 			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			nt.socketEnricherOp,
 			nt.eventOperator(),
 		),
 		gadgetcontext.WithName(networkTraceName),
@@ -77,7 +82,7 @@ func (nt *NetworkTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.annotate": "tracetcp:kubenameresolver.enable=true",
+			"operator.oci.annotate": "tcpdump:kubenameresolver.enable=true",
 		}
 		err := nt.runtime.RunGadget(nt.gadgetCtx, nil, params)
 		if err != nil {
@@ -124,7 +129,7 @@ func (nt *NetworkTracer) eventOperator() operators.DataOperator {
 					igjson.WithPretty(true, "  "),
 				)
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					logger.L().Debug("Matthias - event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					logger.L().Info("Matthias - event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
 					nt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.NetworkEventType})
 					return nil
 				}, opPriority)
