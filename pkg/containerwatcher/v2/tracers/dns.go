@@ -42,6 +42,7 @@ func NewDNSTracer(
 	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
+	socketEnricherOp *socketenricher.SocketEnricher,
 ) *DNSTracer {
 	return &DNSTracer{
 		eventCallback:      eventCallback,
@@ -49,6 +50,7 @@ func NewDNSTracer(
 		ociStore:           ociStore,
 		runtime:            runtime,
 		thirdPartyEnricher: thirdPartyEnricher,
+		socketEnricherOp:   socketEnricherOp,
 	}
 }
 
@@ -62,6 +64,7 @@ func (dt *DNSTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithDataOperators(
 			dt.kubeManager,
 			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			dt.socketEnricherOp,
 			dt.eventOperator(),
 		),
 		gadgetcontext.WithName(dnsTraceName),
@@ -116,7 +119,7 @@ func (dt *DNSTracer) eventOperator() operators.DataOperator {
 					igjson.WithPretty(true, "  "),
 				)
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					logger.L().Debug("Matthias - event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					logger.L().Info("Matthias - event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
 					dt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.DnsEventType})
 					return nil
 				}, opPriority)
