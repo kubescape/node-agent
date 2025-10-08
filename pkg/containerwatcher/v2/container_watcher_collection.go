@@ -6,7 +6,8 @@ import (
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -35,12 +36,18 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 
 	// Initialize socket enricher for network tracers
 	if cw.cfg.EnableNetworkTracing || cw.cfg.EnableRuntimeDetection {
-		socketEnricher, err := socketenricher.NewSocketEnricher(socketenricher.Config{})
-		if err != nil {
-			logger.L().Error("ContainerWatcher - error creating socket enricher", helpers.Error(err))
-			return fmt.Errorf("creating socket enricher: %w", err)
+		socketEnricherOp := &socketenricher.SocketEnricher{}
+		socketEnricherFields := params.ParamDescs{
+			{
+				Key:         "socket-enricher-fields",
+				Description: "Fields to enrich the socket event with",
+				TypeHint:    params.TypeString,
+			},
 		}
-		cw.socketEnricher = socketEnricher
+		if err := socketEnricherOp.Init(socketEnricherFields.ToParams()); err != nil {
+			return fmt.Errorf("init socket enricher: %w", err)
+		}
+		cw.socketEnricher = socketEnricherOp
 	}
 
 	// Set up container callbacks

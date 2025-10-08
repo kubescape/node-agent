@@ -9,9 +9,9 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -361,6 +361,11 @@ func (cw *ContainerWatcher) Stop() {
 	// Stop worker pool
 	if cw.workerPool != nil {
 		cw.workerPool.Release()
+	}
+
+	// Close socket enricher
+	if cw.socketEnricher != nil {
+		cw.socketEnricher.Close()
 	}
 
 	cw.running = false
