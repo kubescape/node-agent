@@ -14,9 +14,9 @@ import (
 	"github.com/cilium/ebpf/perf"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 )
 
@@ -27,8 +27,8 @@ type Config struct {
 }
 
 type Tracer struct {
-	config        *Config
-	enricher      gadgets.DataEnricherByMntNs
+	config *Config
+	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 
 	objs forkObjects
@@ -40,12 +40,12 @@ type Tracer struct {
 	recordPool sync.Pool
 }
 
-func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
+func NewTracer(config *Config, //enricher gadgets.DataEnricherByMntNs,
 	eventCallback func(*types.Event),
 ) (*Tracer, error) {
 	t := &Tracer{
-		config:        config,
-		enricher:      enricher,
+		config: config,
+		//enricher:      enricher,
 		eventCallback: eventCallback,
 	}
 
@@ -81,14 +81,14 @@ func (t *Tracer) close() {
 
 func (t *Tracer) install() error {
 	var err error
-	spec, err := loadFork()
-	if err != nil {
-		return fmt.Errorf("loading ebpf program: %w", err)
-	}
+	//spec, err := loadFork()
+	//if err != nil {
+	//	return fmt.Errorf("loading ebpf program: %w", err)
+	//}
 
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
-	}
+	//if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
+	//	return fmt.Errorf("loading ebpf spec: %w", err)
+	//}
 
 	t.forkLink, err = link.AttachRawTracepoint(link.RawTracepointOptions{
 		Name:    "sched_process_fork",
@@ -117,14 +117,14 @@ func (t *Tracer) run() {
 				return
 			}
 
-			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
-			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			//msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
+			//t.eventCallback(types.Base(eventtypes.Err(msg)))
 			return
 		}
 
 		if record.LostSamples > 0 {
-			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
-			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			//msg := fmt.Sprintf("lost %d samples", record.LostSamples)
+			//t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			t.recordPool.Put(record)
 			continue
 		}
@@ -138,25 +138,25 @@ func (t *Tracer) run() {
 
 		// Check if we have seen enough events for this mntns
 		event := types.Event{
-			Event: eventtypes.Event{
-				Type:      eventtypes.NORMAL,
-				Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-			},
-			WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-			Pid:           bpfEvent.Pid,
-			Tid:           bpfEvent.Tid,
-			PPid:          bpfEvent.Ppid,
-			Uid:           bpfEvent.Uid,
-			Gid:           bpfEvent.Gid,
-			Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
-			ExePath:       gadgets.FromCString(bpfEvent.Exepath[:]),
-			ChildPid:      bpfEvent.ChildPid,
-			ChildTid:      bpfEvent.ChildTid,
+			//Event: eventtypes.Event{
+			//	Type:      eventtypes.NORMAL,
+			//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+			//},
+			//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+			Pid:      bpfEvent.Pid,
+			Tid:      bpfEvent.Tid,
+			PPid:     bpfEvent.Ppid,
+			Uid:      bpfEvent.Uid,
+			Gid:      bpfEvent.Gid,
+			Comm:     gadgets.FromCString(bpfEvent.Comm[:]),
+			ExePath:  gadgets.FromCString(bpfEvent.Exepath[:]),
+			ChildPid: bpfEvent.ChildPid,
+			ChildTid: bpfEvent.ChildTid,
 		}
 
-		if t.enricher != nil {
-			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-		}
+		//if t.enricher != nil {
+		//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+		//}
 
 		t.eventCallback(&event)
 		t.recordPool.Put(record)
@@ -191,7 +191,7 @@ func (t *Tracer) SetEventHandler(handler any) {
 
 type GadgetDesc struct{}
 
-func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
+func (g *GadgetDesc) NewInstance() (ebpfgadgets.Gadget, error) {
 	tracer := &Tracer{
 		config: &Config{},
 	}

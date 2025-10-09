@@ -3,11 +3,7 @@ package adapters
 import (
 	iouringsyscall "github.com/iceber/iouring-go/syscall"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
 type IoUringAdapter struct {
@@ -18,48 +14,48 @@ func NewIoUringAdapter() *IoUringAdapter {
 }
 
 func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
-	if !ok {
-		return
-	}
+	//iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
+	//if !ok {
+	//	return
+	//}
 
-	ok, name := GetOpcodeName(uint8(iouringEvent.Opcode))
-	if !ok {
-		return
-	}
+	//ok, name := GetOpcodeName(uint8(iouringEvent.Opcode))
+	//if !ok {
+	//	return
+	//}
 
-	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = iouringEvent.Pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"opcode":    iouringEvent.Opcode,
-		"flags":     iouringEvent.Flags,
-		"operation": name,
-	}
-	baseRuntimeAlert.Identifiers = &common.Identifiers{
-		Process: &common.ProcessEntity{
-			Name: iouringEvent.Comm,
-		},
-	}
-	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	//baseRuntimeAlert.InfectedPID = iouringEvent.Pid
+	//baseRuntimeAlert.Arguments = map[string]interface{}{
+	//	"opcode":    iouringEvent.Opcode,
+	//	"flags":     iouringEvent.Flags,
+	//	"operation": name,
+	//}
+	//baseRuntimeAlert.Identifiers = &common.Identifiers{
+	//	Process: &common.ProcessEntity{
+	//		Name: iouringEvent.Comm,
+	//	},
+	//}
+	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
-			Comm: iouringEvent.Comm,
-			PID:  iouringEvent.Pid,
-			Uid:  &iouringEvent.Uid,
-			Gid:  &iouringEvent.Gid,
-		},
-		ContainerID: iouringEvent.Runtime.ContainerID,
-	}
-	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	//runtimeProcessDetails := apitypes.ProcessTree{
+	//	ProcessTree: apitypes.Process{
+	//		Comm: iouringEvent.Comm,
+	//		PID:  iouringEvent.Pid,
+	//		Uid:  &iouringEvent.Uid,
+	//		Gid:  &iouringEvent.Gid,
+	//	},
+	//	ContainerID: iouringEvent.Runtime.ContainerID,
+	//}
+	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	failure.SetTriggerEvent(iouringEvent.Event)
+	//failure.SetTriggerEvent(iouringEvent.Event)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-		PodName:   iouringEvent.GetPod(),
-		PodLabels: iouringEvent.K8s.PodLabels,
-	}
-	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	//	PodName:   iouringEvent.GetPod(),
+	//	PodLabels: iouringEvent.K8s.PodLabels,
+	//}
+	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 var OpcodeMap = map[uint8]string{
@@ -121,24 +117,24 @@ func GetOpcodeName(opcode uint8) (bool, string) {
 }
 
 func (c *IoUringAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
-	if !ok {
-		return nil
-	}
+	//iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
+	//if !ok {
+	//	return nil
+	//}
 
-	result := ConvertToMap(&iouringEvent.Event)
+	//result := ConvertToMap(&iouringEvent.Event)
 
-	result["opcode"] = iouringEvent.Opcode
-	result["pid"] = iouringEvent.Pid
-	result["tid"] = iouringEvent.Tid
-	result["uid"] = iouringEvent.Uid
-	result["gid"] = iouringEvent.Gid
-	result["comm"] = iouringEvent.Comm
-	result["flags"] = iouringEvent.Flags
-	result["user_data"] = iouringEvent.UserData
-	result["identifier"] = iouringEvent.Identifier
+	//result["opcode"] = iouringEvent.Opcode
+	//result["pid"] = iouringEvent.Pid
+	//result["tid"] = iouringEvent.Tid
+	//result["uid"] = iouringEvent.Uid
+	//result["gid"] = iouringEvent.Gid
+	//result["comm"] = iouringEvent.Comm
+	//result["flags"] = iouringEvent.Flags
+	//result["user_data"] = iouringEvent.UserData
+	//result["identifier"] = iouringEvent.Identifier
 
-	result["mountnsid"] = iouringEvent.MountNsID
+	//result["mountnsid"] = iouringEvent.MountNsID
 
-	return result
+	return map[string]interface{}{}
 }

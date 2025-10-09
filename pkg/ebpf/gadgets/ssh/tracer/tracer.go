@@ -9,7 +9,7 @@ import (
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/networktracer"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 )
 
@@ -60,14 +60,14 @@ func (t *Tracer) RunWorkaround() error {
 }
 
 func (t *Tracer) run() error {
-	spec, err := loadSsh()
-	if err != nil {
-		return fmt.Errorf("loading ebpf program: %w", err)
-	}
+	//spec, err := loadSsh()
+	//if err != nil {
+	//	return fmt.Errorf("loading ebpf program: %w", err)
+	//}
 
-	if err := t.Tracer.Run(spec, types.Base, t.parseSSH); err != nil {
-		return fmt.Errorf("setting network tracer spec: %w", err)
-	}
+	//if err := t.Tracer.Run(spec, types.Base, t.parseSSH); err != nil {
+	//	return fmt.Errorf("setting network tracer spec: %w", err)
+	//}
 
 	return nil
 }
@@ -82,20 +82,20 @@ func (t *Tracer) parseSSH(rawSample []byte, netns uint64) (*types.Event, error) 
 	binary.BigEndian.PutUint32(dstIP[:], bpfEvent.DstIp)
 	dst := netip.AddrFrom4(dstIP).String()
 	event := types.Event{
-		Event: eventtypes.Event{
-			Type:      eventtypes.NORMAL,
-			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-		},
-		WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-		WithNetNsID:   eventtypes.WithNetNsID{NetNsID: netns},
-		SrcIP:         src,
-		DstIP:         dst,
-		SrcPort:       bpfEvent.SrcPort,
-		DstPort:       bpfEvent.DstPort,
-		Pid:           bpfEvent.Pid,
-		Uid:           bpfEvent.Uid,
-		Gid:           bpfEvent.Gid,
-		Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
+		//Event: eventtypes.Event{
+		//	Type:      eventtypes.NORMAL,
+		//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+		//},
+		//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+		//WithNetNsID:   eventtypes.WithNetNsID{NetNsID: netns},
+		SrcIP:   src,
+		DstIP:   dst,
+		SrcPort: bpfEvent.SrcPort,
+		DstPort: bpfEvent.DstPort,
+		Pid:     bpfEvent.Pid,
+		Uid:     bpfEvent.Uid,
+		Gid:     bpfEvent.Gid,
+		Comm:    gadgets.FromCString(bpfEvent.Comm[:]),
 	}
 
 	return &event, nil
@@ -103,7 +103,7 @@ func (t *Tracer) parseSSH(rawSample []byte, netns uint64) (*types.Event, error) 
 
 type GadgetDesc struct{}
 
-func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
+func (g *GadgetDesc) NewInstance() (ebpfgadgets.Gadget, error) {
 	tracer := &Tracer{}
 	return tracer, nil
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	kernel "github.com/kubescape/node-agent/pkg/validator/ebpf"
 	"github.com/shirou/gopsutil/v4/host"
@@ -30,8 +30,8 @@ type Config struct {
 }
 
 type Tracer struct {
-	config        *Config
-	enricher      gadgets.DataEnricherByMntNs
+	config *Config
+	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 	objs          iouringObjects
 	links         []link.Link
@@ -41,11 +41,11 @@ type Tracer struct {
 	recordPool sync.Pool
 }
 
-func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
+func NewTracer(config *Config, //enricher gadgets.DataEnricherByMntNs,
 	eventCallback func(*types.Event)) (*Tracer, error) {
 	t := &Tracer{
-		config:        config,
-		enricher:      enricher,
+		config: config,
+		//enricher:      enricher,
 		eventCallback: eventCallback,
 	}
 
@@ -77,7 +77,7 @@ func (t *Tracer) Close() {
 }
 
 func (t *Tracer) install() error {
-	var spec *ebpf.CollectionSpec
+	//var spec *ebpf.CollectionSpec
 	var tracepointName string
 
 	info, err := host.Info()
@@ -90,23 +90,23 @@ func (t *Tracer) install() error {
 		return fmt.Errorf("parsing kernel version: %w", err)
 	}
 	if major >= SupportedMajor && minor >= SupportedMinor {
-		spec, err = loadIouring_63()
-		if err != nil {
-			return fmt.Errorf("loading ebpf program: %w", err)
-		}
+		//spec, err = loadIouring_63()
+		//if err != nil {
+		//	return fmt.Errorf("loading ebpf program: %w", err)
+		//}
 		tracepointName = "io_uring_submit_req"
 
 	} else {
-		spec, err = loadIouring()
-		if err != nil {
-			return fmt.Errorf("loading ebpf program: %w", err)
-		}
+		//spec, err = loadIouring()
+		//if err != nil {
+		//	return fmt.Errorf("loading ebpf program: %w", err)
+		//}
 		tracepointName = "io_uring_submit_sqe"
 	}
 
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
-	}
+	//if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
+	//	return fmt.Errorf("loading ebpf spec: %w", err)
+	//}
 
 	tracepoint, err := link.Tracepoint("io_uring", tracepointName, t.objs.HandleSubmitReq, nil)
 	if err != nil {
@@ -134,14 +134,14 @@ func (t *Tracer) run() {
 				return
 			}
 
-			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
-			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			//msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
+			//t.eventCallback(types.Base(eventtypes.Err(msg)))
 			return
 		}
 
 		if record.LostSamples > 0 {
-			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
-			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			//msg := fmt.Sprintf("lost %d samples", record.LostSamples)
+			//t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			t.recordPool.Put(record)
 			continue
 		}
@@ -153,9 +153,9 @@ func (t *Tracer) run() {
 
 		bpfEvent := (*iouringEvent)(unsafe.Pointer(&record.RawSample[0]))
 		event := t.parseEvent(bpfEvent)
-		if t.enricher != nil {
-			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-		}
+		//if t.enricher != nil {
+		//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+		//}
 		t.eventCallback(event)
 		t.recordPool.Put(record)
 	}
@@ -180,25 +180,25 @@ func (t *Tracer) SetEventHandler(handler any) {
 
 func (t *Tracer) parseEvent(bpfEvent *iouringEvent) *types.Event {
 	return &types.Event{
-		Event: eventtypes.Event{
-			Type:      eventtypes.NORMAL,
-			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-		},
-		WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-		Pid:           bpfEvent.Pid,
-		Tid:           bpfEvent.Tid,
-		Uid:           bpfEvent.Uid,
-		Gid:           bpfEvent.Gid,
-		Opcode:        bpfEvent.Opcode,
-		Flags:         bpfEvent.Flags,
-		Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
-		Identifier:    fmt.Sprintf("%s-%d", gadgets.FromCString(bpfEvent.Comm[:]), bpfEvent.Opcode),
+		//Event: eventtypes.Event{
+		//	Type:      eventtypes.NORMAL,
+		//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+		//},
+		//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+		Pid:        bpfEvent.Pid,
+		Tid:        bpfEvent.Tid,
+		Uid:        bpfEvent.Uid,
+		Gid:        bpfEvent.Gid,
+		Opcode:     bpfEvent.Opcode,
+		Flags:      bpfEvent.Flags,
+		Comm:       gadgets.FromCString(bpfEvent.Comm[:]),
+		Identifier: fmt.Sprintf("%s-%d", gadgets.FromCString(bpfEvent.Comm[:]), bpfEvent.Opcode),
 	}
 }
 
 type GadgetDesc struct{}
 
-func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
+func (g *GadgetDesc) NewInstance() (ebpfgadgets.Gadget, error) {
 	tracer := &Tracer{
 		config: &Config{},
 	}

@@ -5,16 +5,11 @@ import (
 	"fmt"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection/networktracer"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerssh "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/tracer"
-	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -51,41 +46,41 @@ func NewSSHTracer(
 
 // Start initializes and starts the SSH tracer
 func (st *SSHTracer) Start(ctx context.Context) error {
-	if err := st.tracerCollection.AddTracer(sshTraceName, st.containerSelector); err != nil {
-		return fmt.Errorf("adding SSH tracer: %w", err)
-	}
+	//if err := st.tracerCollection.AddTracer(sshTraceName, st.containerSelector); err != nil {
+	//	return fmt.Errorf("adding SSH tracer: %w", err)
+	//}
 
-	tracerSsh, err := tracerssh.NewTracer()
-	if err != nil {
-		return fmt.Errorf("creating SSH tracer: %w", err)
-	}
+	//tracerSsh, err := tracerssh.NewTracer()
+	//if err != nil {
+	//	return fmt.Errorf("creating SSH tracer: %w", err)
+	//}
 
-	if st.socketEnricher != nil {
-		tracerSsh.SetSocketEnricherMap(st.socketEnricher.SocketsMap())
-	} else {
-		logger.L().Error("SSHTracer - socket enricher is nil")
-	}
+	//if st.socketEnricher != nil {
+	//	tracerSsh.SetSocketEnricherMap(st.socketEnricher.SocketsMap())
+	//} else {
+	//	logger.L().Error("SSHTracer - socket enricher is nil")
+	//}
 
-	tracerSsh.SetEventHandler(st.sshEventCallback)
+	//tracerSsh.SetEventHandler(st.sshEventCallback)
 
-	err = tracerSsh.RunWorkaround()
-	if err != nil {
-		return fmt.Errorf("running workaround: %w", err)
-	}
+	//err = tracerSsh.RunWorkaround()
+	//if err != nil {
+	//	return fmt.Errorf("running workaround: %w", err)
+	//}
 
-	st.tracer = tracerSsh
+	//st.tracer = tracerSsh
 
-	config := &networktracer.ConnectToContainerCollectionConfig[tracersshtype.Event]{
-		Tracer:   st.tracer,
-		Resolver: st.containerCollection,
-		Selector: st.containerSelector,
-		Base:     tracersshtype.Base,
-	}
+	//config := &networktracer.ConnectToContainerCollectionConfig[tracersshtype.Event]{
+	//	Tracer:   st.tracer,
+	//	Resolver: st.containerCollection,
+	//	Selector: st.containerSelector,
+	//	Base:     tracersshtype.Base,
+	//}
 
-	_, err = networktracer.ConnectToContainerCollection(config)
-	if err != nil {
-		return fmt.Errorf("connecting tracer to container collection: %w", err)
-	}
+	//_, err = networktracer.ConnectToContainerCollection(config)
+	//if err != nil {
+	//	return fmt.Errorf("connecting tracer to container collection: %w", err)
+	//}
 
 	return nil
 }
@@ -119,24 +114,24 @@ func (st *SSHTracer) IsEnabled(cfg config.Config) bool {
 }
 
 // sshEventCallback handles SSH events from the tracer
-func (st *SSHTracer) sshEventCallback(event *tracersshtype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
+//func (st *SSHTracer) sshEventCallback(event *tracersshtype.Event) {
+//	if event.Type == types.DEBUG {
+//		return
+//	}
 
-	if isDroppedEvent(event.Type, event.Message) {
-		logger.L().Warning("ssh tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
-	}
+//	if isDroppedEvent(event.Type, event.Message) {
+//		logger.L().Warning("ssh tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+//		return
+//	}
 
-	st.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
-	st.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
+//	st.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
+//	st.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
+//
+//	if st.eventCallback != nil {
+// Extract container ID and process ID from the SSH event
+//		containerID := event.Runtime.ContainerID
+//		processID := event.Pid
 
-	if st.eventCallback != nil {
-		// Extract container ID and process ID from the SSH event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
-
-		st.eventCallback(event, containerID, processID)
-	}
-}
+//		st.eventCallback(event, containerID, processID)
+//	}
+//}

@@ -5,7 +5,6 @@ import (
 	"net"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
@@ -27,10 +26,4 @@ func IsInternal(ip string) bool {
 func GetColumns() *columns.Columns[Event] {
 	httpColumns := columns.MustCreateColumns[Event]()
 	return httpColumns
-}
-
-func Base(ev eventtypes.Event) *Event {
-	return &Event{
-		Event: ev,
-	}
 }

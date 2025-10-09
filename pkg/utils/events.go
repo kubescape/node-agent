@@ -1,29 +1,96 @@
 package utils
 
 import (
-	"fmt"
-	"path/filepath"
 	"reflect"
 
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 type K8sEvent interface {
-	GetPod() string
 	GetNamespace() string
+	GetPod() string
 	GetTimestamp() types.Time
 }
 
 type EnrichEvent interface {
-	GetBaseEvent() *types.Event
-	GetPID() uint64
-	SetExtra(extra interface{})
+	K8sEvent
+	GetComm() string
+	GetContainer() string
+	GetContainerID() string
+	GetContainerImage() string
+	GetContainerImageDigest() string
+	GetError() int64
+	GetEventType() EventType
 	GetExtra() interface{}
-	GetPod() string
-	GetNamespace() string
-	GetTimestamp() types.Time
+	GetHostNetwork() bool
+	GetPcomm() string
+	GetPID() uint32
+	GetPodLabels() map[string]string
+	GetPpid() uint32
+	GetUid() *uint32
+	SetExtra(extra interface{})
+}
+
+type CapabilitiesEvent interface {
+	EnrichEvent
+	GetCapability() string
+	GetSyscall() string
+}
+
+type DNSEvent interface {
+	EnrichEvent
+	GetAddresses() []string
+	GetDNSName() string
+	GetNumAnswers() int
+	GetQr() DNSPktType
+}
+
+type ExecEvent interface {
+	EnrichEvent
+	GetArgs() []string
+	GetCwd() string
+	GetExecArgsFromEvent() []string
+	GetExecFullPathFromEvent() string
+	GetExePath() string
+	GetExecPathFromEvent() string
+	GetGid() *uint32
+	GetHostFilePathFromEvent(containerPid uint32) (string, error)
+	GetPupperLayer() bool
+	GetUpperLayer() bool
+}
+
+type NetworkEvent interface {
+	EnrichEvent
+	GetDstEndpoint() types.L4Endpoint
+	GetDstPort() uint16
+	GetPktType() string
+	GetPodHostIP() string
+	GetPort() uint16
+	GetProto() string
+}
+
+type OpenEvent interface {
+	EnrichEvent
+	GetFlags() []string
+	GetFlagsRaw() uint32
+	GetGid() *uint32
+	GetHostFilePathFromEvent(containerPid uint32) (string, error)
+	GetPath() string
+	IsDir() bool
+}
+
+type SyscallEvent interface {
+	EnrichEvent
+	GetSyscalls() []string
+}
+
+type EverythingEvent interface {
+	CapabilitiesEvent
+	DNSEvent
+	ExecEvent
+	NetworkEvent
+	OpenEvent
+	SyscallEvent
 }
 
 type EventType string
@@ -47,39 +114,6 @@ const (
 	SymlinkEventType      EventType = "symlink"
 	SyscallEventType      EventType = "syscall"
 )
-
-// Get the path of the file on the node.
-func GetHostFilePathFromEvent(event K8sEvent, containerPid uint32) (string, error) {
-	if execEvent, ok := event.(*tracerexectype.Event); ok {
-		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, GetExecPathFromEvent(execEvent)))
-		return realPath, nil
-	}
-
-	if openEvent, ok := event.(*traceropentype.Event); ok {
-		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, openEvent.FullPath))
-		return realPath, nil
-	}
-
-	return "", fmt.Errorf("event is not of type tracerexectype.Event or traceropentype.Event")
-}
-
-// Get the path of the executable from the given event.
-func GetExecPathFromEvent(event *tracerexectype.Event) string {
-	if len(event.Args) > 0 {
-		if event.Args[0] != "" {
-			return event.Args[0]
-		}
-	}
-	return event.Comm
-}
-
-// Get exec args from the given event.
-func GetExecArgsFromEvent(event *tracerexectype.Event) []string {
-	if len(event.Args) > 1 {
-		return event.Args[1:]
-	}
-	return []string{}
-}
 
 func GetCommFromEvent(event any) string {
 	if event == nil {

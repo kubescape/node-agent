@@ -6,9 +6,8 @@ import (
 )
 
 type Event struct {
-	eventtypes.Event
-	eventtypes.WithMountNsID
-
+	//eventtypes.Event
+	//eventtypes.WithMountNsID
 	Pid        uint32 `json:"pid,omitempty" column:"pid,template:pid"`
 	Tid        uint32 `json:"tid,omitempty" column:"tid,template:tid"`
 	PPid       uint32 `json:"ppid,omitempty" column:"ppid,template:ppid"`
@@ -28,12 +27,6 @@ func GetColumns() *columns.Columns[Event] {
 	return hardlinkColumns
 }
 
-func Base(ev eventtypes.Event) *Event {
-	return &Event{
-		Event: ev,
-	}
-}
-
 func (event *Event) SetExtra(extra interface{}) {
 	event.extra = extra
 }
@@ -42,6 +35,13 @@ func (event *Event) GetExtra() interface{} {
 	return event.extra
 }
 
-func (event *Event) GetPID() uint64 {
-	return (uint64(event.Pid) << 32) | uint64(event.Tid)
+func (event *Event) GetPID() uint32 {
+	//return (uint64(event.Pid) << 32) | uint64(event.Tid)
+	return event.Pid
+}
+
+// GetTimestamp returns the event timestamp
+func (event *Event) GetTimestamp() eventtypes.Time {
+	//return event.Timestamp
+	return 0
 }

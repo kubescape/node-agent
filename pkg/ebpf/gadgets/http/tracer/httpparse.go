@@ -32,19 +32,19 @@ func CreateEventFromRequest(bpfEvent *http_snifferHttpevent) (*tracerhttptype.Ev
 	}
 
 	event := tracerhttptype.Event{
-		Event: eventtypes.Event{
-			Type:      eventtypes.NORMAL,
-			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-		},
-		WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-		Pid:           bpfEvent.Pid,
-		Uid:           bpfEvent.Uid,
-		Gid:           bpfEvent.Gid,
-		OtherPort:     bpfEvent.OtherPort,
-		OtherIp:       ip.String(),
-		Request:       request,
-		Internal:      tracerhttptype.IsInternal(ip.String()),
-		Direction:     direction,
+		//Event: eventtypes.Event{
+		//	Type:      eventtypes.NORMAL,
+		//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+		//},
+		//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+		Pid:       bpfEvent.Pid,
+		Uid:       bpfEvent.Uid,
+		Gid:       bpfEvent.Gid,
+		OtherPort: bpfEvent.OtherPort,
+		OtherIp:   ip.String(),
+		Request:   request,
+		Internal:  tracerhttptype.IsInternal(ip.String()),
+		Direction: direction,
 	}
 
 	return &event, nil
@@ -106,7 +106,7 @@ func FromCString(in []byte) []byte {
 }
 
 func GetUniqueIdentifier(event *http_snifferHttpevent) string {
-	return strconv.FormatUint(uint64(event.SocketInode), 10) + strconv.FormatUint(uint64(event.SockFd), 10)
+	return strconv.FormatUint(event.SocketInode, 10) + strconv.FormatUint(uint64(event.SockFd), 10)
 }
 
 func ToTime(t eventtypes.Time) time.Time {

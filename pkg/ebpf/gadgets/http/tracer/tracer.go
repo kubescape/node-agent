@@ -14,9 +14,9 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 )
@@ -28,8 +28,8 @@ type Config struct {
 }
 
 type Tracer struct {
-	config        *Config
-	enricher      gadgets.DataEnricherByMntNs
+	config *Config
+	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 
 	objs http_snifferObjects
@@ -48,7 +48,7 @@ type Tracer struct {
 	recordPool sync.Pool
 }
 
-func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
+func NewTracer(config *Config, //enricher gadgets.DataEnricherByMntNs,
 	eventCallback func(*types.Event),
 ) (*Tracer, error) {
 	// Create a new LRU cache with a specified size
@@ -58,8 +58,8 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 	}
 
 	t := &Tracer{
-		config:          config,
-		enricher:        enricher,
+		config: config,
+		//enricher:        enricher,
 		eventCallback:   eventCallback,
 		eventsMap:       cache,
 		timeoutDuration: 5 * time.Second,
@@ -102,14 +102,14 @@ func (t *Tracer) Close() {
 
 func (t *Tracer) install() error {
 	var err error
-	spec, err := loadHttp_sniffer()
-	if err != nil {
-		return fmt.Errorf("loading ebpf program: %w", err)
-	}
+	//spec, err := loadHttp_sniffer()
+	//if err != nil {
+	//	return fmt.Errorf("loading ebpf program: %w", err)
+	//}
 
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
-	}
+	//if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
+	//	return fmt.Errorf("loading ebpf spec: %w", err)
+	//}
 
 	tracepoints := GetTracepointDefinitions(&t.objs.http_snifferPrograms)
 	var links []link.Link
@@ -145,14 +145,14 @@ func (t *Tracer) run() {
 				return
 			}
 
-			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
-			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			//msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
+			//t.eventCallback(types.Base(eventtypes.Err(msg)))
 			continue
 		}
 
 		if record.LostSamples > 0 {
-			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
-			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			//msg := fmt.Sprintf("lost %d samples", record.LostSamples)
+			//t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			// Return record to the pool before continuing.
 			t.recordPool.Put(record)
 			continue
@@ -167,9 +167,9 @@ func (t *Tracer) run() {
 		bpfEvent := (*http_snifferHttpevent)(unsafe.Pointer(&record.RawSample[0]))
 		if grouped := t.GroupEvents(bpfEvent); grouped != nil {
 			// We'll only enrich by request properties
-			if t.enricher != nil {
-				t.enricher.EnrichByMntNs(&grouped.CommonData, grouped.MountNsID)
-			}
+			//if t.enricher != nil {
+			//	t.enricher.EnrichByMntNs(&grouped.CommonData, grouped.MountNsID)
+			//}
 			t.eventCallback(grouped)
 		}
 
@@ -222,13 +222,13 @@ func (t *Tracer) transmitOrphenRequests() {
 		keys := t.eventsMap.Keys()
 		for _, key := range keys {
 			if event, ok := t.eventsMap.Peek(key); ok {
-				if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
-					if t.enricher != nil {
-						t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-					}
-					t.eventCallback(event)
-					t.eventsMap.Remove(key)
-				}
+				//if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
+				//if t.enricher != nil {
+				//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+				//}
+				t.eventCallback(event)
+				t.eventsMap.Remove(key)
+				//}
 			}
 		}
 	}
@@ -248,7 +248,7 @@ func (t *Tracer) SetEventHandler(handler any) {
 
 type GadgetDesc struct{}
 
-func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
+func (g *GadgetDesc) NewInstance() (ebpfgadgets.Gadget, error) {
 	tracer := &Tracer{
 		config: &Config{},
 	}
