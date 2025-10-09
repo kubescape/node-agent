@@ -51,8 +51,8 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	xcel.RegisterObject(ta, tp, hardlinkObj, hardlinkTyp, xcel.NewFields(hardlinkObj))
 	iouringObj, iouringTyp := xcel.NewObject(&traceriouringtype.Event{})
 	xcel.RegisterObject(ta, tp, iouringObj, iouringTyp, xcel.NewFields(iouringObj))
-	datasourceObj, datasourceTyp := xcel.NewObject(&utils.DatasourceEvent{})
-	xcel.RegisterObject(ta, tp, datasourceObj, datasourceTyp, utils.DatasourceFields)
+	eventObj, eventTyp := xcel.NewObject(&utils.EverythingEventImpl{})
+	xcel.RegisterObject(ta, tp, eventObj, eventTyp, utils.CelFields)
 	procObj, procTyp := xcel.NewObject(&events.ProcfsEvent{})
 	xcel.RegisterObject(ta, tp, procObj, procTyp, xcel.NewFields(procObj))
 	ptraceObj, ptraceTyp := xcel.NewObject(&tracerptracetype.Event{})
@@ -66,16 +66,12 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	syscallObj, syscallTyp := xcel.NewObject(&types.SyscallEvent{})
 	xcel.RegisterObject(ta, tp, syscallObj, syscallTyp, xcel.NewFields(syscallObj))
 	envOptions := []cel.EnvOption{
+		cel.Variable("event", eventTyp),
 		cel.Variable("event_type", cel.StringType),
-		cel.Variable(string(utils.CapabilitiesEventType), datasourceTyp),
-		cel.Variable(string(utils.DnsEventType), datasourceTyp),
-		cel.Variable(string(utils.ExecveEventType), datasourceTyp),
 		//cel.Variable(string(utils.ExitEventType), exitTyp),
 		cel.Variable(string(utils.ForkEventType), forkTyp),
 		cel.Variable(string(utils.HardlinkEventType), hardlinkTyp),
 		cel.Variable(string(utils.IoUringEventType), iouringTyp),
-		cel.Variable(string(utils.NetworkEventType), datasourceTyp),
-		cel.Variable(string(utils.OpenEventType), datasourceTyp),
 		cel.Variable(string(utils.ProcfsEventType), procTyp),
 		cel.Variable(string(utils.PtraceEventType), ptraceTyp),
 		cel.Variable(string(utils.RandomXEventType), randTyp),
@@ -166,8 +162,8 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 			return false, err
 		}
 
-		obj, _ := xcel.NewObject(event.Event)
-		out, _, err := program.Eval(map[string]any{string(event.EventType): obj, "event_type": string(event.EventType)})
+		obj, _ := xcel.NewObject(event.Event.(utils.EverythingEvent))
+		out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(event.EventType)}) // FIXME put safety check here
 		if err != nil {
 			return false, err
 		}
@@ -246,8 +242,8 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 		return "", err
 	}
 
-	obj, _ := xcel.NewObject(event.Event)
-	out, _, err := program.Eval(map[string]any{string(event.EventType): obj, "event_type": string(event.EventType)})
+	obj, _ := xcel.NewObject(event.Event.(utils.EverythingEvent)) // FIXME put safety check here
+	out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(event.EventType)})
 	if err != nil {
 		return "", err
 	}

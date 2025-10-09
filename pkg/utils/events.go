@@ -13,30 +13,84 @@ type K8sEvent interface {
 }
 
 type EnrichEvent interface {
-	GetExtra() interface{}
-	GetNamespace() string
-	GetPID() uint32
-	GetPod() string
-	GetTimestamp() types.Time
-	SetExtra(extra interface{})
-}
-
-type DNSEvent interface {
-	GetAddresses() []string
-	GetContainerID() string
-	GetDNSName() string
-	GetPID() uint32
-}
-
-type ContainerEvent interface {
+	K8sEvent
+	GetComm() string
 	GetContainer() string
 	GetContainerID() string
 	GetContainerImage() string
 	GetContainerImageDigest() string
+	GetError() int64
+	GetEventType() EventType
+	GetExtra() interface{}
 	GetHostNetwork() bool
-	GetNamespace() string
-	GetPod() string
-	GetTimestamp() types.Time
+	GetPcomm() string
+	GetPID() uint32
+	GetPodLabels() map[string]string
+	GetPpid() uint32
+	GetUid() *uint32
+	SetExtra(extra interface{})
+}
+
+type CapabilitiesEvent interface {
+	EnrichEvent
+	GetCapability() string
+	GetSyscall() string
+}
+
+type DNSEvent interface {
+	EnrichEvent
+	GetAddresses() []string
+	GetDNSName() string
+	GetNumAnswers() int
+	GetQr() DNSPktType
+}
+
+type ExecEvent interface {
+	EnrichEvent
+	GetArgs() []string
+	GetCwd() string
+	GetExecArgsFromEvent() []string
+	GetExecFullPathFromEvent() string
+	GetExePath() string
+	GetExecPathFromEvent() string
+	GetGid() *uint32
+	GetHostFilePathFromEvent(containerPid uint32) (string, error)
+	GetPupperLayer() bool
+	GetUpperLayer() bool
+}
+
+type NetworkEvent interface {
+	EnrichEvent
+	GetDstEndpoint() types.L4Endpoint
+	GetDstPort() uint16
+	GetPktType() string
+	GetPodHostIP() string
+	GetPort() uint16
+	GetProto() string
+}
+
+type OpenEvent interface {
+	EnrichEvent
+	GetFlags() []string
+	GetFlagsRaw() uint32
+	GetGid() *uint32
+	GetHostFilePathFromEvent(containerPid uint32) (string, error)
+	GetPath() string
+	IsDir() bool
+}
+
+type SyscallEvent interface {
+	EnrichEvent
+	GetSyscalls() []string
+}
+
+type EverythingEvent interface {
+	CapabilitiesEvent
+	DNSEvent
+	ExecEvent
+	NetworkEvent
+	OpenEvent
+	SyscallEvent
 }
 
 type EventType string
