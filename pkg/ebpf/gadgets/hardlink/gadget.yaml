@@ -1,0 +1,31 @@
+name: hardlink
+description: Trace link and linkat syscalls and report source/target paths and
+  process info.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/hardlink
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/hardlink
+datasources:
+  hardlink:
+    fields:
+      mntns_id:
+        annotations:
+          description: Mount namespace ID when the event was captured.
+      newpath:
+        annotations:
+          columns.width: "64"
+          description: Path of the new hard link to be created (destination path).
+      oldpath:
+        annotations:
+          columns.width: "64"
+          description: Existing path the hard link points to (target path).
+      process:
+        annotations:
+          description:
+            Process metadata including pid, tid, ppid, uid, gid, comm,
+            etc.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.
+      upper_layer:
+        annotations:
+          description: True if the executable resides on overlayfs upper layer.

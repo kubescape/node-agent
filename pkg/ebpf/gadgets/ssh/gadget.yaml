@@ -1,0 +1,27 @@
+name: ssh
+description:
+  Detect SSH connections by scanning TCP payload for SSH signature and
+  report network and process info.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/ssh
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/ssh
+datasources:
+  ssh:
+    fields:
+      netns_id:
+        annotations:
+          description: Network namespace ID when the event was captured.
+      src:
+        annotations:
+          description: Source IP address and port.
+      dst:
+        annotations:
+          description: Destination IP address and port.
+      process:
+        annotations:
+          description:
+            Process metadata including pid, tid, ppid, uid, gid, comm,
+            etc.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.

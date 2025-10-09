@@ -1,0 +1,22 @@
+name: iouring
+description: Trace io_uring submit events and report opcode and flags with process info.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/iouring
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/iouring
+datasources:
+  iouring:
+    fields:
+      opcode:
+        annotations:
+          description: io_uring operation code.
+      flags:
+        annotations:
+          description: io_uring request flags.
+      process:
+        annotations:
+          description:
+            Process metadata including pid, tid, ppid, uid, gid, comm,
+            etc.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.

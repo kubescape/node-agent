@@ -1,0 +1,29 @@
+name: symlink
+description:
+  Trace symlink and symlinkat syscalls and report source/target paths and
+  process info.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/symlink
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/symlink
+datasources:
+  symlink:
+    fields:
+      newpath:
+        annotations:
+          columns.width: "64"
+          description: Path of the new symlink to be created (destination path).
+      oldpath:
+        annotations:
+          columns.width: "64"
+          description: Existing path the symlink points to (target path).
+      process:
+        annotations:
+          description:
+            Process metadata including pid, tid, ppid, uid, gid, comm,
+            etc.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.
+      upper_layer:
+        annotations:
+          description: True if the executable resides on overlayfs upper layer.

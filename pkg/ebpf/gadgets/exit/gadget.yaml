@@ -1,0 +1,25 @@
+name: exit
+description: Trace process exit events and report exit code/signal with process info.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/exit
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/exit
+datasources:
+  exit:
+    fields:
+      exit_code:
+        annotations:
+          description: Process exit code.
+      exit_signal:
+        annotations:
+          description: Signal that caused the exit (if any).
+      process:
+        annotations:
+          description:
+            Process metadata including pid, tid, ppid, uid, gid, comm,
+            etc.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.
+      upper_layer:
+        annotations:
+          description: True if the executable resides on overlayfs upper layer.

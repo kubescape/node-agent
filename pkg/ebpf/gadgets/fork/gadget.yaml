@@ -1,0 +1,25 @@
+name: fork
+description: Trace process fork events and report parent/child identifiers and process info.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/fork
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/fork
+datasources:
+  fork:
+    fields:
+      child_pid:
+        annotations:
+          description: Process ID of the newly created child.
+      child_tid:
+        annotations:
+          description: Thread ID of the newly created child.
+      parent_pid:
+        annotations:
+          description: Process ID of the parent.
+      process:
+        annotations:
+          description:
+            Process metadata including pid, tid, ppid, uid, gid, comm,
+            etc.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.
