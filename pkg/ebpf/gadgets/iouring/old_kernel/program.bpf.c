@@ -53,7 +53,7 @@ int handle_submit_sqe(struct trace_event_raw_io_uring_submit_sqe_local *ctx)
     if (!event)
         return 0;
 
-    gadget_process_populate(&event->process);
+    gadget_process_populate(&event->proc);
     event->opcode = ctx->opcode;
     event->flags = ctx->flags;
 

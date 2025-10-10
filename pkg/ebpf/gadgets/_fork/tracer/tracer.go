@@ -17,7 +17,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/_fork/types"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event fork bpf/fork.bpf.c -- -I./bpf/

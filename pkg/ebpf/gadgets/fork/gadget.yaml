@@ -19,7 +19,7 @@ datasources:
       parent_pid:
         annotations:
           description: Process ID of the parent.
-      process:
+      proc:
         annotations:
           description: Process metadata including pid, tid, ppid, uid, gid, comm,
             etc.

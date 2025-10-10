@@ -78,15 +78,15 @@ func NewEventHandlerFactory(
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
 		switch eventType {
 		case utils.CapabilitiesEventType:
-			if capEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if capEvent, ok := event.(utils.EverythingEvent); ok {
 				containerProfileManager.ReportCapability(capEvent.GetContainerID(), capEvent.GetCapability())
 			}
 		case utils.ExecveEventType:
-			if execEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if execEvent, ok := event.(utils.EverythingEvent); ok {
 				containerProfileManager.ReportFileExec(execEvent.GetContainerID(), execEvent)
 			}
 		case utils.OpenEventType:
-			if openEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if openEvent, ok := event.(utils.EverythingEvent); ok {
 				containerProfileManager.ReportFileOpen(openEvent.GetContainerID(), openEvent)
 			}
 		//case utils.HTTPEventType:
@@ -102,11 +102,11 @@ func NewEventHandlerFactory(
 		//		containerProfileManager.ReportHardlinkEvent(hardlinkEvent.Runtime.ContainerID, hardlinkEvent)
 		//	}
 		case utils.NetworkEventType:
-			if networkEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if networkEvent, ok := event.(utils.EverythingEvent); ok {
 				containerProfileManager.ReportNetworkEvent(networkEvent.GetContainerID(), networkEvent)
 			}
 		case utils.SyscallEventType:
-			if syscallEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if syscallEvent, ok := event.(utils.EverythingEvent); ok {
 				containerProfileManager.ReportSyscalls(syscallEvent.GetContainerID(), syscallEvent.GetSyscalls())
 			}
 		default:
@@ -119,7 +119,7 @@ func NewEventHandlerFactory(
 		switch eventType {
 		// Won't work for 3rd party tracers, we need to extract comm and containerID from the event by interface
 		case utils.ExecveEventType:
-			if execEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if execEvent, ok := event.(utils.EverythingEvent); ok {
 				rulePolicyReporter.ReportEvent(eventType, event, execEvent.GetContainerID(), execEvent.GetComm())
 			}
 			//case utils.SymlinkEventType:
@@ -142,7 +142,7 @@ func NewEventHandlerFactory(
 		// This would need to be implemented based on the specific event types
 		switch eventType {
 		case utils.DnsEventType:
-			if dnsEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if dnsEvent, ok := event.(utils.EverythingEvent); ok {
 				dnsManager.ReportEvent(dnsEvent)
 			}
 		}

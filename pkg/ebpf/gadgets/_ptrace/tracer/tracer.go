@@ -15,7 +15,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/_ptrace/tracer/types"
 	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 )
 

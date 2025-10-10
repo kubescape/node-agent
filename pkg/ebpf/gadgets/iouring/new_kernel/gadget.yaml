@@ -12,7 +12,7 @@ datasources:
       flags:
         annotations:
           description: io_uring request flags.
-      process:
+      proc:
         annotations:
           description:
             Process metadata including pid, tid, ppid, uid, gid, comm,

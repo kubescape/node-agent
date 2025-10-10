@@ -4,10 +4,8 @@
 
 struct event {
     gadget_timestamp timestamp_raw;
-    struct gadget_process process;
+    struct gadget_process proc;
     bool upper_layer;
     __u32 exit_code;
     __u32 exit_signal;
 };
-
-

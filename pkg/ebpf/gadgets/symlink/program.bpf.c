@@ -35,7 +35,7 @@ int enter_symlink(struct syscall_trace_enter *ctx)
     if (gadget_should_discard_data_current()) {
         return 0;
     }
-    
+
     struct event *event;
     event = gadget_reserve_buf(&events, sizeof(*event));
 	if (!event) {
@@ -43,7 +43,7 @@ int enter_symlink(struct syscall_trace_enter *ctx)
     }
 
     // Populate the process data into the event.
-    gadget_process_populate(&event->process);
+    gadget_process_populate(&event->proc);
 
     // Validate the oldpath and newpath.
     if ((void *)ctx->args[0] == NULL || (void *)ctx->args[1] == NULL) {
@@ -68,8 +68,8 @@ int enter_symlink(struct syscall_trace_enter *ctx)
 
     event->upper_layer = has_upper_layer();
     read_exe_path(event->exepath, sizeof(event->exepath));
-    
-    
+
+
     gadget_submit_buf(ctx, &events, event, sizeof(*event));
 
     return 0;
@@ -81,7 +81,7 @@ int enter_symlinkat(struct syscall_trace_enter *ctx)
     if (gadget_should_discard_data_current()) {
         return 0;
     }
-    
+
     struct event *event;
     event = gadget_reserve_buf(&events, sizeof(*event));
     if (!event) {
@@ -89,7 +89,7 @@ int enter_symlinkat(struct syscall_trace_enter *ctx)
     }
 
     // Populate the process data into the event.
-    gadget_process_populate(&event->process);
+    gadget_process_populate(&event->proc);
 
     // Validate the oldpath and newpath.
     if ((void *)ctx->args[0] == NULL || (void *)ctx->args[2] == NULL) {
@@ -114,8 +114,8 @@ int enter_symlinkat(struct syscall_trace_enter *ctx)
 
     event->upper_layer = has_upper_layer();
     read_exe_path(event->exepath, sizeof(event->exepath));
-    
-    
+
+
     gadget_submit_buf(ctx, &events, event, sizeof(*event));
 
     return 0;

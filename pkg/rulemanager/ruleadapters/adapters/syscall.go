@@ -16,8 +16,8 @@ func NewSyscallAdapter() *SyscallAdapter {
 }
 
 func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	syscallEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
-	if !ok || syscallEvent.EventType != utils.SyscallEventType {
+	syscallEvent, ok := enrichedEvent.Event.(utils.EverythingEvent)
+	if !ok || enrichedEvent.EventType != utils.SyscallEventType {
 		return
 	}
 

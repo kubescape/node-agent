@@ -2,80 +2,80 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	tracerptrace "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer"
-	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
+	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
 const ptraceTraceName = "trace_ptrace"
 
 var _ containerwatcher.TracerInterface = (*PtraceTracer)(nil)
 
-// PtraceTracer implements TracerInterface for ptrace events
+// PtraceTracer implements TracerInterface for events
 type PtraceTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *tracerptrace.Tracer
+	eventCallback containerwatcher.ResultCallback
+	gadgetCtx     *gadgetcontext.GadgetContext
+	kubeManager   *kskubemanager.KubeManager
+	ociStore      *orasoci.ReadOnlyStore
+	runtime       runtime.Runtime
 }
 
-// NewPtraceTracer creates a new ptrace tracer
+// NewPtraceTracer creates a new tracer
 func NewPtraceTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
+	kubeManager *kskubemanager.KubeManager,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 ) *PtraceTracer {
 	return &PtraceTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
+		eventCallback: eventCallback,
+		kubeManager:   kubeManager,
+		ociStore:      ociStore,
+		runtime:       runtime,
 	}
 }
 
-// Start initializes and starts the ptrace tracer
+// Start initializes and starts the tracer
 func (pt *PtraceTracer) Start(ctx context.Context) error {
-	if err := pt.tracerCollection.AddTracer(ptraceTraceName, pt.containerSelector); err != nil {
-		return fmt.Errorf("adding ptrace tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	ptraceMountnsmap, err := pt.tracerCollection.TracerMountNsMap(ptraceTraceName)
-	if err != nil {
-		return fmt.Errorf("getting ptrace mountnsmap: %w", err)
-	}
-
-	tracerPtrace, err := tracerptrace.NewTracer(
-		&tracerptrace.Config{MountnsMap: ptraceMountnsmap},
-		//pt.containerCollection,
-		pt.ptraceEventCallback,
+	pt.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		"ghcr.io/inspektor-gadget/gadget/ptrace:latest",
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			pt.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			pt.eventOperator(),
+		),
+		gadgetcontext.WithName(ptraceTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(pt.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating ptrace tracer: %w", err)
-	}
-
-	pt.tracer = tracerPtrace
+	go func() {
+		err := pt.runtime.RunGadget(pt.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", pt.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the ptrace tracer
+// Stop gracefully stops the tracer
 func (pt *PtraceTracer) Stop() error {
-	if pt.tracer != nil {
-		pt.tracer.Close()
+	if pt.gadgetCtx != nil {
+		pt.gadgetCtx.Cancel()
 	}
-
-	if err := pt.tracerCollection.RemoveTracer(ptraceTraceName); err != nil {
-		return fmt.Errorf("removing ptrace tracer: %w", err)
-	}
-
 	return nil
 }
 
@@ -94,17 +94,37 @@ func (pt *PtraceTracer) IsEnabled(cfg config.Config) bool {
 	return !cfg.DPtrace && cfg.EnableRuntimeDetection
 }
 
-// ptraceEventCallback handles ptrace events from the tracer
-func (pt *PtraceTracer) ptraceEventCallback(event *tracerptracetype.Event) {
-	//if event.Type != types.NORMAL {
-	//	return
-	//}
+func (pt *PtraceTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.PtraceEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				jsonFormatter, _ := igjson.New(d,
+					// Show all fields
+					igjson.WithShowAll(true),
+					// Print json in a pretty format
+					igjson.WithPretty(true, "  "),
+				)
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					logger.L().Debug("Matthias - ptrace event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					pt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.PtraceEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
 
+// callback handles events from the tracer
+func (pt *PtraceTracer) callback(event utils.EverythingEvent) {
 	if pt.eventCallback != nil {
 		// Extract container ID and process ID from the ptrace event
-		//containerID := event.Runtime.ContainerID
-		//processID := event.Pid
-		//
-		//pt.eventCallback(event, containerID, processID)
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
+
+		pt.eventCallback(event, containerID, processID)
 	}
 }

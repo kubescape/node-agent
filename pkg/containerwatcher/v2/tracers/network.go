@@ -138,7 +138,7 @@ func (nt *NetworkTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (nt *NetworkTracer) callback(event *utils.DatasourceEvent) {
+func (nt *NetworkTracer) callback(event utils.EverythingEvent) {
 	// do not skip dropped events as their processing is done in the worker
 
 	//	nt.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)

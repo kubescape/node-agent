@@ -17,7 +17,6 @@ docker-push:
 	docker push $(IMAGE):$(TAG)
 
 gadgets:
-	$(foreach img,$(GADGETS),sudo ig image pull $(img);)
 	make -C ./pkg/ebpf/gadgets/exit build-with-metadata
 	make -C ./pkg/ebpf/gadgets/fork build-with-metadata
 	make -C ./pkg/ebpf/gadgets/hardlink build-with-metadata
@@ -25,4 +24,5 @@ gadgets:
 	make -C ./pkg/ebpf/gadgets/ptrace build-with-metadata
 	make -C ./pkg/ebpf/gadgets/ssh build-with-metadata
 	make -C ./pkg/ebpf/gadgets/symlink build-with-metadata
+	$(foreach img,$(GADGETS),sudo ig image pull $(img);)
 	sudo ig image export $(GADGETS) $(KUBESCAPE_GADGETS) tracers.tar

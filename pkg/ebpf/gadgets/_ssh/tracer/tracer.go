@@ -10,7 +10,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/networktracer"
 	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/_ssh/types"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type event ssh bpf/ssh.bpf.c -- -I./bpf/ -I /usr/include/x86_64-linux-gnu -D__x86_64__

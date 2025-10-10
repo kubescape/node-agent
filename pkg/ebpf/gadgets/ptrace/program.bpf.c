@@ -67,7 +67,7 @@ int trace_enter_ptrace(struct trace_event_raw_sys_enter *ctx)
     }
 
     // Populate the process data into the event.
-    gadget_process_populate(&event->process);
+    gadget_process_populate(&event->proc);
     // Ptrace info
     event->request = request;
     read_exe_path(event->exepath, sizeof(event->exepath));

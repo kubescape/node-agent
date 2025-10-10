@@ -4,14 +4,14 @@ ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /work
 ARG TARGETOS TARGETARCH
 
-#RUN --mount=target=. \
-#    --mount=type=cache,target=/root/.cache/go-build \
-#    --mount=type=cache,target=/go/pkg \
-#    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/node-agent -ldflags="-s -w" ./cmd/main.go
+RUN --mount=target=. \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/node-agent -ldflags="-s -w" ./cmd/main.go
 
 FROM gcr.io/distroless/static-debian12:latest
 
-#COPY --from=builder /out/node-agent /usr/bin/node-agent
+COPY --from=builder /out/node-agent /usr/bin/node-agent
 COPY tracers.tar /root/tracers.tar
 COPY configuration/ig-config.yaml /root/.ig/config.yaml
 

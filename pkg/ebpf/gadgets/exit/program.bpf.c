@@ -40,7 +40,7 @@ int tracepoint__sched_exit(struct bpf_raw_tracepoint_args *ctx)
     if (gadget_should_discard_data_current()) {
         return 0;
     }
-    
+
     struct event *event;
     event = gadget_reserve_buf(&events, sizeof(*event));
     if (!event) {
@@ -61,7 +61,7 @@ int tracepoint__sched_exit(struct bpf_raw_tracepoint_args *ctx)
     }
 
     // Populate the process data into the event.
-    gadget_process_populate(&event->process);
+    gadget_process_populate(&event->proc);
 
     // Exit info
     event->exit_code = BPF_CORE_READ(task, exit_code);
@@ -75,4 +75,3 @@ int tracepoint__sched_exit(struct bpf_raw_tracepoint_args *ctx)
 }
 
 char LICENSE[] SEC("license") = "GPL";
-

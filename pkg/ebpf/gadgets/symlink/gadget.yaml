@@ -18,7 +18,7 @@ datasources:
         annotations:
           columns.width: "64"
           description: Existing path the symlink points to (target path).
-      process:
+      proc:
         annotations:
           description: Process metadata including pid, tid, ppid, uid, gid, comm,
             etc.

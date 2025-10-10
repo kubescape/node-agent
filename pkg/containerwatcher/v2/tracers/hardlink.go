@@ -2,15 +2,21 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/kskubemanager"
+	orasoci "oras.land/oras-go/v2/content/oci"
 
-	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -18,68 +24,62 @@ const hardlinkTraceName = "trace_hardlink"
 
 var _ containerwatcher.TracerInterface = (*HardlinkTracer)(nil)
 
-// HardlinkTracer implements TracerInterface for hardlink events
+// HardlinkTracer implements TracerInterface for events
 type HardlinkTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *tracerhardlink.Tracer
-	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
+	eventCallback      containerwatcher.ResultCallback
+	gadgetCtx          *gadgetcontext.GadgetContext
+	kubeManager        *kskubemanager.KubeManager
+	ociStore           *orasoci.ReadOnlyStore
+	runtime            runtime.Runtime
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
-// NewHardlinkTracer creates a new hardlink tracer
+// NewHardlinkTracer creates a new tracer
 func NewHardlinkTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
+	kubeManager *kskubemanager.KubeManager,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *HardlinkTracer {
 	return &HardlinkTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
-		thirdPartyEnricher:  thirdPartyEnricher,
+		eventCallback:      eventCallback,
+		kubeManager:        kubeManager,
+		ociStore:           ociStore,
+		runtime:            runtime,
+		thirdPartyEnricher: thirdPartyEnricher,
 	}
 }
 
-// Start initializes and starts the hardlink tracer
+// Start initializes and starts the tracer
 func (ht *HardlinkTracer) Start(ctx context.Context) error {
-	if err := ht.tracerCollection.AddTracer(hardlinkTraceName, ht.containerSelector); err != nil {
-		return fmt.Errorf("adding hardlink tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	hardlinkMountnsmap, err := ht.tracerCollection.TracerMountNsMap(hardlinkTraceName)
-	if err != nil {
-		return fmt.Errorf("getting hardlink mountnsmap: %w", err)
-	}
-
-	tracerHardlink, err := tracerhardlink.NewTracer(
-		&tracerhardlink.Config{MountnsMap: hardlinkMountnsmap},
-		//ht.containerCollection,
-		ht.hardlinkEventCallback,
+	ht.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		"ghcr.io/inspektor-gadget/gadget/hardlink:latest",
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			ht.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			ht.eventOperator(),
+		),
+		gadgetcontext.WithName(hardlinkTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(ht.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating hardlink tracer: %w", err)
-	}
-
-	ht.tracer = tracerHardlink
+	go func() {
+		err := ht.runtime.RunGadget(ht.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", ht.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the hardlink tracer
+// Stop gracefully stops the tracer
 func (ht *HardlinkTracer) Stop() error {
-	if ht.tracer != nil {
-		ht.tracer.Stop()
+	if ht.gadgetCtx != nil {
+		ht.gadgetCtx.Cancel()
 	}
-
-	if err := ht.tracerCollection.RemoveTracer(hardlinkTraceName); err != nil {
-		return fmt.Errorf("removing hardlink tracer: %w", err)
-	}
-
 	return nil
 }
 
@@ -98,28 +98,43 @@ func (ht *HardlinkTracer) IsEnabled(cfg config.Config) bool {
 	return !cfg.DHardlink && cfg.EnableRuntimeDetection
 }
 
-// hardlinkEventCallback handles hardlink events from the tracer
-func (ht *HardlinkTracer) hardlinkEventCallback(event *tracerhardlinktype.Event) {
-	//if event.Type == types.DEBUG {
-	//	return
-	//}
-	//
-	//if isDroppedEvent(event.Type, event.Message) {
-	//	logger.L().Warning("hardlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-	//	return
-	//}
+func (ht *HardlinkTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.HardlinkEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				jsonFormatter, _ := igjson.New(d,
+					// Show all fields
+					igjson.WithShowAll(true),
+					// Print json in a pretty format
+					igjson.WithPretty(true, "  "),
+				)
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					logger.L().Debug("Matthias - hardlink event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					ht.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.HardlinkEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
 
+// callback handles events from the tracer
+func (ht *HardlinkTracer) callback(event utils.EverythingEvent) {
 	// Handle the event with syscall enrichment
 	ht.handleEvent(event, []uint64{SYS_LINK, SYS_LINKAT})
 }
 
 // handleEvent processes the event with syscall enrichment
-func (ht *HardlinkTracer) handleEvent(event *tracerhardlinktype.Event, syscalls []uint64) {
-	//if ht.eventCallback != nil {
-	//	// Extract container ID and process ID from the hardlink event
-	//	containerID := event.Runtime.ContainerID
-	//	processID := event.Pid
-	//
-	//	EnrichEvent(ht.thirdPartyEnricher, event, syscalls, ht.eventCallback, containerID, processID)
-	//}
+func (ht *HardlinkTracer) handleEvent(event utils.EverythingEvent, syscalls []uint64) {
+	if ht.eventCallback != nil {
+		// Extract container ID and process ID from the hardlink event
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
+
+		EnrichEvent(ht.thirdPartyEnricher, event, syscalls, ht.eventCallback, containerID, processID)
+	}
 }

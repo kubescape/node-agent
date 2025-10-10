@@ -114,7 +114,7 @@ func (ct *CapabilitiesTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (ct *CapabilitiesTracer) callback(event *utils.DatasourceEvent) {
+func (ct *CapabilitiesTracer) callback(event utils.EverythingEvent) {
 	if ct.eventCallback != nil {
 		// Extract container ID and process ID from the capabilities event
 		containerID := event.GetContainerID()

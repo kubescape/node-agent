@@ -11,7 +11,7 @@ datasources:
         annotations:
           columns.width: "64"
           description: Executable path of the calling process.
-      process:
+      proc:
         annotations:
           description: Process metadata including pid, tid, ppid, uid, gid, comm,
             etc.

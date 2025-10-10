@@ -28,7 +28,7 @@ unsigned long long load_word(const void *skb,
 struct event_t {
 	gadget_timestamp timestamp_raw;
 	gadget_netns_id netns_id;
-	struct gadget_process process;
+	struct gadget_process proc;
 	struct gadget_l4endpoint_t src;
 	struct gadget_l4endpoint_t dst;
 };
@@ -158,7 +158,7 @@ int ig_trace_ssh(struct __sk_buff *skb)
 	struct gadget_socket_value *skb_val = gadget_socket_lookup(skb);
     if (gadget_should_discard_data_by_skb(skb_val))
 		return 0;
-	gadget_process_populate_from_socket(skb_val, &event->process);
+	gadget_process_populate_from_socket(skb_val, &event->proc);
 
 	// Step 9: Send the populated event to userspace
 	bpf_perf_event_output(skb, &events, BPF_F_CURRENT_CPU, event,

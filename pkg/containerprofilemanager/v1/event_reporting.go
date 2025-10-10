@@ -12,9 +12,9 @@ import (
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_hardlink/types"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_symlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -36,7 +36,7 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 }
 
 // ReportFileExec reports a file execution event for a container
-func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event *utils.DatasourceEvent) {
+func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event utils.EverythingEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.execs == nil {
 			data.execs = &maps.SafeMap[string, []string]{}
@@ -62,7 +62,7 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event *ut
 }
 
 // ReportFileOpen reports a file open event for a container
-func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event *utils.DatasourceEvent) {
+func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event utils.EverythingEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.opens == nil {
 			data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
@@ -229,7 +229,7 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 }
 
 // ReportNetworkEvent reports a network event for a container
-func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event *utils.DatasourceEvent) {
+func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event utils.EverythingEvent) {
 	if !cpm.isValidNetworkEvent(event) {
 		return
 	}
@@ -294,7 +294,7 @@ func (cpm *ContainerProfileManager) ReportSyscalls(containerID string, syscalls 
 }
 
 // isValidNetworkEvent checks if the network event is valid for processing
-func (cpm *ContainerProfileManager) isValidNetworkEvent(event *utils.DatasourceEvent) bool {
+func (cpm *ContainerProfileManager) isValidNetworkEvent(event utils.EverythingEvent) bool {
 	pktType := event.GetPktType()
 	// Unknown type, shouldn't happen
 	if pktType != HostPktType && pktType != OutgoingPktType {

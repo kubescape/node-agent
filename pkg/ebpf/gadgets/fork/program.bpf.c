@@ -54,7 +54,7 @@ int tracepoint__sched_fork(struct bpf_raw_tracepoint_args *ctx)
     }
 
     // Populate the process data into the event with the child context.
-    gadget_process_populate(&event->process);
+    gadget_process_populate(&event->proc);
 
     // Mount namespace filtering based on the child.
     gadget_mntns_id mntns_id = BPF_CORE_READ(child, nsproxy, mnt_ns, ns.inum);
@@ -76,4 +76,3 @@ int tracepoint__sched_fork(struct bpf_raw_tracepoint_args *ctx)
 }
 
 char LICENSE[] SEC("license") = "GPL";
-

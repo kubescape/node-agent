@@ -12,7 +12,7 @@ datasources:
       exit_signal:
         annotations:
           description: Signal that caused the exit (if any).
-      process:
+      proc:
         annotations:
           description: Process metadata including pid, tid, ppid, uid, gid, comm,
             etc.

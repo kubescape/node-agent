@@ -4,7 +4,7 @@ Trace `sched_process_exit` and emit events with process metadata and exit detail
 
 ### What it reports
 - **timestamp_raw**: Monotonic timestamp (ns)
-- **process**: PID, TID, PPID, UID, GID, command, and image data captured by Inspektor Gadget
+- **proc**: PID, TID, PPID, UID, GID, command, and image data captured by Inspektor Gadget
 - **exit_code**: Process exit code
 - **exit_signal**: Signal that caused the exit (if any)
 - **upper_layer**: Whether the executable is on overlayfs upper layer
@@ -26,4 +26,3 @@ sudo ig run exit:latest --verify-image=false
 - eBPF program: `program.bpf.c`
 - Event schema: `program.h`
 - Metadata and columns: `gadget.yaml`
-

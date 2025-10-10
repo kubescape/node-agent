@@ -13,7 +13,7 @@ datasources:
       netns_id:
         annotations:
           description: Network namespace ID when the event was captured.
-      process:
+      proc:
         annotations:
           description: Process metadata including pid, tid, ppid, uid, gid, comm,
             etc.
