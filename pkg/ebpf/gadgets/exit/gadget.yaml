@@ -14,8 +14,7 @@ datasources:
           description: Signal that caused the exit (if any).
       process:
         annotations:
-          description:
-            Process metadata including pid, tid, ppid, uid, gid, comm,
+          description: Process metadata including pid, tid, ppid, uid, gid, comm,
             etc.
       timestamp_raw:
         annotations:
@@ -23,3 +22,25 @@ datasources:
       upper_layer:
         annotations:
           description: True if the executable resides on overlayfs upper layer.
+params:
+  ebpf:
+    targ_comm:
+      key: targ_comm
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_gid:
+      key: targ_gid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_pid:
+      key: targ_pid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_tid:
+      key: targ_tid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_uid:
+      key: targ_uid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'

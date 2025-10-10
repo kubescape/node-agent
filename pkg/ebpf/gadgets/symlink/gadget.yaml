@@ -1,6 +1,5 @@
 name: symlink
-description:
-  Trace symlink and symlinkat syscalls and report source/target paths and
+description: Trace symlink and symlinkat syscalls and report source/target paths and
   process info.
 homepageURL: https://github.com/kubescape/node-agent
 documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/symlink
@@ -8,6 +7,9 @@ sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/sy
 datasources:
   symlink:
     fields:
+      exepath:
+        annotations:
+          description: 'TODO: Fill field description'
       newpath:
         annotations:
           columns.width: "64"
@@ -18,8 +20,7 @@ datasources:
           description: Existing path the symlink points to (target path).
       process:
         annotations:
-          description:
-            Process metadata including pid, tid, ppid, uid, gid, comm,
+          description: Process metadata including pid, tid, ppid, uid, gid, comm,
             etc.
       timestamp_raw:
         annotations:
@@ -27,3 +28,25 @@ datasources:
       upper_layer:
         annotations:
           description: True if the executable resides on overlayfs upper layer.
+params:
+  ebpf:
+    targ_comm:
+      key: targ_comm
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_gid:
+      key: targ_gid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_pid:
+      key: targ_pid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_tid:
+      key: targ_tid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_uid:
+      key: targ_uid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'

@@ -1,24 +1,45 @@
 name: ptrace
-description: Trace ptrace syscalls that modify target memory or registers and
-  report process info.
+description: Trace ptrace syscalls that modify target memory or registers and report
+  process info.
 homepageURL: https://github.com/kubescape/node-agent
 documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/ptrace
 sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/ptrace
 datasources:
   ptrace:
     fields:
-      request:
-        annotations:
-          description: Ptrace request (e.g., SETREGS, POKETEXT, POKEDATA).
       exepath:
         annotations:
           columns.width: "64"
           description: Executable path of the calling process.
       process:
         annotations:
-          description:
-            Process metadata including pid, tid, ppid, uid, gid, comm,
+          description: Process metadata including pid, tid, ppid, uid, gid, comm,
             etc.
+      request:
+        annotations:
+          description: Ptrace request (e.g., SETREGS, POKETEXT, POKEDATA).
       timestamp_raw:
         annotations:
           description: Monotonic timestamp in nanoseconds when the event was captured.
+params:
+  ebpf:
+    targ_comm:
+      key: targ_comm
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_gid:
+      key: targ_gid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_pid:
+      key: targ_pid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_tid:
+      key: targ_tid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_uid:
+      key: targ_uid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
