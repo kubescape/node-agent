@@ -2,15 +2,21 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/kskubemanager"
+	orasoci "oras.land/oras-go/v2/content/oci"
 
-	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -18,68 +24,62 @@ const symlinkTraceName = "trace_symlink"
 
 var _ containerwatcher.TracerInterface = (*SymlinkTracer)(nil)
 
-// SymlinkTracer implements TracerInterface for symlink events
+// SymlinkTracer implements TracerInterface for events
 type SymlinkTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *tracersymlink.Tracer
-	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
+	eventCallback      containerwatcher.ResultCallback
+	gadgetCtx          *gadgetcontext.GadgetContext
+	kubeManager        *kskubemanager.KubeManager
+	ociStore           *orasoci.ReadOnlyStore
+	runtime            runtime.Runtime
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
-// NewSymlinkTracer creates a new symlink tracer
+// NewSymlinkTracer creates a new tracer
 func NewSymlinkTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
+	kubeManager *kskubemanager.KubeManager,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *SymlinkTracer {
 	return &SymlinkTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
-		thirdPartyEnricher:  thirdPartyEnricher,
+		eventCallback:      eventCallback,
+		kubeManager:        kubeManager,
+		ociStore:           ociStore,
+		runtime:            runtime,
+		thirdPartyEnricher: thirdPartyEnricher,
 	}
 }
 
-// Start initializes and starts the symlink tracer
+// Start initializes and starts the tracer
 func (st *SymlinkTracer) Start(ctx context.Context) error {
-	if err := st.tracerCollection.AddTracer(symlinkTraceName, st.containerSelector); err != nil {
-		return fmt.Errorf("adding symlink tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	symlinkMountnsmap, err := st.tracerCollection.TracerMountNsMap(symlinkTraceName)
-	if err != nil {
-		return fmt.Errorf("getting symlink mountnsmap: %w", err)
-	}
-
-	tracerSymlink, err := tracersymlink.NewTracer(
-		&tracersymlink.Config{MountnsMap: symlinkMountnsmap},
-		//st.containerCollection,
-		st.symlinkEventCallback,
+	st.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		"ghcr.io/inspektor-gadget/gadget/symlink:latest",
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			st.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			st.eventOperator(),
+		),
+		gadgetcontext.WithName(symlinkTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(st.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating symlink tracer: %w", err)
-	}
-
-	st.tracer = tracerSymlink
+	go func() {
+		err := st.runtime.RunGadget(st.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", st.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
 // Stop gracefully stops the symlink tracer
 func (st *SymlinkTracer) Stop() error {
-	if st.tracer != nil {
-		st.tracer.Stop()
+	if st.gadgetCtx != nil {
+		st.gadgetCtx.Cancel()
 	}
-
-	if err := st.tracerCollection.RemoveTracer(symlinkTraceName); err != nil {
-		return fmt.Errorf("removing symlink tracer: %w", err)
-	}
-
 	return nil
 }
 
@@ -98,28 +98,43 @@ func (st *SymlinkTracer) IsEnabled(cfg config.Config) bool {
 	return !cfg.DSymlink && cfg.EnableRuntimeDetection
 }
 
-// symlinkEventCallback handles symlink events from the tracer
-func (st *SymlinkTracer) symlinkEventCallback(event *tracersymlinktype.Event) {
-	//if event.Type == types.DEBUG {
-	//	return
-	//}
-	//
-	//if isDroppedEvent(event.Type, event.Message) {
-	//	logger.L().Warning("symlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-	//	return
-	//}
-	//
-	//// Handle the event with syscall enrichment
-	//st.handleEvent(event, []uint64{SYS_SYMLINK, SYS_SYMLINKAT})
+func (st *SymlinkTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.SymlinkEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				jsonFormatter, _ := igjson.New(d,
+					// Show all fields
+					igjson.WithShowAll(true),
+					// Print json in a pretty format
+					igjson.WithPretty(true, "  "),
+				)
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					logger.L().Debug("Matthias - symlink event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					st.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.SymlinkEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
+
+// callback handles events from the tracer
+func (st *SymlinkTracer) callback(event utils.EverythingEvent) {
+	// Handle the event with syscall enrichment
+	st.handleEvent(event, []uint64{SYS_SYMLINK, SYS_SYMLINKAT})
 }
 
 // handleEvent processes the event with syscall enrichment
-func (st *SymlinkTracer) handleEvent(event *tracersymlinktype.Event, syscalls []uint64) {
-	//if st.eventCallback != nil {
-	//	// Extract container ID and process ID from the symlink event
-	//	containerID := event.Runtime.ContainerID
-	//	processID := event.Pid
-	//
-	//	DatasourceEvent(st.thirdPartyEnricher, event, syscalls, st.eventCallback, containerID, processID)
-	//}
+func (st *SymlinkTracer) handleEvent(event utils.EverythingEvent, syscalls []uint64) {
+	if st.eventCallback != nil {
+		// Extract container ID and process ID from the symlink event
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
+
+		EnrichEvent(st.thirdPartyEnricher, event, syscalls, st.eventCallback, containerID, processID)
+	}
 }

@@ -20,8 +20,8 @@ func NewExecAdapter() *ExecAdapter {
 }
 
 func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	execEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
-	if !ok || execEvent.EventType != utils.ExecveEventType {
+	execEvent, ok := enrichedEvent.Event.(utils.EverythingEvent)
+	if !ok || enrichedEvent.EventType != utils.ExecveEventType {
 		return
 	}
 

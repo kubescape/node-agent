@@ -10,8 +10,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	traceriouring "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer"
-	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
+	traceriouring "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_iouring/tracer"
+	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_iouring/tracer/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 

@@ -1,3 +1,5 @@
+//go:build !withoutebpf
+
 package tracer
 
 import (
@@ -15,10 +17,10 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/_symlink/types"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -strip /usr/bin/llvm-strip-18 -cc /usr/bin/clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event hardlink bpf/hardlink.bpf.c -- -I./bpf/
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event symlink bpf/symlink.bpf.c -- -I./bpf/
 
 type Config struct {
 	MountnsMap *ebpf.Map
@@ -29,11 +31,11 @@ type Tracer struct {
 	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 
-	objs hardlinkObjects
+	objs symlinkObjects
 
-	linkLink   link.Link
-	linkatLink link.Link
-	reader     *perf.Reader
+	symlinkLink   link.Link
+	symlinkatLink link.Link
+	reader        *perf.Reader
 
 	// recordPool will pool perf.Record objects to avoid allocations.
 	recordPool sync.Pool
@@ -70,9 +72,9 @@ func (t *Tracer) Stop() {
 
 func (t *Tracer) close() {
 	if runtime.GOARCH != "arm64" {
-		t.linkLink = gadgets.CloseLink(t.linkLink)
+		t.symlinkLink = gadgets.CloseLink(t.symlinkLink)
 	}
-	t.linkatLink = gadgets.CloseLink(t.linkatLink)
+	t.symlinkatLink = gadgets.CloseLink(t.symlinkatLink)
 
 	if t.reader != nil {
 		t.reader.Close()
@@ -83,7 +85,7 @@ func (t *Tracer) close() {
 
 func (t *Tracer) install() error {
 	var err error
-	//spec, err := loadHardlink()
+	//spec, err := loadSymlink()
 	//if err != nil {
 	//	return fmt.Errorf("loading ebpf program: %w", err)
 	//}
@@ -93,18 +95,18 @@ func (t *Tracer) install() error {
 	//}
 
 	if runtime.GOARCH != "arm64" {
-		t.linkLink, err = link.Tracepoint("syscalls", "sys_enter_link", t.objs.TracepointSysLink, nil)
+		t.symlinkLink, err = link.Tracepoint("syscalls", "sys_enter_symlink", t.objs.TracepointSysSymlink, nil)
 		if err != nil {
 			return fmt.Errorf("attaching tracepoint: %w", err)
 		}
 	}
 
-	t.linkatLink, err = link.Tracepoint("syscalls", "sys_enter_linkat", t.objs.TracepointSysLinkat, nil)
+	t.symlinkatLink, err = link.Tracepoint("syscalls", "sys_enter_symlinkat", t.objs.TracepointSysSymlinkat, nil)
 	if err != nil {
 		return fmt.Errorf("attaching tracepoint: %w", err)
 	}
 
-	t.reader, err = perf.NewReader(t.objs.hardlinkMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
+	t.reader, err = perf.NewReader(t.objs.symlinkMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
 	if err != nil {
 		return fmt.Errorf("creating perf ring buffer: %w", err)
 	}
@@ -135,7 +137,7 @@ func (t *Tracer) run() {
 			continue
 		}
 
-		bpfEvent := (*hardlinkEvent)(unsafe.Pointer(&record.RawSample[0]))
+		bpfEvent := (*symlinkEvent)(unsafe.Pointer(&record.RawSample[0]))
 
 		// Check if we have seen enough events for this mntns
 		event := types.Event{
@@ -186,7 +188,7 @@ func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
 func (t *Tracer) SetEventHandler(handler any) {
 	nh, ok := handler.(func(ev *types.Event))
 	if !ok {
-		logger.L().Fatal("hardlink Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
+		logger.L().Fatal("symlink Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
 	}
 	t.eventCallback = nh
 }

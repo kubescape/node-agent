@@ -118,7 +118,7 @@ func (st *SyscallTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
+func (st *SyscallTracer) callback(event utils.EverythingEvent) {
 	containerID := event.GetContainerID()
 	if containerID == "" {
 		return

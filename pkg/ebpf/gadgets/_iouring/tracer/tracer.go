@@ -12,7 +12,7 @@ import (
 	"github.com/cilium/ebpf/perf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/_iouring/tracer/types"
 	kernel "github.com/kubescape/node-agent/pkg/validator/ebpf"
 	"github.com/shirou/gopsutil/v4/host"
 )

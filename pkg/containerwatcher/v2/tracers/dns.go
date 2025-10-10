@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
-	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
@@ -112,14 +111,7 @@ func (dt *DNSTracer) eventOperator() operators.DataOperator {
 	return simple.New(string(utils.DnsEventType),
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
-				jsonFormatter, _ := igjson.New(d,
-					// Show all fields
-					igjson.WithShowAll(true),
-					// Print json in a pretty format
-					igjson.WithPretty(true, "  "),
-				)
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					logger.L().Info("Matthias - event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
 					dt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.DnsEventType})
 					return nil
 				}, opPriority)
@@ -133,7 +125,7 @@ func (dt *DNSTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (dt *DNSTracer) callback(event *utils.DatasourceEvent) {
+func (dt *DNSTracer) callback(event utils.EverythingEvent) {
 	if event.GetQr() != utils.DNSPktTypeResponse {
 		return
 	}
@@ -141,14 +133,6 @@ func (dt *DNSTracer) callback(event *utils.DatasourceEvent) {
 	if event.GetNumAnswers() == 0 {
 		return
 	}
-
-	//	if isDroppedEvent(event.Type, event.Message) {
-	//		logger.L().Warning("dns tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-	//		return
-	//}
-
-	//	dt.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
-	//	dt.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
 	if dt.eventCallback != nil {
 		// Extract container ID and process ID from the DNS event

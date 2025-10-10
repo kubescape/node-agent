@@ -2,80 +2,80 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	tracerexit "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/tracer"
-	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
+	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
 const exitTraceName = "trace_exit"
 
 var _ containerwatcher.TracerInterface = (*ExitTracer)(nil)
 
-// ExitTracer implements TracerInterface for exit events
+// ExitTracer implements TracerInterface for events
 type ExitTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *tracerexit.Tracer
+	eventCallback containerwatcher.ResultCallback
+	gadgetCtx     *gadgetcontext.GadgetContext
+	kubeManager   *kskubemanager.KubeManager
+	ociStore      *orasoci.ReadOnlyStore
+	runtime       runtime.Runtime
 }
 
-// NewExitTracer creates a new exit tracer
+// NewExitTracer creates a new tracer
 func NewExitTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
+	kubeManager *kskubemanager.KubeManager,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 ) *ExitTracer {
 	return &ExitTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
+		eventCallback: eventCallback,
+		kubeManager:   kubeManager,
+		ociStore:      ociStore,
+		runtime:       runtime,
 	}
 }
 
-// Start initializes and starts the exit tracer
+// Start initializes and starts the tracer
 func (et *ExitTracer) Start(ctx context.Context) error {
-	if err := et.tracerCollection.AddTracer(exitTraceName, et.containerSelector); err != nil {
-		return fmt.Errorf("adding exit tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	exitMountnsmap, err := et.tracerCollection.TracerMountNsMap(exitTraceName)
-	if err != nil {
-		return fmt.Errorf("getting exit mountnsmap: %w", err)
-	}
-
-	tracerExit, err := tracerexit.NewTracer(
-		&tracerexit.Config{MountnsMap: exitMountnsmap},
-		//et.containerCollection,
-		et.exitEventCallback,
+	et.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		"ghcr.io/inspektor-gadget/gadget/exit:latest",
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			et.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			et.eventOperator(),
+		),
+		gadgetcontext.WithName(exitTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(et.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating exit tracer: %w", err)
-	}
-
-	et.tracer = tracerExit
+	go func() {
+		err := et.runtime.RunGadget(et.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", et.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the exit tracer
+// Stop gracefully stops the tracer
 func (et *ExitTracer) Stop() error {
-	if et.tracer != nil {
-		et.tracer.Stop()
+	if et.gadgetCtx != nil {
+		et.gadgetCtx.Cancel()
 	}
-
-	if err := et.tracerCollection.RemoveTracer(exitTraceName); err != nil {
-		return fmt.Errorf("removing exit tracer: %w", err)
-	}
-
 	return nil
 }
 
@@ -97,17 +97,37 @@ func (et *ExitTracer) IsEnabled(cfg config.Config) bool {
 	return cfg.EnableRuntimeDetection || cfg.EnableApplicationProfile
 }
 
-// exitEventCallback handles exit events from the tracer
-func (et *ExitTracer) exitEventCallback(event *tracerexittype.Event) {
-	//if event.Type == types.DEBUG {
-	//	return
-	//}
-	//
-	//if et.eventCallback != nil {
-	//	// Extract container ID and process ID from the exit event
-	//	containerID := event.Runtime.ContainerID
-	//	processID := event.Pid
-	//
-	//	et.eventCallback(event, containerID, processID)
-	//}
+func (et *ExitTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.ExitEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				jsonFormatter, _ := igjson.New(d,
+					// Show all fields
+					igjson.WithShowAll(true),
+					// Print json in a pretty format
+					igjson.WithPretty(true, "  "),
+				)
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					logger.L().Debug("Matthias - exit event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					et.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.ExitEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
+
+// callback handles events from the tracer
+func (et *ExitTracer) callback(event utils.EverythingEvent) {
+	if et.eventCallback != nil {
+		// Extract container ID and process ID from the exit event
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
+
+		et.eventCallback(event, containerID, processID)
+	}
 }

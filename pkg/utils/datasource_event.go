@@ -229,7 +229,7 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
-	case ExecveEventType:
+	case ExecveEventType, ExitEventType, ForkEventType:
 		gid, _ := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
 		return &gid
 	case OpenEventType:
@@ -402,7 +402,7 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 
 func (e *DatasourceEvent) GetUid() *uint32 {
 	switch e.EventType {
-	case ExecveEventType:
+	case ExecveEventType, ExitEventType, ForkEventType:
 		uid, _ := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
 		return &uid
 	case OpenEventType:

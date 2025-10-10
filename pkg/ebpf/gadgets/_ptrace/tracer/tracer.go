@@ -1,5 +1,3 @@
-//go:build !withoutebpf
-
 package tracer
 
 import (
@@ -17,10 +15,11 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/_ptrace/tracer/types"
+	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event exit bpf/exit.bpf.c -- -I./bpf/
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event ptrace bpf/ptrace_detector.c -- -I./bpf/
 
 type Config struct {
 	MountnsMap *ebpf.Map
@@ -31,10 +30,10 @@ type Tracer struct {
 	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 
-	objs exitObjects
+	objs ptraceObjects
 
-	exitLink link.Link
-	reader   *perf.Reader
+	ptracelinks []link.Link
+	reader      *perf.Reader
 
 	// recordPool will pool perf.Record objects to avoid allocations.
 	recordPool sync.Pool
@@ -49,12 +48,13 @@ func NewTracer(config *Config, //enricher gadgets.DataEnricherByMntNs,
 		eventCallback: eventCallback,
 	}
 
+	// Initialize the sync.Pool to create new perf.Record objects when the pool is empty.
 	t.recordPool.New = func() any {
 		return new(perf.Record)
 	}
 
 	if err := t.install(); err != nil {
-		t.close()
+		t.Close()
 		return nil, err
 	}
 
@@ -63,25 +63,22 @@ func NewTracer(config *Config, //enricher gadgets.DataEnricherByMntNs,
 	return t, nil
 }
 
-// Stop stops the tracer
-// TODO: Remove after refactoring
-func (t *Tracer) Stop() {
-	t.close()
-}
-
-func (t *Tracer) close() {
-	t.exitLink = gadgets.CloseLink(t.exitLink)
+func (t *Tracer) Close() {
+	for _, l := range t.ptracelinks {
+		gadgets.CloseLink(l)
+	}
 
 	if t.reader != nil {
 		t.reader.Close()
 	}
 
 	t.objs.Close()
+
 }
 
 func (t *Tracer) install() error {
 	var err error
-	//spec, err := loadExit()
+	//spec, err := loadPtrace()
 	//if err != nil {
 	//	return fmt.Errorf("loading ebpf program: %w", err)
 	//}
@@ -90,15 +87,17 @@ func (t *Tracer) install() error {
 	//	return fmt.Errorf("loading ebpf spec: %w", err)
 	//}
 
-	t.exitLink, err = link.AttachRawTracepoint(link.RawTracepointOptions{
-		Name:    "sched_process_exit",
-		Program: t.objs.TracepointSchedExit,
-	})
+	var links []link.Link
+	tp := tracepointlib.TracepointInfo{Syscall: "sys_enter_ptrace", ObjFunc: t.objs.ptracePrograms.TraceEnterPtrace}
+	l, err := tracepointlib.AttachTracepoint(tp)
 	if err != nil {
-		return fmt.Errorf("attaching raw tracepoint: %w", err)
+		logger.L().Fatal("ptrace Tracer - error attaching tracepoint", helpers.Error(err))
 	}
+	links = append(links, l)
 
-	t.reader, err = perf.NewReader(t.objs.exitMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
+	t.ptracelinks = links
+
+	t.reader, err = perf.NewReader(t.objs.ptraceMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
 	if err != nil {
 		return fmt.Errorf("creating perf ring buffer: %w", err)
 	}
@@ -108,58 +107,48 @@ func (t *Tracer) install() error {
 
 func (t *Tracer) run() {
 	for {
+		// Get a reusable record from the pool.
 		record := t.recordPool.Get().(*perf.Record)
+
+		// Read into the existing record to avoid allocating a new one.
 		err := t.reader.ReadInto(record)
 		if err != nil {
+			// Return record to the pool before we exit or continue the loop.
 			t.recordPool.Put(record)
 			if errors.Is(err, perf.ErrClosed) {
 				// nothing to do, we're done
 				return
 			}
-
 			//msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
 			//t.eventCallback(types.Base(eventtypes.Err(msg)))
-			return
+			continue
 		}
 
 		if record.LostSamples > 0 {
 			//msg := fmt.Sprintf("lost %d samples", record.LostSamples)
 			//t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			// Return record to the pool before continuing.
 			t.recordPool.Put(record)
 			continue
 		}
 
-		bpfEvent := (*exitEvent)(unsafe.Pointer(&record.RawSample[0]))
-
-		// Check if we have seen enough events for this mntns
-		event := types.Event{
-			//Event: eventtypes.Event{
-			//	Type:      eventtypes.NORMAL,
-			//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-			//},
-			//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-			Pid:        bpfEvent.Pid,
-			Tid:        bpfEvent.Tid,
-			PPid:       bpfEvent.Ppid,
-			Uid:        bpfEvent.Uid,
-			Gid:        bpfEvent.Gid,
-			ExitCode:   bpfEvent.ExitCode,
-			ExitSignal: bpfEvent.ExitSignal,
+		if len(record.RawSample) == 0 {
+			// Empty record, just return it to the pool.
+			t.recordPool.Put(record)
+			continue
 		}
 
-		//if t.enricher != nil {
-		//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-		//}
+		bpfEvent := (*ptraceEvent)(unsafe.Pointer(&record.RawSample[0]))
+		event := t.parseEvent(bpfEvent)
+		t.eventCallback(event)
 
-		t.eventCallback(&event)
+		// Return the record to the pool after processing.
 		t.recordPool.Put(record)
 	}
 }
 
-// --- Registry changes
-
 func (t *Tracer) Run(gadgetCtx gadgets.GadgetContext) error {
-	defer t.close()
+	defer t.Close()
 	if err := t.install(); err != nil {
 		return fmt.Errorf("installing tracer: %w", err)
 	}
@@ -177,9 +166,32 @@ func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
 func (t *Tracer) SetEventHandler(handler any) {
 	nh, ok := handler.(func(ev *types.Event))
 	if !ok {
-		logger.L().Fatal("exit Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
+		logger.L().Fatal("ptrace Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
 	}
 	t.eventCallback = nh
+}
+
+func (t *Tracer) parseEvent(bpfEvent *ptraceEvent) *types.Event {
+	event := types.Event{
+		//Event: eventtypes.Event{
+		//	Type:      eventtypes.NORMAL,
+		//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+		//},
+		//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+		Pid:     bpfEvent.Pid,
+		PPid:    bpfEvent.Ppid,
+		Uid:     bpfEvent.Uid,
+		Gid:     bpfEvent.Gid,
+		Request: bpfEvent.Request,
+		Comm:    gadgets.FromCString(bpfEvent.Comm[:]),
+		ExePath: gadgets.FromCString(bpfEvent.Exepath[:]),
+	}
+
+	//if t.enricher != nil {
+	//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+	//}
+
+	return &event
 }
 
 type GadgetDesc struct{}

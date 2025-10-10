@@ -1,11 +1,10 @@
-//go:build !withoutebpf
-
 package tracer
 
 import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -16,11 +15,10 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/_hardlink/types"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event fork bpf/fork.bpf.c -- -I./bpf/
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -strip /usr/bin/llvm-strip-18 -cc /usr/bin/clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event hardlink bpf/hardlink.bpf.c -- -I./bpf/
 
 type Config struct {
 	MountnsMap *ebpf.Map
@@ -31,10 +29,11 @@ type Tracer struct {
 	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 
-	objs forkObjects
+	objs hardlinkObjects
 
-	forkLink link.Link
-	reader   *perf.Reader
+	linkLink   link.Link
+	linkatLink link.Link
+	reader     *perf.Reader
 
 	// recordPool will pool perf.Record objects to avoid allocations.
 	recordPool sync.Pool
@@ -70,7 +69,10 @@ func (t *Tracer) Stop() {
 }
 
 func (t *Tracer) close() {
-	t.forkLink = gadgets.CloseLink(t.forkLink)
+	if runtime.GOARCH != "arm64" {
+		t.linkLink = gadgets.CloseLink(t.linkLink)
+	}
+	t.linkatLink = gadgets.CloseLink(t.linkatLink)
 
 	if t.reader != nil {
 		t.reader.Close()
@@ -81,7 +83,7 @@ func (t *Tracer) close() {
 
 func (t *Tracer) install() error {
 	var err error
-	//spec, err := loadFork()
+	//spec, err := loadHardlink()
 	//if err != nil {
 	//	return fmt.Errorf("loading ebpf program: %w", err)
 	//}
@@ -90,15 +92,19 @@ func (t *Tracer) install() error {
 	//	return fmt.Errorf("loading ebpf spec: %w", err)
 	//}
 
-	t.forkLink, err = link.AttachRawTracepoint(link.RawTracepointOptions{
-		Name:    "sched_process_fork",
-		Program: t.objs.TracepointSchedFork,
-	})
-	if err != nil {
-		return fmt.Errorf("attaching raw tracepoint: %w", err)
+	if runtime.GOARCH != "arm64" {
+		t.linkLink, err = link.Tracepoint("syscalls", "sys_enter_link", t.objs.TracepointSysLink, nil)
+		if err != nil {
+			return fmt.Errorf("attaching tracepoint: %w", err)
+		}
 	}
 
-	t.reader, err = perf.NewReader(t.objs.forkMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
+	t.linkatLink, err = link.Tracepoint("syscalls", "sys_enter_linkat", t.objs.TracepointSysLinkat, nil)
+	if err != nil {
+		return fmt.Errorf("attaching tracepoint: %w", err)
+	}
+
+	t.reader, err = perf.NewReader(t.objs.hardlinkMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
 	if err != nil {
 		return fmt.Errorf("creating perf ring buffer: %w", err)
 	}
@@ -129,12 +135,7 @@ func (t *Tracer) run() {
 			continue
 		}
 
-		if len(record.RawSample) == 0 {
-			t.recordPool.Put(record)
-			continue
-		}
-
-		bpfEvent := (*forkEvent)(unsafe.Pointer(&record.RawSample[0]))
+		bpfEvent := (*hardlinkEvent)(unsafe.Pointer(&record.RawSample[0]))
 
 		// Check if we have seen enough events for this mntns
 		event := types.Event{
@@ -143,15 +144,16 @@ func (t *Tracer) run() {
 			//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
 			//},
 			//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-			Pid:      bpfEvent.Pid,
-			Tid:      bpfEvent.Tid,
-			PPid:     bpfEvent.Ppid,
-			Uid:      bpfEvent.Uid,
-			Gid:      bpfEvent.Gid,
-			Comm:     gadgets.FromCString(bpfEvent.Comm[:]),
-			ExePath:  gadgets.FromCString(bpfEvent.Exepath[:]),
-			ChildPid: bpfEvent.ChildPid,
-			ChildTid: bpfEvent.ChildTid,
+			Pid:        bpfEvent.Pid,
+			Tid:        bpfEvent.Tid,
+			PPid:       bpfEvent.Ppid,
+			Uid:        bpfEvent.Uid,
+			Gid:        bpfEvent.Gid,
+			UpperLayer: bpfEvent.UpperLayer,
+			Comm:       gadgets.FromCString(bpfEvent.Comm[:]),
+			ExePath:    gadgets.FromCString(bpfEvent.Exepath[:]),
+			OldPath:    gadgets.FromCString(bpfEvent.Oldpath[:]),
+			NewPath:    gadgets.FromCString(bpfEvent.Newpath[:]),
 		}
 
 		//if t.enricher != nil {
@@ -184,16 +186,7 @@ func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
 func (t *Tracer) SetEventHandler(handler any) {
 	nh, ok := handler.(func(ev *types.Event))
 	if !ok {
-		logger.L().Fatal("fork Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
+		logger.L().Fatal("hardlink Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
 	}
 	t.eventCallback = nh
-}
-
-type GadgetDesc struct{}
-
-func (g *GadgetDesc) NewInstance() (ebpfgadgets.Gadget, error) {
-	tracer := &Tracer{
-		config: &Config{},
-	}
-	return tracer, nil
 }
