@@ -2,15 +2,20 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
 const (
@@ -23,72 +28,64 @@ var _ containerwatcher.TracerInterface = (*HTTPTracer)(nil)
 
 // HTTPTracer implements TracerInterface for HTTP events
 type HTTPTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *tracerhttp.Tracer
+	eventCallback containerwatcher.ResultCallback
+	gadgetCtx     *gadgetcontext.GadgetContext
+	kubeManager   *kskubemanager.KubeManager
+	ociStore      *orasoci.ReadOnlyStore
+	runtime       runtime.Runtime
 }
 
 // NewHTTPTracer creates a new HTTP tracer
 func NewHTTPTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
 	eventCallback containerwatcher.ResultCallback,
+	kubeManager *kskubemanager.KubeManager,
+	ociStore *orasoci.ReadOnlyStore,
+	runtime runtime.Runtime,
 ) *HTTPTracer {
 	return &HTTPTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
+		eventCallback: eventCallback,
+		kubeManager:   kubeManager,
+		ociStore:      ociStore,
+		runtime:       runtime,
 	}
 }
 
 // Start initializes and starts the HTTP tracer
 func (ht *HTTPTracer) Start(ctx context.Context) error {
-	if err := ht.tracerCollection.AddTracer(httpTraceName, ht.containerSelector); err != nil {
-		return fmt.Errorf("adding HTTP tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	httpMountnsmap, err := ht.tracerCollection.TracerMountNsMap(httpTraceName)
-	if err != nil {
-		return fmt.Errorf("getting HTTP mountnsmap: %w", err)
-	}
-
-	tracerHttp, err := tracerhttp.NewTracer(
-		&tracerhttp.Config{MountnsMap: httpMountnsmap},
-		//ht.containerCollection,
-		ht.httpEventCallback,
+	ht.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		"ghcr.io/inspektor-gadget/gadget/trace_http:v0.45.0",
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			ht.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			ht.eventOperator(),
+		),
 	)
-	if err != nil {
-		return fmt.Errorf("creating HTTP tracer: %w", err)
-	}
-
-	ht.tracer = tracerHttp
+	go func() {
+		err := ht.runtime.RunGadget(ht.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", ht.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
 // Stop gracefully stops the HTTP tracer
 func (ht *HTTPTracer) Stop() error {
-	if ht.tracer != nil {
-		ht.tracer.Close()
+	if ht.gadgetCtx != nil {
+		ht.gadgetCtx.Cancel()
 	}
-
-	if err := ht.tracerCollection.RemoveTracer(httpTraceName); err != nil {
-		return fmt.Errorf("removing HTTP tracer: %w", err)
-	}
-
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (ht *HTTPTracer) GetName() string {
-	return "http_tracer"
+	return httpTraceName
 }
 
-// GetEventType returns the event type this tracer produces
+// GetName returns the unique name of the tracer
 func (ht *HTTPTracer) GetEventType() utils.EventType {
 	return utils.HTTPEventType
 }
@@ -98,8 +95,29 @@ func (ht *HTTPTracer) IsEnabled(cfg config.Config) bool {
 	return !cfg.DHttp && cfg.EnableHttpDetection
 }
 
-// httpEventCallback handles HTTP events from the tracer
-func (ht *HTTPTracer) httpEventCallback(event *tracerhttptype.Event) {
+// eventOperator returns the event operator for the HTTP tracer
+func (ht *HTTPTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.HTTPEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					ht.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.HTTPEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
+
+// callback handles HTTP events from the HTTP tracer
+func (ht *HTTPTracer) callback(event *utils.DatasourceEvent) {
+
+	// TODO: Implement HTTP tracer and copy all the parsing code of the GroupEvents
+
 	//if event.Type == types.DEBUG {
 	//	return
 	//}

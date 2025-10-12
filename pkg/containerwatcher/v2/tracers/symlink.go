@@ -135,6 +135,6 @@ func (st *SymlinkTracer) handleEvent(event utils.EverythingEvent, syscalls []uin
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
 
-		EnrichEvent(st.thirdPartyEnricher, event, syscalls, st.eventCallback, containerID, processID)
+		enrichEvent(st.thirdPartyEnricher, event, syscalls, st.eventCallback, containerID, processID)
 	}
 }

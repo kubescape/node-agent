@@ -1,0 +1,44 @@
+name: randomx
+description: Trace RandomX mining activity by monitoring x86 FPU register deactivation
+  events and detecting specific FPU control register patterns.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/randomx
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/randomx
+datasources:
+  randomx:
+    fields:
+      exepath:
+        annotations:
+          description: 'TODO: Fill field description'
+      proc:
+        annotations:
+          description: Process metadata including pid, tid, ppid, uid, gid, comm,
+            etc.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.
+      upper_layer:
+        annotations:
+          description: True if the executable resides on overlayfs upper layer.
+params:
+  ebpf:
+    targ_comm:
+      key: targ_comm
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_gid:
+      key: targ_gid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_pid:
+      key: targ_pid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_tid:
+      key: targ_tid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_uid:
+      key: targ_uid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'

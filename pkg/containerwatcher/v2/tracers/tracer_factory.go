@@ -192,13 +192,13 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	manager.RegisterTracer(sshTracer)
 
 	// Create HTTP tracer
-	//httpTracer := NewHTTPTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.HTTPEventType),
-	//)
-	//manager.RegisterTracer(httpTracer)
+	httpTracer := NewHTTPTracer(
+		tf.createEventCallback(utils.HTTPEventType),
+		tf.kubeManager,
+		tf.ociStore,
+		tf.runtime,
+	)
+	manager.RegisterTracer(httpTracer)
 
 	// Create network tracer
 	networkTracer := NewNetworkTracer(

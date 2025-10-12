@@ -143,6 +143,6 @@ func (et *ExecTracer) handleEvent(event utils.EverythingEvent, syscalls []uint64
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
 
-		EnrichEvent(et.thirdPartyEnricher, event, syscalls, et.eventCallback, containerID, processID)
+		enrichEvent(et.thirdPartyEnricher, event, syscalls, et.eventCallback, containerID, processID)
 	}
 }

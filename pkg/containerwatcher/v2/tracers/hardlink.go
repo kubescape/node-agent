@@ -135,6 +135,6 @@ func (ht *HardlinkTracer) handleEvent(event utils.EverythingEvent, syscalls []ui
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
 
-		EnrichEvent(ht.thirdPartyEnricher, event, syscalls, ht.eventCallback, containerID, processID)
+		enrichEvent(ht.thirdPartyEnricher, event, syscalls, ht.eventCallback, containerID, processID)
 	}
 }

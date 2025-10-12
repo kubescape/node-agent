@@ -135,6 +135,6 @@ func (ot *OpenTracer) handleEvent(event utils.EverythingEvent, syscalls []uint64
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
 
-		EnrichEvent(ot.thirdPartyEnricher, event, syscalls, ot.eventCallback, containerID, processID)
+		enrichEvent(ot.thirdPartyEnricher, event, syscalls, ot.eventCallback, containerID, processID)
 	}
 }
