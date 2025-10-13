@@ -1,9 +1,7 @@
 package utils
 
 import (
-	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -46,6 +44,16 @@ func (e *DatasourceEvent) GetArgs() []string {
 	case ExecveEventType:
 		args, _ := e.Datasource.GetField("args").String(e.Data)
 		return strings.Split(args, " ")
+	default:
+		return nil
+	}
+}
+
+func (e *DatasourceEvent) GetBuf() []byte {
+	switch e.EventType {
+	case HTTPEventType:
+		buf, _ := e.Datasource.GetField("buf").Bytes(e.Data)
+		return buf
 	default:
 		return nil
 	}
@@ -134,6 +142,11 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 	}
 }
 
+func (e *DatasourceEvent) GetDstIP() string {
+	//TODO implement me for SSH event
+	panic("implement me")
+}
+
 func (e *DatasourceEvent) GetDstPort() uint16 {
 	switch e.EventType {
 	case NetworkEventType:
@@ -153,51 +166,11 @@ func (e *DatasourceEvent) GetEventType() EventType {
 	return e.EventType
 }
 
-// Get exec args from the given event.
-func (e *DatasourceEvent) GetExecArgsFromEvent() []string {
-	switch e.EventType {
-	case ExecveEventType:
-		if args := e.GetArgs(); len(args) > 1 {
-			return args[1:]
-		}
-		return []string{}
-	default:
-		return nil
-	}
-}
-
-func (e *DatasourceEvent) GetExecFullPathFromEvent() string {
-	switch e.EventType {
-	case ExecveEventType:
-		if path := e.GetExePath(); path != "" {
-			return path
-		}
-		return e.GetExecPathFromEvent()
-	default:
-		return ""
-	}
-}
-
 func (e *DatasourceEvent) GetExePath() string {
 	switch e.EventType {
 	case ExecveEventType:
 		exepath, _ := e.Datasource.GetField("exepath").String(e.Data)
 		return exepath
-	default:
-		return ""
-	}
-}
-
-// Get the path of the executable from the given event.
-func (e *DatasourceEvent) GetExecPathFromEvent() string {
-	switch e.EventType {
-	case ExecveEventType:
-		if args := e.GetArgs(); len(args) > 0 {
-			if args[0] != "" {
-				return args[0]
-			}
-		}
-		return e.GetComm()
 	default:
 		return ""
 	}
@@ -229,7 +202,7 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
-	case ExecveEventType, ExitEventType, ForkEventType:
+	case ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
 		gid, _ := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
 		return &gid
 	case OpenEventType:
@@ -238,20 +211,6 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 	default:
 		logger.L().Warning("GetGid not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
-	}
-}
-
-// Get the path of the file on the node.
-func (e *DatasourceEvent) GetHostFilePathFromEvent(containerPid uint32) (string, error) {
-	switch e.EventType {
-	case ExecveEventType:
-		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, e.GetExecPathFromEvent()))
-		return realPath, nil
-	case OpenEventType:
-		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, e.GetPath()))
-		return realPath, nil
-	default:
-		return "", fmt.Errorf("event is not of type tracerexectype.Event or traceropentype.Event")
 	}
 }
 
@@ -265,6 +224,11 @@ func (e *DatasourceEvent) GetNamespace() string {
 	return namespace
 }
 
+func (e *DatasourceEvent) GetNewPath() string {
+	//TODO implement me for hardlink and symlink events
+	panic("implement me")
+}
+
 func (e *DatasourceEvent) GetNumAnswers() int {
 	switch e.EventType {
 	case DnsEventType:
@@ -273,6 +237,16 @@ func (e *DatasourceEvent) GetNumAnswers() int {
 	default:
 		return 0
 	}
+}
+
+func (e *DatasourceEvent) GetOldPath() string {
+	//TODO implement me for hardlink and symlink events
+	panic("implement me")
+}
+
+func (e *DatasourceEvent) GetOpcode() int {
+	//TODO implement me for IOUring event
+	panic("implement me")
 }
 
 func (e *DatasourceEvent) GetPath() string {
@@ -369,11 +343,44 @@ func (e *DatasourceEvent) GetQr() DNSPktType {
 	}
 }
 
+func (e *DatasourceEvent) GetSocketInode() uint64 {
+	switch e.EventType {
+	case HTTPEventType:
+		socketInode, _ := e.Datasource.GetField("socket_inode").Uint64(e.Data)
+		return socketInode
+	default:
+		return 0
+	}
+}
+
+func (e *DatasourceEvent) GetSockFd() uint32 {
+	switch e.EventType {
+	case HTTPEventType:
+		sockFd, _ := e.Datasource.GetField("sock_fd").Uint32(e.Data)
+		return sockFd
+	default:
+		return 0
+	}
+}
+
+func (e *DatasourceEvent) GetSrcIP() string {
+	//TODO implement me SSH event
+	panic("implement me")
+}
+
+func (e *DatasourceEvent) GetSrcPort() uint16 {
+	//TODO implement me SSH event
+	panic("implement me")
+}
+
 func (e *DatasourceEvent) GetSyscall() string {
 	switch e.EventType {
 	case CapabilitiesEventType:
 		syscallRaw, _ := e.Datasource.GetField("syscall_raw").Uint16(e.Data)
 		return syscalls.SyscallGetName(syscallRaw)
+	case HTTPEventType:
+		syscall, _ := e.Datasource.GetField("syscall").Bytes(e.Data)
+		return gadgets.FromCString(syscall)
 	default:
 		return ""
 	}
@@ -400,9 +407,19 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 	}
 }
 
+func (e *DatasourceEvent) GetType() HTTPDataType {
+	switch e.EventType {
+	case HTTPEventType:
+		t, _ := e.Datasource.GetField("type").Uint8(e.Data)
+		return HTTPDataType(t)
+	default:
+		return 0
+	}
+}
+
 func (e *DatasourceEvent) GetUid() *uint32 {
 	switch e.EventType {
-	case ExecveEventType, ExitEventType, ForkEventType:
+	case ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
 		uid, _ := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
 		return &uid
 	case OpenEventType:

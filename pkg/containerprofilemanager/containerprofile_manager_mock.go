@@ -2,9 +2,6 @@ package containerprofilemanager
 
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_hardlink/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_symlink/types"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -42,7 +39,7 @@ func (a ContainerProfileManagerMock) ReportDroppedEvent(_ string) {
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportHTTPEvent(_ string, _ *tracerhttptype.Event) {
+func (a ContainerProfileManagerMock) ReportHTTPEvent(_ string, _ utils.HttpEvent) {
 	// noop
 }
 
@@ -54,11 +51,11 @@ func (a ContainerProfileManagerMock) ReportIdentifiedCallStack(_ string, _ *v1be
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportSymlinkEvent(_ string, _ *tracersymlinktype.Event) {
+func (a ContainerProfileManagerMock) ReportSymlinkEvent(_ string, _ utils.EverythingEvent) {
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportHardlinkEvent(_ string, _ *tracerhardlinktype.Event) {
+func (a ContainerProfileManagerMock) ReportHardlinkEvent(_ string, _ utils.EverythingEvent) {
 	// noop
 }
 

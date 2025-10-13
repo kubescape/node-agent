@@ -5,7 +5,6 @@ package tracer
 import (
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"unsafe"
 
@@ -80,7 +79,7 @@ func (t *Tracer) close() {
 }
 
 func (t *Tracer) install() error {
-	var err error
+	//var err error
 	//spec, err := loadFork()
 	//if err != nil {
 	//	return fmt.Errorf("loading ebpf program: %w", err)
@@ -90,18 +89,18 @@ func (t *Tracer) install() error {
 	//	return fmt.Errorf("loading ebpf spec: %w", err)
 	//}
 
-	t.forkLink, err = link.AttachRawTracepoint(link.RawTracepointOptions{
-		Name:    "sched_process_fork",
-		Program: t.objs.TracepointSchedFork,
-	})
-	if err != nil {
-		return fmt.Errorf("attaching raw tracepoint: %w", err)
-	}
+	//t.forkLink, err = link.AttachRawTracepoint(link.RawTracepointOptions{
+	//	Name:    "sched_process_fork",
+	//	Program: t.objs.TracepointSchedFork,
+	//})
+	//if err != nil {
+	//	return fmt.Errorf("attaching raw tracepoint: %w", err)
+	//}
 
-	t.reader, err = perf.NewReader(t.objs.forkMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
-	if err != nil {
-		return fmt.Errorf("creating perf ring buffer: %w", err)
-	}
+	//t.reader, err = perf.NewReader(t.objs.forkMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
+	//if err != nil {
+	//	return fmt.Errorf("creating perf ring buffer: %w", err)
+	//}
 
 	return nil
 }

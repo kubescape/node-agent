@@ -1,8 +1,13 @@
 package adapters
 
 import (
+	"path/filepath"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type HardlinkAdapter struct {
@@ -13,52 +18,57 @@ func NewHardlinkAdapter() *HardlinkAdapter {
 }
 
 func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	//hardlinkEvent, ok := enrichedEvent.Event.(*tracerhardlinktype.Event)
-	//if !ok {
-	//	return
-	//}
+	hardlinkEvent, ok := enrichedEvent.Event.(utils.EverythingEvent)
+	if !ok || enrichedEvent.EventType != utils.HardlinkEventType {
+		return
+	}
 
-	//failure.SetExtra(hardlinkEvent.GetExtra())
+	failure.SetExtra(hardlinkEvent.GetExtra())
 
-	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	//baseRuntimeAlert.InfectedPID = hardlinkEvent.Pid
-	//baseRuntimeAlert.Arguments = map[string]interface{}{
-	//	"oldPath": hardlinkEvent.OldPath,
-	//	"newPath": hardlinkEvent.NewPath,
-	//}
-	//baseRuntimeAlert.Identifiers = &common.Identifiers{
-	//	Process: &common.ProcessEntity{
-	//		Name: hardlinkEvent.Comm,
-	//	},
-	//	File: &common.FileEntity{
-	//		Name:      filepath.Base(hardlinkEvent.OldPath),
-	//		Directory: filepath.Dir(hardlinkEvent.OldPath),
-	//	},
-	//}
-	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	pid := hardlinkEvent.GetPID()
+	comm := hardlinkEvent.GetComm()
+	exePath := hardlinkEvent.GetExePath()
+	oldPath := hardlinkEvent.GetOldPath()
+	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	baseRuntimeAlert.InfectedPID = pid
+	baseRuntimeAlert.Arguments = map[string]interface{}{
+		"oldPath": oldPath,
+		"newPath": hardlinkEvent.GetNewPath(),
+	}
+	baseRuntimeAlert.Identifiers = &common.Identifiers{
+		Process: &common.ProcessEntity{
+			Name: comm,
+		},
+		File: &common.FileEntity{
+			Name:      filepath.Base(oldPath),
+			Directory: filepath.Dir(oldPath),
+		},
+	}
+	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	//runtimeProcessDetails := apitypes.ProcessTree{
-	//	ProcessTree: apitypes.Process{
-	//		Comm:       hardlinkEvent.Comm,
-	//		PPID:       hardlinkEvent.PPid,
-	//		PID:        hardlinkEvent.Pid,
-	//		UpperLayer: &hardlinkEvent.UpperLayer,
-	//		Uid:        &hardlinkEvent.Uid,
-	//		Gid:        &hardlinkEvent.Gid,
-	//		Path:       hardlinkEvent.ExePath,
-	//		Hardlink:   hardlinkEvent.ExePath,
-	//	},
-	//	ContainerID: hardlinkEvent.Runtime.ContainerID,
-	//}
-	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	upperLayer := hardlinkEvent.GetUpperLayer()
+	runtimeProcessDetails := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			Comm:       comm,
+			PPID:       hardlinkEvent.GetPpid(),
+			PID:        pid,
+			UpperLayer: &upperLayer,
+			Uid:        hardlinkEvent.GetUid(),
+			Gid:        hardlinkEvent.GetGid(),
+			Path:       exePath,
+			Hardlink:   exePath,
+		},
+		ContainerID: hardlinkEvent.GetContainerID(),
+	}
+	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	//failure.SetTriggerEvent(hardlinkEvent.Event)
+	failure.SetTriggerEvent(hardlinkEvent)
 
-	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-	//	PodName:   hardlinkEvent.GetPod(),
-	//	PodLabels: hardlinkEvent.K8s.PodLabels,
-	//}
-	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+		PodName:   hardlinkEvent.GetPod(),
+		PodLabels: hardlinkEvent.GetPodLabels(),
+	}
+	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *HardlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {

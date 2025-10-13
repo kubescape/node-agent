@@ -85,7 +85,7 @@ func (st *SymlinkTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (st *SymlinkTracer) GetName() string {
-	return "symlink_tracer"
+	return symlinkTraceName
 }
 
 // GetEventType returns the event type this tracer produces

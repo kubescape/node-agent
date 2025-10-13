@@ -193,10 +193,10 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 
 	// Create HTTP tracer
 	httpTracer := NewHTTPTracer(
-		tf.createEventCallback(utils.HTTPEventType),
 		tf.kubeManager,
-		tf.ociStore,
 		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.HTTPEventType),
 	)
 	manager.RegisterTracer(httpTracer)
 
@@ -224,13 +224,13 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	manager.RegisterTracer(dnsTracer)
 
 	// Create randomX tracer
-	//randomXTracer := NewRandomXTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.RandomXEventType),
-	//)
-	//manager.RegisterTracer(randomXTracer)
+	randomXTracer := NewRandomXTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.RandomXEventType),
+	)
+	manager.RegisterTracer(randomXTracer)
 
 	// Create ptrace tracer
 	ptraceTracer := NewPtraceTracer(

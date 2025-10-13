@@ -81,7 +81,7 @@ func (ft *ForkTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (ft *ForkTracer) GetName() string {
-	return "fork_tracer"
+	return forkTraceName
 }
 
 // GetEventType returns the event type this tracer produces

@@ -8,13 +8,7 @@ import (
 	"github.com/google/cel-go/ext"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_fork/types"
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_hardlink/types"
 	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_iouring/tracer/types"
-	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_ptrace/tracer/types"
-	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_ssh/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_symlink/types"
-	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
@@ -22,7 +16,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/networkneighborhood"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/parse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/process"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/picatz/xcel"
@@ -43,42 +36,17 @@ type CEL struct {
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	ta, tp := xcel.NewTypeAdapter(), xcel.NewTypeProvider()
-	//exitObj, exitTyp := xcel.NewObject(&tracerexectype.Event{})
-	//xcel.RegisterObject(ta, tp, exitObj, exitTyp, xcel.NewFields(exitObj))
-	forkObj, forkTyp := xcel.NewObject(&tracerforktype.Event{})
-	xcel.RegisterObject(ta, tp, forkObj, forkTyp, xcel.NewFields(forkObj))
-	hardlinkObj, hardlinkTyp := xcel.NewObject(&tracerhardlinktype.Event{})
-	xcel.RegisterObject(ta, tp, hardlinkObj, hardlinkTyp, xcel.NewFields(hardlinkObj))
 	iouringObj, iouringTyp := xcel.NewObject(&traceriouringtype.Event{})
 	xcel.RegisterObject(ta, tp, iouringObj, iouringTyp, xcel.NewFields(iouringObj))
 	eventObj, eventTyp := xcel.NewObject(&utils.EverythingEventImpl{})
 	xcel.RegisterObject(ta, tp, eventObj, eventTyp, utils.CelFields)
 	procObj, procTyp := xcel.NewObject(&events.ProcfsEvent{})
 	xcel.RegisterObject(ta, tp, procObj, procTyp, xcel.NewFields(procObj))
-	ptraceObj, ptraceTyp := xcel.NewObject(&tracerptracetype.Event{})
-	xcel.RegisterObject(ta, tp, ptraceObj, ptraceTyp, xcel.NewFields(ptraceObj))
-	randObj, randTyp := xcel.NewObject(&tracerrandomxtype.Event{})
-	xcel.RegisterObject(ta, tp, randObj, randTyp, xcel.NewFields(randObj))
-	sshObj, sshTyp := xcel.NewObject(&tracersshtype.Event{})
-	xcel.RegisterObject(ta, tp, sshObj, sshTyp, xcel.NewFields(sshObj))
-	symlinkObj, symlinkTyp := xcel.NewObject(&tracersymlinktype.Event{})
-	xcel.RegisterObject(ta, tp, symlinkObj, symlinkTyp, xcel.NewFields(symlinkObj))
-	syscallObj, syscallTyp := xcel.NewObject(&types.SyscallEvent{})
-	xcel.RegisterObject(ta, tp, syscallObj, syscallTyp, xcel.NewFields(syscallObj))
 	envOptions := []cel.EnvOption{
 		cel.Variable("event", eventTyp),
 		cel.Variable("event_type", cel.StringType),
-		//cel.Variable(string(utils.ExitEventType), exitTyp),
-		cel.Variable(string(utils.ForkEventType), forkTyp),
-		cel.Variable(string(utils.HardlinkEventType), hardlinkTyp),
 		cel.Variable(string(utils.IoUringEventType), iouringTyp),
 		cel.Variable(string(utils.ProcfsEventType), procTyp),
-		cel.Variable(string(utils.PtraceEventType), ptraceTyp),
-		cel.Variable(string(utils.RandomXEventType), randTyp),
-		cel.Variable(string(utils.SSHEventType), sshTyp),
-		cel.Variable(string(utils.SymlinkEventType), symlinkTyp),
-		cel.Variable(string(utils.SyscallEventType), syscallTyp),
-		cel.Variable(string(utils.HTTPEventType), cel.AnyType),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),

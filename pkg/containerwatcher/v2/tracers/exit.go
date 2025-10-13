@@ -81,7 +81,7 @@ func (et *ExitTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (et *ExitTracer) GetName() string {
-	return "exit_tracer"
+	return exitTraceName
 }
 
 // GetEventType returns the event type this tracer produces

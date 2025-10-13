@@ -3,7 +3,7 @@ package tracer
 import (
 	"testing"
 
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/_fork/types"
 	"github.com/stretchr/testify/assert"
 )
 

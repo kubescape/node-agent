@@ -26,33 +26,37 @@ func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 		dstIP = addresses[0]
 	}
 
+	pid := dnsEvent.GetPID()
+	comm := dnsEvent.GetComm()
+	dnsName := dnsEvent.GetDNSName()
+	proto := dnsEvent.GetProto()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = dnsEvent.GetPID()
+	baseRuntimeAlert.InfectedPID = pid
 	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"domain":    dnsEvent.GetDNSName(),
+		"domain":    dnsName,
 		"addresses": dnsEvent.GetAddresses(),
-		"protocol":  dnsEvent.GetProto(),
+		"protocol":  proto,
 		"port":      dnsEvent.GetDstPort(),
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: dnsEvent.GetComm(),
+			Name: comm,
 		},
 		Dns: &common.DnsEntity{
-			Domain: dnsEvent.GetDNSName(),
+			Domain: dnsName,
 		},
 		Network: &common.NetworkEntity{
 			DstIP:    dstIP,
-			Protocol: dnsEvent.GetProto(),
+			Protocol: proto,
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm:  dnsEvent.GetComm(),
+			Comm:  comm,
 			Gid:   dnsEvent.GetGid(),
-			PID:   dnsEvent.GetPID(),
+			PID:   pid,
 			Uid:   dnsEvent.GetUid(),
 			Pcomm: dnsEvent.GetPcomm(),
 			Path:  dnsEvent.GetExePath(),

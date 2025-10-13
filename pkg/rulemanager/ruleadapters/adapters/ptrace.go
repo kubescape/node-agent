@@ -1,8 +1,13 @@
 package adapters
 
 import (
+	"path/filepath"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type PtraceAdapter struct {
@@ -13,44 +18,47 @@ func NewPtraceAdapter() *PtraceAdapter {
 }
 
 func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	//ptraceEvent, ok := enrichedEvent.Event.(*tracerptracetype.Event)
-	//if !ok {
-	//	return
-	//}
+	ptraceEvent, ok := enrichedEvent.Event.(utils.EverythingEvent)
+	if !ok || enrichedEvent.EventType != utils.PtraceEventType {
+		return
+	}
 
-	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	//baseRuntimeAlert.InfectedPID = ptraceEvent.Pid
-	//baseRuntimeAlert.Identifiers = &common.Identifiers{
-	//	Process: &common.ProcessEntity{
-	//		Name: ptraceEvent.Comm,
-	//	},
-	//	File: &common.FileEntity{
-	//		Name:      filepath.Base(ptraceEvent.ExePath),
-	//		Directory: filepath.Dir(ptraceEvent.ExePath),
-	//	},
-	//}
-	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	pid := ptraceEvent.GetPID()
+	exePath := ptraceEvent.GetExePath()
+	comm := ptraceEvent.GetComm()
+	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	baseRuntimeAlert.InfectedPID = pid
+	baseRuntimeAlert.Identifiers = &common.Identifiers{
+		Process: &common.ProcessEntity{
+			Name: comm,
+		},
+		File: &common.FileEntity{
+			Name:      filepath.Base(exePath),
+			Directory: filepath.Dir(exePath),
+		},
+	}
+	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	//runtimeProcessDetails := apitypes.ProcessTree{
-	//	ProcessTree: apitypes.Process{
-	//		Comm: ptraceEvent.Comm,
-	//		PPID: ptraceEvent.PPid,
-	//		PID:  ptraceEvent.Pid,
-	//		Uid:  &ptraceEvent.Uid,
-	//		Gid:  &ptraceEvent.Gid,
-	//		Path: ptraceEvent.ExePath,
-	//	},
-	//	ContainerID: ptraceEvent.Runtime.ContainerID,
-	//}
-	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	runtimeProcessDetails := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			Comm: comm,
+			PPID: ptraceEvent.GetPpid(),
+			PID:  pid,
+			Uid:  ptraceEvent.GetUid(),
+			Gid:  ptraceEvent.GetGid(),
+			Path: exePath,
+		},
+		ContainerID: ptraceEvent.GetContainerID(),
+	}
+	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	//failure.SetTriggerEvent(ptraceEvent.Event)
+	failure.SetTriggerEvent(ptraceEvent)
 
-	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-	//	PodName:   ptraceEvent.GetPod(),
-	//	PodLabels: ptraceEvent.K8s.PodLabels,
-	//}
-	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+		PodName:   ptraceEvent.GetPod(),
+		PodLabels: ptraceEvent.GetPodLabels(),
+	}
+	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *PtraceAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {

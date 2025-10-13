@@ -81,7 +81,7 @@ func (pt *PtraceTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (pt *PtraceTracer) GetName() string {
-	return "ptrace_tracer"
+	return ptraceTraceName
 }
 
 // GetEventType returns the event type this tracer produces

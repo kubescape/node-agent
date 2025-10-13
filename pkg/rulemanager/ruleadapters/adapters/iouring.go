@@ -13,6 +13,7 @@ func NewIoUringAdapter() *IoUringAdapter {
 	return &IoUringAdapter{}
 }
 
+// TODO
 func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	//iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
 	//if !ok {

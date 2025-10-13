@@ -1,9 +1,20 @@
 package utils
 
 import (
+	"fmt"
+	"net/http"
+	"path/filepath"
 	"reflect"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
+)
+
+type HTTPDataType int
+
+const (
+	Request  HTTPDataType = 2
+	Response HTTPDataType = 3
 )
 
 type K8sEvent interface {
@@ -22,6 +33,7 @@ type EnrichEvent interface {
 	GetError() int64
 	GetEventType() EventType
 	GetExtra() interface{}
+	GetGid() *uint32
 	GetHostNetwork() bool
 	GetPcomm() string
 	GetPID() uint32
@@ -49,14 +61,39 @@ type ExecEvent interface {
 	EnrichEvent
 	GetArgs() []string
 	GetCwd() string
-	GetExecArgsFromEvent() []string
-	GetExecFullPathFromEvent() string
 	GetExePath() string
-	GetExecPathFromEvent() string
-	GetGid() *uint32
-	GetHostFilePathFromEvent(containerPid uint32) (string, error)
 	GetPupperLayer() bool
 	GetUpperLayer() bool
+}
+
+type HttpEvent interface {
+	HttpRawEvent
+	GetDirection() consts.NetworkDirection
+	GetInternal() bool
+	GetRequest() *http.Request
+	SetRequest(request *http.Request)
+	SetResponse(response *http.Response)
+	GetResponse() *http.Response
+}
+
+type HttpRawEvent interface {
+	EnrichEvent
+	GetBuf() []byte
+	GetSocketInode() uint64
+	GetSockFd() uint32
+	GetSyscall() string
+	GetType() HTTPDataType
+}
+
+type IOUring interface {
+	EnrichEvent
+	GetOpcode() int
+}
+
+type LinkEvent interface {
+	EnrichEvent
+	GetNewPath() string
+	GetOldPath() string
 }
 
 type NetworkEvent interface {
@@ -73,10 +110,16 @@ type OpenEvent interface {
 	EnrichEvent
 	GetFlags() []string
 	GetFlagsRaw() uint32
-	GetGid() *uint32
-	GetHostFilePathFromEvent(containerPid uint32) (string, error)
 	GetPath() string
 	IsDir() bool
+}
+
+type SshEvent interface {
+	EnrichEvent
+	GetDstIP() string
+	GetDstPort() uint16
+	GetSrcIP() string
+	GetSrcPort() uint16
 }
 
 type SyscallEvent interface {
@@ -88,8 +131,12 @@ type EverythingEvent interface {
 	CapabilitiesEvent
 	DNSEvent
 	ExecEvent
+	HttpRawEvent // not HttpEvent as we need to parse the HTTP data first
+	IOUring
+	LinkEvent
 	NetworkEvent
 	OpenEvent
+	SshEvent
 	SyscallEvent
 }
 
@@ -114,6 +161,38 @@ const (
 	SymlinkEventType      EventType = "symlink"
 	SyscallEventType      EventType = "syscall"
 )
+
+// Get the path of the file on the node.
+func GetHostFilePathFromEvent(event EnrichEvent, containerPid uint32) (string, error) {
+	switch v := event.(type) {
+	case ExecEvent:
+		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, GetExecPathFromEvent(v)))
+		return realPath, nil
+	case OpenEvent:
+		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, v.GetPath()))
+		return realPath, nil
+	default:
+		return "", fmt.Errorf("event is not of type exec or open")
+	}
+}
+
+// Get the path of the executable from the given event.
+func GetExecPathFromEvent(event ExecEvent) string {
+	if args := event.GetArgs(); len(args) > 0 {
+		if args[0] != "" {
+			return args[0]
+		}
+	}
+	return event.GetComm()
+}
+
+// Get exec args from the given event.
+func GetExecArgsFromEvent(event ExecEvent) []string {
+	if args := event.GetArgs(); len(args) > 1 {
+		return args[1:]
+	}
+	return []string{}
+}
 
 func GetCommFromEvent(event any) string {
 	if event == nil {

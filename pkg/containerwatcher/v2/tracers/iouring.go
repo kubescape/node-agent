@@ -84,7 +84,7 @@ func (it *IoUringTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (it *IoUringTracer) GetName() string {
-	return "iouring_tracer"
+	return iouringTraceName
 }
 
 // GetEventType returns the event type this tracer produces

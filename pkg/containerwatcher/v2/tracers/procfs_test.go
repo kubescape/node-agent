@@ -35,7 +35,7 @@ func TestNewProcfsTracer(t *testing.T) {
 	)
 
 	assert.NotNil(t, tracer)
-	assert.Equal(t, "procfs_tracer", tracer.GetName())
+	assert.Equal(t, "trace_procfs", tracer.GetName())
 	assert.Equal(t, utils.ProcfsEventType, tracer.GetEventType())
 	assert.False(t, tracer.started)
 }

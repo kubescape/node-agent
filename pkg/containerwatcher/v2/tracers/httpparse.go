@@ -1,9 +1,8 @@
-package tracer
+package tracers
 
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -11,43 +10,90 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_http/types"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
-func CreateEventFromRequest(bpfEvent *http_snifferHttpevent) (*tracerhttptype.Event, error) {
+var writeSyscalls = map[string]bool{
+	"write":   true,
+	"writev":  true,
+	"sendto":  true,
+	"sendmsg": true,
+}
+
+var readSyscalls = map[string]bool{
+	"read":     true,
+	"readv":    true,
+	"recvfrom": true,
+	"recvmsg":  true,
+}
+
+var ConsistentHeaders = []string{
+	"Accept-Encoding",
+	"Accept-Language",
+	"Connection",
+	"Host",
+	"Upgrade-Insecure-Requests",
+}
+
+func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error) {
 
 	ip := make(net.IP, 4)
-	binary.LittleEndian.PutUint32(ip, bpfEvent.OtherIp)
 
-	request, err := ParseHttpRequest(FromCString(bpfEvent.Buf[:]))
+	request, err := ParseHttpRequest(FromCString(bpfEvent.GetBuf()))
 	if err != nil {
 		return nil, err
 	}
 
-	direction, err := tracerhttptype.GetPacketDirection(gadgets.FromCString(bpfEvent.Syscall[:]))
+	direction, err := GetPacketDirection(bpfEvent.GetSyscall())
 	if err != nil {
 		return nil, err
 	}
 
-	event := tracerhttptype.Event{
-		//Event: eventtypes.Event{
-		//	Type:      eventtypes.NORMAL,
-		//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-		//},
-		//WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-		Pid:       bpfEvent.Pid,
-		Uid:       bpfEvent.Uid,
-		Gid:       bpfEvent.Gid,
-		OtherPort: bpfEvent.OtherPort,
-		OtherIp:   ip.String(),
+	event := utils.StructEvent{
+		Timestamp: int64(bpfEvent.GetTimestamp()),
+		Pid:       bpfEvent.GetPID(),
+		Uid:       *bpfEvent.GetUid(),
+		Gid:       *bpfEvent.GetGid(),
 		Request:   request,
-		Internal:  tracerhttptype.IsInternal(ip.String()),
+		Internal:  IsInternal(ip.String()),
 		Direction: direction,
 	}
 
 	return &event, nil
+}
+
+func ExtractConsistentHeaders(headers http.Header) map[string][]string {
+	result := make(map[string][]string)
+	for _, header := range ConsistentHeaders {
+		if value, ok := headers[header]; ok {
+			switch typedValue := interface{}(value).(type) {
+			case []string:
+				result[header] = typedValue
+			case string:
+				result[header] = []string{typedValue}
+			default:
+				result[header] = []string{fmt.Sprint(typedValue)}
+			}
+		}
+	}
+	return result
+}
+
+func GetPacketDirection(syscall string) (consts.NetworkDirection, error) {
+	if readSyscalls[syscall] {
+		return consts.Inbound, nil
+	} else if writeSyscalls[syscall] {
+		return consts.Outbound, nil
+	} else {
+		return "", fmt.Errorf("unknown syscall %s", syscall)
+	}
+}
+
+func IsInternal(ip string) bool {
+	ipAddress := net.ParseIP(ip)
+	return ipAddress.IsPrivate()
 }
 
 func ParseHttpRequest(data []byte) (*http.Request, error) {
@@ -70,30 +116,14 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 	return req, nil
 }
 
-func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
+func ParseHttpResponse(data []byte) (*http.Request, *http.Response, error) {
+	var req *http.Request
 	resp, err := readResponse(data, req)
 	if err != nil {
 		return fallbackReadResponse(data, req)
 	}
 
-	return resp, nil
-}
-
-func ExtractConsistentHeaders(headers http.Header) map[string][]string {
-	result := make(map[string][]string)
-	for _, header := range tracerhttptype.ConsistentHeaders {
-		if value, ok := headers[header]; ok {
-			switch typedValue := interface{}(value).(type) {
-			case []string:
-				result[header] = typedValue
-			case string:
-				result[header] = []string{typedValue}
-			default:
-				result[header] = []string{fmt.Sprint(typedValue)}
-			}
-		}
-	}
-	return result
+	return req, resp, nil
 }
 
 func FromCString(in []byte) []byte {
@@ -105,8 +135,8 @@ func FromCString(in []byte) []byte {
 	return in
 }
 
-func GetUniqueIdentifier(event *http_snifferHttpevent) string {
-	return strconv.FormatUint(event.SocketInode, 10) + strconv.FormatUint(uint64(event.SockFd), 10)
+func GetUniqueIdentifier(event utils.HttpRawEvent) string {
+	return strconv.FormatUint(event.GetSocketInode(), 10) + strconv.FormatUint(uint64(event.GetSockFd()), 10)
 }
 
 func ToTime(t eventtypes.Time) time.Time {
@@ -148,18 +178,18 @@ func fallbackReadRequest(data []byte) (*http.Request, error) {
 	return req, nil
 }
 
-func fallbackReadResponse(data []byte, req *http.Request) (*http.Response, error) {
+func fallbackReadResponse(data []byte, req *http.Request) (*http.Request, *http.Response, error) {
 	cleanedData, err := cleanCorrupted(data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to clean response data: %w", err)
+		return nil, nil, fmt.Errorf("failed to clean response data: %w", err)
 	}
 
 	resp, err := readResponse(cleanedData, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response even after removing last line: %w", err)
+		return nil, nil, fmt.Errorf("failed to read response even after removing last line: %w", err)
 	}
 
-	return resp, nil
+	return req, resp, nil
 }
 
 func readResponse(data []byte, req *http.Request) (*http.Response, error) {

@@ -98,7 +98,7 @@ func (pt *ProcfsTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (pt *ProcfsTracer) GetName() string {
-	return "procfs_tracer"
+	return procfsTraceName
 }
 
 // GetEventType returns the event type this tracer produces

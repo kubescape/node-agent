@@ -12,6 +12,7 @@ func NewProcfsCreator() *ProcfsFailureSetter {
 	return &ProcfsFailureSetter{}
 }
 
+// TODO
 func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	//procfsEvent, ok := enrichedEvent.Event.(*events.ProcfsEvent)
 	//if !ok {

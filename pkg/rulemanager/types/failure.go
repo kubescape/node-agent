@@ -16,7 +16,7 @@ type GenericRuleFailure struct {
 	AlertType              apitypes.AlertType
 	AlertPlatform          apitypes.AlertSourcePlatform
 	RuntimeProcessDetails  apitypes.ProcessTree
-	TriggerEvent           utils.EverythingEvent
+	TriggerEvent           utils.EnrichEvent
 	RuleAlert              apitypes.RuleAlert
 	RuntimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails
 	RuleID                 string
@@ -33,7 +33,7 @@ type RuleFailure interface {
 	// Get Runtime Process Details
 	GetRuntimeProcessDetails() apitypes.ProcessTree
 	// Get Trigger Event
-	GetTriggerEvent() utils.EverythingEvent
+	GetTriggerEvent() utils.EnrichEvent
 	// Get Rule Description
 	GetRuleAlert() apitypes.RuleAlert
 	// Get K8s Runtime Details
@@ -56,7 +56,7 @@ type RuleFailure interface {
 	// Set Runtime Process Details
 	SetRuntimeProcessDetails(runtimeProcessDetails apitypes.ProcessTree)
 	// Set Trigger Event
-	SetTriggerEvent(triggerEvent utils.EverythingEvent)
+	SetTriggerEvent(triggerEvent utils.EnrichEvent)
 	// Set Rule Description
 	SetRuleAlert(ruleAlert apitypes.RuleAlert)
 	// Set K8s Runtime Details
@@ -79,7 +79,7 @@ func (rule *GenericRuleFailure) GetRuntimeProcessDetails() apitypes.ProcessTree 
 	return rule.RuntimeProcessDetails
 }
 
-func (rule *GenericRuleFailure) GetTriggerEvent() utils.EverythingEvent {
+func (rule *GenericRuleFailure) GetTriggerEvent() utils.EnrichEvent {
 	return rule.TriggerEvent
 }
 
@@ -127,7 +127,7 @@ func (rule *GenericRuleFailure) SetRuntimeProcessDetails(runtimeProcessDetails a
 	rule.RuntimeProcessDetails = runtimeProcessDetails
 }
 
-func (rule *GenericRuleFailure) SetTriggerEvent(triggerEvent utils.EverythingEvent) {
+func (rule *GenericRuleFailure) SetTriggerEvent(triggerEvent utils.EnrichEvent) {
 	rule.TriggerEvent = triggerEvent
 }
 

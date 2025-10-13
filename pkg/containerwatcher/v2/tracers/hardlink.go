@@ -85,7 +85,7 @@ func (ht *HardlinkTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (ht *HardlinkTracer) GetName() string {
-	return "hardlink_tracer"
+	return hardlinkTraceName
 }
 
 // GetEventType returns the event type this tracer produces

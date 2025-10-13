@@ -21,24 +21,26 @@ func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enri
 		return
 	}
 
+	pid := capEvent.GetPID()
+	comm := capEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = capEvent.GetPID()
+	baseRuntimeAlert.InfectedPID = pid
 	baseRuntimeAlert.Arguments = map[string]interface{}{
 		"syscall":    capEvent.GetSyscall(),
 		"capability": capEvent.GetCapability(),
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: capEvent.GetComm(),
+			Name: comm,
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm: capEvent.GetComm(),
+			Comm: comm,
 			Gid:  capEvent.GetGid(),
-			PID:  capEvent.GetPID(),
+			PID:  pid,
 			Uid:  capEvent.GetUid(),
 		},
 		ContainerID: capEvent.GetContainerID(),

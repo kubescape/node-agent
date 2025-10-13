@@ -12,9 +12,6 @@ import (
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_hardlink/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_symlink/types"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -100,35 +97,35 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event uti
 }
 
 // ReportSymlinkEvent reports a symlink creation event for a container
-func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event) {
-	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
-	//	if cpm.enricher != nil {
-	//		symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-	//		go cpm.enricher.DatasourceEvent(containerID, event, symlinkIdentifier)
-	//	}
-	//	return nil
-	//})
+func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event utils.EverythingEvent) {
+	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+		if cpm.enricher != nil {
+			symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.GetOldPath() + event.GetNewPath())
+			go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
+		}
+		return nil
+	})
 
-	//cpm.logEventError(err, "symlink", containerID)
+	cpm.logEventError(err, "symlink", containerID)
 }
 
 // ReportHardlinkEvent reports a hardlink creation event for a container
-func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event *tracerhardlinktype.Event) {
-	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
-	//	if cpm.enricher != nil {
-	//		hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-	//		go cpm.enricher.DatasourceEvent(containerID, event, hardlinkIdentifier)
-	//	}
-	//	return nil
-	//})
+func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event utils.EverythingEvent) {
+	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+		if cpm.enricher != nil {
+			hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.GetOldPath() + event.GetNewPath())
+			go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
+		}
+		return nil
+	})
 
-	//cpm.logEventError(err, "hardlink", containerID)
+	cpm.logEventError(err, "hardlink", containerID)
 }
 
 // ReportHTTPEvent reports an HTTP event for a container
-func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *tracerhttptype.Event) {
+func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event utils.HttpEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
-		if event.Response == nil {
+		if event.GetResponse() == nil {
 			return 0, nil
 		}
 

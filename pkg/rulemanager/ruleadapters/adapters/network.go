@@ -1,8 +1,11 @@
 package adapters
 
 import (
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type NetworkAdapter struct {
@@ -13,48 +16,53 @@ func NewNetworkAdapter() *NetworkAdapter {
 }
 
 func (c *NetworkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	//networkEvent, ok := enrichedEvent.Event.(*tracernetworktype.Event)
-	//if !ok {
-	//	return
-	//}
+	networkEvent, ok := enrichedEvent.Event.(utils.EverythingEvent)
+	if !ok || enrichedEvent.EventType != utils.NetworkEventType {
+		return
+	}
 
-	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	//baseRuntimeAlert.InfectedPID = networkEvent.Pid
-	//baseRuntimeAlert.Arguments = map[string]interface{}{
-	//	"ip":    networkEvent.DstEndpoint.Addr,
-	//	"port":  networkEvent.Port,
-	//	"proto": networkEvent.Proto,
-	//}
-	//baseRuntimeAlert.Identifiers = &common.Identifiers{
-	//	Process: &common.ProcessEntity{
-	//		Name: networkEvent.Comm,
-	//	},
-	//	Network: &common.NetworkEntity{
-	//		DstIP:    networkEvent.DstEndpoint.Addr,
-	//		DstPort:  int(networkEvent.Port),
-	//		Protocol: networkEvent.Proto,
-	//	},
-	//}
-	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	pid := networkEvent.GetPID()
+	comm := networkEvent.GetComm()
+	dstEndpoint := networkEvent.GetDstEndpoint()
+	port := networkEvent.GetPort()
+	proto := networkEvent.GetProto()
+	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	baseRuntimeAlert.InfectedPID = pid
+	baseRuntimeAlert.Arguments = map[string]interface{}{
+		"ip":    dstEndpoint.Addr,
+		"port":  port,
+		"proto": proto,
+	}
+	baseRuntimeAlert.Identifiers = &common.Identifiers{
+		Process: &common.ProcessEntity{
+			Name: comm,
+		},
+		Network: &common.NetworkEntity{
+			DstIP:    dstEndpoint.Addr,
+			DstPort:  int(port),
+			Protocol: proto,
+		},
+	}
+	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	//runtimeProcessDetails := apitypes.ProcessTree{
-	//	ProcessTree: apitypes.Process{
-	//		Comm: networkEvent.Comm,
-	//		Gid:  &networkEvent.Gid,
-	//		PID:  networkEvent.Pid,
-	//		Uid:  &networkEvent.Uid,
-	//	},
-	//	ContainerID: networkEvent.Runtime.ContainerID,
-	//}
-	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	runtimeProcessDetails := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			Comm: comm,
+			Gid:  networkEvent.GetGid(),
+			PID:  pid,
+			Uid:  networkEvent.GetUid(),
+		},
+		ContainerID: networkEvent.GetContainerID(),
+	}
+	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	//failure.SetTriggerEvent(networkEvent.Event)
+	failure.SetTriggerEvent(networkEvent)
 
-	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-	//	PodName:   networkEvent.GetPod(),
-	//	PodLabels: networkEvent.K8s.PodLabels,
-	//}
-	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+		PodName:   networkEvent.GetPod(),
+		PodLabels: networkEvent.GetPodLabels(),
+	}
+	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *NetworkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
