@@ -117,14 +117,14 @@ func (e *DatasourceEvent) GetDNSName() string {
 func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 	switch e.EventType {
 	case NetworkEventType:
-		addr, _ := e.Datasource.GetField("dst.addr_raw.v4").Uint32(e.Data)
-		kind, _ := e.Datasource.GetField("dst.k8s.kind").String(e.Data)
-		name, _ := e.Datasource.GetField("dst.k8s.name").String(e.Data)
-		namespace, _ := e.Datasource.GetField("dst.k8s.namespace").String(e.Data)
-		podLabels, _ := e.Datasource.GetField("dst.k8s.labels").String(e.Data)
-		version, _ := e.Datasource.GetField("dst.version").Uint8(e.Data)
-		port, _ := e.Datasource.GetField("dst.port").Uint16(e.Data)
-		proto, _ := e.Datasource.GetField("dst.proto_raw").Uint16(e.Data)
+		addr, _ := e.Datasource.GetField("endpoint.addr_raw.v4").Uint32(e.Data)
+		kind, _ := e.Datasource.GetField("endpoint.k8s.kind").String(e.Data)
+		name, _ := e.Datasource.GetField("endpoint.k8s.name").String(e.Data)
+		namespace, _ := e.Datasource.GetField("endpoint.k8s.namespace").String(e.Data)
+		podLabels, _ := e.Datasource.GetField("endpoint.k8s.labels").String(e.Data)
+		version, _ := e.Datasource.GetField("endpoint.version").Uint8(e.Data)
+		port, _ := e.Datasource.GetField("endpoint.port").Uint16(e.Data)
+		proto, _ := e.Datasource.GetField("endpoint.proto_raw").Uint16(e.Data)
 		return types.L4Endpoint{
 			L3Endpoint: types.L3Endpoint{
 				Addr:      rawIPv4ToString(addr),
@@ -150,7 +150,7 @@ func (e *DatasourceEvent) GetDstIP() string {
 func (e *DatasourceEvent) GetDstPort() uint16 {
 	switch e.EventType {
 	case NetworkEventType:
-		port, _ := e.Datasource.GetField("dst.port").Uint16(e.Data)
+		port, _ := e.Datasource.GetField("endpoint.port").Uint16(e.Data)
 		return port
 	default:
 		return 0
@@ -297,7 +297,7 @@ func (e *DatasourceEvent) GetPodLabels() map[string]string {
 func (e *DatasourceEvent) GetPort() uint16 {
 	switch e.EventType {
 	case NetworkEventType:
-		port, _ := e.Datasource.GetField("src.port").Uint16(e.Data)
+		port, _ := e.Datasource.GetField("endpoint.port").Uint16(e.Data) // FIXME: find the correct field
 		return port
 	default:
 		return 0
@@ -313,7 +313,7 @@ func (e *DatasourceEvent) GetProto() string {
 	switch e.EventType {
 	case NetworkEventType:
 		// TODO fix proto raw to string mapping
-		proto, _ := e.Datasource.GetField("dst.proto_raw").String(e.Data)
+		proto, _ := e.Datasource.GetField("endpoint.proto_raw").String(e.Data)
 		return proto
 	default:
 		return ""

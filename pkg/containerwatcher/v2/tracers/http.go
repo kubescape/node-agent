@@ -125,7 +125,7 @@ func (ht *HTTPTracer) eventOperator() operators.DataOperator {
 					igjson.WithPretty(true, "  "),
 				)
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					logger.L().Info("Matthias - http event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					logger.L().Debug("Matthias - http event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
 					ht.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.HTTPEventType})
 					return nil
 				}, opPriority)

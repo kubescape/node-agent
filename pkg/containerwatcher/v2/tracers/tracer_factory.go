@@ -209,6 +209,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.ociStore,
 		tf.createEventCallback(utils.NetworkEventType),
 		tf.thirdPartyEnricher,
+		tf.socketEnricher,
 	)
 	manager.RegisterTracer(networkTracer)
 
