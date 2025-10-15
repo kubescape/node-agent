@@ -129,8 +129,8 @@ int ig_trace_ssh(struct __sk_buff *skb)
 	// Step 7: Populate the event with collected data
 	event->timestamp_raw = bpf_ktime_get_boot_ns();
 	event->netns_id = skb->cb[0]; // Filled by the dispatcher
-	event->src.port = tcph.source;
-	event->dst.port = tcph.dest;
+	event->src.port = bpf_ntohs(tcph.source);
+	event->dst.port = bpf_ntohs(tcph.dest);
 	event->src.proto_raw = event->dst.proto_raw = IPPROTO_TCP;
 
 	// Reparse L3 header to fill source and destination IP addresses
