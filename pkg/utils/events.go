@@ -111,7 +111,6 @@ type OpenEvent interface {
 	EnrichEvent
 	GetFlags() []string
 	GetFlagsRaw() uint32
-	GetFullPath() string
 	GetPath() string
 	IsDir() bool
 }

@@ -210,10 +210,6 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 	}
 }
 
-func (e *DatasourceEvent) GetFullPath() string {
-	return e.GetPath()
-}
-
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
 	case ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:

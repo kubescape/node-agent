@@ -217,23 +217,6 @@ var CelFields = map[string]*celtypes.FieldType{
 			return int(x.Raw.GetFlagsRaw()), nil
 		}),
 	},
-	"fullPath": {
-		Type: celtypes.StringType,
-		IsSet: ref.FieldTester(func(target any) bool {
-			x := target.(*xcel.Object[EverythingEvent])
-			if x.Raw == nil || x.Raw.GetEventType() != OpenEventType {
-				return false
-			}
-			return true
-		}),
-		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[EverythingEvent])
-			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
-			}
-			return x.Raw.GetFullPath(), nil
-		}),
-	},
 	"name": {
 		Type: celtypes.StringType,
 		IsSet: ref.FieldTester(func(target any) bool {
@@ -317,6 +300,23 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, fmt.Errorf("celval: object is nil")
 			}
 			return x.Raw.GetOpcode(), nil
+		}),
+	},
+	"path": {
+		Type: celtypes.StringType,
+		IsSet: ref.FieldTester(func(target any) bool {
+			x := target.(*xcel.Object[EverythingEvent])
+			if x.Raw == nil || x.Raw.GetEventType() != OpenEventType {
+				return false
+			}
+			return true
+		}),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[EverythingEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetPath(), nil
 		}),
 	},
 	"pcomm": {

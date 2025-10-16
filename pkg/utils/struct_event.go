@@ -29,7 +29,6 @@ type StructEvent struct {
 	Extra                interface{}
 	Flags                []string
 	FlagsRaw             uint32
-	FullPath             string
 	Gid                  uint32
 	HostNetwork          bool
 	ID                   string
@@ -153,10 +152,6 @@ func (e StructEvent) GetFlags() []string {
 
 func (e StructEvent) GetFlagsRaw() uint32 {
 	return e.FlagsRaw
-}
-
-func (e StructEvent) GetFullPath() string {
-	return e.FullPath
 }
 
 func (e StructEvent) GetGid() *uint32 {
