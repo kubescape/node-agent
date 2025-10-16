@@ -93,16 +93,16 @@ func NewTracerFactory(
 // CreateAllTracers creates all configured tracers
 func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistrer) {
 	// Create procfs tracer (starts 5 seconds before other tracers)
-	//procfsTracer := NewProcfsTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.ProcfsEventType),
-	//	tf.createEventCallback(utils.ExitEventType),
-	//	tf.cfg,
-	//	tf.processTreeManager,
-	//)
-	//manager.RegisterTracer(procfsTracer)
+	procfsTracer := NewProcfsTracer(
+		tf.containerCollection,
+		tf.tracerCollection,
+		tf.containerSelector,
+		tf.createEventCallback(utils.ProcfsEventType),
+		tf.createEventCallback(utils.ExitEventType),
+		tf.cfg,
+		tf.processTreeManager,
+	)
+	manager.RegisterTracer(procfsTracer)
 
 	// Create syscall tracer (seccomp)
 	syscallTracer := NewSyscallTracer(
