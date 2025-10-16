@@ -465,7 +465,6 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 	case SyscallEventType:
 		return types.Time(time.Now().UnixNano())
 	default:
-		logger.L().Warning("GetTimestamp not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		timeStampRaw, _ := e.Datasource.GetField("timestamp_raw").Uint64(e.Data)
 		timeStamp := gadgets.WallTimeFromBootTime(timeStampRaw)
 		return timeStamp

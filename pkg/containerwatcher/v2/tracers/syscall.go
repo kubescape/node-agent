@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
@@ -104,7 +105,14 @@ func (st *SyscallTracer) eventOperator() operators.DataOperator {
 	return simple.New(string(utils.SyscallEventType),
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
+				jsonFormatter, _ := igjson.New(d,
+					// Show all fields
+					igjson.WithShowAll(true),
+					// Print json in a pretty format
+					igjson.WithPretty(true, "  "),
+				)
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					logger.L().Debug("Matthias - syscall event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
 					st.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.SyscallEventType})
 					return nil
 				}, opPriority)
