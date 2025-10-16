@@ -40,7 +40,7 @@ struct mntns_cache {
 // A map to store the cache per mntns_id.
 // key: mntns_id (u64), value: struct mntns_cache
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1024); 
     __type(key, u64);
     __type(value, struct mntns_cache);
