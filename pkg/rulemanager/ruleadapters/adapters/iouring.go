@@ -1,9 +1,12 @@
 package adapters
 
 import (
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	iouringsyscall "github.com/iceber/iouring-go/syscall"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type IoUringAdapter struct {
@@ -13,50 +16,52 @@ func NewIoUringAdapter() *IoUringAdapter {
 	return &IoUringAdapter{}
 }
 
-// TODO
 func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	//iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
-	//if !ok {
-	//	return
-	//}
+	iouringEvent, ok := enrichedEvent.Event.(utils.EverythingEvent)
+	if !ok {
+		return
+	}
 
-	//ok, name := GetOpcodeName(uint8(iouringEvent.Opcode))
-	//if !ok {
-	//	return
-	//}
+	opcode := iouringEvent.GetOpcode()
+	ok, name := GetOpcodeName(uint8(opcode))
+	if !ok {
+		return
+	}
 
-	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	//baseRuntimeAlert.InfectedPID = iouringEvent.Pid
-	//baseRuntimeAlert.Arguments = map[string]interface{}{
-	//	"opcode":    iouringEvent.Opcode,
-	//	"flags":     iouringEvent.Flags,
-	//	"operation": name,
-	//}
-	//baseRuntimeAlert.Identifiers = &common.Identifiers{
-	//	Process: &common.ProcessEntity{
-	//		Name: iouringEvent.Comm,
-	//	},
-	//}
-	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	pid := iouringEvent.GetPID()
+	comm := iouringEvent.GetComm()
+	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	baseRuntimeAlert.InfectedPID = pid
+	baseRuntimeAlert.Arguments = map[string]interface{}{
+		"opcode":    opcode,
+		"flags":     iouringEvent.GetFlags(),
+		"operation": name,
+	}
+	baseRuntimeAlert.Identifiers = &common.Identifiers{
+		Process: &common.ProcessEntity{
+			Name: comm,
+		},
+	}
+	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	//runtimeProcessDetails := apitypes.ProcessTree{
-	//	ProcessTree: apitypes.Process{
-	//		Comm: iouringEvent.Comm,
-	//		PID:  iouringEvent.Pid,
-	//		Uid:  &iouringEvent.Uid,
-	//		Gid:  &iouringEvent.Gid,
-	//	},
-	//	ContainerID: iouringEvent.Runtime.ContainerID,
-	//}
-	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	runtimeProcessDetails := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			Comm: comm,
+			PID:  pid,
+			Uid:  iouringEvent.GetUid(),
+			Gid:  iouringEvent.GetGid(),
+		},
+		ContainerID: iouringEvent.GetContainerID(),
+	}
+	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	//failure.SetTriggerEvent(iouringEvent.Event)
+	failure.SetTriggerEvent(iouringEvent)
 
-	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-	//	PodName:   iouringEvent.GetPod(),
-	//	PodLabels: iouringEvent.K8s.PodLabels,
-	//}
-	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+		PodName:   iouringEvent.GetPod(),
+		PodLabels: iouringEvent.GetPodLabels(),
+	}
+	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 var OpcodeMap = map[uint8]string{

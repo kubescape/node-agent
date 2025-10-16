@@ -4,7 +4,7 @@ BINARY_NAME=node-agent
 IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 GADGETS=advise_seccomp trace_capabilities trace_dns trace_exec trace_open
 VERSION=:v0.45.0
-KUBESCAPE_GADGETS=exit fork hardlink http ptrace randomx ssh symlink network #iouring
+KUBESCAPE_GADGETS=exit fork hardlink http iouring_new iouring_old network ptrace randomx ssh symlink
 TAG?=test
 # TAG?=v0.0.1
 

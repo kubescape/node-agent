@@ -1,4 +1,4 @@
-IMAGE?=iouring
+IMAGE?=iouring_new
 TAG?=latest
 
 build:

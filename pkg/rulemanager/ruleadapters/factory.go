@@ -38,6 +38,6 @@ func (f *EventRuleAdapterFactory) registerAllAdapters() {
 	f.RegisterAdapter(utils.SSHEventType, adapters.NewSSHAdapter())
 	f.RegisterAdapter(utils.HTTPEventType, adapters.NewHTTPAdapter())
 	f.RegisterAdapter(utils.PtraceEventType, adapters.NewPtraceAdapter())
-	//f.RegisterAdapter(utils.IoUringEventType, adapters.NewIoUringAdapter())
+	f.RegisterAdapter(utils.IoUringEventType, adapters.NewIoUringAdapter())
 	f.RegisterAdapter(utils.RandomXEventType, adapters.NewRandomXAdapter())
 }

@@ -243,13 +243,13 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	manager.RegisterTracer(ptraceTracer)
 
 	// Create io_uring tracer
-	//iouringTracer := NewIoUringTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.IoUringEventType),
-	//)
-	//manager.RegisterTracer(iouringTracer)
+	iouringTracer := NewIoUringTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.IoUringEventType),
+	)
+	manager.RegisterTracer(iouringTracer)
 
 	// Create top tracer
 	//topTracer := NewTopTracer(

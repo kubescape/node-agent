@@ -4,81 +4,95 @@ import (
 	"context"
 	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	traceriouring "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_iouring/tracer"
-	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_iouring/tracer/types"
+	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
+	kernel "github.com/kubescape/node-agent/pkg/validator/ebpf"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const iouringTraceName = "trace_iouring"
+const (
+	iouringTraceName = "trace_iouring"
+	SupportedMajor   = 6
+	SupportedMinor   = 3
+)
 
 var _ containerwatcher.TracerInterface = (*IoUringTracer)(nil)
 
-// IoUringTracer implements TracerInterface for io_uring events
+// IoUringTracer implements TracerInterface for events
 type IoUringTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *traceriouring.Tracer
+	eventCallback containerwatcher.ResultCallback
+	gadgetCtx     *gadgetcontext.GadgetContext
+	kubeManager   *kskubemanager.KubeManager
+	ociStore      *orasoci.ReadOnlyStore
+	runtime       runtime.Runtime
 }
 
-// NewIoUringTracer creates a new io_uring tracer
+// NewIoUringTracer creates a new tracer
 func NewIoUringTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
+	kubeManager *kskubemanager.KubeManager,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 ) *IoUringTracer {
 	return &IoUringTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
+		eventCallback: eventCallback,
+		kubeManager:   kubeManager,
+		ociStore:      ociStore,
+		runtime:       runtime,
 	}
 }
 
-// Start initializes and starts the io_uring tracer
-func (it *IoUringTracer) Start(_ context.Context) error {
-	if err := it.tracerCollection.AddTracer(iouringTraceName, it.containerSelector); err != nil {
-		return fmt.Errorf("adding io_uring tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	iouringMountnsmap, err := it.tracerCollection.TracerMountNsMap(iouringTraceName)
+// Start initializes and starts the tracer
+func (it *IoUringTracer) Start(ctx context.Context) error {
+	kernelVersion, _ := kernel.GetKernelVersion()
+	major, minor, _, err := kernel.ParseKernelVersion(kernelVersion)
 	if err != nil {
-		return fmt.Errorf("getting io_uring mountnsmap: %w", err)
+		return fmt.Errorf("parsing kernel version: %w", err)
 	}
-
-	tracerIouring, err := traceriouring.NewTracer(
-		&traceriouring.Config{MountnsMap: iouringMountnsmap},
-		//it.containerCollection,
-		it.iouringEventCallback,
+	var imageName string
+	if major >= SupportedMajor && minor >= SupportedMinor {
+		imageName = "ghcr.io/inspektor-gadget/gadget/iouring_new:latest"
+	} else {
+		imageName = "ghcr.io/inspektor-gadget/gadget/iouring_old:latest"
+	}
+	it.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		imageName,
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			it.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			it.eventOperator(),
+		),
+		gadgetcontext.WithName(iouringTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(it.ociStore),
 	)
-	if err != nil {
-		logger.L().Warning("Failed to create io_uring tracer", helpers.Error(err))
-		return nil
-	}
-
-	it.tracer = tracerIouring
+	go func() {
+		err := it.runtime.RunGadget(it.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", it.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the io_uring tracer
+// Stop gracefully stops the tracer
 func (it *IoUringTracer) Stop() error {
-	if it.tracer != nil {
-		it.tracer.Stop()
+	if it.gadgetCtx != nil {
+		it.gadgetCtx.Cancel()
 	}
-
-	if err := it.tracerCollection.RemoveTracer(iouringTraceName); err != nil {
-		return fmt.Errorf("removing io_uring tracer: %w", err)
-	}
-
 	return nil
 }
 
@@ -97,24 +111,37 @@ func (it *IoUringTracer) IsEnabled(cfg config.Config) bool {
 	return !cfg.DIouring && cfg.EnableRuntimeDetection
 }
 
-// iouringEventCallback handles io_uring events from the tracer
-func (it *IoUringTracer) iouringEventCallback(event *traceriouringtype.Event) {
-	//if event.Type == types.DEBUG {
-	//	return
-	//}
-	//
-	//if isDroppedEvent(event.Type, event.Message) {
-	//	logger.L().Warning("io_uring tracer got drop events - we may miss some realtime data",
-	//		helpers.Interface("event", event),
-	//		helpers.String("error", event.Message))
-	//	return
-	//}
+func (it *IoUringTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.IoUringEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				jsonFormatter, _ := igjson.New(d,
+					// Show all fields
+					igjson.WithShowAll(true),
+					// Print json in a pretty format
+					igjson.WithPretty(true, "  "),
+				)
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					logger.L().Debug("Matthias - iouring event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					it.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.IoUringEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
 
+// callback handles events from the tracer
+func (it *IoUringTracer) callback(event utils.EverythingEvent) {
 	if it.eventCallback != nil {
-		// Extract container ID and process ID from the IoUring event
-		//containerID := event.Runtime.ContainerID
-		//processID := event.Pid
-		//
-		//it.eventCallback(event, containerID, processID)
+		// Extract container ID and process ID from the iouring event
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
+
+		it.eventCallback(event, containerID, processID)
 	}
 }

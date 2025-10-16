@@ -12,21 +12,16 @@ Field descriptions live in `gadget.yaml`.
 
 ### Build
 ```bash
-cd pkg/ebpf/gadgets/iouring
-sudo ig image build -t iouring:latest .
+cd pkg/ebpf/gadgets/iouring_new
+sudo ig image build -t iouring_new:latest .
 ```
 
 ### Run
 ```bash
-sudo ig run iouring:latest --verify-image=false
+sudo ig run iouring_new:latest --verify-image=false
 ```
 
 ### Development
-- New kernel: `new_kernel/program.bpf.c`
-- Old kernel: `old_kernel/program.bpf.c`
+- eBPF program: `program.bpf.c`
 - Event schema: `program.h`
-- New kernel: `new_kernel/program.h`
-- Old kernel: `old_kernel/program.h`
-- Kernel version helper: `kernel_version.h`
 - Metadata and columns: `gadget.yaml`
-
