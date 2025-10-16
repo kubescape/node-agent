@@ -70,7 +70,10 @@ func (dt *DNSTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(dt.ociStore),
 	)
 	go func() {
-		err := dt.runtime.RunGadget(dt.gadgetCtx, nil, nil)
+		params := map[string]string{
+			"operator.oci.ebpf.paths": "true", // CWD paths in events
+		}
+		err := dt.runtime.RunGadget(dt.gadgetCtx, nil, params)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", dt.gadgetCtx.Name()), helpers.Error(err))
 		}
