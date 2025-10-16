@@ -129,7 +129,7 @@ func (nt *NetworkTracer) eventOperator() operators.DataOperator {
 					igjson.WithPretty(true, "  "),
 				)
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					logger.L().Info("Matthias - network event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					logger.L().Debug("Matthias - network event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
 					nt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.NetworkEventType})
 					return nil
 				}, opPriority)

@@ -13,8 +13,10 @@ import (
 type HTTPDataType int
 
 const (
-	Request  HTTPDataType = 2
-	Response HTTPDataType = 3
+	HostPktType                  = "HOST"
+	OutgoingPktType              = "OUTGOING"
+	Request         HTTPDataType = 2
+	Response        HTTPDataType = 3
 )
 
 type K8sEvent interface {
@@ -109,6 +111,7 @@ type OpenEvent interface {
 	EnrichEvent
 	GetFlags() []string
 	GetFlagsRaw() uint32
+	GetFullPath() string
 	GetPath() string
 	IsDir() bool
 }

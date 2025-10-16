@@ -155,6 +155,10 @@ func (e StructEvent) GetFlagsRaw() uint32 {
 	return e.FlagsRaw
 }
 
+func (e StructEvent) GetFullPath() string {
+	return e.FullPath
+}
+
 func (e StructEvent) GetGid() *uint32 {
 	return &e.Gid
 }

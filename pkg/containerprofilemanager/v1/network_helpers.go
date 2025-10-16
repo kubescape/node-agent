@@ -20,8 +20,6 @@ var DefaultLabelsToIgnore = map[string]struct{}{
 const (
 	InternalTrafficType = "internal"
 	ExternalTrafficType = "external"
-	HostPktType         = "HOST"
-	OutgoingPktType     = "OUTGOING"
 )
 
 const (

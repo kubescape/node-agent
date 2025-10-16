@@ -604,8 +604,8 @@ func TestEndpointKindConstants(t *testing.T) {
 func TestTrafficTypeConstants(t *testing.T) {
 	assert.Equal(t, "internal", InternalTrafficType)
 	assert.Equal(t, "external", ExternalTrafficType)
-	assert.Equal(t, "HOST", HostPktType)
-	assert.Equal(t, "OUTGOING", OutgoingPktType)
+	assert.Equal(t, "HOST", utils.HostPktType)
+	assert.Equal(t, "OUTGOING", utils.OutgoingPktType)
 }
 
 func TestDefaultLabelsToIgnore(t *testing.T) {

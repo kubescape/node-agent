@@ -36,7 +36,6 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	baseRuntimeAlert.Arguments = map[string]interface{}{
-		//"retval": execEvent.GetRetval(), // TODO this is missing in execEvent?
 		"exec": execPath,
 		"args": execEvent.GetArgs(),
 	}

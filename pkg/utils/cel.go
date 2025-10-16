@@ -221,7 +221,7 @@ var CelFields = map[string]*celtypes.FieldType{
 		Type: celtypes.StringType,
 		IsSet: ref.FieldTester(func(target any) bool {
 			x := target.(*xcel.Object[EverythingEvent])
-			if x.Raw == nil || x.Raw.GetEventType() != ExecveEventType {
+			if x.Raw == nil || x.Raw.GetEventType() != OpenEventType {
 				return false
 			}
 			return true
@@ -231,7 +231,7 @@ var CelFields = map[string]*celtypes.FieldType{
 			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}
-			return x.Raw.GetPath(), nil // FIXME check if it's ok
+			return x.Raw.GetFullPath(), nil
 		}),
 	},
 	"name": {

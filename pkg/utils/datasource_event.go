@@ -143,8 +143,18 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 }
 
 func (e *DatasourceEvent) GetDstIP() string {
-	//TODO implement me for SSH event
-	panic("implement me")
+	switch e.EventType {
+	case SSHEventType:
+		version, _ := e.Datasource.GetField("dst.version").Uint8(e.Data)
+		if version == 4 {
+			daddr, _ := e.Datasource.GetField("dst.addr_raw.v4").Uint32(e.Data)
+			return rawIPv4ToString(daddr)
+		} else if version == 6 {
+			daddr, _ := e.Datasource.GetField("dst.addr_raw.v6").Bytes(e.Data)
+			return rawIPv6ToString(daddr)
+		}
+	}
+	return ""
 }
 
 func (e *DatasourceEvent) GetDstPort() uint16 {
@@ -200,6 +210,10 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 	}
 }
 
+func (e *DatasourceEvent) GetFullPath() string {
+	return e.GetPath()
+}
+
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
 	case ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
@@ -225,8 +239,13 @@ func (e *DatasourceEvent) GetNamespace() string {
 }
 
 func (e *DatasourceEvent) GetNewPath() string {
-	//TODO implement me for hardlink and symlink events
-	panic("implement me")
+	switch e.EventType {
+	case HardlinkEventType, SymlinkEventType:
+		newPath, _ := e.Datasource.GetField("newpath").String(e.Data)
+		return newPath
+	default:
+		return ""
+	}
 }
 
 func (e *DatasourceEvent) GetNumAnswers() int {
@@ -240,13 +259,23 @@ func (e *DatasourceEvent) GetNumAnswers() int {
 }
 
 func (e *DatasourceEvent) GetOldPath() string {
-	//TODO implement me for hardlink and symlink events
-	panic("implement me")
+	switch e.EventType {
+	case HardlinkEventType, SymlinkEventType:
+		oldPath, _ := e.Datasource.GetField("oldpath").String(e.Data)
+		return oldPath
+	default:
+		return ""
+	}
 }
 
 func (e *DatasourceEvent) GetOpcode() int {
-	//TODO implement me for IOUring event
-	panic("implement me")
+	switch e.EventType {
+	case IoUringEventType:
+		opcode, _ := e.Datasource.GetField("opcode").Int32(e.Data)
+		return int(opcode)
+	default:
+		return 0
+	}
 }
 
 func (e *DatasourceEvent) GetPath() string {
@@ -270,8 +299,11 @@ func (e *DatasourceEvent) GetPID() uint32 {
 }
 
 func (e *DatasourceEvent) GetPktType() string {
-	//pktType, _ := e.Datasource.GetField("type").String(e.Data)
-	return "OUTGOING" // FIXME: this is not present in the trace_tcp event
+	egress, _ := e.Datasource.GetField("egress").Uint8(e.Data)
+	if egress == 1 {
+		return OutgoingPktType
+	}
+	return HostPktType
 }
 
 func (e *DatasourceEvent) GetPod() string {
@@ -354,13 +386,28 @@ func (e *DatasourceEvent) GetSockFd() uint32 {
 }
 
 func (e *DatasourceEvent) GetSrcIP() string {
-	//TODO implement me SSH event
-	panic("implement me")
+	switch e.EventType {
+	case SSHEventType:
+		version, _ := e.Datasource.GetField("src.version").Uint8(e.Data)
+		if version == 4 {
+			addr, _ := e.Datasource.GetField("src.addr_raw.v4").Uint32(e.Data)
+			return rawIPv4ToString(addr)
+		} else if version == 6 {
+			addr, _ := e.Datasource.GetField("src.addr_raw.v6").Bytes(e.Data)
+			return rawIPv6ToString(addr)
+		}
+	}
+	return ""
 }
 
 func (e *DatasourceEvent) GetSrcPort() uint16 {
-	//TODO implement me SSH event
-	panic("implement me")
+	switch e.EventType {
+	case SSHEventType:
+		port, _ := e.Datasource.GetField("src.port").Uint16(e.Data)
+		return port
+	default:
+		return 0
+	}
 }
 
 func (e *DatasourceEvent) GetSyscall() string {

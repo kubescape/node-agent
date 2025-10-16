@@ -294,13 +294,13 @@ func (cpm *ContainerProfileManager) ReportSyscalls(containerID string, syscalls 
 func (cpm *ContainerProfileManager) isValidNetworkEvent(event utils.EverythingEvent) bool {
 	pktType := event.GetPktType()
 	// Unknown type, shouldn't happen
-	if pktType != HostPktType && pktType != OutgoingPktType {
+	if pktType != utils.HostPktType && pktType != utils.OutgoingPktType {
 		logger.L().Debug("pktType is not HOST or OUTGOING", helpers.Interface("event", event))
 		return false
 	}
 
 	// Ignore localhost
-	if pktType == HostPktType && event.GetPodHostIP() == event.GetDstEndpoint().Addr {
+	if pktType == utils.HostPktType && event.GetPodHostIP() == event.GetDstEndpoint().Addr {
 		return false
 	}
 
