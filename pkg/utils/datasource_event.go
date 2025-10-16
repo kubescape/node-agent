@@ -35,6 +35,7 @@ func (e *DatasourceEvent) GetAddresses() []string {
 		args, _ := e.Datasource.GetField("addresses").String(e.Data)
 		return strings.Split(args, ",")
 	default:
+		logger.L().Warning("GetAddresses not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
 }
@@ -45,6 +46,7 @@ func (e *DatasourceEvent) GetArgs() []string {
 		args, _ := e.Datasource.GetField("args").String(e.Data)
 		return strings.Split(args, " ")
 	default:
+		logger.L().Warning("GetArgs not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
 }
@@ -55,6 +57,7 @@ func (e *DatasourceEvent) GetBuf() []byte {
 		buf, _ := e.Datasource.GetField("buf").Bytes(e.Data)
 		return buf
 	default:
+		logger.L().Warning("GetBuf not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
 }
@@ -65,6 +68,7 @@ func (e *DatasourceEvent) GetCapability() string {
 		capability, _ := e.Datasource.GetField("cap").String(e.Data)
 		return capability
 	default:
+		logger.L().Warning("GetCapability not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -100,6 +104,7 @@ func (e *DatasourceEvent) GetCwd() string {
 		cwd, _ := e.Datasource.GetField("cwd").String(e.Data)
 		return cwd
 	default:
+		logger.L().Warning("GetCwd not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -110,6 +115,7 @@ func (e *DatasourceEvent) GetDNSName() string {
 		dnsName, _ := e.Datasource.GetField("name").String(e.Data)
 		return dnsName
 	default:
+		logger.L().Warning("GetDNSName not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -138,6 +144,7 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 			Proto: proto,
 		}
 	default:
+		logger.L().Warning("GetDstEndpoint not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return types.L4Endpoint{}
 	}
 }
@@ -163,6 +170,7 @@ func (e *DatasourceEvent) GetDstPort() uint16 {
 		port, _ := e.Datasource.GetField("endpoint.port").Uint16(e.Data)
 		return port
 	default:
+		logger.L().Warning("GetDstPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -182,6 +190,7 @@ func (e *DatasourceEvent) GetExePath() string {
 		exepath, _ := e.Datasource.GetField("exepath").String(e.Data)
 		return exepath
 	default:
+		logger.L().Warning("GetExePath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -196,6 +205,7 @@ func (e *DatasourceEvent) GetFlags() []string {
 		flags, _ := e.Datasource.GetField("flags_raw").Int32(e.Data)
 		return decodeFlags(flags)
 	default:
+		logger.L().Warning("GetFlags not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
 }
@@ -206,6 +216,7 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 		flags, _ := e.Datasource.GetField("flags_raw").Int32(e.Data)
 		return uint32(flags)
 	default:
+		logger.L().Warning("GetFlagsRaw not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -213,10 +224,16 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
 	case ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
-		gid, _ := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
+		gid, err := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
+		if err != nil {
+			return nil
+		}
 		return &gid
 	case OpenEventType:
-		gid, _ := e.Datasource.GetField("proc.gid").Uint32(e.Data)
+		gid, err := e.Datasource.GetField("proc.gid").Uint32(e.Data)
+		if err != nil {
+			return nil
+		}
 		return &gid
 	default:
 		logger.L().Warning("GetGid not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -240,6 +257,7 @@ func (e *DatasourceEvent) GetNewPath() string {
 		newPath, _ := e.Datasource.GetField("newpath").String(e.Data)
 		return newPath
 	default:
+		logger.L().Warning("GetNewPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -250,6 +268,7 @@ func (e *DatasourceEvent) GetNumAnswers() int {
 		numAnswers, _ := e.Datasource.GetField("num_answers").Int32(e.Data)
 		return int(numAnswers)
 	default:
+		logger.L().Warning("GetNumAnswers not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -260,6 +279,7 @@ func (e *DatasourceEvent) GetOldPath() string {
 		oldPath, _ := e.Datasource.GetField("oldpath").String(e.Data)
 		return oldPath
 	default:
+		logger.L().Warning("GetOldPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -270,6 +290,7 @@ func (e *DatasourceEvent) GetOpcode() int {
 		opcode, _ := e.Datasource.GetField("opcode").Int32(e.Data)
 		return int(opcode)
 	default:
+		logger.L().Warning("GetOpcode not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -280,6 +301,7 @@ func (e *DatasourceEvent) GetPath() string {
 		path, _ := e.Datasource.GetField("fname").String(e.Data)
 		return path
 	default:
+		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -313,6 +335,7 @@ func (e *DatasourceEvent) GetPodHostIP() string {
 		hostIP, _ := e.Datasource.GetField("k8s.hostIP").String(e.Data)
 		return hostIP
 	default:
+		logger.L().Warning("GetPodHostIP not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -334,6 +357,7 @@ func (e *DatasourceEvent) GetProto() string {
 		proto, _ := e.Datasource.GetField("endpoint.proto_raw").String(e.Data)
 		return proto
 	default:
+		logger.L().Warning("GetProto not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -344,6 +368,7 @@ func (e *DatasourceEvent) GetPupperLayer() bool {
 		pupperLayer, _ := e.Datasource.GetField("pupper_layer").Bool(e.Data)
 		return pupperLayer
 	default:
+		logger.L().Warning("GetPupperLayer not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return false
 	}
 }
@@ -357,6 +382,7 @@ func (e *DatasourceEvent) GetQr() DNSPktType {
 		}
 		return DNSPktTypeQuery
 	default:
+		logger.L().Warning("GetQr not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -367,6 +393,7 @@ func (e *DatasourceEvent) GetSocketInode() uint64 {
 		socketInode, _ := e.Datasource.GetField("socket_inode").Uint64(e.Data)
 		return socketInode
 	default:
+		logger.L().Warning("GetSocketInode not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -377,6 +404,7 @@ func (e *DatasourceEvent) GetSockFd() uint32 {
 		sockFd, _ := e.Datasource.GetField("sock_fd").Uint32(e.Data)
 		return sockFd
 	default:
+		logger.L().Warning("GetSockFd not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -402,6 +430,7 @@ func (e *DatasourceEvent) GetSrcPort() uint16 {
 		port, _ := e.Datasource.GetField("src.port").Uint16(e.Data)
 		return port
 	default:
+		logger.L().Warning("GetSrcPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -415,6 +444,7 @@ func (e *DatasourceEvent) GetSyscall() string {
 		syscall, _ := e.Datasource.GetField("syscall").Bytes(e.Data)
 		return gadgets.FromCString(syscall)
 	default:
+		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -425,6 +455,7 @@ func (e *DatasourceEvent) GetSyscalls() []string {
 		syscallsBuffer, _ := e.Datasource.GetField("syscalls").Bytes(e.Data)
 		return decodeSyscalls(syscallsBuffer)
 	default:
+		logger.L().Warning("GetSyscalls not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
 }
@@ -434,6 +465,7 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 	case SyscallEventType:
 		return types.Time(time.Now().UnixNano())
 	default:
+		logger.L().Warning("GetTimestamp not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		timeStampRaw, _ := e.Datasource.GetField("timestamp_raw").Uint64(e.Data)
 		timeStamp := gadgets.WallTimeFromBootTime(timeStampRaw)
 		return timeStamp
@@ -446,6 +478,7 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 		t, _ := e.Datasource.GetField("type").Uint8(e.Data)
 		return HTTPDataType(t)
 	default:
+		logger.L().Warning("GetType not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -453,10 +486,16 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 func (e *DatasourceEvent) GetUid() *uint32 {
 	switch e.EventType {
 	case ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
-		uid, _ := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
+		uid, err := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
+		if err != nil {
+			return nil
+		}
 		return &uid
 	case OpenEventType:
-		uid, _ := e.Datasource.GetField("proc.uid").Uint32(e.Data)
+		uid, err := e.Datasource.GetField("proc.uid").Uint32(e.Data)
+		if err != nil {
+			return nil
+		}
 		return &uid
 	default:
 		logger.L().Warning("GetUid not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -470,6 +509,7 @@ func (e *DatasourceEvent) GetUpperLayer() bool {
 		upperLayer, _ := e.Datasource.GetField("upper_layer").Bool(e.Data)
 		return upperLayer
 	default:
+		logger.L().Warning("GetUpperLayer not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return false
 	}
 }
@@ -481,6 +521,7 @@ func (e *DatasourceEvent) IsDir() bool {
 		fileMode := os.FileMode(raw)
 		return (fileMode & os.ModeType) == os.ModeDir // FIXME not sure if this is correct
 	default:
+		logger.L().Warning("IsDir not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return false
 	}
 }
