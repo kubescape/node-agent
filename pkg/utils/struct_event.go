@@ -46,7 +46,6 @@ type StructEvent struct {
 	Pod                  string
 	PodHostIP            string
 	PodLabels            map[string]string
-	Port                 uint16
 	Ppid                 uint32
 	Proto                string
 	PtraceRequest        int
@@ -214,10 +213,6 @@ func (e StructEvent) GetPodHostIP() string {
 
 func (e StructEvent) GetPodLabels() map[string]string {
 	return e.PodLabels
-}
-
-func (e StructEvent) GetPort() uint16 {
-	return e.Port
 }
 
 func (e StructEvent) GetPpid() uint32 {

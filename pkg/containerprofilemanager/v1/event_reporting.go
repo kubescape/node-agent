@@ -238,7 +238,7 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 
 		dstEndpoint := event.GetDstEndpoint()
 		networkEvent := NetworkEvent{
-			Port:     event.GetPort(),
+			Port:     event.GetDstPort(),
 			Protocol: event.GetProto(),
 			PktType:  event.GetPktType(),
 			Destination: Destination{

@@ -102,7 +102,6 @@ type NetworkEvent interface {
 	GetDstPort() uint16
 	GetPktType() string
 	GetPodHostIP() string
-	GetPort() uint16
 	GetProto() string
 }
 

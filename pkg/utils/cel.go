@@ -404,23 +404,6 @@ var CelFields = map[string]*celtypes.FieldType{
 			return x.Raw.GetPpid(), nil
 		}),
 	},
-	"port": {
-		Type: celtypes.IntType,
-		IsSet: ref.FieldTester(func(target any) bool {
-			x := target.(*xcel.Object[EverythingEvent])
-			if x.Raw == nil || x.Raw.GetEventType() != NetworkEventType {
-				return false
-			}
-			return true
-		}),
-		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[EverythingEvent])
-			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
-			}
-			return int(x.Raw.GetPort()), nil
-		}),
-	},
 	"proto": {
 		Type: celtypes.StringType,
 		IsSet: ref.FieldTester(func(target any) bool {

@@ -385,7 +385,7 @@ func (ns *NetworkStream) buildNetworkEvent(event utils.EverythingEvent, processT
 		Timestamp: time.Unix(0, int64(event.GetTimestamp())),
 		IPAddress: dstEndpoint.Addr,
 		DNSName:   domain,
-		Port:      int32(event.GetPort()),
+		Port:      int32(event.GetDstPort()),
 		Protocol:  apitypes.NetworkStreamEventProtocol(event.GetProto()),
 	}
 
@@ -479,7 +479,7 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream)
 }
 
 func getNetworkEndpointIdentifier(event utils.EverythingEvent) string {
-	return fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetPort(), event.GetProto())
+	return fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetDstPort(), event.GetProto())
 }
 
 func isEmptyNetworkStream(networkStream *apitypes.NetworkStream) bool {

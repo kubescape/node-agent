@@ -24,7 +24,7 @@ func (c *NetworkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	pid := networkEvent.GetPID()
 	comm := networkEvent.GetComm()
 	dstEndpoint := networkEvent.GetDstEndpoint()
-	port := networkEvent.GetPort()
+	port := networkEvent.GetDstPort()
 	proto := networkEvent.GetProto()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid

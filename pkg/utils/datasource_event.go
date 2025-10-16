@@ -294,16 +294,6 @@ func (e *DatasourceEvent) GetPodLabels() map[string]string {
 	return parseStringToMap(podLabels)
 }
 
-func (e *DatasourceEvent) GetPort() uint16 {
-	switch e.EventType {
-	case NetworkEventType:
-		port, _ := e.Datasource.GetField("endpoint.port").Uint16(e.Data) // FIXME: find the correct field
-		return port
-	default:
-		return 0
-	}
-}
-
 func (e *DatasourceEvent) GetPpid() uint32 {
 	ppid, _ := e.Datasource.GetField("proc.parent.pid").Uint32(e.Data)
 	return ppid
