@@ -17,7 +17,7 @@ func NewSSHAdapter() *SSHAdapter {
 
 func (c *SSHAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	sshEvent, ok := enrichedEvent.Event.(utils.SshEvent)
-	if !ok || enrichedEvent.EventType != utils.SSHEventType {
+	if !ok {
 		return
 	}
 

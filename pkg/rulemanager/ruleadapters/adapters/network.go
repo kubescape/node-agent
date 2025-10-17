@@ -17,7 +17,7 @@ func NewNetworkAdapter() *NetworkAdapter {
 
 func (c *NetworkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	networkEvent, ok := enrichedEvent.Event.(utils.NetworkEvent)
-	if !ok || enrichedEvent.EventType != utils.NetworkEventType {
+	if !ok {
 		return
 	}
 

@@ -203,7 +203,7 @@ func (ns *NetworkStream) Start() {
 }
 
 func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
-	eventType := enrichedEvent.EventType
+	eventType := enrichedEvent.Event.GetEventType()
 	switch eventType {
 	case utils.NetworkEventType:
 		networkEvent, ok := enrichedEvent.Event.(utils.NetworkEvent)

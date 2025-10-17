@@ -183,7 +183,8 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	}
 
 	// Get handlers for this event type
-	handlers, exists := ehf.handlers[enrichedEvent.EventType]
+	eventType := enrichedEvent.Event.GetEventType()
+	handlers, exists := ehf.handlers[eventType]
 	if !exists {
 		return
 	}
@@ -193,7 +194,7 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
 			enrichedHandler.ReportEnrichedEvent(enrichedEvent)
 		} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
-			handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+			handler.ReportEvent(eventType, enrichedEvent.Event)
 		}
 	}
 
@@ -254,12 +255,13 @@ func (ehf *EventHandlerFactory) registerHandlers(
 // reportEventToThirdPartyTracers reports events to third-party tracers
 func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(enrichedEvent *events.EnrichedEvent) {
 	if ehf.thirdPartyEventReceivers != nil {
-		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(enrichedEvent.EventType); ok {
+		eventType := enrichedEvent.Event.GetEventType()
+		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(eventType); ok {
 			for receiver := range eventReceivers.Iter() {
 				if enrichedHandler, ok := receiver.(containerwatcher.EnrichedEventReceiver); ok {
 					enrichedHandler.ReportEnrichedEvent(enrichedEvent)
 				} else if handler, ok := receiver.(containerwatcher.EventReceiver); ok {
-					handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+					handler.ReportEvent(eventType, enrichedEvent.Event)
 				}
 			}
 		}

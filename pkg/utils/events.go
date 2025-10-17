@@ -20,6 +20,7 @@ const (
 )
 
 type K8sEvent interface {
+	GetEventType() EventType
 	GetNamespace() string
 	GetPod() string
 	GetTimestamp() types.Time
@@ -33,7 +34,6 @@ type EnrichEvent interface {
 	GetContainerImage() string
 	GetContainerImageDigest() string
 	GetError() int64
-	GetEventType() EventType
 	GetExtra() interface{}
 	GetGid() *uint32
 	GetHostNetwork() bool
@@ -170,12 +170,12 @@ const (
 
 // Get the path of the file on the node.
 func GetHostFilePathFromEvent(event EnrichEvent, containerPid uint32) (string, error) {
-	switch v := event.(type) {
-	case ExecEvent:
-		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, GetExecPathFromEvent(v)))
+	switch event.GetEventType() {
+	case ExecveEventType:
+		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, GetExecPathFromEvent(event.(ExecEvent))))
 		return realPath, nil
-	case OpenEvent:
-		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, v.GetPath()))
+	case OpenEventType:
+		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, event.(OpenEvent).GetPath()))
 		return realPath, nil
 	default:
 		return "", fmt.Errorf("event is not of type exec or open")

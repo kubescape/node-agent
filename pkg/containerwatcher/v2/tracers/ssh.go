@@ -127,7 +127,7 @@ func (st *SSHTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (st *SSHTracer) callback(event utils.EnrichEvent) {
+func (st *SSHTracer) callback(event utils.SshEvent) {
 	if st.eventCallback != nil {
 		// Extract container ID and process ID from the SSH event
 		containerID := event.GetContainerID()

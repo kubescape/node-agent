@@ -19,7 +19,7 @@ func NewHardlinkAdapter() *HardlinkAdapter {
 
 func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	hardlinkEvent, ok := enrichedEvent.Event.(utils.LinkEvent)
-	if !ok || enrichedEvent.EventType != utils.HardlinkEventType {
+	if !ok {
 		return
 	}
 

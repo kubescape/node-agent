@@ -68,11 +68,11 @@ spec:
       id: "R0003"
       description: "Detects unexpected system calls that are not whitelisted by application profile"
       expressions:
-        message: "'Unexpected system call detected: ' + event.syscallName + ' with PID ' + string(event.pid)"
-        unique_id: "event.syscallName"
+        message: "'Unexpected system call detected: todo with PID ' + string(event.pid)"
+        unique_id: "'todo'"
         rule_expression:
           - event_type: "syscall"
-            expression: "!ap.was_syscall_used(event.containerId, event.syscallName)"
+            expression: "!ap.were_syscalls_used(event.containerId, event.syscalls)"
       profile_dependency: 0
       severity: 1
       support_policy: false
@@ -186,10 +186,10 @@ spec:
       description: "Detecting eBPF program load."
       expressions:
         message: "'bpf system call executed in ' + event.containerName"
-        unique_id: "event.comm + '_' + event.syscallName"
+        unique_id: "event.comm + '_bpf'"
         rule_expression:
           - event_type: "syscall"
-            expression: "event.syscallName == 'bpf' && !ap.was_syscall_used(event.containerId, event.syscallName)"
+            expression: "'bpf' in event.syscalls && !ap.was_syscall_used(event.containerId, 'bpf')"
       profile_dependency: 1
       severity: 5
       support_policy: false
@@ -279,13 +279,13 @@ spec:
       id: "R1002"
       description: "Detecting Kernel Module Load."
       expressions:
-        message: "'Kernel module load syscall (' + event.syscallName + ') was called'"
-        unique_id: "event.syscallName"
+        message: "'Kernel module load syscall (init_module) was called'"
+        unique_id: "'init_module'"
         rule_expression:
           - event_type: "syscall"
             expression: >
-              event.syscallName == 'init_module' ||
-              event.syscallName == 'finit_module'
+              'init_module' in event.syscalls ||
+              'finit_module' in event.syscalls
       profile_dependency: 2
       severity: 10
       support_policy: false
@@ -352,11 +352,11 @@ spec:
       id: "R1006"
       description: "Detecting Unshare System Call usage, which can be used to escape container."
       expressions:
-        message: "'Unshare system call detected: ' + event.syscallName + ' with PID ' + string(event.pid)"
-        unique_id: "event.syscallName"
+        message: "'Unshare system call detected: unshare with PID ' + string(event.pid)"
+        unique_id: "'unshare'"
         rule_expression:
           - event_type: "syscall"
-            expression: "event.syscallName == 'unshare' && !ap.was_syscall_used(event.containerId, event.syscallName)"
+            expression: "'unshare' in event.syscalls && !ap.was_syscall_used(event.containerId, 'unshare')"
       profile_dependency: 2
       severity: 5
       support_policy: false

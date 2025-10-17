@@ -30,7 +30,8 @@ func TestResolveIPAddress(t *testing.T) {
 			name:   "ip found",
 			ipAddr: "67.225.146.248",
 			dnsEvent: &utils.StructEvent{
-				DNSName: "test.com",
+				EventType: utils.DnsEventType,
+				DNSName:   "test.com",
 				Addresses: []string{
 					"67.225.146.248",
 				},
@@ -42,7 +43,8 @@ func TestResolveIPAddress(t *testing.T) {
 			name:   "ip not found",
 			ipAddr: "67.225.146.248",
 			dnsEvent: &utils.StructEvent{
-				DNSName: "test.com",
+				EventType: utils.DnsEventType,
+				DNSName:   "test.com",
 				Addresses: []string{
 					"54.23.332.4",
 				},
@@ -54,7 +56,8 @@ func TestResolveIPAddress(t *testing.T) {
 			name:   "no address",
 			ipAddr: "67.225.146.248",
 			dnsEvent: &utils.StructEvent{
-				DNSName: "test.com",
+				EventType: utils.DnsEventType,
+				DNSName:   "test.com",
 			},
 			want:   "",
 			wantOk: false,
@@ -88,7 +91,8 @@ func TestResolveIPAddressFallback(t *testing.T) {
 		{
 			name: "dns resolution fallback",
 			dnsEvent: &utils.StructEvent{
-				DNSName: "example.com", // Using example.com as it's guaranteed to exist
+				EventType: utils.DnsEventType,
+				DNSName:   "example.com", // Using example.com as it's guaranteed to exist
 			},
 			want:   "example.com",
 			wantOk: true,
@@ -124,7 +128,8 @@ func TestCacheFallbackBehavior(t *testing.T) {
 
 	// Test successful DNS lookup caching
 	event := &utils.StructEvent{
-		DNSName: "test.com",
+		EventType: utils.DnsEventType,
+		DNSName:   "test.com",
 		Addresses: []string{
 			"1.2.3.4",
 		},
@@ -147,7 +152,8 @@ func TestCacheFallbackBehavior(t *testing.T) {
 
 	// Test failed lookup caching
 	failEvent := &utils.StructEvent{
-		DNSName: "nonexistent.local",
+		EventType: utils.DnsEventType,
+		DNSName:   "nonexistent.local",
 	}
 	dm.ReportEvent(failEvent)
 
@@ -338,11 +344,13 @@ func TestContainerCloudServices(t *testing.T) {
 		// Process cloud service DNS events
 		cloudEvents := []*utils.StructEvent{
 			{
+				EventType:   utils.DnsEventType,
 				ContainerID: containerId,
 				DNSName:     "test.amazonaws.com.",
 				Pid:         testPid,
 			},
 			{
+				EventType:   utils.DnsEventType,
 				ContainerID: containerId,
 				DNSName:     "example.azure.com.",
 				Pid:         testPid,
@@ -450,6 +458,7 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 	// Add more than maxServiceCacheSize cloud services
 	for i := 0; i < maxServiceCacheSize+10; i++ {
 		dm.ReportEvent(&utils.StructEvent{
+			EventType:   utils.DnsEventType,
 			ContainerID: containerId,
 			DNSName:     fmt.Sprintf("service%d.amazonaws.com.", i),
 			Pid:         testPid,

@@ -8,7 +8,6 @@ import (
 	"github.com/google/cel-go/ext"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/_iouring/tracer/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
@@ -36,16 +35,13 @@ type CEL struct {
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	ta, tp := xcel.NewTypeAdapter(), xcel.NewTypeProvider()
-	iouringObj, iouringTyp := xcel.NewObject(&traceriouringtype.Event{})
-	xcel.RegisterObject(ta, tp, iouringObj, iouringTyp, xcel.NewFields(iouringObj))
-	eventObj, eventTyp := xcel.NewObject(&utils.EverythingEventImpl{})
+	eventObj, eventTyp := xcel.NewObject(&utils.CelEventImpl{})
 	xcel.RegisterObject(ta, tp, eventObj, eventTyp, utils.CelFields)
 	procObj, procTyp := xcel.NewObject(&events.ProcfsEvent{})
 	xcel.RegisterObject(ta, tp, procObj, procTyp, xcel.NewFields(procObj))
 	envOptions := []cel.EnvOption{
 		cel.Variable("event", eventTyp),
 		cel.Variable("event_type", cel.StringType),
-		cel.Variable(string(utils.IoUringEventType), iouringTyp),
 		cel.Variable(string(utils.ProcfsEventType), procTyp),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
@@ -121,7 +117,8 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
-		if expression.EventType != event.EventType {
+		eventType := event.Event.GetEventType()
+		if expression.EventType != eventType {
 			continue
 		}
 
@@ -130,8 +127,8 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 			return false, err
 		}
 
-		obj, _ := xcel.NewObject(event.Event)
-		out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(event.EventType)}) // FIXME put safety check here
+		obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
+		out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(eventType)})
 		if err != nil {
 			return false, err
 		}
@@ -210,8 +207,8 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 		return "", err
 	}
 
-	obj, _ := xcel.NewObject(event.Event) // FIXME put safety check here
-	out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(event.EventType)})
+	obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
+	out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(event.Event.GetEventType())})
 	if err != nil {
 		return "", err
 	}

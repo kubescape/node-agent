@@ -17,7 +17,7 @@ func NewHTTPAdapter() *HTTPAdapter {
 
 func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	httpEvent, ok := enrichedEvent.Event.(utils.HttpEvent)
-	if !ok || enrichedEvent.EventType != utils.HTTPEventType {
+	if !ok {
 		return
 	}
 

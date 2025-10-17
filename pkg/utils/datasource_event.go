@@ -178,6 +178,9 @@ func (e *DatasourceEvent) GetDstPort() uint16 {
 	case NetworkEventType:
 		port, _ := e.Datasource.GetField("endpoint.port").Uint16(e.Data)
 		return port
+	case SSHEventType:
+		port, _ := e.Datasource.GetField("dst.port").Uint16(e.Data)
+		return port
 	default:
 		logger.L().Warning("GetDstPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
@@ -195,7 +198,7 @@ func (e *DatasourceEvent) GetEventType() EventType {
 
 func (e *DatasourceEvent) GetExePath() string {
 	switch e.EventType {
-	case ExecveEventType:
+	case ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType:
 		exepath, _ := e.Datasource.GetField("exepath").String(e.Data)
 		return exepath
 	default:
@@ -232,7 +235,7 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
-	case ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
+	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
 		gid, err := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
 		if err != nil {
 			return nil
@@ -497,14 +500,14 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 		t, _ := e.Datasource.GetField("type").Uint8(e.Data)
 		return HTTPDataType(t)
 	default:
-		logger.L().Warning("GetType not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEventType not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
 
 func (e *DatasourceEvent) GetUid() *uint32 {
 	switch e.EventType {
-	case ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
+	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
 		uid, err := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
 		if err != nil {
 			return nil

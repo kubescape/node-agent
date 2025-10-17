@@ -119,7 +119,7 @@ func (pt *PtraceTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (pt *PtraceTracer) callback(event utils.EnrichEvent) {
+func (pt *PtraceTracer) callback(event utils.PtraceEvent) {
 	if pt.eventCallback != nil {
 		// Extract container ID and process ID from the ptrace event
 		containerID := event.GetContainerID()
