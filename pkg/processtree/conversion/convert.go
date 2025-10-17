@@ -11,11 +11,11 @@ import (
 func ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent, error) {
 	switch eventType {
 	case utils.ExecveEventType:
-		return convertExecEvent(event.(utils.EverythingEvent)), nil
+		return convertExecEvent(event.(utils.ExecEvent)), nil
 	case utils.ForkEventType:
-		return convertForkEvent(event.(utils.EverythingEvent)), nil
+		return convertForkEvent(event.(utils.ForkEvent)), nil
 	case utils.ExitEventType:
-		return convertExitEvent(event.(utils.EverythingEvent)), nil
+		return convertExitEvent(event.(utils.EnrichEvent)), nil
 	case utils.ProcfsEventType:
 		return convertProcfsEvent(event.(*events.ProcfsEvent)), nil
 	default:
@@ -24,7 +24,7 @@ func ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent
 }
 
 // convertExecEvent converts an ExecEvent to ProcessEvent
-func convertExecEvent(execEvent utils.EverythingEvent) ProcessEvent {
+func convertExecEvent(execEvent utils.ExecEvent) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ExecEvent,
 		Timestamp:   time.Now(),
@@ -66,7 +66,7 @@ func convertExecEvent(execEvent utils.EverythingEvent) ProcessEvent {
 }
 
 // convertForkEvent converts a ForkEvent to ProcessEvent
-func convertForkEvent(forkEvent utils.EverythingEvent) ProcessEvent {
+func convertForkEvent(forkEvent utils.ForkEvent) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ForkEvent,
 		Timestamp:   time.Now(),
@@ -94,14 +94,14 @@ func convertForkEvent(forkEvent utils.EverythingEvent) ProcessEvent {
 }
 
 // convertExitEvent converts an ExitEvent to ProcessEvent
-func convertExitEvent(exitEvent utils.EverythingEvent) ProcessEvent {
+func convertExitEvent(exitEvent utils.EnrichEvent) ProcessEvent {
 	event := ProcessEvent{
-		Type:      ExitEvent,
-		Timestamp: time.Now(),
-		PID:       exitEvent.GetPID(),
-		PPID:      exitEvent.GetPpid(),
-		Comm:      exitEvent.GetComm(),
-		//StartTimeNs: uint64(exitEvent.Timestamp), // Use event timestamp for consistency
+		Type:        ExitEvent,
+		Timestamp:   time.Now(),
+		PID:         exitEvent.GetPID(),
+		PPID:        exitEvent.GetPpid(),
+		Comm:        exitEvent.GetComm(),
+		StartTimeNs: uint64(exitEvent.GetTimestamp()), // Use event timestamp for consistency
 	}
 
 	// Set UID and GID if available

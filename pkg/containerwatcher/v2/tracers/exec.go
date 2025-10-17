@@ -128,7 +128,7 @@ func (et *ExecTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (et *ExecTracer) callback(event utils.EverythingEvent) {
+func (et *ExecTracer) callback(event utils.ExecEvent) {
 	path := event.GetComm()
 	if args := event.GetArgs(); len(args) > 0 {
 		path = args[0]
@@ -146,7 +146,7 @@ func (et *ExecTracer) callback(event utils.EverythingEvent) {
 }
 
 // handleEvent processes the event with syscall enrichment
-func (et *ExecTracer) handleEvent(event utils.EverythingEvent, syscalls []uint64) {
+func (et *ExecTracer) handleEvent(event utils.ExecEvent, syscalls []uint64) {
 	if et.eventCallback != nil {
 		containerID := event.GetContainerID()
 		processID := event.GetPID()

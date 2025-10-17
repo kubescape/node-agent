@@ -54,9 +54,13 @@ type CapabilitiesEvent interface {
 type DNSEvent interface {
 	EnrichEvent
 	GetAddresses() []string
+	GetCwd() string
 	GetDNSName() string
+	GetDstPort() uint16
+	GetExePath() string
 	GetNumAnswers() int
 	GetQr() DNSPktType
+	GetProto() string
 }
 
 type ExecEvent interface {
@@ -66,6 +70,11 @@ type ExecEvent interface {
 	GetExePath() string
 	GetPupperLayer() bool
 	GetUpperLayer() bool
+}
+
+type ForkEvent interface {
+	EnrichEvent
+	GetExePath() string
 }
 
 type HttpEvent interface {
@@ -89,13 +98,17 @@ type HttpRawEvent interface {
 
 type IOUring interface {
 	EnrichEvent
+	GetFlags() []string
+	GetIdentifier() string
 	GetOpcode() int
 }
 
 type LinkEvent interface {
 	EnrichEvent
+	GetExePath() string
 	GetNewPath() string
 	GetOldPath() string
+	GetUpperLayer() bool
 }
 
 type NetworkEvent interface {
@@ -115,6 +128,11 @@ type OpenEvent interface {
 	IsDir() bool
 }
 
+type PtraceEvent interface {
+	EnrichEvent
+	GetExePath() string
+}
+
 type SshEvent interface {
 	EnrichEvent
 	GetDstIP() string
@@ -126,19 +144,6 @@ type SshEvent interface {
 type SyscallEvent interface {
 	EnrichEvent
 	GetSyscalls() []string
-}
-
-type EverythingEvent interface {
-	CapabilitiesEvent
-	DNSEvent
-	ExecEvent
-	HttpRawEvent // not HttpEvent as we need to parse the HTTP data first
-	IOUring
-	LinkEvent
-	NetworkEvent
-	OpenEvent
-	SshEvent
-	SyscallEvent
 }
 
 type EventType string

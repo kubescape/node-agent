@@ -143,7 +143,7 @@ func (nt *NetworkTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (nt *NetworkTracer) callback(event utils.EverythingEvent) {
+func (nt *NetworkTracer) callback(event utils.NetworkEvent) {
 	if nt.eventCallback != nil {
 		// Extract container ID and process ID from the network event
 		containerID := event.GetContainerID()

@@ -12,7 +12,7 @@ import (
 func TestNewEnrichedEvent(t *testing.T) {
 	// Test creating a new enriched event
 	eventType := utils.ExecveEventType
-	mockEvent := utils.StructEvent{ID: "test-event"}
+	mockEvent := &utils.StructEvent{ID: "test-event"}
 	timestamp := time.Now()
 	containerID := "test-container-123"
 	processTree := apitypes.Process{
@@ -35,7 +35,7 @@ func TestEnrichedEvent_Structure(t *testing.T) {
 	// Test the structure of enriched event
 	enrichedEvent := &EnrichedEvent{
 		EventType:   utils.OpenEventType,
-		Event:       utils.StructEvent{ID: "open-event"},
+		Event:       &utils.StructEvent{ID: "open-event"},
 		Timestamp:   time.Now(),
 		ContainerID: "container-456",
 		ProcessTree: apitypes.Process{
@@ -47,7 +47,7 @@ func TestEnrichedEvent_Structure(t *testing.T) {
 
 	// Verify all fields are accessible
 	assert.Equal(t, utils.OpenEventType, enrichedEvent.EventType)
-	assert.Equal(t, "open-event", enrichedEvent.Event.(utils.StructEvent).ID)
+	assert.Equal(t, "open-event", enrichedEvent.Event.(*utils.StructEvent).ID)
 	assert.Equal(t, "container-456", enrichedEvent.ContainerID)
 	assert.Equal(t, uint32(5678), enrichedEvent.ProcessTree.PID)
 	assert.Equal(t, "open-process", enrichedEvent.ProcessTree.Comm)
@@ -79,7 +79,7 @@ func TestEnrichedEvent_EventTypes(t *testing.T) {
 
 	for i, eventType := range eventTypes {
 		t.Run(string(eventType), func(t *testing.T) {
-			event := utils.StructEvent{ID: string(rune('A' + i))}
+			event := &utils.StructEvent{ID: string(rune('A' + i))}
 			enrichedEvent := NewEnrichedEvent(eventType, event, timestamp, containerID, processTree)
 
 			assert.Equal(t, eventType, enrichedEvent.EventType)
@@ -115,7 +115,7 @@ func TestEnrichedEvent_ProcessTreeIntegration(t *testing.T) {
 
 	enrichedEvent := NewEnrichedEvent(
 		utils.ExecveEventType,
-		utils.StructEvent{ID: "exec-with-tree"},
+		&utils.StructEvent{ID: "exec-with-tree"},
 		time.Now(),
 		"container-with-tree",
 		processTree,
@@ -147,9 +147,9 @@ func TestEnrichedEvent_TimestampOrdering(t *testing.T) {
 	baseTime := time.Now()
 
 	events := []*EnrichedEvent{
-		NewEnrichedEvent(utils.ExecveEventType, utils.StructEvent{ID: "third"}, baseTime.Add(2*time.Second), "container", apitypes.Process{}),
-		NewEnrichedEvent(utils.OpenEventType, utils.StructEvent{ID: "first"}, baseTime, "container", apitypes.Process{}),
-		NewEnrichedEvent(utils.NetworkEventType, utils.StructEvent{ID: "second"}, baseTime.Add(1*time.Second), "container", apitypes.Process{}),
+		NewEnrichedEvent(utils.ExecveEventType, &utils.StructEvent{ID: "third"}, baseTime.Add(2*time.Second), "container", apitypes.Process{}),
+		NewEnrichedEvent(utils.OpenEventType, &utils.StructEvent{ID: "first"}, baseTime, "container", apitypes.Process{}),
+		NewEnrichedEvent(utils.NetworkEventType, &utils.StructEvent{ID: "second"}, baseTime.Add(1*time.Second), "container", apitypes.Process{}),
 	}
 
 	// Sort by timestamp (manually for test)
@@ -164,9 +164,9 @@ func TestEnrichedEvent_TimestampOrdering(t *testing.T) {
 	}
 
 	// Verify sorted order
-	assert.Equal(t, "first", events[0].Event.(utils.StructEvent).ID)
-	assert.Equal(t, "second", events[1].Event.(utils.StructEvent).ID)
-	assert.Equal(t, "third", events[2].Event.(utils.StructEvent).ID)
+	assert.Equal(t, "first", events[0].Event.(*utils.StructEvent).ID)
+	assert.Equal(t, "second", events[1].Event.(*utils.StructEvent).ID)
+	assert.Equal(t, "third", events[2].Event.(*utils.StructEvent).ID)
 
 	// Verify timestamps are in order
 	assert.True(t, events[0].Timestamp.Before(events[1].Timestamp))
@@ -190,7 +190,7 @@ func TestEnrichedEvent_ContainerIDMatching(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			enrichedEvent := NewEnrichedEvent(
 				utils.ExecveEventType,
-				utils.StructEvent{ID: "test"},
+				&utils.StructEvent{ID: "test"},
 				time.Now(),
 				tc.containerID,
 				apitypes.Process{},
@@ -203,7 +203,7 @@ func TestEnrichedEvent_ContainerIDMatching(t *testing.T) {
 
 func TestEnrichedEvent_EventMetadata(t *testing.T) {
 	// Test event metadata preservation
-	mockEvent := utils.StructEvent{
+	mockEvent := &utils.StructEvent{
 		ID:        "metadata-test",
 		Pod:       "test-pod",
 		Namespace: "test-namespace",
@@ -219,7 +219,7 @@ func TestEnrichedEvent_EventMetadata(t *testing.T) {
 	)
 
 	// Verify original event metadata is preserved
-	originalEvent := enrichedEvent.Event.(utils.StructEvent)
+	originalEvent := enrichedEvent.Event.(*utils.StructEvent)
 	assert.Equal(t, "metadata-test", originalEvent.ID)
 	assert.Equal(t, "test-pod", originalEvent.Pod)
 	assert.Equal(t, "test-namespace", originalEvent.Namespace)
@@ -235,7 +235,7 @@ func TestEnrichedEvent_EmptyProcessTree(t *testing.T) {
 	// Test handling of empty process tree
 	enrichedEvent := NewEnrichedEvent(
 		utils.OpenEventType,
-		utils.StructEvent{ID: "no-process-tree"},
+		&utils.StructEvent{ID: "no-process-tree"},
 		time.Now(),
 		"container-123",
 		apitypes.Process{}, // Empty process tree

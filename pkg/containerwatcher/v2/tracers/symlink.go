@@ -123,13 +123,13 @@ func (st *SymlinkTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (st *SymlinkTracer) callback(event utils.EverythingEvent) {
+func (st *SymlinkTracer) callback(event utils.LinkEvent) {
 	// Handle the event with syscall enrichment
 	st.handleEvent(event, []uint64{SYS_SYMLINK, SYS_SYMLINKAT})
 }
 
 // handleEvent processes the event with syscall enrichment
-func (st *SymlinkTracer) handleEvent(event utils.EverythingEvent, syscalls []uint64) {
+func (st *SymlinkTracer) handleEvent(event utils.LinkEvent, syscalls []uint64) {
 	if st.eventCallback != nil {
 		// Extract container ID and process ID from the symlink event
 		containerID := event.GetContainerID()

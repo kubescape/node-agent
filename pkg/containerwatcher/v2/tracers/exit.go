@@ -122,7 +122,7 @@ func (et *ExitTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (et *ExitTracer) callback(event utils.EverythingEvent) {
+func (et *ExitTracer) callback(event utils.EnrichEvent) {
 	if et.eventCallback != nil {
 		// Extract container ID and process ID from the exit event
 		containerID := event.GetContainerID()

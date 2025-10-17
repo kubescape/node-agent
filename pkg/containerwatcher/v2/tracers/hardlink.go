@@ -123,13 +123,13 @@ func (ht *HardlinkTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (ht *HardlinkTracer) callback(event utils.EverythingEvent) {
+func (ht *HardlinkTracer) callback(event utils.LinkEvent) {
 	// Handle the event with syscall enrichment
 	ht.handleEvent(event, []uint64{SYS_LINK, SYS_LINKAT})
 }
 
 // handleEvent processes the event with syscall enrichment
-func (ht *HardlinkTracer) handleEvent(event utils.EverythingEvent, syscalls []uint64) {
+func (ht *HardlinkTracer) handleEvent(event utils.LinkEvent, syscalls []uint64) {
 	if ht.eventCallback != nil {
 		// Extract container ID and process ID from the hardlink event
 		containerID := event.GetContainerID()

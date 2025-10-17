@@ -27,7 +27,16 @@ type DatasourceEvent struct {
 	extra      interface{}
 }
 
-var _ EverythingEvent = (*DatasourceEvent)(nil)
+var _ CapabilitiesEvent = (*DatasourceEvent)(nil)
+var _ DNSEvent = (*DatasourceEvent)(nil)
+var _ ExecEvent = (*DatasourceEvent)(nil)
+var _ HttpRawEvent = (*DatasourceEvent)(nil)
+var _ IOUring = (*DatasourceEvent)(nil)
+var _ LinkEvent = (*DatasourceEvent)(nil)
+var _ NetworkEvent = (*DatasourceEvent)(nil)
+var _ OpenEvent = (*DatasourceEvent)(nil)
+var _ SshEvent = (*DatasourceEvent)(nil)
+var _ SyscallEvent = (*DatasourceEvent)(nil)
 
 func (e *DatasourceEvent) GetAddresses() []string {
 	switch e.EventType {
@@ -244,6 +253,17 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 func (e *DatasourceEvent) GetHostNetwork() bool {
 	hostNetwork, _ := e.Datasource.GetField("k8s.hostnetwork").Bool(e.Data)
 	return hostNetwork
+}
+
+func (e *DatasourceEvent) GetIdentifier() string {
+	switch e.EventType {
+	case IoUringEventType:
+		identifier, _ := e.Datasource.GetField("identifier").String(e.Data)
+		return identifier
+	default:
+		logger.L().Warning("GetIdentifier not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
 }
 
 func (e *DatasourceEvent) GetNamespace() string {

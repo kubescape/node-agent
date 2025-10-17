@@ -27,11 +27,11 @@ func (a ContainerProfileManagerMock) ReportCapability(_, _ string) {
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportFileExec(_ string, _ utils.EverythingEvent) {
+func (a ContainerProfileManagerMock) ReportFileExec(_ string, _ utils.ExecEvent) {
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportFileOpen(_ string, _ utils.EverythingEvent) {
+func (a ContainerProfileManagerMock) ReportFileOpen(_ string, _ utils.OpenEvent) {
 	// noop
 }
 
@@ -51,11 +51,11 @@ func (a ContainerProfileManagerMock) ReportIdentifiedCallStack(_ string, _ *v1be
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportSymlinkEvent(_ string, _ utils.EverythingEvent) {
+func (a ContainerProfileManagerMock) ReportSymlinkEvent(_ string, _ utils.LinkEvent) {
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportHardlinkEvent(_ string, _ utils.EverythingEvent) {
+func (a ContainerProfileManagerMock) ReportHardlinkEvent(_ string, _ utils.LinkEvent) {
 	// noop
 }
 
@@ -63,7 +63,7 @@ func (a ContainerProfileManagerMock) RegisterForContainerEndOfLife(_ chan *conta
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ utils.EverythingEvent) {
+func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ utils.NetworkEvent) {
 	// noop
 }
 

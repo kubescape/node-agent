@@ -33,7 +33,7 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 }
 
 // ReportFileExec reports a file execution event for a container
-func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event utils.EverythingEvent) {
+func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event utils.ExecEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.execs == nil {
 			data.execs = &maps.SafeMap[string, []string]{}
@@ -59,7 +59,7 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event uti
 }
 
 // ReportFileOpen reports a file open event for a container
-func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event utils.EverythingEvent) {
+func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event utils.OpenEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.opens == nil {
 			data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
@@ -97,7 +97,7 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event uti
 }
 
 // ReportSymlinkEvent reports a symlink creation event for a container
-func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event utils.EverythingEvent) {
+func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event utils.LinkEvent) {
 	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 		if cpm.enricher != nil {
 			symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.GetOldPath() + event.GetNewPath())
@@ -110,7 +110,7 @@ func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event
 }
 
 // ReportHardlinkEvent reports a hardlink creation event for a container
-func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event utils.EverythingEvent) {
+func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event utils.LinkEvent) {
 	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 		if cpm.enricher != nil {
 			hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.GetOldPath() + event.GetNewPath())
@@ -226,7 +226,7 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 }
 
 // ReportNetworkEvent reports a network event for a container
-func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event utils.EverythingEvent) {
+func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event utils.NetworkEvent) {
 	if !cpm.isValidNetworkEvent(event) {
 		return
 	}
@@ -291,7 +291,7 @@ func (cpm *ContainerProfileManager) ReportSyscalls(containerID string, syscalls 
 }
 
 // isValidNetworkEvent checks if the network event is valid for processing
-func (cpm *ContainerProfileManager) isValidNetworkEvent(event utils.EverythingEvent) bool {
+func (cpm *ContainerProfileManager) isValidNetworkEvent(event utils.NetworkEvent) bool {
 	pktType := event.GetPktType()
 	// Unknown type, shouldn't happen
 	if pktType != utils.HostPktType && pktType != utils.OutgoingPktType {

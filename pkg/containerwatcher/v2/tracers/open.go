@@ -125,7 +125,7 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles open events from the tracer
-func (ot *OpenTracer) callback(event utils.EverythingEvent) {
+func (ot *OpenTracer) callback(event utils.OpenEvent) {
 	if event.GetContainer() == "" {
 		return
 	}
@@ -138,7 +138,7 @@ func (ot *OpenTracer) callback(event utils.EverythingEvent) {
 }
 
 // handleEvent processes the event with syscall enrichment
-func (ot *OpenTracer) handleEvent(event utils.EverythingEvent, syscalls []uint64) {
+func (ot *OpenTracer) handleEvent(event utils.OpenEvent, syscalls []uint64) {
 	if ot.eventCallback != nil {
 		containerID := event.GetContainerID()
 		processID := event.GetPID()

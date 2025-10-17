@@ -130,7 +130,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 			return false, err
 		}
 
-		obj, _ := xcel.NewObject(event.Event.(utils.EverythingEvent))
+		obj, _ := xcel.NewObject(event.Event)
 		out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(event.EventType)}) // FIXME put safety check here
 		if err != nil {
 			return false, err
@@ -210,7 +210,7 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 		return "", err
 	}
 
-	obj, _ := xcel.NewObject(event.Event.(utils.EverythingEvent)) // FIXME put safety check here
+	obj, _ := xcel.NewObject(event.Event) // FIXME put safety check here
 	out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(event.EventType)})
 	if err != nil {
 		return "", err

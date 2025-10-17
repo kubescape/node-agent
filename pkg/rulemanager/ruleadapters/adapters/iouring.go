@@ -17,7 +17,7 @@ func NewIoUringAdapter() *IoUringAdapter {
 }
 
 func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	iouringEvent, ok := enrichedEvent.Event.(utils.EverythingEvent)
+	iouringEvent, ok := enrichedEvent.Event.(utils.IOUring)
 	if !ok {
 		return
 	}

@@ -21,7 +21,7 @@ import (
 func TestResolveIPAddress(t *testing.T) {
 	tests := []struct {
 		name     string
-		dnsEvent utils.StructEvent
+		dnsEvent *utils.StructEvent
 		ipAddr   string
 		want     string
 		wantOk   bool
@@ -29,7 +29,7 @@ func TestResolveIPAddress(t *testing.T) {
 		{
 			name:   "ip found",
 			ipAddr: "67.225.146.248",
-			dnsEvent: utils.StructEvent{
+			dnsEvent: &utils.StructEvent{
 				DNSName: "test.com",
 				Addresses: []string{
 					"67.225.146.248",
@@ -41,7 +41,7 @@ func TestResolveIPAddress(t *testing.T) {
 		{
 			name:   "ip not found",
 			ipAddr: "67.225.146.248",
-			dnsEvent: utils.StructEvent{
+			dnsEvent: &utils.StructEvent{
 				DNSName: "test.com",
 				Addresses: []string{
 					"54.23.332.4",
@@ -53,7 +53,7 @@ func TestResolveIPAddress(t *testing.T) {
 		{
 			name:   "no address",
 			ipAddr: "67.225.146.248",
-			dnsEvent: utils.StructEvent{
+			dnsEvent: &utils.StructEvent{
 				DNSName: "test.com",
 			},
 			want:   "",
@@ -81,13 +81,13 @@ func TestResolveIPAddressFallback(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		dnsEvent utils.StructEvent
+		dnsEvent *utils.StructEvent
 		want     string
 		wantOk   bool
 	}{
 		{
 			name: "dns resolution fallback",
-			dnsEvent: utils.StructEvent{
+			dnsEvent: &utils.StructEvent{
 				DNSName: "example.com", // Using example.com as it's guaranteed to exist
 			},
 			want:   "example.com",
@@ -123,7 +123,7 @@ func TestCacheFallbackBehavior(t *testing.T) {
 	dm := CreateDNSManager(1000)
 
 	// Test successful DNS lookup caching
-	event := utils.StructEvent{
+	event := &utils.StructEvent{
 		DNSName: "test.com",
 		Addresses: []string{
 			"1.2.3.4",
@@ -146,7 +146,7 @@ func TestCacheFallbackBehavior(t *testing.T) {
 	}
 
 	// Test failed lookup caching
-	failEvent := utils.StructEvent{
+	failEvent := &utils.StructEvent{
 		DNSName: "nonexistent.local",
 	}
 	dm.ReportEvent(failEvent)
@@ -182,7 +182,7 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Add(numGoroutines)
 
 	// Create some test data
-	testEvents := []utils.StructEvent{
+	testEvents := []*utils.StructEvent{
 		{
 			DNSName:   "test1.com",
 			Addresses: []string{"1.1.1.1", "2.2.2.2"},
@@ -336,7 +336,7 @@ func TestContainerCloudServices(t *testing.T) {
 		pidToServices.Set(testPid, services)
 
 		// Process cloud service DNS events
-		cloudEvents := []utils.StructEvent{
+		cloudEvents := []*utils.StructEvent{
 			{
 				ContainerID: containerId,
 				DNSName:     "test.amazonaws.com.",
@@ -410,7 +410,7 @@ func TestContainerCloudServices(t *testing.T) {
 
 		// Add more services than the cache size
 		for i := 0; i <= maxServiceCacheSize+5; i++ {
-			event := utils.StructEvent{
+			event := &utils.StructEvent{
 				ContainerID: containerId,
 				DNSName:     fmt.Sprintf("service%d.amazonaws.com.", i),
 				Pid:         testPid,
@@ -449,7 +449,7 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 
 	// Add more than maxServiceCacheSize cloud services
 	for i := 0; i < maxServiceCacheSize+10; i++ {
-		dm.ReportEvent(utils.StructEvent{
+		dm.ReportEvent(&utils.StructEvent{
 			ContainerID: containerId,
 			DNSName:     fmt.Sprintf("service%d.amazonaws.com.", i),
 			Pid:         testPid,

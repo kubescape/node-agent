@@ -136,7 +136,7 @@ func (it *IoUringTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (it *IoUringTracer) callback(event utils.EverythingEvent) {
+func (it *IoUringTracer) callback(event utils.IOUring) {
 	if it.eventCallback != nil {
 		// Extract container ID and process ID from the iouring event
 		containerID := event.GetContainerID()

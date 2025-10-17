@@ -120,7 +120,7 @@ func (rt *RandomXTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (rt *RandomXTracer) callback(event utils.EverythingEvent) {
+func (rt *RandomXTracer) callback(event utils.EnrichEvent) {
 	if rt.eventCallback != nil {
 		// Extract container ID and process ID from the randomx event
 		containerID := event.GetContainerID()

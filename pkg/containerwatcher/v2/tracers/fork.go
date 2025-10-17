@@ -122,7 +122,7 @@ func (ft *ForkTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (ft *ForkTracer) callback(event utils.EverythingEvent) {
+func (ft *ForkTracer) callback(event utils.EnrichEvent) {
 	if ft.eventCallback != nil {
 		// Extract container ID and process ID from the fork event
 		containerID := event.GetContainerID()

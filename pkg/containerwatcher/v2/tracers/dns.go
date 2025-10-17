@@ -136,7 +136,7 @@ func (dt *DNSTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (dt *DNSTracer) callback(event utils.EverythingEvent) {
+func (dt *DNSTracer) callback(event utils.DNSEvent) {
 	if event.GetQr() != utils.DNSPktTypeResponse {
 		return
 	}

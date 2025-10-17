@@ -18,7 +18,7 @@ func NewPtraceAdapter() *PtraceAdapter {
 }
 
 func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	ptraceEvent, ok := enrichedEvent.Event.(utils.EverythingEvent)
+	ptraceEvent, ok := enrichedEvent.Event.(utils.PtraceEvent)
 	if !ok || enrichedEvent.EventType != utils.PtraceEventType {
 		return
 	}
