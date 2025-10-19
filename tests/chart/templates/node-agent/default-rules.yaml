@@ -28,7 +28,7 @@ spec:
         - "exec"
         - "applicationprofile"
     - name: "Files Access Anomalies in container"
-      enabled: false
+      enabled: true
       id: "R0002"
       description: "Detects unexpected file access that is not in the baseline"
       expressions:
@@ -215,7 +215,7 @@ spec:
         - "anomaly"
         - "applicationprofile"
     - name: "Unexpected Egress Network Traffic"
-      enabled: false
+      enabled: true
       id: "R0011"
       description: "Detecting unexpected egress network traffic that is not whitelisted by application profile."
       expressions:
@@ -295,7 +295,7 @@ spec:
         - "module"
         - "load"
     - name: "Disallowed ssh connection"
-      enabled: false
+      enabled: true
       id: "R1003"
       description: "Detecting ssh connection to disallowed port"
       expressions:
@@ -439,7 +439,7 @@ spec:
         - "symlink"
         - "applicationprofile"
     - name: "ld_preload hooks technique detected"
-      enabled: false
+      enabled: true
       id: "R1011"
       description: "Detecting ld_preload hook techniques."
       expressions:

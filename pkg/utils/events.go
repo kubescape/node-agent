@@ -264,3 +264,15 @@ func GetContainerIDFromEvent(event interface{}) string {
 
 	return ""
 }
+
+// protoNumToString converts a protocol number to its string representation
+func protoNumToString(protoNum uint16) string {
+	switch protoNum {
+	case 6:
+		return "TCP"
+	case 17:
+		return "UDP"
+	default:
+		return ""
+	}
+}

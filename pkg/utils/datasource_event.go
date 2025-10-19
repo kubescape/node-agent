@@ -195,10 +195,11 @@ func (e *DatasourceEvent) GetDstIP() string {
 	switch e.EventType {
 	case SSHEventType:
 		version, _ := e.Datasource.GetField("dst.version").Uint8(e.Data)
-		if version == 4 {
+		switch version {
+		case 4:
 			daddr, _ := e.Datasource.GetField("dst.addr_raw.v4").Uint32(e.Data)
 			return rawIPv4ToString(daddr)
-		} else if version == 6 {
+		case 6:
 			daddr, _ := e.Datasource.GetField("dst.addr_raw.v6").Bytes(e.Data)
 			return rawIPv6ToString(daddr)
 		}
@@ -268,7 +269,7 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, DnsEventType, OpenEventType:
+	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, DnsEventType, OpenEventType, NetworkEventType:
 		gid, err := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
 		if err != nil {
 			return nil
@@ -417,18 +418,6 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 	return ppid
 }
 
-// protoNumToString converts a protocol number to its string representation
-func protoNumToString(protoNum uint16) string {
-	switch protoNum {
-	case 6:
-		return "TCP"
-	case 17:
-		return "UDP"
-	default:
-		return ""
-	}
-}
-
 func (e *DatasourceEvent) GetProto() string {
 	switch e.EventType {
 	case NetworkEventType:
@@ -494,10 +483,11 @@ func (e *DatasourceEvent) GetSrcIP() string {
 	switch e.EventType {
 	case SSHEventType:
 		version, _ := e.Datasource.GetField("src.version").Uint8(e.Data)
-		if version == 4 {
+		switch version {
+		case 4:
 			addr, _ := e.Datasource.GetField("src.addr_raw.v4").Uint32(e.Data)
 			return rawIPv4ToString(addr)
-		} else if version == 6 {
+		case 6:
 			addr, _ := e.Datasource.GetField("src.addr_raw.v6").Bytes(e.Data)
 			return rawIPv6ToString(addr)
 		}
@@ -565,7 +555,7 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 
 func (e *DatasourceEvent) GetUid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, DnsEventType, OpenEventType:
+	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, DnsEventType, OpenEventType, NetworkEventType:
 		uid, err := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
 		if err != nil {
 			return nil
