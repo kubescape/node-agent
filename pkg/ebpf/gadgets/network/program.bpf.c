@@ -135,7 +135,7 @@ int ig_trace_net(struct __sk_buff *skb)
         event->endpoint.addr_raw.v4 = load_word(skb, ETH_HLEN + offsetof(struct iphdr, daddr));
     }
     // Normalize to network byte order for userspace consumers
-    event->endpoint.addr_raw.v4 = bpf_htonl(event->endpoint.addr_raw.v4);
+    event->endpoint.addr_raw.v4 = event->endpoint.addr_raw.v4;
     event->endpoint.proto_raw = iph.protocol;
 	event->endpoint.port = bpf_ntohs(port);
 	event->endpoint.version = 4;

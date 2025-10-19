@@ -165,7 +165,7 @@ func (e *DatasourceEvent) GetDNSName() string {
 func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 	switch e.EventType {
 	case NetworkEventType:
-		addr, _ := e.Datasource.GetField("endpoint.addr_raw.v4").String(e.Data)
+		addr, _ := e.Datasource.GetField("endpoint.addr_raw.v4").Uint32(e.Data)
 		kind, _ := e.Datasource.GetField("endpoint.k8s.kind").String(e.Data)
 		name, _ := e.Datasource.GetField("endpoint.k8s.name").String(e.Data)
 		namespace, _ := e.Datasource.GetField("endpoint.k8s.namespace").String(e.Data)
@@ -175,7 +175,7 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 		proto, _ := e.Datasource.GetField("endpoint.proto_raw").Uint16(e.Data)
 		return types.L4Endpoint{
 			L3Endpoint: types.L3Endpoint{
-				Addr:      addr,
+				Addr:      rawIPv4ToString(addr),
 				Version:   version,
 				Namespace: namespace,
 				Name:      name,
