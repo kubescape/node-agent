@@ -419,7 +419,7 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 
 func (e *DatasourceEvent) GetProto() string {
 	switch e.EventType {
-	case NetworkEventType:
+	case NetworkEventType, DnsEventType:
 		// TODO fix proto raw to string mapping
 		proto, _ := e.Datasource.GetField("endpoint.proto_raw").String(e.Data)
 		return proto
