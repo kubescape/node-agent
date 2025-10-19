@@ -417,12 +417,26 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 	return ppid
 }
 
+// protoNumToString converts a protocol number to its string representation
+func protoNumToString(protoNum uint16) string {
+	switch protoNum {
+	case 6:
+		return "TCP"
+	case 17:
+		return "UDP"
+	default:
+		return ""
+	}
+}
+
 func (e *DatasourceEvent) GetProto() string {
 	switch e.EventType {
 	case NetworkEventType:
-		// TODO fix proto raw to string mapping
-		proto, _ := e.Datasource.GetField("endpoint.proto_raw").String(e.Data)
-		return proto
+		protoNum, _ := e.Datasource.GetField("endpoint.proto_raw").Uint16(e.Data)
+		return protoNumToString(protoNum)
+	case DnsEventType:
+		protoNum, _ := e.Datasource.GetField("dst.proto_raw").Uint16(e.Data)
+		return protoNumToString(protoNum)
 	default:
 		logger.L().Warning("GetProto not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
