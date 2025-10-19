@@ -130,7 +130,7 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conv
 	}
 }
 
-func (pt *ProcfsTracer) handleExitEvent(event conversion.ProcessEvent) {
+func (pt *ProcfsTracer) handleExitEvent(event conversion.ProcessEvent) { // TODO: implement this
 	//exitEvent := &tracerexittype.Event{
 	//	Pid:  event.PID,
 	//	PPid: event.PPID,

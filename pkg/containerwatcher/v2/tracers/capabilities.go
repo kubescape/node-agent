@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
-	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
@@ -101,14 +100,14 @@ func (ct *CapabilitiesTracer) eventOperator() operators.DataOperator {
 	return simple.New(string(utils.CapabilitiesEventType),
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
-				jsonFormatter, _ := igjson.New(d,
-					// Show all fields
-					igjson.WithShowAll(true),
-					// Print json in a pretty format
-					igjson.WithPretty(true, "  "),
-				)
+				// jsonFormatter, _ := igjson.New(d,
+				// 	// Show all fields
+				// 	igjson.WithShowAll(true),
+				// 	// Print json in a pretty format
+				// 	igjson.WithPretty(true, "  "),
+				// )
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					logger.L().Debug("Matthias - capabilities event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					// logger.L().Debug("Matthias - capabilities event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
 					ct.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.CapabilitiesEventType})
 					return nil
 				}, opPriority)
@@ -122,7 +121,7 @@ func (ct *CapabilitiesTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (ct *CapabilitiesTracer) callback(event utils.SyscallEvent) {
+func (ct *CapabilitiesTracer) callback(event utils.CapabilitiesEvent) {
 	if ct.eventCallback != nil {
 		// Extract container ID and process ID from the capabilities event
 		containerID := event.GetContainerID()

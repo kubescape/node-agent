@@ -77,6 +77,12 @@ type ForkEvent interface {
 	GetExePath() string
 }
 
+type ExitEvent interface {
+	EnrichEvent
+	GetExitCode() uint32
+	GetSignal() uint32
+}
+
 type HttpEvent interface {
 	HttpRawEvent
 	GetDirection() consts.NetworkDirection

@@ -37,6 +37,30 @@ var _ NetworkEvent = (*DatasourceEvent)(nil)
 var _ OpenEvent = (*DatasourceEvent)(nil)
 var _ SshEvent = (*DatasourceEvent)(nil)
 var _ SyscallEvent = (*DatasourceEvent)(nil)
+var _ ExitEvent = (*DatasourceEvent)(nil)
+var _ ForkEvent = (*DatasourceEvent)(nil)
+
+func (e *DatasourceEvent) GetExitCode() uint32 {
+	switch e.EventType {
+	case ExitEventType:
+		exitCode, _ := e.Datasource.GetField("exit_code").Uint32(e.Data)
+		return exitCode
+	default:
+		logger.L().Warning("GetExitCode not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+}
+
+func (e *DatasourceEvent) GetSignal() uint32 {
+	switch e.EventType {
+	case ExitEventType:
+		signal, _ := e.Datasource.GetField("exit_signal").Uint32(e.Data)
+		return signal
+	default:
+		logger.L().Warning("GetSignal not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+}
 
 func (e *DatasourceEvent) GetAddresses() []string {
 	switch e.EventType {
