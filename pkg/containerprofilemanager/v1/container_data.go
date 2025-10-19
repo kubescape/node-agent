@@ -1,6 +1,7 @@
 package containerprofilemanager
 
 import (
+	"fmt"
 	"sort"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -253,6 +254,7 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 
 		if dnsResolverClient != nil {
 			domain, ok := dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
+			logger.L().Info("Matthias - dns resolved", helpers.String("ip", networkEvent.Destination.IPAddress), helpers.String("domain", domain))
 			if ok {
 				neighborEntry.DNS = domain
 				neighborEntry.DNSNames = []string{domain}
@@ -270,6 +272,8 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 		identifier = createUUID()
 	}
 	neighborEntry.Identifier = identifier
+
+	logger.L().Info("Matthias - network neighbor created", helpers.String("neighbor", fmt.Sprintf("%+v", neighborEntry)))
 
 	return &neighborEntry
 }

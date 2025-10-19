@@ -1,6 +1,7 @@
 package dnsmanager
 
 import (
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -61,6 +62,8 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 
 func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	dnsName := dnsEvent.GetDNSName()
+	addresses := dnsEvent.GetAddresses()
+	logger.L().Info("Matthias - dns event received", helpers.String("dnsName", dnsName), helpers.String("addresses", fmt.Sprintf("%v", addresses)))
 	if isCloudService(dnsName) {
 		if pidToServices, found := dm.containerToCloudServices.Load(dnsEvent.GetContainerID()); found {
 			// Guard against cache size getting too large by checking the cardinality per container and pid
@@ -78,8 +81,12 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	}
 
 	if addresses := dnsEvent.GetAddresses(); len(addresses) > 0 {
+		logger.L().Info("Matthias - processing addresses from DNS event", helpers.String("dnsName", dnsName), helpers.String("addresses", fmt.Sprintf("%v", addresses)))
 		for _, address := range addresses {
-			dm.addressToDomainMap.Add(address, dnsName)
+			if address != "" {
+				dm.addressToDomainMap.Add(address, dnsName)
+				logger.L().Info("Matthias - added address mapping", helpers.String("address", address), helpers.String("domain", dnsName))
+			}
 		}
 
 		// Update the cache with these known good addresses
@@ -105,7 +112,7 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	}
 
 	// Only perform lookup if we don't have cached results
-	addresses, err := net.LookupIP(dnsName)
+	ipAddresses, err := net.LookupIP(dnsName)
 	if err != nil {
 		// Cache the failure - we just need to store something, using empty struct
 		dm.failureCache.Set(dnsName, struct{}{})
@@ -113,8 +120,8 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	}
 
 	// Convert addresses to strings and store them
-	addrStrings := make([]string, 0, len(addresses))
-	for _, addr := range addresses {
+	addrStrings := make([]string, 0, len(ipAddresses))
+	for _, addr := range ipAddresses {
 		addrStr := addr.String()
 		addrStrings = append(addrStrings, addrStr)
 		dm.addressToDomainMap.Add(addrStr, dnsName)
@@ -128,6 +135,7 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 
 func (dm *DNSManager) ResolveIPAddress(ipAddr string) (string, bool) {
 	domain, found := dm.addressToDomainMap.Get(ipAddr)
+	logger.L().Info("Matthias - resolving IP address", helpers.String("ip", ipAddr), helpers.String("domain", domain), helpers.String("found", fmt.Sprintf("%t", found)))
 	return domain, found
 }
 
