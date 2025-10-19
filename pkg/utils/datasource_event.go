@@ -266,11 +266,15 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 		}
 		return &gid
 	case OpenEventType:
-		gid, err := e.Datasource.GetField("proc.gid").Uint32(e.Data)
+		gid := e.Datasource.GetField("proc.gid")
+		if gid == nil {
+			return nil
+		}
+		gidValue, err := gid.Uint32(e.Data)
 		if err != nil {
 			return nil
 		}
-		return &gid
+		return &gidValue
 	default:
 		logger.L().Warning("GetGid not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
