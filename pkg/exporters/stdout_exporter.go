@@ -40,7 +40,7 @@ func (exporter *StdoutExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	processTree := failedRule.GetRuntimeProcessDetails().ProcessTree
 	exporter.logger.WithFields(log.Fields{
 		"message":               failedRule.GetRuleAlert().RuleDescription,
-		"event":                 failedRule.GetTriggerEvent(),
+		"event":                 failedRule.GetTriggerEvent(), // TODO: Don't print payload
 		"BaseRuntimeMetadata":   failedRule.GetBaseRuntimeAlert(),
 		"RuntimeProcessDetails": failedRule.GetRuntimeProcessDetails(),
 		"RuntimeK8sDetails":     failedRule.GetRuntimeAlertK8sDetails(),

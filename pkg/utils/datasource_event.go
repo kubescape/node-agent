@@ -133,7 +133,7 @@ func (e *DatasourceEvent) GetContainerImageDigest() string {
 
 func (e *DatasourceEvent) GetCwd() string {
 	switch e.EventType {
-	case ExecveEventType:
+	case ExecveEventType, DnsEventType:
 		cwd, _ := e.Datasource.GetField("cwd").String(e.Data)
 		return cwd
 	default:
@@ -202,7 +202,7 @@ func (e *DatasourceEvent) GetDstPort() uint16 {
 	case NetworkEventType:
 		port, _ := e.Datasource.GetField("endpoint.port").Uint16(e.Data)
 		return port
-	case SSHEventType:
+	case SSHEventType, DnsEventType:
 		port, _ := e.Datasource.GetField("dst.port").Uint16(e.Data)
 		return port
 	default:
@@ -222,7 +222,7 @@ func (e *DatasourceEvent) GetEventType() EventType {
 
 func (e *DatasourceEvent) GetExePath() string {
 	switch e.EventType {
-	case ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType:
+	case ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType, DnsEventType:
 		exepath, _ := e.Datasource.GetField("exepath").String(e.Data)
 		return exepath
 	default:
@@ -259,22 +259,22 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
+	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, DnsEventType, OpenEventType:
 		gid, err := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
 		if err != nil {
 			return nil
 		}
 		return &gid
-	case OpenEventType:
-		gid := e.Datasource.GetField("proc.gid")
-		if gid == nil {
-			return nil
-		}
-		gidValue, err := gid.Uint32(e.Data)
-		if err != nil {
-			return nil
-		}
-		return &gidValue
+	// case OpenEventType:
+	// 	gid := e.Datasource.GetField("proc.gid")
+	// 	if gid == nil {
+	// 		return nil
+	// 	}
+	// 	gidValue, err := gid.Uint32(e.Data)
+	// 	if err != nil {
+	// 		return nil
+	// 	}
+	// 	return &gidValue
 	default:
 		logger.L().Warning("GetGid not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
@@ -363,8 +363,15 @@ func (e *DatasourceEvent) GetPcomm() string {
 }
 
 func (e *DatasourceEvent) GetPID() uint32 {
-	pid, _ := e.Datasource.GetField("proc.pid").Uint32(e.Data)
-	return pid
+	pid := e.Datasource.GetField("proc.pid")
+	if pid == nil {
+		return 0
+	}
+	pidValue, err := pid.Uint32(e.Data)
+	if err != nil {
+		return 0
+	}
+	return pidValue
 }
 
 func (e *DatasourceEvent) GetPktType() string {
@@ -535,18 +542,18 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 
 func (e *DatasourceEvent) GetUid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
+	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, DnsEventType, OpenEventType:
 		uid, err := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
 		if err != nil {
 			return nil
 		}
 		return &uid
-	case OpenEventType:
-		uid, err := e.Datasource.GetField("proc.uid").Uint32(e.Data)
-		if err != nil {
-			return nil
-		}
-		return &uid
+	// case OpenEventType:
+	// 	uid, err := e.Datasource.GetField("proc.uid").Uint32(e.Data)
+	// 	if err != nil {
+	// 		return nil
+	// 	}
+	// 	return &uid
 	default:
 		logger.L().Warning("GetUid not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
