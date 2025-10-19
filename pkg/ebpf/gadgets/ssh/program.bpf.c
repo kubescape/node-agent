@@ -142,8 +142,8 @@ int ig_trace_ssh(struct __sk_buff *skb)
 		event->dst.addr_raw.v4 = load_word(
 			skb, ETH_HLEN + offsetof(struct iphdr, daddr));
 		// Convert back to network byte order for userspace
-		event->src.addr_raw.v4 = bpf_htonl(event->src.addr_raw.v4);
-		event->dst.addr_raw.v4 = bpf_htonl(event->dst.addr_raw.v4);
+		// event->src.addr_raw.v4 = bpf_htonl(event->src.addr_raw.v4);
+		// event->dst.addr_raw.v4 = bpf_htonl(event->dst.addr_raw.v4);
 		break;
 	case ETH_P_IPV6:
 		event->src.version = event->dst.version = 6;
