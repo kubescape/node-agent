@@ -107,8 +107,17 @@ func (e *DatasourceEvent) GetCapability() string {
 }
 
 func (e *DatasourceEvent) GetComm() string {
-	comm, _ := e.Datasource.GetField("proc.comm").String(e.Data)
-	return comm
+	comm := e.Datasource.GetField("proc.comm")
+	if comm == nil {
+		logger.L().Warning("GetComm not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	commValue, err := comm.String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetComm not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return commValue
 }
 
 func (e *DatasourceEvent) GetContainer() string {
