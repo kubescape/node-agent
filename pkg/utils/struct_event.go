@@ -11,65 +11,65 @@ import (
 )
 
 type StructEvent struct {
-	Addresses            []string
-	Args                 []string
-	Buf                  []byte
-	CapName              string
-	Comm                 string
-	Container            string
-	ContainerID          string
-	ContainerImage       string
-	ContainerImageDigest string
-	Cwd                  string
-	DNSName              string
-	Dir                  bool
-	Direction            consts.NetworkDirection
-	DstEndpoint          types.L3Endpoint
-	DstIP                string
-	DstPort              uint16
-	Error                int64
-	EventType            EventType
-	ExePath              string
-	ExitCode             uint32
-	Extra                interface{}
-	Flags                []string
-	FlagsRaw             uint32
-	Gid                  uint32
-	HostNetwork          bool
-	ID                   string
-	Identifier           string
-	Internal             bool
-	Namespace            string
-	NewPath              string
-	NumAnswers           int
-	OldPath              string
-	Opcode               int
-	Path                 string
-	Pcomm                string
-	Pid                  uint32
-	PktType              string
-	Pod                  string
-	PodHostIP            string
-	PodLabels            map[string]string
-	Ppid                 uint32
-	Proto                string
-	PtraceRequest        int
-	PupperLayer          bool
-	Qr                   DNSPktType
-	Request              *http.Request
-	Response             *http.Response
-	Signal               uint32
-	SockFd               uint32
-	SocketInode          uint64
-	SrcIP                string
-	SrcPort              uint16
-	StatusCode           int
-	Syscall              string
-	Timestamp            int64
-	Type                 HTTPDataType
-	Uid                  uint32
-	UpperLayer           bool
-	UserData             int
+	Addresses            []string                `json:"addresses,omitempty" yaml:"addresses,omitempty"`
+	Args                 []string                `json:"args,omitempty" yaml:"args,omitempty"`
+	Buf                  []byte                  `json:"buf,omitempty" yaml:"buf,omitempty"`
+	CapName              string                  `json:"capName,omitempty" yaml:"capName,omitempty"`
+	Comm                 string                  `json:"comm,omitempty" yaml:"comm,omitempty"`
+	Container            string                  `json:"container,omitempty" yaml:"container,omitempty"`
+	ContainerID          string                  `json:"containerId,omitempty" yaml:"containerId,omitempty"`
+	ContainerImage       string                  `json:"containerImage,omitempty" yaml:"containerImage,omitempty"`
+	ContainerImageDigest string                  `json:"containerImageDigest,omitempty" yaml:"containerImageDigest,omitempty"`
+	Cwd                  string                  `json:"cwd,omitempty" yaml:"cwd,omitempty"`
+	DNSName              string                  `json:"dnsName,omitempty" yaml:"dnsName,omitempty"`
+	Dir                  bool                    `json:"dir,omitempty" yaml:"dir,omitempty"`
+	Direction            consts.NetworkDirection `json:"direction,omitempty" yaml:"direction,omitempty"`
+	DstEndpoint          types.L3Endpoint        `json:"dstEndpoint,omitempty" yaml:"dstEndpoint,omitempty"`
+	DstIP                string                  `json:"dstIP,omitempty" yaml:"dstIP,omitempty"`
+	DstPort              uint16                  `json:"dstPort,omitempty" yaml:"dstPort,omitempty"`
+	Error                int64                   `json:"error,omitempty" yaml:"error,omitempty"`
+	EventType            EventType               `json:"eventType,omitempty" yaml:"eventType,omitempty"`
+	ExePath              string                  `json:"exePath,omitempty" yaml:"exePath,omitempty"`
+	ExitCode             uint32                  `json:"exitCode,omitempty" yaml:"exitCode,omitempty"`
+	Extra                interface{}             `json:"extra,omitempty" yaml:"extra,omitempty"`
+	Flags                []string                `json:"flags,omitempty" yaml:"flags,omitempty"`
+	FlagsRaw             uint32                  `json:"flagsRaw,omitempty" yaml:"flagsRaw,omitempty"`
+	Gid                  uint32                  `json:"gid,omitempty" yaml:"gid,omitempty"`
+	HostNetwork          bool                    `json:"hostNetwork,omitempty" yaml:"hostNetwork,omitempty"`
+	ID                   string                  `json:"id,omitempty" yaml:"id,omitempty"`
+	Identifier           string                  `json:"identifier,omitempty" yaml:"identifier,omitempty"`
+	Internal             bool                    `json:"internal,omitempty" yaml:"internal,omitempty"`
+	Namespace            string                  `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	NewPath              string                  `json:"newPath,omitempty" yaml:"newPath,omitempty"`
+	NumAnswers           int                     `json:"numAnswers,omitempty" yaml:"numAnswers,omitempty"`
+	OldPath              string                  `json:"oldPath,omitempty" yaml:"oldPath,omitempty"`
+	Opcode               int                     `json:"opcode,omitempty" yaml:"opcode,omitempty"`
+	Path                 string                  `json:"path,omitempty" yaml:"path,omitempty"`
+	Pcomm                string                  `json:"pcomm,omitempty" yaml:"pcomm,omitempty"`
+	Pid                  uint32                  `json:"pid,omitempty" yaml:"pid,omitempty"`
+	PktType              string                  `json:"pktType,omitempty" yaml:"pktType,omitempty"`
+	Pod                  string                  `json:"pod,omitempty" yaml:"pod,omitempty"`
+	PodHostIP            string                  `json:"podHostIP,omitempty" yaml:"podHostIP,omitempty"`
+	PodLabels            map[string]string       `json:"podLabels,omitempty" yaml:"podLabels,omitempty"`
+	Ppid                 uint32                  `json:"ppid,omitempty" yaml:"ppid,omitempty"`
+	Proto                string                  `json:"proto,omitempty" yaml:"proto,omitempty"`
+	PtraceRequest        int                     `json:"ptraceRequest,omitempty" yaml:"ptraceRequest,omitempty"`
+	PupperLayer          bool                    `json:"pupperLayer,omitempty" yaml:"pupperLayer,omitempty"`
+	Qr                   DNSPktType              `json:"qr,omitempty" yaml:"qr,omitempty"`
+	Request              *http.Request           `json:"request,omitempty" yaml:"request,omitempty"`
+	Response             *http.Response          `json:"response,omitempty" yaml:"response,omitempty"`
+	Signal               uint32                  `json:"signal,omitempty" yaml:"signal,omitempty"`
+	SockFd               uint32                  `json:"sockFd,omitempty" yaml:"sockFd,omitempty"`
+	SocketInode          uint64                  `json:"socketInode,omitempty" yaml:"socketInode,omitempty"`
+	SrcIP                string                  `json:"srcIP,omitempty" yaml:"srcIP,omitempty"`
+	SrcPort              uint16                  `json:"srcPort,omitempty" yaml:"srcPort,omitempty"`
+	StatusCode           int                     `json:"statusCode,omitempty" yaml:"statusCode,omitempty"`
+	Syscall              string                  `json:"syscall,omitempty" yaml:"syscall,omitempty"`
+	Timestamp            int64                   `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
+	Type                 HTTPDataType            `json:"type,omitempty" yaml:"type,omitempty"`
+	Uid                  uint32                  `json:"uid,omitempty" yaml:"uid,omitempty"`
+	UpperLayer           bool                    `json:"upperLayer,omitempty" yaml:"upperLayer,omitempty"`
+	UserData             int                     `json:"userData,omitempty" yaml:"userData,omitempty"`
 }
 
 var _ CapabilitiesEvent = (*DatasourceEvent)(nil)
