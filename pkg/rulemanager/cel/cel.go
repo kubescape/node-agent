@@ -41,7 +41,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	xcel.RegisterObject(ta, tp, procObj, procTyp, xcel.NewFields(procObj))
 	envOptions := []cel.EnvOption{
 		cel.Variable("event", eventTyp),
-		cel.Variable("event_type", cel.StringType),
+		cel.Variable("eventType", cel.StringType),
 		cel.Variable(string(utils.ProcfsEventType), procTyp),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
@@ -128,7 +128,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 		}
 
 		obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
-		out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(eventType)})
+		out, _, err := program.Eval(map[string]any{"event": obj, "eventType": string(eventType)})
 		if err != nil {
 			return false, err
 		}
@@ -151,7 +151,7 @@ func (c *CEL) EvaluateRuleByMap(event map[string]any, eventType utils.EventType,
 	}()
 
 	evalContext[string(eventType)] = event
-	evalContext["event_type"] = string(eventType)
+	evalContext["eventType"] = string(eventType)
 
 	for _, expression := range expressions {
 		if expression.EventType != eventType {
@@ -191,7 +191,7 @@ func (c *CEL) EvaluateExpressionByMap(event map[string]any, expression string, e
 	}()
 
 	evalContext[string(eventType)] = event
-	evalContext["event_type"] = string(eventType)
+	evalContext["eventType"] = string(eventType)
 
 	out, _, err := program.Eval(evalContext)
 	if err != nil {
@@ -208,7 +208,7 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 	}
 
 	obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
-	out, _, err := program.Eval(map[string]any{"event": obj, "event_type": string(event.Event.GetEventType())})
+	out, _, err := program.Eval(map[string]any{"event": obj, "eventType": string(event.Event.GetEventType())})
 	if err != nil {
 		return "", err
 	}
