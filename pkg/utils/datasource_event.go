@@ -40,28 +40,6 @@ var _ SyscallEvent = (*DatasourceEvent)(nil)
 var _ ExitEvent = (*DatasourceEvent)(nil)
 var _ ForkEvent = (*DatasourceEvent)(nil)
 
-func (e *DatasourceEvent) GetExitCode() uint32 {
-	switch e.EventType {
-	case ExitEventType:
-		exitCode, _ := e.Datasource.GetField("exit_code").Uint32(e.Data)
-		return exitCode
-	default:
-		logger.L().Warning("GetExitCode not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
-}
-
-func (e *DatasourceEvent) GetSignal() uint32 {
-	switch e.EventType {
-	case ExitEventType:
-		signal, _ := e.Datasource.GetField("exit_signal").Uint32(e.Data)
-		return signal
-	default:
-		logger.L().Warning("GetSignal not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
-}
-
 func (e *DatasourceEvent) GetAddresses() []string {
 	switch e.EventType {
 	case DnsEventType:
@@ -107,14 +85,14 @@ func (e *DatasourceEvent) GetCapability() string {
 }
 
 func (e *DatasourceEvent) GetComm() string {
-	comm := e.Datasource.GetField("proc.comm")
+	comm := e.Datasource.GetField("proc.comm") // TODO check EventType here
 	if comm == nil {
-		logger.L().Warning("GetComm not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetComm - proc.comm field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 	commValue, err := comm.String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetComm not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetComm - cannot read proc.comm field in event", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 	return commValue
@@ -232,12 +210,23 @@ func (e *DatasourceEvent) GetEventType() EventType {
 
 func (e *DatasourceEvent) GetExePath() string {
 	switch e.EventType {
-	case ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType, DnsEventType:
+	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType:
 		exepath, _ := e.Datasource.GetField("exepath").String(e.Data)
 		return exepath
 	default:
 		logger.L().Warning("GetExePath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
+	}
+}
+
+func (e *DatasourceEvent) GetExitCode() uint32 {
+	switch e.EventType {
+	case ExitEventType:
+		exitCode, _ := e.Datasource.GetField("exit_code").Uint32(e.Data)
+		return exitCode
+	default:
+		logger.L().Warning("GetExitCode not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
 	}
 }
 
@@ -269,22 +258,12 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, DnsEventType, OpenEventType, NetworkEventType:
+	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType:
 		gid, err := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
 		if err != nil {
 			return nil
 		}
 		return &gid
-	// case OpenEventType:
-	// 	gid := e.Datasource.GetField("proc.gid")
-	// 	if gid == nil {
-	// 		return nil
-	// 	}
-	// 	gidValue, err := gid.Uint32(e.Data)
-	// 	if err != nil {
-	// 		return nil
-	// 	}
-	// 	return &gidValue
 	default:
 		logger.L().Warning("GetGid not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
@@ -420,11 +399,11 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 
 func (e *DatasourceEvent) GetProto() string {
 	switch e.EventType {
-	case NetworkEventType:
-		protoNum, _ := e.Datasource.GetField("endpoint.proto_raw").Uint16(e.Data)
-		return protoNumToString(protoNum)
 	case DnsEventType:
 		protoNum, _ := e.Datasource.GetField("dst.proto_raw").Uint16(e.Data)
+		return protoNumToString(protoNum)
+	case NetworkEventType:
+		protoNum, _ := e.Datasource.GetField("endpoint.proto_raw").Uint16(e.Data)
 		return protoNumToString(protoNum)
 	default:
 		logger.L().Warning("GetProto not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -454,6 +433,17 @@ func (e *DatasourceEvent) GetQr() DNSPktType {
 	default:
 		logger.L().Warning("GetQr not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
+	}
+}
+
+func (e *DatasourceEvent) GetSignal() uint32 {
+	switch e.EventType {
+	case ExitEventType:
+		signal, _ := e.Datasource.GetField("exit_signal").Uint32(e.Data)
+		return signal
+	default:
+		logger.L().Warning("GetSignal not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
 	}
 }
 
@@ -555,18 +545,12 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 
 func (e *DatasourceEvent) GetUid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, DnsEventType, OpenEventType, NetworkEventType:
+	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType:
 		uid, err := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
 		if err != nil {
 			return nil
 		}
 		return &uid
-	// case OpenEventType:
-	// 	uid, err := e.Datasource.GetField("proc.uid").Uint32(e.Data)
-	// 	if err != nil {
-	// 		return nil
-	// 	}
-	// 	return &uid
 	default:
 		logger.L().Warning("GetUid not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil

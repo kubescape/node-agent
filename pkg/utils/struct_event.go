@@ -30,6 +30,7 @@ type StructEvent struct {
 	Error                int64
 	EventType            EventType
 	ExePath              string
+	ExitCode             uint32
 	Extra                interface{}
 	Flags                []string
 	FlagsRaw             uint32
@@ -57,6 +58,7 @@ type StructEvent struct {
 	Qr                   DNSPktType
 	Request              *http.Request
 	Response             *http.Response
+	Signal               uint32
 	SockFd               uint32
 	SocketInode          uint64
 	SrcIP                string
@@ -81,6 +83,8 @@ var _ NetworkEvent = (*DatasourceEvent)(nil)
 var _ OpenEvent = (*DatasourceEvent)(nil)
 var _ SshEvent = (*DatasourceEvent)(nil)
 var _ SyscallEvent = (*DatasourceEvent)(nil)
+var _ ExitEvent = (*DatasourceEvent)(nil)
+var _ ForkEvent = (*DatasourceEvent)(nil)
 
 func (e *StructEvent) GetAddresses() []string {
 	switch e.EventType {
@@ -208,11 +212,21 @@ func (e *StructEvent) GetEventType() EventType {
 
 func (e *StructEvent) GetExePath() string {
 	switch e.EventType {
-	case ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType:
+	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType:
 		return e.ExePath
 	default:
 		logger.L().Warning("GetExePath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
+	}
+}
+
+func (e *StructEvent) GetExitCode() uint32 {
+	switch e.EventType {
+	case ExitEventType:
+		return e.ExitCode
+	default:
+		logger.L().Warning("GetExitCode not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
 	}
 }
 
@@ -242,9 +256,7 @@ func (e *StructEvent) GetFlagsRaw() uint32 {
 
 func (e *StructEvent) GetGid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
-		return &e.Gid
-	case OpenEventType:
+	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType:
 		return &e.Gid
 	default:
 		logger.L().Warning("GetGid not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -360,6 +372,8 @@ func (e *StructEvent) GetPpid() uint32 {
 
 func (e *StructEvent) GetProto() string {
 	switch e.EventType {
+	case DnsEventType:
+		return e.Proto
 	case NetworkEventType:
 		return e.Proto
 	default:
@@ -394,6 +408,16 @@ func (e *StructEvent) GetRequest() *http.Request {
 
 func (e *StructEvent) GetResponse() *http.Response {
 	return e.Response
+}
+
+func (e *StructEvent) GetSignal() uint32 {
+	switch e.EventType {
+	case ExitEventType:
+		return e.Signal
+	default:
+		logger.L().Warning("GetSignal not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
 }
 
 func (e *StructEvent) GetSocketInode() uint64 {
@@ -477,9 +501,7 @@ func (e *StructEvent) GetType() HTTPDataType {
 
 func (e *StructEvent) GetUid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType:
-		return &e.Uid
-	case OpenEventType:
+	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType:
 		return &e.Uid
 	default:
 		logger.L().Warning("GetUid not implemented for event type", helpers.String("eventType", string(e.EventType)))

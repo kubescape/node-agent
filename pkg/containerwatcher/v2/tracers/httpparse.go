@@ -52,6 +52,7 @@ func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error
 	}
 
 	event := utils.StructEvent{
+		EventType: utils.HTTPEventType,
 		Timestamp: int64(bpfEvent.GetTimestamp()),
 		Pid:       bpfEvent.GetPID(),
 		Uid:       *bpfEvent.GetUid(),
