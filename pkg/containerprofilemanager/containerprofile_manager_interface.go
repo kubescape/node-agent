@@ -17,7 +17,7 @@ type ContainerProfileManagerClient interface {
 	ReportSymlinkEvent(containerID string, event utils.LinkEvent)
 	ReportHardlinkEvent(containerID string, event utils.LinkEvent)
 	ReportNetworkEvent(containerID string, event utils.NetworkEvent)
-	ReportSyscalls(containerID string, syscalls []string)
+	ReportSyscall(containerID string, syscall string)
 	ReportDroppedEvent(containerID string)
 	RegisterForContainerEndOfLife(notificationChannel chan *containercollection.Container)
 	OnQueueError(profile *v1beta1.ContainerProfile, containerID string, err error)

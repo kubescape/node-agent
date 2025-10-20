@@ -149,7 +149,7 @@ type SshEvent interface {
 
 type SyscallEvent interface {
 	EnrichEvent
-	GetSyscalls() []string
+	GetSyscall() string
 }
 
 type EventType string

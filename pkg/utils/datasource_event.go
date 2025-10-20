@@ -25,6 +25,7 @@ type DatasourceEvent struct {
 	Datasource datasource.DataSource
 	EventType  EventType
 	extra      interface{}
+	Syscall    string
 }
 
 var _ CapabilitiesEvent = (*DatasourceEvent)(nil)
@@ -504,20 +505,11 @@ func (e *DatasourceEvent) GetSyscall() string {
 	case HTTPEventType:
 		syscall, _ := e.Datasource.GetField("syscall").Bytes(e.Data)
 		return gadgets.FromCString(syscall)
+	case SyscallEventType:
+		return e.Syscall
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
-	}
-}
-
-func (e *DatasourceEvent) GetSyscalls() []string {
-	switch e.EventType {
-	case SyscallEventType:
-		syscallsBuffer, _ := e.Datasource.GetField("syscalls").Bytes(e.Data)
-		return decodeSyscalls(syscallsBuffer)
-	default:
-		logger.L().Warning("GetSyscalls not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return nil
 	}
 }
 

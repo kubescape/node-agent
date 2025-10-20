@@ -278,13 +278,12 @@ func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
 	logger.L().Debug("dropped event reported", helpers.String("containerID", containerID))
 }
 
-func (cpm *ContainerProfileManager) ReportSyscalls(containerID string, syscalls []string) {
+func (cpm *ContainerProfileManager) ReportSyscall(containerID string, syscall string) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.syscalls == nil {
 			data.syscalls = mapset.NewSet[string]()
 		}
-		data.syscalls.Append(syscalls...)
-		return size.Of(syscalls), nil
+		return data.syscalls.Append(syscall), nil
 	})
 
 	cpm.logEventError(err, "syscalls", containerID)

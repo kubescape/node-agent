@@ -107,7 +107,7 @@ func NewEventHandlerFactory(
 			}
 		case utils.SyscallEventType:
 			if syscallEvent, ok := event.(utils.SyscallEvent); ok {
-				containerProfileManager.ReportSyscalls(syscallEvent.GetContainerID(), syscallEvent.GetSyscalls())
+				containerProfileManager.ReportSyscall(syscallEvent.GetContainerID(), syscallEvent.GetSyscall())
 			}
 		default:
 			// For event types that don't have specific handling, we might need to add them

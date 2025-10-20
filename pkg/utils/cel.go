@@ -331,17 +331,6 @@ var CelFields = map[string]*celtypes.FieldType{
 			return x.Raw.GetSyscall(), nil
 		}),
 	},
-	"syscalls": {
-		Type:  celtypes.ListType,
-		IsSet: isSet,
-		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[CelEvent])
-			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
-			}
-			return x.Raw.GetSyscalls(), nil
-		}),
-	},
 	"upperlayer": {
 		Type:  celtypes.BoolType,
 		IsSet: isSet,

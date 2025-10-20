@@ -464,6 +464,8 @@ func (e *StructEvent) GetSyscall() string {
 		return e.Syscall
 	case HTTPEventType:
 		return e.Syscall
+	case SyscallEventType:
+		return e.Syscall
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		panic("GetSyscall not implemented for this event type")

@@ -19,7 +19,7 @@ func (a ContainerProfileManagerMock) ContainerCallback(_ containercollection.Pub
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportSyscalls(_ string, _ []string) {
+func (a ContainerProfileManagerMock) ReportSyscall(_ string, _ string) {
 	// noop
 }
 
