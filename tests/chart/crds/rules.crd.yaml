@@ -60,23 +60,6 @@ spec:
                               properties:
                                 eventType:
                                   type: string
-                                  enum:
-                                    - "exec"
-                                    - "open"
-                                    - "capabilities"
-                                    - "dns"
-                                    - "network"
-                                    - "syscall"
-                                    - "randomx"
-                                    - "symlink"
-                                    - "hardlink"
-                                    - "ssh"
-                                    - "http"
-                                    - "ptrace"
-                                    - "iouring"
-                                    - "fork"
-                                    - "exit"
-                                    - "procfs"
                                   description: "Type of event this expression handles"
                                 expression:
                                   type: string
