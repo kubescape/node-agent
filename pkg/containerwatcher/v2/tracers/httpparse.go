@@ -55,14 +55,19 @@ func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error
 	}
 
 	event := utils.StructEvent{
-		EventType: utils.HTTPEventType,
-		Timestamp: int64(bpfEvent.GetTimestamp()),
-		Pid:       bpfEvent.GetPID(),
-		Uid:       *bpfEvent.GetUid(),
-		Gid:       *bpfEvent.GetGid(),
-		Request:   request,
-		Internal:  IsInternal(ip.String()),
-		Direction: direction,
+		EventType:   utils.HTTPEventType,
+		Timestamp:   int64(bpfEvent.GetTimestamp()),
+		Pid:         bpfEvent.GetPID(),
+		Uid:         *bpfEvent.GetUid(),
+		Gid:         *bpfEvent.GetGid(),
+		Request:     request,
+		Internal:    IsInternal(ip.String()),
+		Direction:   direction,
+		SocketInode: bpfEvent.GetSocketInode(),
+		SockFd:      bpfEvent.GetSockFd(),
+		Type:        bpfEvent.GetType(),
+		Buf:         bpfEvent.GetBuf(),
+		Syscall:     bpfEvent.GetSyscall(),
 	}
 
 	return &event, nil
@@ -122,15 +127,14 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 	return req, nil
 }
 
-func ParseHttpResponse(data []byte) (*http.Request, *http.Response, error) {
-	var req *http.Request
+func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 	resp, err := readResponse(data, req)
 	if err != nil {
 		logger.L().Error("Matthias - readResponse error", helpers.Error(err))
 		return fallbackReadResponse(data, req)
 	}
 
-	return req, resp, nil
+	return resp, nil
 }
 
 func FromCString(in []byte) []byte {
@@ -185,18 +189,18 @@ func fallbackReadRequest(data []byte) (*http.Request, error) {
 	return req, nil
 }
 
-func fallbackReadResponse(data []byte, req *http.Request) (*http.Request, *http.Response, error) {
+func fallbackReadResponse(data []byte, req *http.Request) (*http.Response, error) {
 	cleanedData, err := cleanCorrupted(data)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to clean response data: %w", err)
+		return nil, fmt.Errorf("failed to clean response data: %w", err)
 	}
 
 	resp, err := readResponse(cleanedData, req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read response even after removing last line: %w", err)
+		return nil, fmt.Errorf("failed to read response even after removing last line: %w", err)
 	}
 
-	return req, resp, nil
+	return resp, nil
 }
 
 func readResponse(data []byte, req *http.Request) (*http.Response, error) {

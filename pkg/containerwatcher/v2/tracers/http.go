@@ -139,13 +139,17 @@ func (ht *HTTPTracer) eventOperator() operators.DataOperator {
 
 // callback handles events from the tracer
 func (ht *HTTPTracer) callback(event utils.HttpRawEvent) {
+	logger.L().Info("Matthias - callback called", helpers.Int("eventType", int(event.GetType())))
 	if grouped := ht.GroupEvents(event); grouped != nil {
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
+		logger.L().Info("Matthias - calling eventCallback", helpers.String("containerID", containerID), helpers.Int("processID", int(processID)))
 		if grouped.GetRequest() != nil {
 			logger.L().Info("Matthias - http request", helpers.String("Method", grouped.GetRequest().Method), helpers.String("URL", grouped.GetRequest().URL.String()))
 		}
 		ht.eventCallback(grouped, containerID, processID)
+	} else {
+		logger.L().Info("Matthias - GroupEvents returned nil, not calling eventCallback")
 	}
 }
 
@@ -183,18 +187,25 @@ func (ht *HTTPTracer) GroupEvents(bpfEvent utils.HttpRawEvent) utils.HttpEvent {
 			return nil
 		}
 		ht.eventsMap.Add(id, event)
+		logger.L().Info("Matthias - request added to cache", helpers.String("id", id), helpers.Int("cacheSize", ht.eventsMap.Len()))
 	case utils.Response:
+		logger.L().Info("Matthias - http response event", helpers.String("id", id))
 		if exists, ok := ht.eventsMap.Get(id); ok {
+			logger.L().Info("Matthias - found matching request", helpers.String("id", id))
 			grouped := exists
-			request, response, err := ParseHttpResponse(FromCString(bpfEvent.GetBuf()))
+			response, err := ParseHttpResponse(FromCString(bpfEvent.GetBuf()), grouped.GetRequest())
 			if err != nil {
+				logger.L().Error("Matthias - ParseHttpResponse error", helpers.Error(err))
 				return nil
 			}
 
-			grouped.SetRequest(request)
+			grouped.SetRequest(grouped.GetRequest())
 			grouped.SetResponse(response)
 			ht.eventsMap.Remove(id)
+			logger.L().Info("Matthias - response matched, returning grouped event", helpers.String("id", id))
 			return grouped
+		} else {
+			logger.L().Info("Matthias - no matching request found for response", helpers.String("id", id), helpers.Int("cacheSize", ht.eventsMap.Len()))
 		}
 	}
 	return nil

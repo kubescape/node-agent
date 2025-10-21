@@ -55,31 +55,8 @@ struct {
     __type(value, struct packet_msg);
 } msg_packets SEC(".maps");
 
-struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);
-    __type(value, u8[MAX_DATAEVENT_BUFFER]);
-} empty_buffer SEC(".maps");
-
 static __always_inline __u64 min_size(__u64 a, __u64 b) {
     return a < b ? a : b;
-}
-
-static __always_inline struct httpevent *get_dataevent()
-{
-    __u32 zero = 0;
-    struct httpevent *dataevent = bpf_map_lookup_elem(&event_data, &zero);
-    if (!dataevent)
-        return NULL;
-
-    u8 *empty = bpf_map_lookup_elem(&empty_buffer, &zero);
-    if (empty) {
-        bpf_probe_read(dataevent->buf, sizeof(dataevent->buf), empty);
-        bpf_probe_read(dataevent->syscall, sizeof(dataevent->syscall), empty);
-    }
-
-    return dataevent;
 }
 
 // Get inode number for a socket file descriptor
@@ -209,7 +186,7 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
     if (!type)
         return 0;
 
-    struct httpevent *dataevent = get_dataevent();
+    struct httpevent *dataevent = gadget_reserve_buf(&events, sizeof(*dataevent));
     if (!dataevent)
         return 0;
 
@@ -224,8 +201,8 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
 
     // Use gadget_output_buf to copy the event to the map
     // gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent)); // TODO: check if this is correct
-    // gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
-    gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent));
+    gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
+    // gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent));
 
     bpf_map_delete_elem(&buffer_packets, &id);
     return 0;
@@ -295,7 +272,7 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
             seg_len = iov.iov_len;
 
             // Get the event from the map
-            struct httpevent *dataevent = get_dataevent();
+            struct httpevent *dataevent = gadget_reserve_buf(&events, sizeof(*dataevent));
             if (!dataevent)
                 return 0;
 
@@ -313,7 +290,7 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
             bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
 
             // Use gadget_output_buf to copy the event to the map
-            gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent)); // TODO: check if this is correct
+            gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent)); // TODO: check if this is correct
             break;
         }
     }
