@@ -50,23 +50,7 @@ func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error
 		return nil, err
 	}
 
-	event := utils.StructEvent{
-		EventType:   utils.HTTPEventType,
-		Timestamp:   int64(bpfEvent.GetTimestamp()),
-		Pid:         bpfEvent.GetPID(),
-		Uid:         *bpfEvent.GetUid(),
-		Gid:         *bpfEvent.GetGid(),
-		Request:     request,
-		Internal:    IsInternal(ip.String()),
-		Direction:   direction,
-		SocketInode: bpfEvent.GetSocketInode(),
-		SockFd:      bpfEvent.GetSockFd(),
-		Type:        bpfEvent.GetType(),
-		Buf:         bpfEvent.GetBuf(),
-		Syscall:     bpfEvent.GetSyscall(),
-	}
-
-	return &event, nil
+	return bpfEvent.MakeHttpEvent(request, direction, IsInternal(ip.String())), nil
 }
 
 func ExtractConsistentHeaders(headers http.Header) map[string][]string {

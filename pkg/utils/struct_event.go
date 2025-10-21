@@ -72,19 +72,19 @@ type StructEvent struct {
 	UserData             int                     `json:"userData,omitempty" yaml:"userData,omitempty"`
 }
 
-var _ CapabilitiesEvent = (*DatasourceEvent)(nil)
-var _ DNSEvent = (*DatasourceEvent)(nil)
-var _ ExecEvent = (*DatasourceEvent)(nil)
+var _ CapabilitiesEvent = (*StructEvent)(nil)
+var _ DNSEvent = (*StructEvent)(nil)
+var _ ExecEvent = (*StructEvent)(nil)
 var _ HttpEvent = (*StructEvent)(nil)
-var _ HttpRawEvent = (*DatasourceEvent)(nil)
-var _ IOUring = (*DatasourceEvent)(nil)
-var _ LinkEvent = (*DatasourceEvent)(nil)
-var _ NetworkEvent = (*DatasourceEvent)(nil)
-var _ OpenEvent = (*DatasourceEvent)(nil)
-var _ SshEvent = (*DatasourceEvent)(nil)
-var _ SyscallEvent = (*DatasourceEvent)(nil)
-var _ ExitEvent = (*DatasourceEvent)(nil)
-var _ ForkEvent = (*DatasourceEvent)(nil)
+var _ HttpRawEvent = (*StructEvent)(nil)
+var _ IOUring = (*StructEvent)(nil)
+var _ LinkEvent = (*StructEvent)(nil)
+var _ NetworkEvent = (*StructEvent)(nil)
+var _ OpenEvent = (*StructEvent)(nil)
+var _ SshEvent = (*StructEvent)(nil)
+var _ SyscallEvent = (*StructEvent)(nil)
+var _ ExitEvent = (*StructEvent)(nil)
+var _ ForkEvent = (*StructEvent)(nil)
 
 func (e *StructEvent) GetAddresses() []string {
 	switch e.EventType {
@@ -531,12 +531,16 @@ func (e *StructEvent) IsDir() bool {
 	}
 }
 
-func (e *StructEvent) SetExtra(extra interface{}) {
-	e.Extra = extra
+func (e *StructEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, internal bool) HttpEvent {
+	event := *e
+	event.Request = request
+	event.Direction = direction
+	event.Internal = internal
+	return &event
 }
 
-func (e *StructEvent) SetRequest(request *http.Request) {
-	e.Request = request
+func (e *StructEvent) SetExtra(extra interface{}) {
+	e.Extra = extra
 }
 
 func (e *StructEvent) SetResponse(response *http.Response) {

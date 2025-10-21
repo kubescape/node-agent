@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/syscalls"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
 type DNSPktType string
@@ -23,14 +25,19 @@ const (
 type DatasourceEvent struct {
 	Data       datasource.Data
 	Datasource datasource.DataSource
+	Direction  consts.NetworkDirection
 	EventType  EventType
 	extra      interface{}
+	Internal   bool
+	Request    *http.Request
+	Response   *http.Response
 	Syscall    string
 }
 
 var _ CapabilitiesEvent = (*DatasourceEvent)(nil)
 var _ DNSEvent = (*DatasourceEvent)(nil)
 var _ ExecEvent = (*DatasourceEvent)(nil)
+var _ HttpEvent = (*DatasourceEvent)(nil)
 var _ HttpRawEvent = (*DatasourceEvent)(nil)
 var _ IOUring = (*DatasourceEvent)(nil)
 var _ LinkEvent = (*DatasourceEvent)(nil)
@@ -128,6 +135,10 @@ func (e *DatasourceEvent) GetCwd() string {
 		logger.L().Warning("GetCwd not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+}
+
+func (e *DatasourceEvent) GetDirection() consts.NetworkDirection {
+	return e.Direction
 }
 
 func (e *DatasourceEvent) GetDNSName() string {
@@ -287,6 +298,10 @@ func (e *DatasourceEvent) GetIdentifier() string {
 	}
 }
 
+func (e *DatasourceEvent) GetInternal() bool {
+	return e.Internal
+}
+
 func (e *DatasourceEvent) GetNamespace() string {
 	namespace, _ := e.Datasource.GetField("k8s.namespace").String(e.Data)
 	return namespace
@@ -437,6 +452,14 @@ func (e *DatasourceEvent) GetQr() DNSPktType {
 	}
 }
 
+func (e *DatasourceEvent) GetRequest() *http.Request {
+	return e.Request
+}
+
+func (e *DatasourceEvent) GetResponse() *http.Response {
+	return e.Response
+}
+
 func (e *DatasourceEvent) GetSignal() uint32 {
 	switch e.EventType {
 	case ExitEventType:
@@ -572,6 +595,18 @@ func (e *DatasourceEvent) IsDir() bool {
 	}
 }
 
+func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, internal bool) HttpEvent {
+	event := *e
+	event.Request = request
+	event.Direction = direction
+	event.Internal = internal
+	return &event
+}
+
 func (e *DatasourceEvent) SetExtra(extra interface{}) {
 	e.extra = extra
+}
+
+func (e *DatasourceEvent) SetResponse(response *http.Response) {
+	e.Response = response
 }

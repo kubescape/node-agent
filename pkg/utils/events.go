@@ -88,9 +88,8 @@ type HttpEvent interface {
 	GetDirection() consts.NetworkDirection
 	GetInternal() bool
 	GetRequest() *http.Request
-	SetRequest(request *http.Request)
-	SetResponse(response *http.Response)
 	GetResponse() *http.Response
+	SetResponse(response *http.Response)
 }
 
 type HttpRawEvent interface {
@@ -100,6 +99,7 @@ type HttpRawEvent interface {
 	GetSockFd() uint32
 	GetSyscall() string
 	GetType() HTTPDataType
+	MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, internal bool) HttpEvent
 }
 
 type IOUring interface {
