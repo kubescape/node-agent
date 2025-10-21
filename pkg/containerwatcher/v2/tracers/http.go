@@ -1,9 +1,7 @@
 package tracers
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -144,15 +142,8 @@ func (ht *HTTPTracer) callback(event utils.HttpRawEvent) {
 	if grouped := ht.GroupEvents(event); grouped != nil {
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
-		if grouped.GetRequest() != nil && grouped.GetResponse() == nil {
+		if grouped.GetRequest() != nil {
 			logger.L().Info("Matthias - http request", helpers.String("Method", grouped.GetRequest().Method), helpers.String("URL", grouped.GetRequest().URL.String()))
-		}
-		// Safely read and log the request body without consuming it
-		if grouped.GetRequest() != nil && grouped.GetRequest().Body != nil {
-			bodyBytes, _ := io.ReadAll(grouped.GetRequest().Body)
-			_ = grouped.GetRequest().Body.Close()
-			grouped.GetRequest().Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-			logger.L().Info("Matthias - http request body", helpers.String("Body", string(bodyBytes)))
 		}
 		ht.eventCallback(grouped, containerID, processID)
 	}
@@ -160,17 +151,18 @@ func (ht *HTTPTracer) callback(event utils.HttpRawEvent) {
 
 func (ht *HTTPTracer) transmitOrphanRequests() {
 	for range ht.timeoutTicker.C {
+		logger.L().Info("Matthias - transmitOrphanRequests", helpers.String("timeoutDuration", ht.timeoutDuration.String()))
 		keys := ht.eventsMap.Keys()
+		logger.L().Info("Matthias - transmitOrphanRequests", helpers.Int("cacheSize", len(keys)))
 		for _, key := range keys {
+			logger.L().Info("Matthias - transmitOrphanRequests", helpers.String("key", key))
 			if event, ok := ht.eventsMap.Peek(key); ok {
+				logger.L().Info("Matthias - transmitOrphanRequests", helpers.Interface("event", event))
 				if time.Since(ToTime(event.GetTimestamp())) > ht.timeoutDuration {
 					containerID := event.GetContainerID()
 					processID := event.GetPID()
 					if event.GetRequest() != nil {
-						bodyBytes, _ := io.ReadAll(event.GetRequest().Body)
-						_ = event.GetRequest().Body.Close()
-						event.GetRequest().Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-						logger.L().Info("Matthias - http request body", helpers.String("Body", string(bodyBytes)))
+						logger.L().Info("Matthias - http request", helpers.String("Method", event.GetRequest().Method), helpers.String("URL", event.GetRequest().URL.String()))
 					}
 					ht.eventCallback(event, containerID, processID)
 					ht.eventsMap.Remove(key)

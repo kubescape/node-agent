@@ -223,7 +223,9 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
     bpf_probe_read_user(&dataevent->buf, min_size(total_size, MAX_DATAEVENT_BUFFER), (void *)packet->buf);
 
     // Use gadget_output_buf to copy the event to the map
-    gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent)); // TODO: check if this is correct
+    // gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent)); // TODO: check if this is correct
+    // gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
+    gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent));
 
     bpf_map_delete_elem(&buffer_packets, &id);
     return 0;

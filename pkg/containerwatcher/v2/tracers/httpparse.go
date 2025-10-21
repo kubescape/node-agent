@@ -40,7 +40,6 @@ var ConsistentHeaders = []string{
 }
 
 func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error) {
-	logger.L().Info("Matthias - CreateEventFromRequest", helpers.String("bpfEvent", string(bpfEvent.GetBuf())))
 	ip := make(net.IP, 4)
 
 	request, err := ParseHttpRequest(FromCString(bpfEvent.GetBuf()))
