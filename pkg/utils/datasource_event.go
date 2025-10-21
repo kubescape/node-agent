@@ -574,7 +574,7 @@ func (e *DatasourceEvent) GetUid() *uint32 {
 
 func (e *DatasourceEvent) GetUpperLayer() bool {
 	switch e.EventType {
-	case ExecveEventType:
+	case ExecveEventType, SymlinkEventType, HardlinkEventType, ExitEventType, RandomXEventType:
 		upperLayer, _ := e.Datasource.GetField("upper_layer").Bool(e.Data)
 		return upperLayer
 	default:
