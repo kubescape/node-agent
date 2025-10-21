@@ -386,15 +386,24 @@ func (e *DatasourceEvent) GetPcomm() string {
 }
 
 func (e *DatasourceEvent) GetPID() uint32 {
-	pid := e.Datasource.GetField("proc.pid")
-	if pid == nil {
-		return 0
+	switch e.EventType {
+	case SyscallEventType:
+		// FIXME this is a temporary workaround until the gadget has proc enrichment
+		containerPid, _ := e.Datasource.GetField("runtime.containerPid").Uint32(e.Data)
+		return containerPid
+	default:
+		pid := e.Datasource.GetField("proc.pid")
+		if pid == nil {
+			logger.L().Warning("GetPID - proc.pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
+		pidValue, err := pid.Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetPID cannot read proc.pid field in event", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
+		return pidValue
 	}
-	pidValue, err := pid.Uint32(e.Data)
-	if err != nil {
-		return 0
-	}
-	return pidValue
 }
 
 func (e *DatasourceEvent) GetPktType() string {
