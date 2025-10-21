@@ -11,8 +11,6 @@ import (
 	"time"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
@@ -44,13 +42,11 @@ func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error
 
 	request, err := ParseHttpRequest(FromCString(bpfEvent.GetBuf()))
 	if err != nil {
-		logger.L().Error("Matthias - ParseHttpRequest error", helpers.Error(err))
 		return nil, err
 	}
 
 	direction, err := GetPacketDirection(bpfEvent.GetSyscall())
 	if err != nil {
-		logger.L().Error("Matthias - GetPacketDirection error", helpers.Error(err))
 		return nil, err
 	}
 
@@ -110,13 +106,11 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 
 	req, err := http.ReadRequest(bufReader)
 	if err != nil {
-		logger.L().Error("Matthias - http.ReadRequest error", helpers.Error(err))
 		return fallbackReadRequest(data)
 	}
 
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		logger.L().Error("Matthias - io.ReadAll error", helpers.Error(err))
 		return nil, err
 	}
 
@@ -130,7 +124,6 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 	resp, err := readResponse(data, req)
 	if err != nil {
-		logger.L().Error("Matthias - readResponse error", helpers.Error(err))
 		return fallbackReadResponse(data, req)
 	}
 

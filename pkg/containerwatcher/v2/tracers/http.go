@@ -2,6 +2,7 @@ package tracers
 
 import (
 	"context"
+	"io"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -139,35 +140,41 @@ func (ht *HTTPTracer) eventOperator() operators.DataOperator {
 
 // callback handles events from the tracer
 func (ht *HTTPTracer) callback(event utils.HttpRawEvent) {
-	logger.L().Info("Matthias - callback called", helpers.Int("eventType", int(event.GetType())))
 	if grouped := ht.GroupEvents(event); grouped != nil {
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
-		logger.L().Info("Matthias - calling eventCallback", helpers.String("containerID", containerID), helpers.Int("processID", int(processID)))
 		if grouped.GetRequest() != nil {
+			// Print metadata and body of the request for debugging purposes
 			logger.L().Info("Matthias - http request", helpers.String("Method", grouped.GetRequest().Method), helpers.String("URL", grouped.GetRequest().URL.String()))
+
+			if grouped.GetRequest().Body != nil {
+				body, err := io.ReadAll(grouped.GetRequest().Body)
+				if err != nil {
+					logger.L().Error("Matthias - io.ReadAll error", helpers.Error(err))
+				}
+				logger.L().Info("Matthias - http request body", helpers.String("Body", string(body)))
+			} else {
+				logger.L().Info("Matthias - http request body is nil")
+			}
+
+			if grouped.GetResponse() != nil {
+				logger.L().Info("Matthias - http response", helpers.String("Status", grouped.GetResponse().Status))
+			} else {
+				logger.L().Info("Matthias - http response is nil")
+			}
 		}
 		ht.eventCallback(grouped, containerID, processID)
-	} else {
-		logger.L().Info("Matthias - GroupEvents returned nil, not calling eventCallback")
 	}
 }
 
 func (ht *HTTPTracer) transmitOrphanRequests() {
 	for range ht.timeoutTicker.C {
-		logger.L().Info("Matthias - transmitOrphanRequests", helpers.String("timeoutDuration", ht.timeoutDuration.String()))
 		keys := ht.eventsMap.Keys()
-		logger.L().Info("Matthias - transmitOrphanRequests", helpers.Int("cacheSize", len(keys)))
 		for _, key := range keys {
-			logger.L().Info("Matthias - transmitOrphanRequests", helpers.String("key", key))
 			if event, ok := ht.eventsMap.Peek(key); ok {
-				logger.L().Info("Matthias - transmitOrphanRequests", helpers.Interface("event", event))
 				if time.Since(ToTime(event.GetTimestamp())) > ht.timeoutDuration {
 					containerID := event.GetContainerID()
 					processID := event.GetPID()
-					if event.GetRequest() != nil {
-						logger.L().Info("Matthias - http request", helpers.String("Method", event.GetRequest().Method), helpers.String("URL", event.GetRequest().URL.String()))
-					}
 					ht.eventCallback(event, containerID, processID)
 					ht.eventsMap.Remove(key)
 				}
@@ -180,32 +187,22 @@ func (ht *HTTPTracer) GroupEvents(bpfEvent utils.HttpRawEvent) utils.HttpEvent {
 	id := GetUniqueIdentifier(bpfEvent)
 	switch bpfEvent.GetType() {
 	case utils.Request:
-		logger.L().Info("Matthias - http request event", helpers.String("id", id))
 		event, err := CreateEventFromRequest(bpfEvent)
 		if err != nil {
-			logger.L().Error("Matthias - CreateEventFromRequest error", helpers.Error(err))
 			return nil
 		}
 		ht.eventsMap.Add(id, event)
-		logger.L().Info("Matthias - request added to cache", helpers.String("id", id), helpers.Int("cacheSize", ht.eventsMap.Len()))
 	case utils.Response:
-		logger.L().Info("Matthias - http response event", helpers.String("id", id))
 		if exists, ok := ht.eventsMap.Get(id); ok {
-			logger.L().Info("Matthias - found matching request", helpers.String("id", id))
 			grouped := exists
 			response, err := ParseHttpResponse(FromCString(bpfEvent.GetBuf()), grouped.GetRequest())
 			if err != nil {
-				logger.L().Error("Matthias - ParseHttpResponse error", helpers.Error(err))
 				return nil
 			}
 
-			grouped.SetRequest(grouped.GetRequest())
 			grouped.SetResponse(response)
 			ht.eventsMap.Remove(id)
-			logger.L().Info("Matthias - response matched, returning grouped event", helpers.String("id", id))
 			return grouped
-		} else {
-			logger.L().Info("Matthias - no matching request found for response", helpers.String("id", id), helpers.Int("cacheSize", ht.eventsMap.Len()))
 		}
 	}
 	return nil
