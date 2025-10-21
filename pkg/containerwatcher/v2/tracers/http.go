@@ -146,8 +146,6 @@ func (ht *HTTPTracer) callback(event utils.HttpRawEvent) {
 		processID := event.GetPID()
 		if grouped.GetRequest() != nil && grouped.GetResponse() == nil {
 			logger.L().Info("Matthias - http request", helpers.String("Method", grouped.GetRequest().Method), helpers.String("URL", grouped.GetRequest().URL.String()))
-		} else {
-			logger.L().Info("Matthias - http request is nil")
 		}
 		// Safely read and log the request body without consuming it
 		if grouped.GetRequest() != nil && grouped.GetRequest().Body != nil {
@@ -155,8 +153,6 @@ func (ht *HTTPTracer) callback(event utils.HttpRawEvent) {
 			_ = grouped.GetRequest().Body.Close()
 			grouped.GetRequest().Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 			logger.L().Info("Matthias - http request body", helpers.String("Body", string(bodyBytes)))
-		} else {
-			logger.L().Info("Matthias - http request body is nil")
 		}
 		ht.eventCallback(grouped, containerID, processID)
 	}
@@ -170,6 +166,12 @@ func (ht *HTTPTracer) transmitOrphanRequests() {
 				if time.Since(ToTime(event.GetTimestamp())) > ht.timeoutDuration {
 					containerID := event.GetContainerID()
 					processID := event.GetPID()
+					if event.GetRequest() != nil {
+						bodyBytes, _ := io.ReadAll(event.GetRequest().Body)
+						_ = event.GetRequest().Body.Close()
+						event.GetRequest().Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+						logger.L().Info("Matthias - http request body", helpers.String("Body", string(bodyBytes)))
+					}
 					ht.eventCallback(event, containerID, processID)
 					ht.eventsMap.Remove(key)
 				}
@@ -185,6 +187,7 @@ func (ht *HTTPTracer) GroupEvents(bpfEvent utils.HttpRawEvent) utils.HttpEvent {
 		logger.L().Info("Matthias - http request event", helpers.String("id", id))
 		event, err := CreateEventFromRequest(bpfEvent)
 		if err != nil {
+			logger.L().Error("Matthias - CreateEventFromRequest error", helpers.Error(err))
 			return nil
 		}
 		ht.eventsMap.Add(id, event)
