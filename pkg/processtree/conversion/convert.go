@@ -15,7 +15,7 @@ func ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent
 	case utils.ForkEventType:
 		return convertForkEvent(event.(utils.ForkEvent)), nil
 	case utils.ExitEventType:
-		return convertExitEvent(event.(utils.EnrichEvent)), nil
+		return convertExitEvent(event.(utils.ExitEvent)), nil
 	case utils.ProcfsEventType:
 		return convertProcfsEvent(event.(*events.ProcfsEvent)), nil
 	default:
@@ -94,7 +94,7 @@ func convertForkEvent(forkEvent utils.ForkEvent) ProcessEvent {
 }
 
 // convertExitEvent converts an ExitEvent to ProcessEvent
-func convertExitEvent(exitEvent utils.EnrichEvent) ProcessEvent {
+func convertExitEvent(exitEvent utils.ExitEvent) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ExitEvent,
 		Timestamp:   time.Now(),
