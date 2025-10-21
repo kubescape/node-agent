@@ -184,6 +184,8 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
         return 0;
     }
 
+    __builtin_memset(dataevent, 0, sizeof(*dataevent));
+
     // Populate event with socket inode for tracking
     populate_httpevent(dataevent, packet->sockfd);
     
@@ -266,6 +268,8 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
                 return 0;
             }
 
+            __builtin_memset(dataevent, 0, sizeof(*dataevent));
+
             // Populate event with socket inode for tracking
             populate_httpevent(dataevent, msg->fd);
             
@@ -276,7 +280,7 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
             if (copy_len > MAX_DATAEVENT_BUFFER)
                 copy_len = MAX_DATAEVENT_BUFFER;
 
-            bpf_probe_read(&dataevent->buf, copy_len, iov.iov_base);
+            bpf_probe_read_user(&dataevent->buf, copy_len, iov.iov_base);
             bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
             gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
             break;

@@ -1,7 +1,9 @@
 package tracers
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -142,6 +144,20 @@ func (ht *HTTPTracer) callback(event utils.HttpRawEvent) {
 	if grouped := ht.GroupEvents(event); grouped != nil {
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
+		if grouped.GetRequest() != nil && grouped.GetResponse() == nil {
+			logger.L().Info("Matthias - http request", helpers.String("Method", grouped.GetRequest().Method), helpers.String("URL", grouped.GetRequest().URL.String()))
+		} else {
+			logger.L().Info("Matthias - http request is nil")
+		}
+		// Safely read and log the request body without consuming it
+		if grouped.GetRequest() != nil && grouped.GetRequest().Body != nil {
+			bodyBytes, _ := io.ReadAll(grouped.GetRequest().Body)
+			_ = grouped.GetRequest().Body.Close()
+			grouped.GetRequest().Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			logger.L().Info("Matthias - http request body", helpers.String("Body", string(bodyBytes)))
+		} else {
+			logger.L().Info("Matthias - http request body is nil")
+		}
 		ht.eventCallback(grouped, containerID, processID)
 	}
 }
@@ -166,6 +182,7 @@ func (ht *HTTPTracer) GroupEvents(bpfEvent utils.HttpRawEvent) utils.HttpEvent {
 	id := GetUniqueIdentifier(bpfEvent)
 	switch bpfEvent.GetType() {
 	case utils.Request:
+		logger.L().Info("Matthias - http request event", helpers.String("id", id))
 		event, err := CreateEventFromRequest(bpfEvent)
 		if err != nil {
 			return nil
