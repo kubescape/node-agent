@@ -21,6 +21,7 @@ func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 		return
 	}
 
+	comm := syscallEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = syscallEvent.GetPID()
 	baseRuntimeAlert.Arguments = map[string]interface{}{
@@ -28,7 +29,7 @@ func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			//Name: syscallEvent.GetComm(),
+			Name: comm,
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
@@ -36,7 +37,7 @@ func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	// FIXME: find a tracer that provides these required details
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			//Comm: syscallEvent.GetComm(),
+			Comm: comm,
 			//Gid:  syscallEvent.GetGid(),
 			PID: syscallEvent.GetPID(),
 			//Uid: syscallEvent.GetUid(),

@@ -93,17 +93,23 @@ func (e *DatasourceEvent) GetCapability() string {
 }
 
 func (e *DatasourceEvent) GetComm() string {
-	comm := e.Datasource.GetField("proc.comm") // TODO check EventType here
-	if comm == nil {
-		logger.L().Warning("GetComm - proc.comm field not found in event type", helpers.String("eventType", string(e.EventType)))
-		return ""
+	switch e.EventType {
+	case SyscallEventType:
+		// FIXME this is a temporary workaround until the gadget has proc enrichment
+		return e.GetContainer()
+	default:
+		comm := e.Datasource.GetField("proc.comm")
+		if comm == nil {
+			logger.L().Warning("GetComm - proc.comm field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
+		commValue, err := comm.String(e.Data)
+		if err != nil {
+			logger.L().Warning("GetComm - cannot read proc.comm field in event", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
+		return commValue
 	}
-	commValue, err := comm.String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetComm - cannot read proc.comm field in event", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
-	return commValue
 }
 
 func (e *DatasourceEvent) GetParentPid() uint32 {
