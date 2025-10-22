@@ -75,6 +75,8 @@ type StructEvent struct {
 var _ CapabilitiesEvent = (*StructEvent)(nil)
 var _ DNSEvent = (*StructEvent)(nil)
 var _ ExecEvent = (*StructEvent)(nil)
+var _ ExitEvent = (*StructEvent)(nil)
+var _ ForkEvent = (*StructEvent)(nil)
 var _ HttpEvent = (*StructEvent)(nil)
 var _ HttpRawEvent = (*StructEvent)(nil)
 var _ IOUring = (*StructEvent)(nil)
@@ -83,10 +85,6 @@ var _ NetworkEvent = (*StructEvent)(nil)
 var _ OpenEvent = (*StructEvent)(nil)
 var _ SshEvent = (*StructEvent)(nil)
 var _ SyscallEvent = (*StructEvent)(nil)
-
-// TODO: do we need to implement these events?
-// var _ ExitEvent = (*StructEvent)(nil)
-// var _ ForkEvent = (*StructEvent)(nil)
 
 func (e *StructEvent) GetAddresses() []string {
 	switch e.EventType {
@@ -128,6 +126,16 @@ func (e *StructEvent) GetCapability() string {
 	}
 }
 
+func (e *StructEvent) GetChildPid() uint32 {
+	switch e.EventType {
+	case ForkEventType:
+		return e.Pid
+	default:
+		logger.L().Warning("GetChildPid not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+}
+
 func (e *StructEvent) GetComm() string {
 	return e.Comm
 }
@@ -150,7 +158,7 @@ func (e *StructEvent) GetContainerImageDigest() string {
 
 func (e *StructEvent) GetCwd() string {
 	switch e.EventType {
-	case ExecveEventType:
+	case ExecveEventType, DnsEventType:
 		return e.Cwd
 	default:
 		logger.L().Warning("GetCwd not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -196,7 +204,7 @@ func (e *StructEvent) GetDstPort() uint16 {
 	switch e.EventType {
 	case NetworkEventType:
 		return e.DstPort
-	case SSHEventType:
+	case SSHEventType, DnsEventType:
 		return e.DstPort
 	default:
 		logger.L().Warning("GetDstPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -324,6 +332,16 @@ func (e *StructEvent) GetOpcode() int {
 		return e.Opcode
 	default:
 		logger.L().Warning("GetOpcode not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+}
+
+func (e *StructEvent) GetParentPid() uint32 {
+	switch e.EventType {
+	case ForkEventType:
+		return e.Ppid
+	default:
+		logger.L().Warning("GetParentPid not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -471,16 +489,6 @@ func (e *StructEvent) GetSyscall() string {
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		panic("GetSyscall not implemented for this event type")
-	}
-}
-
-func (e *StructEvent) GetSyscalls() []string {
-	switch e.EventType {
-	case SyscallEventType:
-		return []string{e.Syscall}
-	default:
-		logger.L().Warning("GetSyscalls not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return nil
 	}
 }
 

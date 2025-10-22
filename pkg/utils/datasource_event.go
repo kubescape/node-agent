@@ -37,6 +37,8 @@ type DatasourceEvent struct {
 var _ CapabilitiesEvent = (*DatasourceEvent)(nil)
 var _ DNSEvent = (*DatasourceEvent)(nil)
 var _ ExecEvent = (*DatasourceEvent)(nil)
+var _ ExitEvent = (*DatasourceEvent)(nil)
+var _ ForkEvent = (*DatasourceEvent)(nil)
 var _ HttpEvent = (*DatasourceEvent)(nil)
 var _ HttpRawEvent = (*DatasourceEvent)(nil)
 var _ IOUring = (*DatasourceEvent)(nil)
@@ -45,8 +47,6 @@ var _ NetworkEvent = (*DatasourceEvent)(nil)
 var _ OpenEvent = (*DatasourceEvent)(nil)
 var _ SshEvent = (*DatasourceEvent)(nil)
 var _ SyscallEvent = (*DatasourceEvent)(nil)
-var _ ExitEvent = (*DatasourceEvent)(nil)
-var _ ForkEvent = (*DatasourceEvent)(nil)
 
 func (e *DatasourceEvent) GetAddresses() []string {
 	switch e.EventType {
@@ -92,6 +92,17 @@ func (e *DatasourceEvent) GetCapability() string {
 	}
 }
 
+func (e *DatasourceEvent) GetChildPid() uint32 {
+	switch e.EventType {
+	case ForkEventType:
+		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
+		return childPid
+	default:
+		logger.L().Warning("GetChildPid not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+}
+
 func (e *DatasourceEvent) GetComm() string {
 	switch e.EventType {
 	case SyscallEventType:
@@ -112,24 +123,6 @@ func (e *DatasourceEvent) GetComm() string {
 		}
 		return commValue
 	}
-}
-
-func (e *DatasourceEvent) GetParentPid() uint32 {
-	switch e.EventType {
-	case ForkEventType:
-		parentPid, _ := e.Datasource.GetField("parent_pid").Uint32(e.Data)
-		return parentPid
-	}
-	return 0
-}
-
-func (e *DatasourceEvent) GetChildPid() uint32 {
-	switch e.EventType {
-	case ForkEventType:
-		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
-		return childPid
-	}
-	return 0
 }
 
 func (e *DatasourceEvent) GetContainer() string {
@@ -377,6 +370,17 @@ func (e *DatasourceEvent) GetOpcode() int {
 	}
 }
 
+func (e *DatasourceEvent) GetParentPid() uint32 {
+	switch e.EventType {
+	case ForkEventType:
+		parentPid, _ := e.Datasource.GetField("parent_pid").Uint32(e.Data)
+		return parentPid
+	default:
+		logger.L().Warning("GetParentPid not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+}
+
 func (e *DatasourceEvent) GetPath() string {
 	switch e.EventType {
 	case OpenEventType:
@@ -395,6 +399,9 @@ func (e *DatasourceEvent) GetPcomm() string {
 
 func (e *DatasourceEvent) GetPID() uint32 {
 	switch e.EventType {
+	case ForkEventType:
+		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
+		return childPid
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		containerPid, _ := e.Datasource.GetField("runtime.containerPid").Uint32(e.Data)
@@ -445,8 +452,14 @@ func (e *DatasourceEvent) GetPodLabels() map[string]string {
 }
 
 func (e *DatasourceEvent) GetPpid() uint32 {
-	ppid, _ := e.Datasource.GetField("proc.parent.pid").Uint32(e.Data)
-	return ppid
+	switch e.EventType {
+	case ForkEventType:
+		parentPid, _ := e.Datasource.GetField("parent_pid").Uint32(e.Data)
+		return parentPid
+	default:
+		ppid, _ := e.Datasource.GetField("proc.parent.pid").Uint32(e.Data)
+		return ppid
+	}
 }
 
 func (e *DatasourceEvent) GetProto() string {
