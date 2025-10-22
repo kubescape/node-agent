@@ -300,7 +300,7 @@ func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEven
 		return false
 	}
 
-	allowed, err := rm.rulePolicyValidator.Validate(rule.ID, utils.GetCommFromEvent(event), &ap)
+	allowed, err := rm.rulePolicyValidator.Validate(rule.ID, event.(utils.EnrichEvent).GetComm(), &ap)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to validate rule policy", helpers.Error(err))
 		return false
