@@ -126,17 +126,19 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
 	var profileExists bool
-	podId := utils.CreateK8sPodID(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
+	namespace := enrichedEvent.Event.GetNamespace()
+	pod := enrichedEvent.Event.GetPod()
+	podId := utils.CreateK8sPodID(namespace, pod)
 	details, ok := rm.podToWlid.Load(podId)
 	if !ok {
 		return
 	}
 
-	if enrichedEvent.Event.GetPod() == "" || enrichedEvent.Event.GetNamespace() == "" {
+	if pod == "" || namespace == "" {
 		return
 	}
 
-	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
+	rules := rm.ruleBindingCache.ListRulesForPod(namespace, pod)
 	if len(rules) == 0 {
 		return
 	}

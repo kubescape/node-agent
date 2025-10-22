@@ -645,11 +645,14 @@ func (e *DatasourceEvent) IsDir() bool {
 }
 
 func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, internal bool) HttpEvent {
-	event := *e
-	event.Request = request
-	event.Direction = direction
-	event.Internal = internal
-	return &event
+	return &DatasourceEvent{
+		Data:       e.Data,
+		Datasource: e.Datasource,
+		Direction:  direction,
+		EventType:  e.EventType,
+		Internal:   internal,
+		Request:    request,
+	}
 }
 
 func (e *DatasourceEvent) SetExtra(extra interface{}) {
