@@ -24,11 +24,4 @@ func enrichEvent(thirdPartyEnricher containerwatcher.TaskBasedEnricher, event ut
 	} else {
 		callback(event, containerID, processID)
 	}
-
 }
-
-// func isDroppedEvent(eventType types.EventType, message string) bool {
-// 	return eventType != types.NORMAL &&
-// 		eventType != types.DEBUG &&
-// 		strings.Contains(message, "stop tracing container")
-// } // TODO: remove this function if not needed
