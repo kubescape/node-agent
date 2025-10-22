@@ -96,7 +96,9 @@ func (e *DatasourceEvent) GetComm() string {
 	switch e.EventType {
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
-		return e.GetContainer()
+		container := e.GetContainer()
+		logger.L().Info("Matthias - GetComm using GetContainer for SyscallEventType", helpers.String("container", container))
+		return container
 	default:
 		comm := e.Datasource.GetField("proc.comm")
 		if comm == nil {
@@ -396,6 +398,7 @@ func (e *DatasourceEvent) GetPID() uint32 {
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		containerPid, _ := e.Datasource.GetField("runtime.containerPid").Uint32(e.Data)
+		logger.L().Info("Matthias - GetPID using runtime.containerPid for SyscallEventType", helpers.Int("containerPid", int(containerPid)))
 		return containerPid
 	default:
 		pid := e.Datasource.GetField("proc.pid")
