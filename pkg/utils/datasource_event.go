@@ -106,6 +106,24 @@ func (e *DatasourceEvent) GetComm() string {
 	return commValue
 }
 
+func (e *DatasourceEvent) GetParentPid() uint32 {
+	switch e.EventType {
+	case ForkEventType:
+		parentPid, _ := e.Datasource.GetField("parent_pid").Uint32(e.Data)
+		return parentPid
+	}
+	return 0
+}
+
+func (e *DatasourceEvent) GetChildPid() uint32 {
+	switch e.EventType {
+	case ForkEventType:
+		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
+		return childPid
+	}
+	return 0
+}
+
 func (e *DatasourceEvent) GetContainer() string {
 	containerName, _ := e.Datasource.GetField("k8s.containerName").String(e.Data)
 	return containerName

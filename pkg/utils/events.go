@@ -75,6 +75,8 @@ type ExecEvent interface {
 type ForkEvent interface {
 	EnrichEvent
 	GetExePath() string
+	GetParentPid() uint32
+	GetChildPid() uint32
 }
 
 type ExitEvent interface {

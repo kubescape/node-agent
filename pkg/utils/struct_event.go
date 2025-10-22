@@ -83,8 +83,10 @@ var _ NetworkEvent = (*StructEvent)(nil)
 var _ OpenEvent = (*StructEvent)(nil)
 var _ SshEvent = (*StructEvent)(nil)
 var _ SyscallEvent = (*StructEvent)(nil)
-var _ ExitEvent = (*StructEvent)(nil)
-var _ ForkEvent = (*StructEvent)(nil)
+
+// TODO: do we need to implement these events?
+// var _ ExitEvent = (*StructEvent)(nil)
+// var _ ForkEvent = (*StructEvent)(nil)
 
 func (e *StructEvent) GetAddresses() []string {
 	switch e.EventType {
