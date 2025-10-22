@@ -617,18 +617,18 @@ func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, contai
 	return nil, fmt.Errorf("container '%s' not found", containerName)
 }
 
-func PrintNodeAgentLogs(t *testing.T) {
+func PrintAppLogs(t *testing.T, app string) {
 	k8sClient := k8sinterface.NewKubernetesApi()
-	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": "node-agent"}}
+	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": app}}
 	pods, err := k8sClient.KubernetesClient.CoreV1().Pods("kubescape").List(context.TODO(), metav1.ListOptions{
 		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
 	})
 	if err != nil {
-		t.Errorf("error getting node-agent pods: %v", err)
+		t.Errorf("error getting %s pods: %v", app, err)
 		return
 	}
 	if len(pods.Items) == 0 {
-		t.Error("no node-agent pods found")
+		t.Errorf("no %s pods found", app)
 		return
 	}
 
@@ -644,7 +644,7 @@ func PrintNodeAgentLogs(t *testing.T) {
 			VersionedParams(&v1.PodLogOptions{
 				Follow:    false,
 				Previous:  false,
-				Container: "node-agent",
+				Container: app,
 			}, scheme.ParameterCodec)
 
 		readCloser, err := request.Stream(context.TODO())
