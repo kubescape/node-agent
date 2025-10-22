@@ -125,7 +125,7 @@ func (ft *ForkTracer) callback(event utils.ForkEvent) {
 	if ft.eventCallback != nil {
 		// Extract container ID and process ID from the fork event
 		containerID := event.GetContainerID()
-		processID := event.GetPID()
+		processID := event.GetChildPid()
 
 		ft.eventCallback(event, containerID, processID)
 	}
