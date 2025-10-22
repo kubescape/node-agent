@@ -28,7 +28,7 @@ spec:
           - "exec"
           - "applicationprofile"
       - name: "Files Access Anomalies in container"
-        enabled: false
+        enabled: true
         id: "R0002"
         description: "Detects unexpected file access that is not in the baseline"
         expressions:
@@ -124,7 +124,7 @@ spec:
           ruleExpression:
             - eventType: "open"
               expression: >
-                ((event.path.startsWith('/run/secrets/kubernetes.io/serviceaccount') && event.path.endsWith('/token')) || 
+                ((event.path.startsWith('/run/secrets/kubernetes.io/serviceaccount') && event.path.endsWith('/token')) ||
                  (event.path.startsWith('/var/run/secrets/kubernetes.io/serviceaccount') && event.path.endsWith('/token')) ||
                  (event.path.startsWith('/run/secrets/eks.amazonaws.com/serviceaccount') && event.path.endsWith('/token')) ||
                  (event.path.startsWith('/var/run/secrets/eks.amazonaws.com/serviceaccount') && event.path.endsWith('/token'))) &&
@@ -169,7 +169,7 @@ spec:
           ruleExpression:
             - eventType: "open"
               expression: >
-                event.path.startsWith('/proc/') && 
+                event.path.startsWith('/proc/') &&
                 event.path.endsWith('/environ') &&
                 !ap.was_path_opened_with_suffix(event.containerId, '/environ')
         profileDependency: 0 # Required
@@ -215,7 +215,7 @@ spec:
           - "anomaly"
           - "applicationprofile"
       - name: "Unexpected Egress Network Traffic"
-        enabled: false
+        enabled: true
         id: "R0011"
         description: "Detecting unexpected egress network traffic that is not whitelisted by application profile."
         expressions:
@@ -243,7 +243,7 @@ spec:
             - eventType: "exec"
               expression: >
                 (event.exepath == '/dev/shm' || event.exepath.startsWith('/dev/shm/')) ||
-                (event.cwd == '/dev/shm' || event.cwd.startsWith('/dev/shm/') || 
+                (event.cwd == '/dev/shm' || event.cwd.startsWith('/dev/shm/') ||
                 (parse.get_exec_path(event.args, event.comm).startsWith('/dev/shm/')))
         profileDependency: 2
         severity: 8
@@ -295,7 +295,7 @@ spec:
           - "module"
           - "load"
       - name: "Disallowed ssh connection"
-        enabled: false
+        enabled: true
         id: "R1003"
         description: "Detecting ssh connection to disallowed port"
         expressions:
@@ -439,7 +439,7 @@ spec:
           - "symlink"
           - "applicationprofile"
       - name: "ld_preload hooks technique detected"
-        enabled: false
+        enabled: true
         id: "R1011"
         description: "Detecting ld_preload hook techniques."
         expressions:

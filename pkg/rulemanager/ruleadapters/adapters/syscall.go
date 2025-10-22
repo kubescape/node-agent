@@ -28,17 +28,18 @@ func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: syscallEvent.GetComm(),
+			//Name: syscallEvent.GetComm(),
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
+	// FIXME: find a tracer that provides these required details
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm: syscallEvent.GetComm(),
-			Gid:  syscallEvent.GetGid(),
-			PID:  syscallEvent.GetPID(),
-			Uid:  syscallEvent.GetUid(),
+			//Comm: syscallEvent.GetComm(),
+			//Gid:  syscallEvent.GetGid(),
+			PID: syscallEvent.GetPID(),
+			//Uid: syscallEvent.GetUid(),
 		},
 		ContainerID: syscallEvent.GetContainerID(),
 	}
