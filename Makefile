@@ -4,12 +4,15 @@ BINARY_NAME=node-agent
 IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 GADGETS=advise_seccomp trace_capabilities trace_dns trace_exec trace_open
 VERSION=:v0.45.0
-KUBESCAPE_GADGETS=exit fork hardlink http iouring_new iouring_old network ptrace randomx ssh symlink
+KUBESCAPE_GADGETS=exit fork hardlink http iouring_new iouring_old network ptrace randomx ssh symlink kmod unshare bpf
 TAG?=test
 # TAG?=v0.0.1
 
 binary:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) ./cmd/main.go
+
+docker-build-only:
+	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
 
 docker-build: gadgets
 	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
