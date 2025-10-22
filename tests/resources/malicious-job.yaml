@@ -8,7 +8,7 @@ spec:
   template:
     metadata:
       labels:
-        app: malicious-app
+        app: node-agent
     spec:
       hostIPC: true  # This enables IPC host mode (equivalent to --ipc="host")
       containers:

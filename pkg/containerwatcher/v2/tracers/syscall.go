@@ -133,6 +133,7 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	syscallsBuffer, _ := event.Datasource.GetField("syscalls").Bytes(event.Data)
 	for _, syscall := range decodeSyscalls(syscallsBuffer) {
 		event.Syscall = syscall
+		logger.L().Info("Matthias - eventCallback for syscall", helpers.String("syscall", syscall), helpers.String("containerID", containerID), helpers.Int("pid", int(processID)))
 		st.eventCallback(event, containerID, processID)
 	}
 }
