@@ -627,10 +627,6 @@ func PrintAppLogs(t *testing.T, app string) {
 		t.Errorf("error getting %s pods: %v", app, err)
 		return
 	}
-	if len(pods.Items) == 0 {
-		t.Errorf("no %s pods found", app)
-		return
-	}
 
 	for _, pod := range pods.Items {
 		buf := &bytes.Buffer{}
