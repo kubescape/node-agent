@@ -43,7 +43,8 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 	_, err = testutils.PlotNodeAgentPrometheusMemoryUsage(t.Name(), startTime, end)
 	require.NoError(t, err, "Error plotting memory usage")
 
-	testutils.PrintNodeAgentLogs(t)
+	testutils.PrintAppLogs(t, "node-agent")
+	testutils.PrintAppLogs(t, "malicious-app")
 }
 
 func Test_01_BasicAlertTest(t *testing.T) {
