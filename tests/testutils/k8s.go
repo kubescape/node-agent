@@ -620,7 +620,7 @@ func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, contai
 func PrintAppLogs(t *testing.T, app string) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": app}}
-	pods, err := k8sClient.KubernetesClient.CoreV1().Pods("kubescape").List(context.TODO(), metav1.ListOptions{
+	pods, err := k8sClient.KubernetesClient.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
 		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
 	})
 	if err != nil {
