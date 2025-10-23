@@ -1506,6 +1506,9 @@ func Test_23_RuleCooldownTest(t *testing.T) {
 }
 
 func Test_24_ProcessTreeDepthTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
 	ns := testutils.NewRandomNamespace()
 
 	endpointTraffic, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/tree.yaml"))
