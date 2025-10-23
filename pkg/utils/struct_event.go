@@ -240,7 +240,7 @@ func (e *StructEvent) GetEventType() EventType {
 
 func (e *StructEvent) GetExePath() string {
 	switch e.EventType {
-	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType:
+	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
 		return e.ExePath
 	default:
 		logger.L().Warning("GetExePath not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -284,7 +284,7 @@ func (e *StructEvent) GetFlagsRaw() uint32 {
 
 func (e *StructEvent) GetGid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType:
+	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
 		return &e.Gid
 	default:
 		logger.L().Warning("GetGid not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -533,7 +533,7 @@ func (e *StructEvent) GetType() HTTPDataType {
 
 func (e *StructEvent) GetUid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType:
+	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
 		return &e.Uid
 	default:
 		logger.L().Warning("GetUid not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -543,7 +543,7 @@ func (e *StructEvent) GetUid() *uint32 {
 
 func (e *StructEvent) GetUpperLayer() bool {
 	switch e.EventType {
-	case ExecveEventType:
+	case ExecveEventType, SymlinkEventType, HardlinkEventType, ExitEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
 		return e.UpperLayer
 	default:
 		logger.L().Warning("GetUpperLayer not implemented for event type", helpers.String("eventType", string(e.EventType)))

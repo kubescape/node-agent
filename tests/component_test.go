@@ -45,6 +45,8 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 
 	testutils.PrintAppLogs(t, "node-agent")
 	testutils.PrintAppLogs(t, "malicious-app")
+	testutils.PrintAppLogs(t, "endpoint-traffic")
+	testutils.PrintAppLogs(t, "process-tree")
 }
 
 func Test_01_BasicAlertTest(t *testing.T) {
@@ -130,7 +132,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	// Wait for the alerts to be generated
-	time.Sleep(1 * time.Minute)
+	time.Sleep(2 * time.Minute)
 
 	// Get all the alerts for the namespace
 	alerts, err := testutils.GetAlerts(wl.Namespace)
