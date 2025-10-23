@@ -75,6 +75,7 @@ type StructEvent struct {
 	AttrSize             uint32                  `json:"attrSize,omitempty" yaml:"attrSize,omitempty"`
 }
 
+var _ BpfEvent = (*StructEvent)(nil)
 var _ CapabilitiesEvent = (*StructEvent)(nil)
 var _ DNSEvent = (*StructEvent)(nil)
 var _ ExecEvent = (*StructEvent)(nil)
@@ -83,22 +84,13 @@ var _ ForkEvent = (*StructEvent)(nil)
 var _ HttpEvent = (*StructEvent)(nil)
 var _ HttpRawEvent = (*StructEvent)(nil)
 var _ IOUring = (*StructEvent)(nil)
+var _ KmodEvent = (*StructEvent)(nil)
 var _ LinkEvent = (*StructEvent)(nil)
 var _ NetworkEvent = (*StructEvent)(nil)
 var _ OpenEvent = (*StructEvent)(nil)
 var _ SshEvent = (*StructEvent)(nil)
 var _ SyscallEvent = (*StructEvent)(nil)
-var _ KmodEvent = (*StructEvent)(nil)
 var _ UnshareEvent = (*StructEvent)(nil)
-var _ BpfEvent = (*StructEvent)(nil)
-
-func (e *StructEvent) GetModule() string {
-	return e.Module
-}
-
-func (e *StructEvent) GetCmd() uint32 {
-	return e.Cmd
-}
 
 func (e *StructEvent) GetAttrSize() uint32 {
 	return e.AttrSize
@@ -144,18 +136,23 @@ func (e *StructEvent) GetCapability() string {
 	}
 }
 
-func (e *StructEvent) GetChildPid() uint32 {
+func (e *StructEvent) GetCmd() uint32 {
 	switch e.EventType {
-	case ForkEventType:
-		return e.Pid
+	case BpfEventType:
+		return e.Cmd
 	default:
-		logger.L().Warning("GetChildPid not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetCmd not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
 
 func (e *StructEvent) GetComm() string {
-	return e.Comm
+	switch e.EventType {
+	case SyscallEventType:
+		return e.Comm
+	default:
+		return e.Comm
+	}
 }
 
 func (e *StructEvent) GetContainer() string {
@@ -310,6 +307,15 @@ func (e *StructEvent) GetInternal() bool {
 	return e.Internal
 }
 
+func (e *StructEvent) GetModule() string {
+	switch e.EventType {
+	case KmodEventType:
+		return e.Module
+	default:
+		return e.Module
+	}
+}
+
 func (e *StructEvent) GetNamespace() string {
 	return e.Namespace
 }
@@ -354,16 +360,6 @@ func (e *StructEvent) GetOpcode() int {
 	}
 }
 
-func (e *StructEvent) GetParentPid() uint32 {
-	switch e.EventType {
-	case ForkEventType:
-		return e.Ppid
-	default:
-		logger.L().Warning("GetParentPid not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
-}
-
 func (e *StructEvent) GetPath() string {
 	switch e.EventType {
 	case OpenEventType:
@@ -379,7 +375,16 @@ func (e *StructEvent) GetPcomm() string {
 }
 
 func (e *StructEvent) GetPID() uint32 {
-	return e.Pid
+	switch e.EventType {
+	case ForkEventType:
+		return e.Pid
+	case ExitEventType:
+		return e.Pid
+	case SyscallEventType:
+		return e.Pid
+	default:
+		return e.Pid
+	}
 }
 
 func (e *StructEvent) GetPktType() string {
@@ -405,7 +410,14 @@ func (e *StructEvent) GetPodLabels() map[string]string {
 }
 
 func (e *StructEvent) GetPpid() uint32 {
-	return e.Ppid
+	switch e.EventType {
+	case ForkEventType:
+		return e.Ppid
+	case ExitEventType:
+		return e.Ppid
+	default:
+		return e.Ppid
+	}
 }
 
 func (e *StructEvent) GetProto() string {

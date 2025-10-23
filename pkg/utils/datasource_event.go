@@ -34,6 +34,7 @@ type DatasourceEvent struct {
 	Syscall    string
 }
 
+var _ BpfEvent = (*DatasourceEvent)(nil)
 var _ CapabilitiesEvent = (*DatasourceEvent)(nil)
 var _ DNSEvent = (*DatasourceEvent)(nil)
 var _ ExecEvent = (*DatasourceEvent)(nil)
@@ -42,36 +43,13 @@ var _ ForkEvent = (*DatasourceEvent)(nil)
 var _ HttpEvent = (*DatasourceEvent)(nil)
 var _ HttpRawEvent = (*DatasourceEvent)(nil)
 var _ IOUring = (*DatasourceEvent)(nil)
+var _ KmodEvent = (*DatasourceEvent)(nil)
 var _ LinkEvent = (*DatasourceEvent)(nil)
 var _ NetworkEvent = (*DatasourceEvent)(nil)
 var _ OpenEvent = (*DatasourceEvent)(nil)
 var _ SshEvent = (*DatasourceEvent)(nil)
 var _ SyscallEvent = (*DatasourceEvent)(nil)
-var _ KmodEvent = (*DatasourceEvent)(nil)
 var _ UnshareEvent = (*DatasourceEvent)(nil)
-var _ BpfEvent = (*DatasourceEvent)(nil)
-
-func (e *DatasourceEvent) GetModule() string {
-	switch e.EventType {
-	case KmodEventType:
-		module, _ := e.Datasource.GetField("module").String(e.Data)
-		return module
-	default:
-		logger.L().Warning("GetModule not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
-}
-
-func (e *DatasourceEvent) GetCmd() uint32 {
-	switch e.EventType {
-	case BpfEventType:
-		cmd, _ := e.Datasource.GetField("cmd").Uint32(e.Data)
-		return cmd
-	default:
-		logger.L().Warning("GetCmd not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
-}
 
 func (e *DatasourceEvent) GetAttrSize() uint32 {
 	switch e.EventType {
@@ -128,13 +106,13 @@ func (e *DatasourceEvent) GetCapability() string {
 	}
 }
 
-func (e *DatasourceEvent) GetChildPid() uint32 {
+func (e *DatasourceEvent) GetCmd() uint32 {
 	switch e.EventType {
-	case ForkEventType:
-		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
-		return childPid
+	case BpfEventType:
+		cmd, _ := e.Datasource.GetField("cmd").Uint32(e.Data)
+		return cmd
 	default:
-		logger.L().Warning("GetChildPid not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetCmd not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -356,6 +334,17 @@ func (e *DatasourceEvent) GetInternal() bool {
 	return e.Internal
 }
 
+func (e *DatasourceEvent) GetModule() string {
+	switch e.EventType {
+	case KmodEventType:
+		module, _ := e.Datasource.GetField("module").String(e.Data)
+		return module
+	default:
+		logger.L().Warning("GetModule not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+}
+
 func (e *DatasourceEvent) GetNamespace() string {
 	namespace, _ := e.Datasource.GetField("k8s.namespace").String(e.Data)
 	return namespace
@@ -401,17 +390,6 @@ func (e *DatasourceEvent) GetOpcode() int {
 		return int(opcode)
 	default:
 		logger.L().Warning("GetOpcode not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
-}
-
-func (e *DatasourceEvent) GetParentPid() uint32 {
-	switch e.EventType {
-	case ForkEventType:
-		parentPid, _ := e.Datasource.GetField("parent_pid").Uint32(e.Data)
-		return parentPid
-	default:
-		logger.L().Warning("GetParentPid not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }

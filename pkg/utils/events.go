@@ -44,6 +44,14 @@ type EnrichEvent interface {
 	SetExtra(extra interface{})
 }
 
+type BpfEvent interface {
+	EnrichEvent
+	GetExePath() string
+	GetCmd() uint32
+	GetAttrSize() uint32
+	GetUpperLayer() bool
+}
+
 type CapabilitiesEvent interface {
 	EnrichEvent
 	GetCapability() string
@@ -71,17 +79,15 @@ type ExecEvent interface {
 	GetUpperLayer() bool
 }
 
-type ForkEvent interface {
-	EnrichEvent
-	GetExePath() string
-	GetParentPid() uint32
-	GetChildPid() uint32
-}
-
 type ExitEvent interface {
 	EnrichEvent
 	GetExitCode() uint32
 	GetSignal() uint32
+}
+
+type ForkEvent interface {
+	EnrichEvent
+	GetExePath() string
 }
 
 type HttpEvent interface {
@@ -108,6 +114,14 @@ type IOUring interface {
 	GetFlags() []string
 	GetIdentifier() string
 	GetOpcode() int
+}
+
+type KmodEvent interface {
+	EnrichEvent
+	GetModule() string
+	GetExePath() string
+	GetSyscall() string
+	GetUpperLayer() bool
 }
 
 type LinkEvent interface {
@@ -153,14 +167,6 @@ type SyscallEvent interface {
 	GetSyscall() string
 }
 
-type KmodEvent interface {
-	EnrichEvent
-	GetModule() string
-	GetExePath() string
-	GetSyscall() string
-	GetUpperLayer() bool
-}
-
 type UnshareEvent interface {
 	EnrichEvent
 	GetExePath() string
@@ -168,18 +174,11 @@ type UnshareEvent interface {
 	GetUpperLayer() bool
 }
 
-type BpfEvent interface {
-	EnrichEvent
-	GetExePath() string
-	GetCmd() uint32
-	GetAttrSize() uint32
-	GetUpperLayer() bool
-}
-
 type EventType string
 
 const (
 	AllEventType          EventType = "all"
+	BpfEventType          EventType = "bpf"
 	CapabilitiesEventType EventType = "capabilities"
 	DnsEventType          EventType = "dns"
 	ExecveEventType       EventType = "exec"
@@ -188,6 +187,7 @@ const (
 	HTTPEventType         EventType = "http"
 	HardlinkEventType     EventType = "hardlink"
 	IoUringEventType      EventType = "iouring"
+	KmodEventType         EventType = "kmod"
 	NetworkEventType      EventType = "network"
 	OpenEventType         EventType = "open"
 	ProcfsEventType       EventType = "procfs"
@@ -195,10 +195,8 @@ const (
 	RandomXEventType      EventType = "randomx"
 	SSHEventType          EventType = "ssh"
 	SymlinkEventType      EventType = "symlink"
-	KmodEventType         EventType = "kmod"
-	UnshareEventType      EventType = "unshare"
-	BpfEventType          EventType = "bpf"
 	SyscallEventType      EventType = "syscall"
+	UnshareEventType      EventType = "unshare"
 )
 
 // Get the path of the file on the node.

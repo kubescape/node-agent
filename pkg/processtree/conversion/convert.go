@@ -70,8 +70,8 @@ func convertForkEvent(forkEvent utils.ForkEvent) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ForkEvent,
 		Timestamp:   time.Now(),
-		PID:         forkEvent.GetChildPid(),
-		PPID:        forkEvent.GetParentPid(),
+		PID:         forkEvent.GetPID(),
+		PPID:        forkEvent.GetPpid(),
 		Comm:        forkEvent.GetComm(),
 		Path:        forkEvent.GetExePath(),
 		StartTimeNs: uint64(forkEvent.GetTimestamp()), // Use event timestamp for consistency
