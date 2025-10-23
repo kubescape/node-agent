@@ -124,7 +124,7 @@ spec:
           ruleExpression:
             - eventType: "open"
               expression: >
-                ((event.path.startsWith('/run/secrets/kubernetes.io/serviceaccount') && event.path.endsWith('/token')) ||
+                ((event.path.startsWith('/run/secrets/kubernetes.io/serviceaccount') && event.path.endsWith('/token')) || 
                  (event.path.startsWith('/var/run/secrets/kubernetes.io/serviceaccount') && event.path.endsWith('/token')) ||
                  (event.path.startsWith('/run/secrets/eks.amazonaws.com/serviceaccount') && event.path.endsWith('/token')) ||
                  (event.path.startsWith('/var/run/secrets/eks.amazonaws.com/serviceaccount') && event.path.endsWith('/token'))) &&
@@ -169,7 +169,7 @@ spec:
           ruleExpression:
             - eventType: "open"
               expression: >
-                event.path.startsWith('/proc/') &&
+                event.path.startsWith('/proc/') && 
                 event.path.endsWith('/environ') &&
                 !ap.was_path_opened_with_suffix(event.containerId, '/environ')
         profileDependency: 0 # Required
@@ -185,16 +185,16 @@ spec:
         id: "R0009"
         description: "Detecting eBPF program load."
         expressions:
-          message: "'bpf system call executed in ' + event.containerName"
-          uniqueId: "event.comm + '_' + event.syscallName"
+          message: "'bpf program load system call (bpf) was called by process (' + event.comm + ') with command (BPF_PROG_LOAD)'"
+          uniqueId: "event.comm + '_' + 'bpf' + '_' + string(event.cmd)"
           ruleExpression:
-            - eventType: "syscall"
-              expression: "event.syscallName == 'bpf' && !ap.was_syscall_used(event.containerId, event.syscallName)"
+            - eventType: "bpf"
+              expression: "event.cmd == uint(5) && !ap.was_syscall_used(event.containerId, 'bpf')"
         profileDependency: 1
         severity: 5
         supportPolicy: false
         tags:
-          - "syscall"
+          - "bpf"
           - "ebpf"
           - "applicationprofile"
       - name: "Unexpected Sensitive File Access"
@@ -243,7 +243,7 @@ spec:
             - eventType: "exec"
               expression: >
                 (event.exepath == '/dev/shm' || event.exepath.startsWith('/dev/shm/')) ||
-                (event.cwd == '/dev/shm' || event.cwd.startsWith('/dev/shm/') ||
+                (event.cwd == '/dev/shm' || event.cwd.startsWith('/dev/shm/') || 
                 (parse.get_exec_path(event.args, event.comm).startsWith('/dev/shm/')))
         profileDependency: 2
         severity: 8
@@ -279,18 +279,16 @@ spec:
         id: "R1002"
         description: "Detecting Kernel Module Load."
         expressions:
-          message: "'Kernel module load syscall (' + event.syscallName + ') was called'"
-          uniqueId: "event.syscallName"
+          message: "'Kernel module (' + event.module + ') loading attempt with syscall (' + event.syscallName + ') was called by process (' + event.comm + ')'"
+          uniqueId: "event.comm + '_' + event.syscallName + '_' + event.module"
           ruleExpression:
-            - eventType: "syscall"
-              expression: >
-                event.syscallName == 'init_module' ||
-                event.syscallName == 'finit_module'
+            - eventType: "kmod"
+              expression: "event.syscallName == 'init_module' || event.syscallName == 'finit_module'"
         profileDependency: 2
         severity: 10
         supportPolicy: false
         tags:
-          - "syscall"
+          - "kmod"
           - "kernel"
           - "module"
           - "load"
@@ -352,16 +350,16 @@ spec:
         id: "R1006"
         description: "Detecting Unshare System Call usage, which can be used to escape container."
         expressions:
-          message: "'Unshare system call detected: ' + event.syscallName + ' with PID ' + string(event.pid)"
-          uniqueId: "event.syscallName"
+          message: "'Unshare system call (unshare) was called by process (' + event.comm + ')'"
+          uniqueId: "event.comm + '_' + 'unshare'"
           ruleExpression:
-            - eventType: "syscall"
-              expression: "event.syscallName == 'unshare' && !ap.was_syscall_used(event.containerId, event.syscallName)"
+            - eventType: "unshare"
+              expression: "!ap.was_syscall_used(event.containerId, 'unshare')"
         profileDependency: 2
         severity: 5
         supportPolicy: false
         tags:
-          - "syscall"
+          - "unshare"
           - "escape"
           - "unshare"
           - "anomaly"
