@@ -47,6 +47,42 @@ var _ NetworkEvent = (*DatasourceEvent)(nil)
 var _ OpenEvent = (*DatasourceEvent)(nil)
 var _ SshEvent = (*DatasourceEvent)(nil)
 var _ SyscallEvent = (*DatasourceEvent)(nil)
+var _ KmodEvent = (*DatasourceEvent)(nil)
+var _ UnshareEvent = (*DatasourceEvent)(nil)
+var _ BpfEvent = (*DatasourceEvent)(nil)
+
+func (e *DatasourceEvent) GetModule() string {
+	switch e.EventType {
+	case KmodEventType:
+		module, _ := e.Datasource.GetField("module").String(e.Data)
+		return module
+	default:
+		logger.L().Warning("GetModule not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+}
+
+func (e *DatasourceEvent) GetCmd() uint32 {
+	switch e.EventType {
+	case BpfEventType:
+		cmd, _ := e.Datasource.GetField("cmd").Uint32(e.Data)
+		return cmd
+	default:
+		logger.L().Warning("GetCmd not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+}
+
+func (e *DatasourceEvent) GetAttrSize() uint32 {
+	switch e.EventType {
+	case BpfEventType:
+		attrSize, _ := e.Datasource.GetField("attr_size").Uint32(e.Data)
+		return attrSize
+	default:
+		logger.L().Warning("GetAttrSize not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+}
 
 func (e *DatasourceEvent) GetAddresses() []string {
 	switch e.EventType {
@@ -241,7 +277,7 @@ func (e *DatasourceEvent) GetEventType() EventType {
 
 func (e *DatasourceEvent) GetExePath() string {
 	switch e.EventType {
-	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType:
+	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
 		exepath, _ := e.Datasource.GetField("exepath").String(e.Data)
 		return exepath
 	default:
@@ -269,7 +305,7 @@ func (e *DatasourceEvent) GetFlags() []string {
 	switch e.EventType {
 	case OpenEventType:
 		flags, _ := e.Datasource.GetField("flags_raw").Int32(e.Data)
-		return decodeFlags(flags)
+		return decodeOpenFlags(flags)
 	default:
 		logger.L().Warning("GetFlags not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
@@ -579,6 +615,9 @@ func (e *DatasourceEvent) GetSyscall() string {
 		return gadgets.FromCString(syscall)
 	case SyscallEventType:
 		return e.Syscall
+	case KmodEventType:
+		syscall, _ := e.Datasource.GetField("syscall").String(e.Data)
+		return syscall
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""

@@ -250,6 +250,15 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// Syscall events
 	ehf.handlers[utils.SyscallEventType] = []Manager{containerProfileManager, ruleManager, metrics}
+
+	// Kmod events
+	ehf.handlers[utils.KmodEventType] = []Manager{ruleManager, metrics}
+
+	// Unshare events
+	ehf.handlers[utils.UnshareEventType] = []Manager{ruleManager, metrics}
+
+	// Bpf events
+	ehf.handlers[utils.BpfEventType] = []Manager{ruleManager, metrics}
 }
 
 // reportEventToThirdPartyTracers reports events to third-party tracers

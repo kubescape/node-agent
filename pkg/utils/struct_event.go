@@ -70,6 +70,9 @@ type StructEvent struct {
 	Uid                  uint32                  `json:"uid,omitempty" yaml:"uid,omitempty"`
 	UpperLayer           bool                    `json:"upperLayer,omitempty" yaml:"upperLayer,omitempty"`
 	UserData             int                     `json:"userData,omitempty" yaml:"userData,omitempty"`
+	Module               string                  `json:"module,omitempty" yaml:"module,omitempty"`
+	Cmd                  uint32                  `json:"cmd,omitempty" yaml:"cmd,omitempty"`
+	AttrSize             uint32                  `json:"attrSize,omitempty" yaml:"attrSize,omitempty"`
 }
 
 var _ CapabilitiesEvent = (*StructEvent)(nil)
@@ -85,6 +88,21 @@ var _ NetworkEvent = (*StructEvent)(nil)
 var _ OpenEvent = (*StructEvent)(nil)
 var _ SshEvent = (*StructEvent)(nil)
 var _ SyscallEvent = (*StructEvent)(nil)
+var _ KmodEvent = (*StructEvent)(nil)
+var _ UnshareEvent = (*StructEvent)(nil)
+var _ BpfEvent = (*StructEvent)(nil)
+
+func (e *StructEvent) GetModule() string {
+	return e.Module
+}
+
+func (e *StructEvent) GetCmd() uint32 {
+	return e.Cmd
+}
+
+func (e *StructEvent) GetAttrSize() uint32 {
+	return e.AttrSize
+}
 
 func (e *StructEvent) GetAddresses() []string {
 	switch e.EventType {
@@ -485,6 +503,8 @@ func (e *StructEvent) GetSyscall() string {
 	case HTTPEventType:
 		return e.Syscall
 	case SyscallEventType:
+		return e.Syscall
+	case KmodEventType:
 		return e.Syscall
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))

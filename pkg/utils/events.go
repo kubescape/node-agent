@@ -153,6 +153,29 @@ type SyscallEvent interface {
 	GetSyscall() string
 }
 
+type KmodEvent interface {
+	EnrichEvent
+	GetModule() string
+	GetExePath() string
+	GetSyscall() string
+	GetUpperLayer() bool
+}
+
+type UnshareEvent interface {
+	EnrichEvent
+	GetExePath() string
+	// GetFlags() uint64
+	GetUpperLayer() bool
+}
+
+type BpfEvent interface {
+	EnrichEvent
+	GetExePath() string
+	GetCmd() uint32
+	GetAttrSize() uint32
+	GetUpperLayer() bool
+}
+
 type EventType string
 
 const (
@@ -172,6 +195,9 @@ const (
 	RandomXEventType      EventType = "randomx"
 	SSHEventType          EventType = "ssh"
 	SymlinkEventType      EventType = "symlink"
+	KmodEventType         EventType = "kmod"
+	UnshareEventType      EventType = "unshare"
+	BpfEventType          EventType = "bpf"
 	SyscallEventType      EventType = "syscall"
 )
 

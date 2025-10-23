@@ -171,6 +171,16 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	)
 	manager.RegisterTracer(symlinkTracer)
 
+	// Create kmod tracer
+	kmodTracer := NewKmodTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.KmodEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(kmodTracer)
+
 	// Create hardlink tracer
 	hardlinkTracer := NewHardlinkTracer(
 		tf.kubeManager,
@@ -250,6 +260,26 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.createEventCallback(utils.IoUringEventType),
 	)
 	manager.RegisterTracer(iouringTracer)
+
+	// Create unshare tracer
+	unshareTracer := NewUnshareTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.UnshareEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(unshareTracer)
+
+	// Create bpf tracer
+	bpfTracer := NewBpfTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.BpfEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(bpfTracer)
 
 	// Create top tracer
 	//topTracer := NewTopTracer(

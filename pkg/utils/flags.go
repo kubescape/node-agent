@@ -51,7 +51,7 @@ var flagMap = []struct {
 	{O_CLOEXEC, "O_CLOEXEC"},
 }
 
-func decodeFlags(flags int32) []string {
+func decodeOpenFlags(flags int32) []string {
 	// Pre-allocate a slice with a reasonable capacity to avoid reallocations.
 	// The number of set bits gives an exact count.
 	capacity := bits.OnesCount32(uint32(flags))

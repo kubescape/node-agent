@@ -19,6 +19,9 @@ type CelEvent interface {
 	OpenEvent
 	SshEvent
 	SyscallEvent
+	KmodEvent
+	UnshareEvent
+	BpfEvent
 }
 
 type CelEventImpl struct {
@@ -340,6 +343,39 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, fmt.Errorf("celval: object is nil")
 			}
 			return x.Raw.GetUpperLayer(), nil
+		}),
+	},
+	"module": {
+		Type:  celtypes.StringType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetModule(), nil
+		}),
+	},
+	"cmd": {
+		Type:  celtypes.UintType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetCmd(), nil
+		}),
+	},
+	"attrSize": {
+		Type:  celtypes.UintType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetAttrSize(), nil
 		}),
 	},
 }

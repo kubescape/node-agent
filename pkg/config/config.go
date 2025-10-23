@@ -81,6 +81,9 @@ type Config struct {
 	DSeccomp                       bool                                 `mapstructure:"dSeccomp"`
 	DSsh                           bool                                 `mapstructure:"dSsh"`
 	DSymlink                       bool                                 `mapstructure:"dSymlink"`
+	DKmod                          bool                                 `mapstructure:"dKmod"`
+	DUnshare                       bool                                 `mapstructure:"dUnshare"`
+	DBpf                           bool                                 `mapstructure:"dBpf"`
 	DTop                           bool                                 `mapstructure:"dTop"`
 }
 
