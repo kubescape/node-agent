@@ -66,6 +66,9 @@ int tracepoint__sched_exit(struct bpf_raw_tracepoint_args *ctx)
     // Exit info
     event->exit_code = BPF_CORE_READ(task, exit_code);
     event->exit_signal = BPF_CORE_READ(task, exit_signal);
+    event->exit_pid = BPF_CORE_READ(task, tgid);
+    event->exit_tid = BPF_CORE_READ(task, pid);
+    event->exit_ppid = BPF_CORE_READ(task, real_parent, tgid);
     event->upper_layer = has_upper_layer();
 
     /* emit event */

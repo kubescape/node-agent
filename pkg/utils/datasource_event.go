@@ -438,6 +438,9 @@ func (e *DatasourceEvent) GetPID() uint32 {
 	case ForkEventType:
 		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
 		return childPid
+	case ExitEventType:
+		exitPid, _ := e.Datasource.GetField("exit_pid").Uint32(e.Data)
+		return exitPid
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		containerPid, _ := e.Datasource.GetField("runtime.containerPid").Uint32(e.Data)
@@ -492,6 +495,9 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 	case ForkEventType:
 		parentPid, _ := e.Datasource.GetField("parent_pid").Uint32(e.Data)
 		return parentPid
+	case ExitEventType:
+		exitPpid, _ := e.Datasource.GetField("exit_ppid").Uint32(e.Data)
+		return exitPpid
 	default:
 		ppid, _ := e.Datasource.GetField("proc.parent.pid").Uint32(e.Data)
 		return ppid

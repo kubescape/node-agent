@@ -8,4 +8,7 @@ struct event {
     bool upper_layer;
     __u32 exit_code;
     __u32 exit_signal;
+    __u32 exit_pid;
+    __u32 exit_tid;
+    __u32 exit_ppid;
 };
