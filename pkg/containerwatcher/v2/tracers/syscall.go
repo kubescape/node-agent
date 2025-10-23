@@ -65,7 +65,7 @@ func (st *SyscallTracer) Start(ctx context.Context) error {
 	go func() {
 		params := map[string]string{
 			"operator.oci.ebpf.map-fetch-count":    "0",
-			"operator.oci.ebpf.map-fetch-interval": "5s",
+			"operator.oci.ebpf.map-fetch-interval": "30s",
 		}
 		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
 		if err != nil {
