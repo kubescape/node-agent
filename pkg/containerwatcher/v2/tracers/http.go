@@ -2,7 +2,6 @@ package tracers
 
 import (
 	"context"
-	"io"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -143,26 +142,6 @@ func (ht *HTTPTracer) callback(event utils.HttpRawEvent) {
 	if grouped := ht.GroupEvents(event); grouped != nil {
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
-		if grouped.GetRequest() != nil {
-			// Print metadata and body of the request for debugging purposes
-			logger.L().Info("Matthias - http request", helpers.String("Method", grouped.GetRequest().Method), helpers.String("URL", grouped.GetRequest().URL.String()))
-
-			if grouped.GetRequest().Body != nil {
-				body, err := io.ReadAll(grouped.GetRequest().Body)
-				if err != nil {
-					logger.L().Error("Matthias - io.ReadAll error", helpers.Error(err))
-				}
-				logger.L().Info("Matthias - http request body", helpers.String("Body", string(body)))
-			} else {
-				logger.L().Info("Matthias - http request body is nil")
-			}
-
-			if grouped.GetResponse() != nil {
-				logger.L().Info("Matthias - http response", helpers.String("Status", grouped.GetResponse().Status))
-			} else {
-				logger.L().Info("Matthias - http response is nil")
-			}
-		}
 		ht.eventCallback(grouped, containerID, processID)
 	}
 }
