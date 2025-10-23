@@ -325,7 +325,7 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType:
+	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
 		gid, err := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
 		if err != nil {
 			return nil
@@ -654,7 +654,7 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 
 func (e *DatasourceEvent) GetUid() *uint32 {
 	switch e.EventType {
-	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType:
+	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
 		uid, err := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
 		if err != nil {
 			return nil
@@ -668,7 +668,7 @@ func (e *DatasourceEvent) GetUid() *uint32 {
 
 func (e *DatasourceEvent) GetUpperLayer() bool {
 	switch e.EventType {
-	case ExecveEventType, SymlinkEventType, HardlinkEventType, ExitEventType, RandomXEventType:
+	case ExecveEventType, SymlinkEventType, HardlinkEventType, ExitEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
 		upperLayer, _ := e.Datasource.GetField("upper_layer").Bool(e.Data)
 		return upperLayer
 	default:

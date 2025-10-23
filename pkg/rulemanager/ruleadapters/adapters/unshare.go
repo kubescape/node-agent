@@ -42,6 +42,7 @@ func (c *UnshareAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
 			Comm:       comm,
+			Pcomm:      unshareEvent.GetPcomm(),
 			PPID:       unshareEvent.GetPpid(),
 			PID:        pid,
 			UpperLayer: &upperLayer,

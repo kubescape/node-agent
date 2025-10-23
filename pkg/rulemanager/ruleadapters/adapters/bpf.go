@@ -46,6 +46,7 @@ func (c *BpfAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
 			Comm:       comm,
+			Pcomm:      bpfEvent.GetPcomm(),
 			PPID:       bpfEvent.GetPpid(),
 			PID:        pid,
 			UpperLayer: &upperLayer,

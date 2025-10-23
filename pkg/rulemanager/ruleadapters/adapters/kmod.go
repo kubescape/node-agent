@@ -45,6 +45,7 @@ func (c *KmodAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
 			Comm:       comm,
+			Pcomm:      kmodEvent.GetPcomm(),
 			PPID:       kmodEvent.GetPpid(),
 			PID:        pid,
 			UpperLayer: &upperLayer,
