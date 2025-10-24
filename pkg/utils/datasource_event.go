@@ -305,6 +305,7 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
 		gid, err := e.Datasource.GetField("proc.creds.gid").Uint32(e.Data)
 		if err != nil {
+			logger.L().Warning("GetGid - proc.creds.gid field not found in event type", helpers.String("eventType", string(e.EventType)))
 			return nil
 		}
 		return &gid
@@ -416,7 +417,7 @@ func (e *DatasourceEvent) GetPID() uint32 {
 		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
 		return childPid
 	case ExitEventType:
-		exitPid, _ := e.Datasource.GetField("exit_pid").Uint32(e.Data)
+		exitPid, _ := e.Datasource.GetField("exit_pid").Uint32(e.Data) // FIXME it's fine to use the proc enrichment here
 		return exitPid
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
@@ -472,7 +473,7 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 		parentPid, _ := e.Datasource.GetField("parent_pid").Uint32(e.Data)
 		return parentPid
 	case ExitEventType:
-		exitPpid, _ := e.Datasource.GetField("exit_ppid").Uint32(e.Data)
+		exitPpid, _ := e.Datasource.GetField("exit_ppid").Uint32(e.Data) // FIXME it's fine to use the proc enrichment here
 		return exitPpid
 	default:
 		ppid, _ := e.Datasource.GetField("proc.parent.pid").Uint32(e.Data)
@@ -633,6 +634,7 @@ func (e *DatasourceEvent) GetUid() *uint32 {
 	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
 		uid, err := e.Datasource.GetField("proc.creds.uid").Uint32(e.Data)
 		if err != nil {
+			logger.L().Warning("GetUid - proc.creds.uid field not found in event type", helpers.String("eventType", string(e.EventType)))
 			return nil
 		}
 		return &uid

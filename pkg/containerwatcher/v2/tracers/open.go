@@ -103,14 +103,7 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 	return simple.New(string(utils.OpenEventType),
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
-				// jsonFormatter, _ := igjson.New(d,
-				// 	// Show all fields
-				// 	igjson.WithShowAll(true),
-				// 	// Print json in a pretty format
-				// 	igjson.WithPretty(true, "  "),
-				// )
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					// logger.L().Debug("Matthias - open event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
 					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.OpenEventType})
 					return nil
 				}, opPriority)

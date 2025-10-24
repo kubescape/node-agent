@@ -6,12 +6,14 @@ package exporters
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/cenkalti/backoff/v5"
 	"github.com/go-openapi/strfmt"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -62,9 +64,17 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 		trace = ""
 	}
 
-	processTree := failedRule.GetRuntimeProcessDetails().ProcessTree
-	process := utils.GetProcessFromProcessTree(&processTree, failedRule.GetBaseRuntimeAlert().InfectedPID)
-	if process == nil {
+	var processTree apitypes.Process
+	operation := func() (*apitypes.Process, error) {
+		processTree = failedRule.GetRuntimeProcessDetails().ProcessTree
+		process := utils.GetProcessFromProcessTree(&processTree, failedRule.GetBaseRuntimeAlert().InfectedPID)
+		if process == nil {
+			return nil, errors.New("not found")
+		}
+		return process, nil
+	}
+	process, err := backoff.Retry(context.TODO(), operation, backoff.WithBackOff(backoff.NewExponentialBackOff()), backoff.WithMaxElapsedTime(30*time.Second))
+	if err != nil {
 		logger.L().Warning("AlertManagerExporter.SendRuleAlert - failed to get process from process tree", helpers.String("trace", trace), helpers.Int("pid", int(failedRule.GetBaseRuntimeAlert().InfectedPID)))
 		return
 	}

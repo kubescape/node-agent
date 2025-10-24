@@ -276,7 +276,7 @@ func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Proce
 	}
 	proc = &apitypes.Process{PID: pid, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
 	pt.processMap.Set(pid, proc)
-
+	logger.L().Info("Matthias - Created entry in process tree", helpers.String("pid", fmt.Sprintf("%d", pid)))
 	return proc
 }
 
