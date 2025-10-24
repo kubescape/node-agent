@@ -93,16 +93,16 @@ func NewTracerFactory(
 // CreateAllTracers creates all configured tracers
 func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistrer) {
 	// Create procfs tracer (starts 5 seconds before other tracers)
-	//procfsTracer := NewProcfsTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.ProcfsEventType),
-	//	tf.createEventCallback(utils.ExitEventType),
-	//	tf.cfg,
-	//	tf.processTreeManager,
-	//)
-	//manager.RegisterTracer(procfsTracer)
+	procfsTracer := NewProcfsTracer(
+		tf.containerCollection,
+		tf.tracerCollection,
+		tf.containerSelector,
+		tf.createEventCallback(utils.ProcfsEventType),
+		tf.createEventCallback(utils.ExitEventType),
+		tf.cfg,
+		tf.processTreeManager,
+	)
+	manager.RegisterTracer(procfsTracer)
 
 	// Create syscall tracer (seccomp)
 	syscallTracer := NewSyscallTracer(
@@ -124,22 +124,22 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	manager.RegisterTracer(execTracer)
 
 	// Create exit tracer
-	//exitTracer := NewExitTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.ExitEventType),
-	//)
-	//manager.RegisterTracer(exitTracer)
+	exitTracer := NewExitTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.ExitEventType),
+	)
+	manager.RegisterTracer(exitTracer)
 
 	// Create fork tracer
-	//forkTracer := NewForkTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.ForkEventType),
-	//)
-	//manager.RegisterTracer(forkTracer)
+	forkTracer := NewForkTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.ForkEventType),
+	)
+	manager.RegisterTracer(forkTracer)
 
 	// Create open tracer
 	openTracer := NewOpenTracer(
@@ -162,43 +162,53 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	manager.RegisterTracer(capabilitiesTracer)
 
 	// Create symlink tracer
-	//symlinkTracer := NewSymlinkTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.SymlinkEventType),
-	//	tf.thirdPartyEnricher,
-	//)
-	//manager.RegisterTracer(symlinkTracer)
+	symlinkTracer := NewSymlinkTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.SymlinkEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(symlinkTracer)
+
+	// Create kmod tracer
+	kmodTracer := NewKmodTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.KmodEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(kmodTracer)
 
 	// Create hardlink tracer
-	//hardlinkTracer := NewHardlinkTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.HardlinkEventType),
-	//	tf.thirdPartyEnricher,
-	//)
-	//manager.RegisterTracer(hardlinkTracer)
+	hardlinkTracer := NewHardlinkTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.HardlinkEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(hardlinkTracer)
 
 	// Create SSH tracer
-	//sshTracer := NewSSHTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.SSHEventType),
-	//	tf.socketEnricher,
-	//)
-	//manager.RegisterTracer(sshTracer)
+	sshTracer := NewSSHTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.SSHEventType),
+		tf.socketEnricher,
+	)
+	manager.RegisterTracer(sshTracer)
 
 	// Create HTTP tracer
-	//httpTracer := NewHTTPTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.HTTPEventType),
-	//)
-	//manager.RegisterTracer(httpTracer)
+	httpTracer := NewHTTPTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.HTTPEventType),
+	)
+	manager.RegisterTracer(httpTracer)
 
 	// Create network tracer
 	networkTracer := NewNetworkTracer(
@@ -209,6 +219,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.ociStore,
 		tf.createEventCallback(utils.NetworkEventType),
 		tf.thirdPartyEnricher,
+		tf.socketEnricher,
 	)
 	manager.RegisterTracer(networkTracer)
 
@@ -224,31 +235,51 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	manager.RegisterTracer(dnsTracer)
 
 	// Create randomX tracer
-	//randomXTracer := NewRandomXTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.RandomXEventType),
-	//)
-	//manager.RegisterTracer(randomXTracer)
+	randomXTracer := NewRandomXTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.RandomXEventType),
+	)
+	manager.RegisterTracer(randomXTracer)
 
 	// Create ptrace tracer
-	//ptraceTracer := NewPtraceTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.PtraceEventType),
-	//)
-	//manager.RegisterTracer(ptraceTracer)
+	ptraceTracer := NewPtraceTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.PtraceEventType),
+	)
+	manager.RegisterTracer(ptraceTracer)
 
 	// Create io_uring tracer
-	//iouringTracer := NewIoUringTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.IoUringEventType),
-	//)
-	//manager.RegisterTracer(iouringTracer)
+	iouringTracer := NewIoUringTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.IoUringEventType),
+	)
+	manager.RegisterTracer(iouringTracer)
+
+	// Create unshare tracer
+	unshareTracer := NewUnshareTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.UnshareEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(unshareTracer)
+
+	// Create bpf tracer
+	bpfTracer := NewBpfTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.BpfEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(bpfTracer)
 
 	// Create top tracer
 	//topTracer := NewTopTracer(

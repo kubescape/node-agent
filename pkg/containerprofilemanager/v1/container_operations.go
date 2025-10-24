@@ -8,6 +8,10 @@ import (
 // withContainer executes a function with write access to container data
 // This is the core method that handles all locking and error management
 func (cpm *ContainerProfileManager) withContainer(containerID string, fn func(*containerData) (int, error)) error {
+	if containerID == "" {
+		logger.L().Error("ContainerProfileManager.withContainer - invalid empty containerID")
+		return ErrInvalidContainerID
+	}
 	// Get container entry (read lock on map)
 	cpm.containersMu.RLock()
 	entry, exists := cpm.containers[containerID]

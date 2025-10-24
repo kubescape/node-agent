@@ -76,7 +76,7 @@ func (tt *TopTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (tt *TopTracer) GetName() string {
-	return "top_tracer"
+	return topTraceName
 }
 
 // GetEventType returns the event type this tracer produces

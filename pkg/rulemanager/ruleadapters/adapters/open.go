@@ -18,35 +18,38 @@ func NewOpenAdapter() *OpenAdapter {
 }
 
 func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	openEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
-	if !ok || openEvent.EventType != utils.OpenEventType {
+	openEvent, ok := enrichedEvent.Event.(utils.OpenEvent)
+	if !ok {
 		return
 	}
 
 	failure.SetExtra(openEvent.GetExtra())
 
+	pid := openEvent.GetPID()
+	comm := openEvent.GetComm()
+	path := openEvent.GetPath()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = openEvent.GetPID()
+	baseRuntimeAlert.InfectedPID = pid
 	baseRuntimeAlert.Arguments = map[string]interface{}{
 		"flags": openEvent.GetFlags(),
-		"path":  openEvent.GetPath(),
+		"path":  path,
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: openEvent.GetComm(),
+			Name: comm,
 		},
 		File: &common.FileEntity{
-			Name:      filepath.Base(openEvent.GetPath()),
-			Directory: filepath.Dir(openEvent.GetPath()),
+			Name:      filepath.Base(path),
+			Directory: filepath.Dir(path),
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm: openEvent.GetComm(),
+			Comm: comm,
 			Gid:  openEvent.GetGid(),
-			PID:  openEvent.GetPID(),
+			PID:  pid,
 			Uid:  openEvent.GetUid(),
 		},
 		ContainerID: openEvent.GetContainerID(),

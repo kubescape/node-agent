@@ -206,7 +206,7 @@ func CreateContainerWatcher(
 		pool:                 workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 5*time.Second),
 
 		// Lifecycle
-		containerEolNotificationChannel: make(chan *containercollection.Container),
+		containerEolNotificationChannel: make(chan *containercollection.Container, cfg.ContainerEolNotificationBuffer),
 	}, nil
 }
 

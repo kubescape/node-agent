@@ -8,9 +8,8 @@ import (
 )
 
 // NewEnrichedEvent creates a new enriched event
-func NewEnrichedEvent(eventType utils.EventType, event utils.EverythingEvent, timestamp time.Time, containerID string, processTree apitypes.Process) *EnrichedEvent {
+func NewEnrichedEvent(event utils.K8sEvent, timestamp time.Time, containerID string, processTree apitypes.Process) *EnrichedEvent {
 	return &EnrichedEvent{
-		EventType:   eventType,
 		Event:       event,
 		Timestamp:   timestamp,
 		ContainerID: containerID,
@@ -19,7 +18,6 @@ func NewEnrichedEvent(eventType utils.EventType, event utils.EverythingEvent, ti
 }
 
 type EnrichedEvent struct {
-	EventType   utils.EventType
 	Event       utils.K8sEvent
 	Timestamp   time.Time
 	ContainerID string

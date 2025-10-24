@@ -1,8 +1,11 @@
 package adapters
 
 import (
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type RandomXAdapter struct {
@@ -13,41 +16,43 @@ func NewRandomXAdapter() *RandomXAdapter {
 }
 
 func (c *RandomXAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	//randomXEvent, ok := enrichedEvent.Event.(*tracerrandomxtype.Event)
-	//if !ok {
-	//	return
-	//}
+	randomXEvent, ok := enrichedEvent.Event.(utils.EnrichEvent)
+	if !ok {
+		return
+	}
 
-	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	//baseRuntimeAlert.InfectedPID = randomXEvent.Pid
-	//baseRuntimeAlert.Arguments = map[string]interface{}{
-	//	"ppid": randomXEvent.PPid,
-	//}
-	//baseRuntimeAlert.Identifiers = &common.Identifiers{
-	//	Process: &common.ProcessEntity{
-	//		Name: randomXEvent.Comm,
-	//	},
-	//}
-	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	pid := randomXEvent.GetPID()
+	comm := randomXEvent.GetComm()
+	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	baseRuntimeAlert.InfectedPID = pid
+	baseRuntimeAlert.Arguments = map[string]interface{}{
+		"ppid": randomXEvent.GetPpid(),
+	}
+	baseRuntimeAlert.Identifiers = &common.Identifiers{
+		Process: &common.ProcessEntity{
+			Name: comm,
+		},
+	}
+	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	//runtimeProcessDetails := apitypes.ProcessTree{
-	//	ProcessTree: apitypes.Process{
-	//		Comm: randomXEvent.Comm,
-	//		PID:  randomXEvent.Pid,
-	//		Uid:  &randomXEvent.Uid,
-	//		Gid:  &randomXEvent.Gid,
-	//	},
-	//	ContainerID: randomXEvent.Runtime.ContainerID,
-	//}
-	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	runtimeProcessDetails := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			Comm: comm,
+			PID:  pid,
+			Uid:  randomXEvent.GetUid(),
+			Gid:  randomXEvent.GetGid(),
+		},
+		ContainerID: randomXEvent.GetContainerID(),
+	}
+	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	//failure.SetTriggerEvent(randomXEvent.Event)
+	failure.SetTriggerEvent(randomXEvent)
 
-	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-	//	PodName:   randomXEvent.GetPod(),
-	//	PodLabels: randomXEvent.K8s.PodLabels,
-	//}
-	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+		PodName:   randomXEvent.GetPod(),
+		PodLabels: randomXEvent.GetPodLabels(),
+	}
+	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *RandomXAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {

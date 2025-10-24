@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -155,7 +156,7 @@ func (cd *containerData) getIngressNetworkNeighbors(namespace string, k8sClient 
 	}
 
 	for _, event := range cd.networks.ToSlice() {
-		if event.PktType == HostPktType {
+		if event.PktType == utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(event, namespace, k8sClient, dnsResolverClient)
 			if neighbor == nil {
 				continue
@@ -175,7 +176,7 @@ func (cd *containerData) getEgressNetworkNeighbors(namespace string, k8sClient k
 	}
 
 	for _, event := range cd.networks.ToSlice() {
-		if event.PktType != HostPktType {
+		if event.PktType != utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(event, namespace, k8sClient, dnsResolverClient)
 			if neighbor == nil {
 				continue

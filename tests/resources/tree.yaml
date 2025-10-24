@@ -2,55 +2,23 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: endpoint-traffic
-  name: endpoint-traffic-deployment
+    app: process-tree
+  name: process-tree-deployment
 spec:
   selector:
     matchLabels:
-      app: endpoint-traffic
+      app: process-tree
   replicas: 1
   template:
     metadata:
       labels:
-        app: endpoint-traffic
+        app: process-tree
     spec:
       containers:
-      - name: endpoint-traffic
+      - name: process-tree
         image: armoafekb/afek-b-tests:processstree
         imagePullPolicy: Always
-        # Create a volume mount for the script
-        volumeMounts:
-        - name: server-script
-          mountPath: /app
         command: ["/bin/sh"]
         args: ["-c", "sleep 1000000000"]
         ports:
         - containerPort: 80
-        env:
-        - name: SERVER_SCRIPT
-          value: |
-            from http.server import HTTPServer, BaseHTTPRequestHandler
-            class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-                def do_GET(self):
-                    self.send_response(200)
-                    self.send_header("Content-type", "text/plain")
-                    self.end_headers()
-                    self.wfile.write(b"Method GET request received successfully")
-                def do_POST(self):
-                    content_length = int(self.headers["Content-Length"])
-                    post_data = self.rfile.read(content_length)
-                    print(f"Received POST data: {post_data.decode()}")
-                    self.send_response(200)
-                    self.send_header("Content-type", "text/plain")
-                    self.end_headers()
-                    self.wfile.write(b"Method POST request received successfully")
-            def run_server(port=80):
-                server_address = ("", port)
-                httpd = HTTPServer(server_address, SimpleHTTPRequestHandler)
-                print(f"Server running on port {port}")
-                httpd.serve_forever()
-            if __name__ == "__main__":  
-                run_server()
-      volumes:
-      - name: server-script
-        emptyDir: {}

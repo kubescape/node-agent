@@ -101,7 +101,7 @@ func TestSyslogExporter(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: utils.StructEvent{},
+		TriggerEvent: &utils.StructEvent{},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},

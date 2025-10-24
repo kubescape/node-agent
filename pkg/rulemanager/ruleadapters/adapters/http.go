@@ -1,8 +1,11 @@
 package adapters
 
 import (
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type HTTPAdapter struct {
@@ -13,51 +16,48 @@ func NewHTTPAdapter() *HTTPAdapter {
 }
 
 func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	//httpEvent, ok := enrichedEvent.Event.(*tracerhttptype.Event)
-	//if !ok {
-	//	return
-	//}
+	httpEvent, ok := enrichedEvent.Event.(utils.HttpEvent)
+	if !ok {
+		return
+	}
 
-	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	//baseRuntimeAlert.InfectedPID = httpEvent.Pid
-	//baseRuntimeAlert.Arguments = map[string]interface{}{
-	//	"other_ip":   httpEvent.OtherIp,
-	//	"other_port": httpEvent.OtherPort,
-	//	"internal":   httpEvent.Internal,
-	//	"direction":  httpEvent.Direction,
-	//}
-	//baseRuntimeAlert.Identifiers = &common.Identifiers{
-	//	Network: &common.NetworkEntity{
-	//		DstIP:    httpEvent.OtherIp,
-	//		DstPort:  int(httpEvent.OtherPort),
-	//		Protocol: "http",
-	//	},
-	//	Http: &common.HttpEntity{
-	//		Method:    httpEvent.Request.Method,
-	//		Domain:    httpEvent.Request.Host,
-	//		UserAgent: httpEvent.Request.UserAgent(),
-	//		Endpoint:  httpEvent.Request.URL.Path,
-	//	},
-	//}
-	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	request := httpEvent.GetRequest()
+	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	baseRuntimeAlert.InfectedPID = httpEvent.GetPID()
+	baseRuntimeAlert.Arguments = map[string]interface{}{
+		"internal":  httpEvent.GetInternal(),
+		"direction": httpEvent.GetDirection(),
+	}
+	baseRuntimeAlert.Identifiers = &common.Identifiers{
+		Network: &common.NetworkEntity{
+			Protocol: "http",
+		},
+		Http: &common.HttpEntity{
+			Method:    request.Method,
+			Domain:    request.Host,
+			UserAgent: request.UserAgent(),
+			Endpoint:  request.URL.Path,
+		},
+	}
+	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	//runtimeProcessDetails := apitypes.ProcessTree{
-	//	ProcessTree: apitypes.Process{
-	//		PID: httpEvent.Pid,
-	//		Uid: &httpEvent.Uid,
-	//		Gid: &httpEvent.Gid,
-	//	},
-	//	ContainerID: httpEvent.Runtime.ContainerID,
-	//}
-	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	runtimeProcessDetails := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			PID: httpEvent.GetPID(),
+			Uid: httpEvent.GetUid(),
+			Gid: httpEvent.GetGid(),
+		},
+		ContainerID: httpEvent.GetContainerID(),
+	}
+	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	//failure.SetTriggerEvent(httpEvent.Event)
+	failure.SetTriggerEvent(httpEvent)
 
-	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-	//	PodName:   httpEvent.GetPod(),
-	//	PodLabels: httpEvent.K8s.PodLabels,
-	//}
-	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+		PodName:   httpEvent.GetPod(),
+		PodLabels: httpEvent.GetPodLabels(),
+	}
+	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {

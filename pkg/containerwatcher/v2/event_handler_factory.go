@@ -78,36 +78,36 @@ func NewEventHandlerFactory(
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
 		switch eventType {
 		case utils.CapabilitiesEventType:
-			if capEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if capEvent, ok := event.(utils.CapabilitiesEvent); ok {
 				containerProfileManager.ReportCapability(capEvent.GetContainerID(), capEvent.GetCapability())
 			}
 		case utils.ExecveEventType:
-			if execEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if execEvent, ok := event.(utils.ExecEvent); ok {
 				containerProfileManager.ReportFileExec(execEvent.GetContainerID(), execEvent)
 			}
 		case utils.OpenEventType:
-			if openEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if openEvent, ok := event.(utils.OpenEvent); ok {
 				containerProfileManager.ReportFileOpen(openEvent.GetContainerID(), openEvent)
 			}
-		//case utils.HTTPEventType:
-		//	if httpEvent, ok := event.(*tracerhttptype.Event); ok {
-		//		containerProfileManager.ReportHTTPEvent(httpEvent.Runtime.ContainerID, httpEvent)
-		//	}
-		//case utils.SymlinkEventType:
-		//	if symlinkEvent, ok := event.(*tracersymlinktype.Event); ok {
-		//		containerProfileManager.ReportSymlinkEvent(symlinkEvent.Runtime.ContainerID, symlinkEvent)
-		//	}
-		//case utils.HardlinkEventType:
-		//	if hardlinkEvent, ok := event.(*tracerhardlinktype.Event); ok {
-		//		containerProfileManager.ReportHardlinkEvent(hardlinkEvent.Runtime.ContainerID, hardlinkEvent)
-		//	}
+		case utils.HTTPEventType:
+			if httpEvent, ok := event.(utils.HttpEvent); ok {
+				containerProfileManager.ReportHTTPEvent(httpEvent.GetContainerID(), httpEvent)
+			}
+		case utils.SymlinkEventType:
+			if symlinkEvent, ok := event.(utils.LinkEvent); ok {
+				containerProfileManager.ReportSymlinkEvent(symlinkEvent.GetContainerID(), symlinkEvent)
+			}
+		case utils.HardlinkEventType:
+			if hardlinkEvent, ok := event.(utils.LinkEvent); ok {
+				containerProfileManager.ReportHardlinkEvent(hardlinkEvent.GetContainerID(), hardlinkEvent)
+			}
 		case utils.NetworkEventType:
-			if networkEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if networkEvent, ok := event.(utils.NetworkEvent); ok {
 				containerProfileManager.ReportNetworkEvent(networkEvent.GetContainerID(), networkEvent)
 			}
 		case utils.SyscallEventType:
-			if syscallEvent, ok := event.(*utils.DatasourceEvent); ok {
-				containerProfileManager.ReportSyscalls(syscallEvent.GetContainerID(), syscallEvent.GetSyscalls())
+			if syscallEvent, ok := event.(utils.SyscallEvent); ok {
+				containerProfileManager.ReportSyscall(syscallEvent.GetContainerID(), syscallEvent.GetSyscall())
 			}
 		default:
 			// For event types that don't have specific handling, we might need to add them
@@ -119,21 +119,21 @@ func NewEventHandlerFactory(
 		switch eventType {
 		// Won't work for 3rd party tracers, we need to extract comm and containerID from the event by interface
 		case utils.ExecveEventType:
-			if execEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if execEvent, ok := event.(utils.ExecEvent); ok {
 				rulePolicyReporter.ReportEvent(eventType, event, execEvent.GetContainerID(), execEvent.GetComm())
 			}
-			//case utils.SymlinkEventType:
-			//	if symlinkEvent, ok := event.(*tracersymlinktype.Event); ok {
-			//		rulePolicyReporter.ReportEvent(eventType, event, symlinkEvent.Runtime.ContainerID, symlinkEvent.Comm)
-			//	}
-			//case utils.HardlinkEventType:
-			//	if hardlinkEvent, ok := event.(*tracerhardlinktype.Event); ok {
-			//		rulePolicyReporter.ReportEvent(eventType, event, hardlinkEvent.Runtime.ContainerID, hardlinkEvent.Comm)
-			//	}
-			//case utils.IoUringEventType:
-			//	if iouringEvent, ok := event.(*traceriouringtype.Event); ok {
-			//		rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.Runtime.ContainerID, iouringEvent.Identifier)
-			//	}
+		case utils.SymlinkEventType:
+			if symlinkEvent, ok := event.(utils.LinkEvent); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, symlinkEvent.GetContainerID(), symlinkEvent.GetComm())
+			}
+		case utils.HardlinkEventType:
+			if hardlinkEvent, ok := event.(utils.LinkEvent); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, hardlinkEvent.GetContainerID(), hardlinkEvent.GetComm())
+			}
+		case utils.IoUringEventType:
+			if iouringEvent, ok := event.(utils.IOUring); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.GetContainerID(), iouringEvent.GetIdentifier())
+			}
 		}
 	})
 
@@ -142,7 +142,7 @@ func NewEventHandlerFactory(
 		// This would need to be implemented based on the specific event types
 		switch eventType {
 		case utils.DnsEventType:
-			if dnsEvent, ok := event.(*utils.DatasourceEvent); ok {
+			if dnsEvent, ok := event.(utils.DNSEvent); ok {
 				dnsManager.ReportEvent(dnsEvent)
 			}
 		}
@@ -183,7 +183,8 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	}
 
 	// Get handlers for this event type
-	handlers, exists := ehf.handlers[enrichedEvent.EventType]
+	eventType := enrichedEvent.Event.GetEventType()
+	handlers, exists := ehf.handlers[eventType]
 	if !exists {
 		return
 	}
@@ -193,7 +194,7 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
 			enrichedHandler.ReportEnrichedEvent(enrichedEvent)
 		} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
-			handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+			handler.ReportEvent(eventType, enrichedEvent.Event)
 		}
 	}
 
@@ -249,17 +250,27 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// Syscall events
 	ehf.handlers[utils.SyscallEventType] = []Manager{containerProfileManager, ruleManager, metrics}
+
+	// Kmod events
+	ehf.handlers[utils.KmodEventType] = []Manager{ruleManager, metrics}
+
+	// Unshare events
+	ehf.handlers[utils.UnshareEventType] = []Manager{ruleManager, metrics}
+
+	// Bpf events
+	ehf.handlers[utils.BpfEventType] = []Manager{ruleManager, metrics}
 }
 
 // reportEventToThirdPartyTracers reports events to third-party tracers
 func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(enrichedEvent *events.EnrichedEvent) {
 	if ehf.thirdPartyEventReceivers != nil {
-		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(enrichedEvent.EventType); ok {
+		eventType := enrichedEvent.Event.GetEventType()
+		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(eventType); ok {
 			for receiver := range eventReceivers.Iter() {
 				if enrichedHandler, ok := receiver.(containerwatcher.EnrichedEventReceiver); ok {
 					enrichedHandler.ReportEnrichedEvent(enrichedEvent)
 				} else if handler, ok := receiver.(containerwatcher.EventReceiver); ok {
-					handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+					handler.ReportEvent(eventType, enrichedEvent.Event)
 				}
 			}
 		}

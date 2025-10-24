@@ -101,7 +101,7 @@ func TestSendMalwareAlert(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: utils.StructEvent{
+		TriggerEvent: &utils.StructEvent{
 			ContainerID: "testmalwarecontainerid",
 			Container:   "testmalwarecontainername",
 			Namespace:   "testmalwarenamespace",

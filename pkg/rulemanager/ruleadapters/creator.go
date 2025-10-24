@@ -55,9 +55,9 @@ func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSRes
 }
 
 func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
-	eventAdapter, ok := r.adapterFactory.GetAdapter(enrichedEvent.EventType)
+	eventAdapter, ok := r.adapterFactory.GetAdapter(enrichedEvent.Event.GetEventType())
 	if !ok {
-		logger.L().Error("RuleFailureCreator - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
+		logger.L().Error("RuleFailureCreator - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.Event.GetEventType())))
 		return nil
 	}
 
