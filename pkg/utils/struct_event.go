@@ -76,11 +76,9 @@ type StructEvent struct {
 }
 
 var _ BpfEvent = (*StructEvent)(nil)
-var _ CapabilitiesEvent = (*StructEvent)(nil)
 var _ DNSEvent = (*StructEvent)(nil)
 var _ ExecEvent = (*StructEvent)(nil)
 var _ ExitEvent = (*StructEvent)(nil)
-var _ ForkEvent = (*StructEvent)(nil)
 var _ HttpEvent = (*StructEvent)(nil)
 var _ HttpRawEvent = (*StructEvent)(nil)
 var _ IOUring = (*StructEvent)(nil)
@@ -90,7 +88,6 @@ var _ NetworkEvent = (*StructEvent)(nil)
 var _ OpenEvent = (*StructEvent)(nil)
 var _ SshEvent = (*StructEvent)(nil)
 var _ SyscallEvent = (*StructEvent)(nil)
-var _ UnshareEvent = (*StructEvent)(nil)
 
 func (e *StructEvent) GetAttrSize() uint32 {
 	return e.AttrSize

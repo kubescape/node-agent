@@ -9,7 +9,6 @@ import (
 )
 
 type CelEvent interface {
-	CapabilitiesEvent
 	DNSEvent
 	ExecEvent
 	HttpRawEvent
@@ -20,7 +19,6 @@ type CelEvent interface {
 	SshEvent
 	SyscallEvent
 	KmodEvent
-	UnshareEvent
 	BpfEvent
 }
 
@@ -52,7 +50,7 @@ var CelFields = map[string]*celtypes.FieldType{
 		Type:  celtypes.StringType,
 		IsSet: isSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[CelEvent])
+			x := target.(*xcel.Object[*CapabilitiesEvent])
 			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}

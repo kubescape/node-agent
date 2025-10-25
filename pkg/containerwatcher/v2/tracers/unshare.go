@@ -102,7 +102,12 @@ func (ut *UnshareTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					ut.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.UnshareEventType})
+					ut.callback(&utils.UnshareEvent{
+						BaseEvent: utils.BaseEvent{
+							IDataEvent: &utils.DataEvent{Data: data, DataSource: source},
+							EventType:  utils.UnshareEventType, // TODO remove later
+						},
+					})
 					return nil
 				}, opPriority)
 				if err != nil {
@@ -115,7 +120,7 @@ func (ut *UnshareTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (ut *UnshareTracer) callback(event utils.UnshareEvent) {
+func (ut *UnshareTracer) callback(event *utils.UnshareEvent) {
 	if ut.eventCallback != nil {
 		containerID := event.GetContainerID()
 		processID := event.GetPID()

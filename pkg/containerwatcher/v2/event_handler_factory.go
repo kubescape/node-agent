@@ -78,7 +78,7 @@ func NewEventHandlerFactory(
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
 		switch eventType {
 		case utils.CapabilitiesEventType:
-			if capEvent, ok := event.(utils.CapabilitiesEvent); ok {
+			if capEvent, ok := event.(*utils.CapabilitiesEvent); ok {
 				containerProfileManager.ReportCapability(capEvent.GetContainerID(), capEvent.GetCapability())
 			}
 		case utils.ExecveEventType:
