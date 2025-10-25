@@ -52,12 +52,6 @@ type BpfEvent interface {
 	GetUpperLayer() bool
 }
 
-type CapabilitiesEvent interface {
-	EnrichEvent
-	GetCapability() string
-	GetSyscall() string
-}
-
 type DNSEvent interface {
 	EnrichEvent
 	GetAddresses() []string
@@ -83,11 +77,6 @@ type ExitEvent interface {
 	EnrichEvent
 	GetExitCode() uint32
 	GetSignal() uint32
-}
-
-type ForkEvent interface {
-	EnrichEvent
-	GetExePath() string
 }
 
 type HttpEvent interface {
@@ -149,11 +138,6 @@ type OpenEvent interface {
 	IsDir() bool
 }
 
-type PtraceEvent interface {
-	EnrichEvent
-	GetExePath() string
-}
-
 type SshEvent interface {
 	EnrichEvent
 	GetDstIP() string
@@ -165,13 +149,6 @@ type SshEvent interface {
 type SyscallEvent interface {
 	EnrichEvent
 	GetSyscall() string
-}
-
-type UnshareEvent interface {
-	EnrichEvent
-	GetExePath() string
-	// GetFlags() uint64
-	GetUpperLayer() bool
 }
 
 type EventType string

@@ -101,7 +101,12 @@ func (ct *CapabilitiesTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					ct.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.CapabilitiesEventType})
+					ct.callback(&utils.CapabilitiesEvent{
+						BaseEvent: utils.BaseEvent{
+							IDataEvent: &utils.DataEvent{Data: data, DataSource: source},
+							EventType:  utils.CapabilitiesEventType, // TODO remove later
+						},
+					})
 					return nil
 				}, opPriority)
 				if err != nil {
@@ -114,7 +119,7 @@ func (ct *CapabilitiesTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (ct *CapabilitiesTracer) callback(event utils.CapabilitiesEvent) {
+func (ct *CapabilitiesTracer) callback(event *utils.CapabilitiesEvent) {
 	if ct.eventCallback != nil {
 		// Extract container ID and process ID from the capabilities event
 		containerID := event.GetContainerID()

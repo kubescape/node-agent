@@ -35,11 +35,9 @@ type DatasourceEvent struct {
 }
 
 var _ BpfEvent = (*DatasourceEvent)(nil)
-var _ CapabilitiesEvent = (*DatasourceEvent)(nil)
 var _ DNSEvent = (*DatasourceEvent)(nil)
 var _ ExecEvent = (*DatasourceEvent)(nil)
 var _ ExitEvent = (*DatasourceEvent)(nil)
-var _ ForkEvent = (*DatasourceEvent)(nil)
 var _ HttpEvent = (*DatasourceEvent)(nil)
 var _ HttpRawEvent = (*DatasourceEvent)(nil)
 var _ IOUring = (*DatasourceEvent)(nil)
@@ -49,7 +47,6 @@ var _ NetworkEvent = (*DatasourceEvent)(nil)
 var _ OpenEvent = (*DatasourceEvent)(nil)
 var _ SshEvent = (*DatasourceEvent)(nil)
 var _ SyscallEvent = (*DatasourceEvent)(nil)
-var _ UnshareEvent = (*DatasourceEvent)(nil)
 
 func (e *DatasourceEvent) GetAttrSize() uint32 {
 	switch e.EventType {
