@@ -36,10 +36,6 @@ GADGET_TRACER(fork, events, event);
 SEC("raw_tracepoint/sched_process_fork")
 int tracepoint__sched_fork(struct bpf_raw_tracepoint_args *ctx)
 {
-    if (gadget_should_discard_data_current()) {
-        return 0;
-    }
-
     struct event *event;
     event = gadget_reserve_buf(&events, sizeof(*event));
     if (!event) {

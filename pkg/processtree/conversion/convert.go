@@ -2,6 +2,7 @@ package conversion
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -38,14 +39,7 @@ func convertExecEvent(execEvent utils.ExecEvent) ProcessEvent {
 
 	// Convert command line arguments to string
 	if args := execEvent.GetArgs(); len(args) > 0 {
-		// Join all arguments with spaces
-		cmdline := ""
-		for i, arg := range args {
-			if i > 0 {
-				cmdline += " "
-			}
-			cmdline += arg
-		}
+		cmdline := strings.Join(args, " ")
 		event.Cmdline = cmdline
 	}
 
