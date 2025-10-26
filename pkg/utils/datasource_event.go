@@ -474,7 +474,7 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 		parentPid, _ := e.Datasource.GetField("parent_pid").Uint32(e.Data)
 		return parentPid
 	case ExitEventType:
-		exitPpid, _ := e.Datasource.GetField("exit_ppid").Uint32(e.Data) // FIXME it's fine to use the proc enrichment here
+		exitPpid, _ := e.Datasource.GetField("exit_ppid").Uint32(e.Data)
 		return exitPpid
 	default:
 		ppid, _ := e.Datasource.GetField("proc.parent.pid").Uint32(e.Data)

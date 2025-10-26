@@ -132,11 +132,10 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conv
 
 func (pt *ProcfsTracer) handleExitEvent(event conversion.ProcessEvent) {
 	exitEvent := &utils.StructEvent{
-		EventType:   utils.ExitEventType,
-		ContainerID: event.ContainerID,
-		Pid:         event.PID,
-		Ppid:        event.PPID,
-		Comm:        "exit",
+		EventType: utils.ExitEventType,
+		Pid:       event.PID,
+		Ppid:      event.PPID,
+		Comm:      "exit",
 	}
 
 	exitEvent.Timestamp = event.Timestamp.UnixNano()

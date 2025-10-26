@@ -122,7 +122,7 @@ func (et *ExecTracer) eventOperator() operators.DataOperator {
 // callback handles events from the tracer
 func (et *ExecTracer) callback(event utils.ExecEvent) {
 	errorRaw := event.GetError()
-	if errorRaw > -1 {
+	if errorRaw > -1 && event.GetComm() != "" {
 		// Handle the event with syscall enrichment
 		et.handleEvent(event, []uint64{SYS_FORK})
 	}
