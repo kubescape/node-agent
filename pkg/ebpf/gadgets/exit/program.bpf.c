@@ -64,6 +64,7 @@ int tracepoint__sched_exit(struct bpf_raw_tracepoint_args *ctx)
     gadget_process_populate(&event->proc);
 
     // Exit info
+    event->proc.mntns_id = mntns_id;
     event->exit_code = BPF_CORE_READ(task, exit_code);
     event->exit_signal = BPF_CORE_READ(task, exit_signal);
     event->exit_pid = BPF_CORE_READ(task, tgid);

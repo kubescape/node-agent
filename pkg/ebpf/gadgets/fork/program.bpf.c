@@ -64,6 +64,7 @@ int tracepoint__sched_fork(struct bpf_raw_tracepoint_args *ctx)
     }
 
     // Parent/child identifiers
+    event->proc.mntns_id = mntns_id;
     event->parent_pid = BPF_CORE_READ(parent, tgid);
     event->child_pid = BPF_CORE_READ(child, tgid);
     event->child_tid = BPF_CORE_READ(child, pid);
