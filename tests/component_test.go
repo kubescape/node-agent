@@ -659,7 +659,8 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	t.Log("Testing initial alert generation...")
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert
-	time.Sleep(2 * time.Minute)                                // Wait for alert generation
+	// time.Sleep(2 * time.Minute)                                // Wait for alert generation
+	time.Sleep(30 * time.Second) // Wait for alert generation
 
 	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get initial alerts")

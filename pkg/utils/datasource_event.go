@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	igconsts "github.com/inspektor-gadget/inspektor-gadget/gadgets/trace_exec/consts"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -66,7 +67,7 @@ func (e *DatasourceEvent) GetAddresses() []string {
 	switch e.EventType {
 	case DnsEventType:
 		args, _ := e.Datasource.GetField("addresses").String(e.Data)
-		return strings.Split(args, ",")
+		return strings.Split(args, ",") // TODO: verify if this is correct @amit
 	default:
 		logger.L().Warning("GetAddresses not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
@@ -77,7 +78,7 @@ func (e *DatasourceEvent) GetArgs() []string {
 	switch e.EventType {
 	case ExecveEventType:
 		args, _ := e.Datasource.GetField("args").String(e.Data)
-		return strings.Split(args, " ")
+		return strings.Split(args, igconsts.ArgsSeparator)
 	default:
 		logger.L().Warning("GetArgs not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
@@ -411,7 +412,7 @@ func (e *DatasourceEvent) GetPcomm() string {
 	return pcomm
 }
 
-func (e *DatasourceEvent) GetPID() uint32 {
+func (e *DatasourceEvent) GetPID() uint32 { // TODO: for exec extra we should (https://github.com/kubescape/node-agent/blob/0b2c50a0e6494d5c8aa7d9e4d51d8c160cc71b25/pkg/ebpf/events/exec.go#L20)
 	switch e.EventType {
 	case ForkEventType:
 		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
