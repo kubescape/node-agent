@@ -51,6 +51,13 @@ func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event ut
 
 	priority := timestamp.UnixNano()
 	oeq.eventQueue.Push(eventEntry, priority)
+	logger.L().Info("Matthias - Added event to queue",
+		helpers.String("eventType", string(eventType)),
+		helpers.String("containerID", containerID),
+		helpers.Int("processID", int(processID)),
+		helpers.Interface("timestamp", timestamp),
+		helpers.Int("priority", int(priority)),
+	)
 
 	if oeq.eventQueue.Size() >= uint(oeq.maxBufferSize) {
 		logger.L().Warning("Ordered event queue - Event queue full, sending processing alert",

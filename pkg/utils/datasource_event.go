@@ -8,6 +8,7 @@ import (
 
 	igconsts "github.com/inspektor-gadget/inspektor-gadget/gadgets/trace_exec/consts"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/syscalls"
@@ -615,6 +616,13 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 	default:
 		timeStampRaw, _ := e.Datasource.GetField("timestamp_raw").Uint64(e.Data)
 		timeStamp := gadgets.WallTimeFromBootTime(timeStampRaw)
+		if timeStamp > 1771566078166033112 || timeStamp < 0 {
+			jsonFormatter, _ := igjson.New(e.Datasource, igjson.WithShowAll(true), igjson.WithPretty(true, "  "))
+			logger.L().Debug("Matthias - bogus event received",
+				helpers.String("data", string(jsonFormatter.Marshal(e.Data))),
+				helpers.Int("timestamp", int(timeStamp)),
+				helpers.String("eventType", string(e.EventType)))
+		}
 		return timeStamp
 	}
 }
