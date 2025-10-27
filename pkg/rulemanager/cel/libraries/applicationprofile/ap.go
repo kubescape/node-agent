@@ -145,21 +145,6 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
-		"ap.were_syscalls_used": {
-			cel.Overload(
-				"ap_were_syscalls_used", []*cel.Type{cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
-				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
-					if len(values) != 2 {
-						return types.NewErr("expected 2 arguments, got %d", len(values))
-					}
-					wrapperFunc := func(args ...ref.Val) ref.Val {
-						return l.wereSyscallsUsed(args[0], args[1])
-					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.were_syscalls_used")
-					return cachedFunc(values[0], values[1])
-				}),
-			),
-		},
 		"ap.was_capability_used": {
 			cel.Overload(
 				"ap_was_capability_used", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
