@@ -72,6 +72,8 @@ int trace_enter_ptrace(struct trace_event_raw_sys_enter *ctx)
     event->request = request;
     read_exe_path(event->exepath, sizeof(event->exepath));
 
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
+
     gadget_submit_buf(ctx, &events, event, sizeof(*event));
     return 0;
 }

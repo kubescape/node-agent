@@ -68,6 +68,8 @@ int tracepoint__sched_fork(struct bpf_raw_tracepoint_args *ctx)
     // Executable path for the child
     read_task_exe_path(child, event->exepath, sizeof(event->exepath));
 
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
+
     gadget_submit_buf(ctx, &events, event, sizeof(*event));
     return 0;
 }

@@ -57,6 +57,8 @@ int handle_submit_sqe(struct trace_event_raw_io_uring_submit_sqe_local *ctx)
     event->opcode = ctx->opcode;
     event->flags = ctx->flags;
 
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
+
     gadget_submit_buf(ctx, &events, event, sizeof(*event));
     return 0;
 }

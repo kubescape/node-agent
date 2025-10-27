@@ -69,6 +69,7 @@ int enter_symlink(struct syscall_trace_enter *ctx)
     event->upper_layer = has_upper_layer();
     read_exe_path(event->exepath, sizeof(event->exepath));
 
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
 
     gadget_submit_buf(ctx, &events, event, sizeof(*event));
 
@@ -115,7 +116,8 @@ int enter_symlinkat(struct syscall_trace_enter *ctx)
     event->upper_layer = has_upper_layer();
     read_exe_path(event->exepath, sizeof(event->exepath));
 
-
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
+    
     gadget_submit_buf(ctx, &events, event, sizeof(*event));
 
     return 0;

@@ -62,6 +62,8 @@ int trace_enter_unshare(struct trace_event_raw_sys_enter *ctx)
     // Check if running in upper layer
     event->upper_layer = has_upper_layer();
 
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
+
     gadget_submit_buf(ctx, &events, event, sizeof(*event));
     return 0;
 }

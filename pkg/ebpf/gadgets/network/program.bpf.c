@@ -126,7 +126,7 @@ int ig_trace_net(struct __sk_buff *skb)
     gadget_process_populate_from_socket(skb_val, &event->proc);
 
 	event->netns_id = skb->cb[0]; // cb[0] initialized by dispatcher.bpf.c
-    event->timestamp_raw = bpf_ktime_get_ns();
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
 
     if (skb->pkt_type == PACKET_HOST) {
         // Read from skb buffer to avoid taking addresses of bit-fields/stack

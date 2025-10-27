@@ -155,6 +155,8 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
         event->upper_layer = has_upper_layer();
         read_exe_path(event->exepath, sizeof(event->exepath));
 
+        event->timestamp_raw = bpf_ktime_get_boot_ns();
+
         gadget_submit_buf(ctx, &events, event, sizeof(*event));
     } else {
         gadget_discard_buf(event);

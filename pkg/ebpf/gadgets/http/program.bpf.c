@@ -114,6 +114,8 @@ static __always_inline int populate_httpevent(struct httpevent *event, __u32 soc
         event->socket_inode = 0;
     }
 
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
+
     return 0;
 }
 
@@ -198,6 +200,8 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
 
     bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
     bpf_probe_read_user(&dataevent->buf, min_size(total_size, MAX_DATAEVENT_BUFFER), (void *)packet->buf);
+
+    dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
 
     // Use gadget_output_buf to copy the event to the map
     // gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent)); // TODO: check if this is correct
@@ -288,6 +292,8 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
 
             bpf_probe_read_user(&dataevent->buf, copy_len, iov.iov_base);
             bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
+
+            dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
 
             // Use gadget_output_buf to copy the event to the map
             gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent)); // TODO: check if this is correct

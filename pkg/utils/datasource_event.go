@@ -676,6 +676,9 @@ func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.
 		EventType:  e.EventType,
 		Internal:   internal,
 		Request:    request,
+		extra:      e.extra,
+		Syscall:    e.Syscall,
+		Response:   e.Response,
 	}
 }
 
