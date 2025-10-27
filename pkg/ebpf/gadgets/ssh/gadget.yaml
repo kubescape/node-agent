@@ -1,0 +1,47 @@
+name: ssh
+description: Detect SSH connections by scanning TCP payload for SSH signature and
+  report network and process info.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/ssh
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/ssh
+datasources:
+  ssh:
+    fields:
+      dst:
+        annotations:
+          description: Destination IP address and port.
+      netns_id:
+        annotations:
+          description: Network namespace ID when the event was captured.
+      proc:
+        annotations:
+          description: Process metadata including pid, tid, ppid, uid, gid, comm,
+            etc.
+      src:
+        annotations:
+          description: Source IP address and port.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.
+params:
+  ebpf:
+    targ_comm:
+      key: targ_comm
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_gid:
+      key: targ_gid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_pid:
+      key: targ_pid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_tid:
+      key: targ_tid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_uid:
+      key: targ_uid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'

@@ -203,10 +203,10 @@ func (ns *NetworkStream) Start() {
 }
 
 func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
-	eventType := enrichedEvent.EventType
+	eventType := enrichedEvent.Event.GetEventType()
 	switch eventType {
 	case utils.NetworkEventType:
-		networkEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
+		networkEvent, ok := enrichedEvent.Event.(utils.NetworkEvent)
 		if !ok {
 			return
 		}
@@ -222,7 +222,7 @@ func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent
 			return
 		}
 
-		dnsEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
+		dnsEvent, ok := enrichedEvent.Event.(utils.DNSEvent)
 		if !ok {
 			return
 		}
@@ -240,7 +240,7 @@ func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent
 func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
 	switch eventType {
 	case utils.NetworkEventType:
-		networkEvent, ok := event.(*utils.DatasourceEvent)
+		networkEvent, ok := event.(utils.NetworkEvent)
 		if !ok {
 			return
 		}
@@ -256,7 +256,7 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 			return
 		}
 
-		dnsEvent, ok := event.(*utils.DatasourceEvent)
+		dnsEvent, ok := event.(utils.DNSEvent)
 		if !ok {
 			return
 		}
@@ -271,7 +271,7 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 	}
 }
 
-func (ns *NetworkStream) handleDnsEvent(event *utils.DatasourceEvent, processTree *apitypes.ProcessTree) {
+func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *apitypes.ProcessTree) {
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
 
@@ -307,7 +307,7 @@ func (ns *NetworkStream) handleDnsEvent(event *utils.DatasourceEvent, processTre
 	ns.networkEventsStorage.Entities[entityId] = entity
 }
 
-func (ns *NetworkStream) shouldReportDnsEvent(dnsEvent *utils.DatasourceEvent) bool {
+func (ns *NetworkStream) shouldReportDnsEvent(dnsEvent utils.DNSEvent) bool {
 	dnsName := dnsEvent.GetDNSName()
 
 	if dnsName == "" {
@@ -325,7 +325,7 @@ func (ns *NetworkStream) shouldReportDnsEvent(dnsEvent *utils.DatasourceEvent) b
 	return true
 }
 
-func (ns *NetworkStream) handleNetworkEvent(event *utils.DatasourceEvent, processTree *apitypes.ProcessTree) {
+func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTree *apitypes.ProcessTree) {
 	endpointID := getNetworkEndpointIdentifier(event)
 
 	ns.eventsStorageMutex.Lock()
@@ -360,7 +360,7 @@ func (ns *NetworkStream) handleNetworkEvent(event *utils.DatasourceEvent, proces
 	ns.networkEventsStorage.Entities[entityId] = entity
 }
 
-func (ns *NetworkStream) buildNetworkEvent(event *utils.DatasourceEvent, processTree *apitypes.ProcessTree) apitypes.NetworkStreamEvent {
+func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree *apitypes.ProcessTree) apitypes.NetworkStreamEvent {
 	var domain string
 	var ok bool
 	dstEndpoint := event.GetDstEndpoint()
@@ -385,7 +385,7 @@ func (ns *NetworkStream) buildNetworkEvent(event *utils.DatasourceEvent, process
 		Timestamp: time.Unix(0, int64(event.GetTimestamp())),
 		IPAddress: dstEndpoint.Addr,
 		DNSName:   domain,
-		Port:      int32(event.GetPort()),
+		Port:      int32(event.GetDstPort()),
 		Protocol:  apitypes.NetworkStreamEventProtocol(event.GetProto()),
 	}
 
@@ -478,8 +478,8 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream)
 	return nil
 }
 
-func getNetworkEndpointIdentifier(event *utils.DatasourceEvent) string {
-	return fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetPort(), event.GetProto())
+func getNetworkEndpointIdentifier(event utils.NetworkEvent) string {
+	return fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetDstPort(), event.GetProto())
 }
 
 func isEmptyNetworkStream(networkStream *apitypes.NetworkStream) bool {

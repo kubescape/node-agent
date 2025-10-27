@@ -38,6 +38,9 @@ type PrometheusMetric struct {
 	ebpfHTTPCounter       prometheus.Counter
 	ebpfPtraceCounter     prometheus.Counter
 	ebpfIoUringCounter    prometheus.Counter
+	ebpfKmodCounter       prometheus.Counter
+	ebpfUnshareCounter    prometheus.Counter
+	ebpfBpfCounter        prometheus.Counter
 	ruleCounter           *prometheus.CounterVec
 	alertCounter          *prometheus.CounterVec
 	ruleEvaluationTime    *prometheus.HistogramVec
@@ -119,6 +122,18 @@ func NewPrometheusMetric() *PrometheusMetric {
 		ebpfIoUringCounter: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "node_agent_iouring_counter",
 			Help: "The total number of io_uring events received from the eBPF probe",
+		}),
+		ebpfKmodCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_kmod_counter",
+			Help: "The total number of kmod events received from the eBPF probe",
+		}),
+		ebpfUnshareCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_unshare_counter",
+			Help: "The total number of unshare events received from the eBPF probe",
+		}),
+		ebpfBpfCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_bpf_counter",
+			Help: "The total number of bpf events received from the eBPF probe",
 		}),
 		ruleCounter: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "node_agent_rule_counter",
@@ -218,6 +233,9 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.ebpfHTTPCounter)
 	prometheus.Unregister(p.ebpfPtraceCounter)
 	prometheus.Unregister(p.ebpfIoUringCounter)
+	prometheus.Unregister(p.ebpfKmodCounter)
+	prometheus.Unregister(p.ebpfUnshareCounter)
+	prometheus.Unregister(p.ebpfBpfCounter)
 	prometheus.Unregister(p.containerStartCounter)
 	prometheus.Unregister(p.containerStopCounter)
 	// Unregister program ID metrics
@@ -259,6 +277,12 @@ func (p *PrometheusMetric) ReportEvent(eventType utils.EventType) {
 		p.ebpfIoUringCounter.Inc()
 	case utils.SyscallEventType:
 		p.ebpfSyscallCounter.Inc()
+	case utils.KmodEventType:
+		p.ebpfKmodCounter.Inc()
+	case utils.UnshareEventType:
+		p.ebpfUnshareCounter.Inc()
+	case utils.BpfEventType:
+		p.ebpfBpfCounter.Inc()
 	}
 }
 

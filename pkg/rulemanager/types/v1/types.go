@@ -23,21 +23,21 @@ type Rule struct {
 	Name                    string                     `json:"name" yaml:"name"`
 	Description             string                     `json:"description" yaml:"description"`
 	Expressions             RuleExpressions            `json:"expressions" yaml:"expressions"`
-	ProfileDependency       apitypes.ProfileDependency `json:"profile_dependency" yaml:"profile_dependency"`
+	ProfileDependency       apitypes.ProfileDependency `json:"profileDependency" yaml:"profileDependency"`
 	Severity                int                        `json:"severity" yaml:"severity"`
-	SupportPolicy           bool                       `json:"support_policy" yaml:"support_policy"`
+	SupportPolicy           bool                       `json:"supportPolicy" yaml:"supportPolicy"`
 	Tags                    []string                   `json:"tags" yaml:"tags"`
 	State                   map[string]any             `json:"state,omitempty" yaml:"state,omitempty"`
-	AgentVersionRequirement string                     `json:"agent_version_requirement" yaml:"agent_version_requirement"`
+	AgentVersionRequirement string                     `json:"agentVersionRequirement" yaml:"agentVersionRequirement"`
 }
 
 type RuleExpressions struct {
 	Message        string           `json:"message" yaml:"message"`
-	UniqueID       string           `json:"unique_id" yaml:"unique_id"`
-	RuleExpression []RuleExpression `json:"rule_expression" yaml:"rule_expression"`
+	UniqueID       string           `json:"uniqueId" yaml:"uniqueId"`
+	RuleExpression []RuleExpression `json:"ruleExpression" yaml:"ruleExpression"`
 }
 
 type RuleExpression struct {
-	EventType  utils.EventType `json:"event_type" yaml:"event_type"`
+	EventType  utils.EventType `json:"eventType" yaml:"eventType"`
 	Expression string          `json:"expression" yaml:"expression"`
 }

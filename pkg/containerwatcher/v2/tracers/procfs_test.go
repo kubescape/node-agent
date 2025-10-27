@@ -35,7 +35,7 @@ func TestNewProcfsTracer(t *testing.T) {
 	)
 
 	assert.NotNil(t, tracer)
-	assert.Equal(t, "procfs_tracer", tracer.GetName())
+	assert.Equal(t, "trace_procfs", tracer.GetName())
 	assert.Equal(t, utils.ProcfsEventType, tracer.GetEventType())
 	assert.False(t, tracer.started)
 }
@@ -109,6 +109,7 @@ func TestProcfsEvent_InterfaceMethods(t *testing.T) {
 		Comm:      "test-process",
 	}
 
+	assert.Equal(t, utils.ProcfsEventType, event.GetEventType())
 	assert.Equal(t, types.NORMAL, event.GetType())
 	assert.Equal(t, event.Timestamp, event.GetTimestamp())
 	assert.Equal(t, "", event.GetNamespace())

@@ -67,6 +67,7 @@ type Config struct {
 	IgnoreRuleBindings             bool                                 `mapstructure:"ignoreRuleBindings"`
 	DNSCacheSize                   int                                  `mapstructure:"dnsCacheSize"`
 	DCapSys                        bool                                 `mapstructure:"dCapSys"`
+	ContainerEolNotificationBuffer int                                  `mapstructure:"containerEolNotificationBuffer"`
 	DDns                           bool                                 `mapstructure:"dDns"`
 	DExec                          bool                                 `mapstructure:"dExec"`
 	DExit                          bool                                 `mapstructure:"dExit"`
@@ -81,6 +82,9 @@ type Config struct {
 	DSeccomp                       bool                                 `mapstructure:"dSeccomp"`
 	DSsh                           bool                                 `mapstructure:"dSsh"`
 	DSymlink                       bool                                 `mapstructure:"dSymlink"`
+	DKmod                          bool                                 `mapstructure:"dKmod"`
+	DUnshare                       bool                                 `mapstructure:"dUnshare"`
+	DBpf                           bool                                 `mapstructure:"dBpf"`
 	DTop                           bool                                 `mapstructure:"dTop"`
 }
 
@@ -131,6 +135,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ignoreRuleBindings", false)
 
 	viper.SetDefault("dnsCacheSize", 50000)
+	viper.SetDefault("containerEolNotificationBuffer", 100)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()

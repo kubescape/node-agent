@@ -12,9 +12,6 @@ import (
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -36,7 +33,7 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 }
 
 // ReportFileExec reports a file execution event for a container
-func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event *utils.DatasourceEvent) {
+func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event utils.ExecEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.execs == nil {
 			data.execs = &maps.SafeMap[string, []string]{}
@@ -62,7 +59,7 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event *ut
 }
 
 // ReportFileOpen reports a file open event for a container
-func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event *utils.DatasourceEvent) {
+func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event utils.OpenEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.opens == nil {
 			data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
@@ -100,35 +97,35 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event *ut
 }
 
 // ReportSymlinkEvent reports a symlink creation event for a container
-func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event) {
-	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
-	//	if cpm.enricher != nil {
-	//		symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-	//		go cpm.enricher.DatasourceEvent(containerID, event, symlinkIdentifier)
-	//	}
-	//	return nil
-	//})
+func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event utils.LinkEvent) {
+	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+		if cpm.enricher != nil {
+			symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.GetOldPath() + event.GetNewPath())
+			go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
+		}
+		return nil
+	})
 
-	//cpm.logEventError(err, "symlink", containerID)
+	cpm.logEventError(err, "symlink", containerID)
 }
 
 // ReportHardlinkEvent reports a hardlink creation event for a container
-func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event *tracerhardlinktype.Event) {
-	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
-	//	if cpm.enricher != nil {
-	//		hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-	//		go cpm.enricher.DatasourceEvent(containerID, event, hardlinkIdentifier)
-	//	}
-	//	return nil
-	//})
+func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event utils.LinkEvent) {
+	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+		if cpm.enricher != nil {
+			hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.GetOldPath() + event.GetNewPath())
+			go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
+		}
+		return nil
+	})
 
-	//cpm.logEventError(err, "hardlink", containerID)
+	cpm.logEventError(err, "hardlink", containerID)
 }
 
 // ReportHTTPEvent reports an HTTP event for a container
-func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *tracerhttptype.Event) {
+func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event utils.HttpEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
-		if event.Response == nil {
+		if event.GetResponse() == nil {
 			return 0, nil
 		}
 
@@ -229,7 +226,7 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 }
 
 // ReportNetworkEvent reports a network event for a container
-func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event *utils.DatasourceEvent) {
+func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event utils.NetworkEvent) {
 	if !cpm.isValidNetworkEvent(event) {
 		return
 	}
@@ -241,7 +238,7 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 
 		dstEndpoint := event.GetDstEndpoint()
 		networkEvent := NetworkEvent{
-			Port:     event.GetPort(),
+			Port:     event.GetDstPort(),
 			Protocol: event.GetProto(),
 			PktType:  event.GetPktType(),
 			Destination: Destination{
@@ -281,29 +278,28 @@ func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
 	logger.L().Debug("dropped event reported", helpers.String("containerID", containerID))
 }
 
-func (cpm *ContainerProfileManager) ReportSyscalls(containerID string, syscalls []string) {
+func (cpm *ContainerProfileManager) ReportSyscall(containerID string, syscall string) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.syscalls == nil {
 			data.syscalls = mapset.NewSet[string]()
 		}
-		data.syscalls.Append(syscalls...)
-		return size.Of(syscalls), nil
+		return data.syscalls.Append(syscall), nil
 	})
 
 	cpm.logEventError(err, "syscalls", containerID)
 }
 
 // isValidNetworkEvent checks if the network event is valid for processing
-func (cpm *ContainerProfileManager) isValidNetworkEvent(event *utils.DatasourceEvent) bool {
+func (cpm *ContainerProfileManager) isValidNetworkEvent(event utils.NetworkEvent) bool {
 	pktType := event.GetPktType()
 	// Unknown type, shouldn't happen
-	if pktType != HostPktType && pktType != OutgoingPktType {
+	if pktType != utils.HostPktType && pktType != utils.OutgoingPktType {
 		logger.L().Debug("pktType is not HOST or OUTGOING", helpers.Interface("event", event))
 		return false
 	}
 
 	// Ignore localhost
-	if pktType == HostPktType && event.GetPodHostIP() == event.GetDstEndpoint().Addr {
+	if pktType == utils.HostPktType && event.GetPodHostIP() == event.GetDstEndpoint().Addr {
 		return false
 	}
 

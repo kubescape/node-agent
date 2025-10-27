@@ -2,22 +2,21 @@ package conversion
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
-	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 func ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent, error) {
 	switch eventType {
 	case utils.ExecveEventType:
-		return convertExecEvent(event.(*utils.DatasourceEvent)), nil
-	//case utils.ForkEventType:
-	//	return convertForkEvent(event.(*tracerforktype.Event)), nil
-	//case utils.ExitEventType:
-	//	return convertExitEvent(event.(*tracerexittype.Event)), nil
+		return convertExecEvent(event.(utils.ExecEvent)), nil
+	case utils.ForkEventType:
+		return convertForkEvent(event.(utils.ForkEvent)), nil
+	case utils.ExitEventType:
+		return convertExitEvent(event.(utils.ExitEvent)), nil
 	case utils.ProcfsEventType:
 		return convertProcfsEvent(event.(*events.ProcfsEvent)), nil
 	default:
@@ -26,7 +25,7 @@ func ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent
 }
 
 // convertExecEvent converts an ExecEvent to ProcessEvent
-func convertExecEvent(execEvent *utils.DatasourceEvent) ProcessEvent {
+func convertExecEvent(execEvent utils.ExecEvent) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ExecEvent,
 		Timestamp:   time.Now(),
@@ -40,14 +39,7 @@ func convertExecEvent(execEvent *utils.DatasourceEvent) ProcessEvent {
 
 	// Convert command line arguments to string
 	if args := execEvent.GetArgs(); len(args) > 0 {
-		// Join all arguments with spaces
-		cmdline := ""
-		for i, arg := range args {
-			if i > 0 {
-				cmdline += " "
-			}
-			cmdline += arg
-		}
+		cmdline := strings.Join(args, " ")
 		event.Cmdline = cmdline
 	}
 
@@ -68,60 +60,56 @@ func convertExecEvent(execEvent *utils.DatasourceEvent) ProcessEvent {
 }
 
 // convertForkEvent converts a ForkEvent to ProcessEvent
-func convertForkEvent(forkEvent *tracerforktype.Event) ProcessEvent {
+func convertForkEvent(forkEvent utils.ForkEvent) ProcessEvent {
 	event := ProcessEvent{
-		Type:      ForkEvent,
-		Timestamp: time.Now(),
-		PID:       forkEvent.Pid,
-		PPID:      forkEvent.PPid,
-		Comm:      forkEvent.Comm,
-		Path:      forkEvent.ExePath,
-		//StartTimeNs: uint64(forkEvent.Timestamp), // Use event timestamp for consistency
+		Type:        ForkEvent,
+		Timestamp:   time.Now(),
+		PID:         forkEvent.GetPID(),
+		PPID:        forkEvent.GetPpid(),
+		Comm:        forkEvent.GetComm(),
+		Path:        forkEvent.GetExePath(),
+		StartTimeNs: uint64(forkEvent.GetTimestamp()), // Use event timestamp for consistency
 	}
 
 	// Set UID and GID if available
-	if forkEvent.Uid != 0 {
-		uid := forkEvent.Uid
-		event.Uid = &uid
+	if uid := forkEvent.GetUid(); uid != nil {
+		event.Uid = uid
 	}
-	if forkEvent.Gid != 0 {
-		gid := forkEvent.Gid
-		event.Gid = &gid
+	if gid := forkEvent.GetGid(); gid != nil {
+		event.Gid = gid
 	}
 
 	// Set container context if available
-	//if forkEvent.Runtime.ContainerID != "" {
-	//	event.ContainerID = forkEvent.Runtime.ContainerID
-	//}
+	if containerId := forkEvent.GetContainerID(); containerId != "" {
+		event.ContainerID = containerId
+	}
 
 	return event
 }
 
 // convertExitEvent converts an ExitEvent to ProcessEvent
-func convertExitEvent(exitEvent *tracerexittype.Event) ProcessEvent {
+func convertExitEvent(exitEvent utils.ExitEvent) ProcessEvent {
 	event := ProcessEvent{
-		Type:      ExitEvent,
-		Timestamp: time.Now(),
-		PID:       exitEvent.Pid,
-		PPID:      exitEvent.PPid,
-		Comm:      exitEvent.Comm,
-		//StartTimeNs: uint64(exitEvent.Timestamp), // Use event timestamp for consistency
+		Type:        ExitEvent,
+		Timestamp:   time.Now(),
+		PID:         exitEvent.GetPID(),
+		PPID:        exitEvent.GetPpid(),
+		Comm:        exitEvent.GetComm(),
+		StartTimeNs: uint64(exitEvent.GetTimestamp()), // Use event timestamp for consistency
 	}
 
 	// Set UID and GID if available
-	if exitEvent.Uid != 0 {
-		uid := exitEvent.Uid
-		event.Uid = &uid
+	if uid := exitEvent.GetUid(); uid != nil {
+		event.Uid = uid
 	}
-	if exitEvent.Gid != 0 {
-		gid := exitEvent.Gid
-		event.Gid = &gid
+	if gid := exitEvent.GetGid(); gid != nil {
+		event.Gid = gid
 	}
 
 	// Set container context if available
-	//if exitEvent.Runtime.ContainerID != "" {
-	//	event.ContainerID = exitEvent.Runtime.ContainerID
-	//}
+	if containerId := exitEvent.GetContainerID(); containerId != "" {
+		event.ContainerID = containerId
+	}
 
 	return event
 }

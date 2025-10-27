@@ -66,7 +66,7 @@ func (et *ExecTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.ebpf.paths": "false", // TODO set to true to have CWD paths in events
+			"operator.oci.ebpf.paths": "true", // CWD paths in events
 		}
 		err := et.runtime.RunGadget(et.gadgetCtx, nil, params)
 		if err != nil {
@@ -120,29 +120,20 @@ func (et *ExecTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (et *ExecTracer) callback(event *utils.DatasourceEvent) {
-	path := event.GetComm()
-	if args := event.GetArgs(); len(args) > 0 {
-		path = args[0]
-	}
-
-	if path == "" {
-		return
-	}
-
+func (et *ExecTracer) callback(event utils.ExecEvent) {
 	errorRaw := event.GetError()
-	if errorRaw > -1 {
+	if errorRaw > -1 && event.GetComm() != "" {
 		// Handle the event with syscall enrichment
 		et.handleEvent(event, []uint64{SYS_FORK})
 	}
 }
 
 // handleEvent processes the event with syscall enrichment
-func (et *ExecTracer) handleEvent(event *utils.DatasourceEvent, syscalls []uint64) {
+func (et *ExecTracer) handleEvent(event utils.ExecEvent, syscalls []uint64) {
 	if et.eventCallback != nil {
 		containerID := event.GetContainerID()
 		processID := event.GetPID()
 
-		EnrichEvent(et.thirdPartyEnricher, event, syscalls, et.eventCallback, containerID, processID)
+		enrichEvent(et.thirdPartyEnricher, event, syscalls, et.eventCallback, containerID, processID)
 	}
 }

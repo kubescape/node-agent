@@ -79,7 +79,9 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 
 	if addresses := dnsEvent.GetAddresses(); len(addresses) > 0 {
 		for _, address := range addresses {
-			dm.addressToDomainMap.Add(address, dnsName)
+			if address != "" {
+				dm.addressToDomainMap.Add(address, dnsName)
+			}
 		}
 
 		// Update the cache with these known good addresses
@@ -105,7 +107,7 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	}
 
 	// Only perform lookup if we don't have cached results
-	addresses, err := net.LookupIP(dnsName)
+	ipAddresses, err := net.LookupIP(dnsName)
 	if err != nil {
 		// Cache the failure - we just need to store something, using empty struct
 		dm.failureCache.Set(dnsName, struct{}{})
@@ -113,8 +115,8 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	}
 
 	// Convert addresses to strings and store them
-	addrStrings := make([]string, 0, len(addresses))
-	for _, addr := range addresses {
+	addrStrings := make([]string, 0, len(ipAddresses))
+	for _, addr := range ipAddresses {
 		addrStr := addr.String()
 		addrStrings = append(addrStrings, addrStr)
 		dm.addressToDomainMap.Add(addrStr, dnsName)

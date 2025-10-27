@@ -44,7 +44,6 @@ func (ee *EventEnricher) EnrichEvents(entry EventEntry) *ebpfevents.EnrichedEven
 
 	enrichedEvent := &ebpfevents.EnrichedEvent{
 		Event:       event,
-		EventType:   eventType,
 		ProcessTree: processTree,
 		ContainerID: entry.ContainerID,
 		Timestamp:   entry.Timestamp,

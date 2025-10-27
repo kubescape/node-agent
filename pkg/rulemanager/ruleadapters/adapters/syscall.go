@@ -16,29 +16,31 @@ func NewSyscallAdapter() *SyscallAdapter {
 }
 
 func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	syscallEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
-	if !ok || syscallEvent.EventType != utils.SyscallEventType {
+	syscallEvent, ok := enrichedEvent.Event.(utils.SyscallEvent)
+	if !ok {
 		return
 	}
 
+	comm := syscallEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = syscallEvent.GetPID()
 	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"syscall": syscallEvent.GetSyscalls(), // TODO: is it ok as an array?
+		"syscall": syscallEvent.GetSyscall(),
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: syscallEvent.GetComm(),
+			Name: comm,
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
+	// FIXME: find a tracer that provides these required details
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm: syscallEvent.GetComm(),
-			Gid:  syscallEvent.GetGid(),
-			PID:  syscallEvent.GetPID(),
-			Uid:  syscallEvent.GetUid(),
+			Comm: comm,
+			//Gid:  syscallEvent.GetGid(),
+			PID: syscallEvent.GetPID(),
+			//Uid: syscallEvent.GetUid(),
 		},
 		ContainerID: syscallEvent.GetContainerID(),
 	}

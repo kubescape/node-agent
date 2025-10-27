@@ -12,11 +12,11 @@ import (
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
@@ -243,7 +243,7 @@ func TestGetEndpointIdentifier(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			event := &tracerhttptype.Event{
+			event := &utils.StructEvent{
 				Request: &http.Request{
 					Host: tt.host,
 					URL: &url.URL{
@@ -604,8 +604,8 @@ func TestEndpointKindConstants(t *testing.T) {
 func TestTrafficTypeConstants(t *testing.T) {
 	assert.Equal(t, "internal", InternalTrafficType)
 	assert.Equal(t, "external", ExternalTrafficType)
-	assert.Equal(t, "HOST", HostPktType)
-	assert.Equal(t, "OUTGOING", OutgoingPktType)
+	assert.Equal(t, "HOST", utils.HostPktType)
+	assert.Equal(t, "OUTGOING", utils.OutgoingPktType)
 }
 
 func TestDefaultLabelsToIgnore(t *testing.T) {

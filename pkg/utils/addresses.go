@@ -16,3 +16,7 @@ func rawIPv4ToString(ipInt uint32) string {
 	// and .String() returns the dotted-decimal notation.
 	return net.IP(ipBytes).String()
 }
+
+func rawIPv6ToString(b []byte) string {
+	return net.IP(b).String() // TODO make sure it works as expected
+}

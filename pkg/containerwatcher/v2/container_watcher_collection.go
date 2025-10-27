@@ -36,7 +36,6 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 
 	// Initialize socket enricher for network tracers
 	if cw.cfg.EnableNetworkTracing || cw.cfg.EnableRuntimeDetection {
-		socketEnricherOp := &socketenricher.SocketEnricher{}
 		socketEnricherFields := params.ParamDescs{
 			{
 				Key:         "socket-enricher-fields",
@@ -44,7 +43,10 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 				TypeHint:    params.TypeString,
 			},
 		}
-		if err := socketEnricherOp.Init(socketEnricherFields.ToParams()); err != nil {
+		socketEnricherOp := &socketenricher.SocketEnricher{}
+		socketEnricherParams := socketEnricherFields.ToParams()
+		socketEnricherParams.Get("socket-enricher-fields").Set("cwd=512,exepath=512")
+		if err := socketEnricherOp.Init(socketEnricherParams); err != nil {
 			return fmt.Errorf("init socket enricher: %w", err)
 		}
 		cw.socketEnricher = socketEnricherOp

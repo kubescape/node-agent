@@ -9,6 +9,7 @@ import (
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/syscalls"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -64,7 +65,7 @@ func (st *SyscallTracer) Start(ctx context.Context) error {
 	go func() {
 		params := map[string]string{
 			"operator.oci.ebpf.map-fetch-count":    "0",
-			"operator.oci.ebpf.map-fetch-interval": "5s",
+			"operator.oci.ebpf.map-fetch-interval": "30s",
 		}
 		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
 		if err != nil {
@@ -120,9 +121,29 @@ func (st *SyscallTracer) eventOperator() operators.DataOperator {
 // callback handles events from the tracer
 func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	containerID := event.GetContainerID()
-	if containerID == "" {
-		return
-	}
+	processID := event.GetPID()
 
-	st.eventCallback(event, containerID, 0)
+	syscallsBuffer, _ := event.Datasource.GetField("syscalls").Bytes(event.Data)
+	for _, syscall := range decodeSyscalls(syscallsBuffer) {
+		st.eventCallback(&utils.DatasourceEvent{
+			Data:       event.Data,
+			Datasource: event.Datasource,
+			EventType:  event.EventType,
+			Syscall:    syscall,
+		}, containerID, processID)
+	}
+}
+
+func decodeSyscalls(syscallsBuffer []byte) []string {
+	syscallStrings := make([]string, 0)
+	for i := range syscallsBuffer {
+		if syscallsBuffer[i] > 0 {
+			syscallName, exist := syscalls.GetSyscallNameByNumber(i)
+			if !exist {
+				syscallName = "unknown"
+			}
+			syscallStrings = append(syscallStrings, syscallName)
+		}
+	}
+	return syscallStrings
 }

@@ -4,13 +4,13 @@ import (
 	"context"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
-	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubeipresolver"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -34,6 +34,7 @@ type NetworkTracer struct {
 	kubeNameResolver   *kubenameresolver.KubeNameResolver
 	ociStore           *orasoci.ReadOnlyStore
 	runtime            runtime.Runtime
+	socketEnricherOp   *socketenricher.SocketEnricher
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
@@ -46,6 +47,7 @@ func NewNetworkTracer(
 	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
+	socketEnricherOp *socketenricher.SocketEnricher,
 ) *NetworkTracer {
 	return &NetworkTracer{
 		eventCallback:      eventCallback,
@@ -55,6 +57,7 @@ func NewNetworkTracer(
 		ociStore:           ociStore,
 		runtime:            runtime,
 		thirdPartyEnricher: thirdPartyEnricher,
+		socketEnricherOp:   socketEnricherOp,
 	}
 }
 
@@ -63,13 +66,14 @@ func (nt *NetworkTracer) Start(ctx context.Context) error {
 	nt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/trace_tcp:v0.45.0",
+		"ghcr.io/inspektor-gadget/gadget/network:latest",
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			nt.kubeIPResolver,
 			nt.kubeManager,
 			nt.kubeNameResolver,
 			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			nt.socketEnricherOp,
 			nt.eventOperator(),
 		),
 		gadgetcontext.WithName(networkTraceName),
@@ -77,7 +81,7 @@ func (nt *NetworkTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.annotate": "tracetcp:kubenameresolver.enable=true",
+			"operator.oci.annotate": "network:kubenameresolver.enable=true",
 		}
 		err := nt.runtime.RunGadget(nt.gadgetCtx, nil, params)
 		if err != nil {
@@ -117,14 +121,7 @@ func (nt *NetworkTracer) eventOperator() operators.DataOperator {
 	return simple.New(string(utils.NetworkEventType),
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
-				jsonFormatter, _ := igjson.New(d,
-					// Show all fields
-					igjson.WithShowAll(true),
-					// Print json in a pretty format
-					igjson.WithPretty(true, "  "),
-				)
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					logger.L().Debug("Matthias - event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
 					nt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.NetworkEventType})
 					return nil
 				}, opPriority)
@@ -138,55 +135,12 @@ func (nt *NetworkTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (nt *NetworkTracer) callback(event *utils.DatasourceEvent) {
-	// do not skip dropped events as their processing is done in the worker
-
-	//	nt.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
-	//	nt.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
-
-	//	if nt.kubeIPInstance != nil {
-	//		_ = nt.kubeIPInstance.DatasourceEvent(event)
-	//	}
-	//	if nt.kubeNameInstance != nil {
-	//		_ = nt.kubeNameInstance.DatasourceEvent(event)
-	//	}
-
+func (nt *NetworkTracer) callback(event utils.NetworkEvent) {
 	if nt.eventCallback != nil {
 		// Extract container ID and process ID from the network event
 		containerID := event.GetContainerID()
-		if containerID == "" {
-			return
-		}
-		event.GetPort()
-		event.GetProto()
-		event.GetDstPort()
+		processID := event.GetPID()
 
-		nt.eventCallback(event, containerID, 0)
+		nt.eventCallback(event, containerID, processID)
 	}
 }
-
-// startKubernetesResolution starts the kubeIP and kube name resolution
-//func (nt *NetworkTracer) startKubernetesResolution() error {
-//	kubeIPOp := operators.GetRaw(kubeipresolver.OperatorName).(*kubeipresolver.KubeIPResolver)
-//	_ = kubeIPOp.Init(nil)
-
-//	kubeIPInstance, err := kubeIPOp.Instantiate(nil, nil, nil)
-//	if err != nil {
-//		return fmt.Errorf("creating kube ip resolver: %w", err)
-//	}
-
-//	nt.kubeIPInstance = kubeIPInstance
-//	_ = nt.kubeIPInstance.PreGadgetRun()
-
-//	kubeNameOp := operators.GetRaw(kubenameresolver.OperatorName).(*kubenameresolver.KubeNameResolver)
-//	_ = kubeNameOp.Init(nil)
-//	kubeNameInstance, err := kubeNameOp.Instantiate(nil, nil, nil)
-//	if err != nil {
-//		return fmt.Errorf("creating kube name resolver: %w", err)
-//	}
-
-//	nt.kubeNameInstance = kubeNameInstance
-//	_ = nt.kubeNameInstance.PreGadgetRun()
-
-//	return nil
-//}

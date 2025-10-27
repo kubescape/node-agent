@@ -20,28 +20,29 @@ func NewExecAdapter() *ExecAdapter {
 }
 
 func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	execEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
-	if !ok || execEvent.EventType != utils.ExecveEventType {
+	execEvent, ok := enrichedEvent.Event.(utils.ExecEvent)
+	if !ok {
 		return
 	}
 
 	failure.SetExtra(execEvent.GetExtra())
 
-	execPath := execEvent.GetExecPathFromEvent()
-	execFullPath := execEvent.GetExecFullPathFromEvent()
+	execPath := utils.GetExecPathFromEvent(execEvent)
+	execFullPath := GetExecFullPathFromEvent(execEvent)
 	upperLayer := execEvent.GetUpperLayer() || execEvent.GetPupperLayer()
 
+	pid := execEvent.GetPID()
+	comm := execEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = execEvent.GetPID()
+	baseRuntimeAlert.InfectedPID = pid
 	baseRuntimeAlert.Arguments = map[string]interface{}{
-		//"retval": execEvent.GetRetval(), // TODO this is missing in execEvent?
 		"exec": execPath,
 		"args": execEvent.GetArgs(),
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name:        execEvent.GetComm(),
-			CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(execEvent.GetExecArgsFromEvent(), " ")),
+			Name:        comm,
+			CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 		},
 		File: &common.FileEntity{
 			Name:      filepath.Base(execFullPath),
@@ -52,9 +53,9 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm:       execEvent.GetComm(),
+			Comm:       comm,
 			Gid:        execEvent.GetGid(),
-			PID:        execEvent.GetPID(),
+			PID:        pid,
 			Uid:        execEvent.GetUid(),
 			UpperLayer: &upperLayer,
 			PPID:       execEvent.GetPpid(),
@@ -62,7 +63,7 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 			Cwd:        execEvent.GetCwd(),
 			Hardlink:   execEvent.GetExePath(),
 			Path:       execFullPath,
-			Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(execEvent.GetExecArgsFromEvent(), " ")),
+			Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 		},
 		ContainerID: execEvent.GetContainerID(),
 	}
@@ -75,6 +76,13 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 		PodLabels: execEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func GetExecFullPathFromEvent(execEvent utils.ExecEvent) string {
+	if path := execEvent.GetExePath(); path != "" {
+		return path
+	}
+	return utils.GetExecPathFromEvent(execEvent)
 }
 
 func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
