@@ -13,8 +13,10 @@ import (
 type StructEvent struct {
 	Addresses            []string                `json:"addresses,omitempty" yaml:"addresses,omitempty"`
 	Args                 []string                `json:"args,omitempty" yaml:"args,omitempty"`
+	AttrSize             uint32                  `json:"attrSize,omitempty" yaml:"attrSize,omitempty"`
 	Buf                  []byte                  `json:"buf,omitempty" yaml:"buf,omitempty"`
 	CapName              string                  `json:"capName,omitempty" yaml:"capName,omitempty"`
+	Cmd                  uint32                  `json:"cmd,omitempty" yaml:"cmd,omitempty"`
 	Comm                 string                  `json:"comm,omitempty" yaml:"comm,omitempty"`
 	Container            string                  `json:"container,omitempty" yaml:"container,omitempty"`
 	ContainerID          string                  `json:"containerId,omitempty" yaml:"containerId,omitempty"`
@@ -39,11 +41,13 @@ type StructEvent struct {
 	ID                   string                  `json:"id,omitempty" yaml:"id,omitempty"`
 	Identifier           string                  `json:"identifier,omitempty" yaml:"identifier,omitempty"`
 	Internal             bool                    `json:"internal,omitempty" yaml:"internal,omitempty"`
+	Module               string                  `json:"module,omitempty" yaml:"module,omitempty"`
 	Namespace            string                  `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 	NewPath              string                  `json:"newPath,omitempty" yaml:"newPath,omitempty"`
 	NumAnswers           int                     `json:"numAnswers,omitempty" yaml:"numAnswers,omitempty"`
 	OldPath              string                  `json:"oldPath,omitempty" yaml:"oldPath,omitempty"`
 	Opcode               int                     `json:"opcode,omitempty" yaml:"opcode,omitempty"`
+	PID64                uint64                  `json:"pid64,omitempty" yaml:"pid64,omitempty"`
 	Path                 string                  `json:"path,omitempty" yaml:"path,omitempty"`
 	Pcomm                string                  `json:"pcomm,omitempty" yaml:"pcomm,omitempty"`
 	Pid                  uint32                  `json:"pid,omitempty" yaml:"pid,omitempty"`
@@ -70,9 +74,6 @@ type StructEvent struct {
 	Uid                  uint32                  `json:"uid,omitempty" yaml:"uid,omitempty"`
 	UpperLayer           bool                    `json:"upperLayer,omitempty" yaml:"upperLayer,omitempty"`
 	UserData             int                     `json:"userData,omitempty" yaml:"userData,omitempty"`
-	Module               string                  `json:"module,omitempty" yaml:"module,omitempty"`
-	Cmd                  uint32                  `json:"cmd,omitempty" yaml:"cmd,omitempty"`
-	AttrSize             uint32                  `json:"attrSize,omitempty" yaml:"attrSize,omitempty"`
 }
 
 var _ BpfEvent = (*StructEvent)(nil)
@@ -384,6 +385,19 @@ func (e *StructEvent) GetPID() uint32 {
 		return e.Pid
 	default:
 		return e.Pid
+	}
+}
+
+// GetPID64 is a special implementation for stack trace events.
+func (e *StructEvent) GetPID64() uint64 {
+	switch e.EventType {
+	case ExecveEventType:
+		return e.PID64
+	case OpenEventType, ExitEventType, ForkEventType, HardlinkEventType, SymlinkEventType:
+		return e.PID64
+	default:
+		logger.L().Warning("GetPID64 not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
 	}
 }
 
