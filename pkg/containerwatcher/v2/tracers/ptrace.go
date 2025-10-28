@@ -98,7 +98,12 @@ func (pt *PtraceTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.PtraceEventType})
+					pt.callback(&utils.PtraceEvent{
+						BaseEvent: utils.BaseEvent{
+							IDataEvent: &utils.DataEvent{Data: data, DataSource: source},
+							EventType:  utils.PtraceEventType, // TODO remove later
+						},
+					})
 					return nil
 				}, opPriority)
 				if err != nil {
@@ -111,7 +116,7 @@ func (pt *PtraceTracer) eventOperator() operators.DataOperator {
 }
 
 // callback handles events from the tracer
-func (pt *PtraceTracer) callback(event utils.PtraceEvent) {
+func (pt *PtraceTracer) callback(event *utils.PtraceEvent) {
 	if pt.eventCallback != nil {
 		// Extract container ID and process ID from the ptrace event
 		containerID := event.GetContainerID()
