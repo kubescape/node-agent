@@ -38,6 +38,7 @@ type EnrichEvent interface {
 	GetHostNetwork() bool
 	GetPcomm() string
 	GetPID() uint32
+	GetPID64() uint64
 	GetPodLabels() map[string]string
 	GetPpid() uint32
 	GetUid() *uint32

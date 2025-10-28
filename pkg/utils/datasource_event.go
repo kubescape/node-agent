@@ -413,7 +413,7 @@ func (e *DatasourceEvent) GetPcomm() string {
 	return pcomm
 }
 
-func (e *DatasourceEvent) GetPID() uint32 { // TODO: for exec extra we should (https://github.com/kubescape/node-agent/blob/0b2c50a0e6494d5c8aa7d9e4d51d8c160cc71b25/pkg/ebpf/events/exec.go#L20)
+func (e *DatasourceEvent) GetPID() uint32 {
 	switch e.EventType {
 	case ForkEventType:
 		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
@@ -437,6 +437,19 @@ func (e *DatasourceEvent) GetPID() uint32 { // TODO: for exec extra we should (h
 			return 0
 		}
 		return pidValue
+	}
+}
+
+// GetPID64 is a special implementation for stack trace events.
+func (e *DatasourceEvent) GetPID64() uint64 {
+	switch e.EventType {
+	case ExecveEventType:
+		return (uint64(e.GetPpid()) << 32) | e.GetPtid()
+	case OpenEventType, ExitEventType, ForkEventType, HardlinkEventType, SymlinkEventType:
+		return (uint64(e.GetPID()) << 32) | e.GetTid()
+	default:
+		logger.L().Warning("GetPID64 not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
 	}
 }
 
@@ -495,6 +508,11 @@ func (e *DatasourceEvent) GetProto() string {
 		logger.L().Warning("GetProto not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+}
+
+func (e *DatasourceEvent) GetPtid() uint64 {
+	// FIXME Matthias - implement GetPtid
+	return 0
 }
 
 func (e *DatasourceEvent) GetPupperLayer() bool {
@@ -607,6 +625,11 @@ func (e *DatasourceEvent) GetSyscall() string {
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+}
+
+func (e *DatasourceEvent) GetTid() uint64 {
+	// FIXME Matthias - implement GetTid
+	return 0
 }
 
 func (e *DatasourceEvent) GetTimestamp() types.Time {
