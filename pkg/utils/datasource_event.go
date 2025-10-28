@@ -8,7 +8,6 @@ import (
 
 	igconsts "github.com/inspektor-gadget/inspektor-gadget/gadgets/trace_exec/consts"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
-	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/syscalls"
@@ -68,7 +67,7 @@ func (e *DatasourceEvent) GetAddresses() []string {
 	switch e.EventType {
 	case DnsEventType:
 		args, _ := e.Datasource.GetField("addresses").String(e.Data)
-		return strings.Split(args, ",") // TODO: verify if this is correct @amit
+		return strings.Split(args, ",")
 	default:
 		logger.L().Warning("GetAddresses not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return nil
@@ -419,7 +418,7 @@ func (e *DatasourceEvent) GetPID() uint32 {
 		childPid, _ := e.Datasource.GetField("child_pid").Uint32(e.Data)
 		return childPid
 	case ExitEventType:
-		exitPid, _ := e.Datasource.GetField("exit_pid").Uint32(e.Data) // FIXME it's fine to use the proc enrichment here
+		exitPid, _ := e.Datasource.GetField("exit_pid").Uint32(e.Data)
 		return exitPid
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
@@ -511,8 +510,8 @@ func (e *DatasourceEvent) GetProto() string {
 }
 
 func (e *DatasourceEvent) GetPtid() uint64 {
-	// FIXME Matthias - implement GetPtid
-	return 0
+	ptid, _ := e.Datasource.GetField("proc.parent.tid").Uint64(e.Data) // FIXME this doesn't exist
+	return ptid
 }
 
 func (e *DatasourceEvent) GetPupperLayer() bool {
@@ -628,8 +627,8 @@ func (e *DatasourceEvent) GetSyscall() string {
 }
 
 func (e *DatasourceEvent) GetTid() uint64 {
-	// FIXME Matthias - implement GetTid
-	return 0
+	tid, _ := e.Datasource.GetField("proc.tid").Uint64(e.Data)
+	return tid
 }
 
 func (e *DatasourceEvent) GetTimestamp() types.Time {
@@ -638,15 +637,7 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 		return types.Time(time.Now().UnixNano())
 	default:
 		timeStampRaw, _ := e.Datasource.GetField("timestamp_raw").Uint64(e.Data)
-		timeStamp := gadgets.WallTimeFromBootTime(timeStampRaw)
-		if timeStamp > 1771566078166033112 || timeStamp < 0 {
-			jsonFormatter, _ := igjson.New(e.Datasource, igjson.WithShowAll(true), igjson.WithPretty(true, "  "))
-			logger.L().Debug("Matthias - bogus event received",
-				helpers.String("data", string(jsonFormatter.Marshal(e.Data))),
-				helpers.Int("timestamp", int(timeStamp)),
-				helpers.String("eventType", string(e.EventType)))
-		}
-		return timeStamp
+		return gadgets.WallTimeFromBootTime(timeStampRaw)
 	}
 }
 
@@ -692,7 +683,7 @@ func (e *DatasourceEvent) IsDir() bool {
 	case OpenEventType:
 		raw, _ := e.Datasource.GetField("mode_raw").Uint32(e.Data)
 		fileMode := os.FileMode(raw)
-		return (fileMode & os.ModeType) == os.ModeDir // FIXME not sure if this is correct
+		return (fileMode & os.ModeType) == os.ModeDir // FIXME I don't know how to test this
 	default:
 		logger.L().Warning("IsDir not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return false

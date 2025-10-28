@@ -143,11 +143,6 @@ func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event conve
 func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
-	logger.L().Info("Matthias - Handling fork event in process tree",
-		helpers.Int("parentPID", int(event.PPID)),
-		helpers.Int("PID", int(event.PID)),
-		helpers.String("comm", event.Comm),
-	)
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
@@ -186,10 +181,6 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
-	logger.L().Info("Matthias - Handling procfs event in process tree",
-		helpers.Int("PID", int(event.PID)),
-		helpers.String("comm", event.Comm),
-	)
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
@@ -226,10 +217,6 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
-	logger.L().Info("Matthias - Handling exec event in process tree",
-		helpers.Int("PID", int(event.PID)),
-		helpers.String("comm", event.Comm),
-	)
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
@@ -278,10 +265,6 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 func (pt *processTreeCreatorImpl) handleExitEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
-	logger.L().Info("Matthias - Handling exit event in process tree",
-		helpers.Int("PID", int(event.PID)),
-		helpers.String("comm", event.Comm),
-	)
 
 	pt.addPendingExit(event)
 }
