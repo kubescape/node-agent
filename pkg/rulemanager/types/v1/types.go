@@ -29,6 +29,9 @@ type Rule struct {
 	Tags                    []string                   `json:"tags" yaml:"tags"`
 	State                   map[string]any             `json:"state,omitempty" yaml:"state,omitempty"`
 	AgentVersionRequirement string                     `json:"agentVersionRequirement" yaml:"agentVersionRequirement"`
+	IsTriggerAlert          bool                       `json:"isTriggerAlert" yaml:"isTriggerAlert"`
+	MitreTactic             string                     `json:"mitreTactic" yaml:"mitreTactic"`
+	MitreTechnique          string                     `json:"mitreTechnique" yaml:"mitreTechnique"`
 }
 
 type RuleExpressions struct {
