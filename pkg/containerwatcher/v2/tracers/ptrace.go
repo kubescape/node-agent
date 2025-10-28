@@ -98,7 +98,7 @@ func (pt *PtraceTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.PtraceEventType})
+					pt.callback(&utils.DatasourceEvent{Datasource: d, Data: data.DeepCopy(), EventType: utils.PtraceEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

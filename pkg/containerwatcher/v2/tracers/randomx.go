@@ -99,7 +99,7 @@ func (rt *RandomXTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					rt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.RandomXEventType})
+					rt.callback(&utils.DatasourceEvent{Datasource: d, Data: data.DeepCopy(), EventType: utils.RandomXEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

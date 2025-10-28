@@ -107,7 +107,7 @@ func (et *ExecTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					et.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.ExecveEventType})
+					et.callback(&utils.DatasourceEvent{Datasource: d, Data: data.DeepCopy(), EventType: utils.ExecveEventType})
 					return nil
 				}, opPriority)
 				if err != nil {
@@ -121,10 +121,12 @@ func (et *ExecTracer) eventOperator() operators.DataOperator {
 
 // callback handles events from the tracer
 func (et *ExecTracer) callback(event utils.ExecEvent) {
-	errorRaw := event.GetError()
-	if errorRaw > -1 && event.GetComm() != "" {
+	retVal := -event.GetError()
+	if retVal > -1 && event.GetComm() != "" {
 		// Handle the event with syscall enrichment
 		et.handleEvent(event, []uint64{SYS_FORK})
+	} else {
+		logger.L().Info("Matthias - ignoring exec event", helpers.String("containerID", event.GetContainerID()), helpers.String("comm", event.GetComm()), helpers.Int("retVal", int(retVal)))
 	}
 }
 

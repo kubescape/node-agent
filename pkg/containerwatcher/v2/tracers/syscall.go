@@ -106,7 +106,7 @@ func (st *SyscallTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					st.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.SyscallEventType})
+					st.callback(&utils.DatasourceEvent{Datasource: d, Data: data.DeepCopy(), EventType: utils.SyscallEventType})
 					return nil
 				}, opPriority)
 				if err != nil {
@@ -126,7 +126,7 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	syscallsBuffer, _ := event.Datasource.GetField("syscalls").Bytes(event.Data)
 	for _, syscall := range decodeSyscalls(syscallsBuffer) {
 		st.eventCallback(&utils.DatasourceEvent{
-			Data:       event.Data,
+			Data:       event.Data.DeepCopy(),
 			Datasource: event.Datasource,
 			EventType:  event.EventType,
 			Syscall:    syscall,

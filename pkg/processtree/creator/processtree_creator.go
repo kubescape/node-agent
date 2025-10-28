@@ -146,7 +146,7 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 	logger.L().Info("Matthias - Handling fork event in process tree",
 		helpers.Int("parentPID", int(event.PPID)),
 		helpers.Int("PID", int(event.PID)),
-		helpers.String("containerID", event.ContainerID),
+		helpers.String("comm", event.Comm),
 	)
 
 	proc, ok := pt.processMap.Load(event.PID)
@@ -188,7 +188,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 	defer pt.mutex.Unlock()
 	logger.L().Info("Matthias - Handling procfs event in process tree",
 		helpers.Int("PID", int(event.PID)),
-		helpers.String("containerID", event.ContainerID),
+		helpers.String("comm", event.Comm),
 	)
 
 	proc, ok := pt.processMap.Load(event.PID)
@@ -228,7 +228,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 	defer pt.mutex.Unlock()
 	logger.L().Info("Matthias - Handling exec event in process tree",
 		helpers.Int("PID", int(event.PID)),
-		helpers.String("containerID", event.ContainerID),
+		helpers.String("comm", event.Comm),
 	)
 
 	proc, ok := pt.processMap.Load(event.PID)
@@ -280,7 +280,7 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event conversion.ProcessEvent)
 	defer pt.mutex.Unlock()
 	logger.L().Info("Matthias - Handling exit event in process tree",
 		helpers.Int("PID", int(event.PID)),
-		helpers.String("containerID", event.ContainerID),
+		helpers.String("comm", event.Comm),
 	)
 
 	pt.addPendingExit(event)

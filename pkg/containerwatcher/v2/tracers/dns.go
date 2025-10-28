@@ -115,7 +115,7 @@ func (dt *DNSTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					dt.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.DnsEventType})
+					dt.callback(&utils.DatasourceEvent{Datasource: d, Data: data.DeepCopy(), EventType: utils.DnsEventType})
 					return nil
 				}, opPriority)
 				if err != nil {
