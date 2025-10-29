@@ -27,7 +27,7 @@ type TopTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *toptracer.Tracer
 }
 
@@ -36,7 +36,7 @@ func NewTopTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 ) *TopTracer {
 	return &TopTracer{
 		containerCollection: containerCollection,
@@ -89,11 +89,8 @@ func (tt *TopTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (tt *TopTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DTop && config.EnablePrometheusExporter
-	}
-	return false
+func (tt *TopTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DTop && cfg.EnablePrometheusExporter
 }
 
 // topEventCallback handles top events from the tracer

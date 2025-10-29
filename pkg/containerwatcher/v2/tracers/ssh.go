@@ -27,7 +27,7 @@ type SSHTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracerssh.Tracer
 	socketEnricher      *socketenricher.SocketEnricher
 }
@@ -37,7 +37,7 @@ func NewSSHTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 	socketEnricher *socketenricher.SocketEnricher,
 ) *SSHTracer {
 	return &SSHTracer{
@@ -114,11 +114,8 @@ func (st *SSHTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (st *SSHTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DSsh && config.EnableRuntimeDetection
-	}
-	return false
+func (st *SSHTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DSsh && cfg.EnableRuntimeDetection
 }
 
 // sshEventCallback handles SSH events from the tracer
