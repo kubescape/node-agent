@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
@@ -149,6 +150,16 @@ func (e *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 	}
 }
 
+// SendFimAlerts implements the Exporter interface
+func (e *HTTPExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+	defer cancel()
+
+	if err := e.sendFimAlertsWithContext(ctx, fimEvents); err != nil {
+		logger.L().Warning("HTTPExporter.SendFimAlerts - failed to send FIM alerts", helpers.Error(err))
+	}
+}
+
 // Internal methods with context support
 func (e *HTTPExporter) sendRuleAlertWithContext(ctx context.Context, failedRule types.RuleFailure) error {
 	if e.shouldSendLimitAlert() {
@@ -166,6 +177,76 @@ func (e *HTTPExporter) sendMalwareAlertWithContext(ctx context.Context, result m
 
 	alert := e.createMalwareAlert(result)
 	return e.sendAlert(ctx, alert, result.GetRuntimeProcessDetails(), nil)
+}
+
+func (e *HTTPExporter) sendFimAlertsWithContext(ctx context.Context, fimEvents []hostfimsensor.FimEvent) error {
+	payload := e.createFimAlertPayload(fimEvents)
+	return e.sendHTTPRequest(ctx, payload)
+}
+
+type FimEvent struct {
+	EventType hostfimsensor.FimEventType `json:"eventType"`
+	Path      string                     `json:"path"`
+	FileHash  string                     `json:"fileHash"`
+	Timestamp time.Time                  `json:"timestamp"`
+	Uid       uint32                     `json:"uid"`
+	Gid       uint32                     `json:"gid"`
+	Mode      uint32                     `json:"mode"`
+
+	// Enhanced fields for richer event context
+	FileSize    int64     `json:"fileSize"`
+	FileInode   uint64    `json:"fileInode"`
+	FileDevice  uint64    `json:"fileDevice"`
+	FileMtime   time.Time `json:"fileMtime"`
+	FileCtime   time.Time `json:"fileCtime"`
+	ProcessPid  uint32    `json:"processPid"`
+	ProcessName string    `json:"processName"`
+	ProcessArgs []string  `json:"processArgs"`
+	HostName    string    `json:"hostName"`
+	AgentId     string    `json:"agentId"`
+}
+
+type FimEventReport struct {
+	Events      []FimEvent `json:"events"`
+	Host        string     `json:"host"`
+	NodeName    string     `json:"nodeName"`
+	ClusterName string     `json:"clusterName"`
+	ReportedBy  string     `json:"reportedBy"`
+	Timestamp   time.Time  `json:"timestamp"`
+}
+
+func (e *HTTPExporter) createFimAlertPayload(fimEvents []hostfimsensor.FimEvent) FimEventReport {
+	report := FimEventReport{
+		Events:      make([]FimEvent, 0, len(fimEvents)),
+		Host:        e.host,
+		NodeName:    e.nodeName,
+		ClusterName: e.clusterName,
+		ReportedBy:  "kubescape-node-agent",
+		Timestamp:   time.Now(),
+	}
+	for _, event := range fimEvents {
+		report.Events = append(report.Events, FimEvent{
+			EventType:   event.GetEventType(),
+			Path:        event.GetPath(),
+			FileHash:    event.GetFileHash(),
+			Timestamp:   event.GetTimestamp(),
+			Uid:         event.GetUid(),
+			Gid:         event.GetGid(),
+			Mode:        event.GetMode(),
+			FileSize:    event.GetFileSize(),
+			FileInode:   event.GetFileInode(),
+			FileDevice:  event.GetFileDevice(),
+			FileMtime:   event.GetFileMtime(),
+			FileCtime:   event.GetFileCtime(),
+			ProcessPid:  event.GetProcessPid(),
+			ProcessName: event.GetProcessName(),
+			ProcessArgs: event.GetProcessArgs(),
+			HostName:    event.GetHostName(),
+			AgentId:     event.GetAgentId(),
+		})
+	}
+
+	return report
 }
 
 func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.RuntimeAlert {
@@ -232,7 +313,7 @@ func (e *HTTPExporter) getCloudMetadata(cloudServices []string) apitypes.CloudMe
 	return metadata
 }
 
-func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload HTTPAlertsList) error {
+func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload interface{}) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)

@@ -1637,6 +1637,10 @@ github.com/onsi/ginkgo/v2 v2.23.4 h1:ktYTpKJAVZnDT4VjxSbiBenUjmlL/5QkBEocaWXiQus
 github.com/onsi/ginkgo/v2 v2.23.4/go.mod h1:Bt66ApGPBFzHyR+JO10Zbt0Gsp4uWxu5mIOTusL46e8=
 github.com/onsi/gomega v1.37.0 h1:CdEG8g0S133B4OswTDC/5XPSzE1OeP29QOioj2PID2Y=
 github.com/onsi/gomega v1.37.0/go.mod h1:8D9+Txp43QWKhM24yyOBEdpkzN8FvJyAwecBgsU4KU0=
+github.com/opcoder0/capabilities v0.0.0-20221222060822-17fd73bffd2a h1:sbMMqulR2c6d2aeqOg5kzWv87unK0O4V78Dl1+YG4ys=
+github.com/opcoder0/capabilities v0.0.0-20221222060822-17fd73bffd2a/go.mod h1:77JxdABQ4m37PtO4WMtRBrI+DDphomu/8tGeijYXspk=
+github.com/opcoder0/fanotify v0.4.2 h1:Bp7h8scp/LNoWmC16Z1kf7GfxehhQLcDPxqJ31+SThs=
+github.com/opcoder0/fanotify v0.4.2/go.mod h1:S0LITNqjkZwifQ+0qB1fT1S/SmDmnFH+h0SLBzoKW2Q=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
 github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
 github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=

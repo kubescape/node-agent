@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
@@ -159,4 +160,8 @@ func writeMalwareHeaders(csvPath string) {
 		"Container Image",
 		"Container Image Digest",
 	})
+}
+
+func (ce *CsvExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
+	// TODO: Implement FIM alerts sending logic
 }
