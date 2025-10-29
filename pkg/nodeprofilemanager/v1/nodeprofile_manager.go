@@ -33,11 +33,15 @@ type NodeProfileManager struct {
 }
 
 func NewNodeProfileManager(config config.Config, clusterData armometadata.ClusterConfig, nodeName string, k8sObjectCache objectcache.K8sObjectCache, ruleManager rulemanager.RuleManagerClient, cloudMetadata *armotypes.CloudMetadata) *NodeProfileManager {
+	timeoutSeconds := 5
+	if config.Exporters.HTTPExporterConfig != nil {
+		timeoutSeconds = config.Exporters.HTTPExporterConfig.TimeoutSeconds
+	}
 	return &NodeProfileManager{
 		clusterData: clusterData,
 		config:      config,
 		httpClient: &http.Client{
-			Timeout: time.Duration(config.Exporters.HTTPExporterConfig.TimeoutSeconds) * time.Second,
+			Timeout: time.Duration(timeoutSeconds) * time.Second,
 		},
 		k8sObjectCache: k8sObjectCache,
 		nodeName:       nodeName,
