@@ -39,7 +39,7 @@ struct {
     __type(value, struct httpevent);
 } event_data SEC(".maps");
 
-// Used to store the buffer of packets 
+// Used to store the buffer of packets
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 8192);
@@ -105,7 +105,7 @@ static __always_inline int populate_httpevent(struct httpevent *event, __u32 soc
 
     // Populate the process data into the event.
     gadget_process_populate(&event->proc);
-    
+
     // Get and store socket inode
     __u64 socket_inode = 0;
     if (get_socket_inode(sockfd, &socket_inode) == 0) {
@@ -152,7 +152,7 @@ static void inline pre_receive_syscalls(struct syscall_trace_enter *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
     __u32 sockfd = (__u32)ctx->args[0]; // For read, recv, recvfrom, write, send, sendto, sockfd is the first argument
-    
+
     // No need to check if socket is being tracked - track all sockets
     struct packet_buffer packet = {};
     packet.sockfd = sockfd;
@@ -194,7 +194,7 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
 
     // Populate event with socket inode for tracking
     populate_httpevent(dataevent, packet->sockfd);
-        
+
     dataevent->type = type;
     dataevent->sock_fd = packet->sockfd;
 
@@ -203,10 +203,7 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
 
     dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
 
-    // Use gadget_output_buf to copy the event to the map
-    // gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent)); // TODO: check if this is correct
     gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
-    // gadget_output_buf(ctx, &events, dataevent, sizeof(*dataevent));
 
     bpf_map_delete_elem(&buffer_packets, &id);
     return 0;
@@ -216,7 +213,7 @@ static __always_inline int pre_process_msg(struct syscall_trace_enter *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
     __u32 sockfd = (__u32)ctx->args[0]; // For sendmsg and recvmsg, sockfd is the first argument
-    
+
     // No need to check if socket is being tracked - track all sockets
     struct packet_msg write_args = {};
     write_args.fd = sockfd;
@@ -237,7 +234,7 @@ static __always_inline int pre_process_iovec(struct syscall_trace_enter *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
     __u32 sockfd = (__u32)ctx->args[0]; // For writev and readv, sockfd is the first argument
-    
+
     // No need to check if socket is being tracked - track all sockets
     struct packet_msg write_args = {};
     write_args.fd = sockfd;
@@ -282,10 +279,10 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
 
             // Populate event with socket inode for tracking
             populate_httpevent(dataevent, msg->fd);
-            
+
             dataevent->type = type;
             dataevent->sock_fd = msg->fd;
-            
+
             __u64 copy_len = seg_len;
             if (copy_len > MAX_DATAEVENT_BUFFER)
                 copy_len = MAX_DATAEVENT_BUFFER;
@@ -295,8 +292,7 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
 
             dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
 
-            // Use gadget_output_buf to copy the event to the map
-            gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent)); // TODO: check if this is correct
+            gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
             break;
         }
     }

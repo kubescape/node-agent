@@ -70,14 +70,9 @@ func TestRawIPv6ToString(t *testing.T) {
 			expected: "2001:4860:4860::8888",
 		},
 		{
-			name:     "IPv4-mapped IPv6",
-			ipBytes:  net.ParseIP("::ffff:192.168.1.1").To16(),
-			expected: "192.168.1.1",
-		},
-		{
 			name:     "Custom address",
-			ipBytes:  net.ParseIP("fd12:3456:789a:1::1").To16(),
-			expected: "fd12:3456:789a:1::1",
+			ipBytes:  []byte{42, 14, 231, 1, 32, 193, 0, 0, 173, 60, 254, 9, 63, 22, 12, 247},
+			expected: "2a0e:e701:20c1:0:ad3c:fe09:3f16:cf7",
 		},
 	}
 

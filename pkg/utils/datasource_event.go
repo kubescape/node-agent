@@ -510,7 +510,7 @@ func (e *DatasourceEvent) GetProto() string {
 }
 
 func (e *DatasourceEvent) GetPtid() uint64 {
-	ptid, _ := e.Datasource.GetField("proc.parent.tid").Uint64(e.Data) // FIXME this doesn't exist
+	ptid, _ := e.Datasource.GetField("proc.parent.tid").Uint64(e.Data) // FIXME this doesn't exist yet
 	return ptid
 }
 
@@ -683,7 +683,7 @@ func (e *DatasourceEvent) IsDir() bool {
 	case OpenEventType:
 		raw, _ := e.Datasource.GetField("mode_raw").Uint32(e.Data)
 		fileMode := os.FileMode(raw)
-		return (fileMode & os.ModeType) == os.ModeDir // FIXME I don't know how to test this
+		return fileMode.IsDir()
 	default:
 		logger.L().Warning("IsDir not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return false

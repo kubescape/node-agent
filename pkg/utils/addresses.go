@@ -18,5 +18,5 @@ func rawIPv4ToString(ipInt uint32) string {
 }
 
 func rawIPv6ToString(b []byte) string {
-	return net.IP(b).String() // TODO make sure it works as expected
+	return net.IP(b).String()
 }
