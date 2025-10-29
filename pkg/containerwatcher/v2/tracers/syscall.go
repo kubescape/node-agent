@@ -19,7 +19,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const syscallTraceName = "syscall_tracer"
+const (
+	imageName        = "ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.45.0"
+	syscallTraceName = "syscall_tracer"
+)
 
 var _ containerwatcher.TracerInterface = (*SyscallTracer)(nil)
 
@@ -52,7 +55,7 @@ func (st *SyscallTracer) Start(ctx context.Context) error {
 	st.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.45.0",
+		imageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			st.kubeManager,
