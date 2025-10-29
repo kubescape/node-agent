@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
@@ -183,4 +184,9 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 	if err != nil {
 		logger.L().Warning("SyslogExporter - failed to send alert to syslog", helpers.Error(err))
 	}
+}
+
+func (se *SyslogExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
+	// TODO: Implement FIM alerts sending logic
+	logger.L().Debug("SyslogExporter.SendFimAlerts - stub implementation", helpers.Int("events", len(fimEvents)))
 }

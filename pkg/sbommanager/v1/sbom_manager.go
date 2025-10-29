@@ -50,6 +50,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
+	_ "modernc.org/sqlite" // required for rpmdb and other features
 )
 
 const (

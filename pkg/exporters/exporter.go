@@ -1,6 +1,7 @@
 package exporters
 
 import (
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )
@@ -11,6 +12,8 @@ type Exporter interface {
 	SendRuleAlert(failedRule types.RuleFailure)
 	// SendMalwareAlert sends an alert on malware detection to the exporter.
 	SendMalwareAlert(malwareResult malwaremanager.MalwareResult)
+	// SendFimAlert sends an alert on FIM detection to the exporter.
+	SendFimAlerts(fimEvents []hostfimsensor.FimEvent)
 }
 
 var _ Exporter = (*ExporterMock)(nil)
@@ -21,4 +24,7 @@ func (e *ExporterMock) SendRuleAlert(_ types.RuleFailure) {
 }
 
 func (e *ExporterMock) SendMalwareAlert(_ malwaremanager.MalwareResult) {
+}
+
+func (e *ExporterMock) SendFimAlerts(_ []hostfimsensor.FimEvent) {
 }

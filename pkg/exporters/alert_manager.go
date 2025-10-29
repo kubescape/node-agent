@@ -15,6 +15,7 @@ import (
 	"github.com/go-openapi/strfmt"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -174,6 +175,10 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 		logger.L().Warning("AlertManagerExporter.SendMalwareAlert - alert was not sent successfully")
 		return
 	}
+}
+
+func (ame *AlertManagerExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
+	// TODO: Implement FIM alerts sending logic
 }
 
 func traceToString(t apitypes.Trace) (string, error) {
