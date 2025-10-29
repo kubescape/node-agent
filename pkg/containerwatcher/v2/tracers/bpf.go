@@ -19,7 +19,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-const bpfTraceName = "trace_bpf"
+const (
+	bpfImageName = "ghcr.io/inspektor-gadget/gadget/bpf:latest"
+	bpfTraceName = "trace_bpf"
+)
 
 var _ containerwatcher.TracerInterface = (*BpfTracer)(nil)
 
@@ -55,7 +58,7 @@ func (bt *BpfTracer) Start(ctx context.Context) error {
 	bt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/bpf:latest",
+		bpfImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			bt.kubeManager,

@@ -19,7 +19,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-const hardlinkTraceName = "trace_hardlink"
+const (
+	hardlinkImageName = "ghcr.io/inspektor-gadget/gadget/hardlink:latest"
+	hardlinkTraceName = "trace_hardlink"
+)
 
 var _ containerwatcher.TracerInterface = (*HardlinkTracer)(nil)
 
@@ -55,7 +58,7 @@ func (ht *HardlinkTracer) Start(ctx context.Context) error {
 	ht.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/hardlink:latest",
+		hardlinkImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			ht.kubeManager,

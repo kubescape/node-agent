@@ -18,7 +18,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const capabilitiesTraceName = "trace_capabilities"
+const (
+	capabilitiesImageName = "ghcr.io/inspektor-gadget/gadget/trace_capabilities:v0.45.0"
+	capabilitiesTraceName = "trace_capabilities"
+)
 
 var _ containerwatcher.TracerInterface = (*CapabilitiesTracer)(nil)
 
@@ -54,7 +57,7 @@ func (ct *CapabilitiesTracer) Start(ctx context.Context) error {
 	ct.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/trace_capabilities:v0.45.0",
+		capabilitiesImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			ct.kubeManager,
@@ -65,7 +68,10 @@ func (ct *CapabilitiesTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(ct.ociStore),
 	)
 	go func() {
-		err := ct.runtime.RunGadget(ct.gadgetCtx, nil, nil)
+		params := map[string]string{
+			"operator.oci.ebpf.unique": "true",
+		}
+		err := ct.runtime.RunGadget(ct.gadgetCtx, nil, params)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", ct.gadgetCtx.Name()), helpers.Error(err))
 		}

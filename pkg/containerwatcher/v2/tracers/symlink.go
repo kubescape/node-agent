@@ -19,7 +19,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-const symlinkTraceName = "trace_symlink"
+const (
+	symlinkImageName = "ghcr.io/inspektor-gadget/gadget/symlink:latest"
+	symlinkTraceName = "trace_symlink"
+)
 
 var _ containerwatcher.TracerInterface = (*SymlinkTracer)(nil)
 
@@ -55,7 +58,7 @@ func (st *SymlinkTracer) Start(ctx context.Context) error {
 	st.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/symlink:latest",
+		symlinkImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			st.kubeManager,

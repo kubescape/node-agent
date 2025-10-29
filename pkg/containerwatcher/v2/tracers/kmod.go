@@ -19,7 +19,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-const kmodTraceName = "trace_kmod"
+const (
+	kmodImageName = "ghcr.io/inspektor-gadget/gadget/kmod:latest"
+	kmodTraceName = "trace_kmod"
+)
 
 var _ containerwatcher.TracerInterface = (*KmodTracer)(nil)
 
@@ -55,7 +58,7 @@ func (kt *KmodTracer) Start(ctx context.Context) error {
 	kt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/kmod:latest",
+		kmodImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			kt.kubeManager,

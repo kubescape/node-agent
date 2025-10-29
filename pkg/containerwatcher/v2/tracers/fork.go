@@ -18,7 +18,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const forkTraceName = "trace_fork"
+const (
+	forkImageName = "ghcr.io/inspektor-gadget/gadget/fork:latest"
+	forkTraceName = "trace_fork"
+)
 
 var _ containerwatcher.TracerInterface = (*ForkTracer)(nil)
 
@@ -51,7 +54,7 @@ func (ft *ForkTracer) Start(ctx context.Context) error {
 	ft.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/fork:latest",
+		forkImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			ft.kubeManager,

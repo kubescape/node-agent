@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	iouringImageName = "ghcr.io/inspektor-gadget/gadget/iouring_new:latest"
 	iouringTraceName = "trace_iouring"
 	SupportedMajor   = 6
 	SupportedMinor   = 3
@@ -61,7 +62,7 @@ func (it *IoUringTracer) Start(ctx context.Context) error {
 	}
 	var imageName string
 	if major >= SupportedMajor && minor >= SupportedMinor {
-		imageName = "ghcr.io/inspektor-gadget/gadget/iouring_new:latest"
+		imageName = iouringImageName
 	} else {
 		imageName = "ghcr.io/inspektor-gadget/gadget/iouring_old:latest"
 	}

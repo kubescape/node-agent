@@ -19,7 +19,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const dnsTraceName = "trace_dns"
+const (
+	dnsImageName = "ghcr.io/inspektor-gadget/gadget/trace_dns:v0.45.0"
+	dnsTraceName = "trace_dns"
+)
 
 var _ containerwatcher.TracerInterface = (*DNSTracer)(nil)
 
@@ -58,7 +61,7 @@ func (dt *DNSTracer) Start(ctx context.Context) error {
 	dt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/trace_dns:v0.45.0",
+		dnsImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			dt.kubeManager,

@@ -19,7 +19,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-const unshareTraceName = "trace_unshare"
+const (
+	unshareImageName = "ghcr.io/inspektor-gadget/gadget/unshare:latest"
+	unshareTraceName = "trace_unshare"
+)
 
 var _ containerwatcher.TracerInterface = (*UnshareTracer)(nil)
 
@@ -55,7 +58,7 @@ func (ut *UnshareTracer) Start(ctx context.Context) error {
 	ut.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/unshare:latest",
+		unshareImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			ut.kubeManager,

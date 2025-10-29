@@ -18,7 +18,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const exitTraceName = "trace_exit"
+const (
+	exitImageName = "ghcr.io/inspektor-gadget/gadget/exit:latest"
+	exitTraceName = "trace_exit"
+)
 
 var _ containerwatcher.TracerInterface = (*ExitTracer)(nil)
 
@@ -51,7 +54,7 @@ func (et *ExitTracer) Start(ctx context.Context) error {
 	et.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/exit:latest",
+		exitImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			et.kubeManager,

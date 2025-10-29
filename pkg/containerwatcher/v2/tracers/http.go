@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	httpImageName       = "ghcr.io/inspektor-gadget/gadget/http:latest"
 	httpTraceName       = "trace_http"
 	MaxGroupedEventSize = 10000
 	StatusOK            = 200
@@ -71,7 +72,7 @@ func (ht *HTTPTracer) Start(ctx context.Context) error {
 	ht.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/http:latest",
+		httpImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			ht.kubeManager,

@@ -18,7 +18,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const execTraceName = "trace_exec"
+const (
+	execImageName = "ghcr.io/inspektor-gadget/gadget/trace_exec:v0.45.0"
+	execTraceName = "trace_exec"
+)
 
 var _ containerwatcher.TracerInterface = (*ExecTracer)(nil)
 
@@ -54,7 +57,7 @@ func (et *ExecTracer) Start(ctx context.Context) error {
 	et.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/trace_exec:v0.45.0",
+		execImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			et.kubeManager,

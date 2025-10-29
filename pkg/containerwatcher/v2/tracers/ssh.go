@@ -19,7 +19,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const sshTraceName = "trace_ssh"
+const (
+	sshImageName = "ghcr.io/inspektor-gadget/gadget/ssh:latest"
+	sshTraceName = "trace_ssh"
+)
 
 var _ containerwatcher.TracerInterface = (*SSHTracer)(nil)
 
@@ -55,7 +58,7 @@ func (st *SSHTracer) Start(ctx context.Context) error {
 	st.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/ssh:latest",
+		sshImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			st.kubeManager,

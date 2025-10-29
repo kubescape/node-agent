@@ -21,7 +21,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const networkTraceName = "trace_network"
+const (
+	networkImageName = "ghcr.io/inspektor-gadget/gadget/network:latest"
+	networkTraceName = "trace_network"
+)
 
 var _ containerwatcher.TracerInterface = (*NetworkTracer)(nil)
 
@@ -66,7 +69,7 @@ func (nt *NetworkTracer) Start(ctx context.Context) error {
 	nt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/network:latest",
+		networkImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			nt.kubeIPResolver,

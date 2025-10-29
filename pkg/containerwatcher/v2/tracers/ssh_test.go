@@ -12,12 +12,36 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-func TestSyscallFields(t *testing.T) {
+func TestSshFields(t *testing.T) {
 	expectedFields := map[string][]string{
-		"advise": {"text"},
-		"syscalls": {
-			"mntns_id_raw",
-			"syscalls",
+		"ssh": {
+			"dst",
+			"dst.addr_raw",
+			"dst.addr_raw.v4",
+			"dst.addr_raw.v6",
+			"dst.port",
+			"dst.proto_raw",
+			"dst.version",
+			"netns_id",
+			"proc",
+			"proc.comm",
+			"proc.creds",
+			"proc.creds.gid",
+			"proc.creds.uid",
+			"proc.mntns_id",
+			"proc.parent",
+			"proc.parent.comm",
+			"proc.parent.pid",
+			"proc.pid",
+			"proc.tid",
+			"src",
+			"src.addr_raw",
+			"src.addr_raw.v4",
+			"src.addr_raw.v6",
+			"src.port",
+			"src.proto_raw",
+			"src.version",
+			"timestamp_raw",
 		},
 	}
 	ociStore, err := orasoci.NewFromTar(context.Background(), "../../../../tracers.tar")
@@ -25,12 +49,12 @@ func TestSyscallFields(t *testing.T) {
 	gadgetCtx := gadgetcontext.New(
 		context.TODO(),
 		// This is the image that contains the gadget we want to run.
-		syscallImageName,
+		sshImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			ocihandler.OciHandler, // pass singleton instance of the oci-handler
 		),
-		gadgetcontext.WithName(syscallTraceName),
+		gadgetcontext.WithName(sshTraceName),
 		gadgetcontext.WithOrasReadonlyTarget(ociStore),
 	)
 	operator, err := ocihandler.OciHandler.InstantiateDataOperator(gadgetCtx, api.ParamValues{

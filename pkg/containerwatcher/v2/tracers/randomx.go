@@ -19,7 +19,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const randomxTraceName = "trace_randomx"
+const (
+	randomxImageName = "ghcr.io/inspektor-gadget/gadget/randomx:latest"
+	randomxTraceName = "trace_randomx"
+)
 
 var _ containerwatcher.TracerInterface = (*RandomXTracer)(nil)
 
@@ -52,7 +55,7 @@ func (rt *RandomXTracer) Start(ctx context.Context) error {
 	rt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/randomx:latest",
+		randomxImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			rt.kubeManager,

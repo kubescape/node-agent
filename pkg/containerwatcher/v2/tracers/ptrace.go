@@ -18,7 +18,10 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const ptraceTraceName = "trace_ptrace"
+const (
+	ptraceImageName = "ghcr.io/inspektor-gadget/gadget/ptrace:latest"
+	ptraceTraceName = "trace_ptrace"
+)
 
 var _ containerwatcher.TracerInterface = (*PtraceTracer)(nil)
 
@@ -51,7 +54,7 @@ func (pt *PtraceTracer) Start(ctx context.Context) error {
 	pt.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
-		"ghcr.io/inspektor-gadget/gadget/ptrace:latest",
+		ptraceImageName,
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			pt.kubeManager,
