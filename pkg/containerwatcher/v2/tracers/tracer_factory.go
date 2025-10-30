@@ -9,7 +9,6 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubeipresolver"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
-	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/wasm"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
