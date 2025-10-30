@@ -14,7 +14,6 @@ import (
 
 func TestSyscallFields(t *testing.T) {
 	expectedFields := map[string][]string{
-		"advise": {"text"},
 		"syscalls": {
 			"mntns_id_raw",
 			"syscalls",

@@ -67,6 +67,7 @@ func (dt *DNSTracer) Start(ctx context.Context) error {
 			dt.kubeManager,
 			ocihandler.OciHandler, // pass singleton instance of the oci-handler
 			dt.socketEnricherOp,
+			&DnsOperator{},
 			dt.eventOperator(),
 		),
 		gadgetcontext.WithName(dnsTraceName),

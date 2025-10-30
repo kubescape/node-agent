@@ -90,6 +90,9 @@ func TestDnsFields(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer operator.Close(gadgetCtx)
+	dnsOperator, err := (&DnsOperator{}).InstantiateDataOperator(gadgetCtx, api.ParamValues{})
+	require.NoError(t, err)
+	defer dnsOperator.Close(gadgetCtx)
 	dataSources := gadgetCtx.GetDataSources()
 	for name, fields := range expectedFields {
 		actualDS, exists := dataSources[name]
