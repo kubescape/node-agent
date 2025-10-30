@@ -69,7 +69,8 @@ func (ct *CapabilitiesTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.ebpf.unique": "true",
+			"operator.oci.ebpf.collect-kstack": "false",
+			"operator.oci.ebpf.unique":         "true",
 		}
 		err := ct.runtime.RunGadget(ct.gadgetCtx, nil, params)
 		if err != nil {
