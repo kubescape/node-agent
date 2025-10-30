@@ -1,0 +1,192 @@
+name: Basic-Go-Testing
+
+on:
+  workflow_call:
+    inputs:
+      GO_VERSION:
+        required: true
+        type: string
+      GO111MODULE:
+        required: false
+        type: string
+      CGO_ENABLED:
+        required: false
+        type: number
+        default: 1
+      BUILD_PATH:
+        required: false
+        type: string
+        default: "./..."
+      UNIT_TESTS_PATH:
+        required: false
+        type: string
+        default: "./..."
+      FAILEDTHRESHOLD:
+        required: false
+        type: number
+        default: 50
+      # TEST_MULTI_ENVIRONMENTS:
+      #   required: false
+      #   type: boolean
+      #   default: true
+
+    secrets:
+      SNYK_TOKEN:
+        required: false
+      GITGUARDIAN_API_KEY:
+        required: false
+
+jobs:
+  Check-secret:
+    name: check if secrets are set
+    runs-on: ubuntu-latest
+    outputs:
+      run-gitgardian: ${{ steps.check-secret-set.outputs.is-gitgardian-set }}
+      run-snyk: ${{ steps.check-secret-set.outputs.is-snyk-set }}
+    steps:
+      - name: Check whether unity activation requests should be done
+        id: check-secret-set
+        env:
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          echo "is-gitgardian-set=${{ env.GITGUARDIAN_API_KEY != '' }}" >> $GITHUB_OUTPUT
+          echo "is-snyk-set=${{ env.SNYK_TOKEN != '' }}" >> $GITHUB_OUTPUT
+
+  # Setup-Environment:
+  #   runs-on: ubuntu-latest
+  #   outputs:
+  #     matrix: ${{ steps.set-matrix.outputs.matrix }}
+  #   steps:
+  #     - id: set-matrix
+  #       env:
+  #         TEST_MULTI_ENVIRONMENTS: ${{ inputs.TEST_MULTI_ENVIRONMENTS }}
+  #       run: |
+  #         if [ ${{ env.TEST_MULTI_ENVIRONMENTS }} ]; then
+  #           echo "matrix=[\"ubuntu-20.04\", \"macos-latest\", \"windows-latest\"]" >> $GITHUB_OUTPUT
+  #         else
+  #           echo "matrix=[\"ubuntu-20.04\"]" >> $GITHUB_OUTPUT
+  #         fi
+
+  Environment-Test:
+    name: Create cross-platform build
+    # needs: [ Setup-Environment ]
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+      CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
+    # strategy:
+    #   matrix:
+    #     os: ${{ fromJSON(needs.Setup-Environment.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        name: Setup Go
+        with:
+          go-version: '${{ inputs.GO_VERSION }}'
+
+      - name: Ensure ig is installed
+        run: curl https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.45.0/ig_0.45.0_amd64.deb -LO && sudo dpkg -i ig_0.45.0_amd64.deb
+
+      - name: Build gadgets
+        run: make gadgets
+
+      - name: Test race conditions
+        if: ${{ env.CGO_ENABLED == 1 }}
+        run: go test -exec sudo -v -race $(go list ${{ inputs.UNIT_TESTS_PATH }} | grep -v /e2e)
+
+      - name: Test without race conditions
+        if: ${{ env.CGO_ENABLED != 1 }}
+        run: go test -exec sudo -v $(go list ${{ inputs.UNIT_TESTS_PATH }} | grep -v /e2e)
+
+      - name: Initialize CodeQL
+        continue-on-error: true
+        uses: github/codeql-action/init@v2
+        with:
+          languages: go
+
+      - name: Autobuild
+        continue-on-error: true
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        continue-on-error: true
+        uses: github/codeql-action/analyze@v2
+
+      # - name: Test go build
+      #   run: go build -v ${{ inputs.BUILD_PATH }}
+
+  Basic-Test:
+    env:
+      GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+      CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
+    runs-on: ubuntu-latest
+    needs: [Check-secret, Environment-Test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        name: Setup Go
+        with:
+          go-version: '${{ inputs.GO_VERSION }}'
+
+      - name: Scanning - Forbidden Licenses (go-licenses)
+        id: licenses-scan
+        continue-on-error: true
+        run: |
+          echo "## Installing go-licenses tool"
+          go install github.com/google/go-licenses@latest
+          echo "## Scanning for forbiden licenses ##"
+          go-licenses check .
+
+      - name: Scanning - Credentials (GitGuardian)
+        if: needs.check-secret.outputs.run-gitgardian == 'true'
+        continue-on-error: true
+        id: credentials-scan
+        uses: GitGuardian/ggshield/actions/secret@main
+        env:
+          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
+          GITHUB_PULL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+
+      - name: Scanning - Vulnerabilities (Snyk)
+        if: needs.check-secret.outputs.run-snyk == 'true'
+        id: vulnerabilities-scan
+        continue-on-error: true
+        uses: snyk/actions/golang@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Test go linting
+        continue-on-error: true  # TODO: Should be removed
+        uses: golangci/golangci-lint-action@v6
+        id: linting
+        with:
+          version: latest
+          args: --timeout 10m
+          only-new-issues: true
+
+      - name: Test coverage
+        id: unit-test
+        run: go test -v $(go list ${{ inputs.UNIT_TESTS_PATH }} | grep -v /e2e) -covermode=count -coverprofile=coverage.out
+
+      - name: Comment results to PR
+        uses: peter-evans/create-or-update-comment@v4
+        continue-on-error: true # This step typically fails when opening PRs from forks
+        with:
+          issue-number:  ${{ github.event.pull_request.number }}
+          body: |
+            Summary:
+            - License scan: ${{ steps.licenses-scan.outcome }}
+            - Credentials scan: ${{ steps.credentials-scan.outcome }}
+            - Vulnerabilities scan: ${{ steps.vulnerabilities-scan.outcome }}
+            - Unit test: ${{ steps.unit-test.outcome }}
+            - Go linting: ${{ steps.linting.outcome }}
+          reactions: 'eyes'
