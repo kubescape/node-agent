@@ -8,7 +8,7 @@ RUN go install github.com/go-delve/delve/cmd/dlv@latest
 RUN --mount=target=. \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
-    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/node-agent ./cmd/main.go
+    GOOS=$TARGETOS GOARCH=$TARGETARCH GOEXPERIMENT=greenteagc go build -o /out/node-agent ./cmd/main.go
 
 FROM gcr.io/distroless/static-debian12:debug
 
