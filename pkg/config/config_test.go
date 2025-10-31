@@ -55,6 +55,7 @@ func TestLoadConfig(t *testing.T) {
 				EnablePrometheusExporter:       false,
 				EnableRuntimeDetection:         false,
 				EnableSeccomp:                  false,
+				DSeccomp:                       true,
 				EnablePartialProfileGeneration: true,
 				Exporters: exporters.ExportersConfig{
 					SyslogExporter: "http://syslog.kubescape.svc.cluster.local:514",
@@ -93,7 +94,8 @@ func TestLoadConfig(t *testing.T) {
 					MaxSize: 100000,
 					TTL:     1 * time.Minute,
 				},
-				DNSCacheSize: 50000,
+				DNSCacheSize:                   50000,
+				ContainerEolNotificationBuffer: 100,
 				FIM: FIMConfig{
 					Directories: []FIMDirectoryConfig{
 						{

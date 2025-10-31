@@ -12,14 +12,13 @@ import (
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestNetworkEventPodLabels(t *testing.T) {
@@ -244,7 +243,7 @@ func TestGetEndpointIdentifier(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			event := &tracerhttptype.Event{
+			event := &utils.StructEvent{
 				Request: &http.Request{
 					Host: tt.host,
 					URL: &url.URL{
@@ -596,51 +595,6 @@ func TestContainerDataEmptyEvents(t *testing.T) {
 	// Note: syscalls should remain not nil as per the comment in the code
 }
 
-func TestContainerProfileManagerRegisterPeekFunc(t *testing.T) {
-	// Create a unique temporary directory for this test
-	tempDir, err := os.MkdirTemp("", "fake-storage-queue-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir) // Clean up after test
-
-	// Override the queue directory for this test
-	t.Setenv("QUEUE_DIR", tempDir)
-
-	cfg := config.Config{}
-	ctx := context.TODO()
-	k8sClient := &k8sclient.K8sClientMock{}
-	storageClient := &storage.StorageHttpClientMock{}
-	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
-	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
-
-	cpm, err := NewContainerProfileManager(
-		ctx,
-		cfg,
-		k8sClient,
-		k8sObjectCacheMock,
-		storageClient,
-		nil,
-		seccompManagerMock,
-		nil,
-		nil,
-	)
-	require.NoError(t, err)
-
-	// Register a peek function
-	peekFunc := func(mntns uint64) ([]string, error) {
-		return []string{"open", "read"}, nil
-	}
-
-	cpm.RegisterPeekFunc(peekFunc)
-	assert.NotNil(t, cpm.syscallPeekFunc)
-
-	// Test the registered function
-	result, err := cpm.syscallPeekFunc(12345)
-	assert.NoError(t, err)
-	assert.Equal(t, []string{"open", "read"}, result)
-}
-
 func TestEndpointKindConstants(t *testing.T) {
 	assert.Equal(t, EndpointKind("pod"), EndpointKindPod)
 	assert.Equal(t, EndpointKind("svc"), EndpointKindService)
@@ -650,8 +604,8 @@ func TestEndpointKindConstants(t *testing.T) {
 func TestTrafficTypeConstants(t *testing.T) {
 	assert.Equal(t, "internal", InternalTrafficType)
 	assert.Equal(t, "external", ExternalTrafficType)
-	assert.Equal(t, "HOST", HostPktType)
-	assert.Equal(t, "OUTGOING", OutgoingPktType)
+	assert.Equal(t, "HOST", utils.HostPktType)
+	assert.Equal(t, "OUTGOING", utils.OutgoingPktType)
 }
 
 func TestDefaultLabelsToIgnore(t *testing.T) {
