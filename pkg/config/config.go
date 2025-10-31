@@ -166,6 +166,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("celConfigCache::maxSize", 100000)
 	viper.SetDefault("celConfigCache::ttl", 1*time.Minute)
 	viper.SetDefault("ignoreRuleBindings", false)
+	viper.SetDefault("dSeccomp", true)
 
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("containerEolNotificationBuffer", 100)
