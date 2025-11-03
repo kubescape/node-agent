@@ -157,6 +157,7 @@ func CreateContainerWatcher(
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
 		enrichedEvent := i.(*events.EnrichedEvent)
 		eventHandlerFactory.ProcessEvent(enrichedEvent)
+		enrichedEvent.Event.Release() // at this time we should not need the event anymore
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating worker pool: %w", err)

@@ -24,7 +24,14 @@ const (
 	DNSPktTypeResponse DNSPktType = "R"
 )
 
-var fieldCaches = sync.Map{}
+var (
+	DataPool = sync.Pool{
+		New: func() any {
+			return &datasource.Edata{}
+		},
+	}
+	fieldCaches = sync.Map{}
+)
 
 type DatasourceEvent struct {
 	Data       datasource.Data
@@ -728,6 +735,10 @@ func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.
 		Syscall:    e.Syscall,
 		Response:   e.Response,
 	}
+}
+
+func (e *DatasourceEvent) Release() {
+	DataPool.Put(e.Data)
 }
 
 func (e *DatasourceEvent) SetExtra(extra interface{}) {

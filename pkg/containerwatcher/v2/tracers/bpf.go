@@ -105,7 +105,9 @@ func (bt *BpfTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					bt.callback(&utils.DatasourceEvent{Datasource: d, Data: data.DeepCopy(), EventType: utils.BpfEventType})
+					pooledData := utils.DataPool.Get().(*datasource.Edata)
+					data.DeepCopyInto(pooledData)
+					bt.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.BpfEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

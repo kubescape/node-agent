@@ -107,7 +107,9 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: data.DeepCopy(), EventType: utils.OpenEventType})
+					pooledData := utils.DataPool.Get().(*datasource.Edata)
+					data.DeepCopyInto(pooledData)
+					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.OpenEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

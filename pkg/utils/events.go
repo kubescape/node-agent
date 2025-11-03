@@ -23,6 +23,7 @@ type K8sEvent interface {
 	GetNamespace() string
 	GetPod() string
 	GetTimestamp() types.Time
+	Release()
 }
 
 type EnrichEvent interface {

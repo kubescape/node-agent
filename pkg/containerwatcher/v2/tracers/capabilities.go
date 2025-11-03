@@ -108,7 +108,9 @@ func (ct *CapabilitiesTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					ct.callback(&utils.DatasourceEvent{Datasource: d, Data: data.DeepCopy(), EventType: utils.CapabilitiesEventType})
+					pooledData := utils.DataPool.Get().(*datasource.Edata)
+					data.DeepCopyInto(pooledData)
+					ct.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.CapabilitiesEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

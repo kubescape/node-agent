@@ -595,6 +595,8 @@ func (e *StructEvent) MakeHttpEvent(request *http.Request, direction consts.Netw
 	return &event
 }
 
+func (e *StructEvent) Release() {}
+
 func (e *StructEvent) SetExtra(extra interface{}) {
 	e.Extra = extra
 }

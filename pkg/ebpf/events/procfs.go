@@ -49,3 +49,5 @@ func (pe *ProcfsEvent) GetNamespace() string {
 func (pe *ProcfsEvent) GetPod() string {
 	return ""
 }
+
+func (pe *ProcfsEvent) Release() {}
