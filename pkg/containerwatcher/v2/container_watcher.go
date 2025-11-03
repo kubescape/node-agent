@@ -32,6 +32,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/workerpool"
 	"github.com/panjf2000/ants/v2"
 )
@@ -157,7 +158,9 @@ func CreateContainerWatcher(
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
 		enrichedEvent := i.(*events.EnrichedEvent)
 		eventHandlerFactory.ProcessEvent(enrichedEvent)
-		enrichedEvent.Event.Release() // at this time we should not need the event anymore
+		if enrichedEvent.Event.GetEventType() != utils.SyscallEventType {
+			enrichedEvent.Event.Release() // at this time we should not need the event anymore
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating worker pool: %w", err)
