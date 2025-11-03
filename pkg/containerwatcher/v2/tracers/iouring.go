@@ -66,6 +66,9 @@ func (it *IoUringTracer) Start(ctx context.Context) error {
 	} else {
 		imageName = "ghcr.io/inspektor-gadget/gadget/iouring_old:latest"
 	}
+	logger.L().Info("Using iouring gadget image", helpers.String("image", imageName),
+		helpers.String("kernelVersion", kernelVersion),
+		helpers.Int("major", int(major)), helpers.Int("minor", int(minor)))
 	it.gadgetCtx = gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
