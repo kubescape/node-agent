@@ -26,40 +26,73 @@
 
 #include "program.h"
 
-// events is the name of the buffer map and 1024 * 256 (256KB) is its size.
-GADGET_TRACER_MAP(events, 1024 * 256);
+struct {
+	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+	__uint(key_size, sizeof(u32));
+	__uint(value_size, sizeof(u32));
+} events SEC(".maps");
+ 
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct event);
+} empty_event SEC(".maps");
+
+// Declared to avoid compiler deletion
+const struct event *unusedevent __attribute__((unused));
+
+static __always_inline int should_discard()
+{
+    u64 mntns_id;
+    mntns_id = gadget_get_mntns_id();
+
+    if (gadget_should_discard_mntns_id(mntns_id))
+    {
+        return 1;   
+    }
+
+    return 0;
+}
 
 // Define a tracer
 GADGET_TRACER(iouring, events, event);
 
-// Minimal local struct definition for older kernels (< 6.3)
-struct trace_event_raw_io_uring_submit_sqe_local {
-    struct trace_entry ent;
-    void *ctx;
-    void *req;
-    unsigned long long user_data;
-    __u8 opcode;
-    __u32 flags;
-} __attribute__((preserve_access_index));
+struct trace_event_raw_io_uring_submit_sqe {
+	struct trace_entry ent;
+	void *ctx;
+	void *req;
+	long long unsigned int user_data;
+	u8 opcode;
+	u32 flags;
+	bool force_nonblock;
+	bool sq_thread;
+	char __data[0];
+};
 
 SEC("tp/io_uring/io_uring_submit_sqe")
-int handle_submit_sqe(struct trace_event_raw_io_uring_submit_sqe_local *ctx)
+int handle_submit_sqe(struct trace_event_raw_io_uring_submit_sqe *ctx)
 {
-    if (gadget_should_discard_data_current()) {
+    if (should_discard()) {
         return 0;
     }
 
-    struct event *event = gadget_reserve_buf(&events, sizeof(*event));
+    u32 zero = 0;
+    struct event *event = bpf_map_lookup_elem(&empty_event, &zero);
     if (!event)
         return 0;
 
+    // Populate the process data into the event.
     gadget_process_populate(&event->proc);
+
     event->opcode = ctx->opcode;
     event->flags = ctx->flags;
 
+    // Populate the timestamp into the event.
     event->timestamp_raw = bpf_ktime_get_boot_ns();
 
-    gadget_submit_buf(ctx, &events, event, sizeof(*event));
+    // Submit the event to the buffer.
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
     return 0;
 }
 

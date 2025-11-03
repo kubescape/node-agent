@@ -32,7 +32,7 @@ GADGET_TRACER_MAP(events, 1024 * 256);
 // Define a tracer
 GADGET_TRACER(iouring, events, event);
 
-// Use the modern tracepoint: io_uring_submit_req (>= 6.3)
+// Use the modern tracepoint: io_uring_submit_req (>= 6.4)
 SEC("tp/io_uring/io_uring_submit_req")
 int handle_submit_req(struct trace_event_raw_io_uring_submit_req *ctx)
 {

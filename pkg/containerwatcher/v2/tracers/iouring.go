@@ -24,7 +24,7 @@ const (
 	iouringImageName = "ghcr.io/inspektor-gadget/gadget/iouring_new:latest"
 	iouringTraceName = "trace_iouring"
 	SupportedMajor   = 6
-	SupportedMinor   = 3
+	SupportedMinor   = 4
 )
 
 var _ containerwatcher.TracerInterface = (*IoUringTracer)(nil)

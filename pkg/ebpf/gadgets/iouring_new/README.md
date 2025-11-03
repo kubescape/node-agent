@@ -1,6 +1,6 @@
 ### io_uring Gadget
 
-Trace io_uring submit events. Uses runtime kernel version detection to choose between `io_uring_submit_req` (>= 6.3) and `io_uring_submit_sqe` (< 6.3).
+Trace io_uring submit events. Uses runtime kernel version detection to choose between `io_uring_submit_req` (>= 6.4) and `io_uring_submit_sqe` (< 6.4).
 
 ### What it reports
 - **timestamp_raw**: Monotonic timestamp (ns)
