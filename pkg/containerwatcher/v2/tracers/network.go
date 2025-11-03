@@ -125,7 +125,7 @@ func (nt *NetworkTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.DataPool.Get().(*datasource.Edata)
+					pooledData := utils.GetPooledDataItem(utils.NetworkEventType).(*datasource.Edata)
 					data.DeepCopyInto(pooledData)
 					nt.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.NetworkEventType})
 					return nil

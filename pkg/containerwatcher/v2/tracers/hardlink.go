@@ -105,7 +105,7 @@ func (ht *HardlinkTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.DataPool.Get().(*datasource.Edata)
+					pooledData := utils.GetPooledDataItem(utils.HardlinkEventType).(*datasource.Edata)
 					data.DeepCopyInto(pooledData)
 					ht.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.HardlinkEventType})
 					return nil

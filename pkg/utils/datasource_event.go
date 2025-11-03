@@ -25,13 +25,30 @@ const (
 )
 
 var (
-	DataPool = sync.Pool{
-		New: func() any {
-			return &datasource.Edata{}
-		},
-	}
+	dataPools   = sync.Map{}
 	fieldCaches = sync.Map{}
 )
+
+func GetPooledDataItem(eventType EventType) datasource.Data {
+	pool, loaded := dataPools.Load(eventType)
+	if !loaded {
+		var newElement func() any
+		switch eventType {
+		case SyscallEventType:
+			newElement = func() any {
+				return &datasource.EdataElement{}
+			}
+		default:
+			newElement = func() any {
+				return &datasource.Edata{}
+			}
+		}
+		pool, _ = dataPools.LoadOrStore(eventType, &sync.Pool{
+			New: newElement,
+		})
+	}
+	return pool.(*sync.Pool).Get().(datasource.Data)
+}
 
 type DatasourceEvent struct {
 	Data       datasource.Data
@@ -738,7 +755,10 @@ func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.
 }
 
 func (e *DatasourceEvent) Release() {
-	DataPool.Put(e.Data)
+	pool, loaded := dataPools.Load(e.EventType)
+	if loaded {
+		pool.(*sync.Pool).Put(e.Data)
+	}
 }
 
 func (e *DatasourceEvent) SetExtra(extra interface{}) {
