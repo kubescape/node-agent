@@ -291,7 +291,13 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 
 	// Create third-party tracers
 	for tracerInit := range tf.thirdPartyTracersInit.Iter() {
-		tracer, err := tracerInit.NewTracer(tf.containerCollection, tf.tracerCollection, tf.containerSelector, tf.createEventCallback(utils.AllEventType), tf.thirdPartyEnricher)
+		tracer, err := tracerInit.NewTracer(
+			tf.kubeManager,
+			tf.runtime,
+			tf.ociStore,
+			tf.createEventCallback(utils.AllEventType),
+			tf.thirdPartyEnricher,
+		)
 		if err != nil {
 			logger.L().Error("error creating third-party tracer", helpers.Error(err))
 			continue
