@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"net"
 	"net/http"
 	"time"
 
@@ -47,6 +48,7 @@ type StructEvent struct {
 	NumAnswers           int                     `json:"numAnswers,omitempty" yaml:"numAnswers,omitempty"`
 	OldPath              string                  `json:"oldPath,omitempty" yaml:"oldPath,omitempty"`
 	Opcode               int                     `json:"opcode,omitempty" yaml:"opcode,omitempty"`
+	OtherIp              string                  `json:"otherIp,omitempty" yaml:"otherIp,omitempty"`
 	PID64                uint64                  `json:"pid64,omitempty" yaml:"pid64,omitempty"`
 	Path                 string                  `json:"path,omitempty" yaml:"path,omitempty"`
 	Pcomm                string                  `json:"pcomm,omitempty" yaml:"pcomm,omitempty"`
@@ -361,6 +363,16 @@ func (e *StructEvent) GetOpcode() int {
 	}
 }
 
+func (e *StructEvent) GetOtherIp() string {
+	switch e.EventType {
+	case HTTPEventType:
+		return e.OtherIp
+	default:
+		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+}
+
 func (e *StructEvent) GetPath() string {
 	switch e.EventType {
 	case OpenEventType:
@@ -587,11 +599,11 @@ func (e *StructEvent) IsDir() bool {
 	}
 }
 
-func (e *StructEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, internal bool) HttpEvent {
+func (e *StructEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, ip net.IP) HttpEvent {
 	event := *e
 	event.Request = request
 	event.Direction = direction
-	event.Internal = internal
+	event.Internal = ip.IsPrivate()
 	return &event
 }
 

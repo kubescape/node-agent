@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"path/filepath"
 
@@ -96,6 +97,7 @@ type HttpEvent interface {
 	HttpRawEvent
 	GetDirection() consts.NetworkDirection
 	GetInternal() bool
+	GetOtherIp() string
 	GetRequest() *http.Request
 	GetResponse() *http.Response
 	SetResponse(response *http.Response)
@@ -108,7 +110,7 @@ type HttpRawEvent interface {
 	GetSockFd() uint32
 	GetSyscall() string
 	GetType() HTTPDataType
-	MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, internal bool) HttpEvent
+	MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, ip net.IP) HttpEvent
 }
 
 type IOUring interface {

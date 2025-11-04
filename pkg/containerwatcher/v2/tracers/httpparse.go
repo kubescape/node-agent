@@ -50,7 +50,7 @@ func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error
 		return nil, err
 	}
 
-	return bpfEvent.MakeHttpEvent(request, direction, IsInternal(ip.String())), nil
+	return bpfEvent.MakeHttpEvent(request, direction, ip), nil
 }
 
 func ExtractConsistentHeaders(headers http.Header) map[string][]string {
@@ -78,11 +78,6 @@ func GetPacketDirection(syscall string) (consts.NetworkDirection, error) {
 	} else {
 		return "", fmt.Errorf("unknown syscall %s", syscall)
 	}
-}
-
-func IsInternal(ip string) bool {
-	ipAddress := net.ParseIP(ip)
-	return ipAddress.IsPrivate()
 }
 
 func ParseHttpRequest(data []byte) (*http.Request, error) {
