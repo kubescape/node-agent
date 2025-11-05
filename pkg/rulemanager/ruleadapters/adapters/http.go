@@ -61,29 +61,29 @@ func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 }
 
 func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//httpEvent, ok := enrichedEvent.Event.(*tracerhttptype.Event)
-	//if !ok {
-	//	return nil
-	//}
+	httpEvent, ok := enrichedEvent.Event.(utils.HttpEvent)
+	if !ok {
+		return nil
+	}
 
-	//result := ConvertToMap(&httpEvent.Event)
+	result := ConvertToMap(httpEvent)
 
-	//result["pid"] = httpEvent.Pid
-	//result["uid"] = httpEvent.Uid
-	//result["gid"] = httpEvent.Gid
+	result["pid"] = httpEvent.GetPID()
+	result["uid"] = httpEvent.GetUid()
+	result["gid"] = httpEvent.GetGid()
 	//result["other_port"] = httpEvent.OtherPort
-	//result["other_ip"] = httpEvent.OtherIp
-	//result["internal"] = httpEvent.Internal
-	//result["direction"] = httpEvent.Direction
+	result["other_ip"] = httpEvent.GetOtherIp()
+	result["internal"] = httpEvent.GetInternal()
+	result["direction"] = httpEvent.GetDirection()
 
-	//if httpEvent.Request != nil {
-	//	result["request"] = httpEvent.Request
-	//}
-	//if httpEvent.Response != nil {
-	//	result["response"] = httpEvent.Response
-	//}
+	if request := httpEvent.GetRequest(); request != nil {
+		result["request"] = request
+	}
+	if response := httpEvent.GetResponse(); response != nil {
+		result["response"] = response
+	}
 
 	//result["mountnsid"] = httpEvent.MountNsID
 
-	return map[string]interface{}{}
+	return result
 }

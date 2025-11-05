@@ -43,6 +43,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		cel.Variable("event", eventTyp),
 		cel.Variable("eventType", cel.StringType),
 		cel.Variable(string(utils.ProcfsEventType), procTyp),
+		cel.Variable(string(utils.HTTPEventType), cel.AnyType),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),

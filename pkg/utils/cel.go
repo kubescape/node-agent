@@ -12,7 +12,6 @@ type CelEvent interface {
 	CapabilitiesEvent
 	DNSEvent
 	ExecEvent
-	HttpRawEvent
 	IOUring
 	LinkEvent
 	NetworkEvent
@@ -48,6 +47,17 @@ var CelFields = map[string]*celtypes.FieldType{
 			return x.Raw.GetArgs(), nil
 		}),
 	},
+	"attrSize": {
+		Type:  celtypes.UintType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetAttrSize(), nil
+		}),
+	},
 	"capName": {
 		Type:  celtypes.StringType,
 		IsSet: isSet,
@@ -57,6 +67,17 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, fmt.Errorf("celval: object is nil")
 			}
 			return x.Raw.GetCapability(), nil
+		}),
+	},
+	"cmd": {
+		Type:  celtypes.UintType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetCmd(), nil
 		}),
 	},
 	"comm": {
@@ -167,6 +188,17 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, fmt.Errorf("celval: object is nil")
 			}
 			return int(x.Raw.GetFlagsRaw()), nil
+		}),
+	},
+	"module": {
+		Type:  celtypes.StringType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetModule(), nil
 		}),
 	},
 	"name": {
@@ -345,18 +377,7 @@ var CelFields = map[string]*celtypes.FieldType{
 			return x.Raw.GetUpperLayer(), nil
 		}),
 	},
-	"module": {
-		Type:  celtypes.StringType,
-		IsSet: isSet,
-		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[CelEvent])
-			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
-			}
-			return x.Raw.GetModule(), nil
-		}),
-	},
-	"cmd": {
+	"uid": {
 		Type:  celtypes.UintType,
 		IsSet: isSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
@@ -364,18 +385,7 @@ var CelFields = map[string]*celtypes.FieldType{
 			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}
-			return x.Raw.GetCmd(), nil
-		}),
-	},
-	"attrSize": {
-		Type:  celtypes.UintType,
-		IsSet: isSet,
-		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[CelEvent])
-			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
-			}
-			return x.Raw.GetAttrSize(), nil
+			return x.Raw.GetUid(), nil
 		}),
 	},
 }
