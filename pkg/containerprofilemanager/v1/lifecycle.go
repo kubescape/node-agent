@@ -74,6 +74,18 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
 
+	// Check if the container should use a user-defined profile
+	if sharedData.UserDefinedProfile != "" {
+		logger.L().Debug("ignoring container with a user-defined profile",
+			helpers.String("containerID", containerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+			helpers.String("podName", container.K8s.PodName),
+			helpers.String("namespace", container.K8s.Namespace),
+			helpers.String("userDefinedProfile", sharedData.UserDefinedProfile))
+		cpm.removeContainerEntry(containerID)
+		return nil
+	}
+
 	// Ignore ephemeral containers
 	if sharedData.ContainerType == objectcache.EphemeralContainer {
 		logger.L().Debug("ignoring ephemeral container",
