@@ -90,7 +90,7 @@ func TestDnsFields(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer operator.Close(gadgetCtx)
-	dnsOperator, err := (&DnsOperator{}).InstantiateDataOperator(gadgetCtx, api.ParamValues{})
+	dnsOperator, err := NewDnsOperator().InstantiateDataOperator(gadgetCtx, api.ParamValues{})
 	require.NoError(t, err)
 	defer dnsOperator.Close(gadgetCtx)
 	dataSources := gadgetCtx.GetDataSources()
