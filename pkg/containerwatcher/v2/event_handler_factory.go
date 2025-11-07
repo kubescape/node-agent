@@ -76,6 +76,11 @@ func NewEventHandlerFactory(
 
 	// Create adapters for managers that don't implement the Manager interface directly
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
+		// check for dropped events
+		if event.HasDroppedEvents() {
+			containerProfileManager.ReportDroppedEvent(event.GetContainerID())
+		}
+		// ContainerProfileManager has specific methods for different event types
 		switch eventType {
 		case utils.CapabilitiesEventType:
 			if capEvent, ok := event.(utils.CapabilitiesEvent); ok {

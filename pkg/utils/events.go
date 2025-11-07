@@ -20,10 +20,12 @@ const (
 )
 
 type K8sEvent interface {
+	GetContainerID() string
 	GetEventType() EventType
 	GetNamespace() string
 	GetPod() string
 	GetTimestamp() types.Time
+	HasDroppedEvents() bool
 	Release()
 }
 
@@ -31,7 +33,6 @@ type EnrichEvent interface {
 	K8sEvent
 	GetComm() string
 	GetContainer() string
-	GetContainerID() string
 	GetContainerImage() string
 	GetContainerImageDigest() string
 	GetError() int64

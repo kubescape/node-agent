@@ -26,6 +26,10 @@ type ProcfsEvent struct {
 
 var _ utils.K8sEvent = (*ProcfsEvent)(nil)
 
+func (pe *ProcfsEvent) GetContainerID() string {
+	return pe.ContainerID
+}
+
 func (pe *ProcfsEvent) GetEventType() utils.EventType {
 	return utils.ProcfsEventType
 }
@@ -48,6 +52,10 @@ func (pe *ProcfsEvent) GetNamespace() string {
 // GetPod returns the pod name (empty for procfs events)
 func (pe *ProcfsEvent) GetPod() string {
 	return ""
+}
+
+func (pe *ProcfsEvent) HasDroppedEvents() bool {
+	return false
 }
 
 func (pe *ProcfsEvent) Release() {}

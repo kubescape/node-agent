@@ -589,6 +589,10 @@ func (e *StructEvent) GetUpperLayer() bool {
 	}
 }
 
+func (e *StructEvent) HasDroppedEvents() bool {
+	return false
+}
+
 func (e *StructEvent) IsDir() bool {
 	switch e.EventType {
 	case OpenEventType:

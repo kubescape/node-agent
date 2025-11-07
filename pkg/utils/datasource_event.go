@@ -740,6 +740,13 @@ func (e *DatasourceEvent) GetUpperLayer() bool {
 	}
 }
 
+func (e *DatasourceEvent) HasDroppedEvents() bool {
+	if e.Data.LostSampleCount() > 0 {
+		return true
+	}
+	return false
+}
+
 func (e *DatasourceEvent) IsDir() bool {
 	switch e.EventType {
 	case OpenEventType:
