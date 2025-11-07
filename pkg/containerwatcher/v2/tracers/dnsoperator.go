@@ -10,221 +10,166 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 )
 
-type DnsOperator struct{}
-
-func (o *DnsOperator) Name() string {
-	return "dns"
-}
-
-func (o *DnsOperator) Init(params *params.Params) error {
-	return nil
-}
-
-func (o *DnsOperator) GlobalParams() api.Params {
-	return nil
-}
-
-func (o *DnsOperator) InstanceParams() api.Params {
-	return nil
-}
-
-func (o *DnsOperator) InstantiateDataOperator(gadgetCtx operators.GadgetContext, instanceParamValues api.ParamValues) (operators.DataOperatorInstance, error) {
-	if _, ok := gadgetCtx.GetDataSources()["dns"]; !ok {
-		return nil, nil
-	}
-
-	inst := &operatorInstance{}
-	if err := inst.init(gadgetCtx); err != nil {
-		return nil, err
-	}
-
-	return inst, nil
-}
-
-func (o *DnsOperator) Priority() int {
-	return 1
-}
-
-type operatorInstance struct {
-	dataFunc datasource.DataFunc
-}
-
-func (o *operatorInstance) Close(gadgetCtx operators.GadgetContext) error {
-	return nil
-}
-
-func (o *operatorInstance) Name() string {
-	return "dns"
-}
-
-func (o *operatorInstance) Start(gadgetCtx operators.GadgetContext) error {
-	return nil
-}
-
-func (o *operatorInstance) Stop(gadgetCtx operators.GadgetContext) error {
-	return nil
-}
-
-func (o *operatorInstance) init(gadgetCtx operators.GadgetContext) error {
-	ds, ok := gadgetCtx.GetDataSources()["dns"]
-	if !ok {
-		return fmt.Errorf("dns datasource not found")
-	}
-
-	dataF := ds.GetField("data")
-	lenF := ds.GetField("data_len")
-	dnsOffF := ds.GetField("dns_off")
-
-	idF, err := ds.AddField("id", api.Kind_String)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	qrRawF, err := ds.AddField("qr_raw", api.Kind_Bool)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	qrF, err := ds.AddField("qr", api.Kind_String)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	qtypeRawF, err := ds.AddField("qtype_raw", api.Kind_Uint16)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	qtypeF, err := ds.AddField("qtype", api.Kind_String)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	nameF, err := ds.AddField("name", api.Kind_String)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	rcodeRawF, err := ds.AddField("rcode_raw", api.Kind_Uint16)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	rcodeF, err := ds.AddField("rcode", api.Kind_String)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	numAnswersF, err := ds.AddField("num_answers", api.Kind_Int32)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	addressesF, err := ds.AddField("addresses", api.Kind_String)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	TruncatedF, err := ds.AddField("tc", api.Kind_Bool)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	RecursionAvailableF, err := ds.AddField("ra", api.Kind_Bool)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	RecursionDesiredF, err := ds.AddField("rd", api.Kind_Bool)
-	if err != nil {
-		return fmt.Errorf("failed to add field: %s", err)
-	}
-
-	o.dataFunc = func(source datasource.DataSource, data datasource.Data) error {
-		// Get all fields sent by ebpf
-		payloadLen, err := lenF.Uint32(data)
-		if err != nil {
-			return fmt.Errorf("failed to get data_len: %s", err)
-		}
-		dnsOff, err := dnsOffF.Uint16(data)
-		if err != nil {
-			return fmt.Errorf("failed to get dns_off: %s", err)
-		}
-
-		if payloadLen < uint32(dnsOff) {
-			return fmt.Errorf("packet too short: dataLen: %d < dnsOff: %d", payloadLen, dnsOff)
-		}
-
-		payload, err := dataF.Bytes(data)
-		if err != nil {
-			return fmt.Errorf("failed to get data: %s", err)
-		}
-
-		if len(payload) == 0 {
-			return fmt.Errorf("empty data")
-		}
-
-		msg := dnsmessage.Message{}
-		if err := msg.Unpack(payload[dnsOff:]); err != nil {
-			return fmt.Errorf("failed to unpack dns message: %s", err)
-		}
-
-		idF.PutString(data, fmt.Sprintf("%.4x", msg.ID))
-
-		qrRawF.PutBool(data, msg.Header.Response)
-		if msg.Header.Response {
-			rcodeRawF.PutUint16(data, uint16(msg.Header.RCode))
-			rcodeF.PutString(data, RCode(msg.Header.RCode).String())
-			qrF.PutString(data, "R")
-		} else {
-			qrF.PutString(data, "Q")
-		}
-
-		TruncatedF.PutBool(data, msg.Header.Truncated)
-
-		RecursionAvailableF.PutBool(data, msg.Header.RecursionAvailable)
-
-		RecursionDesiredF.PutBool(data, msg.Header.RecursionDesired)
-
-		if len(msg.Questions) > 0 {
-			question := msg.Questions[0]
-			qtypeRawF.PutUint16(data, uint16(question.Type))
-			qtypeF.PutString(data, Type(question.Type).String())
-			nameF.PutString(data, question.Name.String())
-		}
-
-		numAnswersF.PutInt32(data, int32(len(msg.Answers)))
-
-		var addresses []string
-
-		for _, answer := range msg.Answers {
-			var str string
-			switch answer.Header.Type {
-			case dnsmessage.TypeA:
-				ipv4 := answer.Body.(*dnsmessage.AResource)
-				str = net.IP(ipv4.A[:]).String()
-			case dnsmessage.TypeAAAA:
-				ipv6 := answer.Body.(*dnsmessage.AAAAResource)
-				str = net.IP(ipv6.AAAA[:]).String()
+func NewDnsOperator() operators.DataOperator {
+	return simple.New("dns",
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			ds, ok := gadgetCtx.GetDataSources()["dns"]
+			if !ok {
+				return fmt.Errorf("dns datasource not found")
 			}
-			if str != "" {
-				addresses = append(addresses, str)
+
+			dataF := ds.GetField("data")
+			lenF := ds.GetField("data_len")
+			dnsOffF := ds.GetField("dns_off")
+
+			idF, err := ds.AddField("id", api.Kind_String)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
 			}
-		}
 
-		addressesF.PutString(data, strings.Join(addresses, ","))
-		return nil
-	}
+			qrRawF, err := ds.AddField("qr_raw", api.Kind_Bool)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
 
-	return nil
-}
+			qrF, err := ds.AddField("qr", api.Kind_String)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
 
-func (o *operatorInstance) PreStart(gadgetCtx operators.GadgetContext) error {
-	ds := gadgetCtx.GetDataSources()["dns"]
-	return ds.Subscribe(o.dataFunc, 0)
+			qtypeRawF, err := ds.AddField("qtype_raw", api.Kind_Uint16)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			qtypeF, err := ds.AddField("qtype", api.Kind_String)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			nameF, err := ds.AddField("name", api.Kind_String)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			rcodeRawF, err := ds.AddField("rcode_raw", api.Kind_Uint16)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			rcodeF, err := ds.AddField("rcode", api.Kind_String)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			numAnswersF, err := ds.AddField("num_answers", api.Kind_Int32)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			addressesF, err := ds.AddField("addresses", api.Kind_String)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			TruncatedF, err := ds.AddField("tc", api.Kind_Bool)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			RecursionAvailableF, err := ds.AddField("ra", api.Kind_Bool)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			RecursionDesiredF, err := ds.AddField("rd", api.Kind_Bool)
+			if err != nil {
+				return fmt.Errorf("failed to add field: %s", err)
+			}
+
+			dataFunc := func(source datasource.DataSource, data datasource.Data) error {
+				// Get all fields sent by ebpf
+				payloadLen, err := lenF.Uint32(data)
+				if err != nil {
+					return fmt.Errorf("failed to get data_len: %s", err)
+				}
+				dnsOff, err := dnsOffF.Uint16(data)
+				if err != nil {
+					return fmt.Errorf("failed to get dns_off: %s", err)
+				}
+
+				if payloadLen < uint32(dnsOff) {
+					return fmt.Errorf("packet too short: dataLen: %d < dnsOff: %d", payloadLen, dnsOff)
+				}
+
+				payload, err := dataF.Bytes(data)
+				if err != nil {
+					return fmt.Errorf("failed to get data: %s", err)
+				}
+
+				if len(payload) == 0 {
+					return fmt.Errorf("empty data")
+				}
+
+				msg := dnsmessage.Message{}
+				if err := msg.Unpack(payload[dnsOff:]); err != nil {
+					return fmt.Errorf("failed to unpack dns message: %s", err)
+				}
+
+				idF.PutString(data, fmt.Sprintf("%.4x", msg.ID))
+
+				qrRawF.PutBool(data, msg.Header.Response)
+				if msg.Header.Response {
+					rcodeRawF.PutUint16(data, uint16(msg.Header.RCode))
+					rcodeF.PutString(data, RCode(msg.Header.RCode).String())
+					qrF.PutString(data, "R")
+				} else {
+					qrF.PutString(data, "Q")
+				}
+
+				TruncatedF.PutBool(data, msg.Header.Truncated)
+
+				RecursionAvailableF.PutBool(data, msg.Header.RecursionAvailable)
+
+				RecursionDesiredF.PutBool(data, msg.Header.RecursionDesired)
+
+				if len(msg.Questions) > 0 {
+					question := msg.Questions[0]
+					qtypeRawF.PutUint16(data, uint16(question.Type))
+					qtypeF.PutString(data, Type(question.Type).String())
+					nameF.PutString(data, question.Name.String())
+				}
+
+				numAnswersF.PutInt32(data, int32(len(msg.Answers)))
+
+				var addresses []string
+
+				for _, answer := range msg.Answers {
+					var str string
+					switch answer.Header.Type {
+					case dnsmessage.TypeA:
+						ipv4 := answer.Body.(*dnsmessage.AResource)
+						str = net.IP(ipv4.A[:]).String()
+					case dnsmessage.TypeAAAA:
+						ipv6 := answer.Body.(*dnsmessage.AAAAResource)
+						str = net.IP(ipv6.AAAA[:]).String()
+					}
+					if str != "" {
+						addresses = append(addresses, str)
+					}
+				}
+
+				addressesF.PutString(data, strings.Join(addresses, ","))
+				return nil
+			}
+
+			return ds.Subscribe(dataFunc, 0)
+		}),
+		simple.WithPriority(1),
+	)
 }
 
 /// Some helpers
