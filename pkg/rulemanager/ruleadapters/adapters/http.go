@@ -71,6 +71,8 @@ func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 	result["pid"] = httpEvent.GetPID()
 	result["uid"] = httpEvent.GetUid()
 	result["gid"] = httpEvent.GetGid()
+	//result["other_port"] = httpEvent.OtherPort
+	result["other_ip"] = httpEvent.GetOtherIp()
 	result["internal"] = httpEvent.GetInternal()
 	result["direction"] = httpEvent.GetDirection()
 

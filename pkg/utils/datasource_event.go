@@ -57,6 +57,7 @@ type DatasourceEvent struct {
 	Direction  consts.NetworkDirection
 	EventType  EventType
 	Internal   bool
+	OtherIp    string
 	Request    *http.Request
 	Response   *http.Response
 	Syscall    string
@@ -441,6 +442,16 @@ func (e *DatasourceEvent) GetOpcode() int {
 	}
 }
 
+func (e *DatasourceEvent) GetOtherIp() string {
+	switch e.EventType {
+	case HTTPEventType:
+		return e.OtherIp
+	default:
+		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+}
+
 func (e *DatasourceEvent) GetPath() string {
 	switch e.EventType {
 	case OpenEventType:
@@ -760,6 +771,7 @@ func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.
 		Direction:  direction,
 		EventType:  e.EventType,
 		Internal:   ip.IsPrivate(),
+		OtherIp:    ip.String(),
 		Request:    request,
 		Response:   e.Response,
 		Syscall:    e.Syscall,
