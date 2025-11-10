@@ -98,7 +98,6 @@ type HttpEvent interface {
 	HttpRawEvent
 	GetDirection() consts.NetworkDirection
 	GetInternal() bool
-	GetOtherIp() string
 	GetRequest() *http.Request
 	GetResponse() *http.Response
 	SetResponse(response *http.Response)

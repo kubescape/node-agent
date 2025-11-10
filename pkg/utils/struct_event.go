@@ -48,7 +48,6 @@ type StructEvent struct {
 	NumAnswers           int                     `json:"numAnswers,omitempty" yaml:"numAnswers,omitempty"`
 	OldPath              string                  `json:"oldPath,omitempty" yaml:"oldPath,omitempty"`
 	Opcode               int                     `json:"opcode,omitempty" yaml:"opcode,omitempty"`
-	OtherIp              string                  `json:"otherIp,omitempty" yaml:"otherIp,omitempty"`
 	PID64                uint64                  `json:"pid64,omitempty" yaml:"pid64,omitempty"`
 	Path                 string                  `json:"path,omitempty" yaml:"path,omitempty"`
 	Pcomm                string                  `json:"pcomm,omitempty" yaml:"pcomm,omitempty"`
@@ -360,16 +359,6 @@ func (e *StructEvent) GetOpcode() int {
 	default:
 		logger.L().Warning("GetOpcode not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
-	}
-}
-
-func (e *StructEvent) GetOtherIp() string {
-	switch e.EventType {
-	case HTTPEventType:
-		return e.OtherIp
-	default:
-		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
 	}
 }
 
