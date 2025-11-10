@@ -2,7 +2,7 @@ IMAGE?=randomx
 TAG?=latest
 
 build:
-	sudo ig image build -t $(IMAGE):$(TAG) .
+	sudo TMPDIR=$$TMPDIR ig image build -t $(IMAGE):$(TAG) .
 
 build-with-metadata:
 	sudo ig image build -t $(IMAGE):$(TAG) . --update-metadata
