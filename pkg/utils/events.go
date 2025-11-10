@@ -39,6 +39,7 @@ type EnrichEvent interface {
 	GetExtra() interface{}
 	GetGid() *uint32
 	GetHostNetwork() bool
+	GetMountNsID() uint64
 	GetPcomm() string
 	GetPID() uint32
 	GetPID64() uint64

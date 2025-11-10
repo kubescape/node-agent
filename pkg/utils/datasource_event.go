@@ -387,6 +387,11 @@ func (e *DatasourceEvent) GetModule() string {
 	}
 }
 
+func (e *DatasourceEvent) GetMountNsID() uint64 {
+	mountNsID, _ := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
+	return mountNsID
+}
+
 func (e *DatasourceEvent) GetNamespace() string {
 	namespace, _ := e.getFieldAccessor("k8s.namespace").String(e.Data)
 	return namespace

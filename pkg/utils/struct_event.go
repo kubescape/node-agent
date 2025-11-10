@@ -43,6 +43,7 @@ type StructEvent struct {
 	Identifier           string                  `json:"identifier,omitempty" yaml:"identifier,omitempty"`
 	Internal             bool                    `json:"internal,omitempty" yaml:"internal,omitempty"`
 	Module               string                  `json:"module,omitempty" yaml:"module,omitempty"`
+	MountNsID            uint64                  `json:"mountNsID,omitempty" yaml:"mountNsID,omitempty"`
 	Namespace            string                  `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 	NewPath              string                  `json:"newPath,omitempty" yaml:"newPath,omitempty"`
 	NumAnswers           int                     `json:"numAnswers,omitempty" yaml:"numAnswers,omitempty"`
@@ -316,6 +317,10 @@ func (e *StructEvent) GetModule() string {
 	default:
 		return e.Module
 	}
+}
+
+func (e *StructEvent) GetMountNsID() uint64 {
+	return e.MountNsID
 }
 
 func (e *StructEvent) GetNamespace() string {
