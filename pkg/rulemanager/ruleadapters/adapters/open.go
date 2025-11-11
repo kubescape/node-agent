@@ -27,20 +27,20 @@ func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 
 	pid := openEvent.GetPID()
 	comm := openEvent.GetComm()
-	path := openEvent.GetPath()
+	fullPath := openEvent.GetFullPath()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	baseRuntimeAlert.Arguments = map[string]interface{}{
 		"flags": openEvent.GetFlags(),
-		"path":  path,
+		"path":  fullPath,
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,
 		},
 		File: &common.FileEntity{
-			Name:      filepath.Base(path),
-			Directory: filepath.Dir(path),
+			Name:      filepath.Base(fullPath),
+			Directory: filepath.Dir(fullPath),
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)

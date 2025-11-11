@@ -23,4 +23,5 @@ docker-push:
 gadgets:
 	$(foreach img,$(KUBESCAPE_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=$(img) TAG=latest;)
 	$(foreach img,$(GADGETS),sudo ig image pull $(img)$(VERSION);)
-	sudo ig image export $(foreach img,$(GADGETS),$(img)$(VERSION)) $(foreach img,$(KUBESCAPE_GADGETS),$(img):latest) tracers.tar
+	sudo ig image pull quay.io/matthiasb_1/gadgets:open
+	sudo ig image export $(foreach img,$(GADGETS),$(img)$(VERSION)) $(foreach img,$(KUBESCAPE_GADGETS),$(img):latest) quay.io/matthiasb_1/gadgets:open tracers.tar

@@ -342,6 +342,17 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 	}
 }
 
+func (e *DatasourceEvent) GetFullPath() string {
+	switch e.EventType {
+	case OpenEventType:
+		path, _ := e.getFieldAccessor("fpath").String(e.Data)
+		return path
+	default:
+		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+}
+
 func (e *DatasourceEvent) GetGid() *uint32 {
 	switch e.EventType {
 	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:

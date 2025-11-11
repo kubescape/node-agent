@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	openImageName = "ghcr.io/inspektor-gadget/gadget/trace_open:v0.45.0"
+	openImageName = "quay.io/matthiasb_1/gadgets:open"
 	openTraceName = "trace_open"
 )
 
@@ -68,7 +68,10 @@ func (ot *OpenTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(ot.ociStore),
 	)
 	go func() {
-		err := ot.runtime.RunGadget(ot.gadgetCtx, nil, nil)
+		params := map[string]string{
+			"operator.oci.ebpf.paths": "true",
+		}
+		err := ot.runtime.RunGadget(ot.gadgetCtx, nil, params)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", ot.gadgetCtx.Name()), helpers.Error(err))
 		}
