@@ -37,6 +37,7 @@ type StructEvent struct {
 	Extra                interface{}             `json:"extra,omitempty" yaml:"extra,omitempty"`
 	Flags                []string                `json:"flags,omitempty" yaml:"flags,omitempty"`
 	FlagsRaw             uint32                  `json:"flagsRaw,omitempty" yaml:"flagsRaw,omitempty"`
+	FullPath             string                  `json:"fullPath,omitempty" yaml:"fullPath,omitempty"`
 	Gid                  uint32                  `json:"gid,omitempty" yaml:"gid,omitempty"`
 	HostNetwork          bool                    `json:"hostNetwork,omitempty" yaml:"hostNetwork,omitempty"`
 	ID                   string                  `json:"id,omitempty" yaml:"id,omitempty"`
@@ -60,6 +61,7 @@ type StructEvent struct {
 	PodLabels            map[string]string       `json:"podLabels,omitempty" yaml:"podLabels,omitempty"`
 	Ppid                 uint32                  `json:"ppid,omitempty" yaml:"ppid,omitempty"`
 	Proto                string                  `json:"proto,omitempty" yaml:"proto,omitempty"`
+	Ptid                 uint64                  `json:"ptid,omitempty" yaml:"ptid,omitempty"`
 	PtraceRequest        int                     `json:"ptraceRequest,omitempty" yaml:"ptraceRequest,omitempty"`
 	PupperLayer          bool                    `json:"pupperLayer,omitempty" yaml:"pupperLayer,omitempty"`
 	Qr                   DNSPktType              `json:"qr,omitempty" yaml:"qr,omitempty"`
@@ -72,6 +74,8 @@ type StructEvent struct {
 	SrcPort              uint16                  `json:"srcPort,omitempty" yaml:"srcPort,omitempty"`
 	StatusCode           int                     `json:"statusCode,omitempty" yaml:"statusCode,omitempty"`
 	Syscall              string                  `json:"syscall,omitempty" yaml:"syscall,omitempty"`
+	Syscalls             []byte                  `json:"syscalls,omitempty" yaml:"syscalls,omitempty"`
+	Tid                  uint64                  `json:"tid,omitempty" yaml:"tid,omitempty"`
 	Timestamp            int64                   `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
 	Type                 HTTPDataType            `json:"type,omitempty" yaml:"type,omitempty"`
 	Uid                  uint32                  `json:"uid,omitempty" yaml:"uid,omitempty"`
@@ -97,7 +101,13 @@ var _ SyscallEvent = (*StructEvent)(nil)
 var _ UnshareEvent = (*StructEvent)(nil)
 
 func (e *StructEvent) GetAttrSize() uint32 {
-	return e.AttrSize
+	switch e.EventType {
+	case BpfEventType:
+		return e.AttrSize
+	default:
+		logger.L().Warning("GetAttrSize not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
 }
 
 func (e *StructEvent) GetAddresses() []string {
@@ -283,6 +293,16 @@ func (e *StructEvent) GetFlagsRaw() uint32 {
 	}
 }
 
+func (e *StructEvent) GetFullPath() string {
+	switch e.EventType {
+	case OpenEventType:
+		return e.FullPath
+	default:
+		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+}
+
 func (e *StructEvent) GetGid() *uint32 {
 	switch e.EventType {
 	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
@@ -463,6 +483,10 @@ func (e *StructEvent) GetProto() string {
 	}
 }
 
+func (e *StructEvent) GetPtid() uint64 {
+	return e.Ptid
+}
+
 func (e *StructEvent) GetPupperLayer() bool {
 	switch e.EventType {
 	case ExecveEventType:
@@ -553,6 +577,20 @@ func (e *StructEvent) GetSyscall() string {
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		panic("GetSyscall not implemented for this event type")
 	}
+}
+
+func (e *StructEvent) GetSyscalls() []byte {
+	switch e.EventType {
+	case SyscallEventType:
+		return e.Syscalls
+	default:
+		logger.L().Warning("GetSyscalls not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return nil
+	}
+}
+
+func (e *StructEvent) GetTid() uint64 {
+	return e.Tid
 }
 
 func (e *StructEvent) GetTimestamp() types.Time {

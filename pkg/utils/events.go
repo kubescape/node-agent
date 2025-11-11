@@ -151,6 +151,7 @@ type OpenEvent interface {
 	EnrichEvent
 	GetFlags() []string
 	GetFlagsRaw() uint32
+	GetFullPath() string
 	GetPath() string
 	IsDir() bool
 }
@@ -212,7 +213,7 @@ func GetHostFilePathFromEvent(event EnrichEvent, containerPid uint32) (string, e
 		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, GetExecPathFromEvent(event.(ExecEvent))))
 		return realPath, nil
 	case OpenEventType:
-		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, event.(OpenEvent).GetPath()))
+		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, event.(OpenEvent).GetFullPath()))
 		return realPath, nil
 	default:
 		return "", fmt.Errorf("event is not of type exec or open")
