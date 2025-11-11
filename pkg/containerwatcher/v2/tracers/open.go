@@ -2,6 +2,7 @@ package tracers
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -27,6 +28,7 @@ var _ containerwatcher.TracerInterface = (*OpenTracer)(nil)
 
 // OpenTracer implements TracerInterface for open events
 type OpenTracer struct {
+	cfg                config.Config
 	eventCallback      containerwatcher.ResultCallback
 	gadgetCtx          *gadgetcontext.GadgetContext
 	kubeManager        *kskubemanager.KubeManager
@@ -69,7 +71,7 @@ func (ot *OpenTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.ebpf.paths": "true",
+			"operator.oci.ebpf.paths": strconv.FormatBool(ot.cfg.EnableFullPathTracing),
 		}
 		err := ot.runtime.RunGadget(ot.gadgetCtx, nil, params)
 		if err != nil {
@@ -99,6 +101,7 @@ func (ot *OpenTracer) GetEventType() utils.EventType {
 
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (ot *OpenTracer) IsEnabled(cfg config.Config) bool {
+	ot.cfg = cfg
 	if cfg.DOpen {
 		return false
 	}
@@ -112,7 +115,7 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
 					pooledData := utils.GetPooledDataItem(utils.OpenEventType).(*datasource.Edata)
 					data.DeepCopyInto(pooledData)
-					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.OpenEventType})
+					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.OpenEventType, FullPathTracing: ot.cfg.EnableFullPathTracing})
 					return nil
 				}, opPriority)
 				if err != nil {

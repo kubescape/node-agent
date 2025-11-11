@@ -52,16 +52,17 @@ func GetPooledDataItem(eventType EventType) datasource.Data {
 }
 
 type DatasourceEvent struct {
-	Data       datasource.Data
-	Datasource datasource.DataSource
-	Direction  consts.NetworkDirection
-	EventType  EventType
-	Internal   bool
-	OtherIp    string
-	Request    *http.Request
-	Response   *http.Response
-	Syscall    string
-	extra      interface{}
+	Data            datasource.Data
+	Datasource      datasource.DataSource
+	Direction       consts.NetworkDirection
+	EventType       EventType
+	FullPathTracing bool
+	Internal        bool
+	OtherIp         string
+	Request         *http.Request
+	Response        *http.Response
+	Syscall         string
+	extra           interface{}
 }
 
 var _ BpfEvent = (*DatasourceEvent)(nil)
@@ -464,6 +465,9 @@ func (e *DatasourceEvent) GetOtherIp() string {
 }
 
 func (e *DatasourceEvent) GetPath() string {
+	if e.FullPathTracing {
+		return e.GetFullPath()
+	}
 	switch e.EventType {
 	case OpenEventType:
 		path, _ := e.getFieldAccessor("fname").String(e.Data)

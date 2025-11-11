@@ -190,14 +190,17 @@ func TestConcurrentAccess(t *testing.T) {
 	// Create some test data
 	testEvents := []*utils.StructEvent{
 		{
+			EventType: utils.DnsEventType,
 			DNSName:   "test1.com",
 			Addresses: []string{"1.1.1.1", "2.2.2.2"},
 		},
 		{
+			EventType: utils.DnsEventType,
 			DNSName:   "test2.com",
 			Addresses: []string{"3.3.3.3", "4.4.4.4"},
 		},
 		{
+			EventType: utils.DnsEventType,
 			DNSName:   "test3.com",
 			Addresses: []string{"5.5.5.5", "6.6.6.6"},
 		},
