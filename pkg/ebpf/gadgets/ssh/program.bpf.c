@@ -137,8 +137,8 @@ int ig_trace_ssh(struct __sk_buff *skb)
 		break;
 	case ETH_P_IPV6:
 		event->src.version = event->dst.version = 6;
-		event->src.addr_raw.v6 = ip6h.saddr.in6_u.u6_addr32;
-		event->dst.addr_raw.v6 = ip6h.daddr.in6_u.u6_addr32;
+		__builtin_memcpy(event->src.addr_raw.v6, ip6h.saddr.in6_u.u6_addr8, 16);
+		__builtin_memcpy(event->dst.addr_raw.v6, ip6h.daddr.in6_u.u6_addr8, 16);
 		break;
 	}
 
