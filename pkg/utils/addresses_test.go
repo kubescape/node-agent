@@ -23,17 +23,17 @@ func TestRawIPv4ToString(t *testing.T) {
 		},
 		{
 			name:     "Loopback",
-			ipInt:    0x7F000001,
+			ipInt:    0x0100007F,
 			expected: "127.0.0.1",
 		},
 		{
 			name:     "Google DNS",
-			ipInt:    0x08080808,
-			expected: "8.8.8.8",
+			ipInt:    0x04040808,
+			expected: "8.8.4.4",
 		},
 		{
 			name:     "Mixed",
-			ipInt:    0xC0A80101,
+			ipInt:    0x0101A8C0,
 			expected: "192.168.1.1",
 		},
 	}

@@ -44,10 +44,6 @@ GADGET_TRACER(network, events, event_t);
 // Helper functions to load data from the packet buffer (__sk_buff)
 unsigned long long load_byte(const void *skb,
     unsigned long long off) asm("llvm.bpf.load.byte");
-unsigned long long load_half(const void *skb,
-    unsigned long long off) asm("llvm.bpf.load.half");
-unsigned long long load_word(const void *skb,
-    unsigned long long off) asm("llvm.bpf.load.word");
 
 SEC("socket1")
 int ig_trace_net(struct __sk_buff *skb)
@@ -122,7 +118,7 @@ int ig_trace_net(struct __sk_buff *skb)
     struct event_t *event = bpf_map_lookup_elem(&tmp_events, &zero);
     if (!event)
         return 0;
-    
+
     gadget_process_populate_from_socket(skb_val, &event->proc);
 
 	event->netns_id = skb->cb[0]; // cb[0] initialized by dispatcher.bpf.c
@@ -130,12 +126,10 @@ int ig_trace_net(struct __sk_buff *skb)
 
     if (skb->pkt_type == PACKET_HOST) {
         // Read from skb buffer to avoid taking addresses of bit-fields/stack
-        event->endpoint.addr_raw.v4 = load_word(skb, ETH_HLEN + offsetof(struct iphdr, saddr));
+        event->endpoint.addr_raw.v4 = iph.saddr;
     } else {
-        event->endpoint.addr_raw.v4 = load_word(skb, ETH_HLEN + offsetof(struct iphdr, daddr));
+        event->endpoint.addr_raw.v4 = iph.daddr;
     }
-    // Normalize to network byte order for userspace consumers
-    event->endpoint.addr_raw.v4 = event->endpoint.addr_raw.v4;
     event->endpoint.proto_raw = iph.protocol;
 	event->endpoint.port = bpf_ntohs(port);
 	event->endpoint.version = 4;

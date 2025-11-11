@@ -16,14 +16,6 @@
 #include <gadget/sockets-map.h>
 #include <gadget/filter.h>
 
-// Helper functions to load data from the packet buffer (__sk_buff)
-unsigned long long load_byte(const void *skb,
-			     unsigned long long off) asm("llvm.bpf.load.byte");
-unsigned long long load_half(const void *skb,
-			     unsigned long long off) asm("llvm.bpf.load.half");
-unsigned long long load_word(const void *skb,
-			     unsigned long long off) asm("llvm.bpf.load.word");
-
 // The data structure for events sent to userspace.
 struct event_t {
 	gadget_timestamp timestamp_raw;
@@ -55,31 +47,34 @@ int ig_trace_ssh(struct __sk_buff *skb)
 {
 	struct event_t *event;
 	int zero = 0;
-	__u16 l4_off, h_proto;
-	__u8 proto;
+	__u16 l4_off;
+	struct iphdr iph;
+	struct ipv6hdr ip6h;
+	struct ethhdr ethh;
 
 	// Step 1: Parse Ethernet header to get the Layer 3 protocol (IPv4 or IPv6)
-	h_proto = load_half(skb, offsetof(struct ethhdr, h_proto));
+	if (bpf_skb_load_bytes(skb, 0, &ethh, sizeof(ethh)) < 0)
+		return 0;
 
 	// Step 2: Parse IP header to find the start of the Layer 4 header (TCP)
-	switch (h_proto) {
+	switch (bpf_ntohs(ethh.h_proto)) {
 	case ETH_P_IP: { // IPv4
-		proto = load_byte(skb,
-				  ETH_HLEN + offsetof(struct iphdr, protocol));
-		if (proto != IPPROTO_TCP)
+		if (bpf_skb_load_bytes(skb, ETH_HLEN, &iph, sizeof(iph)) < 0)
+			return 0;
+
+		if (iph.protocol != IPPROTO_TCP)
 			return 0; // Not a TCP packet, so it can't be SSH
 
 		// Calculate IPv4 header length (IHL field * 4 bytes)
-		__u8 ihl_byte = load_byte(skb, ETH_HLEN);
-		__u8 ip_header_len = (ihl_byte & 0x0F) * 4;
-		l4_off = ETH_HLEN + ip_header_len;
+		l4_off = ETH_HLEN + (iph.ihl * 4);
 		break;
 	}
 	case ETH_P_IPV6: { // IPv6
-		proto = load_byte(skb,
-				  ETH_HLEN + offsetof(struct ipv6hdr, nexthdr));
+		if (bpf_skb_load_bytes(skb, ETH_HLEN, &ip6h, sizeof(ip6h)) < 0)
+			return 0;
+
 		// Basic check, doesn't handle all IPv6 extension headers
-		if (proto != IPPROTO_TCP)
+		if (ip6h.nexthdr != IPPROTO_TCP)
 			return 0; // Not a TCP packet
 
 		l4_off = ETH_HLEN + sizeof(struct ipv6hdr);
@@ -134,23 +129,16 @@ int ig_trace_ssh(struct __sk_buff *skb)
 	event->src.proto_raw = event->dst.proto_raw = IPPROTO_TCP;
 
 	// Reparse L3 header to fill source and destination IP addresses
-	switch (h_proto) {
+	switch (bpf_ntohs(ethh.h_proto)) {
 	case ETH_P_IP:
 		event->src.version = event->dst.version = 4;
-		event->src.addr_raw.v4 = load_word(
-			skb, ETH_HLEN + offsetof(struct iphdr, saddr));
-		event->dst.addr_raw.v4 = load_word(
-			skb, ETH_HLEN + offsetof(struct iphdr, daddr));
-		// Convert back to network byte order for userspace
-		// event->src.addr_raw.v4 = bpf_htonl(event->src.addr_raw.v4);
-		// event->dst.addr_raw.v4 = bpf_htonl(event->dst.addr_raw.v4);
+		event->src.addr_raw.v4 = iph.saddr;
+		event->dst.addr_raw.v4 = iph.daddr;
 		break;
 	case ETH_P_IPV6:
 		event->src.version = event->dst.version = 6;
-		bpf_skb_load_bytes(skb, ETH_HLEN + offsetof(struct ipv6hdr, saddr),
-				   &event->src.addr_raw.v6, sizeof(event->src.addr_raw.v6));
-		bpf_skb_load_bytes(skb, ETH_HLEN + offsetof(struct ipv6hdr, daddr),
-				   &event->dst.addr_raw.v6, sizeof(event->dst.addr_raw.v6));
+		event->src.addr_raw.v6 = ip6h.saddr.in6_u.u6_addr32;
+		event->dst.addr_raw.v6 = ip6h.daddr.in6_u.u6_addr32;
 		break;
 	}
 
