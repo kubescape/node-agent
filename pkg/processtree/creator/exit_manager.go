@@ -174,5 +174,4 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 
 	pt.processMap.Delete(pid)
 	delete(pt.pendingExits, pid)
-
 }

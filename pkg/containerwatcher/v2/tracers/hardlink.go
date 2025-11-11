@@ -26,7 +26,7 @@ type HardlinkTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracerhardlink.Tracer
 	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
 }
@@ -36,7 +36,7 @@ func NewHardlinkTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *HardlinkTracer {
 	return &HardlinkTracer{
@@ -97,11 +97,8 @@ func (ht *HardlinkTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (ht *HardlinkTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DHardlink && config.EnableRuntimeDetection
-	}
-	return false
+func (ht *HardlinkTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DHardlink && cfg.EnableRuntimeDetection
 }
 
 // hardlinkEventCallback handles hardlink events from the tracer

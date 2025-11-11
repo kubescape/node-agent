@@ -43,7 +43,7 @@ func NewProcfsTracer(
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
 	procfsEventCallback func(utils.K8sEvent, string, uint32),
-	exitEventCallback func(utils.K8sEvent, string, uint32),
+	exitEventCallback containerwatcher.ResultCallback,
 	cfg config.Config,
 	processTreeManager processtree.ProcessTreeManager,
 ) *ProcfsTracer {
@@ -108,11 +108,8 @@ func (pt *ProcfsTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (pt *ProcfsTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return config.EnableRuntimeDetection
-	}
-	return false
+func (pt *ProcfsTracer) IsEnabled(cfg config.Config) bool {
+	return cfg.EnableRuntimeDetection
 }
 
 // processEvents processes events from the procfs feeder
