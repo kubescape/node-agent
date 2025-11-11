@@ -36,6 +36,9 @@ struct httpevent {
     gadget_timestamp timestamp_raw;
     struct gadget_process proc;
 
+    struct gadget_l4endpoint_t src;
+    struct gadget_l4endpoint_t dst;
+
     u8   type;
     u32  sock_fd;
     u8   buf[MAX_DATAEVENT_BUFFER];

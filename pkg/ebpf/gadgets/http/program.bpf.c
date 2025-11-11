@@ -4,6 +4,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
+#include <bpf/bpf_endian.h>
 
 // Inspektor Gadget buffer
 #include <gadget/buffer.h>
@@ -59,39 +60,6 @@ static __always_inline __u64 min_size(__u64 a, __u64 b) {
     return a < b ? a : b;
 }
 
-// Get inode number for a socket file descriptor
-static __always_inline int get_socket_inode(__u32 sockfd, __u64 *inode) {
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    if (!task)
-        return -1;
-
-    struct files_struct *files = BPF_CORE_READ(task, files);
-    if (!files)
-        return -1;
-
-    struct fdtable *fdt = BPF_CORE_READ(files, fdt);
-    if (!fdt)
-        return -1;
-
-    struct file **fd_array = BPF_CORE_READ(fdt, fd);
-    if (!fd_array)
-        return -1;
-
-    struct file *file;
-    void *ptr;
-    bpf_probe_read(&ptr, sizeof(ptr), &fd_array[sockfd]);
-    file = ptr;
-    if (!file)
-        return -1;
-
-    struct inode *inode_ptr = BPF_CORE_READ(file, f_inode);
-    if (!inode_ptr)
-        return -1;
-
-    *inode = BPF_CORE_READ(inode_ptr, i_ino);
-    return 0;
-}
-
 static __always_inline bool is_msg_peek(__u32 flags)
 {
     return flags & MSG_PEEK;
@@ -106,14 +74,55 @@ static __always_inline int populate_httpevent(struct httpevent *event, __u32 soc
     // Populate the process data into the event.
     gadget_process_populate(&event->proc);
 
-    // Get and store socket inode
-    __u64 socket_inode = 0;
-    if (get_socket_inode(sockfd, &socket_inode) == 0) {
-        event->socket_inode = socket_inode;
-    } else {
-        event->socket_inode = 0;
+    // Initialize defaults
+    event->socket_inode = 0;
+
+    // Get socket file descriptor and extract both inode and socket info in one pass
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task)
+        goto out;
+
+    struct files_struct *files = BPF_CORE_READ(task, files);
+    if (!files)
+        goto out;
+
+    struct fdtable *fdt = BPF_CORE_READ(files, fdt);
+    if (!fdt)
+        goto out;
+
+    struct file **fd_array = BPF_CORE_READ(fdt, fd);
+    if (!fd_array)
+        goto out;
+
+    struct file *file_ptr;
+    bpf_probe_read(&file_ptr, sizeof(file_ptr), &fd_array[sockfd]);
+    if (!file_ptr)
+        goto out;
+
+    // Get socket inode from file->f_inode->i_ino
+    struct inode *inode_ptr = BPF_CORE_READ(file_ptr, f_inode);
+    if (inode_ptr) {
+        event->socket_inode = BPF_CORE_READ(inode_ptr, i_ino);
     }
 
+    // Get socket from file->private_data
+    struct socket *sock = BPF_CORE_READ(file_ptr, private_data);
+    if (!sock)
+        goto out;
+
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    if (sk) {
+        event->src.port = BPF_CORE_READ(sk, __sk_common.skc_num);
+        event->src.port = bpf_ntohs(event->src.port);
+        event->src.addr_raw.v4 = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+        event->src.version = 4;
+        event->dst.port = BPF_CORE_READ(sk, __sk_common.skc_dport);
+        event->dst.port = bpf_ntohs(event->dst.port);
+        event->dst.addr_raw.v4 = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+        event->dst.version = 4;
+    }
+
+out:
     event->timestamp_raw = bpf_ktime_get_boot_ns();
 
     return 0;
