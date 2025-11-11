@@ -62,6 +62,7 @@ func (et *ExecTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithDataOperators(
 			et.kubeManager,
 			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			NewExecOperator(),
 			et.eventOperator(),
 		),
 		gadgetcontext.WithName(execTraceName),
