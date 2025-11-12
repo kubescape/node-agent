@@ -68,11 +68,14 @@ type DNSEvent interface {
 	GetAddresses() []string
 	GetCwd() string
 	GetDNSName() string
+	GetDstIP() string
 	GetDstPort() uint16
 	GetExePath() string
 	GetNumAnswers() int
-	GetQr() DNSPktType
 	GetProto() string
+	GetQr() DNSPktType
+	GetSrcIP() string
+	GetSrcPort() uint16
 }
 
 type ExecEvent interface {
@@ -108,8 +111,12 @@ type HttpEvent interface {
 type HttpRawEvent interface {
 	EnrichEvent
 	GetBuf() []byte
-	GetSocketInode() uint64
+	GetDstIP() string
+	GetDstPort() uint16
 	GetSockFd() uint32
+	GetSocketInode() uint64
+	GetSrcIP() string
+	GetSrcPort() uint16
 	GetSyscall() string
 	GetType() HTTPDataType
 	MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, ip net.IP) HttpEvent

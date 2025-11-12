@@ -258,7 +258,7 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 
 func (e *DatasourceEvent) GetDstIP() string {
 	switch e.EventType {
-	case SSHEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		version, _ := e.getFieldAccessor("dst.version").Uint8(e.Data)
 		switch version {
 		case 4:
@@ -277,7 +277,7 @@ func (e *DatasourceEvent) GetDstPort() uint16 {
 	case NetworkEventType:
 		port, _ := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
 		return port
-	case SSHEventType, DnsEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		port, _ := e.getFieldAccessor("dst.port").Uint16(e.Data)
 		return port
 	default:
@@ -653,7 +653,7 @@ func (e *DatasourceEvent) GetSockFd() uint32 {
 
 func (e *DatasourceEvent) GetSrcIP() string {
 	switch e.EventType {
-	case SSHEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		version, _ := e.getFieldAccessor("src.version").Uint8(e.Data)
 		switch version {
 		case 4:
@@ -669,7 +669,7 @@ func (e *DatasourceEvent) GetSrcIP() string {
 
 func (e *DatasourceEvent) GetSrcPort() uint16 {
 	switch e.EventType {
-	case SSHEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		port, _ := e.getFieldAccessor("src.port").Uint16(e.Data)
 		return port
 	default:
