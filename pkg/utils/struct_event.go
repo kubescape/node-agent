@@ -38,6 +38,7 @@ type StructEvent struct {
 	Flags                []string                `json:"flags,omitempty" yaml:"flags,omitempty"`
 	FlagsRaw             uint32                  `json:"flagsRaw,omitempty" yaml:"flagsRaw,omitempty"`
 	FullPath             string                  `json:"fullPath,omitempty" yaml:"fullPath,omitempty"`
+	FullPathTracing      bool                    `json:"fullPathTracing,omitempty" yaml:"fullPathTracing,omitempty"`
 	Gid                  uint32                  `json:"gid,omitempty" yaml:"gid,omitempty"`
 	HostNetwork          bool                    `json:"hostNetwork,omitempty" yaml:"hostNetwork,omitempty"`
 	ID                   string                  `json:"id,omitempty" yaml:"id,omitempty"`
@@ -50,7 +51,6 @@ type StructEvent struct {
 	NumAnswers           int                     `json:"numAnswers,omitempty" yaml:"numAnswers,omitempty"`
 	OldPath              string                  `json:"oldPath,omitempty" yaml:"oldPath,omitempty"`
 	Opcode               int                     `json:"opcode,omitempty" yaml:"opcode,omitempty"`
-	OtherIp              string                  `json:"otherIp,omitempty" yaml:"otherIp,omitempty"`
 	PID64                uint64                  `json:"pid64,omitempty" yaml:"pid64,omitempty"`
 	Path                 string                  `json:"path,omitempty" yaml:"path,omitempty"`
 	Pcomm                string                  `json:"pcomm,omitempty" yaml:"pcomm,omitempty"`
@@ -223,7 +223,7 @@ func (e *StructEvent) GetDstEndpoint() types.L4Endpoint {
 
 func (e *StructEvent) GetDstIP() string {
 	switch e.EventType {
-	case SSHEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		return e.DstIP
 	}
 	return ""
@@ -233,7 +233,7 @@ func (e *StructEvent) GetDstPort() uint16 {
 	switch e.EventType {
 	case NetworkEventType:
 		return e.DstPort
-	case SSHEventType, DnsEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		return e.DstPort
 	default:
 		logger.L().Warning("GetDstPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -298,7 +298,7 @@ func (e *StructEvent) GetFullPath() string {
 	case OpenEventType:
 		return e.FullPath
 	default:
-		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetFullPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -336,7 +336,8 @@ func (e *StructEvent) GetModule() string {
 	case KmodEventType:
 		return e.Module
 	default:
-		return e.Module
+		logger.L().Warning("GetModule not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
 	}
 }
 
@@ -391,14 +392,20 @@ func (e *StructEvent) GetOpcode() int {
 func (e *StructEvent) GetOtherIp() string {
 	switch e.EventType {
 	case HTTPEventType:
-		return e.OtherIp
+		if e.Direction == consts.Inbound {
+			return e.GetSrcIP()
+		}
+		return e.GetDstIP()
 	default:
-		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetOtherIp not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
 
 func (e *StructEvent) GetPath() string {
+	if e.FullPathTracing {
+		return e.GetFullPath()
+	}
 	switch e.EventType {
 	case OpenEventType:
 		return e.Path
@@ -547,7 +554,7 @@ func (e *StructEvent) GetSockFd() uint32 {
 
 func (e *StructEvent) GetSrcIP() string {
 	switch e.EventType {
-	case SSHEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		return e.SrcIP
 	}
 	return ""
@@ -555,7 +562,7 @@ func (e *StructEvent) GetSrcIP() string {
 
 func (e *StructEvent) GetSrcPort() uint16 {
 	switch e.EventType {
-	case SSHEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		return e.SrcPort
 	default:
 		logger.L().Warning("GetSrcPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -575,7 +582,7 @@ func (e *StructEvent) GetSyscall() string {
 		return e.Syscall
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		panic("GetSyscall not implemented for this event type")
+		return ""
 	}
 }
 
@@ -607,7 +614,7 @@ func (e *StructEvent) GetType() HTTPDataType {
 	case HTTPEventType:
 		return e.Type
 	default:
-		logger.L().Warning("GetEventType not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetType not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -646,11 +653,11 @@ func (e *StructEvent) IsDir() bool {
 	}
 }
 
-func (e *StructEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, ip net.IP) HttpEvent {
+func (e *StructEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection) HttpEvent {
 	event := *e
 	event.Request = request
 	event.Direction = direction
-	event.Internal = ip.IsPrivate()
+	event.Internal = func() bool { ip := net.ParseIP(e.GetOtherIp()); return ip != nil && ip.IsPrivate() }()
 	return &event
 }
 

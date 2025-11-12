@@ -58,7 +58,6 @@ type DatasourceEvent struct {
 	EventType       EventType
 	FullPathTracing bool
 	Internal        bool
-	OtherIp         string
 	Request         *http.Request
 	Response        *http.Response
 	Syscall         string
@@ -349,7 +348,7 @@ func (e *DatasourceEvent) GetFullPath() string {
 		path, _ := e.getFieldAccessor("fpath").String(e.Data)
 		return path
 	default:
-		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetFullPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -457,9 +456,12 @@ func (e *DatasourceEvent) GetOpcode() int {
 func (e *DatasourceEvent) GetOtherIp() string {
 	switch e.EventType {
 	case HTTPEventType:
-		return e.OtherIp
+		if e.Direction == consts.Inbound {
+			return e.GetSrcIP()
+		}
+		return e.GetDstIP()
 	default:
-		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetOtherIp not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
@@ -729,7 +731,7 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 		t, _ := e.getFieldAccessor("type").Uint8(e.Data)
 		return HTTPDataType(t)
 	default:
-		logger.L().Warning("GetEventType not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetType not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
 }
@@ -779,14 +781,13 @@ func (e *DatasourceEvent) IsDir() bool {
 	}
 }
 
-func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, ip net.IP) HttpEvent {
+func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection) HttpEvent {
 	return &DatasourceEvent{
 		Data:       e.Data,
 		Datasource: e.Datasource,
 		Direction:  direction,
 		EventType:  e.EventType,
-		Internal:   ip.IsPrivate(),
-		OtherIp:    ip.String(),
+		Internal:   func() bool { ip := net.ParseIP(e.GetOtherIp()); return ip != nil && ip.IsPrivate() }(),
 		Request:    request,
 		Response:   e.Response,
 		Syscall:    e.Syscall,

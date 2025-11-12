@@ -2,7 +2,6 @@ package utils
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"path/filepath"
 
@@ -119,7 +118,7 @@ type HttpRawEvent interface {
 	GetSrcPort() uint16
 	GetSyscall() string
 	GetType() HTTPDataType
-	MakeHttpEvent(request *http.Request, direction consts.NetworkDirection, ip net.IP) HttpEvent
+	MakeHttpEvent(request *http.Request, direction consts.NetworkDirection) HttpEvent
 }
 
 type IOUring interface {

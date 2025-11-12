@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -38,8 +37,6 @@ var ConsistentHeaders = []string{
 }
 
 func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error) {
-	ip := make(net.IP, 4)
-
 	request, err := ParseHttpRequest(FromCString(bpfEvent.GetBuf()))
 	if err != nil {
 		return nil, err
@@ -50,7 +47,7 @@ func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error
 		return nil, err
 	}
 
-	return bpfEvent.MakeHttpEvent(request, direction, ip), nil
+	return bpfEvent.MakeHttpEvent(request, direction), nil
 }
 
 func ExtractConsistentHeaders(headers http.Header) map[string][]string {
