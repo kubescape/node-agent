@@ -2,7 +2,7 @@ DOCKERFILE_PATH=./build/Dockerfile
 BINARY_NAME=node-agent
 
 IMAGE?=quay.io/kubescape/$(BINARY_NAME)
-GADGETS=advise_seccomp trace_capabilities trace_dns trace_exec trace_open
+GADGETS=seccomp capabilities dns exec open
 VERSION=:v0.45.0
 KUBESCAPE_GADGETS=bpf exit fork hardlink http iouring_new iouring_old kmod network ptrace randomx ssh symlink unshare
 TAG?=test
@@ -22,6 +22,5 @@ docker-push:
 
 gadgets:
 	$(foreach img,$(KUBESCAPE_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=$(img) TAG=latest;)
-	$(foreach img,$(GADGETS),sudo ig image pull $(img)$(VERSION);)
-	sudo ig image pull quay.io/matthiasb_1/gadgets:open
-	sudo ig image export $(foreach img,$(GADGETS),$(img)$(VERSION)) $(foreach img,$(KUBESCAPE_GADGETS),$(img):latest) quay.io/matthiasb_1/gadgets:open tracers.tar
+	$(foreach img,$(GADGETS),sudo ig image pull quay.io/matthiasb_1/gadgets:$(img);)
+	sudo ig image export $(foreach img,$(GADGETS),quay.io/matthiasb_1/gadgets:$(img)) $(foreach img,$(KUBESCAPE_GADGETS),$(img):latest) tracers.tar

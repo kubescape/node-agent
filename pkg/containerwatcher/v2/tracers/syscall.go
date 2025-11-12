@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	syscallImageName = "ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.45.0"
+	syscallImageName = "quay.io/matthiasb_1/gadgets:seccomp"
 	syscallTraceName = "syscall_tracer"
 )
 
