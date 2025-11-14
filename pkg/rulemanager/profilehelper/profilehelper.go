@@ -68,7 +68,7 @@ func GetContainerName(objectCache objectcache.ObjectCache, containerID string) s
 		return ""
 	}
 
-	containerInfos, exists := sharedData.ContainerInfos[objectcache.ContainerType(sharedData.ContainerType)]
+	containerInfos, exists := sharedData.ContainerInfos[sharedData.ContainerType]
 	if !exists || len(containerInfos) == 0 {
 		return ""
 	}

@@ -1,0 +1,23 @@
+name: "network"
+description: "Trace network connections and report network and process info."
+homepageURL: "https://github.com/inspektor-gadget/network"
+documentationURL: "https://github.com/inspektor-gadget/network"
+sourceURL: "https://github.com/inspektor-gadget/network"
+datasources:
+  network:
+    fields:
+      egress:
+        annotations:
+          description: "True if the packet is outgoing."
+      endpoint:
+        annotations:
+          description: "L4 endpoint."
+      netns_id:
+        annotations:
+          description: "Network namespace ID when the event was captured."
+      proc:
+        annotations:
+          description: "Process metadata including pid, tid, ppid, uid, gid, comm, etc."
+      timestamp_raw:
+        annotations:
+          description: "Monotonic timestamp in nanoseconds when the event was captured."

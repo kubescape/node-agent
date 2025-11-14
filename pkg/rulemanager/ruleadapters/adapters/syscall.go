@@ -1,11 +1,11 @@
 package adapters
 
 import (
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type SyscallAdapter struct {
@@ -16,58 +16,60 @@ func NewSyscallAdapter() *SyscallAdapter {
 }
 
 func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	syscallEvent, ok := enrichedEvent.Event.(*types.SyscallEvent)
+	syscallEvent, ok := enrichedEvent.Event.(utils.SyscallEvent)
 	if !ok {
 		return
 	}
 
+	comm := syscallEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = syscallEvent.Pid
+	baseRuntimeAlert.InfectedPID = syscallEvent.GetPID()
 	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"syscall": syscallEvent.SyscallName,
+		"syscall": syscallEvent.GetSyscall(),
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: syscallEvent.Comm,
+			Name: comm,
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
+	// FIXME: find a tracer that provides these required details
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm: syscallEvent.Comm,
-			Gid:  &syscallEvent.Gid,
-			PID:  syscallEvent.Pid,
-			Uid:  &syscallEvent.Uid,
+			Comm: comm,
+			//Gid:  syscallEvent.GetGid(),
+			PID: syscallEvent.GetPID(),
+			//Uid: syscallEvent.GetUid(),
 		},
-		ContainerID: syscallEvent.Runtime.ContainerID,
+		ContainerID: syscallEvent.GetContainerID(),
 	}
 	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	failure.SetTriggerEvent(syscallEvent.Event)
+	failure.SetTriggerEvent(syscallEvent)
 
 	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
 		PodName:   syscallEvent.GetPod(),
-		PodLabels: syscallEvent.K8s.PodLabels,
+		PodLabels: syscallEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *SyscallAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	syscallEvent, ok := enrichedEvent.Event.(*types.SyscallEvent)
-	if !ok {
-		return nil
-	}
+	//syscallEvent, ok := enrichedEvent.Event.(*types.SyscallEvent)
+	//if !ok {
+	//	return nil
+	//}
 
-	result := ConvertToMap(&syscallEvent.Event)
+	//result := ConvertToMap(&syscallEvent.Event)
 
-	result["pid"] = syscallEvent.Pid
-	result["comm"] = syscallEvent.Comm
-	result["uid"] = syscallEvent.Uid
-	result["gid"] = syscallEvent.Gid
-	result["syscallName"] = syscallEvent.SyscallName
+	//result["pid"] = syscallEvent.Pid
+	//result["comm"] = syscallEvent.Comm
+	//result["uid"] = syscallEvent.Uid
+	//result["gid"] = syscallEvent.Gid
+	//result["syscallName"] = syscallEvent.SyscallName
 
-	result["mountnsid"] = syscallEvent.MountNsID
+	//result["mountnsid"] = syscallEvent.MountNsID
 
-	return result
+	return map[string]interface{}{}
 }

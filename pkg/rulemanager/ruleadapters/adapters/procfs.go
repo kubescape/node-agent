@@ -3,11 +3,10 @@ package adapters
 import (
 	"fmt"
 
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )
 
 type ProcfsFailureSetter struct {

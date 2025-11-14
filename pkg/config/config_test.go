@@ -93,7 +93,8 @@ func TestLoadConfig(t *testing.T) {
 					MaxSize: 100000,
 					TTL:     1 * time.Minute,
 				},
-				DNSCacheSize: 50000,
+				DNSCacheSize:                   50000,
+				ContainerEolNotificationBuffer: 100,
 				FIM: FIMConfig{
 					Directories: []FIMDirectoryConfig{
 						{

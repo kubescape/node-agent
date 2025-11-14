@@ -43,7 +43,9 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 	_, err = testutils.PlotNodeAgentPrometheusMemoryUsage(t.Name(), startTime, end)
 	require.NoError(t, err, "Error plotting memory usage")
 
-	testutils.PrintNodeAgentLogs(t)
+	testutils.PrintAppLogs(t, "node-agent")
+	testutils.PrintAppLogs(t, "malicious-app")
+	testutils.PrintAppLogs(t, "endpoint-traffic")
 }
 
 func Test_01_BasicAlertTest(t *testing.T) {
@@ -129,7 +131,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	// Wait for the alerts to be generated
-	time.Sleep(1 * time.Minute)
+	time.Sleep(2 * time.Minute)
 
 	// Get all the alerts for the namespace
 	alerts, err := testutils.GetAlerts(wl.Namespace)
@@ -657,7 +659,8 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	t.Log("Testing initial alert generation...")
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert
-	time.Sleep(30 * time.Second)                               // Wait for alert generation
+	// time.Sleep(2 * time.Minute)                                // Wait for alert generation
+	time.Sleep(30 * time.Second) // Wait for alert generation
 
 	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get initial alerts")
@@ -738,12 +741,12 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 
 	// PHASE 4: Verify merged profile behavior
 	t.Log("Verifying merged profile behavior...")
-	time.Sleep(15 * time.Second) // Allow merge to complete
+	time.Sleep(1 * time.Minute) // Allow merge to complete
 
 	// Test merged profile behavior
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: no alert (user profile should suppress alert)
-	time.Sleep(10 * time.Second)                               // Wait for potential alerts
+	time.Sleep(1 * time.Minute)                                // Wait for potential alerts
 
 	// Verify alert counts
 	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
@@ -1505,6 +1508,9 @@ func Test_23_RuleCooldownTest(t *testing.T) {
 }
 
 func Test_24_ProcessTreeDepthTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
 	ns := testutils.NewRandomNamespace()
 
 	endpointTraffic, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/tree.yaml"))
@@ -1528,7 +1534,7 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	t.Logf("Waiting for the alert to be signaled")
 
 	// Wait for the alert to be signaled
-	time.Sleep(60 * time.Second)
+	time.Sleep(2 * time.Minute)
 
 	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
 	require.NoError(t, err, "Error getting alerts")

@@ -40,7 +40,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 				Ports: []v1beta1.NetworkPort{
 					{
 						Name:     "tcp-80",
-						Protocol: v1beta1.Protocol("TCP"),
+						Protocol: "TCP",
 						Port:     ptr.To(int32(80)),
 					},
 				},
@@ -51,7 +51,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 				Ports: []v1beta1.NetworkPort{
 					{
 						Name:     "tcp-5432",
-						Protocol: v1beta1.Protocol("TCP"),
+						Protocol: "TCP",
 						Port:     ptr.To(int32(5432)),
 					},
 				},
@@ -64,7 +64,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 				Ports: []v1beta1.NetworkPort{
 					{
 						Name:     "tcp-8080",
-						Protocol: v1beta1.Protocol("TCP"),
+						Protocol: "TCP",
 						Port:     ptr.To(int32(8080)),
 					},
 				},

@@ -25,7 +25,7 @@ func NewEventEnricher(
 	}
 }
 
-func (ee *EventEnricher) EnrichEvents(entry eventEntry) *ebpfevents.EnrichedEvent {
+func (ee *EventEnricher) EnrichEvents(entry EventEntry) *ebpfevents.EnrichedEvent {
 	var processTree apitypes.Process
 
 	eventType := entry.EventType
@@ -44,7 +44,6 @@ func (ee *EventEnricher) EnrichEvents(entry eventEntry) *ebpfevents.EnrichedEven
 
 	enrichedEvent := &ebpfevents.EnrichedEvent{
 		Event:       event,
-		EventType:   eventType,
 		ProcessTree: processTree,
 		ContainerID: entry.ContainerID,
 		Timestamp:   entry.Timestamp,

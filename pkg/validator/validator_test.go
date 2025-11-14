@@ -77,7 +77,7 @@ func TestCheckPrerequisites(t *testing.T) {
 		{
 			name:    "valid prerequisites",
 			setEnv:  true,
-			wantErr: true, // FIXME: this should be false, but we need privileged containers to run the tests
+			wantErr: false,
 		},
 		{
 			name:    "invalid prerequisites",
@@ -91,7 +91,7 @@ func TestCheckPrerequisites(t *testing.T) {
 				t.Setenv(config.NamespaceEnvVar, "namespace")
 				t.Setenv(config.PodNameEnvVar, "pod")
 			}
-			if err := CheckPrerequisites(config.Config{}); (err != nil) != tt.wantErr {
+			if err := CheckPrerequisites(config.Config{KubernetesMode: true}); (err != nil) != tt.wantErr {
 				t.Errorf("CheckPrerequisites() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
