@@ -147,7 +147,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
-	_, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
+	_, apChecksum, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil
 
 	eventType := enrichedEvent.Event.GetEventType()
@@ -190,7 +190,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				continue
 			}
 
-			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID)
+			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum)
 			if ruleFailure == nil {
 				logger.L().Error("RuleManager - failed to create rule failure", helpers.String("rule", rule.Name),
 					helpers.String("message", message),
@@ -297,7 +297,7 @@ func (rm *RuleManager) evaluateRule(enrichedEvent *events.EnrichedEvent, eventTy
 }
 
 func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEvent, containerID string) bool {
-	ap, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, containerID)
+	ap, _, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, containerID)
 	if err != nil {
 		return false
 	}
