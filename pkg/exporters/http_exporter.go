@@ -52,6 +52,10 @@ type HTTPExporterConfig struct {
 	TimeoutSeconds     int             `json:"timeoutSeconds"`
 	Method             string          `json:"method"`
 	MaxAlertsPerMinute int             `json:"maxAlertsPerMinute"`
+	// Alert bulking configuration
+	EnableAlertBulking bool `json:"enableAlertBulking"`
+	BulkMaxAlerts      int  `json:"bulkMaxAlerts"`
+	BulkTimeoutSeconds int  `json:"bulkTimeoutSeconds"`
 }
 
 type HTTPExporter struct {
@@ -62,6 +66,7 @@ type HTTPExporter struct {
 	httpClient    *http.Client
 	alertMetrics  *alertMetrics
 	cloudMetadata *apitypes.CloudMetadata
+	bulkManager   *AlertBulkManager
 }
 
 type alertMetrics struct {
@@ -89,7 +94,7 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	return &HTTPExporter{
+	exporter := &HTTPExporter{
 		config:      config,
 		nodeName:    nodeName,
 		clusterName: clusterName,
@@ -98,7 +103,23 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		},
 		alertMetrics:  &alertMetrics{},
 		cloudMetadata: cloudMetadata,
-	}, nil
+	}
+
+	// Initialize bulk manager if bulking is enabled
+	if config.EnableAlertBulking {
+		bulkManager := NewAlertBulkManager(
+			config.BulkMaxAlerts,
+			config.BulkTimeoutSeconds,
+			exporter.sendBulkWrapper,
+		)
+		bulkManager.Start()
+		exporter.bulkManager = bulkManager
+		logger.L().Info("HTTPExporter - alert bulking enabled",
+			helpers.Int("maxAlerts", config.BulkMaxAlerts),
+			helpers.Int("timeoutSeconds", config.BulkTimeoutSeconds))
+	}
+
+	return exporter, nil
 }
 
 func (config *HTTPExporterConfig) Validate() error {
@@ -128,11 +149,39 @@ func (config *HTTPExporterConfig) Validate() error {
 		config.QueryParams = []HTTPKeyValues{}
 	}
 
+	// Set defaults for bulking configuration
+	if config.EnableAlertBulking {
+		if config.BulkMaxAlerts == 0 {
+			config.BulkMaxAlerts = 50 // Default max alerts per bulk
+		}
+		if config.BulkTimeoutSeconds == 0 {
+			config.BulkTimeoutSeconds = 10 // Default 10 second timeout
+		}
+	}
+
 	return nil
 }
 
 // SendRuleAlert implements the Exporter interface
 func (e *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+	// Check if alert limit is reached first
+	if e.shouldSendLimitAlert() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+		defer cancel()
+		if err := e.sendAlertLimitReached(ctx); err != nil {
+			logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send alert limit", helpers.Error(err))
+		}
+		return
+	}
+
+	// If bulking is enabled, add to bulk manager
+	if e.bulkManager != nil {
+		alert := e.createRuleAlert(failedRule)
+		e.bulkManager.AddAlert(alert, failedRule.GetRuntimeProcessDetails(), failedRule.GetCloudServices())
+		return
+	}
+
+	// Otherwise, send immediately (legacy behavior)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
 	defer cancel()
 
@@ -143,6 +192,24 @@ func (e *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 
 // SendMalwareAlert implements the Exporter interface
 func (e *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
+	// Check if alert limit is reached first
+	if e.shouldSendLimitAlert() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+		defer cancel()
+		if err := e.sendAlertLimitReached(ctx); err != nil {
+			logger.L().Warning("HTTPExporter.SendMalwareAlert - failed to send alert limit", helpers.Error(err))
+		}
+		return
+	}
+
+	// If bulking is enabled, add to bulk manager
+	if e.bulkManager != nil {
+		alert := e.createMalwareAlert(malwareResult)
+		e.bulkManager.AddAlert(alert, malwareResult.GetRuntimeProcessDetails(), nil)
+		return
+	}
+
+	// Otherwise, send immediately (legacy behavior)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
 	defer cancel()
 
@@ -428,4 +495,20 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 
 	return e.sendAlert(ctx, alert, apitypes.ProcessTree{}, nil)
+}
+
+// Close stops the bulk manager and flushes all pending bulks
+func (e *HTTPExporter) Close() error {
+	if e.bulkManager != nil {
+		e.bulkManager.Stop()
+	}
+	return nil
+}
+
+// FlushContainerAlerts flushes alerts for a specific container immediately
+// This should be called when a container stops
+func (e *HTTPExporter) FlushContainerAlerts(containerID string) {
+	if e.bulkManager != nil {
+		e.bulkManager.FlushContainer(containerID)
+	}
 }
