@@ -74,6 +74,7 @@ type alertMetrics struct {
 type HTTPAlertsList struct {
 	Kind       string             `json:"kind"`
 	APIVersion string             `json:"apiVersion"`
+	Metadata   apitypes.Metadata  `json:"metadata"`
 	Spec       HTTPAlertsListSpec `json:"spec"`
 }
 
@@ -291,11 +292,22 @@ func (e *HTTPExporter) sendAlert(ctx context.Context, alert apitypes.RuntimeAler
 	return e.sendHTTPRequest(ctx, payload)
 }
 
+func getHttpAlertsListName(alerts []apitypes.RuntimeAlert) string {
+	if len(alerts) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("%s-%s-%s", alerts[0].WorkloadKind, alerts[0].WorkloadNamespace, alerts[0].WorkloadName)
+}
+
 func (e *HTTPExporter) createAlertPayload(alertList []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
 	cloudMetadata := e.getCloudMetadata(cloudServices)
 	return HTTPAlertsList{
 		Kind:       runtimeAlertsKind,
 		APIVersion: apiVersion,
+		Metadata: apitypes.Metadata{
+			Name: getHttpAlertsListName(alertList),
+		},
 		Spec: HTTPAlertsListSpec{
 			Alerts:        alertList,
 			ProcessTree:   processTree,
