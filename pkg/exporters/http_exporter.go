@@ -316,6 +316,9 @@ func (e *HTTPExporter) getCloudMetadata(cloudServices []string) apitypes.CloudMe
 
 func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload interface{}) error {
 	body, err := json.Marshal(payload)
+
+	logger.L().Error("http payload", helpers.String("body", string(body)))
+
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
