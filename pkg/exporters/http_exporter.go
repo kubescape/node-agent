@@ -56,6 +56,11 @@ type HTTPExporterConfig struct {
 	EnableAlertBulking bool `json:"enableAlertBulking"`
 	BulkMaxAlerts      int  `json:"bulkMaxAlerts"`
 	BulkTimeoutSeconds int  `json:"bulkTimeoutSeconds"`
+	// Send queue configuration
+	BulkSendQueueSize    int `json:"bulkSendQueueSize"`    // Default: 1000
+	BulkMaxRetries       int `json:"bulkMaxRetries"`       // Default: 3
+	BulkRetryBaseDelayMs int `json:"bulkRetryBaseDelayMs"` // Default: 1000ms
+	BulkRetryMaxDelayMs  int `json:"bulkRetryMaxDelayMs"`  // Default: 30000ms
 }
 
 type HTTPExporter struct {
@@ -110,13 +115,19 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		bulkManager := NewAlertBulkManager(
 			config.BulkMaxAlerts,
 			config.BulkTimeoutSeconds,
+			config.BulkSendQueueSize,
+			config.BulkMaxRetries,
+			config.BulkRetryBaseDelayMs,
+			config.BulkRetryMaxDelayMs,
 			exporter.sendBulkWrapper,
 		)
 		bulkManager.Start()
 		exporter.bulkManager = bulkManager
 		logger.L().Info("HTTPExporter - alert bulking enabled",
 			helpers.Int("maxAlerts", config.BulkMaxAlerts),
-			helpers.Int("timeoutSeconds", config.BulkTimeoutSeconds))
+			helpers.Int("timeoutSeconds", config.BulkTimeoutSeconds),
+			helpers.Int("queueSize", config.BulkSendQueueSize),
+			helpers.Int("maxRetries", config.BulkMaxRetries))
 	}
 
 	return exporter, nil
@@ -156,6 +167,19 @@ func (config *HTTPExporterConfig) Validate() error {
 		}
 		if config.BulkTimeoutSeconds == 0 {
 			config.BulkTimeoutSeconds = 10 // Default 10 second timeout
+		}
+		// Set defaults for queue configuration
+		if config.BulkSendQueueSize == 0 {
+			config.BulkSendQueueSize = 1000
+		}
+		if config.BulkMaxRetries == 0 {
+			config.BulkMaxRetries = 3
+		}
+		if config.BulkRetryBaseDelayMs == 0 {
+			config.BulkRetryBaseDelayMs = 1000
+		}
+		if config.BulkRetryMaxDelayMs == 0 {
+			config.BulkRetryMaxDelayMs = 30000
 		}
 	}
 
