@@ -155,6 +155,7 @@ func (rule *GenericRuleFailure) SetAlertPlatform(alertPlatform apitypes.AlertSou
 }
 
 func (rule *GenericRuleFailure) SetHttpRuleAlert(httpRuleAlert apitypes.HttpRuleAlert) {
+	rule.AlertType = apitypes.AlertTypeHttpRule
 	rule.HttpRuleAlert = httpRuleAlert
 }
 
