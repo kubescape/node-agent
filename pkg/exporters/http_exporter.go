@@ -292,21 +292,21 @@ func (e *HTTPExporter) sendAlert(ctx context.Context, alert apitypes.RuntimeAler
 	return e.sendHTTPRequest(ctx, payload)
 }
 
-func getHttpAlertsListName(alerts []apitypes.RuntimeAlert) string {
-	if len(alerts) == 0 {
-		return ""
-	}
-
-	return fmt.Sprintf("%s-%s-%s", alerts[0].WorkloadKind, alerts[0].WorkloadNamespace, alerts[0].WorkloadName)
-}
-
 func (e *HTTPExporter) createAlertPayload(alertList []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
 	cloudMetadata := e.getCloudMetadata(cloudServices)
+
+	var name string
+	var namespace string
+	if len(alertList) > 0 {
+		name = alertList[0].PodName
+		namespace = alertList[0].PodNamespace
+	}
 	return HTTPAlertsList{
 		Kind:       runtimeAlertsKind,
 		APIVersion: apiVersion,
 		Metadata: apitypes.Metadata{
-			Name: getHttpAlertsListName(alertList),
+			Name:      name,
+			Namespace: namespace,
 		},
 		Spec: HTTPAlertsListSpec{
 			Alerts:        alertList,
