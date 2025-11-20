@@ -65,8 +65,8 @@ static __always_inline bool is_msg_peek(__u32 flags)
     return flags & MSG_PEEK;
 }
 
-
-static __always_inline int populate_httpevent(struct httpevent *event, __u32 sockfd)
+// is_rx: true if this is an inbound packet (read/recv), false if outbound (write/send)
+static __always_inline int populate_httpevent(struct httpevent *event, __u32 sockfd, bool is_rx)
 {
     if (!event)
         return -1;
@@ -112,13 +112,39 @@ static __always_inline int populate_httpevent(struct httpevent *event, __u32 soc
 
     struct sock *sk = BPF_CORE_READ(sock, sk);
     if (sk) {
-        event->src.port = BPF_CORE_READ(sk, __sk_common.skc_num);
-        event->src.port = bpf_ntohs(event->src.port);
-        event->src.addr_raw.v4 = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+        // Get raw values from the socket
+        // skc_num is local port (host endian usually, but we enforce ntohs to be safe)
+        // skc_rcv_saddr is local IP
+        // skc_dport is remote port (network endian)
+        // skc_daddr is remote IP
+        
+        __u16 local_port = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_num));
+        __u32 local_addr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+        
+        __u16 remote_port = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+        __u32 remote_addr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+
+        if (is_rx) {
+            // INBOUND: 
+            // Source = Remote Peer
+            // Dest   = Local Machine
+            event->src.port = remote_port;
+            event->src.addr_raw.v4 = remote_addr;
+            
+            event->dst.port = local_port;
+            event->dst.addr_raw.v4 = local_addr;
+        } else {
+            // OUTBOUND:
+            // Source = Local Machine
+            // Dest   = Remote Peer
+            event->src.port = local_port;
+            event->src.addr_raw.v4 = local_addr;
+            
+            event->dst.port = remote_port;
+            event->dst.addr_raw.v4 = remote_addr;
+        }
+
         event->src.version = 4;
-        event->dst.port = BPF_CORE_READ(sk, __sk_common.skc_dport);
-        event->dst.port = bpf_ntohs(event->dst.port);
-        event->dst.addr_raw.v4 = BPF_CORE_READ(sk, __sk_common.skc_daddr);
         event->dst.version = 4;
     }
 
@@ -170,7 +196,7 @@ static void inline pre_receive_syscalls(struct syscall_trace_enter *ctx)
     bpf_map_update_elem(&buffer_packets, &id, &packet, BPF_ANY);
 }
 
-static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *syscall)
+static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *syscall, bool is_rx)
 {
     __u64 id = bpf_get_current_pid_tgid();
     char buf[PACKET_CHUNK_SIZE] = {0};
@@ -202,7 +228,8 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
         return 0;
 
     // Populate event with socket inode for tracking
-    populate_httpevent(dataevent, packet->sockfd);
+    // Pass is_rx to determine src/dst
+    populate_httpevent(dataevent, packet->sockfd, is_rx);
 
     dataevent->type = type;
     dataevent->sock_fd = packet->sockfd;
@@ -253,7 +280,7 @@ static __always_inline int pre_process_iovec(struct syscall_trace_enter *ctx)
     return 0;
 }
 
-static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *syscall)
+static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *syscall, bool is_rx)
 {
     __u64 id = bpf_get_current_pid_tgid();
     struct packet_msg *msg = bpf_map_lookup_elem(&msg_packets, &id);
@@ -287,7 +314,8 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
                 return 0;
 
             // Populate event with socket inode for tracking
-            populate_httpevent(dataevent, msg->fd);
+            // Pass is_rx to determine src/dst
+            populate_httpevent(dataevent, msg->fd, is_rx);
 
             dataevent->type = type;
             dataevent->sock_fd = msg->fd;
@@ -310,6 +338,10 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
     return 0;
 }
 
+// -----------------------------------------------------------------------------
+// READ / RECV (Inbound: is_rx = true)
+// -----------------------------------------------------------------------------
+
 SEC("tracepoint/syscalls/sys_enter_read")
 int sys_enter_read(struct syscall_trace_enter *ctx)
 {
@@ -327,7 +359,7 @@ int sys_exit_read(struct syscall_trace_exit *ctx)
     if (gadget_should_discard_data_current()) {
         return 0;
     }
-    process_packet(ctx, "read");
+    process_packet(ctx, "read", true);
     return 0;
 }
 
@@ -351,73 +383,7 @@ int sys_exit_recvfrom(struct syscall_trace_exit *ctx)
         return 0;
     }
 
-    process_packet(ctx, "recvfrom");
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_write")
-int syscall__probe_entry_write(struct syscall_trace_enter *ctx)
-{
-    if (gadget_should_discard_data_current()) {
-        return 0;
-    }
-
-    pre_receive_syscalls(ctx);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_exit_write")
-int syscall__probe_ret_write(struct syscall_trace_exit *ctx)
-{
-    if (gadget_should_discard_data_current()) {
-        return 0;
-    }
-
-    process_packet(ctx, "write");
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_sendto")
-int syscall__probe_entry_sendto(struct syscall_trace_enter *ctx)
-{
-    if (gadget_should_discard_data_current()) {
-        return 0;
-    }
-
-    pre_receive_syscalls(ctx);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_exit_sendto")
-int syscall__probe_ret_sendto(struct syscall_trace_exit *ctx)
-{
-    if (gadget_should_discard_data_current()) {
-        return 0;
-    }
-
-    process_packet(ctx, "sendto");
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_sendmsg")
-int syscall__probe_entry_sendmsg(struct syscall_trace_enter *ctx)
-{
-    if (gadget_should_discard_data_current()) {
-        return 0;
-    }
-
-    pre_process_msg(ctx);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_exit_sendmsg")
-int syscall__probe_ret_sendmsg(struct syscall_trace_exit *ctx)
-{
-    if (gadget_should_discard_data_current()) {
-        return 0;
-    }
-
-    process_msg(ctx, "sendmsg");
+    process_packet(ctx, "recvfrom", true);
     return 0;
 }
 
@@ -441,7 +407,97 @@ int syscall__probe_ret_recvmsg(struct syscall_trace_exit *ctx)
         return 0;
     }
 
-    process_msg(ctx, "recvmsg");
+    process_msg(ctx, "recvmsg", true);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_readv")
+int syscall__probe_entry_readv(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+    pre_process_iovec(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_readv")
+int syscall__probe_ret_readv(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+    process_msg(ctx, "readv", true);
+    return 0;
+}
+
+// -----------------------------------------------------------------------------
+// WRITE / SEND (Outbound: is_rx = false)
+// -----------------------------------------------------------------------------
+
+SEC("tracepoint/syscalls/sys_enter_write")
+int syscall__probe_entry_write(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    pre_receive_syscalls(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_write")
+int syscall__probe_ret_write(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    process_packet(ctx, "write", false);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_sendto")
+int syscall__probe_entry_sendto(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    pre_receive_syscalls(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_sendto")
+int syscall__probe_ret_sendto(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    process_packet(ctx, "sendto", false);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_sendmsg")
+int syscall__probe_entry_sendmsg(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    pre_process_msg(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_sendmsg")
+int syscall__probe_ret_sendmsg(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    process_msg(ctx, "sendmsg", false);
     return 0;
 }
 
@@ -463,27 +519,7 @@ int syscall__probe_ret_writev(struct syscall_trace_exit *ctx)
         return 0;
     }
 
-    process_msg(ctx, "writev");
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_readv")
-int syscall__probe_entry_readv(struct syscall_trace_enter *ctx)
-{
-    if (gadget_should_discard_data_current()) {
-        return 0;
-    }
-    pre_process_iovec(ctx);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_exit_readv")
-int syscall__probe_ret_readv(struct syscall_trace_exit *ctx)
-{
-    if (gadget_should_discard_data_current()) {
-        return 0;
-    }
-    process_msg(ctx, "readv");
+    process_msg(ctx, "writev", false);
     return 0;
 }
 

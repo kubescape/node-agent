@@ -257,30 +257,7 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 
 func (e *DatasourceEvent) GetDstIP() string {
 	switch e.EventType {
-	case HTTPEventType:
-		if e.Direction == consts.Inbound {
-			// For inbound, dst IP is the local server (src in BPF)
-			version, _ := e.getFieldAccessor("src.version").Uint8(e.Data)
-			switch version {
-			case 4:
-				addr, _ := e.getFieldAccessor("src.addr_raw.v4").Uint32(e.Data)
-				return rawIPv4ToString(addr)
-			case 6:
-				addr, _ := e.getFieldAccessor("src.addr_raw.v6").Bytes(e.Data)
-				return rawIPv6ToString(addr)
-			}
-		}
-		// For outbound, dst IP is the remote server (dst in BPF)
-		version, _ := e.getFieldAccessor("dst.version").Uint8(e.Data)
-		switch version {
-		case 4:
-			daddr, _ := e.getFieldAccessor("dst.addr_raw.v4").Uint32(e.Data)
-			return rawIPv4ToString(daddr)
-		case 6:
-			daddr, _ := e.getFieldAccessor("dst.addr_raw.v6").Bytes(e.Data)
-			return rawIPv6ToString(daddr)
-		}
-	case DnsEventType, SSHEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		version, _ := e.getFieldAccessor("dst.version").Uint8(e.Data)
 		switch version {
 		case 4:
@@ -678,30 +655,7 @@ func (e *DatasourceEvent) GetSockFd() uint32 {
 
 func (e *DatasourceEvent) GetSrcIP() string {
 	switch e.EventType {
-	case HTTPEventType:
-		if e.Direction == consts.Inbound {
-			// For inbound, src IP is the remote client (dst in BPF)
-			version, _ := e.getFieldAccessor("dst.version").Uint8(e.Data)
-			switch version {
-			case 4:
-				daddr, _ := e.getFieldAccessor("dst.addr_raw.v4").Uint32(e.Data)
-				return rawIPv4ToString(daddr)
-			case 6:
-				daddr, _ := e.getFieldAccessor("dst.addr_raw.v6").Bytes(e.Data)
-				return rawIPv6ToString(daddr)
-			}
-		}
-		// For outbound, src IP is the local client (src in BPF)
-		version, _ := e.getFieldAccessor("src.version").Uint8(e.Data)
-		switch version {
-		case 4:
-			addr, _ := e.getFieldAccessor("src.addr_raw.v4").Uint32(e.Data)
-			return rawIPv4ToString(addr)
-		case 6:
-			addr, _ := e.getFieldAccessor("src.addr_raw.v6").Bytes(e.Data)
-			return rawIPv6ToString(addr)
-		}
-	case DnsEventType, SSHEventType:
+	case DnsEventType, HTTPEventType, SSHEventType:
 		version, _ := e.getFieldAccessor("src.version").Uint8(e.Data)
 		switch version {
 		case 4:
