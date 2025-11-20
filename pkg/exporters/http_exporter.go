@@ -254,19 +254,11 @@ func (e *HTTPExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 
 // Internal methods with context support
 func (e *HTTPExporter) sendRuleAlertWithContext(ctx context.Context, failedRule ruleengine.RuleFailure) error {
-	if e.shouldSendLimitAlert() {
-		return e.sendAlertLimitReached(ctx)
-	}
-
 	alert := e.createRuleAlert(failedRule)
 	return e.sendAlert(ctx, alert, failedRule.GetRuntimeProcessDetails(), failedRule.GetCloudServices())
 }
 
 func (e *HTTPExporter) sendMalwareAlertWithContext(ctx context.Context, result malwaremanager.MalwareResult) error {
-	if e.shouldSendLimitAlert() {
-		return e.sendAlertLimitReached(ctx)
-	}
-
 	alert := e.createMalwareAlert(result)
 	return e.sendAlert(ctx, alert, result.GetRuntimeProcessDetails(), nil)
 }
