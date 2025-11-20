@@ -480,9 +480,9 @@ func (e *DatasourceEvent) GetOtherIp() string {
 	switch e.EventType {
 	case HTTPEventType:
 		if e.Direction == consts.Inbound {
-			return e.GetDstIP()
+			return e.GetSrcIP()
 		}
-		return e.GetSrcIP()
+		return e.GetDstIP()
 	default:
 		logger.L().Warning("GetOtherIp not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
