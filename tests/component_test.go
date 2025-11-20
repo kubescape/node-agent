@@ -18,7 +18,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/tests/testutils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -98,8 +97,8 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "server", []bool{true})
 	testutils.AssertNotContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 
-	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx", []bool{true})
-	testutils.AssertNotContains(t, alerts, "Unexpected domain request", "wget", "server", []bool{true})
+	testutils.AssertContains(t, alerts, "DNS Anomalies in container", "curl", "nginx", []bool{true})
+	testutils.AssertNotContains(t, alerts, "DNS Anomalies in container", "wget", "server", []bool{true})
 
 	// check network neighborhood
 	nn, _ := wl.GetNetworkNeighborhood()
@@ -138,35 +137,35 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 
 	// Validate that all alerts are signaled
 	expectedAlerts := map[string]bool{
-		"Unexpected process launched":              false,
-		"Unexpected file access":                   false,
-		"Unexpected system call":                   false,
-		"Unexpected capability used":               false,
-		"Kubernetes Client Executed":               false,
-		"Exec from malicious source":               false,
-		"Kernel Module Load":                       false,
-		"Exec Binary Not In Base Image":            false,
-		"Exec from mount":                          false,
-		"Unexpected Service Account Token Access":  false,
-		"Unexpected domain request":                false,
-		"Crypto Mining Related Port Communication": false,
-		"Crypto Mining Domain Communication":       false,
+		"Unexpected process launched":               false,
+		"Files Access Anomalies in container":       false,
+		"Syscalls Anomalies in container":           false,
+		"Linux Capabilities Anomalies in container": false,
+		"Workload uses Kubernetes API unexpectedly": false,
+		"Process executed from malicious source":    false,
+		"Process tries to load a kernel module":     false,
+		"Drifted process executed":                  false,
+		"Process executed from mount":               false,
+		"Unexpected service account token access":   false,
+		"DNS Anomalies in container":                false,
+		"Crypto Mining Related Port Communication":  false,
+		"Crypto Mining Domain Communication":        false,
 	}
 
 	expectedFailOnProfile := map[string][]bool{
-		"Unexpected process launched":              {true},
-		"Unexpected file access":                   {true},
-		"Unexpected system call":                   {true},
-		"Unexpected capability used":               {true},
-		"Kubernetes Client Executed":               {true},
-		"Exec from malicious source":               {false},
-		"Kernel Module Load":                       {false},
-		"Exec Binary Not In Base Image":            {true},
-		"Exec from mount":                          {true},
-		"Unexpected Service Account Token Access":  {true},
-		"Unexpected domain request":                {true},
-		"Crypto Mining Related Port Communication": {true},
-		"Crypto Mining Domain Communication":       {false},
+		"Unexpected process launched":               {true},
+		"Files Access Anomalies in container":       {true},
+		"Syscalls Anomalies in container":           {true},
+		"Linux Capabilities Anomalies in container": {true},
+		"Workload uses Kubernetes API unexpectedly": {true},
+		"Process executed from malicious source":    {false},
+		"Process tries to load a kernel module":     {false},
+		"Drifted process executed":                  {true},
+		"Process executed from mount":               {true},
+		"Unexpected service account token access":   {true},
+		"DNS Anomalies in container":                {true},
+		"Crypto Mining Related Port Communication":  {true},
+		"Crypto Mining Domain Communication":        {false},
 	}
 
 	for _, alert := range alerts {
@@ -863,14 +862,14 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	// Record initial alert count
 	initialAlertCount := 0
 	for _, alert := range initialAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
 			initialAlertCount++
 		}
 	}
 
 	// Verify initial alerts
-	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "wget", "server", []bool{true})
-	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "curl", "nginx", []bool{true})
+	testutils.AssertContains(t, initialAlerts, "DNS Anomalies in container", "wget", "server", []bool{true})
+	testutils.AssertContains(t, initialAlerts, "DNS Anomalies in container", "curl", "nginx", []bool{true})
 
 	// PHASE 3: Apply user-managed network neighborhood
 	t.Log("Applying user-managed network neighborhood...")
@@ -963,7 +962,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	// Count new alerts after merge
 	newAlertCount := 0
 	for _, alert := range mergedAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
 			newAlertCount++
 		}
 	}
@@ -973,7 +972,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	if newAlertCount > initialAlertCount {
 		t.Logf("Full alert details:")
 		for _, alert := range mergedAlerts {
-			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
 				t.Logf("Alert: %+v", alert)
 			}
 		}
@@ -1012,7 +1011,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	// Count final alerts
 	finalAlertCount := 0
 	for _, alert := range finalAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
 			finalAlertCount++
 		}
 	}
@@ -1022,7 +1021,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	if finalAlertCount <= initialAlertCount {
 		t.Logf("Full alert details:")
 		for _, alert := range finalAlerts {
-			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
 				t.Logf("Alert: %+v", alert)
 			}
 		}
@@ -1034,39 +1033,47 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	ns := testutils.NewRandomNamespace()
 
 	endpointTraffic, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/endpoint-traffic.yaml"))
-	require.NoError(t, err, "Error creating workload")
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
 	err = endpointTraffic.WaitForReady(80)
-	require.NoError(t, err, "Error waiting for workload to be ready")
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
 
 	// Wait for application profile to be ready
-	require.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
 	time.Sleep(10 * time.Second)
 
 	// Add to rule policy symlink
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Not add to rule policy
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/bin/sh", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
-	require.NoError(t, err, "Error waiting for application profile to be completed")
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
 
 	applicationProfile, err := endpointTraffic.GetApplicationProfile()
-	require.NoError(t, err, "Error getting application profile")
+	if err != nil {
+		t.Errorf("Error getting application profile: %v", err)
+	}
 
-	symlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId[ruleengine.R1010ID]
-	require.Equal(t, []string{"ln"}, symlinkPolicy.AllowedProcesses)
+	symlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId["R1010"]
+	assert.Equal(t, []string{"ln"}, symlinkPolicy.AllowedProcesses)
 
-	hardlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId[ruleengine.R1012ID]
-	require.Len(t, hardlinkPolicy.AllowedProcesses, 0)
+	hardlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId["R1012"]
+	assert.Len(t, hardlinkPolicy.AllowedProcesses, 0)
 
 	fmt.Println("After completed....")
 
@@ -1076,25 +1083,27 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	// generate hardlink alert
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/etc/shadow", "/tmp/a"}, "")
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// not generate alert
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Wait for the alert to be signaled
 	time.Sleep(30 * time.Second)
 
 	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
-	require.NoError(t, err, "Error getting alerts")
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
 
-	testutils.AssertContains(t, alerts, "Hardlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{true})
-	testutils.AssertNotContains(t, alerts, "Symlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{true})
+	testutils.AssertContains(t, alerts, "Hard link created over sensitive file", "ln", "endpoint-traffic", []bool{true})
+	testutils.AssertNotContains(t, alerts, "Soft link created over sensitive file", "ln", "endpoint-traffic", []bool{true})
 
 	// Also check for learning mode
-	testutils.AssertContains(t, alerts, "Symlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{false})
-	testutils.AssertNotContains(t, alerts, "Hardlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{false})
+	testutils.AssertContains(t, alerts, "Soft link created over sensitive file", "ln", "endpoint-traffic", []bool{false})
+	testutils.AssertNotContains(t, alerts, "Hard link created over sensitive file", "ln", "endpoint-traffic", []bool{false})
 
 }
 
@@ -1357,7 +1366,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	time.Sleep(15 * time.Second)
 	alerts, err := testutils.GetAlerts(ns.Name)
 	require.NoError(t, err, "Error getting alerts")
-	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx", []bool{true})
+	testutils.AssertContains(t, alerts, "DNS Anomalies in container", "curl", "nginx", []bool{true})
 
 	nn, err := wl.GetNetworkNeighborhood()
 	require.NoError(t, err, "Error getting network neighborhood")
@@ -1407,7 +1416,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	// Should not contain new alert for curl command after learning
 	count := 0
 	for _, alert := range alertsAfter {
-		if alert.Labels["rule_name"] == "Unexpected domain request" && alert.Labels["container_name"] == "nginx" && alert.Labels["process_name"] == "curl" {
+		if alert.Labels["rule_name"] == "DNS Anomalies in container" && alert.Labels["container_name"] == "nginx" && alert.Labels["process_name"] == "curl" {
 			count++
 		}
 	}
@@ -1449,7 +1458,7 @@ func Test_22_AlertOnPartialNetworkProfileTest(t *testing.T) {
 	time.Sleep(15 * time.Second)
 	alerts, err := testutils.GetAlerts(ns.Name)
 	require.NoError(t, err, "Error getting alerts")
-	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx", []bool{true})
+	testutils.AssertContains(t, alerts, "DNS Anomalies in container", "curl", "nginx", []bool{true})
 }
 
 func Test_23_RuleCooldownTest(t *testing.T) {

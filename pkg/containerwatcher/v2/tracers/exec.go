@@ -24,7 +24,7 @@ type ExecTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracerexec.Tracer
 	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
 }
@@ -34,7 +34,7 @@ func NewExecTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *ExecTracer {
 	return &ExecTracer{
@@ -95,14 +95,11 @@ func (et *ExecTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (et *ExecTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		if config.DExec {
-			return false
-		}
-		return config.EnableApplicationProfile || config.EnableRuntimeDetection
+func (et *ExecTracer) IsEnabled(cfg config.Config) bool {
+	if cfg.DExec {
+		return false
 	}
-	return false
+	return cfg.EnableApplicationProfile || cfg.EnableRuntimeDetection
 }
 
 // execEventCallback handles exec events from the tracer

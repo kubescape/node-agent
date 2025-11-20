@@ -3,6 +3,7 @@ package containerwatcher
 import (
 	"context"
 
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -21,5 +22,5 @@ type TracerInterface interface {
 	GetEventType() utils.EventType
 
 	// IsEnabled checks if this tracer should be enabled based on configuration
-	IsEnabled(cfg interface{}) bool
+	IsEnabled(cfg config.Config) bool
 }

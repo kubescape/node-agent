@@ -29,7 +29,7 @@ type NetworkTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracernetwork.Tracer
 	socketEnricher      *socketenricher.SocketEnricher
 	kubeIPInstance      operators.OperatorInstance
@@ -41,7 +41,7 @@ func NewNetworkTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 	socketEnricher *socketenricher.SocketEnricher,
 ) *NetworkTracer {
 	return &NetworkTracer{
@@ -123,14 +123,11 @@ func (nt *NetworkTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (nt *NetworkTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		if config.DNetwork {
-			return false
-		}
-		return config.EnableNetworkTracing || config.EnableRuntimeDetection
+func (nt *NetworkTracer) IsEnabled(cfg config.Config) bool {
+	if cfg.DNetwork {
+		return false
 	}
-	return false
+	return cfg.EnableNetworkTracing || cfg.EnableRuntimeDetection
 }
 
 // networkEventCallback handles network events from the tracer
