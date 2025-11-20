@@ -516,9 +516,9 @@ func (e *DatasourceEvent) GetPID() uint32 {
 func (e *DatasourceEvent) GetPID64() uint64 {
 	switch e.EventType {
 	case ExecveEventType:
-		return (uint64(e.GetPpid()) << 32) | e.GetPtid()
+		return (uint64(e.GetPpid()) << 32) | e.getPtid()
 	case OpenEventType, ExitEventType, ForkEventType, HardlinkEventType, SymlinkEventType:
-		return (uint64(e.GetPID()) << 32) | e.GetTid()
+		return (uint64(e.GetPID()) << 32) | e.getTid()
 	default:
 		logger.L().Warning("GetPID64 not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return 0
@@ -582,9 +582,9 @@ func (e *DatasourceEvent) GetProto() string {
 	}
 }
 
-func (e *DatasourceEvent) GetPtid() uint64 {
-	ptid, _ := e.getFieldAccessor("proc.parent.tid").Uint64(e.Data)
-	return ptid
+func (e *DatasourceEvent) getPtid() uint64 {
+	ptid, _ := e.getFieldAccessor("proc.parent.tid").Uint32(e.Data)
+	return uint64(ptid)
 }
 
 func (e *DatasourceEvent) GetPupperLayer() bool {
@@ -710,9 +710,9 @@ func (e *DatasourceEvent) GetSyscalls() []byte {
 	}
 }
 
-func (e *DatasourceEvent) GetTid() uint64 {
-	tid, _ := e.getFieldAccessor("proc.tid").Uint64(e.Data)
-	return tid
+func (e *DatasourceEvent) getTid() uint64 {
+	tid, _ := e.getFieldAccessor("proc.tid").Uint32(e.Data)
+	return uint64(tid)
 }
 
 func (e *DatasourceEvent) GetTimestamp() types.Time {
