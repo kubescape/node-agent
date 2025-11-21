@@ -9,7 +9,9 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -30,6 +32,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/workerpool"
 	"github.com/panjf2000/ants/v2"
 )
@@ -87,6 +90,7 @@ type ContainerWatcher struct {
 	pool                 *workerpool.WorkerPool
 
 	// Lifecycle
+	gadgetRuntime                   runtime.Runtime
 	mutex                           sync.RWMutex
 	containerEolNotificationChannel chan *containercollection.Container
 
@@ -154,6 +158,9 @@ func CreateContainerWatcher(
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
 		enrichedEvent := i.(*events.EnrichedEvent)
 		eventHandlerFactory.ProcessEvent(enrichedEvent)
+		if enrichedEvent.Event.GetEventType() != utils.SyscallEventType {
+			enrichedEvent.Event.Release() // at this time we should not need the event anymore
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating worker pool: %w", err)
@@ -203,7 +210,7 @@ func CreateContainerWatcher(
 		pool:                 workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 5*time.Second),
 
 		// Lifecycle
-		containerEolNotificationChannel: make(chan *containercollection.Container),
+		containerEolNotificationChannel: make(chan *containercollection.Container, cfg.ContainerEolNotificationBuffer),
 	}, nil
 }
 
@@ -296,6 +303,11 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	// Start worker pool goroutine
 	go cw.workerPoolLoop()
 
+	cw.gadgetRuntime = local.New()
+	if err := cw.gadgetRuntime.Init(nil); err != nil {
+		logger.L().Fatal("runtime init", helpers.Error(err))
+	}
+
 	// Create tracer factory
 	tracerFactory := tracers.NewTracerFactory(
 		cw.containerCollection,
@@ -309,6 +321,7 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 		cw.thirdPartyEnricher,
 		cw.cfg,
 		cw.processTreeManager,
+		cw.gadgetRuntime,
 	)
 
 	// Initialize tracer manager
@@ -342,6 +355,8 @@ func (cw *ContainerWatcher) Stop() {
 		cw.tracerManagerV2.StopAllTracers()
 	}
 
+	cw.gadgetRuntime.Close()
+
 	// Close worker channel to signal worker goroutine to stop
 	if cw.workerChan != nil {
 		close(cw.workerChan)
@@ -350,6 +365,11 @@ func (cw *ContainerWatcher) Stop() {
 	// Stop worker pool
 	if cw.workerPool != nil {
 		cw.workerPool.Release()
+	}
+
+	// Close socket enricher
+	if cw.socketEnricher != nil {
+		cw.socketEnricher.Close()
 	}
 
 	cw.running = false
@@ -434,7 +454,7 @@ func (cw *ContainerWatcher) processQueueBatch() {
 
 }
 
-func (cw *ContainerWatcher) enrichAndProcess(entry eventEntry) {
+func (cw *ContainerWatcher) enrichAndProcess(entry EventEntry) {
 	enrichedEvent := cw.eventEnricher.EnrichEvents(entry)
 
 	select {

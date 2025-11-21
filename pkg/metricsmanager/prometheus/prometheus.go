@@ -5,8 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
-	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -40,6 +38,9 @@ type PrometheusMetric struct {
 	ebpfHTTPCounter       prometheus.Counter
 	ebpfPtraceCounter     prometheus.Counter
 	ebpfIoUringCounter    prometheus.Counter
+	ebpfKmodCounter       prometheus.Counter
+	ebpfUnshareCounter    prometheus.Counter
+	ebpfBpfCounter        prometheus.Counter
 	ruleCounter           *prometheus.CounterVec
 	alertCounter          *prometheus.CounterVec
 	ruleEvaluationTime    *prometheus.HistogramVec
@@ -121,6 +122,18 @@ func NewPrometheusMetric() *PrometheusMetric {
 		ebpfIoUringCounter: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "node_agent_iouring_counter",
 			Help: "The total number of io_uring events received from the eBPF probe",
+		}),
+		ebpfKmodCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_kmod_counter",
+			Help: "The total number of kmod events received from the eBPF probe",
+		}),
+		ebpfUnshareCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_unshare_counter",
+			Help: "The total number of unshare events received from the eBPF probe",
+		}),
+		ebpfBpfCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_bpf_counter",
+			Help: "The total number of bpf events received from the eBPF probe",
 		}),
 		ruleCounter: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "node_agent_rule_counter",
@@ -220,6 +233,9 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.ebpfHTTPCounter)
 	prometheus.Unregister(p.ebpfPtraceCounter)
 	prometheus.Unregister(p.ebpfIoUringCounter)
+	prometheus.Unregister(p.ebpfKmodCounter)
+	prometheus.Unregister(p.ebpfUnshareCounter)
+	prometheus.Unregister(p.ebpfBpfCounter)
 	prometheus.Unregister(p.containerStartCounter)
 	prometheus.Unregister(p.containerStopCounter)
 	// Unregister program ID metrics
@@ -261,6 +277,12 @@ func (p *PrometheusMetric) ReportEvent(eventType utils.EventType) {
 		p.ebpfIoUringCounter.Inc()
 	case utils.SyscallEventType:
 		p.ebpfSyscallCounter.Inc()
+	case utils.KmodEventType:
+		p.ebpfKmodCounter.Inc()
+	case utils.UnshareEventType:
+		p.ebpfUnshareCounter.Inc()
+	case utils.BpfEventType:
+		p.ebpfBpfCounter.Inc()
 	}
 }
 
@@ -332,25 +354,25 @@ func (p *PrometheusMetric) ReportRuleEvaluationTime(ruleID string, eventType uti
 	p.ruleEvaluationTime.With(labels).Observe(duration.Seconds())
 }
 
-func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
-	logger.L().Debug("reporting ebpf stats", helpers.Int("stats_count", len(stats.Stats)))
-
-	for _, stat := range stats.Stats {
-		labels := prometheus.Labels{
-			programTypeLabel: stat.Type,
-			programNameLabel: stat.Name,
-		}
-
-		p.programRuntimeGauge.With(labels).Set(float64(stat.CurrentRuntime))
-		p.programRunCountGauge.With(labels).Set(float64(stat.CurrentRunCount))
-		p.programTotalRuntimeGauge.With(labels).Set(float64(stat.TotalRuntime))
-		p.programTotalRunCountGauge.With(labels).Set(float64(stat.TotalRunCount))
-		p.programMapMemoryGauge.With(labels).Set(float64(stat.MapMemory))
-		p.programMapCountGauge.With(labels).Set(float64(stat.MapCount))
-		p.programCpuUsageGauge.With(labels).Set(stat.TotalCpuUsage)
-		p.programPerCpuUsageGauge.With(labels).Set(stat.PerCpuUsage)
-	}
-}
+//func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
+//	logger.L().Debug("reporting ebpf stats", helpers.Int("stats_count", len(stats.Stats)))
+//
+//	for _, stat := range stats.Stats {
+//		labels := prometheus.Labels{
+//			programTypeLabel: stat.Type,
+//			programNameLabel: stat.Name,
+//		}
+//
+//		p.programRuntimeGauge.With(labels).Set(float64(stat.CurrentRuntime))
+//		p.programRunCountGauge.With(labels).Set(float64(stat.CurrentRunCount))
+//		p.programTotalRuntimeGauge.With(labels).Set(float64(stat.TotalRuntime))
+//		p.programTotalRunCountGauge.With(labels).Set(float64(stat.TotalRunCount))
+//		p.programMapMemoryGauge.With(labels).Set(float64(stat.MapMemory))
+//		p.programMapCountGauge.With(labels).Set(float64(stat.MapCount))
+//		p.programCpuUsageGauge.With(labels).Set(stat.TotalCpuUsage)
+//		p.programPerCpuUsageGauge.With(labels).Set(stat.PerCpuUsage)
+//	}
+//}
 
 func (p *PrometheusMetric) ReportContainerStart() {
 	p.containerStartCounter.Inc()

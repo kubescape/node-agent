@@ -12,8 +12,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	events "github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
@@ -99,7 +98,7 @@ func (pt *ProcfsTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (pt *ProcfsTracer) GetName() string {
-	return "procfs_tracer"
+	return procfsTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -132,13 +131,14 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conv
 }
 
 func (pt *ProcfsTracer) handleExitEvent(event conversion.ProcessEvent) {
-	exitEvent := &tracerexittype.Event{
-		Pid:  event.PID,
-		PPid: event.PPID,
-		Comm: "exit",
+	exitEvent := &utils.StructEvent{
+		EventType: utils.ExitEventType,
+		Pid:       event.PID,
+		Ppid:      event.PPID,
+		Comm:      "exit",
 	}
 
-	exitEvent.Event.Timestamp = types.Time(event.Timestamp.UnixNano())
+	exitEvent.Timestamp = event.Timestamp.UnixNano()
 
 	pt.exitEventCallback(exitEvent, event.ContainerID, event.PID)
 }
