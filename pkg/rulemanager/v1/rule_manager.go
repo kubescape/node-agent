@@ -236,6 +236,11 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 
+		// Flush any pending alert bulks for this container
+		if exporterBus, ok := rm.exporter.(*exporters.ExporterBus); ok {
+			exporterBus.FlushContainerAlerts(notif.Container.Runtime.ContainerID)
+		}
+
 		rm.trackedContainers.Remove(k8sContainerID)
 		namespace := notif.Container.K8s.Namespace
 		podName := notif.Container.K8s.PodName
