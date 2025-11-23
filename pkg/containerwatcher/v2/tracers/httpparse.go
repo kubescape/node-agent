@@ -100,7 +100,21 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 	resp, err := readResponse(data, req)
 	if err != nil {
-		return fallbackReadResponse(data, req)
+		resp, err = fallbackReadResponse(data, req)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Read and restore the response body, similar to ParseHttpRequest
+	if resp.Body != nil {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(body))
 	}
 
 	return resp, nil
