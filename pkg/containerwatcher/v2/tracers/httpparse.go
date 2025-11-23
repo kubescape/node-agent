@@ -106,6 +106,19 @@ func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 		}
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+
+	resp.Body.Close()
+
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.TransferEncoding = nil
+	resp.Header.Del("Transfer-Encoding")
+	resp.Header.Del("Content-Length")
+
 	return resp, nil
 }
 
