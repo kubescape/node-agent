@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-agent
+  namespace: kubescape
+  labels:
+    app.kubernetes.io/name: kubescape-node-agent
+    app.kubernetes.io/component: linux-audit-rules
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-agent-auditrules
+  labels:
+    app.kubernetes.io/name: kubescape-node-agent
+    app.kubernetes.io/component: linux-audit-rules
+rules:
+# LinuxAuditRule CRD permissions
+- apiGroups: ["kubescape.io"]
+  resources: ["linuxauditrules"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["kubescape.io"]
+  resources: ["linuxauditrules/status"]
+  verbs: ["get", "update", "patch"]
+# Node information (for node selector matching)
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]
+# Events (for audit rule processing events)
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-agent-auditrules
+  labels:
+    app.kubernetes.io/name: kubescape-node-agent
+    app.kubernetes.io/component: linux-audit-rules
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-agent-auditrules
+subjects:
+- kind: ServiceAccount
+  name: node-agent
+  namespace: kubescape
+---
+# Optional: Role for namespace-specific operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: kubescape
+  name: node-agent-local
+  labels:
+    app.kubernetes.io/name: kubescape-node-agent
+    app.kubernetes.io/component: linux-audit-rules
+rules:
+# ConfigMaps and Secrets (if needed for configuration)
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+# Events in the namespace
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: node-agent-local
+  namespace: kubescape
+  labels:
+    app.kubernetes.io/name: kubescape-node-agent
+    app.kubernetes.io/component: linux-audit-rules
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: node-agent-local
+subjects:
+- kind: ServiceAccount
+  name: node-agent
+  namespace: kubescape

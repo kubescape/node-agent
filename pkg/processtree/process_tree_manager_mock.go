@@ -39,6 +39,11 @@ func (m *ProcessTreeManagerMock) GetContainerProcessTree(containerID string, pid
 	return apitypes.Process{}, nil
 }
 
+// GetContainerIDForPid returns an empty string for testing
+func (m *ProcessTreeManagerMock) GetContainerIDForPid(pid uint32) (string, error) {
+	return "", nil
+}
+
 // ReportEvent is a no-op for testing
 func (m *ProcessTreeManagerMock) ReportEvent(eventType utils.EventType, event utils.K8sEvent) error {
 	return nil

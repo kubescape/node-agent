@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -38,11 +39,6 @@ type AlertType string
 const (
 	AlertTypeLimitReached AlertType = "AlertLimitReached"
 )
-
-type HTTPKeyValues struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
 
 type HTTPExporterConfig struct {
 	URL                string          `json:"url"`
@@ -440,4 +436,16 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 
 	return e.sendAlert(ctx, alert, apitypes.ProcessTree{}, nil)
+}
+
+func (e *HTTPExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	// For now, just log audit events since HTTP export for audit events needs more design
+	auditEvent := auditResult.GetAuditEvent()
+	logger.L().Info("Audit event received (HTTP export not fully implemented)",
+		helpers.String("audit_key", strings.Join(auditEvent.Keys, ",")),
+		helpers.String("message_type", auditEvent.Type.String()),
+		helpers.String("rule_type", auditEvent.RuleType),
+		helpers.Int("pid", int(auditEvent.PID)),
+		helpers.String("comm", auditEvent.Comm),
+		helpers.String("path", auditEvent.Path))
 }

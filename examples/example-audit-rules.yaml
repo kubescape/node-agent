@@ -1,0 +1,194 @@
+# Example LinuxAuditRule configurations for testing
+
+---
+# Basic file monitoring
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+  name: security-file-monitoring
+  namespace: kubescape
+  labels:
+    category: security
+    environment: test
+spec:
+  enabled: true
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  rules:
+  - name: passwd-monitoring
+    description: "Monitor changes to user account file"
+    type: file_watch
+    file_watch:
+      path: /etc/passwd
+      permissions: ["write", "attribute"]
+      keys: ["passwd_changes"]
+  - name: shadow-monitoring
+    description: "Monitor access to password shadow file"
+    type: file_watch
+    file_watch:
+      path: /etc/shadow
+      permissions: ["read", "write", "attribute"]
+      keys: ["shadow_access"]
+  - name: hosts-monitoring
+    description: "Monitor changes to hosts file"
+    type: file_watch
+    file_watch:
+      path: /etc/hosts
+      permissions: ["write", "attribute"]
+      keys: ["hosts_changes"]
+  rateLimit:
+    maxEventsPerSecond: 100
+    burstSize: 200
+
+---
+# Process execution monitoring
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+  name: process-monitoring
+  namespace: kubescape
+  labels:
+    category: process
+    environment: test
+spec:
+  enabled: true
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  rules:
+  - name: execve-monitoring
+    description: "Monitor all process executions"
+    type: syscall
+    syscall:
+      names: ["execve"]
+      architecture: "b64"
+      action: "always"
+      list_type: "exit"
+      keys: ["process_execution"]
+  - name: suspicious-commands
+    description: "Monitor execution of potentially suspicious commands"
+    type: syscall
+    syscall:
+      names: ["execve"]
+      architecture: "b64"
+      action: "always"
+      list_type: "exit"
+      filters:
+        - field: "exe"
+          operator: "="
+          value: "/bin/nc"
+        - field: "exe"
+          operator: "="
+          value: "/usr/bin/wget"
+        - field: "exe"
+          operator: "="
+          value: "/usr/bin/curl"
+      keys: ["suspicious_exec"]
+  rateLimit:
+    maxEventsPerSecond: 50
+    burstSize: 100
+
+---
+# Network activity monitoring
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+  name: network-monitoring
+  namespace: kubescape
+  labels:
+    category: network
+    environment: test
+spec:
+  enabled: true
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  rules:
+  - name: network-connections
+    description: "Monitor network connection attempts"
+    type: syscall
+    syscall:
+      names: ["connect", "accept", "bind"]
+      architecture: "b64"
+      action: "always"
+      list_type: "exit"
+      keys: ["network_activity"]
+  - name: socket-creation
+    description: "Monitor socket creation"
+    type: syscall
+    syscall:
+      names: ["socket"]
+      architecture: "b64"
+      action: "always"
+      list_type: "exit"
+      filters:
+        - field: "a0"
+          operator: "="
+          value: "2"  # AF_INET
+      keys: ["socket_creation"]
+  rateLimit:
+    maxEventsPerSecond: 200
+    burstSize: 400
+
+---
+# File system operations
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+  name: filesystem-monitoring
+  namespace: kubescape
+  labels:
+    category: filesystem
+    environment: test
+spec:
+  enabled: true
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  rules:
+  - name: file-deletions
+    description: "Monitor file deletions in sensitive directories"
+    type: syscall
+    syscall:
+      names: ["unlink", "unlinkat", "rmdir"]
+      architecture: "b64"
+      action: "always"
+      list_type: "exit"
+      filters:
+        - field: "dir"
+          operator: "="
+          value: "/etc"
+      keys: ["file_deletions"]
+  - name: directory-watch
+    description: "Monitor access to /var/log directory"
+    type: file_watch
+    file_watch:
+      path: /var/log
+      permissions: ["read", "write", "execute", "attribute"]
+      keys: ["log_directory_access"]
+  rateLimit:
+    maxEventsPerSecond: 150
+    burstSize: 300
+
+---
+# Minimal test rule for quick validation
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+  name: minimal-test
+  namespace: kubescape
+  labels:
+    category: test
+    environment: minimal
+spec:
+  enabled: true
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  rules:
+  - name: simple-file-watch
+    description: "Simple test rule for /tmp directory"
+    type: file_watch
+    file_watch:
+      path: /tmp/audit-test
+      permissions: ["write"]
+      keys: ["simple_test"]
+  rateLimit:
+    maxEventsPerSecond: 10
+    burstSize: 20

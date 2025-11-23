@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -13,12 +14,13 @@ import (
 )
 
 type ExportersConfig struct {
-	StdoutExporter           *bool               `mapstructure:"stdoutExporter"`
-	HTTPExporterConfig       *HTTPExporterConfig `mapstructure:"httpExporterConfig"`
-	SyslogExporter           string              `mapstructure:"syslogExporterURL"`
-	CsvRuleExporterPath      string              `mapstructure:"CsvRuleExporterPath"`
-	CsvMalwareExporterPath   string              `mapstructure:"CsvMalwareExporterPath"`
-	AlertManagerExporterUrls []string            `mapstructure:"alertManagerExporterUrls"`
+	StdoutExporter           *bool                    `mapstructure:"stdoutExporter"`
+	HTTPExporterConfig       *HTTPExporterConfig      `mapstructure:"httpExporterConfig"`
+	AuditbeatExporterConfig  *AuditbeatExporterConfig `mapstructure:"auditbeatExporterConfig"`
+	SyslogExporter           string                   `mapstructure:"syslogExporterURL"`
+	CsvRuleExporterPath      string                   `mapstructure:"CsvRuleExporterPath"`
+	CsvMalwareExporterPath   string                   `mapstructure:"CsvMalwareExporterPath"`
+	AlertManagerExporterUrls []string                 `mapstructure:"alertManagerExporterUrls"`
 }
 
 // This file will contain the single point of contact for all exporters,
@@ -26,6 +28,13 @@ type ExportersConfig struct {
 type ExporterBus struct {
 	// Exporters is a list of all exporters.
 	exporters []Exporter
+}
+
+// NewExporterBus creates a new ExporterBus with the given exporters. This can be used for testing purposes.
+func NewExporterBus(exporters []Exporter) *ExporterBus {
+	return &ExporterBus{
+		exporters: exporters,
+	}
 }
 
 // InitExporters initializes all exporters.
@@ -64,6 +73,22 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 		}
 	}
 
+	// Initialize auditbeat exporter
+	if exportersConfig.AuditbeatExporterConfig == nil {
+		if auditbeatURL := os.Getenv("AUDITBEAT_ENDPOINT_URL"); auditbeatURL != "" {
+			exportersConfig.AuditbeatExporterConfig = &AuditbeatExporterConfig{}
+			exportersConfig.AuditbeatExporterConfig.URL = auditbeatURL
+		}
+	}
+	if exportersConfig.AuditbeatExporterConfig != nil {
+		auditbeatExporter, err := NewAuditbeatExporter(*exportersConfig.AuditbeatExporterConfig, clusterName, nodeName, cloudMetadata)
+		if err == nil {
+			exporters = append(exporters, auditbeatExporter)
+		} else {
+			logger.L().Warning("InitExporters - failed to initialize auditbeat exporter", helpers.Error(err))
+		}
+	}
+
 	if len(exporters) == 0 {
 		logger.L().Fatal("InitExporters - no exporters were initialized")
 	}
@@ -87,5 +112,11 @@ func (e *ExporterBus) SendMalwareAlert(malwareResult malwaremanager.MalwareResul
 func (e *ExporterBus) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	for _, exporter := range e.exporters {
 		exporter.SendFimAlerts(fimEvents)
+	}
+}
+
+func (e *ExporterBus) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	for _, exporter := range e.exporters {
+		exporter.SendAuditAlert(auditResult)
 	}
 }
