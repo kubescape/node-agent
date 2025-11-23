@@ -13,7 +13,7 @@ import (
 
 	fimtypes "github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )
 
 // mockExporter implements the exporters.Exporter interface for testing.
@@ -22,7 +22,7 @@ type mockExporter struct {
 	fimEvents []fimtypes.FimEvent
 }
 
-func (m *mockExporter) SendRuleAlert(_ ruleengine.RuleFailure)          {}
+func (m *mockExporter) SendRuleAlert(_ types.RuleFailure)               {}
 func (m *mockExporter) SendMalwareAlert(_ malwaremanager.MalwareResult) {}
 func (m *mockExporter) SendFimAlerts(events []fimtypes.FimEvent) {
 	m.mu.Lock()

@@ -32,6 +32,10 @@ data:
             "ruleCooldownAfterCount": {{ .Values.nodeAgent.config.ruleCooldown.ruleCooldownAfterCount }},
             "ruleCooldownOnProfileFailure": {{ .Values.nodeAgent.config.ruleCooldown.ruleCooldownOnProfileFailure }},
             "ruleCooldownMaxSize": {{ .Values.nodeAgent.config.ruleCooldown.ruleCooldownMaxSize }}
+        },
+        "celConfigCache": {
+            "maxSize": {{ .Values.nodeAgent.config.celConfigCache.maxSize }},
+            "ttl": "{{ .Values.nodeAgent.config.celConfigCache.ttl }}"
         }
     }
 ---

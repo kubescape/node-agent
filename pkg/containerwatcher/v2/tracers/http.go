@@ -29,7 +29,7 @@ type HTTPTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracerhttp.Tracer
 }
 
@@ -38,7 +38,7 @@ func NewHTTPTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 ) *HTTPTracer {
 	return &HTTPTracer{
 		containerCollection: containerCollection,
@@ -97,11 +97,8 @@ func (ht *HTTPTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (ht *HTTPTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DHttp && config.EnableHttpDetection
-	}
-	return false
+func (ht *HTTPTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DHttp && cfg.EnableHttpDetection
 }
 
 // httpEventCallback handles HTTP events from the tracer

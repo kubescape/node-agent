@@ -25,7 +25,7 @@ type IoUringTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *traceriouring.Tracer
 }
 
@@ -34,7 +34,7 @@ func NewIoUringTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 ) *IoUringTracer {
 	return &IoUringTracer{
 		containerCollection: containerCollection,
@@ -94,11 +94,8 @@ func (it *IoUringTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (it *IoUringTracer) IsEnabled(cfg interface{}) bool {
-	if conf, ok := cfg.(config.Config); ok {
-		return !conf.DIouring && conf.EnableRuntimeDetection
-	}
-	return false
+func (it *IoUringTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DIouring && cfg.EnableRuntimeDetection
 }
 
 // iouringEventCallback handles io_uring events from the tracer
