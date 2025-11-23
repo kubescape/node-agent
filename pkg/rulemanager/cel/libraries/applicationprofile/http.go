@@ -27,7 +27,7 @@ func (l *apLibrary) wasEndpointAccessed(containerID, endpoint ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(endpoint)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
@@ -60,7 +60,7 @@ func (l *apLibrary) wasEndpointAccessedWithMethod(containerID, endpoint, method 
 		return types.MaybeNoSuchOverloadErr(method)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
@@ -96,7 +96,7 @@ func (l *apLibrary) wasEndpointAccessedWithMethods(containerID, endpoint, method
 		return types.NewErr("failed to parse methods: %v", err)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
@@ -129,7 +129,7 @@ func (l *apLibrary) wasEndpointAccessedWithPrefix(containerID, prefix ref.Val) r
 		return types.MaybeNoSuchOverloadErr(prefix)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
@@ -158,7 +158,7 @@ func (l *apLibrary) wasEndpointAccessedWithSuffix(containerID, suffix ref.Val) r
 		return types.MaybeNoSuchOverloadErr(suffix)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
@@ -188,7 +188,7 @@ func (l *apLibrary) wasHostAccessed(containerID, host ref.Val) ref.Val {
 	}
 
 	// Check HTTP endpoints for host access
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err == nil {
 		for _, ep := range container.Endpoints {
 			// Parse the endpoint URL to extract host

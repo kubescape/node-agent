@@ -3,6 +3,7 @@ package profilehelper
 import (
 	"errors"
 
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -76,23 +77,23 @@ func GetContainerName(objectCache objectcache.ObjectCache, containerID string) s
 	return containerInfos[sharedData.ContainerIndex].Name
 }
 
-func GetContainerApplicationProfile(objectCache objectcache.ObjectCache, containerID string) (v1beta1.ApplicationProfileContainer, error) {
+func GetContainerApplicationProfile(objectCache objectcache.ObjectCache, containerID string) (v1beta1.ApplicationProfileContainer, string, error) {
 	ap, err := GetApplicationProfile(containerID, objectCache)
 	if err != nil {
-		return v1beta1.ApplicationProfileContainer{}, err
+		return v1beta1.ApplicationProfileContainer{}, "", err
 	}
 
 	containerName := GetContainerName(objectCache, containerID)
 	if containerName == "" {
-		return v1beta1.ApplicationProfileContainer{}, errors.New("container name not found")
+		return v1beta1.ApplicationProfileContainer{}, "", errors.New("container name not found")
 	}
 
 	container, err := GetContainerFromApplicationProfile(ap, containerName)
 	if err != nil {
-		return v1beta1.ApplicationProfileContainer{}, err
+		return v1beta1.ApplicationProfileContainer{}, "", err
 	}
 
-	return container, nil
+	return container, ap.Annotations[helpers.SyncChecksumMetadataKey], nil
 }
 
 func GetContainerNetworkNeighborhood(objectCache objectcache.ObjectCache, containerID string) (v1beta1.NetworkNeighborhoodContainer, error) {

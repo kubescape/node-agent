@@ -22,7 +22,7 @@ func (l *apLibrary) wasSyscallUsed(containerID, syscallName ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(syscallName)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
