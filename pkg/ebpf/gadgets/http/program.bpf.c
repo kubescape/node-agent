@@ -32,14 +32,6 @@ GADGET_TRACER_MAP(events, 1024 * 256);
 // Define a tracer
 GADGET_TRACER(http, events, httpevent);
 
-// Used to allocate http event
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);
-    __type(value, struct httpevent);
-} event_data SEC(".maps");
-
 // Used to store the buffer of packets
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
