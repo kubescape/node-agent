@@ -3,6 +3,8 @@
 #include <gadget/types.h>
 #include <gadget/filesystem.h>
 
+#define BPF_PROG_LOAD 5
+
 struct event {
     gadget_timestamp timestamp_raw;
     struct gadget_process proc;

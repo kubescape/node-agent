@@ -44,6 +44,14 @@ int trace_enter_bpf(struct trace_event_raw_sys_enter *ctx)
         return 0;
     }
 
+    // For bpf syscall: int bpf(int cmd, union bpf_attr *attr, unsigned int size)
+    // args[0] = cmd (int)
+    // Filter to only capture BPF_PROG_LOAD commands
+    uint32_t cmd = (uint32_t)ctx->args[0];
+    if (cmd != BPF_PROG_LOAD) {
+        return 0;
+    }
+
     struct event *event;
     event = gadget_reserve_buf(&events, sizeof(*event));
     if (!event) {
@@ -53,11 +61,7 @@ int trace_enter_bpf(struct trace_event_raw_sys_enter *ctx)
     // Populate the process data into the event.
     gadget_process_populate(&event->proc);
 
-    // For bpf syscall: int bpf(int cmd, union bpf_attr *attr, unsigned int size)
-    // args[0] = cmd (int)
-    // args[1] = attr (union bpf_attr * - pointer to attributes)
-    // args[2] = size (unsigned int - size of the attr structure)
-    event->cmd = (uint32_t)ctx->args[0];
+    event->cmd = cmd;
 
     // The attribute size is the third argument
     event->attr_size = (uint32_t)ctx->args[2];
