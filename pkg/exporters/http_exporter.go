@@ -160,29 +160,6 @@ func (config *HTTPExporterConfig) Validate() error {
 		config.QueryParams = []HTTPKeyValues{}
 	}
 
-	// Set defaults for bulking configuration
-	if config.EnableAlertBulking {
-		if config.BulkMaxAlerts == 0 {
-			config.BulkMaxAlerts = 50 // Default max alerts per bulk
-		}
-		if config.BulkTimeoutSeconds == 0 {
-			config.BulkTimeoutSeconds = 10 // Default 10 second timeout
-		}
-		// Set defaults for queue configuration
-		if config.BulkSendQueueSize == 0 {
-			config.BulkSendQueueSize = 1000
-		}
-		if config.BulkMaxRetries == 0 {
-			config.BulkMaxRetries = 3
-		}
-		if config.BulkRetryBaseDelayMs == 0 {
-			config.BulkRetryBaseDelayMs = 1000
-		}
-		if config.BulkRetryMaxDelayMs == 0 {
-			config.BulkRetryMaxDelayMs = 30000
-		}
-	}
-
 	return nil
 }
 
