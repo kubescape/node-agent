@@ -17,7 +17,7 @@ func NewSymlinkAdapter() *SymlinkAdapter {
 	return &SymlinkAdapter{}
 }
 
-func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	symlinkEvent, ok := enrichedEvent.Event.(utils.LinkEvent)
 	if !ok {
 		return

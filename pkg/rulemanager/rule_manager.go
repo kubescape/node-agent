@@ -179,6 +179,10 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		if shouldAlert {
+			state := rule.State
+			if eventType == utils.HTTPEventType { // TODO: Manage state evaluation in a better way (this is abuse of the state map, we need a better way to pass payloads from rules.)
+				state = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
+			}
 			rm.metrics.ReportRuleAlert(rule.Name)
 			message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
 			if err != nil {
@@ -190,7 +194,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				continue
 			}
 
-			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum)
+			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum, state)
 			if ruleFailure == nil {
 				logger.L().Error("RuleManager - failed to create rule failure", helpers.String("rule", rule.Name),
 					helpers.String("message", message),
@@ -376,4 +380,44 @@ func hashStringToMD5(str string) string {
 	hash := md5.Sum([]byte(str))
 	hashString := fmt.Sprintf("%x", hash)
 	return hashString
+}
+
+func (rm *RuleManager) evaluateHTTPPayloadState(state map[string]any, enrichedEvent *events.EnrichedEvent) map[string]any {
+	payloadExpression, ok := state["payload"].(string)
+	if !ok || payloadExpression == "" {
+		return state
+	}
+
+	eventAdapter, ok := rm.adapterFactory.GetAdapter(utils.HTTPEventType)
+	if !ok {
+		logger.L().Error("RuleManager - no adapter registered for http payload evaluation", helpers.String("eventType", string(utils.HTTPEventType)))
+		return state
+	}
+
+	eventMap := eventAdapter.ToMap(enrichedEvent)
+	defer adapters.ReleaseEventMap(eventMap)
+
+	payloadValue, err := rm.celEvaluator.EvaluateExpressionByMap(eventMap, payloadExpression, utils.HTTPEventType)
+	if err != nil {
+		logger.L().Error("RuleManager - failed to evaluate http payload expression", helpers.Error(err))
+		return state
+	}
+
+	stateCopy := cloneState(state)
+	stateCopy["payload"] = payloadValue
+
+	return stateCopy
+}
+
+func cloneState(state map[string]any) map[string]any {
+	if state == nil {
+		return map[string]any{}
+	}
+
+	stateCopy := make(map[string]any, len(state))
+	for k, v := range state {
+		stateCopy[k] = v
+	}
+
+	return stateCopy
 }

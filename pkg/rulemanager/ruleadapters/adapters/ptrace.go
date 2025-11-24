@@ -17,7 +17,7 @@ func NewPtraceAdapter() *PtraceAdapter {
 	return &PtraceAdapter{}
 }
 
-func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	ptraceEvent, ok := enrichedEvent.Event.(utils.PtraceEvent)
 	if !ok {
 		return

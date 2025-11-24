@@ -8,9 +8,9 @@ import (
 )
 
 type RuleFailureCreatorInterface interface {
-	CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID, apChecksum string) types.RuleFailure
+	CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID, apChecksum string, state map[string]any) types.RuleFailure
 }
 
 type EventMetadataSetter interface {
-	SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent)
+	SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, state map[string]any)
 }

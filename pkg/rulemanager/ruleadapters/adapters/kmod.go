@@ -15,7 +15,7 @@ func NewKmodAdapter() *KmodAdapter {
 	return &KmodAdapter{}
 }
 
-func (c *KmodAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *KmodAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	kmodEvent, ok := enrichedEvent.Event.(utils.KmodEvent)
 	if !ok {
 		return

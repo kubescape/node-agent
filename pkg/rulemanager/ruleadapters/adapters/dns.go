@@ -15,7 +15,7 @@ func NewDnsAdapter() *DnsAdapter {
 	return &DnsAdapter{}
 }
 
-func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	dnsEvent, ok := enrichedEvent.Event.(utils.DNSEvent)
 	if !ok {
 		return

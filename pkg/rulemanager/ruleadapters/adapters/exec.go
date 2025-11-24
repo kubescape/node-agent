@@ -19,7 +19,7 @@ func NewExecAdapter() *ExecAdapter {
 	return &ExecAdapter{}
 }
 
-func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	execEvent, ok := enrichedEvent.Event.(utils.ExecEvent)
 	if !ok {
 		return

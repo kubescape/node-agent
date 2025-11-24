@@ -17,7 +17,7 @@ func NewOpenAdapter() *OpenAdapter {
 	return &OpenAdapter{}
 }
 
-func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	openEvent, ok := enrichedEvent.Event.(utils.OpenEvent)
 	if !ok {
 		return

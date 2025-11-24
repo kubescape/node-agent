@@ -54,7 +54,7 @@ func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSRes
 	}
 }
 
-func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID, apChecksum string) types.RuleFailure {
+func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID, apChecksum string, state map[string]any) types.RuleFailure {
 	eventAdapter, ok := r.adapterFactory.GetAdapter(enrichedEvent.Event.GetEventType())
 	if !ok {
 		logger.L().Error("RuleFailureCreator - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.Event.GetEventType())))
@@ -80,7 +80,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 		AlertPlatform: apitypes.AlertSourcePlatformK8s,
 	}
 
-	eventAdapter.SetFailureMetadata(ruleFailure, enrichedEvent)
+	eventAdapter.SetFailureMetadata(ruleFailure, enrichedEvent, state)
 
 	r.setBaseRuntimeAlert(ruleFailure)
 	r.setRuntimeAlertK8sDetails(ruleFailure)

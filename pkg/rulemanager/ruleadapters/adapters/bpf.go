@@ -15,7 +15,7 @@ func NewBpfAdapter() *BpfAdapter {
 	return &BpfAdapter{}
 }
 
-func (c *BpfAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *BpfAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	bpfEvent, ok := enrichedEvent.Event.(utils.BpfEvent)
 	if !ok {
 		return

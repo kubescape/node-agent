@@ -15,7 +15,7 @@ func NewUnshareAdapter() *UnshareAdapter {
 	return &UnshareAdapter{}
 }
 
-func (c *UnshareAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *UnshareAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	unshareEvent, ok := enrichedEvent.Event.(utils.UnshareEvent)
 	if !ok {
 		return

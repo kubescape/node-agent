@@ -15,7 +15,7 @@ func NewRandomXAdapter() *RandomXAdapter {
 	return &RandomXAdapter{}
 }
 
-func (c *RandomXAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *RandomXAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	randomXEvent, ok := enrichedEvent.Event.(utils.EnrichEvent)
 	if !ok {
 		return

@@ -16,7 +16,7 @@ func NewProcfsCreator() *ProcfsFailureSetter {
 	return &ProcfsFailureSetter{}
 }
 
-func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, state map[string]any) {
 	procfsEvent, ok := enrichedEvent.Event.(*events.ProcfsEvent)
 	if !ok {
 		return

@@ -17,7 +17,7 @@ func NewHardlinkAdapter() *HardlinkAdapter {
 	return &HardlinkAdapter{}
 }
 
-func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	hardlinkEvent, ok := enrichedEvent.Event.(utils.LinkEvent)
 	if !ok {
 		return

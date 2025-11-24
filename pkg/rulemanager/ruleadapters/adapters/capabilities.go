@@ -15,7 +15,7 @@ func NewCapabilitiesAdapter() *CapabilitiesAdapter {
 	return &CapabilitiesAdapter{}
 }
 
-func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	capEvent, ok := enrichedEvent.Event.(utils.CapabilitiesEvent)
 	if !ok {
 		return

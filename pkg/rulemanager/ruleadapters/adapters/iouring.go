@@ -16,7 +16,7 @@ func NewIoUringAdapter() *IoUringAdapter {
 	return &IoUringAdapter{}
 }
 
-func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
 	iouringEvent, ok := enrichedEvent.Event.(utils.IOUring)
 	if !ok {
 		return
