@@ -169,6 +169,13 @@ func LoadConfig(path string) (Config, error) {
 
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("containerEolNotificationBuffer", 100)
+	// HTTP Exporter Alert Bulking defaults
+	viper.SetDefault("exporters::httpExporterConfig::bulkMaxAlerts", 50)
+	viper.SetDefault("exporters::httpExporterConfig::bulkTimeoutSeconds", 10)
+	viper.SetDefault("exporters::httpExporterConfig::bulkSendQueueSize", 1000)
+	viper.SetDefault("exporters::httpExporterConfig::bulkMaxRetries", 3)
+	viper.SetDefault("exporters::httpExporterConfig::bulkRetryBaseDelayMs", 1000)
+	viper.SetDefault("exporters::httpExporterConfig::bulkRetryMaxDelayMs", 30000)
 	// FIM defaults
 	viper.SetDefault("fim::backendConfig::backendType", "fanotify") // This will be parsed as a string and converted to FimBackendType
 	viper.SetDefault("fim::batchConfig::maxBatchSize", 1000)
