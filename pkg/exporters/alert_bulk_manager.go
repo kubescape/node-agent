@@ -97,8 +97,8 @@ func (cb *containerBulk) mergeProcessChain(chain *apitypes.Process) {
 			newNode := utils.CopyProcess(sourceNode)
 			cb.processMap[newNode.PID] = newNode
 
-			// Identify root (first process or process with PPID = 0)
-			if cb.rootProcess == nil || newNode.PPID == 0 {
+			// Set first process as initial root
+			if cb.rootProcess == nil {
 				cb.rootProcess = newNode
 			}
 
@@ -109,10 +109,50 @@ func (cb *containerBulk) mergeProcessChain(chain *apitypes.Process) {
 						parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 					}
 					parent.ChildrenMap[apitypes.CommPID{PID: newNode.PID}] = newNode
+				} else {
+					// Parent doesn't exist in tree - this is a new root
+					// We need to handle multiple roots by creating a synthetic parent
+					if newNode.PPID == 0 || newNode != cb.rootProcess {
+						cb.attachToSyntheticRoot(newNode)
+					}
+				}
+			} else {
+				// PPID == 0 means this is a root process
+				// If we already have a different root, attach both to synthetic root
+				if cb.rootProcess.PID != newNode.PID {
+					cb.attachToSyntheticRoot(newNode)
 				}
 			}
 		}
 	}
+}
+
+// attachToSyntheticRoot creates a synthetic root (PID 1) to hold multiple independent process trees
+func (cb *containerBulk) attachToSyntheticRoot(newRoot *apitypes.Process) {
+	const syntheticRootPID = 1
+
+	// Check if we need to convert existing root to use synthetic parent
+	if cb.rootProcess.PID != syntheticRootPID {
+		// Create synthetic root if it doesn't exist
+		if _, exists := cb.processMap[syntheticRootPID]; !exists {
+			syntheticRoot := &apitypes.Process{
+				PID:         syntheticRootPID,
+				PPID:        0,
+				Comm:        "container-root",
+				ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+			}
+			cb.processMap[syntheticRootPID] = syntheticRoot
+
+			// Attach current root to synthetic root
+			syntheticRoot.ChildrenMap[apitypes.CommPID{PID: cb.rootProcess.PID}] = cb.rootProcess
+
+			// Update root reference
+			cb.rootProcess = syntheticRoot
+		}
+	}
+
+	// Attach new root to synthetic root
+	cb.rootProcess.ChildrenMap[apitypes.CommPID{PID: newRoot.PID}] = newRoot
 }
 
 // flush returns the bulk data and resets the bulk

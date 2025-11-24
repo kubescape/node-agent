@@ -82,8 +82,15 @@ func TestContainerBulk_AddMultipleAlerts(t *testing.T) {
 	// Cloud services should be merged and deduplicated
 	assert.Contains(t, bulk.cloudServices, "aws-s3")
 	assert.Contains(t, bulk.cloudServices, "azure-blob")
-	// Process map should contain both processes
-	assert.Equal(t, 2, len(bulk.processMap), "Should have 2 processes in map")
+	// Process map should contain both processes plus synthetic root (PID 1)
+	// since both test processes have PPID 1 and parent doesn't exist
+	assert.Equal(t, 3, len(bulk.processMap), "Should have 3 processes in map (2 processes + synthetic root)")
+	// Verify synthetic root exists
+	syntheticRoot, hasSynthetic := bulk.processMap[1]
+	assert.True(t, hasSynthetic, "Should have synthetic root with PID 1")
+	assert.Equal(t, "container-root", syntheticRoot.Comm, "Synthetic root should be named container-root")
+	// Verify both processes are children of synthetic root
+	assert.Equal(t, 2, len(syntheticRoot.ChildrenMap), "Synthetic root should have 2 children")
 }
 
 func TestContainerBulk_ChainMerging(t *testing.T) {
@@ -903,4 +910,109 @@ func TestSendQueue_FIFOOrderingWithRetry(t *testing.T) {
 	assert.Equal(t, "container-1", sendOrder[0], "container-1 should be sent first (after retry)")
 	assert.Equal(t, "container-2", sendOrder[1], "container-2 should be sent second")
 	assert.Equal(t, "container-3", sendOrder[2], "container-3 should be sent third")
+}
+
+// TestContainerBulk_MultipleIndependentRoots verifies that multiple independent process trees
+// (with different root PIDs) are all included in the merged tree
+func TestContainerBulk_MultipleIndependentRoots(t *testing.T) {
+	bulk := &containerBulk{
+		maxSize:         10,
+		timeoutDuration: 10 * time.Second,
+		alerts:          make([]apitypes.RuntimeAlert, 0),
+		processMap:      make(map[uint32]*apitypes.Process),
+	}
+
+	// Add first alert with process chain starting from PID 1000
+	alert1 := createTestAlert("container-1", "alert-1")
+	processTree1 := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			PID:  1000,
+			PPID: 0,
+			Comm: "init-1",
+			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 1001}: {
+					PID:  1001,
+					PPID: 1000,
+					Comm: "child-1",
+				},
+			},
+		},
+	}
+	bulk.addAlert(alert1, processTree1, nil)
+
+	// Add second alert with INDEPENDENT process chain starting from PID 2000
+	alert2 := createTestAlert("container-1", "alert-2")
+	processTree2 := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			PID:  2000,
+			PPID: 0,
+			Comm: "init-2",
+			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 2001}: {
+					PID:  2001,
+					PPID: 2000,
+					Comm: "child-2",
+				},
+			},
+		},
+	}
+	bulk.addAlert(alert2, processTree2, nil)
+
+	// Add third alert with ANOTHER independent process chain starting from PID 3000
+	alert3 := createTestAlert("container-1", "alert-3")
+	processTree3 := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			PID:  3000,
+			PPID: 0,
+			Comm: "init-3",
+			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 3001}: {
+					PID:  3001,
+					PPID: 3000,
+					Comm: "child-3",
+				},
+			},
+		},
+	}
+	bulk.addAlert(alert3, processTree3, nil)
+
+	// Flush and get merged tree
+	alerts, mergedTree, _ := bulk.flush()
+
+	// Verify all alerts are included
+	assert.Equal(t, 3, len(alerts), "Should have 3 alerts")
+
+	// Verify merged tree has synthetic root (PID 1)
+	assert.Equal(t, uint32(1), mergedTree.ProcessTree.PID, "Root should be synthetic root with PID 1")
+	assert.Equal(t, "container-root", mergedTree.ProcessTree.Comm, "Root should be named container-root")
+
+	// Verify all three independent roots are children of synthetic root
+	assert.NotNil(t, mergedTree.ProcessTree.ChildrenMap, "Synthetic root should have children")
+	assert.Equal(t, 3, len(mergedTree.ProcessTree.ChildrenMap), "Synthetic root should have 3 children (the 3 independent roots)")
+
+	// Verify each independent root is present
+	root1, has1 := mergedTree.ProcessTree.ChildrenMap[apitypes.CommPID{PID: 1000}]
+	assert.True(t, has1, "PID 1000 should be child of synthetic root")
+	assert.Equal(t, "init-1", root1.Comm, "PID 1000 should have correct comm")
+
+	root2, has2 := mergedTree.ProcessTree.ChildrenMap[apitypes.CommPID{PID: 2000}]
+	assert.True(t, has2, "PID 2000 should be child of synthetic root")
+	assert.Equal(t, "init-2", root2.Comm, "PID 2000 should have correct comm")
+
+	root3, has3 := mergedTree.ProcessTree.ChildrenMap[apitypes.CommPID{PID: 3000}]
+	assert.True(t, has3, "PID 3000 should be child of synthetic root")
+	assert.Equal(t, "init-3", root3.Comm, "PID 3000 should have correct comm")
+
+	// Verify children of each root are preserved
+	assert.NotNil(t, root1.ChildrenMap, "PID 1000 should have children")
+	assert.Equal(t, 1, len(root1.ChildrenMap), "PID 1000 should have 1 child")
+	child1, hasChild1 := root1.ChildrenMap[apitypes.CommPID{PID: 1001}]
+	assert.True(t, hasChild1, "PID 1001 should be child of 1000")
+	assert.Equal(t, "child-1", child1.Comm, "Child should have correct comm")
+
+	assert.NotNil(t, root2.ChildrenMap, "PID 2000 should have children")
+	assert.Equal(t, 1, len(root2.ChildrenMap), "PID 2000 should have 1 child")
+
+	assert.NotNil(t, root3.ChildrenMap, "PID 3000 should have children")
+	assert.Equal(t, 1, len(root3.ChildrenMap), "PID 3000 should have 1 child")
 }
