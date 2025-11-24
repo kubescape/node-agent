@@ -31,10 +31,11 @@ func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	oldPath := symlinkEvent.GetOldPath()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"oldPath": oldPath,
-		"newPath": symlinkEvent.GetNewPath(),
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["oldPath"] = oldPath
+	baseRuntimeAlert.Arguments["newPath"] = symlinkEvent.GetNewPath()
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

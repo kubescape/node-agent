@@ -29,11 +29,12 @@ func (c *KmodAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	module := kmodEvent.GetModule()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"module":  module,
-		"syscall": kmodEvent.GetSyscall(),
-		"exePath": exePath,
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["module"] = module
+	baseRuntimeAlert.Arguments["syscall"] = kmodEvent.GetSyscall()
+	baseRuntimeAlert.Arguments["exePath"] = exePath
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

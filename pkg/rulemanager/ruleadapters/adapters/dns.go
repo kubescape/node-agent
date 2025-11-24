@@ -32,12 +32,13 @@ func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	proto := dnsEvent.GetProto()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"domain":    dnsName,
-		"addresses": dnsEvent.GetAddresses(),
-		"protocol":  proto,
-		"port":      dnsEvent.GetDstPort(),
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["domain"] = dnsName
+	baseRuntimeAlert.Arguments["addresses"] = dnsEvent.GetAddresses()
+	baseRuntimeAlert.Arguments["protocol"] = proto
+	baseRuntimeAlert.Arguments["port"] = dnsEvent.GetDstPort()
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

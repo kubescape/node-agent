@@ -28,11 +28,12 @@ func (c *NetworkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	proto := networkEvent.GetProto()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"ip":    dstEndpoint.Addr,
-		"port":  port,
-		"proto": proto,
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["ip"] = dstEndpoint.Addr
+	baseRuntimeAlert.Arguments["port"] = port
+	baseRuntimeAlert.Arguments["proto"] = proto
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

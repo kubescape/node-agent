@@ -24,9 +24,10 @@ func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	comm := syscallEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = syscallEvent.GetPID()
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"syscall": syscallEvent.GetSyscall(),
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["syscall"] = syscallEvent.GetSyscall()
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

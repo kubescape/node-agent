@@ -24,10 +24,11 @@ func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	request := httpEvent.GetRequest()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = httpEvent.GetPID()
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"internal":  httpEvent.GetInternal(),
-		"direction": httpEvent.GetDirection(),
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["internal"] = httpEvent.GetInternal()
+	baseRuntimeAlert.Arguments["direction"] = httpEvent.GetDirection()
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Network: &common.NetworkEntity{
 			Protocol: "http",

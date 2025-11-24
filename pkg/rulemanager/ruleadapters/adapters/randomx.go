@@ -25,9 +25,10 @@ func (c *RandomXAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	comm := randomXEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"ppid": randomXEvent.GetPpid(),
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["ppid"] = randomXEvent.GetPpid()
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

@@ -31,11 +31,12 @@ func (c *BpfAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	upperLayer := bpfEvent.GetUpperLayer()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"cmd":      cmd,
-		"attrSize": attrSize,
-		"exePath":  exePath,
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["cmd"] = cmd
+	baseRuntimeAlert.Arguments["attrSize"] = attrSize
+	baseRuntimeAlert.Arguments["exePath"] = exePath
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

@@ -31,10 +31,11 @@ func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enriched
 	oldPath := hardlinkEvent.GetOldPath()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"oldPath": oldPath,
-		"newPath": hardlinkEvent.GetNewPath(),
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["oldPath"] = oldPath
+	baseRuntimeAlert.Arguments["newPath"] = hardlinkEvent.GetNewPath()
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

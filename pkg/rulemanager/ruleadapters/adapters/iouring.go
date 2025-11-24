@@ -32,11 +32,12 @@ func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	comm := iouringEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"opcode":    opcode,
-		"flags":     iouringEvent.GetFlags(),
-		"operation": name,
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["opcode"] = opcode
+	baseRuntimeAlert.Arguments["flags"] = iouringEvent.GetFlags()
+	baseRuntimeAlert.Arguments["operation"] = name
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

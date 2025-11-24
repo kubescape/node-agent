@@ -27,12 +27,13 @@ func (c *SSHAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	dstPort := sshEvent.GetDstPort()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"src_ip":   sshEvent.GetSrcIP(),
-		"dst_ip":   dstIP,
-		"src_port": sshEvent.GetSrcPort(),
-		"dst_port": dstPort,
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["src_ip"] = sshEvent.GetSrcIP()
+	baseRuntimeAlert.Arguments["dst_ip"] = dstIP
+	baseRuntimeAlert.Arguments["src_port"] = sshEvent.GetSrcPort()
+	baseRuntimeAlert.Arguments["dst_port"] = dstPort
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,
