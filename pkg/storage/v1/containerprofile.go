@@ -17,6 +17,6 @@ func (sc *Storage) CreateContainerProfileDirect(profile *v1beta1.ContainerProfil
 	// Unset resourceVersion
 	profile.ResourceVersion = ""
 
-	_, err := sc.StorageClient.ContainerProfiles(profile.Namespace).Create(context.Background(), profile, metav1.CreateOptions{})
+	_, err := sc.storageClient.ContainerProfiles(profile.Namespace).Create(context.Background(), profile, metav1.CreateOptions{})
 	return err
 }

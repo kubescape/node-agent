@@ -19,57 +19,11 @@ const PodNameEnvVar = "POD_NAME"
 const NamespaceEnvVar = "NAMESPACE_NAME"
 
 type Config struct {
-	Exporters                      exporters.ExportersConfig            `mapstructure:"exporters"`
-	InitialDelay                   time.Duration                        `mapstructure:"initialDelay"`
-	MaxSniffingTime                time.Duration                        `mapstructure:"maxSniffingTimePerContainer"`
-	UpdateDataPeriod               time.Duration                        `mapstructure:"updateDataPeriod"`
-	MaxDelaySeconds                int                                  `mapstructure:"maxDelaySeconds"`
-	MaxJitterPercentage            int                                  `mapstructure:"maxJitterPercentage"`
-	MaxImageSize                   int64                                `mapstructure:"maxImageSize"`
-	MaxSBOMSize                    int                                  `mapstructure:"maxSBOMSize"`
-	MaxTsProfileSize               int64                                `mapstructure:"maxTsProfileSize"`
-	EnableFullPathTracing          bool                                 `mapstructure:"fullPathTracingEnabled"`
-	EnableApplicationProfile       bool                                 `mapstructure:"applicationProfileServiceEnabled"`
-	EnableMalwareDetection         bool                                 `mapstructure:"malwareDetectionEnabled"`
-	EnablePrometheusExporter       bool                                 `mapstructure:"prometheusExporterEnabled"`
-	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
-	EnableHttpDetection            bool                                 `mapstructure:"httpDetectionEnabled"`
-	EnableNetworkTracing           bool                                 `mapstructure:"networkServiceEnabled"`
-	EnableNetworkStreaming         bool                                 `mapstructure:"networkStreamingEnabled"`
-	EnableNodeProfile              bool                                 `mapstructure:"nodeProfileServiceEnabled"`
-	EnableHostMalwareSensor        bool                                 `mapstructure:"hostMalwareSensorEnabled"`
-	EnableHostNetworkSensor        bool                                 `mapstructure:"hostNetworkSensorEnabled"`
-	EnableFIM                      bool                                 `mapstructure:"fimEnabled"`
-	NodeProfileInterval            time.Duration                        `mapstructure:"nodeProfileInterval"`
-	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
-	ExcludeLabels                  map[string][]string                  `mapstructure:"excludeLabels"`
-	ExcludeNamespaces              []string                             `mapstructure:"excludeNamespaces"`
-	IncludeNamespaces              []string                             `mapstructure:"includeNamespaces"`
-	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
-	EnableEmbeddedSboms            bool                                 `mapstructure:"enableEmbeddedSBOMs"`
-	NamespaceName                  string                               `mapstructure:"namespaceName"`
-	NodeName                       string                               `mapstructure:"nodeName"`
-	PodName                        string                               `mapstructure:"podName"`
-	KubernetesMode                 bool                                 `mapstructure:"kubernetesMode"`
-	NetworkStreamingInterval       time.Duration                        `mapstructure:"networkStreamingInterval"`
-	WorkerPoolSize                 int                                  `mapstructure:"workerPoolSize"`
-	WorkerChannelSize              int                                  `mapstructure:"workerChannelSize"`
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
-	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
-	TestMode                       bool                                 `mapstructure:"testMode"`
-	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
-	ProfilesCacheRefreshRate       time.Duration                        `mapstructure:"profilesCacheRefreshRate"`
-	RuleCoolDown                   rulecooldown.RuleCooldownConfig      `mapstructure:"ruleCooldown"`
-	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
-	ProcfsScanInterval             time.Duration                        `mapstructure:"procfsScanInterval"`
-	ProcfsPidScanInterval          time.Duration                        `mapstructure:"procfsPidScanInterval"`
-	OrderedEventQueue              OrderedEventQueueConfig              `mapstructure:"orderedEventQueue"`
-	ExitCleanup                    processtreecreator.ExitCleanupConfig `mapstructure:"exitCleanup"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
-	IgnoreRuleBindings             bool                                 `mapstructure:"ignoreRuleBindings"`
-	DNSCacheSize                   int                                  `mapstructure:"dnsCacheSize"`
-	DCapSys                        bool                                 `mapstructure:"dCapSys"`
 	ContainerEolNotificationBuffer int                                  `mapstructure:"containerEolNotificationBuffer"`
+	DBpf                           bool                                 `mapstructure:"dBpf"`
+	DCapSys                        bool                                 `mapstructure:"dCapSys"`
 	DDns                           bool                                 `mapstructure:"dDns"`
 	DExec                          bool                                 `mapstructure:"dExec"`
 	DExit                          bool                                 `mapstructure:"dExit"`
@@ -77,6 +31,8 @@ type Config struct {
 	DHardlink                      bool                                 `mapstructure:"dHardlink"`
 	DHttp                          bool                                 `mapstructure:"dHttp"`
 	DIouring                       bool                                 `mapstructure:"dIouring"`
+	DKmod                          bool                                 `mapstructure:"dKmod"`
+	DNSCacheSize                   int                                  `mapstructure:"dnsCacheSize"`
 	DNetwork                       bool                                 `mapstructure:"dNetwork"`
 	DOpen                          bool                                 `mapstructure:"dOpen"`
 	DPtrace                        bool                                 `mapstructure:"dPtrace"`
@@ -84,11 +40,56 @@ type Config struct {
 	DSeccomp                       bool                                 `mapstructure:"dSeccomp"`
 	DSsh                           bool                                 `mapstructure:"dSsh"`
 	DSymlink                       bool                                 `mapstructure:"dSymlink"`
-	DKmod                          bool                                 `mapstructure:"dKmod"`
-	DUnshare                       bool                                 `mapstructure:"dUnshare"`
-	DBpf                           bool                                 `mapstructure:"dBpf"`
 	DTop                           bool                                 `mapstructure:"dTop"`
+	DUnshare                       bool                                 `mapstructure:"dUnshare"`
+	EnableApplicationProfile       bool                                 `mapstructure:"applicationProfileServiceEnabled"`
+	EnableBackendStorage           bool                                 `mapstructure:"backendStorageEnabled"`
+	EnableEmbeddedSboms            bool                                 `mapstructure:"enableEmbeddedSBOMs"`
+	EnableFIM                      bool                                 `mapstructure:"fimEnabled"`
+	EnableFullPathTracing          bool                                 `mapstructure:"fullPathTracingEnabled"`
+	EnableHostMalwareSensor        bool                                 `mapstructure:"hostMalwareSensorEnabled"`
+	EnableHostNetworkSensor        bool                                 `mapstructure:"hostNetworkSensorEnabled"`
+	EnableHttpDetection            bool                                 `mapstructure:"httpDetectionEnabled"`
+	EnableMalwareDetection         bool                                 `mapstructure:"malwareDetectionEnabled"`
+	EnableNetworkStreaming         bool                                 `mapstructure:"networkStreamingEnabled"`
+	EnableNetworkTracing           bool                                 `mapstructure:"networkServiceEnabled"`
+	EnableNodeProfile              bool                                 `mapstructure:"nodeProfileServiceEnabled"`
+	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
+	EnablePrometheusExporter       bool                                 `mapstructure:"prometheusExporterEnabled"`
+	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
+	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
+	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
+	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
+	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
+	ExcludeLabels                  map[string][]string                  `mapstructure:"excludeLabels"`
+	ExcludeNamespaces              []string                             `mapstructure:"excludeNamespaces"`
+	ExitCleanup                    processtreecreator.ExitCleanupConfig `mapstructure:"exitCleanup"`
+	Exporters                      exporters.ExportersConfig            `mapstructure:"exporters"`
 	FIM                            FIMConfig                            `mapstructure:"fim"`
+	IgnoreRuleBindings             bool                                 `mapstructure:"ignoreRuleBindings"`
+	IncludeNamespaces              []string                             `mapstructure:"includeNamespaces"`
+	InitialDelay                   time.Duration                        `mapstructure:"initialDelay"`
+	KubernetesMode                 bool                                 `mapstructure:"kubernetesMode"`
+	MaxDelaySeconds                int                                  `mapstructure:"maxDelaySeconds"`
+	MaxImageSize                   int64                                `mapstructure:"maxImageSize"`
+	MaxJitterPercentage            int                                  `mapstructure:"maxJitterPercentage"`
+	MaxSBOMSize                    int                                  `mapstructure:"maxSBOMSize"`
+	MaxSniffingTime                time.Duration                        `mapstructure:"maxSniffingTimePerContainer"`
+	MaxTsProfileSize               int64                                `mapstructure:"maxTsProfileSize"`
+	NamespaceName                  string                               `mapstructure:"namespaceName"`
+	NetworkStreamingInterval       time.Duration                        `mapstructure:"networkStreamingInterval"`
+	NodeName                       string                               `mapstructure:"nodeName"`
+	NodeProfileInterval            time.Duration                        `mapstructure:"nodeProfileInterval"`
+	OrderedEventQueue              OrderedEventQueueConfig              `mapstructure:"orderedEventQueue"`
+	PodName                        string                               `mapstructure:"podName"`
+	ProcfsPidScanInterval          time.Duration                        `mapstructure:"procfsPidScanInterval"`
+	ProcfsScanInterval             time.Duration                        `mapstructure:"procfsScanInterval"`
+	ProfilesCacheRefreshRate       time.Duration                        `mapstructure:"profilesCacheRefreshRate"`
+	RuleCoolDown                   rulecooldown.RuleCooldownConfig      `mapstructure:"ruleCooldown"`
+	TestMode                       bool                                 `mapstructure:"testMode"`
+	UpdateDataPeriod               time.Duration                        `mapstructure:"updateDataPeriod"`
+	WorkerChannelSize              int                                  `mapstructure:"workerChannelSize"`
+	WorkerPoolSize                 int                                  `mapstructure:"workerPoolSize"`
 }
 
 // FIMConfig defines the configuration for File Integrity Monitoring
