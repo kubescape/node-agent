@@ -82,12 +82,13 @@ type ContainerWatcher struct {
 	thirdPartyContainerReceivers  mapset.Set[containerwatcher.ContainerReceiver]
 
 	// Cache and state
-	objectCache          objectcache.ObjectCache
-	ruleManagedPods      mapset.Set[string]
-	metrics              metricsmanager.MetricsManager
-	ruleBindingPodNotify *chan rulebindingmanager.RuleBindingNotify
-	runtime              *containerutilsTypes.RuntimeConfig
-	pool                 *workerpool.WorkerPool
+	objectCache             objectcache.ObjectCache
+	ruleManagedPods         mapset.Set[string]
+	ruleBindingsInitialized bool // tracks whether any rule binding notifications have been processed
+	metrics                 metricsmanager.MetricsManager
+	ruleBindingPodNotify    *chan rulebindingmanager.RuleBindingNotify
+	runtime                 *containerutilsTypes.RuntimeConfig
+	pool                    *workerpool.WorkerPool
 
 	// Lifecycle
 	gadgetRuntime                   runtime.Runtime
