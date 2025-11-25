@@ -160,7 +160,7 @@ func main() {
 	// Create clients
 	logger.L().Info("Kubernetes mode is true")
 	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient, err := storage.CreateStorage(ctx, clusterData.Namespace, cfg.UpdateDataPeriod)
+	storageClient, err := storage.CreateStorage(clusterData.Namespace)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
@@ -174,7 +174,7 @@ func main() {
 	}
 
 	// Create watchers
-	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
+	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.GetStorageClient(), cfg.SkipNamespace)
 	k8sObjectCache, err := k8scache.NewK8sObjectCache(cfg.NodeName, k8sClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
@@ -188,7 +188,7 @@ func main() {
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SeccompManager", helpers.Error(err))
 		}
-		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(storageClient.StorageClient, seccompManager)
+		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(storageClient.GetStorageClient(), seccompManager)
 		dWatcher.AddAdaptor(seccompWatcher)
 	} else {
 		seccompManager = seccompmanager.NewSeccompManagerMock()
@@ -267,10 +267,10 @@ func main() {
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
-		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient.StorageClient, k8sObjectCache)
+		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient, k8sObjectCache)
 		apc.Start(ctx)
 
-		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient.StorageClient, k8sObjectCache)
+		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient, k8sObjectCache)
 		nnc.Start(ctx)
 
 		dc := dnscache.NewDnsCache(dnsResolver)
