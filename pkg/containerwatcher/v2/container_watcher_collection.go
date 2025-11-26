@@ -129,6 +129,9 @@ func (cw *ContainerWatcher) startRunningContainers() {
 func (cw *ContainerWatcher) addRunningContainers(notf *rulebindingmanager.RuleBindingNotify) {
 	pod := notf.GetPod()
 
+	// Mark that we've received at least one rule binding notification
+	cw.ruleBindingsInitialized = true
+
 	// skip containers that should be ignored
 	if cw.cfg.IgnoreContainer(pod.GetNamespace(), pod.GetName(), pod.GetLabels()) {
 		logger.L().Debug("ContainerWatcher - skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
