@@ -3,9 +3,7 @@ package exporters
 import (
 	"os"
 	"testing"
-	"time"
 
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -85,19 +83,6 @@ func (m *MockFileHashResult) GetRuntimeProcessDetails() apitypes.ProcessTree {
 		},
 		ContainerID: "testcontainerid",
 		UniqueID:    1,
-	}
-}
-
-func (m *MockFileHashResult) GetTriggerEvent() igtypes.Event {
-	return igtypes.Event{
-		CommonData: igtypes.CommonData{
-			Runtime: igtypes.BasicRuntimeMetadata{
-				ContainerID: "testcontainerid",
-			},
-		},
-		Timestamp: igtypes.Time(time.Now().UnixNano()),
-		Type:      igtypes.EventType("testevent"),
-		Message:   "testmessage",
 	}
 }
 

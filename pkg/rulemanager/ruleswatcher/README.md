@@ -71,14 +71,14 @@ spec:
   description: "An example security rule"
   expressions:
     message: "Security violation detected"
-    unique_id: "example-rule-001"
-    rule_expression:
-      - event_type: "exec"
+    uniqueId: "example-rule-001"
+    ruleExpression:
+      - eventType: "exec"
         expression: "process.name == 'suspicious'"
-  profile_dependency:
+  profileDependency:
     required: 0
   severity: 5
-  support_policy: true
+  supportPolicy: true
   tags: ["security", "example"]
   state: {}
 ```

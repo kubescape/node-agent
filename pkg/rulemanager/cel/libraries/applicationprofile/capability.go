@@ -22,7 +22,7 @@ func (l *apLibrary) wasCapabilityUsed(containerID, capabilityName ref.Val) ref.V
 		return types.MaybeNoSuchOverloadErr(capabilityName)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}

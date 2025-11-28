@@ -47,7 +47,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
-	processtree "github.com/kubescape/node-agent/pkg/processtree"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
@@ -338,7 +338,7 @@ func main() {
 	if err := igconfig.Config.ReadInConfig(); err != nil {
 		logger.L().Warning("reading IG config", helpers.Error(err))
 	}
-	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName)
+	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName, "", "")
 	if err != nil {
 		logger.L().Fatal("error creating IG Kubernetes client", helpers.Error(err))
 	}

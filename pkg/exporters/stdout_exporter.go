@@ -41,7 +41,6 @@ func (exporter *StdoutExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	processTree := failedRule.GetRuntimeProcessDetails().ProcessTree
 	exporter.logger.WithFields(log.Fields{
 		"message":               failedRule.GetRuleAlert().RuleDescription,
-		"event":                 failedRule.GetTriggerEvent(),
 		"BaseRuntimeMetadata":   failedRule.GetBaseRuntimeAlert(),
 		"RuntimeProcessDetails": failedRule.GetRuntimeProcessDetails(),
 		"RuntimeK8sDetails":     failedRule.GetRuntimeAlertK8sDetails(),
@@ -56,7 +55,6 @@ func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.Ma
 
 	exporter.logger.WithFields(log.Fields{
 		"message":               malwareResult.GetMalwareRuntimeAlert().MalwareDescription,
-		"event":                 malwareResult.GetTriggerEvent(),
 		"BaseRuntimeMetadata":   malwareResult.GetBasicRuntimeAlert(),
 		"RuntimeProcessDetails": malwareResult.GetRuntimeProcessDetails(),
 		"RuntimeK8sDetails":     malwareResult.GetRuntimeAlertK8sDetails(),

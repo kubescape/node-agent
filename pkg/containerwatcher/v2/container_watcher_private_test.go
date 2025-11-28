@@ -104,10 +104,11 @@ func TestAddRunningContainers(t *testing.T) {
 			slices.Sort(tt.expectedRuleManagedPods)
 
 			ncw := ContainerWatcher{
-				cfg:                 config.Config{NamespaceName: tt.ignore.namespace},
-				ruleManagedPods:     mapset.NewSet[string](tt.preRuleManagedPods...),
-				containerCollection: &containercollection.ContainerCollection{},
-				objectCache:         &objectcache.ObjectCacheMock{},
+				cfg:                     config.Config{NamespaceName: tt.ignore.namespace},
+				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
+				ruleBindingsInitialized: false,
+				containerCollection:     &containercollection.ContainerCollection{},
+				objectCache:             &objectcache.ObjectCacheMock{},
 			}
 
 			ncw.addRunningContainers(tt.notify)
@@ -116,6 +117,8 @@ func TestAddRunningContainers(t *testing.T) {
 			slices.Sort(r)
 
 			assert.Equal(t, tt.expectedRuleManagedPods, r)
+			// Verify that ruleBindingsInitialized is set to true after processing a notification
+			assert.True(t, ncw.ruleBindingsInitialized, "ruleBindingsInitialized should be set to true after addRunningContainers")
 		})
 	}
 }
@@ -128,17 +131,47 @@ func TestUnregisterContainer(t *testing.T) {
 		preRuleManagedPods      []string
 		podToContainers         map[string][]string
 		expectedContainers      []string
+		enableRuntimeDetection  bool
+		ruleBindingsInitialized bool
 	}{
 		{
-			name:                    "Test unregister container",
+			name:                    "Test unregister container with runtime detection enabled and bindings initialized",
 			unregisterContainer:     "container1",
 			unregisterContainersPod: "pod1",
 			podToContainers: map[string][]string{
 				"pod1": {"container1"},
 				"pod2": {"container2"},
 			},
-			preRuleManagedPods: []string{"test/pod2"},
-			expectedContainers: []string{"container2"},
+			preRuleManagedPods:      []string{"test/pod2"},
+			expectedContainers:      []string{"container2"},
+			enableRuntimeDetection:  true,
+			ruleBindingsInitialized: true,
+		},
+		{
+			name:                    "Test unregister container without runtime detection",
+			unregisterContainer:     "container1",
+			unregisterContainersPod: "pod1",
+			podToContainers: map[string][]string{
+				"pod1": {"container1"},
+				"pod2": {"container2"},
+			},
+			preRuleManagedPods:      []string{"test/pod2"},
+			expectedContainers:      []string{"container2"},
+			enableRuntimeDetection:  false,
+			ruleBindingsInitialized: false,
+		},
+		{
+			name:                    "Test keep container when runtime detection enabled but bindings not initialized",
+			unregisterContainer:     "container1",
+			unregisterContainersPod: "pod1",
+			podToContainers: map[string][]string{
+				"pod1": {"container1"},
+				"pod2": {"container2"},
+			},
+			preRuleManagedPods:      []string{},
+			expectedContainers:      []string{"container1", "container2"},
+			enableRuntimeDetection:  true,
+			ruleBindingsInitialized: false,
 		},
 		{
 			name:                    "Test still in TimeBasedContainers",
@@ -148,38 +181,58 @@ func TestUnregisterContainer(t *testing.T) {
 				"pod1": {"container1"},
 				"pod2": {"container2"},
 			},
-			preRuleManagedPods: []string{"test/pod2"},
-			expectedContainers: []string{"container2"},
+			preRuleManagedPods:      []string{"test/pod2"},
+			expectedContainers:      []string{"container2"},
+			enableRuntimeDetection:  true,
+			ruleBindingsInitialized: true,
 		},
 		{
-			name:                    "Test still in RuleManagedPods",
+			name:                    "Test still in RuleManagedPods with runtime detection enabled",
 			unregisterContainer:     "container1",
 			unregisterContainersPod: "pod1",
 			podToContainers: map[string][]string{
 				"pod1": {"container1", "container2"},
 			},
-			preRuleManagedPods: []string{"test/pod1"},
-			expectedContainers: []string{"container1", "container2"},
+			preRuleManagedPods:      []string{"test/pod1"},
+			expectedContainers:      []string{"container1", "container2"},
+			enableRuntimeDetection:  true,
+			ruleBindingsInitialized: true,
 		},
 		{
-			name:                    "Test still in both",
+			name:                    "Test in RuleManagedPods but runtime detection disabled",
+			unregisterContainer:     "container1",
+			unregisterContainersPod: "pod1",
+			podToContainers: map[string][]string{
+				"pod1": {"container1", "container2"},
+			},
+			preRuleManagedPods:      []string{"test/pod1"},
+			expectedContainers:      []string{"container2"},
+			enableRuntimeDetection:  false,
+			ruleBindingsInitialized: true,
+		},
+		{
+			name:                    "Test still in both with runtime detection enabled",
 			unregisterContainer:     "container1",
 			unregisterContainersPod: "pod1",
 			podToContainers: map[string][]string{
 				"pod1": {"container1"},
 				"pod2": {"container2"},
 			},
-			preRuleManagedPods: []string{"test/pod1", "test/pod2"},
-			expectedContainers: []string{"container1", "container2"},
+			preRuleManagedPods:      []string{"test/pod1", "test/pod2"},
+			expectedContainers:      []string{"container1", "container2"},
+			enableRuntimeDetection:  true,
+			ruleBindingsInitialized: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ncw := ContainerWatcher{
-				ruleManagedPods:     mapset.NewSet[string](tt.preRuleManagedPods...),
-				containerCollection: &containercollection.ContainerCollection{},
-				objectCache:         &objectcache.ObjectCacheMock{},
+				cfg:                     config.Config{EnableRuntimeDetection: tt.enableRuntimeDetection},
+				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
+				ruleBindingsInitialized: tt.ruleBindingsInitialized,
+				containerCollection:     &containercollection.ContainerCollection{},
+				objectCache:             &objectcache.ObjectCacheMock{},
 			}
 
 			for pod, containers := range tt.podToContainers {
