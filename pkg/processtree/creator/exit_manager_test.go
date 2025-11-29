@@ -43,6 +43,11 @@ func (m *mockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree *ma
 func (m *mockContainerProcessTree) GetPidByContainerID(containerID string) (uint32, error) {
 	return 0, nil
 }
+func (m *mockContainerProcessTree) RegisterContainerShim(containerID string, shimPID uint32, containerPID uint32) {
+}
+func (m *mockContainerProcessTree) GetContainerInfo(containerID string) (shimPID, containerPID uint32, exists bool) {
+	return 0, 0, false
+}
 
 // Mock reparenting logic
 type mockReparentingLogic struct{}
