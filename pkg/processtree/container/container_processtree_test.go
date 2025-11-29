@@ -2,6 +2,7 @@ package containerprocesstree
 
 import (
 	"testing"
+	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
@@ -30,16 +31,22 @@ func TestNewContainerProcessTree(t *testing.T) {
 func TestContainerProcessTreeImpl_ContainerCallback_AddContainer(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
-	// Create a mock container event
+	// Manually register a container with shim info
 	containerID := "test-container-123"
+	shimPID := uint32(50)
 	containerPID := uint32(100)
 
-	cpt.containerIdToShimPid[containerID] = containerPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: containerPID,
+		registeredAt: time.Now(),
+	}
 
-	// Verify the container PID was stored
-	storedPID, exists := cpt.containerIdToShimPid[containerID]
+	// Verify the container info was stored
+	info, exists := cpt.containerIdToInfo[containerID]
 	assert.True(t, exists)
-	assert.Equal(t, containerPID, storedPID)
+	assert.Equal(t, shimPID, info.shimPID)
+	assert.Equal(t, containerPID, info.containerPID)
 }
 
 func TestContainerProcessTreeImpl_ContainerCallback_RemoveContainer(t *testing.T) {
@@ -47,8 +54,13 @@ func TestContainerProcessTreeImpl_ContainerCallback_RemoveContainer(t *testing.T
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
+	shimPID := uint32(50)
 	containerPID := uint32(100)
-	cpt.containerIdToShimPid[containerID] = containerPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: containerPID,
+		registeredAt: time.Now(),
+	}
 
 	// Create container remove event
 	event := containercollection.PubSubEvent{
@@ -66,7 +78,7 @@ func TestContainerProcessTreeImpl_ContainerCallback_RemoveContainer(t *testing.T
 	cpt.ContainerCallback(event)
 
 	// Verify the container was removed
-	_, exists := cpt.containerIdToShimPid[containerID]
+	_, exists := cpt.containerIdToInfo[containerID]
 	assert.False(t, exists)
 }
 
@@ -76,7 +88,11 @@ func TestContainerProcessTreeImpl_GetPidBranch_Success(t *testing.T) {
 	// Pre-populate with a container
 	containerID := "test-container-123"
 	shimPID := uint32(50)
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
 	// Create a tree structure: shim (50) -> nginx (100) -> nginx-worker (101)
 	nginxWorker := &apitypes.Process{
@@ -157,7 +173,11 @@ func TestContainerProcessTreeImpl_GetPidBranch_ShimNotFound(t *testing.T) {
 	// Pre-populate with a container but shim PID doesn't exist in tree
 	containerID := "test-container-123"
 	shimPID := uint32(999) // Non-existent PID
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
 	fullTree := map[uint32]*apitypes.Process{
 		1: {
@@ -180,7 +200,11 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetNotFound(t *testing.T) {
 	// Pre-populate with a container
 	containerID := "test-container-123"
 	shimPID := uint32(50)
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
 	shimProcess := &apitypes.Process{
 		PID:         50, // shim
@@ -211,13 +235,17 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetNotInContainer(t *testing.T
 	// Pre-populate with a container
 	containerID := "test-container-123"
 	shimPID := uint32(50)
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
-	// Create a process that's not in the container's subtree
+	// Process outside container subtree
 	outsideProcess := &apitypes.Process{
 		PID:         200,
-		PPID:        1, // Direct child of init, not of shim
-		Comm:        "outside-process",
+		PPID:        1, // Parent is init, not shim
+		Comm:        "outside",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
@@ -238,10 +266,10 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetNotInContainer(t *testing.T
 		200: outsideProcess,
 	}
 
-	// Test with target PID that's not in the container's subtree
+	// Test with target PID not in container's subtree
 	result, err := cpt.GetPidBranch(containerID, 200, createSafeMapFromData(fullTree))
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "target process 200 is not within container test-container-123 subtree")
+	assert.Contains(t, err.Error(), "target process 200 is not within container")
 	assert.Equal(t, apitypes.Process{}, result)
 }
 
@@ -251,49 +279,53 @@ func TestContainerProcessTreeImpl_GetPidBranch_DeepTree(t *testing.T) {
 	// Pre-populate with a container
 	containerID := "test-container-123"
 	shimPID := uint32(50)
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
-	// Create a deep tree: shim (50) -> nginx (100) -> worker (101) -> child (102) -> grandchild (103)
-	grandchild := &apitypes.Process{
+	// Create a deep tree: shim (50) -> bash (100) -> python (101) -> worker (102) -> task (103)
+	taskProcess := &apitypes.Process{
 		PID:         103,
 		PPID:        102,
-		Comm:        "grandchild",
+		Comm:        "task",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
-	child := &apitypes.Process{
+	workerProcess := &apitypes.Process{
 		PID:  102,
 		PPID: 101,
-		Comm: "child",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "grandchild", PID: 103}: grandchild,
-		},
-	}
-
-	worker := &apitypes.Process{
-		PID:  101,
-		PPID: 100,
 		Comm: "worker",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "child", PID: 102}: child,
+			{Comm: "task", PID: 103}: taskProcess,
 		},
 	}
 
-	nginx := &apitypes.Process{
+	pythonProcess := &apitypes.Process{
+		PID:  101,
+		PPID: 100,
+		Comm: "python",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			{Comm: "worker", PID: 102}: workerProcess,
+		},
+	}
+
+	bashProcess := &apitypes.Process{
 		PID:  100,
 		PPID: 50, // parent is shim
-		Comm: "nginx",
+		Comm: "bash",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "worker", PID: 101}: worker,
+			{Comm: "python", PID: 101}: pythonProcess,
 		},
 	}
 
-	shim := &apitypes.Process{
+	shimProcess := &apitypes.Process{
 		PID:  50, // shim
 		PPID: 1,
 		Comm: "containerd-shim",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "nginx", PID: 100}: nginx,
+			{Comm: "bash", PID: 100}: bashProcess,
 		},
 	}
 
@@ -303,36 +335,35 @@ func TestContainerProcessTreeImpl_GetPidBranch_DeepTree(t *testing.T) {
 			PPID: 0,
 			Comm: "init",
 		},
-		50:  shim,
-		100: nginx,
-		101: worker,
-		102: child,
-		103: grandchild,
+		50:  shimProcess,
+		100: bashProcess,
+		101: pythonProcess,
+		102: workerProcess,
+		103: taskProcess,
 	}
 
-	// Test getting branch for grandchild (PID 103)
-	// Should return nginx (PID 100) as the root, but only with the path to grandchild
+	// Test getting branch for task (PID 103) - should get entire path from bash to task
 	result, err := cpt.GetPidBranch(containerID, 103, createSafeMapFromData(fullTree))
 	assert.NoError(t, err)
-	assert.Equal(t, uint32(100), result.PID)
-	assert.Equal(t, "nginx", result.Comm)
+	assert.Equal(t, uint32(100), result.PID) // Root should be bash
+	assert.Equal(t, "bash", result.Comm)
 
-	// Verify the branch structure: nginx -> worker -> child -> grandchild (path only)
+	// Verify the chain: bash -> python -> worker -> task
 	assert.Len(t, result.ChildrenMap, 1)
-	workerNode := result.ChildrenMap[apitypes.CommPID{Comm: "worker", PID: 101}]
-	assert.NotNil(t, workerNode)
-	assert.Equal(t, uint32(101), workerNode.PID)
-	assert.Len(t, workerNode.ChildrenMap, 1) // Only the path child, not all children
+	pythonResult, exists := result.ChildrenMap[apitypes.CommPID{Comm: "python", PID: 101}]
+	assert.True(t, exists)
+	assert.Equal(t, uint32(101), pythonResult.PID)
 
-	childNode := workerNode.ChildrenMap[apitypes.CommPID{Comm: "child", PID: 102}]
-	assert.NotNil(t, childNode)
-	assert.Equal(t, uint32(102), childNode.PID)
-	assert.Len(t, childNode.ChildrenMap, 1) // Only the path child, not all children
+	assert.Len(t, pythonResult.ChildrenMap, 1)
+	workerResult, exists := pythonResult.ChildrenMap[apitypes.CommPID{Comm: "worker", PID: 102}]
+	assert.True(t, exists)
+	assert.Equal(t, uint32(102), workerResult.PID)
 
-	grandchildNode := childNode.ChildrenMap[apitypes.CommPID{Comm: "grandchild", PID: 103}]
-	assert.NotNil(t, grandchildNode)
-	assert.Equal(t, uint32(103), grandchildNode.PID)
-	assert.Len(t, grandchildNode.ChildrenMap, 0) // Leaf node
+	assert.Len(t, workerResult.ChildrenMap, 1)
+	taskResult, exists := workerResult.ChildrenMap[apitypes.CommPID{Comm: "task", PID: 103}]
+	assert.True(t, exists)
+	assert.Equal(t, uint32(103), taskResult.PID)
+	assert.Len(t, taskResult.ChildrenMap, 0) // task has no children
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_TargetIsShimChild(t *testing.T) {
@@ -341,22 +372,26 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetIsShimChild(t *testing.T) {
 	// Pre-populate with a container
 	containerID := "test-container-123"
 	shimPID := uint32(50)
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
 	// Create a simple tree: shim (50) -> nginx (100)
-	nginx := &apitypes.Process{
+	nginxProcess := &apitypes.Process{
 		PID:         100,
-		PPID:        50, // direct child of shim
+		PPID:        50, // parent is shim
 		Comm:        "nginx",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
-	shim := &apitypes.Process{
+	shimProcess := &apitypes.Process{
 		PID:  50, // shim
 		PPID: 1,
 		Comm: "containerd-shim",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "nginx", PID: 100}: nginx,
+			{Comm: "nginx", PID: 100}: nginxProcess,
 		},
 	}
 
@@ -366,115 +401,115 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetIsShimChild(t *testing.T) {
 			PPID: 0,
 			Comm: "init",
 		},
-		50:  shim,
-		100: nginx,
+		50:  shimProcess,
+		100: nginxProcess,
 	}
 
-	// Test getting branch for nginx (PID 100) which is a direct child of shim
-	// Should return nginx (PID 100) as the root with no children (since nginx is the target)
+	// Test getting branch for nginx (direct child of shim)
 	result, err := cpt.GetPidBranch(containerID, 100, createSafeMapFromData(fullTree))
 	assert.NoError(t, err)
 	assert.Equal(t, uint32(100), result.PID)
 	assert.Equal(t, "nginx", result.Comm)
-	assert.Equal(t, uint32(50), result.PPID) // PPID should still be 50 (shim)
-	assert.Len(t, result.ChildrenMap, 0)     // No children since nginx is the target
+	assert.Len(t, result.ChildrenMap, 0) // No children in the branch since target is nginx itself
 }
 
 func TestContainerProcessTreeImpl_GetPidByContainerID_Success(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
-	// Pre-populate with containers
-	containerID1 := "test-container-123"
-	containerID2 := "test-container-456"
-	shimPID1 := uint32(50)
-	shimPID2 := uint32(60)
+	// Pre-populate with a container
+	containerID := "test-container-123"
+	shimPID := uint32(50)
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
-	cpt.containerIdToShimPid[containerID1] = shimPID1
-	cpt.containerIdToShimPid[containerID2] = shimPID2
-
-	// Test getting PID for existing containers
-	pid1, err := cpt.GetPidByContainerID(containerID1)
+	// Test getting shim PID
+	result, err := cpt.GetPidByContainerID(containerID)
 	assert.NoError(t, err)
-	assert.Equal(t, shimPID1, pid1)
-
-	pid2, err := cpt.GetPidByContainerID(containerID2)
-	assert.NoError(t, err)
-	assert.Equal(t, shimPID2, pid2)
+	assert.Equal(t, shimPID, result)
 }
 
 func TestContainerProcessTreeImpl_GetPidByContainerID_NotFound(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
-	// Test getting PID for non-existent container
-	pid, err := cpt.GetPidByContainerID("non-existent-container")
+	// Test with non-existent container
+	result, err := cpt.GetPidByContainerID("non-existent")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "container non-existent-container not found")
-	assert.Equal(t, uint32(0), pid)
+	assert.Equal(t, uint32(0), result)
+}
+
+func TestContainerProcessTreeImpl_GetPidByContainerID_FallbackToContainerPID(t *testing.T) {
+	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+
+	// Pre-populate with a container without shim PID
+	containerID := "test-container-123"
+	containerPID := uint32(100)
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      0, // Shim PID not yet discovered
+		containerPID: containerPID,
+		registeredAt: time.Now(),
+	}
+
+	// Test getting PID - should fall back to container PID
+	result, err := cpt.GetPidByContainerID(containerID)
+	assert.NoError(t, err)
+	assert.Equal(t, containerPID, result)
 }
 
 func TestContainerProcessTreeImpl_GetShimPIDForProcess_Success(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with containers
-	containerID1 := "test-container-123"
-	containerID2 := "test-container-456"
+	containerID1 := "container-1"
 	shimPID1 := uint32(50)
+	cpt.containerIdToInfo[containerID1] = &containerInfo{
+		shimPID:      shimPID1,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
+
+	containerID2 := "container-2"
 	shimPID2 := uint32(60)
+	cpt.containerIdToInfo[containerID2] = &containerInfo{
+		shimPID:      shimPID2,
+		containerPID: 200,
+		registeredAt: time.Now(),
+	}
 
-	cpt.containerIdToShimPid[containerID1] = shimPID1
-	cpt.containerIdToShimPid[containerID2] = shimPID2
-
-	// Create process tree with processes under different containers
-	// Container 1: shim1 (50) -> nginx (100) -> worker (101)
-	// Container 2: shim2 (60) -> redis (200) -> child (201)
-
-	worker := &apitypes.Process{
-		PID:         101,
-		PPID:        100,
-		Comm:        "nginx-worker",
+	// Create tree structure with two containers
+	// Container 1: shim1 (50) -> nginx (100)
+	nginxProcess := &apitypes.Process{
+		PID:         100,
+		PPID:        50,
+		Comm:        "nginx",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
-	nginx := &apitypes.Process{
-		PID:  100,
-		PPID: 50, // parent is shim1
-		Comm: "nginx",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "nginx-worker", PID: 101}: worker,
-		},
-	}
-
-	shim1 := &apitypes.Process{
-		PID:  50, // shim1
+	shimProcess1 := &apitypes.Process{
+		PID:  50,
 		PPID: 1,
 		Comm: "containerd-shim",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "nginx", PID: 100}: nginx,
+			{Comm: "nginx", PID: 100}: nginxProcess,
 		},
 	}
 
-	child := &apitypes.Process{
-		PID:         201,
-		PPID:        200,
-		Comm:        "redis-child",
+	// Container 2: shim2 (60) -> redis (200)
+	redisProcess := &apitypes.Process{
+		PID:         200,
+		PPID:        60,
+		Comm:        "redis",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
-	redis := &apitypes.Process{
-		PID:  200,
-		PPID: 60, // parent is shim2
-		Comm: "redis",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "redis-child", PID: 201}: child,
-		},
-	}
-
-	shim2 := &apitypes.Process{
-		PID:  60, // shim2
+	shimProcess2 := &apitypes.Process{
+		PID:  60,
 		PPID: 1,
 		Comm: "containerd-shim",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "redis", PID: 200}: redis,
+			{Comm: "redis", PID: 200}: redisProcess,
 		},
 	}
 
@@ -484,31 +519,23 @@ func TestContainerProcessTreeImpl_GetShimPIDForProcess_Success(t *testing.T) {
 			PPID: 0,
 			Comm: "init",
 		},
-		50:  shim1,
-		60:  shim2,
-		100: nginx,
-		101: worker,
-		200: redis,
-		201: child,
+		50:  shimProcess1,
+		60:  shimProcess2,
+		100: nginxProcess,
+		200: redisProcess,
 	}
 
-	// Test finding shim PID for processes in container 1
-	shimPID, found := cpt.GetShimPIDForProcess(100, createSafeMapFromData(fullTree)) // nginx
-	assert.True(t, found)
-	assert.Equal(t, shimPID1, shimPID)
+	safeTree := createSafeMapFromData(fullTree)
 
-	shimPID, found = cpt.GetShimPIDForProcess(101, createSafeMapFromData(fullTree)) // worker
+	// Test getting shim for nginx (PID 100) - should return shim1
+	result, found := cpt.GetShimPIDForProcess(100, safeTree)
 	assert.True(t, found)
-	assert.Equal(t, shimPID1, shimPID)
+	assert.Equal(t, shimPID1, result)
 
-	// Test finding shim PID for processes in container 2
-	shimPID, found = cpt.GetShimPIDForProcess(200, createSafeMapFromData(fullTree)) // redis
+	// Test getting shim for redis (PID 200) - should return shim2
+	result, found = cpt.GetShimPIDForProcess(200, safeTree)
 	assert.True(t, found)
-	assert.Equal(t, shimPID2, shimPID)
-
-	shimPID, found = cpt.GetShimPIDForProcess(201, createSafeMapFromData(fullTree)) // child
-	assert.True(t, found)
-	assert.Equal(t, shimPID2, shimPID)
+	assert.Equal(t, shimPID2, result)
 }
 
 func TestContainerProcessTreeImpl_GetShimPIDForProcess_NotFound(t *testing.T) {
@@ -517,13 +544,24 @@ func TestContainerProcessTreeImpl_GetShimPIDForProcess_NotFound(t *testing.T) {
 	// Pre-populate with a container
 	containerID := "test-container-123"
 	shimPID := uint32(50)
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
-	// Create process tree
-	shim := &apitypes.Process{
-		PID:         50, // shim
+	shimProcess := &apitypes.Process{
+		PID:         50,
 		PPID:        1,
 		Comm:        "containerd-shim",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+	}
+
+	// Process outside container
+	outsideProcess := &apitypes.Process{
+		PID:         300,
+		PPID:        1, // Parent is init, not shim
+		Comm:        "outside",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
@@ -533,26 +571,14 @@ func TestContainerProcessTreeImpl_GetShimPIDForProcess_NotFound(t *testing.T) {
 			PPID: 0,
 			Comm: "init",
 		},
-		50: shim,
+		50:  shimProcess,
+		300: outsideProcess,
 	}
 
-	// Test with process not in any container subtree
-	shimPIDResult, found := cpt.GetShimPIDForProcess(999, createSafeMapFromData(fullTree)) // Non-existent process
+	// Test getting shim for process outside container
+	result, found := cpt.GetShimPIDForProcess(300, createSafeMapFromData(fullTree))
 	assert.False(t, found)
-	assert.Equal(t, uint32(0), shimPIDResult)
-
-	// Test with process that exists but is not under any container
-	outsideProcess := &apitypes.Process{
-		PID:         200,
-		PPID:        1, // Direct child of init, not of shim
-		Comm:        "outside-process",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
-	}
-	fullTree[200] = outsideProcess
-
-	shimPIDResult, found = cpt.GetShimPIDForProcess(200, createSafeMapFromData(fullTree)) // Outside process
-	assert.False(t, found)
-	assert.Equal(t, uint32(0), shimPIDResult)
+	assert.Equal(t, uint32(0), result)
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderContainer_Success(t *testing.T) {
@@ -561,31 +587,35 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_Success(t *testing.T) 
 	// Pre-populate with a container
 	containerID := "test-container-123"
 	shimPID := uint32(50)
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
-	// Create process tree: shim (50) -> nginx (100) -> worker (101)
-	worker := &apitypes.Process{
+	// Create tree: shim (50) -> nginx (100) -> worker (101)
+	workerProcess := &apitypes.Process{
 		PID:         101,
 		PPID:        100,
-		Comm:        "nginx-worker",
+		Comm:        "worker",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
-	nginx := &apitypes.Process{
+	nginxProcess := &apitypes.Process{
 		PID:  100,
-		PPID: 50, // parent is shim
+		PPID: 50,
 		Comm: "nginx",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "nginx-worker", PID: 101}: worker,
+			{Comm: "worker", PID: 101}: workerProcess,
 		},
 	}
 
-	shim := &apitypes.Process{
-		PID:  50, // shim
+	shimProcess := &apitypes.Process{
+		PID:  50,
 		PPID: 1,
 		Comm: "containerd-shim",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "nginx", PID: 100}: nginx,
+			{Comm: "nginx", PID: 100}: nginxProcess,
 		},
 	}
 
@@ -595,19 +625,18 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_Success(t *testing.T) 
 			PPID: 0,
 			Comm: "init",
 		},
-		50:  shim,
-		100: nginx,
-		101: worker,
+		50:  shimProcess,
+		100: nginxProcess,
+		101: workerProcess,
 	}
 
-	// Test processes under the container
-	assert.True(t, cpt.IsProcessUnderContainer(50, containerID, createSafeMapFromData(fullTree)))  // shim itself
-	assert.True(t, cpt.IsProcessUnderContainer(100, containerID, createSafeMapFromData(fullTree))) // nginx
-	assert.True(t, cpt.IsProcessUnderContainer(101, containerID, createSafeMapFromData(fullTree))) // worker
+	safeTree := createSafeMapFromData(fullTree)
 
-	// Test processes not under the container
-	assert.False(t, cpt.IsProcessUnderContainer(1, containerID, createSafeMapFromData(fullTree)))   // init
-	assert.False(t, cpt.IsProcessUnderContainer(999, containerID, createSafeMapFromData(fullTree))) // non-existent
+	// Test nginx (direct child of shim)
+	assert.True(t, cpt.IsProcessUnderContainer(100, containerID, safeTree))
+
+	// Test worker (grandchild of shim)
+	assert.True(t, cpt.IsProcessUnderContainer(101, containerID, safeTree))
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderContainer_ContainerNotFound(t *testing.T) {
@@ -622,16 +651,20 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_ContainerNotFound(t *t
 	}
 
 	// Test with non-existent container
-	assert.False(t, cpt.IsProcessUnderContainer(100, "non-existent-container", createSafeMapFromData(fullTree)))
+	assert.False(t, cpt.IsProcessUnderContainer(100, "non-existent", createSafeMapFromData(fullTree)))
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderContainer_ShimNotFound(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
-	// Pre-populate with a container but shim PID doesn't exist in tree
+	// Pre-populate with a container but shim doesn't exist in tree
 	containerID := "test-container-123"
-	shimPID := uint32(999) // Non-existent PID
-	cpt.containerIdToShimPid[containerID] = shimPID
+	shimPID := uint32(999) // Non-existent in tree
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
 	fullTree := map[uint32]*apitypes.Process{
 		1: {
@@ -639,10 +672,25 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_ShimNotFound(t *testin
 			PPID: 0,
 			Comm: "init",
 		},
+		100: {
+			PID:         100,
+			PPID:        1,
+			Comm:        "nginx",
+			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		},
 	}
 
-	// Test with shim PID that doesn't exist in tree
-	assert.False(t, cpt.IsProcessUnderContainer(100, containerID, createSafeMapFromData(fullTree)))
+	safeTree := createSafeMapFromData(fullTree)
+
+	// Test with PID 100 (which is the containerPID) - should return true via fallback
+	// because the new fallback logic checks if target == containerPID or under containerPID
+	assert.True(t, cpt.IsProcessUnderContainer(100, containerID, safeTree))
+
+	// Test with a process outside the container - should return false
+	assert.False(t, cpt.IsProcessUnderContainer(1, containerID, safeTree))
+
+	// Test with non-existent process - should return false
+	assert.False(t, cpt.IsProcessUnderContainer(999, containerID, safeTree))
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderContainer_ProcessNotFound(t *testing.T) {
@@ -651,10 +699,14 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_ProcessNotFound(t *tes
 	// Pre-populate with a container
 	containerID := "test-container-123"
 	shimPID := uint32(50)
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
-	shim := &apitypes.Process{
-		PID:         50, // shim
+	shimProcess := &apitypes.Process{
+		PID:         50,
 		PPID:        1,
 		Comm:        "containerd-shim",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
@@ -666,10 +718,10 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_ProcessNotFound(t *tes
 			PPID: 0,
 			Comm: "init",
 		},
-		50: shim,
+		50: shimProcess,
 	}
 
-	// Test with process that doesn't exist in tree
+	// Test with non-existent process
 	assert.False(t, cpt.IsProcessUnderContainer(999, containerID, createSafeMapFromData(fullTree)))
 }
 
@@ -677,65 +729,52 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_Success(t *t
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with multiple containers
-	containerID1 := "test-container-123"
-	containerID2 := "test-container-456"
+	containerID1 := "container-1"
 	shimPID1 := uint32(50)
+	cpt.containerIdToInfo[containerID1] = &containerInfo{
+		shimPID:      shimPID1,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
+
+	containerID2 := "container-2"
 	shimPID2 := uint32(60)
+	cpt.containerIdToInfo[containerID2] = &containerInfo{
+		shimPID:      shimPID2,
+		containerPID: 200,
+		registeredAt: time.Now(),
+	}
 
-	cpt.containerIdToShimPid[containerID1] = shimPID1
-	cpt.containerIdToShimPid[containerID2] = shimPID2
-
-	// Create process tree with processes under different containers
-	// Container 1: shim1 (50) -> nginx (100) -> worker (101)
-	// Container 2: shim2 (60) -> redis (200) -> child (201)
-
-	worker := &apitypes.Process{
-		PID:         101,
-		PPID:        100,
-		Comm:        "nginx-worker",
+	// Create tree with two containers
+	nginxProcess := &apitypes.Process{
+		PID:         100,
+		PPID:        50,
+		Comm:        "nginx",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
-	nginx := &apitypes.Process{
-		PID:  100,
-		PPID: 50, // parent is shim1
-		Comm: "nginx",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "nginx-worker", PID: 101}: worker,
-		},
-	}
-
-	shim1 := &apitypes.Process{
-		PID:  50, // shim1
+	shimProcess1 := &apitypes.Process{
+		PID:  50,
 		PPID: 1,
 		Comm: "containerd-shim",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "nginx", PID: 100}: nginx,
+			{Comm: "nginx", PID: 100}: nginxProcess,
 		},
 	}
 
-	child := &apitypes.Process{
-		PID:         201,
-		PPID:        200,
-		Comm:        "redis-child",
+	redisProcess := &apitypes.Process{
+		PID:         200,
+		PPID:        60,
+		Comm:        "redis",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
-	redis := &apitypes.Process{
-		PID:  200,
-		PPID: 60, // parent is shim2
-		Comm: "redis",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "redis-child", PID: 201}: child,
-		},
-	}
-
-	shim2 := &apitypes.Process{
-		PID:  60, // shim2
+	shimProcess2 := &apitypes.Process{
+		PID:  60,
 		PPID: 1,
 		Comm: "containerd-shim",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-			{Comm: "redis", PID: 200}: redis,
+			{Comm: "redis", PID: 200}: redisProcess,
 		},
 	}
 
@@ -745,42 +784,40 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_Success(t *t
 			PPID: 0,
 			Comm: "init",
 		},
-		50:  shim1,
-		60:  shim2,
-		100: nginx,
-		101: worker,
-		200: redis,
-		201: child,
+		50:  shimProcess1,
+		60:  shimProcess2,
+		100: nginxProcess,
+		200: redisProcess,
 	}
 
-	// Test processes under any container
-	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(50, createSafeMapFromData(fullTree)))  // shim1
-	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(60, createSafeMapFromData(fullTree)))  // shim2
-	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(100, createSafeMapFromData(fullTree))) // nginx (container 1)
-	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(101, createSafeMapFromData(fullTree))) // worker (container 1)
-	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(200, createSafeMapFromData(fullTree))) // redis (container 2)
-	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(201, createSafeMapFromData(fullTree))) // child (container 2)
+	safeTree := createSafeMapFromData(fullTree)
 
-	// Test processes not under any container
-	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(1, createSafeMapFromData(fullTree)))   // init
-	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(999, createSafeMapFromData(fullTree))) // non-existent
+	// Test nginx (in container 1)
+	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(100, safeTree))
+
+	// Test redis (in container 2)
+	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(200, safeTree))
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_NoContainers(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
-	// No containers registered
 	fullTree := map[uint32]*apitypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
 			Comm: "init",
 		},
+		100: {
+			PID:         100,
+			PPID:        1,
+			Comm:        "some-process",
+			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		},
 	}
 
-	// Test with no containers registered
-	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(1, createSafeMapFromData(fullTree)))
-	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(999, createSafeMapFromData(fullTree)))
+	// No containers registered
+	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(100, createSafeMapFromData(fullTree)))
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_OutsideProcess(t *testing.T) {
@@ -789,20 +826,33 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_OutsideProce
 	// Pre-populate with a container
 	containerID := "test-container-123"
 	shimPID := uint32(50)
-	cpt.containerIdToShimPid[containerID] = shimPID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      shimPID,
+		containerPID: 100,
+		registeredAt: time.Now(),
+	}
 
-	// Create process tree with a process outside the container
-	shim := &apitypes.Process{
-		PID:         50, // shim
-		PPID:        1,
-		Comm:        "containerd-shim",
+	nginxProcess := &apitypes.Process{
+		PID:         100,
+		PPID:        50,
+		Comm:        "nginx",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
+	shimProcess := &apitypes.Process{
+		PID:  50,
+		PPID: 1,
+		Comm: "containerd-shim",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			{Comm: "nginx", PID: 100}: nginxProcess,
+		},
+	}
+
+	// Process outside any container
 	outsideProcess := &apitypes.Process{
-		PID:         200,
-		PPID:        1, // Direct child of init, not of shim
-		Comm:        "outside-process",
+		PID:         300,
+		PPID:        1, // Parent is init
+		Comm:        "outside",
 		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 	}
 
@@ -812,12 +862,101 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_OutsideProce
 			PPID: 0,
 			Comm: "init",
 		},
-		50:  shim,
-		200: outsideProcess,
+		50:  shimProcess,
+		100: nginxProcess,
+		300: outsideProcess,
 	}
 
-	// Test processes
-	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(50, createSafeMapFromData(fullTree)))   // shim
-	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(200, createSafeMapFromData(fullTree))) // outside process
-	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(1, createSafeMapFromData(fullTree)))   // init
+	// Test process outside container
+	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(300, createSafeMapFromData(fullTree)))
+}
+
+func TestContainerProcessTreeImpl_RegisterContainerShim(t *testing.T) {
+	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+
+	containerID := "test-container-123"
+	shimPID := uint32(50)
+	containerPID := uint32(100)
+
+	// Register a new container
+	cpt.RegisterContainerShim(containerID, shimPID, containerPID)
+
+	// Verify container was registered
+	info, exists := cpt.containerIdToInfo[containerID]
+	assert.True(t, exists)
+	assert.Equal(t, shimPID, info.shimPID)
+	assert.Equal(t, containerPID, info.containerPID)
+}
+
+func TestContainerProcessTreeImpl_RegisterContainerShim_UpdatePending(t *testing.T) {
+	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+
+	containerID := "test-container-123"
+	containerPID := uint32(100)
+
+	// First register without shim PID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      0, // Pending
+		containerPID: containerPID,
+		registeredAt: time.Now(),
+	}
+
+	// Now register with shim PID
+	shimPID := uint32(50)
+	cpt.RegisterContainerShim(containerID, shimPID, containerPID)
+
+	// Verify shim PID was updated
+	info := cpt.containerIdToInfo[containerID]
+	assert.Equal(t, shimPID, info.shimPID)
+}
+
+func TestContainerProcessTreeImpl_LazyShimDiscovery(t *testing.T) {
+	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+
+	containerID := "test-container-123"
+	containerPID := uint32(100)
+
+	// Register container without shim PID
+	cpt.containerIdToInfo[containerID] = &containerInfo{
+		shimPID:      0, // Not yet discovered
+		containerPID: containerPID,
+		registeredAt: time.Now(),
+	}
+
+	// Create tree where container process has parent (shim)
+	shimProcess := &apitypes.Process{
+		PID:         50,
+		PPID:        1,
+		Comm:        "containerd-shim",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+	}
+
+	containerProcess := &apitypes.Process{
+		PID:         100,
+		PPID:        50, // Parent is shim
+		Comm:        "container-init",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+	}
+
+	fullTree := map[uint32]*apitypes.Process{
+		1: {
+			PID:  1,
+			PPID: 0,
+			Comm: "init",
+		},
+		50:  shimProcess,
+		100: containerProcess,
+	}
+
+	safeTree := createSafeMapFromData(fullTree)
+
+	// Try to discover shim PID via process tree
+	shimPID := cpt.tryDiscoverShimPID(containerID, safeTree)
+
+	// Verify shim was discovered
+	assert.Equal(t, uint32(50), shimPID)
+
+	// Verify it was saved in containerIdToInfo
+	info := cpt.containerIdToInfo[containerID]
+	assert.Equal(t, uint32(50), info.shimPID)
 }

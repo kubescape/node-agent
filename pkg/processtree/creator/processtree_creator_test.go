@@ -61,6 +61,15 @@ func (m *MockContainerProcessTree) GetPidByContainerID(containerID string) (uint
 	return args.Get(0).(uint32), args.Error(1)
 }
 
+func (m *MockContainerProcessTree) RegisterContainerShim(containerID string, shimPID uint32, containerPID uint32) {
+	m.Called(containerID, shimPID, containerPID)
+}
+
+func (m *MockContainerProcessTree) GetContainerInfo(containerID string) (shimPID, containerPID uint32, exists bool) {
+	args := m.Called(containerID)
+	return args.Get(0).(uint32), args.Get(1).(uint32), args.Bool(2)
+}
+
 // Helper function to create a test config with proper exit cleanup settings
 func createTestConfig(kubernetesMode bool) config.Config {
 	return config.Config{
@@ -163,6 +172,7 @@ func TestHandleExecEvent(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
+	mockContainerTree.On("RegisterContainerShim", mock.AnythingOfType("string"), mock.AnythingOfType("uint32"), mock.AnythingOfType("uint32")).Return()
 	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.Anything).Return(false)
 	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(999), nil)
 
@@ -211,7 +221,8 @@ func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
 	creator := NewProcessTreeCreator(mockContainerTree, createTestConfig(true))
 	impl := creator.(*processTreeCreatorImpl)
 
-	// Mock container tree methods - GetPidByContainerID returns an error
+	// Mock container tree methods
+	mockContainerTree.On("RegisterContainerShim", mock.AnythingOfType("string"), mock.AnythingOfType("uint32"), mock.AnythingOfType("uint32")).Return()
 	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.Anything).Return(false)
 	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(0), fmt.Errorf("container not found"))
 
@@ -260,7 +271,8 @@ func TestHandleExecEventProcessAlreadyUnderContainer(t *testing.T) {
 	creator := NewProcessTreeCreator(mockContainerTree, createTestConfig(true))
 	impl := creator.(*processTreeCreatorImpl)
 
-	// Mock container tree methods - process is already under container subtree
+	// Mock container tree methods - process is already under container
+	mockContainerTree.On("RegisterContainerShim", mock.AnythingOfType("string"), mock.AnythingOfType("uint32"), mock.AnythingOfType("uint32")).Return()
 	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.Anything).Return(true)
 	// GetPidByContainerID should not be called since process is already under container
 

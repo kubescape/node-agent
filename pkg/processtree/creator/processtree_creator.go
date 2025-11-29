@@ -149,6 +149,12 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
+	// FIX: Help discover container shim PID from fork events
+	// When we see a fork event with a containerID and PPID, register the shim
+	if pt.config.KubernetesMode && event.ContainerID != "" && event.PPID != 0 {
+		pt.containerTree.RegisterContainerShim(event.ContainerID, event.PPID, event.PID)
+	}
+
 	pt.UpdatePPID(proc, event)
 
 	if proc.Comm == "" {
@@ -225,7 +231,12 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 
 	pt.UpdatePPID(proc, event)
 
-	if pt.config.KubernetesMode {
+	if pt.config.KubernetesMode && event.ContainerID != "" {
+		// FIX: Try to help discover/register shim PID if we have PPID info
+		if event.PPID != 0 {
+			pt.containerTree.RegisterContainerShim(event.ContainerID, event.PPID, event.PID)
+		}
+
 		isCurrentUnderContainer := pt.containerTree.IsProcessUnderContainer(proc.PID, event.ContainerID, &pt.processMap)
 		if !isCurrentUnderContainer {
 			shimPid, err := pt.containerTree.GetPidByContainerID(event.ContainerID)

@@ -13,6 +13,22 @@ const (
 	ProcfsEvent
 )
 
+// String returns a human-readable string representation of the event type
+func (t ProcessEventType) String() string {
+	switch t {
+	case ForkEvent:
+		return "FORK"
+	case ExecEvent:
+		return "EXEC"
+	case ExitEvent:
+		return "EXIT"
+	case ProcfsEvent:
+		return "PROCFS"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 type ProcessEvent struct {
 	Type      ProcessEventType
 	Timestamp time.Time
