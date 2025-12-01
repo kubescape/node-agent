@@ -154,9 +154,19 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 			return
 		}
 
+		// Get the new parent's comm for updating Pcomm
+		var newParentComm string
+		if newParent, ok := pt.processMap.Load(newParentPID); ok {
+			newParentComm = newParent.Comm
+		}
+
 		for _, child := range pending.Children {
 			if child != nil {
 				child.PPID = newParentPID
+				// Update Pcomm to reflect the new parent's comm
+				if newParentComm != "" {
+					child.Pcomm = newParentComm
+				}
 				pt.linkProcessToParent(child)
 			}
 		}
