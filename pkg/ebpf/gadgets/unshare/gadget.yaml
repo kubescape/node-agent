@@ -1,0 +1,25 @@
+name: unshare
+description: Trace unshare syscall events to monitor namespace unsharing operations.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/unshare
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/unshare
+datasources:
+  unshare:
+    fields:
+      exepath:
+        annotations:
+          columns.width: "64"
+          description: Executable path of the calling process.
+      flags:
+        annotations:
+          columns.width: "16"
+          description: Flags passed to the unshare syscall indicating which namespaces to unshare.
+      proc:
+        annotations:
+          description: Process metadata including pid, tid, ppid, uid, gid, comm, etc.
+      upper_layer:
+        annotations:
+          description: Whether the process is running in an upper layer.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.

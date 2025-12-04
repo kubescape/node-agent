@@ -89,3 +89,14 @@ func (e *ExporterBus) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 		exporter.SendFimAlerts(fimEvents)
 	}
 }
+
+// FlushContainerAlerts flushes all pending alerts for a specific container
+// This should be called when a container is terminating
+func (e *ExporterBus) FlushContainerAlerts(containerID string) {
+	for _, exporter := range e.exporters {
+		// Only HTTPExporter supports bulking, so we need type assertion
+		if httpExporter, ok := exporter.(*HTTPExporter); ok {
+			httpExporter.FlushContainerAlerts(containerID)
+		}
+	}
+}

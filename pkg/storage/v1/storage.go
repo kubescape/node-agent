@@ -67,24 +67,22 @@ func CreateStorage(ctx context.Context, namespace string, maxElapsedTime time.Du
 		return nil, fmt.Errorf("too many retries waiting for storage: %w", err)
 	}
 
-	storage := &Storage{
+	s := &Storage{
 		StorageClient: clientset.SpdxV1beta1(),
 		namespace:     namespace,
 		multiplier:    getMultiplier(),
 	}
 
-	return storage, nil
+	return s, nil
 
 }
 
 func CreateFakeStorage(namespace string) (*Storage, error) {
-	storage := &Storage{
+	return &Storage{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		namespace:     namespace,
 		multiplier:    getMultiplier(),
-	}
-
-	return storage, nil
+	}, nil
 }
 
 func (sc *Storage) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
