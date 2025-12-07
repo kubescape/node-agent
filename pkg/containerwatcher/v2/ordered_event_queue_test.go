@@ -11,7 +11,7 @@ import (
 )
 
 func TestOrderedEventQueue_EventOrdering_LowestTimestampFirst(t *testing.T) {
-	queue := NewOrderedEventQueue(10*time.Millisecond, 1000, nil)
+	queue := NewOrderedEventQueue(10*time.Millisecond, 1000)
 
 	// Create events with specific timestamps (in nanoseconds)
 	// Event 1: timestamp 20
@@ -56,7 +56,7 @@ func TestOrderedEventQueue_EventOrdering_LowestTimestampFirst(t *testing.T) {
 }
 
 func TestOrderedEventQueue_RealTimestampOrdering(t *testing.T) {
-	queue := NewOrderedEventQueue(10*time.Millisecond, 1000, nil)
+	queue := NewOrderedEventQueue(10*time.Millisecond, 1000)
 
 	// Create events with real timestamps (out of order)
 	now := time.Now()
@@ -97,7 +97,7 @@ func TestOrderedEventQueue_RealTimestampOrdering(t *testing.T) {
 
 func TestOrderedEventQueue_FullQueueAlert(t *testing.T) {
 	// Create queue with small buffer to test full alert
-	queue := NewOrderedEventQueue(10*time.Millisecond, 3, nil)
+	queue := NewOrderedEventQueue(10*time.Millisecond, 3)
 
 	// Add events up to the limit
 	for i := 0; i < 3; i++ {
@@ -124,7 +124,7 @@ func TestOrderedEventQueue_FullQueueAlert(t *testing.T) {
 }
 
 func TestOrderedEventQueue_BasicOperations(t *testing.T) {
-	queue := NewOrderedEventQueue(10*time.Millisecond, 1000, nil)
+	queue := NewOrderedEventQueue(10*time.Millisecond, 1000)
 
 	// Test empty queue
 	assert.True(t, queue.Empty())
@@ -168,7 +168,7 @@ func TestOrderedEventQueue_BasicOperations(t *testing.T) {
 }
 
 func TestOrderedEventQueue_MultipleEventTypes(t *testing.T) {
-	queue := NewOrderedEventQueue(10*time.Millisecond, 1000, nil)
+	queue := NewOrderedEventQueue(10*time.Millisecond, 1000)
 
 	eventTypes := []utils.EventType{
 		utils.ExecveEventType,
@@ -201,7 +201,7 @@ func TestOrderedEventQueue_MultipleEventTypes(t *testing.T) {
 }
 
 func TestOrderedEventQueue_LargeNumberOfEvents(t *testing.T) {
-	queue := NewOrderedEventQueue(10*time.Millisecond, 10000, nil)
+	queue := NewOrderedEventQueue(10*time.Millisecond, 10000)
 
 	const numEvents = 1000
 	baseTime := time.Now().UnixNano()

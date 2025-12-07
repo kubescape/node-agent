@@ -711,8 +711,14 @@ func (e *DatasourceEvent) GetSyscalls() []byte {
 }
 
 func (e *DatasourceEvent) getTid() uint64 {
-	tid, _ := e.getFieldAccessor("proc.tid").Uint32(e.Data)
-	return uint64(tid)
+	switch e.EventType {
+	case ExitEventType:
+		tid, _ := e.getFieldAccessor("exit_tid").Uint32(e.Data)
+		return uint64(tid)
+	default:
+		tid, _ := e.getFieldAccessor("proc.tid").Uint32(e.Data)
+		return uint64(tid)
+	}
 }
 
 func (e *DatasourceEvent) GetTimestamp() types.Time {

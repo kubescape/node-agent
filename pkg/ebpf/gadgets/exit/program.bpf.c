@@ -5,6 +5,7 @@
 // Check https://man7.org/linux/man-pages/man7/bpf-helpers.7.html to learn
 // more about different available helpers
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
 
 // Inspektor Gadget buffer
 #include <gadget/buffer.h>
@@ -57,7 +58,14 @@ int tracepoint__sched_exit(struct bpf_raw_tracepoint_args *ctx)
     }
 
     // Populate the process data into the event.
-    gadget_process_populate(&event->proc);
+    // gadget_process_populate(&event->proc);
+    event->proc.pid = BPF_CORE_READ(task, tgid);
+    event->proc.tid = BPF_CORE_READ(task, pid);
+    event->proc.parent.pid = BPF_CORE_READ(task, real_parent, tgid);
+    // event->proc.creds.uid = BPF_CORE_READ(task, real_cred, uid);
+    // event->proc.creds.gid = BPF_CORE_READ(task, real_cred, gid);
+    // event->proc.comm = BPF_CORE_READ(task, comm);
+    // event->proc.parent.comm = BPF_CORE_READ(task, real_parent, comm);
 
     // Exit info
     event->proc.mntns_id = mntns_id;

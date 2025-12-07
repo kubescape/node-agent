@@ -67,6 +67,7 @@ func convertForkEvent(forkEvent utils.ForkEvent) ProcessEvent {
 		PID:         forkEvent.GetPID(),
 		PPID:        forkEvent.GetPpid(),
 		Comm:        forkEvent.GetComm(),
+		Pcomm:       forkEvent.GetPcomm(),
 		Path:        forkEvent.GetExePath(),
 		StartTimeNs: uint64(forkEvent.GetTimestamp()), // Use event timestamp for consistency
 	}
@@ -95,6 +96,7 @@ func convertExitEvent(exitEvent utils.ExitEvent) ProcessEvent {
 		PID:         exitEvent.GetPID(),
 		PPID:        exitEvent.GetPpid(),
 		Comm:        exitEvent.GetComm(),
+		Pcomm:       exitEvent.GetPcomm(),
 		StartTimeNs: uint64(exitEvent.GetTimestamp()), // Use event timestamp for consistency
 	}
 
