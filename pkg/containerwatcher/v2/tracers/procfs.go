@@ -148,30 +148,45 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 	// Create a procfs event that can be processed by the ordered event queue
 	// Use current time as event timestamp, not the process timestamp
 	procfsEvent := &events.ProcfsEvent{
-		Type:        types.NORMAL,
-		Timestamp:   types.Time(time.Now().UnixNano()),
-		PID:         event.PID,
-		PPID:        event.PPID,
-		Comm:        event.Comm,
-		Pcomm:       event.Pcomm,
-		Cmdline:     event.Cmdline,
-		Uid:         event.Uid,
-		Gid:         event.Gid,
-		Cwd:         event.Cwd,
-		Path:        event.Path,
-		StartTimeNs: event.StartTimeNs,
-		ContainerID: event.ContainerID,
-		HostPID:     event.HostPID,
-		HostPPID:    event.HostPPID,
+		Type:           types.NORMAL,
+		Timestamp:      types.Time(time.Now().UnixNano()),
+		PID:            event.PID,
+		PPID:           event.PPID,
+		Comm:           event.Comm,
+		Pcomm:          event.Pcomm,
+		Cmdline:        event.Cmdline,
+		Uid:            event.Uid,
+		Gid:            event.Gid,
+		Cwd:            event.Cwd,
+		Path:           event.Path,
+		StartTimeNs:    event.StartTimeNs,
+		ContainerID:    event.ContainerID,
+		ContainerMntNs: event.ContainerMntNs,
+		ContainerNetNs: event.ContainerNetNs,
+		HostPID:        event.HostPID,
+		HostPPID:       event.HostPPID,
 	}
 
-	// Extract container ID and process ID for the callback
-	containerID := event.ContainerID
-	if containerID == "" {
-		// If no container ID is available, use a placeholder
-		containerID = "host"
+	// Try to find container by mount namespace first
+	container := pt.containerCollection.LookupContainerByMntns(event.ContainerMntNs)
+
+	// Fallback to network namespace if mount namespace lookup failed
+	if container == nil {
+		containersByNetns := pt.containerCollection.LookupContainersByNetns(event.ContainerNetNs)
+		if len(containersByNetns) > 0 {
+			// We don't care which container it is, we just need to find one
+			container = containersByNetns[0]
+		}
+	}
+
+	// Set container ID: use container's ID if found, otherwise "host"
+	if container != nil {
+		procfsEvent.ContainerID = container.Runtime.ContainerID
+	} else {
+		procfsEvent.ContainerID = "host"
 	}
 	processID := event.PID
+	containerID := procfsEvent.ContainerID
 
 	// Send to the ordered event queue
 	if pt.procfsEventCallback != nil {

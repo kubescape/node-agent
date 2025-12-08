@@ -33,12 +33,14 @@ func NewProcessTreeManager(
 
 	containerProcessTreeCache := expirable.NewLRU[string, apitypes.Process](10000, nil, 1*time.Minute)
 
-	return &ProcessTreeManagerImpl{
+	ptm := &ProcessTreeManagerImpl{
 		creator:                   creator,
 		containerTree:             containerTree,
 		containerProcessTreeCache: containerProcessTreeCache,
 		config:                    config,
 	}
+
+	return ptm
 }
 
 // Start initializes the process tree manager and starts background tasks
