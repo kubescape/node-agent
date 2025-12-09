@@ -57,7 +57,7 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	require.NoError(t, err, "Error creating workload")
 	require.NoError(t, wl.WaitForReady(80))
 
-	time.Sleep(10 * time.Second)
+	// time.Sleep(10 * time.Second)
 
 	// process launched from nginx container
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
