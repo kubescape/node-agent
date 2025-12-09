@@ -83,7 +83,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	eventAdapter.SetFailureMetadata(ruleFailure, enrichedEvent, state)
 
 	r.setBaseRuntimeAlert(ruleFailure)
-	r.setRuntimeAlertK8sDetails(ruleFailure)
+	r.setRuntimeAlertK8sDetails(ruleFailure, objectCache)
 	r.setCloudServices(ruleFailure)
 	r.setProfileMetadata(rule, ruleFailure, objectCache)
 	r.enrichRuleFailure(ruleFailure)
@@ -233,7 +233,91 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 
 }
 
-func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.GenericRuleFailure) {
+// extractPodAndOwnerUIDs retrieves pod UID and owner UID from the object cache.
+// It looks up the pod by namespace and name, extracts the pod's UID, and then
+// extracts the owner's UID from the pod's OwnerReferences.
+//
+// For pods with multiple owners, it prefers the owner with Controller=true.
+// If no controller is found, it uses the first owner in the list.
+//
+// Returns:
+//   - podUID: The unique identifier of the pod
+//   - ownerUID: The unique identifier of the pod's owner resource
+//   - ownerKind: The kind of the owner resource (e.g., "ReplicaSet", "StatefulSet")
+//   - ownerName: The name of the owner resource
+//
+// If the pod is not found in the cache, all return values will be empty strings.
+// If the pod has no owner, only podUID will be populated.
+func (r *RuleFailureCreator) extractPodAndOwnerUIDs(
+	objectCache objectcache.ObjectCache,
+	namespace, podName string,
+) (podUID, ownerUID, ownerKind, ownerName string) {
+	// Validate inputs
+	if namespace == "" || podName == "" {
+		logger.L().Debug("extractPodAndOwnerUIDs - empty namespace or podName",
+			helpers.String("namespace", namespace),
+			helpers.String("podName", podName))
+		return "", "", "", ""
+	}
+
+	// Get pod from cache
+	pod := objectCache.K8sObjectCache().GetPod(namespace, podName)
+	if pod == nil {
+		// This can happen if the event arrives before the pod is cached
+		// or after the pod has been deleted. It's not an error condition.
+		logger.L().Debug("extractPodAndOwnerUIDs - pod not found in cache",
+			helpers.String("namespace", namespace),
+			helpers.String("podName", podName))
+		return "", "", "", ""
+	}
+
+	// Extract pod UID
+	podUID = string(pod.UID)
+
+	// Extract owner information from OwnerReferences
+	if len(pod.OwnerReferences) == 0 {
+		// Pod has no owner - this is valid (e.g., standalone pods)
+		logger.L().Debug("extractPodAndOwnerUIDs - pod has no owner references",
+			helpers.String("namespace", namespace),
+			helpers.String("podName", podName),
+			helpers.String("podUID", podUID))
+		return podUID, "", "", ""
+	}
+
+	// Find the controller owner
+	for _, owner := range pod.OwnerReferences {
+		if owner.Controller != nil && *owner.Controller {
+			ownerUID = string(owner.UID)
+			ownerKind = owner.Kind
+			ownerName = owner.Name
+
+			logger.L().Debug("extractPodAndOwnerUIDs - found controller owner",
+				helpers.String("podUID", podUID),
+				helpers.String("ownerUID", ownerUID),
+				helpers.String("ownerKind", ownerKind),
+				helpers.String("ownerName", ownerName))
+			return podUID, ownerUID, ownerKind, ownerName
+		}
+	}
+
+	// If no controller found, use the first owner
+	if len(pod.OwnerReferences) > 0 {
+		owner := pod.OwnerReferences[0]
+		ownerUID = string(owner.UID)
+		ownerKind = owner.Kind
+		ownerName = owner.Name
+
+		logger.L().Debug("extractPodAndOwnerUIDs - using first owner (no controller found)",
+			helpers.String("podUID", podUID),
+			helpers.String("ownerUID", ownerUID),
+			helpers.String("ownerKind", ownerKind),
+			helpers.String("ownerName", ownerName))
+	}
+
+	return podUID, ownerUID, ownerKind, ownerName
+}
+
+func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.GenericRuleFailure, objectCache objectcache.ObjectCache) {
 	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
 	if runtimek8sdetails.Image == "" {
 		runtimek8sdetails.Image = ruleFailure.GetTriggerEvent().GetContainerImage()
@@ -266,6 +350,28 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 	if runtimek8sdetails.HostNetwork == nil {
 		hostNetwork := ruleFailure.GetTriggerEvent().GetHostNetwork()
 		runtimek8sdetails.HostNetwork = &hostNetwork
+	}
+
+	// Extract pod UID and workload UID
+	containerID := runtimek8sdetails.ContainerID
+	namespace := runtimek8sdetails.Namespace
+	podName := runtimek8sdetails.PodName
+
+	// Try to get WorkloadUID from shared container data (pre-computed from WLID)
+	if containerID != "" {
+		if sharedData := objectCache.K8sObjectCache().GetSharedContainerData(containerID); sharedData != nil {
+			if sharedData.WorkloadUID != "" {
+				runtimek8sdetails.WorkloadUID = sharedData.WorkloadUID
+			}
+		}
+	}
+
+	// Get pod UID from pod cache
+	if namespace != "" && podName != "" {
+		pod := objectCache.K8sObjectCache().GetPod(namespace, podName)
+		if pod != nil {
+			runtimek8sdetails.PodUID = string(pod.UID)
+		}
 	}
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)

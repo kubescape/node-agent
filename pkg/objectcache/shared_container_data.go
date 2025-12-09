@@ -64,6 +64,7 @@ type WatchedContainerData struct {
 	ImageTag                string
 	ImageID                 string
 	Wlid                    string
+	WorkloadUID             string // UID of the top-level workload (from WLID)
 	ContainerType           ContainerType
 	ContainerIndex          int
 	ContainerInfos          map[ContainerType][]ContainerInfo

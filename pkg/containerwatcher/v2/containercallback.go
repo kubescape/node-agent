@@ -144,6 +144,8 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 		return nil, fmt.Errorf("failed to validate wlid: %w", err)
 	}
 	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
+	// Extract and store the workload UID (top-level owner from WLID)
+	watchedContainer.WorkloadUID = w.GetUID()
 	// find parent selector
 	selector, err := w.GetSelector()
 	if err != nil {
