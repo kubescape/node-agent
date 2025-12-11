@@ -50,12 +50,12 @@ func (sc *StorageHttpClientMock) GetStorageClient() beta1.SpdxV1beta1Interface {
 	return nil
 }
 
-func (sc *StorageHttpClientMock) ListApplicationProfiles(_ string) (*spdxv1beta1.ApplicationProfileList, error) {
+func (sc *StorageHttpClientMock) ListApplicationProfiles(namespace string, limit int64, cont string) (*spdxv1beta1.ApplicationProfileList, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (sc *StorageHttpClientMock) ListNetworkNeighborhoods(_ string) (*spdxv1beta1.NetworkNeighborhoodList, error) {
+func (sc *StorageHttpClientMock) ListNetworkNeighborhoods(namespace string, limit int64, cont string) (*spdxv1beta1.NetworkNeighborhoodList, error) {
 	//TODO implement me
 	panic("implement me")
 }

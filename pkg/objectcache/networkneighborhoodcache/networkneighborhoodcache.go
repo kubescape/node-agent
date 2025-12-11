@@ -127,11 +127,30 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 		}
 
 		// Get network neighborhoods list for this namespace
-		nnList, err := nnc.storageClient.ListNetworkNeighborhoods(namespace)
-		if err != nil {
-			logger.L().Error("failed to list network neighborhoods",
-				helpers.String("namespace", namespace),
-				helpers.Error(err))
+		var nnList *v1beta1.NetworkNeighborhoodList
+		continueToken := ""
+		for {
+			list, err := nnc.storageClient.ListNetworkNeighborhoods(namespace, int64(50), continueToken)
+			if err != nil {
+				logger.L().Error("failed to list network neighborhoods",
+					helpers.String("namespace", namespace),
+					helpers.Error(err))
+				break
+			}
+
+			if nnList == nil {
+				nnList = list
+			} else {
+				nnList.Items = append(nnList.Items, list.Items...)
+			}
+
+			continueToken = list.Continue
+			if continueToken == "" {
+				break
+			}
+		}
+
+		if nnList == nil {
 			continue
 		}
 

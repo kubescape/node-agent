@@ -135,11 +135,30 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 		}
 
 		// Get profiles list for this namespace
-		profileList, err := apc.storageClient.ListApplicationProfiles(namespace)
-		if err != nil {
-			logger.L().Error("failed to list application profiles",
-				helpers.String("namespace", namespace),
-				helpers.Error(err))
+		var profileList *v1beta1.ApplicationProfileList
+		continueToken := ""
+		for {
+			list, err := apc.storageClient.ListApplicationProfiles(namespace, int64(50), continueToken)
+			if err != nil {
+				logger.L().Error("failed to list application profiles",
+					helpers.String("namespace", namespace),
+					helpers.Error(err))
+				break
+			}
+
+			if profileList == nil {
+				profileList = list
+			} else {
+				profileList.Items = append(profileList.Items, list.Items...)
+			}
+
+			continueToken = list.Continue
+			if continueToken == "" {
+				break
+			}
+		}
+
+		if profileList == nil {
 			continue
 		}
 

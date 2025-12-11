@@ -8,8 +8,8 @@ import (
 type ProfileClient interface {
 	GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error)
 	GetNetworkNeighborhood(namespace, name string) (*v1beta1.NetworkNeighborhood, error)
-	ListApplicationProfiles(namespace string) (*v1beta1.ApplicationProfileList, error)
-	ListNetworkNeighborhoods(namespace string) (*v1beta1.NetworkNeighborhoodList, error)
+	ListApplicationProfiles(namespace string, limit int64, cont string) (*v1beta1.ApplicationProfileList, error)
+	ListNetworkNeighborhoods(namespace string, limit int64, cont string) (*v1beta1.NetworkNeighborhoodList, error)
 }
 
 // ProfileCreator defines the interface for creating container profiles
