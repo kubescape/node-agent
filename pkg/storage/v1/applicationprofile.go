@@ -11,6 +11,9 @@ func (sc *Storage) GetApplicationProfile(namespace, name string) (*v1beta1.Appli
 	return sc.storageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc *Storage) ListApplicationProfiles(namespace string) (*v1beta1.ApplicationProfileList, error) {
-	return sc.storageClient.ApplicationProfiles(namespace).List(context.Background(), metav1.ListOptions{})
+func (sc *Storage) ListApplicationProfiles(namespace string, limit int64, cont string) (*v1beta1.ApplicationProfileList, error) {
+	return sc.storageClient.ApplicationProfiles(namespace).List(context.Background(), metav1.ListOptions{
+		Limit:    limit,
+		Continue: cont,
+	})
 }
