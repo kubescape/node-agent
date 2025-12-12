@@ -256,6 +256,12 @@ func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (conversion.ProcessEvent, er
 		event.Path = exe
 	}
 
+	namespaces, err := proc.Namespaces()
+	if err == nil {
+		event.ContainerMntNs = uint64(namespaces["mnt"].Inode)
+		event.ContainerNetNs = uint64(namespaces["net"].Inode)
+	}
+
 	return event, nil
 }
 

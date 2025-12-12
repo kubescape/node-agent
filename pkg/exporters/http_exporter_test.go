@@ -10,9 +10,9 @@ import (
 
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -171,25 +171,7 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: igtypes.Event{
-			CommonData: igtypes.CommonData{
-				Runtime: igtypes.BasicRuntimeMetadata{
-					ContainerID:          "testmalwarecontainerid",
-					ContainerName:        "testmalwarecontainername",
-					ContainerImageName:   "testmalwarecontainerimage",
-					ContainerImageDigest: "testmalwarecontainerimagedigest",
-				},
-				K8s: igtypes.K8sMetadata{
-					Node:        "testmalwarenode",
-					HostNetwork: false,
-					BasicK8sMetadata: igtypes.BasicK8sMetadata{
-						Namespace:     "testmalwarenamespace",
-						PodName:       "testmalwarepodname",
-						ContainerName: "testmalwarecontainername",
-					},
-				},
-			},
-		},
+		TriggerEvent: &utils.StructEvent{},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},

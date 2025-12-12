@@ -24,7 +24,7 @@ func (l *apLibrary) wasPathOpened(containerID, path ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
@@ -58,7 +58,7 @@ func (l *apLibrary) wasPathOpenedWithFlags(containerID, path, flags ref.Val) ref
 		return types.NewErr("failed to parse flags: %v", err)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
@@ -88,7 +88,7 @@ func (l *apLibrary) wasPathOpenedWithSuffix(containerID, suffix ref.Val) ref.Val
 		return types.MaybeNoSuchOverloadErr(suffix)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
@@ -116,7 +116,7 @@ func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val
 		return types.MaybeNoSuchOverloadErr(prefix)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}

@@ -12,8 +12,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	events "github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
@@ -99,7 +98,7 @@ func (pt *ProcfsTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (pt *ProcfsTracer) GetName() string {
-	return "procfs_tracer"
+	return procfsTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -132,13 +131,14 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conv
 }
 
 func (pt *ProcfsTracer) handleExitEvent(event conversion.ProcessEvent) {
-	exitEvent := &tracerexittype.Event{
-		Pid:  event.PID,
-		PPid: event.PPID,
-		Comm: "exit",
+	exitEvent := &utils.StructEvent{
+		EventType: utils.ExitEventType,
+		Pid:       event.PID,
+		Ppid:      event.PPID,
+		Comm:      "exit",
 	}
 
-	exitEvent.Event.Timestamp = types.Time(event.Timestamp.UnixNano())
+	exitEvent.Timestamp = event.Timestamp.UnixNano()
 
 	pt.exitEventCallback(exitEvent, event.ContainerID, event.PID)
 }
@@ -148,30 +148,45 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 	// Create a procfs event that can be processed by the ordered event queue
 	// Use current time as event timestamp, not the process timestamp
 	procfsEvent := &events.ProcfsEvent{
-		Type:        types.NORMAL,
-		Timestamp:   types.Time(time.Now().UnixNano()),
-		PID:         event.PID,
-		PPID:        event.PPID,
-		Comm:        event.Comm,
-		Pcomm:       event.Pcomm,
-		Cmdline:     event.Cmdline,
-		Uid:         event.Uid,
-		Gid:         event.Gid,
-		Cwd:         event.Cwd,
-		Path:        event.Path,
-		StartTimeNs: event.StartTimeNs,
-		ContainerID: event.ContainerID,
-		HostPID:     event.HostPID,
-		HostPPID:    event.HostPPID,
+		Type:           types.NORMAL,
+		Timestamp:      types.Time(time.Now().UnixNano()),
+		PID:            event.PID,
+		PPID:           event.PPID,
+		Comm:           event.Comm,
+		Pcomm:          event.Pcomm,
+		Cmdline:        event.Cmdline,
+		Uid:            event.Uid,
+		Gid:            event.Gid,
+		Cwd:            event.Cwd,
+		Path:           event.Path,
+		StartTimeNs:    event.StartTimeNs,
+		ContainerID:    event.ContainerID,
+		ContainerMntNs: event.ContainerMntNs,
+		ContainerNetNs: event.ContainerNetNs,
+		HostPID:        event.HostPID,
+		HostPPID:       event.HostPPID,
 	}
 
-	// Extract container ID and process ID for the callback
-	containerID := event.ContainerID
-	if containerID == "" {
-		// If no container ID is available, use a placeholder
-		containerID = "host"
+	// Try to find container by mount namespace first
+	container := pt.containerCollection.LookupContainerByMntns(event.ContainerMntNs)
+
+	// Fallback to network namespace if mount namespace lookup failed
+	if container == nil {
+		containersByNetns := pt.containerCollection.LookupContainersByNetns(event.ContainerNetNs)
+		if len(containersByNetns) > 0 {
+			// We don't care which container it is, we just need to find one
+			container = containersByNetns[0]
+		}
+	}
+
+	// Set container ID: use container's ID if found, otherwise "host"
+	if container != nil {
+		procfsEvent.ContainerID = container.Runtime.ContainerID
+	} else {
+		procfsEvent.ContainerID = "host"
 	}
 	processID := event.PID
+	containerID := procfsEvent.ContainerID
 
 	// Send to the ordered event queue
 	if pt.procfsEventCallback != nil {

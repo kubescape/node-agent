@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	tracerhttphelper "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	"github.com/kubescape/node-agent/pkg/containerwatcher/v2/tracers"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -31,9 +31,9 @@ func createUUID() string {
 	return uuid.New().String()
 }
 
-func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HTTPEndpoint, error) {
-	headers := tracerhttphelper.ExtractConsistentHeaders(event.Request.Header)
-	headers["Host"] = []string{event.Request.Host}
+func GetNewEndpoint(event utils.HttpEvent, identifier string) (*v1beta1.HTTPEndpoint, error) {
+	headers := tracers.ExtractConsistentHeaders(event.GetRequest().Header)
+	headers["Host"] = []string{event.GetRequest().Host}
 	rawJSON, err := json.Marshal(headers)
 	if err != nil {
 		logger.L().Debug("GetNewEndpoint - error marshaling headers", helpers.Error(err), helpers.Interface("headers", headers))
@@ -42,15 +42,15 @@ func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HT
 
 	return &v1beta1.HTTPEndpoint{
 		Endpoint:  identifier,
-		Methods:   []string{event.Request.Method},
-		Internal:  event.Internal,
-		Direction: event.Direction,
+		Methods:   []string{event.GetRequest().Method},
+		Internal:  event.GetInternal(),
+		Direction: event.GetDirection(),
 		Headers:   rawJSON}, nil
 }
 
-func GetEndpointIdentifier(request *tracerhttptype.Event) (string, error) {
-	identifier := request.Request.URL.String()
-	if host := request.Request.Host; host != "" {
+func GetEndpointIdentifier(request utils.HttpEvent) (string, error) {
+	identifier := request.GetRequest().URL.String()
+	if host := request.GetRequest().Host; host != "" {
 
 		if !isValidHost(host) {
 			return "", fmt.Errorf("invalid host: %s", host)

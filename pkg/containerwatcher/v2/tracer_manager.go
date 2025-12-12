@@ -77,7 +77,7 @@ func (tm *TracerManager) startProcfsTracer(ctx context.Context) error {
 	if tracer, exists := tm.GetTracer(utils.ProcfsEventType); exists {
 		delete(tm.tracers, utils.ProcfsEventType)
 		if tracer.IsEnabled(tm.cfg) {
-			logger.L().Info("Starting procfs tracer 5 seconds before other tracers")
+			logger.L().Info("Starting procfs tracer before other tracers")
 			if err := tracer.Start(ctx); err != nil {
 				return fmt.Errorf("starting procfs tracer: %w", err)
 			}

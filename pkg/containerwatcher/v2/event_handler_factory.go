@@ -4,18 +4,11 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -83,34 +76,43 @@ func NewEventHandlerFactory(
 
 	// Create adapters for managers that don't implement the Manager interface directly
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
+		// check for dropped events
+		if event.HasDroppedEvents() {
+			containerProfileManager.ReportDroppedEvent(event.GetContainerID())
+		}
+		// ContainerProfileManager has specific methods for different event types
 		switch eventType {
 		case utils.CapabilitiesEventType:
-			if capEvent, ok := event.(*tracercapabilitiestype.Event); ok {
-				containerProfileManager.ReportCapability(capEvent.Runtime.ContainerID, capEvent.CapName)
+			if capEvent, ok := event.(utils.CapabilitiesEvent); ok {
+				containerProfileManager.ReportCapability(capEvent.GetContainerID(), capEvent.GetCapability())
 			}
 		case utils.ExecveEventType:
-			if execEvent, ok := event.(*events.ExecEvent); ok {
-				containerProfileManager.ReportFileExec(execEvent.Runtime.ContainerID, *execEvent)
+			if execEvent, ok := event.(utils.ExecEvent); ok {
+				containerProfileManager.ReportFileExec(execEvent.GetContainerID(), execEvent)
 			}
 		case utils.OpenEventType:
-			if openEvent, ok := event.(*events.OpenEvent); ok {
-				containerProfileManager.ReportFileOpen(openEvent.Runtime.ContainerID, *openEvent)
+			if openEvent, ok := event.(utils.OpenEvent); ok {
+				containerProfileManager.ReportFileOpen(openEvent.GetContainerID(), openEvent)
 			}
 		case utils.HTTPEventType:
-			if httpEvent, ok := event.(*tracerhttptype.Event); ok {
-				containerProfileManager.ReportHTTPEvent(httpEvent.Runtime.ContainerID, httpEvent)
+			if httpEvent, ok := event.(utils.HttpEvent); ok {
+				containerProfileManager.ReportHTTPEvent(httpEvent.GetContainerID(), httpEvent)
 			}
 		case utils.SymlinkEventType:
-			if symlinkEvent, ok := event.(*tracersymlinktype.Event); ok {
-				containerProfileManager.ReportSymlinkEvent(symlinkEvent.Runtime.ContainerID, symlinkEvent)
+			if symlinkEvent, ok := event.(utils.LinkEvent); ok {
+				containerProfileManager.ReportSymlinkEvent(symlinkEvent.GetContainerID(), symlinkEvent)
 			}
 		case utils.HardlinkEventType:
-			if hardlinkEvent, ok := event.(*tracerhardlinktype.Event); ok {
-				containerProfileManager.ReportHardlinkEvent(hardlinkEvent.Runtime.ContainerID, hardlinkEvent)
+			if hardlinkEvent, ok := event.(utils.LinkEvent); ok {
+				containerProfileManager.ReportHardlinkEvent(hardlinkEvent.GetContainerID(), hardlinkEvent)
 			}
 		case utils.NetworkEventType:
-			if networkEvent, ok := event.(*tracernetworktype.Event); ok {
-				containerProfileManager.ReportNetworkEvent(networkEvent.Runtime.ContainerID, networkEvent)
+			if networkEvent, ok := event.(utils.NetworkEvent); ok {
+				containerProfileManager.ReportNetworkEvent(networkEvent.GetContainerID(), networkEvent)
+			}
+		case utils.SyscallEventType:
+			if syscallEvent, ok := event.(utils.SyscallEvent); ok {
+				containerProfileManager.ReportSyscall(syscallEvent.GetContainerID(), syscallEvent.GetSyscall())
 			}
 		default:
 			// For event types that don't have specific handling, we might need to add them
@@ -122,21 +124,20 @@ func NewEventHandlerFactory(
 		switch eventType {
 		// Won't work for 3rd party tracers, we need to extract comm and containerID from the event by interface
 		case utils.ExecveEventType:
-			if execEvent, ok := event.(*events.ExecEvent); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, execEvent.Runtime.ContainerID, execEvent.Comm)
+			if execEvent, ok := event.(utils.ExecEvent); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, execEvent.GetContainerID(), execEvent.GetComm())
 			}
 		case utils.SymlinkEventType:
-			if symlinkEvent, ok := event.(*tracersymlinktype.Event); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, symlinkEvent.Runtime.ContainerID, symlinkEvent.Comm)
+			if symlinkEvent, ok := event.(utils.LinkEvent); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, symlinkEvent.GetContainerID(), symlinkEvent.GetComm())
 			}
 		case utils.HardlinkEventType:
-			if hardlinkEvent, ok := event.(*tracerhardlinktype.Event); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, hardlinkEvent.Runtime.ContainerID, hardlinkEvent.Comm)
+			if hardlinkEvent, ok := event.(utils.LinkEvent); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, hardlinkEvent.GetContainerID(), hardlinkEvent.GetComm())
 			}
-
 		case utils.IoUringEventType:
-			if iouringEvent, ok := event.(*traceriouringtype.Event); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.Runtime.ContainerID, iouringEvent.Identifier)
+			if iouringEvent, ok := event.(utils.IOUring); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.GetContainerID(), iouringEvent.GetIdentifier())
 			}
 		}
 	})
@@ -146,8 +147,8 @@ func NewEventHandlerFactory(
 		// This would need to be implemented based on the specific event types
 		switch eventType {
 		case utils.DnsEventType:
-			if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
-				dnsManager.ReportEvent(*dnsEvent)
+			if dnsEvent, ok := event.(utils.DNSEvent); ok {
+				dnsManager.ReportEvent(dnsEvent)
 			}
 		}
 	})
@@ -179,7 +180,6 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	// Get container information to check if it should be ignored
 	container, err := ehf.getContainerInfo(enrichedEvent.ContainerID)
 	if err != nil || container == nil {
-
 		return
 	}
 
@@ -188,7 +188,8 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	}
 
 	// Get handlers for this event type
-	handlers, exists := ehf.handlers[enrichedEvent.EventType]
+	eventType := enrichedEvent.Event.GetEventType()
+	handlers, exists := ehf.handlers[eventType]
 	if !exists {
 		return
 	}
@@ -198,7 +199,7 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
 			enrichedHandler.ReportEnrichedEvent(enrichedEvent)
 		} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
-			handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+			handler.ReportEvent(eventType, enrichedEvent.Event)
 		}
 	}
 
@@ -252,19 +253,29 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	// IoUring events
 	ehf.handlers[utils.IoUringEventType] = []Manager{ruleManager, metrics, rulePolicy}
 
-	// Note: SyscallEventType is not registered here because the syscall tracer
-	// doesn't generate events - it only provides a peek function for other components
+	// Syscall events
+	ehf.handlers[utils.SyscallEventType] = []Manager{containerProfileManager, ruleManager, metrics}
+
+	// Kmod events
+	ehf.handlers[utils.KmodEventType] = []Manager{ruleManager, metrics}
+
+	// Unshare events
+	ehf.handlers[utils.UnshareEventType] = []Manager{ruleManager, metrics}
+
+	// Bpf events
+	ehf.handlers[utils.BpfEventType] = []Manager{ruleManager, metrics}
 }
 
 // reportEventToThirdPartyTracers reports events to third-party tracers
 func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(enrichedEvent *events.EnrichedEvent) {
 	if ehf.thirdPartyEventReceivers != nil {
-		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(enrichedEvent.EventType); ok {
+		eventType := enrichedEvent.Event.GetEventType()
+		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(eventType); ok {
 			for receiver := range eventReceivers.Iter() {
 				if enrichedHandler, ok := receiver.(containerwatcher.EnrichedEventReceiver); ok {
 					enrichedHandler.ReportEnrichedEvent(enrichedEvent)
 				} else if handler, ok := receiver.(containerwatcher.EventReceiver); ok {
-					handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+					handler.ReportEvent(eventType, enrichedEvent.Event)
 				}
 			}
 		}

@@ -2,119 +2,108 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection/networktracer"
-	tracernetwork "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/tracer"
-	tracernetworktypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubeipresolver"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const networkTraceName = "trace_network"
+const (
+	networkImageName = "ghcr.io/inspektor-gadget/gadget/network:latest"
+	networkTraceName = "trace_network"
+)
 
 var _ containerwatcher.TracerInterface = (*NetworkTracer)(nil)
 
-// NetworkTracer implements TracerInterface for network events
+// NetworkTracer implements TracerInterface for events
 type NetworkTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *tracernetwork.Tracer
-	socketEnricher      *socketenricher.SocketEnricher
-	kubeIPInstance      operators.OperatorInstance
-	kubeNameInstance    operators.OperatorInstance
+	eventCallback      containerwatcher.ResultCallback
+	gadgetCtx          *gadgetcontext.GadgetContext
+	kubeIPResolver     *kubeipresolver.KubeIPResolver
+	kubeManager        operators.DataOperator
+	kubeNameResolver   *kubenameresolver.KubeNameResolver
+	ociStore           *orasoci.ReadOnlyStore
+	runtime            runtime.Runtime
+	socketEnricherOp   *socketenricher.SocketEnricher
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
-// NewNetworkTracer creates a new network tracer
+// NewNetworkTracer creates a new tracer
 func NewNetworkTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
+	kubeIPResolver *kubeipresolver.KubeIPResolver,
+	kubeManager operators.DataOperator,
+	kubeNameResolver *kubenameresolver.KubeNameResolver,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
-	socketEnricher *socketenricher.SocketEnricher,
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
+	socketEnricherOp *socketenricher.SocketEnricher,
 ) *NetworkTracer {
 	return &NetworkTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
-		socketEnricher:      socketEnricher,
+		eventCallback:      eventCallback,
+		kubeIPResolver:     kubeIPResolver,
+		kubeManager:        kubeManager,
+		kubeNameResolver:   kubeNameResolver,
+		ociStore:           ociStore,
+		runtime:            runtime,
+		thirdPartyEnricher: thirdPartyEnricher,
+		socketEnricherOp:   socketEnricherOp,
 	}
 }
 
-// Start initializes and starts the network tracer
+// Start initializes and starts the tracer
 func (nt *NetworkTracer) Start(ctx context.Context) error {
-	// Start Kubernetes resolution first
-	if err := nt.startKubernetesResolution(); err != nil {
-		return fmt.Errorf("starting kubernetes resolution: %w", err)
-	}
-
-	if err := nt.tracerCollection.AddTracer(networkTraceName, nt.containerSelector); err != nil {
-		return fmt.Errorf("adding network tracer: %w", err)
-	}
-
-	tracerNetwork, err := tracernetwork.NewTracer()
-	if err != nil {
-		return fmt.Errorf("creating network tracer: %w", err)
-	}
-
-	if nt.socketEnricher != nil {
-		tracerNetwork.SetSocketEnricherMap(nt.socketEnricher.SocketsMap())
-	} else {
-		logger.L().Error("NetworkTracer - socket enricher is nil")
-	}
-
-	tracerNetwork.SetEventHandler(nt.networkEventCallback)
-
-	err = tracerNetwork.RunWorkaround()
-	if err != nil {
-		return fmt.Errorf("running workaround: %w", err)
-	}
-
-	nt.tracer = tracerNetwork
-
-	config := &networktracer.ConnectToContainerCollectionConfig[tracernetworktypes.Event]{
-		Tracer:   nt.tracer,
-		Resolver: nt.containerCollection,
-		Selector: nt.containerSelector,
-		Base:     tracernetworktypes.Base,
-	}
-
-	_, err = networktracer.ConnectToContainerCollection(config)
-	if err != nil {
-		return fmt.Errorf("connecting tracer to container collection: %w", err)
-	}
-
+	nt.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		networkImageName,
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			nt.kubeIPResolver,
+			nt.kubeManager,
+			nt.kubeNameResolver,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			nt.socketEnricherOp,
+			nt.eventOperator(),
+		),
+		gadgetcontext.WithName(networkTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(nt.ociStore),
+	)
+	go func() {
+		params := map[string]string{
+			"operator.oci.annotate": "network:kubenameresolver.enable=true",
+		}
+		err := nt.runtime.RunGadget(nt.gadgetCtx, nil, params)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", nt.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the network tracer
+// Stop gracefully stops the tracer
 func (nt *NetworkTracer) Stop() error {
-	if nt.tracer != nil {
-		nt.tracer.Close()
+	if nt.gadgetCtx != nil {
+		nt.gadgetCtx.Cancel()
 	}
-
-	if err := nt.tracerCollection.RemoveTracer(networkTraceName); err != nil {
-		return fmt.Errorf("removing network tracer: %w", err)
-	}
-
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (nt *NetworkTracer) GetName() string {
-	return "network_tracer"
+	return networkTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -130,55 +119,32 @@ func (nt *NetworkTracer) IsEnabled(cfg config.Config) bool {
 	return cfg.EnableNetworkTracing || cfg.EnableRuntimeDetection
 }
 
-// networkEventCallback handles network events from the tracer
-func (nt *NetworkTracer) networkEventCallback(event *tracernetworktypes.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
+func (nt *NetworkTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.NetworkEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					pooledData := utils.GetPooledDataItem(utils.NetworkEventType).(*datasource.Edata)
+					data.DeepCopyInto(pooledData)
+					nt.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.NetworkEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
 
-	// do not skip dropped events as their processing is done in the worker
-
-	nt.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
-	nt.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
-
-	if nt.kubeIPInstance != nil {
-		_ = nt.kubeIPInstance.EnrichEvent(event)
-	}
-	if nt.kubeNameInstance != nil {
-		_ = nt.kubeNameInstance.EnrichEvent(event)
-	}
-
+// callback handles events from the tracer
+func (nt *NetworkTracer) callback(event utils.NetworkEvent) {
 	if nt.eventCallback != nil {
 		// Extract container ID and process ID from the network event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
 
 		nt.eventCallback(event, containerID, processID)
 	}
-}
-
-// startKubernetesResolution starts the kubeIP and kube name resolution
-func (nt *NetworkTracer) startKubernetesResolution() error {
-	kubeIPOp := operators.GetRaw(kubeipresolver.OperatorName).(*kubeipresolver.KubeIPResolver)
-	_ = kubeIPOp.Init(nil)
-
-	kubeIPInstance, err := kubeIPOp.Instantiate(nil, nil, nil)
-	if err != nil {
-		return fmt.Errorf("creating kube ip resolver: %w", err)
-	}
-
-	nt.kubeIPInstance = kubeIPInstance
-	_ = nt.kubeIPInstance.PreGadgetRun()
-
-	kubeNameOp := operators.GetRaw(kubenameresolver.OperatorName).(*kubenameresolver.KubeNameResolver)
-	_ = kubeNameOp.Init(nil)
-	kubeNameInstance, err := kubeNameOp.Instantiate(nil, nil, nil)
-	if err != nil {
-		return fmt.Errorf("creating kube name resolver: %w", err)
-	}
-
-	nt.kubeNameInstance = kubeNameInstance
-	_ = nt.kubeNameInstance.PreGadgetRun()
-
-	return nil
 }

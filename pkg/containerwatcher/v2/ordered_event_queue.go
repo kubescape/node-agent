@@ -5,12 +5,11 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/oleiade/lane/v2"
 )
 
-type eventEntry struct {
+type EventEntry struct {
 	EventType   utils.EventType
 	Event       utils.K8sEvent
 	Timestamp   time.Time
@@ -19,18 +18,16 @@ type eventEntry struct {
 }
 
 type OrderedEventQueue struct {
-	maxBufferSize      int
-	eventQueue         *lane.PriorityQueue[eventEntry, int64]
-	fullQueueAlert     chan struct{}
-	processTreeManager processtree.ProcessTreeManager
+	maxBufferSize  int
+	eventQueue     *lane.PriorityQueue[EventEntry, int64]
+	fullQueueAlert chan struct{}
 }
 
-func NewOrderedEventQueue(collectionInterval time.Duration, maxBufferSize int, processTreeManager processtree.ProcessTreeManager) *OrderedEventQueue {
+func NewOrderedEventQueue(collectionInterval time.Duration, maxBufferSize int) *OrderedEventQueue {
 	return &OrderedEventQueue{
-		maxBufferSize:      maxBufferSize,
-		eventQueue:         lane.NewMinPriorityQueue[eventEntry, int64](),
-		fullQueueAlert:     make(chan struct{}, 1),
-		processTreeManager: processTreeManager,
+		maxBufferSize:  maxBufferSize,
+		eventQueue:     lane.NewMinPriorityQueue[EventEntry, int64](),
+		fullQueueAlert: make(chan struct{}, 1),
 	}
 }
 
@@ -41,7 +38,7 @@ func (oeq *OrderedEventQueue) GetFullQueueAlertChannel() <-chan struct{} {
 func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event utils.K8sEvent, containerID string, processID uint32) {
 	timestamp := time.Unix(0, int64(event.GetTimestamp()))
 
-	eventEntry := eventEntry{
+	eventEntry := EventEntry{
 		EventType:   eventType,
 		Event:       event,
 		Timestamp:   timestamp,
@@ -64,18 +61,18 @@ func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event ut
 	}
 }
 
-func (oeq *OrderedEventQueue) PopEvent() (eventEntry, bool) {
+func (oeq *OrderedEventQueue) PopEvent() (EventEntry, bool) {
 	if oeq.eventQueue.Empty() {
-		return eventEntry{}, false
+		return EventEntry{}, false
 	}
 
 	event, _, ok := oeq.eventQueue.Pop()
 	return event, ok
 }
 
-func (oeq *OrderedEventQueue) PeekEvent() (eventEntry, bool) {
+func (oeq *OrderedEventQueue) PeekEvent() (EventEntry, bool) {
 	if oeq.eventQueue.Empty() {
-		return eventEntry{}, false
+		return EventEntry{}, false
 	}
 
 	event, _, ok := oeq.eventQueue.Head()

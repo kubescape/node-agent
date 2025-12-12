@@ -30,7 +30,9 @@ type ProcessEvent struct {
 	StartTimeNs uint64 // Process start time in nanoseconds for unique identification
 
 	// Container context
-	ContainerID string
+	ContainerID    string
+	ContainerMntNs uint64
+	ContainerNetNs uint64
 
 	// Host context
 	HostPID  int
