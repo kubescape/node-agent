@@ -133,6 +133,9 @@ func (wh *WatchHandler) Stop(_ context.Context) {
 }
 
 func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts metav1.ListOptions) (watch.Interface, error) {
+	if wh.storageClient == nil {
+		return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
+	}
 	switch res.Resource {
 	case "applicationprofiles":
 		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec

@@ -67,7 +67,7 @@ type ContainerProfileManager struct {
 	cfg               config.Config
 	k8sClient         k8sclient.K8sClientInterface
 	k8sObjectCache    objectcache.K8sObjectCache
-	storageClient     storage.StorageClient
+	storageClient     storage.ProfileCreator
 	dnsResolverClient dnsmanager.DNSResolver
 	seccompManager    seccompmanager.SeccompManagerClient
 	enricher          containerprofilemanager.Enricher
@@ -89,7 +89,7 @@ func NewContainerProfileManager(
 	cfg config.Config,
 	k8sClient k8sclient.K8sClientInterface,
 	k8sObjectCache objectcache.K8sObjectCache,
-	storageClient storage.StorageClient,
+	storageClient storage.ProfileCreator,
 	dnsResolverClient dnsmanager.DNSResolver,
 	seccompManager seccompmanager.SeccompManagerClient,
 	enricher containerprofilemanager.Enricher,
