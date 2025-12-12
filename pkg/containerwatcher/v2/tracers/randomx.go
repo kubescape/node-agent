@@ -14,7 +14,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
@@ -30,14 +29,14 @@ var _ containerwatcher.TracerInterface = (*RandomXTracer)(nil)
 type RandomXTracer struct {
 	eventCallback containerwatcher.ResultCallback
 	gadgetCtx     *gadgetcontext.GadgetContext
-	kubeManager   *kskubemanager.KubeManager
+	kubeManager   operators.DataOperator
 	ociStore      *orasoci.ReadOnlyStore
 	runtime       runtime.Runtime
 }
 
 // NewRandomXTracer creates a new tracer
 func NewRandomXTracer(
-	kubeManager *kskubemanager.KubeManager,
+	kubeManager operators.DataOperator,
 	runtime runtime.Runtime,
 	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,

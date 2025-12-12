@@ -5,6 +5,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubeipresolver"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
@@ -37,7 +38,7 @@ type TracerFactory struct {
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
 	containerSelector       containercollection.ContainerSelector
 	kubeIPResolver          *kubeipresolver.KubeIPResolver
-	kubeManager             *kskubemanager.KubeManager
+	kubeManager             operators.DataOperator
 	kubeNameResolver        *kubenameresolver.KubeNameResolver
 	ociStore                *orasoci.ReadOnlyStore
 	orderedEventQueue       EventQueueInterface

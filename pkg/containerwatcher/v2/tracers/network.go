@@ -16,7 +16,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
@@ -33,7 +32,7 @@ type NetworkTracer struct {
 	eventCallback      containerwatcher.ResultCallback
 	gadgetCtx          *gadgetcontext.GadgetContext
 	kubeIPResolver     *kubeipresolver.KubeIPResolver
-	kubeManager        *kskubemanager.KubeManager
+	kubeManager        operators.DataOperator
 	kubeNameResolver   *kubenameresolver.KubeNameResolver
 	ociStore           *orasoci.ReadOnlyStore
 	runtime            runtime.Runtime
@@ -44,7 +43,7 @@ type NetworkTracer struct {
 // NewNetworkTracer creates a new tracer
 func NewNetworkTracer(
 	kubeIPResolver *kubeipresolver.KubeIPResolver,
-	kubeManager *kskubemanager.KubeManager,
+	kubeManager operators.DataOperator,
 	kubeNameResolver *kubenameresolver.KubeNameResolver,
 	runtime runtime.Runtime,
 	ociStore *orasoci.ReadOnlyStore,

@@ -6,11 +6,11 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
@@ -31,7 +31,7 @@ type ContainerWatcher interface {
 
 type CustomTracerInitializer interface {
 	NewTracer(
-		kubeManager *kskubemanager.KubeManager,
+		kubeManager operators.DataOperator,
 		runtime runtime.Runtime,
 		ociStore *orasoci.ReadOnlyStore,
 		eventCallback ResultCallback,
