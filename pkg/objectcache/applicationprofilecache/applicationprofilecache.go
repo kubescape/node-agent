@@ -26,12 +26,12 @@ import (
 
 // ContainerInfo holds container metadata we need for application profile mapping
 type ContainerInfo struct {
-	ContainerID          string
-	WorkloadID           string
-	InstanceTemplateHash string
-	Namespace            string
-	Name                 string
-	PreRunningContainer  bool // True if container was seen from the start
+	ContainerID               string
+	WorkloadID                string
+	InstanceTemplateHash      string
+	Namespace                 string
+	Name                      string
+	SeenContainerFromTheStart bool // True if container was seen from the start
 }
 
 // ContainerCallStackIndex maintains call stack search trees for a container
@@ -180,7 +180,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
 					workloadIDInUse = true
 					// If any container was seen from start, mark it
-					if containerInfo.PreRunningContainer {
+					if containerInfo.SeenContainerFromTheStart {
 						hasNewContainer = true
 					}
 				}
@@ -451,7 +451,7 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 
 		// If container restarts and profile is partial, delete it from cache
 		// This ensures we don't alert on activity we didn't see after restart
-		if existingProfile, exists := apc.workloadIDToProfile.Load(workloadID); exists && sharedData.PreRunningContainer {
+		if existingProfile, exists := apc.workloadIDToProfile.Load(workloadID); exists && !sharedData.PreRunningContainer {
 			if existingProfile != nil && existingProfile.Annotations != nil {
 				completion := existingProfile.Annotations[helpersv1.CompletionMetadataKey]
 				if completion == helpersv1.Partial {
@@ -481,12 +481,12 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 		// Create container info
 		// Mark container as "seen from start" if it is pre-running
 		containerInfo := &ContainerInfo{
-			ContainerID:          containerID,
-			WorkloadID:           workloadID,
-			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
-			Namespace:            container.K8s.Namespace,
-			Name:                 container.Runtime.ContainerName,
-			PreRunningContainer:  sharedData.PreRunningContainer,
+			ContainerID:               containerID,
+			WorkloadID:                workloadID,
+			InstanceTemplateHash:      sharedData.InstanceID.GetTemplateHash(),
+			Namespace:                 container.K8s.Namespace,
+			Name:                      container.Runtime.ContainerName,
+			SeenContainerFromTheStart: !sharedData.PreRunningContainer,
 		}
 
 		// Add to container info map
