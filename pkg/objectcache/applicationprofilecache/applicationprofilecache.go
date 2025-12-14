@@ -31,7 +31,7 @@ type ContainerInfo struct {
 	InstanceTemplateHash string
 	Namespace            string
 	Name                 string
-	SeenFromStart        bool // True if container was seen from the start
+	PreRunningContainer  bool // True if container was seen from the start
 }
 
 // ContainerCallStackIndex maintains call stack search trees for a container
@@ -180,7 +180,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
 					workloadIDInUse = true
 					// If any container was seen from start, mark it
-					if containerInfo.SeenFromStart {
+					if containerInfo.PreRunningContainer {
 						hasNewContainer = true
 					}
 				}
@@ -486,7 +486,7 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
 			Namespace:            container.K8s.Namespace,
 			Name:                 container.Runtime.ContainerName,
-			SeenFromStart:        sharedData.PreRunningContainer,
+			PreRunningContainer:  sharedData.PreRunningContainer,
 		}
 
 		// Add to container info map

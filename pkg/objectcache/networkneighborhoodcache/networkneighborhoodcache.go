@@ -29,7 +29,7 @@ type ContainerInfo struct {
 	WorkloadID           string
 	InstanceTemplateHash string
 	Namespace            string
-	SeenFromStart        bool // True if container was seen from the start
+	PreRunningContainer  bool // True if container was seen from the start
 }
 
 // NetworkNeighborhoodCacheImpl implements the NetworkNeighborhoodCache interface
@@ -175,7 +175,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 					containerInfo.InstanceTemplateHash == nn.Labels[helpersv1.TemplateHashKey] {
 					workloadIDInUse = true
 					// If any container was seen from start, mark it
-					if containerInfo.SeenFromStart {
+					if containerInfo.PreRunningContainer {
 						hasNewContainer = true
 					}
 				}
@@ -398,7 +398,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 			WorkloadID:           workloadID,
 			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
 			Namespace:            container.K8s.Namespace,
-			SeenFromStart:        sharedData.PreRunningContainer,
+			PreRunningContainer:  sharedData.PreRunningContainer,
 		}
 
 		// Add to container info map
