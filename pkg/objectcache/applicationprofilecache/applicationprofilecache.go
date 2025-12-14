@@ -31,6 +31,7 @@ type ContainerInfo struct {
 	InstanceTemplateHash string
 	Namespace            string
 	Name                 string
+	SeenFromStart        bool // True if container was seen from the start
 }
 
 // ContainerCallStackIndex maintains call stack search trees for a container
@@ -172,16 +173,29 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 
 			// Check if this workload ID is used by any container in this namespace
 			workloadIDInUse := false
+			hasNewContainer := false // Track if any container using this workload was seen from start
 			for _, containerID := range containerIDs {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID &&
 					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
 					workloadIDInUse = true
-					break
+					// If any container was seen from start, mark it
+					if containerInfo.SeenFromStart {
+						hasNewContainer = true
+					}
 				}
 			}
 
 			if !workloadIDInUse {
+				continue
+			}
+
+			// If we have a "new" container (seen from start) and the profile is partial,
+			// skip it - we don't want to use partial profiles for containers we're tracking from the start
+			if hasNewContainer && profile.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial {
+				logger.L().Debug("skipping partial profile for container seen from start",
+					helpers.String("workloadID", workloadID),
+					helpers.String("namespace", namespace))
 				continue
 			}
 
@@ -435,13 +449,45 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 			return nil
 		}
 
+		// If container restarts and profile is partial, delete it from cache
+		// This ensures we don't alert on activity we didn't see after restart
+		if existingProfile, exists := apc.workloadIDToProfile.Load(workloadID); exists && sharedData.GetCompletionStatus() == objectcache.WatchedContainerCompletionStatusFull {
+			if existingProfile != nil && existingProfile.Annotations != nil {
+				completion := existingProfile.Annotations[helpersv1.CompletionMetadataKey]
+				if completion == helpersv1.Partial {
+					logger.L().Debug("deleting partial profile on container restart",
+						helpers.String("containerID", containerID),
+						helpers.String("workloadID", workloadID),
+						helpers.String("namespace", container.K8s.Namespace))
+
+					// Delete the profile from cache
+					profileKey := apc.profileKey(existingProfile.Namespace, existingProfile.Name)
+					apc.profileToUserManagedIdentifier.Delete(profileKey)
+					apc.workloadIDToProfile.Delete(workloadID)
+
+					// Also delete call stack indices for all containers using this workload ID
+					// (including the current container if it exists from a previous run)
+					apc.containerToCallStackIndex.Delete(containerID)
+					apc.containerIDToInfo.Range(func(cID string, info *ContainerInfo) bool {
+						if info.WorkloadID == workloadID {
+							apc.containerToCallStackIndex.Delete(cID)
+						}
+						return true
+					})
+				}
+			}
+		}
+
 		// Create container info
+		// Mark container as "seen from start" if it has full completion status
+		seenFromStart := sharedData.GetCompletionStatus() == objectcache.WatchedContainerCompletionStatusFull
 		containerInfo := &ContainerInfo{
 			ContainerID:          containerID,
 			WorkloadID:           workloadID,
 			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
 			Namespace:            container.K8s.Namespace,
 			Name:                 container.Runtime.ContainerName,
+			SeenFromStart:        seenFromStart,
 		}
 
 		// Add to container info map
