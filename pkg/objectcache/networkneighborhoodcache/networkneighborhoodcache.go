@@ -374,7 +374,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 
 		// If container restarts and profile is partial, delete it from cache
 		// This ensures we don't alert on activity we didn't see after restart
-		if existingNN, exists := nnc.workloadIDToNetworkNeighborhood.Load(workloadID); exists && sharedData.GetCompletionStatus() == objectcache.WatchedContainerCompletionStatusFull {
+		if existingNN, exists := nnc.workloadIDToNetworkNeighborhood.Load(workloadID); exists && sharedData.PreRunningContainer {
 			if existingNN != nil && existingNN.Annotations != nil {
 				completion := existingNN.Annotations[helpersv1.CompletionMetadataKey]
 				if completion == helpersv1.Partial {
@@ -392,14 +392,13 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 		}
 
 		// Create container info
-		// Mark container as "seen from start" if it has full completion status
-		seenFromStart := sharedData.GetCompletionStatus() == objectcache.WatchedContainerCompletionStatusFull
+		// Mark container as "seen from start" if it is pre-running
 		containerInfo := &ContainerInfo{
 			ContainerID:          containerID,
 			WorkloadID:           workloadID,
 			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
 			Namespace:            container.K8s.Namespace,
-			SeenFromStart:        seenFromStart,
+			SeenFromStart:        sharedData.PreRunningContainer,
 		}
 
 		// Add to container info map
