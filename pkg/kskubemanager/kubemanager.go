@@ -173,7 +173,17 @@ func (m *KubeManagerInstance) handleGadgetInstance(log helpers.ILogger) error {
 			return fmt.Errorf("creating mountns map: %w", err)
 		}
 
-		log.Debug("set mountnsmap for gadget")
+		// DEBUG: verify mountnsmap presence and FD (if available)
+		if mountnsmap == nil {
+			log.Warning("TracerMountNsMap returned nil mountnsmap")
+		} else {
+			fd := -1
+			// Use a typed assertion to avoid depending on a particular ebpf Map API.
+			if im, ok := interface{}(mountnsmap).(interface{ FD() int }); ok {
+				fd = im.FD()
+			}
+			log.Debug("set mountnsmap for gadget", helpers.Int("fd", fd), helpers.Interface("map", mountnsmap))
+		}
 		setter.SetMountNsMap(mountnsmap)
 
 		m.mountnsmap = mountnsmap
@@ -184,6 +194,17 @@ func (m *KubeManagerInstance) handleGadgetInstance(log helpers.ILogger) error {
 		m.attachedContainers = make(map[string]*containercollection.Container)
 
 		attachContainerFunc := func(container *containercollection.Container) {
+			// DEBUG: check mountnsmap at attach time
+			if m.mountnsmap == nil {
+				log.Warning("mountnsmap is nil at attach time", helpers.String("container", container.K8s.ContainerName), helpers.String("containerID", container.Runtime.ContainerID))
+			} else {
+				fd := -1
+				if im, ok := interface{}(m.mountnsmap).(interface{ FD() int }); ok {
+					fd = im.FD()
+				}
+				log.Debug("mountnsmap at attach time", helpers.Int("fd", fd), helpers.Interface("map", m.mountnsmap), helpers.String("container", container.K8s.ContainerName))
+			}
+
 			log.Debug("calling gadget.AttachContainer()")
 			err := attacher.AttachContainer(container)
 			if err != nil {
