@@ -392,7 +392,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 		}
 
 		// Create container info
-		// Mark container as "seen from start" if it is pre-running
+		// Mark container as "seen from start" if it is not pre-running
 		containerInfo := &ContainerInfo{
 			ContainerID:               containerID,
 			WorkloadID:                workloadID,

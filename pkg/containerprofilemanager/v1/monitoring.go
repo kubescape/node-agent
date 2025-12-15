@@ -28,7 +28,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			}
 
 			watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
-			if err := cpm.saveProfile(watchedContainer, container); err != nil {
+			if err := cpm.saveProfile(watchedContainer, container, false); err != nil {
 				if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != nil {
 					return handledErr
 				}
@@ -37,7 +37,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, ContainerHasTerminatedError):
-				if err := cpm.saveProfile(watchedContainer, container); err != nil {
+				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
 					logger.L().Error("failed to save container profile on termination", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
 						helpers.String("containerName", container.Runtime.ContainerName),
@@ -53,7 +53,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 			case errors.Is(err, ContainerReachedMaxTime):
 				watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
-				if err := cpm.saveProfile(watchedContainer, container); err != nil {
+				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
 					logger.L().Error("failed to save container profile on max time", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
 						helpers.String("containerName", container.Runtime.ContainerName),
@@ -68,7 +68,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				return ContainerReachedMaxTime
 
 			case errors.Is(err, ProfileRequiresSplit):
-				if err := cpm.saveProfile(watchedContainer, container); err != nil {
+				if err := cpm.saveProfile(watchedContainer, container, false); err != nil {
 					if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != nil {
 						return handledErr
 					}
@@ -108,15 +108,16 @@ func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedCon
 	return nil
 }
 
-// saveProfile saves the container profile using the with pattern for safe access
-func (cpm *ContainerProfileManager) saveProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container) error {
+// saveProfile saves the container profile using the with pattern for safe access.
+// When forceSend is true, the profile will be sent even if the collected container data is empty.
+func (cpm *ContainerProfileManager) saveProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container, forceSend bool) error {
 	return cpm.withContainerNoSizeUpdate(watchedContainer.ContainerID, func(data *containerData) error {
-		return cpm.saveContainerProfile(watchedContainer, container, data)
+		return cpm.saveContainerProfile(watchedContainer, container, data, forceSend)
 	})
 }
 
 // saveContainerProfile saves the container profile to storage
-func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container, containerData *containerData) error {
+func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container, containerData *containerData, forceSend bool) error {
 	if watchedContainer == nil {
 		return errors.New("watched container data is nil")
 	}
@@ -143,7 +144,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		watchedContainer.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial)
 	}
 
-	if containerData.isEmpty() { // TODO: Also check if the seccomp profile is new (currently not implemented)
+	if containerData.isEmpty() && !forceSend { // TODO: Also check if the seccomp profile is new (currently not implemented)
 		return nil
 	}
 
