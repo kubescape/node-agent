@@ -7,6 +7,8 @@ package kskubemanager
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"syscall"
 
 	"github.com/cilium/ebpf"
 	"github.com/google/uuid"
@@ -217,6 +219,31 @@ func (m *KubeManagerInstance) handleGadgetInstance(log helpers.ILogger) error {
 				log.Debug("attach error details", helpers.String("err_full", fmt.Sprintf("%+v", err)))
 				for e := err; e != nil; e = errors.Unwrap(e) {
 					log.Debug("wrapped error", helpers.String("type", fmt.Sprintf("%T", e)), helpers.String("msg", e.Error()))
+				}
+
+				// If the failure looks like a map clone/FD problem, try a small probe map creation
+				// to distinguish between capability/kernel limits and map-in-map specific failures.
+				if strings.Contains(err.Error(), "can't clone map") || errors.Is(err, syscall.EBADF) {
+					log.Debug("clone map failure detected; attempting to create a small probe map to test kernel/capabilities")
+					spec := &ebpf.MapSpec{
+						Type:       ebpf.Hash,
+						KeySize:    4,
+						ValueSize:  4,
+						MaxEntries: 1,
+					}
+					testMap, err2 := ebpf.NewMap(spec)
+					if err2 != nil {
+						// Log full error chain/types for the probe creation failure so we can diagnose
+						// FROM USER-SPACE (useful when dmesg isn't available).
+						log.Debug("probe map creation failed", helpers.String("err_full", fmt.Sprintf("%+v", err2)))
+						for e := err2; e != nil; e = errors.Unwrap(e) {
+							log.Debug("probe wrapped error", helpers.String("type", fmt.Sprintf("%T", e)), helpers.String("msg", e.Error()))
+						}
+					} else {
+						// cleanup
+						_ = testMap.Close()
+						log.Debug("probe map creation succeeded", helpers.Interface("map", testMap))
+					}
 				}
 
 				log.Warning("start tracing container", helpers.String("container", container.K8s.ContainerName), helpers.Error(err))
