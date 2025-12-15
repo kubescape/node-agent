@@ -43,7 +43,7 @@ jobs:
       image_repo: ${{ steps.build-and-push-image.outputs.image_repo }}
 
   component-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-and-push-image
     continue-on-error: true
     strategy:
@@ -53,7 +53,7 @@ jobs:
           Test_02_AllAlertsFromMaliciousApp,
           # Test_03_BasicLoadActivities,
           # Test_04_MemoryLeak,
-          # Test_05_MemoryLeak_10K_Alerts, 
+          # Test_05_MemoryLeak_10K_Alerts,
           Test_06_KillProcessInTheMiddle,
           Test_07_RuleBindingApplyTest,
           Test_08_ApplicationProfilePatching,
