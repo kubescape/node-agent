@@ -213,6 +213,12 @@ func (m *KubeManagerInstance) handleGadgetInstance(log helpers.ILogger) error {
 					log.Debug("start tracing container, verifier error", helpers.String("container", container.K8s.ContainerName), helpers.Error(ve))
 				}
 
+				// Extended debug: print the full error chain to help diagnose loader/libbpf issues
+				log.Debug("attach error details", helpers.String("err_full", fmt.Sprintf("%+v", err)))
+				for e := err; e != nil; e = errors.Unwrap(e) {
+					log.Debug("wrapped error", helpers.String("type", fmt.Sprintf("%T", e)), helpers.String("msg", e.Error()))
+				}
+
 				log.Warning("start tracing container", helpers.String("container", container.K8s.ContainerName), helpers.Error(err))
 				return
 			}
