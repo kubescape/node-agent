@@ -7,6 +7,8 @@ package kskubemanager
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"syscall"
 
 	"github.com/cilium/ebpf"
 	"github.com/google/uuid"
@@ -173,7 +175,17 @@ func (m *KubeManagerInstance) handleGadgetInstance(log helpers.ILogger) error {
 			return fmt.Errorf("creating mountns map: %w", err)
 		}
 
-		log.Debug("set mountnsmap for gadget")
+		// DEBUG: verify mountnsmap presence and FD (if available)
+		if mountnsmap == nil {
+			log.Warning("TracerMountNsMap returned nil mountnsmap")
+		} else {
+			fd := -1
+			// Use a typed assertion to avoid depending on a particular ebpf Map API.
+			if im, ok := interface{}(mountnsmap).(interface{ FD() int }); ok {
+				fd = im.FD()
+			}
+			log.Debug("set mountnsmap for gadget", helpers.Int("fd", fd), helpers.Interface("map", mountnsmap))
+		}
 		setter.SetMountNsMap(mountnsmap)
 
 		m.mountnsmap = mountnsmap
@@ -184,12 +196,54 @@ func (m *KubeManagerInstance) handleGadgetInstance(log helpers.ILogger) error {
 		m.attachedContainers = make(map[string]*containercollection.Container)
 
 		attachContainerFunc := func(container *containercollection.Container) {
+			// DEBUG: check mountnsmap at attach time
+			if m.mountnsmap == nil {
+				log.Warning("mountnsmap is nil at attach time", helpers.String("container", container.K8s.ContainerName), helpers.String("containerID", container.Runtime.ContainerID))
+			} else {
+				fd := -1
+				if im, ok := interface{}(m.mountnsmap).(interface{ FD() int }); ok {
+					fd = im.FD()
+				}
+				log.Debug("mountnsmap at attach time", helpers.Int("fd", fd), helpers.Interface("map", m.mountnsmap), helpers.String("container", container.K8s.ContainerName))
+			}
+
 			log.Debug("calling gadget.AttachContainer()")
 			err := attacher.AttachContainer(container)
 			if err != nil {
 				var ve *ebpf.VerifierError
 				if errors.As(err, &ve) {
 					log.Debug("start tracing container, verifier error", helpers.String("container", container.K8s.ContainerName), helpers.Error(ve))
+				}
+
+				// Extended debug: print the full error chain to help diagnose loader/libbpf issues
+				log.Debug("attach error details", helpers.String("err_full", fmt.Sprintf("%+v", err)))
+				for e := err; e != nil; e = errors.Unwrap(e) {
+					log.Debug("wrapped error", helpers.String("type", fmt.Sprintf("%T", e)), helpers.String("msg", e.Error()))
+				}
+
+				// If the failure looks like a map clone/FD problem, try a small probe map creation
+				// to distinguish between capability/kernel limits and map-in-map specific failures.
+				if strings.Contains(err.Error(), "can't clone map") || errors.Is(err, syscall.EBADF) {
+					log.Debug("clone map failure detected; attempting to create a small probe map to test kernel/capabilities")
+					spec := &ebpf.MapSpec{
+						Type:       ebpf.Hash,
+						KeySize:    4,
+						ValueSize:  4,
+						MaxEntries: 1,
+					}
+					testMap, err2 := ebpf.NewMap(spec)
+					if err2 != nil {
+						// Log full error chain/types for the probe creation failure so we can diagnose
+						// FROM USER-SPACE (useful when dmesg isn't available).
+						log.Debug("probe map creation failed", helpers.String("err_full", fmt.Sprintf("%+v", err2)))
+						for e := err2; e != nil; e = errors.Unwrap(e) {
+							log.Debug("probe wrapped error", helpers.String("type", fmt.Sprintf("%T", e)), helpers.String("msg", e.Error()))
+						}
+					} else {
+						// cleanup
+						_ = testMap.Close()
+						log.Debug("probe map creation succeeded", helpers.Interface("map", testMap))
+					}
 				}
 
 				log.Warning("start tracing container", helpers.String("container", container.K8s.ContainerName), helpers.Error(err))

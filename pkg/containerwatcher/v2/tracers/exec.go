@@ -130,8 +130,6 @@ func (et *ExecTracer) callback(event utils.ExecEvent) {
 	if retVal > -1 && event.GetComm() != "" {
 		// Handle the event with syscall enrichment
 		et.handleEvent(event, []uint64{SYS_FORK})
-	} else {
-		logger.L().Info("Matthias - ignoring exec event", helpers.String("containerID", event.GetContainerID()), helpers.String("comm", event.GetComm()), helpers.Int("retVal", int(retVal)))
 	}
 }
 
