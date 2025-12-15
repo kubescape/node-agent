@@ -91,15 +91,28 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	opt := resource.ListOptions()
 
 	if res.Group == kubescapeCustomResourceGroup {
-		if err := backoff.RetryNotify(func() error {
-			var err error
-			opt.ResourceVersion, err = wh.getExistingStorageObjects(ctx, res, opt)
-			return err
-		}, newBackOff(), func(err error, d time.Duration) {
-			logger.L().Debug("WatchHandler - get existing storage objects", helpers.Error(err),
-				helpers.String("retry in", d.String()))
-		}); err != nil {
-			return fmt.Errorf("giving up get existing storage objects: %w", err)
+		// If the storage client isn't available, don't attempt listing existing storage objects.
+		// This avoids noisy retry logs when storage is intentionally not configured.
+		if wh.storageClient == nil {
+			// Informative log so operators know why existing storage objects are not being listed.
+			logger.L().Info("WatchHandler - storage client not available, skipping listing existing storage objects",
+				helpers.String("resource", res.String()))
+		} else {
+			if err := backoff.RetryNotify(func() error {
+				var err error
+				opt.ResourceVersion, err = wh.getExistingStorageObjects(ctx, res, opt)
+				// If the error indicates the storage client is not implemented/available,
+				// treat this as permanent so RetryNotify does not keep retrying.
+				if errors.Is(err, errNotImplemented) {
+					return backoff.Permanent(err)
+				}
+				return err
+			}, newBackOff(), func(err error, d time.Duration) {
+				logger.L().Debug("WatchHandler - get existing storage objects", helpers.Error(err),
+					helpers.String("retry in", d.String()))
+			}); err != nil {
+				return fmt.Errorf("giving up get existing storage objects: %w", err)
+			}
 		}
 	}
 
@@ -108,10 +121,10 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	// process events
 	for event := range eventQueue.ResultChan() {
 		// skip non-objects
-		obj, ok := event.Object.(runtime.Object)
-		if !ok || obj == nil {
+		if event.Object == nil {
 			continue
 		}
+		obj := event.Object
 		for _, handler := range wh.handlers {
 			switch event.Type {
 			case watch.Added:
@@ -133,14 +146,17 @@ func (wh *WatchHandler) Stop(_ context.Context) {
 }
 
 func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts metav1.ListOptions) (watch.Interface, error) {
-	if wh.storageClient == nil {
-		return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
-	}
 	switch res.Resource {
 	case "applicationprofiles":
+		if wh.storageClient == nil {
+			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
+		}
 		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
 		return wh.storageClient.ApplicationProfiles("").Watch(context.Background(), opts)
 	case "networkneighborhoods":
+		if wh.storageClient == nil {
+			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
+		}
 		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
 		return wh.storageClient.NetworkNeighborhoods("").Watch(context.Background(), opts)
 	case "pods":
@@ -150,6 +166,9 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 	case "rules":
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	case "seccompprofiles":
+		if wh.storageClient == nil {
+			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
+		}
 		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
 		return wh.storageClient.SeccompProfiles("").Watch(context.Background(), opts)
 	case "operatorcommands":
@@ -169,10 +188,8 @@ func (wh *WatchHandler) watchRetry(_ context.Context, res schema.GroupVersionRes
 	if err := backoff.RetryNotify(func() error {
 		w, err := wh.chooseWatcher(res, watchOpts)
 		if err != nil {
-			if k8sErrors.ReasonForError(err) == metav1.StatusReasonNotFound {
+			if k8sErrors.ReasonForError(err) == metav1.StatusReasonNotFound || errors.Is(err, errNotImplemented) {
 				exitFatal = false
-				return backoff.Permanent(err)
-			} else if errors.Is(err, errNotImplemented) {
 				return backoff.Permanent(err)
 			}
 			return fmt.Errorf("client resource: %w", err)
@@ -221,9 +238,15 @@ func (wh *WatchHandler) watchRetry(_ context.Context, res schema.GroupVersionRes
 func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav1.ListOptions) (runtime.Object, error) {
 	switch res.Resource {
 	case "applicationprofiles":
+		if wh.storageClient == nil {
+			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
+		}
 		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
 		return wh.storageClient.ApplicationProfiles("").List(context.Background(), opts)
 	case "networkneighborhoods":
+		if wh.storageClient == nil {
+			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
+		}
 		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
 		return wh.storageClient.NetworkNeighborhoods("").List(context.Background(), opts)
 	case "pods":
@@ -231,6 +254,9 @@ func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav
 	case "runtimerulealertbindings":
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
 	case "seccompprofiles":
+		if wh.storageClient == nil {
+			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
+		}
 		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
 		return wh.storageClient.SeccompProfiles("").List(context.Background(), opts)
 	case "operatorcommands":
