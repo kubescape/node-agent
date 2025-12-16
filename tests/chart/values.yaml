@@ -94,7 +94,7 @@ nodeAgent:
         fieldRef:
           fieldPath: spec.nodeName
 
-  privileged: false
+  privileged: true
   seLinuxType: spc_t
 
   volumeMounts:
