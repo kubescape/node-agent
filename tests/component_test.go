@@ -1154,17 +1154,21 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
 	require.NoError(t, err, "Error creating workload")
 
+	require.NoError(t, wl.WaitForReady(80))
+
 	time.Sleep(30 * time.Second)
 
 	_, _, _ = wl.ExecIntoPod([]string{"service", "nginx", "stop"}, "") // suppose to get error
 	require.NoError(t, wl.WaitForReady(80))
-	require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
+	require.NoError(t, wl.WaitForApplicationProfileCompletion(160))
 
-	time.Sleep(30 * time.Second)
+	// Wait for cache to be updated
+	time.Sleep(15 * time.Second)
 
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
 	require.NoError(t, err)
 
+	// Wait for the alert to be generated
 	time.Sleep(30 * time.Second)
 
 	alerts, err := testutils.GetAlerts(wl.Namespace)
