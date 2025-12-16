@@ -41,6 +41,10 @@ struct {
 // Define a tracer
 GADGET_TRACER(network, events, event_t);
 
+// Helper functions to load data from the packet buffer (__sk_buff)
+unsigned long long load_byte(const void *skb,
+    unsigned long long off) asm("llvm.bpf.load.byte");
+
 SEC("socket1")
 int ig_trace_net(struct __sk_buff *skb)
 {
@@ -64,7 +68,9 @@ int ig_trace_net(struct __sk_buff *skb)
     // An IPv4 header doesn't have a fixed size. The IHL field of a packet
     // represents the size of the IP header in 32-bit words, so we need to
     // multiply this value by 4 to get the header size in bytes.
-    __u8 ip_header_len = iph.ihl * 4;
+    // Avoid taking the address of the bit-field; read the first byte from skb.
+    __u8 ihl_byte = load_byte(skb, ip_off);
+    __u8 ip_header_len = (ihl_byte & 0x0F) * 4;
 	int l4_off = ip_off + ip_header_len;
 	__u16 port;
 
