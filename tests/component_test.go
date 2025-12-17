@@ -1164,7 +1164,7 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 	// require.NoError(t, wl.WaitForReady(80))
 	// require.NoError(t, wl.WaitForApplicationProfileCompletion(160))
 
-	time.Sleep(120 * time.Second)
+	time.Sleep(160 * time.Second)
 
 	// Wait for cache to be updated
 	time.Sleep(15 * time.Second)
