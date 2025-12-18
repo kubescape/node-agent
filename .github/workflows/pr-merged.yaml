@@ -21,7 +21,7 @@ jobs:
       id: get-build
       uses: mlilback/build-number@v1
       with:
-        base: -143
+        base: -550
         run-id: ${{ github.run_number }}
 
   pr-merged:
@@ -30,7 +30,7 @@ jobs:
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/node-agent
-      IMAGE_TAG: v0.2.${{ needs.reset-run-number.outputs.run-number }}
+      IMAGE_TAG: v0.3.${{ needs.reset-run-number.outputs.run-number }}
       COMPONENT_NAME: nodeAgent
       CGO_ENABLED: 0
       GO111MODULE: "on"

@@ -14,7 +14,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/cilium/ebpf v0.20.0
 	github.com/crewjam/rfc5424 v0.1.0
-	github.com/cyphar/filepath-securejoin v0.5.1
+	github.com/cyphar/filepath-securejoin v0.6.0
 	github.com/deckarep/golang-set/v2 v2.7.0
 	github.com/dghubble/trie v0.1.0
 	github.com/distribution/distribution v2.8.2+incompatible
@@ -33,7 +33,7 @@ require (
 	github.com/joncrlsn/dque v0.0.0-20241024143830-7723fd131a64
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.24
-	github.com/kubescape/k8s-interface v0.0.199
+	github.com/kubescape/k8s-interface v0.0.200
 	github.com/kubescape/storage v0.0.221
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
@@ -51,8 +51,8 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/multierr v1.11.0
-	golang.org/x/net v0.46.0
-	golang.org/x/sys v0.37.0
+	golang.org/x/net v0.47.0
+	golang.org/x/sys v0.38.0
 	gonum.org/v1/plot v0.14.0
 	google.golang.org/grpc v1.76.0
 	gopkg.in/mcuadros/go-syslog.v2 v2.3.0
@@ -76,6 +76,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.7.0 // indirect
 	cloud.google.com/go/iam v1.2.2 // indirect
 	cloud.google.com/go/storage v1.43.0 // indirect
+	cyphar.com/go-pathrs v0.2.1 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	git.sr.ht/~sbinet/gg v0.5.0 // indirect
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20230811130428-ced1acdcaa24 // indirect
@@ -140,7 +141,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.9.3 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
-	github.com/cilium/cilium v1.16.9 // indirect
+	github.com/cilium/cilium v1.16.17 // indirect
 	github.com/cloudflare/cbpfc v0.0.0-20240920015331-ff978e94500b // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
 	github.com/containerd/cgroups/v3 v3.0.5 // indirect
@@ -300,7 +301,7 @@ require (
 	github.com/olvrng/ujson v1.1.0 // indirect
 	github.com/opcoder0/capabilities v0.0.0-20221222060822-17fd73bffd2a // indirect
 	github.com/opencontainers/runtime-spec v1.2.1 // indirect
-	github.com/opencontainers/selinux v1.12.0 // indirect
+	github.com/opencontainers/selinux v1.13.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.1-0.20220228012449-10b1cf09e00b // indirect
 	github.com/packetcap/go-pcap v0.0.0-20250723190045-d00b185f30b7 // indirect
 	github.com/pborman/indent v1.2.1 // indirect
@@ -392,14 +393,14 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/crypto v0.43.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/term v0.36.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/sync v0.18.0 // indirect
+	golang.org/x/term v0.37.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect

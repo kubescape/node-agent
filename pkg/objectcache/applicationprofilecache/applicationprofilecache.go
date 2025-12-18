@@ -32,6 +32,7 @@ type ContainerInfo struct {
 	Namespace                 string
 	Name                      string
 	SeenContainerFromTheStart bool // True if container was seen from the start
+	UserDefinedProfile   string
 }
 
 // ContainerCallStackIndex maintains call stack search trees for a container
@@ -154,7 +155,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			// Get the workload ID from profile
 			workloadID := apc.wlidKey(profile.Annotations[helpersv1.WlidMetadataKey], profile.Labels[helpersv1.TemplateHashKey])
 			if workloadID == "" {
-				continue
+				continue // this is the case for user-defined profiles
 			}
 
 			// Update profile state regardless of whether we'll update the full profile
@@ -476,6 +477,8 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 					})
 				}
 			}
+		} else {
+			apc.workloadIDToProfileState.Set(workloadID, nil)
 		}
 
 		// Create container info
@@ -489,13 +492,40 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 			SeenContainerFromTheStart: !sharedData.PreRunningContainer,
 		}
 
+		// Check for user-defined profile
+		if userDefinedProfile, ok := container.K8s.PodLabels[helpersv1.UserDefinedProfileMetadataKey]; ok {
+			if userDefinedProfile != "" {
+				// Set the user-defined profile in container info
+				containerInfo.UserDefinedProfile = userDefinedProfile
+				// Fetch the profile from storage
+				// TODO should we cache user-defined profiles separately? - it could allow deduplication
+				fullProfile, err := apc.storageClient.ApplicationProfiles(container.K8s.Namespace).Get(ctx, userDefinedProfile, metav1.GetOptions{})
+				if err != nil {
+					logger.L().Error("failed to get user-defined profile",
+						helpers.String("containerID", containerID),
+						helpers.String("workloadID", workloadID),
+						helpers.String("namespace", container.K8s.Namespace),
+						helpers.String("profileName", userDefinedProfile),
+						helpers.Error(err))
+					// Update the profile state to indicate an error
+					profileState := &objectcache.ProfileState{
+						Error: err,
+					}
+					apc.workloadIDToProfileState.Set(workloadID, profileState)
+					return nil
+				}
+				// Update the profile in the cache
+				apc.workloadIDToProfile.Set(workloadID, fullProfile)
+				logger.L().Debug("added user-defined profile to cache",
+					helpers.String("containerID", containerID),
+					helpers.String("workloadID", workloadID),
+					helpers.String("namespace", container.K8s.Namespace),
+					helpers.String("profileName", userDefinedProfile))
+			}
+		}
+
 		// Add to container info map
 		apc.containerIDToInfo.Set(containerID, containerInfo)
-
-		// Create workload ID to state mapping
-		if _, exists := apc.workloadIDToProfileState.Load(workloadID); !exists {
-			apc.workloadIDToProfileState.Set(workloadID, nil)
-		}
 
 		logger.L().Debug("container added to cache",
 			helpers.String("containerID", containerID),
