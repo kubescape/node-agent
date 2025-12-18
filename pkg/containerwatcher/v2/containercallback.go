@@ -106,6 +106,8 @@ func (cw *ContainerWatcher) setSharedWatchedContainerData(container *containerco
 func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*objectcache.WatchedContainerData, error) {
 	watchedContainer := objectcache.WatchedContainerData{
 		ContainerID: container.Runtime.ContainerID,
+		PodName:     container.K8s.PodName,
+		Namespace:   container.K8s.Namespace,
 		// we get ImageID and ImageTag from the pod spec for consistency with operator
 	}
 

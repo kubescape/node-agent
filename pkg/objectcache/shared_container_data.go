@@ -64,6 +64,8 @@ type WatchedContainerData struct {
 	ImageTag                string
 	ImageID                 string
 	Wlid                    string
+	PodName                 string
+	Namespace               string
 	ContainerType           ContainerType
 	ContainerIndex          int
 	ContainerInfos          map[ContainerType][]ContainerInfo

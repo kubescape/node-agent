@@ -3,7 +3,6 @@ package profilehelper
 import (
 	"errors"
 
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -85,15 +84,7 @@ func GetPodSpec(objectCache objectcache.ObjectCache, containerID string) (*corev
 		return nil, errors.New("shared data not found")
 	}
 
-	err := wlid.IsWlidValid(sharedData.Wlid)
-	if err != nil {
-		return nil, errors.New("invalid wlid")
-	}
-
-	namespace := wlid.GetNamespaceFromWlid(sharedData.Wlid)
-	podName := wlid.GetNameFromWlid(sharedData.Wlid)
-
-	podSpec := objectCache.K8sObjectCache().GetPodSpec(namespace, podName)
+	podSpec := objectCache.K8sObjectCache().GetPodSpec(sharedData.Namespace, sharedData.PodName)
 	if podSpec == nil {
 		return nil, errors.New("pod spec not found")
 	}
