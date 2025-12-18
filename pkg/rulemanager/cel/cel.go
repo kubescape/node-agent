@@ -6,19 +6,8 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/ext"
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
-	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
-	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
-	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
-	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
@@ -26,7 +15,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/networkneighborhood"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/parse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/process"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/picatz/xcel"
@@ -47,53 +35,14 @@ type CEL struct {
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	ta, tp := xcel.NewTypeAdapter(), xcel.NewTypeProvider()
-	capaObj, capaTyp := xcel.NewObject(&tracercapabilitiestype.Event{})
-	xcel.RegisterObject(ta, tp, capaObj, capaTyp, xcel.NewFields(capaObj))
-	dnsObj, dnsTyp := xcel.NewObject(&tracerdnstype.Event{})
-	xcel.RegisterObject(ta, tp, dnsObj, dnsTyp, xcel.NewFields(dnsObj))
-	execObj, execTyp := xcel.NewObject(&events.ExecEvent{})
-	xcel.RegisterObject(ta, tp, execObj, execTyp, xcel.NewFields(execObj))
-	exitObj, exitTyp := xcel.NewObject(&tracerexectype.Event{})
-	xcel.RegisterObject(ta, tp, exitObj, exitTyp, xcel.NewFields(exitObj))
-	forkObj, forkTyp := xcel.NewObject(&tracerforktype.Event{})
-	xcel.RegisterObject(ta, tp, forkObj, forkTyp, xcel.NewFields(forkObj))
-	hardlinkObj, hardlinkTyp := xcel.NewObject(&tracerhardlinktype.Event{})
-	xcel.RegisterObject(ta, tp, hardlinkObj, hardlinkTyp, xcel.NewFields(hardlinkObj))
-	iouringObj, iouringTyp := xcel.NewObject(&traceriouringtype.Event{})
-	xcel.RegisterObject(ta, tp, iouringObj, iouringTyp, xcel.NewFields(iouringObj))
-	netObj, netTyp := xcel.NewObject(&tracernetworktype.Event{})
-	xcel.RegisterObject(ta, tp, netObj, netTyp, xcel.NewFields(netObj))
-	openObj, openTyp := xcel.NewObject(&events.OpenEvent{})
-	xcel.RegisterObject(ta, tp, openObj, openTyp, xcel.NewFields(openObj))
+	eventObj, eventTyp := xcel.NewObject(&utils.CelEventImpl{})
+	xcel.RegisterObject(ta, tp, eventObj, eventTyp, utils.CelFields)
 	procObj, procTyp := xcel.NewObject(&events.ProcfsEvent{})
 	xcel.RegisterObject(ta, tp, procObj, procTyp, xcel.NewFields(procObj))
-	ptraceObj, ptraceTyp := xcel.NewObject(&tracerptracetype.Event{})
-	xcel.RegisterObject(ta, tp, ptraceObj, ptraceTyp, xcel.NewFields(ptraceObj))
-	randObj, randTyp := xcel.NewObject(&tracerrandomxtype.Event{})
-	xcel.RegisterObject(ta, tp, randObj, randTyp, xcel.NewFields(randObj))
-	sshObj, sshTyp := xcel.NewObject(&tracersshtype.Event{})
-	xcel.RegisterObject(ta, tp, sshObj, sshTyp, xcel.NewFields(sshObj))
-	symlinkObj, symlinkTyp := xcel.NewObject(&tracersymlinktype.Event{})
-	xcel.RegisterObject(ta, tp, symlinkObj, symlinkTyp, xcel.NewFields(symlinkObj))
-	syscallObj, syscallTyp := xcel.NewObject(&types.SyscallEvent{})
-	xcel.RegisterObject(ta, tp, syscallObj, syscallTyp, xcel.NewFields(syscallObj))
 	envOptions := []cel.EnvOption{
-		cel.Variable("event_type", cel.StringType),
-		cel.Variable(string(utils.CapabilitiesEventType), capaTyp),
-		cel.Variable(string(utils.DnsEventType), dnsTyp),
-		cel.Variable(string(utils.ExecveEventType), execTyp),
-		cel.Variable(string(utils.ExitEventType), exitTyp),
-		cel.Variable(string(utils.ForkEventType), forkTyp),
-		cel.Variable(string(utils.HardlinkEventType), hardlinkTyp),
-		cel.Variable(string(utils.IoUringEventType), iouringTyp),
-		cel.Variable(string(utils.NetworkEventType), netTyp),
-		cel.Variable(string(utils.OpenEventType), openTyp),
+		cel.Variable("event", eventTyp),
+		cel.Variable("eventType", cel.StringType),
 		cel.Variable(string(utils.ProcfsEventType), procTyp),
-		cel.Variable(string(utils.PtraceEventType), ptraceTyp),
-		cel.Variable(string(utils.RandomXEventType), randTyp),
-		cel.Variable(string(utils.SSHEventType), sshTyp),
-		cel.Variable(string(utils.SymlinkEventType), symlinkTyp),
-		cel.Variable(string(utils.SyscallEventType), syscallTyp),
 		cel.Variable(string(utils.HTTPEventType), cel.AnyType),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
@@ -110,7 +59,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	if err != nil {
 		return nil, err
 	}
-	cel := &CEL{
+	c := &CEL{
 		env:          env,
 		objectCache:  objectCache,
 		programCache: make(map[string]cel.Program),
@@ -118,11 +67,11 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		tp:           tp,
 	}
 
-	cel.evalContextPool.New = func() interface{} {
+	c.evalContextPool.New = func() interface{} {
 		return make(map[string]any, 1)
 	}
 
-	return cel, nil
+	return c, nil
 }
 
 func (c *CEL) registerExpression(expression string) error {
@@ -169,7 +118,8 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
-		if expression.EventType != event.EventType {
+		eventType := event.Event.GetEventType()
+		if expression.EventType != eventType {
 			continue
 		}
 
@@ -178,8 +128,8 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 			return false, err
 		}
 
-		obj, _ := xcel.NewObject(event.Event)
-		out, _, err := program.Eval(map[string]any{string(event.EventType): obj, "event_type": string(event.EventType)})
+		obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
+		out, _, err := program.Eval(map[string]any{"event": obj, "eventType": string(eventType)})
 		if err != nil {
 			return false, err
 		}
@@ -202,7 +152,7 @@ func (c *CEL) EvaluateRuleByMap(event map[string]any, eventType utils.EventType,
 	}()
 
 	evalContext[string(eventType)] = event
-	evalContext["event_type"] = string(eventType)
+	evalContext["eventType"] = string(eventType)
 
 	for _, expression := range expressions {
 		if expression.EventType != eventType {
@@ -242,7 +192,7 @@ func (c *CEL) EvaluateExpressionByMap(event map[string]any, expression string, e
 	}()
 
 	evalContext[string(eventType)] = event
-	evalContext["event_type"] = string(eventType)
+	evalContext["eventType"] = string(eventType)
 
 	out, _, err := program.Eval(evalContext)
 	if err != nil {
@@ -258,8 +208,8 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 		return "", err
 	}
 
-	obj, _ := xcel.NewObject(event.Event)
-	out, _, err := program.Eval(map[string]any{string(event.EventType): obj, "event_type": string(event.EventType)})
+	obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
+	out, _, err := program.Eval(map[string]any{"event": obj, "eventType": string(event.Event.GetEventType())})
 	if err != nil {
 		return "", err
 	}

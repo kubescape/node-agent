@@ -3,12 +3,8 @@ package tracers
 import (
 	"context"
 	"fmt"
-	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
-	toptracer "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/tracer"
-	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -28,7 +24,7 @@ type TopTracer struct {
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
 	eventCallback       containerwatcher.ResultCallback
-	tracer              *toptracer.Tracer
+	//tracer              *toptracer.Tracer
 }
 
 // NewTopTracer creates a new top tracer
@@ -48,28 +44,28 @@ func NewTopTracer(
 
 // Start initializes and starts the top tracer
 func (tt *TopTracer) Start(ctx context.Context) error {
-	if err := tt.tracerCollection.AddTracer(topTraceName, tt.containerSelector); err != nil {
-		return fmt.Errorf("adding top tracer: %w", err)
-	}
+	//if err := tt.tracerCollection.AddTracer(topTraceName, tt.containerSelector); err != nil {
+	//	return fmt.Errorf("adding top tracer: %w", err)
+	//}
 
-	topTracer, err := toptracer.NewTracer(
-		&toptracer.Config{Interval: time.Minute, MaxRows: maxRows},
-		tt.containerCollection,
-		tt.topEventCallback,
-	)
-	if err != nil {
-		return fmt.Errorf("creating top tracer: %w", err)
-	}
+	//topTracer, err := toptracer.NewTracer(
+	//	&toptracer.Config{Interval: time.Minute, MaxRows: maxRows},
+	//	tt.containerCollection,
+	//	tt.topEventCallback,
+	//)
+	//if err != nil {
+	//	return fmt.Errorf("creating top tracer: %w", err)
+	//}
 
-	tt.tracer = topTracer
+	//tt.tracer = topTracer
 	return nil
 }
 
 // Stop gracefully stops the top tracer
 func (tt *TopTracer) Stop() error {
-	if tt.tracer != nil {
-		tt.tracer.Stop()
-	}
+	//if tt.tracer != nil {
+	//	tt.tracer.Stop()
+	//}
 
 	if err := tt.tracerCollection.RemoveTracer(topTraceName); err != nil {
 		return fmt.Errorf("removing top tracer: %w", err)
@@ -80,7 +76,7 @@ func (tt *TopTracer) Stop() error {
 
 // GetName returns the unique name of the tracer
 func (tt *TopTracer) GetName() string {
-	return "top_tracer"
+	return topTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -94,16 +90,16 @@ func (tt *TopTracer) IsEnabled(cfg config.Config) bool {
 }
 
 // topEventCallback handles top events from the tracer
-func (tt *TopTracer) topEventCallback(event *top.Event[toptypes.Stats]) {
-	if event.Error != "" {
-		// Top events are not K8sEvents, so we need to handle them differently
-		// For now, we'll skip them in the unified approach
-		// TODO: Implement proper top event handling
-		return
-	}
+//func (tt *TopTracer) topEventCallback(event *top.Event[toptypes.Stats]) {
+//	if event.Error != "" {
+// Top events are not K8sEvents, so we need to handle them differently
+// For now, we'll skip them in the unified approach
+// TODO: Implement proper top event handling
+//		return
+//	}
 
-	// Top events are not K8sEvents, so we need to handle them differently
-	// For now, we'll skip them in the unified approach
-	// TODO: Implement proper top event handling
-	_ = event
-}
+// Top events are not K8sEvents, so we need to handle them differently
+// For now, we'll skip them in the unified approach
+// TODO: Implement proper top event handling
+//	_ = event
+//}

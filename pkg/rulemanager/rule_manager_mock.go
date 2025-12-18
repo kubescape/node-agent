@@ -22,10 +22,6 @@ func (r RuleManagerMock) ContainerCallback(notif containercollection.PubSubEvent
 	// noop
 }
 
-func (r RuleManagerMock) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {
-	// noop
-}
-
 func (r RuleManagerMock) HasApplicableRuleBindings(namespace, name string) bool {
 	return false
 }

@@ -8,16 +8,17 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 )
 
-// emptyEvents clears all event data except syscalls (which are kept for peek function)
+// emptyEvents clears all event data
 func (cd *containerData) emptyEvents() {
 	cd.size.Store(0)
 	cd.capabilites = nil
-	// cd.syscalls is intentionally not set to nil, as we want to keep the syscalls for the peek function
+	cd.syscalls = nil
 	cd.endpoints = nil
 	cd.execs = nil
 	cd.opens = nil
@@ -95,6 +96,13 @@ func (cd *containerData) getOpens() []v1beta1.OpenCalls {
 	return opens
 }
 
+func (cd *containerData) getSyscalls() []string {
+	if cd.syscalls == nil {
+		return []string{}
+	}
+	return cd.syscalls.ToSlice()
+}
+
 // getEndpoints returns all HTTP endpoints recorded for this container
 func (cd *containerData) getEndpoints() []v1beta1.HTTPEndpoint {
 	var endpoints []v1beta1.HTTPEndpoint
@@ -148,7 +156,7 @@ func (cd *containerData) getIngressNetworkNeighbors(namespace string, k8sClient 
 	}
 
 	for _, event := range cd.networks.ToSlice() {
-		if event.PktType == HostPktType {
+		if event.PktType == utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(event, namespace, k8sClient, dnsResolverClient)
 			if neighbor == nil {
 				continue
@@ -168,7 +176,7 @@ func (cd *containerData) getEgressNetworkNeighbors(namespace string, k8sClient k
 	}
 
 	for _, event := range cd.networks.ToSlice() {
-		if event.PktType != HostPktType {
+		if event.PktType != utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(event, namespace, k8sClient, dnsResolverClient)
 			if neighbor == nil {
 				continue

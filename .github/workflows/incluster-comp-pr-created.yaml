@@ -1,0 +1,55 @@
+name: pull_request_created
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches:
+      - 'master'
+      - 'main'
+    paths-ignore:
+      - '**/**.md' ### Do not run the workflow if Markdown files changed.
+      - '.github/workflows/*' ### Do not run the workflow if files under path: .github/workflows/* changed.
+
+  workflow_call:
+    inputs:
+      GO_VERSION:
+        required: true
+        type: string
+      CGO_ENABLED:
+        required: false
+        type: number
+        default: 1
+      BUILD_PATH:
+        required: false
+        type: string
+        default: "./..."
+      GO111MODULE:
+        required: false
+        type: string
+      UNIT_TESTS_PATH:
+        required: false
+        type: string
+        default: "./..."
+      # TEST_MULTI_ENVIRONMENTS:
+      #   required: false
+      #   type: boolean
+      #   default: false
+    secrets:
+      SNYK_TOKEN:
+        required: false
+      GITGUARDIAN_API_KEY:
+        required: false
+
+jobs:
+  test:
+    permissions:
+      pull-requests: write
+      security-events: write
+    uses: ./.github/workflows/go-basic-tests.yaml
+    with:
+      GO_VERSION: ${{ inputs.GO_VERSION }}
+      GO111MODULE: ${{ inputs.GO111MODULE }}
+      CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
+      UNIT_TESTS_PATH: ${{ inputs.UNIT_TESTS_PATH }}
+      BUILD_PATH: ${{ inputs.BUILD_PATH }}
+      # TEST_MULTI_ENVIRONMENTS: ${{ inputs.TEST_MULTI_ENVIRONMENTS }}
+    secrets: inherit

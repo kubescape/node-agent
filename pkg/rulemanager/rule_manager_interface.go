@@ -10,7 +10,6 @@ import (
 
 type RuleManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
-	RegisterPeekFunc(peek func(mntns uint64) ([]string, error))
 	HasApplicableRuleBindings(namespace, name string) bool
 	HasFinalApplicationProfile(pod *v1.Pod) bool
 	IsContainerMonitored(k8sContainerID string) bool

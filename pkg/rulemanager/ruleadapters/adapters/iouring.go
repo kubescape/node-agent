@@ -1,13 +1,12 @@
 package adapters
 
 import (
-	iouringsyscall "github.com/iceber/iouring-go/syscall"
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
+	iouringsyscall "github.com/iceber/iouring-go/syscall"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type IoUringAdapter struct {
@@ -17,47 +16,51 @@ func NewIoUringAdapter() *IoUringAdapter {
 	return &IoUringAdapter{}
 }
 
-func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
+func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
+	iouringEvent, ok := enrichedEvent.Event.(utils.IOUring)
 	if !ok {
 		return
 	}
 
-	ok, name := GetOpcodeName(uint8(iouringEvent.Opcode))
+	opcode := iouringEvent.GetOpcode()
+	ok, name := GetOpcodeName(uint8(opcode))
 	if !ok {
 		return
 	}
 
+	pid := iouringEvent.GetPID()
+	comm := iouringEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = iouringEvent.Pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"opcode":    iouringEvent.Opcode,
-		"flags":     iouringEvent.Flags,
-		"operation": name,
+	baseRuntimeAlert.InfectedPID = pid
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["opcode"] = opcode
+	baseRuntimeAlert.Arguments["flags"] = iouringEvent.GetFlags()
+	baseRuntimeAlert.Arguments["operation"] = name
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: iouringEvent.Comm,
+			Name: comm,
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm: iouringEvent.Comm,
-			PID:  iouringEvent.Pid,
-			Uid:  &iouringEvent.Uid,
-			Gid:  &iouringEvent.Gid,
+			Comm: comm,
+			PID:  pid,
+			Uid:  iouringEvent.GetUid(),
+			Gid:  iouringEvent.GetGid(),
 		},
-		ContainerID: iouringEvent.Runtime.ContainerID,
+		ContainerID: iouringEvent.GetContainerID(),
 	}
 	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	failure.SetTriggerEvent(iouringEvent.Event)
+	failure.SetTriggerEvent(iouringEvent)
 
 	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
 		PodName:   iouringEvent.GetPod(),
-		PodLabels: iouringEvent.K8s.PodLabels,
+		PodLabels: iouringEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
@@ -121,24 +124,24 @@ func GetOpcodeName(opcode uint8) (bool, string) {
 }
 
 func (c *IoUringAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
-	if !ok {
-		return nil
-	}
+	//iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
+	//if !ok {
+	//	return nil
+	//}
 
-	result := ConvertToMap(&iouringEvent.Event)
+	//result := ConvertToMap(&iouringEvent.Event)
 
-	result["opcode"] = iouringEvent.Opcode
-	result["pid"] = iouringEvent.Pid
-	result["tid"] = iouringEvent.Tid
-	result["uid"] = iouringEvent.Uid
-	result["gid"] = iouringEvent.Gid
-	result["comm"] = iouringEvent.Comm
-	result["flags"] = iouringEvent.Flags
-	result["user_data"] = iouringEvent.UserData
-	result["identifier"] = iouringEvent.Identifier
+	//result["opcode"] = iouringEvent.Opcode
+	//result["pid"] = iouringEvent.Pid
+	//result["tid"] = iouringEvent.Tid
+	//result["uid"] = iouringEvent.Uid
+	//result["gid"] = iouringEvent.Gid
+	//result["comm"] = iouringEvent.Comm
+	//result["flags"] = iouringEvent.Flags
+	//result["user_data"] = iouringEvent.UserData
+	//result["identifier"] = iouringEvent.Identifier
 
-	result["mountnsid"] = iouringEvent.MountNsID
+	//result["mountnsid"] = iouringEvent.MountNsID
 
-	return result
+	return map[string]interface{}{}
 }

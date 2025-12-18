@@ -1,0 +1,518 @@
+// Kernel types definitions
+#include <vmlinux.h>
+
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h>
+#include <bpf/bpf_core_read.h>
+#include <bpf/bpf_endian.h>
+
+// Inspektor Gadget buffer
+#include <gadget/buffer.h>
+
+// Helpers to handle common data
+#include <gadget/common.h>
+
+// Inspektor Gadget macros
+#include <gadget/macros.h>
+
+// Inspektor Gadget filtering
+#include <gadget/filter.h>
+
+// Inspektor Gadget types
+#include <gadget/types.h>
+
+// Inspektor Gadget mntns
+#include <gadget/mntns.h>
+
+#include "program.h"
+
+// events is the name of the buffer map and 1024 * 256 (256KB) is its size.
+GADGET_TRACER_MAP(events, 1024 * 256);
+
+// Define a tracer
+GADGET_TRACER(http, events, httpevent);
+
+// Used to store the buffer of packets
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
+    __type(key, __u64);
+    __type(value, struct packet_buffer);
+} buffer_packets SEC(".maps");
+
+// Used to store the buffer of messages of messages type
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
+    __type(key, __u64);
+    __type(value, struct packet_msg);
+} msg_packets SEC(".maps");
+
+static __always_inline __u64 min_size(__u64 a, __u64 b) {
+    return a < b ? a : b;
+}
+
+static __always_inline bool is_msg_peek(__u32 flags)
+{
+    return flags & MSG_PEEK;
+}
+
+// is_rx: true if this is an inbound packet (read/recv), false if outbound (write/send)
+static __always_inline int populate_httpevent(struct httpevent *event, __u32 sockfd, bool is_rx)
+{
+    if (!event)
+        return -1;
+
+    // Populate the process data into the event.
+    gadget_process_populate(&event->proc);
+
+    // Initialize defaults
+    event->socket_inode = 0;
+
+    // Get socket file descriptor and extract both inode and socket info in one pass
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task)
+        goto out;
+
+    struct files_struct *files = BPF_CORE_READ(task, files);
+    if (!files)
+        goto out;
+
+    struct fdtable *fdt = BPF_CORE_READ(files, fdt);
+    if (!fdt)
+        goto out;
+
+    struct file **fd_array = BPF_CORE_READ(fdt, fd);
+    if (!fd_array)
+        goto out;
+
+    struct file *file_ptr;
+    bpf_probe_read(&file_ptr, sizeof(file_ptr), &fd_array[sockfd]);
+    if (!file_ptr)
+        goto out;
+
+    // Get socket inode from file->f_inode->i_ino
+    struct inode *inode_ptr = BPF_CORE_READ(file_ptr, f_inode);
+    if (inode_ptr) {
+        event->socket_inode = BPF_CORE_READ(inode_ptr, i_ino);
+    }
+
+    // Get socket from file->private_data
+    struct socket *sock = BPF_CORE_READ(file_ptr, private_data);
+    if (!sock)
+        goto out;
+
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    if (sk) {
+        // Get raw values from the socket
+        // skc_num is local port (host endian usually, but we enforce ntohs to be safe)
+        // skc_rcv_saddr is local IP
+        // skc_dport is remote port (network endian)
+        // skc_daddr is remote IP
+        
+        __u16 local_port = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_num));
+        __u32 local_addr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+        
+        __u16 remote_port = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+        __u32 remote_addr = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+
+        if (is_rx) {
+            // INBOUND: 
+            // Source = Remote Peer
+            // Dest   = Local Machine
+            event->src.port = remote_port;
+            event->src.addr_raw.v4 = remote_addr;
+            
+            event->dst.port = local_port;
+            event->dst.addr_raw.v4 = local_addr;
+        } else {
+            // OUTBOUND:
+            // Source = Local Machine
+            // Dest   = Remote Peer
+            event->src.port = local_port;
+            event->src.addr_raw.v4 = local_addr;
+            
+            event->dst.port = remote_port;
+            event->dst.addr_raw.v4 = remote_addr;
+        }
+
+        event->src.version = 4;
+        event->dst.version = 4;
+    }
+
+out:
+    event->timestamp_raw = bpf_ktime_get_boot_ns();
+
+    return 0;
+}
+
+static __always_inline int get_http_type(struct syscall_trace_exit *ctx, void *data, int size)
+{
+    // Check for common HTTP methods
+    const char *http_methods[] = {"GET ", "POST ", "HEAD ", "PUT ", "DELETE ", "OPTIONS ", "TRACE ", "CONNECT "};
+    int num_methods = sizeof(http_methods) / sizeof(http_methods[0]);
+
+    if (size < 4)
+    {
+        return 0;
+    }
+
+    for (int i = 0; i < num_methods; i++)
+    {
+
+        if (__builtin_memcmp(data, http_methods[i], 4) == 0)
+        {
+            return EVENT_TYPE_REQUEST;
+        }
+    }
+
+    if (__builtin_memcmp(data, "HTTP", 4) == 0)
+    {
+        return EVENT_TYPE_RESPONSE;
+    }
+
+    return 0;
+}
+
+// Store the arguments of the receive syscalls in a map
+static void inline pre_receive_syscalls(struct syscall_trace_enter *ctx)
+{
+    __u64 id = bpf_get_current_pid_tgid();
+    __u32 sockfd = (__u32)ctx->args[0]; // For read, recv, recvfrom, write, send, sendto, sockfd is the first argument
+
+    // No need to check if socket is being tracked - track all sockets
+    struct packet_buffer packet = {};
+    packet.sockfd = sockfd;
+    packet.buf = (__u64)ctx->args[1];
+    packet.len = ctx->args[2];
+    bpf_map_update_elem(&buffer_packets, &id, &packet, BPF_ANY);
+}
+
+static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *syscall, bool is_rx)
+{
+    __u64 id = bpf_get_current_pid_tgid();
+    char buf[PACKET_CHUNK_SIZE] = {0};
+    __u32 total_size = (__u32)ctx->ret;
+
+    struct packet_buffer *packet = bpf_map_lookup_elem(&buffer_packets, &id);
+    if (!packet)
+        return 0;
+
+    if (ctx->ret <= 0)
+        return 0;
+
+    if (total_size < 1)
+        return 0;
+
+    if (packet->len < 1)
+        return 0;
+
+    int read_size = bpf_probe_read_user(buf, min_size(packet->len, PACKET_CHUNK_SIZE), (void *)packet->buf);
+    if (read_size < 0)
+        return 0;
+
+    int type = get_http_type(ctx, buf, min_size(total_size, PACKET_CHUNK_SIZE));
+    if (!type)
+        return 0;
+
+    struct httpevent *dataevent = gadget_reserve_buf(&events, sizeof(*dataevent));
+    if (!dataevent)
+        return 0;
+
+    // Populate event with socket inode for tracking
+    // Pass is_rx to determine src/dst
+    populate_httpevent(dataevent, packet->sockfd, is_rx);
+
+    dataevent->type = type;
+    dataevent->sock_fd = packet->sockfd;
+
+    bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
+    bpf_probe_read_user(&dataevent->buf, min_size(total_size, MAX_DATAEVENT_BUFFER), (void *)packet->buf);
+
+    dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
+
+    gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
+
+    bpf_map_delete_elem(&buffer_packets, &id);
+    return 0;
+}
+
+static __always_inline int pre_process_msg(struct syscall_trace_enter *ctx)
+{
+    __u64 id = bpf_get_current_pid_tgid();
+    __u32 sockfd = (__u32)ctx->args[0]; // For sendmsg and recvmsg, sockfd is the first argument
+
+    // No need to check if socket is being tracked - track all sockets
+    struct packet_msg write_args = {};
+    write_args.fd = sockfd;
+
+    struct user_msghdr msghdr = {};
+    if (bpf_probe_read_user(&msghdr, sizeof(msghdr), (void *)ctx->args[1]) != 0)
+    {
+        return 0;
+    }
+
+    write_args.iovec_ptr = (uint64_t)(msghdr.msg_iov);
+    write_args.iovlen = msghdr.msg_iovlen;
+    bpf_map_update_elem(&msg_packets, &id, &write_args, BPF_ANY);
+    return 0;
+}
+
+static __always_inline int pre_process_iovec(struct syscall_trace_enter *ctx)
+{
+    __u64 id = bpf_get_current_pid_tgid();
+    __u32 sockfd = (__u32)ctx->args[0]; // For writev and readv, sockfd is the first argument
+
+    // No need to check if socket is being tracked - track all sockets
+    struct packet_msg write_args = {};
+    write_args.fd = sockfd;
+    write_args.iovec_ptr = (__u64)ctx->args[1];
+    write_args.iovlen = (__u64)ctx->args[2];
+    bpf_map_update_elem(&msg_packets, &id, &write_args, BPF_ANY);
+    return 0;
+}
+
+static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *syscall, bool is_rx)
+{
+    __u64 id = bpf_get_current_pid_tgid();
+    struct packet_msg *msg = bpf_map_lookup_elem(&msg_packets, &id);
+    if (!msg)
+        return 0;
+
+    for (__u64 i = 0; i < msg->iovlen && i < 28; i++)
+    {
+        struct iovec iov = {};
+        int ret = bpf_probe_read_user(&iov, sizeof(iov), (void *)(msg->iovec_ptr + i * sizeof(struct iovec)));
+        if (ret < 0)
+            break;
+
+        __u64 seg_len = iov.iov_len;
+        if (seg_len > PACKET_CHUNK_SIZE)
+            seg_len = PACKET_CHUNK_SIZE;
+
+        char buffer[PACKET_CHUNK_SIZE] = {0};
+        ret = bpf_probe_read_user(buffer, seg_len, iov.iov_base);
+        if (ret < 0)
+            break;
+
+        int type = get_http_type(ctx, buffer, seg_len);
+        if (type)
+        {
+            seg_len = iov.iov_len;
+
+            // Get the event from the map
+            struct httpevent *dataevent = gadget_reserve_buf(&events, sizeof(*dataevent));
+            if (!dataevent)
+                return 0;
+
+            // Populate event with socket inode for tracking
+            // Pass is_rx to determine src/dst
+            populate_httpevent(dataevent, msg->fd, is_rx);
+
+            dataevent->type = type;
+            dataevent->sock_fd = msg->fd;
+
+            __u64 copy_len = seg_len;
+            if (copy_len > MAX_DATAEVENT_BUFFER)
+                copy_len = MAX_DATAEVENT_BUFFER;
+
+            bpf_probe_read_user(&dataevent->buf, copy_len, iov.iov_base);
+            bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
+
+            dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
+
+            gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
+            break;
+        }
+    }
+
+    bpf_map_delete_elem(&msg_packets, &id);
+    return 0;
+}
+
+// -----------------------------------------------------------------------------
+// READ / RECV (Inbound: is_rx = true)
+// -----------------------------------------------------------------------------
+
+SEC("tracepoint/syscalls/sys_enter_read")
+int sys_enter_read(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    pre_receive_syscalls(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_read")
+int sys_exit_read(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+    process_packet(ctx, "read", true);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_recvfrom")
+int sys_enter_recvfrom(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    if (is_msg_peek(ctx->args[3]))
+        return 0;
+    pre_receive_syscalls(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_recvfrom")
+int sys_exit_recvfrom(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    process_packet(ctx, "recvfrom", true);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_recvmsg")
+int syscall__probe_entry_recvmsg(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    if (is_msg_peek(ctx->args[2]))
+        return 0;
+    pre_process_msg(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_recvmsg")
+int syscall__probe_ret_recvmsg(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    process_msg(ctx, "recvmsg", true);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_readv")
+int syscall__probe_entry_readv(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+    pre_process_iovec(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_readv")
+int syscall__probe_ret_readv(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+    process_msg(ctx, "readv", true);
+    return 0;
+}
+
+// -----------------------------------------------------------------------------
+// WRITE / SEND (Outbound: is_rx = false)
+// -----------------------------------------------------------------------------
+
+SEC("tracepoint/syscalls/sys_enter_write")
+int syscall__probe_entry_write(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    pre_receive_syscalls(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_write")
+int syscall__probe_ret_write(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    process_packet(ctx, "write", false);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_sendto")
+int syscall__probe_entry_sendto(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    pre_receive_syscalls(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_sendto")
+int syscall__probe_ret_sendto(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    process_packet(ctx, "sendto", false);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_sendmsg")
+int syscall__probe_entry_sendmsg(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    pre_process_msg(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_sendmsg")
+int syscall__probe_ret_sendmsg(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    process_msg(ctx, "sendmsg", false);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_writev")
+int syscall__probe_entry_writev(struct syscall_trace_enter *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    pre_process_iovec(ctx);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_writev")
+int syscall__probe_ret_writev(struct syscall_trace_exit *ctx)
+{
+    if (gadget_should_discard_data_current()) {
+        return 0;
+    }
+
+    process_msg(ctx, "writev", false);
+    return 0;
+}
+
+char __license[] SEC("license") = "Dual MIT/GPL";

@@ -24,7 +24,7 @@ func (l *apLibrary) wasExecuted(containerID, path ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}
@@ -58,7 +58,7 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.NewErr("failed to parse args: %v", err)
 	}
 
-	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
 	}

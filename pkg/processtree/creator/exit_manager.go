@@ -121,7 +121,7 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 
 	logger.L().Debug("Exit: Force cleanup completed",
 		helpers.String("remaining_pending", fmt.Sprintf("%d", len(pt.pendingExits))),
-		helpers.Int("pids number", int(pt.processMap.Len())))
+		helpers.Int("pids number", pt.processMap.Len()))
 }
 
 func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
@@ -154,9 +154,17 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 			return
 		}
 
+		var newParentComm string
+		if newParent, ok := pt.processMap.Load(newParentPID); ok {
+			newParentComm = newParent.Comm
+		}
+
 		for _, child := range pending.Children {
 			if child != nil {
 				child.PPID = newParentPID
+				if newParentComm != "" {
+					child.Pcomm = newParentComm
+				}
 				pt.linkProcessToParent(child)
 			}
 		}

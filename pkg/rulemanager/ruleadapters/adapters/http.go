@@ -1,12 +1,11 @@
 package adapters
 
 import (
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type HTTPAdapter struct {
@@ -16,78 +15,76 @@ func NewHTTPAdapter() *HTTPAdapter {
 	return &HTTPAdapter{}
 }
 
-func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	httpEvent, ok := enrichedEvent.Event.(*tracerhttptype.Event)
+func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
+	httpEvent, ok := enrichedEvent.Event.(utils.HttpEvent)
 	if !ok {
 		return
 	}
 
+	request := httpEvent.GetRequest()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = httpEvent.Pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"other_ip":   httpEvent.OtherIp,
-		"other_port": httpEvent.OtherPort,
-		"internal":   httpEvent.Internal,
-		"direction":  httpEvent.Direction,
+	baseRuntimeAlert.InfectedPID = httpEvent.GetPID()
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["internal"] = httpEvent.GetInternal()
+	baseRuntimeAlert.Arguments["direction"] = httpEvent.GetDirection()
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Network: &common.NetworkEntity{
-			DstIP:    httpEvent.OtherIp,
-			DstPort:  int(httpEvent.OtherPort),
 			Protocol: "http",
 		},
 		Http: &common.HttpEntity{
-			Method:    httpEvent.Request.Method,
-			Domain:    httpEvent.Request.Host,
-			UserAgent: httpEvent.Request.UserAgent(),
-			Endpoint:  httpEvent.Request.URL.Path,
+			Method:    request.Method,
+			Domain:    request.Host,
+			UserAgent: request.UserAgent(),
+			Endpoint:  request.URL.Path,
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			PID: httpEvent.Pid,
-			Uid: &httpEvent.Uid,
-			Gid: &httpEvent.Gid,
+			PID: httpEvent.GetPID(),
+			Uid: httpEvent.GetUid(),
+			Gid: httpEvent.GetGid(),
 		},
-		ContainerID: httpEvent.Runtime.ContainerID,
+		ContainerID: httpEvent.GetContainerID(),
 	}
 	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	failure.SetTriggerEvent(httpEvent.Event)
+	failure.SetTriggerEvent(httpEvent)
 
 	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
 		PodName:   httpEvent.GetPod(),
-		PodLabels: httpEvent.K8s.PodLabels,
+		PodLabels: httpEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	httpEvent, ok := enrichedEvent.Event.(*tracerhttptype.Event)
+	httpEvent, ok := enrichedEvent.Event.(utils.HttpEvent)
 	if !ok {
 		return nil
 	}
 
-	result := ConvertToMap(&httpEvent.Event)
+	result := ConvertToMap(httpEvent)
 
-	result["pid"] = httpEvent.Pid
-	result["uid"] = httpEvent.Uid
-	result["gid"] = httpEvent.Gid
-	result["other_port"] = httpEvent.OtherPort
-	result["other_ip"] = httpEvent.OtherIp
-	result["internal"] = httpEvent.Internal
-	result["direction"] = httpEvent.Direction
+	result["pid"] = httpEvent.GetPID()
+	result["uid"] = httpEvent.GetUid()
+	result["gid"] = httpEvent.GetGid()
+	//result["other_port"] = httpEvent.OtherPort
+	result["other_ip"] = httpEvent.GetOtherIp()
+	result["internal"] = httpEvent.GetInternal()
+	result["direction"] = httpEvent.GetDirection()
 
-	if httpEvent.Request != nil {
-		result["request"] = httpEvent.Request
+	if request := httpEvent.GetRequest(); request != nil {
+		result["request"] = request
 	}
-	if httpEvent.Response != nil {
-		result["response"] = httpEvent.Response
+	if response := httpEvent.GetResponse(); response != nil {
+		result["response"] = response
 	}
 
-	result["mountnsid"] = httpEvent.MountNsID
+	//result["mountnsid"] = httpEvent.MountNsID
 
 	return result
 }

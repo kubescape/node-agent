@@ -11,7 +11,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/dustin/go-humanize"
 	"github.com/goradd/maps"
-	expirable "github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -54,10 +54,10 @@ func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSRes
 	}
 }
 
-func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
-	eventAdapter, ok := r.adapterFactory.GetAdapter(enrichedEvent.EventType)
+func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID, apChecksum string, state map[string]any) types.RuleFailure {
+	eventAdapter, ok := r.adapterFactory.GetAdapter(enrichedEvent.Event.GetEventType())
 	if !ok {
-		logger.L().Error("RuleFailureCreator - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
+		logger.L().Error("RuleFailureCreator - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.Event.GetEventType())))
 		return nil
 	}
 
@@ -67,7 +67,8 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 			AlertName: rule.Name,
 			Severity:  rule.Severity,
 			Arguments: map[string]interface{}{
-				"message": message,
+				"apChecksum": apChecksum,
+				"message":    message,
 			},
 			Timestamp:   enrichedEvent.Timestamp,
 			InfectedPID: enrichedEvent.ProcessTree.PID,
@@ -79,7 +80,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 		AlertPlatform: apitypes.AlertSourcePlatformK8s,
 	}
 
-	eventAdapter.SetFailureMetadata(ruleFailure, enrichedEvent)
+	eventAdapter.SetFailureMetadata(ruleFailure, enrichedEvent, state)
 
 	r.setBaseRuntimeAlert(ruleFailure)
 	r.setRuntimeAlertK8sDetails(ruleFailure)
@@ -126,7 +127,7 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 
 	switch profileType {
 	case armotypes.ApplicationProfile:
-		state := objectCache.ApplicationProfileCache().GetApplicationProfileState(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
+		state := objectCache.ApplicationProfileCache().GetApplicationProfileState(ruleFailure.GetTriggerEvent().GetContainerID())
 		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
 				Status:            state.Status,
@@ -141,7 +142,7 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 		}
 
 	case armotypes.NetworkProfile:
-		state := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhoodState(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
+		state := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhoodState(ruleFailure.GetTriggerEvent().GetContainerID())
 		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
 				Status:            state.Status,
@@ -166,7 +167,7 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 }
 
 func (r *RuleFailureCreator) setCloudServices(ruleFailure *types.GenericRuleFailure) {
-	if cloudServices := r.dnsManager.ResolveContainerProcessToCloudServices(ruleFailure.GetTriggerEvent().Runtime.ContainerID, ruleFailure.GetBaseRuntimeAlert().InfectedPID); cloudServices != nil {
+	if cloudServices := r.dnsManager.ResolveContainerProcessToCloudServices(ruleFailure.GetTriggerEvent().GetContainerID(), ruleFailure.GetBaseRuntimeAlert().InfectedPID); cloudServices != nil {
 		ruleFailure.SetCloudServices(cloudServices.ToSlice())
 	}
 
@@ -185,9 +186,9 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID, path))
 	}
 
-	if err != nil {
+	if err != nil { // FIXME WTF it's always nil here
 		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" {
-			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", r.containerIdToPid.Get(ruleFailure.GetTriggerEvent().Runtime.ContainerID),
+			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", r.containerIdToPid.Get(ruleFailure.GetTriggerEvent().GetContainerID()),
 				ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path))
 		}
 	} else {
@@ -196,7 +197,7 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 
-	baseRuntimeAlert.Timestamp = time.Unix(0, int64(ruleFailure.GetTriggerEvent().Timestamp))
+	baseRuntimeAlert.Timestamp = time.Unix(0, int64(ruleFailure.GetTriggerEvent().GetTimestamp()))
 	var size int64 = 0
 	if hostPath != "" {
 		size, err = utils.GetFileSize(hostPath)
@@ -209,7 +210,7 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 		baseRuntimeAlert.Size = humanize.Bytes(uint64(size))
 	}
 
-	if size != 0 && size < maxFileSize && hostPath != "" {
+	if size != 0 && size < maxFileSize { //&& hostPath != "" {
 		if baseRuntimeAlert.MD5Hash == "" || baseRuntimeAlert.SHA1Hash == "" {
 			if cached, found := r.hashCache.Get(hostPath); found {
 				baseRuntimeAlert.MD5Hash = cached.MD5Hash
@@ -235,35 +236,35 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.GenericRuleFailure) {
 	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
 	if runtimek8sdetails.Image == "" {
-		runtimek8sdetails.Image = ruleFailure.GetTriggerEvent().Runtime.ContainerImageName
+		runtimek8sdetails.Image = ruleFailure.GetTriggerEvent().GetContainerImage()
 	}
 
 	if runtimek8sdetails.ImageDigest == "" {
-		runtimek8sdetails.ImageDigest = ruleFailure.GetTriggerEvent().Runtime.ContainerImageDigest
+		runtimek8sdetails.ImageDigest = ruleFailure.GetTriggerEvent().GetContainerImageDigest()
 	}
 
 	if runtimek8sdetails.Namespace == "" {
-		runtimek8sdetails.Namespace = ruleFailure.GetTriggerEvent().K8s.Namespace
+		runtimek8sdetails.Namespace = ruleFailure.GetTriggerEvent().GetNamespace()
 	}
 
 	if runtimek8sdetails.PodName == "" {
-		runtimek8sdetails.PodName = ruleFailure.GetTriggerEvent().K8s.PodName
+		runtimek8sdetails.PodName = ruleFailure.GetTriggerEvent().GetPod()
 	}
 
 	if runtimek8sdetails.PodNamespace == "" {
-		runtimek8sdetails.PodNamespace = ruleFailure.GetTriggerEvent().K8s.Namespace
+		runtimek8sdetails.PodNamespace = ruleFailure.GetTriggerEvent().GetNamespace()
 	}
 
 	if runtimek8sdetails.ContainerName == "" {
-		runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().K8s.ContainerName
+		runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().GetContainer()
 	}
 
 	if runtimek8sdetails.ContainerID == "" {
-		runtimek8sdetails.ContainerID = ruleFailure.GetTriggerEvent().Runtime.ContainerID
+		runtimek8sdetails.ContainerID = ruleFailure.GetTriggerEvent().GetContainerID()
 	}
 
 	if runtimek8sdetails.HostNetwork == nil {
-		hostNetwork := ruleFailure.GetTriggerEvent().K8s.HostNetwork
+		hostNetwork := ruleFailure.GetTriggerEvent().GetHostNetwork()
 		runtimek8sdetails.HostNetwork = &hostNetwork
 	}
 

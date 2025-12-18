@@ -2,110 +2,102 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection/networktracer"
-	tracerdns "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/tracer"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const dnsTraceName = "trace_dns"
+const (
+	dnsImageName = "ghcr.io/inspektor-gadget/gadget/trace_dns:v0.45.0"
+	dnsTraceName = "trace_dns"
+)
 
 var _ containerwatcher.TracerInterface = (*DNSTracer)(nil)
 
-// DNSTracer implements TracerInterface for DNS events
+// DNSTracer implements TracerInterface for events
 type DNSTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *tracerdns.Tracer
-	socketEnricher      *socketenricher.SocketEnricher
+	eventCallback      containerwatcher.ResultCallback
+	gadgetCtx          *gadgetcontext.GadgetContext
+	kubeManager        operators.DataOperator
+	ociStore           *orasoci.ReadOnlyStore
+	runtime            runtime.Runtime
+	socketEnricherOp   *socketenricher.SocketEnricher
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
-// NewDNSTracer creates a new DNS tracer
+// NewDNSTracer creates a new tracer
 func NewDNSTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
+	kubeManager operators.DataOperator,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
-	socketEnricher *socketenricher.SocketEnricher,
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
+	socketEnricherOp *socketenricher.SocketEnricher,
 ) *DNSTracer {
 	return &DNSTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
-		socketEnricher:      socketEnricher,
+		eventCallback:      eventCallback,
+		kubeManager:        kubeManager,
+		ociStore:           ociStore,
+		runtime:            runtime,
+		thirdPartyEnricher: thirdPartyEnricher,
+		socketEnricherOp:   socketEnricherOp,
 	}
 }
 
-// Start initializes and starts the DNS tracer
+// Start initializes and starts the tracer
 func (dt *DNSTracer) Start(ctx context.Context) error {
-	if err := dt.tracerCollection.AddTracer(dnsTraceName, dt.containerSelector); err != nil {
-		return fmt.Errorf("adding DNS tracer: %w", err)
-	}
-
-	tracerDns, err := tracerdns.NewTracer(&tracerdns.Config{GetPaths: true})
-	if err != nil {
-		return fmt.Errorf("creating DNS tracer: %w", err)
-	}
-
-	if dt.socketEnricher != nil {
-		tracerDns.SetSocketEnricherMap(dt.socketEnricher.SocketsMap())
-	} else {
-		logger.L().Error("DNSTracer - socket enricher is nil")
-	}
-
-	tracerDns.SetEventHandler(dt.dnsEventCallback)
-
-	err = tracerDns.RunWorkaround()
-	if err != nil {
-		return fmt.Errorf("running workaround: %w", err)
-	}
-
-	dt.tracer = tracerDns
-
-	config := &networktracer.ConnectToContainerCollectionConfig[tracerdnstype.Event]{
-		Tracer:   dt.tracer,
-		Resolver: dt.containerCollection,
-		Selector: dt.containerSelector,
-		Base:     tracerdnstype.Base,
-	}
-
-	_, err = networktracer.ConnectToContainerCollection(config)
-	if err != nil {
-		return fmt.Errorf("connecting tracer to container collection: %w", err)
-	}
-
+	dt.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		dnsImageName,
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			dt.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			dt.socketEnricherOp,
+			NewDnsOperator(),
+			dt.eventOperator(),
+		),
+		gadgetcontext.WithName(dnsTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(dt.ociStore),
+	)
+	go func() {
+		params := map[string]string{
+			"operator.oci.ebpf.paths": "true", // CWD paths in events
+		}
+		err := dt.runtime.RunGadget(dt.gadgetCtx, nil, params)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", dt.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the DNS tracer
+// Stop gracefully stops the tracer
 func (dt *DNSTracer) Stop() error {
-	if dt.tracer != nil {
-		dt.tracer.Close()
+	if dt.socketEnricherOp != nil {
+		dt.socketEnricherOp.Close()
 	}
-
-	if err := dt.tracerCollection.RemoveTracer(dnsTraceName); err != nil {
-		return fmt.Errorf("removing DNS tracer: %w", err)
+	if dt.gadgetCtx != nil {
+		dt.gadgetCtx.Cancel()
 	}
-
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (dt *DNSTracer) GetName() string {
-	return "dns_tracer"
+	return dnsTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -121,32 +113,39 @@ func (dt *DNSTracer) IsEnabled(cfg config.Config) bool {
 	return cfg.EnableNetworkTracing || cfg.EnableRuntimeDetection
 }
 
-// dnsEventCallback handles DNS events from the tracer
-func (dt *DNSTracer) dnsEventCallback(event *tracerdnstype.Event) {
-	if event.Type == types.DEBUG {
+func (dt *DNSTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.DnsEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					pooledData := utils.GetPooledDataItem(utils.DnsEventType).(*datasource.Edata)
+					data.DeepCopyInto(pooledData)
+					dt.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.DnsEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
+
+// callback handles events from the tracer
+func (dt *DNSTracer) callback(event utils.DNSEvent) {
+	if event.GetQr() != utils.DNSPktTypeResponse {
 		return
 	}
 
-	if event.Qr != tracerdnstype.DNSPktTypeResponse {
+	if event.GetNumAnswers() == 0 {
 		return
 	}
-
-	if event.NumAnswers == 0 {
-		return
-	}
-
-	if isDroppedEvent(event.Type, event.Message) {
-		logger.L().Warning("dns tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
-	}
-
-	dt.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
-	dt.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
 	if dt.eventCallback != nil {
 		// Extract container ID and process ID from the DNS event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
 
 		dt.eventCallback(event, containerID, processID)
 	}

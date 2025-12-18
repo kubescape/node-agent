@@ -563,7 +563,7 @@ func TestDeleteRuleBinding(t *testing.T) {
 			for k, v := range tt.podToRBNames {
 				for _, s := range v {
 					c.rbNameToRB.Set(s, typesv1.RuntimeAlertRuleBinding{})
-					c.rbNameToRules.Set(s, []rulemanagertypesv1.Rule{rulemanagertypesv1.Rule{}})
+					c.rbNameToRules.Set(s, []rulemanagertypesv1.Rule{{}})
 
 					if !c.rbNameToPods.Has(s) {
 						c.rbNameToPods.Set(s, mapset.NewSet[string]())
@@ -616,7 +616,7 @@ func TestAddRuleBinding(t *testing.T) {
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection))
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx))
 
-	k8sClient.KubernetesClient = k8sfake.NewSimpleClientset(r...)
+	k8sClient.KubernetesClient = k8sfake.NewClientset(r...)
 
 	tests := []struct {
 		rb                   *typesv1.RuntimeAlertRuleBinding

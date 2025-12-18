@@ -3,11 +3,10 @@ package adapters
 import (
 	"fmt"
 
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )
 
 type ProcfsFailureSetter struct {
@@ -17,7 +16,7 @@ func NewProcfsCreator() *ProcfsFailureSetter {
 	return &ProcfsFailureSetter{}
 }
 
-func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, state map[string]any) {
 	procfsEvent, ok := enrichedEvent.Event.(*events.ProcfsEvent)
 	if !ok {
 		return
@@ -25,10 +24,11 @@ func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enri
 
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = procfsEvent.PID
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"ppid":          procfsEvent.PPID,
-		"start_time_ns": procfsEvent.StartTimeNs,
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["ppid"] = procfsEvent.PPID
+	baseRuntimeAlert.Arguments["start_time_ns"] = procfsEvent.StartTimeNs
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: procfsEvent.Comm,

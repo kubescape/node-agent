@@ -25,10 +25,11 @@ import (
 
 // ContainerInfo holds container metadata we need for network neighborhood mapping
 type ContainerInfo struct {
-	ContainerID          string
-	WorkloadID           string
-	InstanceTemplateHash string
-	Namespace            string
+	ContainerID               string
+	WorkloadID                string
+	InstanceTemplateHash      string
+	Namespace                 string
+	SeenContainerFromTheStart bool // True if container was seen from the start
 }
 
 // NetworkNeighborhoodCacheImpl implements the NetworkNeighborhoodCache interface
@@ -167,16 +168,29 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 
 			// Check if this workload ID is used by any container in this namespace
 			workloadIDInUse := false
+			hasNewContainer := false // Track if any container using this workload was seen from start
 			for _, containerID := range containerIDs {
 				if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID &&
 					containerInfo.InstanceTemplateHash == nn.Labels[helpersv1.TemplateHashKey] {
 					workloadIDInUse = true
-					break
+					// If any container was seen from start, mark it
+					if containerInfo.SeenContainerFromTheStart {
+						hasNewContainer = true
+					}
 				}
 			}
 
 			if !workloadIDInUse {
+				continue
+			}
+
+			// If we have a "new" container (seen from start) and the network neighborhood is partial,
+			// skip it - we don't want to use partial profiles for containers we're tracking from the start
+			if hasNewContainer && nn.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial {
+				logger.L().Debug("skipping partial network neighborhood for container seen from start",
+					helpers.String("workloadID", workloadID),
+					helpers.String("namespace", namespace))
 				continue
 			}
 
@@ -358,12 +372,33 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 			return nil
 		}
 
+		// If container restarts and profile is partial, delete it from cache
+		// This ensures we don't alert on activity we didn't see after restart
+		if existingNN, exists := nnc.workloadIDToNetworkNeighborhood.Load(workloadID); exists && !sharedData.PreRunningContainer {
+			if existingNN != nil && existingNN.Annotations != nil {
+				completion := existingNN.Annotations[helpersv1.CompletionMetadataKey]
+				if completion == helpersv1.Partial {
+					logger.L().Debug("deleting partial network neighborhood on container restart",
+						helpers.String("containerID", containerID),
+						helpers.String("workloadID", workloadID),
+						helpers.String("namespace", container.K8s.Namespace))
+
+					// Delete the network neighborhood from cache
+					nnKey := nnc.networkNeighborhoodKey(existingNN.Namespace, existingNN.Name)
+					nnc.networkNeighborhoodToUserManagedIdentifier.Delete(nnKey)
+					nnc.workloadIDToNetworkNeighborhood.Delete(workloadID)
+				}
+			}
+		}
+
 		// Create container info
+		// Mark container as "seen from start" if it is not pre-running
 		containerInfo := &ContainerInfo{
-			ContainerID:          containerID,
-			WorkloadID:           workloadID,
-			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
-			Namespace:            container.K8s.Namespace,
+			ContainerID:               containerID,
+			WorkloadID:                workloadID,
+			InstanceTemplateHash:      sharedData.InstanceID.GetTemplateHash(),
+			Namespace:                 container.K8s.Namespace,
+			SeenContainerFromTheStart: !sharedData.PreRunningContainer,
 		}
 
 		// Add to container info map

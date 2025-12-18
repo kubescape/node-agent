@@ -3,12 +3,11 @@ package adapters
 import (
 	"path/filepath"
 
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type PtraceAdapter struct {
@@ -18,64 +17,67 @@ func NewPtraceAdapter() *PtraceAdapter {
 	return &PtraceAdapter{}
 }
 
-func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	ptraceEvent, ok := enrichedEvent.Event.(*tracerptracetype.Event)
+func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
+	ptraceEvent, ok := enrichedEvent.Event.(utils.PtraceEvent)
 	if !ok {
 		return
 	}
 
+	pid := ptraceEvent.GetPID()
+	exePath := ptraceEvent.GetExePath()
+	comm := ptraceEvent.GetComm()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = ptraceEvent.Pid
+	baseRuntimeAlert.InfectedPID = pid
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: ptraceEvent.Comm,
+			Name: comm,
 		},
 		File: &common.FileEntity{
-			Name:      filepath.Base(ptraceEvent.ExePath),
-			Directory: filepath.Dir(ptraceEvent.ExePath),
+			Name:      filepath.Base(exePath),
+			Directory: filepath.Dir(exePath),
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm: ptraceEvent.Comm,
-			PPID: ptraceEvent.PPid,
-			PID:  ptraceEvent.Pid,
-			Uid:  &ptraceEvent.Uid,
-			Gid:  &ptraceEvent.Gid,
-			Path: ptraceEvent.ExePath,
+			Comm: comm,
+			PPID: ptraceEvent.GetPpid(),
+			PID:  pid,
+			Uid:  ptraceEvent.GetUid(),
+			Gid:  ptraceEvent.GetGid(),
+			Path: exePath,
 		},
-		ContainerID: ptraceEvent.Runtime.ContainerID,
+		ContainerID: ptraceEvent.GetContainerID(),
 	}
 	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	failure.SetTriggerEvent(ptraceEvent.Event)
+	failure.SetTriggerEvent(ptraceEvent)
 
 	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
 		PodName:   ptraceEvent.GetPod(),
-		PodLabels: ptraceEvent.K8s.PodLabels,
+		PodLabels: ptraceEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *PtraceAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	ptraceEvent, ok := enrichedEvent.Event.(*tracerptracetype.Event)
-	if !ok {
-		return nil
-	}
+	//ptraceEvent, ok := enrichedEvent.Event.(*tracerptracetype.Event)
+	//if !ok {
+	//	return nil
+	//}
 
-	result := ConvertToMap(&ptraceEvent.Event)
+	//result := ConvertToMap(&ptraceEvent.Event)
 
-	result["pid"] = ptraceEvent.Pid
-	result["ppid"] = ptraceEvent.PPid
-	result["uid"] = ptraceEvent.Uid
-	result["gid"] = ptraceEvent.Gid
-	result["request"] = ptraceEvent.Request
-	result["comm"] = ptraceEvent.Comm
-	result["exe_path"] = ptraceEvent.ExePath
+	//result["pid"] = ptraceEvent.Pid
+	//result["ppid"] = ptraceEvent.PPid
+	//result["uid"] = ptraceEvent.Uid
+	//result["gid"] = ptraceEvent.Gid
+	//result["request"] = ptraceEvent.Request
+	//result["comm"] = ptraceEvent.Comm
+	//result["exe_path"] = ptraceEvent.ExePath
 
-	result["mountnsid"] = ptraceEvent.MountNsID
+	//result["mountnsid"] = ptraceEvent.MountNsID
 
-	return result
+	return map[string]interface{}{}
 }

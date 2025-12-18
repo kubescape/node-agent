@@ -3,12 +3,11 @@ package adapters
 import (
 	"path/filepath"
 
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type SymlinkAdapter struct {
@@ -18,75 +17,81 @@ func NewSymlinkAdapter() *SymlinkAdapter {
 	return &SymlinkAdapter{}
 }
 
-func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	symlinkEvent, ok := enrichedEvent.Event.(*tracersymlinktype.Event)
+func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, _ map[string]any) {
+	symlinkEvent, ok := enrichedEvent.Event.(utils.LinkEvent)
 	if !ok {
 		return
 	}
 
 	failure.SetExtra(symlinkEvent.GetExtra())
 
+	pid := symlinkEvent.GetPID()
+	comm := symlinkEvent.GetComm()
+	exePath := symlinkEvent.GetExePath()
+	oldPath := symlinkEvent.GetOldPath()
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = symlinkEvent.Pid
-	baseRuntimeAlert.Arguments = map[string]interface{}{
-		"oldPath": symlinkEvent.OldPath,
-		"newPath": symlinkEvent.NewPath,
+	baseRuntimeAlert.InfectedPID = pid
+	if baseRuntimeAlert.Arguments == nil {
+		baseRuntimeAlert.Arguments = make(map[string]interface{})
 	}
+	baseRuntimeAlert.Arguments["oldPath"] = oldPath
+	baseRuntimeAlert.Arguments["newPath"] = symlinkEvent.GetNewPath()
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: symlinkEvent.Comm,
+			Name: comm,
 		},
 		File: &common.FileEntity{
-			Name:      filepath.Base(symlinkEvent.OldPath),
-			Directory: filepath.Dir(symlinkEvent.OldPath),
+			Name:      filepath.Base(oldPath),
+			Directory: filepath.Dir(oldPath),
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
+	upperLayer := symlinkEvent.GetUpperLayer()
 	runtimeProcessDetails := apitypes.ProcessTree{
 		ProcessTree: apitypes.Process{
-			Comm:       symlinkEvent.Comm,
-			PPID:       symlinkEvent.PPid,
-			PID:        symlinkEvent.Pid,
-			UpperLayer: &symlinkEvent.UpperLayer,
-			Uid:        &symlinkEvent.Uid,
-			Gid:        &symlinkEvent.Gid,
-			Hardlink:   symlinkEvent.ExePath,
-			Path:       symlinkEvent.ExePath,
+			Comm:       comm,
+			PPID:       symlinkEvent.GetPpid(),
+			PID:        pid,
+			UpperLayer: &upperLayer,
+			Uid:        symlinkEvent.GetUid(),
+			Gid:        symlinkEvent.GetGid(),
+			Hardlink:   exePath,
+			Path:       exePath,
 		},
-		ContainerID: symlinkEvent.Runtime.ContainerID,
+		ContainerID: symlinkEvent.GetContainerID(),
 	}
 	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	failure.SetTriggerEvent(symlinkEvent.Event)
+	failure.SetTriggerEvent(symlinkEvent)
 
 	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
 		PodName:   symlinkEvent.GetPod(),
-		PodLabels: symlinkEvent.K8s.PodLabels,
+		PodLabels: symlinkEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *SymlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	symlinkEvent, ok := enrichedEvent.Event.(*tracersymlinktype.Event)
-	if !ok {
-		return nil
-	}
+	//symlinkEvent, ok := enrichedEvent.Event.(*tracersymlinktype.Event)
+	//if !ok {
+	//	return nil
+	//}
 
-	result := ConvertToMap(&symlinkEvent.Event)
+	//result := ConvertToMap(&symlinkEvent.Event)
 
-	result["pid"] = symlinkEvent.Pid
-	result["tid"] = symlinkEvent.Tid
-	result["ppid"] = symlinkEvent.PPid
-	result["uid"] = symlinkEvent.Uid
-	result["gid"] = symlinkEvent.Gid
-	result["upperlayer"] = symlinkEvent.UpperLayer
-	result["comm"] = symlinkEvent.Comm
-	result["exe_path"] = symlinkEvent.ExePath
-	result["oldpath"] = symlinkEvent.OldPath
-	result["newpath"] = symlinkEvent.NewPath
+	//result["pid"] = symlinkEvent.Pid
+	//result["tid"] = symlinkEvent.Tid
+	//result["ppid"] = symlinkEvent.PPid
+	//result["uid"] = symlinkEvent.Uid
+	//result["gid"] = symlinkEvent.Gid
+	//result["upperlayer"] = symlinkEvent.UpperLayer
+	//result["comm"] = symlinkEvent.Comm
+	//result["exe_path"] = symlinkEvent.ExePath
+	//result["oldpath"] = symlinkEvent.OldPath
+	//result["newpath"] = symlinkEvent.NewPath
 
-	result["mountnsid"] = symlinkEvent.MountNsID
+	//result["mountnsid"] = symlinkEvent.MountNsID
 
-	return result
+	return map[string]interface{}{}
 }

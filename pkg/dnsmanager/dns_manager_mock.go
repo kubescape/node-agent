@@ -3,7 +3,7 @@ package dnsmanager
 import (
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type DNSManagerMock struct {
@@ -16,10 +16,10 @@ func CreateDNSManagerMock() *DNSManagerMock {
 	return &DNSManagerMock{}
 }
 
-func (n *DNSManagerMock) ReportEvent(_ tracerdnstype.Event) {
+func (n *DNSManagerMock) ReportEvent(_ utils.DNSEvent) {
 }
 
-func (n *DNSManagerMock) ContainerCallback(notif containercollection.PubSubEvent) {
+func (n *DNSManagerMock) ContainerCallback(_ containercollection.PubSubEvent) {
 }
 
 func (n *DNSManagerMock) ResolveIPAddress(_ string) (string, bool) {

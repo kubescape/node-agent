@@ -66,7 +66,13 @@ func TestLoadConfig(t *testing.T) {
 					CsvRuleExporterPath:    "/rules",
 					CsvMalwareExporterPath: "/malware",
 					HTTPExporterConfig: &exporters.HTTPExporterConfig{
-						URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io",
+						URL:                  "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io",
+						BulkMaxAlerts:        50,
+						BulkTimeoutSeconds:   10,
+						BulkSendQueueSize:    1000,
+						BulkMaxRetries:       3,
+						BulkRetryBaseDelayMs: 1000,
+						BulkRetryMaxDelayMs:  30000,
 					},
 				},
 				WorkerPoolSize:     3000,
@@ -93,7 +99,8 @@ func TestLoadConfig(t *testing.T) {
 					MaxSize: 100000,
 					TTL:     1 * time.Minute,
 				},
-				DNSCacheSize: 50000,
+				DNSCacheSize:                   50000,
+				ContainerEolNotificationBuffer: 100,
 				FIM: FIMConfig{
 					Directories: []FIMDirectoryConfig{
 						{
