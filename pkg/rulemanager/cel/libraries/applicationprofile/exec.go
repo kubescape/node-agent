@@ -2,7 +2,6 @@ package applicationprofile
 
 import (
 	"slices"
-	"strings"
 
 	"github.com/google/cel-go/common/types"
 
@@ -110,17 +109,17 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 	for _, container := range podSpec.Containers {
 		if container.Name == containerName {
 			for _, exec := range container.Command {
-				if strings.Contains(exec, pathStr) {
+				if exec == pathStr {
 					return types.Bool(true)
 				}
 			}
 			for _, exec := range container.Lifecycle.PreStop.Exec.Command {
-				if strings.Contains(exec, pathStr) {
+				if exec == pathStr {
 					return types.Bool(true)
 				}
 			}
 			for _, exec := range container.Lifecycle.PostStart.Exec.Command {
-				if strings.Contains(exec, pathStr) {
+				if exec == pathStr {
 					return types.Bool(true)
 				}
 			}
@@ -131,17 +130,17 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 	for _, container := range podSpec.InitContainers {
 		if container.Name == containerName {
 			for _, exec := range container.Command {
-				if strings.Contains(exec, pathStr) {
+				if exec == pathStr {
 					return types.Bool(true)
 				}
 			}
 			for _, exec := range container.Lifecycle.PreStop.Exec.Command {
-				if strings.Contains(exec, pathStr) {
+				if exec == pathStr {
 					return types.Bool(true)
 				}
 			}
 			for _, exec := range container.Lifecycle.PostStart.Exec.Command {
-				if strings.Contains(exec, pathStr) {
+				if exec == pathStr {
 					return types.Bool(true)
 				}
 			}
@@ -151,17 +150,17 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 	for _, container := range podSpec.EphemeralContainers {
 		if container.Name == containerName {
 			for _, exec := range container.Command {
-				if strings.Contains(exec, pathStr) {
+				if exec == pathStr {
 					return types.Bool(true)
 				}
 			}
 			for _, exec := range container.Lifecycle.PreStop.Exec.Command {
-				if strings.Contains(exec, pathStr) {
+				if exec == pathStr {
 					return types.Bool(true)
 				}
 			}
 			for _, exec := range container.Lifecycle.PostStart.Exec.Command {
-				if strings.Contains(exec, pathStr) {
+				if exec == pathStr {
 					return types.Bool(true)
 				}
 			}
