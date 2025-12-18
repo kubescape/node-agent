@@ -31,7 +31,7 @@ type ContainerInfo struct {
 	Namespace                 string
 	Name                      string
 	SeenContainerFromTheStart bool // True if container was seen from the start
-	UserDefinedProfile   string
+	UserDefinedProfile        string
 }
 
 // ContainerCallStackIndex maintains call stack search trees for a container
@@ -515,7 +515,7 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 				containerInfo.UserDefinedProfile = userDefinedProfile
 				// Fetch the profile from storage
 				// TODO should we cache user-defined profiles separately? - it could allow deduplication
-				fullProfile, err := apc.storageClient.ApplicationProfiles(container.K8s.Namespace).Get(ctx, userDefinedProfile, metav1.GetOptions{})
+				fullProfile, err := apc.storageClient.GetApplicationProfile(container.K8s.Namespace, userDefinedProfile)
 				if err != nil {
 					logger.L().Error("failed to get user-defined profile",
 						helpers.String("containerID", containerID),
