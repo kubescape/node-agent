@@ -144,6 +144,8 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 		return wh.k8sClient.GetKubernetesClient().CoreV1().Pods("").Watch(context.Background(), opts)
 	case "runtimerulealertbindings":
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
+	case "rules":
+		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	case "seccompprofiles":
 		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
 		return wh.storageClient.SeccompProfiles("").Watch(context.Background(), opts)

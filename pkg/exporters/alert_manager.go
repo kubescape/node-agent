@@ -6,17 +6,20 @@ package exporters
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/cenkalti/backoff/v5"
 	"github.com/go-openapi/strfmt"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/prometheus/alertmanager/api/v2/client"
 	"github.com/prometheus/alertmanager/api/v2/client/alert"
@@ -47,7 +50,7 @@ func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
 	}
 }
 
-func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	profileMetadata := failedRule.GetBaseRuntimeAlert().ProfileMetadata
 	failOnProfile := false
 	completedStatus := ""
@@ -62,9 +65,17 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 		trace = ""
 	}
 
-	processTree := failedRule.GetRuntimeProcessDetails().ProcessTree
-	process := utils.GetProcessFromProcessTree(&processTree, failedRule.GetBaseRuntimeAlert().InfectedPID)
-	if process == nil {
+	var processTree apitypes.Process
+	operation := func() (*apitypes.Process, error) {
+		processTree = failedRule.GetRuntimeProcessDetails().ProcessTree
+		process := utils.GetProcessFromProcessTree(&processTree, failedRule.GetBaseRuntimeAlert().InfectedPID)
+		if process == nil {
+			return nil, errors.New("not found")
+		}
+		return process, nil
+	}
+	process, err := backoff.Retry(context.TODO(), operation, backoff.WithBackOff(backoff.NewExponentialBackOff()), backoff.WithMaxElapsedTime(30*time.Second))
+	if err != nil {
 		logger.L().Warning("AlertManagerExporter.SendRuleAlert - failed to get process from process tree", helpers.String("trace", trace), helpers.Int("pid", int(failedRule.GetBaseRuntimeAlert().InfectedPID)))
 		return
 	}
@@ -99,9 +110,9 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 				"container_name":    failedRule.GetRuntimeAlertK8sDetails().ContainerName,
 				"namespace":         failedRule.GetRuntimeAlertK8sDetails().Namespace,
 				"pod_name":          failedRule.GetRuntimeAlertK8sDetails().PodName,
-				"severity":          PriorityToStatus(failedRule.GetBaseRuntimeAlert().Severity),
 				"host":              ame.Host,
 				"node_name":         ame.NodeName,
+				"severity":          strconv.Itoa(failedRule.GetBaseRuntimeAlert().Severity),
 				"pid":               fmt.Sprintf("%d", process.PID),
 				"ppid":              fmt.Sprintf("%d", process.PPID),
 				"pcomm":             process.Pcomm,
@@ -130,7 +141,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 }
 
 func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
-	summary := fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription)
+	summary := fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription)
 	myAlert := models.PostableAlert{
 		StartsAt: strfmt.DateTime(time.Now()),
 		EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
@@ -146,16 +157,16 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 			Labels: map[string]string{
 				"alertname":              "KubescapeMalwareDetected",
 				"malware_name":           malwareResult.GetBasicRuntimeAlert().AlertName,
-				"container_id":           malwareResult.GetTriggerEvent().Runtime.ContainerID,
-				"container_name":         malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
-				"namespace":              malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
-				"pod_name":               malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
+				"container_id":           malwareResult.GetTriggerEvent().GetContainerID(),
+				"container_name":         malwareResult.GetTriggerEvent().GetContainer(),
+				"namespace":              malwareResult.GetTriggerEvent().GetNamespace(),
+				"pod_name":               malwareResult.GetTriggerEvent().GetPod(),
 				"size":                   malwareResult.GetBasicRuntimeAlert().Size,
 				"md5hash":                malwareResult.GetBasicRuntimeAlert().MD5Hash,
 				"sha256hash":             malwareResult.GetBasicRuntimeAlert().SHA256Hash,
 				"sha1hash":               malwareResult.GetBasicRuntimeAlert().SHA1Hash,
-				"container_image":        malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
-				"container_image_digest": malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
+				"container_image":        malwareResult.GetTriggerEvent().GetContainerImage(),
+				"container_image_digest": malwareResult.GetTriggerEvent().GetContainerImageDigest(),
 				"severity":               "critical",
 				"host":                   ame.Host,
 				"node_name":              ame.NodeName,

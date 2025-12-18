@@ -79,7 +79,7 @@ func checkBTFSupport() error {
 // CheckEBPFSupport checks for eBPF support.
 func checkEBPFSupport() error {
 	// Check kernel version (eBPF is fully supported since Linux 4.4)
-	kernelVersion, err := getKernelVersion()
+	kernelVersion, err := GetKernelVersion()
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func checkEBPFSupport() error {
 	return nil
 }
 
-func getKernelVersion() (string, error) {
+func GetKernelVersion() (string, error) {
 	data, err := os.ReadFile("/proc/version")
 	if err != nil {
 		return "", err

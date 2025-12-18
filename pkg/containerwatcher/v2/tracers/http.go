@@ -2,93 +2,105 @@ package tracers
 
 import (
 	"context"
-	"fmt"
+	"time"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
 const (
-	httpTraceName    = "trace_http"
-	StatusOK         = 200
-	StatusBadRequest = 300
+	httpImageName       = "ghcr.io/inspektor-gadget/gadget/http:latest"
+	httpTraceName       = "trace_http"
+	MaxGroupedEventSize = 10000
+	StatusOK            = 200
+	StatusBadRequest    = 300
 )
 
 var _ containerwatcher.TracerInterface = (*HTTPTracer)(nil)
 
-// HTTPTracer implements TracerInterface for HTTP events
+// HTTPTracer implements TracerInterface for events
 type HTTPTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
-	tracer              *tracerhttp.Tracer
+	eventCallback   containerwatcher.ResultCallback
+	eventsMap       *lru.Cache[string, utils.HttpEvent] // Use golang-lru cache
+	gadgetCtx       *gadgetcontext.GadgetContext
+	kubeManager     operators.DataOperator
+	ociStore        *orasoci.ReadOnlyStore
+	runtime         runtime.Runtime
+	timeoutDuration time.Duration
+	timeoutTicker   *time.Ticker
 }
 
-// NewHTTPTracer creates a new HTTP tracer
+// NewHTTPTracer creates a new tracer
 func NewHTTPTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	kubeManager operators.DataOperator,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
+	eventCallback containerwatcher.ResultCallback,
 ) *HTTPTracer {
-	return &HTTPTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
+	// Create a new LRU cache with a specified size
+	cache, err := lru.New[string, utils.HttpEvent](MaxGroupedEventSize)
+	if err != nil {
+		return nil
 	}
+	t := &HTTPTracer{
+		eventCallback:   eventCallback,
+		eventsMap:       cache,
+		kubeManager:     kubeManager,
+		ociStore:        ociStore,
+		runtime:         runtime,
+		timeoutDuration: 5 * time.Second,
+	}
+	t.timeoutTicker = time.NewTicker(t.timeoutDuration)
+	go t.transmitOrphanRequests()
+	return t
 }
 
-// Start initializes and starts the HTTP tracer
+// Start initializes and starts the tracer
 func (ht *HTTPTracer) Start(ctx context.Context) error {
-	if err := ht.tracerCollection.AddTracer(httpTraceName, ht.containerSelector); err != nil {
-		return fmt.Errorf("adding HTTP tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	httpMountnsmap, err := ht.tracerCollection.TracerMountNsMap(httpTraceName)
-	if err != nil {
-		return fmt.Errorf("getting HTTP mountnsmap: %w", err)
-	}
-
-	tracerHttp, err := tracerhttp.NewTracer(
-		&tracerhttp.Config{MountnsMap: httpMountnsmap},
-		ht.containerCollection,
-		ht.httpEventCallback,
+	ht.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		httpImageName,
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			ht.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			ht.eventOperator(),
+		),
+		gadgetcontext.WithName(httpTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(ht.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating HTTP tracer: %w", err)
-	}
-
-	ht.tracer = tracerHttp
+	go func() {
+		err := ht.runtime.RunGadget(ht.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", ht.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the HTTP tracer
+// Stop gracefully stops the tracer
 func (ht *HTTPTracer) Stop() error {
-	if ht.tracer != nil {
-		ht.tracer.Close()
+	if ht.gadgetCtx != nil {
+		ht.gadgetCtx.Cancel()
 	}
-
-	if err := ht.tracerCollection.RemoveTracer(httpTraceName); err != nil {
-		return fmt.Errorf("removing HTTP tracer: %w", err)
-	}
-
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (ht *HTTPTracer) GetName() string {
-	return "http_tracer"
+	return httpTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -97,35 +109,75 @@ func (ht *HTTPTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (ht *HTTPTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DHttp && config.EnableHttpDetection
-	}
-	return false
+func (ht *HTTPTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DHttp && cfg.EnableHttpDetection
 }
 
-// httpEventCallback handles HTTP events from the tracer
-func (ht *HTTPTracer) httpEventCallback(event *tracerhttptype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
+func (ht *HTTPTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.HTTPEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					pooledData := utils.GetPooledDataItem(utils.HTTPEventType).(*datasource.Edata)
+					data.DeepCopyInto(pooledData)
+					ht.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.HTTPEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
 
-	if isDroppedEvent(event.Type, event.Message) {
-		logger.L().Warning("http tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
+// callback handles events from the tracer
+func (ht *HTTPTracer) callback(event utils.HttpRawEvent) {
+	if grouped := ht.GroupEvents(event); grouped != nil {
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
+		ht.eventCallback(grouped, containerID, processID)
 	}
+}
 
-	if event.Response != nil {
-		if event.Response.StatusCode < StatusOK || event.Response.StatusCode >= StatusBadRequest {
-			return
+func (ht *HTTPTracer) transmitOrphanRequests() {
+	for range ht.timeoutTicker.C {
+		keys := ht.eventsMap.Keys()
+		for _, key := range keys {
+			if event, ok := ht.eventsMap.Peek(key); ok {
+				if time.Since(ToTime(event.GetTimestamp())) > ht.timeoutDuration {
+					containerID := event.GetContainerID()
+					processID := event.GetPID()
+					ht.eventCallback(event, containerID, processID)
+					ht.eventsMap.Remove(key)
+				}
+			}
 		}
 	}
+}
 
-	if ht.eventCallback != nil {
-		// Extract container ID and process ID from the HTTP event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
+func (ht *HTTPTracer) GroupEvents(bpfEvent utils.HttpRawEvent) utils.HttpEvent {
+	id := GetUniqueIdentifier(bpfEvent)
+	switch bpfEvent.GetType() {
+	case utils.Request:
+		event, err := CreateEventFromRequest(bpfEvent)
+		if err != nil {
+			return nil
+		}
+		ht.eventsMap.Add(id, event)
+	case utils.Response:
+		if exists, ok := ht.eventsMap.Get(id); ok {
+			grouped := exists
+			response, err := ParseHttpResponse(FromCString(bpfEvent.GetBuf()), grouped.GetRequest())
+			if err != nil {
+				return nil
+			}
 
-		ht.eventCallback(event, containerID, processID)
+			grouped.SetResponse(response)
+			ht.eventsMap.Remove(id)
+			return grouped
+		}
 	}
+	return nil
 }

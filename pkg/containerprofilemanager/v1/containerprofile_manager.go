@@ -69,7 +69,6 @@ type ContainerProfileManager struct {
 	k8sObjectCache    objectcache.K8sObjectCache
 	storageClient     storage.StorageClient
 	dnsResolverClient dnsmanager.DNSResolver
-	syscallPeekFunc   func(nsMountId uint64) ([]string, error)
 	seccompManager    seccompmanager.SeccompManagerClient
 	enricher          containerprofilemanager.Enricher
 	ruleBindingCache  rulebindingmanager.RuleBindingCache

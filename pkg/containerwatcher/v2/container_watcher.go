@@ -7,10 +7,11 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -76,19 +77,21 @@ type ContainerWatcher struct {
 	workerChan chan *events.EnrichedEvent // Channel for worker pool invocation
 
 	// Third party components
-	thirdPartyTracers            mapset.Set[containerwatcher.CustomTracer]
-	thirdPartyContainerReceivers mapset.Set[containerwatcher.ContainerReceiver]
-	thirdPartyEnricher           containerwatcher.TaskBasedEnricher
+	thirdPartyTracersInitializers mapset.Set[containerwatcher.CustomTracerInitializer]
+	thirdPartyEnricher            containerwatcher.TaskBasedEnricher
+	thirdPartyContainerReceivers  mapset.Set[containerwatcher.ContainerReceiver]
 
 	// Cache and state
-	objectCache          objectcache.ObjectCache
-	ruleManagedPods      mapset.Set[string]
-	metrics              metricsmanager.MetricsManager
-	ruleBindingPodNotify *chan rulebindingmanager.RuleBindingNotify
-	runtime              *containerutilsTypes.RuntimeConfig
-	pool                 *workerpool.WorkerPool
+	objectCache             objectcache.ObjectCache
+	ruleManagedPods         mapset.Set[string]
+	ruleBindingsInitialized bool // tracks whether any rule binding notifications have been processed
+	metrics                 metricsmanager.MetricsManager
+	ruleBindingPodNotify    *chan rulebindingmanager.RuleBindingNotify
+	runtime                 *containerutilsTypes.RuntimeConfig
+	pool                    *workerpool.WorkerPool
 
 	// Lifecycle
+	gadgetRuntime                   runtime.Runtime
 	mutex                           sync.RWMutex
 	containerEolNotificationChannel chan *containercollection.Container
 
@@ -111,13 +114,13 @@ func CreateContainerWatcher(
 	sbomManager sbommanager.SbomManagerClient,
 	ruleBindingPodNotify *chan rulebindingmanager.RuleBindingNotify,
 	runtime *containerutilsTypes.RuntimeConfig,
-	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	processTreeManager processtree.ProcessTreeManager,
 	clusterName string,
 	objectCache objectcache.ObjectCache,
 	networkStreamClient networkstream.NetworkStreamClient,
 	containerProcessTree containerprocesstree.ContainerProcessTree,
+	thirdPartyTracers containerwatcher.ThirdPartyTracers,
 ) (*ContainerWatcher, error) {
 
 	// Create container collection
@@ -130,7 +133,7 @@ func CreateContainerWatcher(
 	}
 
 	// Create ordered event queue (50ms collection interval, increased buffer size)
-	orderedEventQueue := NewOrderedEventQueue(cfg.OrderedEventQueue.CollectionDelay, cfg.OrderedEventQueue.Size, processTreeManager)
+	orderedEventQueue := NewOrderedEventQueue(cfg.OrderedEventQueue.CollectionDelay, cfg.OrderedEventQueue.Size)
 
 	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, containerProfileManager)
 
@@ -144,7 +147,7 @@ func CreateContainerWatcher(
 		malwareManager,
 		networkStreamClient,
 		metrics,
-		thirdPartyEventReceivers,
+		thirdPartyTracers.ThirdPartyEventReceivers,
 		thirdPartyEnricher,
 		rulePolicyReporter,
 	)
@@ -156,6 +159,9 @@ func CreateContainerWatcher(
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
 		enrichedEvent := i.(*events.EnrichedEvent)
 		eventHandlerFactory.ProcessEvent(enrichedEvent)
+		if enrichedEvent.Event.GetEventType() != utils.SyscallEventType {
+			enrichedEvent.Event.Release() // at this time we should not need the event anymore
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating worker pool: %w", err)
@@ -192,9 +198,9 @@ func CreateContainerWatcher(
 		workerChan:          make(chan *events.EnrichedEvent, cfg.WorkerChannelSize),
 
 		// Third party components
-		thirdPartyTracers:            mapset.NewSet[containerwatcher.CustomTracer](),
-		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
-		thirdPartyEnricher:           thirdPartyEnricher,
+		thirdPartyTracersInitializers: thirdPartyTracers.ThirdPartyTracersInitializers,
+		thirdPartyEnricher:            thirdPartyEnricher,
+		thirdPartyContainerReceivers:  mapset.NewSet[containerwatcher.ContainerReceiver](),
 
 		// Cache and state
 		objectCache:          objectCache,
@@ -205,7 +211,7 @@ func CreateContainerWatcher(
 		pool:                 workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 5*time.Second),
 
 		// Lifecycle
-		containerEolNotificationChannel: make(chan *containercollection.Container),
+		containerEolNotificationChannel: make(chan *containercollection.Container, cfg.ContainerEolNotificationBuffer),
 	}, nil
 }
 
@@ -223,13 +229,13 @@ func CreateIGContainerWatcher(
 	sbomManager sbommanager.SbomManagerClient,
 	ruleBindingPodNotify *chan rulebindingmanager.RuleBindingNotify,
 	runtime *containerutilsTypes.RuntimeConfig,
-	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	processTreeManager processtree.ProcessTreeManager,
 	clusterName string,
 	objectCache objectcache.ObjectCache,
 	networkStreamClient networkstream.NetworkStreamClient,
 	containerProcessTree containerprocesstree.ContainerProcessTree,
+	thirdPartyTracers containerwatcher.ThirdPartyTracers,
 ) (containerwatcher.ContainerWatcher, error) {
 
 	return CreateContainerWatcher(
@@ -244,13 +250,13 @@ func CreateIGContainerWatcher(
 		sbomManager,
 		ruleBindingPodNotify,
 		runtime,
-		thirdPartyEventReceivers,
 		thirdPartyEnricher,
 		processTreeManager,
 		clusterName,
 		objectCache,
 		networkStreamClient,
 		containerProcessTree,
+		thirdPartyTracers,
 	)
 }
 
@@ -291,13 +297,17 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	})
 
 	// Start ordered event queue BEFORE tracers
-	// No need to start queue anymore - it's just a data structure
 
 	// Start event processing loop
 	go cw.eventProcessingLoop()
 
 	// Start worker pool goroutine
 	go cw.workerPoolLoop()
+
+	cw.gadgetRuntime = local.New()
+	if err := cw.gadgetRuntime.Init(nil); err != nil {
+		logger.L().Fatal("runtime init", helpers.Error(err))
+	}
 
 	// Create tracer factory
 	tracerFactory := tracers.NewTracerFactory(
@@ -308,10 +318,11 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 		cw.socketEnricher,
 		cw.containerProfileManager,
 		cw.ruleManager,
-		cw.thirdPartyTracers,
+		cw.thirdPartyTracersInitializers,
 		cw.thirdPartyEnricher,
 		cw.cfg,
 		cw.processTreeManager,
+		cw.gadgetRuntime,
 	)
 
 	// Initialize tracer manager
@@ -345,7 +356,7 @@ func (cw *ContainerWatcher) Stop() {
 		cw.tracerManagerV2.StopAllTracers()
 	}
 
-	// No need to stop queue - it's just a data structure
+	cw.gadgetRuntime.Close()
 
 	// Close worker channel to signal worker goroutine to stop
 	if cw.workerChan != nil {
@@ -355,6 +366,11 @@ func (cw *ContainerWatcher) Stop() {
 	// Stop worker pool
 	if cw.workerPool != nil {
 		cw.workerPool.Release()
+	}
+
+	// Close socket enricher
+	if cw.socketEnricher != nil {
+		cw.socketEnricher.Close()
 	}
 
 	cw.running = false
@@ -388,19 +404,6 @@ func (cw *ContainerWatcher) GetContainerSelector() *containercollection.Containe
 	return &cw.containerSelector
 }
 
-// RegisterCustomTracer registers a custom tracer
-func (cw *ContainerWatcher) RegisterCustomTracer(tracer containerwatcher.CustomTracer) error {
-	cw.thirdPartyTracers.Add(tracer)
-	return nil
-}
-
-// UnregisterCustomTracer unregisters a custom tracer
-func (cw *ContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
-	cw.thirdPartyTracers.Remove(tracer)
-	return nil
-}
-
-// RegisterContainerReceiver registers a container receiver
 func (cw *ContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
 	cw.thirdPartyContainerReceivers.Add(receiver)
 }
@@ -452,7 +455,7 @@ func (cw *ContainerWatcher) processQueueBatch() {
 
 }
 
-func (cw *ContainerWatcher) enrichAndProcess(entry eventEntry) {
+func (cw *ContainerWatcher) enrichAndProcess(entry EventEntry) {
 	enrichedEvent := cw.eventEnricher.EnrichEvents(entry)
 
 	select {

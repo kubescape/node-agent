@@ -2,13 +2,17 @@ package containerwatcher
 
 import (
 	"context"
-	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
 type ResultCallback func(utils.K8sEvent, string, uint32)
@@ -21,16 +25,21 @@ type ContainerWatcher interface {
 	GetContainerCollection() *containercollection.ContainerCollection
 	GetSocketEnricher() *socketenricher.SocketEnricher
 	GetContainerSelector() *containercollection.ContainerSelector
-	RegisterCustomTracer(tracer CustomTracer) error
-	UnregisterCustomTracer(tracer CustomTracer) error
 	RegisterContainerReceiver(receiver ContainerReceiver)
 	UnregisterContainerReceiver(receiver ContainerReceiver)
 }
 
-type CustomTracer interface {
-	Start() error
-	Stop() error
-	Name() string
+type CustomTracerInitializer interface {
+	NewTracer(
+		kubeManager operators.DataOperator,
+		runtime runtime.Runtime,
+		ociStore *orasoci.ReadOnlyStore,
+		eventCallback ResultCallback,
+		thirdPartyEnricher TaskBasedEnricher,
+	) (TracerInterface, error)
+}
+
+type GenericEventReceiver interface { // TODO: either EventReceiver or EnrichedEventReceiver
 }
 
 type EventReceiver interface {
@@ -49,7 +58,7 @@ type TaskBasedEnricher interface {
 	SubmitEnrichmentTask(event utils.EnrichEvent, syscalls []uint64, callback ResultCallback, containerID string, processID uint32)
 }
 
-type OrderedEventQueueConfig struct {
-	Size            int           `mapstructure:"size"`
-	CollectionDelay time.Duration `mapstructure:"collectionDelay"`
+type ThirdPartyTracers struct {
+	ThirdPartyTracersInitializers mapset.Set[CustomTracerInitializer]
+	ThirdPartyEventReceivers      *maps.SafeMap[utils.EventType, mapset.Set[GenericEventReceiver]] // TODO: either EventReceiver or EnrichedEventReceiver
 }

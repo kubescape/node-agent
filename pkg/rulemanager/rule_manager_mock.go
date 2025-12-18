@@ -1,49 +1,47 @@
 package rulemanager
 
 import (
-	"github.com/kubescape/node-agent/pkg/utils"
-
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	v1 "k8s.io/api/core/v1"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/utils"
+	corev1 "k8s.io/api/core/v1"
 )
 
 type RuleManagerMock struct {
 }
 
 var _ RuleManagerClient = (*RuleManagerMock)(nil)
+var _ containerwatcher.EnrichedEventReceiver = (*RuleManagerMock)(nil)
 
-func CreateRuleManagerMock() *RuleManagerMock {
+func CreateRuleManagerMock() RuleManagerClient {
 	return &RuleManagerMock{}
 }
 
-func (r *RuleManagerMock) ContainerCallback(_ containercollection.PubSubEvent) {
+func (r RuleManagerMock) ContainerCallback(notif containercollection.PubSubEvent) {
 	// noop
 }
 
-func (r *RuleManagerMock) RegisterPeekFunc(_ func(mntns uint64) ([]string, error)) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportEvent(_ utils.EventType, _ utils.K8sEvent) {
-	// noop
-}
-
-func (r *RuleManagerMock) HasApplicableRuleBindings(_, _ string) bool {
+func (r RuleManagerMock) HasApplicableRuleBindings(namespace, name string) bool {
 	return false
 }
 
-func (r *RuleManagerMock) HasFinalApplicationProfile(_ *v1.Pod) bool {
+func (r RuleManagerMock) HasFinalApplicationProfile(pod *corev1.Pod) bool {
 	return false
 }
 
-func (r *RuleManagerMock) IsContainerMonitored(_ string) bool {
+func (r RuleManagerMock) IsContainerMonitored(k8sContainerID string) bool {
 	return false
 }
 
-func (r *RuleManagerMock) IsPodMonitored(_, _ string) bool {
+func (r RuleManagerMock) IsPodMonitored(namespace, pod string) bool {
 	return false
 }
 
-func (r *RuleManagerMock) EvaluatePolicyRulesForEvent(_ utils.EventType, _ utils.K8sEvent) []string {
+func (r RuleManagerMock) EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
 	return []string{}
+}
+
+func (r RuleManagerMock) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
+	// noop
 }

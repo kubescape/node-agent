@@ -23,3 +23,6 @@ rules:
 - apiGroups: ["kubescape.io"]
   resources: ["runtimerulealertbindings"]
   verbs: ["list", "watch"]
+- apiGroups: ["kubescape.io"]
+  resources: ["rules"]
+  verbs: ["list", "watch"]

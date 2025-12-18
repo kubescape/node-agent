@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 func TestCsvExporter(t *testing.T) {
@@ -23,7 +23,7 @@ func TestCsvExporter(t *testing.T) {
 		t.Fatalf("Expected csvExporter to not be nil")
 	}
 
-	csvExporter.SendRuleAlert(&ruleengine.GenericRuleFailure{
+	csvExporter.SendRuleAlert(&types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
@@ -45,24 +45,13 @@ func TestCsvExporter(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: igtypes.Event{
-			CommonData: igtypes.CommonData{
-				Runtime: igtypes.BasicRuntimeMetadata{
-					ContainerID:          "testmalwarecontainerid",
-					ContainerName:        "testmalwarecontainername",
-					ContainerImageName:   "testmalwarecontainerimage",
-					ContainerImageDigest: "testmalwarecontainerimagedigest",
-				},
-				K8s: igtypes.K8sMetadata{
-					Node:        "testmalwarenode",
-					HostNetwork: false,
-					BasicK8sMetadata: igtypes.BasicK8sMetadata{
-						Namespace:     "testmalwarenamespace",
-						PodName:       "testmalwarepodname",
-						ContainerName: "testmalwarecontainername",
-					},
-				},
-			},
+		TriggerEvent: &utils.StructEvent{
+			ContainerID:          "testmalwarecontainerid",
+			Container:            "testmalwarecontainername",
+			ContainerImage:       "testmalwarecontainerimage",
+			ContainerImageDigest: "testmalwarecontainerimagedigest",
+			Namespace:            "testmalwarenamespace",
+			Pod:                  "testmalwarepodname",
 		},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",

@@ -19,6 +19,15 @@ jobs:
           registry: quay.io/kubescape
           username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
           password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+      - name: Install IG
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+          IG_ARCH=amd64
+          IG_VERSION=$(curl -s https://api.github.com/repos/inspektor-gadget/inspektor-gadget/releases/latest | jq -r .tag_name)
+          echo "Installing IG version: ${IG_VERSION}"
+          curl -sL https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-${IG_ARCH}-${IG_VERSION}.tar.gz | sudo tar -C /usr/local/bin -xzf - ig
+          sudo chmod +x /usr/local/bin/ig
       - name: Build the Image and Push to Quay.io
         id: build-and-push-image
         run: |
@@ -105,6 +114,9 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: "1.25"
+      - name: Set unlimited memlock limit
+        run: |
+          sudo sh -c "ulimit -l unlimited"
       - name: Run test
         run: |
           cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component

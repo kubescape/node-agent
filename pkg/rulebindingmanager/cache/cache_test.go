@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/node-agent/mocks"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	rulemanagertypesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -166,7 +166,7 @@ func TestRuntimeObjAddHandler(t *testing.T) {
 			r := tt.args.c.ListRulesForPod(tt.args.pod.GetNamespace(), tt.args.pod.GetName())
 			assert.Equal(t, len(tt.expectedRules), len(r))
 			for i := range r {
-				assert.Equal(t, tt.expectedRules[i].ruleID, r[i].ID())
+				assert.Equal(t, tt.expectedRules[i].ruleID, r[i].ID)
 
 			}
 		})
@@ -219,56 +219,6 @@ func TestDeletePod(t *testing.T) {
 			assert.False(t, c.podToRBNames.Has(tt.uniqueName))
 			for _, rbName := range c.rbNameToPods.Keys() {
 				assert.False(t, c.rbNameToPods.Get(rbName).Contains(tt.uniqueName))
-			}
-		})
-	}
-}
-func TestCreateRule(t *testing.T) {
-	c := NewCacheMock("")
-	tests := []struct {
-		name     string
-		rule     *typesv1.RuntimeAlertRuleBindingRule
-		expected []ruleengine.RuleEvaluator
-	}{
-		{
-			name: "Test with RuleID",
-			rule: &typesv1.RuntimeAlertRuleBindingRule{
-				RuleID:     "rule-1",
-				Parameters: map[string]interface{}{"param1": "value1"},
-			},
-			expected: []ruleengine.RuleEvaluator{&ruleengine.RuleMock{RuleID: "rule-1", RuleParameters: map[string]interface{}{"param1": "value1"}}},
-		},
-		{
-			name: "Test with RuleName",
-			rule: &typesv1.RuntimeAlertRuleBindingRule{
-				RuleName:   "rule-1",
-				Parameters: map[string]interface{}{"param1": "value1"},
-			},
-			expected: []ruleengine.RuleEvaluator{&ruleengine.RuleMock{RuleName: "rule-1", RuleParameters: map[string]interface{}{"param1": "value1"}}},
-		},
-		{
-			name: "Test with RuleTags",
-			rule: &typesv1.RuntimeAlertRuleBindingRule{
-				RuleTags:   []string{"tag1", "tag2"},
-				Parameters: map[string]interface{}{"param1": "value1"},
-			},
-			expected: []ruleengine.RuleEvaluator{&ruleengine.RuleMock{RuleName: "tag1", RuleParameters: map[string]interface{}{"param1": "value1"}}, &ruleengine.RuleMock{RuleName: "tag2", RuleParameters: map[string]interface{}{"param1": "value1"}}},
-		},
-		{
-			name:     "Test with no RuleID, RuleName, or RuleTags",
-			rule:     &typesv1.RuntimeAlertRuleBindingRule{},
-			expected: []ruleengine.RuleEvaluator{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := c.createRule(tt.rule)
-			assert.Equal(t, len(tt.expected), len(result))
-			for i := range result {
-				assert.Equal(t, tt.expected[i].Name(), result[i].Name())
-				assert.Equal(t, tt.expected[i].ID(), result[i].ID())
-				assert.Equal(t, tt.expected[i].GetParameters(), result[i].GetParameters())
 			}
 		})
 	}
@@ -613,7 +563,7 @@ func TestDeleteRuleBinding(t *testing.T) {
 			for k, v := range tt.podToRBNames {
 				for _, s := range v {
 					c.rbNameToRB.Set(s, typesv1.RuntimeAlertRuleBinding{})
-					c.rbNameToRules.Set(s, []ruleengine.RuleEvaluator{&ruleengine.RuleMock{}})
+					c.rbNameToRules.Set(s, []rulemanagertypesv1.Rule{{}})
 
 					if !c.rbNameToPods.Has(s) {
 						c.rbNameToPods.Set(s, mapset.NewSet[string]())
@@ -666,7 +616,7 @@ func TestAddRuleBinding(t *testing.T) {
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection))
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx))
 
-	k8sClient.KubernetesClient = k8sfake.NewSimpleClientset(r...)
+	k8sClient.KubernetesClient = k8sfake.NewClientset(r...)
 
 	tests := []struct {
 		rb                   *typesv1.RuntimeAlertRuleBinding

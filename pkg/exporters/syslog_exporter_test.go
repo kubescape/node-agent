@@ -6,14 +6,12 @@ import (
 	"testing"
 	"time"
 
-	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
-	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
-
-	"gopkg.in/mcuadros/go-syslog.v2"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/mcuadros/go-syslog.v2"
 )
 
 func setupServer() *syslog.Server {
@@ -65,7 +63,7 @@ func TestSyslogExporter(t *testing.T) {
 	}
 
 	// Send an alert
-	syslogExp.SendRuleAlert(&ruleenginev1.GenericRuleFailure{
+	syslogExp.SendRuleAlert(&types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
@@ -80,7 +78,7 @@ func TestSyslogExporter(t *testing.T) {
 		},
 	})
 
-	syslogExp.SendRuleAlert(&ruleenginev1.GenericRuleFailure{
+	syslogExp.SendRuleAlert(&types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
@@ -103,25 +101,7 @@ func TestSyslogExporter(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: igtypes.Event{
-			CommonData: igtypes.CommonData{
-				Runtime: igtypes.BasicRuntimeMetadata{
-					ContainerID:          "testmalwarecontainerid",
-					ContainerName:        "testmalwarecontainername",
-					ContainerImageName:   "testmalwarecontainerimage",
-					ContainerImageDigest: "testmalwarecontainerimagedigest",
-				},
-				K8s: igtypes.K8sMetadata{
-					Node:        "testmalwarenode",
-					HostNetwork: false,
-					BasicK8sMetadata: igtypes.BasicK8sMetadata{
-						Namespace:     "testmalwarenamespace",
-						PodName:       "testmalwarepodname",
-						ContainerName: "testmalwarecontainername",
-					},
-				},
-			},
-		},
+		TriggerEvent: &utils.StructEvent{},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},

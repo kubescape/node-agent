@@ -1,0 +1,50 @@
+name: fork
+description: Trace process fork events and report parent/child identifiers and process
+  info.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/fork
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/fork
+datasources:
+  fork:
+    fields:
+      child_pid:
+        annotations:
+          description: Process ID of the newly created child.
+      child_tid:
+        annotations:
+          description: Thread ID of the newly created child.
+      exepath:
+        annotations:
+          description: 'TODO: Fill field description'
+      parent_pid:
+        annotations:
+          description: Process ID of the parent.
+      proc:
+        annotations:
+          description: Process metadata including pid, tid, ppid, uid, gid, comm,
+            etc.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.
+params:
+  ebpf:
+    targ_comm:
+      key: targ_comm
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_gid:
+      key: targ_gid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_pid:
+      key: targ_pid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_tid:
+      key: targ_tid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_uid:
+      key: targ_uid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'

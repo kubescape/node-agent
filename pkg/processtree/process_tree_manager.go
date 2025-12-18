@@ -2,6 +2,7 @@ package processtree
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -32,12 +33,14 @@ func NewProcessTreeManager(
 
 	containerProcessTreeCache := expirable.NewLRU[string, apitypes.Process](10000, nil, 1*time.Minute)
 
-	return &ProcessTreeManagerImpl{
+	ptm := &ProcessTreeManagerImpl{
 		creator:                   creator,
 		containerTree:             containerTree,
 		containerProcessTreeCache: containerProcessTreeCache,
 		config:                    config,
 	}
+
+	return ptm
 }
 
 // Start initializes the process tree manager and starts background tasks
@@ -65,7 +68,7 @@ func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event 
 }
 
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32, useCache bool) (apitypes.Process, error) {
-	cacheKey := fmt.Sprintf("%s:%d", containerID, pid)
+	cacheKey := containerID + ":" + strconv.FormatUint(uint64(pid), 10)
 	if cached, exists := ptm.containerProcessTreeCache.Get(cacheKey); exists && useCache {
 		return cached, nil
 	}
@@ -80,11 +83,11 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	}()
 
 	if err != nil {
-		return apitypes.Process{}, fmt.Errorf("failed to get process node: %v", err)
+		return apitypes.Process{}, &GetProcessNodeError{Err: err}
 	}
 
 	if processNode == nil {
-		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
+		return apitypes.Process{}, &ProcessNotFoundError{Pid: pid, ContainerID: containerID}
 	}
 
 	// Get container subtree (separate lock scope)
@@ -97,7 +100,7 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	}()
 
 	if subtreeErr != nil {
-		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", subtreeErr)
+		return apitypes.Process{}, &GetContainerSubtreeError{Err: subtreeErr}
 	}
 
 	// Cache the result

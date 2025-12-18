@@ -7,11 +7,12 @@ ARG TARGETOS TARGETARCH
 RUN --mount=target=. \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
-    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/node-agent -ldflags="-s -w" ./cmd/main.go
+    GOOS=$TARGETOS GOARCH=$TARGETARCH GOEXPERIMENT=greenteagc go build -o /out/node-agent -ldflags="-s -w" ./cmd/main.go
 
 FROM gcr.io/distroless/static-debian13:latest
 
 COPY --from=builder /out/node-agent /usr/bin/node-agent
+COPY tracers.tar /root/tracers.tar
 COPY configuration/ig-config.yaml /root/.ig/config.yaml
 
 ARG image_version

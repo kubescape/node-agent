@@ -2,87 +2,87 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	tracerfork "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/tracer"
-	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const forkTraceName = "trace_fork"
+const (
+	forkImageName = "ghcr.io/inspektor-gadget/gadget/fork:latest"
+	forkTraceName = "trace_fork"
+)
 
 var _ containerwatcher.TracerInterface = (*ForkTracer)(nil)
 
-// ForkTracer implements TracerInterface for fork events
+// ForkTracer implements TracerInterface for events
 type ForkTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
-	tracer              *tracerfork.Tracer
+	eventCallback containerwatcher.ResultCallback
+	gadgetCtx     *gadgetcontext.GadgetContext
+	kubeManager   operators.DataOperator
+	ociStore      *orasoci.ReadOnlyStore
+	runtime       runtime.Runtime
 }
 
-// NewForkTracer creates a new fork tracer
+// NewForkTracer creates a new tracer
 func NewForkTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	kubeManager operators.DataOperator,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
+	eventCallback containerwatcher.ResultCallback,
 ) *ForkTracer {
 	return &ForkTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
+		eventCallback: eventCallback,
+		kubeManager:   kubeManager,
+		ociStore:      ociStore,
+		runtime:       runtime,
 	}
 }
 
-// Start initializes and starts the fork tracer
+// Start initializes and starts the tracer
 func (ft *ForkTracer) Start(ctx context.Context) error {
-	if err := ft.tracerCollection.AddTracer(forkTraceName, ft.containerSelector); err != nil {
-		return fmt.Errorf("adding fork tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	forkMountnsmap, err := ft.tracerCollection.TracerMountNsMap(forkTraceName)
-	if err != nil {
-		return fmt.Errorf("getting fork mountnsmap: %w", err)
-	}
-
-	tracerFork, err := tracerfork.NewTracer(
-		&tracerfork.Config{MountnsMap: forkMountnsmap},
-		ft.containerCollection,
-		ft.forkEventCallback,
+	ft.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		forkImageName,
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			ft.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			ft.eventOperator(),
+		),
+		gadgetcontext.WithName(forkTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(ft.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating fork tracer: %w", err)
-	}
-
-	ft.tracer = tracerFork
+	go func() {
+		err := ft.runtime.RunGadget(ft.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", ft.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
 // Stop gracefully stops the fork tracer
 func (ft *ForkTracer) Stop() error {
-	if ft.tracer != nil {
-		ft.tracer.Stop()
+	if ft.gadgetCtx != nil {
+		ft.gadgetCtx.Cancel()
 	}
-
-	if err := ft.tracerCollection.RemoveTracer(forkTraceName); err != nil {
-		return fmt.Errorf("removing fork tracer: %w", err)
-	}
-
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (ft *ForkTracer) GetName() string {
-	return "fork_tracer"
+	return forkTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -91,26 +91,38 @@ func (ft *ForkTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (ft *ForkTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		if config.DFork {
-			return false
-		}
-		return config.EnableApplicationProfile || config.EnableRuntimeDetection
+func (ft *ForkTracer) IsEnabled(cfg config.Config) bool {
+	if cfg.DFork {
+		return false
 	}
-	return false
+	return cfg.EnableApplicationProfile || cfg.EnableRuntimeDetection
 }
 
-// forkEventCallback handles fork events from the tracer
-func (ft *ForkTracer) forkEventCallback(event *tracerforktype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
+func (ft *ForkTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.ForkEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					pooledData := utils.GetPooledDataItem(utils.ForkEventType).(*datasource.Edata)
+					data.DeepCopyInto(pooledData)
+					ft.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.ForkEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
 
+// callback handles events from the tracer
+func (ft *ForkTracer) callback(event utils.ForkEvent) {
 	if ft.eventCallback != nil {
 		// Extract container ID and process ID from the fork event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
 
 		ft.eventCallback(event, containerID, processID)
 	}

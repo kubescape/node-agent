@@ -2,93 +2,95 @@ package tracers
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-
-	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const openTraceName = "trace_open"
+const (
+	openImageName = "quay.io/matthiasb_1/gadgets:open"
+	openTraceName = "trace_open"
+)
 
 var _ containerwatcher.TracerInterface = (*OpenTracer)(nil)
 
 // OpenTracer implements TracerInterface for open events
 type OpenTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
-	tracer              *traceropen.Tracer
-	cfg                 config.Config
-	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
+	cfg                config.Config
+	eventCallback      containerwatcher.ResultCallback
+	gadgetCtx          *gadgetcontext.GadgetContext
+	kubeManager        operators.DataOperator
+	ociStore           *orasoci.ReadOnlyStore
+	runtime            runtime.Runtime
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
 // NewOpenTracer creates a new open tracer
 func NewOpenTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	kubeManager operators.DataOperator,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
+	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *OpenTracer {
 	return &OpenTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
-		thirdPartyEnricher:  thirdPartyEnricher,
+		eventCallback:      eventCallback,
+		kubeManager:        kubeManager,
+		ociStore:           ociStore,
+		runtime:            runtime,
+		thirdPartyEnricher: thirdPartyEnricher,
 	}
 }
 
 // Start initializes and starts the open tracer
 func (ot *OpenTracer) Start(ctx context.Context) error {
-	if err := ot.tracerCollection.AddTracer(openTraceName, ot.containerSelector); err != nil {
-		return fmt.Errorf("adding open tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	openMountnsmap, err := ot.tracerCollection.TracerMountNsMap(openTraceName)
-	if err != nil {
-		return fmt.Errorf("getting open mountnsmap: %w", err)
-	}
-
-	tracerOpen, err := traceropen.NewTracer(
-		&traceropen.Config{MountnsMap: openMountnsmap, FullPath: true},
-		ot.containerCollection,
-		ot.openEventCallback,
+	ot.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		openImageName,
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			ot.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			ot.eventOperator(),
+		),
+		gadgetcontext.WithName(openTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(ot.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating open tracer: %w", err)
-	}
-
-	ot.tracer = tracerOpen
+	go func() {
+		params := map[string]string{
+			"operator.oci.ebpf.paths": strconv.FormatBool(ot.cfg.EnableFullPathTracing),
+		}
+		err := ot.runtime.RunGadget(ot.gadgetCtx, nil, params)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", ot.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
 // Stop gracefully stops the open tracer
 func (ot *OpenTracer) Stop() error {
-	if ot.tracer != nil {
-		ot.tracer.Stop()
+	if ot.gadgetCtx != nil {
+		ot.gadgetCtx.Cancel()
 	}
-
-	if err := ot.tracerCollection.RemoveTracer(openTraceName); err != nil {
-		return fmt.Errorf("removing open tracer: %w", err)
-	}
-
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (ot *OpenTracer) GetName() string {
-	return "open_tracer"
+	return openTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -97,48 +99,52 @@ func (ot *OpenTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (ot *OpenTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		ot.cfg = config
-		if config.DOpen {
-			return false
-		}
-		return config.EnableApplicationProfile || config.EnableRuntimeDetection
+func (ot *OpenTracer) IsEnabled(cfg config.Config) bool {
+	ot.cfg = cfg
+	if cfg.DOpen {
+		return false
 	}
-	return false
+	return cfg.EnableApplicationProfile || cfg.EnableRuntimeDetection
 }
 
-// openEventCallback handles open events from the tracer
-func (ot *OpenTracer) openEventCallback(event *traceropentype.Event) {
-	if event.Type == types.DEBUG {
+func (ot *OpenTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.OpenEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					pooledData := utils.GetPooledDataItem(utils.OpenEventType).(*datasource.Edata)
+					data.DeepCopyInto(pooledData)
+					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.OpenEventType, FullPathTracing: ot.cfg.EnableFullPathTracing})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
+
+// callback handles open events from the tracer
+func (ot *OpenTracer) callback(event utils.OpenEvent) {
+	if event.GetContainer() == "" {
 		return
 	}
 
-	if ot.cfg.EnableFullPathTracing {
-		event.Path = event.FullPath
-	}
-
-	if event.K8s.ContainerName == "" {
-		return
-	}
-
-	if isDroppedEvent(event.Type, event.Message) {
-		return
-	}
-
-	if event.Err > -1 && event.FullPath != "" {
-		openEvent := &events.OpenEvent{Event: *event}
+	errorRaw := event.GetError()
+	if errorRaw > -1 {
 		// Handle the event with syscall enrichment
-		ot.handleEvent(openEvent, []uint64{SYS_OPEN, SYS_OPENAT})
+		ot.handleEvent(event, []uint64{SYS_OPEN, SYS_OPENAT})
 	}
 }
 
 // handleEvent processes the event with syscall enrichment
-func (ot *OpenTracer) handleEvent(event *events.OpenEvent, syscalls []uint64) {
+func (ot *OpenTracer) handleEvent(event utils.OpenEvent, syscalls []uint64) {
 	if ot.eventCallback != nil {
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
 
-		EnrichEvent(ot.thirdPartyEnricher, event, syscalls, ot.eventCallback, containerID, processID)
+		enrichEvent(ot.thirdPartyEnricher, event, syscalls, ot.eventCallback, containerID, processID)
 	}
 }

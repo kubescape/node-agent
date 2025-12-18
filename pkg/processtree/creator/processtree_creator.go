@@ -184,7 +184,15 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
-		return
+		if pt.config.KubernetesMode && event.ContainerID == "host" { // If we are in Kubernetes mode and the container ID is "host", don't create the process.
+			return
+		}
+
+		proc = pt.getOrCreateProcess(event.PID)
+	}
+
+	if event.PPID != 0 {
+		pt.UpdatePPID(proc, event)
 	}
 
 	if event.Comm != "" {
@@ -364,6 +372,6 @@ func (pt *processTreeCreatorImpl) shallowCopyProcess(proc *apitypes.Process) *ap
 	if proc == nil {
 		return nil
 	}
-	copy := *proc
-	return &copy
+	process := *proc
+	return &process
 }

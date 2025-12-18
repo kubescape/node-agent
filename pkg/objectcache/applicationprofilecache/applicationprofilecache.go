@@ -26,11 +26,12 @@ import (
 
 // ContainerInfo holds container metadata we need for application profile mapping
 type ContainerInfo struct {
-	ContainerID          string
-	WorkloadID           string
-	InstanceTemplateHash string
-	Namespace            string
-	Name                 string
+	ContainerID               string
+	WorkloadID                string
+	InstanceTemplateHash      string
+	Namespace                 string
+	Name                      string
+	SeenContainerFromTheStart bool // True if container was seen from the start
 	UserDefinedProfile   string
 }
 
@@ -173,16 +174,29 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 
 			// Check if this workload ID is used by any container in this namespace
 			workloadIDInUse := false
+			hasNewContainer := false // Track if any container using this workload was seen from start
 			for _, containerID := range containerIDs {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID &&
 					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
 					workloadIDInUse = true
-					break
+					// If any container was seen from start, mark it
+					if containerInfo.SeenContainerFromTheStart {
+						hasNewContainer = true
+					}
 				}
 			}
 
 			if !workloadIDInUse {
+				continue
+			}
+
+			// If we have a "new" container (seen from start) and the profile is partial,
+			// skip it - we don't want to use partial profiles for containers we're tracking from the start
+			if hasNewContainer && profile.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial {
+				logger.L().Debug("skipping partial profile for container seen from start",
+					helpers.String("workloadID", workloadID),
+					helpers.String("namespace", namespace))
 				continue
 			}
 
@@ -436,18 +450,46 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 			return nil
 		}
 
-		// Create workload ID to state mapping
-		if _, exists := apc.workloadIDToProfileState.Load(workloadID); !exists {
+		// If container restarts and profile is partial, delete it from cache
+		// This ensures we don't alert on activity we didn't see after restart
+		if existingProfile, exists := apc.workloadIDToProfile.Load(workloadID); exists && !sharedData.PreRunningContainer {
+			if existingProfile != nil && existingProfile.Annotations != nil {
+				completion := existingProfile.Annotations[helpersv1.CompletionMetadataKey]
+				if completion == helpersv1.Partial {
+					logger.L().Debug("deleting partial profile on container restart",
+						helpers.String("containerID", containerID),
+						helpers.String("workloadID", workloadID),
+						helpers.String("namespace", container.K8s.Namespace))
+
+					// Delete the profile from cache
+					profileKey := apc.profileKey(existingProfile.Namespace, existingProfile.Name)
+					apc.profileToUserManagedIdentifier.Delete(profileKey)
+					apc.workloadIDToProfile.Delete(workloadID)
+
+					// Also delete call stack indices for all containers using this workload ID
+					// (including the current container if it exists from a previous run)
+					apc.containerToCallStackIndex.Delete(containerID)
+					apc.containerIDToInfo.Range(func(cID string, info *ContainerInfo) bool {
+						if info.WorkloadID == workloadID {
+							apc.containerToCallStackIndex.Delete(cID)
+						}
+						return true
+					})
+				}
+			}
+		} else {
 			apc.workloadIDToProfileState.Set(workloadID, nil)
 		}
 
 		// Create container info
+		// Mark container as "seen from start" if it is not pre-running
 		containerInfo := &ContainerInfo{
-			ContainerID:          containerID,
-			WorkloadID:           workloadID,
-			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
-			Namespace:            container.K8s.Namespace,
-			Name:                 container.Runtime.ContainerName,
+			ContainerID:               containerID,
+			WorkloadID:                workloadID,
+			InstanceTemplateHash:      sharedData.InstanceID.GetTemplateHash(),
+			Namespace:                 container.K8s.Namespace,
+			Name:                      container.Runtime.ContainerName,
+			SeenContainerFromTheStart: !sharedData.PreRunningContainer,
 		}
 
 		// Check for user-defined profile

@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	hostfimsensor "github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,7 +86,7 @@ func TestLoadConfig(t *testing.T) {
 					OnProfileFailure:   true,
 					MaxSize:            10000,
 				},
-				OrderedEventQueue: containerwatcher.OrderedEventQueueConfig{
+				OrderedEventQueue: OrderedEventQueueConfig{
 					Size:            100000,
 					CollectionDelay: 50 * time.Millisecond,
 				},
@@ -95,7 +95,12 @@ func TestLoadConfig(t *testing.T) {
 					CleanupInterval: 30 * time.Second,
 					CleanupDelay:    5 * time.Minute,
 				},
-				DNSCacheSize: 50000,
+				CelConfigCache: cache.FunctionCacheConfig{
+					MaxSize: 100000,
+					TTL:     1 * time.Minute,
+				},
+				DNSCacheSize:                   50000,
+				ContainerEolNotificationBuffer: 100,
 				FIM: FIMConfig{
 					Directories: []FIMDirectoryConfig{
 						{

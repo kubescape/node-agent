@@ -235,7 +235,7 @@ func CalculateProcessTreeDepth(process *apitypes.Process) int {
 	}
 
 	// Ensure migration from old Children slice to ChildrenMap
-	process.MigrateToMap()
+	process.MigrateToMap() // FIXME can we remove this?
 
 	// If no children, this is a leaf node with depth 1
 	if len(process.ChildrenMap) == 0 {

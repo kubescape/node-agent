@@ -71,7 +71,9 @@ nodeAgent:
       ruleCooldownAfterCount: 10 # for tests
       ruleCooldownOnProfileFailure: true
       ruleCooldownMaxSize: 20000
-
+    celConfigCache:
+      maxSize: 250000
+      ttl: 1s
 
   serviceMonitor:
     enabled: true

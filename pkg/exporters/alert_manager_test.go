@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -36,7 +36,7 @@ func TestSendAlert(t *testing.T) {
 	}
 	// Call SendAlert
 
-	exporter.SendRuleAlert(&ruleengine.GenericRuleFailure{
+	exporter.SendRuleAlert(&types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
@@ -67,7 +67,7 @@ func TestSendAlert(t *testing.T) {
 	assert.Equal(t, "testnamespace", alertLabels["namespace"])
 	assert.Equal(t, "testpodname", alertLabels["pod_name"])
 	assert.Equal(t, "", alertLabels["node_name"])
-	assert.Equal(t, "none", alertLabels["severity"])
+	assert.Equal(t, "0", alertLabels["severity"])
 	assert.Equal(t, "Rule 'testrule' in 'testpodname' namespace 'testnamespace' failed", alert["annotations"].(map[string]interface{})["summary"])
 	assert.Equal(t, "Application profile is missing", alert["annotations"].(map[string]interface{})["message"])
 	assert.Equal(t, strings.HasPrefix(fmt.Sprint(alert["generatorURL"]), "https://armosec.github.io/kubecop/alertviewer/"), true)
@@ -101,24 +101,11 @@ func TestSendMalwareAlert(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: igtypes.Event{
-			CommonData: igtypes.CommonData{
-				Runtime: igtypes.BasicRuntimeMetadata{
-					ContainerID:          "testmalwarecontainerid",
-					ContainerName:        "testmalwarecontainername",
-					ContainerImageName:   "testmalwarecontainerimage",
-					ContainerImageDigest: "testmalwarecontainerimagedigest",
-				},
-				K8s: igtypes.K8sMetadata{
-					Node:        "testmalwarenode",
-					HostNetwork: false,
-					BasicK8sMetadata: igtypes.BasicK8sMetadata{
-						Namespace:     "testmalwarenamespace",
-						PodName:       "testmalwarepodname",
-						ContainerName: "testmalwarecontainername",
-					},
-				},
-			},
+		TriggerEvent: &utils.StructEvent{
+			ContainerID: "testmalwarecontainerid",
+			Container:   "testmalwarecontainername",
+			Namespace:   "testmalwarenamespace",
+			Pod:         "testmalwarepodname",
 		},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
