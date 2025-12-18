@@ -13,6 +13,7 @@ import (
 	"github.com/joncrlsn/dque"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file"
 )
@@ -41,11 +42,6 @@ func QueuedContainerProfileBuilder() interface{} {
 	return &QueuedContainerProfile{}
 }
 
-// ProfileCreator defines the interface for creating container profiles
-type ProfileCreator interface {
-	CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error
-}
-
 // ErrorCallback defines the interface for handling queue processing errors
 type ErrorCallback interface {
 	OnQueueError(profile *v1beta1.ContainerProfile, containerID string, err error)
@@ -55,7 +51,7 @@ type ErrorCallback interface {
 type QueueData struct {
 	queue         *dque.DQue
 	ctx           context.Context
-	creator       ProfileCreator
+	creator       storage.ProfileCreator
 	errorCallback ErrorCallback
 	maxQueueSize  int
 	retryInterval time.Duration
@@ -77,7 +73,7 @@ type QueueConfig struct {
 }
 
 // NewQueueData creates a new QueueData instance with simple LRU behavior
-func NewQueueData(ctx context.Context, creator ProfileCreator, config QueueConfig) (*QueueData, error) {
+func NewQueueData(ctx context.Context, creator storage.ProfileCreator, config QueueConfig) (*QueueData, error) {
 	// Set defaults
 	if config.QueueName == "" {
 		config.QueueName = DefaultQueueName

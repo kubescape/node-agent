@@ -68,13 +68,13 @@ type SbomManager struct {
 	pool               *workerpool.WorkerPool
 	procDir            string
 	processing         mapset.Set[string]
-	storageClient      storage.StorageClient
+	storageClient      storage.SbomClient
 	version            string
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
-func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache) (*SbomManager, error) {
+func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache) (*SbomManager, error) {
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
 	if !exists {

@@ -238,4 +238,3 @@ func Test_26_AlertBulkingWithHTTPMock(t *testing.T) {
 	assert.Less(t, totalRequests, totalAlerts, "Bulking should reduce HTTP requests")
 	assert.Greater(t, bulksWithMultiple, 0, "Should have at least one bulk with multiple alerts")
 }
-

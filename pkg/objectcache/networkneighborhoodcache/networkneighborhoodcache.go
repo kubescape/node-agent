@@ -17,9 +17,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/resourcelocks"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	versioned "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -39,7 +39,7 @@ type NetworkNeighborhoodCacheImpl struct {
 	workloadIDToProfileState                   maps.SafeMap[string, *objectcache.ProfileState] // Tracks profile state even if not in cache
 	containerIDToInfo                          maps.SafeMap[string, *ContainerInfo]
 	networkNeighborhoodToUserManagedIdentifier maps.SafeMap[string, string] // networkNeighborhoodName -> user-managed profile unique identifier
-	storageClient                              versioned.SpdxV1beta1Interface
+	storageClient                              storage.ProfileClient
 	k8sObjectCache                             objectcache.K8sObjectCache
 	updateInterval                             time.Duration
 	updateInProgress                           bool                         // Flag to track if update is in progress
@@ -48,7 +48,7 @@ type NetworkNeighborhoodCacheImpl struct {
 }
 
 // NewNetworkNeighborhoodCache creates a new network neighborhood cache with periodic updates
-func NewNetworkNeighborhoodCache(cfg config.Config, storageClient versioned.SpdxV1beta1Interface, k8sObjectCache objectcache.K8sObjectCache) *NetworkNeighborhoodCacheImpl {
+func NewNetworkNeighborhoodCache(cfg config.Config, storageClient storage.ProfileClient, k8sObjectCache objectcache.K8sObjectCache) *NetworkNeighborhoodCacheImpl {
 	updateInterval := utils.AddJitter(cfg.ProfilesCacheRefreshRate, 10) // Add 10% jitter to avoid high load on the storage
 
 	nnc := &NetworkNeighborhoodCacheImpl{
@@ -127,11 +127,30 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 		}
 
 		// Get network neighborhoods list for this namespace
-		nnList, err := nnc.storageClient.NetworkNeighborhoods(namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			logger.L().Error("failed to list network neighborhoods",
-				helpers.String("namespace", namespace),
-				helpers.Error(err))
+		var nnList *v1beta1.NetworkNeighborhoodList
+		continueToken := ""
+		for {
+			list, err := nnc.storageClient.ListNetworkNeighborhoods(namespace, int64(50), continueToken)
+			if err != nil {
+				logger.L().Error("failed to list network neighborhoods",
+					helpers.String("namespace", namespace),
+					helpers.Error(err))
+				break
+			}
+
+			if nnList == nil {
+				nnList = list
+			} else {
+				nnList.Items = append(nnList.Items, list.Items...)
+			}
+
+			continueToken = list.Continue
+			if continueToken == "" {
+				break
+			}
+		}
+
+		if nnList == nil {
 			continue
 		}
 
@@ -208,7 +227,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 			}
 
 			// Fetch the network neighborhood from storage
-			fullNN, err := nnc.storageClient.NetworkNeighborhoods(namespace).Get(ctx, nn.Name, metav1.GetOptions{})
+			fullNN, err := nnc.storageClient.GetNetworkNeighborhood(namespace, nn.Name)
 			if err != nil {
 				logger.L().Error("failed to get network neighborhood",
 					helpers.String("workloadID", workloadID),
@@ -269,8 +288,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 	}
 
 	// Fetch the full user network neighborhood
-	fullUserNN, err := nnc.storageClient.NetworkNeighborhoods(nn.Namespace).Get(
-		context.Background(), nn.Name, metav1.GetOptions{})
+	fullUserNN, err := nnc.storageClient.GetNetworkNeighborhood(nn.Namespace, nn.Name)
 	if err != nil {
 		logger.L().Error("failed to get user-managed network neighborhood",
 			helpers.String("namespace", nn.Namespace),
@@ -282,8 +300,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 	// Merge the user-managed network neighborhood with the normal network neighborhood
 
 	// First, pull the original network neighborhood from the storage
-	originalNN, err := nnc.storageClient.NetworkNeighborhoods(toMerge.nn.Namespace).Get(
-		context.Background(), toMerge.nn.Name, metav1.GetOptions{})
+	originalNN, err := nnc.storageClient.GetNetworkNeighborhood(toMerge.nn.Namespace, toMerge.nn.Name)
 	if err != nil {
 		logger.L().Error("failed to get original network neighborhood",
 			helpers.String("namespace", toMerge.nn.Namespace),

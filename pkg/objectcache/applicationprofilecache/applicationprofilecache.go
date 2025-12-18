@@ -18,10 +18,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/resourcelocks"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	versioned "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ContainerInfo holds container metadata we need for application profile mapping
@@ -32,7 +31,7 @@ type ContainerInfo struct {
 	Namespace                 string
 	Name                      string
 	SeenContainerFromTheStart bool // True if container was seen from the start
-	UserDefinedProfile   string
+	UserDefinedProfile        string
 }
 
 // ContainerCallStackIndex maintains call stack search trees for a container
@@ -47,7 +46,7 @@ type ApplicationProfileCacheImpl struct {
 	containerIDToInfo              maps.SafeMap[string, *ContainerInfo]
 	profileToUserManagedIdentifier maps.SafeMap[string, string] // profileName -> user-managed profile unique identifier (This is used to prevent merging the same user-managed profile multiple times)
 	containerToCallStackIndex      maps.SafeMap[string, *ContainerCallStackIndex]
-	storageClient                  versioned.SpdxV1beta1Interface
+	storageClient                  storage.ProfileClient
 	k8sObjectCache                 objectcache.K8sObjectCache
 	updateInterval                 time.Duration
 	updateInProgress               bool                         // Flag to track if update is in progress
@@ -56,7 +55,7 @@ type ApplicationProfileCacheImpl struct {
 }
 
 // NewApplicationProfileCache creates a new application profile cache with periodic updates
-func NewApplicationProfileCache(cfg config.Config, storageClient versioned.SpdxV1beta1Interface, k8sObjectCache objectcache.K8sObjectCache) *ApplicationProfileCacheImpl {
+func NewApplicationProfileCache(cfg config.Config, storageClient storage.ProfileClient, k8sObjectCache objectcache.K8sObjectCache) *ApplicationProfileCacheImpl {
 	updateInterval := utils.AddJitter(cfg.ProfilesCacheRefreshRate, 10) // Add 10% jitter to avoid high load on the storage
 
 	apc := &ApplicationProfileCacheImpl{
@@ -136,11 +135,30 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 		}
 
 		// Get profiles list for this namespace
-		profileList, err := apc.storageClient.ApplicationProfiles(namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			logger.L().Error("failed to list application profiles",
-				helpers.String("namespace", namespace),
-				helpers.Error(err))
+		var profileList *v1beta1.ApplicationProfileList
+		continueToken := ""
+		for {
+			list, err := apc.storageClient.ListApplicationProfiles(namespace, int64(50), continueToken)
+			if err != nil {
+				logger.L().Error("failed to list application profiles",
+					helpers.String("namespace", namespace),
+					helpers.Error(err))
+				break
+			}
+
+			if profileList == nil {
+				profileList = list
+			} else {
+				profileList.Items = append(profileList.Items, list.Items...)
+			}
+
+			continueToken = list.Continue
+			if continueToken == "" {
+				break
+			}
+		}
+
+		if profileList == nil {
 			continue
 		}
 
@@ -214,7 +232,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			}
 
 			// Fetch the profile from storage
-			fullProfile, err := apc.storageClient.ApplicationProfiles(namespace).Get(ctx, profile.Name, metav1.GetOptions{})
+			fullProfile, err := apc.storageClient.GetApplicationProfile(namespace, profile.Name)
 			if err != nil {
 				logger.L().Error("failed to get application profile",
 					helpers.String("workloadID", workloadID),
@@ -287,8 +305,7 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	}
 
 	// Fetch the full user profile
-	fullUserProfile, err := apc.storageClient.ApplicationProfiles(profile.Namespace).Get(
-		context.Background(), profile.Name, metav1.GetOptions{})
+	fullUserProfile, err := apc.storageClient.GetApplicationProfile(profile.Namespace, profile.Name)
 	if err != nil {
 		logger.L().Error("failed to get user-managed profile",
 			helpers.String("namespace", profile.Namespace),
@@ -300,8 +317,7 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	// Merge the user-managed profile with the normal profile
 
 	// First, pull the original profile from the storage
-	originalProfile, err := apc.storageClient.ApplicationProfiles(toMerge.profile.Namespace).Get(
-		context.Background(), toMerge.profile.Name, metav1.GetOptions{})
+	originalProfile, err := apc.storageClient.GetApplicationProfile(toMerge.profile.Namespace, toMerge.profile.Name)
 	if err != nil {
 		logger.L().Error("failed to get original profile",
 			helpers.String("namespace", toMerge.profile.Namespace),
@@ -499,7 +515,7 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 				containerInfo.UserDefinedProfile = userDefinedProfile
 				// Fetch the profile from storage
 				// TODO should we cache user-defined profiles separately? - it could allow deduplication
-				fullProfile, err := apc.storageClient.ApplicationProfiles(container.K8s.Namespace).Get(ctx, userDefinedProfile, metav1.GetOptions{})
+				fullProfile, err := apc.storageClient.GetApplicationProfile(container.K8s.Namespace, userDefinedProfile)
 				if err != nil {
 					logger.L().Error("failed to get user-defined profile",
 						helpers.String("containerID", containerID),
