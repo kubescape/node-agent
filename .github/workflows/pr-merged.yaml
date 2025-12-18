@@ -3,10 +3,10 @@ on:
   pull_request_target:
     types: [closed]
     branches:
-    - 'main'
+      - "main"
     paths-ignore:
-      - '**.md' ### Ignore running when README.MD changed.
-      - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
+      - "**.md" ### Ignore running when README.MD changed.
+      - ".github/workflows/*" ### Ignore running when files under path: .github/workflows/* changed.
 
   workflow_dispatch:
 
@@ -17,17 +17,17 @@ jobs:
     outputs:
       run-number: ${{ steps.get-build.outputs.build-number }}
     steps:
-    - name: Get build number
-      id: get-build
-      uses: mlilback/build-number@v1
-      with:
-        base: -550
-        run-id: ${{ github.run_number }}
+      - name: Get build number
+        id: get-build
+        uses: mlilback/build-number@v1
+        with:
+          base: -550
+          run-id: ${{ github.run_number }}
 
   pr-merged:
     if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
     needs: reset-run-number
-    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
+    uses: ./.github/workflows/incluster-comp-pr-merged.yaml
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/node-agent
       IMAGE_TAG: v0.3.${{ needs.reset-run-number.outputs.run-number }}
@@ -37,21 +37,21 @@ jobs:
       BUILD_PLATFORM: linux/amd64,linux/arm64
       GO_VERSION: "1.25"
       REQUIRED_TESTS: '[
-                        "relevantCVEs",
-                        "relevancy_enabled_stop_sniffing",
-                        "relevant_data_is_appended",
-                        "relevancy_large_image",
-                        "relevancy_fix_vuln",
-                        "relevancy_python",
-                        "relevancy_golang",
-                        "relevancy_java",
-                        "relevancy_java_and_python",
-                        "relevancy_golang_dynamic",
-                        "network_policy",
-                        "network_policy_data_appended",
-                        "network_policy_multiple_replicas",
-                        "network_policy_known_servers"
-                      ]'
+        "relevantCVEs",
+        "relevancy_enabled_stop_sniffing",
+        "relevant_data_is_appended",
+        "relevancy_large_image",
+        "relevancy_fix_vuln",
+        "relevancy_python",
+        "relevancy_golang",
+        "relevancy_java",
+        "relevancy_java_and_python",
+        "relevancy_golang_dynamic",
+        "network_policy",
+        "network_policy_data_appended",
+        "network_policy_multiple_replicas",
+        "network_policy_known_servers"
+        ]'
       COSIGN: true
       HELM_E2E_TEST: true
     secrets: inherit
