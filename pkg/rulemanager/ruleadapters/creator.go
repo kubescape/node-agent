@@ -136,7 +136,9 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 				FailOnProfile:     state.Status == helpersv1.Completed,
 				Type:              armotypes.ApplicationProfile,
 				ProfileDependency: profileRequirment,
-				Error:             state.Error.Error(),
+			}
+			if state.Error != nil {
+				profileMetadata.Error = state.Error.Error()
 			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
@@ -151,7 +153,9 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 				FailOnProfile:     state.Status == helpersv1.Completed,
 				Type:              armotypes.NetworkProfile,
 				ProfileDependency: profileRequirment,
-				Error:             state.Error.Error(),
+			}
+			if state.Error != nil {
+				profileMetadata.Error = state.Error.Error()
 			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
