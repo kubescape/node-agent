@@ -136,7 +136,9 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 				FailOnProfile:     state.Status == helpersv1.Completed,
 				Type:              armotypes.ApplicationProfile,
 				ProfileDependency: profileRequirment,
-				Error:             state.Error,
+			}
+			if state.Error != nil {
+				profileMetadata.Error = state.Error.Error()
 			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
@@ -151,7 +153,9 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 				FailOnProfile:     state.Status == helpersv1.Completed,
 				Type:              armotypes.NetworkProfile,
 				ProfileDependency: profileRequirment,
-				Error:             state.Error,
+			}
+			if state.Error != nil {
+				profileMetadata.Error = state.Error.Error()
 			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
@@ -159,7 +163,7 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 		profileMetadata := &armotypes.ProfileMetadata{
 			ProfileDependency: profileRequirment,
 			FailOnProfile:     false,
-			Error:             fmt.Errorf("profile type %d not supported", profileRequirment),
+			Error:             fmt.Sprintf("profile type %d not supported", profileRequirment),
 		}
 		baseRuntimeAlert.ProfileMetadata = profileMetadata
 	}
