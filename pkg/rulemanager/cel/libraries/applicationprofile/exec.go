@@ -134,7 +134,9 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 					if container.Lifecycle.PreStop != nil && container.Lifecycle.PreStop.Exec != nil && container.Lifecycle.PreStop.Exec.Command != nil {
 						for _, exec := range container.Lifecycle.PreStop.Exec.Command {
 							if exec == pathStr {
-								l.preStopCache.MarkPreStopTriggered(containerIDStr)
+								if l.preStopCache != nil {
+									l.preStopCache.MarkPreStopTriggered(containerIDStr)
+								}
 								return types.Bool(true)
 							}
 						}
@@ -166,7 +168,9 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 					if container.Lifecycle.PreStop != nil && container.Lifecycle.PreStop.Exec != nil && container.Lifecycle.PreStop.Exec.Command != nil {
 						for _, exec := range container.Lifecycle.PreStop.Exec.Command {
 							if exec == pathStr {
-								l.preStopCache.MarkPreStopTriggered(containerIDStr)
+								if l.preStopCache != nil {
+									l.preStopCache.MarkPreStopTriggered(containerIDStr)
+								}
 								return types.Bool(true)
 							}
 						}
@@ -179,6 +183,7 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 						}
 					}
 				}
+				return types.Bool(false)
 			}
 		}
 	}
@@ -197,7 +202,9 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 					if container.Lifecycle.PreStop != nil && container.Lifecycle.PreStop.Exec != nil && container.Lifecycle.PreStop.Exec.Command != nil {
 						for _, exec := range container.Lifecycle.PreStop.Exec.Command {
 							if exec == pathStr {
-								l.preStopCache.MarkPreStopTriggered(containerIDStr)
+								if l.preStopCache != nil {
+									l.preStopCache.MarkPreStopTriggered(containerIDStr)
+								}
 								return types.Bool(true)
 							}
 						}
@@ -210,6 +217,7 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 						}
 					}
 				}
+				return types.Bool(false)
 			}
 		}
 	}
