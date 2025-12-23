@@ -26,6 +26,11 @@ func (l *apLibrary) wasExecuted(containerID, path ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
+	// Check if preStop hook was triggered for this container
+	if l.preStopCache != nil && l.preStopCache.WasPreStopTriggered(containerIDStr) {
+		return types.Bool(true)
+	}
+
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return types.Bool(false)
@@ -62,6 +67,11 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 	celArgs, err := celparse.ParseList[string](args)
 	if err != nil {
 		return types.NewErr("failed to parse args: %v", err)
+	}
+
+	// Check if preStop hook was triggered for this container
+	if l.preStopCache != nil && l.preStopCache.WasPreStopTriggered(containerIDStr) {
+		return types.Bool(true)
 	}
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
@@ -124,6 +134,7 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 					if container.Lifecycle.PreStop != nil && container.Lifecycle.PreStop.Exec != nil && container.Lifecycle.PreStop.Exec.Command != nil {
 						for _, exec := range container.Lifecycle.PreStop.Exec.Command {
 							if exec == pathStr {
+								l.preStopCache.MarkPreStopTriggered(containerIDStr)
 								return types.Bool(true)
 							}
 						}
@@ -155,6 +166,7 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 					if container.Lifecycle.PreStop != nil && container.Lifecycle.PreStop.Exec != nil && container.Lifecycle.PreStop.Exec.Command != nil {
 						for _, exec := range container.Lifecycle.PreStop.Exec.Command {
 							if exec == pathStr {
+								l.preStopCache.MarkPreStopTriggered(containerIDStr)
 								return types.Bool(true)
 							}
 						}
@@ -185,6 +197,7 @@ func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 					if container.Lifecycle.PreStop != nil && container.Lifecycle.PreStop.Exec != nil && container.Lifecycle.PreStop.Exec.Command != nil {
 						for _, exec := range container.Lifecycle.PreStop.Exec.Command {
 							if exec == pathStr {
+								l.preStopCache.MarkPreStopTriggered(containerIDStr)
 								return types.Bool(true)
 							}
 						}
