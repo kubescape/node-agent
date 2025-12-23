@@ -102,6 +102,9 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	testutils.AssertContains(t, alerts, "DNS Anomalies in container", "curl", "nginx", []bool{true})
 	testutils.AssertNotContains(t, alerts, "DNS Anomalies in container", "wget", "server", []bool{true})
 
+	// Verify UID fields are populated in alerts
+	testutils.AssertUIDFieldsPopulated(t, alerts, wl.Namespace)
+
 	// check network neighborhood
 	nn, _ := wl.GetNetworkNeighborhood()
 	testutils.AssertNetworkNeighborhoodContains(t, nn, "nginx", []string{"kubernetes.io."}, []string{})

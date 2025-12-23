@@ -144,3 +144,61 @@ func AssertNotContains(t *testing.T, alerts []Alert, notExpectedRuleName string,
 		}
 	}
 }
+
+// AssertUIDFieldsPopulated verifies that pod_uid and workload_uid fields are populated in alerts
+func AssertUIDFieldsPopulated(t *testing.T, alerts []Alert, namespace string) {
+	if len(alerts) == 0 {
+		t.Error("no alerts found to verify UID fields")
+		return
+	}
+
+	alertsWithoutPodUID := 0
+	alertsWithoutWorkloadUID := 0
+	totalAlerts := len(alerts)
+
+	for _, alert := range alerts {
+		podUID, podUIDExists := alert.Labels["pod_uid"]
+		workloadUID, workloadUIDExists := alert.Labels["workload_uid"]
+
+		// Check if pod_uid exists and is not empty
+		if !podUIDExists || podUID == "" {
+			alertsWithoutPodUID++
+			t.Logf("Alert missing pod_uid: rule=%s, container=%s, pod=%s",
+				alert.Labels["rule_name"],
+				alert.Labels["container_name"],
+				alert.Labels["pod_name"])
+		}
+
+		// Check if workload_uid exists and is not empty
+		if !workloadUIDExists || workloadUID == "" {
+			alertsWithoutWorkloadUID++
+			t.Logf("Alert missing workload_uid: rule=%s, container=%s, pod=%s",
+				alert.Labels["rule_name"],
+				alert.Labels["container_name"],
+				alert.Labels["pod_name"])
+		}
+
+		// Log successful UID population for debugging
+		if podUIDExists && podUID != "" && workloadUIDExists && workloadUID != "" {
+			t.Logf("✓ Alert has both UIDs: pod_uid=%s, workload_uid=%s, rule=%s",
+				podUID, workloadUID, alert.Labels["rule_name"])
+		}
+	}
+
+	// Report statistics
+	t.Logf("UID Field Statistics for namespace %s:", namespace)
+	t.Logf("  Total alerts: %d", totalAlerts)
+	t.Logf("  Alerts with pod_uid: %d (%.1f%%)", totalAlerts-alertsWithoutPodUID, float64(totalAlerts-alertsWithoutPodUID)/float64(totalAlerts)*100)
+	t.Logf("  Alerts with workload_uid: %d (%.1f%%)", totalAlerts-alertsWithoutWorkloadUID, float64(totalAlerts-alertsWithoutWorkloadUID)/float64(totalAlerts)*100)
+
+	// Fail if more than 10% of alerts are missing UIDs (allowing for edge cases)
+	if float64(alertsWithoutPodUID)/float64(totalAlerts) > 0.1 {
+		t.Errorf("Too many alerts missing pod_uid: %d out of %d (%.1f%%)",
+			alertsWithoutPodUID, totalAlerts, float64(alertsWithoutPodUID)/float64(totalAlerts)*100)
+	}
+
+	if float64(alertsWithoutWorkloadUID)/float64(totalAlerts) > 0.1 {
+		t.Errorf("Too many alerts missing workload_uid: %d out of %d (%.1f%%)",
+			alertsWithoutWorkloadUID, totalAlerts, float64(alertsWithoutWorkloadUID)/float64(totalAlerts)*100)
+	}
+}

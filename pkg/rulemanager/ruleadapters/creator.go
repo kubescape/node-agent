@@ -83,7 +83,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	eventAdapter.SetFailureMetadata(ruleFailure, enrichedEvent, state)
 
 	r.setBaseRuntimeAlert(ruleFailure)
-	r.setRuntimeAlertK8sDetails(ruleFailure)
+	r.setRuntimeAlertK8sDetails(ruleFailure, objectCache)
 	r.setCloudServices(ruleFailure)
 	r.setProfileMetadata(rule, ruleFailure, objectCache)
 	r.enrichRuleFailure(ruleFailure)
@@ -237,7 +237,7 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 
 }
 
-func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.GenericRuleFailure) {
+func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.GenericRuleFailure, objectCache objectcache.ObjectCache) {
 	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
 	if runtimek8sdetails.Image == "" {
 		runtimek8sdetails.Image = ruleFailure.GetTriggerEvent().GetContainerImage()
@@ -270,6 +270,28 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 	if runtimek8sdetails.HostNetwork == nil {
 		hostNetwork := ruleFailure.GetTriggerEvent().GetHostNetwork()
 		runtimek8sdetails.HostNetwork = &hostNetwork
+	}
+
+	// Extract pod UID and workload UID
+	containerID := runtimek8sdetails.ContainerID
+	namespace := runtimek8sdetails.Namespace
+	podName := runtimek8sdetails.PodName
+
+	// Try to get WorkloadUID from shared container data (pre-computed from WLID)
+	if containerID != "" {
+		if sharedData := objectCache.K8sObjectCache().GetSharedContainerData(containerID); sharedData != nil {
+			if sharedData.WorkloadUID != "" {
+				runtimek8sdetails.WorkloadUID = sharedData.WorkloadUID
+			}
+		}
+	}
+
+	// Get pod UID from pod cache
+	if namespace != "" && podName != "" {
+		pod := objectCache.K8sObjectCache().GetPod(namespace, podName)
+		if pod != nil {
+			runtimek8sdetails.PodUID = string(pod.UID)
+		}
 	}
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
