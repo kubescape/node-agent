@@ -61,6 +61,8 @@ type WatchedContainerData struct {
 	AckChan                 chan struct{}
 	ParentResourceVersion   string
 	ContainerID             string
+	PodName                 string
+	Namespace               string
 	ImageTag                string
 	ImageID                 string
 	Wlid                    string

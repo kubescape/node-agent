@@ -18,6 +18,7 @@ func New(objectCache objectcache.ObjectCache, config config.Config) libraries.Li
 			MaxSize: config.CelConfigCache.MaxSize,
 			TTL:     config.CelConfigCache.TTL,
 		}),
+		preStopCache: GetPreStopHookCache(),
 	}
 }
 
@@ -28,6 +29,7 @@ func AP(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption
 type apLibrary struct {
 	objectCache   objectcache.ObjectCache
 	functionCache *cache.FunctionCache
+	preStopCache  *PreStopHookCache
 }
 
 func (l *apLibrary) LibraryName() string {
