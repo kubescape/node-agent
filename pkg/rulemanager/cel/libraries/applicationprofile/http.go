@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/celparse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -29,7 +30,7 @@ func (l *apLibrary) wasEndpointAccessed(containerID, endpoint ref.Val) ref.Val {
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, ep := range container.Endpoints {
@@ -62,7 +63,7 @@ func (l *apLibrary) wasEndpointAccessedWithMethod(containerID, endpoint, method 
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, ep := range container.Endpoints {
@@ -98,7 +99,7 @@ func (l *apLibrary) wasEndpointAccessedWithMethods(containerID, endpoint, method
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, ep := range container.Endpoints {
@@ -131,7 +132,7 @@ func (l *apLibrary) wasEndpointAccessedWithPrefix(containerID, prefix ref.Val) r
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, ep := range container.Endpoints {
@@ -160,7 +161,7 @@ func (l *apLibrary) wasEndpointAccessedWithSuffix(containerID, suffix ref.Val) r
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, ep := range container.Endpoints {
@@ -189,19 +190,22 @@ func (l *apLibrary) wasHostAccessed(containerID, host ref.Val) ref.Val {
 
 	// Check HTTP endpoints for host access
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
-	if err == nil {
-		for _, ep := range container.Endpoints {
-			// Parse the endpoint URL to extract host
-			if parsedURL, err := url.Parse(ep.Endpoint); err == nil && parsedURL.Host != "" {
-				if parsedURL.Host == hostStr || parsedURL.Hostname() == hostStr {
-					return types.Bool(true)
-				}
-			}
-			// Also check if the endpoint contains the host as a substring (for cases where it's not a full URL)
-			if strings.Contains(ep.Endpoint, hostStr) {
+	if err != nil {
+		return cache.NewProfileNotAvailableErr("%v", err)
+	}
+
+	for _, ep := range container.Endpoints {
+		// Parse the endpoint URL to extract host
+		if parsedURL, err := url.Parse(ep.Endpoint); err == nil && parsedURL.Host != "" {
+			if parsedURL.Host == hostStr || parsedURL.Hostname() == hostStr {
 				return types.Bool(true)
 			}
 		}
+		// Also check if the endpoint contains the host as a substring (for cases where it's not a full URL)
+		if strings.Contains(ep.Endpoint, hostStr) {
+			return types.Bool(true)
+		}
 	}
+
 	return types.Bool(false)
 }

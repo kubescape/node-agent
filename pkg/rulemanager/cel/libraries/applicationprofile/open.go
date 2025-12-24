@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/celparse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -26,7 +27,7 @@ func (l *apLibrary) wasPathOpened(containerID, path ref.Val) ref.Val {
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, open := range container.Opens {
@@ -60,7 +61,7 @@ func (l *apLibrary) wasPathOpenedWithFlags(containerID, path, flags ref.Val) ref
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, open := range container.Opens {
@@ -90,7 +91,7 @@ func (l *apLibrary) wasPathOpenedWithSuffix(containerID, suffix ref.Val) ref.Val
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, open := range container.Opens {
@@ -118,7 +119,7 @@ func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, open := range container.Opens {

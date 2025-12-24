@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 )
 
@@ -24,7 +25,7 @@ func (l *apLibrary) wasCapabilityUsed(containerID, capabilityName ref.Val) ref.V
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	if slices.Contains(container.Capabilities, capabilityNameStr) {

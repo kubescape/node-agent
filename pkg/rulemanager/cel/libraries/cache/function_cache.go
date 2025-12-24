@@ -10,6 +10,41 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
+// ProfileNotAvailableErr is a sentinel error message used to indicate that a profile
+// is not yet available. This error is NOT cached, allowing retry when profile becomes available.
+// After the cache layer, this error should be converted to a default value (e.g., false)
+// to allow rule evaluation to continue without failing.
+const ProfileNotAvailableErr = "profile not available"
+
+// NewProfileNotAvailableErr creates a new "profile not available" error.
+// This error will NOT be cached, allowing the function to be re-evaluated
+// when the profile becomes available.
+func NewProfileNotAvailableErr(format string, args ...any) ref.Val {
+	return types.NewErr(ProfileNotAvailableErr+": "+format, args...)
+}
+
+// IsProfileNotAvailableErr checks if the given value is a "profile not available" error.
+func IsProfileNotAvailableErr(val ref.Val) bool {
+	if !types.IsError(val) {
+		return false
+	}
+	errVal, ok := val.Value().(error)
+	if !ok {
+		return false
+	}
+	return strings.Contains(errVal.Error(), ProfileNotAvailableErr)
+}
+
+// ConvertProfileNotAvailableErrToBool converts a "profile not available" error to a boolean value.
+// This should be called AFTER the cache layer to ensure the error is not cached,
+// but the rule evaluation can continue with a default value.
+func ConvertProfileNotAvailableErrToBool(val ref.Val, defaultVal bool) ref.Val {
+	if IsProfileNotAvailableErr(val) {
+		return types.Bool(defaultVal)
+	}
+	return val
+}
+
 type FunctionCacheConfig struct {
 	MaxSize int           `mapstructure:"maxSize"`
 	TTL     time.Duration `mapstructure:"ttl"`
