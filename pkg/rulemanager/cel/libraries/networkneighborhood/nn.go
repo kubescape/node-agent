@@ -51,7 +51,8 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasAddressInEgress(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_egress")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -66,7 +67,8 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasAddressInIngress(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_ingress")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -78,12 +80,11 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
-						result := l.isDomainInEgress(args[0], args[1])
-						return result
+						return l.isDomainInEgress(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_egress")
 					result := cachedFunc(values[0], values[1])
-					return result
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -98,7 +99,8 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.isDomainInIngress(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_ingress")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -113,7 +115,8 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasAddressPortProtocolInEgress(args[0], args[1], args[2], args[3])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_egress")
-					return cachedFunc(values[0], values[1], values[2], values[3])
+					result := cachedFunc(values[0], values[1], values[2], values[3])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -128,7 +131,8 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasAddressPortProtocolInIngress(args[0], args[1], args[2], args[3])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_ingress")
-					return cachedFunc(values[0], values[1], values[2], values[3])
+					result := cachedFunc(values[0], values[1], values[2], values[3])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},

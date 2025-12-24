@@ -8,6 +8,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/celparse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 )
@@ -33,7 +34,9 @@ func (l *apLibrary) wasExecuted(containerID, path ref.Val) ref.Val {
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		// Return a special error that will NOT be cached, allowing retry when profile becomes available.
+		// The caller should convert this to false after the cache layer.
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, exec := range container.Execs {
@@ -76,7 +79,9 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 
 	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		// Return a special error that will NOT be cached, allowing retry when profile becomes available.
+		// The caller should convert this to false after the cache layer.
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, exec := range container.Execs {

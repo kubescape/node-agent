@@ -141,6 +141,8 @@ func TestWasAddressPortProtocolInEgress(t *testing.T) {
 				types.Int(tc.port),
 				types.String(tc.protocol),
 			)
+			// Convert ProfileNotAvailableErr to false (simulating binding layer behavior)
+			result = cache.ConvertProfileNotAvailableErrToBool(result, false)
 			assert.Equal(t, types.Bool(tc.expectedResult), result)
 		})
 	}
@@ -274,6 +276,8 @@ func TestWasAddressPortProtocolInIngress(t *testing.T) {
 				types.Int(tc.port),
 				types.String(tc.protocol),
 			)
+			// Convert ProfileNotAvailableErr to false (simulating binding layer behavior)
+			result = cache.ConvertProfileNotAvailableErrToBool(result, false)
 			assert.Equal(t, types.Bool(tc.expectedResult), result)
 		})
 	}

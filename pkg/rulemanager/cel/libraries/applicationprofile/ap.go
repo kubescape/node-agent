@@ -53,7 +53,10 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasExecuted(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					// Convert "profile not available" error to false after cache layer
+					// This ensures: 1) error is not cached, 2) rule evaluation continues normally
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -68,7 +71,10 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasExecutedWithArgs(args[0], args[1], args[2])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed_with_args")
-					return cachedFunc(values[0], values[1], values[2])
+					result := cachedFunc(values[0], values[1], values[2])
+					// Convert "profile not available" error to false after cache layer
+					// This ensures: 1) error is not cached, 2) rule evaluation continues normally
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -83,7 +89,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasPathOpened(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -98,7 +105,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasPathOpenedWithFlags(args[0], args[1], args[2])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_flags")
-					return cachedFunc(values[0], values[1], values[2])
+					result := cachedFunc(values[0], values[1], values[2])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -113,7 +121,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasPathOpenedWithSuffix(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_suffix")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -128,7 +137,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasPathOpenedWithPrefix(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_prefix")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -143,7 +153,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasSyscallUsed(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_syscall_used")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -158,7 +169,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasCapabilityUsed(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_capability_used")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -173,7 +185,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasEndpointAccessed(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -188,7 +201,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasEndpointAccessedWithMethod(args[0], args[1], args[2])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_method")
-					return cachedFunc(values[0], values[1], values[2])
+					result := cachedFunc(values[0], values[1], values[2])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -203,7 +217,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasEndpointAccessedWithMethods(args[0], args[1], args[2])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_methods")
-					return cachedFunc(values[0], values[1], values[2])
+					result := cachedFunc(values[0], values[1], values[2])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -218,7 +233,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasEndpointAccessedWithPrefix(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_prefix")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -233,7 +249,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasEndpointAccessedWithSuffix(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_suffix")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
@@ -248,7 +265,8 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.wasHostAccessed(args[0], args[1])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_host_accessed")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},

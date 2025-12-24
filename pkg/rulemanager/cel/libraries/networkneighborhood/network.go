@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -25,7 +26,7 @@ func (l *nnLibrary) wasAddressInEgress(containerID, address ref.Val) ref.Val {
 
 	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, egress := range container.Egress {
@@ -53,7 +54,7 @@ func (l *nnLibrary) wasAddressInIngress(containerID, address ref.Val) ref.Val {
 
 	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, ingress := range container.Ingress {
@@ -81,7 +82,7 @@ func (l *nnLibrary) isDomainInEgress(containerID, domain ref.Val) ref.Val {
 
 	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, egress := range container.Egress {
@@ -109,7 +110,7 @@ func (l *nnLibrary) isDomainInIngress(containerID, domain ref.Val) ref.Val {
 
 	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, ingress := range container.Ingress {
@@ -145,7 +146,7 @@ func (l *nnLibrary) wasAddressPortProtocolInEgress(containerID, address, port, p
 
 	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, egress := range container.Egress {
@@ -185,7 +186,7 @@ func (l *nnLibrary) wasAddressPortProtocolInIngress(containerID, address, port, 
 
 	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
 	if err != nil {
-		return types.Bool(false)
+		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	for _, ingress := range container.Ingress {
