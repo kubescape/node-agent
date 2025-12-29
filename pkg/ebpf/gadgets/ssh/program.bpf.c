@@ -129,16 +129,27 @@ int ig_trace_ssh(struct __sk_buff *skb)
 	event->src.proto_raw = event->dst.proto_raw = IPPROTO_TCP;
 
 	// Reparse L3 header to fill source and destination IP addresses
+	// Read directly from packet buffer to avoid verifier issues with stack variables
 	switch (bpf_ntohs(ethh.h_proto)) {
 	case ETH_P_IP:
 		event->src.version = event->dst.version = 4;
-		event->src.addr_raw.v4 = iph.saddr;
-		event->dst.addr_raw.v4 = iph.daddr;
+		// IPv4 source address is at offset ETH_HLEN + 12 (bytes 12-15 of IP header)
+		// IPv4 destination address is at offset ETH_HLEN + 16 (bytes 16-19 of IP header)
+		if (bpf_skb_load_bytes(skb, ETH_HLEN + 12, &event->src.addr_raw.v4, 4) < 0)
+			return 0;
+		if (bpf_skb_load_bytes(skb, ETH_HLEN + 16, &event->dst.addr_raw.v4, 4) < 0)
+			return 0;
 		break;
 	case ETH_P_IPV6:
 		event->src.version = event->dst.version = 6;
-		__builtin_memcpy(event->src.addr_raw.v6, ip6h.saddr.in6_u.u6_addr8, 16);
-		__builtin_memcpy(event->dst.addr_raw.v6, ip6h.daddr.in6_u.u6_addr8, 16);
+		// Read IPv6 addresses directly from packet buffer to avoid nested struct access
+		// that the verifier on kernel 5.4 cannot track properly.
+		// IPv6 source address is at offset ETH_HLEN + 8 (bytes 8-23 of IPv6 header)
+		// IPv6 destination address is at offset ETH_HLEN + 24 (bytes 24-39 of IPv6 header)
+		if (bpf_skb_load_bytes(skb, ETH_HLEN + 8, &event->src.addr_raw.v6[0], 16) < 0)
+			return 0;
+		if (bpf_skb_load_bytes(skb, ETH_HLEN + 24, &event->dst.addr_raw.v6[0], 16) < 0)
+			return 0;
 		break;
 	}
 
