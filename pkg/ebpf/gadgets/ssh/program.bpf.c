@@ -149,17 +149,11 @@ int ig_trace_ssh(struct __sk_buff *skb)
 	event->dst.port = bpf_ntohs(tcph.dest);
 	event->src.proto_raw = event->dst.proto_raw = IPPROTO_TCP;
 
-	// Fill source and destination IP addresses
 	event->src.version = event->dst.version = ip_version;
 	if (ip_version == 4) {
-		// Use stored IPv4 addresses to avoid verifier issues with cross-switch access
 		event->src.addr_raw.v4 = src_addr_v4;
 		event->dst.addr_raw.v4 = dst_addr_v4;
 	} else if (ip_version == 6) {
-		// Read IPv6 addresses from packet buffer using offsets
-		// This avoids nested struct access that the verifier on kernel 5.4 cannot track properly
-		// IPv6 source address is at offset ETH_HLEN + 8 (bytes 8-23 of IPv6 header)
-		// IPv6 destination address is at offset ETH_HLEN + 24 (bytes 24-39 of IPv6 header)
 		if (bpf_skb_load_bytes(skb, ETH_HLEN + 8, &event->src.addr_raw.v6[0], 16))
 			return 0;
 		if (bpf_skb_load_bytes(skb, ETH_HLEN + 24, &event->dst.addr_raw.v6[0], 16))
