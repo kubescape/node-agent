@@ -42,6 +42,10 @@ struct {
 	__uint(value_size, sizeof(struct event_t));
 } tmp_events SEC(".maps");
 
+// Helper functions to load data from the packet buffer (__sk_buff)
+unsigned long long load_byte(const void *skb,
+    unsigned long long off) asm("llvm.bpf.load.byte");
+
 SEC("socket1")
 int ig_trace_ssh(struct __sk_buff *skb)
 {
@@ -51,6 +55,9 @@ int ig_trace_ssh(struct __sk_buff *skb)
 	struct iphdr iph;
 	struct ipv6hdr ip6h;
 	struct ethhdr ethh;
+	__u8 ip_version = 0;
+	__be32 src_addr_v4 = 0;
+	__be32 dst_addr_v4 = 0;
 
 	// Step 1: Parse Ethernet header to get the Layer 3 protocol (IPv4 or IPv6)
 	if (bpf_skb_load_bytes(skb, 0, &ethh, sizeof(ethh)) < 0)
@@ -65,8 +72,18 @@ int ig_trace_ssh(struct __sk_buff *skb)
 		if (iph.protocol != IPPROTO_TCP)
 			return 0; // Not a TCP packet, so it can't be SSH
 
-		// Calculate IPv4 header length (IHL field * 4 bytes)
-		l4_off = ETH_HLEN + (iph.ihl * 4);
+		// An IPv4 header doesn't have a fixed size. The IHL field of a packet
+		// represents the size of the IP header in 32-bit words, so we need to
+		// multiply this value by 4 to get the header size in bytes.
+		// Avoid taking the address of the bit-field; read the first byte from skb.
+		__u8 ihl_byte = load_byte(skb, ETH_HLEN);
+		__u8 ip_header_len = (ihl_byte & 0x0F) * 4;
+		l4_off = ETH_HLEN + ip_header_len;
+		
+		// Store IPv4 addresses immediately after parsing to avoid verifier issues
+		ip_version = 4;
+		src_addr_v4 = iph.saddr;
+		dst_addr_v4 = iph.daddr;
 		break;
 	}
 	case ETH_P_IPV6: { // IPv6
@@ -78,6 +95,7 @@ int ig_trace_ssh(struct __sk_buff *skb)
 			return 0; // Not a TCP packet
 
 		l4_off = ETH_HLEN + sizeof(struct ipv6hdr);
+		ip_version = 6;
 		break;
 	}
 	default:
@@ -89,11 +107,14 @@ int ig_trace_ssh(struct __sk_buff *skb)
 
 	// Step 3: Find the start of the TCP payload
 	struct tcphdr tcph;
-	if (bpf_skb_load_bytes(skb, l4_off, &tcph, sizeof(tcph)) < 0)
+	if (bpf_skb_load_bytes(skb, l4_off, &tcph, sizeof(tcph))< 0)
 		return 0;
 
 	// TCP header length can vary. 'doff' is in 32-bit words.
-	__u32 tcp_header_len = tcph.doff * 4;
+	// Avoid taking the address of the bit-field; read the byte from skb.
+	// Byte 12 of TCP header contains: data offset (upper 4 bits) and reserved (lower 4 bits)
+	__u8 doff_byte = load_byte(skb, l4_off + 12);
+	__u32 tcp_header_len = ((doff_byte >> 4) & 0x0F) * 4;
 	__u32 payload_offset = l4_off + tcp_header_len;
 
 	// Ensure the packet is long enough to contain the SSH banner.
@@ -113,7 +134,7 @@ int ig_trace_ssh(struct __sk_buff *skb)
 	    banner[6] != '0' || banner[7] != '-') {
 		return 0;
 	}
-
+	
 	// --- Event Population (if signature matched) ---
 
 	// Step 6: Get a temporary event struct to fill
@@ -128,18 +149,15 @@ int ig_trace_ssh(struct __sk_buff *skb)
 	event->dst.port = bpf_ntohs(tcph.dest);
 	event->src.proto_raw = event->dst.proto_raw = IPPROTO_TCP;
 
-	// Reparse L3 header to fill source and destination IP addresses
-	switch (bpf_ntohs(ethh.h_proto)) {
-	case ETH_P_IP:
-		event->src.version = event->dst.version = 4;
-		event->src.addr_raw.v4 = iph.saddr;
-		event->dst.addr_raw.v4 = iph.daddr;
-		break;
-	case ETH_P_IPV6:
-		event->src.version = event->dst.version = 6;
-		__builtin_memcpy(event->src.addr_raw.v6, ip6h.saddr.in6_u.u6_addr8, 16);
-		__builtin_memcpy(event->dst.addr_raw.v6, ip6h.daddr.in6_u.u6_addr8, 16);
-		break;
+	event->src.version = event->dst.version = ip_version;
+	if (ip_version == 4) {
+		event->src.addr_raw.v4 = src_addr_v4;
+		event->dst.addr_raw.v4 = dst_addr_v4;
+	} else if (ip_version == 6) {
+		if (bpf_skb_load_bytes(skb, ETH_HLEN + 8, &event->src.addr_raw.v6[0], 16))
+			return 0;
+		if (bpf_skb_load_bytes(skb, ETH_HLEN + 24, &event->dst.addr_raw.v6[0], 16))
+			return 0;
 	}
 
 	// Step 8: Enrich the event with process information

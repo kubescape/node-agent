@@ -87,11 +87,10 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx)
 
     if (!cache) {
         // First event for this mntns. Create a new entry.
-        struct mntns_cache new_cache = {
-            .timestamp = now,
-            .events_count = 1,
-            .alerted = false,
-        };
+        struct mntns_cache new_cache = {};
+        new_cache.timestamp = now;
+        new_cache.events_count = 1;
+        new_cache.alerted = false;
         bpf_map_update_elem(&mntns_event_count, &mntns_id, &new_cache, BPF_ANY);
         return 0; // Don't send an event yet
     }
