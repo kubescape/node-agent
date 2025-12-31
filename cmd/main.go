@@ -29,6 +29,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/fimmanager"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
+	hostsensormanager "github.com/kubescape/node-agent/pkg/hostsensormanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -174,6 +175,17 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
 	}
 	dWatcher.AddAdaptor(k8sObjectCache)
+
+	// Create the host sensor manager
+	hostSensorConfig := hostsensormanager.Config{
+		Enabled:  cfg.EnableHostSensor,
+		Interval: cfg.HostSensorInterval,
+		NodeName: cfg.NodeName,
+	}
+	hostSensorManager, err := hostsensormanager.NewHostSensorManager(hostSensorConfig)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error creating HostSensorManager", helpers.Error(err))
+	}
 
 	// Create the seccomp manager
 	var seccompManager seccompmanager.SeccompManagerClient
@@ -371,6 +383,12 @@ func main() {
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
+
+	// Start the host sensor manager
+	if err = hostSensorManager.Start(ctx); err != nil {
+		logger.L().Ctx(ctx).Fatal("error starting host sensor manager", helpers.Error(err))
+	}
+	defer hostSensorManager.Stop()
 
 	// Start the FIM manager
 	if fimManager != nil {

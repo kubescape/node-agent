@@ -83,6 +83,10 @@ type Config struct {
 	DSymlink                       bool                                     `mapstructure:"dSymlink"`
 	DTop                           bool                                     `mapstructure:"dTop"`
 	FIM                            FIMConfig                                `mapstructure:"fim"`
+
+	// Host sensor configuration
+	EnableHostSensor   bool          `mapstructure:"hostSensorEnabled"`
+	HostSensorInterval time.Duration `mapstructure:"hostSensorInterval"`
 }
 
 // FIMConfig defines the configuration for File Integrity Monitoring
@@ -179,6 +183,9 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("fim::periodicConfig::maxFileSize", int64(100*1024*1024))
 	viper.SetDefault("fim::periodicConfig::followSymlinks", false)
 	viper.SetDefault("fim::exporters::stdoutExporter", false)
+	// Host sensor defaults
+	viper.SetDefault("hostSensorEnabled", true)
+	viper.SetDefault("hostSensorInterval", 5*time.Minute)
 
 	viper.AutomaticEnv()
 
