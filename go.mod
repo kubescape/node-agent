@@ -50,6 +50,7 @@ require (
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.11.1
+	github.com/weaveworks/procspy v0.0.0-20150706124340-cb970aa190c3
 	go.uber.org/multierr v1.11.0
 	golang.org/x/net v0.47.0
 	golang.org/x/sys v0.38.0

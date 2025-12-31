@@ -44,6 +44,15 @@ func NewHostSensorManager(config Config) (HostSensorManager, error) {
 	// Initialize sensors
 	sensors := []Sensor{
 		NewOsReleaseSensor(config.NodeName),
+		NewKernelVersionSensor(config.NodeName),
+		NewLinuxSecurityHardeningSensor(config.NodeName),
+		NewOpenPortsSensor(config.NodeName),
+		NewLinuxKernelVariablesSensor(config.NodeName),
+		NewKubeletInfoSensor(config.NodeName),
+		NewKubeProxyInfoSensor(config.NodeName),
+		NewControlPlaneInfoSensor(config.NodeName),
+		NewCloudProviderInfoSensor(config.NodeName),
+		NewCNIInfoSensor(config.NodeName),
 	}
 
 	return &manager{
@@ -133,11 +142,38 @@ func (m *manager) runSensing(ctx context.Context) {
 func (m *manager) runSensor(ctx context.Context, sensor Sensor) error {
 	logger.L().Debug("running sensor", helpers.String("kind", sensor.GetKind()))
 
+	// Map Kind to Resource name (plural, lowercase)
+	resource := ""
+	switch sensor.GetKind() {
+	case "OsReleaseFile":
+		resource = "osreleasefiles"
+	case "KernelVersion":
+		resource = "kernelversions"
+	case "LinuxSecurityHardening":
+		resource = "linuxsecurityhardenings"
+	case "OpenPorts":
+		resource = "openports"
+	case "LinuxKernelVariables":
+		resource = "linuxkernelvariables"
+	case "KubeletInfo":
+		resource = "kubeletinfos"
+	case "KubeProxyInfo":
+		resource = "kubeproxyinfos"
+	case "ControlPlaneInfo":
+		resource = "controlplaneinfos"
+	case "CloudProviderInfo":
+		resource = "cloudproviderinfos"
+	case "CNIInfo":
+		resource = "cniinfos"
+	default:
+		return fmt.Errorf("unknown sensor kind: %s", sensor.GetKind())
+	}
+
 	// Sense the data
 	data, err := sensor.Sense()
 	if err != nil {
 		// Update status with error
-		if updateErr := m.crdClient.UpdateStatus(ctx, err.Error()); updateErr != nil {
+		if updateErr := m.crdClient.UpdateStatus(ctx, resource, err.Error()); updateErr != nil {
 			logger.L().Warning("failed to update CRD status",
 				helpers.String("kind", sensor.GetKind()),
 				helpers.Error(updateErr))
@@ -145,18 +181,9 @@ func (m *manager) runSensor(ctx context.Context, sensor Sensor) error {
 		return fmt.Errorf("failed to sense data: %w", err)
 	}
 
-	// Update CRD based on sensor type
-	switch sensor.GetKind() {
-	case "OsReleaseFile":
-		spec, ok := data.(*OsReleaseFileSpec)
-		if !ok {
-			return fmt.Errorf("invalid data type for OsReleaseFile")
-		}
-		if err := m.crdClient.CreateOrUpdateOsReleaseFile(ctx, spec); err != nil {
-			return fmt.Errorf("failed to create/update CRD: %w", err)
-		}
-	default:
-		return fmt.Errorf("unknown sensor kind: %s", sensor.GetKind())
+	// Update CRD
+	if err := m.crdClient.CreateOrUpdateHostData(ctx, resource, sensor.GetKind(), data); err != nil {
+		return fmt.Errorf("failed to create/update CRD: %w", err)
 	}
 
 	logger.L().Debug("sensor completed successfully", helpers.String("kind", sensor.GetKind()))

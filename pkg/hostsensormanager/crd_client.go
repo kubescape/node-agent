@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -39,58 +40,55 @@ func NewCRDClient(nodeName string) (*CRDClient, error) {
 	}, nil
 }
 
-// CreateOrUpdateOsReleaseFile creates or updates an OsReleaseFile CRD
-func (c *CRDClient) CreateOrUpdateOsReleaseFile(ctx context.Context, spec *OsReleaseFileSpec) error {
+// CreateOrUpdateHostData creates or updates a host data CRD
+func (c *CRDClient) CreateOrUpdateHostData(ctx context.Context, resource string, kind string, spec interface{}) error {
 	gvr := schema.GroupVersionResource{
 		Group:    HostDataGroup,
 		Version:  HostDataVersion,
-		Resource: "osreleasefiles",
+		Resource: resource,
 	}
 
-	// Create the CRD object
-	osReleaseFile := &OsReleaseFile{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: fmt.Sprintf("%s/%s", HostDataGroup, HostDataVersion),
-			Kind:       "OsReleaseFile",
+	// Create the unstructured object
+	unstructuredObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": fmt.Sprintf("%s/%s", HostDataGroup, HostDataVersion),
+			"kind":       kind,
+			"metadata": map[string]interface{}{
+				"name": c.nodeName,
+			},
+			"spec": spec,
+			"status": map[string]interface{}{
+				"lastSensed": metav1.Now().UTC().Format(time.RFC3339),
+			},
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name: c.nodeName,
-		},
-		Spec: *spec,
-		Status: OsReleaseFileStatus{
-			LastSensed: metav1.Now(),
-		},
-	}
-
-	// Convert to unstructured
-	unstructuredObj, err := toUnstructured(osReleaseFile)
-	if err != nil {
-		return fmt.Errorf("failed to convert to unstructured: %w", err)
 	}
 
 	// Try to get existing resource
-	existing, err := c.dynamicClient.Resource(gvr).Get(ctx, c.nodeName, metav1.GetOptions{})
+	_, err := c.dynamicClient.Resource(gvr).Get(ctx, c.nodeName, metav1.GetOptions{})
 	if err != nil {
 		// Resource doesn't exist, create it
-		logger.L().Debug("creating new OsReleaseFile CRD", helpers.String("nodeName", c.nodeName))
+		logger.L().Debug("creating new host data CRD",
+			helpers.String("kind", kind),
+			helpers.String("nodeName", c.nodeName))
 		_, err = c.dynamicClient.Resource(gvr).Create(ctx, unstructuredObj, metav1.CreateOptions{})
 		if err != nil {
-			return fmt.Errorf("failed to create OsReleaseFile CRD: %w", err)
+			return fmt.Errorf("failed to create %s CRD: %w", kind, err)
 		}
-		logger.L().Info("created OsReleaseFile CRD", helpers.String("nodeName", c.nodeName))
+		logger.L().Info("created host data CRD",
+			helpers.String("kind", kind),
+			helpers.String("nodeName", c.nodeName))
 		return nil
 	}
 
 	// Resource exists, update it using patch
-	logger.L().Debug("updating existing OsReleaseFile CRD", helpers.String("nodeName", c.nodeName))
-
-	// Preserve the resource version
-	unstructuredObj.SetResourceVersion(existing.GetResourceVersion())
+	logger.L().Debug("updating existing host data CRD",
+		helpers.String("kind", kind),
+		helpers.String("nodeName", c.nodeName))
 
 	// Create patch data
 	patchData, err := json.Marshal(map[string]interface{}{
 		"spec": spec,
-		"status": OsReleaseFileStatus{
+		"status": Status{
 			LastSensed: metav1.Now(),
 		},
 	})
@@ -100,23 +98,25 @@ func (c *CRDClient) CreateOrUpdateOsReleaseFile(ctx context.Context, spec *OsRel
 
 	_, err = c.dynamicClient.Resource(gvr).Patch(ctx, c.nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to patch OsReleaseFile CRD: %w", err)
+		return fmt.Errorf("failed to patch %s CRD: %w", kind, err)
 	}
 
-	logger.L().Debug("updated OsReleaseFile CRD", helpers.String("nodeName", c.nodeName))
+	logger.L().Debug("updated host data CRD",
+		helpers.String("kind", kind),
+		helpers.String("nodeName", c.nodeName))
 	return nil
 }
 
-// UpdateStatus updates the status of an OsReleaseFile CRD with an error
-func (c *CRDClient) UpdateStatus(ctx context.Context, errorMsg string) error {
+// UpdateStatus updates the status of a host data CRD with an error
+func (c *CRDClient) UpdateStatus(ctx context.Context, resource string, errorMsg string) error {
 	gvr := schema.GroupVersionResource{
 		Group:    HostDataGroup,
 		Version:  HostDataVersion,
-		Resource: "osreleasefiles",
+		Resource: resource,
 	}
 
 	patchData, err := json.Marshal(map[string]interface{}{
-		"status": OsReleaseFileStatus{
+		"status": Status{
 			LastSensed: metav1.Now(),
 			Error:      errorMsg,
 		},

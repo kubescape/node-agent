@@ -13,7 +13,6 @@ import (
 const (
 	etcDirName          = "/etc"
 	osReleaseFileSuffix = "os-release"
-	hostFSPrefix        = "/host_fs" // Mount point for host filesystem
 )
 
 // OsReleaseSensor implements the Sensor interface for OS release data
@@ -40,7 +39,7 @@ func (s *OsReleaseSensor) Sense() (interface{}, error) {
 		return nil, fmt.Errorf("failed to find os-release file: %w", err)
 	}
 
-	content, err := s.readFileOnHostFileSystem(path.Join(etcDirName, osFileName))
+	content, err := readFileOnHostFileSystem(path.Join(etcDirName, osFileName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read os-release file: %w", err)
 	}
@@ -53,8 +52,8 @@ func (s *OsReleaseSensor) Sense() (interface{}, error) {
 
 // getOsReleaseFile finds the OS release file in /etc
 func (s *OsReleaseSensor) getOsReleaseFile() (string, error) {
-	hostEtcDir := s.hostPath(etcDirName)
-	etcDir, err := os.Open(hostEtcDir)
+	hEtcDir := hostPath(etcDirName)
+	etcDir, err := os.Open(hEtcDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to open etc dir: %w", err)
 	}
@@ -69,20 +68,5 @@ func (s *OsReleaseSensor) getOsReleaseFile() (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("os-release file not found in %s", hostEtcDir)
-}
-
-// hostPath converts a path to the host filesystem path
-func (s *OsReleaseSensor) hostPath(p string) string {
-	return path.Join(hostFSPrefix, p)
-}
-
-// readFileOnHostFileSystem reads a file from the host filesystem
-func (s *OsReleaseSensor) readFileOnHostFileSystem(filePath string) ([]byte, error) {
-	hostPath := s.hostPath(filePath)
-	content, err := os.ReadFile(hostPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file %s: %w", hostPath, err)
-	}
-	return content, nil
+	return "", fmt.Errorf("os-release file not found in %s", hEtcDir)
 }
