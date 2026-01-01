@@ -41,6 +41,11 @@ func (s *KubeletInfoSensor) GetKind() string {
 	return "KubeletInfo"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *KubeletInfoSensor) GetPluralKind() string {
+	return "kubeletinfos"
+}
+
 // Sense collects the kubelet info data from the host
 func (s *KubeletInfoSensor) Sense() (interface{}, error) {
 	ctx := context.Background()

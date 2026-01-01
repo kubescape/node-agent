@@ -22,6 +22,11 @@ func (s *CloudProviderInfoSensor) GetKind() string {
 	return "CloudProviderInfo"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *CloudProviderInfoSensor) GetPluralKind() string {
+	return "cloudproviderinfos"
+}
+
 // Sense collects the cloud provider info data from the host
 func (s *CloudProviderInfoSensor) Sense() (interface{}, error) {
 	ret := CloudProviderInfoSpec{

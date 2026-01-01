@@ -26,6 +26,11 @@ func (s *LinuxSecurityHardeningSensor) GetKind() string {
 	return "LinuxSecurityHardening"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *LinuxSecurityHardeningSensor) GetPluralKind() string {
+	return "linuxsecurityhardenings"
+}
+
 // Sense collects the security hardening data from the host
 func (s *LinuxSecurityHardeningSensor) Sense() (interface{}, error) {
 	return &LinuxSecurityHardeningSpec{

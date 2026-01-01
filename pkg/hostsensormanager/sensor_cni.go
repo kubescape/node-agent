@@ -23,6 +23,11 @@ func (s *CNIInfoSensor) GetKind() string {
 	return "CNIInfo"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *CNIInfoSensor) GetPluralKind() string {
+	return "cniinfos"
+}
+
 // Sense collects the CNI info data from the host
 func (s *CNIInfoSensor) Sense() (interface{}, error) {
 	ctx := context.Background()

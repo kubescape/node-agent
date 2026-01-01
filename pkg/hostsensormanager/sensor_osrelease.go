@@ -32,6 +32,11 @@ func (s *OsReleaseSensor) GetKind() string {
 	return "OsReleaseFile"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *OsReleaseSensor) GetPluralKind() string {
+	return "osreleasefiles"
+}
+
 // Sense collects the OS release data from the host
 func (s *OsReleaseSensor) Sense() (interface{}, error) {
 	osFileName, err := s.getOsReleaseFile()

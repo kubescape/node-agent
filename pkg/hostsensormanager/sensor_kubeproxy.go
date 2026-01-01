@@ -28,6 +28,11 @@ func (s *KubeProxyInfoSensor) GetKind() string {
 	return "KubeProxyInfo"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *KubeProxyInfoSensor) GetPluralKind() string {
+	return "kubeproxyinfos"
+}
+
 // Sense collects the kube-proxy info data from the host
 func (s *KubeProxyInfoSensor) Sense() (interface{}, error) {
 	ctx := context.Background()

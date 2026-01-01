@@ -32,6 +32,11 @@ func (s *LinuxKernelVariablesSensor) GetKind() string {
 	return "LinuxKernelVariables"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *LinuxKernelVariablesSensor) GetPluralKind() string {
+	return "linuxkernelvariables"
+}
+
 // Sense collects the kernel variables data from the host
 func (s *LinuxKernelVariablesSensor) Sense() (interface{}, error) {
 	hProcSysKernelDir := hostPath(procSysKernelDir)

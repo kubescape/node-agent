@@ -26,6 +26,11 @@ func (s *KernelVersionSensor) GetKind() string {
 	return "KernelVersion"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *KernelVersionSensor) GetPluralKind() string {
+	return "kernelversions"
+}
+
 // Sense collects the kernel version data from the host
 func (s *KernelVersionSensor) Sense() (interface{}, error) {
 	content, err := readFileOnHostFileSystem(path.Join(procDirName, kernelVersionFileName))

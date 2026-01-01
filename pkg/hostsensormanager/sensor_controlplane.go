@@ -37,6 +37,11 @@ func (s *ControlPlaneInfoSensor) GetKind() string {
 	return "ControlPlaneInfo"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *ControlPlaneInfoSensor) GetPluralKind() string {
+	return "controlplaneinfos"
+}
+
 // Sense collects the control plane info data from the host
 func (s *ControlPlaneInfoSensor) Sense() (interface{}, error) {
 	ctx := context.Background()

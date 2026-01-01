@@ -36,6 +36,11 @@ func (s *OpenPortsSensor) GetKind() string {
 	return "OpenPorts"
 }
 
+// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+func (s *OpenPortsSensor) GetPluralKind() string {
+	return "openports"
+}
+
 // Sense collects the open ports data from the host
 func (s *OpenPortsSensor) Sense() (interface{}, error) {
 	res := &OpenPortsSpec{

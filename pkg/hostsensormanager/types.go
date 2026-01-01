@@ -27,6 +27,8 @@ type Sensor interface {
 	Sense() (interface{}, error)
 	// GetKind returns the CRD kind for this sensor
 	GetKind() string
+	// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
+	GetPluralKind() string
 }
 
 // Status contains status information about the sensing (common for all host data CRDs)

@@ -143,31 +143,7 @@ func (m *manager) runSensor(ctx context.Context, sensor Sensor) error {
 	logger.L().Debug("running sensor", helpers.String("kind", sensor.GetKind()))
 
 	// Map Kind to Resource name (plural, lowercase)
-	resource := ""
-	switch sensor.GetKind() {
-	case "OsReleaseFile":
-		resource = "osreleasefiles"
-	case "KernelVersion":
-		resource = "kernelversions"
-	case "LinuxSecurityHardening":
-		resource = "linuxsecurityhardenings"
-	case "OpenPorts":
-		resource = "openports"
-	case "LinuxKernelVariables":
-		resource = "linuxkernelvariables"
-	case "KubeletInfo":
-		resource = "kubeletinfos"
-	case "KubeProxyInfo":
-		resource = "kubeproxyinfos"
-	case "ControlPlaneInfo":
-		resource = "controlplaneinfos"
-	case "CloudProviderInfo":
-		resource = "cloudproviderinfos"
-	case "CNIInfo":
-		resource = "cniinfos"
-	default:
-		return fmt.Errorf("unknown sensor kind: %s", sensor.GetKind())
-	}
+	resource := sensor.GetPluralKind()
 
 	// Sense the data
 	data, err := sensor.Sense()
