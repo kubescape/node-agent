@@ -1,0 +1,28 @@
+name: kmod
+description: Trace kernel module load events by monitoring init_module and finit_module syscalls.
+homepageURL: https://github.com/kubescape/node-agent
+documentationURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/kmod
+sourceURL: https://github.com/kubescape/node-agent/tree/main/pkg/ebpf/gadgets/kmod
+datasources:
+  kmod:
+    fields:
+      exepath:
+        annotations:
+          columns.width: "64"
+          description: Executable path of the calling process.
+      module:
+        annotations:
+          columns.width: "32"
+          description: Path to the kernel module file being loaded.
+      proc:
+        annotations:
+          description: Process metadata including pid, tid, ppid, uid, gid, comm, etc.
+      syscall:
+        annotations:
+          description: The syscall being monitored (init_module or finit_module).
+      upper_layer:
+        annotations:
+          description: Whether the process is running in an upper layer.
+      timestamp_raw:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.

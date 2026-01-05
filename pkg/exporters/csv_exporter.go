@@ -7,7 +7,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	"github.com/sirupsen/logrus"
 )
@@ -52,7 +52,7 @@ func InitCsvExporter(csvRulePath, csvMalwarePath string) *CsvExporter {
 }
 
 // SendRuleAlert sends an alert to csv
-func (ce *CsvExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (ce *CsvExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	csvFile, err := os.OpenFile(ce.CsvRulePath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		logrus.Errorf("failed to initialize csv exporter: %v", err)
@@ -125,12 +125,12 @@ func (ce *CsvExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 		malwareResult.GetBasicRuntimeAlert().SHA256Hash,
 		malwareResult.GetBasicRuntimeAlert().SHA1Hash,
 		malwareResult.GetBasicRuntimeAlert().Size,
-		malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
-		malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
-		malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
-		malwareResult.GetTriggerEvent().Runtime.ContainerID,
-		malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
-		malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
+		malwareResult.GetTriggerEvent().GetNamespace(),
+		malwareResult.GetTriggerEvent().GetPod(),
+		malwareResult.GetTriggerEvent().GetContainer(),
+		malwareResult.GetTriggerEvent().GetContainerID(),
+		malwareResult.GetTriggerEvent().GetContainerImage(),
+		malwareResult.GetTriggerEvent().GetContainerImageDigest(),
 	})
 }
 

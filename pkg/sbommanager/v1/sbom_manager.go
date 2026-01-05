@@ -68,13 +68,13 @@ type SbomManager struct {
 	pool               *workerpool.WorkerPool
 	procDir            string
 	processing         mapset.Set[string]
-	storageClient      storage.StorageClient
+	storageClient      storage.SbomClient
 	version            string
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
-func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache) (*SbomManager, error) {
+func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache) (*SbomManager, error) {
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
 	if !exists {
@@ -158,13 +158,34 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	if s.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return
 	}
+	// get container mounts
+	pid := strconv.Itoa(int(notif.Container.ContainerPid()))
+	mounts, err := s.getMountedVolumes(pid)
+	if err != nil {
+		logger.L().Ctx(s.ctx).Error("SbomManager - failed to get mounted volumes",
+			helpers.Error(err),
+			helpers.String("namespace", notif.Container.K8s.Namespace),
+			helpers.String("pod", notif.Container.K8s.PodName),
+			helpers.String("container", notif.Container.K8s.ContainerName))
+		return
+	}
+	// get image layers
+	imageStatus, err := s.getImageStatus(notif.Container.Runtime.ContainerImageName) // use original name to ask the CRI
+	if err != nil {
+		logger.L().Ctx(s.ctx).Error("SbomManager - failed to get image layers",
+			helpers.Error(err),
+			helpers.String("namespace", notif.Container.K8s.Namespace),
+			helpers.String("pod", notif.Container.K8s.PodName),
+			helpers.String("container", notif.Container.K8s.ContainerName))
+		return
+	}
 	// enqueue the container for processing
 	s.pool.Submit(func() {
-		s.processContainer(notif)
+		s.processContainer(notif, mounts, imageStatus)
 	}, utils.FuncName(s.processContainer))
 }
 
-func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
+func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mounts []string, imageStatus *runtime.ImageStatusResponse) {
 	sharedData, err := s.waitForSharedContainerData(notif.Container.Runtime.ContainerID)
 	if err != nil {
 		logger.L().Error("SbomManager - container not found in shared data",
@@ -284,29 +305,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 	// track SBOM as processing in internal state to prevent concurrent processing
 	s.processing.Add(sbomName)
 	defer s.processing.Remove(sbomName)
-	// get container mounts
-	pid := strconv.Itoa(int(notif.Container.ContainerPid()))
-	mounts, err := s.getMountedVolumes(pid)
-	if err != nil {
-		logger.L().Ctx(s.ctx).Error("SbomManager - failed to get mounted volumes",
-			helpers.Error(err),
-			helpers.String("namespace", notif.Container.K8s.Namespace),
-			helpers.String("pod", notif.Container.K8s.PodName),
-			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("sbomName", sbomName))
-		return
-	}
-	// get image layers
-	imageStatus, err := s.getImageStatus(notif.Container.Runtime.ContainerImageName) // use original name to ask the CRI
-	if err != nil {
-		logger.L().Ctx(s.ctx).Error("SbomManager - failed to get image layers",
-			helpers.Error(err),
-			helpers.String("namespace", notif.Container.K8s.Namespace),
-			helpers.String("pod", notif.Container.K8s.PodName),
-			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("sbomName", sbomName))
-		return
-	}
 	// prepare image source
 	src, err := NewSource(sharedData.ImageTag, sharedData.ImageID, imageID, imageStatus, mounts, s.cfg.MaxImageSize)
 	if err != nil {

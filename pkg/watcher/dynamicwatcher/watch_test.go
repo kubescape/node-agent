@@ -2,9 +2,13 @@ package dynamicwatcher
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/cooldownqueue"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/kubescape/node-agent/mocks"
 	"github.com/kubescape/node-agent/pkg/watcher"
@@ -320,6 +324,91 @@ func TestStart_5(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			startTest(t, tc)
 		})
+	}
+}
+
+func TestChooseWatcher_NoStorageClient_Pods(t *testing.T) {
+	k8sClient := k8sinterface.NewKubernetesApiMock()
+	k8sClient.KubernetesClient = fake.NewSimpleClientset()
+	wh := NewWatchHandler(k8sClient, nil, func(s string) bool { return false })
+
+	res := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+	_, err := wh.chooseWatcher(res, metav1.ListOptions{})
+	if err != nil && errors.Is(err, errNotImplemented) {
+		t.Fatalf("expected chooseWatcher for pods not to return errNotImplemented, got: %v", err)
+	}
+}
+
+func TestChooseWatcher_NoStorageClient_StorageResource(t *testing.T) {
+	k8sClient := k8sinterface.NewKubernetesApiMock()
+	k8sClient.KubernetesClient = fake.NewSimpleClientset()
+	wh := NewWatchHandler(k8sClient, nil, func(s string) bool { return false })
+
+	res := schema.GroupVersionResource{Group: kubescapeCustomResourceGroup, Version: "v1beta1", Resource: "applicationprofiles"}
+	_, err := wh.chooseWatcher(res, metav1.ListOptions{})
+	if !errors.Is(err, errNotImplemented) {
+		t.Fatalf("expected chooseWatcher for storage resource to return errNotImplemented, got: %v", err)
+	}
+}
+
+func TestChooseLister_NoStorageClient_Pods(t *testing.T) {
+	k8sClient := k8sinterface.NewKubernetesApiMock()
+	k8sClient.KubernetesClient = fake.NewSimpleClientset()
+	wh := NewWatchHandler(k8sClient, nil, func(s string) bool { return false })
+
+	res := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+	obj, err := wh.chooseLister(res, metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("expected chooseLister for pods not to error, got: %v", err)
+	}
+	if obj == nil {
+		t.Fatalf("expected chooseLister for pods to return a non-nil object")
+	}
+}
+
+func TestChooseLister_NoStorageClient_StorageResource(t *testing.T) {
+	k8sClient := k8sinterface.NewKubernetesApiMock()
+	k8sClient.KubernetesClient = fake.NewSimpleClientset()
+	wh := NewWatchHandler(k8sClient, nil, func(s string) bool { return false })
+
+	res := schema.GroupVersionResource{Group: kubescapeCustomResourceGroup, Version: "v1beta1", Resource: "applicationprofiles"}
+	_, err := wh.chooseLister(res, metav1.ListOptions{})
+	if !errors.Is(err, errNotImplemented) {
+		t.Fatalf("expected chooseLister for storage resource to return errNotImplemented, got: %v", err)
+	}
+}
+
+// New test: ensure watch() skips attempting to list existing storage objects when the storage client is missing,
+// and does not cause a retry loop or a fatal exit.
+func TestWatch_SkipsListingWhenStorageClientMissing(t *testing.T) {
+	ctx := context.Background()
+	k8sClient := k8sinterface.NewKubernetesApiMock()
+	k8sClient.KubernetesClient = fake.NewClientset()
+	wh := NewWatchHandler(k8sClient, nil, func(s string) bool { return false })
+
+	// Create an event queue and a storage resource; watch should skip listing when storage client is nil
+	eventQueue := cooldownqueue.NewCooldownQueue[watch.Event](cooldownqueue.DefaultExpiration, cooldownqueue.EvictionInterval)
+	resource := watcher.WatchResourceMock{Schema: schema.GroupVersionResource{Group: kubescapeCustomResourceGroup, Version: "v1beta1", Resource: "applicationprofiles"}}
+
+	// Run watch() in a goroutine; it should not return an error (i.e., not be fatal).
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- wh.watch(ctx, &resource, eventQueue)
+	}()
+
+	// Give the watcher time to attempt listing (it should skip and not retry).
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop the queue so watch() can exit cleanly.
+	eventQueue.Stop()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("expected watch to not return an error, got %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("watch did not return in time")
 	}
 }
 

@@ -6,7 +6,8 @@ import (
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -35,12 +36,20 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 
 	// Initialize socket enricher for network tracers
 	if cw.cfg.EnableNetworkTracing || cw.cfg.EnableRuntimeDetection {
-		socketEnricher, err := socketenricher.NewSocketEnricher()
-		if err != nil {
-			logger.L().Error("ContainerWatcher - error creating socket enricher", helpers.Error(err))
-			return fmt.Errorf("creating socket enricher: %w", err)
+		socketEnricherFields := params.ParamDescs{
+			{
+				Key:         "socket-enricher-fields",
+				Description: "Fields to enrich the socket event with",
+				TypeHint:    params.TypeString,
+			},
 		}
-		cw.socketEnricher = socketEnricher
+		socketEnricherOp := &socketenricher.SocketEnricher{}
+		socketEnricherParams := socketEnricherFields.ToParams()
+		socketEnricherParams.Get("socket-enricher-fields").Set("cwd=512,exepath=512")
+		if err := socketEnricherOp.Init(socketEnricherParams); err != nil {
+			return fmt.Errorf("init socket enricher: %w", err)
+		}
+		cw.socketEnricher = socketEnricherOp
 	}
 
 	// Set up container callbacks
@@ -119,6 +128,9 @@ func (cw *ContainerWatcher) startRunningContainers() {
 // addRunningContainers handles rule binding notifications
 func (cw *ContainerWatcher) addRunningContainers(notf *rulebindingmanager.RuleBindingNotify) {
 	pod := notf.GetPod()
+
+	// Mark that we've received at least one rule binding notification
+	cw.ruleBindingsInitialized = true
 
 	// skip containers that should be ignored
 	if cw.cfg.IgnoreContainer(pod.GetNamespace(), pod.GetName(), pod.GetLabels()) {

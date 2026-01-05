@@ -21,6 +21,28 @@ func (cs *ContainerStrategy) GetNewParentPID(exitingPID uint32, children []*apit
 	if containerTree != nil {
 		shimPID, found := containerTree.GetShimPIDForProcess(exitingPID, processMap)
 		if found {
+			// If the exiting process is the container init process (direct child of shim),
+			// its children should be reparented to the shim
+			if proc, ok := processMap.Load(exitingPID); ok && proc.PPID == shimPID {
+				return shimPID
+			}
+
+			// Otherwise, find the container init process (child of shim)
+			// We walk up the tree from the exiting process until we find the process that is a direct child of the shim
+			currentPID := exitingPID
+			for {
+				proc, ok := processMap.Load(currentPID)
+				if !ok {
+					break
+				}
+				if proc.PPID == shimPID {
+					return proc.PID
+				}
+				if proc.PPID == 0 {
+					break
+				}
+				currentPID = proc.PPID
+			}
 			return shimPID
 		}
 	}

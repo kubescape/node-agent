@@ -11,7 +11,7 @@ import (
 
 	fimtypes "github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +25,7 @@ func (m *MockExporter) SendFimAlerts(events []fimtypes.FimEvent) {
 	m.events = append(m.events, events...)
 }
 
-func (m *MockExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (m *MockExporter) SendRuleAlert(failedRule types.RuleFailure) {
 }
 
 func (m *MockExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {

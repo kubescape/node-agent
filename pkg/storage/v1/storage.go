@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/containerprofilemanager/v1/queue"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -29,15 +28,17 @@ const (
 )
 
 type Storage struct {
-	StorageClient spdxv1beta1.SpdxV1beta1Interface
+	storageClient spdxv1beta1.SpdxV1beta1Interface
 	namespace     string
 	multiplier    *int // used for testing to multiply the resources by this
 }
 
+var _ storage.ProfileClient = (*Storage)(nil)
+var _ storage.ProfileCreator = (*Storage)(nil)
+var _ storage.SbomClient = (*Storage)(nil)
 var _ storage.StorageClient = (*Storage)(nil)
-var _ queue.ProfileCreator = (*Storage)(nil)
 
-func CreateStorage(ctx context.Context, namespace string, maxElapsedTime time.Duration) (*Storage, error) {
+func CreateStorage(namespace string) (*Storage, error) {
 	var cfg *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
@@ -67,36 +68,37 @@ func CreateStorage(ctx context.Context, namespace string, maxElapsedTime time.Du
 		return nil, fmt.Errorf("too many retries waiting for storage: %w", err)
 	}
 
-	storage := &Storage{
-		StorageClient: clientset.SpdxV1beta1(),
+	s := &Storage{
+		storageClient: clientset.SpdxV1beta1(),
 		namespace:     namespace,
 		multiplier:    getMultiplier(),
 	}
 
-	return storage, nil
-
+	return s, nil
 }
 
 func CreateFakeStorage(namespace string) (*Storage, error) {
-	storage := &Storage{
-		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
+	return &Storage{
+		storageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		namespace:     namespace,
 		multiplier:    getMultiplier(),
-	}
-
-	return storage, nil
+	}, nil
 }
 
 func (sc *Storage) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
-	return sc.StorageClient.SBOMSyfts(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
+	return sc.storageClient.SBOMSyfts(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 }
 
 func (sc *Storage) GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error) {
-	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{ResourceVersion: softwarecomposition.ResourceVersionMetadata})
+	return sc.storageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{ResourceVersion: softwarecomposition.ResourceVersionMetadata})
+}
+
+func (sc *Storage) GetStorageClient() spdxv1beta1.SpdxV1beta1Interface {
+	return sc.storageClient
 }
 
 func (sc *Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
-	return sc.StorageClient.SBOMSyfts(sc.namespace).Update(context.Background(), SBOM, metav1.UpdateOptions{})
+	return sc.storageClient.SBOMSyfts(sc.namespace).Update(context.Background(), SBOM, metav1.UpdateOptions{})
 }
 
 func (sc *Storage) modifyName(n string) string {

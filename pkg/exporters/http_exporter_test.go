@@ -9,11 +9,10 @@ import (
 	"time"
 
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
-	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,10 +36,9 @@ func TestSendRuleAlert(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
-	failedRule := &ruleenginev1.GenericRuleFailure{
+	failedRule := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
-			Severity:  ruleengine.RulePriorityCritical,
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
@@ -72,7 +70,6 @@ func TestSendRuleAlert(t *testing.T) {
 	assert.Equal(t, "kubescape.io/v1", alertsList.APIVersion)
 	assert.Equal(t, 1, len(alertsList.Spec.Alerts))
 	alert := alertsList.Spec.Alerts[0]
-	assert.Equal(t, ruleengine.RulePriorityCritical, alert.Severity)
 	assert.Equal(t, "testrule", alert.AlertName)
 	assert.Equal(t, "testcontainerid", alert.ContainerID)
 	assert.Equal(t, "testcontainer", alert.ContainerName)
@@ -100,7 +97,7 @@ func TestSendRuleAlertRateReached(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
-	failedRule := &ruleenginev1.GenericRuleFailure{
+	failedRule := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
@@ -174,25 +171,7 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: igtypes.Event{
-			CommonData: igtypes.CommonData{
-				Runtime: igtypes.BasicRuntimeMetadata{
-					ContainerID:          "testmalwarecontainerid",
-					ContainerName:        "testmalwarecontainername",
-					ContainerImageName:   "testmalwarecontainerimage",
-					ContainerImageDigest: "testmalwarecontainerimagedigest",
-				},
-				K8s: igtypes.K8sMetadata{
-					Node:        "testmalwarenode",
-					HostNetwork: false,
-					BasicK8sMetadata: igtypes.BasicK8sMetadata{
-						Namespace:     "testmalwarenamespace",
-						PodName:       "testmalwarepodname",
-						ContainerName: "testmalwarecontainername",
-					},
-				},
-			},
-		},
+		TriggerEvent: &utils.StructEvent{},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},

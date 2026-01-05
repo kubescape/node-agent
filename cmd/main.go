@@ -13,7 +13,10 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/cilium/ebpf/rlimit"
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	"github.com/grafana/pyroscope-go"
+
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	beUtils "github.com/kubescape/backend/pkg/utils"
@@ -24,6 +27,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	containerprofilemanagerv1 "github.com/kubescape/node-agent/pkg/containerprofilemanager/v1"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	containerwatcherv2 "github.com/kubescape/node-agent/pkg/containerwatcher/v2"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
@@ -44,14 +48,17 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
-	processtree "github.com/kubescape/node-agent/pkg/processtree"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
-	rulemanagerv1 "github.com/kubescape/node-agent/pkg/rulemanager/v1"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -154,7 +161,7 @@ func main() {
 	// Create clients
 	logger.L().Info("Kubernetes mode is true")
 	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient, err := storage.CreateStorage(ctx, clusterData.Namespace, cfg.UpdateDataPeriod)
+	storageClient, err := storage.CreateStorage(clusterData.Namespace)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
@@ -168,8 +175,7 @@ func main() {
 	}
 
 	// Create watchers
-	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
-	// create k8sObject cache
+	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.GetStorageClient(), cfg.SkipNamespace)
 	k8sObjectCache, err := k8scache.NewK8sObjectCache(cfg.NodeName, k8sClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
@@ -194,7 +200,7 @@ func main() {
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SeccompManager", helpers.Error(err))
 		}
-		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(storageClient.StorageClient, seccompManager)
+		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(storageClient.GetStorageClient(), seccompManager)
 		dWatcher.AddAdaptor(seccompWatcher)
 	} else {
 		seccompManager = seccompmanager.NewSeccompManagerMock()
@@ -202,7 +208,12 @@ func main() {
 
 	var ruleBindingCache *rulebindingcachev1.RBCache
 	if cfg.EnableRuntimeDetection {
-		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
+		ruleCreator := rulecreator.NewRuleCreator()
+		ruleBindingCache = rulebindingcachev1.NewCache(cfg, k8sClient, ruleCreator)
+		rulesWatcher := ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
+			ruleBindingCache.RefreshRuleBindingsRules()
+		})
+		dWatcher.AddAdaptor(rulesWatcher)
 	}
 
 	// Create and DNS managers
@@ -268,10 +279,10 @@ func main() {
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
-		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient.StorageClient, k8sObjectCache)
+		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient, k8sObjectCache)
 		apc.Start(ctx)
 
-		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient.StorageClient, k8sObjectCache)
+		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient, k8sObjectCache)
 		nnc.Start(ctx)
 
 		dc := dnscache.NewDnsCache(dnsResolver)
@@ -281,8 +292,15 @@ func main() {
 
 		ruleCooldown := rulecooldown.NewRuleCooldown(cfg.RuleCoolDown)
 
+		adapterFactory := ruleadapters.NewEventRuleAdapterFactory()
+
+		celEvaluator, err := cel.NewCEL(objCache, cfg)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating CEL evaluator", helpers.Error(err))
+		}
+
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processTreeManager, dnsResolver, nil, ruleCooldown)
+		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory, celEvaluator)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -298,8 +316,7 @@ func main() {
 
 	// Create the node profile manager
 	var profileManager nodeprofilemanager.NodeProfileManagerClient
-	if cfg.EnableNodeProfile {
-		// FIXME validate the HTTPExporterConfig before we use it ?
+	if cfg.EnableNodeProfile && cfg.Exporters.HTTPExporterConfig != nil {
 		profileManager = nodeprofilemanagerv1.NewNodeProfileManager(cfg, *clusterData, cfg.NodeName, k8sObjectCache, ruleManager, cloudMetadata)
 	} else {
 		profileManager = nodeprofilemanager.NewNodeProfileManagerMock()
@@ -333,7 +350,7 @@ func main() {
 	if err := igconfig.Config.ReadInConfig(); err != nil {
 		logger.L().Warning("reading IG config", helpers.Error(err))
 	}
-	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName)
+	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName, "", "")
 	if err != nil {
 		logger.L().Fatal("error creating IG Kubernetes client", helpers.Error(err))
 	}
@@ -365,11 +382,16 @@ func main() {
 		}
 	}
 
+	thirdPartyTracers := containerwatcher.ThirdPartyTracers{
+		ThirdPartyTracersInitializers: mapset.NewSet[containerwatcher.CustomTracerInitializer](),
+		ThirdPartyEventReceivers:      maps.NewSafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]](),
+	}
+
 	// Create the container handler
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
 		igK8sClient, dnsManagerClient, prometheusExporter, ruleManager,
-		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree)
+		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil,
+		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, thirdPartyTracers)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

@@ -58,7 +58,7 @@ func (k *K8sClientMock) CalculateWorkloadParentRecursive(workload k8sinterface.I
 	return workload.GetKind(), workload.GetName(), nil
 }
 func (k *K8sClientMock) GetKubernetesClient() kubernetes.Interface {
-	return k8sfake.NewSimpleClientset(k.objects...)
+	return k8sfake.NewClientset(k.objects...)
 }
 func (k *K8sClientMock) GetDynamicClient() dynamic.Interface {
 	return dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), k.objects...)

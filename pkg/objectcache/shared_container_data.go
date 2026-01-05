@@ -61,9 +61,12 @@ type WatchedContainerData struct {
 	AckChan                 chan struct{}
 	ParentResourceVersion   string
 	ContainerID             string
+	PodName                 string
+	Namespace               string
 	ImageTag                string
 	ImageID                 string
 	Wlid                    string
+	WorkloadUID             string // UID of the top-level workload (from WLID)
 	ContainerType           ContainerType
 	ContainerIndex          int
 	ContainerInfos          map[ContainerType][]ContainerInfo

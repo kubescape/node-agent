@@ -11,16 +11,17 @@ import (
 	"math/rand/v2"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/stretchr/testify/assert"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 func TestResolveIPAddress(t *testing.T) {
 	tests := []struct {
 		name     string
-		dnsEvent tracerdnstype.Event
+		dnsEvent *utils.StructEvent
 		ipAddr   string
 		want     string
 		wantOk   bool
@@ -28,9 +29,9 @@ func TestResolveIPAddress(t *testing.T) {
 		{
 			name:   "ip found",
 			ipAddr: "67.225.146.248",
-			dnsEvent: tracerdnstype.Event{
-				DNSName:    "test.com",
-				NumAnswers: 1,
+			dnsEvent: &utils.StructEvent{
+				EventType: utils.DnsEventType,
+				DNSName:   "test.com",
 				Addresses: []string{
 					"67.225.146.248",
 				},
@@ -41,9 +42,9 @@ func TestResolveIPAddress(t *testing.T) {
 		{
 			name:   "ip not found",
 			ipAddr: "67.225.146.248",
-			dnsEvent: tracerdnstype.Event{
-				DNSName:    "test.com",
-				NumAnswers: 1,
+			dnsEvent: &utils.StructEvent{
+				EventType: utils.DnsEventType,
+				DNSName:   "test.com",
 				Addresses: []string{
 					"54.23.332.4",
 				},
@@ -54,9 +55,9 @@ func TestResolveIPAddress(t *testing.T) {
 		{
 			name:   "no address",
 			ipAddr: "67.225.146.248",
-			dnsEvent: tracerdnstype.Event{
-				DNSName:    "test.com",
-				NumAnswers: 0,
+			dnsEvent: &utils.StructEvent{
+				EventType: utils.DnsEventType,
+				DNSName:   "test.com",
 			},
 			want:   "",
 			wantOk: false,
@@ -69,9 +70,8 @@ func TestResolveIPAddress(t *testing.T) {
 
 			dm.ReportEvent(tt.dnsEvent)
 			got, ok := dm.ResolveIPAddress(tt.ipAddr)
-			if got != tt.want || ok != tt.wantOk {
-				t.Errorf("ResolveIPAddress() got = %v, ok = %v, want = %v, wantOk = %v", got, ok, tt.want, tt.wantOk)
-			}
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantOk, ok)
 		})
 	}
 }
@@ -84,15 +84,15 @@ func TestResolveIPAddressFallback(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		dnsEvent tracerdnstype.Event
+		dnsEvent *utils.StructEvent
 		want     string
 		wantOk   bool
 	}{
 		{
 			name: "dns resolution fallback",
-			dnsEvent: tracerdnstype.Event{
-				DNSName:    "example.com", // Using example.com as it's guaranteed to exist
-				NumAnswers: 1,
+			dnsEvent: &utils.StructEvent{
+				EventType: utils.DnsEventType,
+				DNSName:   "example.com", // Using example.com as it's guaranteed to exist
 			},
 			want:   "example.com",
 			wantOk: true,
@@ -127,8 +127,9 @@ func TestCacheFallbackBehavior(t *testing.T) {
 	dm := CreateDNSManager(1000)
 
 	// Test successful DNS lookup caching
-	event := tracerdnstype.Event{
-		DNSName: "test.com",
+	event := &utils.StructEvent{
+		EventType: utils.DnsEventType,
+		DNSName:   "test.com",
 		Addresses: []string{
 			"1.2.3.4",
 		},
@@ -150,8 +151,9 @@ func TestCacheFallbackBehavior(t *testing.T) {
 	}
 
 	// Test failed lookup caching
-	failEvent := tracerdnstype.Event{
-		DNSName: "nonexistent.local",
+	failEvent := &utils.StructEvent{
+		EventType: utils.DnsEventType,
+		DNSName:   "nonexistent.local",
 	}
 	dm.ReportEvent(failEvent)
 
@@ -186,16 +188,19 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Add(numGoroutines)
 
 	// Create some test data
-	testEvents := []tracerdnstype.Event{
+	testEvents := []*utils.StructEvent{
 		{
+			EventType: utils.DnsEventType,
 			DNSName:   "test1.com",
 			Addresses: []string{"1.1.1.1", "2.2.2.2"},
 		},
 		{
+			EventType: utils.DnsEventType,
 			DNSName:   "test2.com",
 			Addresses: []string{"3.3.3.3", "4.4.4.4"},
 		},
 		{
+			EventType: utils.DnsEventType,
 			DNSName:   "test3.com",
 			Addresses: []string{"5.5.5.5", "6.6.6.6"},
 		},
@@ -340,28 +345,18 @@ func TestContainerCloudServices(t *testing.T) {
 		pidToServices.Set(testPid, services)
 
 		// Process cloud service DNS events
-		cloudEvents := []tracerdnstype.Event{
+		cloudEvents := []*utils.StructEvent{
 			{
-				Event: eventtypes.Event{
-					CommonData: eventtypes.CommonData{
-						Runtime: eventtypes.BasicRuntimeMetadata{
-							ContainerID: containerId,
-						},
-					},
-				},
-				Pid:     testPid,
-				DNSName: "test.amazonaws.com.",
+				EventType:   utils.DnsEventType,
+				ContainerID: containerId,
+				DNSName:     "test.amazonaws.com.",
+				Pid:         testPid,
 			},
 			{
-				Event: eventtypes.Event{
-					CommonData: eventtypes.CommonData{
-						Runtime: eventtypes.BasicRuntimeMetadata{
-							ContainerID: containerId,
-						},
-					},
-				},
-				Pid:     testPid,
-				DNSName: "example.azure.com.",
+				EventType:   utils.DnsEventType,
+				ContainerID: containerId,
+				DNSName:     "example.azure.com.",
+				Pid:         testPid,
 			},
 		}
 
@@ -426,16 +421,10 @@ func TestContainerCloudServices(t *testing.T) {
 
 		// Add more services than the cache size
 		for i := 0; i <= maxServiceCacheSize+5; i++ {
-			event := tracerdnstype.Event{
-				Event: eventtypes.Event{
-					CommonData: eventtypes.CommonData{
-						Runtime: eventtypes.BasicRuntimeMetadata{
-							ContainerID: containerId,
-						},
-					},
-				},
-				Pid:     testPid,
-				DNSName: fmt.Sprintf("service%d.amazonaws.com.", i),
+			event := &utils.StructEvent{
+				ContainerID: containerId,
+				DNSName:     fmt.Sprintf("service%d.amazonaws.com.", i),
+				Pid:         testPid,
 			}
 			dm.ReportEvent(event)
 		}
@@ -471,16 +460,11 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 
 	// Add more than maxServiceCacheSize cloud services
 	for i := 0; i < maxServiceCacheSize+10; i++ {
-		dm.ReportEvent(tracerdnstype.Event{
-			Event: eventtypes.Event{
-				CommonData: eventtypes.CommonData{
-					Runtime: eventtypes.BasicRuntimeMetadata{
-						ContainerID: containerId,
-					},
-				},
-			},
-			Pid:     testPid,
-			DNSName: fmt.Sprintf("service%d.amazonaws.com.", i),
+		dm.ReportEvent(&utils.StructEvent{
+			EventType:   utils.DnsEventType,
+			ContainerID: containerId,
+			DNSName:     fmt.Sprintf("service%d.amazonaws.com.", i),
+			Pid:         testPid,
 		})
 	}
 

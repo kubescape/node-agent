@@ -17,7 +17,7 @@ import (
 
 // containerCallback handles container events synchronously
 func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
-	logger.L().Info("ContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
+	logger.L().Debug("ContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
 	if notif.Container == nil || notif.Container.Runtime.ContainerID == "" {
 		logger.L().Info("ContainerWatcher.containerCallback - container is nil or has empty ContainerID")
 		return
@@ -106,6 +106,8 @@ func (cw *ContainerWatcher) setSharedWatchedContainerData(container *containerco
 func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*objectcache.WatchedContainerData, error) {
 	watchedContainer := objectcache.WatchedContainerData{
 		ContainerID: container.Runtime.ContainerID,
+		PodName:     container.K8s.PodName,
+		Namespace:   container.K8s.Namespace,
 		// we get ImageID and ImageTag from the pod spec for consistency with operator
 	}
 
@@ -144,6 +146,8 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 		return nil, fmt.Errorf("failed to validate wlid: %w", err)
 	}
 	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
+	// Extract and store the workload UID (top-level owner from WLID)
+	watchedContainer.WorkloadUID = w.GetUID()
 	// find parent selector
 	selector, err := w.GetSelector()
 	if err != nil {
@@ -170,13 +174,34 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 
 // unregisterContainer unregisters a container from monitoring
 func (cw *ContainerWatcher) unregisterContainer(container *containercollection.Container) {
-	if cw.ruleManagedPods.Contains(utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)) {
-		// the container should still be monitored
-		logger.L().Debug("ContainerWatcher - container should still be monitored",
-			helpers.String("container ID", container.Runtime.ContainerID),
-			helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName),
-		)
-		return
+	k8sPodID := utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)
+
+	// When runtime detection is enabled, we need to determine if the container should continue to be monitored.
+	// ruleManagedPods tracks pods that have active rule bindings. However, when there are no rule bindings at all,
+	// ruleManagedPods will be empty, and we should still keep containers monitored for potential future rules.
+	// We only unregister if:
+	// 1. Runtime detection is disabled, OR
+	// 2. Rule bindings have been initialized AND this pod is not in ruleManagedPods
+	if cw.cfg.EnableRuntimeDetection {
+		// If the pod is currently in ruleManagedPods, it should still be monitored
+		if cw.ruleManagedPods.Contains(k8sPodID) {
+			logger.L().Debug("ContainerWatcher - container should still be monitored for runtime detection (in ruleManagedPods)",
+				helpers.String("container ID", container.Runtime.ContainerID),
+				helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName),
+			)
+			return
+		}
+		// If rule bindings haven't been initialized yet, we should keep monitoring all containers
+		// because we don't know yet which pods will have matching rules
+		if !cw.ruleBindingsInitialized {
+			logger.L().Debug("ContainerWatcher - container should still be monitored for runtime detection (rule bindings not initialized yet)",
+				helpers.String("container ID", container.Runtime.ContainerID),
+				helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName),
+			)
+			return
+		}
+		// If we get here, rule bindings have been initialized but this pod is not in ruleManagedPods,
+		// meaning rule bindings exist but don't apply to this pod - proceed with unregistration
 	}
 
 	logger.L().Debug("ContainerWatcher - stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))

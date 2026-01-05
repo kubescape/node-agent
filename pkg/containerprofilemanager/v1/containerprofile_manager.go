@@ -67,9 +67,8 @@ type ContainerProfileManager struct {
 	cfg               config.Config
 	k8sClient         k8sclient.K8sClientInterface
 	k8sObjectCache    objectcache.K8sObjectCache
-	storageClient     storage.StorageClient
+	storageClient     storage.ProfileCreator
 	dnsResolverClient dnsmanager.DNSResolver
-	syscallPeekFunc   func(nsMountId uint64) ([]string, error)
 	seccompManager    seccompmanager.SeccompManagerClient
 	enricher          containerprofilemanager.Enricher
 	ruleBindingCache  rulebindingmanager.RuleBindingCache
@@ -90,7 +89,7 @@ func NewContainerProfileManager(
 	cfg config.Config,
 	k8sClient k8sclient.K8sClientInterface,
 	k8sObjectCache objectcache.K8sObjectCache,
-	storageClient storage.StorageClient,
+	storageClient storage.ProfileCreator,
 	dnsResolverClient dnsmanager.DNSResolver,
 	seccompManager seccompmanager.SeccompManagerClient,
 	enricher containerprofilemanager.Enricher,

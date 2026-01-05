@@ -14,8 +14,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
-	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -165,7 +164,7 @@ func (config *HTTPExporterConfig) Validate() error {
 }
 
 // SendRuleAlert implements the Exporter interface
-func (e *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	// Check if alert limit is reached first
 	if e.shouldSendLimitAlert() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
@@ -231,7 +230,8 @@ func (e *HTTPExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 }
 
 // Internal methods with context support
-func (e *HTTPExporter) sendRuleAlertWithContext(ctx context.Context, failedRule ruleengine.RuleFailure) error {
+func (e *HTTPExporter) sendRuleAlertWithContext(ctx context.Context, failedRule types.RuleFailure) error {
+	// Note: rate limit check is now handled in SendRuleAlert() before calling this function
 	alert := e.createRuleAlert(failedRule)
 	return e.sendAlert(ctx, alert, failedRule.GetRuntimeProcessDetails(), failedRule.GetCloudServices())
 }
@@ -311,7 +311,7 @@ func (e *HTTPExporter) createFimAlertPayload(fimEvents []hostfimsensor.FimEvent)
 	return report
 }
 
-func (e *HTTPExporter) createRuleAlert(failedRule ruleengine.RuleFailure) apitypes.RuntimeAlert {
+func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.RuntimeAlert {
 	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = e.nodeName
 	k8sDetails.ClusterName = e.clusterName
@@ -485,8 +485,8 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		HostName:  e.host,
 		AlertType: apitypes.AlertTypeRule,
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      string(AlertTypeLimitReached),
-			Severity:       ruleenginev1.RulePrioritySystemIssue,
+			AlertName: string(AlertTypeLimitReached),
+			// Severity:       ruleengine.RulePrioritySystemIssue,
 			FixSuggestions: "Check logs for more information",
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{

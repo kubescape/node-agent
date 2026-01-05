@@ -8,7 +8,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -47,7 +47,7 @@ func InitSyslogExporter(syslogHost string) *SyslogExporter {
 }
 
 // SendRuleAlert sends an alert to syslog (RFC 5424) - https://tools.ietf.org/html/rfc5424
-func (se *SyslogExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (se *SyslogExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	message := rfc5424.Message{
 		Priority:  rfc5424.Error,
 		Timestamp: failedRule.GetBaseRuntimeAlert().Timestamp,
@@ -119,8 +119,8 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 	message := rfc5424.Message{
 		Priority:  rfc5424.Error,
 		Timestamp: time.Now(),
-		Hostname:  malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
-		AppName:   malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
+		Hostname:  malwareResult.GetTriggerEvent().GetPod(),
+		AppName:   malwareResult.GetTriggerEvent().GetContainer(),
 		ProcessID: fmt.Sprintf("%d", os.Getpid()), // TODO: is this correct?
 		StructuredData: []rfc5424.StructuredData{
 			{
@@ -152,32 +152,32 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 					},
 					{
 						Name:  "namespace",
-						Value: malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
+						Value: malwareResult.GetTriggerEvent().GetNamespace(),
 					},
 					{
 						Name:  "pod_name",
-						Value: malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
+						Value: malwareResult.GetTriggerEvent().GetPod(),
 					},
 					{
 						Name:  "container_name",
-						Value: malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
+						Value: malwareResult.GetTriggerEvent().GetContainer(),
 					},
 					{
 						Name:  "container_id",
-						Value: malwareResult.GetTriggerEvent().Runtime.ContainerID,
+						Value: malwareResult.GetTriggerEvent().GetContainerID(),
 					},
 					{
 						Name:  "container_image",
-						Value: malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
+						Value: malwareResult.GetTriggerEvent().GetContainerImage(),
 					},
 					{
 						Name:  "container_image_digest",
-						Value: malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
+						Value: malwareResult.GetTriggerEvent().GetContainerImageDigest(),
 					},
 				},
 			},
 		},
-		Message: []byte(fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription)),
+		Message: []byte(fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription)),
 	}
 
 	_, err := message.WriteTo(se.writer)

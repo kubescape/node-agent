@@ -2,87 +2,87 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	tracerexit "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/tracer"
-	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
-const exitTraceName = "trace_exit"
+const (
+	exitImageName = "ghcr.io/inspektor-gadget/gadget/exit:latest"
+	exitTraceName = "trace_exit"
+)
 
 var _ containerwatcher.TracerInterface = (*ExitTracer)(nil)
 
-// ExitTracer implements TracerInterface for exit events
+// ExitTracer implements TracerInterface for events
 type ExitTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
-	tracer              *tracerexit.Tracer
+	eventCallback containerwatcher.ResultCallback
+	gadgetCtx     *gadgetcontext.GadgetContext
+	kubeManager   operators.DataOperator
+	ociStore      *orasoci.ReadOnlyStore
+	runtime       runtime.Runtime
 }
 
-// NewExitTracer creates a new exit tracer
+// NewExitTracer creates a new tracer
 func NewExitTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	kubeManager operators.DataOperator,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
+	eventCallback containerwatcher.ResultCallback,
 ) *ExitTracer {
 	return &ExitTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
+		eventCallback: eventCallback,
+		kubeManager:   kubeManager,
+		ociStore:      ociStore,
+		runtime:       runtime,
 	}
 }
 
-// Start initializes and starts the exit tracer
+// Start initializes and starts the tracer
 func (et *ExitTracer) Start(ctx context.Context) error {
-	if err := et.tracerCollection.AddTracer(exitTraceName, et.containerSelector); err != nil {
-		return fmt.Errorf("adding exit tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	exitMountnsmap, err := et.tracerCollection.TracerMountNsMap(exitTraceName)
-	if err != nil {
-		return fmt.Errorf("getting exit mountnsmap: %w", err)
-	}
-
-	tracerExit, err := tracerexit.NewTracer(
-		&tracerexit.Config{MountnsMap: exitMountnsmap},
-		et.containerCollection,
-		et.exitEventCallback,
+	et.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		exitImageName,
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			et.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			et.eventOperator(),
+		),
+		gadgetcontext.WithName(exitTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(et.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating exit tracer: %w", err)
-	}
-
-	et.tracer = tracerExit
+	go func() {
+		err := et.runtime.RunGadget(et.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", et.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the exit tracer
+// Stop gracefully stops the tracer
 func (et *ExitTracer) Stop() error {
-	if et.tracer != nil {
-		et.tracer.Stop()
+	if et.gadgetCtx != nil {
+		et.gadgetCtx.Cancel()
 	}
-
-	if err := et.tracerCollection.RemoveTracer(exitTraceName); err != nil {
-		return fmt.Errorf("removing exit tracer: %w", err)
-	}
-
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (et *ExitTracer) GetName() string {
-	return "exit_tracer"
+	return exitTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -91,26 +91,38 @@ func (et *ExitTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (et *ExitTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		if config.DExit {
-			return false
-		}
-		return config.EnableRuntimeDetection || config.EnableApplicationProfile
+func (et *ExitTracer) IsEnabled(cfg config.Config) bool {
+	if cfg.DExit {
+		return false
 	}
-	return false
+	return cfg.EnableRuntimeDetection || cfg.EnableApplicationProfile
 }
 
-// exitEventCallback handles exit events from the tracer
-func (et *ExitTracer) exitEventCallback(event *tracerexittype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
+func (et *ExitTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.ExitEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					pooledData := utils.GetPooledDataItem(utils.ExitEventType).(*datasource.Edata)
+					data.DeepCopyInto(pooledData)
+					et.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.ExitEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
+}
 
+// callback handles events from the tracer
+func (et *ExitTracer) callback(event utils.ExitEvent) {
 	if et.eventCallback != nil {
 		// Extract container ID and process ID from the exit event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
+		containerID := event.GetContainerID()
+		processID := event.GetPID()
 
 		et.eventCallback(event, containerID, processID)
 	}

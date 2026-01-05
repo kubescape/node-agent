@@ -2,9 +2,8 @@ package metricsmanager
 
 import (
 	"sync/atomic"
+	"time"
 
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
-	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/goradd/maps"
@@ -17,6 +16,7 @@ type MetricsMock struct {
 	RuleProcessedCounter maps.SafeMap[string, int]
 	RuleAlertCounter     maps.SafeMap[string, int]
 	EventCounter         maps.SafeMap[utils.EventType, int]
+	RuleEvaluationTime   maps.SafeMap[string, time.Duration] // key: "ruleID:eventType"
 }
 
 func NewMetricsMock() *MetricsMock {
@@ -33,6 +33,7 @@ func (m *MetricsMock) Destroy() {
 	m.RuleProcessedCounter.Clear()
 	m.RuleAlertCounter.Clear()
 	m.EventCounter.Clear()
+	m.RuleEvaluationTime.Clear()
 }
 
 func (m *MetricsMock) ReportFailedEvent() {
@@ -51,8 +52,13 @@ func (m *MetricsMock) ReportRuleAlert(ruleID string) {
 	m.RuleAlertCounter.Set(ruleID, m.RuleAlertCounter.Get(ruleID)+1)
 }
 
-func (m *MetricsMock) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
+func (m *MetricsMock) ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration) {
+	key := ruleID + ":" + string(eventType)
+	m.RuleEvaluationTime.Set(key, duration)
 }
+
+//func (m *MetricsMock) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
+//}
 
 func (m *MetricsMock) ReportContainerStart() {}
 
