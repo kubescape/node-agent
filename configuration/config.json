@@ -95,5 +95,7 @@
         "exporters": {
           "stdoutExporter": true
         }
-      }
+      },
+      "hostSensorEnabled": true,
+      "hostSensorInterval": "1m"
     }
