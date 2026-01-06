@@ -70,7 +70,8 @@ func (ot *OpenTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.ebpf.paths": strconv.FormatBool(ot.cfg.EnableFullPathTracing),
+			"operator.oci.ebpf.paths":    strconv.FormatBool(ot.cfg.EnableFullPathTracing),
+			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
 		}
 		err := ot.runtime.RunGadget(ot.gadgetCtx, nil, params)
 		if err != nil {

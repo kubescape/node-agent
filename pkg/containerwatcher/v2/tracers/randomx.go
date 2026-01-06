@@ -65,7 +65,10 @@ func (rt *RandomXTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(rt.ociStore),
 	)
 	go func() {
-		err := rt.runtime.RunGadget(rt.gadgetCtx, nil, nil)
+		params := map[string]string{
+			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
+		}
+		err := rt.runtime.RunGadget(rt.gadgetCtx, nil, params)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", rt.gadgetCtx.Name()), helpers.Error(err))
 		}

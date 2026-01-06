@@ -68,6 +68,7 @@ func (st *SyscallTracer) Start(ctx context.Context) error {
 		params := map[string]string{
 			"operator.oci.ebpf.map-fetch-count":    "0",
 			"operator.oci.ebpf.map-fetch-interval": "30s",
+			"operator.LocalManager.host":           "true", // don't error if container-collection is nil when using local manager
 		}
 		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
 		if err != nil {
