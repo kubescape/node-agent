@@ -129,10 +129,6 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 
 // callback handles open events from the tracer
 func (ot *OpenTracer) callback(event utils.OpenEvent) {
-	if event.GetContainer() == "" {
-		return
-	}
-
 	errorRaw := event.GetError()
 	if errorRaw > -1 {
 		// Handle the event with syscall enrichment
