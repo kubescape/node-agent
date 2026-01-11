@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -12,6 +13,12 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/spf13/viper"
+)
+
+// Valid values for SeccompProfileBackend configuration
+const (
+	SeccompBackendStorage = "storage"
+	SeccompBackendCRD     = "crd"
 )
 
 const NodeNameEnvVar = "NODE_NAME"
@@ -59,6 +66,7 @@ type Config struct {
 	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
 	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
+	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
 	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
 	ExcludeLabels                  map[string][]string                  `mapstructure:"excludeLabels"`
@@ -169,6 +177,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ignoreRuleBindings", false)
 
 	viper.SetDefault("dnsCacheSize", 50000)
+	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
 	// HTTP Exporter Alert Bulking defaults
 	viper.SetDefault("exporters::httpExporterConfig::bulkMaxAlerts", 50)
@@ -201,7 +210,19 @@ func LoadConfig(path string) (Config, error) {
 
 	var config Config
 	err = viper.Unmarshal(&config)
-	return config, err
+	if err != nil {
+		return Config{}, err
+	}
+
+	// Validate seccompProfileBackend value
+	if config.SeccompProfileBackend != "" &&
+		config.SeccompProfileBackend != SeccompBackendStorage &&
+		config.SeccompProfileBackend != SeccompBackendCRD {
+		return Config{}, fmt.Errorf("invalid seccompProfileBackend value: %q (must be %q or %q)",
+			config.SeccompProfileBackend, SeccompBackendStorage, SeccompBackendCRD)
+	}
+
+	return config, nil
 }
 
 func (c *Config) IgnoreContainer(ns, podName string, labels map[string]string) bool {

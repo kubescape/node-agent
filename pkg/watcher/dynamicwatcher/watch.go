@@ -27,6 +27,7 @@ import (
 
 const (
 	kubescapeCustomResourceGroup = "spdx.softwarecomposition.kubescape.io"
+	kubescapeCRDGroup            = "kubescape.io"
 )
 
 // resourceVersionGetter is an interface used to get resource version from events.
@@ -90,10 +91,15 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	res := resource.GroupVersionResource()
 	opt := resource.ListOptions()
 
-	if res.Group == kubescapeCustomResourceGroup {
-		// If the storage client isn't available, don't attempt listing existing storage objects.
-		// This avoids noisy retry logs when storage is intentionally not configured.
-		if wh.storageClient == nil {
+	// List existing objects at startup for:
+	// 1. Storage resources (spdx.softwarecomposition.kubescape.io group)
+	// 2. SeccompProfiles in CRD mode (kubescape.io group)
+	needsExistingObjectListing := res.Group == kubescapeCustomResourceGroup ||
+		(res.Group == kubescapeCRDGroup && res.Resource == "seccompprofiles")
+
+	if needsExistingObjectListing {
+		// For storage backend, check if storage client is available
+		if res.Group == kubescapeCustomResourceGroup && wh.storageClient == nil {
 			// Informative log so operators know why existing storage objects are not being listed.
 			logger.L().Info("WatchHandler - storage client not available, skipping listing existing storage objects",
 				helpers.String("resource", res.String()))
@@ -108,10 +114,10 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 				}
 				return err
 			}, newBackOff(), func(err error, d time.Duration) {
-				logger.L().Debug("WatchHandler - get existing storage objects", helpers.Error(err),
+				logger.L().Debug("WatchHandler - get existing objects", helpers.Error(err),
 					helpers.String("retry in", d.String()))
 			}); err != nil {
-				return fmt.Errorf("giving up get existing storage objects: %w", err)
+				return fmt.Errorf("giving up get existing objects: %w", err)
 			}
 		}
 	}
@@ -166,6 +172,12 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 	case "rules":
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	case "seccompprofiles":
+		// Handle both storage (spdx.softwarecomposition.kubescape.io) and CRD (kubescape.io) modes
+		if res.Group == kubescapeCRDGroup {
+			// CRD mode - use dynamic client
+			return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
+		}
+		// Storage mode - use storage client
 		if wh.storageClient == nil {
 			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
 		}
@@ -214,8 +226,11 @@ func (wh *WatchHandler) watchRetry(_ context.Context, res schema.GroupVersionRes
 				return fmt.Errorf("watch error: %s", event.Object)
 			}
 			obj := event.Object.(metav1.Object)
-			// we don't want to skip kubescape.io resources (CRDs). @amirmalka @amitschendel
-			if res.Group != "kubescape.io" && wh.skipNamespaceFunc(obj.GetNamespace()) {
+			// Skip namespace filtering for kubescape.io CRDs (rules, operatorcommands) EXCEPT for
+			// seccompprofiles which should respect namespace filtering like storage resources.
+			// @amirmalka @amitschendel
+			skipNamespaceFiltering := res.Group == kubescapeCRDGroup && res.Resource != "seccompprofiles"
+			if !skipNamespaceFiltering && wh.skipNamespaceFunc(obj.GetNamespace()) {
 				continue
 			}
 			eventQueue.Enqueue(event, watcher.MakeEventKey(event))
@@ -254,6 +269,12 @@ func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav
 	case "runtimerulealertbindings":
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
 	case "seccompprofiles":
+		// Handle both storage (spdx.softwarecomposition.kubescape.io) and CRD (kubescape.io) modes
+		if res.Group == kubescapeCRDGroup {
+			// CRD mode - use dynamic client
+			return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
+		}
+		// Storage mode - use storage client
 		if wh.storageClient == nil {
 			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
 		}

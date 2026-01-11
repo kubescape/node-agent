@@ -188,7 +188,7 @@ func main() {
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SeccompManager", helpers.Error(err))
 		}
-		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(storageClient.GetStorageClient(), seccompManager)
+		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcherWithBackend(storageClient.GetStorageClient(), seccompManager, cfg.SeccompProfileBackend)
 		dWatcher.AddAdaptor(seccompWatcher)
 	} else {
 		seccompManager = seccompmanager.NewSeccompManagerMock()
