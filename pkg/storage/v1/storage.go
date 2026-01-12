@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -132,4 +133,14 @@ func getMultiplier() *int {
 		}
 	}
 	return nil
+}
+
+// CreateSeccompProfileClient creates the appropriate SeccompProfileClient based on config
+// For "crd" backend, uses the dynamic client to interact with kubescape.io/v1beta1 CRDs
+// For "storage" backend (default), uses the typed storage client for spdx.softwarecomposition.kubescape.io/v1beta1
+func CreateSeccompProfileClient(backend string, storageClient spdxv1beta1.SpdxV1beta1Interface, dynamicClient dynamic.Interface) storage.SeccompProfileClient {
+	if backend == config.SeccompBackendCRD {
+		return NewCRDSeccompProfileClient(dynamicClient)
+	}
+	return NewStorageSeccompProfileClient(storageClient)
 }

@@ -91,11 +91,8 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	res := resource.GroupVersionResource()
 	opt := resource.ListOptions()
 
-	// List existing objects at startup for:
-	// 1. Storage resources (spdx.softwarecomposition.kubescape.io group)
-	// 2. SeccompProfiles in CRD mode (kubescape.io group)
-	needsExistingObjectListing := res.Group == kubescapeCustomResourceGroup ||
-		(res.Group == kubescapeCRDGroup && res.Resource == "seccompprofiles")
+	// List existing objects at startup for storage resources (spdx.softwarecomposition.kubescape.io group)
+	needsExistingObjectListing := res.Group == kubescapeCustomResourceGroup
 
 	if needsExistingObjectListing {
 		// For storage backend, check if storage client is available
@@ -171,18 +168,6 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	case "rules":
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
-	case "seccompprofiles":
-		// Handle both storage (spdx.softwarecomposition.kubescape.io) and CRD (kubescape.io) modes
-		if res.Group == kubescapeCRDGroup {
-			// CRD mode - use dynamic client
-			return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
-		}
-		// Storage mode - use storage client
-		if wh.storageClient == nil {
-			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
-		}
-		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
-		return wh.storageClient.SeccompProfiles("").Watch(context.Background(), opts)
 	case "operatorcommands":
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	default:
@@ -226,10 +211,9 @@ func (wh *WatchHandler) watchRetry(_ context.Context, res schema.GroupVersionRes
 				return fmt.Errorf("watch error: %s", event.Object)
 			}
 			obj := event.Object.(metav1.Object)
-			// Skip namespace filtering for kubescape.io CRDs (rules, operatorcommands) EXCEPT for
-			// seccompprofiles which should respect namespace filtering like storage resources.
+			// Skip namespace filtering for kubescape.io CRDs (rules, operatorcommands)
 			// @amirmalka @amitschendel
-			skipNamespaceFiltering := res.Group == kubescapeCRDGroup && res.Resource != "seccompprofiles"
+			skipNamespaceFiltering := res.Group == kubescapeCRDGroup
 			if !skipNamespaceFiltering && wh.skipNamespaceFunc(obj.GetNamespace()) {
 				continue
 			}
@@ -268,18 +252,6 @@ func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav
 		return wh.k8sClient.GetKubernetesClient().CoreV1().Pods("").List(context.Background(), opts)
 	case "runtimerulealertbindings":
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
-	case "seccompprofiles":
-		// Handle both storage (spdx.softwarecomposition.kubescape.io) and CRD (kubescape.io) modes
-		if res.Group == kubescapeCRDGroup {
-			// CRD mode - use dynamic client
-			return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
-		}
-		// Storage mode - use storage client
-		if wh.storageClient == nil {
-			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
-		}
-		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
-		return wh.storageClient.SeccompProfiles("").List(context.Background(), opts)
 	case "operatorcommands":
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
 	default:

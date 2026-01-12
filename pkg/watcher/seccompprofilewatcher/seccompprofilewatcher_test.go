@@ -1,208 +1,227 @@
 package seccompprofilewatcher
 
 import (
+	"context"
+	"sync"
 	"testing"
+	"time"
 
-	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
+	"github.com/kubescape/node-agent/pkg/storage"
 	v1beta1api "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
-func TestNewSeccompProfileWatcherWithBackend_StorageBackend(t *testing.T) {
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), config.SeccompBackendStorage)
-
-	assert.NotNil(t, watcher)
-	assert.Equal(t, "spdx.softwarecomposition.kubescape.io", watcher.groupVersionResource.Group)
-	assert.Equal(t, "v1beta1", watcher.groupVersionResource.Version)
-	assert.Equal(t, "seccompprofiles", watcher.groupVersionResource.Resource)
-	assert.Equal(t, config.SeccompBackendStorage, watcher.backend)
+// trackingSeccompManagerMock tracks profiles for testing
+type trackingSeccompManagerMock struct {
+	mu       sync.Mutex
+	profiles map[string]*v1beta1api.SeccompProfile
 }
 
-func TestNewSeccompProfileWatcherWithBackend_CRDBackend(t *testing.T) {
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), config.SeccompBackendCRD)
+var _ seccompmanager.SeccompManagerClient = (*trackingSeccompManagerMock)(nil)
 
-	assert.NotNil(t, watcher)
-	assert.Equal(t, "kubescape.io", watcher.groupVersionResource.Group)
-	assert.Equal(t, "v1beta1", watcher.groupVersionResource.Version)
-	assert.Equal(t, "seccompprofiles", watcher.groupVersionResource.Resource)
-	assert.Equal(t, config.SeccompBackendCRD, watcher.backend)
+func newTrackingSeccompManagerMock() *trackingSeccompManagerMock {
+	return &trackingSeccompManagerMock{
+		profiles: make(map[string]*v1beta1api.SeccompProfile),
+	}
 }
 
-func TestNewSeccompProfileWatcherWithBackend_InvalidBackend(t *testing.T) {
-	// Invalid backend should default to storage
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), "invalid")
-
-	assert.NotNil(t, watcher)
-	assert.Equal(t, "spdx.softwarecomposition.kubescape.io", watcher.groupVersionResource.Group)
-	assert.Equal(t, "v1beta1", watcher.groupVersionResource.Version)
-	assert.Equal(t, "seccompprofiles", watcher.groupVersionResource.Resource)
-	// Backend is stored as-is (the config validation catches invalid values at load time)
-	assert.Equal(t, "invalid", watcher.backend)
+func (m *trackingSeccompManagerMock) AddSeccompProfile(profile *v1beta1api.SeccompProfile) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := profile.Namespace + "/" + profile.Name
+	m.profiles[key] = profile
+	return nil
 }
 
-func TestNewSeccompProfileWatcherWithBackend_EmptyBackend(t *testing.T) {
-	// Empty backend should default to storage
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), "")
-
-	assert.NotNil(t, watcher)
-	assert.Equal(t, "spdx.softwarecomposition.kubescape.io", watcher.groupVersionResource.Group)
-	assert.Equal(t, "v1beta1", watcher.groupVersionResource.Version)
-	assert.Equal(t, "seccompprofiles", watcher.groupVersionResource.Resource)
+func (m *trackingSeccompManagerMock) DeleteSeccompProfile(profile *v1beta1api.SeccompProfile) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := profile.Namespace + "/" + profile.Name
+	delete(m.profiles, key)
+	return nil
 }
 
-func TestNewSeccompProfileWatcher_DefaultsToStorage(t *testing.T) {
-	watcher := NewSeccompProfileWatcher(nil, seccompmanager.NewSeccompManagerMock())
-
-	assert.NotNil(t, watcher)
-	assert.Equal(t, "spdx.softwarecomposition.kubescape.io", watcher.groupVersionResource.Group)
-	assert.Equal(t, config.SeccompBackendStorage, watcher.backend)
+func (m *trackingSeccompManagerMock) GetSeccompProfile(_ string, _ *string) (v1beta1api.SingleSeccompProfile, error) {
+	return v1beta1api.SingleSeccompProfile{}, nil
 }
 
-func TestConvertToSeccompProfile_TypedObject(t *testing.T) {
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), config.SeccompBackendStorage)
+func (m *trackingSeccompManagerMock) GetProfileCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.profiles)
+}
 
-	typedProfile := &v1beta1api.SeccompProfile{
+func TestNewSeccompProfileWatcher(t *testing.T) {
+	mockClient := storage.NewSeccompProfileClientMock()
+	mockManager := newTrackingSeccompManagerMock()
+
+	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
+
+	assert.NotNil(t, watcher)
+	assert.NotNil(t, watcher.client)
+	assert.NotNil(t, watcher.seccompManager)
+	assert.NotNil(t, watcher.stopCh)
+}
+
+func TestSeccompProfileWatcher_HandleAdd(t *testing.T) {
+	mockClient := storage.NewSeccompProfileClientMock()
+	mockManager := newTrackingSeccompManagerMock()
+	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
+
+	profile := &v1beta1api.SeccompProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-profile",
 			Namespace: "test-namespace",
 		},
 		Spec: v1beta1api.SeccompProfileSpec{
 			Containers: []v1beta1api.SingleSeccompProfile{
-				{
-					Name: "container1",
-					Path: "/path/to/profile",
-				},
+				{Name: "container1"},
 			},
 		},
 	}
 
-	result, ok := watcher.convertToSeccompProfile(typedProfile)
+	ctx := context.Background()
+	watcher.handleAdd(ctx, profile)
 
-	assert.True(t, ok)
-	assert.NotNil(t, result)
-	assert.Equal(t, "test-profile", result.Name)
-	assert.Equal(t, "test-namespace", result.Namespace)
-	assert.Len(t, result.Spec.Containers, 1)
-	assert.Equal(t, "container1", result.Spec.Containers[0].Name)
+	// Verify the profile was added to the mock manager
+	assert.Equal(t, 1, mockManager.GetProfileCount())
 }
 
-func TestConvertToSeccompProfile_ValidUnstructuredObject(t *testing.T) {
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), config.SeccompBackendCRD)
+func TestSeccompProfileWatcher_HandleModify(t *testing.T) {
+	mockClient := storage.NewSeccompProfileClientMock()
+	mockManager := newTrackingSeccompManagerMock()
+	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
 
-	unstructuredProfile := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "kubescape.io/v1beta1",
-			"kind":       "SeccompProfile",
-			"metadata": map[string]interface{}{
-				"name":      "test-profile",
-				"namespace": "test-namespace",
+	profile := &v1beta1api.SeccompProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-profile",
+			Namespace: "test-namespace",
+		},
+	}
+
+	ctx := context.Background()
+	watcher.handleModify(ctx, profile)
+
+	// Modify also adds the profile
+	assert.Equal(t, 1, mockManager.GetProfileCount())
+}
+
+func TestSeccompProfileWatcher_HandleDelete(t *testing.T) {
+	mockClient := storage.NewSeccompProfileClientMock()
+	mockManager := newTrackingSeccompManagerMock()
+	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
+
+	profile := &v1beta1api.SeccompProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-profile",
+			Namespace: "test-namespace",
+		},
+	}
+
+	// First add the profile
+	ctx := context.Background()
+	watcher.handleAdd(ctx, profile)
+	assert.Equal(t, 1, mockManager.GetProfileCount())
+
+	// Then delete it
+	watcher.handleDelete(ctx, profile)
+	assert.Equal(t, 0, mockManager.GetProfileCount())
+}
+
+func TestSeccompProfileWatcher_ListExisting(t *testing.T) {
+	mockClient := storage.NewSeccompProfileClientMock()
+	mockManager := newTrackingSeccompManagerMock()
+	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
+
+	// Add some profiles to the mock client
+	mockClient.Profiles = []*v1beta1api.SeccompProfile{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "profile1",
+				Namespace: "ns1",
 			},
-			"spec": map[string]interface{}{
-				"containers": []interface{}{
-					map[string]interface{}{
-						"name": "container1",
-						"path": "/path/to/profile",
-						"spec": map[string]interface{}{
-							"defaultAction": "SCMP_ACT_ERRNO",
-						},
-					},
-				},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "profile2",
+				Namespace: "ns2",
 			},
 		},
 	}
 
-	result, ok := watcher.convertToSeccompProfile(unstructuredProfile)
+	ctx := context.Background()
+	err := watcher.listExisting(ctx)
 
-	assert.True(t, ok)
-	assert.NotNil(t, result)
-	assert.Equal(t, "test-profile", result.Name)
-	assert.Equal(t, "test-namespace", result.Namespace)
-	assert.Len(t, result.Spec.Containers, 1)
-	assert.Equal(t, "container1", result.Spec.Containers[0].Name)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, mockManager.GetProfileCount())
 }
 
-func TestConvertToSeccompProfile_MalformedUnstructuredObject(t *testing.T) {
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), config.SeccompBackendCRD)
+func TestSeccompProfileWatcher_ProcessEvents(t *testing.T) {
+	mockClient := storage.NewSeccompProfileClientMock()
+	mockManager := newTrackingSeccompManagerMock()
+	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
 
-	// Create a malformed unstructured object where spec.containers has invalid type
-	malformedProfile := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "kubescape.io/v1beta1",
-			"kind":       "SeccompProfile",
-			"metadata": map[string]interface{}{
-				"name":      "test-profile",
-				"namespace": "test-namespace",
-			},
-			"spec": map[string]interface{}{
-				// containers should be an array, but we give it a string
-				"containers": "invalid-type",
-			},
+	profile := &v1beta1api.SeccompProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "test-profile",
+			Namespace:       "test-namespace",
+			ResourceVersion: "123",
 		},
 	}
 
-	result, ok := watcher.convertToSeccompProfile(malformedProfile)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
 
-	assert.False(t, ok)
-	assert.Nil(t, result)
-}
-
-func TestConvertToSeccompProfile_NilObject(t *testing.T) {
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), config.SeccompBackendStorage)
-
-	// Test with nil which should return false
-	// Note: We can't directly pass unsupported types since convertToSeccompProfile expects runtime.Object
-	result, ok := watcher.convertToSeccompProfile(nil)
-
-	assert.False(t, ok)
-	assert.Nil(t, result)
-}
-
-func TestConvertToSeccompProfile_EmptyUnstructuredObject(t *testing.T) {
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), config.SeccompBackendCRD)
-
-	// Empty unstructured object should still convert (with empty fields)
-	emptyProfile := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"name":      "empty-profile",
-				"namespace": "test-namespace",
-			},
-		},
+	// Create a mock watch that will send events
+	mockWatch := &testWatch{
+		events: make(chan watch.Event, 3),
 	}
 
-	result, ok := watcher.convertToSeccompProfile(emptyProfile)
+	// Send add event
+	mockWatch.events <- watch.Event{
+		Type:   watch.Added,
+		Object: profile,
+	}
 
-	assert.True(t, ok)
-	assert.NotNil(t, result)
-	assert.Equal(t, "empty-profile", result.Name)
-	assert.Equal(t, "test-namespace", result.Namespace)
-	assert.Empty(t, result.Spec.Containers)
+	// Close the watch
+	close(mockWatch.events)
+
+	rv := watcher.processEvents(ctx, mockWatch)
+
+	assert.Equal(t, "123", rv)
+	assert.Equal(t, 1, mockManager.GetProfileCount())
 }
 
-func TestWatchResources_StorageBackend(t *testing.T) {
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), config.SeccompBackendStorage)
+func TestSeccompProfileWatcher_Stop(t *testing.T) {
+	mockClient := storage.NewSeccompProfileClientMock()
+	mockManager := newTrackingSeccompManagerMock()
+	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
 
-	resources := watcher.WatchResources()
+	// Should not panic
+	watcher.Stop()
 
-	assert.Len(t, resources, 1)
-	gvr := resources[0].GroupVersionResource()
-	assert.Equal(t, "spdx.softwarecomposition.kubescape.io", gvr.Group)
-	assert.Equal(t, "v1beta1", gvr.Version)
-	assert.Equal(t, "seccompprofiles", gvr.Resource)
+	// Channel should be closed
+	select {
+	case _, ok := <-watcher.stopCh:
+		assert.False(t, ok, "stopCh should be closed")
+	default:
+		t.Error("stopCh should be closed")
+	}
 }
 
-func TestWatchResources_CRDBackend(t *testing.T) {
-	watcher := NewSeccompProfileWatcherWithBackend(nil, seccompmanager.NewSeccompManagerMock(), config.SeccompBackendCRD)
-
-	resources := watcher.WatchResources()
-
-	assert.Len(t, resources, 1)
-	gvr := resources[0].GroupVersionResource()
-	assert.Equal(t, "kubescape.io", gvr.Group)
-	assert.Equal(t, "v1beta1", gvr.Version)
-	assert.Equal(t, "seccompprofiles", gvr.Resource)
+// testWatch is a simple test implementation of watch.Interface
+type testWatch struct {
+	events  chan watch.Event
+	stopped bool
 }
 
+func (w *testWatch) Stop() {
+	w.stopped = true
+}
+
+func (w *testWatch) ResultChan() <-chan watch.Event {
+	return w.events
+}

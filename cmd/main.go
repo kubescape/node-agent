@@ -183,13 +183,16 @@ func main() {
 
 	// Create the seccomp manager
 	var seccompManager seccompmanager.SeccompManagerClient
+	var seccompWatcher seccompprofilewatcher.SeccompProfileWatcher
 	if cfg.EnableSeccomp {
 		seccompManager, err = seccompmanagerv1.NewSeccompManager()
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SeccompManager", helpers.Error(err))
 		}
-		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcherWithBackend(storageClient.GetStorageClient(), seccompManager, cfg.SeccompProfileBackend)
-		dWatcher.AddAdaptor(seccompWatcher)
+		// Create SeccompProfile client based on configured backend
+		seccompClient := storage.CreateSeccompProfileClient(cfg.SeccompProfileBackend, storageClient.GetStorageClient(), k8sClient.GetDynamicClient())
+		seccompWatcher = seccompprofilewatcher.NewSeccompProfileWatcher(seccompClient, seccompManager)
+		seccompWatcher.Start(ctx)
 	} else {
 		seccompManager = seccompmanager.NewSeccompManagerMock()
 	}

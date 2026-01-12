@@ -33,12 +33,22 @@ SeccompProfile resources can be stored in two different backends:
 │                         │     │ (file-based backend)    │
 └─────────────────────────┘     └─────────────────────────┘
               │                               │
+              ▼                               ▼
+┌─────────────────────────┐     ┌─────────────────────────┐
+│  CRDSeccompClient       │     │  StorageSeccompClient   │
+│  (dynamic client)       │     │  (typed storage client) │
+└─────────────────────────┘     └─────────────────────────┘
               └───────────────┬───────────────┘
                               ▼
               ┌───────────────────────────────┐
-              │         Node Agent            │
+              │    SeccompProfileClient       │
+              │    (interface)                │
+              └───────────────────────────────┘
+                              │
+                              ▼
+              ┌───────────────────────────────┐
               │   SeccompProfileWatcher       │
-              │   (handles both backends)     │
+              │   (backend-agnostic)          │
               └───────────────────────────────┘
 ```
 
@@ -92,19 +102,30 @@ When `seccompProfileBackend: storage` (default):
 
 ### Node-Agent
 
-The `SeccompProfileWatcher` automatically adapts to the configured backend:
+The `SeccompProfileWatcher` is backend-agnostic, using the `SeccompProfileClient` interface:
 
 ```go
-// Storage mode: watches spdx.softwarecomposition.kubescape.io/v1beta1
-// CRD mode: watches kubescape.io/v1beta1
-seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcherWithBackend(
-    storageClient,
-    seccompManager,
+// SeccompProfileClient interface abstracts the backend
+type SeccompProfileClient interface {
+    WatchSeccompProfiles(namespace string, opts metav1.ListOptions) (watch.Interface, error)
+    ListSeccompProfiles(namespace string, opts metav1.ListOptions) (*v1beta1.SeccompProfileList, error)
+    GetSeccompProfile(namespace, name string) (*v1beta1.SeccompProfile, error)
+}
+
+// Factory creates the appropriate implementation based on config
+seccompClient := storage.CreateSeccompProfileClient(
     cfg.SeccompProfileBackend,
+    storageClient.GetStorageClient(),
+    k8sClient.GetDynamicClient(),
 )
+
+// Watcher uses the interface - doesn't know which backend is used
+seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(seccompClient, seccompManager)
 ```
 
-The watcher handles both typed objects (from storage client) and unstructured objects (from dynamic client for CRD mode).
+Two implementations of `SeccompProfileClient` exist:
+- `StorageSeccompProfileClient`: Uses the typed storage client for `spdx.softwarecomposition.kubescape.io/v1beta1`
+- `CRDSeccompProfileClient`: Uses the dynamic client for `kubescape.io/v1beta1`, converting unstructured objects internally
 
 ### Synchronizer
 
@@ -197,7 +218,9 @@ For most installations, **avoid switching backends after initial deployment**. C
 | Storage | `pkg/config/config.go` | Added `DisableSeccompProfileEndpoint` |
 | Storage | `pkg/apiserver/apiserver.go` | Conditional endpoint registration |
 | Node-Agent | `pkg/config/config.go` | Added `SeccompProfileBackend` |
-| Node-Agent | `pkg/watcher/seccompprofilewatcher/` | Backend-aware watcher |
-| Node-Agent | `pkg/watcher/dynamicwatcher/watch.go` | Handles both API groups |
-| Node-Agent | `cmd/main.go` | Uses backend config |
-
+| Node-Agent | `pkg/storage/storage_interface.go` | `SeccompProfileClient` interface |
+| Node-Agent | `pkg/storage/v1/seccompprofile.go` | Storage backend implementation |
+| Node-Agent | `pkg/storage/v1/seccompprofile_crd.go` | CRD backend implementation |
+| Node-Agent | `pkg/storage/v1/storage.go` | Factory function |
+| Node-Agent | `pkg/watcher/seccompprofilewatcher/` | Backend-agnostic watcher |
+| Node-Agent | `cmd/main.go` | Uses `SeccompProfileClient` factory |

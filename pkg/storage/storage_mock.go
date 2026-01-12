@@ -4,6 +4,8 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 const (
@@ -63,4 +65,69 @@ func (sc *StorageHttpClientMock) ListNetworkNeighborhoods(namespace string, limi
 func (sc *StorageHttpClientMock) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	sc.SyftSBOMs = append(sc.SyftSBOMs, SBOM)
 	return SBOM, nil
+}
+
+// SeccompProfileClientMock is a mock implementation of SeccompProfileClient for testing
+type SeccompProfileClientMock struct {
+	Profiles      []*v1beta1.SeccompProfile
+	WatchEvents   chan watch.Event
+	WatchStopped  bool
+	GetError      error
+	ListError     error
+	WatchError    error
+}
+
+var _ SeccompProfileClient = (*SeccompProfileClientMock)(nil)
+
+func NewSeccompProfileClientMock() *SeccompProfileClientMock {
+	return &SeccompProfileClientMock{
+		Profiles:    make([]*v1beta1.SeccompProfile, 0),
+		WatchEvents: make(chan watch.Event, 100),
+	}
+}
+
+func (m *SeccompProfileClientMock) WatchSeccompProfiles(_ string, _ metav1.ListOptions) (watch.Interface, error) {
+	if m.WatchError != nil {
+		return nil, m.WatchError
+	}
+	return &mockWatch{events: m.WatchEvents, stopped: &m.WatchStopped}, nil
+}
+
+func (m *SeccompProfileClientMock) ListSeccompProfiles(_ string, _ metav1.ListOptions) (*v1beta1.SeccompProfileList, error) {
+	if m.ListError != nil {
+		return nil, m.ListError
+	}
+	items := make([]v1beta1.SeccompProfile, 0, len(m.Profiles))
+	for _, p := range m.Profiles {
+		if p != nil {
+			items = append(items, *p)
+		}
+	}
+	return &v1beta1.SeccompProfileList{Items: items}, nil
+}
+
+func (m *SeccompProfileClientMock) GetSeccompProfile(namespace, name string) (*v1beta1.SeccompProfile, error) {
+	if m.GetError != nil {
+		return nil, m.GetError
+	}
+	for _, p := range m.Profiles {
+		if p != nil && p.Namespace == namespace && p.Name == name {
+			return p, nil
+		}
+	}
+	return nil, nil
+}
+
+// mockWatch implements watch.Interface for testing
+type mockWatch struct {
+	events  chan watch.Event
+	stopped *bool
+}
+
+func (m *mockWatch) Stop() {
+	*m.stopped = true
+}
+
+func (m *mockWatch) ResultChan() <-chan watch.Event {
+	return m.events
 }
