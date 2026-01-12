@@ -14,6 +14,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/contextdetection"
+	"github.com/kubescape/node-agent/pkg/contextdetection/detectors"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/exporters"
@@ -57,6 +59,8 @@ type RuleManager struct {
 	adapterFactory       *ruleadapters.EventRuleAdapterFactory
 	ruleFailureCreator   ruleadapters.RuleFailureCreatorInterface
 	rulePolicyValidator  *RulePolicyValidator
+	mntnsRegistry        *contextdetection.MntnsRegistry
+	detectorManager      *detectors.DetectorManager
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -75,9 +79,13 @@ func CreateRuleManager(
 	ruleCooldown *rulecooldown.RuleCooldown,
 	adapterFactory *ruleadapters.EventRuleAdapterFactory,
 	celEvaluator cel.CELRuleEvaluator,
+	mntnsRegistry *contextdetection.MntnsRegistry,
 ) (*RuleManager, error) {
 	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory)
 	rulePolicyValidator := NewRulePolicyValidator(objectCache)
+
+	// Create a detector manager for context detection
+	detectorManager := detectors.NewDetectorManager(mntnsRegistry)
 
 	r := &RuleManager{
 		cfg:                 cfg,
@@ -95,6 +103,8 @@ func CreateRuleManager(
 		celEvaluator:        celEvaluator,
 		ruleFailureCreator:  ruleFailureCreator,
 		rulePolicyValidator: rulePolicyValidator,
+		mntnsRegistry:       mntnsRegistry,
+		detectorManager:     detectorManager,
 	}
 
 	return r, nil
@@ -125,20 +135,49 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
+	// Enrich event with source context and mount namespace ID for context-aware rule evaluation
+	rm.enrichEventWithContext(enrichedEvent)
+
 	var profileExists bool
+	var details string
 	namespace := enrichedEvent.Event.GetNamespace()
 	pod := enrichedEvent.Event.GetPod()
-	podId := utils.CreateK8sPodID(namespace, pod)
-	details, ok := rm.podToWlid.Load(podId)
-	if !ok {
-		return
+
+	// Determine workload ID based on context type
+	isK8sContext := enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes
+
+	if isK8sContext {
+		// K8s context: use pod-based workload ID from cache
+		if pod == "" || namespace == "" {
+			return
+		}
+		podId := utils.CreateK8sPodID(namespace, pod)
+		var ok bool
+		details, ok = rm.podToWlid.Load(podId)
+		if !ok {
+			return
+		}
+	} else {
+		// Host or Standalone context: use SourceContext.WorkloadID()
+		if enrichedEvent.SourceContext == nil {
+			return
+		}
+		details = enrichedEvent.SourceContext.WorkloadID()
+		if details == "" {
+			return
+		}
 	}
 
-	if pod == "" || namespace == "" {
-		return
+	// Retrieve rules based on context: K8s uses pod-based bindings, non-K8s uses all rules
+	var rules []typesv1.Rule
+	if enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes {
+		// K8s context: use pod-based rule bindings
+		rules = rm.ruleBindingCache.ListRulesForPod(namespace, pod)
+	} else {
+		// Host or Standalone context: retrieve all rules (rule filtering deferred to future phases)
+		rules = rm.ruleBindingCache.GetRuleCreator().CreateAllRules()
 	}
 
-	rules := rm.ruleBindingCache.ListRulesForPod(namespace, pod)
 	if len(rules) == 0 {
 		return
 	}
@@ -155,7 +194,9 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		if !rule.Enabled {
 			continue
 		}
-		if !profileExists && rule.ProfileDependency == armotypes.Required {
+		// Skip profile dependency checks for non-K8s contexts (profiles are K8s-specific)
+		// Only K8s contexts should enforce profile dependencies
+		if isK8sContext && !profileExists && rule.ProfileDependency == armotypes.Required {
 			continue
 		}
 
@@ -208,6 +249,25 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			rm.exporter.SendRuleAlert(ruleFailure)
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name)
+	}
+}
+
+func (rm *RuleManager) enrichEventWithContext(enrichedEvent *events.EnrichedEvent) {
+	// Extract mount namespace ID from the event
+	mntnsID := uint64(0)
+	if enrichEvent, ok := enrichedEvent.Event.(utils.EnrichEvent); ok {
+		mntnsID = enrichEvent.GetMountNsID()
+	}
+	enrichedEvent.MountNamespaceID = mntnsID
+
+	// Look up context information for this mount namespace
+	if mntnsID > 0 {
+		if contextInfo, found := rm.mntnsRegistry.Lookup(mntnsID); found {
+			enrichedEvent.SourceContext = contextInfo
+			logger.L().Debug("RuleManager - enriched event with context",
+				helpers.String("mntns", fmt.Sprintf("%d", mntnsID)),
+				helpers.String("context", string(contextInfo.Context())))
+		}
 	}
 }
 
