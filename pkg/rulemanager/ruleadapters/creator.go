@@ -325,7 +325,7 @@ func (r *RuleFailureCreator) setContextSpecificFields(ruleFailure *types.Generic
 		}
 
 	case contextdetection.Standalone:
-		ruleFailure.SetSourceContext("docker")
+		ruleFailure.SetSourceContext("standalone")
 		// For Standalone context, populate container-specific fields in RuntimeAlertK8sDetails
 		if k8sDetails.ContainerID == "" {
 			k8sDetails.ContainerID = enrichedEvent.ContainerID
