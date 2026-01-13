@@ -3,6 +3,7 @@ package ruleadapters
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/node-agent/pkg/contextdetection"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -87,6 +89,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	r.setRuntimeAlertK8sDetails(ruleFailure, objectCache)
 	r.setCloudServices(ruleFailure)
 	r.setProfileMetadata(rule, ruleFailure, objectCache)
+	r.setContextSpecificFields(ruleFailure, enrichedEvent)
 	r.enrichRuleFailure(ruleFailure)
 
 	if enrichedEvent.ProcessTree.PID != 0 {
@@ -296,4 +299,45 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 	}
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
+}
+
+func (r *RuleFailureCreator) setContextSpecificFields(ruleFailure *types.GenericRuleFailure, enrichedEvent *events.EnrichedEvent) {
+	// If no source context is available, default to Kubernetes (backward compatible)
+	if enrichedEvent.SourceContext == nil {
+		ruleFailure.SetSourceContext("kubernetes")
+		return
+	}
+
+	sourceContextType := enrichedEvent.SourceContext.Context()
+	k8sDetails := ruleFailure.GetRuntimeAlertK8sDetails()
+
+	switch sourceContextType {
+	case contextdetection.Kubernetes:
+		ruleFailure.SetSourceContext("kubernetes")
+		// K8s alerts use existing K8s details populated by setRuntimeAlertK8sDetails
+
+	case contextdetection.Host:
+		ruleFailure.SetSourceContext("host")
+		// For Host context, use NodeName to store the hostname
+		hostname, err := os.Hostname()
+		if err == nil {
+			k8sDetails.NodeName = hostname
+		}
+
+	case contextdetection.Standalone:
+		ruleFailure.SetSourceContext("docker")
+		// For Standalone context, populate container-specific fields in RuntimeAlertK8sDetails
+		if k8sDetails.ContainerID == "" {
+			k8sDetails.ContainerID = enrichedEvent.ContainerID
+		}
+		if k8sDetails.Image == "" {
+			k8sDetails.Image = ruleFailure.GetTriggerEvent().GetContainerImage()
+		}
+		// Use container name from trigger event if available
+		if k8sDetails.ContainerName == "" {
+			k8sDetails.ContainerName = ruleFailure.GetTriggerEvent().GetContainer()
+		}
+	}
+
+	ruleFailure.SetRuntimeAlertK8sDetails(k8sDetails)
 }

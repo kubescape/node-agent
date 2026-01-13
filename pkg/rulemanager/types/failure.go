@@ -11,6 +11,29 @@ const (
 	NetworkProfile     = "networkprofile"
 )
 
+// HostDetails contains metadata for Host context alerts.
+// Used when a rule is triggered from the Host execution context (non-containerized).
+// Provides system-level information to identify and contextualize host-level threats.
+type HostDetails struct {
+	Hostname      string
+	HostIP        string
+	OS            string
+	OSVersion     string
+	KernelVersion string
+}
+
+// DockerDetails contains metadata for Standalone/Docker container context alerts.
+// Used when a rule is triggered from a standalone (non-Kubernetes) container.
+// Provides container-level information to identify and contextualize container-specific threats.
+type DockerDetails struct {
+	ContainerID   string
+	ContainerName string
+	ImageID       string
+	ImageName     string
+	ImageTag      string
+	NetworkMode   string
+}
+
 type GenericRuleFailure struct {
 	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
 	AlertType              apitypes.AlertType
@@ -24,6 +47,8 @@ type GenericRuleFailure struct {
 	HttpRuleAlert          apitypes.HttpRuleAlert
 	Extra                  interface{}
 	IsTriggerAlert         bool
+	// SourceContext identifies the execution context: "kubernetes", "host", "docker"
+	SourceContext string
 }
 
 type RuleFailure interface {
@@ -49,6 +74,8 @@ type RuleFailure interface {
 	GetAlertPlatform() apitypes.AlertSourcePlatform
 	// Get Extra
 	GetExtra() interface{}
+	// Get Source Context
+	GetSourceContext() string
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)
@@ -74,6 +101,8 @@ type RuleFailure interface {
 	GetIsTriggerAlert() bool
 	// Set IsTriggerAlert
 	SetIsTriggerAlert(isTriggerAlert bool)
+	// Set Source Context
+	SetSourceContext(sourceContext string)
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -174,4 +203,12 @@ func (rule *GenericRuleFailure) GetIsTriggerAlert() bool {
 
 func (rule *GenericRuleFailure) SetIsTriggerAlert(isTriggerAlert bool) {
 	rule.IsTriggerAlert = isTriggerAlert
+}
+
+func (rule *GenericRuleFailure) GetSourceContext() string {
+	return rule.SourceContext
+}
+
+func (rule *GenericRuleFailure) SetSourceContext(sourceContext string) {
+	rule.SourceContext = sourceContext
 }
