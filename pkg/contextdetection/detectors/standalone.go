@@ -14,12 +14,6 @@ func (s *StandaloneContextInfo) Context() contextdetection.EventSourceContext {
 	return contextdetection.Standalone
 }
 
-// WorkloadID returns a unique identifier for standalone containers.
-// Format priority:
-// 1. "name:containerID" if both name and ID are available
-// 2. containerName if ID is empty
-// 3. containerID if name is empty
-// This identifier is deterministic and unique within standalone contexts.
 func (s *StandaloneContextInfo) WorkloadID() string {
 	if s.ContainerID == "" {
 		return s.ContainerName

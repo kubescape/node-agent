@@ -44,7 +44,6 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 		currentContext = string(contextInfo.Context())
 	}
 
-	// Try ExecutionContexts field first (preferred method)
 	if len(rule.ExecutionContexts) > 0 {
 		for _, ctx := range rule.ExecutionContexts {
 			if ctx == currentContext {

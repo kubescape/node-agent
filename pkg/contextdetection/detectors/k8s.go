@@ -18,8 +18,6 @@ func (k *K8sContextInfo) Context() contextdetection.EventSourceContext {
 	return contextdetection.Kubernetes
 }
 
-// WorkloadID returns the Kubernetes workload identifier in the format "namespace/podname".
-// This format is standardized and deterministic within Kubernetes contexts.
 func (k *K8sContextInfo) WorkloadID() string {
 	return fmt.Sprintf("%s/%s", k.Namespace, k.PodName)
 }

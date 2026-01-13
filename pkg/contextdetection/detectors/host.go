@@ -15,9 +15,6 @@ func (h *HostContextInfo) Context() contextdetection.EventSourceContext {
 	return contextdetection.Host
 }
 
-// WorkloadID returns the hostname as the workload identifier for host contexts.
-// Returns the system hostname if available, or "host" as a fallback.
-// This identifier is unique and deterministic within host contexts.
 func (h *HostContextInfo) WorkloadID() string {
 	if h.HostName != "" {
 		return h.HostName
