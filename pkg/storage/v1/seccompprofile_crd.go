@@ -14,7 +14,7 @@ import (
 
 var seccompProfileCRDGVR = schema.GroupVersionResource{
 	Group:    "kubescape.io",
-	Version:  "v1beta1",
+	Version:  "v1",
 	Resource: "seccompprofiles",
 }
 

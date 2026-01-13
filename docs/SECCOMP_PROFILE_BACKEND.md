@@ -8,7 +8,7 @@ SeccompProfile resources can be stored in two different backends:
 
 | Backend | API Group | Storage | Use Case |
 |---------|-----------|---------|----------|
-| `crd` (default) | `kubescape.io/v1beta1` | Native Kubernetes CRD (etcd) | Standard installations |
+| `crd` (default) | `kubescape.io/v1` | Native Kubernetes CRD (etcd) | Standard installations |
 | `storage` | `spdx.softwarecomposition.kubescape.io/v1beta1` | Aggregated API Server (file-based) | Legacy installations |
 
 ## Architecture
@@ -61,7 +61,7 @@ If we created a CRD in the same group:
 2. All requests would still go to the aggregated API server
 3. The CRD would be effectively "shadowed"
 
-By using `kubescape.io/v1beta1` for the CRD:
+By using `kubescape.io/v1` for the CRD:
 - No APIService claims this group
 - The CRD is served directly by the Kubernetes API server
 - No conflict with the storage component
@@ -125,7 +125,7 @@ seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(seccompClient, 
 
 Two implementations of `SeccompProfileClient` exist:
 - `StorageSeccompProfileClient`: Uses the typed storage client for `spdx.softwarecomposition.kubescape.io/v1beta1`
-- `CRDSeccompProfileClient`: Uses the dynamic client for `kubescape.io/v1beta1`, converting unstructured objects internally
+- `CRDSeccompProfileClient`: Uses the dynamic client for `kubescape.io/v1`, converting unstructured objects internally
 
 ### Synchronizer
 
@@ -133,7 +133,7 @@ When `manageWorkloads` is enabled, the synchronizer is responsible for **creatin
 
 1. Receives SeccompProfile definitions from the ARMO cloud backend
 2. Creates/updates SeccompProfile resources in the cluster using the appropriate API group based on the backend configuration
-3. In CRD mode, writes to `kubescape.io/v1beta1` SeccompProfiles
+3. In CRD mode, writes to `kubescape.io/v1` SeccompProfiles
 4. In storage mode, writes to `spdx.softwarecomposition.kubescape.io/v1beta1` SeccompProfiles
 
 **Note:** When the storage endpoint is disabled (`seccompProfileBackend: crd`), the synchronizer must be configured to write to the CRD backend. The synchronizer's ConfigMap automatically uses the correct API group based on the `seccompProfileBackend` setting.
