@@ -88,23 +88,23 @@ func CreateRuleManager(
 	detectorManager := detectors.NewDetectorManager(mntnsRegistry)
 
 	r := &RuleManager{
-		cfg:                  cfg,
-		ctx:                  ctx,
-		k8sClient:            k8sClient,
-		trackedContainers:    mapset.NewSet[string](),
-		ruleBindingCache:     ruleBindingCache,
-		objectCache:          objectCache,
-		exporter:             exporter,
-		metrics:              metrics,
-		adapterFactory:       adapterFactory,
-		enricher:             enricher,
-		processManager:       processManager,
-		ruleCooldown:         ruleCooldown,
-		celEvaluator:         celEvaluator,
-		ruleFailureCreator:   ruleFailureCreator,
-		rulePolicyValidator:  rulePolicyValidator,
-		mntnsRegistry:        mntnsRegistry,
-		detectorManager:      detectorManager,
+		cfg:                 cfg,
+		ctx:                 ctx,
+		k8sClient:           k8sClient,
+		trackedContainers:   mapset.NewSet[string](),
+		ruleBindingCache:    ruleBindingCache,
+		objectCache:         objectCache,
+		exporter:            exporter,
+		metrics:             metrics,
+		adapterFactory:      adapterFactory,
+		enricher:            enricher,
+		processManager:      processManager,
+		ruleCooldown:        ruleCooldown,
+		celEvaluator:        celEvaluator,
+		ruleFailureCreator:  ruleFailureCreator,
+		rulePolicyValidator: rulePolicyValidator,
+		mntnsRegistry:       mntnsRegistry,
+		detectorManager:     detectorManager,
 	}
 
 	return r, nil
@@ -190,14 +190,12 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	profileExists = err == nil
 
 	eventType := enrichedEvent.Event.GetEventType()
-	// Get current context string for filtering
-	contextStr := eventSourceContextToString(enrichedEvent.SourceContext)
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
 		}
 		// Apply context-based filtering: rules only execute in declared contexts
-		if !RuleAppliesToContext(&rule, contextStr) {
+		if !RuleAppliesToContext(&rule, enrichedEvent.SourceContext) {
 			continue
 		}
 		// Skip profile dependency checks for non-K8s contexts (profiles are K8s-specific)
@@ -428,15 +426,6 @@ func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent
 
 		return message, uniqueID, err
 	}
-}
-
-// eventSourceContextToString converts EventSourceContext to its string representation
-func eventSourceContextToString(contextInfo contextdetection.ContextInfo) string {
-	if contextInfo == nil {
-		// Default to kubernetes when no context info is available
-		return "kubernetes"
-	}
-	return string(contextInfo.Context())
 }
 
 func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEvent) bool {
