@@ -11,6 +11,29 @@ const (
 	NetworkProfile     = "networkprofile"
 )
 
+// HostDetails contains metadata for Host context alerts.
+// Used when a rule is triggered from the Host execution context (non-containerized).
+// Provides system-level information to identify and contextualize host-level threats.
+type HostDetails struct {
+	Hostname      string
+	HostIP        string
+	OS            string
+	OSVersion     string
+	KernelVersion string
+}
+
+// DockerDetails contains metadata for Standalone/Docker container context alerts.
+// Used when a rule is triggered from a standalone (non-Kubernetes) container.
+// Provides container-level information to identify and contextualize container-specific threats.
+type DockerDetails struct {
+	ContainerID   string
+	ContainerName string
+	ImageID       string
+	ImageName     string
+	ImageTag      string
+	NetworkMode   string
+}
+
 type GenericRuleFailure struct {
 	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
 	AlertType              apitypes.AlertType
@@ -23,6 +46,8 @@ type GenericRuleFailure struct {
 	CloudServices          []string
 	HttpRuleAlert          apitypes.HttpRuleAlert
 	Extra                  interface{}
+	// SourceContext identifies the execution context: "kubernetes", "host", "docker"
+	SourceContext string
 }
 
 type RuleFailure interface {
@@ -48,6 +73,8 @@ type RuleFailure interface {
 	GetAlertPlatform() apitypes.AlertSourcePlatform
 	// Get Extra
 	GetExtra() interface{}
+	// Get Source Context
+	GetSourceContext() string
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)
@@ -69,6 +96,8 @@ type RuleFailure interface {
 	SetHttpRuleAlert(httpRuleAlert apitypes.HttpRuleAlert)
 	// Set Extra
 	SetExtra(extra interface{})
+	// Set Source Context
+	SetSourceContext(sourceContext string)
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -161,4 +190,12 @@ func (rule *GenericRuleFailure) SetHttpRuleAlert(httpRuleAlert apitypes.HttpRule
 
 func (rule *GenericRuleFailure) SetExtra(extra interface{}) {
 	rule.Extra = extra
+}
+
+func (rule *GenericRuleFailure) GetSourceContext() string {
+	return rule.SourceContext
+}
+
+func (rule *GenericRuleFailure) SetSourceContext(sourceContext string) {
+	rule.SourceContext = sourceContext
 }
