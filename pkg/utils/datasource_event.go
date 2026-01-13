@@ -88,7 +88,12 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 	}
 	accessor, loaded := cache.(*sync.Map).Load(fieldName)
 	if !loaded {
-		accessor, _ = cache.(*sync.Map).LoadOrStore(fieldName, e.Datasource.GetField(fieldName))
+		field := e.Datasource.GetField(fieldName)
+		accessor, _ = cache.(*sync.Map).LoadOrStore(fieldName, field)
+	}
+	// Handle case where field doesn't exist (returns nil)
+	if accessor == nil {
+		return nil
 	}
 	return accessor.(datasource.FieldAccessor)
 }
@@ -400,7 +405,11 @@ func (e *DatasourceEvent) GetModule() string {
 }
 
 func (e *DatasourceEvent) GetMountNsID() uint64 {
-	mountNsID, _ := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
+	accessor := e.getFieldAccessor("proc.mntns_id")
+	if accessor == nil {
+		return 0
+	}
+	mountNsID, _ := accessor.Uint64(e.Data)
 	return mountNsID
 }
 
