@@ -147,7 +147,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	isK8sContext := enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes
 
 	if isK8sContext {
-		// K8s context: use pod-based workload ID from cache
 		if pod == "" || namespace == "" {
 			return
 		}
@@ -171,7 +170,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	// Retrieve rules based on context: K8s uses pod-based bindings, non-K8s uses all rules
 	var rules []typesv1.Rule
 	if enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes {
-		// K8s context: use pod-based rule bindings
 		rules = rm.ruleBindingCache.ListRulesForPod(namespace, pod)
 	} else {
 		// Host or Standalone context: retrieve all rules (rule filtering deferred to future phases)
@@ -194,7 +192,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		if !rule.Enabled {
 			continue
 		}
-		// Apply context-based filtering: rules only execute in declared contexts
 		if !RuleAppliesToContext(&rule, enrichedEvent.SourceContext) {
 			continue
 		}
