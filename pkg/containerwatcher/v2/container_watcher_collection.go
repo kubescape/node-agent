@@ -3,8 +3,10 @@ package containerwatcher
 import (
 	"context"
 	"fmt"
+	"syscall"
 	"time"
 
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
@@ -104,6 +106,27 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 	}
 	logger.L().Info("ContainerManager - container collection initialized successfully")
 
+	// Create virtual host container if host monitoring enabled
+	if cw.cfg.HostMonitoringEnabled {
+		virtualHostContainer, err := getHostAsContainer()
+		if err != nil {
+			logger.L().Warning("ContainerManager - failed to create virtual host container",
+				helpers.Error(err))
+		} else {
+			cw.containerCollection.AddContainer(virtualHostContainer)
+
+			// Manually trigger callbacks to ensure context detection runs
+			cw.containerCallback(containercollection.PubSubEvent{
+				Type:      containercollection.EventTypeAddContainer,
+				Container: virtualHostContainer,
+			})
+
+			logger.L().Info("ContainerManager - virtual host container created",
+				helpers.String("mntns", fmt.Sprintf("%d", virtualHostContainer.Mntns)),
+				helpers.String("pid", fmt.Sprintf("%d", virtualHostContainer.Runtime.ContainerPID)))
+		}
+	}
+
 	// Start monitoring for rule bindings notifications
 	go cw.startRunningContainers()
 
@@ -147,4 +170,28 @@ func (cw *ContainerWatcher) addRunningContainers(notf *rulebindingmanager.RuleBi
 	case rulebindingmanager.Removed:
 		cw.ruleManagedPods.Remove(k8sPodID)
 	}
+}
+
+// getHostAsContainer creates a synthetic container representing the host's mount namespace.
+// This enables host-level events to be processed through the standard container infrastructure.
+func getHostAsContainer() (*containercollection.Container, error) {
+	pidOne := 1
+
+	// Get the mount namespace ID for PID 1 (init process)
+	// This is done by reading the inode of /proc/1/ns/mnt
+	mntnsPath := fmt.Sprintf("/proc/%d/ns/mnt", pidOne)
+
+	var statData syscall.Stat_t
+	if err := syscall.Stat(mntnsPath, &statData); err != nil {
+		return nil, fmt.Errorf("getting mount namespace for host PID %d: %w", pidOne, err)
+	}
+
+	return &containercollection.Container{
+		Runtime: containercollection.RuntimeMetadata{
+			BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+				ContainerPID: uint32(pidOne),
+			},
+		},
+		Mntns: statData.Ino,
+	}, nil
 }
