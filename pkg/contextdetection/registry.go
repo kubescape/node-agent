@@ -13,11 +13,28 @@ var (
 	ErrInvalidMntns = errors.New("invalid mount namespace ID: cannot be zero")
 )
 
+// Registry defines the interface for managing mount namespace to context mappings.
+type Registry interface {
+	// Register adds or updates a mount namespace entry in the registry.
+	// Returns an error if the mount namespace ID is invalid (zero).
+	Register(mntns uint64, info ContextInfo) error
+
+	// Lookup retrieves the context information for a mount namespace.
+	// Returns the context info and true if found, false otherwise.
+	Lookup(mntns uint64) (ContextInfo, bool)
+
+	// Unregister removes a mount namespace entry from the registry.
+	Unregister(mntns uint64)
+}
+
 // MntnsRegistry maps mount namespace IDs to their context information.
 type MntnsRegistry struct {
 	entries   maps.SafeMap[uint64, ContextInfo]
 	hostMntns uint64
 }
+
+// Verify that MntnsRegistry implements the Registry interface.
+var _ Registry = (*MntnsRegistry)(nil)
 
 // NewMntnsRegistry creates a new MntnsRegistry instance.
 // The hostMntns should be set separately via SetHostMntns after initialization.
@@ -60,32 +77,4 @@ func (r *MntnsRegistry) Unregister(mntns uint64) {
 		logger.L().Debug("MntnsRegistry - unregistered mount namespace",
 			helpers.String("mntns", fmt.Sprintf("%d", mntns)))
 	}
-}
-
-// SetHostMntns sets the host's mount namespace ID.
-func (r *MntnsRegistry) SetHostMntns(mntns uint64) error {
-	if mntns == 0 {
-		return ErrInvalidMntns
-	}
-
-	r.hostMntns = mntns
-	logger.L().Info("MntnsRegistry - host mount namespace set",
-		helpers.String("mntns", fmt.Sprintf("%d", mntns)))
-
-	return nil
-}
-
-// GetHostMntns returns the host's mount namespace ID.
-func (r *MntnsRegistry) GetHostMntns() uint64 {
-	return r.hostMntns
-}
-
-// IsHostMntns checks if the given mount namespace ID is the host's.
-func (r *MntnsRegistry) IsHostMntns(mntns uint64) bool {
-	return r.hostMntns != 0 && mntns == r.hostMntns
-}
-
-// Size returns the number of entries in the registry.
-func (r *MntnsRegistry) Size() int {
-	return r.entries.Len()
 }
