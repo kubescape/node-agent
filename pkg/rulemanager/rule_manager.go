@@ -184,6 +184,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	_, apChecksum, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil
 
+	// Early exit if monitoring is disabled for this context - skip entire rule evaluation
+	if !rm.isContextMonitoringEnabled(enrichedEvent.SourceContext) {
+		return
+	}
+
 	eventType := enrichedEvent.Event.GetEventType()
 	for _, rule := range rules {
 		if !rule.Enabled {
@@ -267,6 +272,26 @@ func (rm *RuleManager) enrichEventWithContext(enrichedEvent *events.EnrichedEven
 		logger.L().Debug("RuleManager - enriched event with context",
 			helpers.String("mntns", fmt.Sprintf("%d", mntnsID)),
 			helpers.String("context", string(contextInfo.Context())))
+	}
+}
+
+func (rm *RuleManager) isContextMonitoringEnabled(sourceContext contextdetection.ContextInfo) bool {
+	if sourceContext == nil {
+		// No context information, default to Kubernetes (backward compatible)
+		return true
+	}
+
+	contextType := sourceContext.Context()
+	switch contextType {
+	case contextdetection.Host:
+		return rm.cfg.HostMonitoringEnabled
+	case contextdetection.Standalone:
+		return rm.cfg.StandaloneMonitoringEnabled
+	case contextdetection.Kubernetes:
+		// Kubernetes monitoring is always enabled (backward compatible)
+		return true
+	default:
+		return true
 	}
 }
 
