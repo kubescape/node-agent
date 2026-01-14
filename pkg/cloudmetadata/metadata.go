@@ -63,6 +63,19 @@ func GetCloudMetadataWithIMDS(ctx context.Context) (*apitypes.CloudMetadata, err
 			logger.L().Info("retrieved cloud metadata from DigitalOcean metadata service as fallback")
 			return doMeta, nil
 		}
+
+		// Try GCP metadata endpoints as a fallback
+		if gcpMeta, gerr := fetchGCPMetadata(ctx); gerr == nil && gcpMeta != nil {
+			logger.L().Info("retrieved cloud metadata from GCP metadata service as fallback")
+			return gcpMeta, nil
+		}
+
+		// Try Azure metadata endpoints as a fallback
+		if azureMeta, aerr := fetchAzureMetadata(ctx); aerr == nil && azureMeta != nil {
+			logger.L().Info("retrieved cloud metadata from Azure metadata service as fallback")
+			return azureMeta, nil
+		}
+
 		// Wrap the underlying error with additional context so logs make it clearer why metadata is missing.
 		// This helps surface issues like IMDS token endpoint failures (e.g. IMDSv2 token 404), unreachable metadata endpoints,
 		// or provider-specific metadata problems.
@@ -141,5 +154,83 @@ func fetchDigitalOceanMetadata(ctx context.Context) (*apitypes.CloudMetadata, er
 		PrivateIP:    privateIP,
 		PublicIP:     publicIP,
 		Hostname:     hostname,
+	}, nil
+}
+
+// fetchGCPMetadata attempts to fetch basic metadata from GCP's metadata service.
+func fetchGCPMetadata(ctx context.Context) (*apitypes.CloudMetadata, error) {
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+	}
+	base := "http://metadata.google.internal/computeMetadata/v1/instance/"
+
+	get := func(path string) string {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+		req.Header.Set("Metadata-Flavor", "Google")
+		resp, err := client.Do(req)
+		if err != nil || resp.StatusCode != 200 {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return ""
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return strings.TrimSpace(string(b))
+	}
+
+	machineType := get("machine-type")
+	if machineType == "" {
+		return nil, fmt.Errorf("not a GCP instance")
+	}
+
+	// GCP returns full path like "projects/12345/machineTypes/n1-standard-1"
+	parts := strings.Split(machineType, "/")
+	instanceType := parts[len(parts)-1]
+
+	return &apitypes.CloudMetadata{
+		Provider:     "gcp",
+		InstanceID:   get("id"),
+		InstanceType: instanceType,
+		Zone:         get("zone"),
+		Hostname:     get("hostname"),
+	}, nil
+}
+
+// fetchAzureMetadata attempts to fetch basic metadata from Azure's metadata service.
+func fetchAzureMetadata(ctx context.Context) (*apitypes.CloudMetadata, error) {
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+	}
+	base := "http://169.254.169.254/metadata/instance/compute/"
+
+	get := func(path string) string {
+		url := base + path + "?api-version=2021-02-01&format=text"
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req.Header.Set("Metadata", "true")
+		resp, err := client.Do(req)
+		if err != nil || resp.StatusCode != 200 {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return ""
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return strings.TrimSpace(string(b))
+	}
+
+	vmSize := get("vmSize")
+	if vmSize == "" {
+		return nil, fmt.Errorf("not an Azure instance")
+	}
+
+	return &apitypes.CloudMetadata{
+		Provider:     "azure",
+		InstanceID:   get("vmId"),
+		InstanceType: vmSize,
+		Region:       get("location"),
+		Zone:         get("zone"),
+		Hostname:     get("name"),
 	}, nil
 }
