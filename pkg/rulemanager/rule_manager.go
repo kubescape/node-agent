@@ -184,8 +184,8 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	_, apChecksum, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil
 
-	// Early exit if monitoring is disabled for this context - skip entire rule evaluation
-	if !rm.isContextMonitoringEnabled(enrichedEvent.SourceContext) {
+	// Early exit if monitoring is disabled for this context - skip rule evaluation
+	if !rm.isMonitoringEnabledForContext(enrichedEvent.SourceContext) {
 		return
 	}
 
@@ -194,7 +194,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		if !rule.Enabled {
 			continue
 		}
-		// TODO: for now we check each rule if it applies to the current context
+
 		if !RuleAppliesToContext(&rule, enrichedEvent.SourceContext) {
 			continue
 		}
@@ -275,7 +275,7 @@ func (rm *RuleManager) enrichEventWithContext(enrichedEvent *events.EnrichedEven
 	}
 }
 
-func (rm *RuleManager) isContextMonitoringEnabled(sourceContext contextdetection.ContextInfo) bool {
+func (rm *RuleManager) isMonitoringEnabledForContext(sourceContext contextdetection.ContextInfo) bool {
 	if sourceContext == nil {
 		// No context information, default to Kubernetes (backward compatible)
 		return true
