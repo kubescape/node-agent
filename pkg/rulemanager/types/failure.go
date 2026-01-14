@@ -3,6 +3,7 @@ package types
 import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/kubescape/node-agent/pkg/contextdetection"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -10,29 +11,6 @@ const (
 	ApplicationProfile = "applicationprofile"
 	NetworkProfile     = "networkprofile"
 )
-
-// HostDetails contains metadata for Host context alerts.
-// Used when a rule is triggered from the Host execution context (non-containerized).
-// Provides system-level information to identify and contextualize host-level threats.
-type HostDetails struct {
-	Hostname      string
-	HostIP        string
-	OS            string
-	OSVersion     string
-	KernelVersion string
-}
-
-// DockerDetails contains metadata for Standalone/Docker container context alerts.
-// Used when a rule is triggered from a standalone (non-Kubernetes) container.
-// Provides container-level information to identify and contextualize container-specific threats.
-type DockerDetails struct {
-	ContainerID   string
-	ContainerName string
-	ImageID       string
-	ImageName     string
-	ImageTag      string
-	NetworkMode   string
-}
 
 type GenericRuleFailure struct {
 	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
@@ -47,8 +25,7 @@ type GenericRuleFailure struct {
 	HttpRuleAlert          apitypes.HttpRuleAlert
 	Extra                  interface{}
 	IsTriggerAlert         bool
-	// SourceContext identifies the execution context: "kubernetes", "host", "docker"
-	SourceContext string
+	SourceContext          contextdetection.EventSourceContext
 }
 
 type RuleFailure interface {
@@ -75,7 +52,7 @@ type RuleFailure interface {
 	// Get Extra
 	GetExtra() interface{}
 	// Get Source Context
-	GetSourceContext() string
+	GetSourceContext() contextdetection.EventSourceContext
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)
@@ -102,7 +79,7 @@ type RuleFailure interface {
 	// Set IsTriggerAlert
 	SetIsTriggerAlert(isTriggerAlert bool)
 	// Set Source Context
-	SetSourceContext(sourceContext string)
+	SetSourceContext(sourceContext contextdetection.EventSourceContext)
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -205,10 +182,10 @@ func (rule *GenericRuleFailure) SetIsTriggerAlert(isTriggerAlert bool) {
 	rule.IsTriggerAlert = isTriggerAlert
 }
 
-func (rule *GenericRuleFailure) GetSourceContext() string {
+func (rule *GenericRuleFailure) GetSourceContext() contextdetection.EventSourceContext {
 	return rule.SourceContext
 }
 
-func (rule *GenericRuleFailure) SetSourceContext(sourceContext string) {
+func (rule *GenericRuleFailure) SetSourceContext(sourceContext contextdetection.EventSourceContext) {
 	rule.SourceContext = sourceContext
 }

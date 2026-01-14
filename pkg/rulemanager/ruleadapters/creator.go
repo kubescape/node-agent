@@ -304,7 +304,7 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 func (r *RuleFailureCreator) setContextSpecificFields(ruleFailure *types.GenericRuleFailure, enrichedEvent *events.EnrichedEvent) {
 	// If no source context is available, default to Kubernetes (backward compatible)
 	if enrichedEvent.SourceContext == nil {
-		ruleFailure.SetSourceContext("kubernetes")
+		ruleFailure.SetSourceContext(contextdetection.Kubernetes)
 		return
 	}
 
@@ -313,11 +313,11 @@ func (r *RuleFailureCreator) setContextSpecificFields(ruleFailure *types.Generic
 
 	switch sourceContextType {
 	case contextdetection.Kubernetes:
-		ruleFailure.SetSourceContext("kubernetes")
+		ruleFailure.SetSourceContext(contextdetection.Kubernetes)
 		// K8s alerts use existing K8s details populated by setRuntimeAlertK8sDetails
 
 	case contextdetection.Host:
-		ruleFailure.SetSourceContext("host")
+		ruleFailure.SetSourceContext(contextdetection.Host)
 		// For Host context, use NodeName to store the hostname
 		hostname, err := os.Hostname()
 		if err == nil {
@@ -325,7 +325,7 @@ func (r *RuleFailureCreator) setContextSpecificFields(ruleFailure *types.Generic
 		}
 
 	case contextdetection.Standalone:
-		ruleFailure.SetSourceContext("standalone")
+		ruleFailure.SetSourceContext(contextdetection.Standalone)
 		// For Standalone context, populate container-specific fields in RuntimeAlertK8sDetails
 		if k8sDetails.ContainerID == "" {
 			k8sDetails.ContainerID = enrichedEvent.ContainerID
