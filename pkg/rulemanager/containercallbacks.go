@@ -62,7 +62,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			return
 		}
 
-		// Detect context and register in the registry
+		// Detect context and add to the registry
 		contextInfo, err := rm.detectorManager.DetectContext(notif.Container)
 		if err != nil {
 			logger.L().Warning("RuleManager - failed to detect context",
@@ -90,7 +90,6 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 
-		// Unregister from the context registry
 		if notif.Container.Mntns != 0 {
 			rm.mntnsRegistry.Unregister(notif.Container.Mntns)
 		}

@@ -83,8 +83,6 @@ func CreateRuleManager(
 ) (*RuleManager, error) {
 	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory)
 	rulePolicyValidator := NewRulePolicyValidator(objectCache)
-
-	// Create a detector manager for context detection
 	detectorManager := detectors.NewDetectorManager(mntnsRegistry)
 
 	r := &RuleManager{
@@ -135,7 +133,6 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
-	// Enrich event with source context and mount namespace ID for context-aware rule evaluation
 	rm.enrichEventWithContext(enrichedEvent)
 
 	var profileExists bool
@@ -143,7 +140,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	namespace := enrichedEvent.Event.GetNamespace()
 	pod := enrichedEvent.Event.GetPod()
 
-	// Determine workload ID based on context type
+	// Determine workload ID based on the context type
 	isK8sContext := enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes
 
 	if isK8sContext {
@@ -167,12 +164,12 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 	}
 
-	// Retrieve rules based on context: K8s uses pod-based bindings, non-K8s uses all rules
+	// Retrieve rules based on context: K8s uses pod-based bindings
 	var rules []typesv1.Rule
 	if enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes {
 		rules = rm.ruleBindingCache.ListRulesForPod(namespace, pod)
 	} else {
-		// Host or Standalone context: retrieve all rules (rule filtering deferred to future phases)
+		// TODO: rule filtering based on context
 		rules = rm.ruleBindingCache.GetRuleCreator().CreateAllRules()
 	}
 
@@ -192,6 +189,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		if !rule.Enabled {
 			continue
 		}
+		// TODO: for now we check each rule if it applies to the current context
 		if !RuleAppliesToContext(&rule, enrichedEvent.SourceContext) {
 			continue
 		}
@@ -261,14 +259,14 @@ func (rm *RuleManager) enrichEventWithContext(enrichedEvent *events.EnrichedEven
 	}
 	enrichedEvent.MountNamespaceID = mntnsID
 
-	// Look up context information for this mount namespace
-	if mntnsID > 0 {
-		if contextInfo, found := rm.mntnsRegistry.Lookup(mntnsID); found {
-			enrichedEvent.SourceContext = contextInfo
-			logger.L().Debug("RuleManager - enriched event with context",
-				helpers.String("mntns", fmt.Sprintf("%d", mntnsID)),
-				helpers.String("context", string(contextInfo.Context())))
-		}
+	if mntnsID == 0 {
+		return
+	}
+	if contextInfo, found := rm.mntnsRegistry.Lookup(mntnsID); found {
+		enrichedEvent.SourceContext = contextInfo
+		logger.L().Debug("RuleManager - enriched event with context",
+			helpers.String("mntns", fmt.Sprintf("%d", mntnsID)),
+			helpers.String("context", string(contextInfo.Context())))
 	}
 }
 

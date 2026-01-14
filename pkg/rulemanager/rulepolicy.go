@@ -37,16 +37,16 @@ func (v *RulePolicyValidator) Validate(ruleId string, process string, ap *v1beta
 // RuleAppliesToContext checks if a rule should execute in the given context
 // by checking the ExecutionContexts field first, then falling back to context: tags
 func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.ContextInfo) bool {
-	var currentContext string
+	var currentContext contextdetection.EventSourceContext
 	if contextInfo == nil {
-		currentContext = string(contextdetection.Kubernetes)
+		currentContext = contextdetection.Kubernetes
 	} else {
-		currentContext = string(contextInfo.Context())
+		currentContext = contextInfo.Context()
 	}
 
 	if len(rule.ExecutionContexts) > 0 {
 		for _, ctx := range rule.ExecutionContexts {
-			if ctx == currentContext {
+			if ctx == string(currentContext) {
 				return true
 			}
 		}
@@ -64,7 +64,7 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 
 	if len(contextTags) > 0 {
 		for _, ctx := range contextTags {
-			if ctx == currentContext {
+			if ctx == string(currentContext) {
 				return true
 			}
 		}
@@ -72,5 +72,5 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 	}
 
 	// No context specified in either field or tags: default to kubernetes only (backward compatible)
-	return currentContext == "kubernetes"
+	return currentContext == contextdetection.Kubernetes
 }

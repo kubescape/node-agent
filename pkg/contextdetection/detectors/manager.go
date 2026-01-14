@@ -9,8 +9,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/contextdetection"
 )
 
-// DetectorManager orchestrates context detection across multiple detectors.
-// It executes detectors in priority order and returns the first match.
+var (
+	ErrInvalidContainer = errors.New("invalid container: nil provided")
+)
+
 type DetectorManager struct {
 	registry  *contextdetection.MntnsRegistry
 	detectors []contextdetection.ContextDetector
@@ -63,8 +65,3 @@ func (dm *DetectorManager) DetectContext(container *containercollection.Containe
 		ContainerName: container.Runtime.ContainerName,
 	}, nil
 }
-
-var (
-	// ErrInvalidContainer is returned when a nil container is provided to DetectContext
-	ErrInvalidContainer = errors.New("invalid container: nil provided")
-)

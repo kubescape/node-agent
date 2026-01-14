@@ -14,7 +14,6 @@ var (
 )
 
 // MntnsRegistry maps mount namespace IDs to their context information.
-// It uses SafeMap for thread-safe concurrent access.
 type MntnsRegistry struct {
 	entries   maps.SafeMap[uint64, ContextInfo]
 	hostMntns uint64
