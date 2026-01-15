@@ -82,7 +82,10 @@ func (it *IoUringTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(it.ociStore),
 	)
 	go func() {
-		err := it.runtime.RunGadget(it.gadgetCtx, nil, nil)
+		params := map[string]string{
+			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
+		}
+		err := it.runtime.RunGadget(it.gadgetCtx, nil, params)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", it.gadgetCtx.Name()), helpers.Error(err))
 		}
