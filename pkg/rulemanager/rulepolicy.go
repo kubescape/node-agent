@@ -35,7 +35,6 @@ func (v *RulePolicyValidator) Validate(ruleId string, process string, ap *v1beta
 }
 
 // RuleAppliesToContext checks if a rule should execute in the given context
-// by checking the ExecutionContexts field first, then falling back to context: tags
 func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.ContextInfo) bool {
 	var currentContext contextdetection.EventSourceContext
 	if contextInfo == nil {
@@ -44,16 +43,6 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 		currentContext = contextInfo.Context()
 	}
 
-	if len(rule.ExecutionContexts) > 0 {
-		for _, ctx := range rule.ExecutionContexts {
-			if ctx == string(currentContext) {
-				return true
-			}
-		}
-		return false
-	}
-
-	// Fall back to parsing context: tags (for external service compatibility)
 	var contextTags []string
 	for _, tag := range rule.Tags {
 		if strings.HasPrefix(tag, "context:") {

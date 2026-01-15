@@ -291,20 +291,7 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("error creating CEL evaluator", helpers.Error(err))
 		}
 
-		// Create and initialize MntnsRegistry for host context monitoring
 		mntnsRegistry := contextdetection.NewMntnsRegistry()
-
-		// Auto-detect and initialize host mount namespace
-		hostMntns, err := contextdetection.GetCurrentHostMntns()
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to detect host mount namespace",
-				helpers.Error(err))
-		} else {
-			if err := mntnsRegistry.SetHostMntns(hostMntns); err != nil {
-				logger.L().Ctx(ctx).Warning("failed to set host mount namespace",
-					helpers.Error(err))
-			}
-		}
 
 		// create runtimeDetection managers
 		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory, celEvaluator, mntnsRegistry)
