@@ -82,7 +82,10 @@ func (ht *HTTPTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(ht.ociStore),
 	)
 	go func() {
-		err := ht.runtime.RunGadget(ht.gadgetCtx, nil, nil)
+		params := map[string]string{
+			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
+		}
+		err := ht.runtime.RunGadget(ht.gadgetCtx, nil, params)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", ht.gadgetCtx.Name()), helpers.Error(err))
 		}

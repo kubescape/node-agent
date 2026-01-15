@@ -351,6 +351,9 @@ func (e *DatasourceEvent) GetFullPath() string {
 	switch e.EventType {
 	case OpenEventType:
 		path, _ := e.getFieldAccessor("fpath").String(e.Data)
+		if path == "" {
+			path, _ = e.getFieldAccessor("fname").String(e.Data)
+		}
 		return path
 	default:
 		logger.L().Warning("GetFullPath not implemented for event type", helpers.String("eventType", string(e.EventType)))

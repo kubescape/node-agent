@@ -70,7 +70,8 @@ func (ot *OpenTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.ebpf.paths": strconv.FormatBool(ot.cfg.EnableFullPathTracing),
+			"operator.oci.ebpf.paths":    strconv.FormatBool(ot.cfg.EnableFullPathTracing),
+			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
 		}
 		err := ot.runtime.RunGadget(ot.gadgetCtx, nil, params)
 		if err != nil {
@@ -128,10 +129,6 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 
 // callback handles open events from the tracer
 func (ot *OpenTracer) callback(event utils.OpenEvent) {
-	if event.GetContainer() == "" {
-		return
-	}
-
 	errorRaw := event.GetError()
 	if errorRaw > -1 {
 		// Handle the event with syscall enrichment
