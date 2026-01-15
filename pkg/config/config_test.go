@@ -39,6 +39,8 @@ func TestLoadConfig(t *testing.T) {
 				EnableFIM:                      true,
 				EnableNetworkStreaming:         false,
 				EnableEmbeddedSboms:            false,
+				EnableHostSensor:               true,
+				HostSensorInterval:             1 * time.Minute,
 				KubernetesMode:                 true,
 				NetworkStreamingInterval:       2 * time.Minute,
 				InitialDelay:                   2 * time.Minute,
