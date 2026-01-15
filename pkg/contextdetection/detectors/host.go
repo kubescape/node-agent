@@ -44,7 +44,7 @@ func (hd *HostDetector) Detect(container *containercollection.Container) (contex
 		return nil, false
 	}
 
-	if container.Runtime.ContainerID != "" {
+	if container.ContainerPid() == 1 {
 		hostInfo := &HostContextInfo{HostName: hd.hostName}
 		return hostInfo, true
 	}
