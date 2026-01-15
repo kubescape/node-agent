@@ -14,13 +14,13 @@ var (
 )
 
 type DetectorManager struct {
-	registry  *contextdetection.MntnsRegistry
+	registry  contextdetection.Registry
 	detectors []contextdetection.ContextDetector
 }
 
 // NewDetectorManager creates a new DetectorManager with the given registry.
 // Detectors are initialized in priority order: K8s (0), Host (1), Standalone (2).
-func NewDetectorManager(registry *contextdetection.MntnsRegistry) *DetectorManager {
+func NewDetectorManager(registry contextdetection.Registry) *DetectorManager {
 	dm := &DetectorManager{
 		registry: registry,
 		detectors: []contextdetection.ContextDetector{

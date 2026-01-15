@@ -59,7 +59,7 @@ type RuleManager struct {
 	adapterFactory       *ruleadapters.EventRuleAdapterFactory
 	ruleFailureCreator   ruleadapters.RuleFailureCreatorInterface
 	rulePolicyValidator  *RulePolicyValidator
-	mntnsRegistry        *contextdetection.MntnsRegistry
+	mntnsRegistry        contextdetection.Registry
 	detectorManager      *detectors.DetectorManager
 }
 
@@ -79,7 +79,7 @@ func CreateRuleManager(
 	ruleCooldown *rulecooldown.RuleCooldown,
 	adapterFactory *ruleadapters.EventRuleAdapterFactory,
 	celEvaluator cel.CELRuleEvaluator,
-	mntnsRegistry *contextdetection.MntnsRegistry,
+	mntnsRegistry contextdetection.Registry,
 ) (*RuleManager, error) {
 	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory)
 	rulePolicyValidator := NewRulePolicyValidator(objectCache)
