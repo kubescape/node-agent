@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	igconsts "github.com/inspektor-gadget/inspektor-gadget/gadgets/trace_exec/consts"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/syscalls"
@@ -81,6 +83,93 @@ var _ SshEvent = (*DatasourceEvent)(nil)
 var _ SyscallEvent = (*DatasourceEvent)(nil)
 var _ UnshareEvent = (*DatasourceEvent)(nil)
 
+var errFieldNotFound = errors.New("field not found")
+
+type nullFieldAccessor struct{}
+
+func (n *nullFieldAccessor) Name() string                                 { return "" }
+func (n *nullFieldAccessor) FullName() string                             { return "" }
+func (n *nullFieldAccessor) Size() uint32                                 { return 0 }
+func (n *nullFieldAccessor) Get(data datasource.Data) []byte              { return nil }
+func (n *nullFieldAccessor) Set(data datasource.Data, value []byte) error { return nil }
+func (n *nullFieldAccessor) IsRequested() bool                            { return false }
+func (n *nullFieldAccessor) AddSubField(name string, kind api.Kind, opts ...datasource.FieldOption) (datasource.FieldAccessor, error) {
+	return nil, errFieldNotFound
+}
+func (n *nullFieldAccessor) GetSubFieldsWithTag(tag ...string) []datasource.FieldAccessor { return nil }
+func (n *nullFieldAccessor) Parent() datasource.FieldAccessor                             { return nil }
+func (n *nullFieldAccessor) SubFields() []datasource.FieldAccessor                        { return nil }
+func (n *nullFieldAccessor) SetHidden(hidden bool, recurse bool)                          {}
+func (n *nullFieldAccessor) Type() api.Kind                                               { return api.Kind_Invalid }
+func (n *nullFieldAccessor) Flags() uint32                                                { return 0 }
+func (n *nullFieldAccessor) Tags() []string                                               { return nil }
+func (n *nullFieldAccessor) AddTags(tags ...string)                                       {}
+func (n *nullFieldAccessor) HasAllTagsOf(tags ...string) bool                             { return false }
+func (n *nullFieldAccessor) HasAnyTagsOf(tags ...string) bool                             { return false }
+func (n *nullFieldAccessor) Annotations() map[string]string                               { return nil }
+func (n *nullFieldAccessor) AddAnnotation(key, value string)                              {}
+func (n *nullFieldAccessor) RemoveReference(recurse bool)                                 {}
+func (n *nullFieldAccessor) Rename(string) error                                          { return errFieldNotFound }
+
+func (n *nullFieldAccessor) Uint8(datasource.Data) (uint8, error)     { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) Uint16(datasource.Data) (uint16, error)   { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) Uint32(datasource.Data) (uint32, error)   { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) Uint64(datasource.Data) (uint64, error)   { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) Int8(datasource.Data) (int8, error)       { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) Int16(datasource.Data) (int16, error)     { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) Int32(datasource.Data) (int32, error)     { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) Int64(datasource.Data) (int64, error)     { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) Float32(datasource.Data) (float32, error) { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) Float64(datasource.Data) (float64, error) { return 0, errFieldNotFound }
+func (n *nullFieldAccessor) String(datasource.Data) (string, error)   { return "", errFieldNotFound }
+func (n *nullFieldAccessor) Bytes(datasource.Data) ([]byte, error)    { return nil, errFieldNotFound }
+func (n *nullFieldAccessor) Bool(datasource.Data) (bool, error)       { return false, errFieldNotFound }
+
+func (n *nullFieldAccessor) Uint8Array(datasource.Data) ([]uint8, error) {
+	return nil, errFieldNotFound
+}
+func (n *nullFieldAccessor) Uint16Array(datasource.Data) ([]uint16, error) {
+	return nil, errFieldNotFound
+}
+func (n *nullFieldAccessor) Uint32Array(datasource.Data) ([]uint32, error) {
+	return nil, errFieldNotFound
+}
+func (n *nullFieldAccessor) Uint64Array(datasource.Data) ([]uint64, error) {
+	return nil, errFieldNotFound
+}
+func (n *nullFieldAccessor) Int8Array(datasource.Data) ([]int8, error) { return nil, errFieldNotFound }
+func (n *nullFieldAccessor) Int16Array(datasource.Data) ([]int16, error) {
+	return nil, errFieldNotFound
+}
+func (n *nullFieldAccessor) Int32Array(datasource.Data) ([]int32, error) {
+	return nil, errFieldNotFound
+}
+func (n *nullFieldAccessor) Int64Array(datasource.Data) ([]int64, error) {
+	return nil, errFieldNotFound
+}
+func (n *nullFieldAccessor) Float32Array(datasource.Data) ([]float32, error) {
+	return nil, errFieldNotFound
+}
+func (n *nullFieldAccessor) Float64Array(datasource.Data) ([]float64, error) {
+	return nil, errFieldNotFound
+}
+
+func (n *nullFieldAccessor) PutUint8(datasource.Data, uint8) error     { return errFieldNotFound }
+func (n *nullFieldAccessor) PutUint16(datasource.Data, uint16) error   { return errFieldNotFound }
+func (n *nullFieldAccessor) PutUint32(datasource.Data, uint32) error   { return errFieldNotFound }
+func (n *nullFieldAccessor) PutUint64(datasource.Data, uint64) error   { return errFieldNotFound }
+func (n *nullFieldAccessor) PutInt8(datasource.Data, int8) error       { return errFieldNotFound }
+func (n *nullFieldAccessor) PutInt16(datasource.Data, int16) error     { return errFieldNotFound }
+func (n *nullFieldAccessor) PutInt32(datasource.Data, int32) error     { return errFieldNotFound }
+func (n *nullFieldAccessor) PutInt64(datasource.Data, int64) error     { return errFieldNotFound }
+func (n *nullFieldAccessor) PutFloat32(datasource.Data, float32) error { return errFieldNotFound }
+func (n *nullFieldAccessor) PutFloat64(datasource.Data, float64) error { return errFieldNotFound }
+func (n *nullFieldAccessor) PutString(datasource.Data, string) error   { return errFieldNotFound }
+func (n *nullFieldAccessor) PutBytes(datasource.Data, []byte) error    { return errFieldNotFound }
+func (n *nullFieldAccessor) PutBool(datasource.Data, bool) error       { return errFieldNotFound }
+
+var missingFieldAccessor datasource.FieldAccessor = &nullFieldAccessor{}
+
 func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAccessor {
 	cache, loaded := fieldCaches.Load(e.EventType)
 	if !loaded {
@@ -91,9 +180,9 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 		field := e.Datasource.GetField(fieldName)
 		accessor, _ = cache.(*sync.Map).LoadOrStore(fieldName, field)
 	}
-	// Handle case where field doesn't exist (returns nil)
+	// Handle case where field doesn't exist
 	if accessor == nil {
-		return nil
+		return missingFieldAccessor
 	}
 	return accessor.(datasource.FieldAccessor)
 }
@@ -171,16 +260,7 @@ func (e *DatasourceEvent) GetComm() string {
 		container := e.GetContainer()
 		return container
 	default:
-		comm := e.getFieldAccessor("proc.comm")
-		if comm == nil {
-			logger.L().Warning("GetComm - proc.comm field not found in event type", helpers.String("eventType", string(e.EventType)))
-			return ""
-		}
-		commValue, err := comm.String(e.Data)
-		if err != nil {
-			logger.L().Warning("GetComm - cannot read proc.comm field in event", helpers.String("eventType", string(e.EventType)))
-			return ""
-		}
+		commValue, _ := e.getFieldAccessor("proc.comm").String(e.Data)
 		return commValue
 	}
 }
@@ -408,11 +488,7 @@ func (e *DatasourceEvent) GetModule() string {
 }
 
 func (e *DatasourceEvent) GetMountNsID() uint64 {
-	accessor := e.getFieldAccessor("proc.mntns_id")
-	if accessor == nil {
-		return 0
-	}
-	mountNsID, _ := accessor.Uint64(e.Data)
+	mountNsID, _ := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
 	return mountNsID
 }
 
@@ -510,16 +586,7 @@ func (e *DatasourceEvent) GetPID() uint32 {
 		containerPid, _ := e.getFieldAccessor("runtime.containerPid").Uint32(e.Data)
 		return containerPid
 	default:
-		pid := e.getFieldAccessor("proc.pid")
-		if pid == nil {
-			logger.L().Warning("GetPID - proc.pid field not found in event type", helpers.String("eventType", string(e.EventType)))
-			return 0
-		}
-		pidValue, err := pid.Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetPID cannot read proc.pid field in event", helpers.String("eventType", string(e.EventType)))
-			return 0
-		}
+		pidValue, _ := e.getFieldAccessor("proc.pid").Uint32(e.Data)
 		return pidValue
 	}
 }

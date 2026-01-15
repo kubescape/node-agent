@@ -16,6 +16,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	azureApiVersion = "2021-12-13"
+)
+
 // GetCloudMetadata retrieves cloud metadata for a given node
 func GetCloudMetadata(ctx context.Context, client *k8sinterface.KubernetesApi, nodeName string) (*apitypes.CloudMetadata, error) {
 	node, err := client.GetKubernetesClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
@@ -207,7 +211,7 @@ func fetchAzureMetadata(ctx context.Context) (*apitypes.CloudMetadata, error) {
 	base := "http://169.254.169.254/metadata/instance/compute/"
 
 	get := func(path string) string {
-		url := base + path + "?api-version=2021-02-01&format=text"
+		url := base + path + "?api-version=" + azureApiVersion + "&format=text"
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		req.Header.Set("Metadata", "true")
 		resp, err := client.Do(req)
