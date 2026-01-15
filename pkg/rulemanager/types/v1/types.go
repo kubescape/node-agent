@@ -27,7 +27,6 @@ type Rule struct {
 	Severity                int                        `json:"severity" yaml:"severity"`
 	SupportPolicy           bool                       `json:"supportPolicy" yaml:"supportPolicy"`
 	Tags                    []string                   `json:"tags" yaml:"tags"`
-	ExecutionContexts       []string                   `json:"executionContexts" yaml:"executionContexts"` // kubernetes, host, standalone
 	State                   map[string]any             `json:"state,omitempty" yaml:"state,omitempty"`
 	AgentVersionRequirement string                     `json:"agentVersionRequirement" yaml:"agentVersionRequirement"`
 	IsTriggerAlert          bool                       `json:"isTriggerAlert" yaml:"isTriggerAlert"`

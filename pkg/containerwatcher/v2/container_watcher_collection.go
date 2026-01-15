@@ -3,10 +3,10 @@ package containerwatcher
 import (
 	"context"
 	"fmt"
-	"syscall"
 	"time"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	containerutils "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
@@ -178,11 +178,8 @@ func getHostAsContainer() (*containercollection.Container, error) {
 	pidOne := 1
 
 	// Get the mount namespace ID for PID 1 (init process)
-	// This is done by reading the inode of /proc/1/ns/mnt
-	mntnsPath := fmt.Sprintf("/proc/%d/ns/mnt", pidOne)
-
-	var statData syscall.Stat_t
-	if err := syscall.Stat(mntnsPath, &statData); err != nil {
+	mntns, err := containerutils.GetMntNs(pidOne)
+	if err != nil {
 		return nil, fmt.Errorf("getting mount namespace for host PID %d: %w", pidOne, err)
 	}
 
@@ -192,6 +189,6 @@ func getHostAsContainer() (*containercollection.Container, error) {
 				ContainerPID: uint32(pidOne),
 			},
 		},
-		Mntns: statData.Ino,
+		Mntns: mntns,
 	}, nil
 }
