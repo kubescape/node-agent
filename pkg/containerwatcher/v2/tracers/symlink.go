@@ -68,7 +68,10 @@ func (st *SymlinkTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(st.ociStore),
 	)
 	go func() {
-		err := st.runtime.RunGadget(st.gadgetCtx, nil, nil)
+		params := map[string]string{
+			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
+		}
+		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", st.gadgetCtx.Name()), helpers.Error(err))
 		}

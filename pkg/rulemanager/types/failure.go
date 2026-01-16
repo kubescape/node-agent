@@ -3,6 +3,7 @@ package types
 import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/kubescape/node-agent/pkg/contextdetection"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -23,6 +24,7 @@ type GenericRuleFailure struct {
 	CloudServices          []string
 	HttpRuleAlert          apitypes.HttpRuleAlert
 	Extra                  interface{}
+	SourceContext          contextdetection.EventSourceContext
 }
 
 type RuleFailure interface {
@@ -48,6 +50,8 @@ type RuleFailure interface {
 	GetAlertPlatform() apitypes.AlertSourcePlatform
 	// Get Extra
 	GetExtra() interface{}
+	// Get Source Context
+	GetSourceContext() contextdetection.EventSourceContext
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)
@@ -69,6 +73,8 @@ type RuleFailure interface {
 	SetHttpRuleAlert(httpRuleAlert apitypes.HttpRuleAlert)
 	// Set Extra
 	SetExtra(extra interface{})
+	// Set Source Context
+	SetSourceContext(sourceContext contextdetection.EventSourceContext)
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -161,4 +167,12 @@ func (rule *GenericRuleFailure) SetHttpRuleAlert(httpRuleAlert apitypes.HttpRule
 
 func (rule *GenericRuleFailure) SetExtra(extra interface{}) {
 	rule.Extra = extra
+}
+
+func (rule *GenericRuleFailure) GetSourceContext() contextdetection.EventSourceContext {
+	return rule.SourceContext
+}
+
+func (rule *GenericRuleFailure) SetSourceContext(sourceContext contextdetection.EventSourceContext) {
+	rule.SourceContext = sourceContext
 }

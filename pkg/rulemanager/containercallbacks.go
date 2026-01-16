@@ -10,6 +10,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/contextdetection/detectors"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -62,6 +63,26 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			return
 		}
 
+		// Detect context and add to the registry
+		contextInfo, err := rm.detectorManager.DetectContext(notif.Container)
+		if err != nil {
+			logger.L().Warning("RuleManager - failed to detect context, defaulting to standalone",
+				helpers.String("container ID", notif.Container.Runtime.ContainerID),
+				helpers.Error(err))
+			contextInfo = &detectors.StandaloneContextInfo{
+				ContainerID:   notif.Container.Runtime.ContainerID,
+				ContainerName: notif.Container.Runtime.ContainerName,
+			}
+		}
+
+		if contextInfo != nil && notif.Container.Mntns != 0 {
+			if err := rm.mntnsRegistry.Register(notif.Container.Mntns, contextInfo); err != nil {
+				logger.L().Warning("RuleManager - failed to register in mntns registry",
+					helpers.String("container ID", notif.Container.Runtime.ContainerID),
+					helpers.Error(err))
+			}
+		}
+
 		rm.trackedContainers.Add(k8sContainerID)
 		shim, err := utils.GetProcessStat(int(notif.Container.ContainerPid()))
 		if err != nil {
@@ -75,6 +96,10 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		logger.L().Debug("RuleManager - remove container",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
+
+		if notif.Container.Mntns != 0 {
+			rm.mntnsRegistry.Unregister(notif.Container.Mntns)
+		}
 
 		rm.trackedContainers.Remove(k8sContainerID)
 		namespace := notif.Container.K8s.Namespace
