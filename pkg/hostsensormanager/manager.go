@@ -17,15 +17,13 @@ type manager struct {
 	sensors   []Sensor
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
-	mu        sync.Mutex
-	running   bool
+	startOnce sync.Once
 }
 
 // NewHostSensorManager creates a new host sensor manager
 func NewHostSensorManager(config Config) (HostSensorManager, error) {
 	if !config.Enabled {
-		logger.L().Info("host sensor manager is disabled")
-		return &noopManager{}, nil
+		return NewNoopHostSensorManager(), nil
 	}
 
 	if config.NodeName == "" {
@@ -65,40 +63,32 @@ func NewHostSensorManager(config Config) (HostSensorManager, error) {
 
 // Start begins the sensing loop
 func (m *manager) Start(ctx context.Context) error {
-	m.mu.Lock()
-	if m.running {
-		m.mu.Unlock()
-		return fmt.Errorf("manager is already running")
-	}
-	m.running = true
-	m.mu.Unlock()
+	m.startOnce.Do(func() {
+		logger.L().Info("starting host sensor manager",
+			helpers.String("nodeName", m.config.NodeName),
+			helpers.String("interval", m.config.Interval.String()))
 
-	logger.L().Info("starting host sensor manager",
-		helpers.String("nodeName", m.config.NodeName),
-		helpers.String("interval", m.config.Interval.String()))
+		// Run initial sensing immediately
+		m.runSensing(ctx)
 
-	// Run initial sensing immediately
-	m.runSensing(ctx)
-
-	// Start periodic sensing
-	m.wg.Add(1)
-	go m.sensingLoop(ctx)
+		// Start periodic sensing
+		m.wg.Add(1)
+		go m.sensingLoop(ctx)
+	})
 
 	return nil
 }
 
 // Stop gracefully stops the manager
 func (m *manager) Stop() error {
-	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
-		return nil
-	}
-	m.running = false
-	m.mu.Unlock()
-
 	logger.L().Info("stopping host sensor manager")
-	close(m.stopCh)
+	select {
+	case <-m.stopCh:
+		// Already closed
+		return nil
+	default:
+		close(m.stopCh)
+	}
 	m.wg.Wait()
 	logger.L().Info("host sensor manager stopped")
 	return nil
@@ -168,6 +158,11 @@ func (m *manager) runSensor(ctx context.Context, sensor Sensor) error {
 
 // noopManager is a no-op implementation when the manager is disabled
 type noopManager struct{}
+
+// NewNoopHostSensorManager creates a new no-op host sensor manager
+func NewNoopHostSensorManager() HostSensorManager {
+	return &noopManager{}
+}
 
 func (n *noopManager) Start(ctx context.Context) error {
 	return nil

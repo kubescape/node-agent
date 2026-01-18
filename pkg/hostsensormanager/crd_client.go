@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -63,48 +64,44 @@ func (c *CRDClient) CreateOrUpdateHostData(ctx context.Context, resource string,
 		},
 	}
 
-	// Try to get existing resource
-	_, err := c.dynamicClient.Resource(gvr).Get(ctx, c.nodeName, metav1.GetOptions{})
-	if err != nil {
-		// Resource doesn't exist, create it
-		logger.L().Debug("creating new host data CRD",
-			helpers.String("kind", kind),
-			helpers.String("nodeName", c.nodeName))
-		_, err = c.dynamicClient.Resource(gvr).Create(ctx, unstructuredObj, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to create %s CRD: %w", kind, err)
-		}
+	// Try to create the resource
+	_, err := c.dynamicClient.Resource(gvr).Create(ctx, unstructuredObj, metav1.CreateOptions{})
+	if err == nil {
 		logger.L().Info("created host data CRD",
 			helpers.String("kind", kind),
 			helpers.String("nodeName", c.nodeName))
 		return nil
 	}
 
-	// Resource exists, update it using patch
-	logger.L().Debug("updating existing host data CRD",
-		helpers.String("kind", kind),
-		helpers.String("nodeName", c.nodeName))
+	// If it already exists, update it
+	if errors.IsAlreadyExists(err) {
+		logger.L().Debug("host data CRD already exists, updating",
+			helpers.String("kind", kind),
+			helpers.String("nodeName", c.nodeName))
 
-	// Create patch data
-	patchData, err := json.Marshal(map[string]interface{}{
-		"spec": spec,
-		"status": Status{
-			LastSensed: metav1.Now(),
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to marshal patch data: %w", err)
+		// Get the existing resource to get the resource version
+		existing, err := c.dynamicClient.Resource(gvr).Get(ctx, c.nodeName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to get existing %s CRD: %w", kind, err)
+		}
+
+		// Update the object with the resource version and other metadata
+		unstructuredObj.SetResourceVersion(existing.GetResourceVersion())
+		unstructuredObj.SetUID(existing.GetUID())
+
+		// Update the resource
+		_, err = c.dynamicClient.Resource(gvr).Update(ctx, unstructuredObj, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to update %s CRD: %w", kind, err)
+		}
+
+		logger.L().Debug("updated host data CRD",
+			helpers.String("kind", kind),
+			helpers.String("nodeName", c.nodeName))
+		return nil
 	}
 
-	_, err = c.dynamicClient.Resource(gvr).Patch(ctx, c.nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to patch %s CRD: %w", kind, err)
-	}
-
-	logger.L().Debug("updated host data CRD",
-		helpers.String("kind", kind),
-		helpers.String("nodeName", c.nodeName))
-	return nil
+	return fmt.Errorf("failed to create %s CRD: %w", kind, err)
 }
 
 // UpdateStatus updates the status of a host data CRD with an error

@@ -15,9 +15,16 @@ import (
 )
 
 const (
-	hostFSPrefix = "/host_fs" // Mount point for host filesystem
-	procDirName  = "/proc"
+	procDirName = "/proc"
 )
+
+var hostFSPrefix = "/host_fs" // Mount point for host filesystem
+
+func init() {
+	if val := os.Getenv("HOST_ROOT"); val != "" { // use HOST_ROOT as inspektor gadget
+		hostFSPrefix = val
+	}
+}
 
 // --- File Utilities ---
 

@@ -183,14 +183,19 @@ func main() {
 	dWatcher.AddAdaptor(k8sObjectCache)
 
 	// Create the host sensor manager
-	hostSensorConfig := hostsensormanager.Config{
-		Enabled:  cfg.EnableHostSensor,
-		Interval: cfg.HostSensorInterval,
-		NodeName: cfg.NodeName,
-	}
-	hostSensorManager, err := hostsensormanager.NewHostSensorManager(hostSensorConfig)
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error creating HostSensorManager", helpers.Error(err))
+	var hostSensorManager hostsensormanager.HostSensorManager
+	if cfg.EnableHostSensor {
+		hostSensorConfig := hostsensormanager.Config{
+			Enabled:  cfg.EnableHostSensor,
+			Interval: cfg.HostSensorInterval,
+			NodeName: cfg.NodeName,
+		}
+		hostSensorManager, err = hostsensormanager.NewHostSensorManager(hostSensorConfig)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating HostSensorManager", helpers.Error(err))
+		}
+	} else {
+		hostSensorManager = hostsensormanager.NewNoopHostSensorManager()
 	}
 
 	// Create the seccomp manager
