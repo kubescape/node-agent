@@ -17,7 +17,7 @@ docker-build-only:
 docker-build: gadgets
 	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
 
-docker-push:
+docker-push: docker-build
 	docker push $(IMAGE):$(TAG)
 
 gadgets:
