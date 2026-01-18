@@ -3,6 +3,8 @@ package storage
 import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 type ProfileClient interface {
@@ -25,4 +27,12 @@ type SbomClient interface {
 
 type StorageClient interface {
 	GetStorageClient() spdxv1beta1.SpdxV1beta1Interface
+}
+
+// SeccompProfileClient defines the interface for SeccompProfile operations
+// This interface abstracts the backend (storage vs CRD) from consumers
+type SeccompProfileClient interface {
+	WatchSeccompProfiles(namespace string, opts metav1.ListOptions) (watch.Interface, error)
+	ListSeccompProfiles(namespace string, opts metav1.ListOptions) (*v1beta1.SeccompProfileList, error)
+	GetSeccompProfile(namespace, name string) (*v1beta1.SeccompProfile, error)
 }

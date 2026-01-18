@@ -57,6 +57,7 @@ func TestLoadConfig(t *testing.T) {
 				EnablePrometheusExporter:       false,
 				EnableRuntimeDetection:         false,
 				EnableSeccomp:                  false,
+				SeccompProfileBackend:          "storage",
 				EnablePartialProfileGeneration: true,
 				Exporters: exporters.ExportersConfig{
 					SyslogExporter: "http://syslog.kubescape.svc.cluster.local:514",

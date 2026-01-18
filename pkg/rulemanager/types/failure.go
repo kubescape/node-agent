@@ -23,6 +23,7 @@ type GenericRuleFailure struct {
 	CloudServices          []string
 	HttpRuleAlert          apitypes.HttpRuleAlert
 	Extra                  interface{}
+	IsTriggerAlert         bool
 }
 
 type RuleFailure interface {
@@ -69,6 +70,10 @@ type RuleFailure interface {
 	SetHttpRuleAlert(httpRuleAlert apitypes.HttpRuleAlert)
 	// Set Extra
 	SetExtra(extra interface{})
+	// Get IsTriggerAlert
+	GetIsTriggerAlert() bool
+	// Set IsTriggerAlert
+	SetIsTriggerAlert(isTriggerAlert bool)
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -161,4 +166,12 @@ func (rule *GenericRuleFailure) SetHttpRuleAlert(httpRuleAlert apitypes.HttpRule
 
 func (rule *GenericRuleFailure) SetExtra(extra interface{}) {
 	rule.Extra = extra
+}
+
+func (rule *GenericRuleFailure) GetIsTriggerAlert() bool {
+	return rule.IsTriggerAlert
+}
+
+func (rule *GenericRuleFailure) SetIsTriggerAlert(isTriggerAlert bool) {
+	rule.IsTriggerAlert = isTriggerAlert
 }
