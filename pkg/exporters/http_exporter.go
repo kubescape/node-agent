@@ -327,6 +327,7 @@ func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.Ru
 		RuntimeAlertK8sDetails: k8sDetails,
 		RuleAlert:              failedRule.GetRuleAlert(),
 		RuleID:                 failedRule.GetRuleId(),
+		IsTriggerAlert:         failedRule.GetIsTriggerAlert(),
 		HttpRuleAlert:          httpDetails,
 	}
 }

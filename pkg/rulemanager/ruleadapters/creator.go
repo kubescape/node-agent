@@ -76,8 +76,9 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 		RuleAlert: apitypes.RuleAlert{
 			RuleDescription: message,
 		},
-		RuleID:        rule.ID,
-		AlertPlatform: apitypes.AlertSourcePlatformK8s,
+		RuleID:         rule.ID,
+		AlertPlatform:  apitypes.AlertSourcePlatformK8s,
+		IsTriggerAlert: rule.IsTriggerAlert,
 	}
 
 	eventAdapter.SetFailureMetadata(ruleFailure, enrichedEvent, state)
