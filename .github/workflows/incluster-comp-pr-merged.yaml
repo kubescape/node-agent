@@ -1,5 +1,8 @@
 name: pr-merged
 on:
+  # This workflow is designed to be called by other workflows (e.g., pr-merged.yaml).
+  # We do not include a direct trigger here because it would be triggered without
+  # the required inputs, leading to validation errors.
   workflow_call:
     inputs:
       HELM_BRANCH:
@@ -153,7 +156,9 @@ jobs:
       - id: export_tests_to_env
         name: set test name
         run: |
-          echo "TEST_NAMES=$input" >> $GITHUB_OUTPUT
+          echo "TEST_NAMES<<EOF" >> $GITHUB_OUTPUT
+          echo "$input" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
         env:
           input: ${{ inputs.REQUIRED_TESTS }}
 

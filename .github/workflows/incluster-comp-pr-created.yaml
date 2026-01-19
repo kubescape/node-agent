@@ -1,14 +1,8 @@
 name: pull_request_created
 on:
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-    branches:
-      - 'master'
-      - 'main'
-    paths-ignore:
-      - '**/**.md' ### Do not run the workflow if Markdown files changed.
-      - '.github/workflows/*' ### Do not run the workflow if files under path: .github/workflows/* changed.
-
+  # This workflow is designed to be called by other workflows (e.g., pr-created.yaml).
+  # We do not include a 'pull_request' trigger here because it would be triggered without
+  # the required inputs, leading to validation errors.
   workflow_call:
     inputs:
       GO_VERSION:
