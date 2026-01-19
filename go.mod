@@ -7,7 +7,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/anchore/syft v1.32.0
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.663
+	github.com/armosec/armoapi-go v0.0.667
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -33,7 +33,7 @@ require (
 	github.com/joncrlsn/dque v0.0.0-20241024143830-7723fd131a64
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.24
-	github.com/kubescape/k8s-interface v0.0.200
+	github.com/kubescape/k8s-interface v0.0.201
 	github.com/kubescape/storage v0.0.221
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
