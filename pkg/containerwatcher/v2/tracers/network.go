@@ -83,7 +83,8 @@ func (nt *NetworkTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.annotate": "network:kubenameresolver.enable=true",
+			"operator.oci.annotate":      "network:kubenameresolver.enable=true",
+			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
 		}
 		err := nt.runtime.RunGadget(nt.gadgetCtx, nil, params)
 		if err != nil {

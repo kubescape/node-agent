@@ -3,6 +3,7 @@ package ruleadapters
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/node-agent/pkg/contextdetection"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -87,6 +89,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	r.setRuntimeAlertK8sDetails(ruleFailure, objectCache)
 	r.setCloudServices(ruleFailure)
 	r.setProfileMetadata(rule, ruleFailure, objectCache)
+	r.setContextSpecificFields(ruleFailure, enrichedEvent)
 	r.enrichRuleFailure(ruleFailure)
 
 	if enrichedEvent.ProcessTree.PID != 0 {
@@ -110,6 +113,11 @@ func (r *RuleFailureCreator) enrichRuleFailure(ruleFailure *types.GenericRuleFai
 }
 
 func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *types.GenericRuleFailure, objectCache objectcache.ObjectCache) {
+	triggerEvent := ruleFailure.GetTriggerEvent()
+	if triggerEvent == nil {
+		return
+	}
+
 	var profileType armotypes.ProfileType
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 	profileRequirment := rule.ProfileDependency
@@ -128,7 +136,7 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 
 	switch profileType {
 	case armotypes.ApplicationProfile:
-		state := objectCache.ApplicationProfileCache().GetApplicationProfileState(ruleFailure.GetTriggerEvent().GetContainerID())
+		state := objectCache.ApplicationProfileCache().GetApplicationProfileState(triggerEvent.GetContainerID())
 		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
 				Status:            state.Status,
@@ -145,7 +153,7 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 		}
 
 	case armotypes.NetworkProfile:
-		state := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhoodState(ruleFailure.GetTriggerEvent().GetContainerID())
+		state := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhoodState(triggerEvent.GetContainerID())
 		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
 				Status:            state.Status,
@@ -172,7 +180,12 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 }
 
 func (r *RuleFailureCreator) setCloudServices(ruleFailure *types.GenericRuleFailure) {
-	if cloudServices := r.dnsManager.ResolveContainerProcessToCloudServices(ruleFailure.GetTriggerEvent().GetContainerID(), ruleFailure.GetBaseRuntimeAlert().InfectedPID); cloudServices != nil {
+	triggerEvent := ruleFailure.GetTriggerEvent()
+	if triggerEvent == nil {
+		return
+	}
+
+	if cloudServices := r.dnsManager.ResolveContainerProcessToCloudServices(triggerEvent.GetContainerID(), ruleFailure.GetBaseRuntimeAlert().InfectedPID); cloudServices != nil {
 		ruleFailure.SetCloudServices(cloudServices.ToSlice())
 	}
 
@@ -183,6 +196,8 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 	var err error
 	var path string
 
+	triggerEvent := ruleFailure.GetTriggerEvent()
+
 	if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path == "" {
 		path, err = utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
 		if err != nil {
@@ -192,8 +207,8 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 	}
 
 	if err != nil { // FIXME WTF it's always nil here
-		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" {
-			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", r.containerIdToPid.Get(ruleFailure.GetTriggerEvent().GetContainerID()),
+		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" && triggerEvent != nil {
+			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", r.containerIdToPid.Get(triggerEvent.GetContainerID()),
 				ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path))
 		}
 	} else {
@@ -202,7 +217,9 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 
-	baseRuntimeAlert.Timestamp = time.Unix(0, int64(ruleFailure.GetTriggerEvent().GetTimestamp()))
+	if triggerEvent != nil {
+		baseRuntimeAlert.Timestamp = time.Unix(0, int64(triggerEvent.GetTimestamp()))
+	}
 	var size int64 = 0
 	if hostPath != "" {
 		size, err = utils.GetFileSize(hostPath)
@@ -240,36 +257,41 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 
 func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.GenericRuleFailure, objectCache objectcache.ObjectCache) {
 	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
+	triggerEvent := ruleFailure.GetTriggerEvent()
+	if triggerEvent == nil {
+		return
+	}
+
 	if runtimek8sdetails.Image == "" {
-		runtimek8sdetails.Image = ruleFailure.GetTriggerEvent().GetContainerImage()
+		runtimek8sdetails.Image = triggerEvent.GetContainerImage()
 	}
 
 	if runtimek8sdetails.ImageDigest == "" {
-		runtimek8sdetails.ImageDigest = ruleFailure.GetTriggerEvent().GetContainerImageDigest()
+		runtimek8sdetails.ImageDigest = triggerEvent.GetContainerImageDigest()
 	}
 
 	if runtimek8sdetails.Namespace == "" {
-		runtimek8sdetails.Namespace = ruleFailure.GetTriggerEvent().GetNamespace()
+		runtimek8sdetails.Namespace = triggerEvent.GetNamespace()
 	}
 
 	if runtimek8sdetails.PodName == "" {
-		runtimek8sdetails.PodName = ruleFailure.GetTriggerEvent().GetPod()
+		runtimek8sdetails.PodName = triggerEvent.GetPod()
 	}
 
 	if runtimek8sdetails.PodNamespace == "" {
-		runtimek8sdetails.PodNamespace = ruleFailure.GetTriggerEvent().GetNamespace()
+		runtimek8sdetails.PodNamespace = triggerEvent.GetNamespace()
 	}
 
 	if runtimek8sdetails.ContainerName == "" {
-		runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().GetContainer()
+		runtimek8sdetails.ContainerName = triggerEvent.GetContainer()
 	}
 
 	if runtimek8sdetails.ContainerID == "" {
-		runtimek8sdetails.ContainerID = ruleFailure.GetTriggerEvent().GetContainerID()
+		runtimek8sdetails.ContainerID = triggerEvent.GetContainerID()
 	}
 
 	if runtimek8sdetails.HostNetwork == nil {
-		hostNetwork := ruleFailure.GetTriggerEvent().GetHostNetwork()
+		hostNetwork := triggerEvent.GetHostNetwork()
 		runtimek8sdetails.HostNetwork = &hostNetwork
 	}
 
@@ -296,4 +318,49 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 	}
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
+}
+
+func (r *RuleFailureCreator) setContextSpecificFields(ruleFailure *types.GenericRuleFailure, enrichedEvent *events.EnrichedEvent) {
+	// If no source context is available, default to Kubernetes (backward compatible)
+	if enrichedEvent.SourceContext == nil {
+		ruleFailure.SetSourceContext(contextdetection.Kubernetes)
+		return
+	}
+
+	sourceContextType := enrichedEvent.SourceContext.Context()
+	k8sDetails := ruleFailure.GetRuntimeAlertK8sDetails()
+
+	switch sourceContextType {
+	case contextdetection.Kubernetes:
+		ruleFailure.SetSourceContext(contextdetection.Kubernetes)
+		// K8s alerts use existing K8s details populated by setRuntimeAlertK8sDetails
+
+	case contextdetection.Host:
+		ruleFailure.SetSourceContext(contextdetection.Host)
+		// For Host context, use NodeName to store the hostname
+		hostname, err := os.Hostname()
+		if err == nil {
+			k8sDetails.NodeName = hostname
+		}
+
+	case contextdetection.Standalone:
+		ruleFailure.SetSourceContext(contextdetection.Standalone)
+		// For Standalone context, populate container-specific fields in RuntimeAlertK8sDetails
+		if k8sDetails.ContainerID == "" {
+			k8sDetails.ContainerID = enrichedEvent.ContainerID
+		}
+
+		triggerEvent := ruleFailure.GetTriggerEvent()
+		if triggerEvent != nil {
+			if k8sDetails.Image == "" {
+				k8sDetails.Image = triggerEvent.GetContainerImage()
+			}
+			// Use container name from trigger event if available
+			if k8sDetails.ContainerName == "" {
+				k8sDetails.ContainerName = triggerEvent.GetContainer()
+			}
+		}
+	}
+
+	ruleFailure.SetRuntimeAlertK8sDetails(k8sDetails)
 }

@@ -66,6 +66,8 @@ type Config struct {
 	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
 	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
+	HostMonitoringEnabled          bool                                 `mapstructure:"hostMonitoringEnabled"`
+	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
 	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
@@ -179,6 +181,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
+	viper.SetDefault("hostMonitoringEnabled", false)
+	viper.SetDefault("standaloneMonitoringEnabled", false)
 	// HTTP Exporter Alert Bulking defaults
 	viper.SetDefault("exporters::httpExporterConfig::bulkMaxAlerts", 50)
 	viper.SetDefault("exporters::httpExporterConfig::bulkTimeoutSeconds", 10)

@@ -2,8 +2,11 @@ package rulemanager
 
 import (
 	"slices"
+	"strings"
 
+	"github.com/kubescape/node-agent/pkg/contextdetection"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -29,4 +32,28 @@ func (v *RulePolicyValidator) Validate(ruleId string, process string, ap *v1beta
 	}
 
 	return false, nil
+}
+
+// RuleAppliesToContext checks if a rule should execute in the given context
+func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.ContextInfo) bool {
+	var currentContext contextdetection.EventSourceContext
+	if contextInfo == nil {
+		currentContext = contextdetection.Kubernetes
+	} else {
+		currentContext = contextInfo.Context()
+	}
+
+	var contextTags []string
+	for _, tag := range rule.Tags {
+		if ctx, found := strings.CutPrefix(tag, "context:"); found {
+			contextTags = append(contextTags, ctx)
+		}
+	}
+
+	if len(contextTags) > 0 {
+		return slices.Contains(contextTags, string(currentContext))
+	}
+
+	// No context specified in tags: default to kubernetes only (backward compatible)
+	return currentContext == contextdetection.Kubernetes
 }
