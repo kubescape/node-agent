@@ -65,7 +65,7 @@ func (c *UnshareAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *UnshareAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *UnshareAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//unshareEvent, ok := enrichedEvent.Event.(*tracerunsharetype.Event)
 	//if !ok {
 	//	return nil
@@ -84,5 +84,5 @@ func (c *UnshareAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 
 	//result["mountnsid"] = unshareEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

@@ -66,7 +66,7 @@ func (c *SSHAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *SSHAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *SSHAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//sshEvent, ok := enrichedEvent.Event.(*tracersshtype.Event)
 	//if !ok {
 	//	return nil
@@ -85,5 +85,5 @@ func (c *SSHAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inter
 
 	//result["mountnsid"] = sshEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

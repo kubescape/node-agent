@@ -65,7 +65,7 @@ func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *OpenAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *OpenAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//openEvent, ok := enrichedEvent.Event.(*events.OpenEvent)
 	//if !ok {
 	//	return nil
@@ -89,5 +89,5 @@ func (c *OpenAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 
 	//result["mountnsid"] = openEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

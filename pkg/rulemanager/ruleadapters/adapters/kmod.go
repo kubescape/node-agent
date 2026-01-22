@@ -68,7 +68,7 @@ func (c *KmodAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *KmodAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *KmodAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//kmodEvent, ok := enrichedEvent.Event.(*tracerkmodtype.Event)
 	//if !ok {
 	//	return nil
@@ -89,5 +89,5 @@ func (c *KmodAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 
 	//result["mountnsid"] = kmodEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

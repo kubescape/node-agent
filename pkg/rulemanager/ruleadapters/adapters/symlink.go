@@ -72,7 +72,7 @@ func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *SymlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *SymlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//symlinkEvent, ok := enrichedEvent.Event.(*tracersymlinktype.Event)
 	//if !ok {
 	//	return nil
@@ -93,5 +93,5 @@ func (c *SymlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 
 	//result["mountnsid"] = symlinkEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

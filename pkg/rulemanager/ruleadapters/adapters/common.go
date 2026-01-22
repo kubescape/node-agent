@@ -1,38 +1,67 @@
 package adapters
 
-import "github.com/kubescape/node-agent/pkg/utils"
+import (
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
+)
 
-func ConvertToMap(e utils.EnrichEvent) map[string]interface{} {
-	result := AcquireMap()
+type RuntimeInfo struct {
+	ContainerID          string
+	ContainerName        string
+	ContainerImageName   string
+	ContainerImageDigest string
+}
 
-	result["timestamp"] = e.GetTimestamp()
-	result["type"] = e.GetEventType()
-	//result["message"] = e.Message
+type K8sInfo struct {
+	Namespace     string
+	PodName       string
+	PodLabels     map[string]string
+	ContainerName string
+	HostNetwork   bool
+}
 
-	runtime := AcquireMap()
-	//runtime["runtimeName"] = e.Runtime.RuntimeName
-	runtime["containerId"] = e.GetContainerID()
-	runtime["containerName"] = e.GetContainer()
-	//runtime["containerPid"] = e.Runtime.ContainerPID
-	runtime["containerImageName"] = e.GetContainerImage()
-	runtime["containerImageDigest"] = e.GetContainerImageDigest()
-	//runtime["containerStartedAt"] = e.Runtime.ContainerStartedAt
-	result["runtime"] = runtime
+type EnrichEventResult struct {
+	Timestamp types.Time
+	Type      utils.EventType
+	Runtime   RuntimeInfo
+	K8s       K8sInfo
+	PID       uint32
+	UID       uint32
+	GID       uint32
+	OtherIP   string
+	Internal  bool
+	Direction consts.NetworkDirection
+	MountNsID uint64
+	//Request   *http.Request
+	//Response  *http.Response
+}
 
-	k8s := AcquireMap()
-	//k8s["node"] = e.K8s.Node
-	k8s["namespace"] = e.GetNamespace()
-	k8s["podName"] = e.GetPod()
-	k8s["podLabels"] = e.GetPodLabels()
-	k8s["containerName"] = e.GetContainer()
-	k8s["hostNetwork"] = e.GetHostNetwork()
-
-	//owner := AcquireMap()
-	//owner["kind"] = e.K8s.Owner.Kind
-	//owner["name"] = e.K8s.Owner.Name
-	//k8s["owner"] = owner
-
-	result["k8s"] = k8s
-
-	return result
+func ConvertToMap(e utils.HttpEvent) EnrichEventResult {
+	return EnrichEventResult{
+		Timestamp: e.GetTimestamp(),
+		Type:      e.GetEventType(),
+		Runtime: RuntimeInfo{
+			ContainerID:          e.GetContainerID(),
+			ContainerName:        e.GetContainer(),
+			ContainerImageName:   e.GetContainerImage(),
+			ContainerImageDigest: e.GetContainerImageDigest(),
+		},
+		K8s: K8sInfo{
+			Namespace:     e.GetNamespace(),
+			PodName:       e.GetPod(),
+			PodLabels:     e.GetPodLabels(),
+			ContainerName: e.GetContainer(),
+			HostNetwork:   e.GetHostNetwork(),
+		},
+		PID:       e.GetPID(),
+		UID:       *e.GetUid(),
+		GID:       *e.GetGid(),
+		OtherIP:   e.GetOtherIp(),
+		Internal:  e.GetInternal(),
+		Direction: e.GetDirection(),
+		MountNsID: e.GetMountNsID(),
+		//Request:   e.GetRequest(),
+		//Response:  e.GetResponse(),
+	}
 }

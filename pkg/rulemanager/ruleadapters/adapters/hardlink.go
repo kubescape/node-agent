@@ -72,7 +72,7 @@ func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enriched
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *HardlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *HardlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//hardlinkEvent, ok := enrichedEvent.Event.(*tracerhardlinktype.Event)
 	//if !ok {
 	//	return nil
@@ -93,5 +93,5 @@ func (c *HardlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]
 
 	//result["mountnsid"] = hardlinkEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

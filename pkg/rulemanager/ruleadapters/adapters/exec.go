@@ -86,7 +86,7 @@ func GetExecFullPathFromEvent(execEvent utils.ExecEvent) string {
 	return utils.GetExecPathFromEvent(execEvent)
 }
 
-func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//execEvent, ok := enrichedEvent.Event.(*events.ExecEvent)
 	//if !ok {
 	//	return nil
@@ -116,5 +116,5 @@ func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 
 	//result["mountnsid"] = execEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

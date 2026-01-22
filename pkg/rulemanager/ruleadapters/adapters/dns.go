@@ -77,7 +77,7 @@ func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *DnsAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *DnsAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//dnsEvent, ok := enrichedEvent.Event.(*tracerdnstype.Event)
 	//if !ok {
 	//	return nil
@@ -112,5 +112,5 @@ func (c *DnsAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inter
 
 	//result["mountnsid"] = dnsEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

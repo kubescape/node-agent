@@ -56,7 +56,7 @@ func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enri
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *CapabilitiesAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *CapabilitiesAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//capEvent, ok := enrichedEvent.Event.(*tracercapabilitiestype.Event)
 	//if !ok {
 	//	return nil
@@ -81,5 +81,5 @@ func (c *CapabilitiesAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[str
 
 	//result["mountnsid"] = capEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

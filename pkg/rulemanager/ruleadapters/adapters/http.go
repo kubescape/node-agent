@@ -61,30 +61,11 @@ func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	httpEvent, ok := enrichedEvent.Event.(utils.HttpEvent)
 	if !ok {
 		return nil
 	}
 
-	result := ConvertToMap(httpEvent)
-
-	result["pid"] = httpEvent.GetPID()
-	result["uid"] = httpEvent.GetUid()
-	result["gid"] = httpEvent.GetGid()
-	//result["other_port"] = httpEvent.OtherPort
-	result["other_ip"] = httpEvent.GetOtherIp()
-	result["internal"] = httpEvent.GetInternal()
-	result["direction"] = httpEvent.GetDirection()
-
-	if request := httpEvent.GetRequest(); request != nil {
-		result["request"] = request
-	}
-	if response := httpEvent.GetResponse(); response != nil {
-		result["response"] = response
-	}
-
-	//result["mountnsid"] = httpEvent.MountNsID
-
-	return result
+	return ConvertToMap(httpEvent)
 }

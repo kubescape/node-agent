@@ -66,7 +66,7 @@ func (c *NetworkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *NetworkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *NetworkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//networkEvent, ok := enrichedEvent.Event.(*tracernetworktype.Event)
 	//if !ok {
 	//	return nil
@@ -98,5 +98,5 @@ func (c *NetworkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 
 	//result["mountnsid"] = networkEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

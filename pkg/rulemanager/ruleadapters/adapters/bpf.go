@@ -69,7 +69,7 @@ func (c *BpfAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *BpfAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *BpfAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//bpfEvent, ok := enrichedEvent.Event.(*tracerbpftype.Event)
 	//if !ok {
 	//	return nil
@@ -90,5 +90,5 @@ func (c *BpfAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inter
 
 	//result["mountnsid"] = bpfEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

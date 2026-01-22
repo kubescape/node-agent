@@ -56,7 +56,7 @@ func (c *RandomXAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *RandomXAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+func (c *RandomXAdapter) ToMap(enrichedEvent *events.EnrichedEvent) any {
 	//randomXEvent, ok := enrichedEvent.Event.(*tracerrandomxtype.Event)
 	//if !ok {
 	//	return nil
@@ -74,5 +74,5 @@ func (c *RandomXAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 
 	//result["mountnsid"] = randomXEvent.MountNsID
 
-	return map[string]interface{}{}
+	return nil
 }

@@ -143,7 +143,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 	return true, nil
 }
 
-func (c *CEL) EvaluateRuleByMap(event map[string]any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error) {
+func (c *CEL) EvaluateRuleByMap(event any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error) {
 	// Get evaluation context map from pool to reduce allocations
 	evalContext := c.evalContextPool.Get().(map[string]any)
 	defer func() {
@@ -178,7 +178,7 @@ func (c *CEL) EvaluateRuleByMap(event map[string]any, eventType utils.EventType,
 	return true, nil
 }
 
-func (c *CEL) EvaluateExpressionByMap(event map[string]any, expression string, eventType utils.EventType) (string, error) {
+func (c *CEL) EvaluateExpressionByMap(event any, expression string, eventType utils.EventType) (string, error) {
 	program, err := c.getOrCreateProgram(expression)
 	if err != nil {
 		return "", err
