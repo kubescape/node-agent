@@ -78,43 +78,58 @@ func GetPacketDirection(syscall string) (consts.NetworkDirection, error) {
 }
 
 func ParseHttpRequest(data []byte) (*http.Request, error) {
-	bufReader := bufio.NewReader(bytes.NewReader(data))
+	// Find header/body boundary
+	headerEnd := bytes.Index(data, []byte("\r\n\r\n"))
+	if headerEnd == -1 {
+		headerEnd = bytes.Index(data, []byte("\n\n"))
+		if headerEnd == -1 {
+			return fallbackReadRequest(data)
+		}
+		headerEnd += 2
+	} else {
+		headerEnd += 4
+	}
 
+	// Parse headers only
+	bufReader := bufio.NewReader(bytes.NewReader(data[:headerEnd]))
 	req, err := http.ReadRequest(bufReader)
 	if err != nil {
 		return fallbackReadRequest(data)
 	}
 
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Body.Close()
-
-	req.Body = io.NopCloser(bytes.NewReader(body))
+	// Set body directly without re-reading
+	bodyData := data[headerEnd:]
+	req.ContentLength = int64(len(bodyData))
+	req.Body = io.NopCloser(bytes.NewReader(bodyData))
 
 	return req, nil
 }
 
 func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
-	resp, err := readResponse(data, req)
-	if err != nil {
-		resp, err = fallbackReadResponse(data, req)
-		if err != nil {
-			return nil, err
+	// Find header/body boundary
+	headerEnd := bytes.Index(data, []byte("\r\n\r\n"))
+	if headerEnd == -1 {
+		headerEnd = bytes.Index(data, []byte("\n\n"))
+		if headerEnd == -1 {
+			return fallbackReadResponse(data, req)
 		}
+		headerEnd += 2
+	} else {
+		headerEnd += 4
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil && err != io.ErrUnexpectedEOF {
-		return nil, err
+	// Parse headers only
+	bufReader := bufio.NewReader(bytes.NewReader(data[:headerEnd]))
+	resp, err := http.ReadResponse(bufReader, req)
+	if err != nil {
+		return fallbackReadResponse(data, req)
 	}
 
+	// Set body directly without re-reading
+	bodyData := data[headerEnd:]
 	resp.Body.Close()
-
-	resp.Body = io.NopCloser(bytes.NewReader(body))
-	resp.ContentLength = int64(len(body))
+	resp.Body = io.NopCloser(bytes.NewReader(bodyData))
+	resp.ContentLength = int64(len(bodyData))
 	resp.TransferEncoding = nil
 	resp.Header.Del("Transfer-Encoding")
 	resp.Header.Del("Content-Length")
