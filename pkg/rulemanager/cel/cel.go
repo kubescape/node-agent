@@ -68,7 +68,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	}
 
 	c.evalContextPool.New = func() interface{} {
-		return make(map[string]any, 1)
+		return make(map[string]any, 2)
 	}
 
 	return c, nil
@@ -117,8 +117,11 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 }
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
+	obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
+	eventType := event.Event.GetEventType()
+	input := map[string]any{"event": obj, "eventType": string(eventType)}
+
 	for _, expression := range expressions {
-		eventType := event.Event.GetEventType()
 		if expression.EventType != eventType {
 			continue
 		}
@@ -127,9 +130,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 		if err != nil {
 			return false, err
 		}
-
-		obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
-		out, _, err := program.Eval(map[string]any{"event": obj, "eventType": string(eventType)})
+		out, _, err := program.Eval(input)
 		if err != nil {
 			return false, err
 		}
