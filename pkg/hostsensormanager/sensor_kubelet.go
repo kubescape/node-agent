@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
 const (
@@ -38,12 +39,12 @@ func NewKubeletInfoSensor(nodeName string) *KubeletInfoSensor {
 
 // GetKind returns the CRD kind for this sensor
 func (s *KubeletInfoSensor) GetKind() string {
-	return "KubeletInfo"
+	return string(hostsensor.KubeletInfo)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *KubeletInfoSensor) GetPluralKind() string {
-	return "kubeletinfos"
+	return hostsensor.MapResourceToPlural(hostsensor.KubeletInfo)
 }
 
 // Sense collects the kubelet info data from the host

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
 const (
@@ -25,12 +26,12 @@ func NewKubeProxyInfoSensor(nodeName string) *KubeProxyInfoSensor {
 
 // GetKind returns the CRD kind for this sensor
 func (s *KubeProxyInfoSensor) GetKind() string {
-	return "KubeProxyInfo"
+	return string(hostsensor.KubeProxyInfo)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *KubeProxyInfoSensor) GetPluralKind() string {
-	return "kubeproxyinfos"
+	return hostsensor.MapResourceToPlural(hostsensor.KubeProxyInfo)
 }
 
 // Sense collects the kube-proxy info data from the host

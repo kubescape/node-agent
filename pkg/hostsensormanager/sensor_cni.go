@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
 // CNIInfoSensor implements the Sensor interface for CNI info data
@@ -20,12 +21,12 @@ func NewCNIInfoSensor(nodeName string) *CNIInfoSensor {
 
 // GetKind returns the CRD kind for this sensor
 func (s *CNIInfoSensor) GetKind() string {
-	return "CNIInfo"
+	return string(hostsensor.CNIInfo)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *CNIInfoSensor) GetPluralKind() string {
-	return "cniinfos"
+	return hostsensor.MapResourceToPlural(hostsensor.CNIInfo)
 }
 
 // Sense collects the CNI info data from the host
