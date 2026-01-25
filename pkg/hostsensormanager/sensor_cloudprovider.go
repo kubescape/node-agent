@@ -3,6 +3,8 @@ package hostsensormanager
 import (
 	"net/http"
 	"time"
+
+	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
 // CloudProviderInfoSensor implements the Sensor interface for cloud provider info data
@@ -19,12 +21,12 @@ func NewCloudProviderInfoSensor(nodeName string) *CloudProviderInfoSensor {
 
 // GetKind returns the CRD kind for this sensor
 func (s *CloudProviderInfoSensor) GetKind() string {
-	return "CloudProviderInfo"
+	return string(hostsensor.CloudProviderInfo)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *CloudProviderInfoSensor) GetPluralKind() string {
-	return "cloudproviderinfos"
+	return hostsensor.MapResourceToPlural(hostsensor.CloudProviderInfo)
 }
 
 // Sense collects the cloud provider info data from the host

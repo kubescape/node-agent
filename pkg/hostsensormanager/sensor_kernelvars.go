@@ -9,6 +9,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
 const (
@@ -29,12 +30,12 @@ func NewLinuxKernelVariablesSensor(nodeName string) *LinuxKernelVariablesSensor 
 
 // GetKind returns the CRD kind for this sensor
 func (s *LinuxKernelVariablesSensor) GetKind() string {
-	return "LinuxKernelVariables"
+	return string(hostsensor.LinuxKernelVariables)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *LinuxKernelVariablesSensor) GetPluralKind() string {
-	return "linuxkernelvariables"
+	return hostsensor.MapResourceToPlural(hostsensor.LinuxKernelVariables)
 }
 
 // Sense collects the kernel variables data from the host

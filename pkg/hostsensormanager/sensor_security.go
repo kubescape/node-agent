@@ -2,6 +2,8 @@ package hostsensormanager
 
 import (
 	"os"
+
+	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
 const (
@@ -23,12 +25,12 @@ func NewLinuxSecurityHardeningSensor(nodeName string) *LinuxSecurityHardeningSen
 
 // GetKind returns the CRD kind for this sensor
 func (s *LinuxSecurityHardeningSensor) GetKind() string {
-	return "LinuxSecurityHardening"
+	return string(hostsensor.LinuxSecurityHardeningStatus)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *LinuxSecurityHardeningSensor) GetPluralKind() string {
-	return "linuxsecurityhardenings"
+	return hostsensor.MapResourceToPlural(hostsensor.LinuxSecurityHardeningStatus)
 }
 
 // Sense collects the security hardening data from the host

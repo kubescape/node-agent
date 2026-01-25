@@ -2,6 +2,8 @@ package hostsensormanager
 
 import (
 	"context"
+
+	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
 const (
@@ -34,12 +36,12 @@ func NewControlPlaneInfoSensor(nodeName string) *ControlPlaneInfoSensor {
 
 // GetKind returns the CRD kind for this sensor
 func (s *ControlPlaneInfoSensor) GetKind() string {
-	return "ControlPlaneInfo"
+	return string(hostsensor.ControlPlaneInfo)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *ControlPlaneInfoSensor) GetPluralKind() string {
-	return "controlplaneinfos"
+	return hostsensor.MapResourceToPlural(hostsensor.ControlPlaneInfo)
 }
 
 // Sense collects the control plane info data from the host

@@ -3,6 +3,8 @@ package hostsensormanager
 import (
 	"fmt"
 	"path"
+
+	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
 const (
@@ -23,12 +25,12 @@ func NewKernelVersionSensor(nodeName string) *KernelVersionSensor {
 
 // GetKind returns the CRD kind for this sensor
 func (s *KernelVersionSensor) GetKind() string {
-	return "KernelVersion"
+	return string(hostsensor.KernelVersion)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *KernelVersionSensor) GetPluralKind() string {
-	return "kernelversions"
+	return hostsensor.MapResourceToPlural(hostsensor.KernelVersion)
 }
 
 // Sense collects the kernel version data from the host

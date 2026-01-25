@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
 const (
@@ -29,12 +30,12 @@ func NewOsReleaseSensor(nodeName string) *OsReleaseSensor {
 
 // GetKind returns the CRD kind for this sensor
 func (s *OsReleaseSensor) GetKind() string {
-	return "OsReleaseFile"
+	return string(hostsensor.OsReleaseFile)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *OsReleaseSensor) GetPluralKind() string {
-	return "osreleasefiles"
+	return hostsensor.MapResourceToPlural(hostsensor.OsReleaseFile)
 }
 
 // Sense collects the OS release data from the host

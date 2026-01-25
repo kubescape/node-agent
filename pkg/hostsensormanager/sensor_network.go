@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/hostsensor"
 	"github.com/weaveworks/procspy"
 )
 
@@ -33,12 +34,12 @@ func NewOpenPortsSensor(nodeName string) *OpenPortsSensor {
 
 // GetKind returns the CRD kind for this sensor
 func (s *OpenPortsSensor) GetKind() string {
-	return "OpenPorts"
+	return string(hostsensor.OpenPortsList)
 }
 
 // GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
 func (s *OpenPortsSensor) GetPluralKind() string {
-	return "openports"
+	return hostsensor.MapResourceToPlural(hostsensor.OpenPortsList)
 }
 
 // Sense collects the open ports data from the host
