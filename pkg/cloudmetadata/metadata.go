@@ -39,7 +39,7 @@ func GetCloudMetadata(ctx context.Context, client *k8sinterface.KubernetesApi, n
 }
 
 func enrichCloudMetadataForAWS(ctx context.Context, client *k8sinterface.KubernetesApi, cMetadata *apitypes.CloudMetadata) {
-	if cMetadata == nil || cMetadata.Provider != k8sInterfaceCloudMetadata.ProviderAWS || cMetadata.AccountID != "" {
+	if cMetadata == nil || cMetadata.Provider != apitypes.ProviderAws || cMetadata.AccountID != "" {
 		return
 	}
 
