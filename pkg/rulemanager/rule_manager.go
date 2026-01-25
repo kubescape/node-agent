@@ -204,10 +204,10 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			continue
 		}
 
-		ruleExpressions := rm.getRuleExpressions(rule, eventType)
-		if len(ruleExpressions) == 0 {
-			continue
-		}
+		//ruleExpressions := rm.getRuleExpressions(rule, eventType)
+		//if len(ruleExpressions) == 0 {
+		//	continue
+		//}
 
 		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
 			continue

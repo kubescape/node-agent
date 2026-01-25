@@ -46,10 +46,10 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 	var hasContextTags bool
 	for _, tag := range rule.Tags {
 		if ctx, found := strings.CutPrefix(tag, "context:"); found {
-			hasContextTags = true
 			if ctx == string(currentContext) {
 				return true
 			}
+			hasContextTags = true
 		}
 	}
 
