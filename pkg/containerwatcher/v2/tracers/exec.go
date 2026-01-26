@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	execImageName = "quay.io/matthiasb_1/gadgets:exec"
+	execImageName = "ghcr.io/inspektor-gadget/gadget/trace_exec:v0.48.0"
 	execTraceName = "trace_exec"
 )
 
@@ -111,9 +111,7 @@ func (et *ExecTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.ExecveEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					et.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.ExecveEventType})
+					et.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.ExecveEventType})
 					return nil
 				}, opPriority)
 				if err != nil {
