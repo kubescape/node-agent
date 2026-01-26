@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	capabilitiesImageName = "quay.io/matthiasb_1/gadgets:capabilities"
+	capabilitiesImageName = "ghcr.io/inspektor-gadget/gadget/trace_capabilities:v0.48.0"
 	capabilitiesTraceName = "trace_capabilities"
 )
 
@@ -108,9 +108,7 @@ func (ct *CapabilitiesTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.CapabilitiesEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					ct.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.CapabilitiesEventType})
+					ct.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.CapabilitiesEventType})
 					return nil
 				}, opPriority)
 				if err != nil {
