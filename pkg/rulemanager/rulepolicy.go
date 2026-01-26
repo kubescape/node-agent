@@ -43,17 +43,20 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 		currentContext = contextInfo.Context()
 	}
 
-	var contextTags []string
+	var hasContextTags bool
 	for _, tag := range rule.Tags {
 		if ctx, found := strings.CutPrefix(tag, "context:"); found {
-			contextTags = append(contextTags, ctx)
+			if ctx == string(currentContext) {
+				return true
+			}
+			hasContextTags = true
 		}
 	}
 
-	if len(contextTags) > 0 {
-		return slices.Contains(contextTags, string(currentContext))
+	// No context specified in tags: default to kubernetes only (backward compatible)
+	if !hasContextTags {
+		return currentContext == contextdetection.Kubernetes
 	}
 
-	// No context specified in tags: default to kubernetes only (backward compatible)
-	return currentContext == contextdetection.Kubernetes
+	return false
 }

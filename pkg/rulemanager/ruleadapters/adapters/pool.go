@@ -7,7 +7,7 @@ import "sync"
 // for the number of keys in your event maps.
 var mapPool = sync.Pool{
 	New: func() interface{} {
-		return make(map[string]interface{}, 32)
+		return make(map[string]interface{}, 5)
 	},
 }
 

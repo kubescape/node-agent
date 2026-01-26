@@ -23,7 +23,9 @@ func ConvertToMap(e utils.EnrichEvent) map[string]interface{} {
 	//k8s["node"] = e.K8s.Node
 	k8s["namespace"] = e.GetNamespace()
 	k8s["podName"] = e.GetPod()
-	k8s["podLabels"] = e.GetPodLabels()
+
+	//k8s["podLabels"] = e.GetPodLabels()
+
 	k8s["containerName"] = e.GetContainer()
 	k8s["hostNetwork"] = e.GetHostNetwork()
 
