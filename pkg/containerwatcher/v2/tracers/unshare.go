@@ -107,9 +107,7 @@ func (ut *UnshareTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.UnshareEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					ut.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.UnshareEventType})
+					ut.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.UnshareEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

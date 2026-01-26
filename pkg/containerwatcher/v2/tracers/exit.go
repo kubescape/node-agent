@@ -106,9 +106,7 @@ func (et *ExitTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.ExitEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					et.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.ExitEventType})
+					et.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.ExitEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

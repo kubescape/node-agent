@@ -2,6 +2,7 @@ package tracers
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -57,9 +58,13 @@ func TestForkFields(t *testing.T) {
 	for name, fields := range expectedFields {
 		actualDS, exists := dataSources[name]
 		require.True(t, exists, "data source %q not found", name)
-		assert.Equal(t, len(fields), len(actualDS.Fields()), "data source %q has unexpected number of fields", name)
 		for _, field := range fields {
 			assert.NotNilf(t, actualDS.GetField(field), "field %q not found in data source %q", field, name)
+		}
+		for _, field := range actualDS.Fields() {
+			if !slices.Contains(fields, field.FullName) {
+				t.Errorf("unexpected field %q in data source %q", field.FullName, name)
+			}
 		}
 	}
 }
