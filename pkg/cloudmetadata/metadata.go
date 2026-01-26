@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	k8sInterfaceCloudMetadata "github.com/kubescape/k8s-interface/cloudmetadata"
@@ -22,7 +22,7 @@ const (
 )
 
 // GetCloudMetadata retrieves cloud metadata for a given node
-func GetCloudMetadata(ctx context.Context, client *k8sinterface.KubernetesApi, nodeName string) (*apitypes.CloudMetadata, error) {
+func GetCloudMetadata(ctx context.Context, client *k8sinterface.KubernetesApi, nodeName string) (*armotypes.CloudMetadata, error) {
 	node, err := client.GetKubernetesClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s: %v", nodeName, err)
@@ -38,8 +38,8 @@ func GetCloudMetadata(ctx context.Context, client *k8sinterface.KubernetesApi, n
 	return cMetadata, nil
 }
 
-func enrichCloudMetadataForAWS(ctx context.Context, client *k8sinterface.KubernetesApi, cMetadata *apitypes.CloudMetadata) {
-	if cMetadata == nil || cMetadata.Provider != apitypes.ProviderAws || cMetadata.AccountID != "" {
+func enrichCloudMetadataForAWS(ctx context.Context, client *k8sinterface.KubernetesApi, cMetadata *armotypes.CloudMetadata) {
+	if cMetadata == nil || cMetadata.Provider != armotypes.ProviderAws || cMetadata.AccountID != "" {
 		return
 	}
 
@@ -58,7 +58,7 @@ func enrichCloudMetadataForAWS(ctx context.Context, client *k8sinterface.Kuberne
 }
 
 // GetCloudMetadataWithIMDS retrieves cloud metadata for a given node using IMDS
-func GetCloudMetadataWithIMDS(ctx context.Context) (*apitypes.CloudMetadata, error) {
+func GetCloudMetadataWithIMDS(ctx context.Context) (*armotypes.CloudMetadata, error) {
 	cMetadataClient := k8sInterfaceCloudMetadata.NewMetadataClient(true)
 
 	cMetadata, err := cMetadataClient.GetMetadata(ctx)
@@ -71,11 +71,16 @@ func GetCloudMetadataWithIMDS(ctx context.Context) (*apitypes.CloudMetadata, err
 	// Fallback strategy: try different providers
 	fallbacks := []struct {
 		name  string
-		fetch func(context.Context) (*apitypes.CloudMetadata, error)
+		fetch func(context.Context) (*armotypes.CloudMetadata, error)
 	}{
-		{name: "DigitalOcean", fetch: fetchDigitalOceanMetadata},
-		{name: "GCP", fetch: fetchGCPMetadata},
-		{name: "Azure", fetch: fetchAzureMetadata},
+		{name: string(armotypes.ProviderDigitalOcean), fetch: fetchDigitalOceanMetadata},
+		{name: string(armotypes.ProviderGcp), fetch: fetchGCPMetadata},
+		{name: string(armotypes.ProviderAzure), fetch: fetchAzureMetadata},
+		{name: string(armotypes.ProviderAlibaba), fetch: fetchAlibabaMetadata},
+		{name: string(armotypes.ProviderOracle), fetch: fetchOracleMetadata},
+		{name: string(armotypes.ProviderOpenStack), fetch: fetchOpenStackMetadata},
+		{name: string(armotypes.ProviderHetzner), fetch: fetchHetznerMetadata},
+		{name: string(armotypes.ProviderLinode), fetch: fetchLinodeMetadata},
 	}
 
 	for _, fb := range fallbacks {
@@ -125,7 +130,7 @@ func getLastPathPart(val string) string {
 }
 
 // fetchDigitalOceanMetadata attempts to fetch basic metadata from DigitalOcean's metadata service.
-func fetchDigitalOceanMetadata(ctx context.Context) (*apitypes.CloudMetadata, error) {
+func fetchDigitalOceanMetadata(ctx context.Context) (*armotypes.CloudMetadata, error) {
 	base := "http://169.254.169.254/metadata/v1/"
 
 	// Probe root to see whether the metadata endpoint responds and contains expected entries.
@@ -134,7 +139,7 @@ func fetchDigitalOceanMetadata(ctx context.Context) (*apitypes.CloudMetadata, er
 		return nil, err
 	}
 
-	// Basic heuristic: the DO metadata root typically lists resources like 'id', 'hostname', 'region' etc.
+	// Basic heuristic: the DO metadata root typically lists resources like 'id', 'region' and 'hostname'.
 	if !strings.Contains(body, "id") && !strings.Contains(body, "region") && !strings.Contains(body, "hostname") {
 		return nil, fmt.Errorf("digitalocean metadata root missing expected entries")
 	}
@@ -153,14 +158,20 @@ func fetchDigitalOceanMetadata(ctx context.Context) (*apitypes.CloudMetadata, er
 		instanceType = get("type")
 	}
 
-	meta := &apitypes.CloudMetadata{
-		Provider:     "digitalocean",
+	meta := &armotypes.CloudMetadata{
+		Provider:     armotypes.ProviderDigitalOcean,
+		HostType:     armotypes.HostTypeDroplet,
 		InstanceID:   id,
 		InstanceType: instanceType,
 		Region:       get("region"),
 		PrivateIP:    get("interfaces/private/0/ipv4/address"),
 		PublicIP:     get("interfaces/public/0/ipv4/address"),
 		Hostname:     get("hostname"),
+	}
+
+	// Detect DOKS
+	if tags := get("tags"); tags != "" && strings.Contains(tags, "k8s") {
+		meta.HostType = armotypes.HostTypeDoks
 	}
 
 	// if nothing useful was obtained, return an error so callers can continue trying other fallbacks
@@ -172,7 +183,7 @@ func fetchDigitalOceanMetadata(ctx context.Context) (*apitypes.CloudMetadata, er
 }
 
 // fetchGCPMetadata attempts to fetch basic metadata from GCP's metadata service.
-func fetchGCPMetadata(ctx context.Context) (*apitypes.CloudMetadata, error) {
+func fetchGCPMetadata(ctx context.Context) (*armotypes.CloudMetadata, error) {
 	base := "http://metadata.google.internal/computeMetadata/v1/"
 	headers := map[string]string{"Metadata-Flavor": "Google"}
 
@@ -186,18 +197,28 @@ func fetchGCPMetadata(ctx context.Context) (*apitypes.CloudMetadata, error) {
 		return nil, fmt.Errorf("not a GCP instance")
 	}
 
-	return &apitypes.CloudMetadata{
-		Provider:     "gcp",
+	meta := &armotypes.CloudMetadata{
+		Provider:     armotypes.ProviderGcp,
+		HostType:     armotypes.HostTypeGce,
 		AccountID:    get("project/project-id"),
 		InstanceID:   get("instance/id"),
 		InstanceType: getLastPathPart(machineType),
 		Zone:         getLastPathPart(get("instance/zone")),
 		Hostname:     get("instance/hostname"),
-	}, nil
+		PrivateIP:    get("instance/network-interfaces/0/ip"),
+		PublicIP:     get("instance/network-interfaces/0/access-configs/0/external-ip"),
+	}
+
+	// Detect GKE
+	if clusterName := get("instance/attributes/cluster-name"); clusterName != "" {
+		meta.HostType = armotypes.HostTypeGke
+	}
+
+	return meta, nil
 }
 
 // fetchAzureMetadata attempts to fetch basic metadata from Azure's metadata service.
-func fetchAzureMetadata(ctx context.Context) (*apitypes.CloudMetadata, error) {
+func fetchAzureMetadata(ctx context.Context) (*armotypes.CloudMetadata, error) {
 	base := "http://169.254.169.254/metadata/instance/compute/"
 	headers := map[string]string{"Metadata": "true"}
 	params := "?api-version=" + azureApiVersion + "&format=text"
@@ -212,13 +233,140 @@ func fetchAzureMetadata(ctx context.Context) (*apitypes.CloudMetadata, error) {
 		return nil, fmt.Errorf("not an Azure instance")
 	}
 
-	return &apitypes.CloudMetadata{
-		Provider:     "azure",
+	meta := &armotypes.CloudMetadata{
+		Provider:     armotypes.ProviderAzure,
+		HostType:     armotypes.HostTypeAzureVm,
 		AccountID:    get("subscriptionId"),
 		InstanceID:   get("vmId"),
 		InstanceType: vmSize,
 		Region:       get("location"),
 		Zone:         get("zone"),
 		Hostname:     get("name"),
+	}
+
+	// Detect AKS (heuristic: check for resource group or vmss tags common in AKS)
+	if strings.Contains(strings.ToLower(get("resourceGroupName")), "aks") {
+		meta.HostType = armotypes.HostTypeAks
+	}
+
+	// Try to get IP info
+	networkBase := "http://169.254.169.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/"
+	if ip, err := fetchHTTPMetadata(ctx, networkBase+"privateIpAddress"+params, headers); err == nil {
+		meta.PrivateIP = ip
+	}
+	if ip, err := fetchHTTPMetadata(ctx, networkBase+"publicIpAddress"+params, headers); err == nil {
+		meta.PublicIP = ip
+	}
+
+	return meta, nil
+}
+
+// fetchAlibabaMetadata attempts to fetch basic metadata from Alibaba Cloud's metadata service.
+func fetchAlibabaMetadata(ctx context.Context) (*armotypes.CloudMetadata, error) {
+	base := "http://100.100.100.200/latest/meta-data/"
+	get := func(path string) string {
+		val, _ := fetchHTTPMetadata(ctx, base+path, nil)
+		return val
+	}
+
+	instanceID := get("instance-id")
+	if instanceID == "" {
+		return nil, fmt.Errorf("not an Alibaba Cloud instance")
+	}
+
+	return &armotypes.CloudMetadata{
+		Provider:     armotypes.ProviderAlibaba,
+		HostType:     armotypes.HostTypeOther,
+		InstanceID:   instanceID,
+		InstanceType: get("instance/instance-type"),
+		Region:       get("region-id"),
+		Zone:         get("zone-id"),
+		PrivateIP:    get("private-ipv4"),
+		PublicIP:     get("public-ipv4"),
+		Hostname:     get("hostname"),
+	}, nil
+}
+
+// fetchOracleMetadata attempts to fetch basic metadata from Oracle Cloud's metadata service.
+func fetchOracleMetadata(ctx context.Context) (*armotypes.CloudMetadata, error) {
+	base := "http://169.254.169.254/opc/v1/instance/"
+	get := func(path string) string {
+		val, _ := fetchHTTPMetadata(ctx, base+path, nil)
+		return val
+	}
+
+	id := get("id")
+	if id == "" {
+		return nil, fmt.Errorf("not an Oracle Cloud instance")
+	}
+
+	return &armotypes.CloudMetadata{
+		Provider:     armotypes.ProviderOracle,
+		HostType:     armotypes.HostTypeOther,
+		InstanceID:   id,
+		InstanceType: get("shape"),
+		Region:       get("region"),
+		Zone:         get("availabilityDomain"),
+		Hostname:     get("displayName"),
+	}, nil
+}
+
+// fetchOpenStackMetadata attempts to fetch basic metadata from OpenStack's metadata service.
+func fetchOpenStackMetadata(ctx context.Context) (*armotypes.CloudMetadata, error) {
+	// OpenStack metadata is typically a JSON, but we can probe the root first.
+	_, err := fetchHTTPMetadata(ctx, "http://169.254.169.254/openstack", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Just return provider for now to signify detection
+	return &armotypes.CloudMetadata{
+		Provider: armotypes.ProviderOpenStack,
+		HostType: armotypes.HostTypeOther,
+	}, nil
+}
+
+// fetchHetznerMetadata attempts to fetch basic metadata from Hetzner Cloud's metadata service.
+func fetchHetznerMetadata(ctx context.Context) (*armotypes.CloudMetadata, error) {
+	base := "http://169.254.169.254/hetzner/v1/metadata"
+	_, err := fetchHTTPMetadata(ctx, base, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	get := func(path string) string {
+		val, _ := fetchHTTPMetadata(ctx, base+"/"+path, nil)
+		return val
+	}
+
+	id := get("instance-id")
+	if id == "" {
+		return nil, fmt.Errorf("not a Hetzner Cloud instance")
+	}
+
+	return &armotypes.CloudMetadata{
+		Provider:     armotypes.ProviderHetzner,
+		HostType:     armotypes.HostTypeOther,
+		InstanceID:   id,
+		InstanceType: get("instance-type"),
+		Region:       get("region"),
+		Zone:         get("availability-zone"),
+		PublicIP:     get("public-ipv4"),
+		Hostname:     get("hostname"),
+	}, nil
+}
+
+// fetchLinodeMetadata attempts to fetch basic metadata from Linode's metadata service.
+func fetchLinodeMetadata(ctx context.Context) (*armotypes.CloudMetadata, error) {
+	base := "http://169.254.169.254/v1/metadata"
+	// Linode returns a JSON usually, but let's check for response
+	_, err := fetchHTTPMetadata(ctx, base, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return &armotypes.CloudMetadata{
+		Provider: armotypes.ProviderLinode,
+		HostType: armotypes.HostTypeOther,
 	}, nil
 }
