@@ -85,6 +85,7 @@ func (c *CEL) registerExpression(expression string) error {
 
 	ast, issues := c.env.Compile(expression)
 	if issues != nil {
+		c.programCache[expression] = nil
 		return fmt.Errorf("failed to compile expression: %s", issues.Err())
 	}
 
@@ -127,10 +128,16 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 		if err != nil {
 			return false, err
 		}
+		if program == nil {
+			return false, nil
+		}
 
 		obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
 		out, _, err := program.Eval(map[string]any{"event": obj, "eventType": string(eventType)})
 		if err != nil {
+			c.cacheMutex.Lock()
+			c.programCache[expression.Expression] = nil
+			c.cacheMutex.Unlock()
 			return false, err
 		}
 
@@ -155,17 +162,19 @@ func (c *CEL) EvaluateRuleByMap(event map[string]any, eventType utils.EventType,
 	evalContext["eventType"] = string(eventType)
 
 	for _, expression := range expressions {
-		if expression.EventType != eventType {
-			continue
-		}
-
 		program, err := c.getOrCreateProgram(expression.Expression)
 		if err != nil {
 			return false, err
 		}
+		if program == nil {
+			return false, nil
+		}
 
 		out, _, err := program.Eval(evalContext)
 		if err != nil {
+			c.cacheMutex.Lock()
+			c.programCache[expression.Expression] = nil
+			c.cacheMutex.Unlock()
 			return false, err
 		}
 
@@ -182,6 +191,9 @@ func (c *CEL) EvaluateExpressionByMap(event map[string]any, expression string, e
 	if err != nil {
 		return "", err
 	}
+	if program == nil {
+		return "", nil
+	}
 
 	// Get evaluation context map from pool to reduce allocations
 	evalContext := c.evalContextPool.Get().(map[string]any)
@@ -196,7 +208,10 @@ func (c *CEL) EvaluateExpressionByMap(event map[string]any, expression string, e
 
 	out, _, err := program.Eval(evalContext)
 	if err != nil {
-		return "", fmt.Errorf("failed to evaluate expression: %s", err)
+		c.cacheMutex.Lock()
+		c.programCache[expression] = nil
+		c.cacheMutex.Unlock()
+		return "", err
 	}
 
 	return out.Value().(string), nil
@@ -207,10 +222,16 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 	if err != nil {
 		return "", err
 	}
+	if program == nil {
+		return "", nil
+	}
 
 	obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
 	out, _, err := program.Eval(map[string]any{"event": obj, "eventType": string(event.Event.GetEventType())})
 	if err != nil {
+		c.cacheMutex.Lock()
+		c.programCache[expression] = nil
+		c.cacheMutex.Unlock()
 		return "", err
 	}
 
