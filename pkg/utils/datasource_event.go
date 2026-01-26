@@ -171,20 +171,40 @@ func (n *nullFieldAccessor) PutBool(datasource.Data, bool) error       { return 
 var missingFieldAccessor datasource.FieldAccessor = &nullFieldAccessor{}
 
 func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAccessor {
-	cache, loaded := fieldCaches.Load(e.EventType)
-	if !loaded {
-		cache, _ = fieldCaches.LoadOrStore(e.EventType, &sync.Map{})
+	if e == nil {
+		return missingFieldAccessor
 	}
-	accessor, loaded := cache.(*sync.Map).Load(fieldName)
-	if !loaded {
+
+	cacheVal, ok := fieldCaches.Load(e.EventType)
+	if !ok {
+		cacheVal, _ = fieldCaches.LoadOrStore(e.EventType, &sync.Map{})
+	}
+
+	m, ok := cacheVal.(*sync.Map)
+	if !ok {
+		return missingFieldAccessor
+	}
+
+	accessor, ok := m.Load(fieldName)
+	if !ok {
+		if e.Datasource == nil {
+			return missingFieldAccessor
+		}
 		field := e.Datasource.GetField(fieldName)
-		accessor, _ = cache.(*sync.Map).LoadOrStore(fieldName, field)
+		accessor, _ = m.LoadOrStore(fieldName, field)
 	}
+
 	// Handle case where field doesn't exist
 	if accessor == nil {
 		return missingFieldAccessor
 	}
-	return accessor.(datasource.FieldAccessor)
+
+	res, ok := accessor.(datasource.FieldAccessor)
+	if !ok {
+		return missingFieldAccessor
+	}
+
+	return res
 }
 
 func (e *DatasourceEvent) GetAttrSize() uint32 {
