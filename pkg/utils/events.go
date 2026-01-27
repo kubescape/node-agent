@@ -46,6 +46,19 @@ type EnrichEvent interface {
 	GetPpid() uint32
 	GetUid() *uint32
 	SetExtra(extra interface{})
+
+	// ECS-specific methods
+	GetEcsClusterName() string
+	GetEcsClusterARN() string
+	GetEcsTaskARN() string
+	GetEcsTaskFamily() string
+	GetEcsTaskDefinitionARN() string
+	GetEcsServiceName() string
+	GetEcsContainerName() string
+	GetEcsContainerARN() string
+	GetEcsContainerInstance() string
+	GetEcsAvailabilityZone() string
+	GetEcsLaunchType() string
 }
 
 type BpfEvent interface {

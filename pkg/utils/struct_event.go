@@ -670,3 +670,48 @@ func (e *StructEvent) SetExtra(extra interface{}) {
 func (e *StructEvent) SetResponse(response *http.Response) {
 	e.Response = response
 }
+
+// ECS-specific methods - implementing EnrichEvent interface
+func (e *StructEvent) GetEcsClusterName() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsClusterARN() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsTaskARN() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsTaskFamily() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsTaskDefinitionARN() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsServiceName() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsContainerName() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsContainerARN() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsContainerInstance() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsAvailabilityZone() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsLaunchType() string {
+	return ""
+}
