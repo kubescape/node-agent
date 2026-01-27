@@ -1473,8 +1473,8 @@ github.com/kubescape/go-logger v0.0.24 h1:JRNlblY16Ty7hD6MSYNPvWYDxNzVAufsDDX/sZ
 github.com/kubescape/go-logger v0.0.24/go.mod h1:sMPVCr3VpW/e+SeMaXig5kClGvmZbDXN8YktUeNU4nY=
 github.com/kubescape/k8s-interface v0.0.202 h1:yu9x+07crFQAgrBatFFU2WuuxMJfHUMHVuCzuHE9Q4M=
 github.com/kubescape/k8s-interface v0.0.202/go.mod h1:d4NVhL81bVXe8yEXlkT4ZHrt3iEppEIN39b8N1oXm5s=
-github.com/kubescape/storage v0.0.239-0.20260126153904-2189fd422f1e h1:2oUUFvIxPNDcANM4nBgQBR+/lmEAC92X+4UzqcGwhvU=
-github.com/kubescape/storage v0.0.239-0.20260126153904-2189fd422f1e/go.mod h1:f6u/Lt3SjUTBrmzOStb33IkKTtaqKM4pyfV5d1lUMiY=
+github.com/kubescape/storage v0.0.239 h1:hfuq1+CuEAKE7zCg9bB8gfU9vZoGMrJBgNh5tAD1rak=
+github.com/kubescape/storage v0.0.239/go.mod h1:f6u/Lt3SjUTBrmzOStb33IkKTtaqKM4pyfV5d1lUMiY=
 github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf h1:hI0jVwrB6fT4GJWvuUjzObfci1CUknrZdRHfnRVtKM0=
 github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf/go.mod h1:Il5baM40PV9cTt4OGdLMeTRRAai3TMfvImu31itIeCM=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
