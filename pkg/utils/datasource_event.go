@@ -889,3 +889,59 @@ func (e *DatasourceEvent) SetExtra(extra interface{}) {
 func (e *DatasourceEvent) SetResponse(response *http.Response) {
 	e.Response = response
 }
+
+// ECS-specific methods - implementing EnrichEvent interface
+func (e *DatasourceEvent) GetEcsClusterName() string {
+	clusterName, _ := e.getFieldAccessor("ecs.clusterName").String(e.Data)
+	return clusterName
+}
+
+func (e *DatasourceEvent) GetEcsClusterARN() string {
+	clusterARN, _ := e.getFieldAccessor("ecs.clusterARN").String(e.Data)
+	return clusterARN
+}
+
+func (e *DatasourceEvent) GetEcsTaskARN() string {
+	taskARN, _ := e.getFieldAccessor("ecs.taskARN").String(e.Data)
+	return taskARN
+}
+
+func (e *DatasourceEvent) GetEcsTaskFamily() string {
+	taskFamily, _ := e.getFieldAccessor("ecs.taskFamily").String(e.Data)
+	return taskFamily
+}
+
+func (e *DatasourceEvent) GetEcsTaskDefinitionARN() string {
+	taskDefARN, _ := e.getFieldAccessor("ecs.taskDefinitionARN").String(e.Data)
+	return taskDefARN
+}
+
+func (e *DatasourceEvent) GetEcsServiceName() string {
+	serviceName, _ := e.getFieldAccessor("ecs.serviceName").String(e.Data)
+	return serviceName
+}
+
+func (e *DatasourceEvent) GetEcsContainerName() string {
+	containerName, _ := e.getFieldAccessor("ecs.containerName").String(e.Data)
+	return containerName
+}
+
+func (e *DatasourceEvent) GetEcsContainerARN() string {
+	containerARN, _ := e.getFieldAccessor("ecs.containerARN").String(e.Data)
+	return containerARN
+}
+
+func (e *DatasourceEvent) GetEcsContainerInstance() string {
+	containerInstance, _ := e.getFieldAccessor("ecs.containerInstance").String(e.Data)
+	return containerInstance
+}
+
+func (e *DatasourceEvent) GetEcsAvailabilityZone() string {
+	availabilityZone, _ := e.getFieldAccessor("ecs.availabilityZone").String(e.Data)
+	return availabilityZone
+}
+
+func (e *DatasourceEvent) GetEcsLaunchType() string {
+	launchType, _ := e.getFieldAccessor("ecs.launchType").String(e.Data)
+	return launchType
+}
