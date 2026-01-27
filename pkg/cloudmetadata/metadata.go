@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	k8sInterfaceCloudMetadata "github.com/kubescape/k8s-interface/cloudmetadata"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -35,6 +36,8 @@ func GetCloudMetadata(ctx context.Context, client *k8sinterface.KubernetesApi, n
 
 	// special case for AWS, if the account ID is not found in the node metadata, we need to get it from ConfigMap
 	enrichCloudMetadataForAWS(ctx, client, cMetadata)
+	// special case for Azure, enrich ResourceGroup from node providerID
+	enrichCloudMetadataForAzure(node, cMetadata)
 	return cMetadata, nil
 }
 
@@ -55,6 +58,36 @@ func enrichCloudMetadataForAWS(ctx context.Context, client *k8sinterface.Kuberne
 	}
 
 	logger.L().Debug("enriched cloud metadata from aws-auth ConfigMap")
+}
+
+func enrichCloudMetadataForAzure(node *corev1.Node, cMetadata *armotypes.CloudMetadata) {
+	if cMetadata == nil || cMetadata.Provider != armotypes.ProviderAzure || cMetadata.ResourceGroup != "" {
+		return
+	}
+
+	// Parse ResourceGroup from node's providerID
+	// Format: azure:///subscriptions/{sub}/resourceGroups/{rg}/providers/...
+	providerID := node.Spec.ProviderID
+	if rg := parseAzureResourceGroup(providerID); rg != "" {
+		cMetadata.ResourceGroup = rg
+		logger.L().Debug("enriched cloud metadata with Azure ResourceGroup from node providerID", helpers.String("resourceGroup", rg))
+	}
+}
+
+func parseAzureResourceGroup(providerID string) string {
+	// providerID format: azure:///subscriptions/.../resourceGroups/{resourceGroup}/providers/...
+	const marker = "/resourceGroups/"
+	idx := strings.Index(strings.ToLower(providerID), strings.ToLower(marker))
+	if idx == -1 {
+		return ""
+	}
+	start := idx + len(marker)
+	rest := providerID[start:]
+	end := strings.Index(rest, "/")
+	if end == -1 {
+		return rest
+	}
+	return rest[:end]
 }
 
 // GetCloudMetadataWithIMDS retrieves cloud metadata for a given node using IMDS
@@ -234,18 +267,19 @@ func fetchAzureMetadata(ctx context.Context) (*armotypes.CloudMetadata, error) {
 	}
 
 	meta := &armotypes.CloudMetadata{
-		Provider:     armotypes.ProviderAzure,
-		HostType:     armotypes.HostTypeAzureVm,
-		AccountID:    get("subscriptionId"),
-		InstanceID:   get("vmId"),
-		InstanceType: vmSize,
-		Region:       get("location"),
-		Zone:         get("zone"),
-		Hostname:     get("name"),
+		Provider:      armotypes.ProviderAzure,
+		HostType:      armotypes.HostTypeAzureVm,
+		AccountID:     get("subscriptionId"),
+		InstanceID:    get("vmId"),
+		InstanceType:  vmSize,
+		Region:        get("location"),
+		Zone:          get("zone"),
+		Hostname:      get("name"),
+		ResourceGroup: get("resourceGroupName"),
 	}
 
 	// Detect AKS (heuristic: check for resource group or vmss tags common in AKS)
-	if strings.Contains(strings.ToLower(get("resourceGroupName")), "aks") {
+	if strings.Contains(strings.ToLower(meta.ResourceGroup), "aks") {
 		meta.HostType = armotypes.HostTypeAks
 	}
 
