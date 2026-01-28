@@ -65,24 +65,3 @@ func (c *UnshareAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *UnshareAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//unshareEvent, ok := enrichedEvent.Event.(*tracerunsharetype.Event)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&unshareEvent.Event)
-
-	//result["pid"] = unshareEvent.Pid
-	//result["tid"] = unshareEvent.Tid
-	//result["ppid"] = unshareEvent.PPid
-	//result["uid"] = unshareEvent.Uid
-	//result["gid"] = unshareEvent.Gid
-	//result["upperlayer"] = unshareEvent.UpperLayer
-	//result["comm"] = unshareEvent.Comm
-	//result["exe_path"] = unshareEvent.ExePath
-
-	//result["mountnsid"] = unshareEvent.MountNsID
-
-	return map[string]interface{}{}
-}
