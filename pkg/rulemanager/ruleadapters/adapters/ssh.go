@@ -66,24 +66,3 @@ func (c *SSHAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *SSHAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//sshEvent, ok := enrichedEvent.Event.(*tracersshtype.Event)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&sshEvent.Event)
-
-	//result["pid"] = sshEvent.Pid
-	//result["uid"] = sshEvent.Uid
-	//result["gid"] = sshEvent.Gid
-	//result["comm"] = sshEvent.Comm
-	//result["src_port"] = sshEvent.SrcPort
-	//result["dst_port"] = sshEvent.DstPort
-	//result["src_ip"] = sshEvent.SrcIP
-	//result["dst_ip"] = sshEvent.DstIP
-
-	//result["mountnsid"] = sshEvent.MountNsID
-
-	return map[string]interface{}{}
-}

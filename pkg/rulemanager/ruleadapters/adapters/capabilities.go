@@ -56,30 +56,3 @@ func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enri
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *CapabilitiesAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//capEvent, ok := enrichedEvent.Event.(*tracercapabilitiestype.Event)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&capEvent.Event)
-
-	//result["pid"] = capEvent.Pid
-	//result["comm"] = capEvent.Comm
-	//result["syscall"] = capEvent.Syscall
-	//result["uid"] = capEvent.Uid
-	//result["gid"] = capEvent.Gid
-	//result["cap"] = capEvent.Cap
-	//result["capName"] = capEvent.CapName
-	//result["audit"] = capEvent.Audit
-	//result["verdict"] = capEvent.Verdict
-	//result["insetid"] = capEvent.InsetID
-	//result["targetuserns"] = capEvent.TargetUserNs
-	//result["currentuserns"] = capEvent.CurrentUserNs
-	//result["caps"] = capEvent.Caps
-	//result["capsNames"] = capEvent.CapsNames
-
-	//result["mountnsid"] = capEvent.MountNsID
-
-	return map[string]interface{}{}
-}

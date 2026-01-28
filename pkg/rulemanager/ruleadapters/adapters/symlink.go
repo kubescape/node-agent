@@ -72,26 +72,3 @@ func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *SymlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//symlinkEvent, ok := enrichedEvent.Event.(*tracersymlinktype.Event)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&symlinkEvent.Event)
-
-	//result["pid"] = symlinkEvent.Pid
-	//result["tid"] = symlinkEvent.Tid
-	//result["ppid"] = symlinkEvent.PPid
-	//result["uid"] = symlinkEvent.Uid
-	//result["gid"] = symlinkEvent.Gid
-	//result["upperlayer"] = symlinkEvent.UpperLayer
-	//result["comm"] = symlinkEvent.Comm
-	//result["exe_path"] = symlinkEvent.ExePath
-	//result["oldpath"] = symlinkEvent.OldPath
-	//result["newpath"] = symlinkEvent.NewPath
-
-	//result["mountnsid"] = symlinkEvent.MountNsID
-
-	return map[string]interface{}{}
-}

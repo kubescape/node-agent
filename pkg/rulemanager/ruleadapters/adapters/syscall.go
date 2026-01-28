@@ -56,21 +56,3 @@ func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *SyscallAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//syscallEvent, ok := enrichedEvent.Event.(*types.SyscallEvent)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&syscallEvent.Event)
-
-	//result["pid"] = syscallEvent.Pid
-	//result["comm"] = syscallEvent.Comm
-	//result["uid"] = syscallEvent.Uid
-	//result["gid"] = syscallEvent.Gid
-	//result["syscallName"] = syscallEvent.SyscallName
-
-	//result["mountnsid"] = syscallEvent.MountNsID
-
-	return map[string]interface{}{}
-}

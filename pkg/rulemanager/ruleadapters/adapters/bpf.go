@@ -69,26 +69,3 @@ func (c *BpfAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *BpfAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//bpfEvent, ok := enrichedEvent.Event.(*tracerbpftype.Event)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&bpfEvent.Event)
-
-	//result["pid"] = bpfEvent.Pid
-	//result["tid"] = bpfEvent.Tid
-	//result["ppid"] = bpfEvent.PPid
-	//result["uid"] = bpfEvent.Uid
-	//result["gid"] = bpfEvent.Gid
-	//result["upperlayer"] = bpfEvent.UpperLayer
-	//result["comm"] = bpfEvent.Comm
-	//result["exe_path"] = bpfEvent.ExePath
-	//result["cmd"] = bpfEvent.Cmd
-	//result["attr_size"] = bpfEvent.AttrSize
-
-	//result["mountnsid"] = bpfEvent.MountNsID
-
-	return map[string]interface{}{}
-}

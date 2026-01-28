@@ -65,29 +65,3 @@ func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *OpenAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//openEvent, ok := enrichedEvent.Event.(*events.OpenEvent)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&openEvent.Event.Event)
-
-	//result["pid"] = openEvent.Pid
-	//result["tid"] = openEvent.Tid
-	//result["uid"] = openEvent.Uid
-	//result["gid"] = openEvent.Gid
-	//result["comm"] = openEvent.Comm
-	//result["fd"] = openEvent.Fd
-	//result["err"] = openEvent.Err
-	//result["flags"] = openEvent.Flags
-	//result["flagsRaw"] = openEvent.FlagsRaw
-	//result["mode"] = openEvent.Mode
-	//result["modeRaw"] = openEvent.ModeRaw
-	//result["path"] = openEvent.Path
-	//result["fullPath"] = openEvent.FullPath
-
-	//result["mountnsid"] = openEvent.MountNsID
-
-	return map[string]interface{}{}
-}
