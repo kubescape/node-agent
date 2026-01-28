@@ -67,27 +67,3 @@ func (c *KmodAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-
-func (c *KmodAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//kmodEvent, ok := enrichedEvent.Event.(*tracerkmodtype.Event)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&kmodEvent.Event)
-
-	//result["pid"] = kmodEvent.Pid
-	//result["tid"] = kmodEvent.Tid
-	//result["ppid"] = kmodEvent.PPid
-	//result["uid"] = kmodEvent.Uid
-	//result["gid"] = kmodEvent.Gid
-	//result["upperlayer"] = kmodEvent.UpperLayer
-	//result["comm"] = kmodEvent.Comm
-	//result["exe_path"] = kmodEvent.ExePath
-	//result["module"] = kmodEvent.Module
-	//result["syscall"] = kmodEvent.Syscall
-
-	//result["mountnsid"] = kmodEvent.MountNsID
-
-	return map[string]interface{}{}
-}

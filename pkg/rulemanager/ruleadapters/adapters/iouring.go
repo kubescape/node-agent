@@ -122,26 +122,3 @@ func GetOpcodeName(opcode uint8) (bool, string) {
 	}
 	return false, "Unknown operation"
 }
-
-func (c *IoUringAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&iouringEvent.Event)
-
-	//result["opcode"] = iouringEvent.Opcode
-	//result["pid"] = iouringEvent.Pid
-	//result["tid"] = iouringEvent.Tid
-	//result["uid"] = iouringEvent.Uid
-	//result["gid"] = iouringEvent.Gid
-	//result["comm"] = iouringEvent.Comm
-	//result["flags"] = iouringEvent.Flags
-	//result["user_data"] = iouringEvent.UserData
-	//result["identifier"] = iouringEvent.Identifier
-
-	//result["mountnsid"] = iouringEvent.MountNsID
-
-	return map[string]interface{}{}
-}

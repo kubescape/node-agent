@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -20,7 +21,7 @@ import (
 	"github.com/picatz/xcel"
 )
 
-var _ CELRuleEvaluator = (*CEL)(nil)
+var _ RuleEvaluator = (*CEL)(nil)
 
 type CEL struct {
 	env             *cel.Env
@@ -28,22 +29,20 @@ type CEL struct {
 	programCache    map[string]cel.Program
 	cacheMutex      sync.RWMutex
 	typeMutex       sync.RWMutex
-	evalContextPool sync.Pool
 	ta              xcel.TypeAdapter
 	tp              *xcel.TypeProvider
+	eventConverters map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	ta, tp := xcel.NewTypeAdapter(), xcel.NewTypeProvider()
+
 	eventObj, eventTyp := xcel.NewObject(&utils.CelEventImpl{})
 	xcel.RegisterObject(ta, tp, eventObj, eventTyp, utils.CelFields)
-	procObj, procTyp := xcel.NewObject(&events.ProcfsEvent{})
-	xcel.RegisterObject(ta, tp, procObj, procTyp, xcel.NewFields(procObj))
+
 	envOptions := []cel.EnvOption{
-		cel.Variable("event", eventTyp),
+		cel.Variable("event", eventTyp), // All events accessible via "event" variable
 		cel.Variable("eventType", cel.StringType),
-		cel.Variable(string(utils.ProcfsEventType), procTyp),
-		cel.Variable(string(utils.HTTPEventType), cel.AnyType),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),
@@ -60,15 +59,12 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		return nil, err
 	}
 	c := &CEL{
-		env:          env,
-		objectCache:  objectCache,
-		programCache: make(map[string]cel.Program),
-		ta:           ta,
-		tp:           tp,
-	}
-
-	c.evalContextPool.New = func() interface{} {
-		return make(map[string]any, 2)
+		env:             env,
+		objectCache:     objectCache,
+		programCache:    make(map[string]cel.Program),
+		ta:              ta,
+		tp:              tp,
+		eventConverters: make(map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent),
 	}
 
 	return c, nil
@@ -116,106 +112,85 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
-	obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
+func (c *CEL) createEvalContext(event *events.EnrichedEvent) map[string]any {
 	eventType := event.Event.GetEventType()
-	input := map[string]any{"event": obj, "eventType": string(eventType)}
 
-	for _, expression := range expressions {
-		if expression.EventType != eventType {
-			continue
-		}
-
-		program, err := c.getOrCreateProgram(expression.Expression)
-		if err != nil {
-			return false, err
-		}
-		out, _, err := program.Eval(input)
-		if err != nil {
-			return false, err
-		}
-
-		if !out.Value().(bool) {
-			return false, nil
-		}
+	// Apply event converter if one is registered, otherwise cast to CelEvent
+	var obj interface{}
+	if converter, exists := c.eventConverters[eventType]; exists {
+		obj, _ = xcel.NewObject(converter(event.Event))
+	} else {
+		obj, _ = xcel.NewObject(event.Event.(utils.CelEvent))
 	}
 
-	return true, nil
-}
-
-func (c *CEL) EvaluateRuleByMap(event map[string]any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error) {
-	// Get evaluation context map from pool to reduce allocations
-	evalContext := c.evalContextPool.Get().(map[string]any)
-	defer func() {
-		// Clear and return to pool
-		clear(evalContext)
-		c.evalContextPool.Put(evalContext)
-	}()
-
-	evalContext[string(eventType)] = event
-	evalContext["eventType"] = string(eventType)
-
-	for _, expression := range expressions {
-		if expression.EventType != eventType {
-			continue
-		}
-
-		program, err := c.getOrCreateProgram(expression.Expression)
-		if err != nil {
-			return false, err
-		}
-
-		out, _, err := program.Eval(evalContext)
-		if err != nil {
-			return false, err
-		}
-
-		if !out.Value().(bool) {
-			return false, nil
-		}
+	evalContext := map[string]any{
+		"eventType": string(eventType),
+		"event":     obj,
 	}
 
-	return true, nil
+	// For HTTP events, also add "http" variable
+	if eventType == utils.HTTPEventType {
+		evalContext["http"] = obj
+	}
+
+	return evalContext
 }
 
-func (c *CEL) EvaluateExpressionByMap(event map[string]any, expression string, eventType utils.EventType) (string, error) {
+// evaluateProgramWithContext compiles (or retrieves cached) and evaluates a CEL expression
+// with the provided evaluation context, returning the CEL result value
+func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[string]any) (ref.Val, error) {
 	program, err := c.getOrCreateProgram(expression)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-
-	// Get evaluation context map from pool to reduce allocations
-	evalContext := c.evalContextPool.Get().(map[string]any)
-	defer func() {
-		// Clear and return to pool
-		clear(evalContext)
-		c.evalContextPool.Put(evalContext)
-	}()
-
-	evalContext[string(eventType)] = event
-	evalContext["eventType"] = string(eventType)
 
 	out, _, err := program.Eval(evalContext)
 	if err != nil {
-		return "", fmt.Errorf("failed to evaluate expression: %s", err)
+		return nil, err
 	}
 
-	return out.Value().(string), nil
+	return out, nil
+}
+
+func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
+	eventType := event.Event.GetEventType()
+	evalContext := c.createEvalContext(event)
+
+	for _, expression := range expressions {
+		if expression.EventType != eventType {
+			continue
+		}
+
+		out, err := c.evaluateProgramWithContext(expression.Expression, evalContext)
+		if err != nil {
+			return false, err
+		}
+
+		boolVal, ok := out.Value().(bool)
+		if !ok {
+			return false, fmt.Errorf("rule expression returned %T, expected bool", out.Value())
+		}
+		if !boolVal {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
-	program, err := c.getOrCreateProgram(expression)
+	evalContext := c.createEvalContext(event)
+
+	out, err := c.evaluateProgramWithContext(expression, evalContext)
 	if err != nil {
 		return "", err
 	}
 
-	obj, _ := xcel.NewObject(event.Event.(utils.CelEvent)) // FIXME put safety check here
-	out, _, err := program.Eval(map[string]any{"event": obj, "eventType": string(event.Event.GetEventType())})
-	if err != nil {
-		return "", err
+	strVal, ok := out.Value().(string)
+	if !ok {
+		return "", fmt.Errorf("expression returned %T, expected string", out.Value())
 	}
-
-	return out.Value().(string), nil
+	return strVal, nil
 }
 
 func (c *CEL) RegisterHelper(function cel.EnvOption) error {
@@ -254,4 +229,8 @@ func (c *CEL) RegisterCustomType(eventType utils.EventType, obj interface{}) err
 	c.cacheMutex.Unlock()
 
 	return nil
+}
+
+func (c *CEL) RegisterEventConverter(eventType utils.EventType, converter func(utils.K8sEvent) utils.K8sEvent) {
+	c.eventConverters[eventType] = converter
 }
