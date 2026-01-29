@@ -61,23 +61,3 @@ func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEv
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *PtraceAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//ptraceEvent, ok := enrichedEvent.Event.(*tracerptracetype.Event)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&ptraceEvent.Event)
-
-	//result["pid"] = ptraceEvent.Pid
-	//result["ppid"] = ptraceEvent.PPid
-	//result["uid"] = ptraceEvent.Uid
-	//result["gid"] = ptraceEvent.Gid
-	//result["request"] = ptraceEvent.Request
-	//result["comm"] = ptraceEvent.Comm
-	//result["exe_path"] = ptraceEvent.ExePath
-
-	//result["mountnsid"] = ptraceEvent.MountNsID
-
-	return map[string]interface{}{}
-}

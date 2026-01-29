@@ -26,7 +26,6 @@ import (
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
-	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters/adapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
@@ -54,7 +53,7 @@ type RuleManager struct {
 	containerIdToPid     maps.SafeMap[string, uint32]
 	enricher             types.Enricher
 	processManager       processtree.ProcessTreeManager
-	celEvaluator         cel.CELRuleEvaluator
+	celEvaluator         cel.RuleEvaluator
 	ruleCooldown         *rulecooldown.RuleCooldown
 	adapterFactory       *ruleadapters.EventRuleAdapterFactory
 	ruleFailureCreator   ruleadapters.RuleFailureCreatorInterface
@@ -78,7 +77,7 @@ func CreateRuleManager(
 	enricher types.Enricher,
 	ruleCooldown *rulecooldown.RuleCooldown,
 	adapterFactory *ruleadapters.EventRuleAdapterFactory,
-	celEvaluator cel.CELRuleEvaluator,
+	celEvaluator cel.RuleEvaluator,
 	mntnsRegistry contextdetection.Registry,
 ) (*RuleManager, error) {
 	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory)
@@ -214,7 +213,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		startTime := time.Now()
-		shouldAlert, err := rm.evaluateRule(enrichedEvent, eventType, rule)
+		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, rule.Expressions.RuleExpression)
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.Name, eventType, evaluationTime)
 
@@ -355,35 +354,6 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	return results
 }
 
-func (rm *RuleManager) evaluateRule(enrichedEvent *events.EnrichedEvent, eventType utils.EventType, rule typesv1.Rule) (bool, error) {
-	// Special event types are evaluated by map because we're doing parsing optimizations
-	// TODO: Manage special event types in a better way
-	if eventType == utils.HTTPEventType {
-		eventAdapter, ok := rm.adapterFactory.GetAdapter(eventType)
-		if !ok {
-			logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(eventType)))
-			return false, nil
-		}
-
-		eventMap := eventAdapter.ToMap(enrichedEvent)
-		defer adapters.ReleaseEventMap(eventMap)
-
-		shouldAlert, err := rm.celEvaluator.EvaluateRuleByMap(eventMap, eventType, rule.Expressions.RuleExpression)
-		if err != nil {
-			logger.L().Error("RuleManager.evaluateRule - failed to evaluate rule by map", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
-			return false, err
-		}
-		return shouldAlert, nil
-	} else {
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, rule.Expressions.RuleExpression)
-		if err != nil {
-			logger.L().Error("RuleManager.evaluateRule - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
-			return false, err
-		}
-		return shouldAlert, nil
-	}
-}
-
 func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEvent, containerID string) bool {
 	ap, _, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, containerID)
 	if err != nil {
@@ -410,42 +380,18 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.Eve
 }
 
 func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent, rule typesv1.Rule) (string, string, error) {
-	// Special event types are evaluated by map because we're doing parsing optimizations
-	// TODO: Manage special event types in a better way
-	eventType := enrichedEvent.Event.GetEventType()
-	if eventType == utils.HTTPEventType {
-		eventAdapter, ok := rm.adapterFactory.GetAdapter(eventType)
-		if !ok {
-			logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(eventType)))
-			return "", "", nil
-		}
-		eventMap := eventAdapter.ToMap(enrichedEvent)
-		defer adapters.ReleaseEventMap(eventMap)
-
-		message, err := rm.celEvaluator.EvaluateExpressionByMap(eventMap, rule.Expressions.Message, eventType)
-		if err != nil {
-			logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
-		}
-		uniqueID, err := rm.celEvaluator.EvaluateExpressionByMap(eventMap, rule.Expressions.UniqueID, eventType)
-		if err != nil {
-			logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
-		}
-		uniqueID = hashStringToMD5(uniqueID)
-		return message, uniqueID, err
-	} else {
-		message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
-		if err != nil {
-			logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
-		}
-		uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
-		if err != nil {
-			logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
-		}
-
-		uniqueID = hashStringToMD5(uniqueID)
-
-		return message, uniqueID, err
+	message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
+	if err != nil {
+		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
+	uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
+	if err != nil {
+		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
+	}
+
+	uniqueID = hashStringToMD5(uniqueID)
+
+	return message, uniqueID, err
 }
 
 func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEvent) bool {
@@ -472,16 +418,7 @@ func (rm *RuleManager) evaluateHTTPPayloadState(state map[string]any, enrichedEv
 		return state
 	}
 
-	eventAdapter, ok := rm.adapterFactory.GetAdapter(utils.HTTPEventType)
-	if !ok {
-		logger.L().Error("RuleManager - no adapter registered for http payload evaluation", helpers.String("eventType", string(utils.HTTPEventType)))
-		return state
-	}
-
-	eventMap := eventAdapter.ToMap(enrichedEvent)
-	defer adapters.ReleaseEventMap(eventMap)
-
-	payloadValue, err := rm.celEvaluator.EvaluateExpressionByMap(eventMap, payloadExpression, utils.HTTPEventType)
+	payloadValue, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, payloadExpression)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate http payload expression", helpers.Error(err))
 		return state

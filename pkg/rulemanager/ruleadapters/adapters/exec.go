@@ -86,35 +86,3 @@ func GetExecFullPathFromEvent(execEvent utils.ExecEvent) string {
 	return utils.GetExecPathFromEvent(execEvent)
 }
 
-func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//execEvent, ok := enrichedEvent.Event.(*events.ExecEvent)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&execEvent.Event.Event)
-
-	//result["pid"] = execEvent.Pid
-	//result["tid"] = execEvent.Tid
-	//result["ppid"] = execEvent.Ppid
-	//result["ptid"] = execEvent.Ptid
-	//result["comm"] = execEvent.Comm
-	//result["pcomm"] = execEvent.Pcomm
-	//result["ret"] = execEvent.Retval
-	//result["args"] = execEvent.Args
-	//result["uid"] = execEvent.Uid
-	//result["user"] = execEvent.Username
-	//result["gid"] = execEvent.Gid
-	//result["group"] = execEvent.Groupname
-	//result["upperlayer"] = execEvent.UpperLayer
-	//result["pupperlayer"] = execEvent.PupperLayer
-	//result["loginuid"] = execEvent.LoginUid
-	//result["sessionid"] = execEvent.SessionId
-	//result["cwd"] = execEvent.Cwd
-	//result["exepath"] = execEvent.ExePath
-	//result["file"] = execEvent.File
-
-	//result["mountnsid"] = execEvent.MountNsID
-
-	return map[string]interface{}{}
-}

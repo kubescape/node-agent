@@ -56,23 +56,3 @@ func (c *RandomXAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func (c *RandomXAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	//randomXEvent, ok := enrichedEvent.Event.(*tracerrandomxtype.Event)
-	//if !ok {
-	//	return nil
-	//}
-
-	//result := ConvertToMap(&randomXEvent.Event)
-
-	//result["pid"] = randomXEvent.Pid
-	//result["ppid"] = randomXEvent.PPid
-	//result["uid"] = randomXEvent.Uid
-	//result["gid"] = randomXEvent.Gid
-	//result["upperlayer"] = randomXEvent.UpperLayer
-	//result["comm"] = randomXEvent.Comm
-	//result["exe_path"] = randomXEvent.ExePath
-
-	//result["mountnsid"] = randomXEvent.MountNsID
-
-	return map[string]interface{}{}
-}

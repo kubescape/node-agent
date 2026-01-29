@@ -7,6 +7,4 @@ import (
 
 type EventRuleAdapter interface {
 	SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent, state map[string]any)
-
-	ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{}
 }
