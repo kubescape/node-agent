@@ -15,7 +15,7 @@ require (
 	github.com/cilium/ebpf v0.20.0
 	github.com/crewjam/rfc5424 v0.1.0
 	github.com/cyphar/filepath-securejoin v0.6.0
-	github.com/deckarep/golang-set/v2 v2.7.0
+	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/dghubble/trie v0.1.0
 	github.com/distribution/distribution v2.8.2+incompatible
 	github.com/dustin/go-humanize v1.0.1
