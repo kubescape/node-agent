@@ -203,7 +203,7 @@ jobs:
             -f "client_payload[in_cluster_chart_branch]=${{ inputs.HELM_BRANCH }}" \
             -f "client_payload[ks_branch]=release" \
             -f "client_payload[charts_name]=kubescape-operator" \
-            -f "client_payload[charts_repo]=${GITHUB_REPOSITORY}"
+            -f "client_payload[charts_repo]=kubescape/helm-charts"
           
           echo "Dispatch completed"
 
