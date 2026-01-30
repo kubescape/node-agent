@@ -29,7 +29,7 @@ jobs:
     needs: reset-run-number
     uses: ./.github/workflows/incluster-comp-pr-merged.yaml
     with:
-      IMAGE_NAME: quay.io/${{ github.repository_owner }}/node-agent
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/node-agent
       IMAGE_TAG: v0.3.${{ needs.reset-run-number.outputs.run-number }}
       COMPONENT_NAME: nodeAgent
       CGO_ENABLED: 0
