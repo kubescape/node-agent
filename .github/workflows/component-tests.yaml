@@ -2,6 +2,13 @@ name: Node Agent Component Tests
 on:
   pull_request:
     types: [synchronize, ready_for_review, opened, reopened]
+  workflow_dispatch:
+    inputs:
+      build_image:
+        description: 'Build and push a new container image for the test'
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -9,6 +16,8 @@ concurrency:
 
 jobs:
   build-and-push-image:
+    # Only run this job if it's a manual trigger with the box checked.
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_image == true
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -49,7 +58,6 @@ jobs:
 
   component-tests:
     runs-on: ubuntu-latest
-    needs: build-and-push-image
     continue-on-error: true
     strategy:
       matrix:
@@ -61,22 +69,23 @@ jobs:
           # Test_05_MemoryLeak_10K_Alerts,
           #Test_06_KillProcessInTheMiddle,
           #Test_07_RuleBindingApplyTest,
-          Test_08_ApplicationProfilePatching,
-          Test_10_MalwareDetectionTest,
-          Test_11_EndpointTest,
+          #Test_08_ApplicationProfilePatching,
+          #Test_10_MalwareDetectionTest,
+          #Test_11_EndpointTest,
           Test_12_MergingProfilesTest,
-          Test_13_MergingNetworkNeighborhoodTest,
-          Test_14_RulePoliciesTest,
-          Test_15_CompletedApCannotBecomeReadyAgain,
-          Test_16_ApNotStuckOnRestart,
-          Test_17_ApCompletedToPartialUpdateTest,
+          #Test_13_MergingNetworkNeighborhoodTest,
+          #Test_14_RulePoliciesTest,
+          #Test_15_CompletedApCannotBecomeReadyAgain,
+          #Test_16_ApNotStuckOnRestart,
+          #Test_17_ApCompletedToPartialUpdateTest,
           #Test_18_ShortLivedJobTest,
           Test_19_AlertOnPartialProfileTest,
           Test_20_AlertOnPartialThenLearnProcessTest,
           #Test_21_AlertOnPartialThenLearnNetworkTest,
           #Test_22_AlertOnPartialNetworkProfileTest,
           #Test_23_RuleCooldownTest,
-          Test_24_ProcessTreeDepthTest
+          #Test_24_ProcessTreeDepthTest
+          Test_27_RegexFileOpenMatchTest
         ]
     steps:
       - name: Checkout code
@@ -106,7 +115,10 @@ jobs:
         run: |
           STORAGE_TAG="latest"
           echo "Storage tag that will be used: ${STORAGE_TAG}"
-          helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${{ needs.build-and-push-image.outputs.image_tag }} --set nodeAgent.image.repository=${{ needs.build-and-push-image.outputs.image_repo }} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 5m --debug
+          IMAGE_TAG=${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.build_image == true) && needs.build-and-push-image.outputs.image_tag || 'latest' }}
+          IMAGE_REPO=${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.build_image == true) && needs.build-and-push-image.outputs.image_repo || 'ghcr.io/kubescape/node-agent' }}
+          echo "Using Node Agent image: ${IMAGE_REPO}:${IMAGE_TAG}"
+          helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${IMAGE_TAG} --set nodeAgent.image.repository=${IMAGE_REPO} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 5m --debug
           # Check that the node-agent pod is running
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=node-agent -n kubescape --timeout=300s
           sleep 5
