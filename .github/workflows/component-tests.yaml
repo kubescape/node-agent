@@ -115,9 +115,10 @@ jobs:
         run: |
           STORAGE_TAG="latest"
           echo "Storage tag that will be used: ${STORAGE_TAG}"
-          IMAGE_TAG=${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.build_image == true) && needs.build-and-push-image.outputs.image_tag || 'latest' }}
-          IMAGE_REPO=${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.build_image == true) && needs.build-and-push-image.outputs.image_repo || 'ghcr.io/kubescape/node-agent' }}
+          IMAGE_TAG=test-5336ad3
+          IMAGE_REPO='ghcr.io/k8sstormcenter/node-agent'
           echo "Using Node Agent image: ${IMAGE_REPO}:${IMAGE_TAG}"
+          # End of constanze modification
           helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${IMAGE_TAG} --set nodeAgent.image.repository=${IMAGE_REPO} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 5m --debug
           # Check that the node-agent pod is running
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=node-agent -n kubescape --timeout=300s
