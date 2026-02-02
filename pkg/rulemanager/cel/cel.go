@@ -7,6 +7,8 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -81,11 +83,17 @@ func (c *CEL) registerExpression(expression string) error {
 
 	ast, issues := c.env.Compile(expression)
 	if issues != nil {
+		// Cache nil to prevent repeated compilation attempts for invalid expressions
+		c.programCache[expression] = nil
+		logger.L().Warning("CEL expression disabled: failed to compile", helpers.String("expression", expression), helpers.Error(issues.Err()))
 		return fmt.Errorf("failed to compile expression: %s", issues.Err())
 	}
 
 	program, err := c.env.Program(ast, cel.EvalOptions(cel.OptOptimize))
 	if err != nil {
+		// Cache nil to prevent repeated program creation attempts
+		c.programCache[expression] = nil
+		logger.L().Warning("CEL expression disabled: failed to create program", helpers.String("expression", expression), helpers.Error(err))
 		return fmt.Errorf("failed to create program: %s", err)
 	}
 
@@ -143,9 +151,16 @@ func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[stri
 	if err != nil {
 		return nil, err
 	}
+	// Check if program is nil (compilation failed previously)
+	if program == nil {
+		return nil, nil
+	}
 
 	out, _, err := program.Eval(evalContext)
 	if err != nil {
+		// Do not cache nil on evaluation errors - these may be transient issues
+		// with specific event data rather than problems with the expression itself.
+		// Only compilation failures are cached as nil to prevent recompilation.
 		return nil, err
 	}
 
@@ -166,6 +181,11 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 			return false, err
 		}
 
+		// Skip if program compilation failed (cached as nil)
+		if out == nil {
+			continue
+		}
+
 		boolVal, ok := out.Value().(bool)
 		if !ok {
 			return false, fmt.Errorf("rule expression returned %T, expected bool", out.Value())
@@ -184,6 +204,11 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 	out, err := c.evaluateProgramWithContext(expression, evalContext)
 	if err != nil {
 		return "", err
+	}
+
+	// Return empty string if program compilation failed (cached as nil)
+	if out == nil {
+		return "", nil
 	}
 
 	strVal, ok := out.Value().(string)
