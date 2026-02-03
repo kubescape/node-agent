@@ -440,16 +440,29 @@ func main() {
 	err = mainHandler.Start(ctx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("error starting the container watcher", helpers.Error(err))
-		switch {
-		case strings.Contains(err.Error(), utils.ErrKernelVersion):
-			os.Exit(utils.ExitCodeIncompatibleKernel)
-		case strings.Contains(err.Error(), utils.ErrMacOS):
-			os.Exit(utils.ExitCodeMacOS)
-		default:
-			os.Exit(utils.ExitCodeError)
+
+		// Container watcher can fail only when FIM mode is enabled
+		// FIM (File Integrity Manager) can run standalone without container monitoring
+		if cfg.EnableFIM {
+			logger.L().Ctx(ctx).Warning("container watcher failed but continuing in FIM-only mode", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("running in FIM-only mode - container monitoring is disabled")
+		} else {
+			// Container watcher is critical - fail startup
+			switch {
+			case strings.Contains(err.Error(), utils.ErrKernelVersion):
+				os.Exit(utils.ExitCodeIncompatibleKernel)
+			case strings.Contains(err.Error(), utils.ErrMacOS):
+				os.Exit(utils.ExitCodeMacOS)
+			default:
+				os.Exit(utils.ExitCodeError)
+			}
 		}
 	}
-	defer mainHandler.Stop()
+
+	// Only defer Stop() if Start succeeded or we're in FIM-only mode
+	if err == nil || cfg.EnableFIM {
+		defer mainHandler.Stop()
+	}
 
 	// start watching
 	dWatcher.Start(ctx)
