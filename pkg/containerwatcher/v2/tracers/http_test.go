@@ -33,6 +33,7 @@ func TestHttpFields(t *testing.T) {
 			"proc.parent",
 			"proc.parent.comm",
 			"proc.parent.pid",
+			"proc.parent.tid",
 			"proc.pid",
 			"proc.tid",
 			"sock_fd",

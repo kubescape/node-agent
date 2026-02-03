@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	dnsImageName = "ghcr.io/inspektor-gadget/gadget/trace_dns:v0.48.0"
+	dnsImageName = "ghcr.io/inspektor-gadget/gadget/trace_dns:v0.48.1"
 	dnsTraceName = "trace_dns"
 )
 

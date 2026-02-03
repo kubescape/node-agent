@@ -34,6 +34,7 @@ func TestNetworkFields(t *testing.T) {
 			"proc.parent",
 			"proc.parent.comm",
 			"proc.parent.pid",
+			"proc.parent.tid",
 			"proc.pid",
 			"proc.tid",
 			"timestamp_raw",

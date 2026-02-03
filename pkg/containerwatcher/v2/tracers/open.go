@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	openImageName = "ghcr.io/inspektor-gadget/gadget/trace_open:v0.48.0"
+	openImageName = "ghcr.io/inspektor-gadget/gadget/trace_open:v0.48.1"
 	openTraceName = "trace_open"
 )
 
