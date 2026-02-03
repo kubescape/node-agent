@@ -27,6 +27,12 @@ jobs:
   pr-merged:
     if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
     needs: reset-run-number
+    permissions:
+      actions: read
+      id-token: write
+      packages: write
+      contents: write
+      pull-requests: read
     uses: ./.github/workflows/incluster-comp-pr-merged.yaml
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/node-agent
