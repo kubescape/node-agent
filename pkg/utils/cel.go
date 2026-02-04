@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,7 +50,20 @@ var requestIsSet = ref.FieldTester(func(target any) bool {
 	if x.Raw.HttpEvent == nil {
 		return false
 	}
-	return true
+	req := x.Raw.HttpEvent.GetRequest()
+	return req != nil
+})
+
+var urlIsSet = ref.FieldTester(func(target any) bool {
+	x := target.(*xcel.Object[HttpRequestAccessor])
+	if x.Raw.HttpEvent == nil {
+		return false
+	}
+	req := x.Raw.HttpEvent.GetRequest()
+	if req == nil || req.URL == nil {
+		return false
+	}
+	return req.URL.String() != ""
 })
 
 var CelFields = map[string]*celtypes.FieldType{
@@ -482,7 +496,7 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 	},
 	"url": {
 		Type:  celtypes.StringType,
-		IsSet: requestIsSet,
+		IsSet: urlIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[HttpRequestAccessor])
 			if x.Raw.HttpEvent == nil {
@@ -497,7 +511,7 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 	},
 	"path": {
 		Type:  celtypes.StringType,
-		IsSet: requestIsSet,
+		IsSet: urlIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[HttpRequestAccessor])
 			if x.Raw.HttpEvent == nil {
@@ -526,10 +540,16 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 			// Fallback to reading from Request.Body (for test events)
 			req := x.Raw.HttpEvent.GetRequest()
 			if req != nil && req.Body != nil {
-				body, err := io.ReadAll(req.Body)
-				if err == nil {
-					return string(body), nil
+				// Read with size limit (10MB) and restore body for downstream readers
+				const maxBodySize = 10 * 1024 * 1024 // 10MB
+				limitedReader := io.LimitReader(req.Body, maxBodySize)
+				bodyBytes, err := io.ReadAll(limitedReader)
+				req.Body.Close()                                    // Close the original body
+				req.Body = io.NopCloser(bytes.NewReader(bodyBytes)) // Restore for downstream
+				if err != nil {
+					return "", err
 				}
+				return string(bodyBytes), nil
 			}
 			return "", nil
 		}),
