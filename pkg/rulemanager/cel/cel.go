@@ -42,8 +42,16 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	eventObj, eventTyp := xcel.NewObject(&utils.CelEventImpl{})
 	xcel.RegisterObject(ta, tp, eventObj, eventTyp, utils.CelFields)
 
+	// Register the nested request accessor type
+	requestObj, requestTyp := xcel.NewObject(utils.HttpRequestAccessor{})
+	xcel.RegisterObject(ta, tp, requestObj, requestTyp, utils.HttpRequestFields)
+
+	// Set the request field's type now that requestTyp is available
+	utils.CelFields["request"].Type = requestTyp
+
 	envOptions := []cel.EnvOption{
 		cel.Variable("event", eventTyp), // All events accessible via "event" variable
+		cel.Variable("http", eventTyp),  // HTTP events also accessible via "http" variable
 		cel.Variable("eventType", cel.StringType),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
