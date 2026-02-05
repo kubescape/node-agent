@@ -191,7 +191,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 
 		// Skip if program compilation failed (cached as nil)
 		if out == nil {
-			continue
+			return false, nil
 		}
 
 		boolVal, ok := out.Value().(bool)
