@@ -19,6 +19,7 @@ import (
 
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	iglogger "github.com/inspektor-gadget/inspektor-gadget/pkg/logger"
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -162,10 +163,10 @@ func main() {
 	// Create clients
 	logger.L().Info("Kubernetes mode is true")
 	k8sClient := k8sinterface.NewKubernetesApi()
-	
+
 	// Fetch cluster UID from kube-system namespace
 	clusterUID := utils.GetClusterUID(k8sClient.GetKubernetesClient())
-	
+
 	storageClient, err := storage.CreateStorage(clusterData.Namespace)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
@@ -364,6 +365,11 @@ func main() {
 	// Create the IG k8sClient
 	if err := igconfig.Config.ReadInConfig(); err != nil {
 		logger.L().Warning("reading IG config", helpers.Error(err))
+	}
+	if logger.L().GetLevel() == "debug" {
+		iglogger.DefaultLogger().SetLevel(iglogger.DebugLevel)
+	} else {
+		iglogger.DefaultLogger().SetLevel(iglogger.ErrorLevel)
 	}
 	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName, "", "")
 	if err != nil {
