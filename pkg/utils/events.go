@@ -2,12 +2,18 @@ package utils
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"path/filepath"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
+
+func isPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	return ip != nil && ip.IsPrivate()
+}
 
 type HTTPDataType int
 

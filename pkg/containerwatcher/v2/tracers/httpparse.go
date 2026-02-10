@@ -14,20 +14,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
-var writeSyscalls = map[string]bool{
-	"write":   true,
-	"writev":  true,
-	"sendto":  true,
-	"sendmsg": true,
-}
-
-var readSyscalls = map[string]bool{
-	"read":     true,
-	"readv":    true,
-	"recvfrom": true,
-	"recvmsg":  true,
-}
-
 var ConsistentHeaders = []string{
 	"Accept-Encoding",
 	"Accept-Language",
@@ -37,12 +23,12 @@ var ConsistentHeaders = []string{
 }
 
 func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error) {
-	request, err := ParseHttpRequest(FromCString(bpfEvent.GetBuf()))
+	direction, err := GetPacketDirection(bpfEvent.GetSyscall())
 	if err != nil {
 		return nil, err
 	}
 
-	direction, err := GetPacketDirection(bpfEvent.GetSyscall())
+	request, err := ParseHttpRequest(FromCString(bpfEvent.GetBuf()))
 	if err != nil {
 		return nil, err
 	}
@@ -68,11 +54,12 @@ func ExtractConsistentHeaders(headers http.Header) map[string][]string {
 }
 
 func GetPacketDirection(syscall string) (consts.NetworkDirection, error) {
-	if readSyscalls[syscall] {
+	switch syscall {
+	case "read", "readv", "recvfrom", "recvmsg":
 		return consts.Inbound, nil
-	} else if writeSyscalls[syscall] {
+	case "write", "writev", "sendto", "sendmsg":
 		return consts.Outbound, nil
-	} else {
+	default:
 		return "", fmt.Errorf("unknown syscall %s", syscall)
 	}
 }
