@@ -357,22 +357,22 @@ func Test_07_RuleBindingApplyTest(t *testing.T) {
 	}
 
 	// valid
-	exitCode := testutils.RunCommand("kubectl", "apply", "-f", ruleBindingPath("all-valid.yaml"))
+	exitCode := testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", ruleBindingPath("all-valid.yaml"))
 	assert.Equal(t, 0, exitCode, "Error applying valid rule binding")
 	exitCode = testutils.RunCommand("kubectl", "delete", "-f", ruleBindingPath("all-valid.yaml"))
 	require.Equal(t, 0, exitCode, "Error deleting valid rule binding")
 
 	// duplicate fields
 	file := ruleBindingPath("dup-fields-name-tag.yaml")
-	exitCode = testutils.RunCommand("kubectl", "apply", "-f", file)
+	exitCode = testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", file)
 	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
 
 	file = ruleBindingPath("dup-fields-name-id.yaml")
-	exitCode = testutils.RunCommand("kubectl", "apply", "-f", file)
+	exitCode = testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", file)
 	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
 
 	file = ruleBindingPath("dup-fields-id-tag.yaml")
-	exitCode = testutils.RunCommand("kubectl", "apply", "-f", file)
+	exitCode = testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", file)
 	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
 }
 
