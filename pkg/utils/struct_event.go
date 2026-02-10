@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"net"
 	"net/http"
 	"time"
 
@@ -654,11 +653,10 @@ func (e *StructEvent) IsDir() bool {
 }
 
 func (e *StructEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection) HttpEvent {
-	event := *e
-	event.Request = request
-	event.Direction = direction
-	event.Internal = func() bool { ip := net.ParseIP(e.GetOtherIp()); return ip != nil && ip.IsPrivate() }()
-	return &event
+	e.Request = request
+	e.Direction = direction
+	e.Internal = isPrivateIP(e.GetOtherIp())
+	return e
 }
 
 func (e *StructEvent) Release() {}
