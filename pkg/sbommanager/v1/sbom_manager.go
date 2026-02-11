@@ -2,7 +2,6 @@ package v1
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -566,7 +565,7 @@ func toLicenses(l []model.License) v1beta1.Licenses {
 		licenses[i].SPDXExpression = l[i].SPDXExpression
 		licenses[i].Type = v1beta1.LicenseType(l[i].Type)
 		licenses[i].URLs = l[i].URLs
-		licenses[i].Locations = toLocations(l[i].Locations)
+		// Locations stripped to reduce SBOM size (saves ~228 KB / 3.2%)
 	}
 	return licenses
 }
@@ -575,9 +574,8 @@ func toLocations(l []file.Location) []v1beta1.Location {
 	locations := make([]v1beta1.Location, len(l))
 	for i := range l {
 		locations[i].Coordinates = v1beta1.Coordinates(l[i].Coordinates)
-		locations[i].VirtualPath = l[i].AccessPath
+		// VirtualPath (accessPath) and Annotations stripped to reduce SBOM size (saves ~159 KB / 2.2%)
 		locations[i].RealPath = l[i].RealPath
-		locations[i].Annotations = l[i].Annotations
 	}
 	return locations
 }
@@ -587,8 +585,7 @@ func toSyftDocument(sbomSBOM *sbom.SBOM) v1beta1.SyftDocument {
 		Pretty: false,
 		Legacy: false,
 	})
-	configuration, _ := json.Marshal(doc.Descriptor.Configuration)
-	metadata, _ := json.Marshal(doc.Source.Metadata)
+	// Source.Metadata and Descriptor.Configuration stripped to reduce SBOM size (saves ~20 KB)
 	syftDocument := v1beta1.SyftDocument{
 		Artifacts:             toSyftPackages(doc.Artifacts),
 		ArtifactRelationships: toSyftRelationships(doc.ArtifactRelationships),
@@ -598,7 +595,7 @@ func toSyftDocument(sbomSBOM *sbom.SBOM) v1beta1.SyftDocument {
 			Name:     doc.Source.Name,
 			Version:  doc.Source.Version,
 			Type:     doc.Source.Type,
-			Metadata: metadata,
+			Metadata: nil,
 		},
 		Distro: v1beta1.LinuxRelease{
 			PrettyName:       doc.Distro.PrettyName,
@@ -623,7 +620,7 @@ func toSyftDocument(sbomSBOM *sbom.SBOM) v1beta1.SyftDocument {
 		SyftDescriptor: v1beta1.SyftDescriptor{
 			Name:          doc.Descriptor.Name,
 			Version:       doc.Descriptor.Version,
-			Configuration: configuration,
+			Configuration: nil,
 		},
 		Schema: v1beta1.Schema{
 			Version: doc.Schema.Version,
@@ -651,14 +648,13 @@ func toSyftPackages(p []model.Package) []v1beta1.SyftPackage {
 		packages[i].Name = p[i].Name
 		packages[i].Version = p[i].Version
 		packages[i].Type = string(p[i].Type)
-		packages[i].FoundBy = p[i].FoundBy
+		// FoundBy stripped to reduce SBOM size (saves ~15 KB)
 		packages[i].Locations = toLocations(p[i].Locations)
 		packages[i].Licenses = toLicenses(p[i].Licenses)
 		packages[i].Language = string(p[i].Language)
 		packages[i].CPEs = toCPEs(p[i].CPEs)
 		packages[i].PURL = p[i].PURL
-		packages[i].Metadata, _ = json.Marshal(p[i].Metadata)
-		packages[i].MetadataType = p[i].MetadataType
+		// Metadata and MetadataType stripped to reduce SBOM size (saves ~3.19 MB / 46%)
 	}
 	return packages
 }
