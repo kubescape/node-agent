@@ -340,6 +340,8 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 		// TODO we could save the error in a status field
 		return
 	}
+	// strip the SBOM to reduce size
+	v1beta1.StripSBOM(syftSBOM)
 	// prepare the SBOM
 	delete(wipSbom.Annotations, NodeNameMetadataKey)
 	wipSbom.Spec.Metadata.Report.CreatedAt = wipSbom.CreationTimestamp
