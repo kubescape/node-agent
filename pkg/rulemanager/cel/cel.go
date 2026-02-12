@@ -129,15 +129,15 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) CreateEvalContext(event *events.EnrichedEvent) map[string]any {
-	eventType := event.Event.GetEventType()
+func (c *CEL) CreateEvalContext(event utils.K8sEvent) map[string]any {
+	eventType := event.GetEventType()
 
 	// Apply event converter if one is registered, otherwise cast to CelEvent
 	var obj interface{}
 	if converter, exists := c.eventConverters[eventType]; exists {
-		obj, _ = xcel.NewObject(converter(event.Event))
+		obj, _ = xcel.NewObject(converter(event))
 	} else {
-		obj, _ = xcel.NewObject(event.Event.(utils.CelEvent))
+		obj, _ = xcel.NewObject(event.(utils.CelEvent))
 	}
 
 	evalContext := map[string]any{
@@ -219,20 +219,12 @@ func (c *CEL) EvaluateExpressionWithContext(evalContext map[string]any, expressi
 }
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
-	evalContext := c.CreateEvalContext(event)
-	eventType := event.Event.GetEventType()
-	// Filter expressions to match event type for backward compatibility
-	var filtered []typesv1.RuleExpression
-	for _, expr := range expressions {
-		if expr.EventType == eventType {
-			filtered = append(filtered, expr)
-		}
-	}
-	return c.EvaluateRuleWithContext(evalContext, filtered)
+	evalContext := c.CreateEvalContext(event.Event)
+	return c.EvaluateRuleWithContext(evalContext, expressions)
 }
 
 func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
-	evalContext := c.CreateEvalContext(event)
+	evalContext := c.CreateEvalContext(event.Event)
 	return c.EvaluateExpressionWithContext(evalContext, expression)
 }
 

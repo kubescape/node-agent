@@ -199,7 +199,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
-	evalContext := rm.celEvaluator.CreateEvalContext(enrichedEvent)
+	evalContext := rm.celEvaluator.CreateEvalContext(enrichedEvent.Event)
 
 	for _, rule := range rules {
 		if !rule.Enabled {
@@ -333,13 +333,12 @@ func (rm *RuleManager) IsPodMonitored(namespace, pod string) bool {
 }
 
 func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
-	results := []string{}
+	var results []string
 
 	creator := rm.ruleBindingCache.GetRuleCreator()
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
-	enrichedEvent := &events.EnrichedEvent{Event: event}
-	evalContext := rm.celEvaluator.CreateEvalContext(enrichedEvent)
+	evalContext := rm.celEvaluator.CreateEvalContext(event)
 
 	for _, rule := range rules {
 		if !rule.SupportPolicy {
@@ -384,7 +383,6 @@ func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEven
 	return allowed
 }
 
-
 func (rm *RuleManager) getUniqueIdAndMessage(evalContext map[string]any, rule typesv1.Rule) (string, string, error) {
 	message, err := rm.celEvaluator.EvaluateExpressionWithContext(evalContext, rule.Expressions.Message)
 	if err != nil {
@@ -399,7 +397,6 @@ func (rm *RuleManager) getUniqueIdAndMessage(evalContext map[string]any, rule ty
 
 	return message, uniqueID, err
 }
-
 
 func hashStringToMD5(str string) string {
 	hash := md5.Sum([]byte(str))
