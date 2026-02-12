@@ -20,6 +20,21 @@ docker-build: gadgets
 docker-push: docker-build
 	docker push $(IMAGE):$(TAG)
 
+STORAGE_LOCAL_PATH ?= ../storage
+
+.PHONY: local
+local:
+	go mod edit -replace "github.com/kubescape/storage=$(STORAGE_LOCAL_PATH)"
+
+.PHONY: unlocal
+unlocal:
+	go mod edit -dropreplace "github.com/kubescape/storage"
+
+.PHONY: test
+test: local
+	go test ./pkg/rulemanager/cel/libraries/applicationprofile/... -v -count=1
+	$(MAKE) unlocal
+
 gadgets:
 	$(foreach img,$(KUBESCAPE_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=$(img) TAG=latest;)
 	$(foreach img,$(GADGETS),sudo ig image pull quay.io/matthiasb_1/gadgets:$(img);)

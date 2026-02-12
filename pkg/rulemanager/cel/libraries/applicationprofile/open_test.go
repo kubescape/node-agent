@@ -105,6 +105,221 @@ func TestOpenInProfile(t *testing.T) {
 	}
 }
 
+func TestOpenWithWildcardProfile(t *testing.T) {
+	objCache := objectcachev1.RuleObjectCacheMock{
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+	}
+
+	objCache.SetSharedContainerData("test-container-id", &objectcache.WatchedContainerData{
+		ContainerType: objectcache.Container,
+		ContainerInfos: map[objectcache.ContainerType][]objectcache.ContainerInfo{
+			objectcache.Container: {
+				{
+					Name: "test-container",
+				},
+			},
+		},
+	})
+
+	// Profile with collapsed wildcard paths (as produced by storage's path analyzer)
+	profile := &v1beta1.ApplicationProfile{}
+	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
+		Name: "test-container",
+		Opens: []v1beta1.OpenCalls{
+			{
+				Path:  "/",
+				Flags: []string{"O_RDONLY"},
+			},
+			{
+				Path:  "/*",
+				Flags: []string{"O_CLOEXEC", "O_RDONLY", "O_RDWR", "O_NONBLOCK"},
+			},
+		},
+	})
+	objCache.SetApplicationProfile(profile)
+
+	env, err := cel.NewEnv(
+		cel.Variable("containerID", cel.StringType),
+		cel.Variable("path", cel.StringType),
+		AP(&objCache, config.Config{}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create env: %v", err)
+	}
+
+	testCases := []struct {
+		name           string
+		path           string
+		expectedResult bool
+	}{
+		{
+			name:           "Root path matches /",
+			path:           "/",
+			expectedResult: true,
+		},
+		{
+			name:           "Wildcard /* matches /lib/x86_64-linux-gnu/libc-2.31.so",
+			path:           "/lib/x86_64-linux-gnu/libc-2.31.so",
+			expectedResult: true,
+		},
+		{
+			name:           "Wildcard /* matches /proc/49/mountinfo",
+			path:           "/proc/49/mountinfo",
+			expectedResult: true,
+		},
+		{
+			name:           "Wildcard /* matches /sys/fs/cgroup/cpu.max",
+			path:           "/sys/fs/cgroup/cpu.max",
+			expectedResult: true,
+		},
+		{
+			name:           "Wildcard /* matches /etc/apache2/apache2.conf",
+			path:           "/etc/apache2/apache2.conf",
+			expectedResult: true,
+		},
+		{
+			name:           "Wildcard /* matches single-level /tmp",
+			path:           "/tmp",
+			expectedResult: true,
+		},
+		{
+			name:           "Wildcard /* matches deep path",
+			path:           "/usr/share/zoneinfo/UTC",
+			expectedResult: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, issues := env.Compile(`ap.was_path_opened(containerID, path)`)
+			if issues != nil {
+				t.Fatalf("failed to compile expression: %v", issues.Err())
+			}
+
+			program, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("failed to create program: %v", err)
+			}
+
+			result, _, err := program.Eval(map[string]interface{}{
+				"containerID": "test-container-id",
+				"path":        tc.path,
+			})
+			if err != nil {
+				t.Fatalf("failed to eval program: %v", err)
+			}
+
+			actualResult := result.Value().(bool)
+			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_path_opened result should match expected value")
+		})
+	}
+}
+
+func TestOpenWithDynamicIdentifierProfile(t *testing.T) {
+	objCache := objectcachev1.RuleObjectCacheMock{
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+	}
+
+	objCache.SetSharedContainerData("test-container-id", &objectcache.WatchedContainerData{
+		ContainerType: objectcache.Container,
+		ContainerInfos: map[objectcache.ContainerType][]objectcache.ContainerInfo{
+			objectcache.Container: {
+				{
+					Name: "test-container",
+				},
+			},
+		},
+	})
+
+	// Profile with ⋯ (single-segment dynamic) and * (multi-segment wildcard)
+	profile := &v1beta1.ApplicationProfile{}
+	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
+		Name: "test-container",
+		Opens: []v1beta1.OpenCalls{
+			{
+				Path:  "/proc/\u22ef/mountinfo",
+				Flags: []string{"O_RDONLY"},
+			},
+			{
+				Path:  "/api/*/data",
+				Flags: []string{"O_RDONLY"},
+			},
+		},
+	})
+	objCache.SetApplicationProfile(profile)
+
+	env, err := cel.NewEnv(
+		cel.Variable("containerID", cel.StringType),
+		cel.Variable("path", cel.StringType),
+		AP(&objCache, config.Config{}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create env: %v", err)
+	}
+
+	testCases := []struct {
+		name           string
+		path           string
+		expectedResult bool
+	}{
+		{
+			name:           "Dynamic ⋯ matches /proc/1/mountinfo",
+			path:           "/proc/1/mountinfo",
+			expectedResult: true,
+		},
+		{
+			name:           "Dynamic ⋯ matches /proc/999/mountinfo",
+			path:           "/proc/999/mountinfo",
+			expectedResult: true,
+		},
+		{
+			name:           "Dynamic ⋯ does NOT match /proc/1/2/mountinfo (two segments)",
+			path:           "/proc/1/2/mountinfo",
+			expectedResult: false,
+		},
+		{
+			name:           "Wildcard * matches /api/v1/users/123/data",
+			path:           "/api/v1/users/123/data",
+			expectedResult: true,
+		},
+		{
+			name:           "Wildcard * matches /api/data (zero intermediate segments)",
+			path:           "/api/data",
+			expectedResult: true,
+		},
+		{
+			name:           "Path not in profile at all",
+			path:           "/etc/passwd",
+			expectedResult: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, issues := env.Compile(`ap.was_path_opened(containerID, path)`)
+			if issues != nil {
+				t.Fatalf("failed to compile expression: %v", issues.Err())
+			}
+
+			program, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("failed to create program: %v", err)
+			}
+
+			result, _, err := program.Eval(map[string]interface{}{
+				"containerID": "test-container-id",
+				"path":        tc.path,
+			})
+			if err != nil {
+				t.Fatalf("failed to eval program: %v", err)
+			}
+
+			actualResult := result.Value().(bool)
+			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_path_opened result should match expected value")
+		})
+	}
+}
+
 func TestOpenNoProfile(t *testing.T) {
 	objCache := objectcachev1.RuleObjectCacheMock{}
 
