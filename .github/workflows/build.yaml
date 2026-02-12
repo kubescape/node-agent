@@ -99,7 +99,7 @@ jobs:
         run: |
           echo "Replacing github.com/kubescape/storage with github.com/${REPO_OWNER}/storage@${COMMIT}"
           go mod edit -replace "github.com/kubescape/storage=github.com/${REPO_OWNER}/storage@${COMMIT}"
-          GOPROXY=direct GONOSUMCHECK=* GONOSUMDB=* go mod tidy
+          GONOSUMCHECK=off GONOSUMDB=off GOFLAGS=-mod=mod GOPROXY=direct go mod tidy
           echo "Resolved storage version:"
           grep "${REPO_OWNER}/storage" go.sum | head -1
 
