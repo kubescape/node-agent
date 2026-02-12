@@ -11,12 +11,15 @@ on:
         required: false
         type: string
         default: ""
-        description: "Branch/tag/commit of k8sstormcenter/storage to use (leave empty to keep go.mod default)"
+        description: "Storage image tag to resolve (maps to go/<tag> Git tag). Leave empty to auto-detect latest."
       PLATFORMS:
         type: boolean
         required: false
         default: false
         description: "Build for both amd64 and arm64"
+  push:
+    branches:
+      - test/localtestbuild
 
 jobs:
   build:
@@ -30,25 +33,53 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Resolve build parameters
+        id: params
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "image_tag=${{ inputs.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+            STORAGE_REF="${{ inputs.STORAGE_REF }}"
+          else
+            # Push trigger: derive tag from short commit SHA
+            echo "image_tag=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            STORAGE_REF=""
+          fi
+
+          # If no STORAGE_REF given, auto-detect the most recent go/ tag on storage
+          if [ -z "$STORAGE_REF" ]; then
+            echo "Auto-detecting latest storage go/ tag..."
+            STORAGE_REF=$(git ls-remote --tags "https://github.com/${REPO_OWNER}/storage.git" 'refs/tags/go/*' \
+              | awk '{print $2}' | sed 's|refs/tags/go/||' | sort -V | tail -1)
+            if [ -n "$STORAGE_REF" ]; then
+              echo "Auto-detected storage ref: ${STORAGE_REF}"
+            else
+              echo "No go/ tags found on storage — will use default go.mod dependency"
+            fi
+          fi
+          echo "storage_ref=${STORAGE_REF}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
 
       - name: Resolve storage commit hash
-        if: ${{ inputs.STORAGE_REF != '' }}
+        if: ${{ steps.params.outputs.storage_ref != '' }}
         id: resolve-storage
         env:
-          STORAGE_REF: ${{ inputs.STORAGE_REF }}
+          STORAGE_REF: ${{ steps.params.outputs.storage_ref }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           # The storage build.yaml creates a git tag "go/<IMAGE_TAG>" specifically
           # for Go module resolution. Try that first, then fall back to raw ref.
           GO_TAG="go/${STORAGE_REF}"
-          echo "Looking up git tag '${GO_TAG}' on k8sstormcenter/storage..."
-          COMMIT=$(git ls-remote https://github.com/k8sstormcenter/storage.git "refs/tags/${GO_TAG}" | awk '{print $1}')
+          echo "Looking up git tag '${GO_TAG}' on ${REPO_OWNER}/storage..."
+          COMMIT=$(git ls-remote "https://github.com/${REPO_OWNER}/storage.git" "refs/tags/${GO_TAG}" | awk '{print $1}')
 
           if [ -z "$COMMIT" ]; then
             echo "Tag '${GO_TAG}' not found, trying raw ref '${STORAGE_REF}'..."
-            COMMIT=$(git ls-remote https://github.com/k8sstormcenter/storage.git "refs/tags/${STORAGE_REF}" "refs/heads/${STORAGE_REF}" | head -1 | awk '{print $1}')
+            COMMIT=$(git ls-remote "https://github.com/${REPO_OWNER}/storage.git" "refs/tags/${STORAGE_REF}" "refs/heads/${STORAGE_REF}" | head -1 | awk '{print $1}')
           fi
 
           if [ -z "$COMMIT" ]; then
@@ -61,15 +92,16 @@ jobs:
           echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
 
       - name: Update storage dependency
-        if: ${{ inputs.STORAGE_REF != '' }}
+        if: ${{ steps.params.outputs.storage_ref != '' }}
         env:
           COMMIT: ${{ steps.resolve-storage.outputs.commit }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          echo "Replacing github.com/kubescape/storage with github.com/k8sstormcenter/storage@${COMMIT}"
-          go mod edit -replace "github.com/kubescape/storage=github.com/k8sstormcenter/storage@${COMMIT}"
-          GOPROXY=direct GONOSUMCHECK="github.com/k8sstormcenter/*" go mod tidy
+          echo "Replacing github.com/kubescape/storage with github.com/${REPO_OWNER}/storage@${COMMIT}"
+          go mod edit -replace "github.com/kubescape/storage=github.com/${REPO_OWNER}/storage@${COMMIT}"
+          GOPROXY=direct GONOSUMCHECK="github.com/${REPO_OWNER}/*" go mod tidy
           echo "Resolved storage version:"
-          grep "k8sstormcenter/storage" go.sum | head -1
+          grep "${REPO_OWNER}/storage" go.sum | head -1
 
       - name: Ensure ig is installed
         run: |
@@ -80,7 +112,7 @@ jobs:
         run: make gadgets
 
       - name: Set up QEMU
-        if: ${{ inputs.PLATFORMS }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.PLATFORMS }}
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -98,7 +130,7 @@ jobs:
         with:
           context: .
           file: build/Dockerfile
-          tags: ghcr.io/${{ github.repository_owner }}/node-agent:${{ inputs.IMAGE_TAG }}
-          build-args: image_version=${{ inputs.IMAGE_TAG }}
-          platforms: ${{ inputs.PLATFORMS && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          tags: ghcr.io/${{ github.repository_owner }}/node-agent:${{ steps.params.outputs.image_tag }}
+          build-args: image_version=${{ steps.params.outputs.image_tag }}
+          platforms: ${{ (github.event_name == 'workflow_dispatch' && inputs.PLATFORMS) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: true
