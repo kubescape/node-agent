@@ -48,6 +48,12 @@ func (l *parseLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"parse.basename": {
+			cel.Overload(
+				"parse_basename", []*cel.Type{cel.StringType}, cel.StringType,
+				cel.UnaryBinding(l.basename),
+			),
+		},
 	}
 }
 
@@ -76,6 +82,9 @@ func (e *parseCostEstimator) EstimateCallCost(function, overloadID string, targe
 	case "parse.get_exec_path":
 		// List parsing + simple array access + string comparison - O(1) operation
 		cost = 5
+	case "parse.basename":
+		// Single string scan for last '/' - O(n) on path length
+		cost = 1
 	}
 	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
 }

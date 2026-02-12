@@ -1,6 +1,8 @@
 package parse
 
 import (
+	"strings"
+
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/celparse"
@@ -24,4 +26,16 @@ func (l *parseLibrary) getExecPath(args ref.Val, comm ref.Val) ref.Val {
 		}
 	}
 	return types.String(commStr)
+}
+
+func (l *parseLibrary) basename(path ref.Val) ref.Val {
+	s, ok := path.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(path)
+	}
+	idx := strings.LastIndex(s, "/")
+	if idx == -1 {
+		return types.String(s)
+	}
+	return types.String(s[idx+1:])
 }

@@ -56,6 +56,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),
+		ext.Bindings(),
 		k8s.K8s(objectCache.K8sObjectCache(), cfg),
 		applicationprofile.AP(objectCache, cfg),
 		networkneighborhood.NN(objectCache, cfg),
@@ -128,7 +129,7 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) createEvalContext(event *events.EnrichedEvent) map[string]any {
+func (c *CEL) CreateEvalContext(event *events.EnrichedEvent) map[string]any {
 	eventType := event.Event.GetEventType()
 
 	// Apply event converter if one is registered, otherwise cast to CelEvent
@@ -175,15 +176,8 @@ func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[stri
 	return out, nil
 }
 
-func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
-	eventType := event.Event.GetEventType()
-	evalContext := c.createEvalContext(event)
-
+func (c *CEL) EvaluateRuleWithContext(evalContext map[string]any, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
-		if expression.EventType != eventType {
-			continue
-		}
-
 		out, err := c.evaluateProgramWithContext(expression.Expression, evalContext)
 		if err != nil {
 			return false, err
@@ -206,9 +200,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 	return true, nil
 }
 
-func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
-	evalContext := c.createEvalContext(event)
-
+func (c *CEL) EvaluateExpressionWithContext(evalContext map[string]any, expression string) (string, error) {
 	out, err := c.evaluateProgramWithContext(expression, evalContext)
 	if err != nil {
 		return "", err
@@ -224,6 +216,24 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 		return "", fmt.Errorf("expression returned %T, expected string", out.Value())
 	}
 	return strVal, nil
+}
+
+func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
+	evalContext := c.CreateEvalContext(event)
+	eventType := event.Event.GetEventType()
+	// Filter expressions to match event type for backward compatibility
+	var filtered []typesv1.RuleExpression
+	for _, expr := range expressions {
+		if expr.EventType == eventType {
+			filtered = append(filtered, expr)
+		}
+	}
+	return c.EvaluateRuleWithContext(evalContext, filtered)
+}
+
+func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
+	evalContext := c.CreateEvalContext(event)
+	return c.EvaluateExpressionWithContext(evalContext, expression)
 }
 
 func (c *CEL) RegisterHelper(function cel.EnvOption) error {
