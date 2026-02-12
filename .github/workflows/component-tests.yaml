@@ -113,9 +113,9 @@ jobs:
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s
       - name: Install Node Agent Chart
         run: |
-          STORAGE_TAG="latest"
+          STORAGE_TAG=$(./tests/scripts/storage-tag.sh)
           echo "Storage tag that will be used: ${STORAGE_TAG}"
-          IMAGE_TAG=test-5336ad3
+          IMAGE_TAG="latest"
           IMAGE_REPO='ghcr.io/k8sstormcenter/node-agent'
           echo "Using Node Agent image: ${IMAGE_REPO}:${IMAGE_TAG}"
           # End of constanze modification
