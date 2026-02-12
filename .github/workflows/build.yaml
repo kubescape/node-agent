@@ -34,13 +34,39 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Update storage dependency
+      - name: Resolve storage commit hash
         if: ${{ inputs.STORAGE_REF != '' }}
+        id: resolve-storage
         env:
           STORAGE_REF: ${{ inputs.STORAGE_REF }}
         run: |
-          echo "Replacing github.com/kubescape/storage with github.com/k8sstormcenter/storage@${STORAGE_REF}"
-          go mod edit -replace "github.com/kubescape/storage=github.com/k8sstormcenter/storage@${STORAGE_REF}"
+          # The storage build.yaml creates a git tag "go/<IMAGE_TAG>" specifically
+          # for Go module resolution. Try that first, then fall back to raw ref.
+          GO_TAG="go/${STORAGE_REF}"
+          echo "Looking up git tag '${GO_TAG}' on k8sstormcenter/storage..."
+          COMMIT=$(git ls-remote https://github.com/k8sstormcenter/storage.git "refs/tags/${GO_TAG}" | awk '{print $1}')
+
+          if [ -z "$COMMIT" ]; then
+            echo "Tag '${GO_TAG}' not found, trying raw ref '${STORAGE_REF}'..."
+            COMMIT=$(git ls-remote https://github.com/k8sstormcenter/storage.git "refs/tags/${STORAGE_REF}" "refs/heads/${STORAGE_REF}" | head -1 | awk '{print $1}')
+          fi
+
+          if [ -z "$COMMIT" ]; then
+            echo "::error::Could not resolve '${STORAGE_REF}' to a commit. Make sure the storage build ran first (it creates the go/ tag)."
+            exit 1
+          fi
+
+          SHORT=$(echo "$COMMIT" | cut -c1-12)
+          echo "Resolved to commit ${COMMIT} (${SHORT})"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+
+      - name: Update storage dependency
+        if: ${{ inputs.STORAGE_REF != '' }}
+        env:
+          COMMIT: ${{ steps.resolve-storage.outputs.commit }}
+        run: |
+          echo "Replacing github.com/kubescape/storage with github.com/k8sstormcenter/storage@${COMMIT}"
+          go mod edit -replace "github.com/kubescape/storage=github.com/k8sstormcenter/storage@${COMMIT}"
           GOPROXY=direct GONOSUMCHECK="github.com/k8sstormcenter/*" go mod tidy
           echo "Resolved storage version:"
           grep "k8sstormcenter/storage" go.sum | head -1
