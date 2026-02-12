@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -869,7 +870,7 @@ func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.
 		Datasource: e.Datasource,
 		Direction:  direction,
 		EventType:  e.EventType,
-		Internal:   isPrivateIP(e.GetOtherIp()),
+		Internal:   func() bool { ip := net.ParseIP(e.GetOtherIp()); return ip != nil && ip.IsPrivate() }(),
 		Request:    request,
 		Response:   e.Response,
 		Syscall:    e.Syscall,
