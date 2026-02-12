@@ -89,7 +89,7 @@ jobs:
           go-version: '${{ inputs.GO_VERSION }}'
 
       - name: Ensure ig is installed
-        run: curl https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.45.0/ig_0.45.0_amd64.deb -LO && sudo dpkg -i ig_0.45.0_amd64.deb
+        run: curl https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.48.1/ig_0.48.1_amd64.deb -LO && sudo dpkg -i ig_0.48.1_amd64.deb
 
       - name: Build gadgets
         run: make gadgets

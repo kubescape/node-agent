@@ -19,6 +19,7 @@ import (
 
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	iglogger "github.com/inspektor-gadget/inspektor-gadget/pkg/logger"
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -162,6 +163,10 @@ func main() {
 	// Create clients
 	logger.L().Info("Kubernetes mode is true")
 	k8sClient := k8sinterface.NewKubernetesApi()
+
+	// Fetch cluster UID from kube-system namespace
+	clusterUID := utils.GetClusterUID(k8sClient.GetKubernetesClient())
+
 	storageClient, err := storage.CreateStorage(clusterData.Namespace)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
@@ -282,7 +287,7 @@ func main() {
 
 	if cfg.EnableRuntimeDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID)
 		dWatcher.AddAdaptor(ruleBindingCache)
 
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
@@ -348,7 +353,7 @@ func main() {
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID)
 		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, prometheusExporter, k8sObjectCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
@@ -360,6 +365,11 @@ func main() {
 	// Create the IG k8sClient
 	if err := igconfig.Config.ReadInConfig(); err != nil {
 		logger.L().Warning("reading IG config", helpers.Error(err))
+	}
+	if logger.L().GetLevel() == "debug" {
+		iglogger.DefaultLogger().SetLevel(iglogger.DebugLevel)
+	} else {
+		iglogger.DefaultLogger().SetLevel(iglogger.ErrorLevel)
 	}
 	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName, "", "")
 	if err != nil {
@@ -385,7 +395,7 @@ func main() {
 	if cfg.EnableFIM {
 		// Initialize FIM-specific exporters
 		fimExportersConfig := cfg.FIM.GetFIMExportersConfig()
-		fimExporter := exporters.InitExporters(fimExportersConfig, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+		fimExporter := exporters.InitExporters(fimExportersConfig, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID)
 
 		fimManager, err = fimmanager.NewFIMManager(cfg, clusterData.ClusterName, fimExporter, cloudMetadata)
 		if err != nil {
@@ -436,16 +446,29 @@ func main() {
 	err = mainHandler.Start(ctx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("error starting the container watcher", helpers.Error(err))
-		switch {
-		case strings.Contains(err.Error(), utils.ErrKernelVersion):
-			os.Exit(utils.ExitCodeIncompatibleKernel)
-		case strings.Contains(err.Error(), utils.ErrMacOS):
-			os.Exit(utils.ExitCodeMacOS)
-		default:
-			os.Exit(utils.ExitCodeError)
+
+		// Container watcher can fail only when FIM mode is enabled
+		// FIM (File Integrity Manager) can run standalone without container monitoring
+		if cfg.EnableFIM {
+			logger.L().Ctx(ctx).Warning("container watcher failed but continuing in FIM-only mode", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("running in FIM-only mode - container monitoring is disabled")
+		} else {
+			// Container watcher is critical - fail startup
+			switch {
+			case strings.Contains(err.Error(), utils.ErrKernelVersion):
+				os.Exit(utils.ExitCodeIncompatibleKernel)
+			case strings.Contains(err.Error(), utils.ErrMacOS):
+				os.Exit(utils.ExitCodeMacOS)
+			default:
+				os.Exit(utils.ExitCodeError)
+			}
 		}
 	}
-	defer mainHandler.Stop()
+
+	// Only defer Stop() if Start succeeded or we're in FIM-only mode
+	if err == nil || cfg.EnableFIM {
+		defer mainHandler.Stop()
+	}
 
 	// start watching
 	dWatcher.Start(ctx)

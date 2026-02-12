@@ -20,6 +20,7 @@ type GenericRuleFailure struct {
 	TriggerEvent           utils.EnrichEvent
 	RuleAlert              apitypes.RuleAlert
 	RuntimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails
+	RuntimeAlertECSDetails apitypes.RuntimeAlertECSDetails
 	RuleID                 string
 	CloudServices          []string
 	HttpRuleAlert          apitypes.HttpRuleAlert
@@ -41,6 +42,8 @@ type RuleFailure interface {
 	GetRuleAlert() apitypes.RuleAlert
 	// Get K8s Runtime Details
 	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
+	// Get ECS Runtime Details
+	GetRuntimeAlertEcsDetails() apitypes.RuntimeAlertECSDetails
 	// Get Rule ID
 	GetRuleId() string
 	// Get Cloud Services
@@ -66,6 +69,8 @@ type RuleFailure interface {
 	SetRuleAlert(ruleAlert apitypes.RuleAlert)
 	// Set K8s Runtime Details
 	SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails)
+	// Set ECS Runtime Details
+	SetRuntimeAlertEcsDetails(runtimeAlertEcsDetails apitypes.RuntimeAlertECSDetails)
 	// Set Cloud Services
 	SetCloudServices(cloudServices []string)
 	// Set Alert Platform
@@ -100,6 +105,10 @@ func (rule *GenericRuleFailure) GetRuleAlert() apitypes.RuleAlert {
 
 func (rule *GenericRuleFailure) GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails {
 	return rule.RuntimeAlertK8sDetails
+}
+
+func (rule *GenericRuleFailure) GetRuntimeAlertEcsDetails() apitypes.RuntimeAlertECSDetails {
+	return rule.RuntimeAlertECSDetails
 }
 
 func (rule *GenericRuleFailure) GetRuleId() string {
@@ -148,6 +157,10 @@ func (rule *GenericRuleFailure) SetRuleAlert(ruleAlert apitypes.RuleAlert) {
 
 func (rule *GenericRuleFailure) SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails) {
 	rule.RuntimeAlertK8sDetails = runtimeAlertK8sDetails
+}
+
+func (rule *GenericRuleFailure) SetRuntimeAlertEcsDetails(runtimeAlertEcsDetails apitypes.RuntimeAlertECSDetails) {
+	rule.RuntimeAlertECSDetails = runtimeAlertEcsDetails
 }
 
 func (rule *GenericRuleFailure) SetWorkloadDetails(workloadDetails string) {
