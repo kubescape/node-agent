@@ -13,4 +13,9 @@ type RuleEvaluator interface {
 	RegisterHelper(function cel.EnvOption) error
 	RegisterCustomType(eventType utils.EventType, obj interface{}) error
 	RegisterEventConverter(eventType utils.EventType, converter func(utils.K8sEvent) utils.K8sEvent)
+
+	// Context-aware variants — create the eval context once and reuse across multiple evaluations
+	CreateEvalContext(event *events.EnrichedEvent) map[string]any
+	EvaluateRuleWithContext(evalContext map[string]any, expressions []typesv1.RuleExpression) (bool, error)
+	EvaluateExpressionWithContext(evalContext map[string]any, expression string) (string, error)
 }
