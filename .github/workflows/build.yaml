@@ -1,0 +1,78 @@
+name: build-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      IMAGE_TAG:
+        required: true
+        type: string
+        description: "Image tag for the node-agent image"
+      STORAGE_REF:
+        required: false
+        type: string
+        default: ""
+        description: "Branch/tag/commit of k8sstormcenter/storage to use (leave empty to keep go.mod default)"
+      PLATFORMS:
+        type: boolean
+        required: false
+        default: false
+        description: "Build for both amd64 and arm64"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Update storage dependency
+        if: ${{ inputs.STORAGE_REF != '' }}
+        env:
+          STORAGE_REF: ${{ inputs.STORAGE_REF }}
+        run: |
+          echo "Replacing github.com/kubescape/storage with github.com/k8sstormcenter/storage@${STORAGE_REF}"
+          go mod edit -replace "github.com/kubescape/storage=github.com/k8sstormcenter/storage@${STORAGE_REF}"
+          GOPROXY=direct GONOSUMCHECK="github.com/k8sstormcenter/*" go mod tidy
+          echo "Resolved storage version:"
+          grep "k8sstormcenter/storage" go.sum | head -1
+
+      - name: Ensure ig is installed
+        run: |
+          curl -L https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.45.0/ig_0.45.0_amd64.deb -O
+          sudo dpkg -i ig_0.45.0_amd64.deb
+
+      - name: Build gadgets
+        run: make gadgets
+
+      - name: Set up QEMU
+        if: ${{ inputs.PLATFORMS }}
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/Dockerfile
+          tags: ghcr.io/${{ github.repository_owner }}/node-agent:${{ inputs.IMAGE_TAG }}
+          build-args: image_version=${{ inputs.IMAGE_TAG }}
+          platforms: ${{ inputs.PLATFORMS && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: true

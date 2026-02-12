@@ -32,7 +32,7 @@ global:
 storage:
   name: "storage"
   image:
-    repository: quay.io/kubescape/storage
+    repository: ghcr.io/k8sstormcenter/storage
     tag: v0.0.156
     pullPolicy: Always
   cleanupInterval: "6h"
@@ -50,7 +50,7 @@ storage:
 nodeAgent:
   name: node-agent
   image:
-    repository: quay.io/kubescape/node-agent
+    repository: ghcr.io/k8sstormcenter/node-agent
     tag: v0.2.21
     pullPolicy: IfNotPresent
 

@@ -1565,3 +1565,76 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 
 	t.Logf("Found alerts for the process tree depth: %v", alerts)
 }
+
+func Test_27_RegexFileOpenMatchTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	t.Log("Starting regex file open match component test")
+
+	// 1. Setup workload and initial profile
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	require.NoError(t, err, "Failed to create workload")
+	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
+	require.NoError(t, wl.WaitForApplicationProfileCompletion(80), "Application profile did not complete")
+
+	// Wait for the initial profile to be processed
+	time.Sleep(30 * time.Second)
+
+	initialProfile, err := wl.GetApplicationProfile()
+	require.NoError(t, err, "Failed to get initial profile")
+
+	// 2. Apply a user-managed profile with a regex rule for file opens
+	t.Log("Applying user-managed profile...")
+	// Create the user-managed profile
+	userProfile := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("ug-%s", initialProfile.Name),
+			Namespace: initialProfile.Namespace,
+			Annotations: map[string]string{
+				"kubescape.io/managed-by": "User",
+			},
+		},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Architectures: []string{"amd64"},
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name: "nginx",
+					Execs: []v1beta1.ExecCalls{
+						{
+							Path: "/usr/bin/ls",
+							Args: []string{"/usr/bin/ls", "-l"},
+						},
+					},
+					Opens: []v1beta1.OpenCalls{
+						{Path: "/etc/nginx/*", Flags: []string{"O_RDONLY"}},
+						{Path: "/var/log/nginx/*", Flags: []string{"O_WRONLY", "O_CREAT"}},
+					},
+				},
+			},
+		},
+	}
+
+	// Create the user-managed profile
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+	_, err = storageClient.ApplicationProfiles(ns.Name).Create(context.Background(), userProfile, metav1.CreateOptions{})
+	require.NoError(t, err, "Failed to create user profile")
+
+	// Wait for the user profile to be processed by the system
+	time.Sleep(60 * time.Second)
+
+	// 3. Trigger file open events to test the regex rule
+	t.Log("Triggering file open events to test regex rule")
+	_, _, _ = wl.ExecIntoPod([]string{"cat", "/etc/nginx/nginx.conf"}, "nginx") // Should be allowed by regex
+	_, _, _ = wl.ExecIntoPod([]string{"cat", "/etc/hostname"}, "nginx")         // Should be blocked (alert)
+
+	time.Sleep(30 * time.Second) // Wait for alerts
+
+	// 4. Verify alerts
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get alerts")
+	testutils.AssertNotContains(t, alerts, "Unexpected file open", "cat", "nginx", []bool{true})
+	testutils.AssertContains(t, alerts, "Unexpected file open", "cat", "hostname", []bool{true})
+}
