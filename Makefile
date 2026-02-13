@@ -25,12 +25,12 @@ STORAGE_LOCAL_PATH ?= ../storage
 .PHONY: local
 local:
 	go mod edit -replace "github.com/kubescape/storage=$(STORAGE_LOCAL_PATH)"
-	GONOSUMDB=github.com/matthyx/* GONOSUMCHECK=github.com/matthyx/* GOPROXY=direct go mod tidy
+	GONOSUMDB=github.com/matthyx/* GONOSUMCHECK=github.com/matthyx/* go mod tidy
 
 .PHONY: unlocal
 unlocal:
 	go mod edit -dropreplace "github.com/kubescape/storage"
-	GONOSUMDB=github.com/matthyx/* GONOSUMCHECK=github.com/matthyx/* go mod tidy
+	GONOSUMDB=github.com/matthyx/* GONOSUMCHECK=github.com/matthyx/* GOFLAGS=-mod=mod go mod tidy
 
 .PHONY: test
 test: local
