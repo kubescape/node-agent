@@ -403,11 +403,11 @@ func (e *StructEvent) GetOtherIp() string {
 }
 
 func (e *StructEvent) GetPath() string {
-	if e.FullPathTracing {
-		return e.GetFullPath()
-	}
 	switch e.EventType {
 	case OpenEventType:
+		if e.FullPath != "" {
+			return e.FullPath
+		}
 		return e.Path
 	default:
 		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))

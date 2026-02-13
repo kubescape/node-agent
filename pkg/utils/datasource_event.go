@@ -553,13 +553,9 @@ func (e *DatasourceEvent) GetOtherIp() string {
 }
 
 func (e *DatasourceEvent) GetPath() string {
-	if e.FullPathTracing {
-		return e.GetFullPath()
-	}
 	switch e.EventType {
 	case OpenEventType:
-		path, _ := e.getFieldAccessor("fname").String(e.Data)
-		return path
+		return e.GetFullPath()
 	default:
 		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
