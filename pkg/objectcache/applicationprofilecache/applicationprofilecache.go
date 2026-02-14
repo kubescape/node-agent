@@ -532,6 +532,14 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 				}
 				// Update the profile in the cache
 				apc.workloadIDToProfile.Set(workloadID, fullProfile)
+				// Set the profile state from the fetched profile's annotations
+				profileState := &objectcache.ProfileState{
+					Completion: fullProfile.Annotations[helpersv1.CompletionMetadataKey],
+					Status:     fullProfile.Annotations[helpersv1.StatusMetadataKey],
+					Name:       fullProfile.Name,
+					Error:      nil,
+				}
+				apc.workloadIDToProfileState.Set(workloadID, profileState)
 				logger.L().Debug("added user-defined profile to cache",
 					helpers.String("containerID", containerID),
 					helpers.String("workloadID", workloadID),
