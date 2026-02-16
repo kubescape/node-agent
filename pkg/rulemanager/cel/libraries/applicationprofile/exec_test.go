@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -322,5 +323,151 @@ func TestExecWithArgsCompilation(t *testing.T) {
 	_, err = env.Program(ast)
 	if err != nil {
 		t.Fatalf("failed to create program: %v", err)
+	}
+}
+
+func TestExecWithArgsWildcardProfile(t *testing.T) {
+	dyn := dynamicpathdetector.DynamicIdentifier
+
+	objCache := objectcachev1.RuleObjectCacheMock{
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+	}
+
+	objCache.SetSharedContainerData("test-container-id", &objectcache.WatchedContainerData{
+		ContainerType: objectcache.Container,
+		ContainerInfos: map[objectcache.ContainerType][]objectcache.ContainerInfo{
+			objectcache.Container: {
+				{
+					Name: "test-container",
+				},
+			},
+		},
+	})
+
+	profile := &v1beta1.ApplicationProfile{}
+	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
+		Name: "test-container",
+		Execs: []v1beta1.ExecCalls{
+			{Path: "/bin/ls", Args: []string{"*"}},
+			{Path: "/usr/bin/curl", Args: []string{"-X", dyn, dyn}},
+			{Path: "/bin/grep", Args: []string{"-r", dyn, "*"}},
+			{Path: "/usr/bin/find", Args: []string{dyn, "-name", dyn, "-type", "*"}},
+		},
+	})
+	objCache.SetApplicationProfile(profile)
+
+	env, err := cel.NewEnv(
+		cel.Variable("containerID", cel.StringType),
+		cel.Variable("path", cel.StringType),
+		cel.Variable("args", cel.ListType(cel.StringType)),
+		AP(&objCache, config.Config{}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create env: %v", err)
+	}
+
+	testCases := []struct {
+		name           string
+		containerID    string
+		path           string
+		args           []string
+		expectedResult bool
+	}{
+		{
+			name:           "Wildcard matches any args",
+			containerID:    "test-container-id",
+			path:           "/bin/ls",
+			args:           []string{"-la", "/tmp"},
+			expectedResult: true,
+		},
+		{
+			name:           "Wildcard matches empty args",
+			containerID:    "test-container-id",
+			path:           "/bin/ls",
+			args:           []string{},
+			expectedResult: true,
+		},
+		{
+			name:           "Dynamic method and URL match",
+			containerID:    "test-container-id",
+			path:           "/usr/bin/curl",
+			args:           []string{"-X", "POST", "https://api.example.com"},
+			expectedResult: true,
+		},
+		{
+			name:           "Dynamic is exact count - extra args fail",
+			containerID:    "test-container-id",
+			path:           "/usr/bin/curl",
+			args:           []string{"-X", "POST", "https://api.example.com", "--verbose"},
+			expectedResult: false,
+		},
+		{
+			name:           "Dynamic plus trailing wildcard",
+			containerID:    "test-container-id",
+			path:           "/bin/grep",
+			args:           []string{"-r", "pattern", "/var/log", "/etc"},
+			expectedResult: true,
+		},
+		{
+			name:           "Complex mixed pattern match",
+			containerID:    "test-container-id",
+			path:           "/usr/bin/find",
+			args:           []string{"/home", "-name", "*.log", "-type", "f"},
+			expectedResult: true,
+		},
+		{
+			name:           "Complex mixed with trailing wildcard",
+			containerID:    "test-container-id",
+			path:           "/usr/bin/find",
+			args:           []string{"/home", "-name", "*.log", "-type", "f", "-delete"},
+			expectedResult: true,
+		},
+		{
+			name:           "Path not in profile",
+			containerID:    "test-container-id",
+			path:           "/bin/nonexistent",
+			args:           []string{"any", "args"},
+			expectedResult: false,
+		},
+		{
+			name:           "Dynamic missing second arg",
+			containerID:    "test-container-id",
+			path:           "/usr/bin/curl",
+			args:           []string{"-X"},
+			expectedResult: false,
+		},
+		{
+			name:           "First literal arg mismatch",
+			containerID:    "test-container-id",
+			path:           "/bin/grep",
+			args:           []string{"-v", "pattern", "/tmp"},
+			expectedResult: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, issues := env.Compile(`ap.was_executed_with_args(containerID, path, args)`)
+			if issues != nil {
+				t.Fatalf("failed to compile expression: %v", issues.Err())
+			}
+
+			program, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("failed to create program: %v", err)
+			}
+
+			result, _, err := program.Eval(map[string]interface{}{
+				"containerID": tc.containerID,
+				"path":        tc.path,
+				"args":        tc.args,
+			})
+			if err != nil {
+				t.Fatalf("failed to eval program: %v", err)
+			}
+
+			actualResult := result.Value().(bool)
+			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_executed_with_args result should match expected value")
+		})
 	}
 }
