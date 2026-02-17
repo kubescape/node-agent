@@ -41,6 +41,9 @@ type Rule struct {
 // Init pre-computes the ExpressionsByEventType index.
 // Must be called after a Rule is created or updated.
 func (r *Rule) Init() {
+	if r.ExpressionsByEventType != nil {
+		return
+	}
 	r.ExpressionsByEventType = make(map[utils.EventType][]RuleExpression, len(r.Expressions.RuleExpression))
 	for _, expr := range r.Expressions.RuleExpression {
 		r.ExpressionsByEventType[expr.EventType] = append(r.ExpressionsByEventType[expr.EventType], expr)
