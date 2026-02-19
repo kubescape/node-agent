@@ -381,7 +381,7 @@ func (e *DatasourceEvent) GetExePath() string {
 	switch e.EventType {
 	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
 		exepath, _ := e.getFieldAccessor("exepath").String(e.Data)
-		return exepath
+		return NormalizePath(exepath)
 	default:
 		logger.L().Warning("GetExePath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
@@ -432,7 +432,7 @@ func (e *DatasourceEvent) GetFullPath() string {
 		if path == "" {
 			path, _ = e.getFieldAccessor("fname").String(e.Data)
 		}
-		return path
+		return NormalizePath(path)
 	default:
 		logger.L().Warning("GetFullPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
@@ -499,7 +499,7 @@ func (e *DatasourceEvent) GetNewPath() string {
 	switch e.EventType {
 	case HardlinkEventType, SymlinkEventType:
 		newPath, _ := e.getFieldAccessor("newpath").String(e.Data)
-		return newPath
+		return NormalizePath(newPath)
 	default:
 		logger.L().Warning("GetNewPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
@@ -521,7 +521,7 @@ func (e *DatasourceEvent) GetOldPath() string {
 	switch e.EventType {
 	case HardlinkEventType, SymlinkEventType:
 		oldPath, _ := e.getFieldAccessor("oldpath").String(e.Data)
-		return oldPath
+		return NormalizePath(oldPath)
 	default:
 		logger.L().Warning("GetOldPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
@@ -559,7 +559,7 @@ func (e *DatasourceEvent) GetPath() string {
 	switch e.EventType {
 	case OpenEventType:
 		path, _ := e.getFieldAccessor("fname").String(e.Data)
-		return path
+		return NormalizePath(path)
 	default:
 		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""

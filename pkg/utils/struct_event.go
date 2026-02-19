@@ -252,7 +252,7 @@ func (e *StructEvent) GetEventType() EventType {
 func (e *StructEvent) GetExePath() string {
 	switch e.EventType {
 	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
-		return e.ExePath
+		return NormalizePath(e.ExePath)
 	default:
 		logger.L().Warning("GetExePath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
@@ -296,7 +296,7 @@ func (e *StructEvent) GetFlagsRaw() uint32 {
 func (e *StructEvent) GetFullPath() string {
 	switch e.EventType {
 	case OpenEventType:
-		return e.FullPath
+		return NormalizePath(e.FullPath)
 	default:
 		logger.L().Warning("GetFullPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
@@ -352,7 +352,7 @@ func (e *StructEvent) GetNamespace() string {
 func (e *StructEvent) GetNewPath() string {
 	switch e.EventType {
 	case HardlinkEventType, SymlinkEventType:
-		return e.NewPath
+		return NormalizePath(e.NewPath)
 	default:
 		logger.L().Warning("GetNewPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
@@ -372,7 +372,7 @@ func (e *StructEvent) GetNumAnswers() int {
 func (e *StructEvent) GetOldPath() string {
 	switch e.EventType {
 	case HardlinkEventType, SymlinkEventType:
-		return e.OldPath
+		return NormalizePath(e.OldPath)
 	default:
 		logger.L().Warning("GetOldPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
@@ -408,7 +408,7 @@ func (e *StructEvent) GetPath() string {
 	}
 	switch e.EventType {
 	case OpenEventType:
-		return e.Path
+		return NormalizePath(e.Path)
 	default:
 		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
