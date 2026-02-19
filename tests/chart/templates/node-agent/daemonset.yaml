@@ -119,6 +119,10 @@ spec:
             {{- if .value }}
               value: "{{ .value }}"
             {{- end }}
+            {{- if .valueFrom }}
+              valueFrom:
+{{ toYaml .valueFrom | indent 16 }}
+            {{- end }}
             {{- end }}
           securityContext:
             runAsUser: 0
