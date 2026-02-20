@@ -17,6 +17,7 @@ type CelEvent interface {
 	ExecEvent
 	HttpEvent
 	IOUring
+	KubeletTLSEvent
 	LinkEvent
 	NetworkEvent
 	OpenEvent
@@ -443,6 +444,39 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, fmt.Errorf("celval: object is nil")
 			}
 			return string(x.Raw.GetDirection()), nil
+		}),
+	},
+	"tlsData": {
+		Type:  celtypes.StringType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return x.Raw.GetTLSData(), nil
+		}),
+	},
+	"tlsDataLen": {
+		Type:  celtypes.IntType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return int(x.Raw.GetTLSDataLen()), nil
+		}),
+	},
+	"tlsEventType": {
+		Type:  celtypes.UintType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, fmt.Errorf("celval: object is nil")
+			}
+			return uint32(x.Raw.GetTLSEventType()), nil
 		}),
 	},
 }
