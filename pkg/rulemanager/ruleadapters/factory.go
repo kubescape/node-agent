@@ -40,6 +40,7 @@ func (f *EventRuleAdapterFactory) registerAllAdapters() {
 	f.RegisterAdapter(utils.HTTPEventType, adapters.NewHTTPAdapter())
 	f.RegisterAdapter(utils.PtraceEventType, adapters.NewPtraceAdapter())
 	f.RegisterAdapter(utils.IoUringEventType, adapters.NewIoUringAdapter())
+	f.RegisterAdapter(utils.KubeletTLSEventType, adapters.NewKubeletTLSAdapter())
 	f.RegisterAdapter(utils.RandomXEventType, adapters.NewRandomXAdapter())
 	f.RegisterAdapter(utils.UnshareEventType, adapters.NewUnshareAdapter())
 	f.RegisterAdapter(utils.BpfEventType, adapters.NewBpfAdapter())

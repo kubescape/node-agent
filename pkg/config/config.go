@@ -39,6 +39,7 @@ type Config struct {
 	DHttp                          bool                                 `mapstructure:"dHttp"`
 	DIouring                       bool                                 `mapstructure:"dIouring"`
 	DKmod                          bool                                 `mapstructure:"dKmod"`
+	DKubeletTLS                    bool                                 `mapstructure:"dKubeletTLS"`
 	DNSCacheSize                   int                                  `mapstructure:"dnsCacheSize"`
 	DNetwork                       bool                                 `mapstructure:"dNetwork"`
 	DOpen                          bool                                 `mapstructure:"dOpen"`

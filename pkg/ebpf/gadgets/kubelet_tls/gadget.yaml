@@ -1,0 +1,29 @@
+name: kubelet_tls
+description: Intercept plaintext TLS traffic from kubelet Go crypto/tls connections using eBPF uprobes.
+homepageURL: https://github.com/k8sstormcenter/node-agent
+documentationURL: https://github.com/k8sstormcenter/node-agent/tree/main/pkg/ebpf/gadgets/kubelet_tls
+sourceURL: https://github.com/k8sstormcenter/node-agent/tree/main/pkg/ebpf/gadgets/kubelet_tls
+datasources:
+  raw:
+    fields:
+      comm:
+        annotations:
+          description: Process command name.
+      data:
+        annotations:
+          description: Plaintext TLS data captured from kubelet.
+      data_len:
+        annotations:
+          description: Length of captured TLS data.
+      event_type:
+        annotations:
+          description: TLS event type (0=write, 1=read).
+      pid:
+        annotations:
+          description: Process ID of the kubelet process.
+      tid:
+        annotations:
+          description: Thread ID of the kubelet thread.
+      ts_ns:
+        annotations:
+          description: Monotonic timestamp in nanoseconds when the event was captured.

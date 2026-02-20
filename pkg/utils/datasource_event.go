@@ -53,6 +53,7 @@ var _ ForkEvent = (*DatasourceEvent)(nil)
 var _ HttpEvent = (*DatasourceEvent)(nil)
 var _ HttpRawEvent = (*DatasourceEvent)(nil)
 var _ IOUring = (*DatasourceEvent)(nil)
+var _ KubeletTLSEvent = (*DatasourceEvent)(nil)
 var _ KmodEvent = (*DatasourceEvent)(nil)
 var _ LinkEvent = (*DatasourceEvent)(nil)
 var _ NetworkEvent = (*DatasourceEvent)(nil)
@@ -257,6 +258,9 @@ func (e *DatasourceEvent) GetComm() string {
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		container := e.GetContainer()
 		return container
+	case KubeletTLSEventType:
+		commValue, _ := e.getFieldAccessor("comm").String(e.Data)
+		return commValue
 	default:
 		commValue, _ := e.getFieldAccessor("proc.comm").String(e.Data)
 		return commValue
@@ -583,6 +587,9 @@ func (e *DatasourceEvent) GetPID() uint32 {
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		containerPid, _ := e.getFieldAccessor("runtime.containerPid").Uint32(e.Data)
 		return containerPid
+	case KubeletTLSEventType:
+		pidValue, _ := e.getFieldAccessor("pid").Uint32(e.Data)
+		return pidValue
 	default:
 		pidValue, _ := e.getFieldAccessor("proc.pid").Uint32(e.Data)
 		return pidValue
@@ -805,6 +812,39 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 	default:
 		timeStampRaw, _ := e.getFieldAccessor("timestamp_raw").Uint64(e.Data)
 		return gadgets.WallTimeFromBootTime(timeStampRaw)
+	}
+}
+
+func (e *DatasourceEvent) GetTLSData() string {
+	switch e.EventType {
+	case KubeletTLSEventType:
+		data, _ := e.getFieldAccessor("data").String(e.Data)
+		return data
+	default:
+		logger.L().Warning("GetTLSData not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+}
+
+func (e *DatasourceEvent) GetTLSDataLen() int32 {
+	switch e.EventType {
+	case KubeletTLSEventType:
+		dataLen, _ := e.getFieldAccessor("data_len").Int32(e.Data)
+		return dataLen
+	default:
+		logger.L().Warning("GetTLSDataLen not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+}
+
+func (e *DatasourceEvent) GetTLSEventType() uint8 {
+	switch e.EventType {
+	case KubeletTLSEventType:
+		eventType, _ := e.getFieldAccessor("event_type").Uint8(e.Data)
+		return eventType
+	default:
+		logger.L().Warning("GetTLSEventType not implemented for event type", helpers.String("eventType", string(e.EventType)))
+		return 0
 	}
 }
 

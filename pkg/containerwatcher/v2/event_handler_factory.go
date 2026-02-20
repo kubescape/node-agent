@@ -253,6 +253,9 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	// IoUring events
 	ehf.handlers[utils.IoUringEventType] = []Manager{ruleManager, metrics, rulePolicy}
 
+	// KubeletTLS events
+	ehf.handlers[utils.KubeletTLSEventType] = []Manager{ruleManager, metrics}
+
 	// Syscall events
 	ehf.handlers[utils.SyscallEventType] = []Manager{containerProfileManager, ruleManager, metrics}
 

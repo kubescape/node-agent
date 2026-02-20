@@ -141,6 +141,13 @@ type IOUring interface {
 	GetOpcode() int
 }
 
+type KubeletTLSEvent interface {
+	EnrichEvent
+	GetTLSData() string
+	GetTLSDataLen() int32
+	GetTLSEventType() uint8 // 0=write, 1=read
+}
+
 type KmodEvent interface {
 	EnrichEvent
 	GetModule() string
@@ -214,6 +221,7 @@ const (
 	HardlinkEventType     EventType = "hardlink"
 	IoUringEventType      EventType = "iouring"
 	KmodEventType         EventType = "kmod"
+	KubeletTLSEventType   EventType = "kubelet_tls"
 	NetworkEventType      EventType = "network"
 	OpenEventType         EventType = "open"
 	ProcfsEventType       EventType = "procfs"

@@ -261,6 +261,15 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	)
 	manager.RegisterTracer(iouringTracer)
 
+	// Create kubelet TLS tracer
+	kubeletTLSTracer := NewKubeletTLSTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.KubeletTLSEventType),
+	)
+	manager.RegisterTracer(kubeletTLSTracer)
+
 	// Create unshare tracer
 	unshareTracer := NewUnshareTracer(
 		tf.kubeManager,
