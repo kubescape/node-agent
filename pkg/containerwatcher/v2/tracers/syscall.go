@@ -109,7 +109,7 @@ func (st *SyscallTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					st.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.SyscallEventType})
+					st.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.SyscallEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

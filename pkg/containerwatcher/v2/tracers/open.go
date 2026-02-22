@@ -113,7 +113,7 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.OpenEventType, FullPathTracing: ot.cfg.EnableFullPathTracing})
+					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.OpenEventType, FullPathTracing: ot.cfg.EnableFullPathTracing})
 					return nil
 				}, opPriority)
 				if err != nil {

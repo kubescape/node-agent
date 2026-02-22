@@ -886,9 +886,6 @@ func (e *DatasourceEvent) GetUpperLayer() bool {
 }
 
 func (e *DatasourceEvent) HasDroppedEvents() bool {
-	if e.Data.LostSampleCount() > 0 {
-		return true
-	}
 	return false
 }
 
@@ -919,7 +916,8 @@ func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.
 }
 
 func (e *DatasourceEvent) Release() {
-	e.Datasource.Release(e.Data)
+	// Data no longer implements Packet; release is a no-op.
+	// Event data is consumed synchronously in Subscribe callbacks.
 }
 
 func (e *DatasourceEvent) SetExtra(extra interface{}) {

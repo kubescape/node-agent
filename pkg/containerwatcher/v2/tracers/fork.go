@@ -106,7 +106,7 @@ func (ft *ForkTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					ft.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.ForkEventType})
+					ft.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.ForkEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

@@ -6,3 +6,4 @@ resources/ebpf/falco/*
 node-agent
 __pycache__
 tracers.tar
+vendor
