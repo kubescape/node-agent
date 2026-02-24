@@ -25,7 +25,7 @@ require (
 	github.com/google/cel-go v0.26.1
 	github.com/google/go-containerregistry v0.20.7
 	github.com/google/uuid v1.6.0
-	github.com/goradd/maps v1.0.0
+	github.com/goradd/maps v1.3.0
 	github.com/grafana/pyroscope-go v1.2.2
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/iceber/iouring-go v0.0.0-20230403020409-002cfd2e2a90
