@@ -19,7 +19,7 @@ type RuleEvaluator interface {
 	RegisterCustomType(eventType utils.EventType, obj interface{}) error
 	RegisterEventConverter(eventType utils.EventType, converter func(utils.K8sEvent) utils.K8sEvent)
 
-	CreateEvalContext(event utils.K8sEvent) map[string]any
-	EvaluateRuleWithContext(evalContext map[string]any, expressions []typesv1.RuleExpression) (bool, error)
-	EvaluateExpressionWithContext(evalContext map[string]any, expression string) (string, error)
+	CreateEvalContext(event utils.K8sEvent) *EventActivation
+	EvaluateRuleWithContext(evalContext *EventActivation, expressions []typesv1.RuleExpression) (bool, error)
+	EvaluateExpressionWithContext(evalContext *EventActivation, expression string) (string, error)
 }

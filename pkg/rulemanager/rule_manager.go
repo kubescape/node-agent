@@ -187,6 +187,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	}
 
 	evalContext := rm.celEvaluator.CreateEvalContext(enrichedEvent.Event)
+	defer evalContext.Release()
 
 	for _, rule := range rules {
 		if !rule.Enabled {
@@ -326,6 +327,7 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
 	evalContext := rm.celEvaluator.CreateEvalContext(event)
+	defer evalContext.Release()
 
 	for _, rule := range rules {
 		if !rule.SupportPolicy {
@@ -370,7 +372,7 @@ func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEven
 	return allowed
 }
 
-func (rm *RuleManager) getUniqueIdAndMessage(evalContext map[string]any, rule typesv1.Rule) (string, string, error) {
+func (rm *RuleManager) getUniqueIdAndMessage(evalContext *cel.EventActivation, rule typesv1.Rule) (string, string, error) {
 	message, err := rm.celEvaluator.EvaluateExpressionWithContext(evalContext, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
@@ -391,7 +393,7 @@ func hashStringToMD5(str string) string {
 	return hashString
 }
 
-func (rm *RuleManager) evaluateHTTPPayloadState(state map[string]any, evalContext map[string]any) map[string]any {
+func (rm *RuleManager) evaluateHTTPPayloadState(state map[string]any, evalContext *cel.EventActivation) map[string]any {
 	payloadExpression, ok := state["payload"].(string)
 	if !ok || payloadExpression == "" {
 		return state
