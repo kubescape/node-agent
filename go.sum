@@ -1329,8 +1329,8 @@ github.com/gookit/color v1.6.0/go.mod h1:9ACFc7/1IpHGBW8RwuDm/0YEnhg3dwwXpoMsmty
 github.com/gopacket/gopacket v1.5.0 h1:9s9fcSUVKFlRV97B77Bq9XNV3ly2gvvsneFMQUGjc+M=
 github.com/gopacket/gopacket v1.5.0/go.mod h1:i3NaGaqfoWKAr1+g7qxEdWsmfT+MXuWkAe9+THv8LME=
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
-github.com/goradd/maps v1.0.0 h1:21HC3xxKFk3p6BdQsELZXg/ByANMVYhCl0Mylzt0R38=
-github.com/goradd/maps v1.0.0/go.mod h1:O3i5k17BAjHa9h5dzGWWfRJizF03umiBDZsNSqFdbVA=
+github.com/goradd/maps v1.3.0 h1:toF7ALsgbjQBmmmRSACTAEO+9g2rApW8dU1WirFQyrE=
+github.com/goradd/maps v1.3.0/go.mod h1:O3i5k17BAjHa9h5dzGWWfRJizF03umiBDZsNSqFdbVA=
 github.com/gorilla/securecookie v1.1.1/go.mod h1:ra0sb63/xPlUeL+yeDciTfxMRAA+MP+HVt/4epWDjd4=
 github.com/gorilla/sessions v1.2.1/go.mod h1:dk2InVEVJ0sfLlnXv9EAgkf6ecYs/i80K/zI+bUmuGM=
 github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 h1:JeSE6pjso5THxAzdVpqr6/geYxZytqFMBCOtn/ujyeo=
