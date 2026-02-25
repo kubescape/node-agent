@@ -100,73 +100,32 @@ var _ SshEvent = (*StructEvent)(nil)
 var _ SyscallEvent = (*StructEvent)(nil)
 var _ UnshareEvent = (*StructEvent)(nil)
 
-func (e *StructEvent) GetAttrSize() uint32 {
-	switch e.EventType {
-	case BpfEventType:
-		return e.AttrSize
-	default:
-		logger.L().Warning("GetAttrSize not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
-}
-
 func (e *StructEvent) GetAddresses() []string {
-	switch e.EventType {
-	case DnsEventType:
-		return e.Addresses
-	default:
-		logger.L().Warning("GetAddresses not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return nil
-	}
+	return e.Addresses
 }
 
 func (e *StructEvent) GetArgs() []string {
-	switch e.EventType {
-	case ExecveEventType:
-		return e.Args
-	default:
-		logger.L().Warning("GetArgs not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return nil
-	}
+	return e.Args
+}
+
+func (e *StructEvent) GetAttrSize() uint32 {
+	return e.AttrSize
 }
 
 func (e *StructEvent) GetBuf() []byte {
-	switch e.EventType {
-	case HTTPEventType:
-		return e.Buf
-	default:
-		logger.L().Warning("GetBuf not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return nil
-	}
+	return e.Buf
 }
 
 func (e *StructEvent) GetCapability() string {
-	switch e.EventType {
-	case CapabilitiesEventType:
-		return e.CapName
-	default:
-		logger.L().Warning("GetCapability not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.CapName
 }
 
 func (e *StructEvent) GetCmd() uint32 {
-	switch e.EventType {
-	case BpfEventType:
-		return e.Cmd
-	default:
-		logger.L().Warning("GetCmd not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.Cmd
 }
 
 func (e *StructEvent) GetComm() string {
-	switch e.EventType {
-	case SyscallEventType:
-		return e.Comm
-	default:
-		return e.Comm
-	}
+	return e.Comm
 }
 
 func (e *StructEvent) GetContainer() string {
@@ -186,13 +145,7 @@ func (e *StructEvent) GetContainerImageDigest() string {
 }
 
 func (e *StructEvent) GetCwd() string {
-	switch e.EventType {
-	case ExecveEventType, DnsEventType:
-		return e.Cwd
-	default:
-		logger.L().Warning("GetCwd not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.Cwd
 }
 
 func (e *StructEvent) GetDirection() consts.NetworkDirection {
@@ -200,45 +153,65 @@ func (e *StructEvent) GetDirection() consts.NetworkDirection {
 }
 
 func (e *StructEvent) GetDNSName() string {
-	switch e.EventType {
-	case DnsEventType:
-		return e.DNSName
-	default:
-		logger.L().Warning("GetDNSName not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.DNSName
 }
 
 func (e *StructEvent) GetDstEndpoint() types.L4Endpoint {
-	switch e.EventType {
-	case NetworkEventType:
-		return types.L4Endpoint{
-			L3Endpoint: e.DstEndpoint,
-		}
-	default:
-		logger.L().Warning("GetDstEndpoint not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return types.L4Endpoint{}
+	return types.L4Endpoint{
+		L3Endpoint: e.DstEndpoint,
 	}
 }
 
 func (e *StructEvent) GetDstIP() string {
-	switch e.EventType {
-	case DnsEventType, HTTPEventType, SSHEventType:
-		return e.DstIP
-	}
-	return ""
+	return e.DstIP
 }
 
 func (e *StructEvent) GetDstPort() uint16 {
-	switch e.EventType {
-	case NetworkEventType:
-		return e.DstPort
-	case DnsEventType, HTTPEventType, SSHEventType:
-		return e.DstPort
-	default:
-		logger.L().Warning("GetDstPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.DstPort
+}
+
+func (e *StructEvent) GetEcsAvailabilityZone() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsClusterARN() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsClusterName() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsContainerARN() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsContainerInstance() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsContainerName() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsLaunchType() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsServiceName() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsTaskARN() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsTaskDefinitionARN() string {
+	return ""
+}
+
+func (e *StructEvent) GetEcsTaskFamily() string {
+	return ""
 }
 
 func (e *StructEvent) GetError() int64 {
@@ -250,23 +223,11 @@ func (e *StructEvent) GetEventType() EventType {
 }
 
 func (e *StructEvent) GetExePath() string {
-	switch e.EventType {
-	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
-		return e.ExePath
-	default:
-		logger.L().Warning("GetExePath not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.ExePath
 }
 
 func (e *StructEvent) GetExitCode() uint32 {
-	switch e.EventType {
-	case ExitEventType:
-		return e.ExitCode
-	default:
-		logger.L().Warning("GetExitCode not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.ExitCode
 }
 
 func (e *StructEvent) GetExtra() interface{} {
@@ -274,43 +235,19 @@ func (e *StructEvent) GetExtra() interface{} {
 }
 
 func (e *StructEvent) GetFlags() []string {
-	switch e.EventType {
-	case OpenEventType:
-		return e.Flags
-	default:
-		logger.L().Warning("GetFlags not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return nil
-	}
+	return e.Flags
 }
 
 func (e *StructEvent) GetFlagsRaw() uint32 {
-	switch e.EventType {
-	case OpenEventType:
-		return e.FlagsRaw
-	default:
-		logger.L().Warning("GetFlagsRaw not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.FlagsRaw
 }
 
 func (e *StructEvent) GetFullPath() string {
-	switch e.EventType {
-	case OpenEventType:
-		return e.FullPath
-	default:
-		logger.L().Warning("GetFullPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.FullPath
 }
 
 func (e *StructEvent) GetGid() *uint32 {
-	switch e.EventType {
-	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
-		return &e.Gid
-	default:
-		logger.L().Warning("GetGid not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return nil
-	}
+	return &e.Gid
 }
 
 func (e *StructEvent) GetHostNetwork() bool {
@@ -318,13 +255,7 @@ func (e *StructEvent) GetHostNetwork() bool {
 }
 
 func (e *StructEvent) GetIdentifier() string {
-	switch e.EventType {
-	case IoUringEventType:
-		return e.Identifier
-	default:
-		logger.L().Warning("GetIdentifier not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.Identifier
 }
 
 func (e *StructEvent) GetInternal() bool {
@@ -332,13 +263,7 @@ func (e *StructEvent) GetInternal() bool {
 }
 
 func (e *StructEvent) GetModule() string {
-	switch e.EventType {
-	case KmodEventType:
-		return e.Module
-	default:
-		logger.L().Warning("GetModule not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.Module
 }
 
 func (e *StructEvent) GetMountNsID() uint64 {
@@ -350,43 +275,19 @@ func (e *StructEvent) GetNamespace() string {
 }
 
 func (e *StructEvent) GetNewPath() string {
-	switch e.EventType {
-	case HardlinkEventType, SymlinkEventType:
-		return e.NewPath
-	default:
-		logger.L().Warning("GetNewPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.NewPath
 }
 
 func (e *StructEvent) GetNumAnswers() int {
-	switch e.EventType {
-	case DnsEventType:
-		return e.NumAnswers
-	default:
-		logger.L().Warning("GetNumAnswers not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.NumAnswers
 }
 
 func (e *StructEvent) GetOldPath() string {
-	switch e.EventType {
-	case HardlinkEventType, SymlinkEventType:
-		return e.OldPath
-	default:
-		logger.L().Warning("GetOldPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.OldPath
 }
 
 func (e *StructEvent) GetOpcode() int {
-	switch e.EventType {
-	case IoUringEventType:
-		return e.Opcode
-	default:
-		logger.L().Warning("GetOpcode not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.Opcode
 }
 
 func (e *StructEvent) GetOtherIp() string {
@@ -406,13 +307,7 @@ func (e *StructEvent) GetPath() string {
 	if e.FullPathTracing {
 		return e.GetFullPath()
 	}
-	switch e.EventType {
-	case OpenEventType:
-		return e.Path
-	default:
-		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.Path
 }
 
 func (e *StructEvent) GetPcomm() string {
@@ -420,29 +315,12 @@ func (e *StructEvent) GetPcomm() string {
 }
 
 func (e *StructEvent) GetPID() uint32 {
-	switch e.EventType {
-	case ForkEventType:
-		return e.Pid
-	case ExitEventType:
-		return e.Pid
-	case SyscallEventType:
-		return e.Pid
-	default:
-		return e.Pid
-	}
+	return e.Pid
 }
 
 // GetPID64 is a special implementation for stack trace events.
 func (e *StructEvent) GetPID64() uint64 {
-	switch e.EventType {
-	case ExecveEventType:
-		return e.PID64
-	case OpenEventType, ExitEventType, ForkEventType, HardlinkEventType, SymlinkEventType:
-		return e.PID64
-	default:
-		logger.L().Warning("GetPID64 not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.PID64
 }
 
 func (e *StructEvent) GetPktType() string {
@@ -454,13 +332,7 @@ func (e *StructEvent) GetPod() string {
 }
 
 func (e *StructEvent) GetPodHostIP() string {
-	switch e.EventType {
-	case NetworkEventType:
-		return e.PodHostIP
-	default:
-		logger.L().Warning("GetPodHostIP not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.PodHostIP
 }
 
 func (e *StructEvent) GetPodLabels() map[string]string {
@@ -468,26 +340,11 @@ func (e *StructEvent) GetPodLabels() map[string]string {
 }
 
 func (e *StructEvent) GetPpid() uint32 {
-	switch e.EventType {
-	case ForkEventType:
-		return e.Ppid
-	case ExitEventType:
-		return e.Ppid
-	default:
-		return e.Ppid
-	}
+	return e.Ppid
 }
 
 func (e *StructEvent) GetProto() string {
-	switch e.EventType {
-	case DnsEventType:
-		return e.Proto
-	case NetworkEventType:
-		return e.Proto
-	default:
-		logger.L().Warning("GetProto not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.Proto
 }
 
 func (e *StructEvent) GetPtid() uint64 {
@@ -495,23 +352,11 @@ func (e *StructEvent) GetPtid() uint64 {
 }
 
 func (e *StructEvent) GetPupperLayer() bool {
-	switch e.EventType {
-	case ExecveEventType:
-		return e.PupperLayer
-	default:
-		logger.L().Warning("GetPupperLayer not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return false
-	}
+	return e.PupperLayer
 }
 
 func (e *StructEvent) GetQr() DNSPktType {
-	switch e.EventType {
-	case DnsEventType:
-		return e.Qr
-	default:
-		logger.L().Warning("GetQr not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.Qr
 }
 
 func (e *StructEvent) GetRequest() *http.Request {
@@ -523,77 +368,31 @@ func (e *StructEvent) GetResponse() *http.Response {
 }
 
 func (e *StructEvent) GetSignal() uint32 {
-	switch e.EventType {
-	case ExitEventType:
-		return e.Signal
-	default:
-		logger.L().Warning("GetSignal not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.Signal
 }
 
 func (e *StructEvent) GetSocketInode() uint64 {
-	switch e.EventType {
-	case HTTPEventType:
-		return e.SocketInode
-	default:
-		logger.L().Warning("GetSocketInode not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.SocketInode
 }
 
 func (e *StructEvent) GetSockFd() uint32 {
-	switch e.EventType {
-	case HTTPEventType:
-		return e.SockFd
-	default:
-		logger.L().Warning("GetSockFd not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.SockFd
 }
 
 func (e *StructEvent) GetSrcIP() string {
-	switch e.EventType {
-	case DnsEventType, HTTPEventType, SSHEventType:
-		return e.SrcIP
-	}
-	return ""
+	return e.SrcIP
 }
 
 func (e *StructEvent) GetSrcPort() uint16 {
-	switch e.EventType {
-	case DnsEventType, HTTPEventType, SSHEventType:
-		return e.SrcPort
-	default:
-		logger.L().Warning("GetSrcPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.SrcPort
 }
 
 func (e *StructEvent) GetSyscall() string {
-	switch e.EventType {
-	case CapabilitiesEventType:
-		return e.Syscall
-	case HTTPEventType:
-		return e.Syscall
-	case SyscallEventType:
-		return e.Syscall
-	case KmodEventType:
-		return e.Syscall
-	default:
-		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
-	}
+	return e.Syscall
 }
 
 func (e *StructEvent) GetSyscalls() []byte {
-	switch e.EventType {
-	case SyscallEventType:
-		return e.Syscalls
-	default:
-		logger.L().Warning("GetSyscalls not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return nil
-	}
+	return e.Syscalls
 }
 
 func (e *StructEvent) GetTid() uint64 {
@@ -610,33 +409,15 @@ func (e *StructEvent) GetTimestamp() types.Time {
 }
 
 func (e *StructEvent) GetType() HTTPDataType {
-	switch e.EventType {
-	case HTTPEventType:
-		return e.Type
-	default:
-		logger.L().Warning("GetType not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
+	return e.Type
 }
 
 func (e *StructEvent) GetUid() *uint32 {
-	switch e.EventType {
-	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
-		return &e.Uid
-	default:
-		logger.L().Warning("GetUid not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return nil
-	}
+	return &e.Uid
 }
 
 func (e *StructEvent) GetUpperLayer() bool {
-	switch e.EventType {
-	case ExecveEventType, SymlinkEventType, HardlinkEventType, ExitEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
-		return e.UpperLayer
-	default:
-		logger.L().Warning("GetUpperLayer not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return false
-	}
+	return e.UpperLayer
 }
 
 func (e *StructEvent) HasDroppedEvents() bool {
@@ -644,13 +425,7 @@ func (e *StructEvent) HasDroppedEvents() bool {
 }
 
 func (e *StructEvent) IsDir() bool {
-	switch e.EventType {
-	case OpenEventType:
-		return e.Dir
-	default:
-		logger.L().Warning("IsDir not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return false
-	}
+	return e.Dir
 }
 
 func (e *StructEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection) HttpEvent {
@@ -669,49 +444,4 @@ func (e *StructEvent) SetExtra(extra interface{}) {
 
 func (e *StructEvent) SetResponse(response *http.Response) {
 	e.Response = response
-}
-
-// ECS-specific methods - implementing EnrichEvent interface
-func (e *StructEvent) GetEcsClusterName() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsClusterARN() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsTaskARN() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsTaskFamily() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsTaskDefinitionARN() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsServiceName() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsContainerName() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsContainerARN() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsContainerInstance() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsAvailabilityZone() string {
-	return ""
-}
-
-func (e *StructEvent) GetEcsLaunchType() string {
-	return ""
 }
