@@ -185,70 +185,58 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 	return res
 }
 
-func (e *DatasourceEvent) GetAttrSize() uint32 {
-	switch e.EventType {
-	case BpfEventType:
-		attrSize, _ := e.getFieldAccessor("attr_size").Uint32(e.Data)
-		return attrSize
-	default:
-		logger.L().Warning("GetAttrSize not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return 0
-	}
-}
-
 func (e *DatasourceEvent) GetAddresses() []string {
-	switch e.EventType {
-	case DnsEventType:
-		args, _ := e.getFieldAccessor("addresses").String(e.Data)
-		return strings.Split(args, ",")
-	default:
-		logger.L().Warning("GetAddresses not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	addresses, err := e.getFieldAccessor("addresses").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetAddresses - addresses field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
+	return strings.Split(addresses, ",")
 }
 
 func (e *DatasourceEvent) GetArgs() []string {
-	switch e.EventType {
-	case ExecveEventType:
-		args, _ := e.getFieldAccessor("args").String(e.Data)
-		return strings.Split(args, igconsts.ArgsSeparator)
-	default:
-		logger.L().Warning("GetArgs not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	args, err := e.getFieldAccessor("args").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetArgs - args field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
+	return strings.Split(args, igconsts.ArgsSeparator)
+}
+
+func (e *DatasourceEvent) GetAttrSize() uint32 {
+	attrSize, err := e.getFieldAccessor("attr_size").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetAttrSize - attr_size field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+	return attrSize
 }
 
 func (e *DatasourceEvent) GetBuf() []byte {
-	switch e.EventType {
-	case HTTPEventType:
-		buf, _ := e.getFieldAccessor("buf").Bytes(e.Data)
-		return buf
-	default:
-		logger.L().Warning("GetBuf not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	buf, err := e.getFieldAccessor("buf").Bytes(e.Data)
+	if err != nil {
+		logger.L().Warning("GetBuf - buf field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
+	return buf
 }
 
 func (e *DatasourceEvent) GetCapability() string {
-	switch e.EventType {
-	case CapabilitiesEventType:
-		capability, _ := e.getFieldAccessor("cap").String(e.Data)
-		return capability
-	default:
-		logger.L().Warning("GetCapability not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	capability, err := e.getFieldAccessor("cap").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetCapability - cap field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return capability
 }
 
 func (e *DatasourceEvent) GetCmd() uint32 {
-	switch e.EventType {
-	case BpfEventType:
-		cmd, _ := e.getFieldAccessor("cmd").Uint32(e.Data)
-		return cmd
-	default:
-		logger.L().Warning("GetCmd not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	cmd, err := e.getFieldAccessor("cmd").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetCmd - cmd field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return cmd
 }
 
 func (e *DatasourceEvent) GetComm() string {
@@ -258,40 +246,58 @@ func (e *DatasourceEvent) GetComm() string {
 		container := e.GetContainer()
 		return container
 	default:
-		commValue, _ := e.getFieldAccessor("proc.comm").String(e.Data)
+		commValue, err := e.getFieldAccessor("proc.comm").String(e.Data)
+		if err != nil {
+			logger.L().Warning("GetComm - proc.comm field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
 		return commValue
 	}
 }
 
 func (e *DatasourceEvent) GetContainer() string {
-	containerName, _ := e.getFieldAccessor("k8s.containerName").String(e.Data)
+	containerName, err := e.getFieldAccessor("k8s.containerName").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetContainer - k8s.containerName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
 	return containerName
 }
 
 func (e *DatasourceEvent) GetContainerID() string {
-	containerId, _ := e.getFieldAccessor("runtime.containerId").String(e.Data)
+	containerId, err := e.getFieldAccessor("runtime.containerId").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetContainerID - runtime.containerId field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
 	return containerId
 }
 
 func (e *DatasourceEvent) GetContainerImage() string {
-	containerImageName, _ := e.getFieldAccessor("runtime.containerImageName").String(e.Data)
+	containerImageName, err := e.getFieldAccessor("runtime.containerImageName").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetContainerImage - runtime.containerImageName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
 	return containerImageName
 }
 
 func (e *DatasourceEvent) GetContainerImageDigest() string {
-	containerImageDigest, _ := e.getFieldAccessor("runtime.containerImageDigest").String(e.Data)
+	containerImageDigest, err := e.getFieldAccessor("runtime.containerImageDigest").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetContainerImageDigest - runtime.containerImageDigest field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
 	return containerImageDigest
 }
 
 func (e *DatasourceEvent) GetCwd() string {
-	switch e.EventType {
-	case ExecveEventType, DnsEventType:
-		cwd, _ := e.getFieldAccessor("cwd").String(e.Data)
-		return cwd
-	default:
-		logger.L().Warning("GetCwd not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	cwd, err := e.getFieldAccessor("cwd").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetCwd - cwd field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return cwd
 }
 
 func (e *DatasourceEvent) GetDirection() consts.NetworkDirection {
@@ -299,57 +305,90 @@ func (e *DatasourceEvent) GetDirection() consts.NetworkDirection {
 }
 
 func (e *DatasourceEvent) GetDNSName() string {
-	switch e.EventType {
-	case DnsEventType:
-		dnsName, _ := e.getFieldAccessor("name").String(e.Data)
-		return dnsName
-	default:
-		logger.L().Warning("GetDNSName not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	dnsName, err := e.getFieldAccessor("name").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDNSName - name field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return dnsName
 }
 
 func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
-	switch e.EventType {
-	case NetworkEventType:
-		addr, _ := e.getFieldAccessor("endpoint.addr_raw.v4").Uint32(e.Data)
-		kind, _ := e.getFieldAccessor("endpoint.k8s.kind").String(e.Data)
-		name, _ := e.getFieldAccessor("endpoint.k8s.name").String(e.Data)
-		namespace, _ := e.getFieldAccessor("endpoint.k8s.namespace").String(e.Data)
-		podLabels, _ := e.getFieldAccessor("endpoint.k8s.labels").String(e.Data)
-		version, _ := e.getFieldAccessor("endpoint.version").Uint8(e.Data)
-		port, _ := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
-		proto, _ := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
-		return types.L4Endpoint{
-			L3Endpoint: types.L3Endpoint{
-				Addr:      rawIPv4ToString(addr),
-				Version:   version,
-				Namespace: namespace,
-				Name:      name,
-				Kind:      types.EndpointKind(kind),
-				PodLabels: parseStringToMap(podLabels),
-			},
-			Port:  port,
-			Proto: proto,
-		}
-	default:
-		logger.L().Warning("GetDstEndpoint not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	addr, err := e.getFieldAccessor("endpoint.addr_raw.v4").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDstEndpoint - endpoint.addr_raw.v4 field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return types.L4Endpoint{}
+	}
+	kind, err := e.getFieldAccessor("endpoint.k8s.kind").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDstEndpoint - endpoint.k8s.kind field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return types.L4Endpoint{}
+	}
+	name, err := e.getFieldAccessor("endpoint.k8s.name").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDstEndpoint - endpoint.k8s.name field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return types.L4Endpoint{}
+	}
+	namespace, err := e.getFieldAccessor("endpoint.k8s.namespace").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDstEndpoint - endpoint.k8s.namespace field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return types.L4Endpoint{}
+	}
+	podLabels, err := e.getFieldAccessor("endpoint.k8s.labels").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDstEndpoint - endpoint.k8s.labels field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return types.L4Endpoint{}
+	}
+	version, err := e.getFieldAccessor("endpoint.version").Uint8(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDstEndpoint - endpoint.version field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return types.L4Endpoint{}
+	}
+	port, err := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDstEndpoint - endpoint.port field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return types.L4Endpoint{}
+	}
+	proto, err := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDstEndpoint - endpoint.proto_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return types.L4Endpoint{}
+	}
+	return types.L4Endpoint{
+		L3Endpoint: types.L3Endpoint{
+			Addr:      rawIPv4ToString(addr),
+			Version:   version,
+			Namespace: namespace,
+			Name:      name,
+			Kind:      types.EndpointKind(kind),
+			PodLabels: parseStringToMap(podLabels),
+		},
+		Port:  port,
+		Proto: proto,
 	}
 }
 
 func (e *DatasourceEvent) GetDstIP() string {
-	switch e.EventType {
-	case DnsEventType, HTTPEventType, SSHEventType:
-		version, _ := e.getFieldAccessor("dst.version").Uint8(e.Data)
-		switch version {
-		case 4:
-			daddr, _ := e.getFieldAccessor("dst.addr_raw.v4").Uint32(e.Data)
-			return rawIPv4ToString(daddr)
-		case 6:
-			daddr, _ := e.getFieldAccessor("dst.addr_raw.v6").Bytes(e.Data)
-			return rawIPv6ToString(daddr)
+	version, err := e.getFieldAccessor("dst.version").Uint8(e.Data)
+	if err != nil {
+		logger.L().Warning("GetDstIP - dst.version field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	switch version {
+	case 4:
+		daddr, err := e.getFieldAccessor("dst.addr_raw.v4").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetDstIP - dst.addr_raw.v4 field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
 		}
+		return rawIPv4ToString(daddr)
+	case 6:
+		daddr, err := e.getFieldAccessor("dst.addr_raw.v6").Bytes(e.Data)
+		if err != nil {
+			logger.L().Warning("GetDstIP - dst.addr_raw.v6 field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
+		return rawIPv6ToString(daddr)
 	}
 	return ""
 }
@@ -357,10 +396,18 @@ func (e *DatasourceEvent) GetDstIP() string {
 func (e *DatasourceEvent) GetDstPort() uint16 {
 	switch e.EventType {
 	case NetworkEventType:
-		port, _ := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
+		port, err := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
+		if err != nil {
+			logger.L().Warning("GetDstPort - endpoint.port field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return port
 	case DnsEventType, HTTPEventType, SSHEventType:
-		port, _ := e.getFieldAccessor("dst.port").Uint16(e.Data)
+		port, err := e.getFieldAccessor("dst.port").Uint16(e.Data)
+		if err != nil {
+			logger.L().Warning("GetDstPort - dst.port field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return port
 	default:
 		logger.L().Warning("GetDstPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -368,9 +415,112 @@ func (e *DatasourceEvent) GetDstPort() uint16 {
 	}
 }
 
+func (e *DatasourceEvent) GetEcsAvailabilityZone() string {
+	availabilityZone, err := e.getFieldAccessor("ecs.availabilityZone").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsAvailabilityZone - ecs.availabilityZone field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return availabilityZone
+}
+
+func (e *DatasourceEvent) GetEcsClusterARN() string {
+	clusterARN, err := e.getFieldAccessor("ecs.clusterARN").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsClusterARN - ecs.clusterARN field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return clusterARN
+}
+
+func (e *DatasourceEvent) GetEcsClusterName() string {
+	clusterName, err := e.getFieldAccessor("ecs.clusterName").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsClusterName - ecs.clusterName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return clusterName
+}
+
+func (e *DatasourceEvent) GetEcsContainerARN() string {
+	containerARN, err := e.getFieldAccessor("ecs.containerARN").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsContainerARN - ecs.containerARN field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return containerARN
+}
+
+func (e *DatasourceEvent) GetEcsContainerInstance() string {
+	containerInstance, err := e.getFieldAccessor("ecs.containerInstance").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsContainerInstance - ecs.containerInstance field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return containerInstance
+}
+
+func (e *DatasourceEvent) GetEcsContainerName() string {
+	containerName, err := e.getFieldAccessor("ecs.containerName").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsContainerName - ecs.containerName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return containerName
+}
+
+func (e *DatasourceEvent) GetEcsLaunchType() string {
+	launchType, err := e.getFieldAccessor("ecs.launchType").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsLaunchType - ecs.launchType field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return launchType
+}
+
+func (e *DatasourceEvent) GetEcsServiceName() string {
+	serviceName, err := e.getFieldAccessor("ecs.serviceName").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsServiceName - ecs.serviceName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return serviceName
+}
+
+func (e *DatasourceEvent) GetEcsTaskARN() string {
+	taskARN, err := e.getFieldAccessor("ecs.taskARN").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsTaskARN - ecs.taskARN field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return taskARN
+}
+
+func (e *DatasourceEvent) GetEcsTaskDefinitionARN() string {
+	taskDefARN, err := e.getFieldAccessor("ecs.taskDefinitionARN").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsTaskDefinitionARN - ecs.taskDefinitionARN field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return taskDefARN
+}
+
+func (e *DatasourceEvent) GetEcsTaskFamily() string {
+	taskFamily, err := e.getFieldAccessor("ecs.taskFamily").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetEcsTaskFamily - ecs.taskFamily field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	return taskFamily
+}
+
 func (e *DatasourceEvent) GetError() int64 {
-	err, _ := e.getFieldAccessor("error_raw").Int64(e.Data)
-	return err
+	errVal, err := e.getFieldAccessor("error_raw").Int64(e.Data)
+	if err != nil {
+		logger.L().Warning("GetError - error_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+	return errVal
 }
 
 func (e *DatasourceEvent) GetEventType() EventType {
@@ -378,25 +528,21 @@ func (e *DatasourceEvent) GetEventType() EventType {
 }
 
 func (e *DatasourceEvent) GetExePath() string {
-	switch e.EventType {
-	case DnsEventType, ExecveEventType, ForkEventType, PtraceEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
-		exepath, _ := e.getFieldAccessor("exepath").String(e.Data)
-		return exepath
-	default:
-		logger.L().Warning("GetExePath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	exepath, err := e.getFieldAccessor("exepath").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetExePath - exepath field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return exepath
 }
 
 func (e *DatasourceEvent) GetExitCode() uint32 {
-	switch e.EventType {
-	case ExitEventType:
-		exitCode, _ := e.getFieldAccessor("exit_code").Uint32(e.Data)
-		return exitCode
-	default:
-		logger.L().Warning("GetExitCode not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	exitCode, err := e.getFieldAccessor("exit_code").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetExitCode - exit_code field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return exitCode
 }
 
 func (e *DatasourceEvent) GetExtra() interface{} {
@@ -404,70 +550,59 @@ func (e *DatasourceEvent) GetExtra() interface{} {
 }
 
 func (e *DatasourceEvent) GetFlags() []string {
-	switch e.EventType {
-	case OpenEventType:
-		flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
-		return decodeOpenFlags(flags)
-	default:
-		logger.L().Warning("GetFlags not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	flags, err := e.getFieldAccessor("flags_raw").Int32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetFlags - flags_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
+	return decodeOpenFlags(flags)
 }
 
 func (e *DatasourceEvent) GetFlagsRaw() uint32 {
-	switch e.EventType {
-	case OpenEventType:
-		flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
-		return uint32(flags)
-	default:
-		logger.L().Warning("GetFlagsRaw not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	flags, err := e.getFieldAccessor("flags_raw").Int32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetFlagsRaw - flags_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return uint32(flags)
 }
 
 func (e *DatasourceEvent) GetFullPath() string {
-	switch e.EventType {
-	case OpenEventType:
-		path, _ := e.getFieldAccessor("fpath").String(e.Data)
-		if path == "" {
-			path, _ = e.getFieldAccessor("fname").String(e.Data)
+	path, err := e.getFieldAccessor("fpath").String(e.Data)
+	if err != nil || path == "" {
+		path, err = e.getFieldAccessor("fname").String(e.Data)
+		if err != nil {
+			return ""
 		}
-		return path
-	default:
-		logger.L().Warning("GetFullPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
-		return ""
 	}
+	return path
 }
 
 func (e *DatasourceEvent) GetGid() *uint32 {
-	switch e.EventType {
-	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
-		gid, err := e.getFieldAccessor("proc.creds.gid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetGid - proc.creds.gid field not found in event type", helpers.String("eventType", string(e.EventType)))
-			return nil
-		}
-		return &gid
-	default:
-		logger.L().Warning("GetGid not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	gid, err := e.getFieldAccessor("proc.creds.gid").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetGid - proc.creds.gid field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
+	return &gid
 }
 
 func (e *DatasourceEvent) GetHostNetwork() bool {
-	hostNetwork, _ := e.getFieldAccessor("k8s.hostnetwork").Bool(e.Data)
+	hostNetwork, err := e.getFieldAccessor("k8s.hostnetwork").Bool(e.Data)
+	if err != nil {
+		logger.L().Warning("GetHostNetwork - k8s.hostnetwork field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return false
+	}
 	return hostNetwork
 }
 
 func (e *DatasourceEvent) GetIdentifier() string {
-	switch e.EventType {
-	case IoUringEventType:
-		identifier, _ := e.getFieldAccessor("identifier").String(e.Data)
-		return identifier
-	default:
-		logger.L().Warning("GetIdentifier not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	identifier, err := e.getFieldAccessor("identifier").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetIdentifier - identifier field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return identifier
 }
 
 func (e *DatasourceEvent) GetInternal() bool {
@@ -475,68 +610,66 @@ func (e *DatasourceEvent) GetInternal() bool {
 }
 
 func (e *DatasourceEvent) GetModule() string {
-	switch e.EventType {
-	case KmodEventType:
-		module, _ := e.getFieldAccessor("module").String(e.Data)
-		return module
-	default:
-		logger.L().Warning("GetModule not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	module, err := e.getFieldAccessor("module").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetModule - module field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return module
 }
 
 func (e *DatasourceEvent) GetMountNsID() uint64 {
-	mountNsID, _ := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
+	mountNsID, err := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
+	if err != nil {
+		logger.L().Warning("GetMountNsID - proc.mntns_id field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
 	return mountNsID
 }
 
 func (e *DatasourceEvent) GetNamespace() string {
-	namespace, _ := e.getFieldAccessor("k8s.namespace").String(e.Data)
+	namespace, err := e.getFieldAccessor("k8s.namespace").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetNamespace - k8s.namespace field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
 	return namespace
 }
 
 func (e *DatasourceEvent) GetNewPath() string {
-	switch e.EventType {
-	case HardlinkEventType, SymlinkEventType:
-		newPath, _ := e.getFieldAccessor("newpath").String(e.Data)
-		return newPath
-	default:
-		logger.L().Warning("GetNewPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	newPath, err := e.getFieldAccessor("newpath").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetNewPath - newpath field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return newPath
 }
 
 func (e *DatasourceEvent) GetNumAnswers() int {
-	switch e.EventType {
-	case DnsEventType:
-		numAnswers, _ := e.getFieldAccessor("num_answers").Int32(e.Data)
-		return int(numAnswers)
-	default:
-		logger.L().Warning("GetNumAnswers not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	numAnswers, err := e.getFieldAccessor("num_answers").Int32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetNumAnswers - num_answers field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return int(numAnswers)
 }
 
 func (e *DatasourceEvent) GetOldPath() string {
-	switch e.EventType {
-	case HardlinkEventType, SymlinkEventType:
-		oldPath, _ := e.getFieldAccessor("oldpath").String(e.Data)
-		return oldPath
-	default:
-		logger.L().Warning("GetOldPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	oldPath, err := e.getFieldAccessor("oldpath").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetOldPath - oldpath field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return oldPath
 }
 
 func (e *DatasourceEvent) GetOpcode() int {
-	switch e.EventType {
-	case IoUringEventType:
-		opcode, _ := e.getFieldAccessor("opcode").Int32(e.Data)
-		return int(opcode)
-	default:
-		logger.L().Warning("GetOpcode not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	opcode, err := e.getFieldAccessor("opcode").Int32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetOpcode - opcode field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return int(opcode)
 }
 
 func (e *DatasourceEvent) GetOtherIp() string {
@@ -556,35 +689,53 @@ func (e *DatasourceEvent) GetPath() string {
 	if e.FullPathTracing {
 		return e.GetFullPath()
 	}
-	switch e.EventType {
-	case OpenEventType:
-		path, _ := e.getFieldAccessor("fname").String(e.Data)
-		return path
-	default:
-		logger.L().Warning("GetPath not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	path, err := e.getFieldAccessor("fname").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetPath - fname field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return path
 }
 
 func (e *DatasourceEvent) GetPcomm() string {
-	pcomm, _ := e.getFieldAccessor("proc.parent.comm").String(e.Data)
+	pcomm, err := e.getFieldAccessor("proc.parent.comm").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetPcomm - proc.parent.comm field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
 	return pcomm
 }
 
 func (e *DatasourceEvent) GetPID() uint32 {
 	switch e.EventType {
 	case ForkEventType:
-		childPid, _ := e.getFieldAccessor("child_pid").Uint32(e.Data)
+		childPid, err := e.getFieldAccessor("child_pid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetPID - child_pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return childPid
 	case ExitEventType:
-		exitPid, _ := e.getFieldAccessor("exit_pid").Uint32(e.Data)
+		exitPid, err := e.getFieldAccessor("exit_pid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetPID - exit_pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return exitPid
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
-		containerPid, _ := e.getFieldAccessor("runtime.containerPid").Uint32(e.Data)
+		containerPid, err := e.getFieldAccessor("runtime.containerPid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetPID - runtime.containerPid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return containerPid
 	default:
-		pidValue, _ := e.getFieldAccessor("proc.pid").Uint32(e.Data)
+		pidValue, err := e.getFieldAccessor("proc.pid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetPID - proc.pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return pidValue
 	}
 }
@@ -602,8 +753,21 @@ func (e *DatasourceEvent) GetPID64() uint64 {
 	}
 }
 
+func (e *DatasourceEvent) getPtid() uint64 {
+	ptid, err := e.getFieldAccessor("proc.parent.tid").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("getPtid - proc.parent.tid field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return 0
+	}
+	return uint64(ptid)
+}
+
 func (e *DatasourceEvent) GetPktType() string {
-	egress, _ := e.getFieldAccessor("egress").Uint8(e.Data)
+	egress, err := e.getFieldAccessor("egress").Uint8(e.Data)
+	if err != nil {
+		logger.L().Warning("GetPktType - egress field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
 	if egress == 1 {
 		return OutgoingPktType
 	}
@@ -611,36 +775,54 @@ func (e *DatasourceEvent) GetPktType() string {
 }
 
 func (e *DatasourceEvent) GetPod() string {
-	podName, _ := e.getFieldAccessor("k8s.podName").String(e.Data)
+	podName, err := e.getFieldAccessor("k8s.podName").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetPod - k8s.podName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
 	return podName
 }
 
 func (e *DatasourceEvent) GetPodHostIP() string {
-	switch e.EventType {
-	case NetworkEventType:
-		hostIP, _ := e.getFieldAccessor("k8s.hostIP").String(e.Data)
-		return hostIP
-	default:
-		logger.L().Warning("GetPodHostIP not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	hostIP, err := e.getFieldAccessor("k8s.hostIP").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetPodHostIP - k8s.hostIP field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	return hostIP
 }
 
 func (e *DatasourceEvent) GetPodLabels() map[string]string {
-	podLabels, _ := e.getFieldAccessor("k8s.podLabels").String(e.Data)
+	podLabels, err := e.getFieldAccessor("k8s.podLabels").String(e.Data)
+	if err != nil {
+		logger.L().Warning("GetPodLabels - k8s.podLabels field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return nil
+	}
 	return parseStringToMap(podLabels)
 }
 
 func (e *DatasourceEvent) GetPpid() uint32 {
 	switch e.EventType {
 	case ForkEventType:
-		parentPid, _ := e.getFieldAccessor("parent_pid").Uint32(e.Data)
+		parentPid, err := e.getFieldAccessor("parent_pid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetPpid - parent_pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return parentPid
 	case ExitEventType:
-		exitPpid, _ := e.getFieldAccessor("exit_ppid").Uint32(e.Data)
+		exitPpid, err := e.getFieldAccessor("exit_ppid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetPpid - exit_ppid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return exitPpid
 	default:
-		ppid, _ := e.getFieldAccessor("proc.parent.pid").Uint32(e.Data)
+		ppid, err := e.getFieldAccessor("proc.parent.pid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetPpid - proc.parent.pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return ppid
 	}
 }
@@ -648,10 +830,18 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 func (e *DatasourceEvent) GetProto() string {
 	switch e.EventType {
 	case DnsEventType:
-		protoNum, _ := e.getFieldAccessor("dst.proto_raw").Uint16(e.Data)
+		protoNum, err := e.getFieldAccessor("dst.proto_raw").Uint16(e.Data)
+		if err != nil {
+			logger.L().Warning("GetProto - dst.proto_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
 		return protoNumToString(protoNum)
 	case NetworkEventType:
-		protoNum, _ := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
+		protoNum, err := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
+		if err != nil {
+			logger.L().Warning("GetProto - endpoint.proto_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
 		return protoNumToString(protoNum)
 	default:
 		logger.L().Warning("GetProto not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -659,34 +849,25 @@ func (e *DatasourceEvent) GetProto() string {
 	}
 }
 
-func (e *DatasourceEvent) getPtid() uint64 {
-	ptid, _ := e.getFieldAccessor("proc.parent.tid").Uint32(e.Data)
-	return uint64(ptid)
-}
-
 func (e *DatasourceEvent) GetPupperLayer() bool {
-	switch e.EventType {
-	case ExecveEventType:
-		pupperLayer, _ := e.getFieldAccessor("pupper_layer").Bool(e.Data)
-		return pupperLayer
-	default:
-		logger.L().Warning("GetPupperLayer not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	pupperLayer, err := e.getFieldAccessor("pupper_layer").Bool(e.Data)
+	if err != nil {
+		logger.L().Warning("GetPupperLayer - pupper_layer field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return false
 	}
+	return pupperLayer
 }
 
 func (e *DatasourceEvent) GetQr() DNSPktType {
-	switch e.EventType {
-	case DnsEventType:
-		isResponse, _ := e.getFieldAccessor("qr_raw").Bool(e.Data)
-		if isResponse {
-			return DNSPktTypeResponse
-		}
-		return DNSPktTypeQuery
-	default:
-		logger.L().Warning("GetQr not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	isResponse, err := e.getFieldAccessor("qr_raw").Bool(e.Data)
+	if err != nil {
+		logger.L().Warning("GetQr - qr_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+	if isResponse {
+		return DNSPktTypeResponse
+	}
+	return DNSPktTypeQuery
 }
 
 func (e *DatasourceEvent) GetRequest() *http.Request {
@@ -698,77 +879,90 @@ func (e *DatasourceEvent) GetResponse() *http.Response {
 }
 
 func (e *DatasourceEvent) GetSignal() uint32 {
-	switch e.EventType {
-	case ExitEventType:
-		signal, _ := e.getFieldAccessor("exit_signal").Uint32(e.Data)
-		return signal
-	default:
-		logger.L().Warning("GetSignal not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	signal, err := e.getFieldAccessor("exit_signal").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetSignal - exit_signal field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return signal
 }
 
 func (e *DatasourceEvent) GetSocketInode() uint64 {
-	switch e.EventType {
-	case HTTPEventType:
-		socketInode, _ := e.getFieldAccessor("socket_inode").Uint64(e.Data)
-		return socketInode
-	default:
-		logger.L().Warning("GetSocketInode not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	socketInode, err := e.getFieldAccessor("socket_inode").Uint64(e.Data)
+	if err != nil {
+		logger.L().Warning("GetSocketInode - socket_inode field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return socketInode
 }
 
 func (e *DatasourceEvent) GetSockFd() uint32 {
-	switch e.EventType {
-	case HTTPEventType:
-		sockFd, _ := e.getFieldAccessor("sock_fd").Uint32(e.Data)
-		return sockFd
-	default:
-		logger.L().Warning("GetSockFd not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	sockFd, err := e.getFieldAccessor("sock_fd").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetSockFd - sock_fd field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return sockFd
 }
 
 func (e *DatasourceEvent) GetSrcIP() string {
-	switch e.EventType {
-	case DnsEventType, HTTPEventType, SSHEventType:
-		version, _ := e.getFieldAccessor("src.version").Uint8(e.Data)
-		switch version {
-		case 4:
-			addr, _ := e.getFieldAccessor("src.addr_raw.v4").Uint32(e.Data)
-			return rawIPv4ToString(addr)
-		case 6:
-			addr, _ := e.getFieldAccessor("src.addr_raw.v6").Bytes(e.Data)
-			return rawIPv6ToString(addr)
+	version, err := e.getFieldAccessor("src.version").Uint8(e.Data)
+	if err != nil {
+		logger.L().Warning("GetSrcIP - src.version field not found in event type", helpers.String("eventType", string(e.EventType)))
+		return ""
+	}
+	switch version {
+	case 4:
+		addr, err := e.getFieldAccessor("src.addr_raw.v4").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetSrcIP - src.addr_raw.v4 field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
 		}
+		return rawIPv4ToString(addr)
+	case 6:
+		addr, err := e.getFieldAccessor("src.addr_raw.v6").Bytes(e.Data)
+		if err != nil {
+			logger.L().Warning("GetSrcIP - src.addr_raw.v6 field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
+		return rawIPv6ToString(addr)
 	}
 	return ""
 }
 
 func (e *DatasourceEvent) GetSrcPort() uint16 {
-	switch e.EventType {
-	case DnsEventType, HTTPEventType, SSHEventType:
-		port, _ := e.getFieldAccessor("src.port").Uint16(e.Data)
-		return port
-	default:
-		logger.L().Warning("GetSrcPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	port, err := e.getFieldAccessor("src.port").Uint16(e.Data)
+	if err != nil {
+		logger.L().Warning("GetSrcPort - src.port field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return port
 }
 
 func (e *DatasourceEvent) GetSyscall() string {
 	switch e.EventType {
 	case CapabilitiesEventType:
-		syscallRaw, _ := e.getFieldAccessor("syscall_raw").Uint16(e.Data)
+		syscallRaw, err := e.getFieldAccessor("syscall_raw").Uint16(e.Data)
+		if err != nil {
+			logger.L().Warning("GetSyscall - syscall_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
 		return syscalls.SyscallGetName(syscallRaw)
 	case HTTPEventType:
-		syscall, _ := e.getFieldAccessor("syscall").Bytes(e.Data)
+		syscall, err := e.getFieldAccessor("syscall").Bytes(e.Data)
+		if err != nil {
+			logger.L().Warning("GetSyscall - syscall field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
 		return gadgets.FromCString(syscall)
 	case SyscallEventType:
 		return e.Syscall
 	case KmodEventType:
-		syscall, _ := e.getFieldAccessor("syscall").String(e.Data)
+		syscall, err := e.getFieldAccessor("syscall").String(e.Data)
+		if err != nil {
+			logger.L().Warning("GetSyscall - syscall field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return ""
+		}
 		return syscall
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -777,23 +971,29 @@ func (e *DatasourceEvent) GetSyscall() string {
 }
 
 func (e *DatasourceEvent) GetSyscalls() []byte {
-	switch e.EventType {
-	case SyscallEventType:
-		syscallsBuffer, _ := e.getFieldAccessor("syscalls").Bytes(e.Data)
-		return syscallsBuffer
-	default:
-		logger.L().Warning("GetSyscalls not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	syscallsBuffer, err := e.getFieldAccessor("syscalls").Bytes(e.Data)
+	if err != nil {
+		logger.L().Warning("GetSyscalls - syscalls field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
+	return syscallsBuffer
 }
 
 func (e *DatasourceEvent) getTid() uint64 {
 	switch e.EventType {
 	case ExitEventType:
-		tid, _ := e.getFieldAccessor("exit_tid").Uint32(e.Data)
+		tid, err := e.getFieldAccessor("exit_tid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("getTid - exit_tid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return uint64(tid)
 	default:
-		tid, _ := e.getFieldAccessor("proc.tid").Uint32(e.Data)
+		tid, err := e.getFieldAccessor("proc.tid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("getTid - proc.tid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return 0
+		}
 		return uint64(tid)
 	}
 }
@@ -803,46 +1003,40 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 	case SyscallEventType:
 		return types.Time(time.Now().UnixNano())
 	default:
-		timeStampRaw, _ := e.getFieldAccessor("timestamp_raw").Uint64(e.Data)
+		timeStampRaw, err := e.getFieldAccessor("timestamp_raw").Uint64(e.Data)
+		if err != nil {
+			logger.L().Warning("GetTimestamp - timestamp_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+			return types.Time(0)
+		}
 		return gadgets.WallTimeFromBootTime(timeStampRaw)
 	}
 }
 
 func (e *DatasourceEvent) GetType() HTTPDataType {
-	switch e.EventType {
-	case HTTPEventType:
-		t, _ := e.getFieldAccessor("type").Uint8(e.Data)
-		return HTTPDataType(t)
-	default:
-		logger.L().Warning("GetType not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	t, err := e.getFieldAccessor("type").Uint8(e.Data)
+	if err != nil {
+		logger.L().Warning("GetType - type field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return 0
 	}
+	return HTTPDataType(t)
 }
 
 func (e *DatasourceEvent) GetUid() *uint32 {
-	switch e.EventType {
-	case CapabilitiesEventType, DnsEventType, ExecveEventType, ExitEventType, ForkEventType, HTTPEventType, NetworkEventType, OpenEventType, KmodEventType, UnshareEventType, BpfEventType:
-		uid, err := e.getFieldAccessor("proc.creds.uid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetUid - proc.creds.uid field not found in event type", helpers.String("eventType", string(e.EventType)))
-			return nil
-		}
-		return &uid
-	default:
-		logger.L().Warning("GetUid not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	uid, err := e.getFieldAccessor("proc.creds.uid").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("GetUid - proc.creds.uid field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return nil
 	}
+	return &uid
 }
 
 func (e *DatasourceEvent) GetUpperLayer() bool {
-	switch e.EventType {
-	case ExecveEventType, SymlinkEventType, HardlinkEventType, ExitEventType, RandomXEventType, KmodEventType, UnshareEventType, BpfEventType:
-		upperLayer, _ := e.getFieldAccessor("upper_layer").Bool(e.Data)
-		return upperLayer
-	default:
-		logger.L().Warning("GetUpperLayer not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	upperLayer, err := e.getFieldAccessor("upper_layer").Bool(e.Data)
+	if err != nil {
+		logger.L().Warning("GetUpperLayer - upper_layer field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return false
 	}
+	return upperLayer
 }
 
 func (e *DatasourceEvent) HasDroppedEvents() bool {
@@ -853,15 +1047,13 @@ func (e *DatasourceEvent) HasDroppedEvents() bool {
 }
 
 func (e *DatasourceEvent) IsDir() bool {
-	switch e.EventType {
-	case OpenEventType:
-		raw, _ := e.getFieldAccessor("mode_raw").Uint32(e.Data)
-		fileMode := os.FileMode(raw)
-		return fileMode.IsDir()
-	default:
-		logger.L().Warning("IsDir not implemented for event type", helpers.String("eventType", string(e.EventType)))
+	raw, err := e.getFieldAccessor("mode_raw").Uint32(e.Data)
+	if err != nil {
+		logger.L().Warning("IsDir - mode_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
 		return false
 	}
+	fileMode := os.FileMode(raw)
+	return fileMode.IsDir()
 }
 
 func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection) HttpEvent {
@@ -888,60 +1080,4 @@ func (e *DatasourceEvent) SetExtra(extra interface{}) {
 
 func (e *DatasourceEvent) SetResponse(response *http.Response) {
 	e.Response = response
-}
-
-// ECS-specific methods - implementing EnrichEvent interface
-func (e *DatasourceEvent) GetEcsClusterName() string {
-	clusterName, _ := e.getFieldAccessor("ecs.clusterName").String(e.Data)
-	return clusterName
-}
-
-func (e *DatasourceEvent) GetEcsClusterARN() string {
-	clusterARN, _ := e.getFieldAccessor("ecs.clusterARN").String(e.Data)
-	return clusterARN
-}
-
-func (e *DatasourceEvent) GetEcsTaskARN() string {
-	taskARN, _ := e.getFieldAccessor("ecs.taskARN").String(e.Data)
-	return taskARN
-}
-
-func (e *DatasourceEvent) GetEcsTaskFamily() string {
-	taskFamily, _ := e.getFieldAccessor("ecs.taskFamily").String(e.Data)
-	return taskFamily
-}
-
-func (e *DatasourceEvent) GetEcsTaskDefinitionARN() string {
-	taskDefARN, _ := e.getFieldAccessor("ecs.taskDefinitionARN").String(e.Data)
-	return taskDefARN
-}
-
-func (e *DatasourceEvent) GetEcsServiceName() string {
-	serviceName, _ := e.getFieldAccessor("ecs.serviceName").String(e.Data)
-	return serviceName
-}
-
-func (e *DatasourceEvent) GetEcsContainerName() string {
-	containerName, _ := e.getFieldAccessor("ecs.containerName").String(e.Data)
-	return containerName
-}
-
-func (e *DatasourceEvent) GetEcsContainerARN() string {
-	containerARN, _ := e.getFieldAccessor("ecs.containerARN").String(e.Data)
-	return containerARN
-}
-
-func (e *DatasourceEvent) GetEcsContainerInstance() string {
-	containerInstance, _ := e.getFieldAccessor("ecs.containerInstance").String(e.Data)
-	return containerInstance
-}
-
-func (e *DatasourceEvent) GetEcsAvailabilityZone() string {
-	availabilityZone, _ := e.getFieldAccessor("ecs.availabilityZone").String(e.Data)
-	return availabilityZone
-}
-
-func (e *DatasourceEvent) GetEcsLaunchType() string {
-	launchType, _ := e.getFieldAccessor("ecs.launchType").String(e.Data)
-	return launchType
 }
