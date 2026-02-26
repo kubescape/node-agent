@@ -458,4 +458,4 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20260203101533-6ef87216d3dd
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20260226175242-c524fbad47d9
