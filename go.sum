@@ -962,8 +962,8 @@ github.com/docker/go-events v0.0.0-20250114142523-c867878c5e32/go.mod h1:Uw6Uezg
 github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4=
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
 github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815/go.mod h1:WwZ+bS3ebgob9U8Nd0kOddGdZWjyMGR8Wziv+TBNwSE=
-github.com/dorkamotorka/inspektor-gadget v0.0.0-20260226105444-58715f6d2986 h1:GLbnwqy3PpTzXj2nk0lr4CNJJVZvzw9fuRZwpL2Z99M=
-github.com/dorkamotorka/inspektor-gadget v0.0.0-20260226105444-58715f6d2986/go.mod h1:nJkyhZHcPSqUhD6s/nufqQsAiXuxwEkHCd/7dWZZXfY=
+github.com/dorkamotorka/inspektor-gadget v0.0.0-20260226233601-a892f727b327 h1:nXnAo6AkzwWMhs30YWMJVhkqb4Y+X+FbIknfP6vtE1M=
+github.com/dorkamotorka/inspektor-gadget v0.0.0-20260226233601-a892f727b327/go.mod h1:nJkyhZHcPSqUhD6s/nufqQsAiXuxwEkHCd/7dWZZXfY=
 github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 h1:2tV76y6Q9BB+NEBasnqvs7e49aEBFI8ejC89PSnWH+4=
 github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707/go.mod h1:qssHWj60/X5sZFNxpG4HBPDHVqxNm4DfnCKgrbZOT+s=
 github.com/dsnet/golib v0.0.0-20171103203638-1ea166775780/go.mod h1:Lj+Z9rebOhdfkVLjJ8T6VcRQv3SXugXy999NBtR9aFY=
@@ -1436,6 +1436,8 @@ github.com/jstemmer/go-junit-report v0.9.1/go.mod h1:Brl9GWCQeLvo8nXZwPNNblvFj/X
 github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7VTCxuUUipMqKk8s4w=
 github.com/jung-kurt/gofpdf v1.0.0/go.mod h1:7Id9E/uU8ce6rXgefFLlgrJj/GYY22cpxn+r32jIOes=
 github.com/jung-kurt/gofpdf v1.0.3-0.20190309125859-24315acbbda5/go.mod h1:7Id9E/uU8ce6rXgefFLlgrJj/GYY22cpxn+r32jIOes=
+github.com/k8sstormcenter/storage v0.0.240-0.20260220214509-f4507e8afed1 h1:aE1ovbddfrNMXx5Beq5x62hkk+GQ4zbud8ARD+avpCs=
+github.com/k8sstormcenter/storage v0.0.240-0.20260220214509-f4507e8afed1/go.mod h1:f6u/Lt3SjUTBrmzOStb33IkKTtaqKM4pyfV5d1lUMiY=
 github.com/kastenhq/goversion v0.0.0-20230811215019-93b2f8823953 h1:WdAeg/imY2JFPc/9CST4bZ80nNJbiBFCAdSZCSgrS5Y=
 github.com/kastenhq/goversion v0.0.0-20230811215019-93b2f8823953/go.mod h1:6o+UrvuZWc4UTyBhQf0LGjW9Ld7qJxLz/OqvSOWWlEc=
 github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51/go.mod h1:CzGEWj7cYgsdH8dAjBGEr58BoE7ScuLd+fwFZ44+/x8=
