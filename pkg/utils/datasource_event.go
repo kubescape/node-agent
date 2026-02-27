@@ -169,6 +169,10 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 			return missingFieldAccessor
 		}
 		field := e.Datasource.GetField(fieldName)
+		if field == nil {
+			// Don't cache nil results - another data source may have this field
+			return missingFieldAccessor
+		}
 		accessor, _ = m.LoadOrStore(fieldName, field)
 	}
 
@@ -188,7 +192,7 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 func (e *DatasourceEvent) GetAddresses() []string {
 	addresses, err := e.getFieldAccessor("addresses").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetAddresses - addresses field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetAddresses - error reading field addresses", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return nil
 	}
 	return strings.Split(addresses, ",")
@@ -197,7 +201,7 @@ func (e *DatasourceEvent) GetAddresses() []string {
 func (e *DatasourceEvent) GetArgs() []string {
 	args, err := e.getFieldAccessor("args").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetArgs - args field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetArgs - error reading field args", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return nil
 	}
 	return strings.Split(args, igconsts.ArgsSeparator)
@@ -206,7 +210,7 @@ func (e *DatasourceEvent) GetArgs() []string {
 func (e *DatasourceEvent) GetAttrSize() uint32 {
 	attrSize, err := e.getFieldAccessor("attr_size").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetAttrSize - attr_size field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetAttrSize - error reading field attr_size", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return attrSize
@@ -215,7 +219,7 @@ func (e *DatasourceEvent) GetAttrSize() uint32 {
 func (e *DatasourceEvent) GetBuf() []byte {
 	buf, err := e.getFieldAccessor("buf").Bytes(e.Data)
 	if err != nil {
-		logger.L().Warning("GetBuf - buf field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetBuf - error reading field buf", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return nil
 	}
 	return buf
@@ -224,7 +228,7 @@ func (e *DatasourceEvent) GetBuf() []byte {
 func (e *DatasourceEvent) GetCapability() string {
 	capability, err := e.getFieldAccessor("cap").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetCapability - cap field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetCapability - error reading field cap", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return capability
@@ -233,7 +237,7 @@ func (e *DatasourceEvent) GetCapability() string {
 func (e *DatasourceEvent) GetCmd() uint32 {
 	cmd, err := e.getFieldAccessor("cmd").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetCmd - cmd field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetCmd - error reading field cmd", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return cmd
@@ -248,7 +252,7 @@ func (e *DatasourceEvent) GetComm() string {
 	default:
 		commValue, err := e.getFieldAccessor("proc.comm").String(e.Data)
 		if err != nil {
-			logger.L().Warning("GetComm - proc.comm field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetComm - error reading field proc.comm", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return commValue
@@ -258,7 +262,7 @@ func (e *DatasourceEvent) GetComm() string {
 func (e *DatasourceEvent) GetContainer() string {
 	containerName, err := e.getFieldAccessor("k8s.containerName").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetContainer - k8s.containerName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetContainer - error reading field k8s.containerName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return containerName
@@ -267,7 +271,7 @@ func (e *DatasourceEvent) GetContainer() string {
 func (e *DatasourceEvent) GetContainerID() string {
 	containerId, err := e.getFieldAccessor("runtime.containerId").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetContainerID - runtime.containerId field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetContainerID - error reading field runtime.containerId", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return containerId
@@ -276,7 +280,7 @@ func (e *DatasourceEvent) GetContainerID() string {
 func (e *DatasourceEvent) GetContainerImage() string {
 	containerImageName, err := e.getFieldAccessor("runtime.containerImageName").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetContainerImage - runtime.containerImageName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetContainerImage - error reading field runtime.containerImageName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return containerImageName
@@ -285,7 +289,7 @@ func (e *DatasourceEvent) GetContainerImage() string {
 func (e *DatasourceEvent) GetContainerImageDigest() string {
 	containerImageDigest, err := e.getFieldAccessor("runtime.containerImageDigest").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetContainerImageDigest - runtime.containerImageDigest field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetContainerImageDigest - error reading field runtime.containerImageDigest", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return containerImageDigest
@@ -294,7 +298,7 @@ func (e *DatasourceEvent) GetContainerImageDigest() string {
 func (e *DatasourceEvent) GetCwd() string {
 	cwd, err := e.getFieldAccessor("cwd").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetCwd - cwd field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetCwd - error reading field cwd", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return cwd
@@ -307,7 +311,7 @@ func (e *DatasourceEvent) GetDirection() consts.NetworkDirection {
 func (e *DatasourceEvent) GetDNSName() string {
 	dnsName, err := e.getFieldAccessor("name").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDNSName - name field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDNSName - error reading field name", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return dnsName
@@ -316,42 +320,42 @@ func (e *DatasourceEvent) GetDNSName() string {
 func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 	addr, err := e.getFieldAccessor("endpoint.addr_raw.v4").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDstEndpoint - endpoint.addr_raw.v4 field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDstEndpoint - error reading field endpoint.addr_raw.v4", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return types.L4Endpoint{}
 	}
 	kind, err := e.getFieldAccessor("endpoint.k8s.kind").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDstEndpoint - endpoint.k8s.kind field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDstEndpoint - error reading field endpoint.k8s.kind", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return types.L4Endpoint{}
 	}
 	name, err := e.getFieldAccessor("endpoint.k8s.name").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDstEndpoint - endpoint.k8s.name field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDstEndpoint - error reading field endpoint.k8s.name", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return types.L4Endpoint{}
 	}
 	namespace, err := e.getFieldAccessor("endpoint.k8s.namespace").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDstEndpoint - endpoint.k8s.namespace field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDstEndpoint - error reading field endpoint.k8s.namespace", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return types.L4Endpoint{}
 	}
 	podLabels, err := e.getFieldAccessor("endpoint.k8s.labels").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDstEndpoint - endpoint.k8s.labels field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDstEndpoint - error reading field endpoint.k8s.labels", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return types.L4Endpoint{}
 	}
 	version, err := e.getFieldAccessor("endpoint.version").Uint8(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDstEndpoint - endpoint.version field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDstEndpoint - error reading field endpoint.version", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return types.L4Endpoint{}
 	}
 	port, err := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDstEndpoint - endpoint.port field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDstEndpoint - error reading field endpoint.port", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return types.L4Endpoint{}
 	}
 	proto, err := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDstEndpoint - endpoint.proto_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDstEndpoint - error reading field endpoint.proto_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return types.L4Endpoint{}
 	}
 	return types.L4Endpoint{
@@ -371,21 +375,21 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 func (e *DatasourceEvent) GetDstIP() string {
 	version, err := e.getFieldAccessor("dst.version").Uint8(e.Data)
 	if err != nil {
-		logger.L().Warning("GetDstIP - dst.version field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetDstIP - error reading field dst.version", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	switch version {
 	case 4:
 		daddr, err := e.getFieldAccessor("dst.addr_raw.v4").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("GetDstIP - dst.addr_raw.v4 field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetDstIP - error reading field dst.addr_raw.v4", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return rawIPv4ToString(daddr)
 	case 6:
 		daddr, err := e.getFieldAccessor("dst.addr_raw.v6").Bytes(e.Data)
 		if err != nil {
-			logger.L().Warning("GetDstIP - dst.addr_raw.v6 field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetDstIP - error reading field dst.addr_raw.v6", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return rawIPv6ToString(daddr)
@@ -398,14 +402,14 @@ func (e *DatasourceEvent) GetDstPort() uint16 {
 	case NetworkEventType:
 		port, err := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
 		if err != nil {
-			logger.L().Warning("GetDstPort - endpoint.port field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetDstPort - error reading field endpoint.port", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return port
 	case DnsEventType, HTTPEventType, SSHEventType:
 		port, err := e.getFieldAccessor("dst.port").Uint16(e.Data)
 		if err != nil {
-			logger.L().Warning("GetDstPort - dst.port field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetDstPort - error reading field dst.port", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return port
@@ -418,7 +422,7 @@ func (e *DatasourceEvent) GetDstPort() uint16 {
 func (e *DatasourceEvent) GetEcsAvailabilityZone() string {
 	availabilityZone, err := e.getFieldAccessor("ecs.availabilityZone").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsAvailabilityZone - ecs.availabilityZone field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsAvailabilityZone - error reading field ecs.availabilityZone", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return availabilityZone
@@ -427,7 +431,7 @@ func (e *DatasourceEvent) GetEcsAvailabilityZone() string {
 func (e *DatasourceEvent) GetEcsClusterARN() string {
 	clusterARN, err := e.getFieldAccessor("ecs.clusterARN").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsClusterARN - ecs.clusterARN field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsClusterARN - error reading field ecs.clusterARN", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return clusterARN
@@ -436,7 +440,7 @@ func (e *DatasourceEvent) GetEcsClusterARN() string {
 func (e *DatasourceEvent) GetEcsClusterName() string {
 	clusterName, err := e.getFieldAccessor("ecs.clusterName").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsClusterName - ecs.clusterName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsClusterName - error reading field ecs.clusterName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return clusterName
@@ -445,7 +449,7 @@ func (e *DatasourceEvent) GetEcsClusterName() string {
 func (e *DatasourceEvent) GetEcsContainerARN() string {
 	containerARN, err := e.getFieldAccessor("ecs.containerARN").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsContainerARN - ecs.containerARN field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsContainerARN - error reading field ecs.containerARN", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return containerARN
@@ -454,7 +458,7 @@ func (e *DatasourceEvent) GetEcsContainerARN() string {
 func (e *DatasourceEvent) GetEcsContainerInstance() string {
 	containerInstance, err := e.getFieldAccessor("ecs.containerInstance").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsContainerInstance - ecs.containerInstance field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsContainerInstance - error reading field ecs.containerInstance", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return containerInstance
@@ -463,7 +467,7 @@ func (e *DatasourceEvent) GetEcsContainerInstance() string {
 func (e *DatasourceEvent) GetEcsContainerName() string {
 	containerName, err := e.getFieldAccessor("ecs.containerName").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsContainerName - ecs.containerName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsContainerName - error reading field ecs.containerName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return containerName
@@ -472,7 +476,7 @@ func (e *DatasourceEvent) GetEcsContainerName() string {
 func (e *DatasourceEvent) GetEcsLaunchType() string {
 	launchType, err := e.getFieldAccessor("ecs.launchType").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsLaunchType - ecs.launchType field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsLaunchType - error reading field ecs.launchType", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return launchType
@@ -481,7 +485,7 @@ func (e *DatasourceEvent) GetEcsLaunchType() string {
 func (e *DatasourceEvent) GetEcsServiceName() string {
 	serviceName, err := e.getFieldAccessor("ecs.serviceName").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsServiceName - ecs.serviceName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsServiceName - error reading field ecs.serviceName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return serviceName
@@ -490,7 +494,7 @@ func (e *DatasourceEvent) GetEcsServiceName() string {
 func (e *DatasourceEvent) GetEcsTaskARN() string {
 	taskARN, err := e.getFieldAccessor("ecs.taskARN").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsTaskARN - ecs.taskARN field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsTaskARN - error reading field ecs.taskARN", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return taskARN
@@ -499,7 +503,7 @@ func (e *DatasourceEvent) GetEcsTaskARN() string {
 func (e *DatasourceEvent) GetEcsTaskDefinitionARN() string {
 	taskDefARN, err := e.getFieldAccessor("ecs.taskDefinitionARN").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsTaskDefinitionARN - ecs.taskDefinitionARN field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsTaskDefinitionARN - error reading field ecs.taskDefinitionARN", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return taskDefARN
@@ -508,19 +512,19 @@ func (e *DatasourceEvent) GetEcsTaskDefinitionARN() string {
 func (e *DatasourceEvent) GetEcsTaskFamily() string {
 	taskFamily, err := e.getFieldAccessor("ecs.taskFamily").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetEcsTaskFamily - ecs.taskFamily field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetEcsTaskFamily - error reading field ecs.taskFamily", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return taskFamily
 }
 
 func (e *DatasourceEvent) GetError() int64 {
-	errVal, err := e.getFieldAccessor("error_raw").Int64(e.Data)
+	errVal, err := e.getFieldAccessor("error_raw").Int32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetError - error_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetError - error reading field error_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
-	return errVal
+	return int64(errVal)
 }
 
 func (e *DatasourceEvent) GetEventType() EventType {
@@ -530,7 +534,7 @@ func (e *DatasourceEvent) GetEventType() EventType {
 func (e *DatasourceEvent) GetExePath() string {
 	exepath, err := e.getFieldAccessor("exepath").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetExePath - exepath field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetExePath - error reading field exepath", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return exepath
@@ -539,7 +543,7 @@ func (e *DatasourceEvent) GetExePath() string {
 func (e *DatasourceEvent) GetExitCode() uint32 {
 	exitCode, err := e.getFieldAccessor("exit_code").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetExitCode - exit_code field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetExitCode - error reading field exit_code", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return exitCode
@@ -552,7 +556,7 @@ func (e *DatasourceEvent) GetExtra() interface{} {
 func (e *DatasourceEvent) GetFlags() []string {
 	flags, err := e.getFieldAccessor("flags_raw").Int32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetFlags - flags_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetFlags - error reading field flags_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return nil
 	}
 	return decodeOpenFlags(flags)
@@ -561,7 +565,7 @@ func (e *DatasourceEvent) GetFlags() []string {
 func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 	flags, err := e.getFieldAccessor("flags_raw").Int32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetFlagsRaw - flags_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetFlagsRaw - error reading field flags_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return uint32(flags)
@@ -581,7 +585,7 @@ func (e *DatasourceEvent) GetFullPath() string {
 func (e *DatasourceEvent) GetGid() *uint32 {
 	gid, err := e.getFieldAccessor("proc.creds.gid").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetGid - proc.creds.gid field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetGid - error reading field proc.creds.gid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return nil
 	}
 	return &gid
@@ -590,7 +594,7 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 func (e *DatasourceEvent) GetHostNetwork() bool {
 	hostNetwork, err := e.getFieldAccessor("k8s.hostnetwork").Bool(e.Data)
 	if err != nil {
-		logger.L().Warning("GetHostNetwork - k8s.hostnetwork field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetHostNetwork - error reading field k8s.hostnetwork", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return false
 	}
 	return hostNetwork
@@ -599,7 +603,7 @@ func (e *DatasourceEvent) GetHostNetwork() bool {
 func (e *DatasourceEvent) GetIdentifier() string {
 	identifier, err := e.getFieldAccessor("identifier").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetIdentifier - identifier field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetIdentifier - error reading field identifier", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return identifier
@@ -612,7 +616,7 @@ func (e *DatasourceEvent) GetInternal() bool {
 func (e *DatasourceEvent) GetModule() string {
 	module, err := e.getFieldAccessor("module").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetModule - module field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetModule - error reading field module", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return module
@@ -621,7 +625,7 @@ func (e *DatasourceEvent) GetModule() string {
 func (e *DatasourceEvent) GetMountNsID() uint64 {
 	mountNsID, err := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
 	if err != nil {
-		logger.L().Warning("GetMountNsID - proc.mntns_id field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetMountNsID - error reading field proc.mntns_id", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return mountNsID
@@ -630,7 +634,7 @@ func (e *DatasourceEvent) GetMountNsID() uint64 {
 func (e *DatasourceEvent) GetNamespace() string {
 	namespace, err := e.getFieldAccessor("k8s.namespace").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetNamespace - k8s.namespace field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetNamespace - error reading field k8s.namespace", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return namespace
@@ -639,7 +643,7 @@ func (e *DatasourceEvent) GetNamespace() string {
 func (e *DatasourceEvent) GetNewPath() string {
 	newPath, err := e.getFieldAccessor("newpath").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetNewPath - newpath field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetNewPath - error reading field newpath", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return newPath
@@ -648,7 +652,7 @@ func (e *DatasourceEvent) GetNewPath() string {
 func (e *DatasourceEvent) GetNumAnswers() int {
 	numAnswers, err := e.getFieldAccessor("num_answers").Int32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetNumAnswers - num_answers field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetNumAnswers - error reading field num_answers", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return int(numAnswers)
@@ -657,7 +661,7 @@ func (e *DatasourceEvent) GetNumAnswers() int {
 func (e *DatasourceEvent) GetOldPath() string {
 	oldPath, err := e.getFieldAccessor("oldpath").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetOldPath - oldpath field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetOldPath - error reading field oldpath", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return oldPath
@@ -666,7 +670,7 @@ func (e *DatasourceEvent) GetOldPath() string {
 func (e *DatasourceEvent) GetOpcode() int {
 	opcode, err := e.getFieldAccessor("opcode").Int32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetOpcode - opcode field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetOpcode - error reading field opcode", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return int(opcode)
@@ -691,7 +695,7 @@ func (e *DatasourceEvent) GetPath() string {
 	}
 	path, err := e.getFieldAccessor("fname").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetPath - fname field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetPath - error reading field fname", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return path
@@ -700,7 +704,7 @@ func (e *DatasourceEvent) GetPath() string {
 func (e *DatasourceEvent) GetPcomm() string {
 	pcomm, err := e.getFieldAccessor("proc.parent.comm").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetPcomm - proc.parent.comm field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetPcomm - error reading field proc.parent.comm", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return pcomm
@@ -711,29 +715,24 @@ func (e *DatasourceEvent) GetPID() uint32 {
 	case ForkEventType:
 		childPid, err := e.getFieldAccessor("child_pid").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("GetPID - child_pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetPID - error reading field child_pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return childPid
 	case ExitEventType:
 		exitPid, err := e.getFieldAccessor("exit_pid").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("GetPID - exit_pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetPID - error reading field exit_pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return exitPid
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
-		containerPid, err := e.getFieldAccessor("runtime.containerPid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetPID - runtime.containerPid field not found in event type", helpers.String("eventType", string(e.EventType)))
-			return 0
-		}
-		return containerPid
+		return 0
 	default:
 		pidValue, err := e.getFieldAccessor("proc.pid").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("GetPID - proc.pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetPID - error reading field proc.pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return pidValue
@@ -756,7 +755,7 @@ func (e *DatasourceEvent) GetPID64() uint64 {
 func (e *DatasourceEvent) getPtid() uint64 {
 	ptid, err := e.getFieldAccessor("proc.parent.tid").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("getPtid - proc.parent.tid field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("getPtid - error reading field proc.parent.tid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return uint64(ptid)
@@ -765,7 +764,7 @@ func (e *DatasourceEvent) getPtid() uint64 {
 func (e *DatasourceEvent) GetPktType() string {
 	egress, err := e.getFieldAccessor("egress").Uint8(e.Data)
 	if err != nil {
-		logger.L().Warning("GetPktType - egress field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetPktType - error reading field egress", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	if egress == 1 {
@@ -777,7 +776,7 @@ func (e *DatasourceEvent) GetPktType() string {
 func (e *DatasourceEvent) GetPod() string {
 	podName, err := e.getFieldAccessor("k8s.podName").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetPod - k8s.podName field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetPod - error reading field k8s.podName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return podName
@@ -786,7 +785,7 @@ func (e *DatasourceEvent) GetPod() string {
 func (e *DatasourceEvent) GetPodHostIP() string {
 	hostIP, err := e.getFieldAccessor("k8s.hostIP").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetPodHostIP - k8s.hostIP field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetPodHostIP - error reading field k8s.hostIP", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	return hostIP
@@ -795,7 +794,7 @@ func (e *DatasourceEvent) GetPodHostIP() string {
 func (e *DatasourceEvent) GetPodLabels() map[string]string {
 	podLabels, err := e.getFieldAccessor("k8s.podLabels").String(e.Data)
 	if err != nil {
-		logger.L().Warning("GetPodLabels - k8s.podLabels field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetPodLabels - error reading field k8s.podLabels", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return nil
 	}
 	return parseStringToMap(podLabels)
@@ -806,21 +805,21 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 	case ForkEventType:
 		parentPid, err := e.getFieldAccessor("parent_pid").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("GetPpid - parent_pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetPpid - error reading field parent_pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return parentPid
 	case ExitEventType:
 		exitPpid, err := e.getFieldAccessor("exit_ppid").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("GetPpid - exit_ppid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetPpid - error reading field exit_ppid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return exitPpid
 	default:
 		ppid, err := e.getFieldAccessor("proc.parent.pid").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("GetPpid - proc.parent.pid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetPpid - error reading field proc.parent.pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return ppid
@@ -832,14 +831,14 @@ func (e *DatasourceEvent) GetProto() string {
 	case DnsEventType:
 		protoNum, err := e.getFieldAccessor("dst.proto_raw").Uint16(e.Data)
 		if err != nil {
-			logger.L().Warning("GetProto - dst.proto_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetProto - error reading field dst.proto_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return protoNumToString(protoNum)
 	case NetworkEventType:
 		protoNum, err := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
 		if err != nil {
-			logger.L().Warning("GetProto - endpoint.proto_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetProto - error reading field endpoint.proto_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return protoNumToString(protoNum)
@@ -852,7 +851,7 @@ func (e *DatasourceEvent) GetProto() string {
 func (e *DatasourceEvent) GetPupperLayer() bool {
 	pupperLayer, err := e.getFieldAccessor("pupper_layer").Bool(e.Data)
 	if err != nil {
-		logger.L().Warning("GetPupperLayer - pupper_layer field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetPupperLayer - error reading field pupper_layer", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return false
 	}
 	return pupperLayer
@@ -861,7 +860,7 @@ func (e *DatasourceEvent) GetPupperLayer() bool {
 func (e *DatasourceEvent) GetQr() DNSPktType {
 	isResponse, err := e.getFieldAccessor("qr_raw").Bool(e.Data)
 	if err != nil {
-		logger.L().Warning("GetQr - qr_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetQr - error reading field qr_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	if isResponse {
@@ -881,7 +880,7 @@ func (e *DatasourceEvent) GetResponse() *http.Response {
 func (e *DatasourceEvent) GetSignal() uint32 {
 	signal, err := e.getFieldAccessor("exit_signal").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetSignal - exit_signal field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetSignal - error reading field exit_signal", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return signal
@@ -890,7 +889,7 @@ func (e *DatasourceEvent) GetSignal() uint32 {
 func (e *DatasourceEvent) GetSocketInode() uint64 {
 	socketInode, err := e.getFieldAccessor("socket_inode").Uint64(e.Data)
 	if err != nil {
-		logger.L().Warning("GetSocketInode - socket_inode field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetSocketInode - error reading field socket_inode", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return socketInode
@@ -899,7 +898,7 @@ func (e *DatasourceEvent) GetSocketInode() uint64 {
 func (e *DatasourceEvent) GetSockFd() uint32 {
 	sockFd, err := e.getFieldAccessor("sock_fd").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetSockFd - sock_fd field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetSockFd - error reading field sock_fd", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return sockFd
@@ -908,21 +907,21 @@ func (e *DatasourceEvent) GetSockFd() uint32 {
 func (e *DatasourceEvent) GetSrcIP() string {
 	version, err := e.getFieldAccessor("src.version").Uint8(e.Data)
 	if err != nil {
-		logger.L().Warning("GetSrcIP - src.version field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetSrcIP - error reading field src.version", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
 	switch version {
 	case 4:
 		addr, err := e.getFieldAccessor("src.addr_raw.v4").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("GetSrcIP - src.addr_raw.v4 field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetSrcIP - error reading field src.addr_raw.v4", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return rawIPv4ToString(addr)
 	case 6:
 		addr, err := e.getFieldAccessor("src.addr_raw.v6").Bytes(e.Data)
 		if err != nil {
-			logger.L().Warning("GetSrcIP - src.addr_raw.v6 field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetSrcIP - error reading field src.addr_raw.v6", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return rawIPv6ToString(addr)
@@ -933,7 +932,7 @@ func (e *DatasourceEvent) GetSrcIP() string {
 func (e *DatasourceEvent) GetSrcPort() uint16 {
 	port, err := e.getFieldAccessor("src.port").Uint16(e.Data)
 	if err != nil {
-		logger.L().Warning("GetSrcPort - src.port field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetSrcPort - error reading field src.port", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return port
@@ -944,14 +943,14 @@ func (e *DatasourceEvent) GetSyscall() string {
 	case CapabilitiesEventType:
 		syscallRaw, err := e.getFieldAccessor("syscall_raw").Uint16(e.Data)
 		if err != nil {
-			logger.L().Warning("GetSyscall - syscall_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetSyscall - error reading field syscall_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return syscalls.SyscallGetName(syscallRaw)
 	case HTTPEventType:
 		syscall, err := e.getFieldAccessor("syscall").Bytes(e.Data)
 		if err != nil {
-			logger.L().Warning("GetSyscall - syscall field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetSyscall - error reading field syscall", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return gadgets.FromCString(syscall)
@@ -960,7 +959,7 @@ func (e *DatasourceEvent) GetSyscall() string {
 	case KmodEventType:
 		syscall, err := e.getFieldAccessor("syscall").String(e.Data)
 		if err != nil {
-			logger.L().Warning("GetSyscall - syscall field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetSyscall - error reading field syscall", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return ""
 		}
 		return syscall
@@ -973,7 +972,7 @@ func (e *DatasourceEvent) GetSyscall() string {
 func (e *DatasourceEvent) GetSyscalls() []byte {
 	syscallsBuffer, err := e.getFieldAccessor("syscalls").Bytes(e.Data)
 	if err != nil {
-		logger.L().Warning("GetSyscalls - syscalls field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetSyscalls - error reading field syscalls", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return nil
 	}
 	return syscallsBuffer
@@ -984,14 +983,14 @@ func (e *DatasourceEvent) getTid() uint64 {
 	case ExitEventType:
 		tid, err := e.getFieldAccessor("exit_tid").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("getTid - exit_tid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("getTid - error reading field exit_tid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return uint64(tid)
 	default:
 		tid, err := e.getFieldAccessor("proc.tid").Uint32(e.Data)
 		if err != nil {
-			logger.L().Warning("getTid - proc.tid field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("getTid - error reading field proc.tid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return 0
 		}
 		return uint64(tid)
@@ -1005,7 +1004,7 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 	default:
 		timeStampRaw, err := e.getFieldAccessor("timestamp_raw").Uint64(e.Data)
 		if err != nil {
-			logger.L().Warning("GetTimestamp - timestamp_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+			logger.L().Warning("GetTimestamp - error reading field timestamp_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 			return types.Time(0)
 		}
 		return gadgets.WallTimeFromBootTime(timeStampRaw)
@@ -1015,7 +1014,7 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 func (e *DatasourceEvent) GetType() HTTPDataType {
 	t, err := e.getFieldAccessor("type").Uint8(e.Data)
 	if err != nil {
-		logger.L().Warning("GetType - type field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetType - error reading field type", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return 0
 	}
 	return HTTPDataType(t)
@@ -1024,7 +1023,7 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 func (e *DatasourceEvent) GetUid() *uint32 {
 	uid, err := e.getFieldAccessor("proc.creds.uid").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("GetUid - proc.creds.uid field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetUid - error reading field proc.creds.uid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return nil
 	}
 	return &uid
@@ -1033,7 +1032,7 @@ func (e *DatasourceEvent) GetUid() *uint32 {
 func (e *DatasourceEvent) GetUpperLayer() bool {
 	upperLayer, err := e.getFieldAccessor("upper_layer").Bool(e.Data)
 	if err != nil {
-		logger.L().Warning("GetUpperLayer - upper_layer field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("GetUpperLayer - error reading field upper_layer", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return false
 	}
 	return upperLayer
@@ -1049,7 +1048,7 @@ func (e *DatasourceEvent) HasDroppedEvents() bool {
 func (e *DatasourceEvent) IsDir() bool {
 	raw, err := e.getFieldAccessor("mode_raw").Uint32(e.Data)
 	if err != nil {
-		logger.L().Warning("IsDir - mode_raw field not found in event type", helpers.String("eventType", string(e.EventType)))
+		logger.L().Warning("IsDir - error reading field mode_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return false
 	}
 	fileMode := os.FileMode(raw)
