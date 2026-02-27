@@ -7,6 +7,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
+	"github.com/google/cel-go/interpreter"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -22,6 +23,48 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/picatz/xcel"
 )
+
+// EventActivation implements interpreter.Activation for zero-allocation CEL evaluation.
+type EventActivation struct {
+	eventType string
+	event     *xcel.Object[utils.CelEvent]
+	isHTTP    bool
+}
+
+var eventActivationPool = sync.Pool{
+	New: func() any { return &EventActivation{} },
+}
+
+var objectPool = sync.Pool{
+	New: func() any { return &xcel.Object[utils.CelEvent]{} },
+}
+
+func (a *EventActivation) ResolveName(name string) (any, bool) {
+	switch name {
+	case "event":
+		return a.event, true
+	case "eventType":
+		return a.eventType, true
+	case "http":
+		if a.isHTTP {
+			return a.event, true
+		}
+		return nil, false
+	}
+	return nil, false
+}
+
+func (a *EventActivation) Parent() interpreter.Activation { return nil }
+
+// Release returns the activation and its wrapped object to their pools.
+func (a *EventActivation) Release() {
+	a.event.Raw = nil
+	objectPool.Put(a.event)
+	a.event = nil
+	a.eventType = ""
+	a.isHTTP = false
+	eventActivationPool.Put(a)
+}
 
 var _ RuleEvaluator = (*CEL)(nil)
 
@@ -56,6 +99,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),
+		ext.Bindings(),
 		k8s.K8s(objectCache.K8sObjectCache(), cfg),
 		applicationprofile.AP(objectCache, cfg),
 		networkneighborhood.NN(objectCache, cfg),
@@ -128,33 +172,27 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) createEvalContext(event *events.EnrichedEvent) map[string]any {
-	eventType := event.Event.GetEventType()
+func (c *CEL) CreateEvalContext(event utils.K8sEvent) *EventActivation {
+	eventType := event.GetEventType()
 
-	// Apply event converter if one is registered, otherwise cast to CelEvent
-	var obj interface{}
+	obj := objectPool.Get().(*xcel.Object[utils.CelEvent])
 	if converter, exists := c.eventConverters[eventType]; exists {
-		obj, _ = xcel.NewObject(converter(event.Event))
+		obj.Raw = converter(event).(utils.CelEvent)
 	} else {
-		obj, _ = xcel.NewObject(event.Event.(utils.CelEvent))
+		obj.Raw = event.(utils.CelEvent)
 	}
 
-	evalContext := map[string]any{
-		"eventType": string(eventType),
-		"event":     obj,
-	}
+	activation := eventActivationPool.Get().(*EventActivation)
+	activation.eventType = string(eventType)
+	activation.event = obj
+	activation.isHTTP = eventType == utils.HTTPEventType
 
-	// For HTTP events, also add "http" variable
-	if eventType == utils.HTTPEventType {
-		evalContext["http"] = obj
-	}
-
-	return evalContext
+	return activation
 }
 
 // evaluateProgramWithContext compiles (or retrieves cached) and evaluates a CEL expression
 // with the provided evaluation context, returning the CEL result value
-func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[string]any) (ref.Val, error) {
+func (c *CEL) evaluateProgramWithContext(expression string, evalContext *EventActivation) (ref.Val, error) {
 	program, err := c.getOrCreateProgram(expression)
 	if err != nil {
 		return nil, err
@@ -175,15 +213,8 @@ func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[stri
 	return out, nil
 }
 
-func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
-	eventType := event.Event.GetEventType()
-	evalContext := c.createEvalContext(event)
-
+func (c *CEL) EvaluateRuleWithContext(evalContext *EventActivation, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
-		if expression.EventType != eventType {
-			continue
-		}
-
 		out, err := c.evaluateProgramWithContext(expression.Expression, evalContext)
 		if err != nil {
 			return false, err
@@ -206,9 +237,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 	return true, nil
 }
 
-func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
-	evalContext := c.createEvalContext(event)
-
+func (c *CEL) EvaluateExpressionWithContext(evalContext *EventActivation, expression string) (string, error) {
 	out, err := c.evaluateProgramWithContext(expression, evalContext)
 	if err != nil {
 		return "", err
@@ -224,6 +253,18 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 		return "", fmt.Errorf("expression returned %T, expected string", out.Value())
 	}
 	return strVal, nil
+}
+
+func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
+	evalContext := c.CreateEvalContext(event.Event)
+	defer evalContext.Release()
+	return c.EvaluateRuleWithContext(evalContext, expressions)
+}
+
+func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
+	evalContext := c.CreateEvalContext(event.Event)
+	defer evalContext.Release()
+	return c.EvaluateExpressionWithContext(evalContext, expression)
 }
 
 func (c *CEL) RegisterHelper(function cel.EnvOption) error {

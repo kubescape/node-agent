@@ -51,6 +51,7 @@ func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.Rule {
 }
 
 func (r *RuleCreatorImpl) RegisterRule(rule typesv1.Rule) {
+	rule.Init()
 	r.Rules = append(r.Rules, rule)
 }
 
@@ -105,8 +106,9 @@ func (r *RuleCreatorImpl) SyncRules(newRules []typesv1.Rule) {
 
 	// Create a map of new rules by ID for quick lookup
 	newRuleMap := make(map[string]typesv1.Rule)
-	for _, rule := range newRules {
-		newRuleMap[rule.ID] = rule
+	for i := range newRules {
+		newRules[i].Init()
+		newRuleMap[newRules[i].ID] = newRules[i]
 	}
 
 	// Remove rules that are no longer present
@@ -147,6 +149,8 @@ func (r *RuleCreatorImpl) RemoveRuleByID(id string) bool {
 func (r *RuleCreatorImpl) UpdateRule(rule typesv1.Rule) bool {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+
+	rule.Init()
 
 	for i, existingRule := range r.Rules {
 		if existingRule.ID == rule.ID {

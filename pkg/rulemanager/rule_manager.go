@@ -177,9 +177,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
-	if !isSupportedEventType(rules, enrichedEvent) {
-		return
-	}
+	eventType := enrichedEvent.Event.GetEventType()
 
 	_, apChecksum, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil
@@ -189,9 +187,17 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
-	eventType := enrichedEvent.Event.GetEventType()
+	evalContext := rm.celEvaluator.CreateEvalContext(enrichedEvent.Event)
+	defer evalContext.Release()
+
 	for _, rule := range rules {
 		if !rule.Enabled {
+			continue
+		}
+
+		// Fast path: skip rules that have no expressions for this event type
+		ruleExpressions := rule.ExpressionsByEventType[eventType]
+		if len(ruleExpressions) == 0 {
 			continue
 		}
 
@@ -204,17 +210,12 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			continue
 		}
 
-		ruleExpressions := rm.getRuleExpressions(rule, eventType)
-		if len(ruleExpressions) == 0 {
-			continue
-		}
-
 		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
 			continue
 		}
 
 		startTime := time.Now()
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, rule.Expressions.RuleExpression)
+		shouldAlert, err := rm.celEvaluator.EvaluateRuleWithContext(evalContext, ruleExpressions)
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.Name, eventType, evaluationTime)
 
@@ -226,10 +227,10 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		if shouldAlert {
 			state := rule.State
 			if eventType == utils.HTTPEventType { // TODO: Manage state evaluation in a better way (this is abuse of the state map, we need a better way to pass payloads from rules.)
-				state = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
+				state = rm.evaluateHTTPPayloadState(rule.State, evalContext)
 			}
 			rm.metrics.ReportRuleAlert(rule.Name)
-			message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
+			message, uniqueID, err := rm.getUniqueIdAndMessage(evalContext, rule)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
 				continue
@@ -321,24 +322,26 @@ func (rm *RuleManager) IsPodMonitored(namespace, pod string) bool {
 }
 
 func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
-	results := []string{}
+	var results []string
 
 	creator := rm.ruleBindingCache.GetRuleCreator()
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
+
+	evalContext := rm.celEvaluator.CreateEvalContext(event)
+	defer evalContext.Release()
 
 	for _, rule := range rules {
 		if !rule.SupportPolicy {
 			continue
 		}
 
-		enrichedEvent := &events.EnrichedEvent{Event: event}
-		ruleExpressions := rm.getRuleExpressions(rule, eventType)
+		ruleExpressions := rule.ExpressionsByEventType[eventType]
 		if len(ruleExpressions) == 0 {
 			continue
 		}
 
 		startTime := time.Now()
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, ruleExpressions)
+		shouldAlert, err := rm.celEvaluator.EvaluateRuleWithContext(evalContext, ruleExpressions)
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.ID, eventType, evaluationTime)
 
@@ -370,22 +373,12 @@ func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEven
 	return allowed
 }
 
-func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.EventType) []typesv1.RuleExpression {
-	var ruleExpressions []typesv1.RuleExpression
-	for _, expression := range rule.Expressions.RuleExpression {
-		if string(expression.EventType) == string(eventType) {
-			ruleExpressions = append(ruleExpressions, expression)
-		}
-	}
-	return ruleExpressions
-}
-
-func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent, rule typesv1.Rule) (string, string, error) {
-	message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
+func (rm *RuleManager) getUniqueIdAndMessage(evalContext *cel.EventActivation, rule typesv1.Rule) (string, string, error) {
+	message, err := rm.celEvaluator.EvaluateExpressionWithContext(evalContext, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
-	uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
+	uniqueID, err := rm.celEvaluator.EvaluateExpressionWithContext(evalContext, rule.Expressions.UniqueID)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}
@@ -395,31 +388,19 @@ func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent
 	return message, uniqueID, err
 }
 
-func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEvent) bool {
-	eventType := enrichedEvent.Event.GetEventType()
-	for _, rule := range rules {
-		for _, expression := range rule.Expressions.RuleExpression {
-			if string(expression.EventType) == string(eventType) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func hashStringToMD5(str string) string {
 	hash := md5.Sum([]byte(str))
 	hashString := fmt.Sprintf("%x", hash)
 	return hashString
 }
 
-func (rm *RuleManager) evaluateHTTPPayloadState(state map[string]any, enrichedEvent *events.EnrichedEvent) map[string]any {
+func (rm *RuleManager) evaluateHTTPPayloadState(state map[string]any, evalContext *cel.EventActivation) map[string]any {
 	payloadExpression, ok := state["payload"].(string)
 	if !ok || payloadExpression == "" {
 		return state
 	}
 
-	payloadValue, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, payloadExpression)
+	payloadValue, err := rm.celEvaluator.EvaluateExpressionWithContext(evalContext, payloadExpression)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate http payload expression", helpers.Error(err))
 		return state
