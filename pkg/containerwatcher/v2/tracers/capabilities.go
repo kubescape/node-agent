@@ -70,7 +70,6 @@ func (ct *CapabilitiesTracer) Start(ctx context.Context) error {
 		params := map[string]string{
 			"operator.oci.ebpf.collect-kstack": "false",
 			"operator.oci.ebpf.unique":         "true",
-			"operator.LocalManager.host":       "true", // don't error if container-collection is nil when using local manager
 		}
 		err := ct.runtime.RunGadget(ct.gadgetCtx, nil, params)
 		if err != nil {

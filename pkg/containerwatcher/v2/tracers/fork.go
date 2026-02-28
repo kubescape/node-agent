@@ -64,10 +64,7 @@ func (ft *ForkTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(ft.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := ft.runtime.RunGadget(ft.gadgetCtx, nil, params)
+		err := ft.runtime.RunGadget(ft.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", ft.gadgetCtx.Name()), helpers.Error(err))
 		}

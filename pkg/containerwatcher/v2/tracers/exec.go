@@ -69,8 +69,7 @@ func (et *ExecTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.ebpf.paths":    "true", // CWD paths in events
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
+			"operator.oci.ebpf.paths": "true", // CWD paths in events
 		}
 		err := et.runtime.RunGadget(et.gadgetCtx, nil, params)
 		if err != nil {
