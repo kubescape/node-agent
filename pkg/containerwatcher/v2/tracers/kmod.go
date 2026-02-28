@@ -68,10 +68,7 @@ func (kt *KmodTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(kt.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := kt.runtime.RunGadget(kt.gadgetCtx, nil, params)
+		err := kt.runtime.RunGadget(kt.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", kt.gadgetCtx.Name()), helpers.Error(err))
 		}

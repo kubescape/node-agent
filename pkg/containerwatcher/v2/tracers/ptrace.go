@@ -64,10 +64,7 @@ func (pt *PtraceTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(pt.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := pt.runtime.RunGadget(pt.gadgetCtx, nil, params)
+		err := pt.runtime.RunGadget(pt.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", pt.gadgetCtx.Name()), helpers.Error(err))
 		}
