@@ -11,6 +11,7 @@ data:
     {
         "applicationProfileServiceEnabled": {{ eq .Values.capabilities.runtimeObservability "enable" }},
         "relevantCVEServiceEnabled": true,
+        "HostMonitoringEnabled": true,
         "prometheusExporterEnabled": {{ eq .Values.nodeAgent.config.prometheusExporter "enable" }},
         "runtimeDetectionEnabled": {{ eq .Values.capabilities.runtimeDetection "enable" }},
         "networkServiceEnabled": {{ eq .Values.capabilities.networkPolicyService "enable" }},
