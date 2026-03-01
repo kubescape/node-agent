@@ -97,8 +97,15 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 		return fallbackReadRequest(data)
 	}
 
-	// Set body directly without re-reading
+	// Set body directly without re-reading.
+	// Use Content-Length (when present) to discard trailing garbage from the
+	// fixed-size BPF ring-buffer.  The kernel-side gadget submits the entire
+	// 4 KiB struct regardless of how many bytes were actually captured, so
+	// everything past the real payload is uninitialised memory.
 	bodyData := data[headerEnd:]
+	if req.ContentLength >= 0 && req.ContentLength < int64(len(bodyData)) {
+		bodyData = bodyData[:req.ContentLength]
+	}
 	req.ContentLength = int64(len(bodyData))
 	req.Body = io.NopCloser(bytes.NewReader(bodyData))
 
@@ -125,8 +132,12 @@ func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 		return fallbackReadResponse(data, req)
 	}
 
-	// Set body directly without re-reading
+	// Set body directly without re-reading.
+	// See ParseHttpRequest for why we need the Content-Length guard.
 	bodyData := data[headerEnd:]
+	if resp.ContentLength >= 0 && resp.ContentLength < int64(len(bodyData)) {
+		bodyData = bodyData[:resp.ContentLength]
+	}
 	resp.Body.Close()
 	resp.Body = io.NopCloser(bytes.NewReader(bodyData))
 	resp.ContentLength = int64(len(bodyData))
