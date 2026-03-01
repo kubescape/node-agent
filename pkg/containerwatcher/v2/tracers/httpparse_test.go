@@ -73,6 +73,23 @@ func TestBPFBufferGarbageResponse(t *testing.T) {
 	assert.Equal(t, "OK", string(body))
 }
 
+func TestBPFBufferGarbageResponse_Chunked(t *testing.T) {
+	dummyReq, err := ParseHttpRequest([]byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))
+	require.NoError(t, err)
+
+	httpData := "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n"
+	buf := makeBPFBuffer(httpData)
+
+	cleaned := FromCString(buf)
+	assert.Equal(t, bpfBufSize, len(cleaned))
+
+	resp, err := ParseHttpResponse(cleaned, dummyReq)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "Wikipedia", string(body), "chunked response body should be decoded and should ignore trailing garbage")
+}
+
 func TestBPFBufferGarbageRequest_ContentLengthZero(t *testing.T) {
 	httpData := "GET / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 0\r\n\r\n"
 	buf := makeBPFBuffer(httpData)

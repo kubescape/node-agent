@@ -145,6 +145,12 @@ func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 	// Set body directly without re-reading.
 	// See ParseHttpRequest for why we need the Content-Length guard.
 	bodyData := data[headerEnd:]
+	if len(resp.TransferEncoding) > 0 && resp.TransferEncoding[0] == "chunked" {
+		decodedBody, err := io.ReadAll(httputil.NewChunkedReader(bytes.NewReader(bodyData)))
+		if err == nil {
+			bodyData = decodedBody
+		}
+	}
 	if resp.ContentLength >= 0 && resp.ContentLength < int64(len(bodyData)) {
 		bodyData = bodyData[:resp.ContentLength]
 	}
