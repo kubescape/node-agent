@@ -87,6 +87,20 @@ func TestBPFBufferGarbageRequest_ContentLengthZero(t *testing.T) {
 	assert.Empty(t, body, "Content-Length: 0 should produce empty body even with trailing garbage")
 }
 
+func TestBPFBufferGarbageRequest_ChunkedPost(t *testing.T) {
+	httpData := "POST /api HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n"
+	buf := makeBPFBuffer(httpData)
+
+	cleaned := FromCString(buf)
+	assert.Equal(t, bpfBufSize, len(cleaned))
+
+	req, err := ParseHttpRequest(cleaned)
+	require.NoError(t, err)
+	body, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "Wikipedia", string(body), "chunked POST body should be decoded and should ignore trailing garbage")
+}
+
 func TestFromCString_NullTerminatedBPFBuffer(t *testing.T) {
 	// When BPF buffer has a null byte after the real data, FromCString truncates correctly.
 	httpData := "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"

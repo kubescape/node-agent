@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
 	"strconv"
 	"time"
 
@@ -103,6 +104,15 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 	// 4 KiB struct regardless of how many bytes were actually captured, so
 	// everything past the real payload is uninitialised memory.
 	bodyData := data[headerEnd:]
+	if len(req.TransferEncoding) > 0 && req.TransferEncoding[0] == "chunked" {
+		decodedBody, err := io.ReadAll(httputil.NewChunkedReader(bytes.NewReader(bodyData)))
+		if err == nil {
+			bodyData = decodedBody
+			req.TransferEncoding = nil
+			req.Header.Del("Transfer-Encoding")
+			req.Header.Del("Content-Length")
+		}
+	}
 	if req.ContentLength >= 0 && req.ContentLength < int64(len(bodyData)) {
 		bodyData = bodyData[:req.ContentLength]
 	}
