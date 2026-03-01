@@ -68,10 +68,7 @@ func (bt *BpfTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(bt.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := bt.runtime.RunGadget(bt.gadgetCtx, nil, params)
+		err := bt.runtime.RunGadget(bt.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", bt.gadgetCtx.Name()), helpers.Error(err))
 		}
