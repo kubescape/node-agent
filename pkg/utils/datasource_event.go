@@ -583,12 +583,18 @@ func (e *DatasourceEvent) GetFullPath() string {
 }
 
 func (e *DatasourceEvent) GetGid() *uint32 {
-	gid, err := e.getFieldAccessor("proc.creds.gid").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetGid - error reading field proc.creds.gid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+	switch e.EventType {
+	case SyscallEventType:
+		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return nil
+	default:
+		gid, err := e.getFieldAccessor("proc.creds.gid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetGid - error reading field proc.creds.gid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+			return nil
+		}
+		return &gid
 	}
-	return &gid
 }
 
 func (e *DatasourceEvent) GetHostNetwork() bool {
@@ -623,12 +629,18 @@ func (e *DatasourceEvent) GetModule() string {
 }
 
 func (e *DatasourceEvent) GetMountNsID() uint64 {
-	mountNsID, err := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
-	if err != nil {
-		logger.L().Warning("GetMountNsID - error reading field proc.mntns_id", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+	switch e.EventType {
+	case SyscallEventType:
+		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return 0
+	default:
+		mountNsID, err := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
+		if err != nil {
+			logger.L().Warning("GetMountNsID - error reading field proc.mntns_id", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+			return 0
+		}
+		return mountNsID
 	}
-	return mountNsID
 }
 
 func (e *DatasourceEvent) GetNamespace() string {
@@ -702,12 +714,18 @@ func (e *DatasourceEvent) GetPath() string {
 }
 
 func (e *DatasourceEvent) GetPcomm() string {
-	pcomm, err := e.getFieldAccessor("proc.parent.comm").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetPcomm - error reading field proc.parent.comm", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+	switch e.EventType {
+	case SyscallEventType:
+		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return ""
+	default:
+		pcomm, err := e.getFieldAccessor("proc.parent.comm").String(e.Data)
+		if err != nil {
+			logger.L().Warning("GetPcomm - error reading field proc.parent.comm", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+			return ""
+		}
+		return pcomm
 	}
-	return pcomm
 }
 
 func (e *DatasourceEvent) GetPID() uint32 {
@@ -753,12 +771,18 @@ func (e *DatasourceEvent) GetPID64() uint64 {
 }
 
 func (e *DatasourceEvent) getPtid() uint64 {
-	ptid, err := e.getFieldAccessor("proc.parent.tid").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("getPtid - error reading field proc.parent.tid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+	switch e.EventType {
+	case SyscallEventType:
+		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return 0
+	default:
+		ptid, err := e.getFieldAccessor("proc.parent.tid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("getPtid - error reading field proc.parent.tid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+			return 0
+		}
+		return uint64(ptid)
 	}
-	return uint64(ptid)
 }
 
 func (e *DatasourceEvent) GetPktType() string {
@@ -816,6 +840,9 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 			return 0
 		}
 		return exitPpid
+	case SyscallEventType:
+		// FIXME this is a temporary workaround until the gadget has proc enrichment
+		return 0
 	default:
 		ppid, err := e.getFieldAccessor("proc.parent.pid").Uint32(e.Data)
 		if err != nil {
@@ -987,6 +1014,9 @@ func (e *DatasourceEvent) getTid() uint64 {
 			return 0
 		}
 		return uint64(tid)
+	case SyscallEventType:
+		// FIXME this is a temporary workaround until the gadget has proc enrichment
+		return 0
 	default:
 		tid, err := e.getFieldAccessor("proc.tid").Uint32(e.Data)
 		if err != nil {
@@ -1021,12 +1051,18 @@ func (e *DatasourceEvent) GetType() HTTPDataType {
 }
 
 func (e *DatasourceEvent) GetUid() *uint32 {
-	uid, err := e.getFieldAccessor("proc.creds.uid").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetUid - error reading field proc.creds.uid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+	switch e.EventType {
+	case SyscallEventType:
+		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return nil
+	default:
+		uid, err := e.getFieldAccessor("proc.creds.uid").Uint32(e.Data)
+		if err != nil {
+			logger.L().Warning("GetUid - error reading field proc.creds.uid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+			return nil
+		}
+		return &uid
 	}
-	return &uid
 }
 
 func (e *DatasourceEvent) GetUpperLayer() bool {
