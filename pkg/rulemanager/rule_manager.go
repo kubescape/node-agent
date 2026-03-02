@@ -81,7 +81,7 @@ func CreateRuleManager(
 	celEvaluator cel.RuleEvaluator,
 	mntnsRegistry contextdetection.Registry,
 ) (*RuleManager, error) {
-	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory)
+	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory, armotypes.AlertSourcePlatformK8sAgent)
 	rulePolicyValidator := NewRulePolicyValidator(objectCache)
 	detectorManager := detectors.NewDetectorManager(mntnsRegistry)
 

@@ -82,6 +82,7 @@ type CEL struct {
 	ta              xcel.TypeAdapter
 	tp              *xcel.TypeProvider
 	eventConverters map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent
+	optimizer       *cel.StaticOptimizer
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
@@ -117,6 +118,14 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	if err != nil {
 		return nil, err
 	}
+	folder, err := cel.NewConstantFoldingOptimizer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create constant folding optimizer: %w", err)
+	}
+	optimizer, err := cel.NewStaticOptimizer(folder)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create static optimizer: %w", err)
+	}
 	c := &CEL{
 		env:             env,
 		objectCache:     objectCache,
@@ -124,6 +133,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		ta:              ta,
 		tp:              tp,
 		eventConverters: make(map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent),
+		optimizer:       optimizer,
 	}
 
 	return c, nil
@@ -144,6 +154,14 @@ func (c *CEL) registerExpression(expression string) error {
 		c.programCache[expression] = nil
 		logger.L().Warning("CEL expression disabled: failed to compile", helpers.String("expression", expression), helpers.Error(issues.Err()))
 		return fmt.Errorf("failed to compile expression: %s", issues.Err())
+	}
+
+	if optimizedAst, optIssues := c.optimizer.Optimize(c.env, ast); optIssues == nil || optIssues.Err() == nil {
+		ast = optimizedAst
+	} else {
+		logger.L().Warning("CEL static optimizer failed, using unoptimized AST",
+			helpers.String("expression", expression),
+			helpers.Error(optIssues.Err()))
 	}
 
 	program, err := c.env.Program(ast, cel.EvalOptions(cel.OptOptimize))
