@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
 	"github.com/google/cel-go/interpreter"
 	"github.com/kubescape/go-logger"
@@ -58,6 +59,10 @@ func (a *EventActivation) Parent() interpreter.Activation { return nil }
 
 // Release returns the activation and its wrapped object to their pools.
 func (a *EventActivation) Release() {
+	if w, ok := a.event.Raw.(*utils.HttpEventWrapper); ok {
+		w.CelEvent = nil
+		utils.HttpEventWrapperPool.Put(w)
+	}
 	a.event.Raw = nil
 	objectPool.Put(a.event)
 	a.event = nil
@@ -85,11 +90,11 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	eventObj, eventTyp := xcel.NewObject(&utils.CelEventImpl{})
 	xcel.RegisterObject(ta, tp, eventObj, eventTyp, utils.CelFields)
 
-	// Register the nested request accessor type
-	requestObj, requestTyp := xcel.NewObject(utils.HttpRequestAccessor{})
-	xcel.RegisterObject(ta, tp, requestObj, requestTyp, utils.HttpRequestFields)
-
-	// Set the request field's type now that requestTyp is available
+	// Register the nested request type (HttpEventWrapper implements ref.Val directly)
+	requestTyp := cel.ObjectType("HttpEventWrapper", traits.ReceiverType)
+	xcel.RegisterType(tp, requestTyp)
+	xcel.RegisterStructType(tp, requestTyp.TypeName(), utils.HttpRequestFields)
+	utils.SetHttpRequestType(requestTyp)
 	utils.CelFields["request"].Type = requestTyp
 
 	envOptions := []cel.EnvOption{
@@ -176,10 +181,19 @@ func (c *CEL) CreateEvalContext(event utils.K8sEvent) *EventActivation {
 	eventType := event.GetEventType()
 
 	obj := objectPool.Get().(*xcel.Object[utils.CelEvent])
+	var celEvent utils.CelEvent
 	if converter, exists := c.eventConverters[eventType]; exists {
-		obj.Raw = converter(event).(utils.CelEvent)
+		celEvent = converter(event).(utils.CelEvent)
 	} else {
-		obj.Raw = event.(utils.CelEvent)
+		celEvent = event.(utils.CelEvent)
+	}
+
+	if eventType == utils.HTTPEventType {
+		wrapper := utils.HttpEventWrapperPool.Get().(*utils.HttpEventWrapper)
+		wrapper.CelEvent = celEvent
+		obj.Raw = wrapper
+	} else {
+		obj.Raw = celEvent
 	}
 
 	activation := eventActivationPool.Get().(*EventActivation)

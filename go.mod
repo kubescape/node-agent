@@ -42,7 +42,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/panjf2000/ants/v2 v2.11.3
-	github.com/picatz/xcel v0.0.0-20250816143731-885b5f678a12
+	github.com/picatz/xcel v0.0.0-20260226001349-6958ffac5706
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/procfs v0.19.2

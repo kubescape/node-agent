@@ -1729,8 +1729,8 @@ github.com/petermattis/goid v0.0.0-20241211131331-93ee7e083c43/go.mod h1:pxMtw7c
 github.com/phpdave11/gofpdf v1.4.2/go.mod h1:zpO6xFn9yxo3YLyMvW8HcKWVdbNqgIfOOp2dXMnm1mY=
 github.com/phpdave11/gofpdi v1.0.12/go.mod h1:vBmVV0Do6hSBHC8uKUQ71JGW+ZGQq74llk/7bXwjDoI=
 github.com/phpdave11/gofpdi v1.0.13/go.mod h1:vBmVV0Do6hSBHC8uKUQ71JGW+ZGQq74llk/7bXwjDoI=
-github.com/picatz/xcel v0.0.0-20250816143731-885b5f678a12 h1:RS7RxrC+OtnYpgI0li0NwvpE0cqYewsZGXUb6wAe0oQ=
-github.com/picatz/xcel v0.0.0-20250816143731-885b5f678a12/go.mod h1:jxNaYyVlWe+WPV3G45KzlMLvplS3PQdHLUsFePIcaEg=
+github.com/picatz/xcel v0.0.0-20260226001349-6958ffac5706 h1:xfPEUCHSHcjpu4WxgtC1lwBkP4Xa7R/pl8sXVF103Yg=
+github.com/picatz/xcel v0.0.0-20260226001349-6958ffac5706/go.mod h1:bFTXcuU+280rICoGMpVTk/06XNfgvfeplhjWWoLKPys=
 github.com/pierrec/lz4/v4 v4.1.15/go.mod h1:gZWDp/Ze/IJXGXf23ltt2EXimqmTUXEy0GFuRQyBid4=
 github.com/pierrec/lz4/v4 v4.1.22 h1:cKFw6uJDK+/gfw5BcDL0JL5aBsAFdsIT18eRtLj7VIU=
 github.com/pierrec/lz4/v4 v4.1.22/go.mod h1:gZWDp/Ze/IJXGXf23ltt2EXimqmTUXEy0GFuRQyBid4=

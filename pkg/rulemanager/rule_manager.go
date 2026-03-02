@@ -3,7 +3,8 @@ package rulemanager
 import (
 	"context"
 	"crypto/md5"
-	"fmt"
+	"encoding/hex"
+	"strconv"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -208,8 +209,8 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		// Fast path: skip rules that have no expressions for this event type
-		ruleExpressions := rule.ExpressionsByEventType[eventType]
-		if len(ruleExpressions) == 0 {
+		ruleExpressions, ok := rule.ExpressionsByEventType[eventType]
+		if !ok {
 			continue
 		}
 
@@ -283,7 +284,7 @@ func (rm *RuleManager) enrichEventWithContext(enrichedEvent *events.EnrichedEven
 	if contextInfo, found := rm.mntnsRegistry.Lookup(mntnsID); found {
 		enrichedEvent.SourceContext = contextInfo
 		logger.L().Debug("RuleManager - enriched event with context",
-			helpers.String("mntns", fmt.Sprintf("%d", mntnsID)),
+			helpers.String("mntns", strconv.FormatUint(mntnsID, 10)),
 			helpers.String("context", string(contextInfo.Context())))
 	}
 }
@@ -347,8 +348,8 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			continue
 		}
 
-		ruleExpressions := rule.ExpressionsByEventType[eventType]
-		if len(ruleExpressions) == 0 {
+		ruleExpressions, ok := rule.ExpressionsByEventType[eventType]
+		if !ok {
 			continue
 		}
 
@@ -402,8 +403,7 @@ func (rm *RuleManager) getUniqueIdAndMessage(evalContext *cel.EventActivation, r
 
 func hashStringToMD5(str string) string {
 	hash := md5.Sum([]byte(str))
-	hashString := fmt.Sprintf("%x", hash)
-	return hashString
+	return hex.EncodeToString(hash[:])
 }
 
 func (rm *RuleManager) evaluateHTTPPayloadState(state map[string]any, evalContext *cel.EventActivation) map[string]any {
