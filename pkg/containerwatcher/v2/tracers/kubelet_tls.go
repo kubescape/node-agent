@@ -5,11 +5,11 @@ import (
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
-  "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -102,35 +102,35 @@ func (t *KubeletTLSTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-          eventFields := make(map[string]interface{})
+					eventFields := make(map[string]interface{})
 
-    for _, acc := range source.Accessors(false) {
-        var val interface{}
-        var err error
+					for _, acc := range source.Accessors(false) {
+						var val interface{}
+						var err error
 
-        // Use the correct getter based on the field type defined in the gadget
-        switch acc.Type() {
-        case api.Kind_Uint32:
-            val, err = acc.Uint32(data)
-        case api.Kind_Uint64:
-            val, err = acc.Uint64(data)
-        case api.Kind_Int32:
-            val, err = acc.Int32(data)
-        case api.Kind_String, api.Kind_CString:
-            val, err = acc.String(data)
-        case api.Kind_Bool:
-            val, err = acc.Bool(data)
-        default:
-            // Fallback for types we didn't explicitly handle
-            val, _ = acc.String(data)
-        }
+						// Use the correct getter based on the field type defined in the gadget
+						switch acc.Type() {
+						case api.Kind_Uint32:
+							val, err = acc.Uint32(data)
+						case api.Kind_Uint64:
+							val, err = acc.Uint64(data)
+						case api.Kind_Int32:
+							val, err = acc.Int32(data)
+						case api.Kind_String, api.Kind_CString:
+							val, err = acc.String(data)
+						case api.Kind_Bool:
+							val, err = acc.Bool(data)
+						default:
+							// Fallback for types we didn't explicitly handle
+							val, _ = acc.String(data)
+						}
 
-        if err == nil {
-            eventFields[acc.Name()] = val
-        }
-    }
+						if err == nil {
+							eventFields[acc.Name()] = val
+						}
+					}
 
-    logger.L().Info("KubeletTLS Event Captured", helpers.Interface("metadata", eventFields))
+					logger.L().Info("KubeletTLS Event Captured", helpers.Interface("metadata", eventFields))
 					t.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.KubeletTLSEventType})
 					return nil
 				}, opPriority)
