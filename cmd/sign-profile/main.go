@@ -80,11 +80,16 @@ func parseSignFlags() {
 	fs.StringVar(&inputFile, "file", "", "Input profile YAML file (required)")
 	fs.StringVar(&outputFile, "output", "", "Output file for signed profile (required)")
 	fs.StringVar(&keyFile, "key", "", "Path to private key file")
-	fs.BoolVar(&useKeyless, "keyless", false, "Use keyless signing (OIDC)")
 	fs.StringVar(&profileType, "type", "auto", "Profile type: applicationprofile, seccompprofile, or auto")
+	fs.BoolVar(&useKeyless, "keyless", true, "Use keyless signing (OIDC)")
 	fs.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 
-	if err := fs.Parse(os.Args[2:]); err != nil {
+	offset := 2
+	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "-") {
+		offset = 1
+	}
+
+	if err := fs.Parse(os.Args[offset:]); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
 		os.Exit(1)
 	}
