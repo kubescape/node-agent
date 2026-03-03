@@ -537,7 +537,7 @@ func (e *DatasourceEvent) GetExePath() string {
 		logger.L().Warning("GetExePath - error reading field exepath", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
-	return exepath
+	return NormalizePath(exepath)
 }
 
 func (e *DatasourceEvent) GetExitCode() uint32 {
@@ -579,7 +579,7 @@ func (e *DatasourceEvent) GetFullPath() string {
 			return ""
 		}
 	}
-	return path
+	return NormalizePath(path)
 }
 
 func (e *DatasourceEvent) GetGid() *uint32 {
@@ -658,7 +658,7 @@ func (e *DatasourceEvent) GetNewPath() string {
 		logger.L().Warning("GetNewPath - error reading field newpath", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
-	return newPath
+	return NormalizePath(newPath)
 }
 
 func (e *DatasourceEvent) GetNumAnswers() int {
@@ -676,7 +676,7 @@ func (e *DatasourceEvent) GetOldPath() string {
 		logger.L().Warning("GetOldPath - error reading field oldpath", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
-	return oldPath
+	return NormalizePath(oldPath)
 }
 
 func (e *DatasourceEvent) GetOpcode() int {
@@ -710,7 +710,7 @@ func (e *DatasourceEvent) GetPath() string {
 		logger.L().Warning("GetPath - error reading field fname", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
 		return ""
 	}
-	return path
+	return NormalizePath(path)
 }
 
 func (e *DatasourceEvent) GetPcomm() string {
