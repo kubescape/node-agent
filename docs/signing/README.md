@@ -325,7 +325,7 @@ metadata:
   namespace: default
 spec:
   containers:
-  - name: app容器
+  - name: app-container
 EOF
 
 # 3. Sign with local key
@@ -442,7 +442,7 @@ sequenceDiagram
     - Built-in identity from GitHub Actions/Google/Kubernetes
     - Transparent, auditable signing process
 
-2. **Sign Before Applying**
+3. **Sign Before Applying**
     - Always verify signatures before applying to clusters
     - Enable cache verification in node-agent for automatic validation
     - Consider admission controller to enforce verification

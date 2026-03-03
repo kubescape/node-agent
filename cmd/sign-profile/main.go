@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -38,14 +39,18 @@ func main() {
 
 	command = os.Args[1]
 
+	argsRewritten := false
 	if strings.HasPrefix(command, "-") {
 		command = "sign"
+		argsRewritten = true
 	}
 
 	switch command {
 	case "sign", "":
 		parseSignFlags()
-		os.Args = append([]string{"sign-profile"}, os.Args[1:]...)
+		if argsRewritten {
+			os.Args = append([]string{"sign-profile"}, os.Args[1:]...)
+		}
 	case "verify":
 		parseVerifyFlags()
 		os.Args = append([]string{"sign-profile verify"}, os.Args[2:]...)
@@ -106,6 +111,7 @@ func parseSignFlags() {
 func parseVerifyFlags() {
 	fs := flag.NewFlagSet("sign-profile verify", flag.ExitOnError)
 	fs.StringVar(&inputFile, "file", "", "Signed profile YAML file (required)")
+	fs.StringVar(&profileType, "type", "auto", "Profile type: applicationprofile, seccompprofile, or auto")
 	fs.BoolVar(&strict, "strict", true, "Require trusted issuer/identity")
 	fs.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 
@@ -141,6 +147,7 @@ func parseGenerateFlags() {
 func parseExtractFlags() {
 	fs := flag.NewFlagSet("sign-profile extract-signature", flag.ExitOnError)
 	fs.StringVar(&inputFile, "file", "", "Signed profile YAML file (required)")
+	fs.StringVar(&profileType, "type", "auto", "Profile type: applicationprofile, seccompprofile, or auto")
 	fs.BoolVar(&jsonOutput, "json", false, "Output as JSON")
 
 	if err := fs.Parse(os.Args[2:]); err != nil {
@@ -200,7 +207,23 @@ func runSign() error {
 		if verbose {
 			fmt.Printf("Using local key from: %s\n", keyFile)
 		}
-		signErr = signature.SignProfileWithKey(profileAdapter)
+
+		keyData, err := os.ReadFile(keyFile)
+		if err != nil {
+			return fmt.Errorf("failed to read private key file: %w", err)
+		}
+
+		block, _ := pem.Decode(keyData)
+		if block == nil {
+			return fmt.Errorf("failed to decode PEM block from key file")
+		}
+
+		privateKey, err := x509.ParseECPrivateKey(block.Bytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse EC private key: %w", err)
+		}
+
+		signErr = signature.SignProfile(profileAdapter, signature.WithPrivateKey(privateKey))
 	}
 
 	if signErr != nil {
@@ -277,26 +300,41 @@ func runVerify() error {
 }
 
 func runGenerateKeyPair() error {
-	var outputData []byte
-
 	adapter, err := signature.NewCosignAdapter(false)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 
-	sig, err := adapter.SignData([]byte("test-data-for-key-generation"))
+	pubKeyBytes, err := adapter.GetPublicKeyPEM()
 	if err != nil {
-		return fmt.Errorf("failed to generate signature: %w", err)
+		return fmt.Errorf("failed to get public key: %w", err)
 	}
 
-	outputData = sig.Certificate
+	if publicOnly {
+		if err := os.WriteFile(outputFile, pubKeyBytes, 0644); err != nil {
+			return fmt.Errorf("failed to write public key file: %w", err)
+		}
 
-	if err := os.WriteFile(outputFile, outputData, 0600); err != nil {
-		return fmt.Errorf("failed to write key file: %w", err)
+		fmt.Printf("✓ Public key written to: %s\n", outputFile)
+		return nil
 	}
 
-	fmt.Printf("✓ Public key written to: %s\n", outputFile)
-	fmt.Printf("  (Private key is generated internally for signing operations)\n")
+	privKeyBytes, err := adapter.GetPrivateKeyPEM()
+	if err != nil {
+		return fmt.Errorf("failed to get private key: %w", err)
+	}
+
+	if err := os.WriteFile(outputFile, privKeyBytes, 0600); err != nil {
+		return fmt.Errorf("failed to write private key file: %w", err)
+	}
+
+	pubKeyFile := outputFile + ".pub"
+	if err := os.WriteFile(pubKeyFile, pubKeyBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write public key file: %w", err)
+	}
+
+	fmt.Printf("✓ Private key written to: %s\n", outputFile)
+	fmt.Printf("✓ Public key written to: %s\n", pubKeyFile)
 	return nil
 }
 
@@ -433,17 +471,19 @@ SIGN FLAGS:
     --verbose               Enable verbose logging
 
 VERIFY FLAGS:
-    --file <path>           Signed profile YAML file (required)
-    --strict                Require trusted issuer/identity (default: true)
-    --verbose               Enable verbose logging
+    --file <path>                 Signed profile YAML file (required)
+    --type <type>                 Profile type: applicationprofile, seccompprofile, or auto (default: auto)
+    --strict                      Require trusted issuer/identity (default: true)
+    --verbose                     Enable verbose logging
 
 GENERATE-KEYPAIR FLAGS:
-    --output <path>         Output PEM file (required)
-    --public-only           Only output public key
+    --output <path>         Output PEM file for private key (required)
+    --public-only           Only output public key (no private key)
 
 EXTRACT-SIGNATURE FLAGS:
-    --file <path>           Signed profile YAML file (required)
-    --json                  Output as JSON
+    --file <path>                 Signed profile YAML file (required)
+    --type <type>                 Profile type: applicationprofile, seccompprofile, or auto (default: auto)
+    --json                        Output as JSON
 
 EXAMPLES:
     # Sign with keyless (OIDC)
@@ -455,8 +495,11 @@ EXAMPLES:
     # Verify a signed profile
     sign-profile verify --file signed-profile.yaml
 
-    # Generate a key pair
-    sign-profile generate-keypair --output my-key-pair.pem
+    # Generate a key pair (writes my-key.pem and my-key.pem.pub)
+    sign-profile generate-keypair --output my-key.pem
+
+    # Generate only public key
+    sign-profile generate-keypair --output my-key.pem --public-only
 
     # Extract signature information
     sign-profile extract-signature --file signed-profile.yaml
