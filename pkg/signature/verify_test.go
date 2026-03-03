@@ -168,11 +168,19 @@ func TestSignAndVerifyDifferentKeys(t *testing.T) {
 		t.Fatalf("GetProfileSignature failed for profile2: %v", err)
 	}
 
-	if sig1.Issuer == sig2.Issuer && sig1.Issuer != "" {
-		t.Log("Both profiles have same issuer")
+	if sig1.Issuer != "local" {
+		t.Errorf("Expected key-based signing issuer 'local', got '%s'", sig1.Issuer)
 	}
 
-	if sig1.Identity == sig2.Identity && sig1.Identity != "" {
-		t.Log("Both profiles have same identity")
+	if sig1.Identity != "local-key" {
+		t.Errorf("Expected key-based signing identity 'local-key', got '%s'", sig1.Identity)
+	}
+
+	if sig2.Issuer == "" {
+		t.Errorf("Expected keyless signing to have issuer, got empty")
+	}
+
+	if sig2.Identity == "" {
+		t.Errorf("Expected keyless signing to have identity, got empty")
 	}
 }

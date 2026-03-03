@@ -168,8 +168,8 @@ func TestGetProfileSignature(t *testing.T) {
 		setupAnnotations func(*MockSignableProfile)
 	}{
 		{
-			name:      "No annotations",
-			profile:   NewMockSignableProfile("uid", "ns", "name", map[string]string{}),
+			name:      "Nil annotations",
+			profile:   &MockSignableProfile{uid: "uid", namespace: "ns", name: "name", content: map[string]string{}, annotations: nil},
 			wantErr:   true,
 			setupSign: false,
 		},

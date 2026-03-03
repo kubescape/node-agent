@@ -271,11 +271,33 @@ func TestAdapterUniqueness(t *testing.T) {
 	apAdapter := NewApplicationProfileAdapter(ap)
 	spAdapter := NewSeccompProfileAdapter(sp)
 
-	signature.SignProfileWithKey(apAdapter)
-	signature.SignProfileWithKey(spAdapter)
+	err := signature.SignProfileWithKey(apAdapter)
+	if err != nil {
+		t.Fatalf("SignProfileWithKey failed for ApplicationProfile: %v", err)
+	}
 
-	apSig, _ := signature.GetProfileSignature(apAdapter)
-	spSig, _ := signature.GetProfileSignature(spAdapter)
+	err = signature.SignProfileWithKey(spAdapter)
+	if err != nil {
+		t.Fatalf("SignProfileWithKey failed for SeccompProfile: %v", err)
+	}
+
+	apSig, err := signature.GetProfileSignature(apAdapter)
+	if err != nil {
+		t.Fatalf("GetProfileSignature failed for ApplicationProfile: %v", err)
+	}
+
+	if apSig == nil {
+		t.Fatal("GetProfileSignature returned nil for ApplicationProfile")
+	}
+
+	spSig, err := signature.GetProfileSignature(spAdapter)
+	if err != nil {
+		t.Fatalf("GetProfileSignature failed for SeccompProfile: %v", err)
+	}
+
+	if spSig == nil {
+		t.Fatal("GetProfileSignature returned nil for SeccompProfile")
+	}
 
 	if apSig.Issuer != "local" {
 		t.Errorf("Expected AP issuer 'local', got '%s'", apSig.Issuer)

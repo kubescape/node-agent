@@ -17,9 +17,17 @@ func SignProfile(profile SignableProfile, opts ...SignOption) error {
 		opt(options)
 	}
 
-	signer, err := NewCosignSigner(options.UseKeyless)
+	var adapter *CosignAdapter
+	var err error
+
+	if options.PrivateKey != nil {
+		adapter, err = NewCosignAdapterWithPrivateKey(options.UseKeyless, options.PrivateKey)
+	} else {
+		adapter, err = NewCosignAdapter(options.UseKeyless)
+	}
+
 	if err != nil {
-		return fmt.Errorf("failed to create signer: %w", err)
+		return fmt.Errorf("failed to create cosign adapter: %w", err)
 	}
 
 	content := profile.GetContent()
@@ -27,11 +35,6 @@ func SignProfile(profile SignableProfile, opts ...SignOption) error {
 	contentBytes, err := json.Marshal(content)
 	if err != nil {
 		return fmt.Errorf("failed to marshal profile content: %w", err)
-	}
-
-	adapter, err := NewCosignAdapter(options.UseKeyless)
-	if err != nil {
-		return fmt.Errorf("failed to create cosign adapter: %w", err)
 	}
 
 	hash, err := adapter.GetContentHash(content)
@@ -44,7 +47,7 @@ func SignProfile(profile SignableProfile, opts ...SignOption) error {
 		helpers.String("name", profile.GetName()),
 		helpers.String("contentHash", hash))
 
-	sig, err := signer.Sign(contentBytes)
+	sig, err := adapter.SignData(contentBytes)
 	if err != nil {
 		return fmt.Errorf("failed to sign profile: %w", err)
 	}
@@ -54,7 +57,16 @@ func SignProfile(profile SignableProfile, opts ...SignOption) error {
 		return fmt.Errorf("failed to encode signature to annotations: %w", err)
 	}
 
-	profile.SetAnnotations(annotations)
+	existingAnnotations := profile.GetAnnotations()
+	if existingAnnotations == nil {
+		existingAnnotations = make(map[string]string)
+	}
+
+	for k, v := range annotations {
+		existingAnnotations[k] = v
+	}
+
+	profile.SetAnnotations(existingAnnotations)
 
 	logger.L().Info("Successfully signed profile",
 		helpers.String("namespace", profile.GetNamespace()),

@@ -5,15 +5,23 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
 )
+
+type ecdsaSignature struct {
+	R, S *big.Int
+}
 
 const (
 	sigstoreIssuer = "https://token.actions.githubusercontent.com"
@@ -43,6 +51,17 @@ func NewCosignAdapter(useKeyless bool) (*CosignAdapter, error) {
 	}, nil
 }
 
+func NewCosignAdapterWithPrivateKey(useKeyless bool, privateKey *ecdsa.PrivateKey) (*CosignAdapter, error) {
+	if privateKey == nil {
+		return nil, fmt.Errorf("private key cannot be nil")
+	}
+
+	return &CosignAdapter{
+		privateKey: privateKey,
+		useKeyless: useKeyless,
+	}, nil
+}
+
 func (c *CosignAdapter) SignData(data []byte) (*Signature, error) {
 	digest := sha256.Sum256(data)
 	digestBytes := digest[:]
@@ -65,14 +84,14 @@ func (c *CosignAdapter) signKeyless(digest []byte) (*Signature, error) {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}
 
-	pubKeyBytes, err := cryptoutils.MarshalPublicKeyToPEM(&signerPrivKey.PublicKey)
+	certBytes, err := c.generateCertificate(signerPrivKey, sigstoreOIDC, sigstoreIssuer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal public key: %w", err)
+		return nil, fmt.Errorf("failed to generate certificate: %w", err)
 	}
 
 	sigObj := &Signature{
 		Signature:   signature,
-		Certificate: pubKeyBytes,
+		Certificate: certBytes,
 		Issuer:      sigstoreIssuer,
 		Identity:    sigstoreOIDC,
 		Timestamp:   time.Now().Unix(),
@@ -87,14 +106,14 @@ func (c *CosignAdapter) signWithKey(digest []byte) (*Signature, error) {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}
 
-	pubKeyBytes, err := cryptoutils.MarshalPublicKeyToPEM(&c.privateKey.PublicKey)
+	certBytes, err := c.generateCertificate(c.privateKey, "local-key", "local")
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal public key: %w", err)
+		return nil, fmt.Errorf("failed to generate certificate: %w", err)
 	}
 
 	sigObj := &Signature{
 		Signature:   signature,
-		Certificate: pubKeyBytes,
+		Certificate: certBytes,
 		Issuer:      "local",
 		Identity:    "local-key",
 		Timestamp:   time.Now().Unix(),
@@ -103,44 +122,129 @@ func (c *CosignAdapter) signWithKey(digest []byte) (*Signature, error) {
 	return sigObj, nil
 }
 
+func (c *CosignAdapter) generateCertificate(privKey *ecdsa.PrivateKey, identity, issuer string) ([]byte, error) {
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName: identity,
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+		BasicConstraintsValid: true,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privKey.PublicKey, privKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certDER,
+	})
+
+	return certPEM, nil
+}
+
 func (c *CosignAdapter) ecdsaSign(privKey *ecdsa.PrivateKey, digest []byte) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand.Reader, privKey, digest)
 	if err != nil {
 		return nil, err
 	}
 
-	signature := append(r.Bytes(), s.Bytes()...)
-	return signature, nil
+	return asn1.Marshal(ecdsaSignature{R: r, S: s})
+}
+
+func (c *CosignAdapter) GetPrivateKeyPEM() ([]byte, error) {
+	if c.privateKey == nil {
+		return nil, fmt.Errorf("no private key available")
+	}
+
+	derBytes, err := x509.MarshalECPrivateKey(c.privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal private key: %w", err)
+	}
+
+	block := &pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: derBytes,
+	}
+
+	return pem.EncodeToMemory(block), nil
+}
+
+func (c *CosignAdapter) GetPublicKeyPEM() ([]byte, error) {
+	if c.privateKey == nil {
+		return nil, fmt.Errorf("no private key available")
+	}
+
+	pubKeyBytes, err := cryptoutils.MarshalPublicKeyToPEM(&c.privateKey.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal public key: %w", err)
+	}
+
+	return pubKeyBytes, nil
 }
 
 func (c *CosignAdapter) VerifyData(data []byte, sig *Signature, allowUntrusted bool) error {
 	digest := sha256.Sum256(data)
 	digestBytes := digest[:]
 
-	pubKey, err := cryptoutils.UnmarshalPEMToPublicKey(sig.Certificate)
+	var ecdsaPubKey *ecdsa.PublicKey
+
+	block, _ := pem.Decode(sig.Certificate)
+	if block != nil && block.Type == "CERTIFICATE" {
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse certificate: %w", err)
+		}
+
+		var ok bool
+		ecdsaPubKey, ok = cert.PublicKey.(*ecdsa.PublicKey)
+		if !ok {
+			return fmt.Errorf("certificate public key is not ECDSA")
+		}
+
+		if !allowUntrusted {
+			if cert.IsCA || cert.Subject.CommonName == "" {
+				return fmt.Errorf("invalid certificate: must not be CA and must have a valid subject")
+			}
+
+			if time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
+				return fmt.Errorf("certificate is not valid at this time")
+			}
+		}
+	} else {
+		if !allowUntrusted {
+			return fmt.Errorf("untrusted certificate rejected: require valid x509 certificate chain")
+		}
+
+		pubKey, err := cryptoutils.UnmarshalPEMToPublicKey(sig.Certificate)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal public key: %w", err)
+		}
+
+		var ok bool
+		ecdsaPubKey, ok = pubKey.(*ecdsa.PublicKey)
+		if !ok {
+			return fmt.Errorf("public key is not ECDSA")
+		}
+	}
+
+	var ecdsaSig ecdsaSignature
+	_, err := asn1.Unmarshal(sig.Signature, &ecdsaSig)
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal public key: %w", err)
+		return fmt.Errorf("failed to unmarshal signature: %w", err)
 	}
 
-	ecdsaPubKey, ok := pubKey.(*ecdsa.PublicKey)
-	if !ok {
-		return fmt.Errorf("public key is not ECDSA")
-	}
-
-	signatureLen := len(sig.Signature)
-	if signatureLen < 1 {
-		return fmt.Errorf("invalid signature length")
-	}
-
-	curveOrderBytes := (ecdsaPubKey.Params().N.BitLen() + 7) / 8
-	if signatureLen != 2*curveOrderBytes {
-		return fmt.Errorf("signature length mismatch")
-	}
-
-	r := new(big.Int).SetBytes(sig.Signature[:curveOrderBytes])
-	s := new(big.Int).SetBytes(sig.Signature[curveOrderBytes:])
-
-	valid := ecdsa.Verify(ecdsaPubKey, digestBytes, r, s)
+	valid := ecdsa.Verify(ecdsaPubKey, digestBytes, ecdsaSig.R, ecdsaSig.S)
 	if !valid {
 		return fmt.Errorf("invalid signature")
 	}
