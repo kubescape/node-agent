@@ -247,20 +247,17 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			}
 
 			// Verify signature if enabled
-			if apc.cfg.EnableProfileVerification {
-				profileAdapter := profiles.NewApplicationProfileAdapter(fullProfile)
-				if err := signature.VerifyProfile(profileAdapter); err != nil {
-					logger.L().Warning("profile verification failed, skipping",
-						helpers.String("profile", profile.Name),
-						helpers.String("namespace", namespace),
-						helpers.String("workloadID", workloadID),
-						helpers.Error(err))
-					// Continue to next profile as per requirements: skip on verification failure
-					continue
+			if err := apc.verifyApplicationProfile(fullProfile, workloadID, "profile"); err != nil {
+				// Update profile state with verification error
+				profileState := &objectcache.ProfileState{
+					Completion: "failed",
+					Status:     "verification-failed",
+					Name:       profile.Name,
+					Error:      err,
 				}
-				logger.L().Debug("profile verification successful",
-					helpers.String("profile", profile.Name),
-					helpers.String("namespace", namespace))
+				apc.workloadIDToProfileState.Set(workloadID, profileState)
+				// Continue to next profile as per requirements: skip on verification failure
+				continue
 			}
 
 			apc.workloadIDToProfile.Set(workloadID, fullProfile)
@@ -282,6 +279,28 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 		}
 		// Continue to next namespace
 	}
+}
+
+// verifyApplicationProfile verifies the profile signature if verification is enabled.
+// Returns error if verification fails, nil otherwise (including when verification is disabled).
+// Also updates profileState with error details if verification fails.
+func (apc *ApplicationProfileCacheImpl) verifyApplicationProfile(profile *v1beta1.ApplicationProfile, workloadID, context string) error {
+	if !apc.cfg.EnableProfileVerification {
+		return nil
+	}
+	profileAdapter := profiles.NewApplicationProfileAdapter(profile)
+	if err := signature.VerifyProfile(profileAdapter); err != nil {
+		logger.L().Warning(context+" verification failed, skipping",
+			helpers.String("profile", profile.Name),
+			helpers.String("namespace", profile.Namespace),
+			helpers.String("workloadID", workloadID),
+			helpers.Error(err))
+		return err
+	}
+	logger.L().Debug(context+" verification successful",
+		helpers.String("profile", profile.Name),
+		helpers.String("namespace", profile.Namespace))
+	return nil
 }
 
 // handleUserManagedProfile handles user-managed profiles
@@ -334,18 +353,17 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	}
 
 	// Verify signature if enabled
-	if apc.cfg.EnableProfileVerification {
-		profileAdapter := profiles.NewApplicationProfileAdapter(fullUserProfile)
-		if err := signature.VerifyProfile(profileAdapter); err != nil {
-			logger.L().Warning("user-managed profile verification failed, skipping",
-				helpers.String("profile", profile.Name),
-				helpers.String("namespace", profile.Namespace),
-				helpers.Error(err))
-			return
+	if err := apc.verifyApplicationProfile(fullUserProfile, toMerge.wlid, "user-managed profile"); err != nil {
+		// Update profile state with verification error
+		profileState := &objectcache.ProfileState{
+			Completion: "failed",
+			Status:     "verification-failed",
+			Name:       profile.Name,
+			Error:      err,
 		}
-		logger.L().Debug("user-managed profile verification successful",
-			helpers.String("profile", profile.Name),
-			helpers.String("namespace", profile.Namespace))
+		apc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
+
+		return
 	}
 
 	// Merge the user-managed profile with the normal profile
@@ -566,24 +584,16 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 				}
 
 				// Verify signature if enabled
-				if apc.cfg.EnableProfileVerification {
-					profileAdapter := profiles.NewApplicationProfileAdapter(fullProfile)
-					if err := signature.VerifyProfile(profileAdapter); err != nil {
-						logger.L().Warning("user-defined profile verification failed, skipping",
-							helpers.String("profile", userDefinedProfile),
-							helpers.String("namespace", container.K8s.Namespace),
-							helpers.String("workloadID", workloadID),
-							helpers.Error(err))
-						// Update the profile state to indicate an error
-						profileState := &objectcache.ProfileState{
-							Error: fmt.Errorf("profile verification failed: %w", err),
-						}
-						apc.workloadIDToProfileState.Set(workloadID, profileState)
-						return nil
+				if err := apc.verifyApplicationProfile(fullProfile, workloadID, "user-defined profile"); err != nil {
+					// Update the profile state to indicate an error
+					profileState := &objectcache.ProfileState{
+						Completion: "failed",
+						Status:     "verification-failed",
+						Name:       userDefinedProfile,
+						Error:      fmt.Errorf("profile verification failed: %w", err),
 					}
-					logger.L().Debug("user-defined profile verification successful",
-						helpers.String("profile", userDefinedProfile),
-						helpers.String("namespace", container.K8s.Namespace))
+					apc.workloadIDToProfileState.Set(workloadID, profileState)
+					return nil
 				}
 
 				// Update the profile in the cache

@@ -26,6 +26,8 @@ func VerifyProfile(profile SignableProfile, opts ...VerifyOption) error {
 		return fmt.Errorf("profile is not signed (missing %s annotation)", AnnotationSignature)
 	}
 
+	// useKeyless=true is fine for verification since we use the certificate
+	// stored in the profile annotations, regardless of how the profile was signed
 	adapter, err := NewCosignAdapter(true)
 	if err != nil {
 		return fmt.Errorf("failed to create cosign adapter: %w", err)
