@@ -9,6 +9,9 @@ import (
 )
 
 func VerifyProfile(profile SignableProfile, opts ...VerifyOption) error {
+	if profile == nil {
+		return fmt.Errorf("profile is nil")
+	}
 	options := &VerifyOptions{
 		AllowUntrusted: false,
 	}

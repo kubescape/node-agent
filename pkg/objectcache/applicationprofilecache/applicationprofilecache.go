@@ -248,14 +248,6 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 
 			// Verify signature if enabled
 			if err := apc.verifyApplicationProfile(fullProfile, workloadID, "profile"); err != nil {
-				// Update profile state with verification error
-				profileState := &objectcache.ProfileState{
-					Completion: "failed",
-					Status:     "verification-failed",
-					Name:       profile.Name,
-					Error:      err,
-				}
-				apc.workloadIDToProfileState.Set(workloadID, profileState)
 				// Continue to next profile as per requirements: skip on verification failure
 				continue
 			}
@@ -295,12 +287,26 @@ func (apc *ApplicationProfileCacheImpl) verifyApplicationProfile(profile *v1beta
 			helpers.String("namespace", profile.Namespace),
 			helpers.String("workloadID", workloadID),
 			helpers.Error(err))
+
+		// Update profile state with verification error
+		apc.setVerificationFailed(workloadID, profile.Name, err)
+
 		return err
 	}
 	logger.L().Debug(context+" verification successful",
 		helpers.String("profile", profile.Name),
 		helpers.String("namespace", profile.Namespace))
 	return nil
+}
+
+func (apc *ApplicationProfileCacheImpl) setVerificationFailed(workloadID, profileName string, err error) {
+	profileState := &objectcache.ProfileState{
+		Completion: "failed",
+		Status:     "verification-failed",
+		Name:       profileName,
+		Error:      err,
+	}
+	apc.workloadIDToProfileState.Set(workloadID, profileState)
 }
 
 // handleUserManagedProfile handles user-managed profiles
@@ -354,15 +360,6 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 
 	// Verify signature if enabled
 	if err := apc.verifyApplicationProfile(fullUserProfile, toMerge.wlid, "user-managed profile"); err != nil {
-		// Update profile state with verification error
-		profileState := &objectcache.ProfileState{
-			Completion: "failed",
-			Status:     "verification-failed",
-			Name:       profile.Name,
-			Error:      err,
-		}
-		apc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
-
 		return
 	}
 
@@ -588,14 +585,6 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 
 				// Verify signature if enabled
 				if err := apc.verifyApplicationProfile(fullProfile, workloadID, "user-defined profile"); err != nil {
-					// Update the profile state to indicate an error
-					profileState := &objectcache.ProfileState{
-						Completion: "failed",
-						Status:     "verification-failed",
-						Name:       userDefinedProfile,
-						Error:      fmt.Errorf("profile verification failed: %w", err),
-					}
-					apc.workloadIDToProfileState.Set(workloadID, profileState)
 					return nil
 				}
 
