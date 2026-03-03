@@ -244,6 +244,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("hostSensorInterval", 5*time.Minute)
 
 	viper.AutomaticEnv()
+	_ = viper.BindEnv("enableProfileVerification", "ENABLE_PROFILE_VERIFICATION")
 
 	if err := viper.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError

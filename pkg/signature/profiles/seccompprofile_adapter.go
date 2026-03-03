@@ -17,7 +17,7 @@ func NewSeccompProfileAdapter(profile *v1beta1.SeccompProfile) *SeccompProfileAd
 
 func (s *SeccompProfileAdapter) GetAnnotations() map[string]string {
 	if s.profile.Annotations == nil {
-		return make(map[string]string)
+		s.profile.Annotations = make(map[string]string)
 	}
 	return s.profile.Annotations
 }

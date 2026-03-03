@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"strconv"
 	"time"
 
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
@@ -213,12 +214,18 @@ func (c *CosignAdapter) VerifyData(data []byte, sig *Signature, allowUntrusted b
 		}
 
 		if !allowUntrusted {
-			if cert.IsCA || cert.Subject.CommonName == "" {
-				return fmt.Errorf("invalid certificate: must not be CA and must have a valid subject")
+			if cert.IsCA {
+				return fmt.Errorf("invalid certificate: must not be CA")
 			}
 
 			if time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
 				return fmt.Errorf("certificate is not valid at this time")
+			}
+
+			// In a real production environment, we should verify against a trust root (Fulcio/Custom CA).
+			// For now, we validate the identity binding if strict mode is requested.
+			if sig.Identity != "" && cert.Subject.CommonName != sig.Identity {
+				return fmt.Errorf("identity mismatch: certificate subject %q does not match signature identity %q", cert.Subject.CommonName, sig.Identity)
 			}
 		}
 	} else {
@@ -239,9 +246,15 @@ func (c *CosignAdapter) VerifyData(data []byte, sig *Signature, allowUntrusted b
 	}
 
 	var ecdsaSig ecdsaSignature
-	_, err := asn1.Unmarshal(sig.Signature, &ecdsaSig)
+	rest, err := asn1.Unmarshal(sig.Signature, &ecdsaSig)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal signature: %w", err)
+	}
+	if len(rest) > 0 {
+		return fmt.Errorf("trailing data in signature")
+	}
+	if ecdsaSig.R == nil || ecdsaSig.S == nil {
+		return fmt.Errorf("invalid signature: R or S is nil")
 	}
 
 	valid := ecdsa.Verify(ecdsaPubKey, digestBytes, ecdsaSig.R, ecdsaSig.S)
@@ -312,8 +325,7 @@ func (c *CosignAdapter) DecodeSignatureFromAnnotations(annotations map[string]st
 	sig.Identity = annotations[AnnotationIdentity]
 
 	if timestamp, ok := annotations[AnnotationTimestamp]; ok {
-		var ts int64
-		_, err = fmt.Sscanf(timestamp, "%d", &ts)
+		ts, err := strconv.ParseInt(timestamp, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse timestamp: %w", err)
 		}

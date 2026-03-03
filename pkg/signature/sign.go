@@ -9,6 +9,9 @@ import (
 )
 
 func SignProfile(profile SignableProfile, opts ...SignOption) error {
+	if profile == nil {
+		return fmt.Errorf("profile is nil")
+	}
 	options := &SignOptions{
 		UseKeyless: true,
 	}

@@ -17,7 +17,7 @@ func NewApplicationProfileAdapter(profile *v1beta1.ApplicationProfile) *Applicat
 
 func (a *ApplicationProfileAdapter) GetAnnotations() map[string]string {
 	if a.profile.Annotations == nil {
-		return make(map[string]string)
+		a.profile.Annotations = make(map[string]string)
 	}
 	return a.profile.Annotations
 }
