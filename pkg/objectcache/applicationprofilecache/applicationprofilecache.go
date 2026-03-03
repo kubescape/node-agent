@@ -18,6 +18,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/resourcelocks"
+	"github.com/kubescape/node-agent/pkg/signature"
+	"github.com/kubescape/node-agent/pkg/signature/profiles"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -244,6 +246,23 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				continue
 			}
 
+			// Verify signature if enabled
+			if apc.cfg.EnableProfileVerification {
+				profileAdapter := profiles.NewApplicationProfileAdapter(fullProfile)
+				if err := signature.VerifyProfile(profileAdapter); err != nil {
+					logger.L().Warning("profile verification failed, skipping",
+						helpers.String("profile", profile.Name),
+						helpers.String("namespace", namespace),
+						helpers.String("workloadID", workloadID),
+						helpers.Error(err))
+					// Continue to next profile as per requirements: skip on verification failure
+					continue
+				}
+				logger.L().Debug("profile verification successful",
+					helpers.String("profile", profile.Name),
+					helpers.String("namespace", namespace))
+			}
+
 			apc.workloadIDToProfile.Set(workloadID, fullProfile)
 			logger.L().Debug("updated profile in cache",
 				helpers.String("workloadID", workloadID),
@@ -312,6 +331,21 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 			helpers.String("profileName", profile.Name),
 			helpers.Error(err))
 		return
+	}
+
+	// Verify signature if enabled
+	if apc.cfg.EnableProfileVerification {
+		profileAdapter := profiles.NewApplicationProfileAdapter(fullUserProfile)
+		if err := signature.VerifyProfile(profileAdapter); err != nil {
+			logger.L().Warning("user-managed profile verification failed, skipping",
+				helpers.String("profile", profile.Name),
+				helpers.String("namespace", profile.Namespace),
+				helpers.Error(err))
+			return
+		}
+		logger.L().Debug("user-managed profile verification successful",
+			helpers.String("profile", profile.Name),
+			helpers.String("namespace", profile.Namespace))
 	}
 
 	// Merge the user-managed profile with the normal profile
@@ -533,6 +567,28 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 					apc.workloadIDToProfileState.Set(workloadID, profileState)
 					return nil
 				}
+
+				// Verify signature if enabled
+				if apc.cfg.EnableProfileVerification {
+					profileAdapter := profiles.NewApplicationProfileAdapter(fullProfile)
+					if err := signature.VerifyProfile(profileAdapter); err != nil {
+						logger.L().Warning("user-defined profile verification failed, skipping",
+							helpers.String("profile", userDefinedProfile),
+							helpers.String("namespace", container.K8s.Namespace),
+							helpers.String("workloadID", workloadID),
+							helpers.Error(err))
+						// Update the profile state to indicate an error
+						profileState := &objectcache.ProfileState{
+							Error: fmt.Errorf("profile verification failed: %w", err),
+						}
+						apc.workloadIDToProfileState.Set(workloadID, profileState)
+						return nil
+					}
+					logger.L().Debug("user-defined profile verification successful",
+						helpers.String("profile", userDefinedProfile),
+						helpers.String("namespace", container.K8s.Namespace))
+				}
+
 				// Update the profile in the cache
 				apc.workloadIDToProfile.Set(workloadID, fullProfile)
 				logger.L().Debug("added user-defined profile to cache",
