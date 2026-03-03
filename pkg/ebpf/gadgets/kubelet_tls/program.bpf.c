@@ -10,8 +10,10 @@
 #include <gadget/buffer.h>
 #include <gadget/filesystem.h>
 #include <gadget/macros.h>
-#include <gadget/mntns_filter.h>
+#include <gadget/mntns.h>
+#include <gadget/filter.h>
 #include <gadget/types.h>
+#include <gadget/common.h>
 
 #include "go_argument.h"
 
@@ -24,6 +26,7 @@
 #define recordTypeApplicationData 23
 
 struct event {
+    struct gadget_process proc;
     u64 ts_ns;
     u32 pid;
     u32 tid;
@@ -65,6 +68,7 @@ static __always_inline int gotls_write(struct pt_regs *ctx, bool is_register_abi
     event->pid = id >> 32;
     event->tid = (__u32)id;
     event->event_type = GOTLS_EVENT_TYPE_WRITE;
+    gadget_process_populate(&event->proc);
     bpf_get_current_comm(event->comm, sizeof(event->comm));
 
     event->data_len =
@@ -134,6 +138,7 @@ static __always_inline int gotls_read(struct pt_regs *ctx, bool is_register_abi)
     event->pid = id >> 32;
     event->tid = (__u32)id;
     event->event_type = GOTLS_EVENT_TYPE_READ;
+    gadget_process_populate(&event->proc);
     bpf_get_current_comm(event->comm, sizeof(event->comm));
 
     event->data_len = (ret_len < MAX_DATA_SIZE_OPENSSL ? (ret_len & (MAX_DATA_SIZE_OPENSSL - 1)) : MAX_DATA_SIZE_OPENSSL);
