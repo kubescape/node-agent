@@ -71,4 +71,3 @@ func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

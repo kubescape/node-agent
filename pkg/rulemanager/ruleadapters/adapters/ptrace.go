@@ -60,4 +60,3 @@ func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEv
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

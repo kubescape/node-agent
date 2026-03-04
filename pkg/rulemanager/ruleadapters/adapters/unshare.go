@@ -64,4 +64,3 @@ func (c *UnshareAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

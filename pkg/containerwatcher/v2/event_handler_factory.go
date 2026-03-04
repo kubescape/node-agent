@@ -1,6 +1,7 @@
 package containerwatcher
 
 import (
+  "fmt"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -173,32 +174,55 @@ func NewEventHandlerFactory(
 
 // ProcessEvent processes an event through all registered handlers
 func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent) {
+	eventTypeTest := enrichedEvent.Event.GetEventType()
+  if eventTypeTest == utils.KubeletTLSEventType {
+    fmt.Printf("Teo4-before: Got the %s enriched event!\n", eventTypeTest)
+  }
+
+  // TODO: THIS IS RETURNING WHICH THEN BLOCKS PROCESSING OF THE MESSAGE
 	if enrichedEvent.ContainerID == "" {
+    	fmt.Println("Teo-ContainerId is empty - returning")
 		return
 	}
 
 	// Get container information to check if it should be ignored
+  /*
 	container, err := ehf.getContainerInfo(enrichedEvent.ContainerID)
 	if err != nil || container == nil {
+    	fmt.Println("Teo-containerInfo is empty - returning")
 		return
 	}
 
 	if ehf.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels) {
+    fmt.Println("Teo-ignoredContainer - returning")
 		return
 	}
+  */
 
 	// Get handlers for this event type
 	eventType := enrichedEvent.Event.GetEventType()
+  if eventType == utils.KubeletTLSEventType {
+    fmt.Printf("Teo4-after: Got the %s enriched event!\n", eventType)
+  } else { fmt.Printf("Teo4-other: Got the %s enriched event!\n", eventType) }
 	handlers, exists := ehf.handlers[eventType]
 	if !exists {
 		return
 	}
+  if eventType == utils.KubeletTLSEventType {
+    fmt.Printf("Teo4: FOUND THE HANDLER for %s TO HANDLE IT!\n", eventType)
+  }
 
 	// Process event through each handler
 	for _, handler := range handlers {
 		if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
+			if eventType == utils.KubeletTLSEventType {
+				fmt.Println("Teo5: ReportEnrichedEvent() called")
+			}
 			enrichedHandler.ReportEnrichedEvent(enrichedEvent)
 		} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
+			if eventType == utils.KubeletTLSEventType {
+				fmt.Println("Teo5: ReportEvent() called")
+			}
 			handler.ReportEvent(eventType, enrichedEvent.Event)
 		}
 	}

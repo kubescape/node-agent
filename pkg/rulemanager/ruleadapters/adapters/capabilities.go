@@ -55,4 +55,3 @@ func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enri
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

@@ -150,4 +150,3 @@ func (cw *convertingWatch) Stop() {
 func (cw *convertingWatch) ResultChan() <-chan watch.Event {
 	return cw.result
 }
-

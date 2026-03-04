@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"time"
+  "fmt"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -45,6 +46,7 @@ func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event ut
 		ContainerID: containerID,
 		ProcessID:   processID,
 	}
+  fmt.Printf("Teo: %s (containerID: %s)\n", eventType, containerID)
 
 	priority := timestamp.UnixNano()
 	oeq.eventQueue.Push(eventEntry, priority)

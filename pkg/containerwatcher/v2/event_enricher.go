@@ -30,6 +30,9 @@ func (ee *EventEnricher) EnrichEvents(entry EventEntry) *ebpfevents.EnrichedEven
 
 	eventType := entry.EventType
 	event := entry.Event
+  if eventType == utils.KubeletTLSEventType {
+    fmt.Printf("TeoZ: ContainerID in EnrichEvents is %s", entry.ContainerID)
+  }
 
 	if isProcessTreeEvent(eventType) {
 		if err := ee.processTreeManager.ReportEvent(eventType, event); err != nil {

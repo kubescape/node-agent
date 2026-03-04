@@ -24,8 +24,8 @@ type mockTLSEvent struct {
 	tlsEventType uint8
 }
 
-func (m *mockTLSEvent) GetContainerID() string         { return m.containerID }
-func (m *mockTLSEvent) GetEventType() utils.EventType  { return m.eventType }
+func (m *mockTLSEvent) GetContainerID() string          { return m.containerID }
+func (m *mockTLSEvent) GetEventType() utils.EventType   { return m.eventType }
 func (m *mockTLSEvent) GetNamespace() string            { return "test-ns" }
 func (m *mockTLSEvent) GetPod() string                  { return "test-pod" }
 func (m *mockTLSEvent) GetTimestamp() types.Time        { return 0 }
@@ -60,53 +60,55 @@ func (m *mockTLSEvent) GetEcsTaskDefinitionARN() string { return "" }
 func (m *mockTLSEvent) GetEcsServiceName() string       { return "" }
 func (m *mockTLSEvent) GetEcsContainerName() string     { return "" }
 func (m *mockTLSEvent) GetEcsContainerARN() string      { return "" }
-func (m *mockTLSEvent) GetEcsContainerInstance() string  { return "" }
+func (m *mockTLSEvent) GetEcsContainerInstance() string { return "" }
 func (m *mockTLSEvent) GetEcsAvailabilityZone() string  { return "" }
 func (m *mockTLSEvent) GetEcsLaunchType() string        { return "" }
 
 // Additional methods that may be required by other interfaces in the chain
-func (m *mockTLSEvent) GetExePath() string                                                   { return "" }
-func (m *mockTLSEvent) GetCwd() string                                                       { return "" }
-func (m *mockTLSEvent) GetArgs() []string                                                    { return nil }
-func (m *mockTLSEvent) GetFlags() []string                                                   { return nil }
-func (m *mockTLSEvent) GetUpperLayer() bool                                                  { return false }
-func (m *mockTLSEvent) GetPupperLayer() bool                                                 { return false }
-func (m *mockTLSEvent) GetDstIP() string                                                     { return "" }
-func (m *mockTLSEvent) GetDstPort() uint16                                                   { return 0 }
-func (m *mockTLSEvent) GetSrcIP() string                                                     { return "" }
-func (m *mockTLSEvent) GetSrcPort() uint16                                                   { return 0 }
-func (m *mockTLSEvent) GetDirection() consts.NetworkDirection                                { return "" }
-func (m *mockTLSEvent) GetInternal() bool                                                    { return false }
-func (m *mockTLSEvent) GetOtherIp() string                                                   { return "" }
-func (m *mockTLSEvent) GetRequest() *http.Request                                            { return nil }
-func (m *mockTLSEvent) GetResponse() *http.Response                                          { return nil }
-func (m *mockTLSEvent) SetResponse(_ *http.Response)                                         {}
-func (m *mockTLSEvent) GetBuf() []byte                                                       { return nil }
-func (m *mockTLSEvent) GetSockFd() uint32                                                    { return 0 }
-func (m *mockTLSEvent) GetSocketInode() uint64                                               { return 0 }
-func (m *mockTLSEvent) GetType() utils.HTTPDataType                                          { return 0 }
-func (m *mockTLSEvent) MakeHttpEvent(_ *http.Request, _ consts.NetworkDirection) utils.HttpEvent { return nil }
-func (m *mockTLSEvent) GetSyscall() string                                                   { return "" }
-func (m *mockTLSEvent) GetCapability() string                                                { return "" }
-func (m *mockTLSEvent) GetDNSName() string                                                   { return "" }
-func (m *mockTLSEvent) GetAddresses() []string                                               { return nil }
-func (m *mockTLSEvent) GetNumAnswers() int                                                   { return 0 }
-func (m *mockTLSEvent) GetQr() utils.DNSPktType                                             { return "" }
-func (m *mockTLSEvent) GetProto() string                                                     { return "" }
-func (m *mockTLSEvent) GetDstEndpoint() types.L4Endpoint                                    { return types.L4Endpoint{} }
-func (m *mockTLSEvent) GetPktType() string                                                   { return "" }
-func (m *mockTLSEvent) GetPodHostIP() string                                                 { return "" }
-func (m *mockTLSEvent) GetFlagsRaw() uint32                                                  { return 0 }
-func (m *mockTLSEvent) GetFullPath() string                                                  { return "" }
-func (m *mockTLSEvent) GetPath() string                                                      { return "" }
-func (m *mockTLSEvent) IsDir() bool                                                          { return false }
-func (m *mockTLSEvent) GetNewPath() string                                                   { return "" }
-func (m *mockTLSEvent) GetOldPath() string                                                   { return "" }
-func (m *mockTLSEvent) GetModule() string                                                    { return "" }
-func (m *mockTLSEvent) GetIdentifier() string                                                { return "" }
-func (m *mockTLSEvent) GetOpcode() int                                                       { return 0 }
-func (m *mockTLSEvent) GetCmd() uint32                                                       { return 0 }
-func (m *mockTLSEvent) GetAttrSize() uint32                                                  { return 0 }
+func (m *mockTLSEvent) GetExePath() string                    { return "" }
+func (m *mockTLSEvent) GetCwd() string                        { return "" }
+func (m *mockTLSEvent) GetArgs() []string                     { return nil }
+func (m *mockTLSEvent) GetFlags() []string                    { return nil }
+func (m *mockTLSEvent) GetUpperLayer() bool                   { return false }
+func (m *mockTLSEvent) GetPupperLayer() bool                  { return false }
+func (m *mockTLSEvent) GetDstIP() string                      { return "" }
+func (m *mockTLSEvent) GetDstPort() uint16                    { return 0 }
+func (m *mockTLSEvent) GetSrcIP() string                      { return "" }
+func (m *mockTLSEvent) GetSrcPort() uint16                    { return 0 }
+func (m *mockTLSEvent) GetDirection() consts.NetworkDirection { return "" }
+func (m *mockTLSEvent) GetInternal() bool                     { return false }
+func (m *mockTLSEvent) GetOtherIp() string                    { return "" }
+func (m *mockTLSEvent) GetRequest() *http.Request             { return nil }
+func (m *mockTLSEvent) GetResponse() *http.Response           { return nil }
+func (m *mockTLSEvent) SetResponse(_ *http.Response)          {}
+func (m *mockTLSEvent) GetBuf() []byte                        { return nil }
+func (m *mockTLSEvent) GetSockFd() uint32                     { return 0 }
+func (m *mockTLSEvent) GetSocketInode() uint64                { return 0 }
+func (m *mockTLSEvent) GetType() utils.HTTPDataType           { return 0 }
+func (m *mockTLSEvent) MakeHttpEvent(_ *http.Request, _ consts.NetworkDirection) utils.HttpEvent {
+	return nil
+}
+func (m *mockTLSEvent) GetSyscall() string               { return "" }
+func (m *mockTLSEvent) GetCapability() string            { return "" }
+func (m *mockTLSEvent) GetDNSName() string               { return "" }
+func (m *mockTLSEvent) GetAddresses() []string           { return nil }
+func (m *mockTLSEvent) GetNumAnswers() int               { return 0 }
+func (m *mockTLSEvent) GetQr() utils.DNSPktType          { return "" }
+func (m *mockTLSEvent) GetProto() string                 { return "" }
+func (m *mockTLSEvent) GetDstEndpoint() types.L4Endpoint { return types.L4Endpoint{} }
+func (m *mockTLSEvent) GetPktType() string               { return "" }
+func (m *mockTLSEvent) GetPodHostIP() string             { return "" }
+func (m *mockTLSEvent) GetFlagsRaw() uint32              { return 0 }
+func (m *mockTLSEvent) GetFullPath() string              { return "" }
+func (m *mockTLSEvent) GetPath() string                  { return "" }
+func (m *mockTLSEvent) IsDir() bool                      { return false }
+func (m *mockTLSEvent) GetNewPath() string               { return "" }
+func (m *mockTLSEvent) GetOldPath() string               { return "" }
+func (m *mockTLSEvent) GetModule() string                { return "" }
+func (m *mockTLSEvent) GetIdentifier() string            { return "" }
+func (m *mockTLSEvent) GetOpcode() int                   { return 0 }
+func (m *mockTLSEvent) GetCmd() uint32                   { return 0 }
+func (m *mockTLSEvent) GetAttrSize() uint32              { return 0 }
 
 // Compile-time check
 var _ utils.KubeletTLSEvent = (*mockTLSEvent)(nil)
@@ -203,10 +205,10 @@ func TestKubeletTLSAdapter_NonTLSEvent(t *testing.T) {
 // nonTLSEvent implements K8sEvent but NOT KubeletTLSEvent
 type nonTLSEvent struct{}
 
-func (n *nonTLSEvent) GetContainerID() string         { return "" }
-func (n *nonTLSEvent) GetEventType() utils.EventType  { return utils.ExecveEventType }
-func (n *nonTLSEvent) GetNamespace() string            { return "" }
-func (n *nonTLSEvent) GetPod() string                  { return "" }
-func (n *nonTLSEvent) GetTimestamp() types.Time        { return 0 }
-func (n *nonTLSEvent) HasDroppedEvents() bool          { return false }
-func (n *nonTLSEvent) Release()                        {}
+func (n *nonTLSEvent) GetContainerID() string        { return "" }
+func (n *nonTLSEvent) GetEventType() utils.EventType { return utils.ExecveEventType }
+func (n *nonTLSEvent) GetNamespace() string          { return "" }
+func (n *nonTLSEvent) GetPod() string                { return "" }
+func (n *nonTLSEvent) GetTimestamp() types.Time      { return 0 }
+func (n *nonTLSEvent) HasDroppedEvents() bool        { return false }
+func (n *nonTLSEvent) Release()                      {}

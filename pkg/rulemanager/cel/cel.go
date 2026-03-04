@@ -176,29 +176,40 @@ func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[stri
 }
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
+	fmt.Println("TEOS: Evaluating Rule")
 	eventType := event.Event.GetEventType()
 	evalContext := c.createEvalContext(event)
+	fmt.Printf("TEOS: evalContext is %+v\n", evalContext)
 
 	for _, expression := range expressions {
+		fmt.Printf("TEOS: expression.EventType is %s\n", expression.EventType)
+		fmt.Printf("TEOS: eventType is %s\n", eventType)
 		if expression.EventType != eventType {
 			continue
 		}
 
 		out, err := c.evaluateProgramWithContext(expression.Expression, evalContext)
 		if err != nil {
+			fmt.Println("TEOS: Evaluating Rule - first if")
 			return false, err
 		}
 
+		fmt.Println("TEOS: out is ", out)
+
 		// Skip if program compilation failed (cached as nil)
 		if out == nil {
+			fmt.Println("TEOS: Evaluating Rule - second if")
 			return false, nil
 		}
 
 		boolVal, ok := out.Value().(bool)
+		fmt.Println("TEOS: boolVal is ", boolVal)
 		if !ok {
+			fmt.Println("TEOS: Evaluating Rule - third if")
 			return false, fmt.Errorf("rule expression returned %T, expected bool", out.Value())
 		}
 		if !boolVal {
+			fmt.Println("TEOS: Evaluating Rule - forth if")
 			return false, nil
 		}
 	}

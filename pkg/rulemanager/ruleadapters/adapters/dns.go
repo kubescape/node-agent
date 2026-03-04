@@ -76,4 +76,3 @@ func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

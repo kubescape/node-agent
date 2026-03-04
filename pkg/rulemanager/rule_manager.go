@@ -132,37 +132,48 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
+	fmt.Println("Hey - I'm inside the ReportEnrichedEvent")
 	rm.enrichEventWithContext(enrichedEvent)
+	fmt.Println("Hey2 - I'm inside the ReportEnrichedEvent")
 
 	var profileExists bool
 	var details string
 	namespace := enrichedEvent.Event.GetNamespace()
 	pod := enrichedEvent.Event.GetPod()
+	fmt.Println("Hey3 - I'm inside the ReportEnrichedEvent")
 
 	// Determine workload ID based on the context type
-	isK8sContext := enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes
+	isK8sContext := false //enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes
 
+	fmt.Println("Hey4 - I'm inside the ReportEnrichedEvent")
 	if isK8sContext {
+		fmt.Println("Hey5 - I'm inside the ReportEnrichedEvent")
 		if pod == "" || namespace == "" {
+			fmt.Println("Hey6 - I'm inside the ReportEnrichedEvent")
 			return
 		}
 		podId := utils.CreateK8sPodID(namespace, pod)
 		var ok bool
 		details, ok = rm.podToWlid.Load(podId)
 		if !ok {
+			fmt.Println("Hey7 - I'm inside the ReportEnrichedEvent")
 			return
 		}
 	} else {
 		// Host or Standalone context: use SourceContext.WorkloadID()
 		if enrichedEvent.SourceContext == nil {
+			fmt.Println("HeyHey - SourceContext is nil")
 			return
 		}
 		details = enrichedEvent.SourceContext.WorkloadID()
 		if details == "" {
+			fmt.Println("HeyHey - failed to get details of WorkloadID")
 			return
 		}
+		fmt.Println("HeyHey - not a K8sContext")
 	}
 
+	fmt.Println("Hey8 - I'm inside the ReportEnrichedEvent")
 	// Retrieve rules based on context: K8s uses pod-based bindings
 	var rules []typesv1.Rule
 	if enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes {
@@ -173,42 +184,51 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	}
 
 	if len(rules) == 0 {
+		fmt.Println("HeyHeyHey - len(rules) is 0")
 		return
 	}
 
 	if !isSupportedEventType(rules, enrichedEvent) {
+		fmt.Println("HeyHeyHeyHey - it's not a supported event")
 		return
 	}
+	fmt.Println("HeyHeyHeyHeyHey - found support event type")
 
 	_, apChecksum, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil
 
 	// Early exit if monitoring is disabled for this context - skip rule evaluation
 	if !rm.isMonitoringEnabledForContext(enrichedEvent.SourceContext) {
+		fmt.Println("HeyHeyHeyHeyHey - monitoring disabled for context")
 		return
 	}
 
 	eventType := enrichedEvent.Event.GetEventType()
 	for _, rule := range rules {
 		if !rule.Enabled {
+			fmt.Printf("Rule %s is not enabled\n", rule.Name)
 			continue
 		}
 
 		if !RuleAppliesToContext(&rule, enrichedEvent.SourceContext) {
+			fmt.Printf("rule doesn't apply to context for %s\n", rule.Name)
 			continue
 		}
 		// Skip profile dependency checks for non-K8s contexts (profiles are K8s-specific)
 		// Only K8s contexts should enforce profile dependencies
 		if isK8sContext && !profileExists && rule.ProfileDependency == armotypes.Required {
+			fmt.Printf("next continue for %s\n", rule.Name)
 			continue
 		}
 
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
+			fmt.Printf("nextnext continue for %s\n", rule.Name)
 			continue
 		}
 
 		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
+			fmt.Printf("nextnextnext continue for %s\n", rule.Name)
 			continue
 		}
 
@@ -222,7 +242,9 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			continue
 		}
 
+		fmt.Println("before shouldAlert for %s", rule.Name)
 		if shouldAlert {
+			fmt.Println("inside shouldAlert for %s", rule.Name)
 			state := rule.State
 			if eventType == utils.HTTPEventType { // TODO: Manage state evaluation in a better way (this is abuse of the state map, we need a better way to pass payloads from rules.)
 				state = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
@@ -231,12 +253,16 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
+				fmt.Println("first continue inside shouldAlert for %s", rule.Name)
 				continue
 			}
 
+			/*
 			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
+				fmt.Println("second continue inside shouldAlert for %s", rule.Name)
 				continue
 			}
+			*/
 
 			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum, state)
 			if ruleFailure == nil {
@@ -245,12 +271,15 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 					helpers.String("uniqueID", uniqueID),
 					helpers.String("enrichedEvent.EventType", string(eventType)),
 				)
+				fmt.Printf("Rule failure for %s", rule.Name)
 				continue
 			}
 
 			ruleFailure.SetWorkloadDetails(details)
+			fmt.Println("Sending alert for %s", rule.Name)
 			rm.exporter.SendRuleAlert(ruleFailure)
 		}
+		fmt.Println("Reporting Rule Processed for %s", rule.Name)
 		rm.metrics.ReportRuleProcessed(rule.Name)
 	}
 }
@@ -321,6 +350,7 @@ func (rm *RuleManager) IsPodMonitored(namespace, pod string) bool {
 
 func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
 	results := []string{}
+  fmt.Printf("Teo2: Evaluation rules for %s\n", eventType)
 
 	creator := rm.ruleBindingCache.GetRuleCreator()
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
@@ -371,7 +401,10 @@ func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEven
 
 func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.EventType) []typesv1.RuleExpression {
 	var ruleExpressions []typesv1.RuleExpression
+	fmt.Printf("Getting expression for %s\n", rule.Name)
 	for _, expression := range rule.Expressions.RuleExpression {
+		fmt.Printf("First %s\n", string(eventType))
+		fmt.Printf("Second %s\n", string(expression.EventType))
 		if string(expression.EventType) == string(eventType) {
 			ruleExpressions = append(ruleExpressions, expression)
 		}
@@ -396,9 +429,13 @@ func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent
 
 func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEvent) bool {
 	eventType := enrichedEvent.Event.GetEventType()
+	fmt.Printf("HeyHeyHeyHey - Event type is %s\n", string(eventType))
 	for _, rule := range rules {
+		fmt.Printf("HeyHeyHeyHey - Testing against rule %s\n", rule.Name)
 		for _, expression := range rule.Expressions.RuleExpression {
+			fmt.Printf("HeyHeyHeyHey - Testing Event type expression is %s\n", string(expression.EventType))
 			if string(expression.EventType) == string(eventType) {
+				fmt.Println("Found the rule!!")
 				return true
 			}
 		}

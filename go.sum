@@ -962,8 +962,8 @@ github.com/docker/go-events v0.0.0-20250114142523-c867878c5e32/go.mod h1:Uw6Uezg
 github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4=
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
 github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815/go.mod h1:WwZ+bS3ebgob9U8Nd0kOddGdZWjyMGR8Wziv+TBNwSE=
-github.com/dorkamotorka/inspektor-gadget v0.0.0-20260226233601-a892f727b327 h1:nXnAo6AkzwWMhs30YWMJVhkqb4Y+X+FbIknfP6vtE1M=
-github.com/dorkamotorka/inspektor-gadget v0.0.0-20260226233601-a892f727b327/go.mod h1:nJkyhZHcPSqUhD6s/nufqQsAiXuxwEkHCd/7dWZZXfY=
+github.com/dorkamotorka/inspektor-gadget v0.0.0-20260228094312-bf5c2eaa6a48 h1:EazamyPATffM+HYIj6FB9xFoRwIxEdrfnk8VglYL7Zc=
+github.com/dorkamotorka/inspektor-gadget v0.0.0-20260228094312-bf5c2eaa6a48/go.mod h1:nJkyhZHcPSqUhD6s/nufqQsAiXuxwEkHCd/7dWZZXfY=
 github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 h1:2tV76y6Q9BB+NEBasnqvs7e49aEBFI8ejC89PSnWH+4=
 github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707/go.mod h1:qssHWj60/X5sZFNxpG4HBPDHVqxNm4DfnCKgrbZOT+s=
 github.com/dsnet/golib v0.0.0-20171103203638-1ea166775780/go.mod h1:Lj+Z9rebOhdfkVLjJ8T6VcRQv3SXugXy999NBtR9aFY=

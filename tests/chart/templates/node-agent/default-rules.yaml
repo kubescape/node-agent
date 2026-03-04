@@ -22,9 +22,6 @@ spec:
         profileDependency: 0
         severity: 1
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0002"
-        mitreTechnique: "T1059"
         tags:
           - "anomaly"
           - "process"
@@ -61,9 +58,6 @@ spec:
         profileDependency: 0
         severity: 1
         supportPolicy: false
-        isTriggerAlert: false
-        mitreTactic: "TA0009"
-        mitreTechnique: "T1005"
         tags:
           - "anomaly"
           - "file"
@@ -82,9 +76,6 @@ spec:
         profileDependency: 0
         severity: 1
         supportPolicy: false
-        isTriggerAlert: false
-        mitreTactic: "TA0002"
-        mitreTechnique: "T1059"
         tags:
           - "anomaly"
           - "syscall"
@@ -102,9 +93,6 @@ spec:
         profileDependency: 0
         severity: 1
         supportPolicy: false
-        isTriggerAlert: false
-        mitreTactic: "TA0002"
-        mitreTechnique: "T1059"
         tags:
           - "anomaly"
           - "capabilities"
@@ -122,9 +110,6 @@ spec:
         profileDependency: 0
         severity: 1
         supportPolicy: false
-        isTriggerAlert: false
-        mitreTactic: "TA0011"
-        mitreTechnique: "T1071.004"
         tags:
           - "dns"
           - "anomaly"
@@ -150,9 +135,6 @@ spec:
         profileDependency: 1
         severity: 5
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0006"
-        mitreTechnique: "T1528"
         tags:
           - "anomaly"
           - "serviceaccount"
@@ -172,9 +154,6 @@ spec:
         profileDependency: 0
         severity: 5 # Medium
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0008"
-        mitreTechnique: "T1210"
         tags:
           - "exec"
           - "network"
@@ -196,9 +175,6 @@ spec:
         profileDependency: 0 # Required
         severity: 5 # Medium
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0006"
-        mitreTechnique: "T1552.001"
         tags:
           - "anomaly"
           - "procfs"
@@ -217,9 +193,6 @@ spec:
         profileDependency: 1
         severity: 5
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0005"
-        mitreTechnique: "T1218"
         tags:
           - "bpf"
           - "ebpf"
@@ -237,9 +210,6 @@ spec:
         profileDependency: 1
         severity: 5
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0006"
-        mitreTechnique: "T1005"
         tags:
           - "files"
           - "anomaly"
@@ -257,9 +227,6 @@ spec:
         profileDependency: 0
         severity: 5 # Medium
         supportPolicy: false
-        isTriggerAlert: false
-        mitreTactic: "TA0010"
-        mitreTechnique: "T1041"
         tags:
           - "whitelisted"
           - "network"
@@ -281,9 +248,6 @@ spec:
         profileDependency: 2
         severity: 8
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0002"
-        mitreTechnique: "T1059"
         tags:
           - "exec"
           - "signature"
@@ -304,9 +268,6 @@ spec:
         profileDependency: 1
         severity: 8
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0005"
-        mitreTechnique: "T1036"
         tags:
           - "exec"
           - "malicious"
@@ -326,9 +287,6 @@ spec:
         profileDependency: 2
         severity: 10
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0005"
-        mitreTechnique: "T1547.006"
         tags:
           - "kmod"
           - "kernel"
@@ -347,9 +305,6 @@ spec:
         profileDependency: 1
         severity: 5
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0008"
-        mitreTechnique: "T1021.001"
         tags:
           - "ssh"
           - "connection"
@@ -369,9 +324,6 @@ spec:
         profileDependency: 1
         severity: 5
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0002"
-        mitreTechnique: "T1059"
         tags:
           - "exec"
           - "mount"
@@ -389,9 +341,6 @@ spec:
         profileDependency: 2
         severity: 8
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0005"
-        mitreTechnique: "T1055"
         tags:
           - "fileless"
           - "execution"
@@ -409,9 +358,6 @@ spec:
         profileDependency: 2
         severity: 5
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0004"
-        mitreTechnique: "T1611"
         tags:
           - "unshare"
           - "escape"
@@ -431,9 +377,6 @@ spec:
         profileDependency: 2
         severity: 10
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0040"
-        mitreTechnique: "T1496"
         tags:
           - "crypto"
           - "miners"
@@ -451,9 +394,6 @@ spec:
         profileDependency: 2
         severity: 10
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0011"
-        mitreTechnique: "T1071.004"
         tags:
           - "network"
           - "crypto"
@@ -473,9 +413,6 @@ spec:
         profileDependency: 1
         severity: 3
         supportPolicy: false
-        isTriggerAlert: false
-        mitreTactic: "TA0011"
-        mitreTechnique: "T1071"
         tags:
           - "network"
           - "crypto"
@@ -495,9 +432,6 @@ spec:
         profileDependency: 1
         severity: 5
         supportPolicy: true
-        isTriggerAlert: true
-        mitreTactic: "TA0006"
-        mitreTechnique: "T1005"
         tags:
           - "anomaly"
           - "symlink"
@@ -517,9 +451,6 @@ spec:
         profileDependency: 1
         severity: 5
         supportPolicy: true
-        isTriggerAlert: true
-        mitreTactic: "TA0005"
-        mitreTechnique: "T1574.006"
         tags:
           - "exec"
           - "malicious"
@@ -537,9 +468,6 @@ spec:
         profileDependency: 1
         severity: 5
         supportPolicy: true
-        isTriggerAlert: true
-        mitreTactic: "TA0006"
-        mitreTechnique: "T1005"
         tags:
           - "files"
           - "malicious"
@@ -557,9 +485,6 @@ spec:
         profileDependency: 2
         severity: 5
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0005"
-        mitreTechnique: "T1622"
         tags:
           - "process"
           - "malicious"
@@ -576,9 +501,6 @@ spec:
         profileDependency: 0
         severity: 5
         supportPolicy: true
-        isTriggerAlert: true
-        mitreTactic: "TA0002"
-        mitreTechnique: "T1218"
         tags:
           - "syscalls"
           - "io_uring"
@@ -596,9 +518,6 @@ spec:
         profileDependency: 0
         severity: 8
         supportPolicy: false
-        isTriggerAlert: true
-        mitreTactic: "TA0002"
-        mitreTechnique: "T1609"
         tags:
           - "kubelet"
           - "tls"

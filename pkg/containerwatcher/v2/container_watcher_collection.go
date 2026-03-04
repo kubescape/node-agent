@@ -108,22 +108,27 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 
 	// Create virtual host container if host monitoring enabled
 	if cw.cfg.HostMonitoringEnabled {
+		fmt.Println("TeoTeo: HostMonitoringEnabled")
 		virtualHostContainer, err := GetHostAsContainer()
 		if err != nil {
 			logger.L().Warning("ContainerManager - failed to create virtual host container",
 				helpers.Error(err))
 		} else {
+			fmt.Println("TeoTeo: Adding Host Container HostMonitoringEnabled")
 			cw.containerCollection.AddContainer(virtualHostContainer)
 
+			fmt.Println("TeoTeo: Adding Host Container - calling containerCallback")
 			// Manually trigger callbacks to ensure context detection runs
 			cw.containerCallback(containercollection.PubSubEvent{
 				Type:      containercollection.EventTypeAddContainer,
 				Container: virtualHostContainer,
 			})
 
+			fmt.Println("TeoTeo: Adding Host Container - donedone")
 			logger.L().Info("ContainerManager - virtual host container created",
 				helpers.String("mntns", fmt.Sprintf("%d", virtualHostContainer.Mntns)),
-				helpers.String("pid", fmt.Sprintf("%d", virtualHostContainer.Runtime.ContainerPID)))
+				helpers.String("pid", fmt.Sprintf("%d", virtualHostContainer.Runtime.ContainerPID)),
+				helpers.String("id", fmt.Sprintf("%s", virtualHostContainer.Runtime.ContainerID)))
 		}
 	}
 

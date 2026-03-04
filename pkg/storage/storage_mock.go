@@ -69,12 +69,12 @@ func (sc *StorageHttpClientMock) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.S
 
 // SeccompProfileClientMock is a mock implementation of SeccompProfileClient for testing
 type SeccompProfileClientMock struct {
-	Profiles      []*v1beta1.SeccompProfile
-	WatchEvents   chan watch.Event
-	WatchStopped  bool
-	GetError      error
-	ListError     error
-	WatchError    error
+	Profiles     []*v1beta1.SeccompProfile
+	WatchEvents  chan watch.Event
+	WatchStopped bool
+	GetError     error
+	ListError    error
+	WatchError   error
 }
 
 var _ SeccompProfileClient = (*SeccompProfileClientMock)(nil)

@@ -158,6 +158,9 @@ func CreateContainerWatcher(
 	// Create worker pool for processing individual events
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
 		enrichedEvent := i.(*events.EnrichedEvent)
+		if enrichedEvent.Event.GetEventType() == utils.KubeletTLSEventType {
+      fmt.Printf("TeoX: Processing kubelet_tls event!\n")
+    } else { fmt.Printf("TeoY: Processing other event!\n") }
 		eventHandlerFactory.ProcessEvent(enrichedEvent)
 		if enrichedEvent.Event.GetEventType() != utils.SyscallEventType {
 			enrichedEvent.Event.Release() // at this time we should not need the event anymore
@@ -462,6 +465,7 @@ func (cw *ContainerWatcher) processQueueBatch() {
 
 func (cw *ContainerWatcher) enrichAndProcess(entry EventEntry) {
 	enrichedEvent := cw.eventEnricher.EnrichEvents(entry)
+  fmt.Printf("Teo3: Just pulled the %+v event of type %s from the Queue and enriched it %+v\n", entry, string(entry.EventType), enrichedEvent)
 
 	select {
 	case cw.workerChan <- enrichedEvent:

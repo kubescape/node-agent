@@ -71,4 +71,3 @@ func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enriched
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

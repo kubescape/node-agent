@@ -3,6 +3,7 @@ package tracers
 import (
 	"context"
 	"strconv"
+  "fmt"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -138,6 +139,7 @@ func (ot *OpenTracer) callback(event utils.OpenEvent) {
 func (ot *OpenTracer) handleEvent(event utils.OpenEvent, syscalls []uint64) {
 	if ot.eventCallback != nil {
 		containerID := event.GetContainerID()
+    fmt.Printf("Dummy: ContainerID %s in open gadget\n", containerID)
 		processID := event.GetPID()
 
 		enrichEvent(ot.thirdPartyEnricher, event, syscalls, ot.eventCallback, containerID, processID)

@@ -85,4 +85,3 @@ func GetExecFullPathFromEvent(execEvent utils.ExecEvent) string {
 	}
 	return utils.GetExecPathFromEvent(execEvent)
 }
-
