@@ -32,6 +32,22 @@ type Rule struct {
 	IsTriggerAlert          bool                       `json:"isTriggerAlert" yaml:"isTriggerAlert"`
 	MitreTactic             string                     `json:"mitreTactic" yaml:"mitreTactic"`
 	MitreTechnique          string                     `json:"mitreTechnique" yaml:"mitreTechnique"`
+
+	// Pre-computed index: event type → expressions for that type.
+	// Populated by Init(). Avoids per-event scanning and allocation.
+	ExpressionsByEventType map[utils.EventType][]RuleExpression `json:"-" yaml:"-"`
+}
+
+// Init pre-computes the ExpressionsByEventType index.
+// Must be called after a Rule is created or updated.
+func (r *Rule) Init() {
+	if r.ExpressionsByEventType != nil {
+		return
+	}
+	r.ExpressionsByEventType = make(map[utils.EventType][]RuleExpression, len(r.Expressions.RuleExpression))
+	for _, expr := range r.Expressions.RuleExpression {
+		r.ExpressionsByEventType[expr.EventType] = append(r.ExpressionsByEventType[expr.EventType], expr)
+	}
 }
 
 type RuleExpressions struct {

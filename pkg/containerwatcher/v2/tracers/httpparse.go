@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strconv"
+	"sync"
 	"time"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -27,6 +28,12 @@ var readSyscalls = map[string]bool{
 	"readv":    true,
 	"recvfrom": true,
 	"recvmsg":  true,
+}
+
+var bufReaderPool = sync.Pool{
+	New: func() any {
+		return bufio.NewReaderSize(nil, 4096)
+	},
 }
 
 var ConsistentHeaders = []string{
@@ -92,8 +99,10 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 	}
 
 	// Parse headers only
-	bufReader := bufio.NewReader(bytes.NewReader(data[:headerEnd]))
-	req, err := http.ReadRequest(bufReader)
+	br := bufReaderPool.Get().(*bufio.Reader)
+	br.Reset(bytes.NewReader(data[:headerEnd]))
+	req, err := http.ReadRequest(br)
+	bufReaderPool.Put(br)
 	if err != nil {
 		return fallbackReadRequest(data)
 	}
@@ -136,8 +145,10 @@ func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 	}
 
 	// Parse headers only
-	bufReader := bufio.NewReader(bytes.NewReader(data[:headerEnd]))
-	resp, err := http.ReadResponse(bufReader, req)
+	br := bufReaderPool.Get().(*bufio.Reader)
+	br.Reset(bytes.NewReader(data[:headerEnd]))
+	resp, err := http.ReadResponse(br, req)
+	bufReaderPool.Put(br)
 	if err != nil {
 		return fallbackReadResponse(data, req)
 	}
