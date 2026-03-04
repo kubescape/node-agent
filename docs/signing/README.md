@@ -2,7 +2,7 @@
 
 ## Overview
 
-The node-agent supports cryptographic signing of Kubernetes profiles to ensure their integrity and authenticity. This feature uses ECDSA P-256 signatures compatible with the Sigstore/Cosign ecosystem.
+The node-agent supports cryptographic signing of Kubernetes profiles to ensure their integrity and authenticity. This feature uses signatures compatible with the **Sigstore/Cosign** ecosystem, leveraging official `sigstore/sigstore` and `sigstore/cosign` libraries for robust blob signing.
 
 Signed profiles can be:
 - **ApplicationProfiles** - defining allowed application behavior
@@ -62,27 +62,25 @@ graph TB
         A[Profile Resource] --> B[Adapter]
         B --> C[SignableProfile Interface]
         C --> D[Content: JSON without annotations]
-        D --> E[SHA256 Hash]
-        E --> F[ECDSA P-256 Signer]
-        F --> G[Signature]
-        F --> H[Public Key/Certificate]
-        G --> I[Base64 Encode]
-        H --> I
-        I --> J[Profile Annotations]
-        J --> K[Signed Profile]
+        D --> E[Sigstore Signer]
+        E --> F[Signature]
+        E --> G[Certificate]
+        F --> H[Base64 Encode]
+        G --> H
+        H --> I[Profile Annotations]
+        I --> J[Signed Profile]
     end
 
     subgraph "Verification Flow"
-        L[Signed Profile] --> M[Extract Signature]
-        L --> N[Extract Certificate]
-        L --> O[Get Content without annotations]
-        O --> P[SHA256 Hash]
-        P --> Q[ECDSA Verifier]
-        M --> Q
-        N --> Q
-        Q --> R{Valid?}
-        R -->|Yes| S[Profile accepted]
-        R -->|No| T[Profile rejected]
+        K[Signed Profile] --> L[Extract Signature]
+        K --> M[Extract Certificate]
+        K --> N[Get Content without annotations]
+        N --> O[Sigstore Verifier]
+        L --> O
+        M --> O
+        O --> P{Valid?}
+        P -->|Yes| Q[Profile accepted]
+        P -->|No| R[Profile rejected]
     end
 
     K --> L
@@ -404,18 +402,18 @@ sequenceDiagram
     participant Verifier
 
     Admin->>CLI: sign-profile --keyless
-    CLI->>Signer: Generate ECDSA key pair
+    CLI->>Signer: Initialize Sigstore Signer
     CLI->>Profile: Marshal content to JSON
-    CLI->>Signer: SHA256 hash of content
-    Signer->>Signer: ECDSA-P256 sign(hash)
-    Signer-->>CLI: Return signature + public key
+    CLI->>Signer: Sign content
+    Signer->>Signer: Sign with Sigstore
+    Signer-->>CLI: Return signature + certificate
     CLI->>Profile: Add signature annotations
     Profile-->>Admin: Signed profile YAML
 
     Admin->>Cluster: kubectl apply signed-profile.yaml
     Cluster->>Verifier: Verify signature
-    Verifier->>Verifier: Extract content & signature
-    Verifier->>Verifier: Verify ECDSA signature
+    Verifier->>Verifier: Extract content & signature/cert
+    Verifier->>Verifier: Verify with Sigstore
     Verifier-->>Cluster: Valid ✓
     Cluster-->>Admin: Profile applied
 ```
