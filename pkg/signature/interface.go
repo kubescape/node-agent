@@ -24,6 +24,7 @@ type SignableProfile interface {
 type Signature struct {
 	Signature   []byte
 	Certificate []byte
+	RekorBundle []byte
 	Issuer      string
 	Identity    string
 	Timestamp   int64

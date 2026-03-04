@@ -2,7 +2,7 @@
 
 ## Overview
 
-The node-agent supports cryptographic signing of Kubernetes profiles to ensure their integrity and authenticity. This feature uses signatures compatible with the **Sigstore/Cosign** ecosystem, leveraging official `sigstore/sigstore` and `sigstore/cosign` libraries for robust blob signing.
+The node-agent supports cryptographic signing of Kubernetes profiles to ensure their integrity and authenticity. This feature uses signatures compatible with the **Sigstore/Cosign** ecosystem, leveraging official `sigstore/sigstore`, `sigstore/cosign`, and `sigstore/sigstore-go` libraries for robust blob signing and verification.
 
 Signed profiles can be:
 - **ApplicationProfiles** - defining allowed application behavior
@@ -62,25 +62,28 @@ graph TB
         A[Profile Resource] --> B[Adapter]
         B --> C[SignableProfile Interface]
         C --> D[Content: JSON without annotations]
-        D --> E[Sigstore Signer]
-        E --> F[Signature]
-        E --> G[Certificate]
-        F --> H[Base64 Encode]
-        G --> H
-        H --> I[Profile Annotations]
-        I --> J[Signed Profile]
+        D --> E{Signing Mode}
+        E -->|Keyless| F[Sigstore: OIDC + Fulcio + Rekor]
+        E -->|Key-based| G[Local ECDSA Signer]
+        F --> H[Signature + Cert + RekorBundle]
+        G --> H[Signature + Public Key]
+        H --> I[Base64 Encode]
+        I --> J[Profile Annotations]
+        J --> K[Signed Profile]
     end
 
     subgraph "Verification Flow"
-        K[Signed Profile] --> L[Extract Signature]
-        K --> M[Extract Certificate]
-        K --> N[Get Content without annotations]
-        N --> O[Sigstore Verifier]
-        L --> O
-        M --> O
-        O --> P{Valid?}
-        P -->|Yes| Q[Profile accepted]
-        P -->|No| R[Profile rejected]
+        L[Signed Profile] --> M[Extract Signature]
+        L --> N[Extract Cert/Key]
+        L --> O[Extract RekorBundle]
+        L --> P[Get Content without annotations]
+        P --> Q[Sigstore Verifier]
+        M --> Q
+        N --> Q
+        O --> Q
+        Q --> R{Valid?}
+        R -->|Yes| S[Profile accepted]
+        R -->|No| T[Profile rejected]
     end
 
     K --> L
@@ -94,7 +97,8 @@ Signed profiles store signature information in these annotations:
 metadata:
   annotations:
     signature.kubescape.io/signature: "base64-encoded-signature"
-    signature.kubescape.io/certificate: "base64-encoded-public-key"
+    signature.kubescape.io/certificate: "base64-encoded-cert-or-pubkey"
+    signature.kubescape.io/rekor-bundle: "base64-encoded-rekor-bundle"
     signature.kubescape.io/issuer: "https://token.actions.githubusercontent.com"
     signature.kubescape.io/identity: "kubernetes.io"
     signature.kubescape.io/timestamp: "1709894400"
@@ -105,7 +109,8 @@ metadata:
 | Key | Description | Example |
 |-----|-------------|---------|
 | `signature.kubescape.io/signature` | Base64-encoded ECDSA signature | `MEUCIQD...` |
-| `signature.kubescape.io/certificate` | Base64-encoded public key (PEM) | `MFkwEwY...` |
+| `signature.kubescape.io/certificate` | Base64-encoded x509 cert or public key | `MFkwEwY...` |
+| `signature.kubescape.io/rekor-bundle` | Base64-encoded Rekor transparency log bundle | `eyJzaWdu...` |
 | `signature.kubescape.io/issuer` | OIDC issuer (for keyless) | `https://token.actions.githubusercontent.com` |
 | `signature.kubescape.io/identity` | Signing identity | `kubernetes.io` or `local-key` |
 | `signature.kubescape.io/timestamp` | Unix timestamp of signing | `1709894400` |
@@ -513,15 +518,13 @@ The webhook would:
 
 ## Key Files
 
-| File | Description |
-|------|-------------|
-| `pkg/signature/interface.go` | SignableProfile interface |
-| `pkg/signature/cosign_adapter.go` | ECDSA signing/verification |
-| `pkg/signature/sign.go` | Public signing API |
-| `pkg/signature/verify.go` | Public verification API |
+| `pkg/signature/interface.go` | SignableProfile interface and Signature struct |
+| `pkg/signature/cosign_adapter.go` | Sigstore/Cosign signing and verification |
+| `pkg/signature/sign.go` | Public signing API and annotation encoding |
+| `pkg/signature/verify.go` | Public verification API and cache integration |
 | `pkg/signature/profiles/applicationprofile_adapter.go` | ApplicationProfile adapter |
 | `pkg/signature/profiles/seccompprofile_adapter.go` | SeccompProfile adapter |
-| `cmd/sign-profile/main.go` | CLI tool |
+| `cmd/sign-profile/main.go` | CLI tool for profile signing |
 
 ## Additional Resources
 
