@@ -47,6 +47,8 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/procfs v0.19.2
 	github.com/sigstore/cosign/v2 v2.6.2
+	github.com/sigstore/fulcio v1.8.4
+	github.com/sigstore/rekor v1.4.3
 	github.com/sigstore/sigstore v1.10.4
 	github.com/sirupsen/logrus v1.9.4-0.20230606125235-dd1b4c2e81af
 	github.com/spf13/afero v1.15.0
@@ -385,7 +387,6 @@ require (
 	github.com/shibumi/go-pathspec v1.3.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sigstore/protobuf-specs v0.5.0 // indirect
-	github.com/sigstore/rekor v1.4.3 // indirect
 	github.com/sigstore/rekor-tiles/v2 v2.0.1 // indirect
 	github.com/sigstore/sigstore-go v1.1.4 // indirect
 	github.com/sigstore/timestamp-authority/v2 v2.0.3 // indirect
