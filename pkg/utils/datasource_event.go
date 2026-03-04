@@ -170,6 +170,7 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 		}
 		field := e.Datasource.GetField(fieldName)
 		if field == nil {
+			logger.L().Warning("field not found", helpers.String("field", fieldName), helpers.String("eventType", string(e.EventType)))
 			// Don't cache nil results - another data source may have this field
 			return missingFieldAccessor
 		}
@@ -190,56 +191,38 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 }
 
 func (e *DatasourceEvent) GetAddresses() []string {
-	addresses, err := e.getFieldAccessor("addresses").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetAddresses - error reading field addresses", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+	addresses, _ := e.getFieldAccessor("addresses").String(e.Data)
+	if addresses == "" {
 		return nil
 	}
 	return strings.Split(addresses, ",")
 }
 
 func (e *DatasourceEvent) GetArgs() []string {
-	args, err := e.getFieldAccessor("args").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetArgs - error reading field args", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
+	args, _ := e.getFieldAccessor("args").String(e.Data)
+	if args == "" {
 		return nil
 	}
 	return strings.Split(args, igconsts.ArgsSeparator)
 }
 
 func (e *DatasourceEvent) GetAttrSize() uint32 {
-	attrSize, err := e.getFieldAccessor("attr_size").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetAttrSize - error reading field attr_size", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	attrSize, _ := e.getFieldAccessor("attr_size").Uint32(e.Data)
 	return attrSize
 }
 
 func (e *DatasourceEvent) GetBuf() []byte {
-	buf, err := e.getFieldAccessor("buf").Bytes(e.Data)
-	if err != nil {
-		logger.L().Warning("GetBuf - error reading field buf", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return nil
-	}
+	buf, _ := e.getFieldAccessor("buf").Bytes(e.Data)
 	return buf
 }
 
 func (e *DatasourceEvent) GetCapability() string {
-	capability, err := e.getFieldAccessor("cap").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetCapability - error reading field cap", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	capability, _ := e.getFieldAccessor("cap").String(e.Data)
 	return capability
 }
 
 func (e *DatasourceEvent) GetCmd() uint32 {
-	cmd, err := e.getFieldAccessor("cmd").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetCmd - error reading field cmd", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	cmd, _ := e.getFieldAccessor("cmd").Uint32(e.Data)
 	return cmd
 }
 
@@ -250,57 +233,33 @@ func (e *DatasourceEvent) GetComm() string {
 		container := e.GetContainer()
 		return container
 	default:
-		commValue, err := e.getFieldAccessor("proc.comm").String(e.Data)
-		if err != nil {
-			logger.L().Warning("GetComm - error reading field proc.comm", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		commValue, _ := e.getFieldAccessor("proc.comm").String(e.Data)
 		return commValue
 	}
 }
 
 func (e *DatasourceEvent) GetContainer() string {
-	containerName, err := e.getFieldAccessor("k8s.containerName").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetContainer - error reading field k8s.containerName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	containerName, _ := e.getFieldAccessor("k8s.containerName").String(e.Data)
 	return containerName
 }
 
 func (e *DatasourceEvent) GetContainerID() string {
-	containerId, err := e.getFieldAccessor("runtime.containerId").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetContainerID - error reading field runtime.containerId", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	containerId, _ := e.getFieldAccessor("runtime.containerId").String(e.Data)
 	return containerId
 }
 
 func (e *DatasourceEvent) GetContainerImage() string {
-	containerImageName, err := e.getFieldAccessor("runtime.containerImageName").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetContainerImage - error reading field runtime.containerImageName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	containerImageName, _ := e.getFieldAccessor("runtime.containerImageName").String(e.Data)
 	return containerImageName
 }
 
 func (e *DatasourceEvent) GetContainerImageDigest() string {
-	containerImageDigest, err := e.getFieldAccessor("runtime.containerImageDigest").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetContainerImageDigest - error reading field runtime.containerImageDigest", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	containerImageDigest, _ := e.getFieldAccessor("runtime.containerImageDigest").String(e.Data)
 	return containerImageDigest
 }
 
 func (e *DatasourceEvent) GetCwd() string {
-	cwd, err := e.getFieldAccessor("cwd").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetCwd - error reading field cwd", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	cwd, _ := e.getFieldAccessor("cwd").String(e.Data)
 	return cwd
 }
 
@@ -309,55 +268,19 @@ func (e *DatasourceEvent) GetDirection() consts.NetworkDirection {
 }
 
 func (e *DatasourceEvent) GetDNSName() string {
-	dnsName, err := e.getFieldAccessor("name").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDNSName - error reading field name", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	dnsName, _ := e.getFieldAccessor("name").String(e.Data)
 	return dnsName
 }
 
 func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
-	addr, err := e.getFieldAccessor("endpoint.addr_raw.v4").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDstEndpoint - error reading field endpoint.addr_raw.v4", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return types.L4Endpoint{}
-	}
-	kind, err := e.getFieldAccessor("endpoint.k8s.kind").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDstEndpoint - error reading field endpoint.k8s.kind", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return types.L4Endpoint{}
-	}
-	name, err := e.getFieldAccessor("endpoint.k8s.name").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDstEndpoint - error reading field endpoint.k8s.name", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return types.L4Endpoint{}
-	}
-	namespace, err := e.getFieldAccessor("endpoint.k8s.namespace").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDstEndpoint - error reading field endpoint.k8s.namespace", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return types.L4Endpoint{}
-	}
-	podLabels, err := e.getFieldAccessor("endpoint.k8s.labels").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDstEndpoint - error reading field endpoint.k8s.labels", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return types.L4Endpoint{}
-	}
-	version, err := e.getFieldAccessor("endpoint.version").Uint8(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDstEndpoint - error reading field endpoint.version", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return types.L4Endpoint{}
-	}
-	port, err := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDstEndpoint - error reading field endpoint.port", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return types.L4Endpoint{}
-	}
-	proto, err := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDstEndpoint - error reading field endpoint.proto_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return types.L4Endpoint{}
-	}
+	addr, _ := e.getFieldAccessor("endpoint.addr_raw.v4").Uint32(e.Data)
+	kind, _ := e.getFieldAccessor("endpoint.k8s.kind").String(e.Data)
+	name, _ := e.getFieldAccessor("endpoint.k8s.name").String(e.Data)
+	namespace, _ := e.getFieldAccessor("endpoint.k8s.namespace").String(e.Data)
+	podLabels, _ := e.getFieldAccessor("endpoint.k8s.labels").String(e.Data)
+	version, _ := e.getFieldAccessor("endpoint.version").Uint8(e.Data)
+	port, _ := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
+	proto, _ := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
 	return types.L4Endpoint{
 		L3Endpoint: types.L3Endpoint{
 			Addr:      rawIPv4ToString(addr),
@@ -373,25 +296,13 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 }
 
 func (e *DatasourceEvent) GetDstIP() string {
-	version, err := e.getFieldAccessor("dst.version").Uint8(e.Data)
-	if err != nil {
-		logger.L().Warning("GetDstIP - error reading field dst.version", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	version, _ := e.getFieldAccessor("dst.version").Uint8(e.Data)
 	switch version {
 	case 4:
-		daddr, err := e.getFieldAccessor("dst.addr_raw.v4").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetDstIP - error reading field dst.addr_raw.v4", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		daddr, _ := e.getFieldAccessor("dst.addr_raw.v4").Uint32(e.Data)
 		return rawIPv4ToString(daddr)
 	case 6:
-		daddr, err := e.getFieldAccessor("dst.addr_raw.v6").Bytes(e.Data)
-		if err != nil {
-			logger.L().Warning("GetDstIP - error reading field dst.addr_raw.v6", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		daddr, _ := e.getFieldAccessor("dst.addr_raw.v6").Bytes(e.Data)
 		return rawIPv6ToString(daddr)
 	}
 	return ""
@@ -400,18 +311,10 @@ func (e *DatasourceEvent) GetDstIP() string {
 func (e *DatasourceEvent) GetDstPort() uint16 {
 	switch e.EventType {
 	case NetworkEventType:
-		port, err := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
-		if err != nil {
-			logger.L().Warning("GetDstPort - error reading field endpoint.port", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		port, _ := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
 		return port
 	case DnsEventType, HTTPEventType, SSHEventType:
-		port, err := e.getFieldAccessor("dst.port").Uint16(e.Data)
-		if err != nil {
-			logger.L().Warning("GetDstPort - error reading field dst.port", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		port, _ := e.getFieldAccessor("dst.port").Uint16(e.Data)
 		return port
 	default:
 		logger.L().Warning("GetDstPort not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -420,110 +323,62 @@ func (e *DatasourceEvent) GetDstPort() uint16 {
 }
 
 func (e *DatasourceEvent) GetEcsAvailabilityZone() string {
-	availabilityZone, err := e.getFieldAccessor("ecs.availabilityZone").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsAvailabilityZone - error reading field ecs.availabilityZone", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	availabilityZone, _ := e.getFieldAccessor("ecs.availabilityZone").String(e.Data)
 	return availabilityZone
 }
 
 func (e *DatasourceEvent) GetEcsClusterARN() string {
-	clusterARN, err := e.getFieldAccessor("ecs.clusterARN").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsClusterARN - error reading field ecs.clusterARN", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	clusterARN, _ := e.getFieldAccessor("ecs.clusterARN").String(e.Data)
 	return clusterARN
 }
 
 func (e *DatasourceEvent) GetEcsClusterName() string {
-	clusterName, err := e.getFieldAccessor("ecs.clusterName").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsClusterName - error reading field ecs.clusterName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	clusterName, _ := e.getFieldAccessor("ecs.clusterName").String(e.Data)
 	return clusterName
 }
 
 func (e *DatasourceEvent) GetEcsContainerARN() string {
-	containerARN, err := e.getFieldAccessor("ecs.containerARN").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsContainerARN - error reading field ecs.containerARN", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	containerARN, _ := e.getFieldAccessor("ecs.containerARN").String(e.Data)
 	return containerARN
 }
 
 func (e *DatasourceEvent) GetEcsContainerInstance() string {
-	containerInstance, err := e.getFieldAccessor("ecs.containerInstance").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsContainerInstance - error reading field ecs.containerInstance", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	containerInstance, _ := e.getFieldAccessor("ecs.containerInstance").String(e.Data)
 	return containerInstance
 }
 
 func (e *DatasourceEvent) GetEcsContainerName() string {
-	containerName, err := e.getFieldAccessor("ecs.containerName").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsContainerName - error reading field ecs.containerName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	containerName, _ := e.getFieldAccessor("ecs.containerName").String(e.Data)
 	return containerName
 }
 
 func (e *DatasourceEvent) GetEcsLaunchType() string {
-	launchType, err := e.getFieldAccessor("ecs.launchType").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsLaunchType - error reading field ecs.launchType", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	launchType, _ := e.getFieldAccessor("ecs.launchType").String(e.Data)
 	return launchType
 }
 
 func (e *DatasourceEvent) GetEcsServiceName() string {
-	serviceName, err := e.getFieldAccessor("ecs.serviceName").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsServiceName - error reading field ecs.serviceName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	serviceName, _ := e.getFieldAccessor("ecs.serviceName").String(e.Data)
 	return serviceName
 }
 
 func (e *DatasourceEvent) GetEcsTaskARN() string {
-	taskARN, err := e.getFieldAccessor("ecs.taskARN").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsTaskARN - error reading field ecs.taskARN", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	taskARN, _ := e.getFieldAccessor("ecs.taskARN").String(e.Data)
 	return taskARN
 }
 
 func (e *DatasourceEvent) GetEcsTaskDefinitionARN() string {
-	taskDefARN, err := e.getFieldAccessor("ecs.taskDefinitionARN").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsTaskDefinitionARN - error reading field ecs.taskDefinitionARN", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	taskDefARN, _ := e.getFieldAccessor("ecs.taskDefinitionARN").String(e.Data)
 	return taskDefARN
 }
 
 func (e *DatasourceEvent) GetEcsTaskFamily() string {
-	taskFamily, err := e.getFieldAccessor("ecs.taskFamily").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetEcsTaskFamily - error reading field ecs.taskFamily", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	taskFamily, _ := e.getFieldAccessor("ecs.taskFamily").String(e.Data)
 	return taskFamily
 }
 
 func (e *DatasourceEvent) GetError() int64 {
-	errVal, err := e.getFieldAccessor("error_raw").Int32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetError - error reading field error_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	errVal, _ := e.getFieldAccessor("error_raw").Int32(e.Data)
 	return int64(errVal)
 }
 
@@ -532,20 +387,12 @@ func (e *DatasourceEvent) GetEventType() EventType {
 }
 
 func (e *DatasourceEvent) GetExePath() string {
-	exepath, err := e.getFieldAccessor("exepath").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetExePath - error reading field exepath", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	exepath, _ := e.getFieldAccessor("exepath").String(e.Data)
 	return exepath
 }
 
 func (e *DatasourceEvent) GetExitCode() uint32 {
-	exitCode, err := e.getFieldAccessor("exit_code").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetExitCode - error reading field exit_code", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	exitCode, _ := e.getFieldAccessor("exit_code").Uint32(e.Data)
 	return exitCode
 }
 
@@ -554,30 +401,19 @@ func (e *DatasourceEvent) GetExtra() interface{} {
 }
 
 func (e *DatasourceEvent) GetFlags() []string {
-	flags, err := e.getFieldAccessor("flags_raw").Int32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetFlags - error reading field flags_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return nil
-	}
+	flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
 	return decodeOpenFlags(flags)
 }
 
 func (e *DatasourceEvent) GetFlagsRaw() uint32 {
-	flags, err := e.getFieldAccessor("flags_raw").Int32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetFlagsRaw - error reading field flags_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
 	return uint32(flags)
 }
 
 func (e *DatasourceEvent) GetFullPath() string {
-	path, err := e.getFieldAccessor("fpath").String(e.Data)
-	if err != nil || path == "" {
-		path, err = e.getFieldAccessor("fname").String(e.Data)
-		if err != nil {
-			return ""
-		}
+	path, _ := e.getFieldAccessor("fpath").String(e.Data)
+	if path == "" {
+		path, _ = e.getFieldAccessor("fname").String(e.Data)
 	}
 	return path
 }
@@ -588,30 +424,18 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return nil
 	default:
-		gid, err := e.getFieldAccessor("proc.creds.gid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetGid - error reading field proc.creds.gid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return nil
-		}
+		gid, _ := e.getFieldAccessor("proc.creds.gid").Uint32(e.Data)
 		return &gid
 	}
 }
 
 func (e *DatasourceEvent) GetHostNetwork() bool {
-	hostNetwork, err := e.getFieldAccessor("k8s.hostnetwork").Bool(e.Data)
-	if err != nil {
-		logger.L().Warning("GetHostNetwork - error reading field k8s.hostnetwork", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return false
-	}
+	hostNetwork, _ := e.getFieldAccessor("k8s.hostnetwork").Bool(e.Data)
 	return hostNetwork
 }
 
 func (e *DatasourceEvent) GetIdentifier() string {
-	identifier, err := e.getFieldAccessor("identifier").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetIdentifier - error reading field identifier", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	identifier, _ := e.getFieldAccessor("identifier").String(e.Data)
 	return identifier
 }
 
@@ -620,11 +444,7 @@ func (e *DatasourceEvent) GetInternal() bool {
 }
 
 func (e *DatasourceEvent) GetModule() string {
-	module, err := e.getFieldAccessor("module").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetModule - error reading field module", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	module, _ := e.getFieldAccessor("module").String(e.Data)
 	return module
 }
 
@@ -634,57 +454,33 @@ func (e *DatasourceEvent) GetMountNsID() uint64 {
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return 0
 	default:
-		mountNsID, err := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
-		if err != nil {
-			logger.L().Warning("GetMountNsID - error reading field proc.mntns_id", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		mountNsID, _ := e.getFieldAccessor("proc.mntns_id").Uint64(e.Data)
 		return mountNsID
 	}
 }
 
 func (e *DatasourceEvent) GetNamespace() string {
-	namespace, err := e.getFieldAccessor("k8s.namespace").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetNamespace - error reading field k8s.namespace", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	namespace, _ := e.getFieldAccessor("k8s.namespace").String(e.Data)
 	return namespace
 }
 
 func (e *DatasourceEvent) GetNewPath() string {
-	newPath, err := e.getFieldAccessor("newpath").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetNewPath - error reading field newpath", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	newPath, _ := e.getFieldAccessor("newpath").String(e.Data)
 	return newPath
 }
 
 func (e *DatasourceEvent) GetNumAnswers() int {
-	numAnswers, err := e.getFieldAccessor("num_answers").Int32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetNumAnswers - error reading field num_answers", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	numAnswers, _ := e.getFieldAccessor("num_answers").Int32(e.Data)
 	return int(numAnswers)
 }
 
 func (e *DatasourceEvent) GetOldPath() string {
-	oldPath, err := e.getFieldAccessor("oldpath").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetOldPath - error reading field oldpath", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	oldPath, _ := e.getFieldAccessor("oldpath").String(e.Data)
 	return oldPath
 }
 
 func (e *DatasourceEvent) GetOpcode() int {
-	opcode, err := e.getFieldAccessor("opcode").Int32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetOpcode - error reading field opcode", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	opcode, _ := e.getFieldAccessor("opcode").Int32(e.Data)
 	return int(opcode)
 }
 
@@ -705,11 +501,7 @@ func (e *DatasourceEvent) GetPath() string {
 	if e.FullPathTracing {
 		return e.GetFullPath()
 	}
-	path, err := e.getFieldAccessor("fname").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetPath - error reading field fname", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	path, _ := e.getFieldAccessor("fname").String(e.Data)
 	return path
 }
 
@@ -719,11 +511,7 @@ func (e *DatasourceEvent) GetPcomm() string {
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return ""
 	default:
-		pcomm, err := e.getFieldAccessor("proc.parent.comm").String(e.Data)
-		if err != nil {
-			logger.L().Warning("GetPcomm - error reading field proc.parent.comm", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		pcomm, _ := e.getFieldAccessor("proc.parent.comm").String(e.Data)
 		return pcomm
 	}
 }
@@ -731,28 +519,16 @@ func (e *DatasourceEvent) GetPcomm() string {
 func (e *DatasourceEvent) GetPID() uint32 {
 	switch e.EventType {
 	case ForkEventType:
-		childPid, err := e.getFieldAccessor("child_pid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetPID - error reading field child_pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		childPid, _ := e.getFieldAccessor("child_pid").Uint32(e.Data)
 		return childPid
 	case ExitEventType:
-		exitPid, err := e.getFieldAccessor("exit_pid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetPID - error reading field exit_pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		exitPid, _ := e.getFieldAccessor("exit_pid").Uint32(e.Data)
 		return exitPid
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return 0
 	default:
-		pidValue, err := e.getFieldAccessor("proc.pid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetPID - error reading field proc.pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		pidValue, _ := e.getFieldAccessor("proc.pid").Uint32(e.Data)
 		return pidValue
 	}
 }
@@ -776,21 +552,13 @@ func (e *DatasourceEvent) getPtid() uint64 {
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return 0
 	default:
-		ptid, err := e.getFieldAccessor("proc.parent.tid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("getPtid - error reading field proc.parent.tid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		ptid, _ := e.getFieldAccessor("proc.parent.tid").Uint32(e.Data)
 		return uint64(ptid)
 	}
 }
 
 func (e *DatasourceEvent) GetPktType() string {
-	egress, err := e.getFieldAccessor("egress").Uint8(e.Data)
-	if err != nil {
-		logger.L().Warning("GetPktType - error reading field egress", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	egress, _ := e.getFieldAccessor("egress").Uint8(e.Data)
 	if egress == 1 {
 		return OutgoingPktType
 	}
@@ -798,57 +566,33 @@ func (e *DatasourceEvent) GetPktType() string {
 }
 
 func (e *DatasourceEvent) GetPod() string {
-	podName, err := e.getFieldAccessor("k8s.podName").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetPod - error reading field k8s.podName", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	podName, _ := e.getFieldAccessor("k8s.podName").String(e.Data)
 	return podName
 }
 
 func (e *DatasourceEvent) GetPodHostIP() string {
-	hostIP, err := e.getFieldAccessor("k8s.hostIP").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetPodHostIP - error reading field k8s.hostIP", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	hostIP, _ := e.getFieldAccessor("k8s.hostIP").String(e.Data)
 	return hostIP
 }
 
 func (e *DatasourceEvent) GetPodLabels() map[string]string {
-	podLabels, err := e.getFieldAccessor("k8s.podLabels").String(e.Data)
-	if err != nil {
-		logger.L().Warning("GetPodLabels - error reading field k8s.podLabels", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return nil
-	}
+	podLabels, _ := e.getFieldAccessor("k8s.podLabels").String(e.Data)
 	return parseStringToMap(podLabels)
 }
 
 func (e *DatasourceEvent) GetPpid() uint32 {
 	switch e.EventType {
 	case ForkEventType:
-		parentPid, err := e.getFieldAccessor("parent_pid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetPpid - error reading field parent_pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		parentPid, _ := e.getFieldAccessor("parent_pid").Uint32(e.Data)
 		return parentPid
 	case ExitEventType:
-		exitPpid, err := e.getFieldAccessor("exit_ppid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetPpid - error reading field exit_ppid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		exitPpid, _ := e.getFieldAccessor("exit_ppid").Uint32(e.Data)
 		return exitPpid
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return 0
 	default:
-		ppid, err := e.getFieldAccessor("proc.parent.pid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetPpid - error reading field proc.parent.pid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		ppid, _ := e.getFieldAccessor("proc.parent.pid").Uint32(e.Data)
 		return ppid
 	}
 }
@@ -856,18 +600,10 @@ func (e *DatasourceEvent) GetPpid() uint32 {
 func (e *DatasourceEvent) GetProto() string {
 	switch e.EventType {
 	case DnsEventType:
-		protoNum, err := e.getFieldAccessor("dst.proto_raw").Uint16(e.Data)
-		if err != nil {
-			logger.L().Warning("GetProto - error reading field dst.proto_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		protoNum, _ := e.getFieldAccessor("dst.proto_raw").Uint16(e.Data)
 		return protoNumToString(protoNum)
 	case NetworkEventType:
-		protoNum, err := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
-		if err != nil {
-			logger.L().Warning("GetProto - error reading field endpoint.proto_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		protoNum, _ := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
 		return protoNumToString(protoNum)
 	default:
 		logger.L().Warning("GetProto not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -876,20 +612,12 @@ func (e *DatasourceEvent) GetProto() string {
 }
 
 func (e *DatasourceEvent) GetPupperLayer() bool {
-	pupperLayer, err := e.getFieldAccessor("pupper_layer").Bool(e.Data)
-	if err != nil {
-		logger.L().Warning("GetPupperLayer - error reading field pupper_layer", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return false
-	}
+	pupperLayer, _ := e.getFieldAccessor("pupper_layer").Bool(e.Data)
 	return pupperLayer
 }
 
 func (e *DatasourceEvent) GetQr() DNSPktType {
-	isResponse, err := e.getFieldAccessor("qr_raw").Bool(e.Data)
-	if err != nil {
-		logger.L().Warning("GetQr - error reading field qr_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	isResponse, _ := e.getFieldAccessor("qr_raw").Bool(e.Data)
 	if isResponse {
 		return DNSPktTypeResponse
 	}
@@ -905,90 +633,50 @@ func (e *DatasourceEvent) GetResponse() *http.Response {
 }
 
 func (e *DatasourceEvent) GetSignal() uint32 {
-	signal, err := e.getFieldAccessor("exit_signal").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetSignal - error reading field exit_signal", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	signal, _ := e.getFieldAccessor("exit_signal").Uint32(e.Data)
 	return signal
 }
 
 func (e *DatasourceEvent) GetSocketInode() uint64 {
-	socketInode, err := e.getFieldAccessor("socket_inode").Uint64(e.Data)
-	if err != nil {
-		logger.L().Warning("GetSocketInode - error reading field socket_inode", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	socketInode, _ := e.getFieldAccessor("socket_inode").Uint64(e.Data)
 	return socketInode
 }
 
 func (e *DatasourceEvent) GetSockFd() uint32 {
-	sockFd, err := e.getFieldAccessor("sock_fd").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("GetSockFd - error reading field sock_fd", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	sockFd, _ := e.getFieldAccessor("sock_fd").Uint32(e.Data)
 	return sockFd
 }
 
 func (e *DatasourceEvent) GetSrcIP() string {
-	version, err := e.getFieldAccessor("src.version").Uint8(e.Data)
-	if err != nil {
-		logger.L().Warning("GetSrcIP - error reading field src.version", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return ""
-	}
+	version, _ := e.getFieldAccessor("src.version").Uint8(e.Data)
 	switch version {
 	case 4:
-		addr, err := e.getFieldAccessor("src.addr_raw.v4").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetSrcIP - error reading field src.addr_raw.v4", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		addr, _ := e.getFieldAccessor("src.addr_raw.v4").Uint32(e.Data)
 		return rawIPv4ToString(addr)
 	case 6:
-		addr, err := e.getFieldAccessor("src.addr_raw.v6").Bytes(e.Data)
-		if err != nil {
-			logger.L().Warning("GetSrcIP - error reading field src.addr_raw.v6", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		addr, _ := e.getFieldAccessor("src.addr_raw.v6").Bytes(e.Data)
 		return rawIPv6ToString(addr)
 	}
 	return ""
 }
 
 func (e *DatasourceEvent) GetSrcPort() uint16 {
-	port, err := e.getFieldAccessor("src.port").Uint16(e.Data)
-	if err != nil {
-		logger.L().Warning("GetSrcPort - error reading field src.port", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	port, _ := e.getFieldAccessor("src.port").Uint16(e.Data)
 	return port
 }
 
 func (e *DatasourceEvent) GetSyscall() string {
 	switch e.EventType {
 	case CapabilitiesEventType:
-		syscallRaw, err := e.getFieldAccessor("syscall_raw").Uint16(e.Data)
-		if err != nil {
-			logger.L().Warning("GetSyscall - error reading field syscall_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		syscallRaw, _ := e.getFieldAccessor("syscall_raw").Uint16(e.Data)
 		return syscalls.SyscallGetName(syscallRaw)
 	case HTTPEventType:
-		syscall, err := e.getFieldAccessor("syscall").Bytes(e.Data)
-		if err != nil {
-			logger.L().Warning("GetSyscall - error reading field syscall", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		syscall, _ := e.getFieldAccessor("syscall").Bytes(e.Data)
 		return gadgets.FromCString(syscall)
 	case SyscallEventType:
 		return e.Syscall
 	case KmodEventType:
-		syscall, err := e.getFieldAccessor("syscall").String(e.Data)
-		if err != nil {
-			logger.L().Warning("GetSyscall - error reading field syscall", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return ""
-		}
+		syscall, _ := e.getFieldAccessor("syscall").String(e.Data)
 		return syscall
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
@@ -997,32 +685,20 @@ func (e *DatasourceEvent) GetSyscall() string {
 }
 
 func (e *DatasourceEvent) GetSyscalls() []byte {
-	syscallsBuffer, err := e.getFieldAccessor("syscalls").Bytes(e.Data)
-	if err != nil {
-		logger.L().Warning("GetSyscalls - error reading field syscalls", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return nil
-	}
+	syscallsBuffer, _ := e.getFieldAccessor("syscalls").Bytes(e.Data)
 	return syscallsBuffer
 }
 
 func (e *DatasourceEvent) getTid() uint64 {
 	switch e.EventType {
 	case ExitEventType:
-		tid, err := e.getFieldAccessor("exit_tid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("getTid - error reading field exit_tid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		tid, _ := e.getFieldAccessor("exit_tid").Uint32(e.Data)
 		return uint64(tid)
 	case SyscallEventType:
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return 0
 	default:
-		tid, err := e.getFieldAccessor("proc.tid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("getTid - error reading field proc.tid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return 0
-		}
+		tid, _ := e.getFieldAccessor("proc.tid").Uint32(e.Data)
 		return uint64(tid)
 	}
 }
@@ -1032,21 +708,13 @@ func (e *DatasourceEvent) GetTimestamp() types.Time {
 	case SyscallEventType:
 		return types.Time(time.Now().UnixNano())
 	default:
-		timeStampRaw, err := e.getFieldAccessor("timestamp_raw").Uint64(e.Data)
-		if err != nil {
-			logger.L().Warning("GetTimestamp - error reading field timestamp_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return types.Time(0)
-		}
+		timeStampRaw, _ := e.getFieldAccessor("timestamp_raw").Uint64(e.Data)
 		return gadgets.WallTimeFromBootTime(timeStampRaw)
 	}
 }
 
 func (e *DatasourceEvent) GetType() HTTPDataType {
-	t, err := e.getFieldAccessor("type").Uint8(e.Data)
-	if err != nil {
-		logger.L().Warning("GetType - error reading field type", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return 0
-	}
+	t, _ := e.getFieldAccessor("type").Uint8(e.Data)
 	return HTTPDataType(t)
 }
 
@@ -1056,21 +724,13 @@ func (e *DatasourceEvent) GetUid() *uint32 {
 		// FIXME this is a temporary workaround until the gadget has proc enrichment
 		return nil
 	default:
-		uid, err := e.getFieldAccessor("proc.creds.uid").Uint32(e.Data)
-		if err != nil {
-			logger.L().Warning("GetUid - error reading field proc.creds.uid", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-			return nil
-		}
+		uid, _ := e.getFieldAccessor("proc.creds.uid").Uint32(e.Data)
 		return &uid
 	}
 }
 
 func (e *DatasourceEvent) GetUpperLayer() bool {
-	upperLayer, err := e.getFieldAccessor("upper_layer").Bool(e.Data)
-	if err != nil {
-		logger.L().Warning("GetUpperLayer - error reading field upper_layer", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return false
-	}
+	upperLayer, _ := e.getFieldAccessor("upper_layer").Bool(e.Data)
 	return upperLayer
 }
 
@@ -1082,11 +742,7 @@ func (e *DatasourceEvent) HasDroppedEvents() bool {
 }
 
 func (e *DatasourceEvent) IsDir() bool {
-	raw, err := e.getFieldAccessor("mode_raw").Uint32(e.Data)
-	if err != nil {
-		logger.L().Warning("IsDir - error reading field mode_raw", helpers.String("eventType", string(e.EventType)), helpers.Error(err))
-		return false
-	}
+	raw, _ := e.getFieldAccessor("mode_raw").Uint32(e.Data)
 	fileMode := os.FileMode(raw)
 	return fileMode.IsDir()
 }
