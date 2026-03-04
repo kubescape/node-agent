@@ -135,7 +135,9 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	go cpm.startContainerMonitoring(container, sharedData)
 
 	// Signal that the container entry is ready
-	close(entry.ready)
+	entry.readyOnce.Do(func() {
+		close(entry.ready)
+	})
 
 	logger.L().Debug("container added to container profile manager",
 		helpers.String("containerID", containerID),

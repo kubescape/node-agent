@@ -186,6 +186,7 @@ func GetHostAsContainer() (*containercollection.Container, error) {
 	return &containercollection.Container{
 		Runtime: containercollection.RuntimeMetadata{
 			BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+				ContainerID:  "host",
 				ContainerPID: uint32(hostInitPID),
 			},
 		},

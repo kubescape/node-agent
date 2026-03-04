@@ -32,6 +32,8 @@ type ContainerEntry struct {
 	mu   sync.RWMutex
 	// ready channel is used to signal when the container entry is fully initialized
 	ready chan struct{}
+	// readyOnce ensures the ready channel is closed exactly once
+	readyOnce sync.Once
 }
 
 // containerData contains all the monitored data for a single container
