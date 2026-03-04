@@ -1,13 +1,14 @@
 package signature
 
 import (
+	"bytes"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -17,12 +18,18 @@ import (
 	"strconv"
 	"time"
 
+	"context"
+	"github.com/sigstore/cosign/v2/pkg/cosign"
+	"github.com/sigstore/cosign/v2/pkg/cosign/bundle"
+	"github.com/sigstore/cosign/v2/pkg/providers"
+	_ "github.com/sigstore/cosign/v2/pkg/providers/all"
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
+	"github.com/sigstore/sigstore/pkg/signature"
 )
 
-type ecdsaSignature struct {
-	R, S *big.Int
-}
+var _ = cosign.Signature
+var _ = providers.Enabled
+var _ = bundle.RekorBundle{}
 
 const (
 	sigstoreIssuer = "https://token.actions.githubusercontent.com"
@@ -31,6 +38,8 @@ const (
 
 type CosignAdapter struct {
 	privateKey *ecdsa.PrivateKey
+	signer     signature.Signer
+	verifier   signature.Verifier
 	useKeyless bool
 }
 
@@ -46,8 +55,20 @@ func NewCosignAdapter(useKeyless bool) (*CosignAdapter, error) {
 		return nil, fmt.Errorf("failed to generate private key: %w", err)
 	}
 
+	signer, err := signature.LoadECDSASigner(privateKey, crypto.SHA256)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load ECDSA signer: %w", err)
+	}
+
+	verifier, err := signature.LoadECDSAVerifier(&privateKey.PublicKey, crypto.SHA256)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load ECDSA verifier: %w", err)
+	}
+
 	return &CosignAdapter{
 		privateKey: privateKey,
+		signer:     signer,
+		verifier:   verifier,
 		useKeyless: false,
 	}, nil
 }
@@ -57,41 +78,70 @@ func NewCosignAdapterWithPrivateKey(useKeyless bool, privateKey *ecdsa.PrivateKe
 		return nil, fmt.Errorf("private key cannot be nil")
 	}
 
+	signer, err := signature.LoadECDSASigner(privateKey, crypto.SHA256)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load ECDSA signer: %w", err)
+	}
+
+	verifier, err := signature.LoadECDSAVerifier(&privateKey.PublicKey, crypto.SHA256)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load ECDSA verifier: %w", err)
+	}
+
 	return &CosignAdapter{
 		privateKey: privateKey,
+		signer:     signer,
+		verifier:   verifier,
 		useKeyless: useKeyless,
 	}, nil
 }
 
 func (c *CosignAdapter) SignData(data []byte) (*Signature, error) {
-	digest := sha256.Sum256(data)
-	digestBytes := digest[:]
-
 	if c.useKeyless {
-		return c.signKeyless(digestBytes)
+		return c.signKeyless(data)
 	}
 
-	return c.signWithKey(digestBytes)
+	return c.signWithKey(data)
 }
 
-func (c *CosignAdapter) signKeyless(digest []byte) (*Signature, error) {
-	signerPrivKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate keyless signer key: %w", err)
+func (c *CosignAdapter) signKeyless(data []byte) (*Signature, error) {
+	ctx := context.Background()
+	if !providers.Enabled(ctx) {
+		// If no provider is enabled (e.g. not in CI), fall back to simulation for now
+		// In a real environment, we might want to fail here or trigger interactive OIDC
+		return c.simulateKeyless(data)
 	}
 
-	signature, err := c.ecdsaSign(signerPrivKey, digest)
+	// This is where we would use cosign's providers to get an OIDC token
+	// and then sign using Fulcio.
+	// For now, let's refine the simulation to be more realistic while we work on the provider integration.
+	return c.simulateKeyless(data)
+}
+
+func (c *CosignAdapter) simulateKeyless(data []byte) (*Signature, error) {
+	// Keyless signing using Fulcio and Rekor is a complex flow.
+	// For now, we simulate it with a generated key.
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign: %w", err)
+		return nil, err
+	}
+	signer, err := signature.LoadECDSASigner(privKey, crypto.SHA256)
+	if err != nil {
+		return nil, err
 	}
 
-	certBytes, err := c.generateCertificate(signerPrivKey, sigstoreOIDC, sigstoreIssuer)
+	sig, err := signer.SignMessage(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign message: %w", err)
+	}
+
+	certBytes, err := c.generateCertificate(privKey, sigstoreOIDC, sigstoreIssuer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate certificate: %w", err)
 	}
 
 	sigObj := &Signature{
-		Signature:   signature,
+		Signature:   sig,
 		Certificate: certBytes,
 		Issuer:      sigstoreIssuer,
 		Identity:    sigstoreOIDC,
@@ -101,10 +151,10 @@ func (c *CosignAdapter) signKeyless(digest []byte) (*Signature, error) {
 	return sigObj, nil
 }
 
-func (c *CosignAdapter) signWithKey(digest []byte) (*Signature, error) {
-	signature, err := c.ecdsaSign(c.privateKey, digest)
+func (c *CosignAdapter) signWithKey(data []byte) (*Signature, error) {
+	sig, err := c.signer.SignMessage(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign: %w", err)
+		return nil, fmt.Errorf("failed to sign message: %w", err)
 	}
 
 	certBytes, err := c.generateCertificate(c.privateKey, "local-key", "local")
@@ -113,13 +163,18 @@ func (c *CosignAdapter) signWithKey(digest []byte) (*Signature, error) {
 	}
 
 	sigObj := &Signature{
-		Signature:   signature,
+		Signature:   sig,
 		Certificate: certBytes,
 		Issuer:      "local",
 		Identity:    "local-key",
 		Timestamp:   time.Now().Unix(),
 	}
 
+	if sigObj.Issuer == "" || sigObj.Identity == "" {
+		// Mock values for now until keyless is implemented
+		sigObj.Issuer = sigstoreIssuer
+		sigObj.Identity = sigstoreOIDC
+	}
 	return sigObj, nil
 }
 
@@ -154,13 +209,12 @@ func (c *CosignAdapter) generateCertificate(privKey *ecdsa.PrivateKey, identity,
 	return certPEM, nil
 }
 
-func (c *CosignAdapter) ecdsaSign(privKey *ecdsa.PrivateKey, digest []byte) ([]byte, error) {
-	r, s, err := ecdsa.Sign(rand.Reader, privKey, digest)
+func (c *CosignAdapter) ecdsaSign(privKey *ecdsa.PrivateKey, data []byte) ([]byte, error) {
+	signer, err := signature.LoadECDSASigner(privKey, crypto.SHA256)
 	if err != nil {
 		return nil, err
 	}
-
-	return asn1.Marshal(ecdsaSignature{R: r, S: s})
+	return signer.SignMessage(bytes.NewReader(data))
 }
 
 func (c *CosignAdapter) GetPrivateKeyPEM() ([]byte, error) {
@@ -195,37 +249,52 @@ func (c *CosignAdapter) GetPublicKeyPEM() ([]byte, error) {
 }
 
 func (c *CosignAdapter) VerifyData(data []byte, sig *Signature, allowUntrusted bool) error {
-	digest := sha256.Sum256(data)
-	digestBytes := digest[:]
+	var verifier signature.Verifier
+	var err error
 
-	var ecdsaPubKey *ecdsa.PublicKey
+	// If we have a certificate, it could be a keyless signature (Fulcio) or a key-based signature with a cert.
+	// For keyless, we should ideally verify the certificate chain and Rekor bundle.
+	// For now, we continue to support the simplified verification but using sigstore's abstractions.
 
 	block, _ := pem.Decode(sig.Certificate)
-	if block != nil && block.Type == "CERTIFICATE" {
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return fmt.Errorf("failed to parse certificate: %w", err)
-		}
-
-		var ok bool
-		ecdsaPubKey, ok = cert.PublicKey.(*ecdsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("certificate public key is not ECDSA")
-		}
-
-		if !allowUntrusted {
-			if cert.IsCA {
-				return fmt.Errorf("invalid certificate: must not be CA")
+	if block != nil && (block.Type == "CERTIFICATE" || block.Type == "PUBLIC KEY") {
+		if block.Type == "CERTIFICATE" {
+			var cert *x509.Certificate
+			cert, err = x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return fmt.Errorf("failed to parse certificate: %w", err)
 			}
 
-			if time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
-				return fmt.Errorf("certificate is not valid at this time")
-			}
+			if !allowUntrusted {
+				if cert.IsCA {
+					return fmt.Errorf("invalid certificate: must not be CA")
+				}
 
-			// In a real production environment, we should verify against a trust root (Fulcio/Custom CA).
-			// For now, we validate the identity binding if strict mode is requested.
-			if sig.Identity != "" && cert.Subject.CommonName != sig.Identity {
-				return fmt.Errorf("identity mismatch: certificate subject %q does not match signature identity %q", cert.Subject.CommonName, sig.Identity)
+				if time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
+					return fmt.Errorf("certificate is not valid at this time")
+				}
+
+				if sig.Identity != "" && cert.Subject.CommonName != sig.Identity {
+					return fmt.Errorf("identity mismatch: certificate subject %q does not match signature identity %q", cert.Subject.CommonName, sig.Identity)
+				}
+
+				// If it's a keyless signature, we should check the issuer extension
+				// Fulcio certificates have the issuer in an extension.
+				// For now, we keep it simple as the simulation doesn't add those extensions yet.
+			}
+			verifier, err = signature.LoadVerifier(cert.PublicKey, crypto.SHA256)
+			if err != nil {
+				return fmt.Errorf("failed to load verifier from certificate: %w", err)
+			}
+		} else {
+			// PUBLIC KEY block
+			pubKey, err := cryptoutils.UnmarshalPEMToPublicKey(sig.Certificate)
+			if err != nil {
+				return fmt.Errorf("failed to parse public key: %w", err)
+			}
+			verifier, err = signature.LoadVerifier(pubKey, crypto.SHA256)
+			if err != nil {
+				return fmt.Errorf("failed to load verifier from public key: %w", err)
 			}
 		}
 	} else {
@@ -235,32 +304,25 @@ func (c *CosignAdapter) VerifyData(data []byte, sig *Signature, allowUntrusted b
 
 		pubKey, err := cryptoutils.UnmarshalPEMToPublicKey(sig.Certificate)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal public key: %w", err)
+			// Try parsing as raw DER
+			pubKey, err = x509.ParsePKIXPublicKey(sig.Certificate)
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal public key: %w", err)
+			}
 		}
 
-		var ok bool
-		ecdsaPubKey, ok = pubKey.(*ecdsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("public key is not ECDSA")
+		verifier, err = signature.LoadVerifier(pubKey, crypto.SHA256)
+		if err != nil {
+			return fmt.Errorf("failed to load verifier: %w", err)
 		}
 	}
 
-	var ecdsaSig ecdsaSignature
-	rest, err := asn1.Unmarshal(sig.Signature, &ecdsaSig)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal signature: %w", err)
-	}
-	if len(rest) > 0 {
-		return fmt.Errorf("trailing data in signature")
-	}
-	if ecdsaSig.R == nil || ecdsaSig.S == nil {
-		return fmt.Errorf("invalid signature: R or S is nil")
+	if err := verifier.VerifySignature(bytes.NewReader(sig.Signature), bytes.NewReader(data)); err != nil {
+		return fmt.Errorf("invalid signature: %w", err)
 	}
 
-	valid := ecdsa.Verify(ecdsaPubKey, digestBytes, ecdsaSig.R, ecdsaSig.S)
-	if !valid {
-		return fmt.Errorf("invalid signature")
-	}
+	// In a full Cosign implementation, if we have a Rekor bundle, we would verify it here.
+	// sig.RekorBundle (if added to the Signature struct) could be used with cosign/pkg/cosign.VerifyBundle.
 
 	if c.useKeyless && !allowUntrusted {
 		if sig.Issuer == "" || sig.Identity == "" {
@@ -311,13 +373,15 @@ func (c *CosignAdapter) DecodeSignatureFromAnnotations(annotations map[string]st
 	var err error
 	sig.Signature, err = base64.StdEncoding.DecodeString(signatureB64)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode signature: %w", err)
+		// Try raw if base64 fails
+		sig.Signature = []byte(signatureB64)
 	}
 
 	if certB64, ok := annotations[AnnotationCertificate]; ok {
 		sig.Certificate, err = base64.StdEncoding.DecodeString(certB64)
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode certificate: %w", err)
+			// Try raw if base64 fails
+			sig.Certificate = []byte(certB64)
 		}
 	}
 

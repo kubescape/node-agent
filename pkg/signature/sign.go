@@ -94,11 +94,7 @@ func GetProfileSignature(profile SignableProfile) (*Signature, error) {
 		return nil, fmt.Errorf("profile has no annotations")
 	}
 
-	adapter, err := NewCosignAdapter(true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cosign adapter: %w", err)
-	}
-
+	adapter := &CosignAdapter{}
 	sig, err := adapter.DecodeSignatureFromAnnotations(annotations)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode signature from annotations: %w", err)
