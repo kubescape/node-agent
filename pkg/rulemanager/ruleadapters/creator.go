@@ -339,7 +339,9 @@ func (r *RuleFailureCreator) setContextSpecificFields(ruleFailure *types.Generic
 
 	case contextdetection.Host:
 		ruleFailure.SetSourceContext(contextdetection.Host)
-		// For Host context, use NodeName to store the hostname
+		if k8sDetails.ContainerID == "" {
+			k8sDetails.ContainerID = enrichedEvent.ContainerID
+		}
 		hostname, err := os.Hostname()
 		if err == nil {
 			k8sDetails.NodeName = hostname
