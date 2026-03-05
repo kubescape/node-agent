@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -237,4 +238,81 @@ func TestParseHttpResponse_ContentLengthTruncatesGarbage(t *testing.T) {
 			assert.Equal(t, tt.expectedBody, string(body))
 		})
 	}
+}
+
+// mockHttpRawEvent allows testing GetValidBuf with explicit buf_len values
+// that differ from the actual buffer length (to test edge cases).
+type mockHttpRawEvent struct {
+	utils.StructEvent
+	bufLen uint16
+}
+
+func (m *mockHttpRawEvent) GetBufLen() uint16 { return m.bufLen }
+
+func TestGetValidBuf(t *testing.T) {
+	httpData := "POST /api HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\nhello"
+
+	t.Run("uses buf_len when set", func(t *testing.T) {
+		event := &utils.StructEvent{Buf: []byte(httpData)}
+		result := GetValidBuf(event)
+		assert.Equal(t, len(httpData), len(result))
+		assert.Equal(t, httpData, string(result))
+	})
+
+	t.Run("buf_len truncates garbage from ring buffer", func(t *testing.T) {
+		// BPF buffer has valid data followed by a previous event's data (no null byte separator).
+		previousEvent := "GET /old HTTP/1.1\r\nHost: old.com\r\n\r\n"
+		buf := makeBPFBuffer(httpData + previousEvent)
+		// With buf_len set correctly, only the real data is returned.
+		event := &utils.StructEvent{Buf: buf[:len(httpData)]}
+		result := GetValidBuf(event)
+		assert.Equal(t, len(httpData), len(result))
+		assert.Equal(t, httpData, string(result))
+
+		// Verify the parsed request is clean.
+		req, err := ParseHttpRequest(result)
+		require.NoError(t, err)
+		body, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "hello", string(body))
+	})
+
+	t.Run("buf_len < len(buf) truncates correctly", func(t *testing.T) {
+		// Normal case: buf_len indicates valid data is shorter than buffer.
+		buf := makeBPFBuffer(httpData)
+		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: buf}, bufLen: uint16(len(httpData))}
+		result := GetValidBuf(event)
+		assert.Equal(t, len(httpData), len(result), "should truncate to buf_len")
+		assert.Equal(t, httpData, string(result))
+	})
+
+	t.Run("buf_len=0 returns full buffer (backward compatibility)", func(t *testing.T) {
+		// When buf_len is 0 (error case), we fall back to returning the full buffer.
+		buf := makeBPFBuffer(httpData)
+		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: buf}, bufLen: 0}
+		result := GetValidBuf(event)
+		assert.Equal(t, len(buf), len(result), "buf_len=0 should return full buffer")
+	})
+
+	t.Run("buf_len > len(buf) returns full buffer (safety)", func(t *testing.T) {
+		// If buf_len exceeds buffer size, return full buffer as safety measure.
+		buf := []byte(httpData)
+		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: buf}, bufLen: uint16(len(buf) + 100)}
+		result := GetValidBuf(event)
+		assert.Equal(t, len(buf), len(result), "buf_len > len(buf) should return full buffer")
+	})
+
+	t.Run("empty buffer", func(t *testing.T) {
+		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: []byte{}}, bufLen: 0}
+		result := GetValidBuf(event)
+		assert.Empty(t, result)
+	})
+
+	t.Run("buf_len equals buffer length", func(t *testing.T) {
+		buf := []byte(httpData)
+		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: buf}, bufLen: uint16(len(buf))}
+		result := GetValidBuf(event)
+		assert.Equal(t, len(buf), len(result))
+		assert.Equal(t, httpData, string(result))
+	})
 }

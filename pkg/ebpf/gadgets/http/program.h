@@ -41,6 +41,7 @@ struct httpevent {
 
     u8   type;
     u32  sock_fd;
+    u16  buf_len;
     u8   buf[MAX_DATAEVENT_BUFFER];
     u8   syscall[MAX_SYSCALL];
     

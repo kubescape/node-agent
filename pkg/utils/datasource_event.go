@@ -216,6 +216,14 @@ func (e *DatasourceEvent) GetBuf() []byte {
 	return buf
 }
 
+func (e *DatasourceEvent) GetBufLen() uint16 {
+	bufLen, err := e.getFieldAccessor("buf_len").Uint16(e.Data)
+	if err != nil {
+		return 0
+	}
+	return bufLen
+}
+
 func (e *DatasourceEvent) GetCapability() string {
 	capability, _ := e.getFieldAccessor("cap").String(e.Data)
 	return capability

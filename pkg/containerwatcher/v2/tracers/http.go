@@ -167,7 +167,7 @@ func (ht *HTTPTracer) GroupEvents(bpfEvent utils.HttpRawEvent) utils.HttpEvent {
 	case utils.Response:
 		if exists, ok := ht.eventsMap.Get(id); ok {
 			grouped := exists
-			response, err := ParseHttpResponse(FromCString(bpfEvent.GetBuf()), grouped.GetRequest())
+			response, err := ParseHttpResponse(GetValidBuf(bpfEvent), grouped.GetRequest())
 			if err != nil {
 				return nil
 			}

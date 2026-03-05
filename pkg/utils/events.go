@@ -123,6 +123,7 @@ type HttpEvent interface {
 type HttpRawEvent interface {
 	EnrichEvent
 	GetBuf() []byte
+	GetBufLen() uint16
 	GetDstIP() string
 	GetDstPort() uint16
 	GetSockFd() uint32

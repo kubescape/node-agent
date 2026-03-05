@@ -116,6 +116,10 @@ func (e *StructEvent) GetBuf() []byte {
 	return e.Buf
 }
 
+func (e *StructEvent) GetBufLen() uint16 {
+	return uint16(len(e.Buf))
+}
+
 func (e *StructEvent) GetCapability() string {
 	return e.CapName
 }
