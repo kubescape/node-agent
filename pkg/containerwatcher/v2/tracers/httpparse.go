@@ -38,7 +38,7 @@ var ConsistentHeaders = []string{
 }
 
 func CreateEventFromRequest(bpfEvent utils.HttpRawEvent) (utils.HttpEvent, error) {
-	request, err := ParseHttpRequest(FromCString(bpfEvent.GetBuf()))
+	request, err := ParseHttpRequest(GetValidBuf(bpfEvent))
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +171,16 @@ func FromCString(in []byte) []byte {
 		}
 	}
 	return in
+}
+
+// GetValidBuf returns only the valid portion of the BPF event buffer.
+// It uses buf_len set by the gadget to determine the actual data length.
+func GetValidBuf(event utils.HttpRawEvent) []byte {
+	buf := event.GetBuf()
+	if n := event.GetBufLen(); n > 0 && int(n) <= len(buf) {
+		return buf[:n]
+	}
+	return buf
 }
 
 func GetUniqueIdentifier(event utils.HttpRawEvent) string {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -237,4 +238,33 @@ func TestParseHttpResponse_ContentLengthTruncatesGarbage(t *testing.T) {
 			assert.Equal(t, tt.expectedBody, string(body))
 		})
 	}
+}
+
+func TestGetValidBuf(t *testing.T) {
+	httpData := "POST /api HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\nhello"
+
+	t.Run("uses buf_len when set", func(t *testing.T) {
+		event := &utils.StructEvent{Buf: []byte(httpData)}
+		result := GetValidBuf(event)
+		assert.Equal(t, len(httpData), len(result))
+		assert.Equal(t, httpData, string(result))
+	})
+
+	t.Run("buf_len truncates garbage from ring buffer", func(t *testing.T) {
+		// BPF buffer has valid data followed by a previous event's data (no null byte separator).
+		previousEvent := "GET /old HTTP/1.1\r\nHost: old.com\r\n\r\n"
+		buf := makeBPFBuffer(httpData + previousEvent)
+		// With buf_len set correctly, only the real data is returned.
+		event := &utils.StructEvent{Buf: buf[:len(httpData)]}
+		result := GetValidBuf(event)
+		assert.Equal(t, len(httpData), len(result))
+		assert.Equal(t, httpData, string(result))
+
+		// Verify the parsed request is clean.
+		req, err := ParseHttpRequest(result)
+		require.NoError(t, err)
+		body, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "hello", string(body))
+	})
 }
