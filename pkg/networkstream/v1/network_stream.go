@@ -96,6 +96,9 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
+		if utils.IsHostContainer(notif.Container) {
+			return
+		}
 		ns.eventsStorageMutex.Lock()
 		ns.networkEventsStorage.Entities[notif.Container.Runtime.ContainerID] = apitypes.NetworkStreamEntity{
 			Kind: apitypes.NetworkStreamEntityKindContainer,

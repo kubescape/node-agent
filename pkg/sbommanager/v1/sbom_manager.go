@@ -154,6 +154,9 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	if notif.Type != containercollection.EventTypeAddContainer {
 		return
 	}
+	if utils.IsHostContainer(notif.Container) {
+		return
+	}
 	if notif.Container.Runtime.ContainerImageName == "" {
 		logger.L().Ctx(s.ctx).Debug("SbomManager - skipping container with empty image name",
 			helpers.String("namespace", notif.Container.K8s.Namespace),
