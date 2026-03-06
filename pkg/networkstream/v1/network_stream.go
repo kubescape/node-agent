@@ -279,6 +279,9 @@ func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *apity
 	defer ns.eventsStorageMutex.Unlock()
 
 	entityId := event.GetContainerID()
+	if entityId == utils.HostContainerID {
+		return
+	}
 	if entityId == "" || ns.k8sObjectCache == nil {
 		entityId = ns.nodeName
 	}
@@ -335,6 +338,9 @@ func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTre
 	defer ns.eventsStorageMutex.Unlock()
 
 	entityId := event.GetContainerID()
+	if entityId == utils.HostContainerID {
+		return
+	}
 	if entityId == "" || ns.k8sObjectCache == nil {
 		entityId = ns.nodeName
 	}
