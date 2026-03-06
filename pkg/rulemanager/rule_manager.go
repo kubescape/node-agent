@@ -109,6 +109,21 @@ func CreateRuleManager(
 }
 
 func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string) {
+	// Skip shared data wait for host containers (identified by ContainerPID==1 or ContainerID=="host")
+	// ContainerWatcher deliberately skips shared data setup for host containers
+	if container.Runtime.ContainerPID == 1 || container.Runtime.ContainerID == "host" {
+		logger.L().Debug("RuleManager - skipping shared data wait for host container",
+			helpers.String("container ID", container.Runtime.ContainerID))
+		// Skip podToWlid and shim PID setup for host containers as they don't have K8s metadata
+		if err := rm.monitorContainer(container, k8sContainerID); err != nil {
+			logger.L().Debug("RuleManager - stop monitor on host container",
+				helpers.String("reason", err.Error()),
+				helpers.String("container ID", container.Runtime.ContainerID),
+				helpers.String("k8s container id", k8sContainerID))
+		}
+		return
+	}
+
 	sharedData, err := rm.waitForSharedContainerData(container.Runtime.ContainerID)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to get shared container data", helpers.Error(err))
