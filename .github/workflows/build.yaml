@@ -38,10 +38,12 @@ jobs:
         if: ${{ inputs.STORAGE_REF != '' }}
         env:
           STORAGE_REF: ${{ inputs.STORAGE_REF }}
+          GONOSUMCHECK: "*"
+          GOFLAGS: ""
         run: |
           echo "Replacing github.com/kubescape/storage with github.com/k8sstormcenter/storage@${STORAGE_REF}"
           go mod edit -replace "github.com/kubescape/storage=github.com/k8sstormcenter/storage@${STORAGE_REF}"
-          GOPROXY=direct GONOSUMCHECK="github.com/k8sstormcenter/*" go mod tidy
+          go mod tidy
           echo "Resolved storage version:"
           grep "k8sstormcenter/storage" go.sum | head -1
 
@@ -76,3 +78,25 @@ jobs:
           build-args: image_version=${{ inputs.IMAGE_TAG }}
           platforms: ${{ inputs.PLATFORMS && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: true
+
+
+  trigger-component-tests:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger component tests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          STORAGE_TAG="${{ inputs.IMAGE_TAG }}"
+          NODE_AGENT_TAG="${{ inputs.IMAGE_TAG }}"
+          STORAGE_REF="${{ inputs.STORAGE_REF }}"
+          echo "Triggering component tests with STORAGE_TAG=${STORAGE_TAG} NODE_AGENT_TAG=${NODE_AGENT_TAG} STORAGE_REF=${STORAGE_REF}"
+          gh workflow run component-tests.yaml \
+            --repo "${{ github.repository }}" \
+            --ref "${{ github.ref_name }}" \
+            -f STORAGE_TAG="${STORAGE_TAG}" \
+            -f NODE_AGENT_TAG="${NODE_AGENT_TAG}" \
+            -f STORAGE_REF="${STORAGE_REF}"

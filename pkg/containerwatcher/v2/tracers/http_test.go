@@ -17,6 +17,7 @@ func TestHttpFields(t *testing.T) {
 	expectedFields := map[string][]string{
 		"http": {
 			"buf",
+			"buf_len",
 			"dst",
 			"dst.addr_raw",
 			"dst.addr_raw.v4",

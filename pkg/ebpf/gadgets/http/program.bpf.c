@@ -227,7 +227,10 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
     dataevent->sock_fd = packet->sockfd;
 
     bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
-    bpf_probe_read_user(&dataevent->buf, min_size(total_size, MAX_DATAEVENT_BUFFER), (void *)packet->buf);
+
+    __u64 buf_copy_len = min_size(total_size, MAX_DATAEVENT_BUFFER);
+    dataevent->buf_len = (__u16)buf_copy_len;
+    bpf_probe_read_user(&dataevent->buf, buf_copy_len, (void *)packet->buf);
 
     dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
 
@@ -316,6 +319,7 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
             if (copy_len > MAX_DATAEVENT_BUFFER)
                 copy_len = MAX_DATAEVENT_BUFFER;
 
+            dataevent->buf_len = (__u16)copy_len;
             bpf_probe_read_user(&dataevent->buf, copy_len, iov.iov_base);
             bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
 

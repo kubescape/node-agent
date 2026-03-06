@@ -44,15 +44,17 @@ type RuleFailureCreator struct {
 	dnsManager       dnsmanager.DNSResolver
 	enricher         types.Enricher
 	hashCache        *expirable.LRU[string, *FileHashCache]
+	alertPlatform    apitypes.AlertSourcePlatform
 }
 
-func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver, adapterFactory *EventRuleAdapterFactory) *RuleFailureCreator {
+func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver, adapterFactory *EventRuleAdapterFactory, alertPlatform apitypes.AlertSourcePlatform) *RuleFailureCreator {
 	hashCache := expirable.NewLRU[string, *FileHashCache](hashCacheMaxSize, nil, hashCacheTTL)
 	return &RuleFailureCreator{
 		adapterFactory: adapterFactory,
 		dnsManager:     dnsManager,
 		enricher:       enricher,
 		hashCache:      hashCache,
+		alertPlatform:  alertPlatform,
 	}
 }
 
@@ -79,7 +81,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 			RuleDescription: message,
 		},
 		RuleID:         rule.ID,
-		AlertPlatform:  apitypes.AlertSourcePlatformK8s,
+		AlertPlatform:  r.alertPlatform,
 		IsTriggerAlert: rule.IsTriggerAlert,
 	}
 

@@ -64,10 +64,7 @@ func (et *ExitTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(et.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := et.runtime.RunGadget(et.gadgetCtx, nil, params)
+		err := et.runtime.RunGadget(et.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", et.gadgetCtx.Name()), helpers.Error(err))
 		}

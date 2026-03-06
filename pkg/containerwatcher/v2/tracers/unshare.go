@@ -68,10 +68,7 @@ func (ut *UnshareTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(ut.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := ut.runtime.RunGadget(ut.gadgetCtx, nil, params)
+		err := ut.runtime.RunGadget(ut.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", ut.gadgetCtx.Name()), helpers.Error(err))
 		}
