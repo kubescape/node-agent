@@ -183,7 +183,7 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 	if container != nil {
 		procfsEvent.ContainerID = container.Runtime.ContainerID
 	} else {
-		procfsEvent.ContainerID = "host"
+		procfsEvent.ContainerID = utils.HostContainerID
 	}
 	processID := event.PID
 	containerID := procfsEvent.ContainerID

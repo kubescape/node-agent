@@ -12,6 +12,7 @@ import (
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type processTreeCreatorImpl struct {
@@ -184,7 +185,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
-		if pt.config.KubernetesMode && event.ContainerID == "host" { // If we are in Kubernetes mode and the container ID is "host", don't create the process.
+		if pt.config.KubernetesMode && event.ContainerID == utils.HostContainerID { // If we are in Kubernetes mode and the container ID is "host", don't create the process.
 			return
 		}
 
