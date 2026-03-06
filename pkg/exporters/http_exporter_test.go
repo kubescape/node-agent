@@ -32,7 +32,7 @@ func TestSendRuleAlert(t *testing.T) {
 	// Create an HTTPExporter with the mock server URL
 	exporter, err := NewHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
-	}, "", "", nil, "")
+	}, "", "", nil, "", apitypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
@@ -93,7 +93,7 @@ func TestSendRuleAlertRateReached(t *testing.T) {
 	exporter, err := NewHTTPExporter(HTTPExporterConfig{
 		URL:                server.URL,
 		MaxAlertsPerMinute: 1,
-	}, "", "", nil, "")
+	}, "", "", nil, "", apitypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
@@ -159,7 +159,7 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 	// Create an HTTPExporter with the mock server URL
 	exporter, err := NewHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
-	}, "", "", nil, "")
+	}, "", "", nil, "", apitypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 
 	// Create a mock malware description
@@ -213,13 +213,13 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 
 func TestValidateHTTPExporterConfig(t *testing.T) {
 	// Test case: URL is empty
-	_, err := NewHTTPExporter(HTTPExporterConfig{}, "", "", nil, "")
+	_, err := NewHTTPExporter(HTTPExporterConfig{}, "", "", nil, "", apitypes.AlertSourcePlatformK8sAgent)
 	assert.Error(t, err)
 
 	// Test case: URL is not empty
 	exp, err := NewHTTPExporter(HTTPExporterConfig{
 		URL: "http://localhost:9093",
-	}, "cluster", "node", nil, "test-cluster-uid")
+	}, "cluster", "node", nil, "test-cluster-uid", apitypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 	assert.Equal(t, "POST", exp.config.Method)
 	assert.Equal(t, 5, exp.config.TimeoutSeconds)
@@ -241,7 +241,7 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 				Value: "Bearer token",
 			},
 		},
-	}, "", "", nil, "")
+	}, "", "", nil, "", apitypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 	assert.Equal(t, "PUT", exp.config.Method)
 	assert.Equal(t, 2, exp.config.TimeoutSeconds)
@@ -252,6 +252,6 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 	_, err = NewHTTPExporter(HTTPExporterConfig{
 		URL:    "http://localhost:9093",
 		Method: "DELETE",
-	}, "", "", nil, "")
+	}, "", "", nil, "", apitypes.AlertSourcePlatformK8sAgent)
 	assert.Error(t, err)
 }

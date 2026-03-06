@@ -63,15 +63,16 @@ type HTTPExporterConfig struct {
 }
 
 type HTTPExporter struct {
-	config        HTTPExporterConfig
-	host          string
-	nodeName      string
-	clusterName   string
-	clusterUID    string
-	httpClient    *http.Client
-	alertMetrics  *alertMetrics
-	cloudMetadata *apitypes.CloudMetadata
-	bulkManager   *AlertBulkManager
+	config              HTTPExporterConfig
+	host                string
+	nodeName            string
+	clusterName         string
+	clusterUID          string
+	httpClient          *http.Client
+	alertMetrics        *alertMetrics
+	cloudMetadata       *apitypes.CloudMetadata
+	bulkManager         *AlertBulkManager
+	alertSourcePlatform apitypes.AlertSourcePlatform
 }
 
 type alertMetrics struct {
@@ -95,7 +96,7 @@ type HTTPAlertsListSpec struct {
 }
 
 // NewHTTPExporter creates a new HTTPExporter instance
-func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata, clusterUID string) (*HTTPExporter, error) {
+func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata, clusterUID string, alertSourcePlatform apitypes.AlertSourcePlatform) (*HTTPExporter, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -108,8 +109,9 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		httpClient: &http.Client{
 			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
 		},
-		alertMetrics:  &alertMetrics{},
-		cloudMetadata: cloudMetadata,
+		alertMetrics:        &alertMetrics{},
+		cloudMetadata:       cloudMetadata,
+		alertSourcePlatform: alertSourcePlatform,
 	}
 
 	// Initialize bulk manager if bulking is enabled
@@ -327,7 +329,7 @@ func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.Ru
 		Message:                failedRule.GetRuleAlert().RuleDescription,
 		HostName:               e.host,
 		AlertType:              failedRule.GetAlertType(),
-		AlertSourcePlatform:    failedRule.GetAlertPlatform(),
+		AlertSourcePlatform:    e.alertSourcePlatform,
 		BaseRuntimeAlert:       failedRule.GetBaseRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		RuleAlert:              failedRule.GetRuleAlert(),
@@ -347,7 +349,7 @@ func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) a
 		Message:                fmt.Sprintf("Malware detected: %s", result.GetBasicRuntimeAlert().AlertName),
 		HostName:               e.host,
 		AlertType:              apitypes.AlertTypeMalware,
-		AlertSourcePlatform:    apitypes.AlertSourcePlatformK8sAgent,
+		AlertSourcePlatform:    e.alertSourcePlatform,
 		BaseRuntimeAlert:       result.GetBasicRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		MalwareAlert:           result.GetMalwareRuntimeAlert(),
@@ -492,7 +494,7 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		Message:             "Alert limit reached",
 		HostName:            e.host,
 		AlertType:           apitypes.AlertTypeRule,
-		AlertSourcePlatform: apitypes.AlertSourcePlatformK8sAgent,
+		AlertSourcePlatform: e.alertSourcePlatform,
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: string(AlertTypeLimitReached),
 			// Severity:       ruleengine.RulePrioritySystemIssue,

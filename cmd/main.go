@@ -287,7 +287,7 @@ func main() {
 
 	if cfg.EnableRuntimeDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, apitypes.AlertSourcePlatformK8sAgent)
 		dWatcher.AddAdaptor(ruleBindingCache)
 
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
@@ -353,7 +353,7 @@ func main() {
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, apitypes.AlertSourcePlatformK8sAgent)
 		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, prometheusExporter, k8sObjectCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
@@ -395,7 +395,7 @@ func main() {
 	if cfg.EnableFIM {
 		// Initialize FIM-specific exporters
 		fimExportersConfig := cfg.FIM.GetFIMExportersConfig()
-		fimExporter := exporters.InitExporters(fimExportersConfig, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID)
+		fimExporter := exporters.InitExporters(fimExportersConfig, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, apitypes.AlertSourcePlatformK8sAgent)
 
 		fimManager, err = fimmanager.NewFIMManager(cfg, clusterData.ClusterName, fimExporter, cloudMetadata)
 		if err != nil {
