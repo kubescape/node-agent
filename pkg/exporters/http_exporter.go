@@ -327,6 +327,7 @@ func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.Ru
 		Message:                failedRule.GetRuleAlert().RuleDescription,
 		HostName:               e.host,
 		AlertType:              failedRule.GetAlertType(),
+		AlertSourcePlatform:    failedRule.GetAlertPlatform(),
 		BaseRuntimeAlert:       failedRule.GetBaseRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		RuleAlert:              failedRule.GetRuleAlert(),
@@ -346,6 +347,7 @@ func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) a
 		Message:                fmt.Sprintf("Malware detected: %s", result.GetBasicRuntimeAlert().AlertName),
 		HostName:               e.host,
 		AlertType:              apitypes.AlertTypeMalware,
+		AlertSourcePlatform:    apitypes.AlertSourcePlatformK8sAgent,
 		BaseRuntimeAlert:       result.GetBasicRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		MalwareAlert:           result.GetMalwareRuntimeAlert(),
@@ -487,9 +489,10 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 	e.alertMetrics.Unlock()
 
 	alert := apitypes.RuntimeAlert{
-		Message:   "Alert limit reached",
-		HostName:  e.host,
-		AlertType: apitypes.AlertTypeRule,
+		Message:             "Alert limit reached",
+		HostName:            e.host,
+		AlertType:           apitypes.AlertTypeRule,
+		AlertSourcePlatform: apitypes.AlertSourcePlatformK8sAgent,
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: string(AlertTypeLimitReached),
 			// Severity:       ruleengine.RulePrioritySystemIssue,
