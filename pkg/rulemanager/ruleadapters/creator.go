@@ -120,6 +120,11 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 		return
 	}
 
+	// Skip profile metadata for host containers - they don't have profiles
+	if triggerEvent.GetContainerID() == utils.HostContainerID {
+		return
+	}
+
 	var profileType armotypes.ProfileType
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 	profileRequirment := rule.ProfileDependency
