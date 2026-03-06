@@ -102,9 +102,9 @@ type AlertBulkManager struct {
 type containerBulk struct {
     sync.Mutex
     containerID       string
-    alerts            []apitypes.RuntimeAlert
-    processMap        map[uint32]*apitypes.Process  // PID → Process
-    rootProcess       *apitypes.Process             // Container init
+    alerts            []armotypes.RuntimeAlert
+    processMap        map[uint32]*armotypes.Process  // PID → Process
+    rootProcess       *armotypes.Process             // Container init
     cloudServices     []string
     firstAlertTime    time.Time
     maxSize           int
@@ -113,8 +113,8 @@ type containerBulk struct {
 
 type bulkQueueItem struct {
     containerID   string
-    alerts        []apitypes.RuntimeAlert
-    processTree   apitypes.ProcessTree
+    alerts        []armotypes.RuntimeAlert
+    processTree   armotypes.ProcessTree
     cloudServices []string
     retryCount    int
     enqueuedAt    time.Time

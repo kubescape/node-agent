@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 func TestCalculateSHA256FileExecHash(t *testing.T) {
@@ -105,20 +105,20 @@ func TestCreateK8sContainerID(t *testing.T) {
 
 func TestGetProcessFromProcessTree(t *testing.T) {
 	type args struct {
-		process *apitypes.Process
+		process *armotypes.Process
 		pid     uint32
 	}
 	tests := []struct {
 		name string
 		args args
-		want *apitypes.Process
+		want *armotypes.Process
 	}{
 		{
 			name: "Test Case 1: Process found in tree",
 			args: args{
-				process: &apitypes.Process{
+				process: &armotypes.Process{
 					PID: 1,
-					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+					ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 						{PID: 2}: {
 							PID: 2,
 						},
@@ -129,16 +129,16 @@ func TestGetProcessFromProcessTree(t *testing.T) {
 				},
 				pid: 2,
 			},
-			want: &apitypes.Process{
+			want: &armotypes.Process{
 				PID: 2,
 			},
 		},
 		{
 			name: "Test Case 2: Process not found in tree",
 			args: args{
-				process: &apitypes.Process{
+				process: &armotypes.Process{
 					PID: 1,
-					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+					ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 						{PID: 2}: {
 							PID: 2,
 						},

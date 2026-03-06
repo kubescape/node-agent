@@ -19,7 +19,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -70,9 +70,9 @@ type HTTPExporter struct {
 	clusterUID          string
 	httpClient          *http.Client
 	alertMetrics        *alertMetrics
-	cloudMetadata       *apitypes.CloudMetadata
+	cloudMetadata       *armotypes.CloudMetadata
 	bulkManager         *AlertBulkManager
-	alertSourcePlatform apitypes.AlertSourcePlatform
+	alertSourcePlatform armotypes.AlertSourcePlatform
 }
 
 type alertMetrics struct {
@@ -85,18 +85,18 @@ type alertMetrics struct {
 type HTTPAlertsList struct {
 	Kind       string             `json:"kind"`
 	APIVersion string             `json:"apiVersion"`
-	Metadata   apitypes.Metadata  `json:"metadata"`
+	Metadata   armotypes.Metadata `json:"metadata"`
 	Spec       HTTPAlertsListSpec `json:"spec"`
 }
 
 type HTTPAlertsListSpec struct {
-	Alerts        []apitypes.RuntimeAlert `json:"alerts"`
-	ProcessTree   apitypes.ProcessTree    `json:"processTree"`
-	CloudMetadata apitypes.CloudMetadata  `json:"cloudMetadata"`
+	Alerts        []armotypes.RuntimeAlert `json:"alerts"`
+	ProcessTree   armotypes.ProcessTree    `json:"processTree"`
+	CloudMetadata armotypes.CloudMetadata  `json:"cloudMetadata"`
 }
 
 // NewHTTPExporter creates a new HTTPExporter instance
-func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata, clusterUID string, alertSourcePlatform apitypes.AlertSourcePlatform) (*HTTPExporter, error) {
+func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *armotypes.CloudMetadata, clusterUID string, alertSourcePlatform armotypes.AlertSourcePlatform) (*HTTPExporter, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -315,7 +315,7 @@ func (e *HTTPExporter) createFimAlertPayload(fimEvents []hostfimsensor.FimEvent)
 	return report
 }
 
-func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.RuntimeAlert {
+func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) armotypes.RuntimeAlert {
 	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = e.nodeName
 	k8sDetails.ClusterName = e.clusterName
@@ -325,7 +325,7 @@ func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.Ru
 	httpDetails.SourcePodInfo.ClusterName = e.clusterName
 	httpDetails.SourcePodInfo.ClusterUID = e.clusterUID
 
-	return apitypes.RuntimeAlert{
+	return armotypes.RuntimeAlert{
 		Message:                failedRule.GetRuleAlert().RuleDescription,
 		HostName:               e.host,
 		AlertType:              failedRule.GetAlertType(),
@@ -339,16 +339,16 @@ func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.Ru
 	}
 }
 
-func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) apitypes.RuntimeAlert {
+func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) armotypes.RuntimeAlert {
 	k8sDetails := result.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = e.nodeName
 	k8sDetails.ClusterName = e.clusterName
 	k8sDetails.ClusterUID = e.clusterUID
 
-	return apitypes.RuntimeAlert{
+	return armotypes.RuntimeAlert{
 		Message:                fmt.Sprintf("Malware detected: %s", result.GetBasicRuntimeAlert().AlertName),
 		HostName:               e.host,
-		AlertType:              apitypes.AlertTypeMalware,
+		AlertType:              armotypes.AlertTypeMalware,
 		AlertSourcePlatform:    e.alertSourcePlatform,
 		BaseRuntimeAlert:       result.GetBasicRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
@@ -357,12 +357,12 @@ func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) a
 	}
 }
 
-func (e *HTTPExporter) sendAlert(ctx context.Context, alert apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
-	payload := e.createAlertPayload([]apitypes.RuntimeAlert{alert}, processTree, cloudServices)
+func (e *HTTPExporter) sendAlert(ctx context.Context, alert armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
+	payload := e.createAlertPayload([]armotypes.RuntimeAlert{alert}, processTree, cloudServices)
 	return e.sendHTTPRequest(ctx, payload)
 }
 
-func (e *HTTPExporter) createAlertPayload(alertList []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
+func (e *HTTPExporter) createAlertPayload(alertList []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) HTTPAlertsList {
 	cloudMetadata := e.getCloudMetadata(cloudServices)
 
 	var name string
@@ -374,7 +374,7 @@ func (e *HTTPExporter) createAlertPayload(alertList []apitypes.RuntimeAlert, pro
 	return HTTPAlertsList{
 		Kind:       runtimeAlertsKind,
 		APIVersion: apiVersion,
-		Metadata: apitypes.Metadata{
+		Metadata: armotypes.Metadata{
 			Name:      name,
 			Namespace: namespace,
 		},
@@ -386,9 +386,9 @@ func (e *HTTPExporter) createAlertPayload(alertList []apitypes.RuntimeAlert, pro
 	}
 }
 
-func (e *HTTPExporter) getCloudMetadata(cloudServices []string) apitypes.CloudMetadata {
+func (e *HTTPExporter) getCloudMetadata(cloudServices []string) armotypes.CloudMetadata {
 	if e.cloudMetadata == nil {
-		return apitypes.CloudMetadata{}
+		return armotypes.CloudMetadata{}
 	}
 
 	metadata := *e.cloudMetadata
@@ -490,17 +490,17 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 	e.alertMetrics.isNotified = true
 	e.alertMetrics.Unlock()
 
-	alert := apitypes.RuntimeAlert{
+	alert := armotypes.RuntimeAlert{
 		Message:             "Alert limit reached",
 		HostName:            e.host,
-		AlertType:           apitypes.AlertTypeRule,
+		AlertType:           armotypes.AlertTypeRule,
 		AlertSourcePlatform: e.alertSourcePlatform,
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			AlertName: string(AlertTypeLimitReached),
 			// Severity:       ruleengine.RulePrioritySystemIssue,
 			FixSuggestions: "Check logs for more information",
 		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+		RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{
 			NodeName:    e.nodeName,
 			ClusterName: e.clusterName,
 		},
@@ -510,7 +510,7 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		helpers.Int("alerts", e.alertMetrics.count),
 		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 
-	return e.sendAlert(ctx, alert, apitypes.ProcessTree{}, nil)
+	return e.sendAlert(ctx, alert, armotypes.ProcessTree{}, nil)
 }
 
 // Close stops the bulk manager and flushes all pending bulks

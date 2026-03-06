@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/dustin/go-humanize"
 	"github.com/goradd/maps"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -44,10 +43,10 @@ type RuleFailureCreator struct {
 	dnsManager       dnsmanager.DNSResolver
 	enricher         types.Enricher
 	hashCache        *expirable.LRU[string, *FileHashCache]
-	alertPlatform    apitypes.AlertSourcePlatform
+	alertPlatform    armotypes.AlertSourcePlatform
 }
 
-func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver, adapterFactory *EventRuleAdapterFactory, alertPlatform apitypes.AlertSourcePlatform) *RuleFailureCreator {
+func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver, adapterFactory *EventRuleAdapterFactory, alertPlatform armotypes.AlertSourcePlatform) *RuleFailureCreator {
 	hashCache := expirable.NewLRU[string, *FileHashCache](hashCacheMaxSize, nil, hashCacheTTL)
 	return &RuleFailureCreator{
 		adapterFactory: adapterFactory,
@@ -66,7 +65,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	}
 
 	ruleFailure := &types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			UniqueID:  uniqueID,
 			AlertName: rule.Name,
 			Severity:  rule.Severity,
@@ -77,7 +76,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 			Timestamp:   enrichedEvent.Timestamp,
 			InfectedPID: enrichedEvent.ProcessTree.PID,
 		},
-		RuleAlert: apitypes.RuleAlert{
+		RuleAlert: armotypes.RuleAlert{
 			RuleDescription: message,
 		},
 		RuleID:         rule.ID,
@@ -95,7 +94,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	r.enrichRuleFailure(ruleFailure)
 
 	if enrichedEvent.ProcessTree.PID != 0 {
-		ruleFailure.SetRuntimeProcessDetails(apitypes.ProcessTree{
+		ruleFailure.SetRuntimeProcessDetails(armotypes.ProcessTree{
 			ProcessTree: enrichedEvent.ProcessTree,
 			ContainerID: enrichedEvent.ContainerID,
 		})
@@ -121,7 +120,7 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 	}
 
 	// Skip profile metadata for host containers - they don't have profiles
-	if triggerEvent.GetContainerID() == utils.HostContainerID {
+	if triggerEvent.GetContainerID() == armotypes.HostContainerID {
 		return
 	}
 

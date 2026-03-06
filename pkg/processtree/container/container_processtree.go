@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -58,42 +58,42 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 	}
 }
 
-func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) (apitypes.Process, error) {
+func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) (armotypes.Process, error) {
 	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	c.mutex.RUnlock()
 
 	if !ok {
-		return apitypes.Process{}, fmt.Errorf("container %s not found", containerID)
+		return armotypes.Process{}, fmt.Errorf("container %s not found", containerID)
 	}
 
 	// Find the process node for the shim PID
 	shimNode, ok := fullTree.Load(shimPID)
 	if !ok {
-		return apitypes.Process{}, fmt.Errorf("shim process %d not found in process tree", shimPID)
+		return armotypes.Process{}, fmt.Errorf("shim process %d not found in process tree", shimPID)
 	}
 
 	// Find the target process node
 	targetNode, ok := fullTree.Load(targetPID)
 	if !ok {
-		return apitypes.Process{}, fmt.Errorf("target process %d not found in process tree", targetPID)
+		return armotypes.Process{}, fmt.Errorf("target process %d not found in process tree", targetPID)
 	}
 
 	// Check if the target PID is within the shim's subtree
 	if !c.isProcessInSubtree(targetNode, shimNode, fullTree) {
-		return apitypes.Process{}, fmt.Errorf("target process %d is not within container %s subtree", targetPID, containerID)
+		return armotypes.Process{}, fmt.Errorf("target process %d is not within container %s subtree", targetPID, containerID)
 	}
 
 	// Build the branch from target PID up to (but not including) shim
 	branch := c.buildBranchToShim(targetNode, shimPID, fullTree)
 	if branch == nil {
-		return apitypes.Process{}, fmt.Errorf("failed to build branch for target %d", targetPID)
+		return armotypes.Process{}, fmt.Errorf("failed to build branch for target %d", targetPID)
 	}
 
 	return *branch, nil
 }
 
-func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) (uint32, bool) {
+func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) (uint32, bool) {
 	c.mutex.RLock()
 	shimPIDs := make([]uint32, 0, len(c.containerIdToShimPid))
 	for _, shimPID := range c.containerIdToShimPid {
@@ -131,7 +131,7 @@ func (c *containerProcessTreeImpl) GetPidByContainerID(containerID string) (uint
 	return shimPID, nil
 }
 
-func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
+func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) bool {
 	c.mutex.RLock()
 	containerIDs := make([]string, 0, len(c.containerIdToShimPid))
 	for containerID := range c.containerIdToShimPid {
@@ -147,7 +147,7 @@ func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32,
 	return false
 }
 
-func (c *containerProcessTreeImpl) IsProcessUnderContainer(pid uint32, containerID string, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
+func (c *containerProcessTreeImpl) IsProcessUnderContainer(pid uint32, containerID string, fullTree *maps.SafeMap[uint32, *armotypes.Process]) bool {
 	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	c.mutex.RUnlock()
@@ -173,7 +173,7 @@ func (c *containerProcessTreeImpl) IsProcessUnderContainer(pid uint32, container
 	return false
 }
 
-func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apitypes.Process, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
+func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *armotypes.Process, fullTree *maps.SafeMap[uint32, *armotypes.Process]) bool {
 	if targetNode == nil || rootNode == nil {
 		return false
 	}
@@ -199,16 +199,16 @@ func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apit
 
 // buildBranchToShim builds a process tree branch from targetNode up to (but not including) shimPID
 // This creates a new process tree containing only the nodes along the path from target to shim
-func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Process, shimPID uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) *apitypes.Process {
+func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *armotypes.Process, shimPID uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) *armotypes.Process {
 
 	// Create a map to store the branch nodes
-	branchNodes := make(map[uint32]*apitypes.Process)
+	branchNodes := make(map[uint32]*armotypes.Process)
 
 	if targetNode == nil {
 		return nil
 	}
 
-	var pathNodes []*apitypes.Process
+	var pathNodes []*armotypes.Process
 	current := targetNode
 	for current.PPID != 0 {
 		pathNodes = append(pathNodes, current)
@@ -230,7 +230,7 @@ func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Proces
 	}
 
 	for _, node := range pathNodes {
-		branchNodes[node.PID] = &apitypes.Process{
+		branchNodes[node.PID] = &armotypes.Process{
 			PID:         node.PID,
 			PPID:        node.PPID,
 			Comm:        node.Comm,
@@ -240,7 +240,7 @@ func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Proces
 			Gid:         node.Gid,
 			Cwd:         node.Cwd,
 			Path:        node.Path,
-			ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+			ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 		}
 	}
 
@@ -248,7 +248,7 @@ func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Proces
 		branchNode := branchNodes[node.PID]
 		if branchNode.PPID != 0 && branchNode.PPID != shimPID {
 			if parentBranch, exists := branchNodes[branchNode.PPID]; exists {
-				key := apitypes.CommPID{Comm: branchNode.Comm, PID: branchNode.PID}
+				key := armotypes.CommPID{Comm: branchNode.Comm, PID: branchNode.PID}
 				parentBranch.ChildrenMap[key] = branchNode
 			}
 		}
@@ -265,7 +265,7 @@ func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Proces
 
 // getProcessFromProc retrieves process information from the /proc filesystem
 // for a given PID. This is a simplified version of the process manager's implementation.
-func (c *containerProcessTreeImpl) getProcessFromProc(pid int) (*apitypes.Process, error) {
+func (c *containerProcessTreeImpl) getProcessFromProc(pid int) (*armotypes.Process, error) {
 	proc, err := procfs.NewProc(pid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get process info: %v", err)
@@ -276,7 +276,7 @@ func (c *containerProcessTreeImpl) getProcessFromProc(pid int) (*apitypes.Proces
 		return nil, fmt.Errorf("failed to get process stat: %v", err)
 	}
 
-	return &apitypes.Process{
+	return &armotypes.Process{
 		PID:  uint32(pid),
 		PPID: uint32(stat.PPID),
 		Comm: stat.Comm,

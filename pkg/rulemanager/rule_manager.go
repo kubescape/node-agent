@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -81,7 +80,7 @@ func CreateRuleManager(
 	celEvaluator cel.RuleEvaluator,
 	mntnsRegistry contextdetection.Registry,
 ) (*RuleManager, error) {
-	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory, apitypes.AlertSourcePlatformK8sAgent)
+	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory, armotypes.AlertSourcePlatformK8sAgent)
 	rulePolicyValidator := NewRulePolicyValidator(objectCache)
 	detectorManager := detectors.NewDetectorManager(mntnsRegistry)
 

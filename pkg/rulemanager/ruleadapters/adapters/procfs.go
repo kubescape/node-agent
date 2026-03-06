@@ -3,7 +3,7 @@ package adapters
 import (
 	"fmt"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -36,8 +36,8 @@ func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enri
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	runtimeProcessDetails := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			Comm: procfsEvent.Comm,
 			PID:  procfsEvent.PID,
 			PPID: procfsEvent.PPID,
@@ -49,12 +49,12 @@ func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enri
 	}
 	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	ruleAlert := apitypes.RuleAlert{
+	ruleAlert := armotypes.RuleAlert{
 		RuleDescription: fmt.Sprintf("Procfs event detected for process %s (PID: %d)", procfsEvent.Comm, procfsEvent.PID),
 	}
 	failure.SetRuleAlert(ruleAlert)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	runtimeAlertK8sDetails := armotypes.RuntimeAlertK8sDetails{
 		PodName: procfsEvent.GetPod(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)

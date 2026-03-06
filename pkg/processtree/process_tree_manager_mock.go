@@ -1,7 +1,7 @@
 package processtree
 
 import (
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -35,8 +35,8 @@ func (m *ProcessTreeManagerMock) Stop() {
 }
 
 // GetContainerProcessTree returns an empty process for testing
-func (m *ProcessTreeManagerMock) GetContainerProcessTree(containerID string, pid uint32, useCache bool) (apitypes.Process, error) {
-	return apitypes.Process{}, nil
+func (m *ProcessTreeManagerMock) GetContainerProcessTree(containerID string, pid uint32, useCache bool) (armotypes.Process, error) {
+	return armotypes.Process{}, nil
 }
 
 // ReportEvent is a no-op for testing

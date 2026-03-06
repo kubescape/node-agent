@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -52,8 +52,8 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	runtimeProcessDetails := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			Comm:       comm,
 			Gid:        execEvent.GetGid(),
 			PID:        pid,
@@ -72,7 +72,7 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 
 	failure.SetTriggerEvent(execEvent)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	runtimeAlertK8sDetails := armotypes.RuntimeAlertK8sDetails{
 		PodName:   execEvent.GetPod(),
 		PodLabels: execEvent.GetPodLabels(),
 	}
@@ -85,4 +85,3 @@ func GetExecFullPathFromEvent(execEvent utils.ExecEvent) string {
 	}
 	return utils.GetExecPathFromEvent(execEvent)
 }
-

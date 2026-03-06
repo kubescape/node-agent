@@ -4,16 +4,16 @@ import (
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 // ProfileRequirement indicates how a rule uses profiles
 type ProfileRequirement struct {
 	// ProfileDependency indicates if the rule requires a profile
-	ProfileDependency apitypes.ProfileDependency
+	ProfileDependency armotypes.ProfileDependency
 
 	// ProfileType indicates what type of profile is needed (Application, Network, etc)
-	ProfileType apitypes.ProfileType
+	ProfileType armotypes.ProfileType
 }
 
 // RuleCreator is an interface for creating rules by tags, IDs, and names

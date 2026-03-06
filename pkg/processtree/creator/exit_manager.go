@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
@@ -16,7 +16,7 @@ type pendingExit struct {
 	StartTimeNs uint64
 	Comm        string
 	Timestamp   time.Time
-	Children    []*apitypes.Process
+	Children    []*armotypes.Process
 }
 
 func (pt *processTreeCreatorImpl) startExitManager() {
@@ -132,7 +132,7 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 	}
 
 	// Collect children for reparenting
-	children := make([]*apitypes.Process, 0, len(proc.ChildrenMap))
+	children := make([]*armotypes.Process, 0, len(proc.ChildrenMap))
 	for _, child := range proc.ChildrenMap {
 		if child != nil {
 			children = append(children, child)
@@ -172,8 +172,8 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 
 	if proc.PPID != 0 {
 		if parent, ok := pt.processMap.Load(proc.PPID); ok {
-			if _, ok := parent.ChildrenMap[apitypes.CommPID{PID: pid}]; ok {
-				delete(parent.ChildrenMap, apitypes.CommPID{PID: pid})
+			if _, ok := parent.ChildrenMap[armotypes.CommPID{PID: pid}]; ok {
+				delete(parent.ChildrenMap, armotypes.CommPID{PID: pid})
 			} else {
 				logger.L().Warning("exitByPid: process not found in parent's children map", helpers.String("pid", fmt.Sprintf("%d", pid)))
 			}

@@ -1,7 +1,7 @@
 package adapters
 
 import (
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -53,8 +53,8 @@ func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	runtimeProcessDetails := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			Comm:  comm,
 			Gid:   dnsEvent.GetGid(),
 			PID:   pid,
@@ -70,10 +70,9 @@ func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 
 	failure.SetTriggerEvent(dnsEvent)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	runtimeAlertK8sDetails := armotypes.RuntimeAlertK8sDetails{
 		PodName:   dnsEvent.GetPod(),
 		PodLabels: dnsEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

@@ -1,7 +1,7 @@
 package adapters
 
 import (
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -46,8 +46,8 @@ func (c *SSHAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	runtimeProcessDetails := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			Comm: comm,
 			PID:  pid,
 			Uid:  sshEvent.GetUid(),
@@ -59,10 +59,9 @@ func (c *SSHAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 
 	failure.SetTriggerEvent(sshEvent)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	runtimeAlertK8sDetails := armotypes.RuntimeAlertK8sDetails{
 		PodName:   sshEvent.GetPod(),
 		PodLabels: sshEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

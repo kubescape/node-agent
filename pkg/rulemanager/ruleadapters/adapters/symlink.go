@@ -3,7 +3,7 @@ package adapters
 import (
 	"path/filepath"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -48,8 +48,8 @@ func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	upperLayer := symlinkEvent.GetUpperLayer()
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	runtimeProcessDetails := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			Comm:       comm,
 			PPID:       symlinkEvent.GetPpid(),
 			PID:        pid,
@@ -65,10 +65,9 @@ func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 
 	failure.SetTriggerEvent(symlinkEvent)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	runtimeAlertK8sDetails := armotypes.RuntimeAlertK8sDetails{
 		PodName:   symlinkEvent.GetPod(),
 		PodLabels: symlinkEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-
