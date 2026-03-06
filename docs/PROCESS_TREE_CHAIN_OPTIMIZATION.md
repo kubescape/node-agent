@@ -53,8 +53,8 @@ type containerBulk struct {
     // ... other fields ...
 
     // NEW: Maintain incrementally instead of rebuilding
-    processMap  map[uint32]*apitypes.Process  // PID -> Process for O(1) lookup
-    rootProcess *apitypes.Process             // Root of merged tree
+    processMap  map[uint32]*armotypes.Process  // PID -> Process for O(1) lookup
+    rootProcess *armotypes.Process             // Root of merged tree
 }
 ```
 
@@ -69,9 +69,9 @@ Instead of recursively merging arbitrary trees, we:
    - If new: **create and link** to parent in tree
 
 ```go
-func (cb *containerBulk) mergeProcessChain(chain *apitypes.Process) {
+func (cb *containerBulk) mergeProcessChain(chain *armotypes.Process) {
     if cb.processMap == nil {
-        cb.processMap = make(map[uint32]*apitypes.Process)
+        cb.processMap = make(map[uint32]*armotypes.Process)
     }
 
     // Flatten chain: O(k) where k = chain length
@@ -92,7 +92,7 @@ func (cb *containerBulk) mergeProcessChain(chain *apitypes.Process) {
             }
 
             if parent, ok := cb.processMap[newNode.PPID]; ok {
-                parent.ChildrenMap[apitypes.CommPID{PID: newNode.PID}] = newNode
+                parent.ChildrenMap[armotypes.CommPID{PID: newNode.PID}] = newNode
             }
         }
     }
@@ -207,4 +207,3 @@ By recognizing that runtime alerts provide **chains, not arbitrary trees**, we a
 - ✅ **Thread-safe** (race detector clean)
 
 This optimization addresses matthyx's performance concern and makes the alert bulking feature production-ready.
-

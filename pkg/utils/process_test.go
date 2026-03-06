@@ -3,13 +3,13 @@ package utils
 import (
 	"testing"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 func TestCalculateProcessTreeDepth(t *testing.T) {
 	tests := []struct {
 		name     string
-		process  *apitypes.Process
+		process  *armotypes.Process
 		expected int
 	}{
 		{
@@ -19,30 +19,30 @@ func TestCalculateProcessTreeDepth(t *testing.T) {
 		},
 		{
 			name: "single process with no children",
-			process: &apitypes.Process{
+			process: &armotypes.Process{
 				PID:         1,
 				Comm:        "init",
-				ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+				ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 			},
 			expected: 1,
 		},
 		{
 			name: "process with one level of children",
-			process: &apitypes.Process{
+			process: &armotypes.Process{
 				PID:  1,
 				Comm: "init",
-				ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+				ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 					{Comm: "child1", PID: 2}: {
 						PID:         2,
 						Comm:        "child1",
 						PPID:        1,
-						ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+						ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 					},
 					{Comm: "child2", PID: 3}: {
 						PID:         3,
 						Comm:        "child2",
 						PPID:        1,
-						ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+						ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 					},
 				},
 			},
@@ -50,20 +50,20 @@ func TestCalculateProcessTreeDepth(t *testing.T) {
 		},
 		{
 			name: "process with multiple levels",
-			process: &apitypes.Process{
+			process: &armotypes.Process{
 				PID:  1,
 				Comm: "init",
-				ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+				ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 					{Comm: "child1", PID: 2}: {
 						PID:  2,
 						Comm: "child1",
 						PPID: 1,
-						ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+						ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 							{Comm: "grandchild1", PID: 4}: {
 								PID:         4,
 								Comm:        "grandchild1",
 								PPID:        2,
-								ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+								ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 							},
 						},
 					},
@@ -71,7 +71,7 @@ func TestCalculateProcessTreeDepth(t *testing.T) {
 						PID:         3,
 						Comm:        "child2",
 						PPID:        1,
-						ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+						ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 					},
 				},
 			},
@@ -79,30 +79,30 @@ func TestCalculateProcessTreeDepth(t *testing.T) {
 		},
 		{
 			name: "process with deep nesting",
-			process: &apitypes.Process{
+			process: &armotypes.Process{
 				PID:  1,
 				Comm: "root",
-				ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+				ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 					{Comm: "level1", PID: 2}: {
 						PID:  2,
 						Comm: "level1",
 						PPID: 1,
-						ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+						ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 							{Comm: "level2", PID: 3}: {
 								PID:  3,
 								Comm: "level2",
 								PPID: 2,
-								ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+								ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 									{Comm: "level3", PID: 4}: {
 										PID:  4,
 										Comm: "level3",
 										PPID: 3,
-										ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+										ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 											{Comm: "level4", PID: 5}: {
 												PID:         5,
 												Comm:        "level4",
 												PPID:        4,
-												ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+												ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 											},
 										},
 									},

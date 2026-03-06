@@ -17,6 +17,9 @@ import (
 func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
+		if utils.IsHostContainer(notif.Container) {
+			return
+		}
 		if cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
@@ -52,6 +55,11 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 	case err := <-done:
 		if err != nil {
 			logger.L().Error("failed to add container to the container profile manager", helpers.Error(err))
+			// Close ready channel and remove entry on error
+			entry.readyOnce.Do(func() {
+				close(entry.ready)
+			})
+			cpm.removeContainerEntry(containerID)
 		}
 	case <-ctx.Done():
 		logger.L().Error("timeout while adding container to the container profile manager",
@@ -59,6 +67,11 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
+		// Close ready channel and remove entry on timeout
+		entry.readyOnce.Do(func() {
+			close(entry.ready)
+		})
+		cpm.removeContainerEntry(containerID)
 	}
 }
 
@@ -69,7 +82,12 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	// Wait for shared container data with timeout
 	sharedData, err := cpm.waitForSharedContainerData(containerID, ctx)
 	if err != nil {
-		// Remove the container entry and all stacked events if we fail
+		// Close ready channel and remove the container entry if we fail
+		if entry, exists := cpm.getContainerEntry(containerID); exists {
+			entry.readyOnce.Do(func() {
+				close(entry.ready)
+			})
+		}
 		cpm.removeContainerEntry(containerID)
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
@@ -82,6 +100,12 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace),
 			helpers.String("userDefinedProfile", sharedData.UserDefinedProfile))
+		// Close ready channel before removing entry
+		if entry, exists := cpm.getContainerEntry(containerID); exists {
+			entry.readyOnce.Do(func() {
+				close(entry.ready)
+			})
+		}
 		cpm.removeContainerEntry(containerID)
 		return nil
 	}
@@ -93,6 +117,12 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
+		// Close ready channel before removing entry
+		if entry, exists := cpm.getContainerEntry(containerID); exists {
+			entry.readyOnce.Do(func() {
+				close(entry.ready)
+			})
+		}
 		cpm.removeContainerEntry(containerID)
 		return nil
 	}
@@ -103,6 +133,12 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
+		// Close ready channel before removing entry
+		if entry, exists := cpm.getContainerEntry(containerID); exists {
+			entry.readyOnce.Do(func() {
+				close(entry.ready)
+			})
+		}
 		cpm.removeContainerEntry(containerID)
 		return nil
 	}
@@ -135,7 +171,9 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	go cpm.startContainerMonitoring(container, sharedData)
 
 	// Signal that the container entry is ready
-	close(entry.ready)
+	entry.readyOnce.Do(func() {
+		close(entry.ready)
+	})
 
 	logger.L().Debug("container added to container profile manager",
 		helpers.String("containerID", containerID),

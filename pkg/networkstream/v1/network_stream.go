@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v5"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -32,7 +32,7 @@ const (
 )
 
 type NetworkStream struct {
-	networkEventsStorage      apitypes.NetworkStream
+	networkEventsStorage      armotypes.NetworkStream
 	eventsStorageMutex        sync.RWMutex // Mutex to protect access to networkEventsStorage.Containers
 	cfg                       config.Config
 	ctx                       context.Context
@@ -41,12 +41,12 @@ type NetworkStream struct {
 	k8sInventory              common.K8sInventoryCache
 	nodeName                  string
 	httpClient                *http.Client
-	eventsNotificationChannel chan apitypes.NetworkStream
+	eventsNotificationChannel chan armotypes.NetworkStream
 	dnsSupport                bool
 	processTreeManager        processtree.ProcessTreeManager
 }
 
-func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool, processTreeManager processtree.ProcessTreeManager) (*NetworkStream, error) {
+func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, nodeName string, eventsNotificationChannel chan armotypes.NetworkStream, dnsSupport bool, processTreeManager processtree.ProcessTreeManager) (*NetworkStream, error) {
 	var k8sInventory common.K8sInventoryCache
 
 	if cfg.KubernetesMode {
@@ -66,8 +66,8 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 	}
 
 	ns := NetworkStream{
-		networkEventsStorage: apitypes.NetworkStream{
-			Entities: make(map[string]apitypes.NetworkStreamEntity),
+		networkEventsStorage: armotypes.NetworkStream{
+			Entities: make(map[string]armotypes.NetworkStreamEntity),
 		},
 		cfg:            cfg,
 		ctx:            ctx,
@@ -84,10 +84,10 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 	}
 
 	// Create the host entity
-	ns.networkEventsStorage.Entities[nodeName] = apitypes.NetworkStreamEntity{
-		Kind:     apitypes.NetworkStreamEntityKindHost,
-		Inbound:  make(map[string]apitypes.NetworkStreamEvent),
-		Outbound: make(map[string]apitypes.NetworkStreamEvent),
+	ns.networkEventsStorage.Entities[nodeName] = armotypes.NetworkStreamEntity{
+		Kind:     armotypes.NetworkStreamEntityKindHost,
+		Inbound:  make(map[string]armotypes.NetworkStreamEvent),
+		Outbound: make(map[string]armotypes.NetworkStreamEvent),
 	}
 
 	return &ns, nil
@@ -97,24 +97,33 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		ns.eventsStorageMutex.Lock()
-		ns.networkEventsStorage.Entities[notif.Container.Runtime.ContainerID] = apitypes.NetworkStreamEntity{
-			Kind: apitypes.NetworkStreamEntityKindContainer,
-			NetworkStreamEntityContainer: apitypes.NetworkStreamEntityContainer{
+		// Normalize host container ID to nodeName for consistent entity mapping
+		containerID := notif.Container.Runtime.ContainerID
+		if utils.IsHostContainer(notif.Container) {
+			containerID = ns.nodeName
+		}
+		ns.networkEventsStorage.Entities[containerID] = armotypes.NetworkStreamEntity{
+			Kind: armotypes.NetworkStreamEntityKindContainer,
+			NetworkStreamEntityContainer: armotypes.NetworkStreamEntityContainer{
 				ContainerName: notif.Container.Runtime.ContainerName,
 				ContainerID:   notif.Container.Runtime.ContainerID,
 				PodNamespace:  notif.Container.K8s.Namespace,
 				PodName:       notif.Container.K8s.PodName,
 			},
-			Inbound:  make(map[string]apitypes.NetworkStreamEvent),
-			Outbound: make(map[string]apitypes.NetworkStreamEvent),
+			Inbound:  make(map[string]armotypes.NetworkStreamEvent),
+			Outbound: make(map[string]armotypes.NetworkStreamEvent),
 		}
 		ns.eventsStorageMutex.Unlock()
-		if ns.k8sObjectCache != nil {
+		if ns.k8sObjectCache != nil && !utils.IsHostContainer(notif.Container) {
 			go ns.enrichWorkloadDetails(notif.Container.Runtime.ContainerID)
 		}
 	case containercollection.EventTypeRemoveContainer:
 		ns.eventsStorageMutex.Lock()
-		delete(ns.networkEventsStorage.Entities, notif.Container.Runtime.ContainerID)
+		containerID := notif.Container.Runtime.ContainerID
+		if utils.IsHostContainer(notif.Container) {
+			containerID = ns.nodeName
+		}
+		delete(ns.networkEventsStorage.Entities, containerID)
 		ns.eventsStorageMutex.Unlock()
 	}
 }
@@ -185,15 +194,15 @@ func (ns *NetworkStream) Start() {
 				// Clear the storage
 				for entityId := range ns.networkEventsStorage.Entities {
 					entity := ns.networkEventsStorage.Entities[entityId]
-					entity.Inbound = make(map[string]apitypes.NetworkStreamEvent)
-					entity.Outbound = make(map[string]apitypes.NetworkStreamEvent)
+					entity.Inbound = make(map[string]armotypes.NetworkStreamEvent)
+					entity.Outbound = make(map[string]armotypes.NetworkStreamEvent)
 					ns.networkEventsStorage.Entities[entityId] = entity
 				}
 				// Re-create the host entity
-				ns.networkEventsStorage.Entities[ns.nodeName] = apitypes.NetworkStreamEntity{
-					Kind:     apitypes.NetworkStreamEntityKindHost,
-					Inbound:  make(map[string]apitypes.NetworkStreamEvent),
-					Outbound: make(map[string]apitypes.NetworkStreamEvent),
+				ns.networkEventsStorage.Entities[ns.nodeName] = armotypes.NetworkStreamEntity{
+					Kind:     armotypes.NetworkStreamEntityKindHost,
+					Inbound:  make(map[string]armotypes.NetworkStreamEvent),
+					Outbound: make(map[string]armotypes.NetworkStreamEvent),
 				}
 				ns.eventsStorageMutex.Unlock()
 				logger.L().Debug("NetworkStream - sent network events")
@@ -216,7 +225,7 @@ func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent
 			return // Ignore localhost events
 		}
 
-		ns.handleNetworkEvent(networkEvent, &apitypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
+		ns.handleNetworkEvent(networkEvent, &armotypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
 	case utils.DnsEventType:
 		if !ns.dnsSupport {
 			return
@@ -230,7 +239,7 @@ func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent
 			return
 		}
 
-		ns.handleDnsEvent(dnsEvent, &apitypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
+		ns.handleDnsEvent(dnsEvent, &armotypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
 
 	default:
 		logger.L().Error("NetworkStream - unknown event type", helpers.String("event type", string(eventType)))
@@ -271,11 +280,15 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 	}
 }
 
-func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *apitypes.ProcessTree) {
+func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *armotypes.ProcessTree) {
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
 
 	entityId := event.GetContainerID()
+	// Normalize host container ID to nodeName
+	if entityId == armotypes.HostContainerID {
+		entityId = ns.nodeName
+	}
 	if entityId == "" || ns.k8sObjectCache == nil {
 		entityId = ns.nodeName
 	}
@@ -292,12 +305,12 @@ func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *apity
 		return
 	}
 
-	networkEvent := apitypes.NetworkStreamEvent{
+	networkEvent := armotypes.NetworkStreamEvent{
 		Timestamp: time.Unix(0, int64(event.GetTimestamp())),
 		DNSName:   event.GetDNSName(),
 		Port:      int32(event.GetDstPort()),
-		Protocol:  apitypes.NetworkStreamEventProtocolDNS,
-		Kind:      apitypes.EndpointKindRaw,
+		Protocol:  armotypes.NetworkStreamEventProtocolDNS,
+		Kind:      armotypes.EndpointKindRaw,
 	}
 
 	processTree = ns.getProcessTreeByPid(event.GetPID(), event.GetComm(), processTree)
@@ -325,13 +338,17 @@ func (ns *NetworkStream) shouldReportDnsEvent(dnsEvent utils.DNSEvent) bool {
 	return true
 }
 
-func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTree *apitypes.ProcessTree) {
+func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTree *armotypes.ProcessTree) {
 	endpointID := getNetworkEndpointIdentifier(event)
 
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
 
 	entityId := event.GetContainerID()
+	// Normalize host container ID to nodeName
+	if entityId == armotypes.HostContainerID {
+		entityId = ns.nodeName
+	}
 	if entityId == "" || ns.k8sObjectCache == nil {
 		entityId = ns.nodeName
 	}
@@ -360,7 +377,7 @@ func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTre
 	ns.networkEventsStorage.Entities[entityId] = entity
 }
 
-func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree *apitypes.ProcessTree) apitypes.NetworkStreamEvent {
+func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree *armotypes.ProcessTree) armotypes.NetworkStreamEvent {
 	var domain string
 	var ok bool
 	dstEndpoint := event.GetDstEndpoint()
@@ -381,15 +398,15 @@ func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree
 		domain, _ = ns.dnsResolver.ResolveIPAddress(dstEndpoint.Addr)
 	}
 
-	networkEvent := apitypes.NetworkStreamEvent{
+	networkEvent := armotypes.NetworkStreamEvent{
 		Timestamp: time.Unix(0, int64(event.GetTimestamp())),
 		IPAddress: dstEndpoint.Addr,
 		DNSName:   domain,
 		Port:      int32(event.GetDstPort()),
-		Protocol:  apitypes.NetworkStreamEventProtocol(event.GetProto()),
+		Protocol:  armotypes.NetworkStreamEventProtocol(event.GetProto()),
 	}
 
-	if apitypes.EndpointKind(dstEndpoint.Kind) == apitypes.EndpointKindPod {
+	if armotypes.EndpointKind(dstEndpoint.Kind) == armotypes.EndpointKindPod {
 		slimPod := ns.k8sInventory.GetPodByIp(dstEndpoint.Addr)
 		if slimPod != nil {
 			networkEvent.PodName = slimPod.Name
@@ -411,7 +428,7 @@ func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree
 			networkEvent.WorkloadKind = workloadKind
 			networkEvent.WorkloadNamespace = slimPod.Namespace
 		}
-	} else if apitypes.EndpointKind(dstEndpoint.Kind) == apitypes.EndpointKindService {
+	} else if armotypes.EndpointKind(dstEndpoint.Kind) == armotypes.EndpointKindService {
 		slimService := ns.k8sInventory.GetSvcByIp(dstEndpoint.Addr)
 		if slimService != nil {
 			networkEvent.ServiceName = slimService.Name
@@ -419,7 +436,7 @@ func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree
 		}
 	}
 
-	networkEvent.Kind = apitypes.EndpointKind(dstEndpoint.Kind)
+	networkEvent.Kind = armotypes.EndpointKind(dstEndpoint.Kind)
 
 	processTree = ns.getProcessTreeByPid(event.GetPID(), event.GetComm(), processTree)
 	networkEvent.ProcessTree = processTree
@@ -427,7 +444,7 @@ func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree
 	return networkEvent
 }
 
-func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
+func (ns *NetworkStream) sendNetworkEvent(networkStream *armotypes.NetworkStream) error {
 	if !ns.cfg.KubernetesMode || ns.cfg.Exporters.HTTPExporterConfig == nil {
 		return nil
 	}
@@ -437,10 +454,10 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream)
 	}
 
 	// create a GenericCRD with NetworkStream as Spec
-	crd := apitypes.GenericCRD[apitypes.NetworkStream]{
+	crd := armotypes.GenericCRD[armotypes.NetworkStream]{
 		Kind:       "NetworkStreams",
 		ApiVersion: "kubescape.io/v1",
-		Metadata: apitypes.Metadata{
+		Metadata: armotypes.Metadata{
 			Name: ns.nodeName,
 		},
 		Spec: *networkStream,
@@ -482,7 +499,7 @@ func getNetworkEndpointIdentifier(event utils.NetworkEvent) string {
 	return fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetDstPort(), event.GetProto())
 }
 
-func isEmptyNetworkStream(networkStream *apitypes.NetworkStream) bool {
+func isEmptyNetworkStream(networkStream *armotypes.NetworkStream) bool {
 	if len(networkStream.Entities) == 0 {
 		return true
 	}
@@ -494,7 +511,7 @@ func isEmptyNetworkStream(networkStream *apitypes.NetworkStream) bool {
 	return true
 }
 
-func removeProcessTreeFromEvents(networkStream *apitypes.NetworkStream) {
+func removeProcessTreeFromEvents(networkStream *armotypes.NetworkStream) {
 	for entityId, entity := range networkStream.Entities {
 		for eventId, event := range entity.Inbound {
 			event.ProcessTree = nil
@@ -508,15 +525,15 @@ func removeProcessTreeFromEvents(networkStream *apitypes.NetworkStream) {
 	}
 }
 
-func (ns *NetworkStream) getProcessTreeByPid(pid uint32, comm string, processTree *apitypes.ProcessTree) *apitypes.ProcessTree {
+func (ns *NetworkStream) getProcessTreeByPid(pid uint32, comm string, processTree *armotypes.ProcessTree) *armotypes.ProcessTree {
 	if processTree != nil {
 		return processTree
 	}
 
 	logger.L().Debug("NetworkStream - getting process tree by pid", helpers.Int("pid", int(pid)), helpers.String("comm", comm))
 
-	return &apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	return &armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID:  pid,
 			Comm: comm,
 		},

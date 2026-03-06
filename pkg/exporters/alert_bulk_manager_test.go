@@ -5,29 +5,29 @@ import (
 	"testing"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
 )
 
-func createTestAlert(containerID string, alertName string) apitypes.RuntimeAlert {
-	return apitypes.RuntimeAlert{
+func createTestAlert(containerID string, alertName string) armotypes.RuntimeAlert {
+	return armotypes.RuntimeAlert{
 		Message: alertName,
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+		RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{
 			ContainerID:   containerID,
 			ContainerName: "test-container",
 			PodName:       "test-pod",
 			Namespace:     "test-ns",
 		},
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			AlertName: alertName,
 			Timestamp: time.Now(),
 		},
 	}
 }
 
-func createTestProcessTree(pid uint32) apitypes.ProcessTree {
-	return apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+func createTestProcessTree(pid uint32) armotypes.ProcessTree {
+	return armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID:     pid,
 			PPID:    1,
 			Comm:    "test-process",
@@ -39,7 +39,7 @@ func createTestProcessTree(pid uint32) apitypes.ProcessTree {
 func TestContainerBulk_AddAlert(t *testing.T) {
 	bulk := &containerBulk{
 		containerID:     "container-123",
-		alerts:          make([]apitypes.RuntimeAlert, 0),
+		alerts:          make([]armotypes.RuntimeAlert, 0),
 		cloudServices:   make([]string, 0),
 		maxSize:         50,
 		timeoutDuration: 10 * time.Second,
@@ -62,7 +62,7 @@ func TestContainerBulk_AddAlert(t *testing.T) {
 func TestContainerBulk_AddMultipleAlerts(t *testing.T) {
 	bulk := &containerBulk{
 		containerID:     "container-123",
-		alerts:          make([]apitypes.RuntimeAlert, 0),
+		alerts:          make([]armotypes.RuntimeAlert, 0),
 		cloudServices:   make([]string, 0),
 		maxSize:         50,
 		timeoutDuration: 10 * time.Second,
@@ -96,29 +96,29 @@ func TestContainerBulk_AddMultipleAlerts(t *testing.T) {
 func TestContainerBulk_ChainMerging(t *testing.T) {
 	bulk := &containerBulk{
 		containerID:     "container-123",
-		alerts:          make([]apitypes.RuntimeAlert, 0),
+		alerts:          make([]armotypes.RuntimeAlert, 0),
 		cloudServices:   make([]string, 0),
 		maxSize:         50,
 		timeoutDuration: 10 * time.Second,
 	}
 
 	// Create a chain: PID 1 (init) -> PID 10 (bash) -> PID 100 (curl)
-	chain1 := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	chain1 := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID:  1,
 			PPID: 0,
 			Comm: "init",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 				{PID: 10}: {
 					PID:  10,
 					PPID: 1,
 					Comm: "bash",
-					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+					ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 						{PID: 100}: {
 							PID:         100,
 							PPID:        10,
 							Comm:        "curl",
-							ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+							ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 						},
 					},
 				},
@@ -134,22 +134,22 @@ func TestContainerBulk_ChainMerging(t *testing.T) {
 	assert.Equal(t, uint32(1), bulk.rootProcess.PID, "Root should be PID 1")
 
 	// Create a second chain with a branch: PID 1 -> PID 10 -> PID 101 (wget)
-	chain2 := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	chain2 := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID:  1,
 			PPID: 0,
 			Comm: "init",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 				{PID: 10}: {
 					PID:  10,
 					PPID: 1,
 					Comm: "bash",
-					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+					ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 						{PID: 101}: {
 							PID:         101,
 							PPID:        10,
 							Comm:        "wget",
-							ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+							ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 						},
 					},
 				},
@@ -168,26 +168,26 @@ func TestContainerBulk_ChainMerging(t *testing.T) {
 	bash := bulk.processMap[10]
 	assert.NotNil(t, bash, "Bash process should exist")
 	assert.Equal(t, 2, len(bash.ChildrenMap), "Bash should have 2 children")
-	assert.NotNil(t, bash.ChildrenMap[apitypes.CommPID{PID: 100}], "Should have curl child")
-	assert.NotNil(t, bash.ChildrenMap[apitypes.CommPID{PID: 101}], "Should have wget child")
+	assert.NotNil(t, bash.ChildrenMap[armotypes.CommPID{PID: 100}], "Should have curl child")
+	assert.NotNil(t, bash.ChildrenMap[armotypes.CommPID{PID: 101}], "Should have wget child")
 }
 
 func TestContainerBulk_ProcessEnrichment(t *testing.T) {
 	bulk := &containerBulk{
 		containerID:     "container-123",
-		alerts:          make([]apitypes.RuntimeAlert, 0),
+		alerts:          make([]armotypes.RuntimeAlert, 0),
 		cloudServices:   make([]string, 0),
 		maxSize:         50,
 		timeoutDuration: 10 * time.Second,
 	}
 
 	// First chain with minimal info
-	chain1 := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	chain1 := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID:         100,
 			PPID:        1,
 			Comm:        "bash",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 		},
 	}
 
@@ -195,14 +195,14 @@ func TestContainerBulk_ProcessEnrichment(t *testing.T) {
 	bulk.addAlert(alert1, chain1, nil)
 
 	// Second chain with additional info for same process
-	chain2 := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	chain2 := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID:         100,
 			PPID:        1,
 			Comm:        "bash",
 			Path:        "/bin/bash",
 			Cmdline:     "bash -c 'echo test'",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 		},
 	}
 
@@ -221,7 +221,7 @@ func TestContainerBulk_ProcessEnrichment(t *testing.T) {
 func TestContainerBulk_ShouldFlushSize(t *testing.T) {
 	bulk := &containerBulk{
 		containerID:     "container-123",
-		alerts:          make([]apitypes.RuntimeAlert, 0, 5),
+		alerts:          make([]armotypes.RuntimeAlert, 0, 5),
 		cloudServices:   make([]string, 0),
 		maxSize:         5,
 		timeoutDuration: 10 * time.Second,
@@ -245,7 +245,7 @@ func TestContainerBulk_ShouldFlushSize(t *testing.T) {
 func TestContainerBulk_ShouldFlushTimeout(t *testing.T) {
 	bulk := &containerBulk{
 		containerID:     "container-123",
-		alerts:          make([]apitypes.RuntimeAlert, 0),
+		alerts:          make([]armotypes.RuntimeAlert, 0),
 		cloudServices:   make([]string, 0),
 		maxSize:         50,
 		timeoutDuration: 100 * time.Millisecond,
@@ -264,7 +264,7 @@ func TestContainerBulk_ShouldFlushTimeout(t *testing.T) {
 func TestContainerBulk_Flush(t *testing.T) {
 	bulk := &containerBulk{
 		containerID:     "container-123",
-		alerts:          make([]apitypes.RuntimeAlert, 0),
+		alerts:          make([]armotypes.RuntimeAlert, 0),
 		cloudServices:   make([]string, 0),
 		maxSize:         50,
 		timeoutDuration: 10 * time.Second,
@@ -294,7 +294,7 @@ func TestContainerBulk_Flush(t *testing.T) {
 func TestAlertBulkManager_AddAlert(t *testing.T) {
 	sendCount := 0
 	var sendMutex sync.Mutex
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendCount++
@@ -316,8 +316,8 @@ func TestAlertBulkManager_AddAlert(t *testing.T) {
 func TestAlertBulkManager_FlushOnSizeLimit(t *testing.T) {
 	sendCount := 0
 	var sendMutex sync.Mutex
-	var sentAlerts []apitypes.RuntimeAlert
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	var sentAlerts []armotypes.RuntimeAlert
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendCount++
@@ -353,7 +353,7 @@ func TestAlertBulkManager_FlushOnSizeLimit(t *testing.T) {
 func TestAlertBulkManager_FlushOnTimeout(t *testing.T) {
 	sendCount := 0
 	var sendMutex sync.Mutex
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendCount++
@@ -386,7 +386,7 @@ func TestAlertBulkManager_MultipleContainers(t *testing.T) {
 	var sendMutex sync.Mutex
 	containerSends := make(map[string]int)
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendCount++
@@ -427,7 +427,7 @@ func TestAlertBulkManager_FlushContainer(t *testing.T) {
 	var sendMutex sync.Mutex
 	var flushedContainerID string
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendCount++
@@ -468,7 +468,7 @@ func TestAlertBulkManager_FlushAll(t *testing.T) {
 	sendCount := 0
 	var sendMutex sync.Mutex
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendCount++
@@ -506,7 +506,7 @@ func TestAlertBulkManager_FlushAll(t *testing.T) {
 
 func TestAlertBulkManager_EmptyContainerID(t *testing.T) {
 	sendCount := 0
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendCount++
 		return nil
 	}
@@ -532,7 +532,7 @@ func TestAlertBulkManager_RaceConditionProtection(t *testing.T) {
 	var sendMutex sync.Mutex
 	sentBulks := make(map[string]int) // containerID -> number of times flushed
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendCount++
@@ -598,7 +598,7 @@ func TestSendQueue_SuccessfulSendThroughQueue(t *testing.T) {
 	var sendMutex sync.Mutex
 	receivedContainers := make([]string, 0)
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendCount++
@@ -633,7 +633,7 @@ func TestSendQueue_RetryOnFailure(t *testing.T) {
 	var sendMutex sync.Mutex
 	failUntilAttempt := 2 // Fail first 2 attempts, succeed on 3rd
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendAttempts++
@@ -668,7 +668,7 @@ func TestSendQueue_MaxRetriesExceeded(t *testing.T) {
 	sendAttempts := 0
 	var sendMutex sync.Mutex
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendAttempts++
@@ -700,7 +700,7 @@ func TestSendQueue_QueueFullHandling(t *testing.T) {
 	var blockMutex sync.Mutex
 	blockMutex.Lock() // Lock to block sending
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		blockMutex.Lock()
 		defer blockMutex.Unlock()
 		return nil
@@ -734,7 +734,7 @@ func TestSendQueue_GracefulShutdownWithDrain(t *testing.T) {
 	var sendMutex sync.Mutex
 	receivedContainers := make([]string, 0)
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		time.Sleep(50 * time.Millisecond) // Simulate slow send
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
@@ -772,7 +772,7 @@ func TestSendQueue_ConcurrentEnqueueing(t *testing.T) {
 	sendCount := 0
 	var sendMutex sync.Mutex
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendCount++
@@ -817,7 +817,7 @@ func TestSendQueue_ExponentialBackoff(t *testing.T) {
 	attemptTimes := make([]time.Time, 0)
 	var sendMutex sync.Mutex
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 		sendAttempts++
@@ -869,7 +869,7 @@ func TestSendQueue_FIFOOrderingWithRetry(t *testing.T) {
 	var sendMutex sync.Mutex
 	failFirstBulk := true
 
-	sendFunc := func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	sendFunc := func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
 
@@ -918,18 +918,18 @@ func TestContainerBulk_MultipleIndependentRoots(t *testing.T) {
 	bulk := &containerBulk{
 		maxSize:         10,
 		timeoutDuration: 10 * time.Second,
-		alerts:          make([]apitypes.RuntimeAlert, 0),
-		processMap:      make(map[uint32]*apitypes.Process),
+		alerts:          make([]armotypes.RuntimeAlert, 0),
+		processMap:      make(map[uint32]*armotypes.Process),
 	}
 
 	// Add first alert with process chain starting from PID 1000
 	alert1 := createTestAlert("container-1", "alert-1")
-	processTree1 := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	processTree1 := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID:  1000,
 			PPID: 0,
 			Comm: "init-1",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 				{PID: 1001}: {
 					PID:  1001,
 					PPID: 1000,
@@ -942,12 +942,12 @@ func TestContainerBulk_MultipleIndependentRoots(t *testing.T) {
 
 	// Add second alert with INDEPENDENT process chain starting from PID 2000
 	alert2 := createTestAlert("container-1", "alert-2")
-	processTree2 := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	processTree2 := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID:  2000,
 			PPID: 0,
 			Comm: "init-2",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 				{PID: 2001}: {
 					PID:  2001,
 					PPID: 2000,
@@ -960,12 +960,12 @@ func TestContainerBulk_MultipleIndependentRoots(t *testing.T) {
 
 	// Add third alert with ANOTHER independent process chain starting from PID 3000
 	alert3 := createTestAlert("container-1", "alert-3")
-	processTree3 := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	processTree3 := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID:  3000,
 			PPID: 0,
 			Comm: "init-3",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 				{PID: 3001}: {
 					PID:  3001,
 					PPID: 3000,
@@ -991,22 +991,22 @@ func TestContainerBulk_MultipleIndependentRoots(t *testing.T) {
 	assert.Equal(t, 3, len(mergedTree.ProcessTree.ChildrenMap), "Synthetic root should have 3 children (the 3 independent roots)")
 
 	// Verify each independent root is present
-	root1, has1 := mergedTree.ProcessTree.ChildrenMap[apitypes.CommPID{PID: 1000}]
+	root1, has1 := mergedTree.ProcessTree.ChildrenMap[armotypes.CommPID{PID: 1000}]
 	assert.True(t, has1, "PID 1000 should be child of synthetic root")
 	assert.Equal(t, "init-1", root1.Comm, "PID 1000 should have correct comm")
 
-	root2, has2 := mergedTree.ProcessTree.ChildrenMap[apitypes.CommPID{PID: 2000}]
+	root2, has2 := mergedTree.ProcessTree.ChildrenMap[armotypes.CommPID{PID: 2000}]
 	assert.True(t, has2, "PID 2000 should be child of synthetic root")
 	assert.Equal(t, "init-2", root2.Comm, "PID 2000 should have correct comm")
 
-	root3, has3 := mergedTree.ProcessTree.ChildrenMap[apitypes.CommPID{PID: 3000}]
+	root3, has3 := mergedTree.ProcessTree.ChildrenMap[armotypes.CommPID{PID: 3000}]
 	assert.True(t, has3, "PID 3000 should be child of synthetic root")
 	assert.Equal(t, "init-3", root3.Comm, "PID 3000 should have correct comm")
 
 	// Verify children of each root are preserved
 	assert.NotNil(t, root1.ChildrenMap, "PID 1000 should have children")
 	assert.Equal(t, 1, len(root1.ChildrenMap), "PID 1000 should have 1 child")
-	child1, hasChild1 := root1.ChildrenMap[apitypes.CommPID{PID: 1001}]
+	child1, hasChild1 := root1.ChildrenMap[armotypes.CommPID{PID: 1001}]
 	assert.True(t, hasChild1, "PID 1001 should be child of 1000")
 	assert.Equal(t, "child-1", child1.Comm, "Child should have correct comm")
 

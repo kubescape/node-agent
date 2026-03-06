@@ -1,7 +1,7 @@
 package adapters
 
 import (
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
 	iouringsyscall "github.com/iceber/iouring-go/syscall"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -45,8 +45,8 @@ func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	runtimeProcessDetails := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			Comm: comm,
 			PID:  pid,
 			Uid:  iouringEvent.GetUid(),
@@ -58,7 +58,7 @@ func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 
 	failure.SetTriggerEvent(iouringEvent)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	runtimeAlertK8sDetails := armotypes.RuntimeAlertK8sDetails{
 		PodName:   iouringEvent.GetPod(),
 		PodLabels: iouringEvent.GetPodLabels(),
 	}

@@ -29,7 +29,7 @@ type ExporterBus struct {
 }
 
 // InitExporters initializes all exporters.
-func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string, cloudMetadata *armotypes.CloudMetadata, clusterUID string) *ExporterBus {
+func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string, cloudMetadata *armotypes.CloudMetadata, clusterUID string, alertSourcePlatform armotypes.AlertSourcePlatform) *ExporterBus {
 	var exporters []Exporter
 	for _, url := range exportersConfig.AlertManagerExporterUrls {
 		alertMan := InitAlertManagerExporter(url)
@@ -56,7 +56,7 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 		}
 	}
 	if exportersConfig.HTTPExporterConfig != nil {
-		httpExporter, err := NewHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName, cloudMetadata, clusterUID)
+		httpExporter, err := NewHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName, cloudMetadata, clusterUID, alertSourcePlatform)
 		if err == nil {
 			exporters = append(exporters, httpExporter)
 		} else {

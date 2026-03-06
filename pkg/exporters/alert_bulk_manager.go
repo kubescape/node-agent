@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -16,9 +16,9 @@ import (
 type containerBulk struct {
 	sync.Mutex
 	containerID     string
-	alerts          []apitypes.RuntimeAlert
-	processMap      map[uint32]*apitypes.Process // Incremental map for O(1) lookup
-	rootProcess     *apitypes.Process            // Root of merged tree
+	alerts          []armotypes.RuntimeAlert
+	processMap      map[uint32]*armotypes.Process // Incremental map for O(1) lookup
+	rootProcess     *armotypes.Process            // Root of merged tree
 	cloudServices   []string
 	firstAlertTime  time.Time
 	maxSize         int
@@ -45,7 +45,7 @@ func (cb *containerBulk) shouldFlush() bool {
 
 // addAlert adds an alert to the bulk and merges its process chain
 // Optimized for chain-structured process trees (container init -> parent -> ... -> offending process)
-func (cb *containerBulk) addAlert(alert apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) {
+func (cb *containerBulk) addAlert(alert armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) {
 	cb.Lock()
 	defer cb.Unlock()
 
@@ -69,14 +69,14 @@ func (cb *containerBulk) addAlert(alert apitypes.RuntimeAlert, processTree apity
 // mergeProcessChain merges a chain-structured process tree into the accumulated tree
 // This is optimized for chains: ContainerInit -> Parent1 -> ... -> OffendingProcess
 // Complexity: O(k) where k is chain length, vs O(n) for full tree merge
-func (cb *containerBulk) mergeProcessChain(chain *apitypes.Process) {
+func (cb *containerBulk) mergeProcessChain(chain *armotypes.Process) {
 	if chain == nil || chain.PID == 0 {
 		return
 	}
 
 	// Lazy initialization
 	if cb.processMap == nil {
-		cb.processMap = make(map[uint32]*apitypes.Process)
+		cb.processMap = make(map[uint32]*armotypes.Process)
 	}
 
 	// Ensure chain uses map structure
@@ -106,9 +106,9 @@ func (cb *containerBulk) mergeProcessChain(chain *apitypes.Process) {
 			if newNode.PPID != 0 {
 				if parent, ok := cb.processMap[newNode.PPID]; ok {
 					if parent.ChildrenMap == nil {
-						parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+						parent.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)
 					}
-					parent.ChildrenMap[apitypes.CommPID{PID: newNode.PID}] = newNode
+					parent.ChildrenMap[armotypes.CommPID{PID: newNode.PID}] = newNode
 				} else {
 					// Parent doesn't exist in tree - this is a new root
 					// We need to handle multiple roots by creating a synthetic parent
@@ -128,23 +128,23 @@ func (cb *containerBulk) mergeProcessChain(chain *apitypes.Process) {
 }
 
 // attachToSyntheticRoot creates a synthetic root (PID 1) to hold multiple independent process trees
-func (cb *containerBulk) attachToSyntheticRoot(newRoot *apitypes.Process) {
+func (cb *containerBulk) attachToSyntheticRoot(newRoot *armotypes.Process) {
 	const syntheticRootPID = 1
 
 	// Check if we need to convert existing root to use synthetic parent
 	if cb.rootProcess.PID != syntheticRootPID {
 		// Create synthetic root if it doesn't exist
 		if _, exists := cb.processMap[syntheticRootPID]; !exists {
-			syntheticRoot := &apitypes.Process{
+			syntheticRoot := &armotypes.Process{
 				PID:         syntheticRootPID,
 				PPID:        0,
 				Comm:        "container-root",
-				ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+				ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 			}
 			cb.processMap[syntheticRootPID] = syntheticRoot
 
 			// Attach current root to synthetic root
-			syntheticRoot.ChildrenMap[apitypes.CommPID{PID: cb.rootProcess.PID}] = cb.rootProcess
+			syntheticRoot.ChildrenMap[armotypes.CommPID{PID: cb.rootProcess.PID}] = cb.rootProcess
 
 			// Update root reference
 			cb.rootProcess = syntheticRoot
@@ -152,18 +152,18 @@ func (cb *containerBulk) attachToSyntheticRoot(newRoot *apitypes.Process) {
 	}
 
 	// Attach new root to synthetic root
-	cb.rootProcess.ChildrenMap[apitypes.CommPID{PID: newRoot.PID}] = newRoot
+	cb.rootProcess.ChildrenMap[armotypes.CommPID{PID: newRoot.PID}] = newRoot
 }
 
 // flush returns the bulk data and resets the bulk
-func (cb *containerBulk) flush() ([]apitypes.RuntimeAlert, apitypes.ProcessTree, []string) {
+func (cb *containerBulk) flush() ([]armotypes.RuntimeAlert, armotypes.ProcessTree, []string) {
 	cb.Lock()
 	defer cb.Unlock()
 
 	alerts := cb.alerts
 
 	// Build result from root process
-	processTree := apitypes.ProcessTree{}
+	processTree := armotypes.ProcessTree{}
 	if cb.rootProcess != nil {
 		processTree.ProcessTree = *cb.rootProcess
 	}
@@ -183,8 +183,8 @@ func (cb *containerBulk) flush() ([]apitypes.RuntimeAlert, apitypes.ProcessTree,
 // bulkQueueItem represents a bulk waiting to be sent
 type bulkQueueItem struct {
 	containerID   string
-	alerts        []apitypes.RuntimeAlert
-	processTree   apitypes.ProcessTree
+	alerts        []armotypes.RuntimeAlert
+	processTree   armotypes.ProcessTree
 	cloudServices []string
 	retryCount    int
 	enqueuedAt    time.Time
@@ -207,7 +207,7 @@ type AlertBulkManager struct {
 	retryMaxDelay   time.Duration
 	sendWorkerCount int
 
-	sendFunc func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error
+	sendFunc func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 }
@@ -220,7 +220,7 @@ func NewAlertBulkManager(
 	maxRetries int,
 	retryBaseDelayMs int,
 	retryMaxDelayMs int,
-	sendFunc func(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error,
+	sendFunc func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error,
 ) *AlertBulkManager {
 	// Set defaults
 	if sendQueueSize == 0 {
@@ -281,7 +281,7 @@ func (abm *AlertBulkManager) Stop() {
 }
 
 // AddAlert adds an alert to the appropriate container bulk
-func (abm *AlertBulkManager) AddAlert(alert apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) {
+func (abm *AlertBulkManager) AddAlert(alert armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) {
 	containerID := alert.RuntimeAlertK8sDetails.ContainerID
 	if containerID == "" {
 		logger.L().Warning("AlertBulkManager.AddAlert - containerID is empty, cannot add to bulk")
@@ -294,7 +294,7 @@ func (abm *AlertBulkManager) AddAlert(alert apitypes.RuntimeAlert, processTree a
 	if !exists {
 		bulk = &containerBulk{
 			containerID:     containerID,
-			alerts:          make([]apitypes.RuntimeAlert, 0, abm.bulkMaxAlerts),
+			alerts:          make([]armotypes.RuntimeAlert, 0, abm.bulkMaxAlerts),
 			cloudServices:   make([]string, 0),
 			maxSize:         abm.bulkMaxAlerts,
 			timeoutDuration: abm.bulkTimeoutDuration,
@@ -571,7 +571,7 @@ func (abm *AlertBulkManager) GetBulkCount() int {
 }
 
 // sendBulkWrapper is a helper to adapt the bulk send to HTTPExporter's sendAlert method
-func (e *HTTPExporter) sendBulkWrapper(containerID string, alerts []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+func (e *HTTPExporter) sendBulkWrapper(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
 	defer cancel()
 

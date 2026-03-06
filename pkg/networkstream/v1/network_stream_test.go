@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/exporters"
 )
@@ -63,7 +63,7 @@ func TestNewNetworkStream(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			nodeName := "test-node"
-			eventsChannel := make(chan apitypes.NetworkStream, 1)
+			eventsChannel := make(chan armotypes.NetworkStream, 1)
 
 			ns, err := NewNetworkStream(
 				ctx,
@@ -100,8 +100,8 @@ func TestNewNetworkStream(t *testing.T) {
 				t.Errorf("Host entity for node %s should exist", nodeName)
 			}
 
-			if hostEntity.Kind != apitypes.NetworkStreamEntityKindHost {
-				t.Errorf("Expected host entity kind %v, got %v", apitypes.NetworkStreamEntityKindHost, hostEntity.Kind)
+			if hostEntity.Kind != armotypes.NetworkStreamEntityKindHost {
+				t.Errorf("Expected host entity kind %v, got %v", armotypes.NetworkStreamEntityKindHost, hostEntity.Kind)
 			}
 
 			if hostEntity.Inbound == nil || hostEntity.Outbound == nil {

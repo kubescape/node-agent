@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -183,7 +184,7 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 	if container != nil {
 		procfsEvent.ContainerID = container.Runtime.ContainerID
 	} else {
-		procfsEvent.ContainerID = "host"
+		procfsEvent.ContainerID = armotypes.HostContainerID
 	}
 	processID := event.PID
 	containerID := procfsEvent.ContainerID

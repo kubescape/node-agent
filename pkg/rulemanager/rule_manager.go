@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -25,6 +24,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
@@ -32,7 +32,6 @@ import (
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -81,7 +80,7 @@ func CreateRuleManager(
 	celEvaluator cel.RuleEvaluator,
 	mntnsRegistry contextdetection.Registry,
 ) (*RuleManager, error) {
-	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory, apitypes.AlertSourcePlatformK8sAgent)
+	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory, armotypes.AlertSourcePlatformK8sAgent)
 	rulePolicyValidator := NewRulePolicyValidator(objectCache)
 	detectorManager := detectors.NewDetectorManager(mntnsRegistry)
 
@@ -109,6 +108,19 @@ func CreateRuleManager(
 }
 
 func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string) {
+	if utils.IsHostContainer(container) {
+		logger.L().Debug("RuleManager - skipping shared data wait for host container",
+			helpers.String("container ID", container.Runtime.ContainerID))
+		// Skip podToWlid and shim PID setup for host containers as they don't have K8s metadata
+		if err := rm.monitorContainer(container, k8sContainerID); err != nil {
+			logger.L().Debug("RuleManager - stop monitor on host container",
+				helpers.String("reason", err.Error()),
+				helpers.String("container ID", container.Runtime.ContainerID),
+				helpers.String("k8s container id", k8sContainerID))
+		}
+		return
+	}
+
 	sharedData, err := rm.waitForSharedContainerData(container.Runtime.ContainerID)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to get shared container data", helpers.Error(err))

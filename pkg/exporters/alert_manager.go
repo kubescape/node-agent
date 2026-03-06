@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/cenkalti/backoff/v5"
 	"github.com/go-openapi/strfmt"
 	"github.com/kubescape/go-logger"
@@ -65,8 +65,8 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 		trace = ""
 	}
 
-	var processTree apitypes.Process
-	operation := func() (*apitypes.Process, error) {
+	var processTree armotypes.Process
+	operation := func() (*armotypes.Process, error) {
 		processTree = failedRule.GetRuntimeProcessDetails().ProcessTree
 		process := utils.GetProcessFromProcessTree(&processTree, failedRule.GetBaseRuntimeAlert().InfectedPID)
 		if process == nil {
@@ -195,7 +195,7 @@ func (ame *AlertManagerExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEven
 	// TODO: Implement FIM alerts sending logic
 }
 
-func traceToString(t apitypes.Trace) (string, error) {
+func traceToString(t armotypes.Trace) (string, error) {
 	bytes, err := json.Marshal(t)
 	if err != nil {
 		return "", fmt.Errorf("error marshaling trace: %v", err)
