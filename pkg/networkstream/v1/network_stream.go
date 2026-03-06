@@ -96,11 +96,13 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if utils.IsHostContainer(notif.Container) {
-			return
-		}
 		ns.eventsStorageMutex.Lock()
-		ns.networkEventsStorage.Entities[notif.Container.Runtime.ContainerID] = armotypes.NetworkStreamEntity{
+		// Normalize host container ID to nodeName for consistent entity mapping
+		containerID := notif.Container.Runtime.ContainerID
+		if utils.IsHostContainer(notif.Container) {
+			containerID = ns.nodeName
+		}
+		ns.networkEventsStorage.Entities[containerID] = armotypes.NetworkStreamEntity{
 			Kind: armotypes.NetworkStreamEntityKindContainer,
 			NetworkStreamEntityContainer: armotypes.NetworkStreamEntityContainer{
 				ContainerName: notif.Container.Runtime.ContainerName,
@@ -112,12 +114,16 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 			Outbound: make(map[string]armotypes.NetworkStreamEvent),
 		}
 		ns.eventsStorageMutex.Unlock()
-		if ns.k8sObjectCache != nil {
+		if ns.k8sObjectCache != nil && !utils.IsHostContainer(notif.Container) {
 			go ns.enrichWorkloadDetails(notif.Container.Runtime.ContainerID)
 		}
 	case containercollection.EventTypeRemoveContainer:
 		ns.eventsStorageMutex.Lock()
-		delete(ns.networkEventsStorage.Entities, notif.Container.Runtime.ContainerID)
+		containerID := notif.Container.Runtime.ContainerID
+		if utils.IsHostContainer(notif.Container) {
+			containerID = ns.nodeName
+		}
+		delete(ns.networkEventsStorage.Entities, containerID)
 		ns.eventsStorageMutex.Unlock()
 	}
 }
@@ -279,8 +285,9 @@ func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *armot
 	defer ns.eventsStorageMutex.Unlock()
 
 	entityId := event.GetContainerID()
+	// Normalize host container ID to nodeName
 	if entityId == armotypes.HostContainerID {
-		return
+		entityId = ns.nodeName
 	}
 	if entityId == "" || ns.k8sObjectCache == nil {
 		entityId = ns.nodeName
@@ -338,8 +345,9 @@ func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTre
 	defer ns.eventsStorageMutex.Unlock()
 
 	entityId := event.GetContainerID()
+	// Normalize host container ID to nodeName
 	if entityId == armotypes.HostContainerID {
-		return
+		entityId = ns.nodeName
 	}
 	if entityId == "" || ns.k8sObjectCache == nil {
 		entityId = ns.nodeName
