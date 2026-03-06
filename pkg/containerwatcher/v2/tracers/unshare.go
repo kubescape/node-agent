@@ -68,10 +68,7 @@ func (ut *UnshareTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(ut.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := ut.runtime.RunGadget(ut.gadgetCtx, nil, params)
+		err := ut.runtime.RunGadget(ut.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", ut.gadgetCtx.Name()), helpers.Error(err))
 		}
@@ -107,9 +104,7 @@ func (ut *UnshareTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.UnshareEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					ut.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.UnshareEventType})
+					ut.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.UnshareEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

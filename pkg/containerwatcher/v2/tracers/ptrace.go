@@ -64,10 +64,7 @@ func (pt *PtraceTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(pt.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := pt.runtime.RunGadget(pt.gadgetCtx, nil, params)
+		err := pt.runtime.RunGadget(pt.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", pt.gadgetCtx.Name()), helpers.Error(err))
 		}
@@ -103,9 +100,7 @@ func (pt *PtraceTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.PtraceEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					pt.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.PtraceEventType})
+					pt.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.PtraceEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

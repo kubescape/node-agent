@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	capabilitiesImageName = "quay.io/matthiasb_1/gadgets:capabilities"
+	capabilitiesImageName = "ghcr.io/inspektor-gadget/gadget/trace_capabilities:v0.48.1"
 	capabilitiesTraceName = "trace_capabilities"
 )
 
@@ -70,7 +70,6 @@ func (ct *CapabilitiesTracer) Start(ctx context.Context) error {
 		params := map[string]string{
 			"operator.oci.ebpf.collect-kstack": "false",
 			"operator.oci.ebpf.unique":         "true",
-			"operator.LocalManager.host":       "true", // don't error if container-collection is nil when using local manager
 		}
 		err := ct.runtime.RunGadget(ct.gadgetCtx, nil, params)
 		if err != nil {
@@ -108,9 +107,7 @@ func (ct *CapabilitiesTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.CapabilitiesEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					ct.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.CapabilitiesEventType})
+					ct.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.CapabilitiesEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

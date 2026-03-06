@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	openImageName = "quay.io/matthiasb_1/gadgets:open"
+	openImageName = "ghcr.io/inspektor-gadget/gadget/trace_open:v0.48.1"
 	openTraceName = "trace_open"
 )
 
@@ -70,8 +70,7 @@ func (ot *OpenTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.ebpf.paths":    strconv.FormatBool(ot.cfg.EnableFullPathTracing),
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
+			"operator.oci.ebpf.paths": strconv.FormatBool(ot.cfg.EnableFullPathTracing),
 		}
 		err := ot.runtime.RunGadget(ot.gadgetCtx, nil, params)
 		if err != nil {
@@ -113,9 +112,7 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.OpenEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.OpenEventType, FullPathTracing: ot.cfg.EnableFullPathTracing})
+					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.OpenEventType, FullPathTracing: ot.cfg.EnableFullPathTracing})
 					return nil
 				}, opPriority)
 				if err != nil {

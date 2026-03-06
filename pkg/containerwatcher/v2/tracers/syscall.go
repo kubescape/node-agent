@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	syscallImageName = "quay.io/matthiasb_1/gadgets:seccomp"
+	syscallImageName = "ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.48.1"
 	syscallTraceName = "syscall_tracer"
 )
 
@@ -68,7 +68,6 @@ func (st *SyscallTracer) Start(ctx context.Context) error {
 		params := map[string]string{
 			"operator.oci.ebpf.map-fetch-count":    "0",
 			"operator.oci.ebpf.map-fetch-interval": "30s",
-			"operator.LocalManager.host":           "true", // don't error if container-collection is nil when using local manager
 		}
 		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
 		if err != nil {
@@ -109,9 +108,7 @@ func (st *SyscallTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.SyscallEventType).(*datasource.EdataElement)
-					data.DeepCopyInto(pooledData)
-					st.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.SyscallEventType})
+					st.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.SyscallEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

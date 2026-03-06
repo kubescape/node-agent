@@ -65,10 +65,7 @@ func (rt *RandomXTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(rt.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := rt.runtime.RunGadget(rt.gadgetCtx, nil, params)
+		err := rt.runtime.RunGadget(rt.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", rt.gadgetCtx.Name()), helpers.Error(err))
 		}
@@ -104,9 +101,7 @@ func (rt *RandomXTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.RandomXEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					rt.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.RandomXEventType})
+					rt.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.RandomXEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

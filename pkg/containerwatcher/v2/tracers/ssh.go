@@ -69,10 +69,7 @@ func (st *SSHTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(st.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
+		err := st.runtime.RunGadget(st.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", st.gadgetCtx.Name()), helpers.Error(err))
 		}
@@ -111,9 +108,7 @@ func (st *SSHTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.SSHEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					st.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.SSHEventType})
+					st.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.SSHEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

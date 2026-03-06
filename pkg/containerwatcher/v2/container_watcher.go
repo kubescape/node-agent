@@ -290,11 +290,16 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	cw.containerProfileManager.RegisterForContainerEndOfLife(cw.containerEolNotificationChannel)
 
 	// Start container collection (similar to v1 startContainerCollection)
+	var containerCollectionErr error
 	logger.L().TimedWrapper("StartContainerCollection", 5*time.Second, func() {
 		if err := cw.StartContainerCollection(ctx); err != nil {
+			containerCollectionErr = err
 			logger.L().Error("error starting container collection", helpers.Error(err))
 		}
 	})
+	if containerCollectionErr != nil {
+		return fmt.Errorf("starting container collection: %w", containerCollectionErr)
+	}
 
 	// Start ordered event queue BEFORE tracers
 
@@ -306,7 +311,7 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 
 	cw.gadgetRuntime = local.New()
 	if err := cw.gadgetRuntime.Init(nil); err != nil {
-		logger.L().Fatal("runtime init", helpers.Error(err))
+		return fmt.Errorf("initializing gadget runtime: %w", err)
 	}
 
 	// Create tracer factory

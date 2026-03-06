@@ -82,10 +82,7 @@ func (ht *HTTPTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(ht.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := ht.runtime.RunGadget(ht.gadgetCtx, nil, params)
+		err := ht.runtime.RunGadget(ht.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", ht.gadgetCtx.Name()), helpers.Error(err))
 		}
@@ -121,9 +118,7 @@ func (ht *HTTPTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.HTTPEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					ht.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.HTTPEventType})
+					ht.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.HTTPEventType})
 					return nil
 				}, opPriority)
 				if err != nil {
@@ -172,7 +167,7 @@ func (ht *HTTPTracer) GroupEvents(bpfEvent utils.HttpRawEvent) utils.HttpEvent {
 	case utils.Response:
 		if exists, ok := ht.eventsMap.Get(id); ok {
 			grouped := exists
-			response, err := ParseHttpResponse(FromCString(bpfEvent.GetBuf()), grouped.GetRequest())
+			response, err := ParseHttpResponse(GetValidBuf(bpfEvent), grouped.GetRequest())
 			if err != nil {
 				return nil
 			}

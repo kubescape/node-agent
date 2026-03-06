@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	dnsImageName = "ghcr.io/inspektor-gadget/gadget/trace_dns:v0.45.0"
+	dnsImageName = "ghcr.io/inspektor-gadget/gadget/trace_dns:v0.48.1"
 	dnsTraceName = "trace_dns"
 )
 
@@ -74,8 +74,7 @@ func (dt *DNSTracer) Start(ctx context.Context) error {
 	)
 	go func() {
 		params := map[string]string{
-			"operator.oci.ebpf.paths":    "true", // CWD paths in events
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
+			"operator.oci.ebpf.paths": "true", // CWD paths in events
 		}
 		err := dt.runtime.RunGadget(dt.gadgetCtx, nil, params)
 		if err != nil {
@@ -119,9 +118,7 @@ func (dt *DNSTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.DnsEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					dt.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.DnsEventType})
+					dt.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.DnsEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

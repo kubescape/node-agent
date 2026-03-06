@@ -68,10 +68,7 @@ func (ht *HardlinkTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(ht.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := ht.runtime.RunGadget(ht.gadgetCtx, nil, params)
+		err := ht.runtime.RunGadget(ht.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", ht.gadgetCtx.Name()), helpers.Error(err))
 		}
@@ -107,9 +104,7 @@ func (ht *HardlinkTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.HardlinkEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					ht.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.HardlinkEventType})
+					ht.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.HardlinkEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

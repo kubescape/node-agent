@@ -67,6 +67,7 @@ type HTTPExporter struct {
 	host          string
 	nodeName      string
 	clusterName   string
+	clusterUID    string
 	httpClient    *http.Client
 	alertMetrics  *alertMetrics
 	cloudMetadata *apitypes.CloudMetadata
@@ -94,7 +95,7 @@ type HTTPAlertsListSpec struct {
 }
 
 // NewHTTPExporter creates a new HTTPExporter instance
-func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata) (*HTTPExporter, error) {
+func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata, clusterUID string) (*HTTPExporter, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -103,6 +104,7 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		config:      config,
 		nodeName:    nodeName,
 		clusterName: clusterName,
+		clusterUID:  clusterUID,
 		httpClient: &http.Client{
 			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
 		},
@@ -315,9 +317,11 @@ func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.Ru
 	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = e.nodeName
 	k8sDetails.ClusterName = e.clusterName
+	k8sDetails.ClusterUID = e.clusterUID
 
 	httpDetails := failedRule.GetHttpRuleAlert()
 	httpDetails.SourcePodInfo.ClusterName = e.clusterName
+	httpDetails.SourcePodInfo.ClusterUID = e.clusterUID
 
 	return apitypes.RuntimeAlert{
 		Message:                failedRule.GetRuleAlert().RuleDescription,
@@ -336,6 +340,7 @@ func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) a
 	k8sDetails := result.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = e.nodeName
 	k8sDetails.ClusterName = e.clusterName
+	k8sDetails.ClusterUID = e.clusterUID
 
 	return apitypes.RuntimeAlert{
 		Message:                fmt.Sprintf("Malware detected: %s", result.GetBasicRuntimeAlert().AlertName),

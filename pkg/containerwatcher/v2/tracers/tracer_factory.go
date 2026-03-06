@@ -8,6 +8,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubeipresolver"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubemanager"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
@@ -17,7 +18,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -76,7 +76,7 @@ func NewTracerFactory(
 		containerProfileManager: containerProfileManager,
 		containerSelector:       containerSelector,
 		kubeIPResolver:          &kubeipresolver.KubeIPResolver{},
-		kubeManager:             kskubemanager.NewKsKubeManager(containerCollection, tracerCollection),
+		kubeManager:             kubemanager.NewKubeManager(containerCollection, tracerCollection),
 		kubeNameResolver:        &kubenameresolver.KubeNameResolver{},
 		ociStore:                ociStore,
 		orderedEventQueue:       orderedEventQueue,

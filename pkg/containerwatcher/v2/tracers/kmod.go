@@ -68,10 +68,7 @@ func (kt *KmodTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithOrasReadonlyTarget(kt.ociStore),
 	)
 	go func() {
-		params := map[string]string{
-			"operator.LocalManager.host": "true", // don't error if container-collection is nil when using local manager
-		}
-		err := kt.runtime.RunGadget(kt.gadgetCtx, nil, params)
+		err := kt.runtime.RunGadget(kt.gadgetCtx, nil, nil)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", kt.gadgetCtx.Name()), helpers.Error(err))
 		}
@@ -107,9 +104,7 @@ func (kt *KmodTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					pooledData := utils.GetPooledDataItem(utils.KmodEventType).(*datasource.Edata)
-					data.DeepCopyInto(pooledData)
-					kt.callback(&utils.DatasourceEvent{Datasource: d, Data: pooledData, EventType: utils.KmodEventType})
+					kt.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.KmodEventType})
 					return nil
 				}, opPriority)
 				if err != nil {

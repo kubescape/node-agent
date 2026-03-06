@@ -13,6 +13,10 @@ concurrency:
 
 jobs:
   pr-created:
+    permissions:
+      pull-requests: write
+      security-events: write
+      contents: read
     uses: ./.github/workflows/incluster-comp-pr-created.yaml
     with:
       GO_VERSION: "1.25"

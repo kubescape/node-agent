@@ -208,7 +208,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("fim::periodicConfig::followSymlinks", false)
 	viper.SetDefault("fim::exporters::stdoutExporter", false)
 	// Host sensor defaults
-	viper.SetDefault("hostSensorEnabled", true)
+	viper.SetDefault("hostSensorEnabled", false)
 	viper.SetDefault("hostSensorInterval", 5*time.Minute)
 
 	viper.AutomaticEnv()
