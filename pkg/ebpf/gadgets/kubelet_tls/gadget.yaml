@@ -25,34 +25,9 @@ datasources:
       pid:
         annotations:
           description: Process ID of the kubelet process.
-      proc:
-        annotations:
-          description: 'TODO: Fill field description'
       tid:
         annotations:
           description: Thread ID of the kubelet thread.
       ts_ns:
         annotations:
           description: Monotonic timestamp in nanoseconds when the event was captured.
-params:
-  ebpf:
-    targ_comm:
-      key: targ_comm
-      defaultValue: ""
-      description: 'TODO: Fill parameter description'
-    targ_gid:
-      key: targ_gid
-      defaultValue: ""
-      description: 'TODO: Fill parameter description'
-    targ_pid:
-      key: targ_pid
-      defaultValue: ""
-      description: 'TODO: Fill parameter description'
-    targ_tid:
-      key: targ_tid
-      defaultValue: ""
-      description: 'TODO: Fill parameter description'
-    targ_uid:
-      key: targ_uid
-      defaultValue: ""
-      description: 'TODO: Fill parameter description'

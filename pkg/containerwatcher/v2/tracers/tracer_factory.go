@@ -105,6 +105,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	manager.RegisterTracer(procfsTracer)
 
 	// Create syscall tracer (seccomp)
+  /*
 	syscallTracer := NewSyscallTracer(
 		tf.kubeManager,
 		tf.runtime,
@@ -260,6 +261,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.createEventCallback(utils.IoUringEventType),
 	)
 	manager.RegisterTracer(iouringTracer)
+  */
 
 	// Create kubelet TLS tracer
 	kubeletTLSTracer := NewKubeletTLSTracer(
@@ -271,6 +273,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	manager.RegisterTracer(kubeletTLSTracer)
 
 	// Create unshare tracer
+  /*
 	unshareTracer := NewUnshareTracer(
 		tf.kubeManager,
 		tf.runtime,
@@ -289,6 +292,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.thirdPartyEnricher,
 	)
 	manager.RegisterTracer(bpfTracer)
+  */
 
 	// Create top tracer
 	//topTracer := NewTopTracer(
