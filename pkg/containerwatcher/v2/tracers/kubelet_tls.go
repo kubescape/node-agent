@@ -2,7 +2,7 @@ package tracers
 
 import (
 	"context"
-  "fmt"
+  //"fmt"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -149,7 +149,6 @@ func (t *KubeletTLSTracer) callback(event utils.KubeletTLSEvent) {
 	if t.eventCallback != nil {
 		containerID := "host"  // Hardcode for proof-of-concept
 		processID := event.GetPID()
-    fmt.Printf("Teo-problem: processID is %s\n", processID)
 		t.eventCallback(event, containerID, processID)
 	}
 }

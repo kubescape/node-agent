@@ -137,7 +137,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	fmt.Println("Hey2 - I'm inside the ReportEnrichedEvent")
 
 	var profileExists bool
-	var details string
+	//var details string
 	namespace := enrichedEvent.Event.GetNamespace()
 	pod := enrichedEvent.Event.GetPod()
 	fmt.Println("Hey3 - I'm inside the ReportEnrichedEvent")
@@ -148,6 +148,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	fmt.Println("Hey4 - I'm inside the ReportEnrichedEvent")
 	if isK8sContext {
 		fmt.Println("Hey5 - I'm inside the ReportEnrichedEvent")
+    /*
 		if pod == "" || namespace == "" {
 			fmt.Println("Hey6 - I'm inside the ReportEnrichedEvent")
 			return
@@ -159,8 +160,10 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			fmt.Println("Hey7 - I'm inside the ReportEnrichedEvent")
 			return
 		}
+    */
 	} else {
 		// Host or Standalone context: use SourceContext.WorkloadID()
+    /*
 		if enrichedEvent.SourceContext == nil {
 			fmt.Println("HeyHey - SourceContext is nil")
 			return
@@ -171,6 +174,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			return
 		}
 		fmt.Println("HeyHey - not a K8sContext")
+    */
 	}
 
 	fmt.Println("Hey8 - I'm inside the ReportEnrichedEvent")
@@ -275,7 +279,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				continue
 			}
 
-			ruleFailure.SetWorkloadDetails(details)
+			//ruleFailure.SetWorkloadDetails(details)
 			fmt.Println("Sending alert for %s", rule.Name)
 			rm.exporter.SendRuleAlert(ruleFailure)
 		}
