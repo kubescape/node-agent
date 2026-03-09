@@ -56,12 +56,22 @@ This ensures security while maintaining availability - if a profile can't be ver
 
 ## Architecture
 
-```mermaid
+### Canonical Hashing
+
+To ensure the signature remains valid regardless of minor YAML formatting differences or the presence of the signature itself, we use **Canonical Hashing**.
+
+1. **Sanitization**: Before hashing, the profile is "sanitized" by creating a copy that excludes the `metadata.annotations`, `metadata.managedFields`, and the `status` block.
+2. **Canonical JSON**: The sanitized object is marshaled to JSON.
+3. **Hashing**: We use `github.com/kubescape/storage/pkg/utils.CanonicalHash` which performs a specialized SHA-256 hash of the JSON.
+
+**Key Finding:** `CanonicalHash` includes all fields in its input. Therefore, the **sanitization step is mandatory** to prevent a circular dependency where adding the signature annotation changes the hash and invalidates the signature.
+
+### Diagram
 graph TB
     subgraph "Signing Flow"
         A[Profile Resource] --> B[Adapter]
         B --> C[SignableProfile Interface]
-        C --> D[Content: JSON without annotations]
+        C --> D[GetContent: Sanitized JSON]
         D --> E{Signing Mode}
         E -->|Keyless| F[Sigstore: OIDC + Fulcio + Rekor]
         E -->|Key-based| G[Local ECDSA Signer]
@@ -69,24 +79,25 @@ graph TB
         G --> H[Signature + Public Key]
         H --> I[Base64 Encode]
         I --> J[Profile Annotations]
-        J --> K[Signed Profile]
+        J --> K[GetUpdatedProfile: Live Resource]
+        K --> L[Signed Profile YAML]
     end
 
     subgraph "Verification Flow"
-        L[Signed Profile] --> M[Extract Signature]
-        L --> N[Extract Cert/Key]
-        L --> O[Extract RekorBundle]
-        L --> P[Get Content without annotations]
-        P --> Q[Sigstore Verifier]
-        M --> Q
-        N --> Q
-        O --> Q
-        Q --> R{Valid?}
-        R -->|Yes| S[Profile accepted]
-        R -->|No| T[Profile rejected]
+        M[Signed Profile] --> N[Extract Signature]
+        M --> O[Extract Cert/Key]
+        M --> P[Extract RekorBundle]
+        M --> Q[GetContent: Sanitized JSON]
+        Q --> R[Sigstore Verifier]
+        N --> R
+        O --> R
+        P --> R
+        R --> S{Valid?}
+        S -->|Yes| T[Profile accepted]
+        S -->|No| U[Profile rejected]
     end
 
-    K --> L
+    L --> M
 ```
 
 ## Annotation Format
