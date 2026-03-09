@@ -375,7 +375,12 @@ func (c *CosignAdapter) GetContentHash(obj interface{}) (string, error) {
 		return "", fmt.Errorf("failed to marshal object: %w", err)
 	}
 
-	return utils.CanonicalHash(data)
+	hash, err := utils.CanonicalHash(data)
+	if err != nil {
+		return "", err
+	}
+
+	return hash, nil
 }
 
 func (c *CosignAdapter) EncodeSignatureToAnnotations(sig *Signature) (map[string]string, error) {

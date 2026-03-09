@@ -2,7 +2,6 @@ package profiles
 
 import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type SeccompProfileAdapter struct {
@@ -39,17 +38,23 @@ func (s *SeccompProfileAdapter) GetName() string {
 }
 
 func (s *SeccompProfileAdapter) GetContent() interface{} {
-	return &v1beta1.SeccompProfile{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: s.profile.APIVersion,
-			Kind:       s.profile.Kind,
+	apiVersion := s.profile.APIVersion
+	if apiVersion == "" {
+		apiVersion = "spdx.softwarecomposition.kubescape.io/v1beta1"
+	}
+	kind := s.profile.Kind
+	if kind == "" {
+		kind = "SeccompProfile"
+	}
+	return map[string]interface{}{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"metadata": map[string]interface{}{
+			"name":      s.profile.Name,
+			"namespace": s.profile.Namespace,
+			"labels":    s.profile.Labels,
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      s.profile.Name,
-			Namespace: s.profile.Namespace,
-			Labels:    s.profile.Labels,
-		},
-		Spec: s.profile.Spec,
+		"spec": s.profile.Spec,
 	}
 }
 
