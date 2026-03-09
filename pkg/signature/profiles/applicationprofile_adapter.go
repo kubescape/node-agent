@@ -2,7 +2,6 @@ package profiles
 
 import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type ApplicationProfileAdapter struct {
@@ -39,17 +38,41 @@ func (a *ApplicationProfileAdapter) GetName() string {
 }
 
 func (a *ApplicationProfileAdapter) GetContent() interface{} {
-	return &v1beta1.ApplicationProfile{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: a.profile.APIVersion,
-			Kind:       a.profile.Kind,
+	// Normalize PolicyByRuleId to ensure consistent JSON representation
+	// Empty maps become {} instead of null
+	for i := range a.profile.Spec.Containers {
+		if a.profile.Spec.Containers[i].PolicyByRuleId == nil {
+			a.profile.Spec.Containers[i].PolicyByRuleId = make(map[string]v1beta1.RulePolicy)
+		}
+	}
+	for i := range a.profile.Spec.InitContainers {
+		if a.profile.Spec.InitContainers[i].PolicyByRuleId == nil {
+			a.profile.Spec.InitContainers[i].PolicyByRuleId = make(map[string]v1beta1.RulePolicy)
+		}
+	}
+	for i := range a.profile.Spec.EphemeralContainers {
+		if a.profile.Spec.EphemeralContainers[i].PolicyByRuleId == nil {
+			a.profile.Spec.EphemeralContainers[i].PolicyByRuleId = make(map[string]v1beta1.RulePolicy)
+		}
+	}
+
+	apiVersion := a.profile.APIVersion
+	if apiVersion == "" {
+		apiVersion = "spdx.softwarecomposition.kubescape.io/v1beta1"
+	}
+	kind := a.profile.Kind
+	if kind == "" {
+		kind = "ApplicationProfile"
+	}
+	return map[string]interface{}{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"metadata": map[string]interface{}{
+			"name":      a.profile.Name,
+			"namespace": a.profile.Namespace,
+			"labels":    a.profile.Labels,
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      a.profile.Name,
-			Namespace: a.profile.Namespace,
-			Labels:    a.profile.Labels,
-		},
-		Spec: a.profile.Spec,
+		"spec": a.profile.Spec,
 	}
 }
 

@@ -70,17 +70,30 @@ func TestApplicationProfileAdapter(t *testing.T) {
 		t.Fatal("Expected non-nil content")
 	}
 
-	apContent, ok := content.(*v1beta1.ApplicationProfile)
+	apContent, ok := content.(map[string]interface{})
 	if !ok {
-		t.Fatal("Expected ApplicationProfile content type")
+		t.Fatal("Expected map[string]interface{} content type")
 	}
 
-	if apContent.Name != "test-ap" {
-		t.Errorf("Expected content name 'test-ap', got '%s'", apContent.Name)
+	metadata, ok := apContent["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected metadata to be map[string]interface{}")
 	}
 
-	if apContent.Namespace != "default" {
-		t.Errorf("Expected content namespace 'default', got '%s'", apContent.Namespace)
+	if metadata["name"] != "test-ap" {
+		t.Errorf("Expected content name 'test-ap', got '%v'", metadata["name"])
+	}
+
+	if metadata["namespace"] != "default" {
+		t.Errorf("Expected content namespace 'default', got '%v'", metadata["namespace"])
+	}
+
+	if apContent["apiVersion"] != "softwarecomposition.kubescape.io/v1beta1" {
+		t.Errorf("Expected apiVersion 'softwarecomposition.kubescape.io/v1beta1', got '%v'", apContent["apiVersion"])
+	}
+
+	if apContent["kind"] != "ApplicationProfile" {
+		t.Errorf("Expected kind 'ApplicationProfile', got '%v'", apContent["kind"])
 	}
 }
 
@@ -189,17 +202,30 @@ func TestSeccompProfileAdapter(t *testing.T) {
 		t.Fatal("Expected non-nil content")
 	}
 
-	scContent, ok := content.(*v1beta1.SeccompProfile)
+	scContent, ok := content.(map[string]interface{})
 	if !ok {
-		t.Fatal("Expected SeccompProfile content type")
+		t.Fatal("Expected map[string]interface{} content type")
 	}
 
-	if scContent.Name != "test-seccomp" {
-		t.Errorf("Expected content name 'test-seccomp', got '%s'", scContent.Name)
+	metadata, ok := scContent["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected metadata to be map[string]interface{}")
 	}
 
-	if scContent.Namespace != "default" {
-		t.Errorf("Expected content namespace 'default', got '%s'", scContent.Namespace)
+	if metadata["name"] != "test-seccomp" {
+		t.Errorf("Expected content name 'test-seccomp', got '%v'", metadata["name"])
+	}
+
+	if metadata["namespace"] != "default" {
+		t.Errorf("Expected content namespace 'default', got '%v'", metadata["namespace"])
+	}
+
+	if scContent["apiVersion"] != "softwarecomposition.kubescape.io/v1beta1" {
+		t.Errorf("Expected apiVersion 'softwarecomposition.kubescape.io/v1beta1', got '%v'", scContent["apiVersion"])
+	}
+
+	if scContent["kind"] != "SeccompProfile" {
+		t.Errorf("Expected kind 'SeccompProfile', got '%v'", scContent["kind"])
 	}
 }
 
