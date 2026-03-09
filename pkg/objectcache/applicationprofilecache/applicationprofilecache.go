@@ -282,11 +282,20 @@ func (apc *ApplicationProfileCacheImpl) verifyApplicationProfile(profile *v1beta
 	}
 	profileAdapter := profiles.NewApplicationProfileAdapter(profile)
 	if err := signature.VerifyProfile(profileAdapter); err != nil {
-		logger.L().Warning(context+" verification failed, skipping",
-			helpers.String("profile", profile.Name),
-			helpers.String("namespace", profile.Namespace),
-			helpers.String("workloadID", workloadID),
-			helpers.Error(err))
+		// Only warn if signature exists but doesn't match; missing signatures are debug
+		isMissingSig := err.Error() == fmt.Sprintf("profile is not signed (missing %s annotation)", signature.AnnotationSignature)
+		if isMissingSig {
+			logger.L().Debug(context+" profile is not signed, skipping",
+				helpers.String("profile", profile.Name),
+				helpers.String("namespace", profile.Namespace),
+				helpers.String("workloadID", workloadID))
+		} else {
+			logger.L().Warning(context+" signature verification failed, skipping",
+				helpers.String("profile", profile.Name),
+				helpers.String("namespace", profile.Namespace),
+				helpers.String("workloadID", workloadID),
+				helpers.Error(err))
+		}
 
 		// Update profile state with verification error
 		apc.setVerificationFailed(workloadID, profile.Name, err)
