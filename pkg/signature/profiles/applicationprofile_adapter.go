@@ -76,6 +76,6 @@ func (a *ApplicationProfileAdapter) GetContent() interface{} {
 	}
 }
 
-func (a *ApplicationProfileAdapter) GetUpdatedProfile() interface{} {
+func (a *ApplicationProfileAdapter) GetUpdatedObject() interface{} {
 	return a.profile
 }

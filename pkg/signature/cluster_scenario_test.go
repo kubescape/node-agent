@@ -67,8 +67,8 @@ func TestClusterScenarioIntegration(t *testing.T) {
 	}
 
 	// Now verify that signing and verification work end-to-end
-	if err := SignProfileWithKey(adapter); err != nil {
-		t.Fatalf("Failed to sign profile: %v", err)
+	if err := SignObjectWithKey(adapter); err != nil {
+		t.Fatalf("Failed to sign object: %v", err)
 	}
 
 	if clusterProfile.Annotations == nil {
@@ -80,8 +80,8 @@ func TestClusterScenarioIntegration(t *testing.T) {
 	}
 
 	// Verify the signature
-	if err := VerifyProfileStrict(adapter); err != nil {
-		t.Fatalf("Failed to verify profile signature: %v", err)
+	if err := VerifyObjectStrict(adapter); err != nil {
+		t.Fatalf("Failed to verify object: %v", err)
 	}
 
 	t.Log("✓ Cluster scenario integration test passed: profile with empty TypeMeta successfully signed and verified")

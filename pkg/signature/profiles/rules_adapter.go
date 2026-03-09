@@ -58,6 +58,6 @@ func (r *RulesAdapter) GetContent() interface{} {
 	}
 }
 
-func (r *RulesAdapter) GetUpdatedProfile() interface{} {
+func (r *RulesAdapter) GetUpdatedObject() interface{} {
 	return r.rules
 }

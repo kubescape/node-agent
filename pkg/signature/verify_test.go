@@ -4,47 +4,47 @@ import (
 	"testing"
 )
 
-func TestVerifyProfileStrict(t *testing.T) {
+func TestVerifyObjectStrict(t *testing.T) {
 	profileContent := map[string]interface{}{
 		"type":  "test-profile",
 		"data":  "test-data",
 		"value": 123,
 	}
 
-	profile := NewMockSignableProfile("test-uid", "test-ns", "test-profile-verify", profileContent)
+	profile := NewMockSignableObject("test-uid", "test-ns", "test-profile-verify", profileContent)
 
-	err := SignProfileKeyless(profile)
+	err := SignObjectKeyless(profile)
 	if err != nil {
-		t.Fatalf("SignProfileKeyless failed: %v", err)
+		t.Fatalf("SignObjectKeyless failed: %v", err)
 	}
 
-	err = VerifyProfileStrict(profile)
+	err = VerifyObjectStrict(profile)
 	if err != nil {
-		t.Fatalf("VerifyProfileStrict failed: %v", err)
+		t.Fatalf("VerifyObjectStrict failed: %v", err)
 	}
 }
 
-func TestVerifyProfileAllowUntrusted(t *testing.T) {
+func TestVerifyObjectAllowUntrusted(t *testing.T) {
 	profileContent := map[string]interface{}{
 		"type":  "test-profile",
 		"data":  "test-data",
 		"value": 456,
 	}
 
-	profile := NewMockSignableProfile("test-uid", "test-ns", "test-profile-verify-2", profileContent)
+	profile := NewMockSignableObject("test-uid", "test-ns", "test-profile-verify-2", profileContent)
 
-	err := SignProfileWithKey(profile)
+	err := SignObjectWithKey(profile)
 	if err != nil {
-		t.Fatalf("SignProfileWithKey failed: %v", err)
+		t.Fatalf("SignObjectWithKey failed: %v", err)
 	}
 
-	err = VerifyProfileAllowUntrusted(profile)
+	err = VerifyObjectAllowUntrusted(profile)
 	if err != nil {
-		t.Fatalf("VerifyProfileAllowUntrusted failed: %v", err)
+		t.Fatalf("VerifyObjectAllowUntrusted failed: %v", err)
 	}
 }
 
-func TestVerifyProfileTampered(t *testing.T) {
+func TestVerifyObjectTampered(t *testing.T) {
 	originalContent := map[string]interface{}{
 		"type":      "test-profile",
 		"data":      "test-data",
@@ -52,11 +52,11 @@ func TestVerifyProfileTampered(t *testing.T) {
 		"confident": "secret",
 	}
 
-	profile := NewMockSignableProfile("test-uid", "test-ns", "test-profile-tamper", originalContent)
+	profile := NewMockSignableObject("test-uid", "test-ns", "test-profile-tamper", originalContent)
 
-	err := SignProfileKeyless(profile)
+	err := SignObjectKeyless(profile)
 	if err != nil {
-		t.Fatalf("SignProfileKeyless failed: %v", err)
+		t.Fatalf("SignObjectKeyless failed: %v", err)
 	}
 
 	tamperedContent := map[string]interface{}{
@@ -67,39 +67,39 @@ func TestVerifyProfileTampered(t *testing.T) {
 	}
 	profile.content = tamperedContent
 
-	err = VerifyProfileStrict(profile)
+	err = VerifyObjectStrict(profile)
 	if err == nil {
 		t.Error("Expected verification failure for tampered profile, got success")
 	}
 }
 
-func TestVerifyProfileNoAnnotations(t *testing.T) {
+func TestVerifyObjectNoAnnotations(t *testing.T) {
 	profileContent := map[string]interface{}{
 		"type": "test-profile",
 		"data": "test-data",
 	}
 
-	profile := NewMockSignableProfile("test-uid", "test-ns", "test-profile-no-sig", profileContent)
+	profile := NewMockSignableObject("test-uid", "test-ns", "test-profile-no-sig", profileContent)
 
-	err := VerifyProfileStrict(profile)
+	err := VerifyObjectStrict(profile)
 	if err == nil {
 		t.Error("Expected error for profile without annotations, got nil")
 	}
 }
 
-func TestVerifyProfileMissingSignature(t *testing.T) {
+func TestVerifyObjectMissingSignature(t *testing.T) {
 	profileContent := map[string]interface{}{
 		"type": "test-profile",
 		"data": "test-data",
 	}
 
-	profile := NewMockSignableProfile("test-uid", "test-ns", "test-profile-missing-sig", profileContent)
+	profile := NewMockSignableObject("test-uid", "test-ns", "test-profile-missing-sig", profileContent)
 	profile.SetAnnotations(map[string]string{
 		AnnotationIssuer:   "test-issuer",
 		AnnotationIdentity: "test-identity",
 	})
 
-	err := VerifyProfileStrict(profile)
+	err := VerifyObjectStrict(profile)
 	if err == nil {
 		t.Error("Expected error for profile without signature annotation, got nil")
 	}
@@ -113,29 +113,29 @@ func TestSignAndVerifyRoundTrip(t *testing.T) {
 		"networkPolicy": "allow",
 	}
 
-	profile := NewMockSignableProfile("roundtrip-uid", "roundtrip-ns", "roundtrip-profile", profileContent)
+	profile := NewMockSignableObject("roundtrip-uid", "roundtrip-ns", "roundtrip-profile", profileContent)
 
-	err := SignProfileKeyless(profile)
+	err := SignObjectKeyless(profile)
 	if err != nil {
-		t.Fatalf("SignProfileKeyless failed: %v", err)
+		t.Fatalf("SignObjectKeyless failed: %v", err)
 	}
 
 	if !IsSigned(profile) {
 		t.Fatal("Profile should be signed after signing")
 	}
 
-	sig, err := GetProfileSignature(profile)
+	sig, err := GetObjectSignature(profile)
 	if err != nil {
-		t.Fatalf("GetProfileSignature failed: %v", err)
+		t.Fatalf("GetObjectSignature failed: %v", err)
 	}
 
 	if len(sig.Signature) == 0 {
 		t.Error("Signature should not be empty")
 	}
 
-	err = VerifyProfileStrict(profile)
+	err = VerifyObjectStrict(profile)
 	if err != nil {
-		t.Fatalf("VerifyProfileStrict failed after signing: %v", err)
+		t.Fatalf("VerifyObjectStrict failed after signing: %v", err)
 	}
 }
 
@@ -145,27 +145,27 @@ func TestSignAndVerifyDifferentKeys(t *testing.T) {
 		"data": "data",
 	}
 
-	profile1 := NewMockSignableProfile("uid1", "ns", "profile1", profileContent)
-	profile2 := NewMockSignableProfile("uid2", "ns", "profile2", profileContent)
+	profile1 := NewMockSignableObject("uid1", "ns", "profile1", profileContent)
+	profile2 := NewMockSignableObject("uid2", "ns", "profile2", profileContent)
 
-	err := SignProfileWithKey(profile1)
+	err := SignObjectWithKey(profile1)
 	if err != nil {
-		t.Fatalf("SignProfileWithKey failed for profile1: %v", err)
+		t.Fatalf("SignObjectWithKey failed for profile1: %v", err)
 	}
 
-	err = SignProfileKeyless(profile2)
+	err = SignObjectKeyless(profile2)
 	if err != nil {
-		t.Fatalf("SignProfileKeyless failed for profile2: %v", err)
+		t.Fatalf("SignObjectKeyless failed for profile2: %v", err)
 	}
 
-	sig1, err := GetProfileSignature(profile1)
+	sig1, err := GetObjectSignature(profile1)
 	if err != nil {
-		t.Fatalf("GetProfileSignature failed for profile1: %v", err)
+		t.Fatalf("GetObjectSignature failed for profile1: %v", err)
 	}
 
-	sig2, err := GetProfileSignature(profile2)
+	sig2, err := GetObjectSignature(profile2)
 	if err != nil {
-		t.Fatalf("GetProfileSignature failed for profile2: %v", err)
+		t.Fatalf("GetObjectSignature failed for profile2: %v", err)
 	}
 
 	if sig1.Issuer != "local" {

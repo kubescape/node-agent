@@ -114,9 +114,9 @@ func TestRulesAdapterSignAndVerify(t *testing.T) {
 
 	adapter := NewRulesAdapter(rules)
 
-	err := signature.SignProfileKeyless(adapter)
+	err := signature.SignObjectKeyless(adapter)
 	if err != nil {
-		t.Fatalf("SignProfileKeyless failed: %v", err)
+		t.Fatalf("SignObjectKeyless failed: %v", err)
 	}
 
 	if rules.Annotations == nil {
@@ -127,9 +127,9 @@ func TestRulesAdapterSignAndVerify(t *testing.T) {
 		t.Error("Expected signature annotation on rules")
 	}
 
-	err = signature.VerifyProfileStrict(adapter)
+	err = signature.VerifyObjectStrict(adapter)
 	if err != nil {
-		t.Fatalf("VerifyProfileStrict failed: %v", err)
+		t.Fatalf("VerifyObjectStrict failed: %v", err)
 	}
 }
 
@@ -166,14 +166,14 @@ func TestRulesAdapterSignAndVerifyWithTampering(t *testing.T) {
 
 	adapter := NewRulesAdapter(rules)
 
-	err := signature.SignProfileKeyless(adapter)
+	err := signature.SignObjectKeyless(adapter)
 	if err != nil {
-		t.Fatalf("SignProfileKeyless failed: %v", err)
+		t.Fatalf("SignObjectKeyless failed: %v", err)
 	}
 
 	rules.Spec.Rules[0].Name = "Modified Rule Name"
 
-	err = signature.VerifyProfileStrict(adapter)
+	err = signature.VerifyObjectStrict(adapter)
 	if err == nil {
 		t.Fatal("Expected verification to fail after tampering, but it succeeded")
 	}

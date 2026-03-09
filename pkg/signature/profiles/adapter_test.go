@@ -124,9 +124,9 @@ func TestApplicationProfileAdapterSignAndVerify(t *testing.T) {
 
 	adapter := NewApplicationProfileAdapter(profile)
 
-	err := signature.SignProfileKeyless(adapter)
+	err := signature.SignObjectKeyless(adapter)
 	if err != nil {
-		t.Fatalf("SignProfileKeyless failed: %v", err)
+		t.Fatalf("SignObjectKeyless failed: %v", err)
 	}
 
 	if profile.Annotations == nil {
@@ -137,9 +137,9 @@ func TestApplicationProfileAdapterSignAndVerify(t *testing.T) {
 		t.Error("Expected signature annotation on profile")
 	}
 
-	err = signature.VerifyProfileStrict(adapter)
+	err = signature.VerifyObjectStrict(adapter)
 	if err != nil {
-		t.Fatalf("VerifyProfileStrict failed: %v", err)
+		t.Fatalf("VerifyObjectStrict failed: %v", err)
 	}
 }
 
@@ -254,9 +254,9 @@ func TestSeccompProfileAdapterSignAndVerify(t *testing.T) {
 
 	adapter := NewSeccompProfileAdapter(profile)
 
-	err := signature.SignProfileKeyless(adapter)
+	err := signature.SignObjectKeyless(adapter)
 	if err != nil {
-		t.Fatalf("SignProfileKeyless failed: %v", err)
+		t.Fatalf("SignObjectKeyless failed: %v", err)
 	}
 
 	if profile.Annotations == nil {
@@ -267,9 +267,9 @@ func TestSeccompProfileAdapterSignAndVerify(t *testing.T) {
 		t.Error("Expected signature annotation on profile")
 	}
 
-	err = signature.VerifyProfileStrict(adapter)
+	err = signature.VerifyObjectStrict(adapter)
 	if err != nil {
-		t.Fatalf("VerifyProfileStrict failed: %v", err)
+		t.Fatalf("VerifyObjectStrict failed: %v", err)
 	}
 }
 
@@ -297,32 +297,32 @@ func TestAdapterUniqueness(t *testing.T) {
 	apAdapter := NewApplicationProfileAdapter(ap)
 	spAdapter := NewSeccompProfileAdapter(sp)
 
-	err := signature.SignProfileWithKey(apAdapter)
+	err := signature.SignObjectWithKey(apAdapter)
 	if err != nil {
-		t.Fatalf("SignProfileWithKey failed for ApplicationProfile: %v", err)
+		t.Fatalf("SignObjectWithKey failed for ApplicationProfile: %v", err)
 	}
 
-	err = signature.SignProfileWithKey(spAdapter)
+	err = signature.SignObjectWithKey(spAdapter)
 	if err != nil {
-		t.Fatalf("SignProfileWithKey failed for SeccompProfile: %v", err)
+		t.Fatalf("SignObjectWithKey failed for SeccompProfile: %v", err)
 	}
 
-	apSig, err := signature.GetProfileSignature(apAdapter)
+	apSig, err := signature.GetObjectSignature(apAdapter)
 	if err != nil {
-		t.Fatalf("GetProfileSignature failed for ApplicationProfile: %v", err)
+		t.Fatalf("GetObjectSignature failed for ApplicationProfile: %v", err)
 	}
 
 	if apSig == nil {
-		t.Fatal("GetProfileSignature returned nil for ApplicationProfile")
+		t.Fatal("GetObjectSignature returned nil for ApplicationProfile")
 	}
 
-	spSig, err := signature.GetProfileSignature(spAdapter)
+	spSig, err := signature.GetObjectSignature(spAdapter)
 	if err != nil {
-		t.Fatalf("GetProfileSignature failed for SeccompProfile: %v", err)
+		t.Fatalf("GetObjectSignature failed for SeccompProfile: %v", err)
 	}
 
 	if spSig == nil {
-		t.Fatal("GetProfileSignature returned nil for SeccompProfile")
+		t.Fatal("GetObjectSignature returned nil for SeccompProfile")
 	}
 
 	if apSig.Issuer != "local" {

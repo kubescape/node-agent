@@ -58,6 +58,6 @@ func (s *SeccompProfileAdapter) GetContent() interface{} {
 	}
 }
 
-func (s *SeccompProfileAdapter) GetUpdatedProfile() interface{} {
+func (s *SeccompProfileAdapter) GetUpdatedObject() interface{} {
 	return s.profile
 }
