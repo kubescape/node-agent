@@ -52,3 +52,7 @@ func (a *ApplicationProfileAdapter) GetContent() interface{} {
 		Spec: a.profile.Spec,
 	}
 }
+
+func (a *ApplicationProfileAdapter) GetUpdatedProfile() interface{} {
+	return a.profile
+}

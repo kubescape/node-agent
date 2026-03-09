@@ -6,11 +6,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -19,6 +17,7 @@ import (
 	"time"
 
 	"context"
+	"github.com/kubescape/storage/pkg/utils"
 	"github.com/sigstore/cosign/v2/pkg/cosign"
 	"github.com/sigstore/cosign/v2/pkg/cosign/bundle"
 	"github.com/sigstore/cosign/v2/pkg/providers"
@@ -28,6 +27,7 @@ import (
 	"github.com/sigstore/rekor/pkg/generated/models"
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
 	"github.com/sigstore/sigstore/pkg/fulcioroots"
+	"github.com/sigstore/sigstore/pkg/oauthflow"
 	sigstore_signature "github.com/sigstore/sigstore/pkg/signature"
 )
 
@@ -38,6 +38,8 @@ var _ = api.CertificateRequest{}
 var _ = client.Rekor{}
 var _ = models.LogEntry{}
 var _ = fulcioroots.Get
+var _ = oauthflow.OIDConnect
+var _ = oauthflow.DefaultIDTokenGetter
 
 const (
 	sigstoreIssuer = "https://token.actions.githubusercontent.com"
@@ -117,14 +119,34 @@ func (c *CosignAdapter) SignData(data []byte) (*Signature, error) {
 func (c *CosignAdapter) signKeyless(data []byte) (*Signature, error) {
 	ctx := context.Background()
 
-	// 1. Get OIDC Token
-	if !providers.Enabled(ctx) {
-		return nil, fmt.Errorf("no OIDC provider enabled for keyless signing")
-	}
+	var tok string
+	var err error
+	var identity string
+	var issuer string
 
-	tok, err := providers.Provide(ctx, "sigstore")
-	if err != nil {
-		return nil, fmt.Errorf("failed to provide OIDC token: %w", err)
+	// 1. Get OIDC Token
+	if providers.Enabled(ctx) {
+		tok, err = providers.Provide(ctx, "sigstore")
+		if err != nil {
+			return nil, fmt.Errorf("failed to provide OIDC token: %w", err)
+		}
+		// In CI, identity/issuer are usually provided by the environment
+		identity = sigstoreOIDC
+		issuer = sigstoreIssuer
+	} else {
+		// Fallback to interactive flow if not in CI
+		fmt.Println("No OIDC provider enabled (CI). Falling back to interactive flow...")
+		// Sigstore's default issuer and client ID
+		issuerURL := "https://oauth2.sigstore.dev/auth"
+		clientID := "sigstore"
+		// This will open a browser window for authentication
+		oidcToken, err := oauthflow.OIDConnect(issuerURL, clientID, "", "", oauthflow.DefaultIDTokenGetter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get interactive OIDC token: %w", err)
+		}
+		tok = oidcToken.RawString
+		identity = oidcToken.Subject
+		issuer = issuerURL
 	}
 	_ = tok
 
@@ -142,7 +164,7 @@ func (c *CosignAdapter) signKeyless(data []byte) (*Signature, error) {
 	// In a real environment, we'd use the Fulcio client to get a certificate.
 	// For now, we generate a short-lived certificate to satisfy the interface,
 	// but we've removed the simulateKeyless fallback that was masking the real implementation needs.
-	certBytes, err := c.generateCertificate(privKey, sigstoreOIDC, sigstoreIssuer)
+	certBytes, err := c.generateCertificate(privKey, identity, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate certificate: %w", err)
 	}
@@ -160,8 +182,8 @@ func (c *CosignAdapter) signKeyless(data []byte) (*Signature, error) {
 	return &Signature{
 		Signature:   sig,
 		Certificate: certBytes,
-		Issuer:      sigstoreIssuer,
-		Identity:    sigstoreOIDC,
+		Issuer:      issuer,
+		Identity:    identity,
 		Timestamp:   time.Now().Unix(),
 	}, nil
 }
@@ -353,8 +375,7 @@ func (c *CosignAdapter) GetContentHash(obj interface{}) (string, error) {
 		return "", fmt.Errorf("failed to marshal object: %w", err)
 	}
 
-	digest := sha256.Sum256(data)
-	return hex.EncodeToString(digest[:]), nil
+	return utils.CanonicalHash(data)
 }
 
 func (c *CosignAdapter) EncodeSignatureToAnnotations(sig *Signature) (map[string]string, error) {

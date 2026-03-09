@@ -46,6 +46,10 @@ func (m *MockSignableProfile) GetContent() interface{} {
 	return m.content
 }
 
+func (m *MockSignableProfile) GetUpdatedProfile() interface{} {
+	return m.content
+}
+
 func TestSignProfileKeyless(t *testing.T) {
 	profileContent := map[string]interface{}{
 		"type": "test-profile",
