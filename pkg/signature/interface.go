@@ -19,6 +19,7 @@ type SignableProfile interface {
 	GetNamespace() string
 	GetName() string
 	GetContent() interface{}
+	GetUpdatedProfile() interface{}
 }
 
 type Signature struct {

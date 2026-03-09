@@ -1,7 +1,6 @@
 package signature
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/kubescape/go-logger"
@@ -35,11 +34,6 @@ func SignProfile(profile SignableProfile, opts ...SignOption) error {
 
 	content := profile.GetContent()
 
-	contentBytes, err := json.Marshal(content)
-	if err != nil {
-		return fmt.Errorf("failed to marshal profile content: %w", err)
-	}
-
 	hash, err := adapter.GetContentHash(content)
 	if err != nil {
 		return fmt.Errorf("failed to compute content hash: %w", err)
@@ -50,7 +44,7 @@ func SignProfile(profile SignableProfile, opts ...SignOption) error {
 		helpers.String("name", profile.GetName()),
 		helpers.String("contentHash", hash))
 
-	sig, err := adapter.SignData(contentBytes)
+	sig, err := adapter.SignData([]byte(hash))
 	if err != nil {
 		return fmt.Errorf("failed to sign profile: %w", err)
 	}

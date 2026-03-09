@@ -245,7 +245,7 @@ func runSign() error {
 	fmt.Printf("  Identity: %s\n", sig.Identity)
 	fmt.Printf("  Timestamp: %d\n", sig.Timestamp)
 
-	profileBytes, err := sigsyaml.Marshal(profileAdapter.GetContent())
+	profileBytes, err := sigsyaml.Marshal(profileAdapter.GetUpdatedProfile())
 	if err != nil {
 		return fmt.Errorf("failed to marshal signed profile: %w", err)
 	}

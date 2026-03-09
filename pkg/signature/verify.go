@@ -1,7 +1,6 @@
 package signature
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/kubescape/go-logger"
@@ -42,10 +41,9 @@ func VerifyProfile(profile SignableProfile, opts ...VerifyOption) error {
 	}
 
 	content := profile.GetContent()
-
-	contentBytes, err := json.Marshal(content)
+	hash, err := adapter.GetContentHash(content)
 	if err != nil {
-		return fmt.Errorf("failed to marshal profile content: %w", err)
+		return fmt.Errorf("failed to compute content hash: %w", err)
 	}
 
 	verifier, err := NewCosignVerifier(true)
@@ -55,9 +53,9 @@ func VerifyProfile(profile SignableProfile, opts ...VerifyOption) error {
 
 	var verifyErr error
 	if options.AllowUntrusted {
-		verifyErr = verifier.VerifyAllowUntrusted(contentBytes, sig)
+		verifyErr = verifier.VerifyAllowUntrusted([]byte(hash), sig)
 	} else {
-		verifyErr = verifier.Verify(contentBytes, sig)
+		verifyErr = verifier.Verify([]byte(hash), sig)
 	}
 
 	if verifyErr != nil {

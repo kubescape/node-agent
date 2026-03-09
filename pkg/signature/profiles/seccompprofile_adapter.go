@@ -52,3 +52,7 @@ func (s *SeccompProfileAdapter) GetContent() interface{} {
 		Spec: s.profile.Spec,
 	}
 }
+
+func (s *SeccompProfileAdapter) GetUpdatedProfile() interface{} {
+	return s.profile
+}
