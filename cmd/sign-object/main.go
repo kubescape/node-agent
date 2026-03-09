@@ -12,6 +12,7 @@ import (
 
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 
+	rulemanagertypesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/signature"
 	"github.com/kubescape/node-agent/pkg/signature/profiles"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -19,16 +20,16 @@ import (
 )
 
 var (
-	inputFile   string
-	outputFile  string
-	keyFile     string
-	profileType string
-	useKeyless  bool
-	verbose     bool
-	strict      bool
-	jsonOutput  bool
-	publicOnly  bool
-	command     string
+	inputFile  string
+	outputFile string
+	keyFile    string
+	objectType string
+	useKeyless bool
+	verbose    bool
+	strict     bool
+	jsonOutput bool
+	publicOnly bool
+	command    string
 )
 
 func main() {
@@ -49,17 +50,17 @@ func main() {
 	case "sign", "":
 		parseSignFlags()
 		if argsRewritten {
-			os.Args = append([]string{"sign-profile"}, os.Args[1:]...)
+			os.Args = append([]string{"sign-object"}, os.Args[1:]...)
 		}
 	case "verify":
 		parseVerifyFlags()
-		os.Args = append([]string{"sign-profile verify"}, os.Args[2:]...)
+		os.Args = append([]string{"sign-object verify"}, os.Args[2:]...)
 	case "generate-keypair":
 		parseGenerateFlags()
-		os.Args = append([]string{"sign-profile generate-keypair"}, os.Args[2:]...)
+		os.Args = append([]string{"sign-object generate-keypair"}, os.Args[2:]...)
 	case "extract-signature":
 		parseExtractFlags()
-		os.Args = append([]string{"sign-profile extract-signature"}, os.Args[2:]...)
+		os.Args = append([]string{"sign-object extract-signature"}, os.Args[2:]...)
 	case "help", "--help", "-h":
 		printUsage()
 		os.Exit(0)
@@ -76,11 +77,11 @@ func main() {
 }
 
 func parseSignFlags() {
-	fs := flag.NewFlagSet("sign-profile sign", flag.ExitOnError)
-	fs.StringVar(&inputFile, "file", "", "Input profile YAML file (required)")
-	fs.StringVar(&outputFile, "output", "", "Output file for signed profile (required)")
+	fs := flag.NewFlagSet("sign-object sign", flag.ExitOnError)
+	fs.StringVar(&inputFile, "file", "", "Input object YAML file (required)")
+	fs.StringVar(&outputFile, "output", "", "Output file for signed object (required)")
 	fs.StringVar(&keyFile, "key", "", "Path to private key file")
-	fs.StringVar(&profileType, "type", "auto", "Profile type: applicationprofile, seccompprofile, or auto")
+	fs.StringVar(&objectType, "type", "auto", "Object type: applicationprofile, seccompprofile, rules, or auto")
 	fs.BoolVar(&useKeyless, "keyless", false, "Use keyless signing (OIDC)")
 	fs.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 
@@ -114,9 +115,9 @@ func parseSignFlags() {
 }
 
 func parseVerifyFlags() {
-	fs := flag.NewFlagSet("sign-profile verify", flag.ExitOnError)
-	fs.StringVar(&inputFile, "file", "", "Signed profile YAML file (required)")
-	fs.StringVar(&profileType, "type", "auto", "Profile type: applicationprofile, seccompprofile, or auto")
+	fs := flag.NewFlagSet("sign-object verify", flag.ExitOnError)
+	fs.StringVar(&inputFile, "file", "", "Signed object YAML file (required)")
+	fs.StringVar(&objectType, "type", "auto", "Object type: applicationprofile, seccompprofile, rules, or auto")
 	fs.BoolVar(&strict, "strict", true, "Require trusted issuer/identity")
 	fs.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 
@@ -133,7 +134,7 @@ func parseVerifyFlags() {
 }
 
 func parseGenerateFlags() {
-	fs := flag.NewFlagSet("sign-profile generate-keypair", flag.ExitOnError)
+	fs := flag.NewFlagSet("sign-object generate-keypair", flag.ExitOnError)
 	fs.StringVar(&outputFile, "output", "", "Output PEM file")
 	fs.BoolVar(&publicOnly, "public-only", false, "Only output public key")
 
@@ -150,9 +151,9 @@ func parseGenerateFlags() {
 }
 
 func parseExtractFlags() {
-	fs := flag.NewFlagSet("sign-profile extract-signature", flag.ExitOnError)
-	fs.StringVar(&inputFile, "file", "", "Signed profile YAML file (required)")
-	fs.StringVar(&profileType, "type", "auto", "Profile type: applicationprofile, seccompprofile, or auto")
+	fs := flag.NewFlagSet("sign-object extract-signature", flag.ExitOnError)
+	fs.StringVar(&inputFile, "file", "", "Signed object YAML file (required)")
+	fs.StringVar(&objectType, "type", "auto", "Object type: applicationprofile, seccompprofile, rules, or auto")
 	fs.BoolVar(&jsonOutput, "json", false, "Output as JSON")
 
 	if err := fs.Parse(os.Args[2:]); err != nil {
@@ -193,13 +194,13 @@ func runSign() error {
 		fmt.Printf("Profile size: %d bytes\n", len(data))
 	}
 
-	profileAdapter, err := detectType(profileType, data)
+	profileAdapter, err := detectObjectType(objectType, data)
 	if err != nil {
 		return fmt.Errorf("failed to detect profile type: %w", err)
 	}
 
 	if verbose {
-		fmt.Printf("Detected profile type: %s\n", getProfileName(profileAdapter))
+		fmt.Printf("Detected object type: %s\n", getObjectName(profileAdapter))
 	}
 
 	var signErr error
@@ -207,7 +208,7 @@ func runSign() error {
 		if verbose {
 			fmt.Println("Using keyless signing (OIDC)")
 		}
-		signErr = signature.SignProfileKeyless(profileAdapter)
+		signErr = signature.SignObjectKeyless(profileAdapter)
 	} else {
 		if verbose {
 			fmt.Printf("Using local key from: %s\n", keyFile)
@@ -228,14 +229,14 @@ func runSign() error {
 			return fmt.Errorf("failed to parse EC private key: %w", err)
 		}
 
-		signErr = signature.SignProfile(profileAdapter, signature.WithPrivateKey(privateKey))
+		signErr = signature.SignObject(profileAdapter, signature.WithPrivateKey(privateKey))
 	}
 
 	if signErr != nil {
 		return fmt.Errorf("failed to sign profile: %w", signErr)
 	}
 
-	sig, err := signature.GetProfileSignature(profileAdapter)
+	sig, err := signature.GetObjectSignature(profileAdapter)
 	if err != nil {
 		return fmt.Errorf("failed to get signature: %w", err)
 	}
@@ -245,9 +246,9 @@ func runSign() error {
 	fmt.Printf("  Identity: %s\n", sig.Identity)
 	fmt.Printf("  Timestamp: %d\n", sig.Timestamp)
 
-	profileBytes, err := sigsyaml.Marshal(profileAdapter.GetUpdatedProfile())
+	profileBytes, err := sigsyaml.Marshal(profileAdapter.GetUpdatedObject())
 	if err != nil {
-		return fmt.Errorf("failed to marshal signed profile: %w", err)
+		return fmt.Errorf("failed to marshal signed object: %w", err)
 	}
 
 	if err := os.WriteFile(outputFile, profileBytes, 0644); err != nil {
@@ -268,12 +269,12 @@ func runVerify() error {
 		fmt.Printf("Reading profile from: %s\n", inputFile)
 	}
 
-	profileAdapter, err := detectType(profileType, data)
+	profileAdapter, err := detectObjectType(objectType, data)
 	if err != nil {
 		return fmt.Errorf("failed to detect profile type: %w", err)
 	}
 
-	sig, err := signature.GetProfileSignature(profileAdapter)
+	sig, err := signature.GetObjectSignature(profileAdapter)
 	if err != nil {
 		return fmt.Errorf("profile is not signed: %w", err)
 	}
@@ -288,12 +289,12 @@ func runVerify() error {
 		if verbose {
 			fmt.Println("Verifying with strict mode (keyless signatures must have issuer/identity)")
 		}
-		verifyErr = signature.VerifyProfileStrict(profileAdapter)
+		verifyErr = signature.VerifyObjectStrict(profileAdapter)
 	} else {
 		if verbose {
 			fmt.Println("Verifying in non-strict mode (allowing untrusted signatures)")
 		}
-		verifyErr = signature.VerifyProfileAllowUntrusted(profileAdapter)
+		verifyErr = signature.VerifyObjectAllowUntrusted(profileAdapter)
 	}
 
 	if verifyErr != nil {
@@ -349,12 +350,12 @@ func runExtractSignature() error {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
-	profileAdapter, err := detectType(profileType, data)
+	profileAdapter, err := detectObjectType(objectType, data)
 	if err != nil {
 		return fmt.Errorf("failed to detect profile type: %w", err)
 	}
 
-	sig, err := signature.GetProfileSignature(profileAdapter)
+	sig, err := signature.GetObjectSignature(profileAdapter)
 	if err != nil {
 		return fmt.Errorf("profile is not signed: %w", err)
 	}
@@ -392,7 +393,7 @@ func runExtractSignature() error {
 	return nil
 }
 
-func detectType(profileType string, data []byte) (signature.SignableProfile, error) {
+func detectObjectType(objectType string, data []byte) (signature.SignableObject, error) {
 	var decoded map[string]interface{}
 	if err := k8syaml.Unmarshal(data, &decoded); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
@@ -405,14 +406,16 @@ func detectType(profileType string, data []byte) (signature.SignableProfile, err
 		fmt.Printf("Detected API: %s, Kind: %s\n", apiVersion, kind)
 	}
 
-	if profileType != "auto" {
-		switch strings.ToLower(profileType) {
+	if objectType != "auto" {
+		switch strings.ToLower(objectType) {
 		case "applicationprofile", "application-profile", "ap":
 			return loadApplicationProfile(data)
 		case "seccompprofile", "seccomp-profile", "sp":
 			return loadSeccompProfile(data)
+		case "rules", "rule", "r":
+			return loadRules(data)
 		default:
-			return nil, fmt.Errorf("unknown profile type: %s", profileType)
+			return nil, fmt.Errorf("unknown object type: %s", objectType)
 		}
 	}
 
@@ -425,10 +428,14 @@ func detectType(profileType string, data []byte) (signature.SignableProfile, err
 		}
 	}
 
-	return nil, fmt.Errorf("unable to auto-detect profile type")
+	if strings.Contains(strings.ToLower(apiVersion), "kubescape.io") && strings.ToLower(kind) == "rules" {
+		return loadRules(data)
+	}
+
+	return nil, fmt.Errorf("unable to auto-detect object type")
 }
 
-func loadApplicationProfile(data []byte) (signature.SignableProfile, error) {
+func loadApplicationProfile(data []byte) (signature.SignableObject, error) {
 	var profile v1beta1.ApplicationProfile
 	if err := k8syaml.Unmarshal(data, &profile); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal ApplicationProfile: %w", err)
@@ -436,7 +443,7 @@ func loadApplicationProfile(data []byte) (signature.SignableProfile, error) {
 	return profiles.NewApplicationProfileAdapter(&profile), nil
 }
 
-func loadSeccompProfile(data []byte) (signature.SignableProfile, error) {
+func loadSeccompProfile(data []byte) (signature.SignableObject, error) {
 	var profile v1beta1.SeccompProfile
 	if err := k8syaml.Unmarshal(data, &profile); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal SeccompProfile: %w", err)
@@ -444,40 +451,51 @@ func loadSeccompProfile(data []byte) (signature.SignableProfile, error) {
 	return profiles.NewSeccompProfileAdapter(&profile), nil
 }
 
-func getProfileName(profile signature.SignableProfile) string {
+func loadRules(data []byte) (signature.SignableObject, error) {
+	var rules rulemanagertypesv1.Rules
+	if err := k8syaml.Unmarshal(data, &rules); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Rules: %w", err)
+	}
+	return profiles.NewRulesAdapter(&rules), nil
+}
+
+func getObjectName(profile signature.SignableObject) string {
 	if _, ok := profile.(*profiles.ApplicationProfileAdapter); ok {
 		return "ApplicationProfile"
 	}
 	if _, ok := profile.(*profiles.SeccompProfileAdapter); ok {
 		return "SeccompProfile"
 	}
+	if _, ok := profile.(*profiles.RulesAdapter); ok {
+		return "Rules"
+	}
 	return "Unknown"
 }
 
 func printUsage() {
-	fmt.Println(`sign-profile - Sign and verify Kubernetes security profiles
+	fmt.Println(`sign-object - Sign and verify Kubernetes security objects
 
 USAGE:
-    sign-profile <command> [flags]
+    sign-object <command> [flags]
 
 COMMANDS:
     sign              Sign a profile (default command)
-    verify            Verify a signed profile
+    verify            Verify a signed object
     generate-keypair  Generate a new ECDSA key pair
     extract-signature Extract signature info from a profile
     help              Show this help message
 
 SIGN FLAGS:
-    --file <path>           Input profile YAML file (required)
-    --output <path>         Output file for signed profile (required)
+    --file <path>           Input object YAML file (required)
+    --output <path>         Output file for signed object (required)
     --keyless               Use keyless signing (OIDC)
     --key <path>            Path to private key file
-    --type <type>           Profile type: applicationprofile, seccompprofile, or auto (default: auto)
+    --type <type>           Object type: applicationprofile, seccompprofile, rules, or auto (default: auto)
     --verbose               Enable verbose logging
 
 VERIFY FLAGS:
-    --file <path>                 Signed profile YAML file (required)
-    --type <type>                 Profile type: applicationprofile, seccompprofile, or auto (default: auto)
+    --file <path>                 Signed object YAML file (required)
+    --type <type>                 Object type: applicationprofile, seccompprofile, rules, or auto (default: auto)
     --strict                      Require trusted issuer/identity (default: true)
     --verbose                     Enable verbose logging
 
@@ -486,28 +504,28 @@ GENERATE-KEYPAIR FLAGS:
     --public-only           Only output public key (no private key)
 
 EXTRACT-SIGNATURE FLAGS:
-    --file <path>                 Signed profile YAML file (required)
-    --type <type>                 Profile type: applicationprofile, seccompprofile, or auto (default: auto)
+    --file <path>                 Signed object YAML file (required)
+    --type <type>                 Object type: applicationprofile, seccompprofile, rules, or auto (default: auto)
     --json                        Output as JSON
 
 EXAMPLES:
     # Sign with keyless (OIDC)
-    sign-profile --keyless --file profile.yaml --output signed-profile.yaml
+    sign-object --keyless --file object.yaml --output signed-object.yaml
 
     # Sign with local key
-    sign-profile --key my-key.pem --file profile.yaml --output signed-profile.yaml
+    sign-object --key my-key.pem --file object.yaml --output signed-object.yaml
 
-    # Verify a signed profile
-    sign-profile verify --file signed-profile.yaml
+    # Verify a signed object
+    sign-object verify --file signed-object.yaml
 
     # Generate a key pair (writes my-key.pem and my-key.pem.pub)
-    sign-profile generate-keypair --output my-key.pem
+    sign-object generate-keypair --output my-key.pem
 
     # Generate only public key
-    sign-profile generate-keypair --output my-key.pem --public-only
+    sign-object generate-keypair --output my-key.pem --public-only
 
     # Extract signature information
-    sign-profile extract-signature --file signed-profile.yaml
+    sign-object extract-signature --file signed-object.yaml
 
 For more information, see: docs/signing/README.md`)
 }

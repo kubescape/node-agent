@@ -7,9 +7,9 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
-func VerifyProfile(profile SignableProfile, opts ...VerifyOption) error {
-	if profile == nil {
-		return fmt.Errorf("profile is nil")
+func VerifyObject(obj SignableObject, opts ...VerifyOption) error {
+	if obj == nil {
+		return fmt.Errorf("object is nil")
 	}
 	options := &VerifyOptions{
 		AllowUntrusted: false,
@@ -19,17 +19,17 @@ func VerifyProfile(profile SignableProfile, opts ...VerifyOption) error {
 		opt(options)
 	}
 
-	annotations := profile.GetAnnotations()
+	annotations := obj.GetAnnotations()
 	if annotations == nil {
-		return fmt.Errorf("profile has no annotations")
+		return fmt.Errorf("object has no annotations")
 	}
 
 	if _, ok := annotations[AnnotationSignature]; !ok {
-		return fmt.Errorf("profile is not signed (missing %s annotation)", AnnotationSignature)
+		return fmt.Errorf("object is not signed (missing %s annotation)", AnnotationSignature)
 	}
 
 	// useKeyless=true is fine for verification since we use the certificate
-	// stored in the profile annotations, regardless of how the profile was signed
+	// stored in the object annotations, regardless of how the object was signed
 	adapter, err := NewCosignAdapter(true)
 	if err != nil {
 		return fmt.Errorf("failed to create cosign adapter: %w", err)
@@ -40,7 +40,7 @@ func VerifyProfile(profile SignableProfile, opts ...VerifyOption) error {
 		return fmt.Errorf("failed to decode signature from annotations: %w", err)
 	}
 
-	content := profile.GetContent()
+	content := obj.GetContent()
 	hash, err := adapter.GetContentHash(content)
 	if err != nil {
 		return fmt.Errorf("failed to compute content hash: %w", err)
@@ -59,27 +59,27 @@ func VerifyProfile(profile SignableProfile, opts ...VerifyOption) error {
 	}
 
 	if verifyErr != nil {
-		logger.L().Warning("Profile signature verification failed",
-			helpers.String("namespace", profile.GetNamespace()),
-			helpers.String("name", profile.GetName()),
+		logger.L().Warning("Object signature verification failed",
+			helpers.String("namespace", obj.GetNamespace()),
+			helpers.String("name", obj.GetName()),
 			helpers.String("error", verifyErr.Error()))
 
 		return fmt.Errorf("signature verification failed: %w", verifyErr)
 	}
 
-	logger.L().Info("Successfully verified profile signature",
-		helpers.String("namespace", profile.GetNamespace()),
-		helpers.String("name", profile.GetName()),
+	logger.L().Info("Successfully verified object signature",
+		helpers.String("namespace", obj.GetNamespace()),
+		helpers.String("name", obj.GetName()),
 		helpers.String("identity", sig.Identity),
 		helpers.String("issuer", sig.Issuer))
 
 	return nil
 }
 
-func VerifyProfileStrict(profile SignableProfile) error {
-	return VerifyProfile(profile, WithUntrusted(false))
+func VerifyObjectStrict(obj SignableObject) error {
+	return VerifyObject(obj, WithUntrusted(false))
 }
 
-func VerifyProfileAllowUntrusted(profile SignableProfile) error {
-	return VerifyProfile(profile, WithUntrusted(true))
+func VerifyObjectAllowUntrusted(obj SignableObject) error {
+	return VerifyObject(obj, WithUntrusted(true))
 }

@@ -66,7 +66,7 @@ type Config struct {
 	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
 	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
-	EnableProfileVerification      bool                                 `mapstructure:"enableProfileVerification"`
+	EnableSignatureVerification    bool                                 `mapstructure:"enableSignatureVerification"`
 	HostMonitoringEnabled          bool                                 `mapstructure:"hostMonitoringEnabled"`
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
@@ -181,7 +181,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("celConfigCache::maxSize", 100000)
 	viper.SetDefault("celConfigCache::ttl", 1*time.Minute)
 	viper.SetDefault("ignoreRuleBindings", false)
-	viper.SetDefault("enableProfileVerification", false)
+	viper.SetDefault("enableSignatureVerification", false)
 
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
@@ -214,7 +214,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("hostSensorInterval", 5*time.Minute)
 
 	viper.AutomaticEnv()
-	_ = viper.BindEnv("enableProfileVerification", "ENABLE_PROFILE_VERIFICATION")
+	_ = viper.BindEnv("enableSignatureVerification", "ENABLE_SIGNATURE_VERIFICATION")
 
 	err := viper.ReadInConfig()
 	if err != nil {

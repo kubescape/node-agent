@@ -7,7 +7,7 @@ The node-agent supports cryptographic signing of Kubernetes profiles to ensure t
 Signed profiles can be:
 - **ApplicationProfiles** - defining allowed application behavior
 - **SeccompProfiles** - defining allowed syscalls
-- Any future profile types that implement the `SignableProfile` interface
+- Any future profile types that implement the `SignableObject` interface
 
 ## Why Sign Profiles?
 
@@ -22,12 +22,12 @@ The ApplicationProfileCache can automatically verify signatures when loading pro
 
 ### Enabling Verification
 
-Set the `enableProfileVerification` configuration flag:
+Set the `enableSignatureVerification` configuration flag:
 
 ```yaml
 # config.json
 {
-  "enableProfileVerification": true
+  "enableSignatureVerification": true
 }
 ```
 
@@ -70,7 +70,7 @@ To ensure the signature remains valid regardless of minor YAML formatting differ
 graph TB
     subgraph "Signing Flow"
         A[Profile Resource] --> B[Adapter]
-        B --> C[SignableProfile Interface]
+        B --> C[SignableObject Interface]
         C --> D[GetContent: Sanitized JSON]
         D --> E{Signing Mode}
         E -->|Keyless| F[Sigstore: OIDC + Fulcio + Rekor]
@@ -79,8 +79,8 @@ graph TB
         G --> H[Signature + Public Key]
         H --> I[Base64 Encode]
         I --> J[Profile Annotations]
-        J --> K[GetUpdatedProfile: Live Resource]
-        K --> L[Signed Profile YAML]
+        J --> K[GetUpdatedObject: Live Resource]
+        K --> L[Signed Object YAML]
     end
 
     subgraph "Verification Flow"
@@ -447,7 +447,7 @@ sequenceDiagram
 ## Best Practices
 
 1. **Enable Verification in Production**
-    - Set `enableProfileVerification: true` in node-agent config
+    - Set `enableSignatureVerification: true` in node-agent config
     - Profiles failing verification are skipped with warnings
     - Doesn't crash the agent - maintains availability
 
@@ -529,7 +529,7 @@ The webhook would:
 
 ## Key Files
 
-| `pkg/signature/interface.go` | SignableProfile interface and Signature struct |
+| `pkg/signature/interface.go` | SignableObject interface and Signature struct |
 | `pkg/signature/cosign_adapter.go` | Sigstore/Cosign signing and verification |
 | `pkg/signature/sign.go` | Public signing API and annotation encoding |
 | `pkg/signature/verify.go` | Public verification API and cache integration |

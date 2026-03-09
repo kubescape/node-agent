@@ -147,12 +147,12 @@ func unstructuredToRules(obj *unstructured.Unstructured) (*typesv1.Rules, error)
 }
 
 func (w *RulesWatcherImpl) verifyRules(rules *typesv1.Rules) error {
-	if !w.cfg.EnableProfileVerification {
+	if !w.cfg.EnableSignatureVerification {
 		return nil
 	}
 	rulesAdapter := profiles.NewRulesAdapter(rules)
-	if err := signature.VerifyProfile(rulesAdapter); err != nil {
-		isMissingSig := err.Error() == fmt.Sprintf("profile is not signed (missing %s annotation)", signature.AnnotationSignature)
+	if err := signature.VerifyObject(rulesAdapter); err != nil {
+		isMissingSig := err.Error() == fmt.Sprintf("object is not signed (missing %s annotation)", signature.AnnotationSignature)
 		if isMissingSig {
 			logger.L().Debug("Rules resource is not signed, skipping",
 				helpers.String("name", rules.Name),

@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-type MockSignableProfile struct {
+type MockSignableObject struct {
 	annotations map[string]string
 	uid         string
 	namespace   string
@@ -12,8 +12,8 @@ type MockSignableProfile struct {
 	content     interface{}
 }
 
-func NewMockSignableProfile(uid, namespace, name string, content interface{}) *MockSignableProfile {
-	return &MockSignableProfile{
+func NewMockSignableObject(uid, namespace, name string, content interface{}) *MockSignableObject {
+	return &MockSignableObject{
 		annotations: make(map[string]string),
 		uid:         uid,
 		namespace:   namespace,
@@ -22,54 +22,54 @@ func NewMockSignableProfile(uid, namespace, name string, content interface{}) *M
 	}
 }
 
-func (m *MockSignableProfile) GetAnnotations() map[string]string {
+func (m *MockSignableObject) GetAnnotations() map[string]string {
 	return m.annotations
 }
 
-func (m *MockSignableProfile) SetAnnotations(annotations map[string]string) {
+func (m *MockSignableObject) SetAnnotations(annotations map[string]string) {
 	m.annotations = annotations
 }
 
-func (m *MockSignableProfile) GetUID() string {
+func (m *MockSignableObject) GetUID() string {
 	return m.uid
 }
 
-func (m *MockSignableProfile) GetNamespace() string {
+func (m *MockSignableObject) GetNamespace() string {
 	return m.namespace
 }
 
-func (m *MockSignableProfile) GetName() string {
+func (m *MockSignableObject) GetName() string {
 	return m.name
 }
 
-func (m *MockSignableProfile) GetContent() interface{} {
+func (m *MockSignableObject) GetContent() interface{} {
 	return m.content
 }
 
-func (m *MockSignableProfile) GetUpdatedProfile() interface{} {
+func (m *MockSignableObject) GetUpdatedObject() interface{} {
 	return m.content
 }
 
-func TestSignProfileKeyless(t *testing.T) {
+func TestSignObjectKeyless(t *testing.T) {
 	profileContent := map[string]interface{}{
 		"type": "test-profile",
 		"data": "test-data",
 	}
 
-	profile := NewMockSignableProfile("test-uid", "test-ns", "test-profile", profileContent)
+	profile := NewMockSignableObject("test-uid", "test-ns", "test-profile", profileContent)
 
-	err := SignProfileKeyless(profile)
+	err := SignObjectKeyless(profile)
 	if err != nil {
-		t.Fatalf("SignProfileKeyless failed: %v", err)
+		t.Fatalf("SignObjectKeyless failed: %v", err)
 	}
 
 	if !IsSigned(profile) {
 		t.Error("Profile should be signed")
 	}
 
-	sig, err := GetProfileSignature(profile)
+	sig, err := GetObjectSignature(profile)
 	if err != nil {
-		t.Fatalf("GetProfileSignature failed: %v", err)
+		t.Fatalf("GetObjectSignature failed: %v", err)
 	}
 
 	if len(sig.Signature) == 0 {
@@ -89,26 +89,26 @@ func TestSignProfileKeyless(t *testing.T) {
 	}
 }
 
-func TestSignProfileWithKey(t *testing.T) {
+func TestSignObjectWithKey(t *testing.T) {
 	profileContent := map[string]interface{}{
 		"type": "test-profile",
 		"data": "test-data",
 	}
 
-	profile := NewMockSignableProfile("test-uid", "test-ns", "test-profile-key", profileContent)
+	profile := NewMockSignableObject("test-uid", "test-ns", "test-profile-key", profileContent)
 
-	err := SignProfileWithKey(profile)
+	err := SignObjectWithKey(profile)
 	if err != nil {
-		t.Fatalf("SignProfileWithKey failed: %v", err)
+		t.Fatalf("SignObjectWithKey failed: %v", err)
 	}
 
 	if !IsSigned(profile) {
 		t.Error("Profile should be signed")
 	}
 
-	sig, err := GetProfileSignature(profile)
+	sig, err := GetObjectSignature(profile)
 	if err != nil {
-		t.Fatalf("GetProfileSignature failed: %v", err)
+		t.Fatalf("GetObjectSignature failed: %v", err)
 	}
 
 	if len(sig.Signature) == 0 {
@@ -127,23 +127,23 @@ func TestSignProfileWithKey(t *testing.T) {
 func TestIsSigned(t *testing.T) {
 	tests := []struct {
 		name     string
-		profile  *MockSignableProfile
+		profile  *MockSignableObject
 		expected bool
 	}{
 		{
 			name:     "Unsigned profile",
-			profile:  NewMockSignableProfile("uid", "ns", "name", map[string]string{}),
+			profile:  NewMockSignableObject("uid", "ns", "name", map[string]string{}),
 			expected: false,
 		},
 		{
 			name:     "Profile with empty annotations",
-			profile:  &MockSignableProfile{annotations: make(map[string]string)},
+			profile:  &MockSignableObject{annotations: make(map[string]string)},
 			expected: false,
 		},
 		{
 			name: "Profile with signature annotation",
-			profile: func() *MockSignableProfile {
-				p := NewMockSignableProfile("uid", "ns", "name", map[string]string{})
+			profile: func() *MockSignableObject {
+				p := NewMockSignableObject("uid", "ns", "name", map[string]string{})
 				p.SetAnnotations(map[string]string{
 					AnnotationSignature: "test-sig",
 				})
@@ -163,25 +163,25 @@ func TestIsSigned(t *testing.T) {
 	}
 }
 
-func TestGetProfileSignature(t *testing.T) {
+func TestGetObjectSignature(t *testing.T) {
 	tests := []struct {
 		name             string
-		profile          *MockSignableProfile
+		profile          *MockSignableObject
 		wantErr          bool
 		setupSign        bool
-		setupAnnotations func(*MockSignableProfile)
+		setupAnnotations func(*MockSignableObject)
 	}{
 		{
 			name:      "Nil annotations",
-			profile:   &MockSignableProfile{uid: "uid", namespace: "ns", name: "name", content: map[string]string{}, annotations: nil},
+			profile:   &MockSignableObject{uid: "uid", namespace: "ns", name: "name", content: map[string]string{}, annotations: nil},
 			wantErr:   true,
 			setupSign: false,
 		},
 		{
 			name:    "Missing signature annotation",
-			profile: NewMockSignableProfile("uid", "ns", "name", map[string]string{}),
+			profile: NewMockSignableObject("uid", "ns", "name", map[string]string{}),
 			wantErr: true,
-			setupAnnotations: func(p *MockSignableProfile) {
+			setupAnnotations: func(p *MockSignableObject) {
 				p.SetAnnotations(map[string]string{
 					AnnotationIssuer: "test-issuer",
 				})
@@ -189,7 +189,7 @@ func TestGetProfileSignature(t *testing.T) {
 		},
 		{
 			name:      "Complete signature",
-			profile:   NewMockSignableProfile("uid", "ns", "name", map[string]string{}),
+			profile:   NewMockSignableObject("uid", "ns", "name", map[string]string{}),
 			wantErr:   false,
 			setupSign: true,
 		},
@@ -198,12 +198,12 @@ func TestGetProfileSignature(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.setupSign {
-				SignProfileKeyless(tt.profile)
+				SignObjectKeyless(tt.profile)
 			} else if tt.setupAnnotations != nil {
 				tt.setupAnnotations(tt.profile)
 			}
 
-			sig, err := GetProfileSignature(tt.profile)
+			sig, err := GetObjectSignature(tt.profile)
 
 			if tt.wantErr {
 				if err == nil {
@@ -213,7 +213,7 @@ func TestGetProfileSignature(t *testing.T) {
 			}
 
 			if err != nil {
-				t.Fatalf("GetProfileSignature failed: %v", err)
+				t.Fatalf("GetObjectSignature failed: %v", err)
 			}
 
 			if sig == nil {

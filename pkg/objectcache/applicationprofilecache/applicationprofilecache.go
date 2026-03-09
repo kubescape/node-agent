@@ -277,13 +277,13 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 // Returns error if verification fails, nil otherwise (including when verification is disabled).
 // Also updates profileState with error details if verification fails.
 func (apc *ApplicationProfileCacheImpl) verifyApplicationProfile(profile *v1beta1.ApplicationProfile, workloadID, context string) error {
-	if !apc.cfg.EnableProfileVerification {
+	if !apc.cfg.EnableSignatureVerification {
 		return nil
 	}
 	profileAdapter := profiles.NewApplicationProfileAdapter(profile)
-	if err := signature.VerifyProfile(profileAdapter); err != nil {
+	if err := signature.VerifyObject(profileAdapter); err != nil {
 		// Only warn if signature exists but doesn't match; missing signatures are debug
-		isMissingSig := err.Error() == fmt.Sprintf("profile is not signed (missing %s annotation)", signature.AnnotationSignature)
+		isMissingSig := err.Error() == fmt.Sprintf("object is not signed (missing %s annotation)", signature.AnnotationSignature)
 		if isMissingSig {
 			logger.L().Debug(context+" profile is not signed, skipping",
 				helpers.String("profile", profile.Name),

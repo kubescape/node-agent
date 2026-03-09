@@ -12,14 +12,14 @@ type Verifier interface {
 	Verify(data []byte, sig *Signature) error
 }
 
-type SignableProfile interface {
+type SignableObject interface {
 	GetAnnotations() map[string]string
 	SetAnnotations(annotations map[string]string)
 	GetUID() string
 	GetNamespace() string
 	GetName() string
 	GetContent() interface{}
-	GetUpdatedProfile() interface{}
+	GetUpdatedObject() interface{}
 }
 
 type Signature struct {
