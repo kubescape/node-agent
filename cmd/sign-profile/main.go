@@ -81,7 +81,7 @@ func parseSignFlags() {
 	fs.StringVar(&outputFile, "output", "", "Output file for signed profile (required)")
 	fs.StringVar(&keyFile, "key", "", "Path to private key file")
 	fs.StringVar(&profileType, "type", "auto", "Profile type: applicationprofile, seccompprofile, or auto")
-	fs.BoolVar(&useKeyless, "keyless", true, "Use keyless signing (OIDC)")
+	fs.BoolVar(&useKeyless, "keyless", false, "Use keyless signing (OIDC)")
 	fs.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 
 	offset := 2

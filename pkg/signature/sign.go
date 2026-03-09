@@ -23,7 +23,7 @@ func SignProfile(profile SignableProfile, opts ...SignOption) error {
 	var err error
 
 	if options.PrivateKey != nil {
-		adapter, err = NewCosignAdapterWithPrivateKey(options.UseKeyless, options.PrivateKey)
+		adapter, err = NewCosignAdapterWithPrivateKey(false, options.PrivateKey)
 	} else {
 		adapter, err = NewCosignAdapter(options.UseKeyless)
 	}
