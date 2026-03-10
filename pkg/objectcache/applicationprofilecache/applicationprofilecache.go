@@ -285,7 +285,7 @@ func (apc *ApplicationProfileCacheImpl) verifyApplicationProfile(profile *v1beta
 		// Only warn if signature exists but doesn't match; missing signatures are debug
 		isMissingSig := err.Error() == fmt.Sprintf("object is not signed (missing %s annotation)", signature.AnnotationSignature)
 		if isMissingSig {
-			logger.L().Debug(context+" profile is not signed, skipping",
+			logger.L().Debug(context+" is not signed, skipping",
 				helpers.String("profile", profile.Name),
 				helpers.String("namespace", profile.Namespace),
 				helpers.String("workloadID", workloadID))
