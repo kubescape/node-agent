@@ -114,80 +114,149 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "nginx", []string{"ebpf.io."}, []string{})
 }
 
+// Test_02_AllAlertsFromMaliciousApp deploys a malicious workload and verifies that
+// every enabled detection rule fires correctly.
+//
+// Hypothesis: A single malicious app that performs all known attack patterns should
+// trigger every enabled runtime detection rule. Each hypothesis below documents
+// exactly which action in the malicious app triggers which rule, and what
+// fail_on_profile value to expect based on the rule's profile tag.
+//
+// fail_on_profile is determined by the rule's tags (see ruleadapters/creator.go):
+//   - tag "applicationprofile" → fail_on_profile = (app profile status == Completed)
+//   - tag "networkprofile"     → fail_on_profile = (network neighborhood status == Completed)
+//   - no profile tag           → fail_on_profile = false
 func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
-	// Create a random namespace
 	ns := testutils.NewRandomNamespace()
 
-	// Create a workload
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/malicious-job.yaml"))
-	require.NoError(t, err, "Error creating workload")
+	require.NoError(t, err)
+	require.NoError(t, wl.WaitForReady(80))
+	require.NoError(t, wl.WaitForApplicationProfileCompletion(150))
 
-	// Wait for the workload to be ready
-	err = wl.WaitForReady(80)
-	require.NoError(t, err, "Error waiting for workload to be ready")
-
-	// Wait for the application profile to be created and completed
-	err = wl.WaitForApplicationProfileCompletion(150)
-	require.NoError(t, err, "Error waiting for application profile to be completed")
-
-	// Wait for the alerts to be generated
+	// The malicious app starts after WAIT_BEFORE_START=3m (after the 2m learning
+	// period). Wait for all attacks to execute and alerts to propagate.
 	time.Sleep(2 * time.Minute)
 
-	// Get all the alerts for the namespace
 	alerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Error getting alerts")
+	require.NoError(t, err)
 
-	// Validate that all alerts are signaled
-	expectedAlerts := map[string]bool{
-		"Unexpected process launched":               false,
-		"Files Access Anomalies in container":       false,
-		"Syscalls Anomalies in container":           false,
-		"Linux Capabilities Anomalies in container": false,
-		"Workload uses Kubernetes API unexpectedly": false,
-		"Process executed from malicious source":    false,
-		"Process tries to load a kernel module":     false,
-		"Drifted process executed":                  false,
-		"Process executed from mount":               false,
-		"Unexpected service account token access":   false,
-		"DNS Anomalies in container":                false,
-		"Crypto Mining Related Port Communication":  false,
-		"Crypto Mining Domain Communication":        false,
+	// Log all received alerts for debugging.
+	t.Logf("Received %d alerts in namespace %s:", len(alerts), wl.Namespace)
+	for i, a := range alerts {
+		t.Logf("  [%d] rule=%s container=%s comm=%s fail_on_profile=%s",
+			i, a.Labels["rule_name"], a.Labels["container_name"],
+			a.Labels["comm"], a.Labels["fail_on_profile"])
 	}
 
-	expectedFailOnProfile := map[string][]bool{
-		"Unexpected process launched":               {true},
-		"Files Access Anomalies in container":       {true},
-		"Syscalls Anomalies in container":           {true},
-		"Linux Capabilities Anomalies in container": {true},
-		"Workload uses Kubernetes API unexpectedly": {true},
-		"Process executed from malicious source":    {false},
-		"Process tries to load a kernel module":     {false},
-		"Drifted process executed":                  {true},
-		"Process executed from mount":               {true},
-		"Unexpected service account token access":   {true},
-		"DNS Anomalies in container":                {true},
-		"Crypto Mining Related Port Communication":  {true},
-		"Crypto Mining Domain Communication":        {false},
+	// --- Hypotheses ---
+	// Each entry documents:
+	//   ruleID   - rule identifier in default-rules.yaml
+	//   ruleName - exact rule name as it appears in alert labels
+	//   trigger  - what action in malicious.go causes this rule to fire
+	//   failOnProfile - expected label value based on rule tags
+	type alertHypothesis struct {
+		ruleID        string
+		ruleName      string
+		trigger       string
+		failOnProfile []bool
 	}
 
-	for _, alert := range alerts {
-		ruleName, ruleOk := alert.Labels["rule_name"]
-		failOnProfile, failOnProfileOk := alert.Labels["fail_on_profile"]
-		failOnProfileBool, err := strconv.ParseBool(failOnProfile)
-		require.NoError(t, err, "Error parsing fail_on_profile")
-		if ruleOk && failOnProfileOk {
-			if _, exists := expectedAlerts[ruleName]; exists && slices.Contains(expectedFailOnProfile[ruleName], failOnProfileBool) {
-				expectedAlerts[ruleName] = true
+	hypotheses := []alertHypothesis{
+		// Profile-dependent anomaly rules (tag: applicationprofile → fail_on_profile=true)
+		{"R0001", "Unexpected process launched",
+			"kubectl + ls from /dev/shm are not in the baseline profile",
+			[]bool{true}},
+		{"R0002", "Files Access Anomalies in container",
+			"writing malicious.txt, opening /etc/shadow, reading /proc/self/environ",
+			[]bool{true}},
+		{"R0003", "Syscalls Anomalies in container",
+			"SYS_UNSHARE and SYS_INIT_MODULE are not in the baseline profile",
+			[]bool{true}},
+		{"R0004", "Linux Capabilities Anomalies in container",
+			"binding to privileged port 80 requires capabilities not in baseline",
+			[]bool{true}},
+		{"R0006", "Unexpected service account token access",
+			"reading /run/secrets/kubernetes.io/serviceaccount/token",
+			[]bool{true}},
+		{"R0007", "Workload uses Kubernetes API unexpectedly",
+			"executing kubectl binary (exec event) + API server network connection",
+			[]bool{true}},
+		{"R0008", "Read Environment Variables from procfs",
+			"reading /proc/self/environ",
+			[]bool{true}},
+		{"R0010", "Unexpected Sensitive File Access",
+			"reading /etc/shadow",
+			[]bool{true}},
+
+		// Profile-dependent anomaly rules (tag: networkprofile → fail_on_profile=true)
+		{"R0005", "DNS Anomalies in container",
+			"DNS lookups for google.com and xmr.pool.minergate.com",
+			[]bool{true}},
+
+		// Signature rules with applicationprofile tag → fail_on_profile=true
+		{"R1001", "Drifted process executed",
+			"downloaded kubectl has upperlayer=true, not in base image",
+			[]bool{true}},
+		{"R1004", "Process executed from mount",
+			"kubectl copied to /podmount (emptyDir volume) and executed",
+			[]bool{true}},
+		{"R1006", "Process tries to escape container",
+			"SYS_UNSHARE with CLONE_NEWUSER from non-runc parent",
+			[]bool{true}},
+
+		// Signature rules with networkprofile tag → fail_on_profile=true
+		{"R1009", "Crypto Mining Related Port Communication",
+			"TCP connect to xmr.pool.minergate.com:45700 (port in [3333, 45700])",
+			[]bool{true}},
+
+		// Signature rules without profile tag → fail_on_profile=false
+		{"R1000", "Process executed from malicious source",
+			"symlink /bin/ls to /dev/shm/ls and execute from /dev/shm",
+			[]bool{false}},
+		{"R1002", "Process tries to load a kernel module",
+			"SYS_INIT_MODULE syscall",
+			[]bool{false}},
+		{"R1008", "Crypto Mining Domain Communication",
+			"DNS lookup for xmr.pool.minergate.com (in known mining domain list)",
+			[]bool{false}},
+		{"R1015", "Malicious Ptrace Usage",
+			"PTRACE_TRACEME syscall",
+			[]bool{false}},
+	}
+
+	// Verify each hypothesis.
+	var missing []string
+	for _, h := range hypotheses {
+		found := false
+		for _, alert := range alerts {
+			if alert.Labels["rule_name"] != h.ruleName {
+				continue
 			}
+			fop, err := strconv.ParseBool(alert.Labels["fail_on_profile"])
+			if err != nil {
+				continue
+			}
+			if slices.Contains(h.failOnProfile, fop) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, fmt.Sprintf("%s %q [trigger: %s]",
+				h.ruleID, h.ruleName, h.trigger))
 		}
 	}
 
-	for ruleName, signaled := range expectedAlerts {
-		assert.Truef(t, signaled, "Expected alert '%s' was not signaled", ruleName)
+	for _, m := range missing {
+		t.Errorf("MISSING expected alert: %s", m)
 	}
+
+	// Verify UID fields are populated across all alerts.
+	testutils.AssertUIDFieldsPopulated(t, alerts, wl.Namespace)
 }
 
 func Test_03_BasicLoadActivities(t *testing.T) {
