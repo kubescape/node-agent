@@ -24,7 +24,9 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			// Adjust ticker after first tick for faster initial updates
 			if !watchedContainer.InitialDelayExpired {
 				watchedContainer.InitialDelayExpired = true
-				watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(cpm.cfg.UpdateDataPeriod, cpm.cfg.MaxJitterPercentage))
+				if cpm.cfg.UpdateDataPeriod > 0 {
+					watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(cpm.cfg.UpdateDataPeriod, cpm.cfg.MaxJitterPercentage))
+				}
 			}
 
 			watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
@@ -166,7 +168,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 				helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
 				helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
 			},
-			Labels: objectcache.GetLabels(watchedContainer, false),
+			Labels: objectcache.GetLabels(cpm.cloudMetadata, watchedContainer, false),
 		},
 		Spec: v1beta1.ContainerProfileSpec{
 			Architectures:        []string{runtime.GOARCH},

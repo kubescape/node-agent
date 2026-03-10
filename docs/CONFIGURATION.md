@@ -133,8 +133,8 @@ These environment variables are read directly (not through config file):
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `initialDelay` | duration | `2m` | Delay before starting monitors |
-| `maxSniffingTimePerContainer` | duration | - | Max time to monitor a container |
-| `updateDataPeriod` | duration | - | How often to update storage |
+| `maxSniffingTimePerContainer` | duration | `24h` | Max time to monitor a container |
+| `updateDataPeriod` | duration | `10m` | How often to update storage |
 | `nodeProfileInterval` | duration | `10m` | Node profile update interval |
 | `networkStreamingInterval` | duration | `2m` | Network streaming batch interval |
 | `profilesCacheRefreshRate` | duration | `1m` | Profile cache refresh rate |

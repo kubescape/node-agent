@@ -18,7 +18,8 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		if utils.IsHostContainer(notif.Container) {
-			return
+			logger.L().Debug("adding host container to the container profile manager",
+				helpers.String("containerID", notif.Container.Runtime.ContainerID))
 		}
 		if cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
@@ -235,8 +236,8 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 	}
 
 	if err == nil {
-		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
+		cpm.deleteContainer(container)
 	}
 }
 

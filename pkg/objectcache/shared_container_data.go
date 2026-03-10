@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/kubescape/go-logger"
@@ -89,7 +90,7 @@ type ContainerInfo struct {
 	ImageID  string
 }
 
-func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[string]string {
+func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *WatchedContainerData, stripContainer bool) map[string]string {
 	labels := watchedContainer.InstanceID.GetLabels()
 	for i := range labels {
 		if labels[i] == "" {
@@ -115,6 +116,21 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	}
 	if watchedContainer.ParentResourceVersion != "" {
 		labels[helpersv1.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
+	}
+	if cloudMetadata != nil {
+		labels[helpersv1.HostTypeMetadataKey] = string(cloudMetadata.HostType)
+		if machineID := cloudMetadata.MachineID; machineID != "" {
+			labels[helpersv1.HostIDMetadataKey] = machineID
+		}
+		if clusterName := cloudMetadata.ClusterName; clusterName != "" {
+			labels[helpersv1.ClusterMetadataKey] = clusterName
+		}
+		if accountID := cloudMetadata.AccountID; accountID != "" {
+			labels[helpersv1.AWSAccountIDMetadataKey] = accountID
+		}
+		if region := cloudMetadata.Region; region != "" {
+			labels[helpersv1.RegionMetadataKey] = region
+		}
 	}
 	return labels
 }

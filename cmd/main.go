@@ -247,8 +247,17 @@ func main() {
 	}
 
 	var containerProfileManager containerprofilemanager.ContainerProfileManagerClient
+	var cloudMetadata *armotypes.CloudMetadata
+
+	if cfg.EnableApplicationProfile || cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
+		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("error getting cloud metadata", helpers.Error(err))
+		}
+	}
+
 	if cfg.EnableApplicationProfile {
-		containerProfileManager, err = containerprofilemanagerv1.NewContainerProfileManager(ctx, cfg, k8sClient, k8sObjectCache, storageClient, dnsResolver, seccompManager, nil, ruleBindingCache)
+		containerProfileManager, err = containerprofilemanagerv1.NewContainerProfileManager(ctx, cfg, k8sClient, k8sObjectCache, storageClient, dnsResolver, seccompManager, nil, ruleBindingCache, cloudMetadata)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the container profile manager", helpers.Error(err))
 		}
@@ -260,7 +269,6 @@ func main() {
 	var processTreeManager processtree.ProcessTreeManager
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
-	var cloudMetadata *armotypes.CloudMetadata
 
 	// Create the container process tree
 	containerProcessTree := containerprocesstree.NewContainerProcessTree()
@@ -277,13 +285,6 @@ func main() {
 
 	// Start the process tree manager to activate the exit cleanup manager
 	processTreeManager.Start()
-
-	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
-		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("error getting cloud metadata", helpers.Error(err))
-		}
-	}
 
 	if cfg.EnableRuntimeDetection {
 		// create exporter

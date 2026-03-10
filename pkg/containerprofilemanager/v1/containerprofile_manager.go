@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -76,6 +77,9 @@ type ContainerProfileManager struct {
 	ruleBindingCache  rulebindingmanager.RuleBindingCache
 	queueData         *queue.QueueData
 
+	// Cloud metadata for annotation population
+	cloudMetadata *armotypes.CloudMetadata
+
 	// Container storage with embedded locking
 	containers   map[string]*ContainerEntry
 	containersMu sync.RWMutex
@@ -83,6 +87,11 @@ type ContainerProfileManager struct {
 	// Notification channels for container end of life
 	maxSniffTimeNotificationChan []chan *containercollection.Container
 	notificationMu               sync.RWMutex
+
+	// Host profile support
+	hostProfile   *v1beta1.ContainerProfile
+	hostProfileMu sync.RWMutex
+	hostID        string
 }
 
 // NewContainerProfileManager creates a new container profile manager
@@ -96,6 +105,7 @@ func NewContainerProfileManager(
 	seccompManager seccompmanager.SeccompManagerClient,
 	enricher containerprofilemanager.Enricher,
 	ruleBindingCache rulebindingmanager.RuleBindingCache,
+	cloudMetadata *armotypes.CloudMetadata,
 ) (*ContainerProfileManager, error) {
 	containerProfileManager := &ContainerProfileManager{
 		ctx:                          ctx,
@@ -109,6 +119,7 @@ func NewContainerProfileManager(
 		ruleBindingCache:             ruleBindingCache,
 		containers:                   make(map[string]*ContainerEntry),
 		maxSniffTimeNotificationChan: make([]chan *containercollection.Container, 0),
+		cloudMetadata:                cloudMetadata,
 	}
 
 	// Initialize queue
@@ -150,6 +161,26 @@ func NewContainerProfileManager(
 		helpers.Int("currentQueueSize", queueData.GetQueueSize()))
 
 	return containerProfileManager, nil
+}
+
+// Stop stops the container profile manager
+func (cpm *ContainerProfileManager) Close() {
+	// Stop all container timers and clear container map
+	cpm.containersMu.Lock()
+	for containerID, entry := range cpm.containers {
+		entry.mu.Lock()
+		if entry.data != nil && entry.data.timer != nil {
+			entry.data.timer.Stop()
+			entry.data.timer = nil
+		}
+		entry.mu.Unlock()
+		delete(cpm.containers, containerID)
+	}
+	cpm.containersMu.Unlock()
+
+	if cpm.queueData != nil {
+		_ = cpm.queueData.Close()
+	}
 }
 
 var _ containerprofilemanager.ContainerProfileManagerClient = (*ContainerProfileManager)(nil)
