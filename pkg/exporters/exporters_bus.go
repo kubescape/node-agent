@@ -49,6 +49,10 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 	if csvExp != nil {
 		exporters = append(exporters, csvExp)
 	}
+	// Normalize: treat an HTTPExporterConfig with no URL as nil
+	if exportersConfig.HTTPExporterConfig != nil && exportersConfig.HTTPExporterConfig.URL == "" {
+		exportersConfig.HTTPExporterConfig = nil
+	}
 	if exportersConfig.HTTPExporterConfig == nil {
 		if httpURL := os.Getenv("HTTP_ENDPOINT_URL"); httpURL != "" {
 			exportersConfig.HTTPExporterConfig = &HTTPExporterConfig{}
