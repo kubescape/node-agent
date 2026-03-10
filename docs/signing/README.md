@@ -1,24 +1,25 @@
-# Profile Signing Documentation
+# Object Signing Documentation
 
 ## Overview
 
-The node-agent supports cryptographic signing of Kubernetes profiles to ensure their integrity and authenticity. This feature uses signatures compatible with the **Sigstore/Cosign** ecosystem, leveraging official `sigstore/sigstore`, `sigstore/cosign`, and `sigstore/sigstore-go` libraries for robust blob signing and verification.
+The node-agent supports cryptographic signing of Kubernetes objects (profiles and rules) to ensure their integrity and authenticity. This feature uses signatures compatible with the **Sigstore/Cosign** ecosystem, leveraging official `sigstore/sigstore`, `sigstore/cosign`, and `sigstore/sigstore-go` libraries for robust blob signing and verification.
 
-Signed profiles can be:
+Signed objects can be:
 - **ApplicationProfiles** - defining allowed application behavior
 - **SeccompProfiles** - defining allowed syscalls
-- Any future profile types that implement the `SignableObject` interface
+- **Rules** - defining security rules for the Rule Manager
+- Any future object types that implement the `SignableObject` interface
 
-## Why Sign Profiles?
+## Why Sign Objects?
 
-1. **Integrity** - Detect if a profile has been tampered with
-2. **Authenticity** - Verify who created the profile
+1. **Integrity** - Detect if an object has been tampered with
+2. **Authenticity** - Verify who created the object
 3. **Trust** - Establish a chain of trust for security policies
 4. **Audit** - Track who signed what and when
 
-## Cache Verification
+## Signature Verification
 
-The ApplicationProfileCache can automatically verify signatures when loading profiles. This ensures that only trusted profiles are used for policy enforcement.
+The node-agent can automatically verify signatures when loading objects. This ensures that only trusted policies are enforced.
 
 ### Enabling Verification
 
@@ -34,7 +35,7 @@ Set the `enableSignatureVerification` configuration flag:
 Or via environment variable:
 
 ```bash
-export ENABLE_PROFILE_VERIFICATION=true
+export ENABLE_SIGNATURE_VERIFICATION=true
 ```
 
 **Default:** `false` (verification disabled for backward compatibility)
@@ -43,16 +44,16 @@ export ENABLE_PROFILE_VERIFICATION=true
 
 When verification is enabled:
 
-1. **Normal Profiles**: Verified when fetched in `updateAllProfiles`
-2. **User-Managed Profiles**: Verified when fetched in `handleUserManagedProfile`
-3. **User-Defined Profiles**: Verified when fetched in `addContainer`
+1. **ApplicationProfiles**: Verified in the ApplicationProfileCache when fetched from storage.
+2. **SeccompProfiles**: Verified when fetched from storage.
+3. **Rules**: Verified by the RulesWatcher when syncing from the cluster.
 
 On **verification failure**:
-- Profile is **skipped** (not loaded into cache)
-- Warning is logged with profile namespace, name, and error
+- Object is **skipped** (not loaded or processed)
+- Warning is logged with object namespace, name, and error
 - Enforcement continues (doesn't crash the agent)
 
-This ensures security while maintaining availability - if a profile can't be verified, the node-agent continues operating with other valid profiles.
+This ensures security while maintaining availability - if an object can't be verified, the node-agent continues operating with other valid objects.
 
 ## Architecture
 
@@ -60,7 +61,7 @@ This ensures security while maintaining availability - if a profile can't be ver
 
 To ensure the signature remains valid regardless of minor YAML formatting differences or the presence of the signature itself, we use **Canonical Hashing**.
 
-1. **Sanitization**: Before hashing, the profile is "sanitized" by creating a copy that excludes the `metadata.annotations`, `metadata.managedFields`, and the `status` block.
+1. **Sanitization**: Before hashing, the object is "sanitized" by creating a copy that excludes the `metadata.annotations`, `metadata.managedFields`, and the `status` block.
 2. **Canonical JSON**: The sanitized object is marshaled to JSON.
 3. **Hashing**: We use `github.com/kubescape/storage/pkg/utils.CanonicalHash` which performs a specialized SHA-256 hash of the JSON.
 
@@ -69,7 +70,7 @@ To ensure the signature remains valid regardless of minor YAML formatting differ
 ### Diagram
 graph TB
     subgraph "Signing Flow"
-        A[Profile Resource] --> B[Adapter]
+        A[K8s Resource] --> B[Adapter]
         B --> C[SignableObject Interface]
         C --> D[GetContent: Sanitized JSON]
         D --> E{Signing Mode}
@@ -78,13 +79,13 @@ graph TB
         F --> H[Signature + Cert + RekorBundle]
         G --> H[Signature + Public Key]
         H --> I[Base64 Encode]
-        I --> J[Profile Annotations]
+        I --> J[Object Annotations]
         J --> K[GetUpdatedObject: Live Resource]
         K --> L[Signed Object YAML]
     end
 
     subgraph "Verification Flow"
-        M[Signed Profile] --> N[Extract Signature]
+        M[Signed Object] --> N[Extract Signature]
         M --> O[Extract Cert/Key]
         M --> P[Extract RekorBundle]
         M --> Q[GetContent: Sanitized JSON]
@@ -93,8 +94,8 @@ graph TB
         O --> R
         P --> R
         R --> S{Valid?}
-        S -->|Yes| T[Profile accepted]
-        S -->|No| U[Profile rejected]
+        S -->|Yes| T[Object accepted]
+        S -->|No| U[Object rejected]
     end
 
     L --> M
@@ -102,7 +103,7 @@ graph TB
 
 ## Annotation Format
 
-Signed profiles store signature information in these annotations:
+Signed objects store signature information in these annotations:
 
 ```yaml
 metadata:
@@ -133,7 +134,7 @@ metadata:
 Uses OIDC identity providers like GitHub Actions, Google, or Kubernetes. No need to manage private keys.
 
 ```bash
-sign-profile \
+sign-object \
   --keyless \
   --file my-app-profile.yaml \
   --output signed-profile.yaml
@@ -154,10 +155,10 @@ Uses a locally generated ECDSA P-256 key pair. Useful for:
 
 ```bash
 # Generate a key pair (one-time)
-sign-profile generate-keypair --output my-key-pair.pem
+sign-object generate-keypair --output my-key-pair.pem
 
 # Sign with the key
-sign-profile \
+sign-object \
   --key my-key-pair.pem \
   --file my-app-profile.yaml \
   --output signed-profile.yaml
@@ -169,63 +170,67 @@ sign-profile \
 
 ```bash
 # Build from source
-cd cmd/sign-profile
-go build -o sign-profile
+cd cmd/sign-object
+go build -o sign-object
 
 # Or install globally
-go install github.com/kubescape/node-agent/cmd/sign-profile@latest
+go install github.com/kubescape/node-agent/cmd/sign-object@latest
 ```
 
 ### Commands
 
-#### `sign-profile [sign]`
+#### `sign-object [sign]`
 
-Sign a profile resource.
+Sign a Kubernetes object.
 
 ```bash
-sign-profile [sign] [flags]
+sign-object [sign] [flags]
 ```
 
 **Flags:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--file` | string | required | Input profile YAML file |
-| `--output` | string | required | Output file for signed profile |
+| `--file` | string | required | Input object YAML file |
+| `--output` | string | required | Output file for signed object |
 | `--keyless` | bool | false | Use keyless signing (OIDC) |
 | `--key` | string | - | Path to private key file |
-| `--type` | string | auto | Profile type: `applicationprofile`, `seccompprofile`, or `auto` |
+| `--type` | string | auto | Object type: `applicationprofile`, `seccompprofile`, `rules`, or `auto` |
 | `--verbose` | bool | false | Enable verbose logging |
 
 **Examples:**
 
 ```bash
 # Sign with keyless (OIDC)
-sign-profile --keyless --file app-profile.yaml --output signed-app-profile.yaml
+sign-object --keyless --file app-profile.yaml --output signed-app-profile.yaml
 
 # Sign with local key
-sign-profile --key my-key.pem --file seccomp-profile.yaml --output signed-seccomp.yaml
+sign-object --key my-key.pem --file seccomp-profile.yaml --output signed-seccomp.yaml
 
-# Auto-detect profile type
-sign-profile --keyless --file profile.yaml --output signed.yaml
+# Sign Rules CRD
+sign-object --keyless --file rules.yaml --output signed-rules.yaml
 
-# Specify profile type explicitly
-sign-profile --keyless --type seccompprofile --file profile.yaml --output signed.yaml
+# Auto-detect object type
+sign-object --keyless --file object.yaml --output signed.yaml
+
+# Specify object type explicitly
+sign-object --keyless --type seccompprofile --file profile.yaml --output signed.yaml
 ```
 
-#### `sign-profile verify`
+#### `sign-object verify`
 
-Verify a signed profile's signature.
+Verify a signed object's signature.
 
 ```bash
-sign-profile verify [flags]
+sign-object verify [flags]
 ```
 
 **Flags:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--file` | string | required | Signed profile YAML file |
+| `--file` | string | required | Signed object YAML file |
+| `--type` | string | auto | Object type: `applicationprofile`, `seccompprofile`, `rules`, or `auto` |
 | `--strict` | bool | true | Require trusted issuer/identity |
 | `--verbose` | bool | false | Enable verbose logging |
 
@@ -233,18 +238,18 @@ sign-profile verify [flags]
 
 ```bash
 # Verify with strict checking (keyless must have issuer/identity)
-sign-profile verify --file signed-profile.yaml
+sign-object verify --file signed-object.yaml
 
 # Allow untrusted local signatures
-sign-profile verify --file signed-profile.yaml --strict=false
+sign-object verify --file signed-object.yaml --strict=false
 ```
 
-#### `sign-profile generate-keypair`
+#### `sign-object generate-keypair`
 
 Generate a new ECDSA P-256 key pair for local signing.
 
 ```bash
-sign-profile generate-keypair [flags]
+sign-object generate-keypair [flags]
 ```
 
 **Flags:**
@@ -258,35 +263,36 @@ sign-profile generate-keypair [flags]
 
 ```bash
 # Generate full key pair
-sign-profile generate-keypair --output my-signing-key.pem
+sign-object generate-keypair --output my-signing-key.pem
 
 # Generate only public key (for verification only)
-sign-profile generate-keypair --public-only --output public-key.pem
+sign-object generate-keypair --public-only --output public-key.pem
 ```
 
-#### `sign-profile extract-signature`
+#### `sign-object extract-signature`
 
-Extract signature information from a signed profile.
+Extract signature information from a signed object.
 
 ```bash
-sign-profile extract-signature [flags]
+sign-object extract-signature [flags]
 ```
 
 **Flags:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--file` | string | required | Signed profile YAML file |
+| `--file` | string | required | Signed object YAML file |
+| `--type` | string | auto | Object type: `applicationprofile`, `seccompprofile`, `rules`, or `auto` |
 | `--json` | bool | false | Output as JSON |
 
 **Examples:**
 
 ```bash
 # Display signature info
-sign-profile extract-signature --file signed-profile.yaml
+sign-object extract-signature --file signed-object.yaml
 
 # Output as JSON for scripting
-sign-profile extract-signature --file signed-profile.yaml --json
+sign-object extract-signature --file signed-object.yaml --json
 ```
 
 ## Complete Workflow
@@ -313,7 +319,7 @@ spec:
 EOF
 
 # 2. Sign with keyless
-sign-profile --keyless \
+sign-object --keyless \
   --file my-app-profile.yaml \
   --output signed-app-profile.yaml
 
@@ -321,14 +327,14 @@ sign-profile --keyless \
 kubectl apply -f signed-app-profile.yaml
 
 # 4. Verify anytime
-sign-profile verify --file signed-app-profile.yaml
+sign-object verify --file signed-app-profile.yaml
 ```
 
 ### Example 2: Sign SeccompProfile with Local Key
 
 ```bash
 # 1. Generate key pair
-sign-profile generate-keypair --output seccomp-signing-key.pem
+sign-object generate-keypair --output seccomp-signing-key.pem
 
 # 2. Create SeccompProfile
 cat > my-seccomp-profile.yaml << 'EOF'
@@ -343,24 +349,52 @@ spec:
 EOF
 
 # 3. Sign with local key
-sign-profile --key seccomp-signing-key.pem \
+sign-object --key seccomp-signing-key.pem \
   --file my-seccomp-profile.yaml \
   --output signed-seccomp-profile.yaml
 
 # 4. Verify
-sign-profile verify --file signed-seccomp-profile.yaml
+sign-object verify --file signed-seccomp-profile.yaml
 ```
 
-### Example 3: Batch Signing in CI/CD
+### Example 3: Sign Rules CRD
+
+```bash
+# 1. Create Rules CRD
+cat > my-rules.yaml << 'EOF'
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  name: my-security-rules
+  namespace: kubescape
+spec:
+  rules:
+  - id: R0001
+    enabled: true
+    name: "Suspicious Exec"
+    parameters:
+      paths: ["/bin/bash"]
+EOF
+
+# 2. Sign with keyless
+sign-object --keyless \
+  --file my-rules.yaml \
+  --output signed-rules.yaml
+
+# 3. Verify
+sign-object verify --file signed-rules.yaml
+```
+
+### Example 4: Batch Signing in CI/CD
 
 ```yaml
-# .github/workflows/sign-profiles.yml
-name: Sign Security Profiles
+# .github/workflows/sign-objects.yml
+name: Sign Security Objects
 
 on:
   push:
     paths:
-      - 'profiles/**.yaml'
+      - 'policies/**.yaml'
 
 jobs:
   sign:
@@ -372,37 +406,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install sign-profile
+      - name: Install sign-object
         run: |
-          cd cmd/sign-profile
-          go build -o sign-profile
+          cd cmd/sign-object
+          go build -o sign-object
 
-      - name: Sign ApplicationProfiles
+      - name: Sign Objects
         run: |
-          for profile in profiles/*application*.yaml; do
-            ./sign-profile --keyless \
-              --file "$profile" \
-              --output "signed/$(basename $profile)"
+          for obj in policies/*.yaml; do
+            ./sign-object --keyless \
+              --file "$obj" \
+              --output "signed/$(basename $obj)"
           done
 
-      - name: Sign SeccompProfiles
+      - name: Verify all signed objects
         run: |
-          for profile in profiles/*seccomp*.yaml; do
-            ./sign-profile --keyless \
-              --file "$profile" \
-              --output "signed/$(basename $profile)"
+          for obj in signed/*.yaml; do
+            ./sign-object verify --file "$obj"
           done
 
-      - name: Verify all signed profiles
-        run: |
-          for profile in signed/*.yaml; do
-            ./sign-profile verify --file "$profile"
-          done
-
-      - name: Upload signed profiles
+      - name: Upload signed objects
         uses: actions/upload-artifact@v4
         with:
-          name: signed-profiles
+          name: signed-objects
           path: signed/*.yaml
 ```
 
@@ -413,32 +439,32 @@ sequenceDiagram
     participant Admin
     participant CLI
     participant Signer
-    participant Profile
+    participant Object
     participant Cluster
     participant Verifier
 
-    Admin->>CLI: sign-profile --keyless
+    Admin->>CLI: sign-object --keyless
     CLI->>Signer: Initialize Sigstore Signer
-    CLI->>Profile: Marshal content to JSON
+    CLI->>Object: Marshal content to JSON
     CLI->>Signer: Sign content
     Signer->>Signer: Sign with Sigstore
     Signer-->>CLI: Return signature + certificate
-    CLI->>Profile: Add signature annotations
-    Profile-->>Admin: Signed profile YAML
+    CLI->>Object: Add signature annotations
+    Object-->>Admin: Signed object YAML
 
-    Admin->>Cluster: kubectl apply signed-profile.yaml
+    Admin->>Cluster: kubectl apply signed-object.yaml
     Cluster->>Verifier: Verify signature
     Verifier->>Verifier: Extract content & signature/cert
     Verifier->>Verifier: Verify with Sigstore
     Verifier-->>Cluster: Valid ✓
-    Cluster-->>Admin: Profile applied
+    Cluster-->>Admin: Object applied
 ```
 
 ## Threat Model
 
 | Threat | Mitigation |
 |--------|------------|
-| Profile tampering | ECDSA signature verification |
+| Object tampering | ECDSA signature verification |
 | Impersonation | OIDC identity verification (keyless) |
 | Key compromise | Short-lived keys, rotation support |
 | Replay attacks | Timestamps, uniqueness checks |
@@ -448,7 +474,7 @@ sequenceDiagram
 
 1. **Enable Verification in Production**
     - Set `enableSignatureVerification: true` in node-agent config
-    - Profiles failing verification are skipped with warnings
+    - Objects failing verification are skipped with warnings
     - Doesn't crash the agent - maintains availability
 
 2. **Use Keyless Signing in Production**
@@ -461,16 +487,16 @@ sequenceDiagram
     - Enable cache verification in node-agent for automatic validation
     - Consider admission controller to enforce verification
 
-3. **Version Your Profiles**
+4. **Version Your Objects**
    - Include version in metadata
    - Old signatures become invalid on content changes
 
-4. **Key Management for Local Signing**
+5. **Key Management for Local Signing**
    - Store keys in secure locations (HSM, KMS)
    - Rotate keys regularly
    - Use read-only keys for verification
 
-5. **Audit Trail**
+6. **Audit Trail**
    - Store signing timestamps
    - Track who signed what
    - Use GitHub Actions for audit logs
@@ -480,18 +506,18 @@ sequenceDiagram
 ### Verification Fails
 
 ```bash
-# Check if profile was modified
-sign-profile extract-signature --file profile.yaml
+# Check if object was modified
+sign-object extract-signature --file object.yaml
 
 # Verify with verbose output
-sign-profile verify --file profile.yaml --verbose
+sign-object verify --file object.yaml --verbose
 ```
 
 ### Missing Annotation
 
 ```bash
 # This error means no signature annotation found
-# Ensure you're using the signed version of the profile
+# Ensure you're using the signed version of the object
 ```
 
 ### OIDC Token Issues
@@ -504,27 +530,31 @@ sign-profile verify --file profile.yaml --verbose
 
 ## Integration with Admission Controllers
 
-For clusters that require verified profiles, use an admission webhook:
+For clusters that require verified objects, use an admission webhook:
 
 ```yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: profile-signature-verifier
+  name: object-signature-verifier
 webhooks:
-- name: verify-profile-signature.kubescape.io
+- name: verify-object-signature.kubescape.io
   rules:
   - apiGroups: ["softwarecomposition.kubescape.io"]
     apiVersions: ["v1beta1"]
     operations: ["CREATE", "UPDATE"]
     resources: ["applicationprofiles", "seccompprofiles"]
+  - apiGroups: ["kubescape.io"]
+    apiVersions: ["v1"]
+    operations: ["CREATE", "UPDATE"]
+    resources: ["rules"]
   sideEffects: None
   admissionReviewVersions: ["v1"]
 ```
 
 The webhook would:
 1. Extract signature from annotations
-2. Verify signature against profile content
+2. Verify signature against object content
 3. Reject if signature invalid or missing
 
 ## Key Files
@@ -535,7 +565,8 @@ The webhook would:
 | `pkg/signature/verify.go` | Public verification API and cache integration |
 | `pkg/signature/profiles/applicationprofile_adapter.go` | ApplicationProfile adapter |
 | `pkg/signature/profiles/seccompprofile_adapter.go` | SeccompProfile adapter |
-| `cmd/sign-profile/main.go` | CLI tool for profile signing |
+| `pkg/signature/profiles/rules_adapter.go` | Rules adapter |
+| `cmd/sign-object/main.go` | CLI tool for object signing |
 
 ## Additional Resources
 
