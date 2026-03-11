@@ -1,0 +1,42 @@
+##
+## User-managed NetworkNeighborhood for Test_28.
+##
+## This is a TEMPLATE. Replace {{NN_NAME}} with the auto-learned
+## NetworkNeighborhood name discovered at runtime:
+##
+##   NN_NAME=$(kubectl get networkneighborhoods -n "$NS" \
+##     -l kubescape.io/workload-name=nginx-fusioncore-deployment \
+##     -o jsonpath='{.items[0].metadata.name}')
+##
+##   sed "s/{{NN_NAME}}/$NN_NAME/g; s/{{NAMESPACE}}/$NS/g" \
+##     known-network-neighborhood.yaml | kubectl apply -f -
+##
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: "ug-{{NN_NAME}}"
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    kubescape.io/managed-by: "User"
+spec:
+  matchLabels:
+    app: nginx-fusioncore
+  containers:
+  - name: nginx
+    ingress: []
+    egress:
+    - identifier: fusioncore-ai
+      type: external
+      dnsNames:
+      - "fusioncore.ai."
+      ipAddress: "162.0.217.171"
+      ports:
+      - name: TCP-80
+        protocol: TCP
+        port: 80
+      - name: TCP-443
+        protocol: TCP
+        port: 443
+      - name: UDP-53
+        protocol: UDP
+        port: 53
