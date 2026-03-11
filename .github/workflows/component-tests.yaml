@@ -1,5 +1,8 @@
 name: Node Agent Component Tests
 on:
+  push:
+    branches:
+      - test/improvecomponenttest
   workflow_dispatch:
     inputs:
       build_image:
@@ -11,15 +14,17 @@ on:
         description: 'Storage image tag (must match the tag built by storage/build)'
         type: string
         required: true
+        default: 'latest'
       NODE_AGENT_TAG:
         description: 'Node-agent image tag (must match the tag built by node-agent/build)'
         type: string
         required: true
+        default: 'latest'
       STORAGE_REF:
         description: 'Branch/tag/commit of k8sstormcenter/storage to use (leave empty to keep go.mod default)'
         type: string
         required: false
-        default: ''
+        default: 'a042ebaa0ec9280d69eac81b5eeaa4d0dfd1c558'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -95,7 +100,7 @@ jobs:
           Test_21_AlertOnPartialThenLearnNetworkTest,
           Test_22_AlertOnPartialNetworkProfileTest,
           Test_23_RuleCooldownTest,
-          Test_24_ProcessTreeDepthTest
+          Test_24_ProcessTreeDepthTest,
           Test_27_RegexFileOpenMatchTest
         ]
     steps:
@@ -124,9 +129,9 @@ jobs:
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s
       - name: Install Node Agent Chart
         run: |
-          STORAGE_TAG="${{ inputs.STORAGE_TAG }}"
+          STORAGE_TAG="${{ inputs.STORAGE_TAG || 'latest' }}"
           echo "Storage tag that will be used: ${STORAGE_TAG}"
-          IMAGE_TAG="${{ inputs.NODE_AGENT_TAG }}"
+          IMAGE_TAG="${{ inputs.NODE_AGENT_TAG || 'latest' }}"
           IMAGE_REPO='ghcr.io/k8sstormcenter/node-agent'
           echo "Using Node Agent image: ${IMAGE_REPO}:${IMAGE_TAG}"
           helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${IMAGE_TAG} --set nodeAgent.image.repository=${IMAGE_REPO} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 5m --debug
@@ -146,7 +151,7 @@ jobs:
         run: |
           sudo sh -c "ulimit -l unlimited"
       - name: Update storage dependency
-        if: ${{ inputs.STORAGE_REF != '' }}
+        if: ${{ inputs.STORAGE_REF != '' && inputs.STORAGE_REF != 'latest' }}
         env:
           STORAGE_REF: ${{ inputs.STORAGE_REF }}
           GONOSUMCHECK: "*"
