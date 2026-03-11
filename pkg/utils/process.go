@@ -3,7 +3,7 @@ package utils
 import (
 	"strings"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/prometheus/procfs"
@@ -78,29 +78,29 @@ func GetProcessEnv(pid int) (map[string]string, error) {
 
 // Creates a process tree from a process.
 // The process tree will be built from scanning the /proc filesystem.
-func CreateProcessTree(process *apitypes.Process, shimPid uint32) (apitypes.Process, error) {
+func CreateProcessTree(process *armotypes.Process, shimPid uint32) (armotypes.Process, error) {
 	pfs, err := procfs.NewFS("/proc")
 	if err != nil {
-		return apitypes.Process{}, err
+		return armotypes.Process{}, err
 	}
 
 	proc, err := pfs.Proc(int(process.PID))
 	if err != nil {
 		logger.L().Debug("Failed to get process", helpers.String("error", err.Error()))
-		return apitypes.Process{}, err
+		return armotypes.Process{}, err
 	}
 
 	// build the process tree
 	treeRoot, err := buildProcessTree(proc, &pfs, shimPid, nil)
 	if err != nil {
-		return apitypes.Process{}, err
+		return armotypes.Process{}, err
 	}
 
 	return treeRoot, nil
 }
 
 // Recursively build the process tree.
-func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree *apitypes.Process) (apitypes.Process, error) {
+func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree *armotypes.Process) (armotypes.Process, error) {
 	// If the current process is the shim, return the process tree.
 	if proc.PID == int(shimPid) {
 		return *processTree.DeepCopy(), nil
@@ -108,25 +108,25 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 
 	stat, err := proc.Stat()
 	if err != nil {
-		return apitypes.Process{}, err
+		return armotypes.Process{}, err
 	}
 
 	parent, err := procfs.Proc(stat.PPID)
 	if err != nil {
-		return apitypes.Process{}, err
+		return armotypes.Process{}, err
 	}
 
 	var uid, gid uint32
 	status, err := proc.NewStatus()
 	if err != nil {
-		return apitypes.Process{}, err
+		return armotypes.Process{}, err
 	} else {
 		uid = uint32(status.UIDs[1])
 		gid = uint32(status.GIDs[1])
 	}
 
 	// Make the parent process the parent of the current process (move the current process to the parent's children).
-	currentProcess := apitypes.Process{
+	currentProcess := armotypes.Process{
 		Comm: stat.Comm,
 		Path: func() string {
 			path, err := proc.Executable()
@@ -166,9 +166,9 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 
 	if processTree != nil {
 		if currentProcess.ChildrenMap == nil {
-			currentProcess.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+			currentProcess.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)
 		}
-		currentProcess.ChildrenMap[apitypes.CommPID{PID: processTree.PID}] = processTree
+		currentProcess.ChildrenMap[armotypes.CommPID{PID: processTree.PID}] = processTree
 	}
 
 	return buildProcessTree(parent, procfs, shimPid, &currentProcess)
@@ -212,7 +212,7 @@ func GetCommFromPid(pid uint32) (string, error) {
 	return comm, nil
 }
 
-func GetProcessFromProcessTree(process *apitypes.Process, pid uint32) *apitypes.Process {
+func GetProcessFromProcessTree(process *armotypes.Process, pid uint32) *armotypes.Process {
 	if process.PID == pid {
 		return process
 	}
@@ -229,7 +229,7 @@ func GetProcessFromProcessTree(process *apitypes.Process, pid uint32) *apitypes.
 // CalculateProcessTreeDepth calculates the maximum depth of a process tree.
 // The depth is the maximum number of levels from the root process to any leaf process.
 // A single process (no children) has a depth of 1.
-func CalculateProcessTreeDepth(process *apitypes.Process) int {
+func CalculateProcessTreeDepth(process *armotypes.Process) int {
 	if process == nil {
 		return 0
 	}

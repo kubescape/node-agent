@@ -154,6 +154,17 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	if notif.Type != containercollection.EventTypeAddContainer {
 		return
 	}
+	if utils.IsHostContainer(notif.Container) {
+		return
+	}
+	if notif.Container.Runtime.ContainerImageName == "" {
+		logger.L().Ctx(s.ctx).Debug("SbomManager - skipping container with empty image name",
+			helpers.String("namespace", notif.Container.K8s.Namespace),
+			helpers.String("pod", notif.Container.K8s.PodName),
+			helpers.String("container", notif.Container.K8s.ContainerName),
+			helpers.String("container ID", notif.Container.Runtime.ContainerID))
+		return
+	}
 	// check if the container should be ignored
 	if s.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return

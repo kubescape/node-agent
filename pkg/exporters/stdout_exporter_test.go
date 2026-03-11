@@ -6,7 +6,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -52,16 +52,16 @@ func TestStdoutExporter_SendAlert(t *testing.T) {
 	assert.NotNil(t, exporter)
 
 	exporter.SendRuleAlert(&types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+		RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
 			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
 			PodName:       "testpodname",
 		},
-		RuleAlert: apitypes.RuleAlert{
+		RuleAlert: armotypes.RuleAlert{
 			RuleDescription: "Application profile is missing",
 		},
 	})
@@ -70,15 +70,15 @@ func TestStdoutExporter_SendAlert(t *testing.T) {
 type MockFileHashResult struct {
 }
 
-func (m *MockFileHashResult) GetBasicRuntimeAlert() apitypes.BaseRuntimeAlert {
-	return apitypes.BaseRuntimeAlert{
+func (m *MockFileHashResult) GetBasicRuntimeAlert() armotypes.BaseRuntimeAlert {
+	return armotypes.BaseRuntimeAlert{
 		AlertName: "testrule",
 	}
 }
 
-func (m *MockFileHashResult) GetRuntimeProcessDetails() apitypes.ProcessTree {
-	return apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+func (m *MockFileHashResult) GetRuntimeProcessDetails() armotypes.ProcessTree {
+	return armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			PID: 1,
 		},
 		ContainerID: "testcontainerid",
@@ -86,14 +86,14 @@ func (m *MockFileHashResult) GetRuntimeProcessDetails() apitypes.ProcessTree {
 	}
 }
 
-func (m *MockFileHashResult) GetMalwareRuntimeAlert() apitypes.MalwareAlert {
-	return apitypes.MalwareAlert{
+func (m *MockFileHashResult) GetMalwareRuntimeAlert() armotypes.MalwareAlert {
+	return armotypes.MalwareAlert{
 		MalwareDescription: "testmalware",
 	}
 }
 
-func (m *MockFileHashResult) GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails {
-	return apitypes.RuntimeAlertK8sDetails{
+func (m *MockFileHashResult) GetRuntimeAlertK8sDetails() armotypes.RuntimeAlertK8sDetails {
+	return armotypes.RuntimeAlertK8sDetails{
 		ContainerID:   "testcontainerid",
 		ContainerName: "testcontainer",
 		Namespace:     "testnamespace",

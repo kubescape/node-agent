@@ -10,7 +10,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 func TestCsvExporter(t *testing.T) {
@@ -24,21 +24,21 @@ func TestCsvExporter(t *testing.T) {
 	}
 
 	csvExporter.SendRuleAlert(&types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+		RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
 			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
 			PodName:       "testpodname",
 		},
-		RuleAlert: apitypes.RuleAlert{
+		RuleAlert: armotypes.RuleAlert{
 			RuleDescription: "Application profile is missing",
 		},
 	})
 	csvExporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
-		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BasicRuntimeAlert: armotypes.BaseRuntimeAlert{
 			AlertName:  "testmalware",
 			Size:       "2MiB",
 			MD5Hash:    "testmalwarehash",
@@ -53,7 +53,7 @@ func TestCsvExporter(t *testing.T) {
 			Namespace:            "testmalwarenamespace",
 			Pod:                  "testmalwarepodname",
 		},
-		MalwareRuntimeAlert: apitypes.MalwareAlert{
+		MalwareRuntimeAlert: armotypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},
 	})

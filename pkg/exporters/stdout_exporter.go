@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -15,10 +15,10 @@ import (
 
 type StdoutExporter struct {
 	logger        *log.Logger
-	cloudmetadata *apitypes.CloudMetadata
+	cloudmetadata *armotypes.CloudMetadata
 }
 
-func InitStdoutExporter(useStdout *bool, cloudmetadata *apitypes.CloudMetadata) *StdoutExporter {
+func InitStdoutExporter(useStdout *bool, cloudmetadata *armotypes.CloudMetadata) *StdoutExporter {
 	if useStdout == nil {
 		useStdout = new(bool)
 		*useStdout = os.Getenv("STDOUT_ENABLED") != "false"

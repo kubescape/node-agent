@@ -3,7 +3,7 @@ package containerprocesstree
 import (
 	"testing"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -11,8 +11,8 @@ import (
 )
 
 // Helper function to create a SafeMap from regular map data
-func createSafeMapFromData(data map[uint32]*apitypes.Process) *maps.SafeMap[uint32, *apitypes.Process] {
-	safeMap := &maps.SafeMap[uint32, *apitypes.Process]{}
+func createSafeMapFromData(data map[uint32]*armotypes.Process) *maps.SafeMap[uint32, *armotypes.Process] {
+	safeMap := &maps.SafeMap[uint32, *armotypes.Process]{}
 	for pid, proc := range data {
 		safeMap.Set(pid, proc)
 	}
@@ -79,32 +79,32 @@ func TestContainerProcessTreeImpl_GetPidBranch_Success(t *testing.T) {
 	cpt.containerIdToShimPid[containerID] = shimPID
 
 	// Create a tree structure: shim (50) -> nginx (100) -> nginx-worker (101)
-	nginxWorker := &apitypes.Process{
+	nginxWorker := &armotypes.Process{
 		PID:         101,
 		PPID:        100,
 		Comm:        "nginx-worker",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	nginxProcess := &apitypes.Process{
+	nginxProcess := &armotypes.Process{
 		PID:  100,
 		PPID: 50, // parent is shim
 		Comm: "nginx",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx-worker", PID: 101}: nginxWorker,
 		},
 	}
 
-	shimProcess := &apitypes.Process{
+	shimProcess := &armotypes.Process{
 		PID:  50, // shim
 		PPID: 1,
 		Comm: "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx", PID: 100}: nginxProcess,
 		},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -122,7 +122,7 @@ func TestContainerProcessTreeImpl_GetPidBranch_Success(t *testing.T) {
 	assert.Equal(t, uint32(100), result.PID)
 	assert.Equal(t, "nginx", result.Comm)
 	assert.Len(t, result.ChildrenMap, 1)
-	assert.Contains(t, result.ChildrenMap, apitypes.CommPID{Comm: "nginx-worker", PID: 101})
+	assert.Contains(t, result.ChildrenMap, armotypes.CommPID{Comm: "nginx-worker", PID: 101})
 
 	// Test getting branch for nginx (PID 100)
 	// Should return nginx (PID 100) as the root with no children (since nginx itself is the target)
@@ -136,7 +136,7 @@ func TestContainerProcessTreeImpl_GetPidBranch_Success(t *testing.T) {
 func TestContainerProcessTreeImpl_GetPidBranch_ContainerNotFound(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -148,7 +148,7 @@ func TestContainerProcessTreeImpl_GetPidBranch_ContainerNotFound(t *testing.T) {
 	result, err := cpt.GetPidBranch("non-existent", 100, createSafeMapFromData(fullTree))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "container non-existent not found")
-	assert.Equal(t, apitypes.Process{}, result)
+	assert.Equal(t, armotypes.Process{}, result)
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_ShimNotFound(t *testing.T) {
@@ -159,7 +159,7 @@ func TestContainerProcessTreeImpl_GetPidBranch_ShimNotFound(t *testing.T) {
 	shimPID := uint32(999) // Non-existent PID
 	cpt.containerIdToShimPid[containerID] = shimPID
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -171,7 +171,7 @@ func TestContainerProcessTreeImpl_GetPidBranch_ShimNotFound(t *testing.T) {
 	result, err := cpt.GetPidBranch(containerID, 100, createSafeMapFromData(fullTree))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "shim process 999 not found in process tree")
-	assert.Equal(t, apitypes.Process{}, result)
+	assert.Equal(t, armotypes.Process{}, result)
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_TargetNotFound(t *testing.T) {
@@ -182,14 +182,14 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetNotFound(t *testing.T) {
 	shimPID := uint32(50)
 	cpt.containerIdToShimPid[containerID] = shimPID
 
-	shimProcess := &apitypes.Process{
+	shimProcess := &armotypes.Process{
 		PID:         50, // shim
 		PPID:        1,
 		Comm:        "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -202,7 +202,7 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetNotFound(t *testing.T) {
 	result, err := cpt.GetPidBranch(containerID, 999, createSafeMapFromData(fullTree))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "target process 999 not found in process tree")
-	assert.Equal(t, apitypes.Process{}, result)
+	assert.Equal(t, armotypes.Process{}, result)
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_TargetNotInContainer(t *testing.T) {
@@ -214,21 +214,21 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetNotInContainer(t *testing.T
 	cpt.containerIdToShimPid[containerID] = shimPID
 
 	// Create a process that's not in the container's subtree
-	outsideProcess := &apitypes.Process{
+	outsideProcess := &armotypes.Process{
 		PID:         200,
 		PPID:        1, // Direct child of init, not of shim
 		Comm:        "outside-process",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	shimProcess := &apitypes.Process{
+	shimProcess := &armotypes.Process{
 		PID:         50, // shim
 		PPID:        1,
 		Comm:        "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -242,7 +242,7 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetNotInContainer(t *testing.T
 	result, err := cpt.GetPidBranch(containerID, 200, createSafeMapFromData(fullTree))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "target process 200 is not within container test-container-123 subtree")
-	assert.Equal(t, apitypes.Process{}, result)
+	assert.Equal(t, armotypes.Process{}, result)
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_DeepTree(t *testing.T) {
@@ -254,50 +254,50 @@ func TestContainerProcessTreeImpl_GetPidBranch_DeepTree(t *testing.T) {
 	cpt.containerIdToShimPid[containerID] = shimPID
 
 	// Create a deep tree: shim (50) -> nginx (100) -> worker (101) -> child (102) -> grandchild (103)
-	grandchild := &apitypes.Process{
+	grandchild := &armotypes.Process{
 		PID:         103,
 		PPID:        102,
 		Comm:        "grandchild",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	child := &apitypes.Process{
+	child := &armotypes.Process{
 		PID:  102,
 		PPID: 101,
 		Comm: "child",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "grandchild", PID: 103}: grandchild,
 		},
 	}
 
-	worker := &apitypes.Process{
+	worker := &armotypes.Process{
 		PID:  101,
 		PPID: 100,
 		Comm: "worker",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "child", PID: 102}: child,
 		},
 	}
 
-	nginx := &apitypes.Process{
+	nginx := &armotypes.Process{
 		PID:  100,
 		PPID: 50, // parent is shim
 		Comm: "nginx",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "worker", PID: 101}: worker,
 		},
 	}
 
-	shim := &apitypes.Process{
+	shim := &armotypes.Process{
 		PID:  50, // shim
 		PPID: 1,
 		Comm: "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx", PID: 100}: nginx,
 		},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -319,17 +319,17 @@ func TestContainerProcessTreeImpl_GetPidBranch_DeepTree(t *testing.T) {
 
 	// Verify the branch structure: nginx -> worker -> child -> grandchild (path only)
 	assert.Len(t, result.ChildrenMap, 1)
-	workerNode := result.ChildrenMap[apitypes.CommPID{Comm: "worker", PID: 101}]
+	workerNode := result.ChildrenMap[armotypes.CommPID{Comm: "worker", PID: 101}]
 	assert.NotNil(t, workerNode)
 	assert.Equal(t, uint32(101), workerNode.PID)
 	assert.Len(t, workerNode.ChildrenMap, 1) // Only the path child, not all children
 
-	childNode := workerNode.ChildrenMap[apitypes.CommPID{Comm: "child", PID: 102}]
+	childNode := workerNode.ChildrenMap[armotypes.CommPID{Comm: "child", PID: 102}]
 	assert.NotNil(t, childNode)
 	assert.Equal(t, uint32(102), childNode.PID)
 	assert.Len(t, childNode.ChildrenMap, 1) // Only the path child, not all children
 
-	grandchildNode := childNode.ChildrenMap[apitypes.CommPID{Comm: "grandchild", PID: 103}]
+	grandchildNode := childNode.ChildrenMap[armotypes.CommPID{Comm: "grandchild", PID: 103}]
 	assert.NotNil(t, grandchildNode)
 	assert.Equal(t, uint32(103), grandchildNode.PID)
 	assert.Len(t, grandchildNode.ChildrenMap, 0) // Leaf node
@@ -344,23 +344,23 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetIsShimChild(t *testing.T) {
 	cpt.containerIdToShimPid[containerID] = shimPID
 
 	// Create a simple tree: shim (50) -> nginx (100)
-	nginx := &apitypes.Process{
+	nginx := &armotypes.Process{
 		PID:         100,
 		PPID:        50, // direct child of shim
 		Comm:        "nginx",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	shim := &apitypes.Process{
+	shim := &armotypes.Process{
 		PID:  50, // shim
 		PPID: 1,
 		Comm: "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx", PID: 100}: nginx,
 		},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -428,57 +428,57 @@ func TestContainerProcessTreeImpl_GetShimPIDForProcess_Success(t *testing.T) {
 	// Container 1: shim1 (50) -> nginx (100) -> worker (101)
 	// Container 2: shim2 (60) -> redis (200) -> child (201)
 
-	worker := &apitypes.Process{
+	worker := &armotypes.Process{
 		PID:         101,
 		PPID:        100,
 		Comm:        "nginx-worker",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	nginx := &apitypes.Process{
+	nginx := &armotypes.Process{
 		PID:  100,
 		PPID: 50, // parent is shim1
 		Comm: "nginx",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx-worker", PID: 101}: worker,
 		},
 	}
 
-	shim1 := &apitypes.Process{
+	shim1 := &armotypes.Process{
 		PID:  50, // shim1
 		PPID: 1,
 		Comm: "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx", PID: 100}: nginx,
 		},
 	}
 
-	child := &apitypes.Process{
+	child := &armotypes.Process{
 		PID:         201,
 		PPID:        200,
 		Comm:        "redis-child",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	redis := &apitypes.Process{
+	redis := &armotypes.Process{
 		PID:  200,
 		PPID: 60, // parent is shim2
 		Comm: "redis",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "redis-child", PID: 201}: child,
 		},
 	}
 
-	shim2 := &apitypes.Process{
+	shim2 := &armotypes.Process{
 		PID:  60, // shim2
 		PPID: 1,
 		Comm: "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "redis", PID: 200}: redis,
 		},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -520,14 +520,14 @@ func TestContainerProcessTreeImpl_GetShimPIDForProcess_NotFound(t *testing.T) {
 	cpt.containerIdToShimPid[containerID] = shimPID
 
 	// Create process tree
-	shim := &apitypes.Process{
+	shim := &armotypes.Process{
 		PID:         50, // shim
 		PPID:        1,
 		Comm:        "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -542,11 +542,11 @@ func TestContainerProcessTreeImpl_GetShimPIDForProcess_NotFound(t *testing.T) {
 	assert.Equal(t, uint32(0), shimPIDResult)
 
 	// Test with process that exists but is not under any container
-	outsideProcess := &apitypes.Process{
+	outsideProcess := &armotypes.Process{
 		PID:         200,
 		PPID:        1, // Direct child of init, not of shim
 		Comm:        "outside-process",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 	fullTree[200] = outsideProcess
 
@@ -564,32 +564,32 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_Success(t *testing.T) 
 	cpt.containerIdToShimPid[containerID] = shimPID
 
 	// Create process tree: shim (50) -> nginx (100) -> worker (101)
-	worker := &apitypes.Process{
+	worker := &armotypes.Process{
 		PID:         101,
 		PPID:        100,
 		Comm:        "nginx-worker",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	nginx := &apitypes.Process{
+	nginx := &armotypes.Process{
 		PID:  100,
 		PPID: 50, // parent is shim
 		Comm: "nginx",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx-worker", PID: 101}: worker,
 		},
 	}
 
-	shim := &apitypes.Process{
+	shim := &armotypes.Process{
 		PID:  50, // shim
 		PPID: 1,
 		Comm: "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx", PID: 100}: nginx,
 		},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -613,7 +613,7 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_Success(t *testing.T) 
 func TestContainerProcessTreeImpl_IsProcessUnderContainer_ContainerNotFound(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -633,7 +633,7 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_ShimNotFound(t *testin
 	shimPID := uint32(999) // Non-existent PID
 	cpt.containerIdToShimPid[containerID] = shimPID
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -653,14 +653,14 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_ProcessNotFound(t *tes
 	shimPID := uint32(50)
 	cpt.containerIdToShimPid[containerID] = shimPID
 
-	shim := &apitypes.Process{
+	shim := &armotypes.Process{
 		PID:         50, // shim
 		PPID:        1,
 		Comm:        "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -689,57 +689,57 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_Success(t *t
 	// Container 1: shim1 (50) -> nginx (100) -> worker (101)
 	// Container 2: shim2 (60) -> redis (200) -> child (201)
 
-	worker := &apitypes.Process{
+	worker := &armotypes.Process{
 		PID:         101,
 		PPID:        100,
 		Comm:        "nginx-worker",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	nginx := &apitypes.Process{
+	nginx := &armotypes.Process{
 		PID:  100,
 		PPID: 50, // parent is shim1
 		Comm: "nginx",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx-worker", PID: 101}: worker,
 		},
 	}
 
-	shim1 := &apitypes.Process{
+	shim1 := &armotypes.Process{
 		PID:  50, // shim1
 		PPID: 1,
 		Comm: "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "nginx", PID: 100}: nginx,
 		},
 	}
 
-	child := &apitypes.Process{
+	child := &armotypes.Process{
 		PID:         201,
 		PPID:        200,
 		Comm:        "redis-child",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	redis := &apitypes.Process{
+	redis := &armotypes.Process{
 		PID:  200,
 		PPID: 60, // parent is shim2
 		Comm: "redis",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "redis-child", PID: 201}: child,
 		},
 	}
 
-	shim2 := &apitypes.Process{
+	shim2 := &armotypes.Process{
 		PID:  60, // shim2
 		PPID: 1,
 		Comm: "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "redis", PID: 200}: redis,
 		},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -770,7 +770,7 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_NoContainers
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// No containers registered
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
@@ -792,21 +792,21 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_OutsideProce
 	cpt.containerIdToShimPid[containerID] = shimPID
 
 	// Create process tree with a process outside the container
-	shim := &apitypes.Process{
+	shim := &armotypes.Process{
 		PID:         50, // shim
 		PPID:        1,
 		Comm:        "containerd-shim",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	outsideProcess := &apitypes.Process{
+	outsideProcess := &armotypes.Process{
 		PID:         200,
 		PPID:        1, // Direct child of init, not of shim
 		Comm:        "outside-process",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
 
-	fullTree := map[uint32]*apitypes.Process{
+	fullTree := map[uint32]*armotypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,

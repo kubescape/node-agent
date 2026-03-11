@@ -1,18 +1,18 @@
 package utils
 
 import (
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 // FlattenChainToList converts a chain-structured process tree into an ordered list (root-first)
 // A chain is a single path from container init to the offending process
 // This is optimized for the common case where each alert provides one linear path
-func FlattenChainToList(root *apitypes.Process) []*apitypes.Process {
+func FlattenChainToList(root *armotypes.Process) []*armotypes.Process {
 	if root == nil {
 		return nil
 	}
 
-	result := make([]*apitypes.Process, 0, 10) // Typical chain length: container init -> parent -> ... -> offender
+	result := make([]*armotypes.Process, 0, 10) // Typical chain length: container init -> parent -> ... -> offender
 	current := root
 
 	for current != nil {
@@ -25,7 +25,7 @@ func FlattenChainToList(root *apitypes.Process) []*apitypes.Process {
 		}
 
 		// Get the single child in the chain
-		var child *apitypes.Process
+		var child *armotypes.Process
 		for _, c := range current.ChildrenMap {
 			child = c
 			break // Only one child in a chain
@@ -38,12 +38,12 @@ func FlattenChainToList(root *apitypes.Process) []*apitypes.Process {
 
 // CopyProcess creates a deep copy of a process node (without children)
 // Children map is initialized empty so the caller can rebuild the tree structure
-func CopyProcess(src *apitypes.Process) *apitypes.Process {
+func CopyProcess(src *armotypes.Process) *armotypes.Process {
 	if src == nil {
 		return nil
 	}
 
-	return &apitypes.Process{
+	return &armotypes.Process{
 		PID:         src.PID,
 		PPID:        src.PPID,
 		Comm:        src.Comm,
@@ -53,14 +53,14 @@ func CopyProcess(src *apitypes.Process) *apitypes.Process {
 		Cwd:         src.Cwd,
 		Gid:         copyUint32Ptr(src.Gid),
 		Uid:         copyUint32Ptr(src.Uid),
-		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+		ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 	}
 }
 
 // EnrichProcess updates target with non-empty fields from source
 // This is used when merging process information from multiple alerts
 // Only overwrites fields that are empty in target but present in source
-func EnrichProcess(target *apitypes.Process, source *apitypes.Process) {
+func EnrichProcess(target *armotypes.Process, source *armotypes.Process) {
 	if target == nil || source == nil {
 		return
 	}

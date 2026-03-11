@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
@@ -14,7 +14,7 @@ func TestNewEnrichedEvent(t *testing.T) {
 	mockEvent := &utils.StructEvent{ID: "test-event"}
 	timestamp := time.Now()
 	containerID := "test-container-123"
-	processTree := apitypes.Process{
+	processTree := armotypes.Process{
 		PID:  1234,
 		Comm: "test-process",
 		Path: "/usr/bin/test",
@@ -35,7 +35,7 @@ func TestEnrichedEvent_Structure(t *testing.T) {
 		Event:       &utils.StructEvent{ID: "open-event", EventType: utils.OpenEventType},
 		Timestamp:   time.Now(),
 		ContainerID: "container-456",
-		ProcessTree: apitypes.Process{
+		ProcessTree: armotypes.Process{
 			PID:  5678,
 			Comm: "open-process",
 			Path: "/bin/open",
@@ -72,7 +72,7 @@ func TestEnrichedEvent_EventTypes(t *testing.T) {
 
 	timestamp := time.Now()
 	containerID := "test-container"
-	processTree := apitypes.Process{PID: 1000, Comm: "test"}
+	processTree := armotypes.Process{PID: 1000, Comm: "test"}
 
 	for i, eventType := range eventTypes {
 		t.Run(string(eventType), func(t *testing.T) {
@@ -87,14 +87,14 @@ func TestEnrichedEvent_EventTypes(t *testing.T) {
 
 func TestEnrichedEvent_ProcessTreeIntegration(t *testing.T) {
 	// Test process tree integration
-	processTree := apitypes.Process{
+	processTree := armotypes.Process{
 		PID:     9999,
 		PPID:    1,
 		Comm:    "parent-process",
 		Path:    "/usr/bin/parent",
 		Cmdline: "parent-process --arg1 --arg2",
 		Cwd:     "/home/user",
-		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
 			{Comm: "child1", PID: 10001}: {
 				PID:  10001,
 				PPID: 9999,
@@ -122,12 +122,12 @@ func TestEnrichedEvent_ProcessTreeIntegration(t *testing.T) {
 	assert.Len(t, enrichedEvent.ProcessTree.ChildrenMap, 2)
 
 	// Verify children
-	child1, exists := enrichedEvent.ProcessTree.ChildrenMap[apitypes.CommPID{Comm: "child1", PID: 10001}]
+	child1, exists := enrichedEvent.ProcessTree.ChildrenMap[armotypes.CommPID{Comm: "child1", PID: 10001}]
 	assert.True(t, exists)
 	assert.Equal(t, uint32(10001), child1.PID)
 	assert.Equal(t, uint32(9999), child1.PPID)
 
-	child2, exists := enrichedEvent.ProcessTree.ChildrenMap[apitypes.CommPID{Comm: "child2", PID: 10002}]
+	child2, exists := enrichedEvent.ProcessTree.ChildrenMap[armotypes.CommPID{Comm: "child2", PID: 10002}]
 	assert.True(t, exists)
 	assert.Equal(t, uint32(10002), child2.PID)
 	assert.Equal(t, uint32(9999), child2.PPID)
@@ -138,9 +138,9 @@ func TestEnrichedEvent_TimestampOrdering(t *testing.T) {
 	baseTime := time.Now()
 
 	events := []*EnrichedEvent{
-		NewEnrichedEvent(&utils.StructEvent{ID: "third"}, baseTime.Add(2*time.Second), "container", apitypes.Process{}),
-		NewEnrichedEvent(&utils.StructEvent{ID: "first"}, baseTime, "container", apitypes.Process{}),
-		NewEnrichedEvent(&utils.StructEvent{ID: "second"}, baseTime.Add(1*time.Second), "container", apitypes.Process{}),
+		NewEnrichedEvent(&utils.StructEvent{ID: "third"}, baseTime.Add(2*time.Second), "container", armotypes.Process{}),
+		NewEnrichedEvent(&utils.StructEvent{ID: "first"}, baseTime, "container", armotypes.Process{}),
+		NewEnrichedEvent(&utils.StructEvent{ID: "second"}, baseTime.Add(1*time.Second), "container", armotypes.Process{}),
 	}
 
 	// Sort by timestamp (manually for test)
@@ -179,7 +179,7 @@ func TestEnrichedEvent_ContainerIDMatching(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			enrichedEvent := NewEnrichedEvent(&utils.StructEvent{ID: "test"}, time.Now(), tc.containerID, apitypes.Process{})
+			enrichedEvent := NewEnrichedEvent(&utils.StructEvent{ID: "test"}, time.Now(), tc.containerID, armotypes.Process{})
 
 			assert.Equal(t, tc.expected, enrichedEvent.ContainerID)
 		})
@@ -196,7 +196,7 @@ func TestEnrichedEvent_EventMetadata(t *testing.T) {
 		Timestamp: time.Now().UnixNano(),
 	}
 
-	enrichedEvent := NewEnrichedEvent(mockEvent, time.Now(), "test-container", apitypes.Process{PID: 1234})
+	enrichedEvent := NewEnrichedEvent(mockEvent, time.Now(), "test-container", armotypes.Process{PID: 1234})
 
 	// Verify original event metadata is preserved
 	originalEvent := enrichedEvent.Event.(*utils.StructEvent)
@@ -213,7 +213,7 @@ func TestEnrichedEvent_EventMetadata(t *testing.T) {
 
 func TestEnrichedEvent_EmptyProcessTree(t *testing.T) {
 	// Test handling of empty process tree
-	enrichedEvent := NewEnrichedEvent(&utils.StructEvent{ID: "no-process-tree", EventType: utils.OpenEventType}, time.Now(), "container-123", apitypes.Process{})
+	enrichedEvent := NewEnrichedEvent(&utils.StructEvent{ID: "no-process-tree", EventType: utils.OpenEventType}, time.Now(), "container-123", armotypes.Process{})
 
 	assert.Equal(t, utils.OpenEventType, enrichedEvent.Event.GetEventType())
 	assert.Equal(t, "container-123", enrichedEvent.ContainerID)

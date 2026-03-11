@@ -60,8 +60,7 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
 		cw.metrics.ReportContainerStart()
 
-		// Skip shared data setup for virtual host container (identified by ContainerPID == 1)
-		if notif.Container.Runtime.ContainerPID == 1 {
+		if utils.IsHostContainer(notif.Container) {
 			logger.L().Debug("ContainerWatcher.containerCallback - skipping shared data setup for virtual host container")
 			return
 		}

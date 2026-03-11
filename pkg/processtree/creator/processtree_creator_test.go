@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -22,17 +22,17 @@ type MockContainerProcessTree struct {
 	mock.Mock
 }
 
-func (m *MockContainerProcessTree) GetPidBranch(containerID string, targetPID uint32, processMap *maps.SafeMap[uint32, *apitypes.Process]) (apitypes.Process, error) {
+func (m *MockContainerProcessTree) GetPidBranch(containerID string, targetPID uint32, processMap *maps.SafeMap[uint32, *armotypes.Process]) (armotypes.Process, error) {
 	args := m.Called(containerID, targetPID, processMap)
-	return args.Get(0).(apitypes.Process), args.Error(1)
+	return args.Get(0).(armotypes.Process), args.Error(1)
 }
 
-func (m *MockContainerProcessTree) IsProcessUnderAnyContainerSubtree(pid uint32, processMap *maps.SafeMap[uint32, *apitypes.Process]) bool {
+func (m *MockContainerProcessTree) IsProcessUnderAnyContainerSubtree(pid uint32, processMap *maps.SafeMap[uint32, *armotypes.Process]) bool {
 	args := m.Called(pid, processMap)
 	return args.Bool(0)
 }
 
-func (m *MockContainerProcessTree) IsProcessUnderContainer(pid uint32, containerID string, processMap *maps.SafeMap[uint32, *apitypes.Process]) bool {
+func (m *MockContainerProcessTree) IsProcessUnderContainer(pid uint32, containerID string, processMap *maps.SafeMap[uint32, *armotypes.Process]) bool {
 	args := m.Called(pid, containerID, processMap)
 	return args.Bool(0)
 }
@@ -41,9 +41,9 @@ func (m *MockContainerProcessTree) ContainerCallback(notif containercollection.P
 	m.Called(notif)
 }
 
-func (m *MockContainerProcessTree) GetContainerTreeNodes(containerID string, fullTree *maps.SafeMap[uint32, *apitypes.Process]) ([]apitypes.Process, error) {
+func (m *MockContainerProcessTree) GetContainerTreeNodes(containerID string, fullTree *maps.SafeMap[uint32, *armotypes.Process]) ([]armotypes.Process, error) {
 	args := m.Called(containerID, fullTree)
-	return args.Get(0).([]apitypes.Process), args.Error(1)
+	return args.Get(0).([]armotypes.Process), args.Error(1)
 }
 
 func (m *MockContainerProcessTree) ListContainers() []string {
@@ -51,7 +51,7 @@ func (m *MockContainerProcessTree) ListContainers() []string {
 	return args.Get(0).([]string)
 }
 
-func (m *MockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) (uint32, bool) {
+func (m *MockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) (uint32, bool) {
 	args := m.Called(pid, fullTree)
 	return args.Get(0).(uint32), args.Bool(1)
 }
@@ -453,7 +453,7 @@ func TestGetPidBranch(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
-	expectedProcess := apitypes.Process{
+	expectedProcess := armotypes.Process{
 		PID:  1234,
 		Comm: "container-process",
 	}
@@ -533,7 +533,7 @@ func TestLinkProcessToParent(t *testing.T) {
 
 	// Verify link
 	assert.Len(t, parent.ChildrenMap, 1)
-	key := apitypes.CommPID{PID: 1234}
+	key := armotypes.CommPID{PID: 1234}
 	assert.Contains(t, parent.ChildrenMap, key)
 	assert.Equal(t, child, parent.ChildrenMap[key])
 
@@ -571,7 +571,7 @@ func TestUpdateProcessPPID(t *testing.T) {
 	assert.Len(t, oldParent.ChildrenMap, 0) // Removed from old parent
 	assert.Len(t, newParent.ChildrenMap, 1) // Added to new parent
 
-	key := apitypes.CommPID{PID: 1234}
+	key := armotypes.CommPID{PID: 1234}
 	assert.Contains(t, newParent.ChildrenMap, key)
 	assert.Equal(t, child, newParent.ChildrenMap[key])
 
@@ -591,17 +591,17 @@ func TestShallowCopyProcess(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create original process
-	original := &apitypes.Process{
+	original := &armotypes.Process{
 		PID:         1234,
 		PPID:        1000,
 		Comm:        "test-process",
 		Cmdline:     "test-process --arg",
-		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+		ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 	}
 
 	// Add a child to the original
-	child := &apitypes.Process{PID: 5678, Comm: "child"}
-	key := apitypes.CommPID{PID: 5678}
+	child := &armotypes.Process{PID: 5678, Comm: "child"}
+	key := armotypes.CommPID{PID: 5678}
 	original.ChildrenMap[key] = child
 
 	// Create shallow copy
@@ -686,7 +686,7 @@ func TestConcurrentAccess(t *testing.T) {
 	// Note: The process tree may contain additional processes (like PPID=1) that are auto-created
 	// so we check that we have at least the expected number of processes by counting non-nil entries
 	count := 0
-	processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
+	processMap.Range(func(pid uint32, proc *armotypes.Process) bool {
 		if proc != nil {
 			count++
 		}
@@ -822,7 +822,7 @@ func TestReparentingLogicDirect(t *testing.T) {
 		assert.Equal(t, uint32(1234), grandchild.PPID)
 
 		// Test reparenting logic directly
-		children := []*apitypes.Process{grandchild}
+		children := []*armotypes.Process{grandchild}
 		newParentPID, err := impl.reparentingStrategies.Reparent(1234, children, containerTree, &impl.processMap)
 
 		assert.NoError(t, err)
@@ -866,7 +866,7 @@ func TestReparentingLogicDirect(t *testing.T) {
 		assert.Equal(t, uint32(1234), child.PPID)
 
 		// Test reparenting logic directly
-		children := []*apitypes.Process{child}
+		children := []*armotypes.Process{child}
 		newParentPID, err := impl.reparentingStrategies.Reparent(1234, children, containerTree, &impl.processMap)
 
 		assert.NoError(t, err)
@@ -926,7 +926,7 @@ func TestReparentingLogicDirect(t *testing.T) {
 		assert.Equal(t, uint32(100), worker.PPID)
 
 		// Test reparenting logic directly
-		children := []*apitypes.Process{worker}
+		children := []*armotypes.Process{worker}
 		newParentPID, err := impl.reparentingStrategies.Reparent(100, children, mockContainerTree, &impl.processMap)
 
 		assert.NoError(t, err)
@@ -975,7 +975,7 @@ func TestComplexProcessTree(t *testing.T) {
 
 	// Count entries manually since SafeMap doesn't support len()
 	count := 0
-	processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
+	processMap.Range(func(pid uint32, proc *armotypes.Process) bool {
 		if proc != nil {
 			count++
 		}
@@ -1086,7 +1086,7 @@ func TestPerformanceWithManyProcesses(t *testing.T) {
 	// Verify all processes were created (plus the parent process with PID 1)
 	processMap := creator.GetProcessMap()
 	count := 0
-	processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
+	processMap.Range(func(pid uint32, proc *armotypes.Process) bool {
 		if proc != nil {
 			count++
 		}

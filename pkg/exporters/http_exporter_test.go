@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -32,22 +32,22 @@ func TestSendRuleAlert(t *testing.T) {
 	// Create an HTTPExporter with the mock server URL
 	exporter, err := NewHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
-	}, "", "", nil, "")
+	}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
 	failedRule := &types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+		RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
 			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
 			PodNamespace:  "testnamespace",
 			PodName:       "testpodname",
 		},
-		RuleAlert: apitypes.RuleAlert{
+		RuleAlert: armotypes.RuleAlert{
 			RuleDescription: "Application profile is missing",
 		},
 	}
@@ -93,21 +93,21 @@ func TestSendRuleAlertRateReached(t *testing.T) {
 	exporter, err := NewHTTPExporter(HTTPExporterConfig{
 		URL:                server.URL,
 		MaxAlertsPerMinute: 1,
-	}, "", "", nil, "")
+	}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
 	failedRule := &types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+		RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
 			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
 			PodName:       "testpodname",
 		},
-		RuleAlert: apitypes.RuleAlert{
+		RuleAlert: armotypes.RuleAlert{
 			RuleDescription: "Application profile is missing",
 		},
 	}
@@ -159,12 +159,12 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 	// Create an HTTPExporter with the mock server URL
 	exporter, err := NewHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
-	}, "", "", nil, "")
+	}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 
 	// Create a mock malware description
 	malwareDesc := &mmtypes.GenericMalwareResult{
-		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BasicRuntimeAlert: armotypes.BaseRuntimeAlert{
 			AlertName:  "testmalware",
 			Size:       "2MiB",
 			MD5Hash:    "testmalwarehash",
@@ -172,10 +172,10 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 			SHA256Hash: "testmalwarehash",
 		},
 		TriggerEvent: &utils.StructEvent{},
-		MalwareRuntimeAlert: apitypes.MalwareAlert{
+		MalwareRuntimeAlert: armotypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+		RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testmalwarecontainerid",
 			Namespace:     "testmalwarenamespace",
 			PodName:       "testmalwarepodname",
@@ -213,13 +213,13 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 
 func TestValidateHTTPExporterConfig(t *testing.T) {
 	// Test case: URL is empty
-	_, err := NewHTTPExporter(HTTPExporterConfig{}, "", "", nil, "")
+	_, err := NewHTTPExporter(HTTPExporterConfig{}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
 	assert.Error(t, err)
 
 	// Test case: URL is not empty
 	exp, err := NewHTTPExporter(HTTPExporterConfig{
 		URL: "http://localhost:9093",
-	}, "cluster", "node", nil, "test-cluster-uid")
+	}, "cluster", "node", nil, "test-cluster-uid", armotypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 	assert.Equal(t, "POST", exp.config.Method)
 	assert.Equal(t, 5, exp.config.TimeoutSeconds)
@@ -241,7 +241,7 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 				Value: "Bearer token",
 			},
 		},
-	}, "", "", nil, "")
+	}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
 	assert.NoError(t, err)
 	assert.Equal(t, "PUT", exp.config.Method)
 	assert.Equal(t, 2, exp.config.TimeoutSeconds)
@@ -252,6 +252,6 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 	_, err = NewHTTPExporter(HTTPExporterConfig{
 		URL:    "http://localhost:9093",
 		Method: "DELETE",
-	}, "", "", nil, "")
+	}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
 	assert.Error(t, err)
 }
