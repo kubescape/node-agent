@@ -7,6 +7,7 @@ The node-agent supports cryptographic signing of Kubernetes objects (profiles an
 Signed objects can be:
 - **ApplicationProfiles** - defining allowed application behavior
 - **SeccompProfiles** - defining allowed syscalls
+- **NetworkNeighborhoods** - defining allowed network traffic
 - **Rules** - defining security rules for the Rule Manager
 - Any future object types that implement the `SignableObject` interface
 
@@ -46,7 +47,8 @@ When verification is enabled:
 
 1. **ApplicationProfiles**: Verified in the ApplicationProfileCache when fetched from storage.
 2. **SeccompProfiles**: Verified when fetched from storage.
-3. **Rules**: Verified by the RulesWatcher when syncing from the cluster.
+3. **NetworkNeighborhoods**: Verified in the NetworkNeighborhoodCache when fetched from storage.
+4. **Rules**: Verified by the RulesWatcher when syncing from the cluster.
 
 On **verification failure**:
 - Object is **skipped** (not loaded or processed)
@@ -195,7 +197,7 @@ sign-object [sign] [flags]
 | `--output` | string | required | Output file for signed object |
 | `--keyless` | bool | false | Use keyless signing (OIDC) |
 | `--key` | string | - | Path to private key file |
-| `--type` | string | auto | Object type: `applicationprofile`, `seccompprofile`, `rules`, or `auto` |
+| `--type` | string | auto | Object type: `applicationprofile`, `seccompprofile`, `networkneighborhood`, `rules`, or `auto` |
 | `--verbose` | bool | false | Enable verbose logging |
 
 **Examples:**
@@ -230,7 +232,7 @@ sign-object verify [flags]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--file` | string | required | Signed object YAML file |
-| `--type` | string | auto | Object type: `applicationprofile`, `seccompprofile`, `rules`, or `auto` |
+| `--type` | string | auto | Object type: `applicationprofile`, `seccompprofile`, `networkneighborhood`, `rules`, or `auto` |
 | `--strict` | bool | true | Require trusted issuer/identity |
 | `--verbose` | bool | false | Enable verbose logging |
 
@@ -282,7 +284,7 @@ sign-object extract-signature [flags]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--file` | string | required | Signed object YAML file |
-| `--type` | string | auto | Object type: `applicationprofile`, `seccompprofile`, `rules`, or `auto` |
+| `--type` | string | auto | Object type: `applicationprofile`, `seccompprofile`, `networkneighborhood`, `rules`, or `auto` |
 | `--json` | bool | false | Output as JSON |
 
 **Examples:**
@@ -385,7 +387,37 @@ sign-object --keyless \
 sign-object verify --file signed-rules.yaml
 ```
 
-### Example 4: Batch Signing in CI/CD
+### Example 4: Sign NetworkNeighborhood with Keyless
+
+```bash
+# 1. Create NetworkNeighborhood
+cat > my-nn.yaml << 'EOF'
+apiVersion: softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nginx-nn
+  namespace: default
+spec:
+  containers:
+  - name: nginx
+    egress:
+    - identifier: "dns:8.8.8.8"
+      ipAddress: "8.8.8.8"
+      ports:
+      - port: 53
+        protocol: UDP
+EOF
+
+# 2. Sign with keyless
+sign-object --keyless \
+  --file my-nn.yaml \
+  --output signed-nn.yaml
+
+# 3. Verify
+sign-object verify --file signed-nn.yaml
+```
+
+### Example 5: Batch Signing in CI/CD
 
 ```yaml
 # .github/workflows/sign-objects.yml
@@ -565,6 +597,7 @@ The webhook would:
 | `pkg/signature/verify.go` | Public verification API and cache integration |
 | `pkg/signature/profiles/applicationprofile_adapter.go` | ApplicationProfile adapter |
 | `pkg/signature/profiles/seccompprofile_adapter.go` | SeccompProfile adapter |
+| `pkg/signature/profiles/networkneighborhood_adapter.go` | NetworkNeighborhood adapter |
 | `pkg/signature/profiles/rules_adapter.go` | Rules adapter |
 | `cmd/sign-object/main.go` | CLI tool for object signing |
 

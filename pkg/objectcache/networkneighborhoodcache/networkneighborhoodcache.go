@@ -17,6 +17,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/resourcelocks"
+	"github.com/kubescape/node-agent/pkg/signature"
+	"github.com/kubescape/node-agent/pkg/signature/profiles"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -238,6 +240,19 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 				continue
 			}
 
+			// Verify signature if enabled
+			if nnc.cfg.EnableSignatureVerification {
+				adapter := profiles.NewNetworkNeighborhoodAdapter(fullNN)
+				if err := signature.VerifyObjectStrict(adapter); err != nil {
+					logger.L().Warning("network neighborhood signature verification failed, skipping",
+						helpers.String("workloadID", workloadID),
+						helpers.String("namespace", namespace),
+						helpers.String("name", fullNN.Name),
+						helpers.Error(err))
+					continue
+				}
+			}
+
 			nnc.workloadIDToNetworkNeighborhood.Set(workloadID, fullNN)
 			logger.L().Debug("updated network neighborhood in cache",
 				helpers.String("workloadID", workloadID),
@@ -310,6 +325,20 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 	}
 	// Merge the network neighborhoods
 	mergedNN := nnc.performMerge(originalNN, fullUserNN)
+
+	// Verify signature if enabled
+	if nnc.cfg.EnableSignatureVerification {
+		adapter := profiles.NewNetworkNeighborhoodAdapter(mergedNN)
+		if err := signature.VerifyObjectStrict(adapter); err != nil {
+			logger.L().Warning("merged network neighborhood signature verification failed, skipping",
+				helpers.String("workloadID", toMerge.wlid),
+				helpers.String("namespace", nn.Namespace),
+				helpers.String("name", mergedNN.Name),
+				helpers.Error(err))
+			return
+		}
+	}
+
 	// Update the cache with the merged network neighborhood
 	nnc.workloadIDToNetworkNeighborhood.Set(toMerge.wlid, mergedNN)
 	// Update profile state for the merged profile
