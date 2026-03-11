@@ -1587,6 +1587,43 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	const ruleName = "Files Access Anomalies in container"
 	const profileName = "nginx-regex-profile"
 
+	// --- result tracking for end-of-test summary ---
+	type subtestResult struct {
+		name        string
+		profilePath string
+		filePath    string
+		expectAlert bool
+		passed      bool
+		detail      string
+	}
+	var results []subtestResult
+	addResult := func(name, profilePath, filePath string, expectAlert, passed bool, detail string) {
+		results = append(results, subtestResult{name, profilePath, filePath, expectAlert, passed, detail})
+	}
+	defer func() {
+		t.Log("\n========== Test_27 Summary ==========")
+		anyFailed := false
+		for _, r := range results {
+			status := "PASS"
+			if !r.passed {
+				status = "FAIL"
+				anyFailed = true
+			}
+			expect := "expect alert"
+			if !r.expectAlert {
+				expect = "expect NO alert"
+			}
+			t.Logf("  [%s] %-35s profile=%-25s file=%-25s %s", status, r.name, r.profilePath, r.filePath, expect)
+			if !r.passed {
+				t.Logf("         -> %s", r.detail)
+			}
+		}
+		if !anyFailed {
+			t.Log("  All subtests passed.")
+		}
+		t.Log("======================================")
+	}()
+
 	// deployWithProfile creates a user-defined ApplicationProfile with the
 	// given Opens list, deploys nginx with the kubescape.io/user-defined-profile
 	// label pointing at it, and waits for the pod + cache to be ready.
@@ -1617,12 +1654,12 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
 			context.Background(), profile, metav1.CreateOptions{})
-		require.NoError(t, err, "create user-defined profile")
+		require.NoError(t, err, "create user-defined profile %q in ns %s", profileName, ns.Name)
 
 		wl, err := testutils.NewTestWorkload(ns.Name,
 			path.Join(utils.CurrentDir(), "resources/nginx-user-profile-deployment.yaml"))
-		require.NoError(t, err, "create workload")
-		require.NoError(t, wl.WaitForReady(80), "workload not ready")
+		require.NoError(t, err, "create workload in ns %s", ns.Name)
+		require.NoError(t, wl.WaitForReady(80), "workload not ready in ns %s", ns.Name)
 
 		time.Sleep(20 * time.Second) // let node-agent pick up the profile
 		return wl
@@ -1631,11 +1668,26 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	// triggerAndGetAlerts execs cat on the given path and returns the alerts.
 	triggerAndGetAlerts := func(t *testing.T, wl *testutils.TestWorkload, filePath string) []testutils.Alert {
 		t.Helper()
-		_, _, _ = wl.ExecIntoPod([]string{"cat", filePath}, "nginx")
+		stdout, stderr, err := wl.ExecIntoPod([]string{"cat", filePath}, "nginx")
+		if err != nil {
+			t.Errorf("exec 'cat %s' in container nginx failed: %v (stdout=%q stderr=%q)", filePath, err, stdout, stderr)
+		}
 		time.Sleep(30 * time.Second)
 		alerts, err := testutils.GetAlerts(wl.Namespace)
-		require.NoError(t, err, "get alerts")
+		require.NoError(t, err, "get alerts from ns %s", wl.Namespace)
 		return alerts
+	}
+
+	// hasAlert checks whether an R0002 alert exists for comm=cat, container=nginx.
+	hasAlert := func(alerts []testutils.Alert) bool {
+		for _, a := range alerts {
+			if a.Labels["rule_name"] == ruleName &&
+				a.Labels["comm"] == "cat" &&
+				a.Labels["container_name"] == "nginx" {
+				return true
+			}
+		}
+		return false
 	}
 
 	// ---------------------------------------------------------------
@@ -1653,14 +1705,24 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		profile, err := wl.GetApplicationProfile()
 		require.NoError(t, err, "get application profile")
 
+		passed := true
 		for _, container := range profile.Spec.Containers {
 			for _, open := range container.Opens {
-				assert.True(t, strings.HasPrefix(open.Path, "/"),
-					"recorded path must be absolute: got %q (container %s)", open.Path, container.Name)
-				assert.NotEqual(t, ".", open.Path,
-					"recorded path must not be relative dot (container %s)", container.Name)
+				if !strings.HasPrefix(open.Path, "/") {
+					t.Errorf("recorded path must be absolute: got %q (container %s)", open.Path, container.Name)
+					passed = false
+				}
+				if open.Path == "." {
+					t.Errorf("recorded path must not be relative dot: got %q (container %s)", open.Path, container.Name)
+					passed = false
+				}
 			}
 		}
+		detail := ""
+		if !passed {
+			detail = "found non-absolute or '.' paths in recorded profile"
+		}
+		addResult("recorded_profile_absolute_paths", "(auto-learned)", "(nginx startup)", false, passed, detail)
 	})
 
 	// ---------------------------------------------------------------
@@ -1669,53 +1731,84 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	//     different Opens pattern and verifies R0002 behaviour.
 	// ---------------------------------------------------------------
 
-	// User-defined profiles bypass the learning period, so alerts arrive
-	// with fail_on_profile=false (no "completed" profile status).
-	failOnProfile := []bool{false}
-
-	// 1b-1: Exact path — profile has the exact file ⇒ no alert.
+	// 1b-1: Exact path — profile has the exact file => no alert.
 	t.Run("exact_path_match", func(t *testing.T) {
+		profilePath := "/etc/nginx/nginx.conf"
+		filePath := "/etc/nginx/nginx.conf"
 		wl := deployWithProfile(t, []v1beta1.OpenCalls{
-			{Path: "/etc/nginx/nginx.conf", Flags: []string{"O_RDONLY"}},
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
 		})
-		alerts := triggerAndGetAlerts(t, wl, "/etc/nginx/nginx.conf")
-		testutils.AssertNotContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if got {
+			t.Errorf("expected NO R0002 alert: profile allows %q, opened %q, but alert fired", profilePath, filePath)
+		}
+		addResult("exact_path_match", profilePath, filePath, false, !got,
+			fmt.Sprintf("got %d alerts, expected none for cat", len(alerts)))
 	})
 
-	// 1b-2: Exact path — profile has a DIFFERENT file ⇒ alert.
+	// 1b-2: Exact path — profile has a DIFFERENT file => alert.
 	t.Run("exact_path_mismatch", func(t *testing.T) {
+		profilePath := "/etc/nginx/nginx.conf"
+		filePath := "/etc/hostname"
 		wl := deployWithProfile(t, []v1beta1.OpenCalls{
-			{Path: "/etc/nginx/nginx.conf", Flags: []string{"O_RDONLY"}},
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
 		})
-		alerts := triggerAndGetAlerts(t, wl, "/etc/hostname")
-		testutils.AssertContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if !got {
+			t.Errorf("expected R0002 alert: profile only allows %q, opened %q, but no alert", profilePath, filePath)
+		}
+		addResult("exact_path_mismatch", profilePath, filePath, true, got,
+			fmt.Sprintf("got %d alerts, expected at least one for cat", len(alerts)))
 	})
 
 	// 1b-3: Ellipsis ⋯ matches single segment — /etc/⋯ covers /etc/hostname.
 	t.Run("ellipsis_single_segment_match", func(t *testing.T) {
+		profilePath := "/etc/" + dynamicpathdetector.DynamicIdentifier
+		filePath := "/etc/hostname"
 		wl := deployWithProfile(t, []v1beta1.OpenCalls{
-			{Path: "/etc/" + dynamicpathdetector.DynamicIdentifier, Flags: []string{"O_RDONLY"}},
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
 		})
-		alerts := triggerAndGetAlerts(t, wl, "/etc/hostname")
-		testutils.AssertNotContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if got {
+			t.Errorf("expected NO R0002 alert: profile %q should match %q (single segment), but alert fired", profilePath, filePath)
+		}
+		addResult("ellipsis_single_segment_match", profilePath, filePath, false, !got,
+			fmt.Sprintf("got %d alerts, expected none for cat", len(alerts)))
 	})
 
 	// 1b-4: Ellipsis ⋯ rejects multi-segment — /etc/⋯ does NOT cover
 	//        /etc/nginx/nginx.conf (two segments past /etc/).
 	t.Run("ellipsis_rejects_multi_segment", func(t *testing.T) {
+		profilePath := "/etc/" + dynamicpathdetector.DynamicIdentifier
+		filePath := "/etc/nginx/nginx.conf"
 		wl := deployWithProfile(t, []v1beta1.OpenCalls{
-			{Path: "/etc/" + dynamicpathdetector.DynamicIdentifier, Flags: []string{"O_RDONLY"}},
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
 		})
-		alerts := triggerAndGetAlerts(t, wl, "/etc/nginx/nginx.conf")
-		testutils.AssertContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if !got {
+			t.Errorf("expected R0002 alert: profile %q should NOT match %q (two segments), but no alert", profilePath, filePath)
+		}
+		addResult("ellipsis_rejects_multi_segment", profilePath, filePath, true, got,
+			fmt.Sprintf("got %d alerts, expected at least one for cat", len(alerts)))
 	})
 
 	// 1b-5: Wildcard * matches any depth — /etc/* covers /etc/nginx/nginx.conf.
 	t.Run("wildcard_matches_deep_path", func(t *testing.T) {
+		profilePath := "/etc/*"
+		filePath := "/etc/nginx/nginx.conf"
 		wl := deployWithProfile(t, []v1beta1.OpenCalls{
-			{Path: "/etc/*", Flags: []string{"O_RDONLY"}},
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
 		})
-		alerts := triggerAndGetAlerts(t, wl, "/etc/nginx/nginx.conf")
-		testutils.AssertNotContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if got {
+			t.Errorf("expected NO R0002 alert: profile %q should match %q (wildcard), but alert fired", profilePath, filePath)
+		}
+		addResult("wildcard_matches_deep_path", profilePath, filePath, false, !got,
+			fmt.Sprintf("got %d alerts, expected none for cat", len(alerts)))
 	})
 }
