@@ -153,7 +153,7 @@ jobs:
       - name: Update storage dependency
         #if: ${{ inputs.STORAGE_REF != '' && inputs.STORAGE_REF != 'latest' }}
         env:
-          STORAGE_REF: ${{ inputs.STORAGE_REF }}
+          STORAGE_REF: ${{ inputs.STORAGE_REF || 'a042ebaa0ec9280d69eac81b5eeaa4d0dfd1c558' }}
           GONOSUMCHECK: "*"
           GOFLAGS: ""
         run: |
