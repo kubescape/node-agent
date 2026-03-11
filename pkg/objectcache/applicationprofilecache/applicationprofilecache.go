@@ -410,6 +410,9 @@ func (apc *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, co
 func (apc *ApplicationProfileCacheImpl) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
+		if utils.IsHostContainer(notif.Container) {
+			return
+		}
 		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}

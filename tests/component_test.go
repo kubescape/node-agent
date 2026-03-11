@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"path"
 	"reflect"
-	"strings"
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1820,12 +1820,13 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 // label (kubescape.io/user-defined-profile).
 //
 // Subtests:
-//   a. both_defined_allowed_activity   — AP + NN provided; allowed exec+DNS → no alerts
-//   b. both_defined_unknown_exec       — AP + NN provided; unknown exec → R0001
-//   c. both_defined_unknown_dns        — AP + NN provided; unknown DNS → R0005
-//   d. nn_only_allowed_dns             — only NN provided; allowed DNS → no R0005
-//   e. nn_only_unknown_dns             — only NN provided; unknown DNS → R0005
-//   f. profile_only_unknown_dns        — only AP provided (NN auto-learns); unknown DNS → R0005
+//
+//	a. both_defined_allowed_activity   — AP + NN provided; allowed exec+DNS → no alerts
+//	b. both_defined_unknown_exec       — AP + NN provided; unknown exec → R0001
+//	c. both_defined_unknown_dns        — AP + NN provided; unknown DNS → R0005
+//	d. nn_only_allowed_dns             — only NN provided; allowed DNS → no R0005
+//	e. nn_only_unknown_dns             — only NN provided; unknown DNS → R0005
+//	f. profile_only_unknown_dns        — only AP provided (NN auto-learns); unknown DNS → R0005
 func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)

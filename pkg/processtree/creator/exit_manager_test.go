@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -21,23 +21,23 @@ import (
 type mockContainerProcessTree struct{}
 
 func (m *mockContainerProcessTree) ContainerCallback(notif containercollection.PubSubEvent) {}
-func (m *mockContainerProcessTree) GetContainerTreeNodes(containerID string, fullTree *maps.SafeMap[uint32, *apitypes.Process]) ([]apitypes.Process, error) {
-	return []apitypes.Process{}, nil
+func (m *mockContainerProcessTree) GetContainerTreeNodes(containerID string, fullTree *maps.SafeMap[uint32, *armotypes.Process]) ([]armotypes.Process, error) {
+	return []armotypes.Process{}, nil
 }
-func (m *mockContainerProcessTree) GetPidBranch(containerID string, targetPID uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) (apitypes.Process, error) {
-	return apitypes.Process{}, nil
+func (m *mockContainerProcessTree) GetPidBranch(containerID string, targetPID uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) (armotypes.Process, error) {
+	return armotypes.Process{}, nil
 }
 func (m *mockContainerProcessTree) ListContainers() []string {
 	return []string{}
 }
-func (m *mockContainerProcessTree) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
+func (m *mockContainerProcessTree) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) bool {
 	return false
 }
-func (m *mockContainerProcessTree) IsProcessUnderContainer(pid uint32, containerID string, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
+func (m *mockContainerProcessTree) IsProcessUnderContainer(pid uint32, containerID string, fullTree *maps.SafeMap[uint32, *armotypes.Process]) bool {
 	return false
 }
 
-func (m *mockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) (uint32, bool) {
+func (m *mockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) (uint32, bool) {
 	return 0, false
 }
 func (m *mockContainerProcessTree) GetPidByContainerID(containerID string) (uint32, error) {
@@ -47,7 +47,7 @@ func (m *mockContainerProcessTree) GetPidByContainerID(containerID string) (uint
 // Mock reparenting logic
 type mockReparentingLogic struct{}
 
-func (m *mockReparentingLogic) Reparent(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap *maps.SafeMap[uint32, *apitypes.Process]) (uint32, error) {
+func (m *mockReparentingLogic) Reparent(exitingPID uint32, children []*armotypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap *maps.SafeMap[uint32, *armotypes.Process]) (uint32, error) {
 	return 1, nil // Always reparent to init
 }
 func (m *mockReparentingLogic) AddStrategy(strategy reparenting.ReparentingStrategy) {}
@@ -67,7 +67,7 @@ func createTestProcessTreeCreator() *processTreeCreatorImpl {
 	}
 
 	return &processTreeCreatorImpl{
-		processMap:            maps.SafeMap[uint32, *apitypes.Process]{},
+		processMap:            maps.SafeMap[uint32, *armotypes.Process]{},
 		containerTree:         &mockContainerProcessTree{},
 		reparentingStrategies: &mockReparentingLogic{},
 		pendingExits:          make(map[uint32]*pendingExit),
@@ -76,12 +76,12 @@ func createTestProcessTreeCreator() *processTreeCreatorImpl {
 }
 
 // Helper function to create a test process
-func createTestProcess(pid uint32, ppid uint32, comm string) *apitypes.Process {
-	return &apitypes.Process{
+func createTestProcess(pid uint32, ppid uint32, comm string) *armotypes.Process {
+	return &armotypes.Process{
 		PID:         pid,
 		PPID:        ppid,
 		Comm:        comm,
-		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+		ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 	}
 }
 
@@ -118,7 +118,7 @@ func TestExitManager_AddPendingExit(t *testing.T) {
 	// Create a test process
 	parent := createTestProcess(100, 1, "parent")
 	child := createTestProcess(200, 100, "child")
-	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child
+	parent.ChildrenMap[armotypes.CommPID{PID: 200}] = child
 
 	pt.processMap.Set(100, parent)
 	pt.processMap.Set(200, child)
@@ -159,7 +159,7 @@ func TestExitManager_MaxPendingExits(t *testing.T) {
 			PID:         pid,
 			StartTimeNs: uint64(i),
 			Timestamp:   time.Now().Add(-10 * time.Minute), // Old timestamp
-			Children:    []*apitypes.Process{},
+			Children:    []*armotypes.Process{},
 		}
 	}
 
@@ -184,8 +184,8 @@ func TestExitManager_RemoveProcessFromPending(t *testing.T) {
 	child1 := createTestProcess(200, 100, "child1")
 	child2 := createTestProcess(300, 100, "child2")
 
-	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
-	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
+	parent.ChildrenMap[armotypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[armotypes.CommPID{PID: 300}] = child2
 
 	pt.processMap.Set(100, parent)
 	pt.processMap.Set(200, child1)
@@ -197,7 +197,7 @@ func TestExitManager_RemoveProcessFromPending(t *testing.T) {
 		PID:         100,
 		StartTimeNs: 12345,
 		Timestamp:   time.Now(),
-		Children:    []*apitypes.Process{child1, child2},
+		Children:    []*armotypes.Process{child1, child2},
 	}
 	pt.mutex.Unlock()
 
@@ -239,7 +239,7 @@ func TestExitManager_PerformExitCleanup(t *testing.T) {
 		PID:         100,
 		StartTimeNs: 12345,
 		Timestamp:   oldTime,
-		Children:    []*apitypes.Process{},
+		Children:    []*armotypes.Process{},
 	}
 
 	// Add recent pending exit (should NOT be cleaned up)
@@ -247,7 +247,7 @@ func TestExitManager_PerformExitCleanup(t *testing.T) {
 		PID:         200,
 		StartTimeNs: 67890,
 		Timestamp:   recentTime,
-		Children:    []*apitypes.Process{},
+		Children:    []*armotypes.Process{},
 	}
 	pt.mutex.Unlock()
 
@@ -302,13 +302,13 @@ func TestExitManager_ForceCleanupAllPendingExits(t *testing.T) {
 		PID:         100,
 		StartTimeNs: 12345,
 		Timestamp:   time.Now(),
-		Children:    []*apitypes.Process{},
+		Children:    []*armotypes.Process{},
 	}
 	pt.pendingExits[200] = &pendingExit{
 		PID:         200,
 		StartTimeNs: 67890,
 		Timestamp:   time.Now(),
-		Children:    []*apitypes.Process{},
+		Children:    []*armotypes.Process{},
 	}
 	pt.mutex.Unlock()
 
@@ -400,8 +400,8 @@ func TestExitManager_HandleExitEventFlow(t *testing.T) {
 	child1 := createTestProcess(200, 100, "child1")
 	child2 := createTestProcess(300, 100, "child2")
 
-	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
-	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
+	parent.ChildrenMap[armotypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[armotypes.CommPID{PID: 300}] = child2
 
 	pt.processMap.Set(100, parent)
 	pt.processMap.Set(200, child1)
@@ -443,10 +443,10 @@ func TestExitManager_ReparentingDuringCleanup(t *testing.T) {
 	grandchild := createTestProcess(400, 300, "grandchild")
 
 	// Set up relationships
-	grandparent.ChildrenMap[apitypes.CommPID{PID: 100}] = parent
-	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
-	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
-	child2.ChildrenMap[apitypes.CommPID{PID: 400}] = grandchild
+	grandparent.ChildrenMap[armotypes.CommPID{PID: 100}] = parent
+	parent.ChildrenMap[armotypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[armotypes.CommPID{PID: 300}] = child2
+	child2.ChildrenMap[armotypes.CommPID{PID: 400}] = grandchild
 
 	// Add all to process map
 	pt.processMap.Set(1, grandparent)
@@ -461,7 +461,7 @@ func TestExitManager_ReparentingDuringCleanup(t *testing.T) {
 		PID:         100,
 		StartTimeNs: 12345,
 		Timestamp:   time.Now().Add(-10 * time.Minute), // Old enough to be cleaned up
-		Children:    []*apitypes.Process{child1, child2},
+		Children:    []*armotypes.Process{child1, child2},
 	}
 	pt.mutex.Unlock()
 
@@ -503,7 +503,7 @@ func TestExitManager_CleanupLoop(t *testing.T) {
 		PID:         100,
 		StartTimeNs: 12345,
 		Timestamp:   time.Now().Add(-cleanupDelay - time.Minute), // Old enough to be cleaned up
-		Children:    []*apitypes.Process{},
+		Children:    []*armotypes.Process{},
 	}
 	pt.mutex.Unlock()
 
@@ -526,8 +526,8 @@ func TestExitManager_CleanupChildrenMapWithEmptyComm(t *testing.T) {
 	child2 := createTestProcess(300, 100, "child2")
 
 	// Add children to parent's ChildrenMap using only PID (Comm is empty)
-	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
-	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
+	parent.ChildrenMap[armotypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[armotypes.CommPID{PID: 300}] = child2
 
 	pt.processMap.Set(100, parent)
 	pt.processMap.Set(200, child1)
@@ -578,9 +578,9 @@ func TestExitManager_CleanupChildrenMapWithMixedCommValues(t *testing.T) {
 
 	// Add children with mixed Comm values (some empty, some not)
 	// This tests that the cleanup works regardless of Comm values
-	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1 // Empty Comm
-	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2 // Empty Comm
-	parent.ChildrenMap[apitypes.CommPID{PID: 400}] = child3 // Empty Comm
+	parent.ChildrenMap[armotypes.CommPID{PID: 200}] = child1 // Empty Comm
+	parent.ChildrenMap[armotypes.CommPID{PID: 300}] = child2 // Empty Comm
+	parent.ChildrenMap[armotypes.CommPID{PID: 400}] = child3 // Empty Comm
 
 	pt.processMap.Set(100, parent)
 	pt.processMap.Set(200, child1)
@@ -628,8 +628,8 @@ func TestExitManager_RemoveFromParentChildrenMap(t *testing.T) {
 	grandchild := createTestProcess(300, 200, "grandchild")
 
 	// Set up parent-child relationships
-	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child
-	child.ChildrenMap[apitypes.CommPID{PID: 300}] = grandchild
+	parent.ChildrenMap[armotypes.CommPID{PID: 200}] = child
+	child.ChildrenMap[armotypes.CommPID{PID: 300}] = grandchild
 
 	// Add all processes to the process map
 	pt.processMap.Set(100, parent)
@@ -639,8 +639,8 @@ func TestExitManager_RemoveFromParentChildrenMap(t *testing.T) {
 	// Verify initial state
 	assert.Len(t, parent.ChildrenMap, 1, "Parent should have 1 child initially")
 	assert.Len(t, child.ChildrenMap, 1, "Child should have 1 grandchild initially")
-	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should contain child")
-	assert.Contains(t, child.ChildrenMap, apitypes.CommPID{PID: 300}, "Child should contain grandchild")
+	assert.Contains(t, parent.ChildrenMap, armotypes.CommPID{PID: 200}, "Parent should contain child")
+	assert.Contains(t, child.ChildrenMap, armotypes.CommPID{PID: 300}, "Child should contain grandchild")
 
 	// Test case 1: Exit the child process - should remove it from parent's ChildrenMap
 	// First, add the child to pending exits
@@ -649,7 +649,7 @@ func TestExitManager_RemoveFromParentChildrenMap(t *testing.T) {
 		PID:         200,
 		StartTimeNs: 12345,
 		Timestamp:   time.Now(),
-		Children:    []*apitypes.Process{grandchild},
+		Children:    []*armotypes.Process{grandchild},
 	}
 	pt.mutex.Unlock()
 
@@ -661,7 +661,7 @@ func TestExitManager_RemoveFromParentChildrenMap(t *testing.T) {
 	// Verify child was removed from parent's ChildrenMap
 	pt.mutex.RLock()
 	assert.Len(t, parent.ChildrenMap, 0, "Parent should have no children after child exit")
-	assert.NotContains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should not contain child anymore")
+	assert.NotContains(t, parent.ChildrenMap, armotypes.CommPID{PID: 200}, "Parent should not contain child anymore")
 
 	// Child process should be removed from process map
 	assert.Nil(t, pt.processMap.Get(200), "Child process should be removed from process map")
@@ -677,7 +677,7 @@ func TestExitManager_RemoveFromParentChildrenMap(t *testing.T) {
 		PID:         300,
 		StartTimeNs: 12346,
 		Timestamp:   time.Now(),
-		Children:    []*apitypes.Process{},
+		Children:    []*armotypes.Process{},
 	}
 	pt.mutex.Unlock()
 
@@ -701,9 +701,9 @@ func TestExitManager_RemoveFromParentChildrenMapWithMultipleChildren(t *testing.
 	child3 := createTestProcess(400, 100, "child3")
 
 	// Set up parent-child relationships
-	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
-	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
-	parent.ChildrenMap[apitypes.CommPID{PID: 400}] = child3
+	parent.ChildrenMap[armotypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[armotypes.CommPID{PID: 300}] = child2
+	parent.ChildrenMap[armotypes.CommPID{PID: 400}] = child3
 
 	// Add all processes to the process map
 	pt.processMap.Set(100, parent)
@@ -713,9 +713,9 @@ func TestExitManager_RemoveFromParentChildrenMapWithMultipleChildren(t *testing.
 
 	// Verify initial state
 	assert.Len(t, parent.ChildrenMap, 3, "Parent should have 3 children initially")
-	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should contain child1")
-	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 300}, "Parent should contain child2")
-	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 400}, "Parent should contain child3")
+	assert.Contains(t, parent.ChildrenMap, armotypes.CommPID{PID: 200}, "Parent should contain child1")
+	assert.Contains(t, parent.ChildrenMap, armotypes.CommPID{PID: 300}, "Parent should contain child2")
+	assert.Contains(t, parent.ChildrenMap, armotypes.CommPID{PID: 400}, "Parent should contain child3")
 
 	// Test case: Exit child2 - should remove it from parent's ChildrenMap
 	// First, add child2 to pending exits
@@ -724,7 +724,7 @@ func TestExitManager_RemoveFromParentChildrenMapWithMultipleChildren(t *testing.
 		PID:         300,
 		StartTimeNs: 12345,
 		Timestamp:   time.Now(),
-		Children:    []*apitypes.Process{},
+		Children:    []*armotypes.Process{},
 	}
 	pt.mutex.Unlock()
 
@@ -735,9 +735,9 @@ func TestExitManager_RemoveFromParentChildrenMapWithMultipleChildren(t *testing.
 	// Verify child2 was removed from parent's ChildrenMap
 	pt.mutex.RLock()
 	assert.Len(t, parent.ChildrenMap, 2, "Parent should have 2 children after child2 exit")
-	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should still contain child1")
-	assert.NotContains(t, parent.ChildrenMap, apitypes.CommPID{PID: 300}, "Parent should not contain child2 anymore")
-	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 400}, "Parent should still contain child3")
+	assert.Contains(t, parent.ChildrenMap, armotypes.CommPID{PID: 200}, "Parent should still contain child1")
+	assert.NotContains(t, parent.ChildrenMap, armotypes.CommPID{PID: 300}, "Parent should not contain child2 anymore")
+	assert.Contains(t, parent.ChildrenMap, armotypes.CommPID{PID: 400}, "Parent should still contain child3")
 
 	// Child2 process should be removed from process map
 	assert.Nil(t, pt.processMap.Get(300), "Child2 process should be removed from process map")
@@ -754,7 +754,7 @@ func TestExitManager_RemoveFromParentChildrenMapWithMultipleChildren(t *testing.
 		PID:         200,
 		StartTimeNs: 12346,
 		Timestamp:   time.Now(),
-		Children:    []*apitypes.Process{},
+		Children:    []*armotypes.Process{},
 	}
 	pt.mutex.Unlock()
 
@@ -765,8 +765,8 @@ func TestExitManager_RemoveFromParentChildrenMapWithMultipleChildren(t *testing.
 	// Verify child1 was removed from parent's ChildrenMap
 	pt.mutex.RLock()
 	assert.Len(t, parent.ChildrenMap, 1, "Parent should have 1 child after child1 exit")
-	assert.NotContains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should not contain child1 anymore")
-	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 400}, "Parent should still contain child3")
+	assert.NotContains(t, parent.ChildrenMap, armotypes.CommPID{PID: 200}, "Parent should not contain child1 anymore")
+	assert.Contains(t, parent.ChildrenMap, armotypes.CommPID{PID: 400}, "Parent should still contain child3")
 
 	// Child1 process should be removed from process map
 	assert.Nil(t, pt.processMap.Get(200), "Child1 process should be removed from process map")

@@ -3,7 +3,7 @@ package adapters
 import (
 	"path/filepath"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -46,8 +46,8 @@ func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	runtimeProcessDetails := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			Comm: comm,
 			Gid:  openEvent.GetGid(),
 			PID:  pid,
@@ -59,9 +59,8 @@ func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 
 	failure.SetTriggerEvent(openEvent)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	runtimeAlertK8sDetails := armotypes.RuntimeAlertK8sDetails{
 		PodName: openEvent.GetPod(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

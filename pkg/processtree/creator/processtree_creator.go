@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -15,7 +15,7 @@ import (
 )
 
 type processTreeCreatorImpl struct {
-	processMap            maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
+	processMap            maps.SafeMap[uint32, *armotypes.Process] // PID -> Process
 	containerTree         containerprocesstree.ContainerProcessTree
 	reparentingStrategies reparenting.ReparentingStrategies
 	mutex                 sync.RWMutex // Protects process tree modifications
@@ -35,7 +35,7 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 	}
 
 	creator := &processTreeCreatorImpl{
-		processMap:            maps.SafeMap[uint32, *apitypes.Process]{},
+		processMap:            maps.SafeMap[uint32, *armotypes.Process]{},
 		reparentingStrategies: reparentingLogic,
 		containerTree:         containerTree,
 		pendingExits:          make(map[uint32]*pendingExit),
@@ -68,12 +68,12 @@ func (pt *processTreeCreatorImpl) FeedEvent(event conversion.ProcessEvent) {
 	}
 }
 
-func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
+func (pt *processTreeCreatorImpl) GetRootTree() ([]armotypes.Process, error) {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()
 
 	// Find root processes (those whose parent is not in the map or PPID==0)
-	roots := []apitypes.Process{}
+	roots := []armotypes.Process{}
 	for _, proc := range pt.processMap.Values() {
 		_, ok := pt.processMap.Load(proc.PPID)
 		if proc.PPID == 0 || !ok {
@@ -83,11 +83,11 @@ func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
 	return roots, nil
 }
 
-func (pt *processTreeCreatorImpl) GetProcessMap() *maps.SafeMap[uint32, *apitypes.Process] {
+func (pt *processTreeCreatorImpl) GetProcessMap() *maps.SafeMap[uint32, *armotypes.Process] {
 	return &pt.processMap
 }
 
-func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, error) {
+func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*armotypes.Process, error) {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()
 
@@ -99,21 +99,21 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, er
 }
 
 // GetPidBranch performs container branch operation (no longer needs to be atomic)
-func (pt *processTreeCreatorImpl) GetPidBranch(containerTree interface{}, containerID string, targetPID uint32) (apitypes.Process, error) {
+func (pt *processTreeCreatorImpl) GetPidBranch(containerTree interface{}, containerID string, targetPID uint32) (armotypes.Process, error) {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()
 
 	// Type assert the container tree
 	ct, ok := containerTree.(containerprocesstree.ContainerProcessTree)
 	if !ok {
-		return apitypes.Process{}, fmt.Errorf("invalid container tree type")
+		return armotypes.Process{}, fmt.Errorf("invalid container tree type")
 	}
 
 	return ct.GetPidBranch(containerID, targetPID, &pt.processMap)
 }
 
 // UpdatePPID handles PPID updates using the new reparenting strategy
-func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event conversion.ProcessEvent) {
+func (pt *processTreeCreatorImpl) UpdatePPID(proc *armotypes.Process, event conversion.ProcessEvent) {
 	if event.PPID != proc.PPID && event.PPID != 0 {
 		// New reparenting strategy:
 		// 1. If new PPID is under container subtree, update regardless of current state
@@ -174,7 +174,7 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 	}
 
 	if proc.ChildrenMap == nil {
-		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+		proc.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)
 	}
 }
 
@@ -184,7 +184,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
-		if pt.config.KubernetesMode && event.ContainerID == "host" { // If we are in Kubernetes mode and the container ID is "host", don't create the process.
+		if pt.config.KubernetesMode && event.ContainerID == armotypes.HostContainerID { // If we are in Kubernetes mode and the container ID is "host", don't create the process.
 			return
 		}
 
@@ -218,7 +218,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 	}
 
 	if proc.ChildrenMap == nil {
-		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+		proc.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)
 	}
 }
 
@@ -265,7 +265,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 		proc.Path = event.Path
 	}
 	if proc.ChildrenMap == nil {
-		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+		proc.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)
 	}
 }
 
@@ -277,19 +277,19 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event conversion.ProcessEvent)
 	pt.addPendingExit(event)
 }
 
-func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Process {
+func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *armotypes.Process {
 	proc, ok := pt.processMap.Load(pid)
 	if ok {
 		return proc
 	}
-	proc = &apitypes.Process{PID: pid, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
+	proc = &armotypes.Process{PID: pid, ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process)}
 	pt.processMap.Set(pid, proc)
 
 	return proc
 }
 
 // linkProcessToParent ensures proc is added as a child to its parent (if PPID != 0)
-func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
+func (pt *processTreeCreatorImpl) linkProcessToParent(proc *armotypes.Process) {
 	if proc == nil || proc.PPID == 0 {
 		return
 	}
@@ -301,15 +301,15 @@ func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
 
 	parent := pt.getOrCreateProcess(proc.PPID)
 	if parent.ChildrenMap == nil {
-		parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+		parent.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)
 	}
-	key := apitypes.CommPID{PID: proc.PID}
+	key := armotypes.CommPID{PID: proc.PID}
 	parent.ChildrenMap[key] = proc
 }
 
 // updateProcessPPID safely updates a process's PPID by removing it from the old parent's
 // children map and adding it to the new parent's children map
-func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newPPID uint32) {
+func (pt *processTreeCreatorImpl) updateProcessPPID(proc *armotypes.Process, newPPID uint32) {
 	if proc == nil || proc.PPID == newPPID {
 		return // No change needed
 	}
@@ -327,7 +327,7 @@ func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newP
 	// Remove from old parent's children map
 	if proc.PPID != 0 {
 		if oldParent, ok := pt.processMap.Load(proc.PPID); ok && oldParent.ChildrenMap != nil {
-			key := apitypes.CommPID{PID: proc.PID}
+			key := armotypes.CommPID{PID: proc.PID}
 			if _, ok := oldParent.ChildrenMap[key]; ok {
 				delete(oldParent.ChildrenMap, key)
 			} else {
@@ -368,7 +368,7 @@ func (pt *processTreeCreatorImpl) isDescendant(parentPID, targetPID uint32) bool
 	return false
 }
 
-func (pt *processTreeCreatorImpl) shallowCopyProcess(proc *apitypes.Process) *apitypes.Process {
+func (pt *processTreeCreatorImpl) shallowCopyProcess(proc *armotypes.Process) *armotypes.Process {
 	if proc == nil {
 		return nil
 	}

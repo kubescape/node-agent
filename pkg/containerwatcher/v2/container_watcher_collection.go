@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutils "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
@@ -186,6 +187,7 @@ func GetHostAsContainer() (*containercollection.Container, error) {
 	return &containercollection.Container{
 		Runtime: containercollection.RuntimeMetadata{
 			BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+				ContainerID:  armotypes.HostContainerID,
 				ContainerPID: uint32(hostInitPID),
 			},
 		},

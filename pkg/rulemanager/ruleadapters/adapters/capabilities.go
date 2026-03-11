@@ -1,7 +1,7 @@
 package adapters
 
 import (
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -37,8 +37,8 @@ func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enri
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	runtimeProcessDetails := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			Comm: comm,
 			Gid:  capEvent.GetGid(),
 			PID:  pid,
@@ -50,9 +50,8 @@ func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enri
 
 	failure.SetTriggerEvent(capEvent)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	runtimeAlertK8sDetails := armotypes.RuntimeAlertK8sDetails{
 		PodName: capEvent.GetPod(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-

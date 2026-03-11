@@ -341,6 +341,9 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 func (nnc *NetworkNeighborhoodCacheImpl) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
+		if utils.IsHostContainer(notif.Container) {
+			return
+		}
 		if nnc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}

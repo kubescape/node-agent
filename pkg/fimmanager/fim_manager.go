@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/exporters"
-	hostfimsensor "github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
+	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 )
 
 // FIMManager manages the File Integrity Monitoring functionality
@@ -20,12 +20,12 @@ type FIMManager struct {
 	exporter      exporters.Exporter
 	clusterName   string
 	nodeName      string
-	cloudMetadata *apitypes.CloudMetadata
+	cloudMetadata *armotypes.CloudMetadata
 	running       bool
 }
 
 // NewFIMManager creates a new FIM manager
-func NewFIMManager(cfg config.Config, clusterName string, exporter exporters.Exporter, cloudMetadata *apitypes.CloudMetadata) (*FIMManager, error) {
+func NewFIMManager(cfg config.Config, clusterName string, exporter exporters.Exporter, cloudMetadata *armotypes.CloudMetadata) (*FIMManager, error) {
 	if !cfg.EnableFIM {
 		logger.L().Info("FIM is disabled in configuration")
 		return &FIMManager{

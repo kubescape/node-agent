@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -30,10 +30,10 @@ func TestShouldCooldown(t *testing.T) {
 				MaxSize:            1000,
 			},
 			ruleFailure: &types.GenericRuleFailure{
-				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-1",
 				},
-				RuntimeProcessDetails: apitypes.ProcessTree{
+				RuntimeProcessDetails: armotypes.ProcessTree{
 					ContainerID: "test-container-1",
 				},
 			},
@@ -51,10 +51,10 @@ func TestShouldCooldown(t *testing.T) {
 				MaxSize:            1000,
 			},
 			ruleFailure: &types.GenericRuleFailure{
-				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-2",
 				},
-				RuntimeProcessDetails: apitypes.ProcessTree{
+				RuntimeProcessDetails: armotypes.ProcessTree{
 					ContainerID: "test-container-2",
 				},
 			},
@@ -72,13 +72,13 @@ func TestShouldCooldown(t *testing.T) {
 				MaxSize:            1000,
 			},
 			ruleFailure: &types.GenericRuleFailure{
-				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-3",
-					ProfileMetadata: &apitypes.ProfileMetadata{
+					ProfileMetadata: &armotypes.ProfileMetadata{
 						FailOnProfile: true,
 					},
 				},
-				RuntimeProcessDetails: apitypes.ProcessTree{
+				RuntimeProcessDetails: armotypes.ProcessTree{
 					ContainerID: "test-container-3",
 				},
 			},
@@ -96,10 +96,10 @@ func TestShouldCooldown(t *testing.T) {
 				MaxSize:            1000,
 			},
 			ruleFailure: &types.GenericRuleFailure{
-				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-4",
 				},
-				RuntimeProcessDetails: apitypes.ProcessTree{
+				RuntimeProcessDetails: armotypes.ProcessTree{
 					ContainerID: "test-container-4",
 				},
 			},
@@ -118,13 +118,13 @@ func TestShouldCooldown(t *testing.T) {
 				MaxSize:            1000,
 			},
 			ruleFailure: &types.GenericRuleFailure{
-				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-3",
-					ProfileMetadata: &apitypes.ProfileMetadata{
+					ProfileMetadata: &armotypes.ProfileMetadata{
 						FailOnProfile: true,
 					},
 				},
-				RuntimeProcessDetails: apitypes.ProcessTree{
+				RuntimeProcessDetails: armotypes.ProcessTree{
 					ContainerID: "test-container-3",
 				},
 			},
@@ -168,10 +168,10 @@ func TestShouldCooldownImmediate(t *testing.T) {
 	})
 
 	ruleFailure := &types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-immediate",
 		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
+		RuntimeProcessDetails: armotypes.ProcessTree{
 			ContainerID: "test-container-immediate",
 		},
 	}
@@ -196,13 +196,13 @@ func TestShouldCooldownOnProfileFailure(t *testing.T) {
 	})
 
 	ruleFailure := &types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-profile",
-			ProfileMetadata: &apitypes.ProfileMetadata{
+			ProfileMetadata: &armotypes.ProfileMetadata{
 				FailOnProfile: true,
 			},
 		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
+		RuntimeProcessDetails: armotypes.ProcessTree{
 			ContainerID: "test-container-profile",
 		},
 	}
@@ -233,20 +233,20 @@ func TestShouldCooldownDifferentKeys(t *testing.T) {
 
 	// First rule failure
 	ruleFailure1 := &types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-1",
 		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
+		RuntimeProcessDetails: armotypes.ProcessTree{
 			ContainerID: "test-container-1",
 		},
 	}
 
 	// Second rule failure with different key
 	ruleFailure2 := &types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-2",
 		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
+		RuntimeProcessDetails: armotypes.ProcessTree{
 			ContainerID: "test-container-1", // Same container, different alert
 		},
 	}
@@ -284,10 +284,10 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 	// Fill up the cache
 	for i := 0; i < maxSize; i++ {
 		failure := &types.GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 				UniqueID: fmt.Sprintf("test-alert-%d", i),
 			},
-			RuntimeProcessDetails: apitypes.ProcessTree{
+			RuntimeProcessDetails: armotypes.ProcessTree{
 				ContainerID: fmt.Sprintf("test-container-%d", i),
 			},
 		}
@@ -296,10 +296,10 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 
 	// Add one more to trigger eviction
 	newFailure := &types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-new",
 		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
+		RuntimeProcessDetails: armotypes.ProcessTree{
 			ContainerID: "test-container-new",
 		},
 	}
@@ -311,10 +311,10 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 
 	// Verify the oldest entry was evicted by trying to access it
 	oldFailure := &types.GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-0",
 		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
+		RuntimeProcessDetails: armotypes.ProcessTree{
 			ContainerID: "test-container-0",
 		},
 	}

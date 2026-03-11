@@ -1,7 +1,7 @@
 package adapters
 
 import (
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -40,8 +40,8 @@ func (c *UnshareAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	runtimeProcessDetails := apitypes.ProcessTree{
-		ProcessTree: apitypes.Process{
+	runtimeProcessDetails := armotypes.ProcessTree{
+		ProcessTree: armotypes.Process{
 			Comm:       comm,
 			Pcomm:      unshareEvent.GetPcomm(),
 			PPID:       unshareEvent.GetPpid(),
@@ -58,10 +58,9 @@ func (c *UnshareAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 
 	failure.SetTriggerEvent(unshareEvent)
 
-	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+	runtimeAlertK8sDetails := armotypes.RuntimeAlertK8sDetails{
 		PodName:   unshareEvent.GetPod(),
 		PodLabels: unshareEvent.GetPodLabels(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
-
