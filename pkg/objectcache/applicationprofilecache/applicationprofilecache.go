@@ -594,7 +594,17 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 
 				// Verify signature if enabled
 				if err := apc.verifyApplicationProfile(fullProfile, workloadID, "user-defined profile"); err != nil {
-					return nil
+					logger.L().Warning("user-defined profile signature verification failed, continuing without signature",
+						helpers.String("containerID", containerID),
+						helpers.String("workloadID", workloadID),
+						helpers.String("namespace", container.K8s.Namespace),
+						helpers.String("profileName", userDefinedProfile),
+						helpers.Error(err))
+					// Update the profile state to indicate an error
+					profileState := &objectcache.ProfileState{
+						Error: fmt.Errorf("signature verification failed: %w", err),
+					}
+					apc.workloadIDToProfileState.Set(workloadID, profileState)
 				}
 
 				// Update the profile in the cache

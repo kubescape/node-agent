@@ -2,7 +2,7 @@ package ruleswatcher
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"os"
 
 	"github.com/Masterminds/semver/v3"
@@ -97,10 +97,6 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 
 		// Verify signature if enabled
 		if err := w.verifyRules(rules); err != nil {
-			logger.L().Warning("RulesWatcher - rule signature verification failed",
-				helpers.String("name", rules.Name),
-				helpers.String("namespace", rules.Namespace),
-				helpers.Error(err))
 			skippedVerificationCount++
 			continue
 		}
@@ -147,13 +143,12 @@ func unstructuredToRules(obj *unstructured.Unstructured) (*typesv1.Rules, error)
 }
 
 func (w *RulesWatcherImpl) verifyRules(rules *typesv1.Rules) error {
-	if !w.cfg.EnableSignatureVerification {
+	if w.cfg == nil || !w.cfg.EnableSignatureVerification {
 		return nil
 	}
 	rulesAdapter := profiles.NewRulesAdapter(rules)
 	if err := signature.VerifyObject(rulesAdapter); err != nil {
-		isMissingSig := err.Error() == fmt.Sprintf("object is not signed (missing %s annotation)", signature.AnnotationSignature)
-		if isMissingSig {
+		if errors.Is(err, signature.ErrObjectNotSigned) {
 			logger.L().Debug("Rules resource is not signed, skipping",
 				helpers.String("name", rules.Name),
 				helpers.String("namespace", rules.Namespace))

@@ -25,7 +25,7 @@ func VerifyObject(obj SignableObject, opts ...VerifyOption) error {
 	}
 
 	if _, ok := annotations[AnnotationSignature]; !ok {
-		return fmt.Errorf("object is not signed (missing %s annotation)", AnnotationSignature)
+		return ErrObjectNotSigned
 	}
 
 	// useKeyless=true is fine for verification since we use the certificate

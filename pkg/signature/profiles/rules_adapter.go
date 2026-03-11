@@ -15,9 +15,6 @@ func NewRulesAdapter(rules *rulemanagertypesv1.Rules) *RulesAdapter {
 }
 
 func (r *RulesAdapter) GetAnnotations() map[string]string {
-	if r.rules.Annotations == nil {
-		r.rules.Annotations = make(map[string]string)
-	}
 	return r.rules.Annotations
 }
 

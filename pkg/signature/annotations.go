@@ -1,5 +1,7 @@
 package signature
 
+import "errors"
+
 const (
 	AnnotationPrefix = "signature.kubescape.io"
 
@@ -10,3 +12,5 @@ const (
 	AnnotationIdentity    = AnnotationPrefix + "/identity"
 	AnnotationTimestamp   = AnnotationPrefix + "/timestamp"
 )
+
+var ErrObjectNotSigned = errors.New("object is not signed (missing signature annotation)")

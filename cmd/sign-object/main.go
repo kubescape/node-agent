@@ -41,6 +41,10 @@ func main() {
 	command = os.Args[1]
 
 	argsRewritten := false
+	if command == "-h" || command == "--help" {
+		printUsage()
+		os.Exit(0)
+	}
 	if strings.HasPrefix(command, "-") {
 		command = "sign"
 		argsRewritten = true
