@@ -1,0 +1,22 @@
+---
+# Custom CoreDNS ConfigMap that adds a hosts entry for xmr.pool.minergate.com.
+# This ensures the DNS query goes through CoreDNS (triggering R1008 detection)
+# and resolves to 127.0.0.1 (so the TCP connect for R1009 fails fast with
+# "connection refused" instead of timing out against a firewalled address).
+#
+# Apply to the cluster before running the malicious app test:
+#   kubectl apply -f coredns-custom-records.yaml
+#   kubectl rollout restart -n kube-system deployment/coredns
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  mining-pools.override: |
+    # Redirect known mining pool domains to localhost for testing.
+    # The DNS query itself is what triggers R1008; resolution target doesn't matter.
+    hosts {
+      127.0.0.1 xmr.pool.minergate.com
+      fallthrough
+    }

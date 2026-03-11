@@ -11,6 +11,14 @@ spec:
         app: malicious-app
     spec:
       hostIPC: true  # This enables IPC host mode (equivalent to --ipc="host")
+      # Provide local DNS for mining domains so the TCP connect (R1009)
+      # fails fast with "connection refused" instead of a firewall timeout.
+      # The explicit net.Resolver DNS lookup in malicious.go still queries
+      # CoreDNS for R1008 detection.
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "xmr.pool.minergate.com"
       containers:
       - name: malicious-app
         # sourcecode: node-agent/tests/images/malicious-app

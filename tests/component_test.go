@@ -210,7 +210,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 
 		// Signature rules with networkprofile tag → fail_on_profile=true
 		{"R1009", "Crypto Mining Related Port Communication",
-			"TCP connect to xmr.pool.minergate.com:45700 (port in [3333, 45700])",
+			"TCP connect to xmr.pool.minergate.com:45700 via DialTimeout (hostAliases→127.0.0.1, fails fast)",
 			[]bool{true}},
 
 		// Signature rules without profile tag → fail_on_profile=false
@@ -221,7 +221,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 			"SYS_INIT_MODULE syscall",
 			[]bool{false}},
 		{"R1008", "Crypto Mining Domain Communication",
-			"DNS lookup for xmr.pool.minergate.com (in known mining domain list)",
+			"explicit net.Resolver DNS lookup for xmr.pool.minergate.com (PreferGo: true → CoreDNS query)",
 			[]bool{false}},
 		{"R1015", "Malicious Ptrace Usage",
 			"PTRACE_TRACEME syscall",
