@@ -19,6 +19,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
+// UserDefinedNetworkMetadataKey is the pod label that references a
+// user-provided NetworkNeighborhood resource by name (analogous to
+// helpersv1.UserDefinedProfileMetadataKey for ApplicationProfiles).
+const UserDefinedNetworkMetadataKey = "kubescape.io/user-defined-network"
+
 type ContainerType int
 
 const (
@@ -81,6 +86,7 @@ type WatchedContainerData struct {
 	PreviousReportTimestamp time.Time
 	CurrentReportTimestamp  time.Time
 	UserDefinedProfile      string
+	UserDefinedNetwork      string
 }
 
 type ContainerInfo struct {
@@ -149,6 +155,16 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				helpers.String("container", containerName),
 				helpers.String("workload", wl.GetName()))
 			watchedContainer.UserDefinedProfile = userDefinedProfile
+		}
+	}
+	// check for user defined network neighborhood
+	if userDefinedNetwork, ok := labels[UserDefinedNetworkMetadataKey]; ok {
+		if userDefinedNetwork != "" {
+			logger.L().Info("container has a user defined network neighborhood",
+				helpers.String("network", userDefinedNetwork),
+				helpers.String("container", containerName),
+				helpers.String("workload", wl.GetName()))
+			watchedContainer.UserDefinedNetwork = userDefinedNetwork
 		}
 	}
 	podSpec, err := wl.GetPodSpec()
