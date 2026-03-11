@@ -70,6 +70,7 @@ To ensure the signature remains valid regardless of minor YAML formatting differ
 **Key Finding:** `CanonicalHash` includes all fields in its input. Therefore, the **sanitization step is mandatory** to prevent a circular dependency where adding the signature annotation changes the hash and invalidates the signature.
 
 ### Diagram
+```mermaid
 graph TB
     subgraph "Signing Flow"
         A[K8s Resource] --> B[Adapter]
@@ -258,8 +259,8 @@ sign-object generate-keypair [flags]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--output` | string | - | Output PEM file (contains both keys) |
-| `--public-only` | bool | false | Only output public key |
+| `--output` | string | - | Path for the private key file (writes `FILE` for private key and `FILE.pub` for public key) |
+| `--public-only` | bool | false | Only write the public key (writes only to `FILE`, no `.pub` suffix) |
 
 **Examples:**
 

@@ -6,9 +6,13 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
-	"encoding/hex"
+	"encoding/pem"
+	"math/big"
 	"testing"
+	"time"
 
 	sigstore_signature "github.com/sigstore/sigstore/pkg/signature"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,11 +83,23 @@ func TestReproduceClusterVerificationFlow(t *testing.T) {
 	t.Logf("Computed hash: %s", hash)
 
 	// Generate a key and sign
-	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	signer, _ := sigstore_signature.LoadECDSASigner(privKey, crypto.SHA256)
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
+	signer, err := sigstore_signature.LoadECDSASigner(privKey, crypto.SHA256)
+	if err != nil {
+		t.Fatalf("Failed to load signer: %v", err)
+	}
 
-	sig, _ := signer.SignMessage(bytes.NewReader([]byte(hash)))
-	certBytes := generateTestCertificate(privKey)
+	sig, err := signer.SignMessage(bytes.NewReader([]byte(hash)))
+	if err != nil {
+		t.Fatalf("Failed to sign message: %v", err)
+	}
+	certBytes, err := generateTestCertificate(privKey)
+	if err != nil {
+		t.Fatalf("Failed to generate test certificate: %v", err)
+	}
 
 	// Add signature annotations
 	adapter.SetAnnotations(map[string]string{
@@ -91,17 +107,38 @@ func TestReproduceClusterVerificationFlow(t *testing.T) {
 		"signature.kubescape.io/certificate": base64.StdEncoding.EncodeToString(certBytes),
 	})
 
-	// Now verify
-	sigObj, _ := cosignAdapter.DecodeSignatureFromAnnotations(adapter.GetAnnotations())
-	verifier, _ := sigstore_signature.LoadECDSAVerifier(&privKey.PublicKey, crypto.SHA256)
+	// Now verify using the higher-level flow via CosignVerifier
+	// Create verifier and decode signature from annotations
+	sigObj, err := cosignAdapter.DecodeSignatureFromAnnotations(adapter.GetAnnotations())
+	if err != nil {
+		t.Fatalf("Failed to decode signature from annotations: %v", err)
+	}
 
+	// Parse certificate from decoded signature
+	block, _ := pem.Decode(sigObj.Certificate)
+	if block == nil {
+		t.Fatalf("Failed to decode PEM from certificate data: certificate data is %d bytes", len(sigObj.Certificate))
+	}
+	if block.Type != "CERTIFICATE" {
+		t.Fatalf("Wrong PEM block type: got %q, want CERTIFICATE", block.Type)
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("Failed to parse certificate: %v", err)
+	}
+
+	// Verify using the certificate's public key (exercise the real verification path)
+	verifier, err := sigstore_signature.LoadVerifier(cert.PublicKey, crypto.SHA256)
+	if err != nil {
+		t.Fatalf("Failed to load verifier from certificate: %v", err)
+	}
+
+	// Verify signature against hash string
 	err = verifier.VerifySignature(bytes.NewReader(sig), bytes.NewReader([]byte(hash)))
-	t.Logf("Verification after signing with hash string: %v", err)
-
-	// Try with hex-decoded bytes
-	hashBytes, _ := hex.DecodeString(hash)
-	err = verifier.VerifySignature(bytes.NewReader(sig), bytes.NewReader(hashBytes))
-	t.Logf("Verification with hex-decoded bytes: %v", err)
+	if err != nil {
+		t.Fatalf("Verification failed: %v", err)
+	}
 
 	// Clean up: verify the signature is correctly stored and retrieved
 	if sigObj.Signature == nil {
@@ -109,15 +146,32 @@ func TestReproduceClusterVerificationFlow(t *testing.T) {
 	}
 }
 
-func generateTestCertificate(privKey *ecdsa.PrivateKey) []byte {
-	certPEM := `-----BEGIN CERTIFICATE-----
-MIIBgDCCASagAwIBAgIRAI2ZHwaseDxijN4mwQBzDX0wCgYIKoZIzj0EAwIwJjEk
-MCIGA1UEAwwbbWF0dGhpYXMuYmVydHNjaHlAZ21haWwuY29tMB4XDTI2MDMwOTE1
-NDQxNloXDTI3MDMwOTE1NDQxNlowJjEkMCIGA1UEAwwbbWF0dGhpYXMuYmVydHNj
-aHlAZ21haWwuY29tMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEsw03ufyGYW/+
-XZYflPREBvDuKYQ/vkg94kuHSDlPnsqkisDCdusaI61FKAN1O2ICVgpSkultFDkVY
-yXUVgC9wuMbKNTANBgkqhkiG9w0BAQsFAAOCAQEAnJKHv40VUxqsKS0hF45sKSvVN
-2l2xLOo0Rke0FPQrCIQCuwFKMxQo42ZbJxdhqpnpCgmLmOeGN/M4GgaGKOrynvg==
------END CERTIFICATE-----`
-	return []byte(certPEM)
+func generateTestCertificate(privKey *ecdsa.PrivateKey) ([]byte, error) {
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, err
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName: "test-signer",
+		},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privKey.PublicKey, privKey)
+	if err != nil {
+		return nil, err
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certDER,
+	})
+
+	return certPEM, nil
 }
