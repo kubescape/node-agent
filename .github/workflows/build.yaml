@@ -74,7 +74,9 @@ jobs:
         with:
           context: .
           file: build/Dockerfile
-          tags: ghcr.io/${{ github.repository_owner }}/node-agent:${{ inputs.IMAGE_TAG }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/node-agent:${{ inputs.IMAGE_TAG }}
+            ghcr.io/${{ github.repository_owner }}/node-agent:latest
           build-args: image_version=${{ inputs.IMAGE_TAG }}
           platforms: ${{ inputs.PLATFORMS && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: true

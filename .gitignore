@@ -7,3 +7,4 @@ resources/ebpf/falco/*
 node-agent
 __pycache__
 tracers.tar
+tests/COMPONENT_TEST_STRATEGY.md
