@@ -1572,29 +1572,15 @@ func Test_27_RegexFileOpenMatchTest(t *testing.T) {
 
 	t.Log("Starting regex file open match component test")
 
-	// 1. Setup workload and initial profile
 	ns := testutils.NewRandomNamespace()
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
-	require.NoError(t, err, "Failed to create workload")
-	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
-	require.NoError(t, wl.WaitForApplicationProfileCompletion(80), "Application profile did not complete")
 
-	// Wait for the initial profile to be processed
-	time.Sleep(30 * time.Second)
-
-	initialProfile, err := wl.GetApplicationProfile()
-	require.NoError(t, err, "Failed to get initial profile")
-
-	// 2. Apply a user-managed profile with a regex rule for file opens
-	t.Log("Applying user-managed profile...")
-	// Create the user-managed profile
+	// 1. Create the user-defined ApplicationProfile before the workload so
+	//    the node-agent can find it as soon as the Pod starts.
+	profileName := "nginx-regex-profile"
 	userProfile := &v1beta1.ApplicationProfile{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("ug-%s", initialProfile.Name),
-			Namespace: initialProfile.Namespace,
-			Annotations: map[string]string{
-				"kubescape.io/managed-by": "User",
-			},
+			Name:      profileName,
+			Namespace: ns.Name,
 		},
 		Spec: v1beta1.ApplicationProfileSpec{
 			Architectures: []string{"amd64"},
@@ -1603,8 +1589,8 @@ func Test_27_RegexFileOpenMatchTest(t *testing.T) {
 					Name: "nginx",
 					Execs: []v1beta1.ExecCalls{
 						{
-							Path: "/usr/bin/ls",
-							Args: []string{"/usr/bin/ls", "-l"},
+							Path: "/bin/cat",
+							Args: []string{"/bin/cat"},
 						},
 					},
 					Opens: []v1beta1.OpenCalls{
@@ -1616,25 +1602,28 @@ func Test_27_RegexFileOpenMatchTest(t *testing.T) {
 		},
 	}
 
-	// Create the user-managed profile
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-	_, err = storageClient.ApplicationProfiles(ns.Name).Create(context.Background(), userProfile, metav1.CreateOptions{})
-	require.NoError(t, err, "Failed to create user profile")
+	_, err := storageClient.ApplicationProfiles(ns.Name).Create(context.Background(), userProfile, metav1.CreateOptions{})
+	require.NoError(t, err, "Failed to create user-defined profile")
 
-	// Wait for the user profile to be processed by the system
-	time.Sleep(60 * time.Second)
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-user-profile-deployment.yaml"))
+	require.NoError(t, err, "Failed to create workload")
+	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
 
-	// 3. Trigger file open events to test the regex rule
-	t.Log("Triggering file open events to test regex rule")
-	_, _, _ = wl.ExecIntoPod([]string{"cat", "/etc/nginx/nginx.conf"}, "nginx") // Should be allowed by regex
-	_, _, _ = wl.ExecIntoPod([]string{"cat", "/etc/hostname"}, "nginx")         // Should be blocked (alert)
+	// Give the node-agent time to pick up the profile from the label.
+	time.Sleep(20 * time.Second)
 
-	time.Sleep(30 * time.Second) // Wait for alerts
+	// 3. Trigger file open events.
+	_, _, _ = wl.ExecIntoPod([]string{"cat", "/etc/nginx/nginx.conf"}, "nginx") // matches /etc/nginx/* → allowed
+	_, _, _ = wl.ExecIntoPod([]string{"cat", "/etc/hostname"}, "nginx")         // not in profile → alert
 
-	// 4. Verify alerts
+	time.Sleep(30 * time.Second)
+
+	// 4. Verify alerts.
 	alerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get alerts")
+
 	testutils.AssertNotContains(t, alerts, "Unexpected file open", "cat", "nginx", []bool{true})
 	testutils.AssertContains(t, alerts, "Unexpected file open", "cat", "hostname", []bool{true})
 }
