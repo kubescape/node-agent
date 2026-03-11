@@ -74,7 +74,7 @@ func SignObject(obj SignableObject, opts ...SignOption) error {
 	return nil
 }
 
-func SignObjectWithKey(obj SignableObject) error {
+func SignObjectDisableKeyless(obj SignableObject) error {
 	return SignObject(obj, WithKeyless(false))
 }
 
@@ -83,6 +83,9 @@ func SignObjectKeyless(obj SignableObject) error {
 }
 
 func GetObjectSignature(obj SignableObject) (*Signature, error) {
+	if obj == nil {
+		return nil, fmt.Errorf("GetObjectSignature: nil object")
+	}
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
 		return nil, fmt.Errorf("object has no annotations")
@@ -98,6 +101,9 @@ func GetObjectSignature(obj SignableObject) (*Signature, error) {
 }
 
 func IsSigned(obj SignableObject) bool {
+	if obj == nil {
+		return false
+	}
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
 		return false

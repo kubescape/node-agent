@@ -67,7 +67,7 @@ func TestClusterScenarioIntegration(t *testing.T) {
 	}
 
 	// Now verify that signing and verification work end-to-end
-	if err := SignObjectWithKey(adapter); err != nil {
+	if err := SignObjectDisableKeyless(adapter); err != nil {
 		t.Fatalf("Failed to sign object: %v", err)
 	}
 

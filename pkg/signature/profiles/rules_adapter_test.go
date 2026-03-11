@@ -114,9 +114,9 @@ func TestRulesAdapterSignAndVerify(t *testing.T) {
 
 	adapter := NewRulesAdapter(rules)
 
-	err := signature.SignObjectKeyless(adapter)
+	err := signature.SignObjectDisableKeyless(adapter)
 	if err != nil {
-		t.Fatalf("SignObjectKeyless failed: %v", err)
+		t.Fatalf("SignObjectDisableKeyless failed: %v", err)
 	}
 
 	if rules.Annotations == nil {
@@ -166,9 +166,9 @@ func TestRulesAdapterSignAndVerifyWithTampering(t *testing.T) {
 
 	adapter := NewRulesAdapter(rules)
 
-	err := signature.SignObjectKeyless(adapter)
+	err := signature.SignObjectDisableKeyless(adapter)
 	if err != nil {
-		t.Fatalf("SignObjectKeyless failed: %v", err)
+		t.Fatalf("SignObjectDisableKeyless failed: %v", err)
 	}
 
 	rules.Spec.Rules[0].Name = "Modified Rule Name"
