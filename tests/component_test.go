@@ -1879,6 +1879,8 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 
 	// ----------------------------------------------------------------
 	// Shared helper: create user-defined NetworkNeighborhood resource.
+	// Deliberately has NO "kubescape.io/managed-by: User" annotation —
+	// the user-defined-network label on the pod is the sole linkage.
 	// ----------------------------------------------------------------
 	createNetwork := func(t *testing.T, ns string) {
 		t.Helper()
@@ -1886,10 +1888,6 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      networkName,
 				Namespace: ns,
-				Annotations: map[string]string{
-					"kubescape.io/status":     "completed",
-					"kubescape.io/completion": "complete",
-				},
 			},
 			Spec: v1beta1.NetworkNeighborhoodSpec{
 				LabelSelector: metav1.LabelSelector{

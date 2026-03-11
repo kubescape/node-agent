@@ -75,6 +75,7 @@ EOF
 
 # ---------------------------------------------------------------
 # Create user-defined NetworkNeighborhood in a namespace.
+# No "kubescape.io/managed-by: User" — the pod label is the sole link.
 # ---------------------------------------------------------------
 create_network() {
   local ns="$1" name="$2"
@@ -84,9 +85,6 @@ kind: NetworkNeighborhood
 metadata:
   name: "$name"
   namespace: "$ns"
-  annotations:
-    kubescape.io/status: completed
-    kubescape.io/completion: complete
 spec:
   matchLabels:
     app: nginx-fusioncore

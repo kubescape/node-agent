@@ -1,23 +1,21 @@
 ##
-## User-managed NetworkNeighborhood for Test_28.
+## User-defined NetworkNeighborhood for Test_28.
 ##
-## This is a TEMPLATE. Replace {{NN_NAME}} with the auto-learned
-## NetworkNeighborhood name discovered at runtime:
+## Referenced directly from a pod via the label:
+##   kubescape.io/user-defined-network: fusioncore-network
 ##
-##   NN_NAME=$(kubectl get networkneighborhoods -n "$NS" \
-##     -l kubescape.io/workload-name=nginx-fusioncore-deployment \
-##     -o jsonpath='{.items[0].metadata.name}')
+## This resource does NOT carry "kubescape.io/managed-by: User" —
+## the pod label is the sole linkage mechanism.
 ##
-##   sed "s/{{NN_NAME}}/$NN_NAME/g; s/{{NAMESPACE}}/$NS/g" \
-##     known-network-neighborhood.yaml | kubectl apply -f -
+## Usage:
+##   sed "s/{{NAMESPACE}}/$NS/g" known-network-neighborhood.yaml \
+##     | kubectl apply -f -
 ##
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: NetworkNeighborhood
 metadata:
-  name: "ug-{{NN_NAME}}"
+  name: fusioncore-network
   namespace: "{{NAMESPACE}}"
-  annotations:
-    kubescape.io/managed-by: "User"
 spec:
   matchLabels:
     app: nginx-fusioncore
@@ -37,6 +35,14 @@ spec:
       - name: TCP-443
         protocol: TCP
         port: 443
+      - name: UDP-53
+        protocol: UDP
+        port: 53
+    - identifier: cluster-dns
+      type: internal
+      dnsNames:
+      - "kubernetes.default.svc.cluster.local."
+      ports:
       - name: UDP-53
         protocol: UDP
         port: 53
