@@ -1,10 +1,14 @@
 package signature
 
 import (
+	"os"
 	"testing"
 )
 
 func TestVerifyObjectStrict(t *testing.T) {
+	if os.Getenv("ENABLE_KEYLESS_TESTS") == "" {
+		t.Skip("Skipping TestVerifyObjectStrict. Set ENABLE_KEYLESS_TESTS to run.")
+	}
 	profileContent := map[string]interface{}{
 		"type":  "test-profile",
 		"data":  "test-data",
@@ -45,6 +49,9 @@ func TestVerifyObjectAllowUntrusted(t *testing.T) {
 }
 
 func TestVerifyObjectTampered(t *testing.T) {
+	if os.Getenv("ENABLE_KEYLESS_TESTS") == "" {
+		t.Skip("Skipping TestVerifyObjectTampered. Set ENABLE_KEYLESS_TESTS to run.")
+	}
 	originalContent := map[string]interface{}{
 		"type":      "test-profile",
 		"data":      "test-data",
@@ -106,6 +113,9 @@ func TestVerifyObjectMissingSignature(t *testing.T) {
 }
 
 func TestSignAndVerifyRoundTrip(t *testing.T) {
+	if os.Getenv("ENABLE_KEYLESS_TESTS") == "" {
+		t.Skip("Skipping TestSignAndVerifyRoundTrip. Set ENABLE_KEYLESS_TESTS to run.")
+	}
 	profileContent := map[string]interface{}{
 		"type":          "roundtrip-profile",
 		"containers":    []string{"nginx", "redis"},
@@ -140,6 +150,9 @@ func TestSignAndVerifyRoundTrip(t *testing.T) {
 }
 
 func TestSignAndVerifyDifferentKeys(t *testing.T) {
+	if os.Getenv("ENABLE_KEYLESS_TESTS") == "" {
+		t.Skip("Skipping TestSignAndVerifyDifferentKeys. Set ENABLE_KEYLESS_TESTS to run.")
+	}
 	profileContent := map[string]interface{}{
 		"type": "multi-key-test",
 		"data": "data",

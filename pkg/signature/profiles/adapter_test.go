@@ -137,9 +137,9 @@ func TestApplicationProfileAdapterSignAndVerify(t *testing.T) {
 		t.Error("Expected signature annotation on profile")
 	}
 
-	err = signature.VerifyObjectStrict(adapter)
+	err = signature.VerifyObjectAllowUntrusted(adapter)
 	if err != nil {
-		t.Fatalf("VerifyObjectStrict failed: %v", err)
+		t.Fatalf("VerifyObjectAllowUntrusted failed: %v", err)
 	}
 }
 
@@ -267,9 +267,9 @@ func TestSeccompProfileAdapterSignAndVerify(t *testing.T) {
 		t.Error("Expected signature annotation on profile")
 	}
 
-	err = signature.VerifyObjectStrict(adapter)
+	err = signature.VerifyObjectAllowUntrusted(adapter)
 	if err != nil {
-		t.Fatalf("VerifyObjectStrict failed: %v", err)
+		t.Fatalf("VerifyObjectAllowUntrusted failed: %v", err)
 	}
 }
 

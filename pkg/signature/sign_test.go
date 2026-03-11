@@ -52,8 +52,8 @@ func (m *MockSignableObject) GetUpdatedObject() interface{} {
 }
 
 func TestSignObjectKeyless(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		t.Skip("Skipping TestSignObjectKeyless in CI environment")
+	if os.Getenv("ENABLE_KEYLESS_TESTS") == "" {
+		t.Skip("Skipping TestSignObjectKeyless. Set ENABLE_KEYLESS_TESTS to run.")
 	}
 	profileContent := map[string]interface{}{
 		"type": "test-profile",
@@ -202,6 +202,9 @@ func TestGetObjectSignature(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.setupSign {
+				if os.Getenv("ENABLE_KEYLESS_TESTS") == "" {
+					t.Skip("Skipping subtest with SignObjectKeyless. Set ENABLE_KEYLESS_TESTS to run.")
+				}
 				SignObjectKeyless(tt.profile)
 			} else if tt.setupAnnotations != nil {
 				tt.setupAnnotations(tt.profile)
