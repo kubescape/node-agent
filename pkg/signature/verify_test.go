@@ -33,9 +33,9 @@ func TestVerifyObjectAllowUntrusted(t *testing.T) {
 
 	profile := NewMockSignableObject("test-uid", "test-ns", "test-profile-verify-2", profileContent)
 
-	err := SignObjectWithKey(profile)
+	err := SignObjectDisableKeyless(profile)
 	if err != nil {
-		t.Fatalf("SignObjectWithKey failed: %v", err)
+		t.Fatalf("SignObjectDisableKeyless failed: %v", err)
 	}
 
 	err = VerifyObjectAllowUntrusted(profile)
@@ -148,9 +148,9 @@ func TestSignAndVerifyDifferentKeys(t *testing.T) {
 	profile1 := NewMockSignableObject("uid1", "ns", "profile1", profileContent)
 	profile2 := NewMockSignableObject("uid2", "ns", "profile2", profileContent)
 
-	err := SignObjectWithKey(profile1)
+	err := SignObjectDisableKeyless(profile1)
 	if err != nil {
-		t.Fatalf("SignObjectWithKey failed for profile1: %v", err)
+		t.Fatalf("SignObjectDisableKeyless failed for profile1: %v", err)
 	}
 
 	err = SignObjectKeyless(profile2)

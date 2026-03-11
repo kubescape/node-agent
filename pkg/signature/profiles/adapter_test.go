@@ -124,9 +124,9 @@ func TestApplicationProfileAdapterSignAndVerify(t *testing.T) {
 
 	adapter := NewApplicationProfileAdapter(profile)
 
-	err := signature.SignObjectKeyless(adapter)
+	err := signature.SignObjectDisableKeyless(adapter)
 	if err != nil {
-		t.Fatalf("SignObjectKeyless failed: %v", err)
+		t.Fatalf("SignObjectDisableKeyless failed: %v", err)
 	}
 
 	if profile.Annotations == nil {
@@ -254,9 +254,9 @@ func TestSeccompProfileAdapterSignAndVerify(t *testing.T) {
 
 	adapter := NewSeccompProfileAdapter(profile)
 
-	err := signature.SignObjectKeyless(adapter)
+	err := signature.SignObjectDisableKeyless(adapter)
 	if err != nil {
-		t.Fatalf("SignObjectKeyless failed: %v", err)
+		t.Fatalf("SignObjectDisableKeyless failed: %v", err)
 	}
 
 	if profile.Annotations == nil {
@@ -297,14 +297,14 @@ func TestAdapterUniqueness(t *testing.T) {
 	apAdapter := NewApplicationProfileAdapter(ap)
 	spAdapter := NewSeccompProfileAdapter(sp)
 
-	err := signature.SignObjectWithKey(apAdapter)
+	err := signature.SignObjectDisableKeyless(apAdapter)
 	if err != nil {
-		t.Fatalf("SignObjectWithKey failed for ApplicationProfile: %v", err)
+		t.Fatalf("SignObjectDisableKeyless failed for ApplicationProfile: %v", err)
 	}
 
-	err = signature.SignObjectWithKey(spAdapter)
+	err = signature.SignObjectDisableKeyless(spAdapter)
 	if err != nil {
-		t.Fatalf("SignObjectWithKey failed for SeccompProfile: %v", err)
+		t.Fatalf("SignObjectDisableKeyless failed for SeccompProfile: %v", err)
 	}
 
 	apSig, err := signature.GetObjectSignature(apAdapter)

@@ -2,6 +2,7 @@ package applicationprofilecache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -247,7 +248,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			}
 
 			// Verify signature if enabled
-			if err := apc.verifyApplicationProfile(fullProfile, workloadID, "profile"); err != nil {
+			if err := apc.verifyApplicationProfile(fullProfile, workloadID, "profile", true); err != nil {
 				// Continue to next profile as per requirements: skip on verification failure
 				continue
 			}
@@ -276,15 +277,14 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 // verifyApplicationProfile verifies the profile signature if verification is enabled.
 // Returns error if verification fails, nil otherwise (including when verification is disabled).
 // Also updates profileState with error details if verification fails.
-func (apc *ApplicationProfileCacheImpl) verifyApplicationProfile(profile *v1beta1.ApplicationProfile, workloadID, context string) error {
+func (apc *ApplicationProfileCacheImpl) verifyApplicationProfile(profile *v1beta1.ApplicationProfile, workloadID, context string, recordFailure bool) error {
 	if !apc.cfg.EnableSignatureVerification {
 		return nil
 	}
 	profileAdapter := profiles.NewApplicationProfileAdapter(profile)
 	if err := signature.VerifyObject(profileAdapter); err != nil {
 		// Only warn if signature exists but doesn't match; missing signatures are debug
-		isMissingSig := err.Error() == fmt.Sprintf("object is not signed (missing %s annotation)", signature.AnnotationSignature)
-		if isMissingSig {
+		if errors.Is(err, signature.ErrObjectNotSigned) {
 			logger.L().Debug(context+" is not signed, skipping",
 				helpers.String("profile", profile.Name),
 				helpers.String("namespace", profile.Namespace),
@@ -298,7 +298,9 @@ func (apc *ApplicationProfileCacheImpl) verifyApplicationProfile(profile *v1beta
 		}
 
 		// Update profile state with verification error
-		apc.setVerificationFailed(workloadID, profile.Name, err)
+		if recordFailure {
+			apc.setVerificationFailed(workloadID, profile.Name, err)
+		}
 
 		return err
 	}
@@ -368,7 +370,7 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	}
 
 	// Verify signature if enabled
-	if err := apc.verifyApplicationProfile(fullUserProfile, toMerge.wlid, "user-managed profile"); err != nil {
+	if err := apc.verifyApplicationProfile(fullUserProfile, toMerge.wlid, "user-managed profile", false); err != nil {
 		return
 	}
 
@@ -593,18 +595,14 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 				}
 
 				// Verify signature if enabled
-				if err := apc.verifyApplicationProfile(fullProfile, workloadID, "user-defined profile"); err != nil {
-					logger.L().Warning("user-defined profile signature verification failed, continuing without signature",
-						helpers.String("containerID", containerID),
-						helpers.String("workloadID", workloadID),
-						helpers.String("namespace", container.K8s.Namespace),
-						helpers.String("profileName", userDefinedProfile),
-						helpers.Error(err))
+				if err := apc.verifyApplicationProfile(fullProfile, workloadID, "user-defined profile", false); err != nil {
 					// Update the profile state to indicate an error
 					profileState := &objectcache.ProfileState{
 						Error: fmt.Errorf("signature verification failed: %w", err),
 					}
 					apc.workloadIDToProfileState.Set(workloadID, profileState)
+					// Skip caching the unverified profile
+					return nil
 				}
 
 				// Update the profile in the cache

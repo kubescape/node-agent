@@ -8,7 +8,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/pem"
 	"math/big"
 	"testing"
@@ -101,48 +100,22 @@ func TestReproduceClusterVerificationFlow(t *testing.T) {
 		t.Fatalf("Failed to generate test certificate: %v", err)
 	}
 
-	// Add signature annotations
-	adapter.SetAnnotations(map[string]string{
-		"signature.kubescape.io/signature":   base64.StdEncoding.EncodeToString(sig),
-		"signature.kubescape.io/certificate": base64.StdEncoding.EncodeToString(certBytes),
-	})
-
-	// Now verify using the higher-level flow via CosignVerifier
-	// Create verifier and decode signature from annotations
-	sigObj, err := cosignAdapter.DecodeSignatureFromAnnotations(adapter.GetAnnotations())
+	// Use the package-level annotation flow
+	sigObj := &Signature{
+		Signature:   sig,
+		Certificate: certBytes,
+		Timestamp:   time.Now().Unix(),
+	}
+	annotations, err := cosignAdapter.EncodeSignatureToAnnotations(sigObj)
 	if err != nil {
-		t.Fatalf("Failed to decode signature from annotations: %v", err)
+		t.Fatalf("Failed to encode signature to annotations: %v", err)
 	}
+	adapter.SetAnnotations(annotations)
 
-	// Parse certificate from decoded signature
-	block, _ := pem.Decode(sigObj.Certificate)
-	if block == nil {
-		t.Fatalf("Failed to decode PEM from certificate data: certificate data is %d bytes", len(sigObj.Certificate))
-	}
-	if block.Type != "CERTIFICATE" {
-		t.Fatalf("Wrong PEM block type: got %q, want CERTIFICATE", block.Type)
-	}
-
-	cert, err := x509.ParseCertificate(block.Bytes)
+	// Now verify using the higher-level flow
+	err = VerifyObjectAllowUntrusted(adapter)
 	if err != nil {
-		t.Fatalf("Failed to parse certificate: %v", err)
-	}
-
-	// Verify using the certificate's public key (exercise the real verification path)
-	verifier, err := sigstore_signature.LoadVerifier(cert.PublicKey, crypto.SHA256)
-	if err != nil {
-		t.Fatalf("Failed to load verifier from certificate: %v", err)
-	}
-
-	// Verify signature against hash string
-	err = verifier.VerifySignature(bytes.NewReader(sig), bytes.NewReader([]byte(hash)))
-	if err != nil {
-		t.Fatalf("Verification failed: %v", err)
-	}
-
-	// Clean up: verify the signature is correctly stored and retrieved
-	if sigObj.Signature == nil {
-		t.Error("Signature was not properly decoded from annotations")
+		t.Fatalf("VerifyObjectAllowUntrusted failed: %v", err)
 	}
 }
 

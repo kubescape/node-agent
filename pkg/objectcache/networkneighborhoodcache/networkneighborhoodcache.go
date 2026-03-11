@@ -342,6 +342,8 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 				Error:      fmt.Errorf("signature verification failed: %w", err),
 			}
 			nnc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
+			// Evict stale merged profile from cache on verification failure
+			nnc.workloadIDToNetworkNeighborhood.Delete(toMerge.wlid)
 			return
 		}
 	}
@@ -362,12 +364,22 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 				Error:      fmt.Errorf("signature verification failed: %w", err),
 			}
 			nnc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
+			// Restore cache to originalNN on user-managed verification failure
+			nnc.workloadIDToNetworkNeighborhood.Set(toMerge.wlid, originalNN)
 			return
 		}
 	}
 
 	// Merge the network neighborhoods
 	mergedNN := nnc.performMerge(originalNN, fullUserNN)
+
+	// Clear stale signature annotations after merge
+	delete(mergedNN.Annotations, signature.AnnotationSignature)
+	delete(mergedNN.Annotations, signature.AnnotationCertificate)
+	delete(mergedNN.Annotations, signature.AnnotationRekorBundle)
+	delete(mergedNN.Annotations, signature.AnnotationIssuer)
+	delete(mergedNN.Annotations, signature.AnnotationIdentity)
+	delete(mergedNN.Annotations, signature.AnnotationTimestamp)
 
 	// Update the cache with the merged network neighborhood
 	nnc.workloadIDToNetworkNeighborhood.Set(toMerge.wlid, mergedNN)

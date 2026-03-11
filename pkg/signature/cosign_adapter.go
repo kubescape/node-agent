@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"context"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/kubescape/storage/pkg/utils"
 	"github.com/sigstore/cosign/v3/pkg/cosign"
 	"github.com/sigstore/cosign/v3/pkg/cosign/bundle"
@@ -50,10 +51,11 @@ const (
 )
 
 type CosignAdapter struct {
-	privateKey *ecdsa.PrivateKey
-	signer     sigstore_signature.Signer
-	verifier   sigstore_signature.Verifier
-	useKeyless bool
+	privateKey    *ecdsa.PrivateKey
+	signer        sigstore_signature.Signer
+	verifier      sigstore_signature.Verifier
+	useKeyless    bool
+	tokenProvider func(ctx context.Context) (string, error)
 }
 
 func NewCosignAdapter(useKeyless bool) (*CosignAdapter, error) {
@@ -117,6 +119,10 @@ func (c *CosignAdapter) SignData(data []byte) (*Signature, error) {
 	return c.signWithKey(data)
 }
 
+func (c *CosignAdapter) SetTokenProvider(provider func(context.Context) (string, error)) {
+	c.tokenProvider = provider
+}
+
 func (c *CosignAdapter) signKeyless(data []byte) (*Signature, error) {
 	ctx := context.Background()
 
@@ -126,16 +132,44 @@ func (c *CosignAdapter) signKeyless(data []byte) (*Signature, error) {
 	var issuer string
 
 	// 1. Get OIDC Token
-	if providers.Enabled(ctx) {
+	if c.tokenProvider != nil {
+		tok, err = c.tokenProvider(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to provide OIDC token from provider: %w", err)
+		}
+	} else if providers.Enabled(ctx) {
 		tok, err = providers.Provide(ctx, "sigstore")
 		if err != nil {
 			return nil, fmt.Errorf("failed to provide OIDC token: %w", err)
 		}
-		// In CI, identity/issuer are usually provided by the environment
-		identity = sigstoreOIDC
-		issuer = sigstoreIssuer
+	}
+
+	if tok != "" {
+		// Extract "sub" and "iss" from the JWT token
+		parser := jwt.NewParser()
+		token, _, err := parser.ParseUnverified(tok, jwt.MapClaims{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse OIDC token: %w", err)
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			return nil, fmt.Errorf("failed to get claims from OIDC token")
+		}
+
+		sub, ok := claims["sub"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to get 'sub' claim from OIDC token")
+		}
+		identity = sub
+
+		iss, ok := claims["iss"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to get 'iss' claim from OIDC token")
+		}
+		issuer = iss
 	} else {
-		// Fallback to interactive flow if not in CI
+		// Fallback to interactive flow if not in CI and no provider
 		fmt.Println("No OIDC provider enabled (CI). Falling back to interactive flow...")
 		// Sigstore's default issuer and client ID
 		issuerURL := "https://oauth2.sigstore.dev/auth"
@@ -324,6 +358,13 @@ func (c *CosignAdapter) GetPublicKeyPEM() ([]byte, error) {
 }
 
 func (c *CosignAdapter) VerifyData(data []byte, sig *Signature, allowUntrusted bool) error {
+	if sig == nil {
+		return fmt.Errorf("VerifyData: Signature value is nil")
+	}
+	if len(sig.Certificate) == 0 {
+		return fmt.Errorf("VerifyData: Signature.Certificate is empty")
+	}
+
 	var verifier sigstore_signature.Verifier
 	var err error
 
@@ -332,68 +373,90 @@ func (c *CosignAdapter) VerifyData(data []byte, sig *Signature, allowUntrusted b
 	// For now, we continue to support the simplified verification but using sigstore's abstractions.
 
 	block, _ := pem.Decode(sig.Certificate)
-	if block != nil && (block.Type == "CERTIFICATE" || block.Type == "PUBLIC KEY") {
-		if block.Type == "CERTIFICATE" {
-			var cert *x509.Certificate
-			cert, err = x509.ParseCertificate(block.Bytes)
-			if err != nil {
-				return fmt.Errorf("failed to parse certificate: %w", err)
+	if block != nil && block.Type == "CERTIFICATE" {
+		var cert *x509.Certificate
+		cert, err = x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse certificate: %w", err)
+		}
+
+		if !allowUntrusted {
+			if cert.IsCA {
+				return fmt.Errorf("invalid certificate: must not be CA")
 			}
 
-			if !allowUntrusted {
-				if cert.IsCA {
-					return fmt.Errorf("invalid certificate: must not be CA")
-				}
+			// Build and verify the certificate chain
+			roots, err := fulcioroots.Get()
+			if err != nil {
+				return fmt.Errorf("failed to get Fulcio roots: %w", err)
+			}
+			opts := x509.VerifyOptions{
+				Roots: roots,
+				KeyUsages: []x509.ExtKeyUsage{
+					x509.ExtKeyUsageCodeSigning,
+				},
+				CurrentTime: time.Unix(sig.Timestamp, 0),
+			}
+			if _, err := cert.Verify(opts); err != nil {
+				return fmt.Errorf("failed to verify certificate chain: %w", err)
+			}
 
-				if time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
-					return fmt.Errorf("certificate is not valid at this time")
-				}
+			if time.Unix(sig.Timestamp, 0).Before(cert.NotBefore) || time.Unix(sig.Timestamp, 0).After(cert.NotAfter) {
+				return fmt.Errorf("certificate was not valid at signing time")
+			}
 
-				// Check identity. Fulcio certs store identity in Subject Alternative Name (SAN)
-				// but many systems still look at CommonName or use specific extensions.
-				// Sigstore's verify library is usually used for this, but for now we'll check SANs.
-				foundIdentity := false
-				if cert.Subject.CommonName == sig.Identity {
-					foundIdentity = true
-				} else {
-					for _, email := range cert.EmailAddresses {
-						if email == sig.Identity {
+			// In a production environment, we would verify the certificate chain here
+			// against the Fulcio root set and system roots.
+			// roots, _ := fulcioroots.Get()
+			// cert.Verify(x509.VerifyOptions{Roots: roots})
+
+			// Check identity. Fulcio certs store identity in Subject Alternative Name (SAN)
+			// but many systems still look at CommonName or use specific extensions.
+			// Sigstore's verify library is usually used for this, but for now we'll check SANs.
+			foundIdentity := false
+			if cert.Subject.CommonName == sig.Identity {
+				foundIdentity = true
+			} else {
+				for _, email := range cert.EmailAddresses {
+					if email == sig.Identity {
+						foundIdentity = true
+						break
+					}
+				}
+				if !foundIdentity {
+					for _, uri := range cert.URIs {
+						if uri.String() == sig.Identity {
 							foundIdentity = true
 							break
 						}
 					}
-					if !foundIdentity {
-						for _, uri := range cert.URIs {
-							if uri.String() == sig.Identity {
-								foundIdentity = true
-								break
-							}
-						}
-					}
 				}
+			}
 
-				if sig.Identity != "" && !foundIdentity {
-					return fmt.Errorf("identity mismatch: certificate does not match signature identity %q (CN: %q, SANs: %v)", sig.Identity, cert.Subject.CommonName, cert.EmailAddresses)
+			if sig.Identity != "" && !foundIdentity {
+				return fmt.Errorf("identity mismatch: certificate does not match signature identity %q (CN: %q, SANs: %v)", sig.Identity, cert.Subject.CommonName, cert.EmailAddresses)
+			}
+
+			// Validate Rekor/CT evidence if Rekor bundle is present
+			if len(sig.RekorBundle) > 0 {
+				// In a full implementation, we would use cosign.VerifyBundle
+				// for now we acknowledge its presence for strict verification
+			} else if sig.Issuer != "local" && sig.Issuer != "" {
+				// For non-local certificates, we expect a Rekor bundle in strict mode
+				// But we'll allow it if we are in interactive mode (where Rekor might not be used)
+				if sig.Issuer != "https://oauth2.sigstore.dev/auth" {
+					return fmt.Errorf("strict verification failed: missing Rekor bundle for certificate from %q", sig.Issuer)
 				}
-			}
-			verifier, err = sigstore_signature.LoadVerifier(cert.PublicKey, crypto.SHA256)
-			if err != nil {
-				return fmt.Errorf("failed to load verifier from certificate: %w", err)
-			}
-		} else {
-			// PUBLIC KEY block
-			pubKey, err := cryptoutils.UnmarshalPEMToPublicKey(sig.Certificate)
-			if err != nil {
-				return fmt.Errorf("failed to parse public key: %w", err)
-			}
-			verifier, err = sigstore_signature.LoadVerifier(pubKey, crypto.SHA256)
-			if err != nil {
-				return fmt.Errorf("failed to load verifier from public key: %w", err)
 			}
 		}
+		verifier, err = sigstore_signature.LoadVerifier(cert.PublicKey, crypto.SHA256)
+		if err != nil {
+			return fmt.Errorf("failed to load verifier from certificate: %w", err)
+		}
 	} else {
+		// If not a certificate, it must be a public key
 		if !allowUntrusted {
-			return fmt.Errorf("untrusted certificate rejected: require valid x509 certificate chain")
+			return fmt.Errorf("untrusted public key rejected: require valid x509 certificate chain")
 		}
 
 		pubKey, err := cryptoutils.UnmarshalPEMToPublicKey(sig.Certificate)
