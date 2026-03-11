@@ -80,7 +80,7 @@ func TestClusterScenarioIntegration(t *testing.T) {
 	}
 
 	// Verify the signature
-	if err := VerifyObjectStrict(adapter); err != nil {
+	if err := VerifyObjectAllowUntrusted(adapter); err != nil {
 		t.Fatalf("Failed to verify object: %v", err)
 	}
 

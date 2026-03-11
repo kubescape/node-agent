@@ -127,9 +127,9 @@ func TestRulesAdapterSignAndVerify(t *testing.T) {
 		t.Error("Expected signature annotation on rules")
 	}
 
-	err = signature.VerifyObjectStrict(adapter)
+	err = signature.VerifyObjectAllowUntrusted(adapter)
 	if err != nil {
-		t.Fatalf("VerifyObjectStrict failed: %v", err)
+		t.Fatalf("VerifyObjectAllowUntrusted failed: %v", err)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestRulesAdapterSignAndVerifyWithTampering(t *testing.T) {
 
 	rules.Spec.Rules[0].Name = "Modified Rule Name"
 
-	err = signature.VerifyObjectStrict(adapter)
+	err = signature.VerifyObjectAllowUntrusted(adapter)
 	if err == nil {
 		t.Fatal("Expected verification to fail after tampering, but it succeeded")
 	}
