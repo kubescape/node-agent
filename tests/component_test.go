@@ -1737,6 +1737,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		filePath := "/etc/nginx/nginx.conf"
 		wl := deployWithProfile(t, []v1beta1.OpenCalls{
 			{Path: profilePath, Flags: []string{"O_RDONLY"}},
+			{Path: "/etc/ld.so.cache", Flags: []string{"O_RDONLY", "O_CLOEXEC"}}, // dynamic linker opens this on every exec
 		})
 		alerts := triggerAndGetAlerts(t, wl, filePath)
 		got := hasAlert(alerts)
