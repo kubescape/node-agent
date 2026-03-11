@@ -151,7 +151,7 @@ jobs:
         run: |
           sudo sh -c "ulimit -l unlimited"
       - name: Update storage dependency
-        if: ${{ inputs.STORAGE_REF != '' && inputs.STORAGE_REF != 'latest' }}
+        #if: ${{ inputs.STORAGE_REF != '' && inputs.STORAGE_REF != 'latest' }}
         env:
           STORAGE_REF: ${{ inputs.STORAGE_REF }}
           GONOSUMCHECK: "*"

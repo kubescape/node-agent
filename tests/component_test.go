@@ -1669,13 +1669,17 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	//     different Opens pattern and verifies R0002 behaviour.
 	// ---------------------------------------------------------------
 
+	// User-defined profiles bypass the learning period, so alerts arrive
+	// with fail_on_profile=false (no "completed" profile status).
+	failOnProfile := []bool{false}
+
 	// 1b-1: Exact path — profile has the exact file ⇒ no alert.
 	t.Run("exact_path_match", func(t *testing.T) {
 		wl := deployWithProfile(t, []v1beta1.OpenCalls{
 			{Path: "/etc/nginx/nginx.conf", Flags: []string{"O_RDONLY"}},
 		})
 		alerts := triggerAndGetAlerts(t, wl, "/etc/nginx/nginx.conf")
-		testutils.AssertNotContains(t, alerts, ruleName, "cat", "nginx", []bool{true})
+		testutils.AssertNotContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
 	})
 
 	// 1b-2: Exact path — profile has a DIFFERENT file ⇒ alert.
@@ -1684,7 +1688,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			{Path: "/etc/nginx/nginx.conf", Flags: []string{"O_RDONLY"}},
 		})
 		alerts := triggerAndGetAlerts(t, wl, "/etc/hostname")
-		testutils.AssertContains(t, alerts, ruleName, "cat", "nginx", []bool{true})
+		testutils.AssertContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
 	})
 
 	// 1b-3: Ellipsis ⋯ matches single segment — /etc/⋯ covers /etc/hostname.
@@ -1693,7 +1697,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			{Path: "/etc/" + dynamicpathdetector.DynamicIdentifier, Flags: []string{"O_RDONLY"}},
 		})
 		alerts := triggerAndGetAlerts(t, wl, "/etc/hostname")
-		testutils.AssertNotContains(t, alerts, ruleName, "cat", "nginx", []bool{true})
+		testutils.AssertNotContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
 	})
 
 	// 1b-4: Ellipsis ⋯ rejects multi-segment — /etc/⋯ does NOT cover
@@ -1703,7 +1707,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			{Path: "/etc/" + dynamicpathdetector.DynamicIdentifier, Flags: []string{"O_RDONLY"}},
 		})
 		alerts := triggerAndGetAlerts(t, wl, "/etc/nginx/nginx.conf")
-		testutils.AssertContains(t, alerts, ruleName, "cat", "nginx", []bool{true})
+		testutils.AssertContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
 	})
 
 	// 1b-5: Wildcard * matches any depth — /etc/* covers /etc/nginx/nginx.conf.
@@ -1712,6 +1716,6 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			{Path: "/etc/*", Flags: []string{"O_RDONLY"}},
 		})
 		alerts := triggerAndGetAlerts(t, wl, "/etc/nginx/nginx.conf")
-		testutils.AssertNotContains(t, alerts, ruleName, "cat", "nginx", []bool{true})
+		testutils.AssertNotContains(t, alerts, ruleName, "cat", "nginx", failOnProfile)
 	})
 }
