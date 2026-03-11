@@ -13,6 +13,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -160,13 +161,10 @@ func (c *CosignAdapter) signKeyless(data []byte) (*Signature, error) {
 		return nil, fmt.Errorf("failed to load ephemeral signer: %w", err)
 	}
 
-	// 3. Get Certificate from Fulcio
-	// In a real environment, we'd use the Fulcio client to get a certificate.
-	// For now, we generate a short-lived certificate to satisfy the interface,
-	// but we've removed the simulateKeyless fallback that was masking the real implementation needs.
-	certBytes, err := c.generateCertificate(privKey, identity, issuer)
+	// 3. Get Certificate from Fulcio using the real client
+	certBytes, err := c.getFulcioCertificate(ctx, privKey, identity, tok)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate certificate: %w", err)
+		return nil, fmt.Errorf("failed to get certificate from Fulcio: %w", err)
 	}
 
 	// 4. Sign Data
@@ -212,6 +210,47 @@ func (c *CosignAdapter) signWithKey(data []byte) (*Signature, error) {
 	}
 
 	return sigObj, nil
+}
+
+func (c *CosignAdapter) getFulcioCertificate(ctx context.Context, privKey *ecdsa.PrivateKey, identity, oidcToken string) ([]byte, error) {
+	// Parse Fulcio URL
+	fulcioAddr, err := url.Parse(fulcioURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Fulcio URL: %w", err)
+	}
+
+	// Create Fulcio client
+	fulcioClient := api.NewClient(fulcioAddr)
+
+	// Marshal public key to ASN.1 DER format
+	pubKeyBytes, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal public key: %w", err)
+	}
+
+	// Create CertificateRequest with the public key
+	certReq := api.CertificateRequest{
+		PublicKey: api.Key{
+			Content:   pubKeyBytes,
+			Algorithm: "ecdsa",
+		},
+	}
+
+	// We need to prove possession of the OIDC token's identity by signing the identity
+	// Fulcio expects a signature over the identity (e.g. email or subject)
+	proof, err := c.ecdsaSign(privKey, []byte(identity))
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign identity for proof: %w", err)
+	}
+	certReq.SignedEmailAddress = proof
+
+	// Call Fulcio API to get certificate
+	certResp, err := fulcioClient.SigningCert(certReq, oidcToken)
+	if err != nil {
+		return nil, fmt.Errorf("Fulcio SigningCert failed: %w", err)
+	}
+
+	return certResp.CertPEM, nil
 }
 
 func (c *CosignAdapter) generateCertificate(privKey *ecdsa.PrivateKey, identity, issuer string) ([]byte, error) {
@@ -310,13 +349,32 @@ func (c *CosignAdapter) VerifyData(data []byte, sig *Signature, allowUntrusted b
 					return fmt.Errorf("certificate is not valid at this time")
 				}
 
-				if sig.Identity != "" && cert.Subject.CommonName != sig.Identity {
-					return fmt.Errorf("identity mismatch: certificate subject %q does not match signature identity %q", cert.Subject.CommonName, sig.Identity)
+				// Check identity. Fulcio certs store identity in Subject Alternative Name (SAN)
+				// but many systems still look at CommonName or use specific extensions.
+				// Sigstore's verify library is usually used for this, but for now we'll check SANs.
+				foundIdentity := false
+				if cert.Subject.CommonName == sig.Identity {
+					foundIdentity = true
+				} else {
+					for _, email := range cert.EmailAddresses {
+						if email == sig.Identity {
+							foundIdentity = true
+							break
+						}
+					}
+					if !foundIdentity {
+						for _, uri := range cert.URIs {
+							if uri.String() == sig.Identity {
+								foundIdentity = true
+								break
+							}
+						}
+					}
 				}
 
-				// If it's a keyless signature, we should check the issuer extension
-				// Fulcio certificates have the issuer in an extension.
-				// For now, we keep it simple as the simulation doesn't add those extensions yet.
+				if sig.Identity != "" && !foundIdentity {
+					return fmt.Errorf("identity mismatch: certificate does not match signature identity %q (CN: %q, SANs: %v)", sig.Identity, cert.Subject.CommonName, cert.EmailAddresses)
+				}
 			}
 			verifier, err = sigstore_signature.LoadVerifier(cert.PublicKey, crypto.SHA256)
 			if err != nil {
