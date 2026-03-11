@@ -101,7 +101,7 @@ jobs:
           Test_22_AlertOnPartialNetworkProfileTest,
           Test_23_RuleCooldownTest,
           Test_24_ProcessTreeDepthTest,
-          Test_27_RegexFileOpenMatchTest
+          Test_27_ApplicationProfileOpens
         ]
     steps:
       - name: Checkout code
