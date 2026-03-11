@@ -81,7 +81,7 @@ func parseSignFlags() {
 	fs.StringVar(&inputFile, "file", "", "Input object YAML file (required)")
 	fs.StringVar(&outputFile, "output", "", "Output file for signed object (required)")
 	fs.StringVar(&keyFile, "key", "", "Path to private key file")
-	fs.StringVar(&objectType, "type", "auto", "Object type: applicationprofile, seccompprofile, rules, or auto")
+	fs.StringVar(&objectType, "type", "auto", "Object type: applicationprofile, seccompprofile, networkneighborhood, rules, or auto")
 	fs.BoolVar(&useKeyless, "keyless", false, "Use keyless signing (OIDC)")
 	fs.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 
@@ -117,7 +117,7 @@ func parseSignFlags() {
 func parseVerifyFlags() {
 	fs := flag.NewFlagSet("sign-object verify", flag.ExitOnError)
 	fs.StringVar(&inputFile, "file", "", "Signed object YAML file (required)")
-	fs.StringVar(&objectType, "type", "auto", "Object type: applicationprofile, seccompprofile, rules, or auto")
+	fs.StringVar(&objectType, "type", "auto", "Object type: applicationprofile, seccompprofile, networkneighborhood, rules, or auto")
 	fs.BoolVar(&strict, "strict", true, "Require trusted issuer/identity")
 	fs.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 
@@ -153,7 +153,7 @@ func parseGenerateFlags() {
 func parseExtractFlags() {
 	fs := flag.NewFlagSet("sign-object extract-signature", flag.ExitOnError)
 	fs.StringVar(&inputFile, "file", "", "Signed object YAML file (required)")
-	fs.StringVar(&objectType, "type", "auto", "Object type: applicationprofile, seccompprofile, rules, or auto")
+	fs.StringVar(&objectType, "type", "auto", "Object type: applicationprofile, seccompprofile, networkneighborhood, rules, or auto")
 	fs.BoolVar(&jsonOutput, "json", false, "Output as JSON")
 
 	if err := fs.Parse(os.Args[2:]); err != nil {
@@ -412,6 +412,8 @@ func detectObjectType(objectType string, data []byte) (signature.SignableObject,
 			return loadApplicationProfile(data)
 		case "seccompprofile", "seccomp-profile", "sp":
 			return loadSeccompProfile(data)
+		case "networkneighborhood", "network-neighborhood", "nn":
+			return loadNetworkNeighborhood(data)
 		case "rules", "rule", "r":
 			return loadRules(data)
 		default:
@@ -425,6 +427,8 @@ func detectObjectType(objectType string, data []byte) (signature.SignableObject,
 			return loadApplicationProfile(data)
 		case "seccompprofile", "seccomp-profile":
 			return loadSeccompProfile(data)
+		case "networkneighborhood", "network-neighborhood":
+			return loadNetworkNeighborhood(data)
 		}
 	}
 
@@ -451,6 +455,14 @@ func loadSeccompProfile(data []byte) (signature.SignableObject, error) {
 	return profiles.NewSeccompProfileAdapter(&profile), nil
 }
 
+func loadNetworkNeighborhood(data []byte) (signature.SignableObject, error) {
+	var nn v1beta1.NetworkNeighborhood
+	if err := k8syaml.Unmarshal(data, &nn); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal NetworkNeighborhood: %w", err)
+	}
+	return profiles.NewNetworkNeighborhoodAdapter(&nn), nil
+}
+
 func loadRules(data []byte) (signature.SignableObject, error) {
 	var rules rulemanagertypesv1.Rules
 	if err := k8syaml.Unmarshal(data, &rules); err != nil {
@@ -465,6 +477,9 @@ func getObjectName(profile signature.SignableObject) string {
 	}
 	if _, ok := profile.(*profiles.SeccompProfileAdapter); ok {
 		return "SeccompProfile"
+	}
+	if _, ok := profile.(*profiles.NetworkNeighborhoodAdapter); ok {
+		return "NetworkNeighborhood"
 	}
 	if _, ok := profile.(*profiles.RulesAdapter); ok {
 		return "Rules"
@@ -490,12 +505,12 @@ SIGN FLAGS:
     --output <path>         Output file for signed object (required)
     --keyless               Use keyless signing (OIDC)
     --key <path>            Path to private key file
-    --type <type>           Object type: applicationprofile, seccompprofile, rules, or auto (default: auto)
+    --type <type>           Object type: applicationprofile, seccompprofile, networkneighborhood, rules, or auto (default: auto)
     --verbose               Enable verbose logging
 
 VERIFY FLAGS:
     --file <path>                 Signed object YAML file (required)
-    --type <type>                 Object type: applicationprofile, seccompprofile, rules, or auto (default: auto)
+    --type <type>                 Object type: applicationprofile, seccompprofile, networkneighborhood, rules, or auto (default: auto)
     --strict                      Require trusted issuer/identity (default: true)
     --verbose                     Enable verbose logging
 
@@ -505,7 +520,7 @@ GENERATE-KEYPAIR FLAGS:
 
 EXTRACT-SIGNATURE FLAGS:
     --file <path>                 Signed object YAML file (required)
-    --type <type>                 Object type: applicationprofile, seccompprofile, rules, or auto (default: auto)
+    --type <type>                 Object type: applicationprofile, seccompprofile, networkneighborhood, rules, or auto (default: auto)
     --json                        Output as JSON
 
 EXAMPLES:
