@@ -1,3 +1,31 @@
+# =============================================================================
+# Node Agent Component Tests
+# =============================================================================
+#
+# Architecture:
+#   There are TWO independent artifacts in play:
+#
+#   1. Node-agent container image — the eBPF runtime agent deployed INTO the
+#      Kind cluster via Helm.  Lives in pkg/, cmd/, Makefile, Dockerfile, etc.
+#      Changes here require an image rebuild before tests can validate them.
+#
+#   2. Component test binary — a Go test suite compiled on-the-fly from
+#      tests/component_test.go via `go test`.  Runs OUTSIDE the cluster on the
+#      CI runner.  It drives the cluster by creating k8s resources, exec-ing
+#      into pods, and querying Alertmanager for alerts.
+#      Changes here do NOT require a node-agent image rebuild.
+#
+# Rebuild logic (on push):
+#   - If ONLY files under tests/ or .github/ changed  → skip image build,
+#     run tests immediately against the existing 'latest' image.
+#   - If ANY agent code changed (pkg/, cmd/, go.mod, Makefile, …) → rebuild
+#     the node-agent image first, then run tests against the freshly built image.
+#
+# Manual trigger (workflow_dispatch):
+#   - Use the `build_image` checkbox to force an image rebuild.
+#   - Supply NODE_AGENT_TAG / STORAGE_TAG to pin specific pre-built images.
+# =============================================================================
+
 name: Node Agent Component Tests
 on:
   push:
@@ -31,9 +59,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # -------------------------------------------------------------------
+  # Detect what changed to decide whether an image rebuild is needed.
+  # On push: compare HEAD with HEAD~1.
+  # On workflow_dispatch: always outputs false (rebuild controlled by input).
+  # -------------------------------------------------------------------
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      needs_rebuild: ${{ steps.check.outputs.needs_rebuild }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for agent code changes
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "Not a push event — rebuild decision deferred to workflow inputs"
+            echo "needs_rebuild=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          echo "=== Changed files ==="
+          echo "$CHANGED"
+          echo ""
+
+          # Agent code = anything outside tests/ and .github/
+          # These are the paths that end up in the node-agent container image.
+          AGENT_CHANGES=$(echo "$CHANGED" | grep -vE '^(tests/|\.github/)' || true)
+
+          if [ -n "$AGENT_CHANGES" ]; then
+            echo "=== Agent code changed (rebuild needed) ==="
+            echo "$AGENT_CHANGES"
+            echo "needs_rebuild=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "=== Only test/workflow files changed — no rebuild needed ==="
+            echo "needs_rebuild=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # -------------------------------------------------------------------
+  # Build and push the node-agent container image.
+  # Triggers when:
+  #   - Manual dispatch with build_image=true, OR
+  #   - Push event where agent code changed (detected above)
+  # -------------------------------------------------------------------
   build-and-push-image:
-    # Only run this job if it's a manual trigger with the box checked.
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.build_image == true
+    needs: [detect-changes]
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.build_image == true) ||
+      (needs.detect-changes.outputs.needs_rebuild == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,7 +136,7 @@ jobs:
           echo "Installing IG version: ${IG_VERSION}"
           curl -sL https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-${IG_ARCH}-${IG_VERSION}.tar.gz | sudo tar -C /usr/local/bin -xzf - ig
           sudo chmod +x /usr/local/bin/ig
-      - name: Build the Image and Push to Quay.io
+      - name: Build the Image and Push to GHCR
         id: build-and-push-image
         run: |
           COMMIT_HASH=$(git rev-parse --short HEAD)
@@ -72,7 +150,27 @@ jobs:
       image_tag: ${{ steps.build-and-push-image.outputs.image_tag }}
       image_repo: ${{ steps.build-and-push-image.outputs.image_repo }}
 
+  # -------------------------------------------------------------------
+  # Component tests.
+  #
+  # These are Go tests compiled from tests/component_test.go — they are
+  # NOT part of the node-agent container image.  The test binary runs on
+  # the CI runner and talks to the Kind cluster via the k8s API.
+  #
+  # Dependency logic:
+  #   - If build-and-push-image ran → waits for it, uses the freshly
+  #     built image tag.
+  #   - If build-and-push-image was skipped (tests-only change) → runs
+  #     immediately with the default 'latest' image.
+  #   - If build-and-push-image failed → tests do NOT run (no point
+  #     testing against a stale image when code changed).
+  # -------------------------------------------------------------------
   component-tests:
+    needs: [detect-changes, build-and-push-image]
+    # Run when build succeeded or was skipped; don't run if build failed.
+    if: >-
+      always() && !cancelled() &&
+      (needs.build-and-push-image.result == 'success' || needs.build-and-push-image.result == 'skipped')
     runs-on: ubuntu-latest
     continue-on-error: true
     strategy:
@@ -128,13 +226,27 @@ jobs:
           helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --set grafana.enabled=false --namespace monitoring --create-namespace --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false,prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false --set prometheus.prometheusSpec.maximumStartupDurationSeconds=300 --wait --timeout 5m
           # Check that the prometheus pod is running
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s
+
+      # Image selection logic:
+      #   - If the build job ran and produced a tag → use it.
+      #   - Otherwise fall back to the workflow_dispatch input or 'latest'.
       - name: Install Node Agent Chart
         run: |
           STORAGE_TAG="${{ inputs.STORAGE_TAG || 'latest' }}"
-          echo "Storage tag that will be used: ${STORAGE_TAG}"
-          IMAGE_TAG="${{ inputs.NODE_AGENT_TAG || 'latest' }}"
-          IMAGE_REPO='ghcr.io/k8sstormcenter/node-agent'
-          echo "Using Node Agent image: ${IMAGE_REPO}:${IMAGE_TAG}"
+          echo "Storage tag: ${STORAGE_TAG}"
+
+          # Prefer freshly built image; fall back to input or default.
+          IMAGE_TAG="${{ needs.build-and-push-image.outputs.image_tag || inputs.NODE_AGENT_TAG || 'latest' }}"
+          IMAGE_REPO="${{ needs.build-and-push-image.outputs.image_repo || 'ghcr.io/k8sstormcenter/node-agent' }}"
+          echo "Node Agent image: ${IMAGE_REPO}:${IMAGE_TAG}"
+
+          # Log whether we're using a freshly built image or a pre-existing one.
+          if [ -n "${{ needs.build-and-push-image.outputs.image_tag }}" ]; then
+            echo ">>> Using FRESHLY BUILT image from this workflow run"
+          else
+            echo ">>> Using PRE-EXISTING image (no agent code changes detected)"
+          fi
+
           helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${IMAGE_TAG} --set nodeAgent.image.repository=${IMAGE_REPO} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 5m --debug
           # Check that the node-agent pod is running
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=node-agent -n kubescape --timeout=300s
@@ -142,6 +254,11 @@ jobs:
       - name: Run Port Forwarding
         run: |
           ./tests/scripts/port-forward.sh
+
+      # The test binary is compiled from source here — it is NOT part of
+      # the node-agent container image.  Only changes under tests/ affect
+      # it; agent code changes (pkg/, cmd/, …) require an image rebuild
+      # but do NOT change the test binary.
       - name: Set up Go
         env:
           CGO_ENABLED: 0

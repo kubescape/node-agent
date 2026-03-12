@@ -1866,7 +1866,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 						Name: "nginx",
 						Execs: []v1beta1.ExecCalls{
 							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
-							{Path: "/usr/bin/wget", Args: []string{"/usr/bin/wget"}},
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl"}},
 						},
 						Opens: []v1beta1.OpenCalls{
 							{Path: "/etc/nginx/nginx.conf", Flags: []string{"O_RDONLY"}},
@@ -2047,8 +2047,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 
 		// Exec an allowed command + resolve an allowed domain.
 		execAndLog(t, wl, []string{"cat", "/etc/nginx/nginx.conf"}, "nginx")
-		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
-			"http://" + allowedDomain}, "nginx")
+		execAndLog(t, wl, []string{"curl", allowedDomain, "-m", "2"}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2119,8 +2118,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		time.Sleep(ingestWait)
 
 		// evil.example.com is not in the user-defined NN → R0005.
-		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
-			"http://" + unknownDomain}, "nginx")
+		execAndLog(t, wl, []string{"curl", unknownDomain, "-m", "2"}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2154,8 +2152,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
 		// fusioncore.ai is in the user-defined NN → no R0005.
-		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
-			"http://" + allowedDomain}, "nginx")
+		execAndLog(t, wl, []string{"curl", allowedDomain, "-m", "2"}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2186,8 +2183,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			"application profile failed to complete")
 		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
-		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
-			"http://" + unknownDomain}, "nginx")
+		execAndLog(t, wl, []string{"curl", unknownDomain, "-m", "2"}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2225,7 +2221,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 					{
 						Name: "nginx",
 						Execs: []v1beta1.ExecCalls{
-							{Path: "/usr/bin/wget", Args: []string{"/usr/bin/wget"}},
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl"}},
 						},
 						Opens: []v1beta1.OpenCalls{
 							{Path: "/etc/ld.so.cache", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
@@ -2255,8 +2251,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		time.Sleep(ingestWait)
 
 		// evil.example.com was never seen during learning → R0005.
-		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
-			"http://" + unknownDomain}, "nginx")
+		execAndLog(t, wl, []string{"curl", unknownDomain, "-m", "2"}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)

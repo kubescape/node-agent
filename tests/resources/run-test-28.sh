@@ -63,8 +63,8 @@ spec:
     execs:
     - path: /bin/cat
       args: ["/bin/cat"]
-    - path: /usr/bin/wget
-      args: ["/usr/bin/wget"]
+    - path: /usr/bin/curl
+      args: ["/usr/bin/curl"]
     opens:
     - path: /etc/nginx/nginx.conf
       flags: ["O_RDONLY"]
@@ -137,7 +137,7 @@ run_both() {
   echo "  (a) Allowed exec + allowed DNS..."
   kubectl exec -n "$NS" "$POD" -c nginx -- cat /etc/nginx/nginx.conf >/dev/null 2>&1 || true
   kubectl exec -n "$NS" "$POD" -c nginx -- \
-    wget --spider -T 2 -t 1 http://fusioncore.ai 2>/dev/null || true
+    curl -m 2 http://fusioncore.ai 2>/dev/null || true
   sleep 30
 
   local EXEC_ALERTS; EXEC_ALERTS=$(get_alerts "$NS" "Unexpected process launched" nginx)
@@ -156,7 +156,7 @@ run_both() {
   # --- c. Unknown DNS → R0005 ---
   echo "  (c) Unknown DNS (evil.example.com)..."
   kubectl exec -n "$NS" "$POD" -c nginx -- \
-    wget --spider -T 2 -t 1 http://evil.example.com 2>/dev/null || true
+    curl -m 2 http://evil.example.com 2>/dev/null || true
   sleep 30
 
   DNS_ALERTS=$(get_alerts "$NS" "DNS Anomalies in container" nginx)
@@ -193,7 +193,7 @@ run_nn_only() {
   # --- d. Allowed DNS → no R0005 ---
   echo "  (d) Allowed DNS (fusioncore.ai)..."
   kubectl exec -n "$NS" "$POD" -c nginx -- \
-    wget --spider -T 2 -t 1 http://fusioncore.ai 2>/dev/null || true
+    curl -m 2 http://fusioncore.ai 2>/dev/null || true
   sleep 30
 
   local DNS_ALERTS; DNS_ALERTS=$(get_alerts "$NS" "DNS Anomalies in container" nginx)
@@ -202,7 +202,7 @@ run_nn_only() {
   # --- e. Unknown DNS → R0005 ---
   echo "  (e) Unknown DNS (evil.example.com)..."
   kubectl exec -n "$NS" "$POD" -c nginx -- \
-    wget --spider -T 2 -t 1 http://evil.example.com 2>/dev/null || true
+    curl -m 2 http://evil.example.com 2>/dev/null || true
   sleep 30
 
   DNS_ALERTS=$(get_alerts "$NS" "DNS Anomalies in container" nginx)
@@ -242,7 +242,7 @@ run_profile_only() {
   # --- f. Unknown DNS → R0005 (NN was auto-learned, evil.example.com not in it) ---
   echo "  (f) Unknown DNS (evil.example.com)..."
   kubectl exec -n "$NS" "$POD" -c nginx -- \
-    wget --spider -T 2 -t 1 http://evil.example.com 2>/dev/null || true
+    curl -m 2 http://evil.example.com 2>/dev/null || true
   sleep 30
 
   local DNS_ALERTS; DNS_ALERTS=$(get_alerts "$NS" "DNS Anomalies in container" nginx)
