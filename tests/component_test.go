@@ -1841,16 +1841,22 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 
 		allowedDomain = "fusioncore.ai"
 		unknownDomain = "evil.example.com"
+
+		// How long to let node-agent ingest user-defined resources before exec.
+		ingestWait = 10 * time.Second
+		// How long to let alerts propagate after exec.
+		alertWait = 30 * time.Second
 	)
 
 	// ----------------------------------------------------------------
 	// Shared helper: create user-defined ApplicationProfile resource.
 	// ----------------------------------------------------------------
-	createProfile := func(t *testing.T, ns string) {
+	createProfile := func(t *testing.T, ns, name string) {
 		t.Helper()
+		t.Logf("[%s] creating ApplicationProfile %q in namespace %q", t.Name(), name, ns)
 		profile := &v1beta1.ApplicationProfile{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      profileName,
+				Name:      name,
 				Namespace: ns,
 			},
 			Spec: v1beta1.ApplicationProfileSpec{
@@ -1876,6 +1882,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		_, err := storageClient.ApplicationProfiles(ns).Create(
 			context.Background(), profile, metav1.CreateOptions{})
 		require.NoError(t, err, "create user-defined application profile in ns %s", ns)
+		t.Logf("[%s] ApplicationProfile %q created successfully", t.Name(), name)
 	}
 
 	// ----------------------------------------------------------------
@@ -1885,6 +1892,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	// ----------------------------------------------------------------
 	createNetwork := func(t *testing.T, ns string) {
 		t.Helper()
+		t.Logf("[%s] creating NetworkNeighborhood %q in namespace %q", t.Name(), networkName, ns)
 		nn := &v1beta1.NetworkNeighborhood{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      networkName,
@@ -1946,21 +1954,67 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		_, err := storageClient.NetworkNeighborhoods(ns).Create(
 			context.Background(), nn, metav1.CreateOptions{})
 		require.NoError(t, err, "create user-defined network neighborhood in ns %s", ns)
+		t.Logf("[%s] NetworkNeighborhood %q created successfully", t.Name(), networkName)
 	}
 
 	// ----------------------------------------------------------------
-	// Shared helper: deploy workload and wait for it to become ready.
+	// Shared helper: deploy workload, wait for ready, log pod name.
 	// Resources (AP and/or NN) must be created BEFORE the deployment so
 	// the node-agent picks them up on first container add.
 	// ----------------------------------------------------------------
 	deployAndWait := func(t *testing.T, ns, yamlFile string) *testutils.TestWorkload {
 		t.Helper()
-		wl, err := testutils.NewTestWorkload(ns,
-			path.Join(utils.CurrentDir(), "resources/"+yamlFile))
+		yamlPath := path.Join(utils.CurrentDir(), "resources/"+yamlFile)
+		t.Logf("[%s] deploying workload from %s into namespace %q", t.Name(), yamlFile, ns)
+		wl, err := testutils.NewTestWorkload(ns, yamlPath)
 		require.NoError(t, err, "create workload in ns %s", ns)
+		t.Logf("[%s] workload created, waiting for pods to be ready...", t.Name())
 		require.NoError(t, wl.WaitForReady(80), "workload not ready in ns %s", ns)
-		time.Sleep(30 * time.Second) // let node-agent ingest the user-defined resources
+		pods, podErr := wl.GetPods()
+		if podErr == nil && len(pods) > 0 {
+			t.Logf("[%s] pod ready: %s (namespace=%s)", t.Name(), pods[0].Name, ns)
+		} else {
+			t.Logf("[%s] pods ready but could not list them: %v", t.Name(), podErr)
+		}
 		return wl
+	}
+
+	// ----------------------------------------------------------------
+	// Shared helper: exec into pod and log everything.
+	// ----------------------------------------------------------------
+	execAndLog := func(t *testing.T, wl *testutils.TestWorkload, cmd []string, container string) (string, string, error) {
+		t.Helper()
+		t.Logf("[%s] exec into pod: %v (container=%s)", t.Name(), cmd, container)
+		stdout, stderr, err := wl.ExecIntoPod(cmd, container)
+		if err != nil {
+			t.Logf("[%s] exec error: %v", t.Name(), err)
+		}
+		if stdout != "" {
+			t.Logf("[%s] exec stdout: %s", t.Name(), stdout)
+		}
+		if stderr != "" {
+			t.Logf("[%s] exec stderr: %s", t.Name(), stderr)
+		}
+		if stdout == "" && stderr == "" && err == nil {
+			t.Logf("[%s] exec completed with no output", t.Name())
+		}
+		return stdout, stderr, err
+	}
+
+	// ----------------------------------------------------------------
+	// Shared helper: fetch and log alerts.
+	// ----------------------------------------------------------------
+	fetchAlerts := func(t *testing.T, ns string) []testutils.Alert {
+		t.Helper()
+		t.Logf("[%s] fetching alerts for namespace %q", t.Name(), ns)
+		alerts, err := testutils.GetAlerts(ns)
+		require.NoError(t, err, "get alerts for ns %s", ns)
+		t.Logf("[%s] total alerts in namespace: %d", t.Name(), len(alerts))
+		for i, a := range alerts {
+			t.Logf("[%s]   alert[%d]: rule=%s container=%s labels=%v",
+				t.Name(), i, a.Labels["rule_name"], a.Labels["container_name"], a.Labels)
+		}
+		return alerts
 	}
 
 	// ----------------------------------------------------------------
@@ -1980,25 +2034,32 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	// a. Both AP + NN user-defined — allowed activity → no alerts.
 	// =================================================================
 	t.Run("both_defined_allowed_activity", func(t *testing.T) {
+		t.Logf("[%s] START — both AP+NN user-defined, allowed activity, expect NO alerts", t.Name())
 		ns := testutils.NewRandomNamespace()
-		createProfile(t, ns.Name)
+		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
+
+		createProfile(t, ns.Name, profileName)
 		createNetwork(t, ns.Name)
 		wl := deployAndWait(t, ns.Name, "nginx-both-user-defined-deployment.yaml")
 
-		// Exec an allowed command + resolve an allowed domain.
-		_, _, _ = wl.ExecIntoPod([]string{"cat", "/etc/nginx/nginx.conf"}, "nginx")
-		_, _, _ = wl.ExecIntoPod([]string{"wget", "--spider", "-T", "2", "-t", "1",
-			"http://" + allowedDomain}, "nginx")
-		time.Sleep(30 * time.Second)
+		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
+		time.Sleep(ingestWait)
 
-		alerts, err := testutils.GetAlerts(wl.Namespace)
-		require.NoError(t, err)
+		// Exec an allowed command + resolve an allowed domain.
+		execAndLog(t, wl, []string{"cat", "/etc/nginx/nginx.conf"}, "nginx")
+		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
+			"http://" + allowedDomain}, "nginx")
+
+		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
+		time.Sleep(alertWait)
+
+		alerts := fetchAlerts(t, wl.Namespace)
 
 		execCount := countAlerts(alerts, execRuleName, "nginx")
 		openCount := countAlerts(alerts, openRuleName, "nginx")
 		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
 
-		t.Logf("allowed activity: exec=%d open=%d dns=%d", execCount, openCount, dnsCount)
+		t.Logf("[%s] result: exec=%d open=%d dns=%d", t.Name(), execCount, openCount, dnsCount)
 		if execCount > 0 {
 			t.Errorf("expected no R0001 alert for allowed exec, got %d", execCount)
 		}
@@ -2008,53 +2069,70 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		if dnsCount > 0 {
 			t.Errorf("expected no R0005 alert for allowed DNS, got %d", dnsCount)
 		}
+		t.Logf("[%s] DONE", t.Name())
 	})
 
 	// =================================================================
 	// b. Both AP + NN user-defined — unknown exec → R0001 alert.
 	// =================================================================
 	t.Run("both_defined_unknown_exec", func(t *testing.T) {
+		t.Logf("[%s] START — both AP+NN user-defined, unknown exec (ls), expect R0001", t.Name())
 		ns := testutils.NewRandomNamespace()
-		createProfile(t, ns.Name)
+		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
+
+		createProfile(t, ns.Name, profileName)
 		createNetwork(t, ns.Name)
 		wl := deployAndWait(t, ns.Name, "nginx-both-user-defined-deployment.yaml")
 
-		// ls is not in the user-defined AP → should trigger R0001.
-		_, _, _ = wl.ExecIntoPod([]string{"ls", "/"}, "nginx")
-		time.Sleep(30 * time.Second)
+		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
+		time.Sleep(ingestWait)
 
-		alerts, err := testutils.GetAlerts(wl.Namespace)
-		require.NoError(t, err)
+		// ls is not in the user-defined AP → should trigger R0001.
+		execAndLog(t, wl, []string{"ls", "/"}, "nginx")
+
+		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
+		time.Sleep(alertWait)
+
+		alerts := fetchAlerts(t, wl.Namespace)
 
 		execCount := countAlerts(alerts, execRuleName, "nginx")
-		t.Logf("unknown exec: R0001 alerts=%d", execCount)
+		t.Logf("[%s] result: R0001=%d", t.Name(), execCount)
 		if execCount == 0 {
 			t.Errorf("expected R0001 alert for 'ls' (not in user-defined AP), got none")
 		}
+		t.Logf("[%s] DONE", t.Name())
 	})
 
 	// =================================================================
 	// c. Both AP + NN user-defined — unknown DNS → R0005 alert.
 	// =================================================================
 	t.Run("both_defined_unknown_dns", func(t *testing.T) {
+		t.Logf("[%s] START — both AP+NN user-defined, unknown DNS (%s), expect R0005", t.Name(), unknownDomain)
 		ns := testutils.NewRandomNamespace()
-		createProfile(t, ns.Name)
+		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
+
+		createProfile(t, ns.Name, profileName)
 		createNetwork(t, ns.Name)
 		wl := deployAndWait(t, ns.Name, "nginx-both-user-defined-deployment.yaml")
 
-		// evil.example.com is not in the user-defined NN → R0005.
-		_, _, _ = wl.ExecIntoPod([]string{"wget", "--spider", "-T", "2", "-t", "1",
-			"http://" + unknownDomain}, "nginx")
-		time.Sleep(30 * time.Second)
+		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
+		time.Sleep(ingestWait)
 
-		alerts, err := testutils.GetAlerts(wl.Namespace)
-		require.NoError(t, err)
+		// evil.example.com is not in the user-defined NN → R0005.
+		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
+			"http://" + unknownDomain}, "nginx")
+
+		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
+		time.Sleep(alertWait)
+
+		alerts := fetchAlerts(t, wl.Namespace)
 
 		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
-		t.Logf("unknown DNS: R0005 alerts=%d", dnsCount)
+		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
 		if dnsCount == 0 {
 			t.Errorf("expected R0005 alert for %q (not in user-defined NN), got none", unknownDomain)
 		}
+		t.Logf("[%s] DONE", t.Name())
 	})
 
 	// =================================================================
@@ -2062,52 +2140,66 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	//    AP auto-learns normally.
 	// =================================================================
 	t.Run("nn_only_allowed_dns", func(t *testing.T) {
+		t.Logf("[%s] START — NN-only user-defined, allowed DNS (%s), expect NO R0005", t.Name(), allowedDomain)
 		ns := testutils.NewRandomNamespace()
+		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
+
 		createNetwork(t, ns.Name)
 		wl := deployAndWait(t, ns.Name, "nginx-user-network-deployment.yaml")
 
 		// Wait for auto-learned AP to complete (NN is user-defined, AP is learned).
+		t.Logf("[%s] waiting for ApplicationProfile to auto-learn and complete...", t.Name())
 		require.NoError(t, wl.WaitForApplicationProfileCompletion(80),
 			"application profile failed to complete")
+		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
 		// fusioncore.ai is in the user-defined NN → no R0005.
-		_, _, _ = wl.ExecIntoPod([]string{"wget", "--spider", "-T", "2", "-t", "1",
+		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
 			"http://" + allowedDomain}, "nginx")
-		time.Sleep(30 * time.Second)
 
-		alerts, err := testutils.GetAlerts(wl.Namespace)
-		require.NoError(t, err)
+		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
+		time.Sleep(alertWait)
+
+		alerts := fetchAlerts(t, wl.Namespace)
 
 		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
-		t.Logf("nn_only allowed DNS: R0005 alerts=%d", dnsCount)
+		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
 		if dnsCount > 0 {
 			t.Errorf("expected no R0005 alert for %q (in user-defined NN), got %d", allowedDomain, dnsCount)
 		}
+		t.Logf("[%s] DONE", t.Name())
 	})
 
 	// =================================================================
 	// e. Only NN user-defined (no AP label) — unknown DNS → R0005.
 	// =================================================================
 	t.Run("nn_only_unknown_dns", func(t *testing.T) {
+		t.Logf("[%s] START — NN-only user-defined, unknown DNS (%s), expect R0005", t.Name(), unknownDomain)
 		ns := testutils.NewRandomNamespace()
+		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
+
 		createNetwork(t, ns.Name)
 		wl := deployAndWait(t, ns.Name, "nginx-user-network-deployment.yaml")
 
+		t.Logf("[%s] waiting for ApplicationProfile to auto-learn and complete...", t.Name())
 		require.NoError(t, wl.WaitForApplicationProfileCompletion(80),
 			"application profile failed to complete")
+		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
-		_, _, _ = wl.ExecIntoPod([]string{"wget", "--spider", "-T", "2", "-t", "1",
+		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
 			"http://" + unknownDomain}, "nginx")
-		time.Sleep(30 * time.Second)
 
-		alerts, err := testutils.GetAlerts(wl.Namespace)
-		require.NoError(t, err)
+		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
+		time.Sleep(alertWait)
+
+		alerts := fetchAlerts(t, wl.Namespace)
 
 		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
-		t.Logf("nn_only unknown DNS: R0005 alerts=%d", dnsCount)
+		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
 		if dnsCount == 0 {
 			t.Errorf("expected R0005 alert for %q (not in user-defined NN), got none", unknownDomain)
 		}
+		t.Logf("[%s] DONE", t.Name())
 	})
 
 	// =================================================================
@@ -2115,10 +2207,13 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	//    After learning, unknown DNS triggers R0005.
 	// =================================================================
 	t.Run("profile_only_unknown_dns", func(t *testing.T) {
+		t.Logf("[%s] START — AP-only user-defined, NN auto-learns, unknown DNS (%s), expect R0005", t.Name(), unknownDomain)
 		ns := testutils.NewRandomNamespace()
+		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
 
 		// The existing nginx-user-profile-deployment.yaml references
 		// "nginx-regex-profile" — create the AP with that name.
+		t.Logf("[%s] creating ApplicationProfile %q for profile-only subtest", t.Name(), "nginx-regex-profile")
 		apForProfile := &v1beta1.ApplicationProfile{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "nginx-regex-profile",
@@ -2144,30 +2239,35 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		_, err := sc.ApplicationProfiles(ns.Name).Create(
 			context.Background(), apForProfile, metav1.CreateOptions{})
 		require.NoError(t, err, "create AP for profile_only subtest")
+		t.Logf("[%s] ApplicationProfile %q created", t.Name(), "nginx-regex-profile")
 
 		// Use the deployment that only has the user-defined-profile label.
-		wl, err := testutils.NewTestWorkload(ns.Name,
-			path.Join(utils.CurrentDir(), "resources/nginx-user-profile-deployment.yaml"))
-		require.NoError(t, err, "create workload")
-		require.NoError(t, wl.WaitForReady(80), "workload not ready")
+		wl := deployAndWait(t, ns.Name, "nginx-user-profile-deployment.yaml")
 
 		// NN auto-learns — wait for it to complete.
+		t.Logf("[%s] waiting for NetworkNeighborhood to auto-learn and complete...", t.Name())
 		require.NoError(t, wl.WaitForNetworkNeighborhoodCompletion(80),
 			"network neighborhood failed to complete")
-		time.Sleep(10 * time.Second)
+		t.Logf("[%s] NetworkNeighborhood completed", t.Name())
+
+		// Small settle time after NN completion.
+		t.Logf("[%s] waiting %v for node-agent to activate detection on completed NN", t.Name(), ingestWait)
+		time.Sleep(ingestWait)
 
 		// evil.example.com was never seen during learning → R0005.
-		_, _, _ = wl.ExecIntoPod([]string{"wget", "--spider", "-T", "2", "-t", "1",
+		execAndLog(t, wl, []string{"wget", "--spider", "-T", "2", "-t", "1",
 			"http://" + unknownDomain}, "nginx")
-		time.Sleep(30 * time.Second)
 
-		alerts, err := testutils.GetAlerts(wl.Namespace)
-		require.NoError(t, err)
+		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
+		time.Sleep(alertWait)
+
+		alerts := fetchAlerts(t, wl.Namespace)
 
 		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
-		t.Logf("profile_only unknown DNS: R0005 alerts=%d", dnsCount)
+		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
 		if dnsCount == 0 {
 			t.Errorf("expected R0005 alert for %q (not seen during NN learning), got none", unknownDomain)
 		}
+		t.Logf("[%s] DONE", t.Name())
 	})
 }
