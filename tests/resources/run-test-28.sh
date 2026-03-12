@@ -336,6 +336,77 @@ run_nn_only() {
 }
 
 # =================================================================
+# Scenario: LEARN — no user-defined labels, learn NN from scratch.
+# Useful to inspect the correct NN schema.
+# =================================================================
+run_learn() {
+  local NS="t28-learn-$(head -c4 /dev/urandom | xxd -p)"
+  echo ""
+  echo "=== Scenario: LEARN NN from scratch (no user-defined labels)  (ns=$NS) ==="
+
+  kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl apply -n "$NS" -f "$SCRIPT_DIR/curl-plain-deployment.yaml"
+  wait_for_pod "$NS"
+  local POD; POD=$(get_pod "$NS")
+  echo "Pod: $POD"
+
+  # Trigger DNS + network traffic DURING the learning window.
+  echo "  Triggering DNS + network traffic during learning window..."
+
+  # 1. nslookup — pure UDP DNS query to kube-dns
+  echo "  (1) nslookup fusioncore.ai"
+  kubectl exec -n "$NS" "$POD" -c curl -- nslookup fusioncore.ai 2>&1 || true
+
+  # 2. curl — DNS lookup + TCP connection to fusioncore.ai:80
+  echo "  (2) curl -sm5 http://fusioncore.ai"
+  kubectl exec -n "$NS" "$POD" -c curl -- curl -sm5 http://fusioncore.ai >/dev/null 2>&1 || true
+
+  # 3. wget — alternative HTTP client (busybox)
+  echo "  (3) wget -q -O /dev/null http://fusioncore.ai"
+  kubectl exec -n "$NS" "$POD" -c curl -- wget -q -O /dev/null http://fusioncore.ai 2>&1 || true
+
+  # 4. Repeat a few times to ensure capture
+  sleep 5
+  echo "  (4) repeat: nslookup + curl"
+  kubectl exec -n "$NS" "$POD" -c curl -- nslookup fusioncore.ai 2>&1 || true
+  kubectl exec -n "$NS" "$POD" -c curl -- curl -sm5 http://fusioncore.ai >/dev/null 2>&1 || true
+
+  echo "  Waiting for ApplicationProfile + NetworkNeighborhood to complete..."
+  for i in $(seq 1 80); do
+    AP_STATUS=$(kubectl get applicationprofiles -n "$NS" \
+      -o jsonpath='{.items[0].metadata.annotations.kubescape\.io/status}' 2>/dev/null || true)
+    [ "$AP_STATUS" = "completed" ] && break
+    sleep 10
+  done
+  echo "  AP status: $AP_STATUS"
+
+  # Check NN status
+  local NN_STATUS
+  NN_STATUS=$(kubectl get networkneighborhoods -n "$NS" \
+    -o jsonpath='{.items[0].metadata.annotations.kubescape\.io/status}' 2>/dev/null || true)
+  echo "  NN status: $NN_STATUS"
+
+  # Dump the learned NN
+  echo ""
+  echo "  === Learned NetworkNeighborhood ==="
+  kubectl get networkneighborhoods -n "$NS" -o yaml 2>&1
+  echo "  ==================================="
+
+  # Dump the learned AP (execs only, for brevity)
+  echo ""
+  echo "  === Learned ApplicationProfile (execs) ==="
+  kubectl get applicationprofiles -n "$NS" -o jsonpath='{.items[0].spec.containers[0].execs}' 2>&1 | python3 -m json.tool 2>/dev/null || \
+    kubectl get applicationprofiles -n "$NS" -o jsonpath='{.items[0].spec.containers[0].execs}' 2>&1
+  echo ""
+  echo "  ==========================================="
+
+  echo ""
+  echo "  Namespace $NS left intact for inspection."
+  echo "  Inspect:  kubectl get networkneighborhoods -n $NS -o yaml"
+  echo "  Cleanup:  kubectl delete namespace $NS"
+}
+
+# =================================================================
 # Main
 # =================================================================
 echo "=== Test 28: User-Defined Network Neighborhood ==="
@@ -344,13 +415,14 @@ echo "Alertmanager: $ALERTMANAGER_URL"
 case "$SCENARIO" in
   both)    run_both ;;
   nn-only) run_nn_only ;;
+  learn)   run_learn ;;
   all)
     run_both
     run_nn_only
     ;;
   *)
     echo "Unknown scenario: $SCENARIO"
-    echo "Usage: $0 [all|both|nn-only]"
+    echo "Usage: $0 [all|both|nn-only|learn]"
     exit 1
     ;;
 esac
