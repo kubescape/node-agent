@@ -197,7 +197,7 @@ EOF
 
 # ---------------------------------------------------------------
 # Create user-defined NetworkNeighborhood in a namespace.
-# No "kubescape.io/managed-by: User" — the pod label is the sole link.
+# Carries managed-by annotation and workload labels for cache lookup.
 # ---------------------------------------------------------------
 create_network() {
   local ns="$1" name="$2"
@@ -207,6 +207,16 @@ kind: NetworkNeighborhood
 metadata:
   name: "$name"
   namespace: "$ns"
+  annotations:
+    kubescape.io/managed-by: User
+    kubescape.io/status: completed
+    kubescape.io/completion: complete
+  labels:
+    kubescape.io/workload-api-group: apps
+    kubescape.io/workload-api-version: v1
+    kubescape.io/workload-kind: Deployment
+    kubescape.io/workload-name: curl-fusioncore-deployment
+    kubescape.io/workload-namespace: "$ns"
 spec:
   matchLabels:
     app: curl-fusioncore

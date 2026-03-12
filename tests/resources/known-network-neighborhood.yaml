@@ -4,8 +4,8 @@
 ## Referenced directly from a pod via the label:
 ##   kubescape.io/user-defined-network: fusioncore-network
 ##
-## This resource does NOT carry "kubescape.io/managed-by: User" —
-## the pod label is the sole linkage mechanism.
+## Carries "kubescape.io/managed-by: User" annotation and workload
+## labels to match the schema the node-agent cache expects.
 ##
 ## Modeled after a real auto-learned NN from curlimages/curl:8.5.0.
 ##
@@ -18,6 +18,16 @@ kind: NetworkNeighborhood
 metadata:
   name: fusioncore-network
   namespace: "{{NAMESPACE}}"
+  annotations:
+    kubescape.io/managed-by: User
+    kubescape.io/status: completed
+    kubescape.io/completion: complete
+  labels:
+    kubescape.io/workload-api-group: apps
+    kubescape.io/workload-api-version: v1
+    kubescape.io/workload-kind: Deployment
+    kubescape.io/workload-name: curl-fusioncore-deployment
+    kubescape.io/workload-namespace: "{{NAMESPACE}}"
 spec:
   matchLabels:
     app: curl-fusioncore

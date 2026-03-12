@@ -2042,6 +2042,18 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      networkName,
 				Namespace: ns,
+				Annotations: map[string]string{
+					helpersv1.ManagedByMetadataKey:   helpersv1.ManagedByUserValue,
+					helpersv1.StatusMetadataKey:      "completed",
+					helpersv1.CompletionMetadataKey:  "complete",
+				},
+				Labels: map[string]string{
+					helpersv1.ApiGroupMetadataKey:   "apps",
+					helpersv1.ApiVersionMetadataKey: "v1",
+					helpersv1.KindMetadataKey:       "Deployment",
+					helpersv1.NameMetadataKey:       "curl-fusioncore-deployment",
+					helpersv1.NamespaceMetadataKey:  ns,
+				},
 			},
 			Spec: v1beta1.NetworkNeighborhoodSpec{
 				LabelSelector: metav1.LabelSelector{
