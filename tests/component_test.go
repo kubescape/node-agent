@@ -1949,7 +1949,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	// 1. Create user-defined ApplicationProfile (skip learning).
 	ap := &v1beta1.ApplicationProfile{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "nginx-ap",
+			Name:      "curl-ap",
 			Namespace: ns.Name,
 			Annotations: map[string]string{
 				helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
@@ -1960,17 +1960,17 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 				helpersv1.ApiGroupMetadataKey:   "apps",
 				helpersv1.ApiVersionMetadataKey: "v1",
 				helpersv1.KindMetadataKey:       "Deployment",
-				helpersv1.NameMetadataKey:       "nginx-28",
+				helpersv1.NameMetadataKey:       "curl-28",
 				helpersv1.NamespaceMetadataKey:  ns.Name,
 			},
 		},
 		Spec: v1beta1.ApplicationProfileSpec{
 			Containers: []v1beta1.ApplicationProfileContainer{
 				{
-					Name:         "nginx",
+					Name:         "curl",
 					Capabilities: []string{},
 					Execs: []v1beta1.ExecCalls{
-						{Path: "/usr/sbin/nginx"},
+						{Path: "/bin/sleep"},
 						{Path: "/usr/bin/curl"},
 					},
 					Opens:    []v1beta1.OpenCalls{},
@@ -1981,12 +1981,12 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	}
 	_, err := storageClient.ApplicationProfiles(ns.Name).Create(
 		context.Background(), ap, metav1.CreateOptions{})
-	require.NoError(t, err, "create AP nginx-ap")
+	require.NoError(t, err, "create AP curl-ap")
 
 	// 2. Create user-defined NN allowing only fusioncore.ai on TCP/80.
 	nn := &v1beta1.NetworkNeighborhood{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "nginx-nn",
+			Name:      "curl-nn",
 			Namespace: ns.Name,
 			Annotations: map[string]string{
 				helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
@@ -1997,17 +1997,17 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 				helpersv1.ApiGroupMetadataKey:   "apps",
 				helpersv1.ApiVersionMetadataKey: "v1",
 				helpersv1.KindMetadataKey:       "Deployment",
-				helpersv1.NameMetadataKey:       "nginx-28",
+				helpersv1.NameMetadataKey:       "curl-28",
 				helpersv1.NamespaceMetadataKey:  ns.Name,
 			},
 		},
 		Spec: v1beta1.NetworkNeighborhoodSpec{
 			LabelSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": "nginx-28"},
+				MatchLabels: map[string]string{"app": "curl-28"},
 			},
 			Containers: []v1beta1.NetworkNeighborhoodContainer{
 				{
-					Name: "nginx",
+					Name: "curl",
 					Egress: []v1beta1.NetworkNeighbor{
 						{
 							Identifier: "fusioncore-egress",
@@ -2026,20 +2026,20 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	}
 	_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(
 		context.Background(), nn, metav1.CreateOptions{})
-	require.NoError(t, err, "create NN nginx-nn")
+	require.NoError(t, err, "create NN curl-nn")
 	t.Logf("created AP + NN in ns %s", ns.Name)
 
 	// 2b. Poll storage until both AP and NN are retrievable.
 	// Node-agent does a single fetch on container start with no retry,
 	// so the profile MUST exist before the pod is created.
 	require.Eventually(t, func() bool {
-		_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), "nginx-ap", metav1.GetOptions{})
-		_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), "nginx-nn", metav1.GetOptions{})
+		_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), "curl-ap", metav1.GetOptions{})
+		_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), "curl-nn", metav1.GetOptions{})
 		return apErr == nil && nnErr == nil
 	}, 30*time.Second, 1*time.Second, "AP and NN must be retrievable from storage before deploying the pod")
 	t.Logf("verified AP + NN are retrievable from storage")
 
-	// 3. Deploy nginx with both user-defined labels (no learning).
+	// 3. Deploy curl with both user-defined labels (no learning).
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
 	require.NoError(t, err)
 	require.NoError(t, wl.WaitForReady(80))
@@ -2050,7 +2050,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 
 	// 4. Trigger anomalous traffic NOT in the NN.
 	exec := func(cmd []string) {
-		stdout, stderr, err := wl.ExecIntoPod(cmd, "nginx")
+		stdout, stderr, err := wl.ExecIntoPod(cmd, "curl")
 		t.Logf("exec %v → err=%v stdout=%q stderr=%q", cmd, err, stdout, stderr)
 	}
 
