@@ -96,6 +96,8 @@ spec:
       args: ["/bin/cat"]
     - path: /usr/bin/curl
       args: ["/usr/bin/curl", "-sm2", "fusioncore.ai"]
+    - path: /usr/bin/nslookup
+      args: ["/usr/bin/nslookup"]
     opens:
     - path: /etc/hosts
       flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
@@ -254,8 +256,10 @@ run_both() {
   sleep 30
 
   # --- a. Allowed activity → no alerts ---
-  echo "  (a) Allowed exec + allowed DNS..."
+  echo "  (a) Allowed exec + allowed DNS (nslookup) + allowed HTTP (curl)..."
   kubectl exec -n "$NS" "$POD" -c curl -- cat /etc/hosts >/dev/null 2>&1 || true
+  kubectl exec -n "$NS" "$POD" -c curl -- \
+    nslookup fusioncore.ai >/dev/null 2>&1 || true
   kubectl exec -n "$NS" "$POD" -c curl -- \
     curl -sm2 http://fusioncore.ai >/dev/null 2>&1 || true
   sleep 10
@@ -274,9 +278,9 @@ run_both() {
   [ "$EXEC_ALERTS" -gt 0 ] && pass "R0001 fired for unknown exec" || fail "no R0001 for unknown exec"
 
   # --- c. Unknown DNS → R0005 ---
-  echo "  (c) Unknown DNS (evil.example.com)..."
+  echo "  (c) Unknown DNS (evil.example.com) via nslookup..."
   kubectl exec -n "$NS" "$POD" -c curl -- \
-    curl -sm2 http://evil.example.com >/dev/null 2>&1 || true
+    nslookup evil.example.com >/dev/null 2>&1 || true
   sleep 30
 
   DNS_ALERTS=$(get_alerts "$NS" "DNS Anomalies in container" curl)
@@ -311,18 +315,18 @@ run_nn_only() {
   sleep 10
 
   # --- d. Allowed DNS → no R0005 ---
-  echo "  (d) Allowed DNS (fusioncore.ai)..."
+  echo "  (d) Allowed DNS (fusioncore.ai) via nslookup..."
   kubectl exec -n "$NS" "$POD" -c curl -- \
-    curl -sm2 http://fusioncore.ai >/dev/null 2>&1 || true
+    nslookup fusioncore.ai >/dev/null 2>&1 || true
   sleep 30
 
   local DNS_ALERTS; DNS_ALERTS=$(get_alerts "$NS" "DNS Anomalies in container" curl)
   [ "$DNS_ALERTS" -eq 0 ] && pass "no R0005 for allowed DNS (NN-only)" || fail "R0005 fired ($DNS_ALERTS) for allowed DNS (NN-only)"
 
   # --- e. Unknown DNS → R0005 ---
-  echo "  (e) Unknown DNS (evil.example.com)..."
+  echo "  (e) Unknown DNS (evil.example.com) via nslookup..."
   kubectl exec -n "$NS" "$POD" -c curl -- \
-    curl -sm2 http://evil.example.com >/dev/null 2>&1 || true
+    nslookup evil.example.com >/dev/null 2>&1 || true
   sleep 30
 
   DNS_ALERTS=$(get_alerts "$NS" "DNS Anomalies in container" curl)

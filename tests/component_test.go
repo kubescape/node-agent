@@ -1989,6 +1989,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 							{Path: "/bin/sleep", Args: []string{"/bin/sleep", "infinity"}},
 							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
 							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-sm2", "fusioncore.ai"}},
+							{Path: "/usr/bin/nslookup", Args: []string{"/usr/bin/nslookup"}},
 						},
 						Opens: []v1beta1.OpenCalls{
 							{Path: "/etc/hosts", Flags: []string{"O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"}},
@@ -2189,8 +2190,10 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
 		time.Sleep(ingestWait)
 
-		// Exec allowed commands: cat (in profile) and curl an allowed domain (in NN).
+		// Exec allowed commands: cat (in profile), nslookup for DNS (UDP),
+		// and curl for HTTP (TCP).
 		execAndLog(t, wl, []string{"cat", "/etc/hosts"}, "curl")
+		execAndLog(t, wl, []string{"nslookup", allowedDomain}, "curl")
 		execAndLog(t, wl, []string{"curl", "-sm2", allowedDomain}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
@@ -2262,7 +2265,8 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		time.Sleep(ingestWait)
 
 		// evil.example.com is not in the user-defined NN → R0005.
-		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "curl")
+		// Use nslookup to trigger a pure UDP DNS query.
+		execAndLog(t, wl, []string{"nslookup", unknownDomain}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2296,7 +2300,8 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
 		// fusioncore.ai is in the user-defined NN → no R0005.
-		execAndLog(t, wl, []string{"curl", "-sm2", allowedDomain}, "curl")
+		// Use nslookup for a pure UDP DNS query.
+		execAndLog(t, wl, []string{"nslookup", allowedDomain}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2327,7 +2332,8 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			"application profile failed to complete")
 		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
-		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "curl")
+		// Use nslookup for a pure UDP DNS query.
+		execAndLog(t, wl, []string{"nslookup", unknownDomain}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)

@@ -35,6 +35,8 @@ spec:
       args: ["/bin/cat"]
     - path: /usr/bin/curl
       args: ["/usr/bin/curl", "-sm2", "fusioncore.ai"]
+    - path: /usr/bin/nslookup
+      args: ["/usr/bin/nslookup"]
     opens:
     # --- /etc: wildcard covers any config file ---
     - path: "/etc/*"
