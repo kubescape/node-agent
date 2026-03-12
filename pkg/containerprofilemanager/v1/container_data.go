@@ -25,20 +25,30 @@ func (cd *containerData) emptyEvents() {
 	cd.rulePolicies = nil
 	cd.callStacks = nil
 	cd.networks = nil
-	cd.lastReportedCompletion = string(cd.watchedContainerData.GetCompletionStatus())
-	cd.lastReportedStatus = string(cd.watchedContainerData.GetStatus())
+	if cd.watchedContainerData != nil {
+		cd.lastReportedCompletion = string(cd.watchedContainerData.GetCompletionStatus())
+		cd.lastReportedStatus = string(cd.watchedContainerData.GetStatus())
+	}
 }
 
 // isEmpty returns true if the container data is empty
 func (cd *containerData) isEmpty() bool {
-	return cd.capabilites == nil &&
-		cd.endpoints == nil &&
-		cd.execs == nil &&
-		cd.opens == nil &&
-		cd.rulePolicies == nil &&
-		cd.callStacks == nil &&
-		cd.networks == nil &&
-		cd.lastReportedCompletion == string(cd.watchedContainerData.GetCompletionStatus()) &&
+	if cd.capabilites != nil ||
+		cd.syscalls != nil ||
+		cd.endpoints != nil ||
+		cd.execs != nil ||
+		cd.opens != nil ||
+		cd.rulePolicies != nil ||
+		cd.callStacks != nil ||
+		cd.networks != nil {
+		return false
+	}
+
+	if cd.watchedContainerData == nil {
+		return true
+	}
+
+	return cd.lastReportedCompletion == string(cd.watchedContainerData.GetCompletionStatus()) &&
 		cd.lastReportedStatus == string(cd.watchedContainerData.GetStatus())
 }
 

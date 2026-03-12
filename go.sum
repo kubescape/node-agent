@@ -761,10 +761,8 @@ github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj
 github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
-github.com/armosec/armoapi-go v0.0.682 h1:H/bMUS3ESNrcun16iS9ficCkE1mWyOIkZJXokauuI6U=
-github.com/armosec/armoapi-go v0.0.682/go.mod h1:9jAH0g8ZsryhiBDd/aNMX4+n10bGwTx/doWCyyjSxts=
-github.com/armosec/armoapi-go v0.0.687 h1:ZnHAgQVyK92KG1UlBEovzOVM3vFaw/nrnV48dmQKTbU=
-github.com/armosec/armoapi-go v0.0.687/go.mod h1:9jAH0g8ZsryhiBDd/aNMX4+n10bGwTx/doWCyyjSxts=
+github.com/armosec/armoapi-go v0.0.688 h1:YpDXRv2rJL3n45SZ64kvoHkKMeIe+bRfDhSLW6+CUxE=
+github.com/armosec/armoapi-go v0.0.688/go.mod h1:9jAH0g8ZsryhiBDd/aNMX4+n10bGwTx/doWCyyjSxts=
 github.com/armosec/gojay v1.2.17 h1:VSkLBQzD1c2V+FMtlGFKqWXNsdNvIKygTKJI9ysY8eM=
 github.com/armosec/gojay v1.2.17/go.mod h1:vuvX3DlY0nbVrJ0qCklSS733AWMoQboq3cFyuQW9ybc=
 github.com/armosec/utils-go v0.0.58 h1:g9RnRkxZAmzTfPe2ruMo2OXSYLwVSegQSkSavOfmaIE=
@@ -1503,8 +1501,8 @@ github.com/kubescape/backend v0.0.37 h1:aAMd5M0Ih4h+enD0LdKzVIDXYVFqEuFBkSyjiGto
 github.com/kubescape/backend v0.0.37/go.mod h1:4TjTNf9GSD2XxrnW6doB3ANSFzFEkXKYZHGFQX0BiKM=
 github.com/kubescape/go-logger v0.0.24 h1:JRNlblY16Ty7hD6MSYNPvWYDxNzVAufsDDX/sZJayL0=
 github.com/kubescape/go-logger v0.0.24/go.mod h1:sMPVCr3VpW/e+SeMaXig5kClGvmZbDXN8YktUeNU4nY=
-github.com/kubescape/k8s-interface v0.0.202 h1:yu9x+07crFQAgrBatFFU2WuuxMJfHUMHVuCzuHE9Q4M=
-github.com/kubescape/k8s-interface v0.0.202/go.mod h1:d4NVhL81bVXe8yEXlkT4ZHrt3iEppEIN39b8N1oXm5s=
+github.com/kubescape/k8s-interface v0.0.204 h1:YkphM8aozocUazKpp0H37By/KZjUjnKeoYqP1b7uBWk=
+github.com/kubescape/k8s-interface v0.0.204/go.mod h1:d4NVhL81bVXe8yEXlkT4ZHrt3iEppEIN39b8N1oXm5s=
 github.com/kubescape/storage v0.0.247 h1:Xf0ScExy7oT/NrZz9732tX/9V3/xudtIeHWKlNxXdxc=
 github.com/kubescape/storage v0.0.247/go.mod h1:huYJIFh7TUAlV0W3+cmOh7KoJnWRcbWtGw0kY9YIrjU=
 github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf h1:hI0jVwrB6fT4GJWvuUjzObfci1CUknrZdRHfnRVtKM0=

@@ -517,6 +517,7 @@ func TestContainerProfileManagerCreation(t *testing.T) {
 		seccompManagerMock,
 		nil,
 		nil,
+		nil,
 	)
 
 	assert.NoError(t, err)
