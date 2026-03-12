@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: nginx-28
+  name: nginx-28
+spec:
+  selector:
+    matchLabels:
+      app: nginx-28
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: nginx-28
+        kubescape.io/user-defined-network: nginx-nn
+        kubescape.io/user-defined-profile: nginx-ap
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25.5
+        ports:
+        - containerPort: 80

@@ -1930,44 +1930,83 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	})
 }
 
-// Test_28_UserDefinedNetworkNeighborhood applies the user-defined NN
-// manifest (known-network-neighborhood.yaml), deploys curl with the
-// user-defined-network label, waits for the AP to auto-learn, then
-// triggers traffic and checks if ANY alerts fire at all.
+// Test_28_UserDefinedNetworkNeighborhood creates user-defined AP and NN,
+// deploys a pod with both user-defined-profile and user-defined-network
+// labels (skipping all learning), then triggers TCP egress to IPs NOT in
+// the NN and asserts R0011 "Unexpected Egress Network Traffic" fires.
 func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
 	ns := testutils.NewRandomNamespace()
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
-	// 1. Create the user-defined NN (matching known-network-neighborhood.yaml).
-	nn := &v1beta1.NetworkNeighborhood{
+	// 1. Create user-defined ApplicationProfile (skip learning).
+	ap := &v1beta1.ApplicationProfile{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "fusioncore-network",
+			Name:      "nginx-ap",
 			Namespace: ns.Name,
 			Annotations: map[string]string{
 				helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
-				helpersv1.StatusMetadataKey:     "completed",
-				helpersv1.CompletionMetadataKey: "complete",
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
 			},
 			Labels: map[string]string{
 				helpersv1.ApiGroupMetadataKey:   "apps",
 				helpersv1.ApiVersionMetadataKey: "v1",
 				helpersv1.KindMetadataKey:       "Deployment",
-				helpersv1.NameMetadataKey:       "curl-fusioncore-deployment",
+				helpersv1.NameMetadataKey:       "nginx-28",
+				helpersv1.NamespaceMetadataKey:  ns.Name,
+			},
+		},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name:         "nginx",
+					Capabilities: []string{},
+					Execs: []v1beta1.ExecCalls{
+						{Path: "/usr/sbin/nginx"},
+						{Path: "/usr/bin/curl"},
+					},
+					Opens:    []v1beta1.OpenCalls{},
+					Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev"},
+				},
+			},
+		},
+	}
+	_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+		context.Background(), ap, metav1.CreateOptions{})
+	require.NoError(t, err, "create AP nginx-ap")
+
+	// 2. Create user-defined NN allowing only fusioncore.ai on TCP/80.
+	nn := &v1beta1.NetworkNeighborhood{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nginx-nn",
+			Namespace: ns.Name,
+			Annotations: map[string]string{
+				helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+			},
+			Labels: map[string]string{
+				helpersv1.ApiGroupMetadataKey:   "apps",
+				helpersv1.ApiVersionMetadataKey: "v1",
+				helpersv1.KindMetadataKey:       "Deployment",
+				helpersv1.NameMetadataKey:       "nginx-28",
 				helpersv1.NamespaceMetadataKey:  ns.Name,
 			},
 		},
 		Spec: v1beta1.NetworkNeighborhoodSpec{
 			LabelSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": "curl-fusioncore-28-1"},
+				MatchLabels: map[string]string{"app": "nginx-28"},
 			},
 			Containers: []v1beta1.NetworkNeighborhoodContainer{
 				{
-					Name: "curl",
+					Name: "nginx",
 					Egress: []v1beta1.NetworkNeighbor{
 						{
-							Identifier: "a5e64ff1db824089b1706ac872303e55075f92cf6a652b5272f06c3a2b9e8d10",
+							Identifier: "fusioncore-egress",
 							Type:       "external",
 							DNS:        "fusioncore.ai.",
 							DNSNames:   []string{"fusioncore.ai."},
@@ -1981,46 +2020,48 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			},
 		},
 	}
-
-	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-	_, err := storageClient.NetworkNeighborhoods(ns.Name).Create(
+	_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(
 		context.Background(), nn, metav1.CreateOptions{})
-	require.NoError(t, err, "create NN fusioncore-network")
-	t.Logf("created NN in ns %s", ns.Name)
+	require.NoError(t, err, "create NN nginx-nn")
+	t.Logf("created AP + NN in ns %s", ns.Name)
 
-	// 2. Deploy curl with user-defined-network label.
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/curl-user-network-deployment.yaml"))
+	// 3. Deploy nginx with both user-defined labels (no learning).
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
 	require.NoError(t, err)
 	require.NoError(t, wl.WaitForReady(80))
 	t.Logf("pod ready in ns %s", ns.Name)
 
-	// 3. Wait for AP to auto-learn.
-	require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
-	t.Logf("AP completed")
+	// Give node-agent a moment to load the user-defined profiles into cache.
+	time.Sleep(5 * time.Second)
 
-	// 4. Trigger traffic: allowed domain + unknown domain.
+	// 4. Trigger TCP egress to external IPs NOT in the NN.
+	// 8.8.8.8 and 1.1.1.1 are public IPs not in the NN egress (only 162.0.217.171 is allowed).
 	exec := func(cmd []string) {
-		stdout, stderr, err := wl.ExecIntoPod(cmd, "curl")
+		stdout, stderr, err := wl.ExecIntoPod(cmd, "nginx")
 		t.Logf("exec %v → err=%v stdout=%q stderr=%q", cmd, err, stdout, stderr)
 	}
-	exec([]string{"nslookup", "fusioncore.ai"})
-	exec([]string{"curl", "-sm2", "http://fusioncore.ai"})
-	exec([]string{"nslookup", "evil.example.com"})
-	exec([]string{"curl", "-sm2", "http://evil.example.com"})
+	exec([]string{"curl", "-sm5", "http://8.8.8.8"})
+	exec([]string{"curl", "-sm5", "http://1.1.1.1"})
 
-	time.Sleep(30 * time.Second)
-
-	// 5. Fetch ALL alerts and log them.
+	// 5. Wait for alerts and assert R0011 fires.
+	time.Sleep(10 * time.Second)
 	alerts, err := testutils.GetAlerts(ns.Name)
 	require.NoError(t, err)
 
 	t.Logf("=== %d alerts in namespace %s ===", len(alerts), ns.Name)
 	for i, a := range alerts {
-		t.Logf("  [%d] rule=%s container=%s labels=%v", i, a.Labels["rule_name"], a.Labels["container_name"], a.Labels)
+		t.Logf("  [%d] rule=%s(%s) container=%s", i,
+			a.Labels["rule_name"], a.Labels["rule_id"], a.Labels["container_name"])
 	}
 
-	if len(alerts) == 0 {
-		t.Errorf("expected at least one alert (R0005 for evil.example.com), got ZERO")
+	// Check for R0011 alerts specifically.
+	r0011Count := 0
+	for _, a := range alerts {
+		if a.Labels["rule_id"] == "R0011" {
+			r0011Count++
+		}
 	}
+	require.Greater(t, r0011Count, 0,
+		"expected R0011 'Unexpected Egress Network Traffic' alerts for 8.8.8.8/1.1.1.1, got none")
+	t.Logf("R0011 alerts: %d — user-defined NN correctly detects anomalous egress", r0011Count)
 }

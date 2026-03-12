@@ -126,7 +126,7 @@ spec:
         profileDependency: 0
         severity: 1
         supportPolicy: false
-        isTriggerAlert: false
+        isTriggerAlert: true
         mitreTactic: "TA0011"
         mitreTechnique: "T1071.004"
         tags:
@@ -252,7 +252,7 @@ spec:
           - "applicationprofile"
           - "context:kubernetes"
       - name: "Unexpected Egress Network Traffic"
-        enabled: false
+        enabled: true
         id: "R0011"
         description: "Detecting unexpected egress network traffic that is not whitelisted by application profile."
         expressions:
@@ -264,7 +264,7 @@ spec:
         profileDependency: 0
         severity: 5 # Medium
         supportPolicy: false
-        isTriggerAlert: false
+        isTriggerAlert: true
         mitreTactic: "TA0010"
         mitreTechnique: "T1041"
         tags:
