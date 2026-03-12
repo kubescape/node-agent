@@ -1932,8 +1932,12 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 
 // Test_28_UserDefinedNetworkNeighborhood creates user-defined AP and NN,
 // deploys a pod with both user-defined-profile and user-defined-network
-// labels (skipping all learning), then triggers TCP egress to IPs NOT in
-// the NN and asserts R0011 "Unexpected Egress Network Traffic" fires.
+// labels (skipping all learning), then triggers:
+//   - TCP egress to IPs NOT in the NN → R0011 "Unexpected Egress Network Traffic"
+//   - DNS lookups for domains NOT in the NN → R0005 "DNS Anomalies in container"
+//
+// Note: R0005 requires real resolvable domains (not NXDOMAIN), because the
+// trace_dns eBPF callback drops DNS responses with 0 answers.
 func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
@@ -2034,16 +2038,24 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	// Give node-agent a moment to load the user-defined profiles into cache.
 	time.Sleep(5 * time.Second)
 
-	// 4. Trigger TCP egress to external IPs NOT in the NN.
-	// 8.8.8.8 and 1.1.1.1 are public IPs not in the NN egress (only 162.0.217.171 is allowed).
+	// 4. Trigger anomalous traffic NOT in the NN.
 	exec := func(cmd []string) {
 		stdout, stderr, err := wl.ExecIntoPod(cmd, "nginx")
 		t.Logf("exec %v → err=%v stdout=%q stderr=%q", cmd, err, stdout, stderr)
 	}
+
+	// 4a. TCP egress to IPs not in NN (triggers R0011).
 	exec([]string{"curl", "-sm5", "http://8.8.8.8"})
 	exec([]string{"curl", "-sm5", "http://1.1.1.1"})
 
-	// 5. Wait for alerts and assert R0011 fires.
+	// 4b. DNS lookups for real resolvable domains not in NN (triggers R0005).
+	// Must use domains that actually resolve (non-NXDOMAIN) because trace_dns
+	// drops responses with 0 answers.
+	exec([]string{"curl", "-sm5", "http://google.com"})
+	exec([]string{"curl", "-sm5", "http://ebpf.io"})
+	exec([]string{"curl", "-sm5", "http://cloudflare.com"})
+
+	// 5. Wait for alerts and assert both R0011 and R0005 fire.
 	time.Sleep(10 * time.Second)
 	alerts, err := testutils.GetAlerts(ns.Name)
 	require.NoError(t, err)
@@ -2054,14 +2066,22 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			a.Labels["rule_name"], a.Labels["rule_id"], a.Labels["container_name"])
 	}
 
-	// Check for R0011 alerts specifically.
 	r0011Count := 0
+	r0005Count := 0
 	for _, a := range alerts {
-		if a.Labels["rule_id"] == "R0011" {
+		switch a.Labels["rule_id"] {
+		case "R0011":
 			r0011Count++
+		case "R0005":
+			r0005Count++
 		}
 	}
+
 	require.Greater(t, r0011Count, 0,
 		"expected R0011 'Unexpected Egress Network Traffic' alerts for 8.8.8.8/1.1.1.1, got none")
-	t.Logf("R0011 alerts: %d — user-defined NN correctly detects anomalous egress", r0011Count)
+	t.Logf("R0011 alerts: %d — user-defined NN correctly detects anomalous TCP egress", r0011Count)
+
+	require.Greater(t, r0005Count, 0,
+		"expected R0005 'DNS Anomalies' alerts for google.com/ebpf.io/cloudflare.com, got none")
+	t.Logf("R0005 alerts: %d — user-defined NN correctly detects anomalous DNS lookups", r0005Count)
 }
