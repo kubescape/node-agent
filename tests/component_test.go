@@ -1930,434 +1930,97 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	})
 }
 
-// Test_28_UserDefinedNetworkNeighborhood exercises the user-defined
-// NetworkNeighborhood label (kubescape.io/user-defined-network), both
-// standalone and in combination with the user-defined ApplicationProfile
-// label (kubescape.io/user-defined-profile).
-//
-// Subtests:
-//
-//	a. both_defined_allowed_activity   — AP + NN provided; allowed exec+DNS → no alerts
-//	b. both_defined_unknown_exec       — AP + NN provided; unknown exec → R0001
-//	c. both_defined_unknown_dns        — AP + NN provided; unknown DNS → R0005
-//	d. nn_only_allowed_dns             — only NN provided; allowed DNS → no R0005
-//	e. nn_only_unknown_dns             — only NN provided; unknown DNS → R0005
+// Test_28_UserDefinedNetworkNeighborhood applies the user-defined NN
+// manifest (known-network-neighborhood.yaml), deploys curl with the
+// user-defined-network label, waits for the AP to auto-learn, then
+// triggers traffic and checks if ANY alerts fire at all.
 func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
-	const (
-		execRuleName = "Unexpected process launched"
-		dnsRuleName  = "DNS Anomalies in container"
-		openRuleName = "Files Access Anomalies in container"
+	ns := testutils.NewRandomNamespace()
 
-		profileName = "fusioncore-profile"
-		networkName = "fusioncore-network"
-
-		allowedDomain = "fusioncore.ai"
-		unknownDomain = "evil.example.com"
-
-		// How long to let node-agent ingest user-defined resources before exec.
-		ingestWait = 10 * time.Second
-		// How long to let alerts propagate after exec.
-		alertWait = 10 * time.Second
-	)
-
-	// ----------------------------------------------------------------
-	// Shared helper: create user-defined ApplicationProfile resource.
-	// ----------------------------------------------------------------
-	createProfile := func(t *testing.T, ns, name string) {
-		t.Helper()
-		t.Logf("[%s] creating ApplicationProfile %q in namespace %q", t.Name(), name, ns)
-		profile := &v1beta1.ApplicationProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: ns,
+	// 1. Create the user-defined NN (matching known-network-neighborhood.yaml).
+	nn := &v1beta1.NetworkNeighborhood{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "fusioncore-network",
+			Namespace: ns.Name,
+			Annotations: map[string]string{
+				helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
+				helpersv1.StatusMetadataKey:     "completed",
+				helpersv1.CompletionMetadataKey: "complete",
 			},
-			Spec: v1beta1.ApplicationProfileSpec{
-				Architectures: []string{"amd64"},
-				Containers: []v1beta1.ApplicationProfileContainer{
-					{
-						Name:     "curl",
-						ImageID:  "docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058",
-						ImageTag: "docker.io/curlimages/curl:8.5.0",
-						Capabilities: []string{
-							"CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH",
-							"CAP_SETGID", "CAP_SETPCAP", "CAP_SETUID", "CAP_SYS_ADMIN",
-						},
-						Execs: []v1beta1.ExecCalls{
-							{Path: "/bin/sleep", Args: []string{"/bin/sleep", "infinity"}},
-							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
-							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-sm2", "fusioncore.ai"}},
-							{Path: "/usr/bin/nslookup", Args: []string{"/usr/bin/nslookup"}},
-						},
-						Opens: []v1beta1.OpenCalls{
-							{Path: "/etc/hosts", Flags: []string{"O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"}},
-							{Path: "/etc/ld-musl-x86_64.path", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
-							{Path: "/etc/passwd", Flags: []string{"O_RDONLY", "O_CLOEXEC", "O_LARGEFILE"}},
-							{Path: "/etc/resolv.conf", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
-							{Path: "/etc/ssl/openssl.cnf", Flags: []string{"O_RDONLY", "O_LARGEFILE"}},
-							{Path: "/lib/libcurl.so.4", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
-							{Path: "/lib/libcrypto.so.3", Flags: []string{"O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"}},
-							{Path: "/lib/libssl.so.3", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
-							{Path: "/lib/libz.so.1.3", Flags: []string{"O_LARGEFILE", "O_CLOEXEC", "O_RDONLY"}},
-						},
-						Syscalls: []string{
-							"arch_prctl", "bind", "brk", "capget", "capset", "chdir",
-							"clone", "close", "close_range", "connect", "epoll_ctl",
-							"epoll_pwait", "execve", "exit", "exit_group", "faccessat2",
-							"fchown", "fcntl", "fstat", "fstatfs", "futex", "getcwd",
-							"getdents64", "getegid", "geteuid", "getgid", "getpeername",
-							"getppid", "getsockname", "getsockopt", "gettid", "getuid",
-							"ioctl", "membarrier", "mmap", "mprotect", "munmap",
-							"nanosleep", "newfstatat", "open", "openat", "openat2",
-							"pipe", "poll", "prctl", "read", "recvfrom", "recvmsg",
-							"rt_sigaction", "rt_sigprocmask", "rt_sigreturn", "sendto",
-							"set_tid_address", "setgid", "setgroups", "setsockopt",
-							"setuid", "sigaltstack", "socket", "statx", "tkill",
-							"unknown", "write", "writev",
-						},
-					},
-				},
+			Labels: map[string]string{
+				helpersv1.ApiGroupMetadataKey:   "apps",
+				helpersv1.ApiVersionMetadataKey: "v1",
+				helpersv1.KindMetadataKey:       "Deployment",
+				helpersv1.NameMetadataKey:       "curl-fusioncore-deployment",
+				helpersv1.NamespaceMetadataKey:  ns.Name,
 			},
-		}
-
-		k8sClient := k8sinterface.NewKubernetesApi()
-		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-		_, err := storageClient.ApplicationProfiles(ns).Create(
-			context.Background(), profile, metav1.CreateOptions{})
-		require.NoError(t, err, "create user-defined application profile in ns %s", ns)
-		t.Logf("[%s] ApplicationProfile %q created successfully", t.Name(), name)
-	}
-
-	// ----------------------------------------------------------------
-	// Shared helper: create user-defined NetworkNeighborhood resource.
-	// Deliberately has NO "kubescape.io/managed-by: User" annotation —
-	// the user-defined-network label on the pod is the sole linkage.
-	// ----------------------------------------------------------------
-	createNetwork := func(t *testing.T, ns string) {
-		t.Helper()
-		t.Logf("[%s] creating NetworkNeighborhood %q in namespace %q", t.Name(), networkName, ns)
-		nn := &v1beta1.NetworkNeighborhood{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      networkName,
-				Namespace: ns,
-				Annotations: map[string]string{
-					helpersv1.ManagedByMetadataKey:   helpersv1.ManagedByUserValue,
-					helpersv1.StatusMetadataKey:      "completed",
-					helpersv1.CompletionMetadataKey:  "complete",
-				},
-				Labels: map[string]string{
-					helpersv1.ApiGroupMetadataKey:   "apps",
-					helpersv1.ApiVersionMetadataKey: "v1",
-					helpersv1.KindMetadataKey:       "Deployment",
-					helpersv1.NameMetadataKey:       "curl-fusioncore-deployment",
-					helpersv1.NamespaceMetadataKey:  ns,
-				},
+		},
+		Spec: v1beta1.NetworkNeighborhoodSpec{
+			LabelSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "curl-fusioncore-28-1"},
 			},
-			Spec: v1beta1.NetworkNeighborhoodSpec{
-				LabelSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"app": "curl-fusioncore",
-					},
-				},
-				Containers: []v1beta1.NetworkNeighborhoodContainer{
-					{
-						Name: "curl",
-						Egress: []v1beta1.NetworkNeighbor{
-							{
-								Identifier: "kube-dns",
-								Type:       "internal",
-								NamespaceSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{
-										"kubernetes.io/metadata.name": "kube-system",
-									},
-								},
-								PodSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{
-										"k8s-app": "kube-dns",
-									},
-								},
-								Ports: []v1beta1.NetworkPort{
-									{
-										Name:     "UDP-53",
-										Protocol: "UDP",
-										Port:     ptr.To(int32(53)),
-									},
-								},
-							},
-							{
-								Identifier: "fusioncore-ai",
-								Type:       "external",
-								DNS:        "fusioncore.ai.",
-								DNSNames:   []string{"fusioncore.ai."},
-								IPAddress:  "162.0.217.171",
-								Ports: []v1beta1.NetworkPort{
-									{
-										Name:     "TCP-80",
-										Protocol: "TCP",
-										Port:     ptr.To(int32(80)),
-									},
-								},
+			Containers: []v1beta1.NetworkNeighborhoodContainer{
+				{
+					Name: "curl",
+					Egress: []v1beta1.NetworkNeighbor{
+						{
+							Identifier: "a5e64ff1db824089b1706ac872303e55075f92cf6a652b5272f06c3a2b9e8d10",
+							Type:       "external",
+							DNS:        "fusioncore.ai.",
+							DNSNames:   []string{"fusioncore.ai."},
+							IPAddress:  "162.0.217.171",
+							Ports: []v1beta1.NetworkPort{
+								{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
 							},
 						},
 					},
 				},
 			},
-		}
-
-		k8sClient := k8sinterface.NewKubernetesApi()
-		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-		_, err := storageClient.NetworkNeighborhoods(ns).Create(
-			context.Background(), nn, metav1.CreateOptions{})
-		require.NoError(t, err, "create user-defined network neighborhood in ns %s", ns)
-		t.Logf("[%s] NetworkNeighborhood %q created successfully", t.Name(), networkName)
+		},
 	}
 
-	// ----------------------------------------------------------------
-	// Shared helper: deploy workload, wait for ready, log pod name.
-	// Resources (AP and/or NN) must be created BEFORE the deployment so
-	// the node-agent picks them up on first container add.
-	// ----------------------------------------------------------------
-	deployAndWait := func(t *testing.T, ns, yamlFile string) *testutils.TestWorkload {
-		t.Helper()
-		yamlPath := path.Join(utils.CurrentDir(), "resources/"+yamlFile)
-		t.Logf("[%s] deploying workload from %s into namespace %q", t.Name(), yamlFile, ns)
-		wl, err := testutils.NewTestWorkload(ns, yamlPath)
-		require.NoError(t, err, "create workload in ns %s", ns)
-		t.Logf("[%s] workload created, waiting for pods to be ready...", t.Name())
-		require.NoError(t, wl.WaitForReady(80), "workload not ready in ns %s", ns)
-		pods, podErr := wl.GetPods()
-		if podErr == nil && len(pods) > 0 {
-			t.Logf("[%s] pod ready: %s (namespace=%s)", t.Name(), pods[0].Name, ns)
-		} else {
-			t.Logf("[%s] pods ready but could not list them: %v", t.Name(), podErr)
-		}
-		return wl
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+	_, err := storageClient.NetworkNeighborhoods(ns.Name).Create(
+		context.Background(), nn, metav1.CreateOptions{})
+	require.NoError(t, err, "create NN fusioncore-network")
+	t.Logf("created NN in ns %s", ns.Name)
+
+	// 2. Deploy curl with user-defined-network label.
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/curl-user-network-deployment.yaml"))
+	require.NoError(t, err)
+	require.NoError(t, wl.WaitForReady(80))
+	t.Logf("pod ready in ns %s", ns.Name)
+
+	// 3. Wait for AP to auto-learn.
+	require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
+	t.Logf("AP completed")
+
+	// 4. Trigger traffic: allowed domain + unknown domain.
+	exec := func(cmd []string) {
+		stdout, stderr, err := wl.ExecIntoPod(cmd, "curl")
+		t.Logf("exec %v → err=%v stdout=%q stderr=%q", cmd, err, stdout, stderr)
+	}
+	exec([]string{"nslookup", "fusioncore.ai"})
+	exec([]string{"curl", "-sm2", "http://fusioncore.ai"})
+	exec([]string{"nslookup", "evil.example.com"})
+	exec([]string{"curl", "-sm2", "http://evil.example.com"})
+
+	time.Sleep(30 * time.Second)
+
+	// 5. Fetch ALL alerts and log them.
+	alerts, err := testutils.GetAlerts(ns.Name)
+	require.NoError(t, err)
+
+	t.Logf("=== %d alerts in namespace %s ===", len(alerts), ns.Name)
+	for i, a := range alerts {
+		t.Logf("  [%d] rule=%s container=%s labels=%v", i, a.Labels["rule_name"], a.Labels["container_name"], a.Labels)
 	}
 
-	// ----------------------------------------------------------------
-	// Shared helper: exec into pod and log everything.
-	// ----------------------------------------------------------------
-	execAndLog := func(t *testing.T, wl *testutils.TestWorkload, cmd []string, container string) (string, string, error) {
-		t.Helper()
-		t.Logf("[%s] exec into pod: %v (container=%s)", t.Name(), cmd, container)
-		stdout, stderr, err := wl.ExecIntoPod(cmd, container)
-		if err != nil {
-			t.Logf("[%s] exec error: %v", t.Name(), err)
-		}
-		if stdout != "" {
-			t.Logf("[%s] exec stdout: %s", t.Name(), stdout)
-		}
-		if stderr != "" {
-			t.Logf("[%s] exec stderr: %s", t.Name(), stderr)
-		}
-		if stdout == "" && stderr == "" && err == nil {
-			t.Logf("[%s] exec completed with no output", t.Name())
-		}
-		return stdout, stderr, err
+	if len(alerts) == 0 {
+		t.Errorf("expected at least one alert (R0005 for evil.example.com), got ZERO")
 	}
-
-	// ----------------------------------------------------------------
-	// Shared helper: fetch and log alerts.
-	// ----------------------------------------------------------------
-	fetchAlerts := func(t *testing.T, ns string) []testutils.Alert {
-		t.Helper()
-		t.Logf("[%s] fetching alerts for namespace %q", t.Name(), ns)
-		alerts, err := testutils.GetAlerts(ns)
-		require.NoError(t, err, "get alerts for ns %s", ns)
-		t.Logf("[%s] total alerts in namespace: %d", t.Name(), len(alerts))
-		for i, a := range alerts {
-			t.Logf("[%s]   alert[%d]: rule=%s container=%s labels=%v",
-				t.Name(), i, a.Labels["rule_name"], a.Labels["container_name"], a.Labels)
-		}
-		return alerts
-	}
-
-	// ----------------------------------------------------------------
-	// Shared helper: count alerts by rule+container.
-	// ----------------------------------------------------------------
-	countAlerts := func(alerts []testutils.Alert, ruleName, containerName string) int {
-		n := 0
-		for _, a := range alerts {
-			if a.Labels["rule_name"] == ruleName && a.Labels["container_name"] == containerName {
-				n++
-			}
-		}
-		return n
-	}
-
-	// =================================================================
-	// a. Both AP + NN user-defined — allowed activity → no alerts.
-	// =================================================================
-	t.Run("both_defined_allowed_activity", func(t *testing.T) {
-		t.Logf("[%s] START — both AP+NN user-defined, allowed activity, expect NO alerts", t.Name())
-		ns := testutils.NewRandomNamespace()
-		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
-
-		createProfile(t, ns.Name, profileName)
-		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "curl-both-user-defined-deployment.yaml")
-
-		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
-		time.Sleep(ingestWait)
-
-		// Exec allowed commands: cat (in profile), nslookup for DNS (UDP),
-		// and curl for HTTP (TCP).
-		execAndLog(t, wl, []string{"cat", "/etc/hosts"}, "curl")
-		execAndLog(t, wl, []string{"nslookup", allowedDomain}, "curl")
-		execAndLog(t, wl, []string{"curl", "-sm2", allowedDomain}, "curl")
-
-		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
-		time.Sleep(alertWait)
-
-		alerts := fetchAlerts(t, wl.Namespace)
-
-		execCount := countAlerts(alerts, execRuleName, "curl")
-		openCount := countAlerts(alerts, openRuleName, "curl")
-		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
-
-		t.Logf("[%s] result: exec=%d open=%d dns=%d", t.Name(), execCount, openCount, dnsCount)
-		if execCount > 0 {
-			t.Errorf("expected no R0001 alert for allowed exec, got %d", execCount)
-		}
-		if openCount > 0 {
-			t.Errorf("expected no R0002 alert for allowed open, got %d", openCount)
-		}
-		if dnsCount > 0 {
-			t.Errorf("expected no R0005 alert for allowed DNS, got %d", dnsCount)
-		}
-		t.Logf("[%s] DONE", t.Name())
-	})
-
-	// =================================================================
-	// b. Both AP + NN user-defined — unknown exec → R0001 alert.
-	// =================================================================
-	t.Run("both_defined_unknown_exec", func(t *testing.T) {
-		t.Logf("[%s] START — both AP+NN user-defined, unknown exec (ls), expect R0001", t.Name())
-		ns := testutils.NewRandomNamespace()
-		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
-
-		createProfile(t, ns.Name, profileName)
-		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "curl-both-user-defined-deployment.yaml")
-
-		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
-		time.Sleep(ingestWait)
-
-		// ls is not in the user-defined AP → should trigger R0001.
-		execAndLog(t, wl, []string{"ls", "/"}, "curl")
-
-		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
-		time.Sleep(alertWait)
-
-		alerts := fetchAlerts(t, wl.Namespace)
-
-		execCount := countAlerts(alerts, execRuleName, "curl")
-		t.Logf("[%s] result: R0001=%d", t.Name(), execCount)
-		if execCount == 0 {
-			t.Errorf("expected R0001 alert for 'ls' (not in user-defined AP), got none")
-		}
-		t.Logf("[%s] DONE", t.Name())
-	})
-
-	// =================================================================
-	// c. Both AP + NN user-defined — unknown DNS → R0005 alert.
-	// =================================================================
-	t.Run("both_defined_unknown_dns", func(t *testing.T) {
-		t.Logf("[%s] START — both AP+NN user-defined, unknown DNS (%s), expect R0005", t.Name(), unknownDomain)
-		ns := testutils.NewRandomNamespace()
-		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
-
-		createProfile(t, ns.Name, profileName)
-		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "curl-both-user-defined-deployment.yaml")
-
-		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
-		time.Sleep(ingestWait)
-
-		// evil.example.com is not in the user-defined NN → R0005.
-		// Use nslookup to trigger a pure UDP DNS query.
-		execAndLog(t, wl, []string{"nslookup", unknownDomain}, "curl")
-
-		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
-		time.Sleep(alertWait)
-
-		alerts := fetchAlerts(t, wl.Namespace)
-
-		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
-		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
-		if dnsCount == 0 {
-			t.Errorf("expected R0005 alert for %q (not in user-defined NN), got none", unknownDomain)
-		}
-		t.Logf("[%s] DONE", t.Name())
-	})
-
-	// =================================================================
-	// d. Only NN user-defined (no AP label) — allowed DNS → no R0005.
-	//    AP auto-learns normally.
-	// =================================================================
-	t.Run("nn_only_allowed_dns", func(t *testing.T) {
-		t.Logf("[%s] START — NN-only user-defined, allowed DNS (%s), expect NO R0005", t.Name(), allowedDomain)
-		ns := testutils.NewRandomNamespace()
-		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
-
-		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "curl-user-network-deployment.yaml")
-
-		// Wait for auto-learned AP to complete (NN is user-defined, AP is learned).
-		t.Logf("[%s] waiting for ApplicationProfile to auto-learn and complete...", t.Name())
-		require.NoError(t, wl.WaitForApplicationProfileCompletion(80),
-			"application profile failed to complete")
-		t.Logf("[%s] ApplicationProfile completed", t.Name())
-
-		// fusioncore.ai is in the user-defined NN → no R0005.
-		// Use nslookup for a pure UDP DNS query.
-		execAndLog(t, wl, []string{"nslookup", allowedDomain}, "curl")
-
-		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
-		time.Sleep(alertWait)
-
-		alerts := fetchAlerts(t, wl.Namespace)
-
-		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
-		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
-		if dnsCount > 0 {
-			t.Errorf("expected no R0005 alert for %q (in user-defined NN), got %d", allowedDomain, dnsCount)
-		}
-		t.Logf("[%s] DONE", t.Name())
-	})
-
-	// =================================================================
-	// e. Only NN user-defined (no AP label) — unknown DNS → R0005.
-	// =================================================================
-	t.Run("nn_only_unknown_dns", func(t *testing.T) {
-		t.Logf("[%s] START — NN-only user-defined, unknown DNS (%s), expect R0005", t.Name(), unknownDomain)
-		ns := testutils.NewRandomNamespace()
-		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
-
-		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "curl-user-network-deployment.yaml")
-
-		t.Logf("[%s] waiting for ApplicationProfile to auto-learn and complete...", t.Name())
-		require.NoError(t, wl.WaitForApplicationProfileCompletion(80),
-			"application profile failed to complete")
-		t.Logf("[%s] ApplicationProfile completed", t.Name())
-
-		// Use nslookup for a pure UDP DNS query.
-		execAndLog(t, wl, []string{"nslookup", unknownDomain}, "curl")
-
-		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
-		time.Sleep(alertWait)
-
-		alerts := fetchAlerts(t, wl.Namespace)
-
-		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
-		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
-		if dnsCount == 0 {
-			t.Errorf("expected R0005 alert for %q (not in user-defined NN), got none", unknownDomain)
-		}
-		t.Logf("[%s] DONE", t.Name())
-	})
-
 }

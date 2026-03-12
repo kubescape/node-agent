@@ -30,30 +30,20 @@ metadata:
     kubescape.io/workload-namespace: "{{NAMESPACE}}"
 spec:
   matchLabels:
-    app: curl-fusioncore
+    app: curl-fusioncore-28-1
   containers:
   - name: curl
     ingress: []
     egress:
-    - identifier: kube-dns
-      type: internal
-      namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-      podSelector:
-        matchLabels:
-          k8s-app: kube-dns
-      ports:
-      - name: UDP-53
-        protocol: UDP
-        port: 53
-    - identifier: fusioncore-ai
-      type: external
-      dns: "fusioncore.ai."
+    - dns: fusioncore.ai.
       dnsNames:
-      - "fusioncore.ai."
-      ipAddress: "162.0.217.171"
+      - fusioncore.ai.
+      identifier: a5e64ff1db824089b1706ac872303e55075f92cf6a652b5272f06c3a2b9e8d10
+      ipAddress: 162.0.217.171
+      namespaceSelector: null
+      podSelector: null
       ports:
       - name: TCP-80
-        protocol: TCP
         port: 80
+        protocol: TCP
+      type: external

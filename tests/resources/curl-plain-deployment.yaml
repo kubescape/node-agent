@@ -2,17 +2,17 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: curl-fusioncore
+    app: curl-fusioncore-28-0
   name: curl-fusioncore-deployment
 spec:
   selector:
     matchLabels:
-      app: curl-fusioncore
+      app: curl-fusioncore-28-0
   replicas: 1
   template:
     metadata:
       labels:
-        app: curl-fusioncore
+        app: curl-fusioncore-28-0
     spec:
       containers:
       - name: curl

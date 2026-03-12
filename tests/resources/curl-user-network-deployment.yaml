@@ -2,17 +2,17 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: curl-fusioncore
+    app: curl-fusioncore-28-1
   name: curl-fusioncore-deployment
 spec:
   selector:
     matchLabels:
-      app: curl-fusioncore
+      app: curl-fusioncore-28-1
   replicas: 1
   template:
     metadata:
       labels:
-        app: curl-fusioncore
+        app: curl-fusioncore-28-1
         kubescape.io/user-defined-network: fusioncore-network
     spec:
       containers:
