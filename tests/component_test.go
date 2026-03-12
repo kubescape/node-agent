@@ -2029,6 +2029,16 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	require.NoError(t, err, "create NN nginx-nn")
 	t.Logf("created AP + NN in ns %s", ns.Name)
 
+	// 2b. Poll storage until both AP and NN are retrievable.
+	// Node-agent does a single fetch on container start with no retry,
+	// so the profile MUST exist before the pod is created.
+	require.Eventually(t, func() bool {
+		_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), "nginx-ap", metav1.GetOptions{})
+		_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), "nginx-nn", metav1.GetOptions{})
+		return apErr == nil && nnErr == nil
+	}, 30*time.Second, 1*time.Second, "AP and NN must be retrievable from storage before deploying the pod")
+	t.Logf("verified AP + NN are retrievable from storage")
+
 	// 3. Deploy nginx with both user-defined labels (no learning).
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
 	require.NoError(t, err)
