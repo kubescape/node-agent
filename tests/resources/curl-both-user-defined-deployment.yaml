@@ -2,22 +2,21 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: nginx-fusioncore
-  name: nginx-fusioncore-deployment
+    app: curl-fusioncore
+  name: curl-fusioncore-deployment
 spec:
   selector:
     matchLabels:
-      app: nginx-fusioncore
+      app: curl-fusioncore
   replicas: 1
   template:
     metadata:
       labels:
-        app: nginx-fusioncore
+        app: curl-fusioncore
         kubescape.io/user-defined-profile: fusioncore-profile
         kubescape.io/user-defined-network: fusioncore-network
     spec:
       containers:
-      - name: nginx
-        image: nginx:1.14.2
-        ports:
-        - containerPort: 80
+      - name: curl
+        image: curlimages/curl:8.5.0
+        command: ["sleep", "infinity"]

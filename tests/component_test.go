@@ -1863,7 +1863,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 				Architectures: []string{"amd64"},
 				Containers: []v1beta1.ApplicationProfileContainer{
 					{
-						Name: "nginx",
+						Name: "curl",
 						Execs: []v1beta1.ExecCalls{
 							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
 							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl"}},
@@ -1901,12 +1901,12 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			Spec: v1beta1.NetworkNeighborhoodSpec{
 				LabelSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"app": "nginx-fusioncore",
+						"app": "curl-fusioncore",
 					},
 				},
 				Containers: []v1beta1.NetworkNeighborhoodContainer{
 					{
-						Name: "nginx",
+						Name: "curl",
 						Egress: []v1beta1.NetworkNeighbor{
 							{
 								Identifier: "fusioncore-ai",
@@ -2040,23 +2040,23 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 
 		createProfile(t, ns.Name, profileName)
 		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "nginx-both-user-defined-deployment.yaml")
+		wl := deployAndWait(t, ns.Name, "curl-both-user-defined-deployment.yaml")
 
 		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
 		time.Sleep(ingestWait)
 
 		// Exec allowed commands: cat (in profile) and curl an allowed domain (in NN).
-		execAndLog(t, wl, []string{"cat", "/etc/hosts"}, "nginx")
-		execAndLog(t, wl, []string{"curl", "-sm2", allowedDomain}, "nginx")
+		execAndLog(t, wl, []string{"cat", "/etc/hosts"}, "curl")
+		execAndLog(t, wl, []string{"curl", "-sm2", allowedDomain}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
 
 		alerts := fetchAlerts(t, wl.Namespace)
 
-		execCount := countAlerts(alerts, execRuleName, "nginx")
-		openCount := countAlerts(alerts, openRuleName, "nginx")
-		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
+		execCount := countAlerts(alerts, execRuleName, "curl")
+		openCount := countAlerts(alerts, openRuleName, "curl")
+		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
 
 		t.Logf("[%s] result: exec=%d open=%d dns=%d", t.Name(), execCount, openCount, dnsCount)
 		if execCount > 0 {
@@ -2081,20 +2081,20 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 
 		createProfile(t, ns.Name, profileName)
 		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "nginx-both-user-defined-deployment.yaml")
+		wl := deployAndWait(t, ns.Name, "curl-both-user-defined-deployment.yaml")
 
 		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
 		time.Sleep(ingestWait)
 
 		// ls is not in the user-defined AP → should trigger R0001.
-		execAndLog(t, wl, []string{"ls", "/"}, "nginx")
+		execAndLog(t, wl, []string{"ls", "/"}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
 
 		alerts := fetchAlerts(t, wl.Namespace)
 
-		execCount := countAlerts(alerts, execRuleName, "nginx")
+		execCount := countAlerts(alerts, execRuleName, "curl")
 		t.Logf("[%s] result: R0001=%d", t.Name(), execCount)
 		if execCount == 0 {
 			t.Errorf("expected R0001 alert for 'ls' (not in user-defined AP), got none")
@@ -2112,20 +2112,20 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 
 		createProfile(t, ns.Name, profileName)
 		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "nginx-both-user-defined-deployment.yaml")
+		wl := deployAndWait(t, ns.Name, "curl-both-user-defined-deployment.yaml")
 
 		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
 		time.Sleep(ingestWait)
 
 		// evil.example.com is not in the user-defined NN → R0005.
-		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "nginx")
+		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
 
 		alerts := fetchAlerts(t, wl.Namespace)
 
-		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
+		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
 		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
 		if dnsCount == 0 {
 			t.Errorf("expected R0005 alert for %q (not in user-defined NN), got none", unknownDomain)
@@ -2143,7 +2143,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
 
 		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "nginx-user-network-deployment.yaml")
+		wl := deployAndWait(t, ns.Name, "curl-user-network-deployment.yaml")
 
 		// Wait for auto-learned AP to complete (NN is user-defined, AP is learned).
 		t.Logf("[%s] waiting for ApplicationProfile to auto-learn and complete...", t.Name())
@@ -2152,14 +2152,14 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
 		// fusioncore.ai is in the user-defined NN → no R0005.
-		execAndLog(t, wl, []string{"curl", "-sm2", allowedDomain}, "nginx")
+		execAndLog(t, wl, []string{"curl", "-sm2", allowedDomain}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
 
 		alerts := fetchAlerts(t, wl.Namespace)
 
-		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
+		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
 		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
 		if dnsCount > 0 {
 			t.Errorf("expected no R0005 alert for %q (in user-defined NN), got %d", allowedDomain, dnsCount)
@@ -2176,21 +2176,21 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
 
 		createNetwork(t, ns.Name)
-		wl := deployAndWait(t, ns.Name, "nginx-user-network-deployment.yaml")
+		wl := deployAndWait(t, ns.Name, "curl-user-network-deployment.yaml")
 
 		t.Logf("[%s] waiting for ApplicationProfile to auto-learn and complete...", t.Name())
 		require.NoError(t, wl.WaitForApplicationProfileCompletion(80),
 			"application profile failed to complete")
 		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
-		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "nginx")
+		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
 
 		alerts := fetchAlerts(t, wl.Namespace)
 
-		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
+		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
 		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
 		if dnsCount == 0 {
 			t.Errorf("expected R0005 alert for %q (not in user-defined NN), got none", unknownDomain)
@@ -2207,19 +2207,19 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		ns := testutils.NewRandomNamespace()
 		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
 
-		// The existing nginx-user-profile-deployment.yaml references
-		// "nginx-regex-profile" — create the AP with that name.
-		t.Logf("[%s] creating ApplicationProfile %q for profile-only subtest", t.Name(), "nginx-regex-profile")
+		// curl-user-profile-deployment.yaml references
+		// "curl-regex-profile" — create the AP with that name.
+		t.Logf("[%s] creating ApplicationProfile %q for profile-only subtest", t.Name(), "curl-regex-profile")
 		apForProfile := &v1beta1.ApplicationProfile{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "nginx-regex-profile",
+				Name:      "curl-regex-profile",
 				Namespace: ns.Name,
 			},
 			Spec: v1beta1.ApplicationProfileSpec{
 				Architectures: []string{"amd64"},
 				Containers: []v1beta1.ApplicationProfileContainer{
 					{
-						Name: "nginx",
+						Name: "curl",
 						Execs: []v1beta1.ExecCalls{
 							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl"}},
 						},
@@ -2235,10 +2235,10 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		_, err := sc.ApplicationProfiles(ns.Name).Create(
 			context.Background(), apForProfile, metav1.CreateOptions{})
 		require.NoError(t, err, "create AP for profile_only subtest")
-		t.Logf("[%s] ApplicationProfile %q created", t.Name(), "nginx-regex-profile")
+		t.Logf("[%s] ApplicationProfile %q created", t.Name(), "curl-regex-profile")
 
 		// Use the deployment that only has the user-defined-profile label.
-		wl := deployAndWait(t, ns.Name, "nginx-user-profile-deployment.yaml")
+		wl := deployAndWait(t, ns.Name, "curl-user-profile-deployment.yaml")
 
 		// NN auto-learns — wait for it to complete.
 		t.Logf("[%s] waiting for NetworkNeighborhood to auto-learn and complete...", t.Name())
@@ -2251,14 +2251,14 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		time.Sleep(ingestWait)
 
 		// evil.example.com was never seen during learning → R0005.
-		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "nginx")
+		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "curl")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
 
 		alerts := fetchAlerts(t, wl.Namespace)
 
-		dnsCount := countAlerts(alerts, dnsRuleName, "nginx")
+		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
 		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
 		if dnsCount == 0 {
 			t.Errorf("expected R0005 alert for %q (not seen during NN learning), got none", unknownDomain)

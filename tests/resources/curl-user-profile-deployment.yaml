@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: curl
+  name: curl-deployment
+spec:
+  selector:
+    matchLabels:
+      app: curl
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: curl
+        kubescape.io/user-defined-profile: curl-regex-profile
+    spec:
+      containers:
+      - name: curl
+        image: curlimages/curl:8.5.0
+        command: ["sleep", "infinity"]

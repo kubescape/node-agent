@@ -17,5 +17,6 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: curlimages/curl:8.5.0
-        command: ["sleep", "infinity"]
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
