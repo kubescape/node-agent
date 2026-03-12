@@ -316,7 +316,8 @@ func main() {
 		mntnsRegistry := contextdetection.NewMntnsRegistry()
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory, celEvaluator, mntnsRegistry)
+		agentVersion := os.Getenv("AGENT_VERSION")
+		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory, celEvaluator, mntnsRegistry, agentVersion)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
