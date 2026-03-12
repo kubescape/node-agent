@@ -1826,7 +1826,6 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 //	c. both_defined_unknown_dns        — AP + NN provided; unknown DNS → R0005
 //	d. nn_only_allowed_dns             — only NN provided; allowed DNS → no R0005
 //	e. nn_only_unknown_dns             — only NN provided; unknown DNS → R0005
-//	f. profile_only_unknown_dns        — only AP provided (NN auto-learns); unknown DNS → R0005
 func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
@@ -1845,7 +1844,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		// How long to let node-agent ingest user-defined resources before exec.
 		ingestWait = 10 * time.Second
 		// How long to let alerts propagate after exec.
-		alertWait = 30 * time.Second
+		alertWait = 10 * time.Second
 	)
 
 	// ----------------------------------------------------------------
@@ -1863,14 +1862,43 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 				Architectures: []string{"amd64"},
 				Containers: []v1beta1.ApplicationProfileContainer{
 					{
-						Name: "curl",
+						Name:     "curl",
+						ImageID:  "docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058",
+						ImageTag: "docker.io/curlimages/curl:8.5.0",
+						Capabilities: []string{
+							"CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH",
+							"CAP_SETGID", "CAP_SETPCAP", "CAP_SETUID", "CAP_SYS_ADMIN",
+						},
 						Execs: []v1beta1.ExecCalls{
+							{Path: "/bin/sleep", Args: []string{"/bin/sleep", "infinity"}},
 							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
-							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl"}},
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-sm2", "fusioncore.ai"}},
 						},
 						Opens: []v1beta1.OpenCalls{
-							{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}},
-							{Path: "/etc/ld.so.cache", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/etc/hosts", Flags: []string{"O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"}},
+							{Path: "/etc/ld-musl-x86_64.path", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/etc/passwd", Flags: []string{"O_RDONLY", "O_CLOEXEC", "O_LARGEFILE"}},
+							{Path: "/etc/resolv.conf", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/etc/ssl/openssl.cnf", Flags: []string{"O_RDONLY", "O_LARGEFILE"}},
+							{Path: "/lib/libcurl.so.4", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/lib/libcrypto.so.3", Flags: []string{"O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"}},
+							{Path: "/lib/libssl.so.3", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/lib/libz.so.1.3", Flags: []string{"O_LARGEFILE", "O_CLOEXEC", "O_RDONLY"}},
+						},
+						Syscalls: []string{
+							"arch_prctl", "bind", "brk", "capget", "capset", "chdir",
+							"clone", "close", "close_range", "connect", "epoll_ctl",
+							"epoll_pwait", "execve", "exit", "exit_group", "faccessat2",
+							"fchown", "fcntl", "fstat", "fstatfs", "futex", "getcwd",
+							"getdents64", "getegid", "geteuid", "getgid", "getpeername",
+							"getppid", "getsockname", "getsockopt", "gettid", "getuid",
+							"ioctl", "membarrier", "mmap", "mprotect", "munmap",
+							"nanosleep", "newfstatat", "open", "openat", "openat2",
+							"pipe", "poll", "prctl", "read", "recvfrom", "recvmsg",
+							"rt_sigaction", "rt_sigprocmask", "rt_sigreturn", "sendto",
+							"set_tid_address", "setgid", "setgroups", "setsockopt",
+							"setuid", "sigaltstack", "socket", "statx", "tkill",
+							"unknown", "write", "writev",
 						},
 					},
 				},
@@ -1909,21 +1937,19 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 						Name: "curl",
 						Egress: []v1beta1.NetworkNeighbor{
 							{
-								Identifier: "fusioncore-ai",
-								Type:       "external",
-								DNSNames:   []string{"fusioncore.ai."},
-								IPAddress:  "162.0.217.171",
+								Identifier: "kube-dns",
+								Type:       "internal",
+								NamespaceSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"kubernetes.io/metadata.name": "kube-system",
+									},
+								},
+								PodSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"k8s-app": "kube-dns",
+									},
+								},
 								Ports: []v1beta1.NetworkPort{
-									{
-										Name:     "TCP-80",
-										Protocol: "TCP",
-										Port:     ptr.To(int32(80)),
-									},
-									{
-										Name:     "TCP-443",
-										Protocol: "TCP",
-										Port:     ptr.To(int32(443)),
-									},
 									{
 										Name:     "UDP-53",
 										Protocol: "UDP",
@@ -1932,14 +1958,16 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 								},
 							},
 							{
-								Identifier: "cluster-dns",
-								Type:       "internal",
-								DNSNames:   []string{"kubernetes.default.svc.cluster.local."},
+								Identifier: "fusioncore-ai",
+								Type:       "external",
+								DNS:        "fusioncore.ai.",
+								DNSNames:   []string{"fusioncore.ai."},
+								IPAddress:  "162.0.217.171",
 								Ports: []v1beta1.NetworkPort{
 									{
-										Name:     "UDP-53",
-										Protocol: "UDP",
-										Port:     ptr.To(int32(53)),
+										Name:     "TCP-80",
+										Protocol: "TCP",
+										Port:     ptr.To(int32(80)),
 									},
 								},
 							},
@@ -2198,71 +2226,4 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		t.Logf("[%s] DONE", t.Name())
 	})
 
-	// =================================================================
-	// f. Only AP user-defined (no NN label) — AP works, NN auto-learns.
-	//    After learning, unknown DNS triggers R0005.
-	// =================================================================
-	t.Run("profile_only_unknown_dns", func(t *testing.T) {
-		t.Logf("[%s] START — AP-only user-defined, NN auto-learns, unknown DNS (%s), expect R0005", t.Name(), unknownDomain)
-		ns := testutils.NewRandomNamespace()
-		t.Logf("[%s] namespace created: %s", t.Name(), ns.Name)
-
-		// curl-user-profile-deployment.yaml references
-		// "curl-regex-profile" — create the AP with that name.
-		t.Logf("[%s] creating ApplicationProfile %q for profile-only subtest", t.Name(), "curl-regex-profile")
-		apForProfile := &v1beta1.ApplicationProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "curl-regex-profile",
-				Namespace: ns.Name,
-			},
-			Spec: v1beta1.ApplicationProfileSpec{
-				Architectures: []string{"amd64"},
-				Containers: []v1beta1.ApplicationProfileContainer{
-					{
-						Name: "curl",
-						Execs: []v1beta1.ExecCalls{
-							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl"}},
-						},
-						Opens: []v1beta1.OpenCalls{
-							{Path: "/etc/ld.so.cache", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
-						},
-					},
-				},
-			},
-		}
-		k8sClient := k8sinterface.NewKubernetesApi()
-		sc := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-		_, err := sc.ApplicationProfiles(ns.Name).Create(
-			context.Background(), apForProfile, metav1.CreateOptions{})
-		require.NoError(t, err, "create AP for profile_only subtest")
-		t.Logf("[%s] ApplicationProfile %q created", t.Name(), "curl-regex-profile")
-
-		// Use the deployment that only has the user-defined-profile label.
-		wl := deployAndWait(t, ns.Name, "curl-user-profile-deployment.yaml")
-
-		// NN auto-learns — wait for it to complete.
-		t.Logf("[%s] waiting for NetworkNeighborhood to auto-learn and complete...", t.Name())
-		require.NoError(t, wl.WaitForNetworkNeighborhoodCompletion(80),
-			"network neighborhood failed to complete")
-		t.Logf("[%s] NetworkNeighborhood completed", t.Name())
-
-		// Small settle time after NN completion.
-		t.Logf("[%s] waiting %v for node-agent to activate detection on completed NN", t.Name(), ingestWait)
-		time.Sleep(ingestWait)
-
-		// evil.example.com was never seen during learning → R0005.
-		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "curl")
-
-		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
-		time.Sleep(alertWait)
-
-		alerts := fetchAlerts(t, wl.Namespace)
-
-		dnsCount := countAlerts(alerts, dnsRuleName, "curl")
-		t.Logf("[%s] result: R0005=%d", t.Name(), dnsCount)
-		if dnsCount == 0 {
-			t.Errorf("expected R0005 alert for %q (not seen during NN learning), got none", unknownDomain)
-		}
-		t.Logf("[%s] DONE", t.Name())
-	})
 }

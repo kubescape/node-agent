@@ -7,6 +7,8 @@
 ## This resource does NOT carry "kubescape.io/managed-by: User" —
 ## the pod label is the sole linkage mechanism.
 ##
+## Modeled after a real auto-learned NN from curlimages/curl:8.5.0.
+##
 ## Usage:
 ##   sed "s/{{NAMESPACE}}/$NS/g" known-network-neighborhood.yaml \
 ##     | kubectl apply -f -
@@ -18,13 +20,26 @@ metadata:
   namespace: "{{NAMESPACE}}"
 spec:
   matchLabels:
-    app: nginx-fusioncore
+    app: curl-fusioncore
   containers:
-  - name: nginx
+  - name: curl
     ingress: []
     egress:
+    - identifier: kube-dns
+      type: internal
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+      ports:
+      - name: UDP-53
+        protocol: UDP
+        port: 53
     - identifier: fusioncore-ai
       type: external
+      dns: "fusioncore.ai."
       dnsNames:
       - "fusioncore.ai."
       ipAddress: "162.0.217.171"
@@ -32,17 +47,3 @@ spec:
       - name: TCP-80
         protocol: TCP
         port: 80
-      - name: TCP-443
-        protocol: TCP
-        port: 443
-      - name: UDP-53
-        protocol: UDP
-        port: 53
-    - identifier: cluster-dns
-      type: internal
-      dnsNames:
-      - "kubernetes.default.svc.cluster.local."
-      ports:
-      - name: UDP-53
-        protocol: UDP
-        port: 53
