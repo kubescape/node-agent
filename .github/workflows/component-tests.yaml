@@ -90,7 +90,7 @@ jobs:
 
           # Agent code = anything outside tests/ and .github/
           # These are the paths that end up in the node-agent container image.
-          AGENT_CHANGES=$(echo "$CHANGED" | grep -vE '^(tests/|\.github/)' || true)
+          AGENT_CHANGES=$(echo "$CHANGED" | grep -vE '^(tests/|\.github/|docs/)' || true)
 
           if [ -n "$AGENT_CHANGES" ]; then
             echo "=== Agent code changed (rebuild needed) ==="

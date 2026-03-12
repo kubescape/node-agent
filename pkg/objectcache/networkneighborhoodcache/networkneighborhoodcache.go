@@ -17,6 +17,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/resourcelocks"
+	"github.com/kubescape/node-agent/pkg/signature"
+	"github.com/kubescape/node-agent/pkg/signature/profiles"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -246,6 +248,21 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 				continue
 			}
 
+			// Verify signature if enabled
+			if nnc.cfg.EnableSignatureVerification {
+				adapter := profiles.NewNetworkNeighborhoodAdapter(fullNN)
+				if err := signature.VerifyObjectStrict(adapter); err != nil {
+					logger.L().Warning("network neighborhood signature verification failed, skipping",
+						helpers.String("workloadID", workloadID),
+						helpers.String("namespace", namespace),
+						helpers.String("name", fullNN.Name),
+						helpers.Error(err))
+					profileState.Error = fmt.Errorf("signature verification failed: %w", err)
+					nnc.workloadIDToProfileState.Set(workloadID, profileState)
+					continue
+				}
+			}
+
 			nnc.workloadIDToNetworkNeighborhood.Set(workloadID, fullNN)
 			logger.L().Debug("updated network neighborhood in cache",
 				helpers.String("workloadID", workloadID),
@@ -316,8 +333,62 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 			helpers.Error(err))
 		return
 	}
+
+	// Verify signature on the original network neighborhood before merging
+	if nnc.cfg.EnableSignatureVerification {
+		adapter := profiles.NewNetworkNeighborhoodAdapter(originalNN)
+		if err := signature.VerifyObjectStrict(adapter); err != nil {
+			logger.L().Warning("original network neighborhood signature verification failed, skipping merge",
+				helpers.String("workloadID", toMerge.wlid),
+				helpers.String("namespace", originalNN.Namespace),
+				helpers.String("name", originalNN.Name),
+				helpers.Error(err))
+			profileState := &objectcache.ProfileState{
+				Completion: originalNN.Annotations[helpersv1.CompletionMetadataKey],
+				Status:     originalNN.Annotations[helpersv1.StatusMetadataKey],
+				Name:       originalNN.Name,
+				Error:      fmt.Errorf("signature verification failed: %w", err),
+			}
+			nnc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
+			// Evict stale merged profile from cache on verification failure
+			nnc.workloadIDToNetworkNeighborhood.Delete(toMerge.wlid)
+			return
+		}
+	}
+
+	// Verify signature on the user-managed network neighborhood before merging
+	if nnc.cfg.EnableSignatureVerification {
+		adapter := profiles.NewNetworkNeighborhoodAdapter(fullUserNN)
+		if err := signature.VerifyObjectStrict(adapter); err != nil {
+			logger.L().Warning("user-managed network neighborhood signature verification failed, skipping merge",
+				helpers.String("workloadID", toMerge.wlid),
+				helpers.String("namespace", fullUserNN.Namespace),
+				helpers.String("name", fullUserNN.Name),
+				helpers.Error(err))
+			profileState := &objectcache.ProfileState{
+				Completion: fullUserNN.Annotations[helpersv1.CompletionMetadataKey],
+				Status:     fullUserNN.Annotations[helpersv1.StatusMetadataKey],
+				Name:       fullUserNN.Name,
+				Error:      fmt.Errorf("signature verification failed: %w", err),
+			}
+			nnc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
+			// Restore cache to originalNN on user-managed verification failure
+			nnc.workloadIDToNetworkNeighborhood.Set(toMerge.wlid, originalNN)
+			return
+		}
+	}
+
 	// Merge the network neighborhoods
 	mergedNN := nnc.performMerge(originalNN, fullUserNN)
+
+	// Clear stale signature annotations after merge
+	delete(mergedNN.Annotations, signature.AnnotationSignature)
+	delete(mergedNN.Annotations, signature.AnnotationCertificate)
+	delete(mergedNN.Annotations, signature.AnnotationRekorBundle)
+	delete(mergedNN.Annotations, signature.AnnotationIssuer)
+	delete(mergedNN.Annotations, signature.AnnotationIdentity)
+	delete(mergedNN.Annotations, signature.AnnotationTimestamp)
+
 	// Update the cache with the merged network neighborhood
 	nnc.workloadIDToNetworkNeighborhood.Set(toMerge.wlid, mergedNN)
 	// Update profile state for the merged profile
