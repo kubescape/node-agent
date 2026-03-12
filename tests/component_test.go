@@ -1869,7 +1869,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl"}},
 						},
 						Opens: []v1beta1.OpenCalls{
-							{Path: "/etc/nginx/nginx.conf", Flags: []string{"O_RDONLY"}},
+							{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}},
 							{Path: "/etc/ld.so.cache", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
 						},
 					},
@@ -2045,9 +2045,9 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		t.Logf("[%s] waiting %v for node-agent to ingest user-defined resources", t.Name(), ingestWait)
 		time.Sleep(ingestWait)
 
-		// Exec an allowed command + resolve an allowed domain.
-		execAndLog(t, wl, []string{"cat", "/etc/nginx/nginx.conf"}, "nginx")
-		execAndLog(t, wl, []string{"curl", allowedDomain, "-m", "2"}, "nginx")
+		// Exec allowed commands: cat (in profile) and curl an allowed domain (in NN).
+		execAndLog(t, wl, []string{"cat", "/etc/hosts"}, "nginx")
+		execAndLog(t, wl, []string{"curl", "-sm2", allowedDomain}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2118,7 +2118,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		time.Sleep(ingestWait)
 
 		// evil.example.com is not in the user-defined NN → R0005.
-		execAndLog(t, wl, []string{"curl", unknownDomain, "-m", "2"}, "nginx")
+		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2152,7 +2152,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
 		// fusioncore.ai is in the user-defined NN → no R0005.
-		execAndLog(t, wl, []string{"curl", allowedDomain, "-m", "2"}, "nginx")
+		execAndLog(t, wl, []string{"curl", "-sm2", allowedDomain}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2183,7 +2183,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			"application profile failed to complete")
 		t.Logf("[%s] ApplicationProfile completed", t.Name())
 
-		execAndLog(t, wl, []string{"curl", unknownDomain, "-m", "2"}, "nginx")
+		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
@@ -2251,7 +2251,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		time.Sleep(ingestWait)
 
 		// evil.example.com was never seen during learning → R0005.
-		execAndLog(t, wl, []string{"curl", unknownDomain, "-m", "2"}, "nginx")
+		execAndLog(t, wl, []string{"curl", "-sm2", unknownDomain}, "nginx")
 
 		t.Logf("[%s] waiting %v for alerts to propagate", t.Name(), alertWait)
 		time.Sleep(alertWait)
