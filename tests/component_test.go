@@ -1812,6 +1812,122 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		addResult("wildcard_matches_deep_path", profilePath, filePath, false, !got,
 			fmt.Sprintf("got %d alerts, expected none for cat", len(alerts)))
 	})
+
+	// ---------------------------------------------------------------
+	// 1c. Deploy known-application-profile-wildcards.yaml (curl image)
+	//     and verify that files under wildcard-covered opens paths
+	//     produce no R0002 alert.
+	// ---------------------------------------------------------------
+	t.Run("wildcard_yaml_profile_allowed_opens", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		wildcardProfileName := "fusioncore-profile-wildcards"
+
+		// Create the profile matching known-application-profile-wildcards.yaml.
+		profile := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      wildcardProfileName,
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Architectures: []string{"amd64"},
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name:     "curl",
+						ImageID:  "docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058",
+						ImageTag: "docker.io/curlimages/curl:8.5.0",
+						Capabilities: []string{
+							"CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH",
+							"CAP_SETGID", "CAP_SETPCAP", "CAP_SETUID", "CAP_SYS_ADMIN",
+						},
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/bin/sleep", Args: []string{"/bin/sleep", "infinity"}},
+							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-sm2", "fusioncore.ai"}},
+						},
+						Opens: []v1beta1.OpenCalls{
+							{Path: "/etc/*", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/etc/ssl/openssl.cnf", Flags: []string{"O_RDONLY", "O_LARGEFILE"}},
+							{Path: "/home/*", Flags: []string{"O_RDONLY", "O_LARGEFILE"}},
+							{Path: "/lib/*", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/usr/lib/*", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/usr/local/lib/*", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/proc/*/cgroup", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/proc/*/kernel/cap_last_cap", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/proc/*/mountinfo", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/proc/*/task/*/fd", Flags: []string{"O_RDONLY", "O_DIRECTORY", "O_CLOEXEC"}},
+							{Path: "/sys/fs/cgroup/cpu.max", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/sys/kernel/mm/transparent_hugepage/hpage_pmd_size", Flags: []string{"O_RDONLY"}},
+							{Path: "/7/setgroups", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/runc", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+						},
+						Syscalls: []string{
+							"arch_prctl", "bind", "brk", "capget", "capset", "chdir",
+							"clone", "close", "close_range", "connect", "epoll_ctl",
+							"epoll_pwait", "execve", "exit", "exit_group", "faccessat2",
+							"fchown", "fcntl", "fstat", "fstatfs", "futex", "getcwd",
+							"getdents64", "getegid", "geteuid", "getgid", "getpeername",
+							"getppid", "getsockname", "getsockopt", "gettid", "getuid",
+							"ioctl", "membarrier", "mmap", "mprotect", "munmap",
+							"nanosleep", "newfstatat", "open", "openat", "openat2",
+							"pipe", "poll", "prctl", "read", "recvfrom", "recvmsg",
+							"rt_sigaction", "rt_sigprocmask", "rt_sigreturn", "sendto",
+							"set_tid_address", "setgid", "setgroups", "setsockopt",
+							"setuid", "sigaltstack", "socket", "statx", "tkill",
+							"unknown", "write", "writev",
+						},
+					},
+				},
+			},
+		}
+
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), profile, metav1.CreateOptions{})
+		require.NoError(t, err, "create wildcard profile %q in ns %s", wildcardProfileName, ns.Name)
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/curl-user-profile-wildcards-deployment.yaml"))
+		require.NoError(t, err, "create curl workload in ns %s", ns.Name)
+		require.NoError(t, wl.WaitForReady(80), "curl workload not ready in ns %s", ns.Name)
+
+		time.Sleep(20 * time.Second) // let node-agent pick up the profile
+
+		// Cat files that are covered by the wildcard opens.
+		allowedFiles := []string{
+			"/etc/hosts",          // covered by /etc/*
+			"/etc/resolv.conf",    // covered by /etc/*
+			"/etc/ssl/openssl.cnf", // exact match
+		}
+		for _, f := range allowedFiles {
+			stdout, stderr, err := wl.ExecIntoPod([]string{"cat", f}, "curl")
+			if err != nil {
+				t.Logf("exec 'cat %s' failed: %v (stdout=%q stderr=%q)", f, err, stdout, stderr)
+			}
+		}
+
+		time.Sleep(30 * time.Second) // let alerts propagate
+
+		alerts, err := testutils.GetAlerts(wl.Namespace)
+		require.NoError(t, err, "get alerts from ns %s", wl.Namespace)
+
+		var r0002Fired bool
+		for _, a := range alerts {
+			if a.Labels["rule_name"] == ruleName &&
+				a.Labels["comm"] == "cat" &&
+				a.Labels["container_name"] == "curl" {
+				r0002Fired = true
+				break
+			}
+		}
+		if r0002Fired {
+			t.Errorf("expected NO R0002 for files covered by wildcard opens, but alert fired")
+		}
+		addResult("wildcard_yaml_profile_allowed_opens",
+			"/etc/*, /etc/ssl/openssl.cnf", "/etc/hosts, /etc/resolv.conf, /etc/ssl/openssl.cnf",
+			false, !r0002Fired,
+			fmt.Sprintf("got R0002=%v, expected none for wildcard-covered files", r0002Fired))
+	})
 }
 
 // Test_28_UserDefinedNetworkNeighborhood exercises the user-defined

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: curl-fusioncore
+  name: curl-fusioncore-deployment
+spec:
+  selector:
+    matchLabels:
+      app: curl-fusioncore
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: curl-fusioncore
+        kubescape.io/user-defined-profile: fusioncore-profile-wildcards
+    spec:
+      containers:
+      - name: curl
+        image: curlimages/curl:8.5.0
+        command: ["sleep", "infinity"]
