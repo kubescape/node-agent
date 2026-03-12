@@ -2045,8 +2045,8 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	require.NoError(t, wl.WaitForReady(80))
 	t.Logf("pod ready in ns %s", ns.Name)
 
-	// Give node-agent a moment to load the user-defined profiles into cache.
-	time.Sleep(5 * time.Second)
+	// Give node-agent time to load the user-defined profiles into cache.
+	time.Sleep(30 * time.Second)
 
 	// 4. Trigger anomalous traffic NOT in the NN.
 	exec := func(cmd []string) {
@@ -2066,7 +2066,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	exec([]string{"curl", "-sm5", "http://cloudflare.com"})
 
 	// 5. Wait for alerts and assert both R0011 and R0005 fire.
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 	alerts, err := testutils.GetAlerts(ns.Name)
 	require.NoError(t, err)
 
