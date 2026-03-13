@@ -247,7 +247,6 @@ func main() {
 	}
 
 	var containerProfileManager containerprofilemanager.ContainerProfileManagerClient
-	var cloudMetadata *armotypes.CloudMetadata
 
 	if cfg.EnableApplicationProfile || cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
 		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
