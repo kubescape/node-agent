@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: curl-28
+  name: curl-28
+spec:
+  selector:
+    matchLabels:
+      app: curl-28
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: curl-28
+        kubescape.io/user-defined-network: curl-nn
+        kubescape.io/user-defined-profile: curl-ap
+    spec:
+      containers:
+      - name: curl
+        image: docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058
+        command: ["sleep", "infinity"]

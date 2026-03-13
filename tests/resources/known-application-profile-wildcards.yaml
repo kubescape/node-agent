@@ -1,0 +1,155 @@
+##
+## User-defined ApplicationProfile with wildcard opens for Test_27.
+##
+## Derived from the learned AP of curlimages/curl:8.5.0,
+## with opens collapsed using the wildcard identifier:
+##   *  — matches zero or more path segments
+##
+## Usage:
+##   sed "s/{{NAMESPACE}}/$NS/g" known-application-profile-wildcards.yaml \
+##     | kubectl apply -f -
+##
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ApplicationProfile
+metadata:
+  name: fusioncore-profile-wildcards
+  namespace: "{{NAMESPACE}}"
+spec:
+  architectures: ["amd64"]
+  containers:
+  - name: curl
+    imageID: "docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058"
+    imageTag: "docker.io/curlimages/curl:8.5.0"
+    capabilities:
+    - CAP_CHOWN
+    - CAP_DAC_OVERRIDE
+    - CAP_DAC_READ_SEARCH
+    - CAP_SETGID
+    - CAP_SETPCAP
+    - CAP_SETUID
+    - CAP_SYS_ADMIN
+    execs:
+    - path: /bin/sleep
+      args: ["/bin/sleep", "infinity"]
+    - path: /bin/cat
+      args: ["/bin/cat"]
+    - path: /usr/bin/curl
+      args: ["/usr/bin/curl", "-sm2", "fusioncore.ai"]
+    - path: /usr/bin/nslookup
+      args: ["/usr/bin/nslookup"]
+    opens:
+    # --- /etc: wildcard covers any config file ---
+    - path: "/etc/*"
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    # --- /etc/ssl: exact ---
+    - path: /etc/ssl/openssl.cnf
+      flags: ["O_RDONLY", "O_LARGEFILE"]
+    # --- /home: wildcard covers curlrc in any depth ---
+    - path: "/home/*"
+      flags: ["O_RDONLY", "O_LARGEFILE"]
+    # --- /lib: wildcard covers all shared libs ---
+    - path: "/lib/*"
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    # --- /usr/lib: wildcard covers all versioned shared libs ---
+    - path: "/usr/lib/*"
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    # --- /usr/local/lib: wildcard covers all local shared libs ---
+    - path: "/usr/local/lib/*"
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    # --- /proc: wildcard for dynamic PID segments ---
+    - path: "/proc/*/cgroup"
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: "/proc/*/kernel/cap_last_cap"
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: "/proc/*/mountinfo"
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: "/proc/*/task/*/fd"
+      flags: ["O_RDONLY", "O_DIRECTORY", "O_CLOEXEC"]
+    # --- /sys ---
+    - path: "/sys/fs/cgroup/cpu.max"
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: "/sys/kernel/mm/transparent_hugepage/hpage_pmd_size"
+      flags: ["O_RDONLY"]
+    # --- runtime internals ---
+    - path: /7/setgroups
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: /runc
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    syscalls:
+    - arch_prctl
+    - bind
+    - brk
+    - capget
+    - capset
+    - chdir
+    - clone
+    - close
+    - close_range
+    - connect
+    - epoll_ctl
+    - epoll_pwait
+    - execve
+    - exit
+    - exit_group
+    - faccessat2
+    - fchown
+    - fcntl
+    - fstat
+    - fstatfs
+    - futex
+    - getcwd
+    - getdents64
+    - getegid
+    - geteuid
+    - getgid
+    - getpeername
+    - getppid
+    - getsockname
+    - getsockopt
+    - gettid
+    - getuid
+    - ioctl
+    - membarrier
+    - mmap
+    - mprotect
+    - munmap
+    - nanosleep
+    - newfstatat
+    - open
+    - openat
+    - openat2
+    - pipe
+    - poll
+    - prctl
+    - read
+    - recvfrom
+    - recvmsg
+    - rt_sigaction
+    - rt_sigprocmask
+    - rt_sigreturn
+    - sendto
+    - set_tid_address
+    - setgid
+    - setgroups
+    - setsockopt
+    - setuid
+    - sigaltstack
+    - socket
+    - statx
+    - tkill
+    - unknown
+    - write
+    - writev
+    endpoints:
+    - endpoint: ":80/"
+      direction: outbound
+      methods: ["GET"]
+      internal: false
+      headers: '{"Host":["fusioncore.ai"]}'
+    seccompProfile:
+      spec:
+        defaultAction: ""
+    rulePolicies: {}
+  initContainers: []
+  ephemeralContainers: []
+status: {}

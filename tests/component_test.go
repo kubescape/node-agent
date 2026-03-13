@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1564,4 +1565,533 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	assert.Truef(t, found, "Expected to find an alert for the process tree depth")
 
 	t.Logf("Found alerts for the process tree depth: %v", alerts)
+}
+
+// Test_27_ApplicationProfileOpens tests that the dynamic path matching in
+// application profiles works correctly for both recorded (auto-learned)
+// profiles and user-defined profiles.
+//
+// Path matching symbols:
+//
+//	⋯  (U+22EF DynamicIdentifier)  — matches exactly ONE path segment
+//	*  (WildcardIdentifier)         — matches ZERO or more path segments
+//	0  (in endpoints)               — wildcard port (any port)
+//
+// R0002 "Files Access Anomalies in container" fires when a file is opened
+// under a monitored prefix (/etc/, /var/log/, …) and the path was NOT
+// recorded in the application profile.
+func Test_27_ApplicationProfileOpens(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	const ruleName = "Files Access Anomalies in container"
+	const profileName = "nginx-regex-profile"
+
+	// --- result tracking for end-of-test summary ---
+	type subtestResult struct {
+		name        string
+		profilePath string
+		filePath    string
+		expectAlert bool
+		passed      bool
+		detail      string
+	}
+	var results []subtestResult
+	addResult := func(name, profilePath, filePath string, expectAlert, passed bool, detail string) {
+		results = append(results, subtestResult{name, profilePath, filePath, expectAlert, passed, detail})
+	}
+	defer func() {
+		t.Log("\n========== Test_27 Summary ==========")
+		anyFailed := false
+		for _, r := range results {
+			status := "PASS"
+			if !r.passed {
+				status = "FAIL"
+				anyFailed = true
+			}
+			expect := "expect alert"
+			if !r.expectAlert {
+				expect = "expect NO alert"
+			}
+			t.Logf("  [%s] %-35s profile=%-25s file=%-25s %s", status, r.name, r.profilePath, r.filePath, expect)
+			if !r.passed {
+				t.Logf("         -> %s", r.detail)
+			}
+		}
+		if !anyFailed {
+			t.Log("  All subtests passed.")
+		}
+		t.Log("======================================")
+	}()
+
+	// deployWithProfile creates a user-defined ApplicationProfile with the
+	// given Opens list, deploys nginx with the kubescape.io/user-defined-profile
+	// label pointing at it, and waits for the pod + cache to be ready.
+	deployWithProfile := func(t *testing.T, opens []v1beta1.OpenCalls) *testutils.TestWorkload {
+		t.Helper()
+		ns := testutils.NewRandomNamespace()
+
+		profile := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      profileName,
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Architectures: []string{"amd64"},
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "nginx",
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
+						},
+						Opens: opens,
+					},
+				},
+			},
+		}
+
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), profile, metav1.CreateOptions{})
+		require.NoError(t, err, "create user-defined profile %q in ns %s", profileName, ns.Name)
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/nginx-user-profile-deployment.yaml"))
+		require.NoError(t, err, "create workload in ns %s", ns.Name)
+		require.NoError(t, wl.WaitForReady(80), "workload not ready in ns %s", ns.Name)
+
+		time.Sleep(20 * time.Second) // let node-agent pick up the profile
+		return wl
+	}
+
+	// triggerAndGetAlerts execs cat on the given path and returns the alerts.
+	triggerAndGetAlerts := func(t *testing.T, wl *testutils.TestWorkload, filePath string) []testutils.Alert {
+		t.Helper()
+		stdout, stderr, err := wl.ExecIntoPod([]string{"cat", filePath}, "nginx")
+		if err != nil {
+			t.Errorf("exec 'cat %s' in container nginx failed: %v (stdout=%q stderr=%q)", filePath, err, stdout, stderr)
+		}
+		time.Sleep(30 * time.Second)
+		alerts, err := testutils.GetAlerts(wl.Namespace)
+		require.NoError(t, err, "get alerts from ns %s", wl.Namespace)
+		return alerts
+	}
+
+	// hasAlert checks whether an R0002 alert exists for comm=cat, container=nginx.
+	hasAlert := func(alerts []testutils.Alert) bool {
+		for _, a := range alerts {
+			if a.Labels["rule_name"] == ruleName &&
+				a.Labels["comm"] == "cat" &&
+				a.Labels["container_name"] == "nginx" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// ---------------------------------------------------------------
+	// 1a. Recorded (auto-learned) profile must use absolute paths.
+	//     There must be no "." in the Opens paths.
+	// ---------------------------------------------------------------
+	t.Run("recorded_profile_absolute_paths", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+		require.NoError(t, err)
+		require.NoError(t, wl.WaitForReady(80))
+		require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
+
+		profile, err := wl.GetApplicationProfile()
+		require.NoError(t, err, "get application profile")
+
+		passed := true
+		for _, container := range profile.Spec.Containers {
+			for _, open := range container.Opens {
+				if !strings.HasPrefix(open.Path, "/") {
+					t.Errorf("recorded path must be absolute: got %q (container %s)", open.Path, container.Name)
+					passed = false
+				}
+				if open.Path == "." {
+					t.Errorf("recorded path must not be relative dot: got %q (container %s)", open.Path, container.Name)
+					passed = false
+				}
+			}
+		}
+		detail := ""
+		if !passed {
+			detail = "found non-absolute or '.' paths in recorded profile"
+		}
+		addResult("recorded_profile_absolute_paths", "(auto-learned)", "(nginx startup)", false, passed, detail)
+	})
+
+	// ---------------------------------------------------------------
+	// 1b. User-defined profile wildcard tests.
+	//     Each sub-test deploys nginx in its own namespace with a
+	//     different Opens pattern and verifies R0002 behaviour.
+	// ---------------------------------------------------------------
+
+	// 1b-1: Exact path — profile has the exact file => no alert.
+	t.Run("exact_path_match", func(t *testing.T) {
+		profilePath := "/etc/nginx/nginx.conf"
+		filePath := "/etc/nginx/nginx.conf"
+		wl := deployWithProfile(t, []v1beta1.OpenCalls{
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
+			{Path: "/etc/ld.so.cache", Flags: []string{"O_RDONLY", "O_CLOEXEC"}}, // dynamic linker opens this on every exec
+		})
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if got {
+			t.Errorf("expected NO R0002 alert: profile allows %q, opened %q, but alert fired", profilePath, filePath)
+		}
+		addResult("exact_path_match", profilePath, filePath, false, !got,
+			fmt.Sprintf("got %d alerts, expected none for cat", len(alerts)))
+	})
+
+	// 1b-2: Exact path — profile has a DIFFERENT file => alert.
+	t.Run("exact_path_mismatch", func(t *testing.T) {
+		profilePath := "/etc/nginx/nginx.conf"
+		filePath := "/etc/hostname"
+		wl := deployWithProfile(t, []v1beta1.OpenCalls{
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
+		})
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if !got {
+			t.Errorf("expected R0002 alert: profile only allows %q, opened %q, but no alert", profilePath, filePath)
+		}
+		addResult("exact_path_mismatch", profilePath, filePath, true, got,
+			fmt.Sprintf("got %d alerts, expected at least one for cat", len(alerts)))
+	})
+
+	// 1b-3: Ellipsis ⋯ matches single segment — /etc/⋯ covers /etc/hostname.
+	t.Run("ellipsis_single_segment_match", func(t *testing.T) {
+		profilePath := "/etc/" + dynamicpathdetector.DynamicIdentifier
+		filePath := "/etc/hostname"
+		wl := deployWithProfile(t, []v1beta1.OpenCalls{
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
+		})
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if got {
+			t.Errorf("expected NO R0002 alert: profile %q should match %q (single segment), but alert fired", profilePath, filePath)
+		}
+		addResult("ellipsis_single_segment_match", profilePath, filePath, false, !got,
+			fmt.Sprintf("got %d alerts, expected none for cat", len(alerts)))
+	})
+
+	// 1b-4: Ellipsis ⋯ rejects multi-segment — /etc/⋯ does NOT cover
+	//        /etc/nginx/nginx.conf (two segments past /etc/).
+	t.Run("ellipsis_rejects_multi_segment", func(t *testing.T) {
+		profilePath := "/etc/" + dynamicpathdetector.DynamicIdentifier
+		filePath := "/etc/nginx/nginx.conf"
+		wl := deployWithProfile(t, []v1beta1.OpenCalls{
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
+		})
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if !got {
+			t.Errorf("expected R0002 alert: profile %q should NOT match %q (two segments), but no alert", profilePath, filePath)
+		}
+		addResult("ellipsis_rejects_multi_segment", profilePath, filePath, true, got,
+			fmt.Sprintf("got %d alerts, expected at least one for cat", len(alerts)))
+	})
+
+	// 1b-5: Wildcard * matches any depth — /etc/* covers /etc/nginx/nginx.conf.
+	t.Run("wildcard_matches_deep_path", func(t *testing.T) {
+		profilePath := "/etc/*"
+		filePath := "/etc/nginx/nginx.conf"
+		wl := deployWithProfile(t, []v1beta1.OpenCalls{
+			{Path: profilePath, Flags: []string{"O_RDONLY"}},
+		})
+		alerts := triggerAndGetAlerts(t, wl, filePath)
+		got := hasAlert(alerts)
+		if got {
+			t.Errorf("expected NO R0002 alert: profile %q should match %q (wildcard), but alert fired", profilePath, filePath)
+		}
+		addResult("wildcard_matches_deep_path", profilePath, filePath, false, !got,
+			fmt.Sprintf("got %d alerts, expected none for cat", len(alerts)))
+	})
+
+	// ---------------------------------------------------------------
+	// 1c. Deploy known-application-profile-wildcards.yaml (curl image)
+	//     and verify that files under wildcard-covered opens paths
+	//     produce no R0002 alert.
+	// ---------------------------------------------------------------
+	t.Run("wildcard_yaml_profile_allowed_opens", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		wildcardProfileName := "fusioncore-profile-wildcards"
+
+		// Create the profile matching known-application-profile-wildcards.yaml.
+		profile := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      wildcardProfileName,
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Architectures: []string{"amd64"},
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name:     "curl",
+						ImageID:  "docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058",
+						ImageTag: "docker.io/curlimages/curl:8.5.0",
+						Capabilities: []string{
+							"CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH",
+							"CAP_SETGID", "CAP_SETPCAP", "CAP_SETUID", "CAP_SYS_ADMIN",
+						},
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/bin/sleep", Args: []string{"/bin/sleep", "infinity"}},
+							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-sm2", "fusioncore.ai"}},
+						},
+						Opens: []v1beta1.OpenCalls{
+							{Path: "/etc/*", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/etc/ssl/openssl.cnf", Flags: []string{"O_RDONLY", "O_LARGEFILE"}},
+							{Path: "/home/*", Flags: []string{"O_RDONLY", "O_LARGEFILE"}},
+							{Path: "/lib/*", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/usr/lib/*", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/usr/local/lib/*", Flags: []string{"O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"}},
+							{Path: "/proc/*/cgroup", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/proc/*/kernel/cap_last_cap", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/proc/*/mountinfo", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/proc/*/task/*/fd", Flags: []string{"O_RDONLY", "O_DIRECTORY", "O_CLOEXEC"}},
+							{Path: "/sys/fs/cgroup/cpu.max", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/sys/kernel/mm/transparent_hugepage/hpage_pmd_size", Flags: []string{"O_RDONLY"}},
+							{Path: "/7/setgroups", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+							{Path: "/runc", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+						},
+						Syscalls: []string{
+							"arch_prctl", "bind", "brk", "capget", "capset", "chdir",
+							"clone", "close", "close_range", "connect", "epoll_ctl",
+							"epoll_pwait", "execve", "exit", "exit_group", "faccessat2",
+							"fchown", "fcntl", "fstat", "fstatfs", "futex", "getcwd",
+							"getdents64", "getegid", "geteuid", "getgid", "getpeername",
+							"getppid", "getsockname", "getsockopt", "gettid", "getuid",
+							"ioctl", "membarrier", "mmap", "mprotect", "munmap",
+							"nanosleep", "newfstatat", "open", "openat", "openat2",
+							"pipe", "poll", "prctl", "read", "recvfrom", "recvmsg",
+							"rt_sigaction", "rt_sigprocmask", "rt_sigreturn", "sendto",
+							"set_tid_address", "setgid", "setgroups", "setsockopt",
+							"setuid", "sigaltstack", "socket", "statx", "tkill",
+							"unknown", "write", "writev",
+						},
+					},
+				},
+			},
+		}
+
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), profile, metav1.CreateOptions{})
+		require.NoError(t, err, "create wildcard profile %q in ns %s", wildcardProfileName, ns.Name)
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/curl-user-profile-wildcards-deployment.yaml"))
+		require.NoError(t, err, "create curl workload in ns %s", ns.Name)
+		require.NoError(t, wl.WaitForReady(80), "curl workload not ready in ns %s", ns.Name)
+
+		time.Sleep(20 * time.Second) // let node-agent pick up the profile
+
+		// Cat files that are covered by the wildcard opens.
+		allowedFiles := []string{
+			"/etc/hosts",          // covered by /etc/*
+			"/etc/resolv.conf",    // covered by /etc/*
+			"/etc/ssl/openssl.cnf", // exact match
+		}
+		for _, f := range allowedFiles {
+			stdout, stderr, err := wl.ExecIntoPod([]string{"cat", f}, "curl")
+			if err != nil {
+				t.Logf("exec 'cat %s' failed: %v (stdout=%q stderr=%q)", f, err, stdout, stderr)
+			}
+		}
+
+		time.Sleep(30 * time.Second) // let alerts propagate
+
+		alerts, err := testutils.GetAlerts(wl.Namespace)
+		require.NoError(t, err, "get alerts from ns %s", wl.Namespace)
+
+		var r0002Fired bool
+		for _, a := range alerts {
+			if a.Labels["rule_name"] == ruleName &&
+				a.Labels["comm"] == "cat" &&
+				a.Labels["container_name"] == "curl" {
+				r0002Fired = true
+				break
+			}
+		}
+		if r0002Fired {
+			t.Errorf("expected NO R0002 for files covered by wildcard opens, but alert fired")
+		}
+		addResult("wildcard_yaml_profile_allowed_opens",
+			"/etc/*, /etc/ssl/openssl.cnf", "/etc/hosts, /etc/resolv.conf, /etc/ssl/openssl.cnf",
+			false, !r0002Fired,
+			fmt.Sprintf("got R0002=%v, expected none for wildcard-covered files", r0002Fired))
+	})
+}
+
+// Test_28_UserDefinedNetworkNeighborhood creates user-defined AP and NN,
+// deploys a pod with both user-defined-profile and user-defined-network
+// labels (skipping all learning), then triggers:
+//   - TCP egress to IPs NOT in the NN → R0011 "Unexpected Egress Network Traffic"
+//   - DNS lookups for domains NOT in the NN → R0005 "DNS Anomalies in container"
+//
+// Note: R0005 requires real resolvable domains (not NXDOMAIN), because the
+// trace_dns eBPF callback drops DNS responses with 0 answers.
+func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	// 1. Create user-defined ApplicationProfile (skip learning).
+	ap := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "curl-ap",
+			Namespace: ns.Name,
+			Annotations: map[string]string{
+				helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+			},
+			Labels: map[string]string{
+				helpersv1.ApiGroupMetadataKey:   "apps",
+				helpersv1.ApiVersionMetadataKey: "v1",
+				helpersv1.KindMetadataKey:       "Deployment",
+				helpersv1.NameMetadataKey:       "curl-28",
+				helpersv1.NamespaceMetadataKey:  ns.Name,
+			},
+		},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name:         "curl",
+					Capabilities: []string{},
+					Execs: []v1beta1.ExecCalls{
+						{Path: "/bin/sleep"},
+						{Path: "/usr/bin/curl"},
+					},
+					Opens:    []v1beta1.OpenCalls{},
+					Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev"},
+				},
+			},
+		},
+	}
+	_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+		context.Background(), ap, metav1.CreateOptions{})
+	require.NoError(t, err, "create AP curl-ap")
+
+	// 2. Create user-defined NN allowing only fusioncore.ai on TCP/80.
+	nn := &v1beta1.NetworkNeighborhood{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "curl-nn",
+			Namespace: ns.Name,
+			Annotations: map[string]string{
+				helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+			},
+			Labels: map[string]string{
+				helpersv1.ApiGroupMetadataKey:   "apps",
+				helpersv1.ApiVersionMetadataKey: "v1",
+				helpersv1.KindMetadataKey:       "Deployment",
+				helpersv1.NameMetadataKey:       "curl-28",
+				helpersv1.NamespaceMetadataKey:  ns.Name,
+			},
+		},
+		Spec: v1beta1.NetworkNeighborhoodSpec{
+			LabelSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "curl-28"},
+			},
+			Containers: []v1beta1.NetworkNeighborhoodContainer{
+				{
+					Name: "curl",
+					Egress: []v1beta1.NetworkNeighbor{
+						{
+							Identifier: "fusioncore-egress",
+							Type:       "external",
+							DNS:        "fusioncore.ai.",
+							DNSNames:   []string{"fusioncore.ai."},
+							IPAddress:  "162.0.217.171",
+							Ports: []v1beta1.NetworkPort{
+								{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(
+		context.Background(), nn, metav1.CreateOptions{})
+	require.NoError(t, err, "create NN curl-nn")
+	t.Logf("created AP + NN in ns %s", ns.Name)
+
+	// 2b. Poll storage until both AP and NN are retrievable.
+	// Node-agent does a single fetch on container start with no retry,
+	// so the profile MUST exist before the pod is created.
+	require.Eventually(t, func() bool {
+		_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), "curl-ap", metav1.GetOptions{})
+		_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), "curl-nn", metav1.GetOptions{})
+		return apErr == nil && nnErr == nil
+	}, 30*time.Second, 1*time.Second, "AP and NN must be retrievable from storage before deploying the pod")
+	t.Logf("verified AP + NN are retrievable from storage")
+
+	// 3. Deploy curl with both user-defined labels (no learning).
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
+	require.NoError(t, err)
+	require.NoError(t, wl.WaitForReady(80))
+	t.Logf("pod ready in ns %s", ns.Name)
+
+	// Give node-agent time to load the user-defined profiles into cache.
+	time.Sleep(30 * time.Second)
+
+	// 4. Trigger anomalous traffic NOT in the NN.
+	exec := func(cmd []string) {
+		stdout, stderr, err := wl.ExecIntoPod(cmd, "curl")
+		t.Logf("exec %v → err=%v stdout=%q stderr=%q", cmd, err, stdout, stderr)
+	}
+
+	// 4a. TCP egress to IPs not in NN (triggers R0011).
+	exec([]string{"curl", "-sm5", "http://8.8.8.8"})
+	exec([]string{"curl", "-sm5", "http://1.1.1.1"})
+
+	// 4b. DNS lookups for real resolvable domains not in NN (triggers R0005).
+	// Must use domains that actually resolve (non-NXDOMAIN) because trace_dns
+	// drops responses with 0 answers.
+	exec([]string{"curl", "-sm5", "http://google.com"})
+	exec([]string{"curl", "-sm5", "http://ebpf.io"})
+	exec([]string{"curl", "-sm5", "http://cloudflare.com"})
+
+	// 5. Wait for alerts and assert both R0011 and R0005 fire.
+	time.Sleep(30 * time.Second)
+	alerts, err := testutils.GetAlerts(ns.Name)
+	require.NoError(t, err)
+
+	t.Logf("=== %d alerts in namespace %s ===", len(alerts), ns.Name)
+	for i, a := range alerts {
+		t.Logf("  [%d] rule=%s(%s) container=%s", i,
+			a.Labels["rule_name"], a.Labels["rule_id"], a.Labels["container_name"])
+	}
+
+	r0011Count := 0
+	r0005Count := 0
+	for _, a := range alerts {
+		switch a.Labels["rule_id"] {
+		case "R0011":
+			r0011Count++
+		case "R0005":
+			r0005Count++
+		}
+	}
+
+	require.Greater(t, r0011Count, 0,
+		"expected R0011 'Unexpected Egress Network Traffic' alerts for 8.8.8.8/1.1.1.1, got none")
+	t.Logf("R0011 alerts: %d — user-defined NN correctly detects anomalous TCP egress", r0011Count)
+
+	require.Greater(t, r0005Count, 0,
+		"expected R0005 'DNS Anomalies' alerts for google.com/ebpf.io/cloudflare.com, got none")
+	t.Logf("R0005 alerts: %d — user-defined NN correctly detects anomalous DNS lookups", r0005Count)
 }
