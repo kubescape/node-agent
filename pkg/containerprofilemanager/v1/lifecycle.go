@@ -18,8 +18,7 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		if utils.IsHostContainer(notif.Container) {
-			logger.L().Debug("adding host container to the container profile manager",
-				helpers.String("containerID", notif.Container.Runtime.ContainerID))
+			return
 		}
 		if cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
@@ -93,14 +92,17 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
 
-	// Check if the container should use a user-defined profile
+	// Check if the container should use a user-defined profile.
+	// When both an ApplicationProfile and a NetworkNeighborhood are
+	// user-provided, skip ALL recording — there is nothing to learn.
 	if sharedData.UserDefinedProfile != "" {
 		logger.L().Debug("ignoring container with a user-defined profile",
 			helpers.String("containerID", containerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace),
-			helpers.String("userDefinedProfile", sharedData.UserDefinedProfile))
+			helpers.String("userDefinedProfile", sharedData.UserDefinedProfile),
+			helpers.String("userDefinedNetwork", sharedData.UserDefinedNetwork))
 		// Close ready channel before removing entry
 		if entry, exists := cpm.getContainerEntry(containerID); exists {
 			entry.readyOnce.Do(func() {
