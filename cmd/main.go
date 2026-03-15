@@ -227,6 +227,13 @@ func main() {
 		rulesWatcher := ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
 			ruleBindingCache.RefreshRuleBindingsRules()
 		})
+		// Synchronous initial sync so rules are available before tracers start,
+		// preventing early events from being silently dropped.
+		if err := rulesWatcher.InitialSync(ctx); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to perform initial rules sync, early events may be missed", helpers.Error(err))
+		} else {
+			ruleBindingCache.RefreshRuleBindingsRules()
+		}
 		dWatcher.AddAdaptor(rulesWatcher)
 	}
 
