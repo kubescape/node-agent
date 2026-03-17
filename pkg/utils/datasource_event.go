@@ -170,7 +170,7 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 		}
 		field := e.Datasource.GetField(fieldName)
 		if field == nil {
-			logger.L().Warning("field not found", helpers.String("field", fieldName), helpers.String("eventType", string(e.EventType)))
+			logger.L().Debug("field not found", helpers.String("field", fieldName), helpers.String("eventType", string(e.EventType)))
 			// Don't cache nil results - another data source may have this field
 			return missingFieldAccessor
 		}
