@@ -409,13 +409,28 @@ func (e *DatasourceEvent) GetExtra() interface{} {
 }
 
 func (e *DatasourceEvent) GetFlags() []string {
-	flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
-	return decodeOpenFlags(flags)
+	switch e.EventType {
+	case IoUringEventType:
+		flags, _ := e.getFieldAccessor("flags").String(e.Data)
+		if flags == "" {
+			return nil
+		}
+		return []string{flags}
+	default:
+		flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
+		return decodeOpenFlags(flags)
+	}
 }
 
 func (e *DatasourceEvent) GetFlagsRaw() uint32 {
-	flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
-	return uint32(flags)
+	switch e.EventType {
+	case IoUringEventType:
+		flags, _ := e.getFieldAccessor("flags").Uint32(e.Data)
+		return flags
+	default:
+		flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
+		return uint32(flags)
+	}
 }
 
 func (e *DatasourceEvent) GetFullPath() string {
