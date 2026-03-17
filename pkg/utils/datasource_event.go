@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -411,11 +412,11 @@ func (e *DatasourceEvent) GetExtra() interface{} {
 func (e *DatasourceEvent) GetFlags() []string {
 	switch e.EventType {
 	case IoUringEventType:
-		flags, _ := e.getFieldAccessor("flags").String(e.Data)
-		if flags == "" {
+		flags, _ := e.getFieldAccessor("flags").Uint32(e.Data)
+		if flags == 0 {
 			return nil
 		}
-		return []string{flags}
+		return []string{strconv.FormatUint(uint64(flags), 10)}
 	default:
 		flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
 		return decodeOpenFlags(flags)
