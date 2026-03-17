@@ -99,9 +99,9 @@ func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *Watched
 			delete(labels, i)
 		} else {
 			switch i {
-			case helpersv1.KindMetadataKey:
+			case helpersv1.RelatedKindMetadataKey:
 				labels[i] = wlid.GetKindFromWlid(watchedContainer.Wlid)
-			case helpersv1.NameMetadataKey:
+			case helpersv1.RelatedNameMetadataKey:
 				labels[i] = wlid.GetNameFromWlid(watchedContainer.Wlid)
 			}
 			errs := validation.IsValidLabelValue(labels[i])
