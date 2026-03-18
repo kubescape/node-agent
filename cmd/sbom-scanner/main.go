@@ -11,6 +11,7 @@ import (
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
 	pb "github.com/kubescape/node-agent/pkg/sbomscanner/v1/proto"
 	"google.golang.org/grpc"
+	_ "modernc.org/sqlite"
 )
 
 func main() {
