@@ -63,6 +63,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
+	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	seccompmanagerv1 "github.com/kubescape/node-agent/pkg/seccompmanager/v1"
 	"github.com/kubescape/node-agent/pkg/storage/v1"
@@ -381,10 +382,19 @@ func main() {
 	logger.L().Info("IG Kubernetes client created", helpers.Interface("client", igK8sClient))
 	logger.L().Info("detected container runtime", helpers.String("containerRuntime", igK8sClient.RuntimeConfig.Name.String()))
 
+	// Create the SBOM scanner sidecar client (if configured)
+	var scannerClient sbomscanner.SBOMScannerClient
+	if socket, ok := os.LookupEnv("SBOM_SCANNER_SOCKET"); ok {
+		scannerClient, err = sbomscanner.NewSBOMScannerClient(socket)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("SBOM scanner sidecar not available, falling back to in-process scanning", helpers.Error(err))
+		}
+	}
+
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient
 	if cfg.EnableSbomGeneration {
-		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache)
+		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache, scannerClient)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
 		}
