@@ -65,7 +65,10 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 
 	syftSBOM, err := syft.CreateSBOM(ctx, src, cfg)
 	if err != nil {
-		if ctx.Err() != nil {
+		if ctx.Err() == context.Canceled {
+			return nil, status.Error(codes.Canceled, "scan canceled")
+		}
+		if ctx.Err() == context.DeadlineExceeded {
 			return nil, status.Error(codes.DeadlineExceeded, "scan timed out")
 		}
 		return nil, status.Errorf(codes.Internal, "failed to generate SBOM: %v", err)

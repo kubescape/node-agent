@@ -380,6 +380,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 		}
 		sbomScanTotal.WithLabelValues("success").Inc()
 		sbomScanDuration.WithLabelValues("success").Observe(time.Since(scanStart).Seconds())
+		delete(s.scanRetries, sbomName)
 		syftDoc = result.SyftDocument
 	} else if s.scannerClient != nil {
 		sbomScannerReady.Set(0)
