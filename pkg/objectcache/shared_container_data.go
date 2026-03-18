@@ -16,8 +16,8 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/utils"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 type ContainerType int
@@ -99,12 +99,12 @@ func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *Watched
 			delete(labels, i)
 		} else {
 			switch i {
-			case helpersv1.KindMetadataKey:
-				labels[i] = wlid.GetKindFromWlid(watchedContainer.Wlid)
-			case helpersv1.NameMetadataKey:
+			case helpersv1.RelatedKindMetadataKey:
+				labels[i] = strings.TrimPrefix(wlid.GetKindFromWlid(watchedContainer.Wlid), "ECS")
+			case helpersv1.RelatedNameMetadataKey:
 				labels[i] = wlid.GetNameFromWlid(watchedContainer.Wlid)
 			}
-			errs := validation.IsValidLabelValue(labels[i])
+			errs := content.IsLabelValue(labels[i])
 			if len(errs) != 0 {
 				logger.L().Debug("GetLabels - label is not valid", helpers.String("label", labels[i]))
 				for j := range errs {
@@ -126,7 +126,7 @@ func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *Watched
 			labels[helpersv1.ClusterMetadataKey] = clusterName
 		}
 		if accountID := cloudMetadata.AccountID; accountID != "" {
-			labels[helpersv1.AWSAccountIDMetadataKey] = accountID
+			labels[helpersv1.CloudAccountIdentifierMetadataKey] = accountID
 		}
 		if region := cloudMetadata.Region; region != "" {
 			labels[helpersv1.RegionMetadataKey] = region
