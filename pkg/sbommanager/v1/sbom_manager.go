@@ -71,7 +71,7 @@ type SbomManager struct {
 	version            string
 	scannerClient      sbomscanner.SBOMScannerClient
 	scannerMemLimit    int64
-	scanRetries        map[string]int
+	scanRetries        map[string]int // safe without mutex: only accessed from pool workers (pool size 1)
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
