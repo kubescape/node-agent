@@ -42,6 +42,26 @@ func TestParseLibrary(t *testing.T) {
 			expr:     "parse.get_exec_path(['/usr/bin/python'], 'python')",
 			expected: "/usr/bin/python",
 		},
+		{
+			name:     "basename with full path",
+			expr:     "parse.basename('/usr/bin/nmap')",
+			expected: "nmap",
+		},
+		{
+			name:     "basename with just filename",
+			expr:     "parse.basename('nmap')",
+			expected: "nmap",
+		},
+		{
+			name:     "basename with trailing slash",
+			expr:     "parse.basename('/usr/bin/')",
+			expected: "",
+		},
+		{
+			name:     "basename with root path",
+			expr:     "parse.basename('/nmap')",
+			expected: "nmap",
+		},
 	}
 
 	for _, tt := range tests {

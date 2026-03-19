@@ -177,7 +177,7 @@ func main() {
 	if cfg.EnablePrometheusExporter {
 		prometheusExporter = metricprometheus.NewPrometheusMetric()
 	} else {
-		prometheusExporter = metricsmanager.NewMetricsMock()
+		prometheusExporter = metricsmanager.NewMetricsNoop()
 	}
 
 	// Create watchers
