@@ -22,6 +22,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/intern"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -496,7 +497,7 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *armotypes.NetworkStream
 }
 
 func getNetworkEndpointIdentifier(event utils.NetworkEvent) string {
-	return fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetDstPort(), event.GetProto())
+	return intern.String(fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetDstPort(), event.GetProto()))
 }
 
 func isEmptyNetworkStream(networkStream *armotypes.NetworkStream) bool {

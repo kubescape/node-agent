@@ -18,6 +18,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/syscalls"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/intern"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
@@ -292,11 +293,11 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 	proto, _ := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
 	return types.L4Endpoint{
 		L3Endpoint: types.L3Endpoint{
-			Addr:      rawIPv4ToString(addr),
+			Addr:      rawIPv4ToString(addr), // already interned via rawIPv4ToString
 			Version:   version,
-			Namespace: namespace,
-			Name:      name,
-			Kind:      types.EndpointKind(kind),
+			Namespace: intern.String(namespace),
+			Name:      intern.String(name),
+			Kind:      types.EndpointKind(intern.String(string(kind))),
 			PodLabels: parseStringToMap(podLabels),
 		},
 		Port:  port,

@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/intern"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
@@ -140,7 +141,7 @@ func (c *CEL) createEvalContext(event *events.EnrichedEvent) map[string]any {
 	}
 
 	evalContext := map[string]any{
-		"eventType": string(eventType),
+		"eventType": intern.String(string(eventType)),
 		"event":     obj,
 	}
 

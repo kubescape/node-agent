@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/intern"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -77,23 +78,25 @@ func (ne *NetworkEvent) SetDestinationPodLabels(podLabels map[string]string) {
 
 // generatePodLabels generates a single string from a map of pod labels. This string is separated with commas and is needed so the set in network manager will work
 func generatePodLabels(podLabels map[string]string) string {
-	var keys []string
+	if len(podLabels) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(podLabels))
 	for key := range podLabels {
 		keys = append(keys, key)
 	}
-
 	sort.Strings(keys)
 
-	var podLabelsString string
-	for _, key := range keys {
-		podLabelsString = podLabelsString + key + "=" + podLabels[key] + ","
+	var sb strings.Builder
+	for i, key := range keys {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(key)
+		sb.WriteByte('=')
+		sb.WriteString(podLabels[key])
 	}
-
-	if len(podLabelsString) > 0 {
-		podLabelsString = podLabelsString[:len(podLabelsString)-1]
-	}
-
-	return podLabelsString
+	return intern.String(sb.String())
 }
 
 func generatePortIdentifierFromEvent(networkEvent NetworkEvent) string {
@@ -101,7 +104,7 @@ func generatePortIdentifierFromEvent(networkEvent NetworkEvent) string {
 }
 
 func generatePortIdentifier(protocol string, port int32) string {
-	return fmt.Sprintf("%s-%d", protocol, port)
+	return intern.String(fmt.Sprintf("%s-%d", protocol, port))
 }
 
 // filterLabels filters out labels that are not relevant for the network neighbor

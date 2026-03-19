@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/intern"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
@@ -152,10 +153,10 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 	pt.UpdatePPID(proc, event)
 
 	if proc.Comm == "" {
-		proc.Comm = event.Comm
+		proc.Comm = intern.String(event.Comm)
 	}
 	if proc.Pcomm == "" {
-		proc.Pcomm = event.Pcomm
+		proc.Pcomm = intern.String(event.Pcomm)
 	}
 	if proc.Cmdline == "" {
 		proc.Cmdline = event.Cmdline
@@ -170,7 +171,7 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 		proc.Cwd = event.Cwd
 	}
 	if proc.Path == "" {
-		proc.Path = event.Path
+		proc.Path = intern.String(event.Path)
 	}
 
 	if proc.ChildrenMap == nil {
@@ -196,10 +197,10 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 	}
 
 	if event.Comm != "" {
-		proc.Comm = event.Comm
+		proc.Comm = intern.String(event.Comm)
 	}
 	if event.Pcomm != "" {
-		proc.Pcomm = event.Pcomm
+		proc.Pcomm = intern.String(event.Pcomm)
 	}
 	if event.Cmdline != "" {
 		proc.Cmdline = event.Cmdline
@@ -214,7 +215,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 		proc.Cwd = event.Cwd
 	}
 	if event.Path != "" {
-		proc.Path = event.Path
+		proc.Path = intern.String(event.Path)
 	}
 
 	if proc.ChildrenMap == nil {
@@ -244,10 +245,10 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 	}
 
 	if event.Comm != "" {
-		proc.Comm = event.Comm
+		proc.Comm = intern.String(event.Comm)
 	}
 	if event.Pcomm != "" {
-		proc.Pcomm = event.Pcomm
+		proc.Pcomm = intern.String(event.Pcomm)
 	}
 	if event.Cmdline != "" {
 		proc.Cmdline = event.Cmdline
@@ -262,7 +263,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 		proc.Cwd = event.Cwd
 	}
 	if event.Path != "" {
-		proc.Path = event.Path
+		proc.Path = intern.String(event.Path)
 	}
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)

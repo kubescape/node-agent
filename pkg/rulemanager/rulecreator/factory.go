@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/kubescape/node-agent/pkg/intern"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -51,7 +52,19 @@ func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.Rule {
 }
 
 func (r *RuleCreatorImpl) RegisterRule(rule typesv1.Rule) {
+	internRule(&rule)
 	r.Rules = append(r.Rules, rule)
+}
+
+func internRule(rule *typesv1.Rule) {
+	rule.ID = intern.String(rule.ID)
+	rule.Name = intern.String(rule.Name)
+	rule.Description = intern.String(rule.Description)
+	rule.Expressions.Message = intern.String(rule.Expressions.Message)
+	rule.Expressions.UniqueID = intern.String(rule.Expressions.UniqueID)
+	for i := range rule.Expressions.RuleExpression {
+		rule.Expressions.RuleExpression[i].Expression = intern.String(rule.Expressions.RuleExpression[i].Expression)
+	}
 }
 
 func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule {
@@ -105,8 +118,9 @@ func (r *RuleCreatorImpl) SyncRules(newRules []typesv1.Rule) {
 
 	// Create a map of new rules by ID for quick lookup
 	newRuleMap := make(map[string]typesv1.Rule)
-	for _, rule := range newRules {
-		newRuleMap[rule.ID] = rule
+	for i := range newRules {
+		internRule(&newRules[i])
+		newRuleMap[newRules[i].ID] = newRules[i]
 	}
 
 	// Remove rules that are no longer present
@@ -147,6 +161,8 @@ func (r *RuleCreatorImpl) RemoveRuleByID(id string) bool {
 func (r *RuleCreatorImpl) UpdateRule(rule typesv1.Rule) bool {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+
+	internRule(&rule)
 
 	for i, existingRule := range r.Rules {
 		if existingRule.ID == rule.ID {
