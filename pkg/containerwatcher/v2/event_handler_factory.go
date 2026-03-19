@@ -137,7 +137,7 @@ func NewEventHandlerFactory(
 			}
 		case utils.IoUringEventType:
 			if iouringEvent, ok := event.(utils.IOUring); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.GetContainerID(), iouringEvent.GetIdentifier())
+				rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.GetContainerID(), iouringEvent.GetComm())
 			}
 		}
 	})
