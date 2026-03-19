@@ -1,4 +1,4 @@
-package v1
+package syftutil
 
 import (
 	"encoding/json"
@@ -37,16 +37,13 @@ type ImageInfo struct {
 }
 
 func NewSource(imageName, imageDigest, imageID string, imageStatus *runtime.ImageStatusResponse, mounts []string, maxImageSize int64) (*NodeSource, error) {
-	// unmarshal image info
 	var imageInfo ImageInfo
 	err := json.Unmarshal([]byte(imageStatus.Info["info"]), &imageInfo)
 	if err != nil {
 		return nil, fmt.Errorf("unable to unmarshal image info: %w", err)
 	}
 	reverseLayers := imageInfo.ImageSpec.RootFS.DiffIDs
-	// reverse layers to match the order of the mounts
 	slices.Reverse(reverseLayers)
-	// prepare image config
 	configFile := v1.ConfigFile{
 		Architecture:  imageInfo.ImageSpec.Architecture,
 		Author:        imageInfo.ImageSpec.Author,
@@ -66,7 +63,6 @@ func NewSource(imageName, imageDigest, imageID string, imageStatus *runtime.Imag
 		return nil, fmt.Errorf("unable to marshal image config: %w", err)
 	}
 	layers, totalSize := toLayers(imageInfo.ImageSpec.RootFS.DiffIDs, mounts)
-	// check total size
 	if totalSize > maxImageSize {
 		return nil, ErrImageTooLarge
 	}
