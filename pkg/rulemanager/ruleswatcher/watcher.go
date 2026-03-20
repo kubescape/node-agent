@@ -2,14 +2,18 @@ package ruleswatcher
 
 import (
 	"context"
+	"errors"
 	"os"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/signature"
+	"github.com/kubescape/node-agent/pkg/signature/profiles"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -22,14 +26,16 @@ var _ RulesWatcher = (*RulesWatcherImpl)(nil)
 type RulesWatcherImpl struct {
 	ruleCreator    rulecreator.RuleCreator
 	k8sClient      k8sclient.K8sClientInterface
+	cfg            *config.Config
 	callback       RulesWatcherCallback
 	watchResources []watcher.WatchResource
 }
 
-func NewRulesWatcher(k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator, callback RulesWatcherCallback) *RulesWatcherImpl {
+func NewRulesWatcher(k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator, callback RulesWatcherCallback, cfg *config.Config) *RulesWatcherImpl {
 	return &RulesWatcherImpl{
 		ruleCreator: ruleCreator,
 		k8sClient:   k8sClient,
+		cfg:         cfg,
 		callback:    callback,
 		watchResources: []watcher.WatchResource{
 			watcher.NewWatchResource(typesv1.RuleGvr, metav1.ListOptions{}),
@@ -71,7 +77,8 @@ func (w *RulesWatcherImpl) syncAllRulesAndNotify(ctx context.Context) {
 // syncAllRulesFromCluster fetches all rules from the cluster and syncs them with the rule creator.
 // Rules are filtered by:
 // 1. Enabled status - only enabled rules are considered
-// 2. Agent version compatibility - rules with AgentVersionRequirement are checked against AGENT_VERSION env var using semver
+// 2. Signature verification - if enabled, verifies rules have valid signatures
+// 3. Agent version compatibility - rules with AgentVersionRequirement are checked against AGENT_VERSION env var using semver
 func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 	unstructuredList, err := w.k8sClient.GetDynamicClient().Resource(typesv1.RuleGvr).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -80,12 +87,20 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 
 	var enabledRules []typesv1.Rule
 	var skippedVersionCount int
+	var skippedVerificationCount int
 	for _, item := range unstructuredList.Items {
 		rules, err := unstructuredToRules(&item)
 		if err != nil {
 			logger.L().Warning("RulesWatcher - failed to convert rule during sync", helpers.Error(err))
 			continue
 		}
+
+		// Verify signature if enabled
+		if err := w.verifyRules(rules); err != nil {
+			skippedVerificationCount++
+			continue
+		}
+
 		for _, rule := range rules.Spec.Rules {
 			if rule.Enabled {
 				// Check agent version requirement if specified
@@ -109,7 +124,8 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 	logger.L().Info("RulesWatcher - synced rules from cluster",
 		helpers.Int("enabledRules", len(enabledRules)),
 		helpers.Int("totalRules", len(unstructuredList.Items)),
-		helpers.Int("skippedByVersion", skippedVersionCount))
+		helpers.Int("skippedByVersion", skippedVersionCount),
+		helpers.Int("skippedByVerification", skippedVerificationCount))
 	return nil
 }
 
@@ -124,6 +140,30 @@ func unstructuredToRules(obj *unstructured.Unstructured) (*typesv1.Rules, error)
 	}
 
 	return rule, nil
+}
+
+func (w *RulesWatcherImpl) verifyRules(rules *typesv1.Rules) error {
+	if w.cfg == nil || !w.cfg.EnableSignatureVerification {
+		return nil
+	}
+	rulesAdapter := profiles.NewRulesAdapter(rules)
+	if err := signature.VerifyObject(rulesAdapter); err != nil {
+		if errors.Is(err, signature.ErrObjectNotSigned) {
+			logger.L().Debug("Rules resource is not signed, skipping",
+				helpers.String("name", rules.Name),
+				helpers.String("namespace", rules.Namespace))
+		} else {
+			logger.L().Warning("Rules resource signature verification failed",
+				helpers.String("name", rules.Name),
+				helpers.String("namespace", rules.Namespace),
+				helpers.Error(err))
+		}
+		return err
+	}
+	logger.L().Debug("Rules resource signature verification successful",
+		helpers.String("name", rules.Name),
+		helpers.String("namespace", rules.Namespace))
+	return nil
 }
 
 // isAgentVersionCompatible checks if the current agent version satisfies the given requirement
