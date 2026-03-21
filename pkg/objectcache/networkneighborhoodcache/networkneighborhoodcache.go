@@ -30,6 +30,7 @@ type ContainerInfo struct {
 	InstanceTemplateHash      string
 	Namespace                 string
 	SeenContainerFromTheStart bool // True if container was seen from the start
+	UserDefinedNetwork        string // Non-empty when pod has a user-defined NN label
 }
 
 // NetworkNeighborhoodCacheImpl implements the NetworkNeighborhoodCache interface
@@ -201,6 +202,13 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 			}
 
 			if !workloadIDInUse {
+				continue
+			}
+
+			// Never overwrite a user-defined network neighborhood with an
+			// auto-learned one.  Check if any container for this workload
+			// has a user-defined-network label.
+			if nnc.workloadHasUserDefinedNetwork(workloadID) {
 				continue
 			}
 
@@ -419,10 +427,47 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 			InstanceTemplateHash:      sharedData.InstanceID.GetTemplateHash(),
 			Namespace:                 container.K8s.Namespace,
 			SeenContainerFromTheStart: !sharedData.PreRunningContainer,
+			UserDefinedNetwork:        sharedData.UserDefinedNetwork,
 		}
 
 		// Add to container info map
 		nnc.containerIDToInfo.Set(containerID, containerInfo)
+
+		// If the container has a user-defined network neighborhood, load it
+		// directly into the cache — skip learning entirely for this workload.
+		if sharedData.UserDefinedNetwork != "" {
+			fullNN, err := nnc.storageClient.GetNetworkNeighborhood(
+				container.K8s.Namespace, sharedData.UserDefinedNetwork)
+			if err != nil {
+				logger.L().Error("failed to get user-defined network neighborhood",
+					helpers.String("containerID", containerID),
+					helpers.String("workloadID", workloadID),
+					helpers.String("namespace", container.K8s.Namespace),
+					helpers.String("nnName", sharedData.UserDefinedNetwork),
+					helpers.Error(err))
+				profileState := &objectcache.ProfileState{
+					Error: err,
+				}
+				nnc.workloadIDToProfileState.Set(workloadID, profileState)
+				return nil
+			}
+
+			nnc.workloadIDToNetworkNeighborhood.Set(workloadID, fullNN)
+			profileState := &objectcache.ProfileState{
+				Completion: helpersv1.Full,
+				Status:     helpersv1.Completed,
+				Name:       fullNN.Name,
+				Error:      nil,
+			}
+			nnc.workloadIDToProfileState.Set(workloadID, profileState)
+
+			logger.L().Debug("added user-defined network neighborhood to cache",
+				helpers.String("containerID", containerID),
+				helpers.String("workloadID", workloadID),
+				helpers.String("namespace", container.K8s.Namespace),
+				helpers.String("nnName", sharedData.UserDefinedNetwork))
+			return nil
+		}
 
 		// Create workload ID to state mapping
 		if _, exists := nnc.workloadIDToProfileState.Load(workloadID); !exists {
@@ -716,6 +761,20 @@ func (nnc *NetworkNeighborhoodCacheImpl) mergeNetworkPorts(normalPorts, userPort
 	}
 
 	return normalPorts
+}
+
+// workloadHasUserDefinedNetwork returns true if any container tracked for
+// the given workloadID has a user-defined-network label set.
+func (nnc *NetworkNeighborhoodCacheImpl) workloadHasUserDefinedNetwork(workloadID string) bool {
+	found := false
+	nnc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
+		if info.WorkloadID == workloadID && info.UserDefinedNetwork != "" {
+			found = true
+			return false // stop iteration
+		}
+		return true
+	})
+	return found
 }
 
 func isUserManagedNN(nn *v1beta1.NetworkNeighborhood) bool {
