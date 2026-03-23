@@ -348,7 +348,10 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 				helpers.String("sbomName", sbomName))
 			return
 		}
-		result, scanErr := s.scannerClient.CreateSBOM(s.ctx, sbomscanner.ScanRequest{
+		scanTimeout := 16 * time.Minute // slightly longer than server-side timeout as a transport-level safety net
+		scanCtx, scanCancel := context.WithTimeout(s.ctx, scanTimeout)
+		defer scanCancel()
+		result, scanErr := s.scannerClient.CreateSBOM(scanCtx, sbomscanner.ScanRequest{
 			ImageID:             imageID,
 			ImageTag:            sharedData.ImageTag,
 			LayerPaths:          mounts,
@@ -493,7 +496,12 @@ func (s *SbomManager) handleScannerCrash(sbomName string, wipSbom *v1beta1.SBOMS
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
 		wipSbom.Annotations[ScannerMemoryLimitAnnotation] = fmt.Sprintf("%d", s.scannerMemLimit)
 		wipSbom.Spec = v1beta1.SBOMSyftSpec{}
-		_, _ = s.storageClient.ReplaceSBOM(wipSbom)
+		if _, replaceErr := s.storageClient.ReplaceSBOM(wipSbom); replaceErr != nil {
+			logger.L().Error("SbomManager - failed to mark SBOM as TooLarge after scanner crashes",
+				helpers.Error(replaceErr),
+				helpers.String("sbomName", sbomName))
+			return
+		}
 		delete(s.scanRetries, sbomName)
 	}
 }

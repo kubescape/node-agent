@@ -23,7 +23,7 @@ import (
 
 type scannerServer struct {
 	pb.UnimplementedSBOMScannerServer
-	mu      sync.Mutex
+	mu      sync.Mutex // single-client sidecar; a context-aware semaphore is unnecessary here
 	version string
 }
 
