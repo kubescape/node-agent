@@ -2,6 +2,7 @@ package applicationprofilecache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/resourcelocks"
+	"github.com/kubescape/node-agent/pkg/signature"
+	"github.com/kubescape/node-agent/pkg/signature/profiles"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -244,6 +247,12 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				continue
 			}
 
+			// Verify signature if enabled
+			if err := apc.verifyApplicationProfile(fullProfile, workloadID, "profile", true); err != nil {
+				// Continue to next profile as per requirements: skip on verification failure
+				continue
+			}
+
 			apc.workloadIDToProfile.Set(workloadID, fullProfile)
 			logger.L().Debug("updated profile in cache",
 				helpers.String("workloadID", workloadID),
@@ -263,6 +272,52 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 		}
 		// Continue to next namespace
 	}
+}
+
+// verifyApplicationProfile verifies the profile signature if verification is enabled.
+// Returns error if verification fails, nil otherwise (including when verification is disabled).
+// Also updates profileState with error details if verification fails.
+func (apc *ApplicationProfileCacheImpl) verifyApplicationProfile(profile *v1beta1.ApplicationProfile, workloadID, context string, recordFailure bool) error {
+	if !apc.cfg.EnableSignatureVerification {
+		return nil
+	}
+	profileAdapter := profiles.NewApplicationProfileAdapter(profile)
+	if err := signature.VerifyObject(profileAdapter); err != nil {
+		// Only warn if signature exists but doesn't match; missing signatures are debug
+		if errors.Is(err, signature.ErrObjectNotSigned) {
+			logger.L().Debug(context+" is not signed, skipping",
+				helpers.String("profile", profile.Name),
+				helpers.String("namespace", profile.Namespace),
+				helpers.String("workloadID", workloadID))
+		} else {
+			logger.L().Warning(context+" signature verification failed, skipping",
+				helpers.String("profile", profile.Name),
+				helpers.String("namespace", profile.Namespace),
+				helpers.String("workloadID", workloadID),
+				helpers.Error(err))
+		}
+
+		// Update profile state with verification error
+		if recordFailure {
+			apc.setVerificationFailed(workloadID, profile.Name, err)
+		}
+
+		return err
+	}
+	logger.L().Debug(context+" verification successful",
+		helpers.String("profile", profile.Name),
+		helpers.String("namespace", profile.Namespace))
+	return nil
+}
+
+func (apc *ApplicationProfileCacheImpl) setVerificationFailed(workloadID, profileName string, err error) {
+	profileState := &objectcache.ProfileState{
+		Completion: "failed",
+		Status:     "verification-failed",
+		Name:       profileName,
+		Error:      err,
+	}
+	apc.workloadIDToProfileState.Set(workloadID, profileState)
 }
 
 // handleUserManagedProfile handles user-managed profiles
@@ -311,6 +366,11 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 			helpers.String("namespace", profile.Namespace),
 			helpers.String("profileName", profile.Name),
 			helpers.Error(err))
+		return
+	}
+
+	// Verify signature if enabled
+	if err := apc.verifyApplicationProfile(fullUserProfile, toMerge.wlid, "user-managed profile", false); err != nil {
 		return
 	}
 
@@ -533,6 +593,18 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 					apc.workloadIDToProfileState.Set(workloadID, profileState)
 					return nil
 				}
+
+				// Verify signature if enabled
+				if err := apc.verifyApplicationProfile(fullProfile, workloadID, "user-defined profile", false); err != nil {
+					// Update the profile state to indicate an error
+					profileState := &objectcache.ProfileState{
+						Error: fmt.Errorf("signature verification failed: %w", err),
+					}
+					apc.workloadIDToProfileState.Set(workloadID, profileState)
+					// Skip caching the unverified profile
+					return nil
+				}
+
 				// Update the profile in the cache
 				apc.workloadIDToProfile.Set(workloadID, fullProfile)
 				logger.L().Debug("added user-defined profile to cache",

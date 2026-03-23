@@ -227,7 +227,7 @@ func main() {
 		ruleBindingCache = rulebindingcachev1.NewCache(cfg, k8sClient, ruleCreator)
 		rulesWatcher := ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
 			ruleBindingCache.RefreshRuleBindingsRules()
-		})
+		}, &cfg)
 		dWatcher.AddAdaptor(rulesWatcher)
 	}
 
