@@ -231,7 +231,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		var shouldAlert bool
 		var err error
 		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
-			shouldAlert, err = rm.celEvaluator.EvaluateRule(enrichedEvent, rule.Expressions.RuleExpression)
+			shouldAlert, err = rm.celEvaluator.EvaluateRule(enrichedEvent, ruleExpressions)
 		})
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.Name, eventType, evaluationTime)
