@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"runtime/pprof"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -227,7 +228,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		startTime := time.Now()
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, rule.Expressions.RuleExpression)
+		var shouldAlert bool
+		var err error
+		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
+			shouldAlert, err = rm.celEvaluator.EvaluateRule(enrichedEvent, rule.Expressions.RuleExpression)
+		})
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.Name, eventType, evaluationTime)
 
@@ -351,7 +356,11 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 		}
 
 		startTime := time.Now()
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, ruleExpressions)
+		var shouldAlert bool
+		var err error
+		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
+			shouldAlert, err = rm.celEvaluator.EvaluateRule(enrichedEvent, ruleExpressions)
+		})
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.ID, eventType, evaluationTime)
 
