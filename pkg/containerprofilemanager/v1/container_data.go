@@ -34,7 +34,6 @@ func (cd *containerData) emptyEvents() {
 // isEmpty returns true if the container data is empty
 func (cd *containerData) isEmpty() bool {
 	if cd.capabilites != nil ||
-		cd.syscalls != nil ||
 		cd.endpoints != nil ||
 		cd.execs != nil ||
 		cd.opens != nil ||
