@@ -5,6 +5,7 @@
 // Check https://man7.org/linux/man-pages/man7/bpf-helpers.7.html to learn
 // more about different available helpers
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
 
 // Inspektor Gadget buffer
 #include <gadget/buffer.h>
@@ -45,8 +46,8 @@ int handle_submit_req(struct trace_event_raw_io_uring_submit_req *ctx)
         return 0;
 
     gadget_process_populate(&event->proc);
-    event->opcode = ctx->opcode;
-    event->flags = ctx->flags;
+    event->opcode = BPF_CORE_READ(ctx, opcode);
+    event->flags = BPF_CORE_READ(ctx, flags);
 
     event->timestamp_raw = bpf_ktime_get_boot_ns();
 
