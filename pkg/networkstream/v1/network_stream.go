@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v5"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -149,8 +149,9 @@ func (ns *NetworkStream) enrichWorkloadDetails(containerID string) {
 		return
 	}
 
-	container.WorkloadName = wlid.GetNameFromWlid(sharedData.Wlid)
-	container.WorkloadKind = wlid.GetKindFromWlid(sharedData.Wlid)
+	labels := sharedData.InstanceID.GetLabels()
+	container.WorkloadName = labels[helpersv1.RelatedNameMetadataKey]
+	container.WorkloadKind = labels[helpersv1.RelatedKindMetadataKey]
 	ns.networkEventsStorage.Entities[containerID] = container
 	ns.eventsStorageMutex.Unlock()
 }

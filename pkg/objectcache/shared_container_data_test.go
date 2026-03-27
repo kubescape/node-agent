@@ -33,7 +33,7 @@ func Test_GetLabels(t *testing.T) {
 		watchedContainer *WatchedContainerData
 		stripContainer   bool
 	}
-	instanceID, _ := instanceidhandler.GenerateInstanceIDFromString("apiVersion-v1/namespace-aaa/kind-deployment/name-redis/containerName-redis")
+	instanceID, _ := instanceidhandler.GenerateInstanceIDFromString("apiVersion-v1/namespace-aaa/kind-Deployment/name-redis/containerName-redis")
 	tests := []struct {
 		name string
 		args args

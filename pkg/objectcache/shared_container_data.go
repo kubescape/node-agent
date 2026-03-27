@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -16,8 +15,8 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/utils"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 type ContainerType int
@@ -82,6 +81,7 @@ type WatchedContainerData struct {
 	PreviousReportTimestamp time.Time
 	CurrentReportTimestamp  time.Time
 	UserDefinedProfile      string
+	LabelOverrides          map[string]string // optional label overrides applied after GetLabels()
 }
 
 type ContainerInfo struct {
@@ -93,25 +93,27 @@ type ContainerInfo struct {
 func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *WatchedContainerData, stripContainer bool) map[string]string {
 	labels := watchedContainer.InstanceID.GetLabels()
 	for i := range labels {
-		if labels[i] == "" {
+		if labels[i] == "" || (stripContainer && i == helpersv1.ContainerNameMetadataKey) {
 			delete(labels, i)
-		} else if stripContainer && i == helpersv1.ContainerNameMetadataKey {
+			continue
+		}
+		if errs := content.IsLabelValue(labels[i]); len(errs) != 0 {
+			logger.L().Debug("GetLabels - label is not valid", helpers.String("label", labels[i]))
+			for j := range errs {
+				logger.L().Debug("GetLabels - label err description", helpers.String("Err: ", errs[j]))
+			}
 			delete(labels, i)
+		}
+	}
+	// Apply label overrides
+	for k, v := range watchedContainer.LabelOverrides {
+		if v == "" {
+			delete(labels, k)
+		} else if errs := content.IsLabelValue(v); len(errs) != 0 {
+			logger.L().Warning("GetLabels - label override value is not valid, skipping", helpers.String("key", k), helpers.String("value", v))
+			delete(labels, k)
 		} else {
-			switch i {
-			case helpersv1.KindMetadataKey:
-				labels[i] = wlid.GetKindFromWlid(watchedContainer.Wlid)
-			case helpersv1.NameMetadataKey:
-				labels[i] = wlid.GetNameFromWlid(watchedContainer.Wlid)
-			}
-			errs := validation.IsValidLabelValue(labels[i])
-			if len(errs) != 0 {
-				logger.L().Debug("GetLabels - label is not valid", helpers.String("label", labels[i]))
-				for j := range errs {
-					logger.L().Debug("GetLabels - label err description", helpers.String("Err: ", errs[j]))
-				}
-				delete(labels, i)
-			}
+			labels[k] = v
 		}
 	}
 	if watchedContainer.ParentResourceVersion != "" {
@@ -126,7 +128,7 @@ func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *Watched
 			labels[helpersv1.ClusterMetadataKey] = clusterName
 		}
 		if accountID := cloudMetadata.AccountID; accountID != "" {
-			labels[helpersv1.AWSAccountIDMetadataKey] = accountID
+			labels[helpersv1.CloudAccountIdentifierMetadataKey] = accountID
 		}
 		if region := cloudMetadata.Region; region != "" {
 			labels[helpersv1.RegionMetadataKey] = region
