@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -153,6 +154,13 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
 	// Extract and store the workload UID (top-level owner from WLID)
 	watchedContainer.WorkloadUID = w.GetUID()
+	// Override workload-kind and workload-name labels to use top-level workload identity
+	// (InstanceID uses the direct pod owner, e.g. ReplicaSet, but profiles should be labeled
+	// with the top-level workload, e.g. Deployment, so lookups by workload kind/name work correctly)
+	watchedContainer.LabelOverrides = map[string]string{
+		helpersv1.RelatedKindMetadataKey: kind,
+		helpersv1.RelatedNameMetadataKey: name,
+	}
 	// find parent selector
 	selector, err := w.GetSelector()
 	if err != nil {
