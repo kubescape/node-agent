@@ -563,8 +563,7 @@ func (s *SbomManager) handleScannerCrash(sbomName string, wipSbom *v1beta1.SBOMS
 				helpers.String("sbomName", sbomName))
 		}
 		// Report OOM regardless of persist success — the user should know the scan failed
-		// TODO: use scanfailure.ReasonScannerOOMKilled after armoapi-go bump (PR armosec/armoapi-go#625)
-		s.reportFailure(notif, imageTag, imageID, "scanner_oom_killed", scanErr)
+		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonScannerOOMKilled, scanErr)
 		delete(s.scanRetries, sbomName)
 	}
 }
