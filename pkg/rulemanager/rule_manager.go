@@ -221,6 +221,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			continue
 		}
 
+		ruleExpressions := rm.getRuleExpressions(rule, eventType)
+		if len(ruleExpressions) == 0 {
+			continue
+		}
+
 		// Pre-filter: skip CEL evaluation if parsed parameters exclude this event.
 		if rule.Prefilter != nil {
 			if !eventFields.Extracted {
@@ -230,11 +235,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				rm.metrics.ReportRulePrefiltered(rule.Name)
 				continue
 			}
-		}
-
-		ruleExpressions := rm.getRuleExpressions(rule, eventType)
-		if len(ruleExpressions) == 0 {
-			continue
 		}
 
 		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
