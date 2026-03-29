@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
+	"github.com/kubescape/node-agent/pkg/rulemanager/prefilter"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
@@ -203,6 +204,9 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	}
 
 	eventType := enrichedEvent.Event.GetEventType()
+
+	var eventFields prefilter.EventFields
+
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
@@ -220,6 +224,17 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
 			continue
+		}
+
+		// Pre-filter: skip CEL evaluation if parsed parameters exclude this event.
+		if rule.Prefilter != nil {
+			if !eventFields.Extracted {
+				eventFields = extractEventFields(enrichedEvent.Event)
+			}
+			if rule.Prefilter.ShouldSkip(eventFields) {
+				rm.metrics.ReportRulePrefiltered(rule.Name)
+				continue
+			}
 		}
 
 		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
@@ -442,6 +457,44 @@ func (rm *RuleManager) evaluateHTTPPayloadState(state map[string]any, enrichedEv
 	stateCopy["payload"] = payloadValue
 
 	return stateCopy
+}
+
+// extractEventFields extracts pre-filterable fields from an event.
+// Called lazily on first rule with a prefilter — the returned value type is
+// reused across all remaining rules.
+func extractEventFields(event utils.K8sEvent) prefilter.EventFields {
+	f := prefilter.EventFields{Extracted: true}
+
+	switch event.GetEventType() {
+	case utils.OpenEventType:
+		if e, ok := event.(utils.OpenEvent); ok {
+			f.Path = e.GetPath()
+		}
+	case utils.ExecveEventType:
+		if e, ok := event.(utils.ExecEvent); ok {
+			f.Path = e.GetExePath()
+		}
+	case utils.HTTPEventType:
+		if e, ok := event.(utils.HttpEvent); ok {
+			f.SetDirection(string(e.GetDirection()))
+			f.DstPort = e.GetDstPort()
+			if req := e.GetRequest(); req != nil {
+				f.SetMethod(req.Method)
+			}
+		}
+	case utils.NetworkEventType:
+		if e, ok := event.(utils.NetworkEvent); ok {
+			f.DstPort = e.GetDstPort()
+			f.PortEligible = true
+		}
+	case utils.SSHEventType:
+		if e, ok := event.(utils.SshEvent); ok {
+			f.DstPort = e.GetDstPort()
+			f.PortEligible = true
+		}
+	}
+
+	return f
 }
 
 func cloneState(state map[string]any) map[string]any {

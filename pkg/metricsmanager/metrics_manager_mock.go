@@ -60,6 +60,8 @@ func (m *MetricsMock) ReportRuleEvaluationTime(ruleID string, eventType utils.Ev
 //func (m *MetricsMock) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
 //}
 
+func (m *MetricsMock) ReportRulePrefiltered(ruleName string) {}
+
 func (m *MetricsMock) ReportContainerStart() {}
 
 func (m *MetricsMock) ReportContainerStop() {}
