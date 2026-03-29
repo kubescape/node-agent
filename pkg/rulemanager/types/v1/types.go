@@ -2,6 +2,7 @@ package types
 
 import (
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/node-agent/pkg/rulemanager/prefilter"
 	"github.com/kubescape/node-agent/pkg/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -32,6 +33,7 @@ type Rule struct {
 	IsTriggerAlert          bool                        `json:"isTriggerAlert" yaml:"isTriggerAlert"`
 	MitreTactic             string                      `json:"mitreTactic" yaml:"mitreTactic"`
 	MitreTechnique          string                      `json:"mitreTechnique" yaml:"mitreTechnique"`
+	Prefilter               *prefilter.Params  `json:"-" yaml:"-"`
 }
 
 type RuleExpressions struct {

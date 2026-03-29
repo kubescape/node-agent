@@ -14,6 +14,7 @@ import (
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
 	rulemanagertypesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -1037,6 +1038,49 @@ func TestDiff(t *testing.T) {
 			slices.Sort(wantL)
 
 			assert.Equal(t, wantL, gotL)
+		})
+	}
+}
+
+func TestCreateRulePrefilter(t *testing.T) {
+	tests := []struct {
+		name       string
+		binding    *typesv1.RuntimeAlertRuleBindingRule
+		wantNil    bool
+		wantIgnore []string
+		wantIncl   []string
+	}{
+		{
+			name: "parameters propagate to prefilter",
+			binding: &typesv1.RuntimeAlertRuleBindingRule{
+				RuleID: "R0002",
+				Parameters: map[string]interface{}{
+					"ignorePrefixes":  []interface{}{"/tmp", "/var/log"},
+					"includePrefixes": []interface{}{"/etc"},
+				},
+			},
+			wantIgnore: []string{"/tmp/", "/var/log/"},
+			wantIncl:   []string{"/etc/"},
+		},
+		{
+			name:    "nil parameters produce nil prefilter",
+			binding: &typesv1.RuntimeAlertRuleBindingRule{RuleID: "R0002"},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewCacheMock("")
+			rules := c.createRule(tt.binding)
+			require.Len(t, rules, 1)
+			if tt.wantNil {
+				assert.Nil(t, rules[0].Prefilter)
+			} else {
+				require.NotNil(t, rules[0].Prefilter)
+				assert.Equal(t, tt.wantIgnore, rules[0].Prefilter.IgnorePrefixes)
+				assert.Equal(t, tt.wantIncl, rules[0].Prefilter.IncludePrefixes)
+			}
 		})
 	}
 }
