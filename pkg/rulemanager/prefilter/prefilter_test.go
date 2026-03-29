@@ -41,9 +41,9 @@ func TestParseWithDefaults(t *testing.T) {
 			expect:        &Params{Dir: DirInbound, MethodMask: MethodPOST, IgnorePrefixes: []string{"/tmp/"}},
 		},
 		{
-			name:          "allowedPorts (float64 from JSON)",
-			bindingParams: map[string]any{"allowedPorts": []interface{}{float64(22), float64(2222)}},
-			expect:        &Params{AllowedPorts: []uint16{22, 2222}},
+			name:          "ports (float64 from JSON)",
+			bindingParams: map[string]any{"ports": []interface{}{float64(22), float64(2222)}},
+			expect:        &Params{Ports: []uint16{22, 2222}},
 		},
 		{
 			name:      "direction normalized to lowercase",
@@ -70,11 +70,7 @@ func TestParseWithDefaults(t *testing.T) {
 				assert.Nil(t, got)
 			} else {
 				require.NotNil(t, got)
-				assert.Equal(t, tt.expect.IgnorePrefixes, got.IgnorePrefixes)
-				assert.Equal(t, tt.expect.IncludePrefixes, got.IncludePrefixes)
-				assert.Equal(t, tt.expect.AllowedPorts, got.AllowedPorts)
-				assert.Equal(t, tt.expect.Dir, got.Dir)
-				assert.Equal(t, tt.expect.MethodMask, got.MethodMask)
+				assert.Equal(t, tt.expect, got)
 			}
 		})
 	}
@@ -117,12 +113,12 @@ func TestShouldSkip(t *testing.T) {
 		{"method mismatch GET", &Params{MethodMask: MethodPOST | MethodPUT}, EventFields{MethodBit: MethodGET}, true},
 		{"method empty event (non-HTTP)", &Params{MethodMask: MethodPOST}, EventFields{}, false},
 
-		// --- allowedPorts (scoped to SSH/network via PortEligible) ---
-		{"SSH port in allowed list (skip)", &Params{AllowedPorts: []uint16{22, 2222}}, EventFields{DstPort: 22, PortEligible: true}, true},
-		{"network port in allowed list (skip)", &Params{AllowedPorts: []uint16{22}}, EventFields{DstPort: 22, PortEligible: true}, true},
-		{"port not in allowed list", &Params{AllowedPorts: []uint16{22, 2222}}, EventFields{DstPort: 8080, PortEligible: true}, false},
-		{"port zero (non-network)", &Params{AllowedPorts: []uint16{22}}, EventFields{}, false},
-		{"HTTP port ignored by allowedPorts", &Params{AllowedPorts: []uint16{22}}, EventFields{DstPort: 22, PortEligible: false}, false},
+		// --- ports (scoped to SSH/network via PortEligible) ---
+		{"port in monitored list (keep)", &Params{Ports: []uint16{22, 2222}}, EventFields{DstPort: 22, PortEligible: true}, false},
+		{"port in monitored list single (keep)", &Params{Ports: []uint16{22}}, EventFields{DstPort: 22, PortEligible: true}, false},
+		{"port not in monitored list (skip)", &Params{Ports: []uint16{22, 2222}}, EventFields{DstPort: 8080, PortEligible: true}, true},
+		{"port zero (non-network)", &Params{Ports: []uint16{22}}, EventFields{}, false},
+		{"HTTP port not filtered by ports", &Params{Ports: []uint16{22}}, EventFields{DstPort: 22, PortEligible: false}, false},
 
 		// --- combined: HTTP direction + method ---
 		{"HTTP direction mismatch skips", &Params{Dir: DirInbound, MethodMask: MethodPOST | MethodPUT}, EventFields{Dir: DirOutbound, MethodBit: MethodPOST}, true},

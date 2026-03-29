@@ -93,7 +93,7 @@ func (f *EventFields) SetMethod(method string) {
 type Params struct {
 	IgnorePrefixes  []string   // open, exec — skip if path starts with prefix
 	IncludePrefixes []string   // open, exec — skip if path does NOT match any prefix
-	AllowedPorts    []uint16   // SSH, network — skip if port IS in list
+	Ports           []uint16   // SSH, network — skip if port is NOT in list
 	Dir             Direction  // HTTP — DirInbound or DirOutbound
 	MethodMask      MethodMask // HTTP — bitmask of allowed methods
 }
@@ -130,8 +130,8 @@ func ParseWithDefaults(ruleState map[string]any, bindingParams map[string]any) *
 		hasFilter = true
 	}
 
-	if v, ok := toUint16Slice(merged["allowedPorts"]); ok && len(v) > 0 {
-		p.AllowedPorts = v
+	if v, ok := toUint16Slice(merged["ports"]); ok && len(v) > 0 {
+		p.Ports = v
 		hasFilter = true
 	}
 
@@ -182,7 +182,7 @@ func (p *Params) ShouldSkip(e EventFields) bool {
 		}
 	}
 
-	if e.PortEligible && len(p.AllowedPorts) > 0 && slices.Contains(p.AllowedPorts, e.DstPort) {
+	if e.PortEligible && len(p.Ports) > 0 && !slices.Contains(p.Ports, e.DstPort) {
 		return true
 	}
 
@@ -241,10 +241,13 @@ func toUint16Slice(v interface{}) ([]uint16, bool) {
 }
 
 func ensureTrailingSlash(prefixes []string) []string {
+	result := make([]string, len(prefixes))
 	for i, p := range prefixes {
 		if !strings.HasSuffix(p, "/") {
-			prefixes[i] = p + "/"
+			result[i] = p + "/"
+		} else {
+			result[i] = p
 		}
 	}
-	return prefixes
+	return result
 }
