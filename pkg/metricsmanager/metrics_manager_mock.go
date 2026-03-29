@@ -63,3 +63,5 @@ func (m *MetricsMock) ReportRuleEvaluationTime(ruleID string, eventType utils.Ev
 func (m *MetricsMock) ReportContainerStart() {}
 
 func (m *MetricsMock) ReportContainerStop() {}
+
+func (m *MetricsMock) ReportDedupEvent(eventType utils.EventType, duplicate bool) {}

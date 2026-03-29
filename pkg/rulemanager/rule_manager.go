@@ -146,6 +146,9 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
+	if enrichedEvent.Duplicate {
+		return
+	}
 	rm.enrichEventWithContext(enrichedEvent)
 
 	var profileExists bool

@@ -25,6 +25,12 @@ const NodeNameEnvVar = "NODE_NAME"
 const PodNameEnvVar = "POD_NAME"
 const NamespaceEnvVar = "NAMESPACE_NAME"
 
+// EventDedupConfig controls eBPF event deduplication before CEL rule evaluation.
+type EventDedupConfig struct {
+	Enabled       bool  `mapstructure:"enabled"`
+	SlotsExponent uint8 `mapstructure:"slotsExponent"`
+}
+
 type Config struct {
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
@@ -70,6 +76,7 @@ type Config struct {
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
+	EventDedup                     EventDedupConfig                     `mapstructure:"eventDedup"`
 	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
 	ExcludeLabels                  map[string][]string                  `mapstructure:"excludeLabels"`
 	ExcludeNamespaces              []string                             `mapstructure:"excludeNamespaces"`
@@ -183,6 +190,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("celConfigCache::ttl", 1*time.Minute)
 	viper.SetDefault("ignoreRuleBindings", false)
 
+	viper.SetDefault("eventDedup::enabled", true)
+	viper.SetDefault("eventDedup::slotsExponent", 18)
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
