@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -136,6 +137,10 @@ type FIMExportersConfig struct {
 
 // LoadConfig reads configuration from file or environment variables.
 func LoadConfig(path string) (Config, error) {
+	return LoadConfigOptional(path, true)
+}
+
+func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.AddConfigPath(path)
 	viper.SetConfigName("config")
 	viper.SetConfigType("json")
@@ -215,14 +220,15 @@ func LoadConfig(path string) (Config, error) {
 
 	viper.AutomaticEnv()
 
-	err := viper.ReadInConfig()
-	if err != nil {
-		return Config{}, err
+	if err := viper.ReadInConfig(); err != nil {
+		var notFound viper.ConfigFileNotFoundError
+		if !(errors.As(err, &notFound) && !errNotFound) {
+			return Config{}, err
+		}
 	}
 
 	var config Config
-	err = viper.Unmarshal(&config)
-	if err != nil {
+	if err := viper.Unmarshal(&config); err != nil {
 		return Config{}, err
 	}
 
