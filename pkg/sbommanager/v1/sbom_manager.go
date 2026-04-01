@@ -20,6 +20,7 @@ import (
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/aquilax/truncate"
+	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/cenkalti/backoff/v5"
 	securejoin "github.com/cyphar/filepath-securejoin"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -32,7 +33,6 @@ import (
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager/v1/syftutil"
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
@@ -88,14 +88,12 @@ type SbomManager struct {
 	pendingScans       map[string]pendingScan
 	pendingOrder       []string
 	pendingMu          sync.Mutex
-	failureReporter    sbommanager.SbomFailureReporter // nil = no failure reporting (backward compat)
-	accountID          string
-	clusterName        string
+	failureReporter    sbommanager.SbomFailureReporter
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
-func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter, accountID, clusterName string) (*SbomManager, error) {
+func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter) (*SbomManager, error) {
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
 	if !exists {
@@ -137,8 +135,6 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		scanRetries:        make(map[string]int),
 		pendingScans:       make(map[string]pendingScan),
 		failureReporter:    failureReporter,
-		accountID:          accountID,
-		clusterName:        clusterName,
 	}
 	if scannerClient != nil {
 		sm.startScannerReadinessWatcher()
@@ -399,7 +395,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				sbomScanDuration.WithLabelValues("oom_killed").Observe(scanDuration)
 				sbomScannerRestartsTotal.Inc()
 				sbomScannerReady.Set(0)
-				s.handleScannerCrash(sbomName, wipSbom, notif, scanErr, sharedData.ImageTag, imageID)
+				s.handleScannerCrash(sbomName, wipSbom, notif, scanErr, imageTag, imageID)
 				return
 			}
 			sbomScanTotal.WithLabelValues("error").Inc()
@@ -410,7 +406,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
-			s.reportFailure(notif, sharedData.ImageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)
+			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)
 			return
 		}
 		sbomScanTotal.WithLabelValues("success").Inc()
@@ -460,9 +456,9 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 						helpers.Error(replaceErr),
 						helpers.String("sbomName", sbomName))
 				}
-				s.reportFailure(notif, sharedData.ImageTag, imageID, scanfailure.ReasonImageTooLarge, srcErr)
+				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonImageTooLarge, srcErr)
 			} else {
-				s.reportFailure(notif, sharedData.ImageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, srcErr)
+				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, srcErr)
 			}
 			return
 		}
@@ -480,7 +476,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
-			s.reportFailure(notif, sharedData.ImageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, syftErr)
+			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, syftErr)
 			return
 		}
 		v1beta1.StripSBOM(syftSBOM)
@@ -507,7 +503,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
 		// clear the spec
 		wipSbom.Spec = v1beta1.SBOMSyftSpec{}
-		s.reportFailure(notif, sharedData.ImageTag, imageID, scanfailure.ReasonSBOMTooLarge, nil)
+		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMTooLarge, nil)
 	} else {
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Learning
 	}
@@ -520,7 +516,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
 			helpers.String("sbomName", sbomName))
-		s.reportFailure(notif, sharedData.ImageTag, imageID, scanfailure.ReasonSBOMStorageFailed, err)
+		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMStorageFailed, err)
 		return
 	}
 	logger.L().Debug("SbomManager - saved SBOM after successful processing",
@@ -620,14 +616,12 @@ func (s *SbomManager) reportFailure(notif containercollection.PubSubEvent, image
 	}
 
 	report := scanfailure.ScanFailureReport{
-		CustomerGUID:  s.accountID,
 		ImageTag:      imageTag,
 		ImageHash:     imageID,
 		FailureCase:   scanfailure.ScanFailureSBOMGeneration,
 		FailureReason: reason,
 		Timestamp:     time.Now(),
 		Workloads: []scanfailure.WorkloadIdentifier{{
-			ClusterName:   s.clusterName,
 			Namespace:     notif.Container.K8s.Namespace,
 			WorkloadKind:  "Pod",
 			WorkloadName:  notif.Container.K8s.PodName,

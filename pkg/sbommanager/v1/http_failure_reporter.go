@@ -19,23 +19,33 @@ var _ sbommanager.SbomFailureReporter = (*HTTPSbomFailureReporter)(nil)
 // HTTPSbomFailureReporter sends scan failure reports to careportreceiver via HTTP POST.
 // Uses the same endpoint and auth as kubevuln: POST /k8s/v2/scanFailure with X-API-KEY header.
 type HTTPSbomFailureReporter struct {
-	eventReceiverURL string
 	accessKey        string
+	accountID        string
+	clusterName      string
+	eventReceiverURL string
 	httpClient       *http.Client
 }
 
 // NewHTTPSbomFailureReporter creates a reporter that POSTs to the given event receiver URL.
 // eventReceiverURL is the base URL (e.g., "http://event-receiver-http.kubescape.svc.cluster.local:8080").
 // accessKey is the cluster access key for the X-API-KEY header.
-func NewHTTPSbomFailureReporter(eventReceiverURL, accessKey string) *HTTPSbomFailureReporter {
+func NewHTTPSbomFailureReporter(eventReceiverURL, accessKey, accountID, clusterName string) *HTTPSbomFailureReporter {
 	return &HTTPSbomFailureReporter{
 		eventReceiverURL: eventReceiverURL,
 		accessKey:        accessKey,
+		accountID:        accountID,
+		clusterName:      clusterName,
 		httpClient:       &http.Client{},
 	}
 }
 
 func (r *HTTPSbomFailureReporter) ReportSbomFailure(ctx context.Context, report scanfailure.ScanFailureReport) error {
+	// enrich report
+	report.CustomerGUID = r.accountID
+	for i := range report.Workloads {
+		report.Workloads[i].ClusterName = r.clusterName
+	}
+
 	payload, err := json.Marshal(report)
 	if err != nil {
 		return fmt.Errorf("marshal scan failure report: %w", err)

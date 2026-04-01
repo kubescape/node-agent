@@ -26,7 +26,7 @@ func TestHTTPSbomFailureReporter_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reporter := NewHTTPSbomFailureReporter(server.URL, "test-key")
+	reporter := NewHTTPSbomFailureReporter(server.URL, "test-key", "test-account", "")
 
 	report := scanfailure.ScanFailureReport{
 		CustomerGUID:  "test-account",
@@ -62,7 +62,7 @@ func TestHTTPSbomFailureReporter_HTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reporter := NewHTTPSbomFailureReporter(server.URL, "test-key")
+	reporter := NewHTTPSbomFailureReporter(server.URL, "test-key", "test-account", "")
 
 	err := reporter.ReportSbomFailure(context.Background(), scanfailure.ScanFailureReport{
 		CustomerGUID:  "test",
@@ -82,7 +82,7 @@ func TestHTTPSbomFailureReporter_NoAccessKey(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reporter := NewHTTPSbomFailureReporter(server.URL, "")
+	reporter := NewHTTPSbomFailureReporter(server.URL, "", "", "")
 
 	err := reporter.ReportSbomFailure(context.Background(), scanfailure.ScanFailureReport{
 		CustomerGUID:  "test",
@@ -94,7 +94,7 @@ func TestHTTPSbomFailureReporter_NoAccessKey(t *testing.T) {
 }
 
 func TestHTTPSbomFailureReporter_ConnectionError(t *testing.T) {
-	reporter := NewHTTPSbomFailureReporter("http://localhost:1", "test-key")
+	reporter := NewHTTPSbomFailureReporter("http://localhost:1", "test-key", "", "")
 
 	err := reporter.ReportSbomFailure(context.Background(), scanfailure.ScanFailureReport{
 		CustomerGUID:  "test",
