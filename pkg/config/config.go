@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kubescape/backend/pkg/servicediscovery"
+	"github.com/kubescape/backend/pkg/servicediscovery/schema"
+	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
@@ -284,6 +287,15 @@ func (c *Config) SkipNamespace(ns string) bool {
 		}
 	}
 	return false
+}
+
+func LoadServiceURLs(filePath string) (schema.IBackendServices, error) {
+	if pathFromEnv, present := os.LookupEnv("SERVICES"); present {
+		filePath = pathFromEnv
+	}
+	return servicediscovery.GetServices(
+		servicediscoveryv2.NewServiceDiscoveryFileV2(filePath),
+	)
 }
 
 type OrderedEventQueueConfig struct {
