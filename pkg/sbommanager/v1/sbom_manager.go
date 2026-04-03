@@ -166,6 +166,9 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mounts: %w", err)
 	}
+	if len(mounts) == 0 {
+		return nil, fmt.Errorf("no overlay mount found for pid %s", pid)
+	}
 	for _, option := range strings.Split(mounts[0].VFSOptions, ",") {
 		if strings.HasPrefix(option, "lowerdir=") {
 			var volumes []string
