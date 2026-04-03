@@ -395,7 +395,11 @@ func main() {
 
 	// Create scan failure reporter (sends SBOM failures to careportreceiver for user notifications)
 	var failureReporter sbommanager.SbomFailureReporter
-	if services, svcErr := config.LoadServiceURLs("/etc/config/services.json"); svcErr == nil && services.GetReportReceiverHttpUrl() != "" {
+	apiURL := os.Getenv("API_URL")
+	if apiURL == "" {
+		apiURL = "api.armosec.io"
+	}
+	if services, svcErr := config.LoadServiceURLs(apiURL); svcErr == nil && services.GetReportReceiverHttpUrl() != "" {
 		failureReporter = sbommanagerv1.NewHTTPSbomFailureReporter(services.GetReportReceiverHttpUrl(), accessKey, clusterData.AccountID, clusterData.ClusterName)
 		logger.L().Info("scan failure reporting enabled", helpers.String("eventReceiverURL", services.GetReportReceiverHttpUrl()))
 	}
