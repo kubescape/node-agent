@@ -51,6 +51,11 @@ func TestParseWithDefaults(t *testing.T) {
 			expect:        &Params{Ports: []uint16{22, 2222}},
 		},
 		{
+			name:          "file path prefix not broken by trailing-slash normalization",
+			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/etc/passwd"}},
+			expect:        &Params{IgnorePrefixes: []string{"/etc/passwd"}},
+		},
+		{
 			name:      "direction normalized to lowercase",
 			ruleState: map[string]any{"direction": "Inbound"},
 			expect:    &Params{Dir: DirInbound},
@@ -99,6 +104,7 @@ func TestShouldSkip(t *testing.T) {
 		{"ignore no match", &Params{IgnorePrefixes: []string{"/tmp", "/var/log"}}, EventFields{Path: "/etc/passwd"}, false},
 		{"ignore directory boundary", &Params{IgnorePrefixes: []string{"/tmp"}}, EventFields{Path: "/tmpfiles/secret"}, false},
 		{"ignore empty path skipped", &Params{IgnorePrefixes: []string{"/tmp"}}, EventFields{}, false},
+		{"ignore exact file path not broken by slash append", &Params{IgnorePrefixes: []string{"/etc/passwd"}}, EventFields{Path: "/etc/passwd"}, true},
 
 		// --- includePrefixes ---
 		{"include match", &Params{IncludePrefixes: []string{"/etc", "/usr"}}, EventFields{Path: "/etc/passwd"}, false},

@@ -1,9 +1,12 @@
 package prefilter
 
 import (
-	"math"
+	"encoding/json"
 	"slices"
 	"strings"
+
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 // Direction represents an HTTP traffic direction as a compact integer.
@@ -99,6 +102,16 @@ type Params struct {
 	MethodMask      MethodMask // HTTP — bitmask of allowed methods
 }
 
+// rawParams is the JSON/YAML-decodable shape of pre-filter parameters.
+// encoding/json handles all numeric type coercion (float64, int, int64, etc.)
+type rawParams struct {
+	IgnorePrefixes  []string `json:"ignorePrefixes"`
+	IncludePrefixes []string `json:"includePrefixes"`
+	Ports           []uint16 `json:"ports"`
+	Direction       string   `json:"direction"`
+	Methods         []string `json:"methods"`
+}
+
 // ParseWithDefaults merges pre-filter parameters from two sources:
 //   - ruleState: defaults from the rule library YAML (Rule.State)
 //   - bindingParams: per-deployment overrides from the rule binding CRD
@@ -118,33 +131,44 @@ func ParseWithDefaults(ruleState map[string]any, bindingParams map[string]any) *
 		merged[k] = v // binding overrides state
 	}
 
+	buf, err := json.Marshal(merged)
+	if err != nil {
+		logger.L().Warning("prefilter: failed to marshal params", helpers.Error(err))
+		return nil
+	}
+	var raw rawParams
+	if err := json.Unmarshal(buf, &raw); err != nil {
+		logger.L().Warning("prefilter: failed to unmarshal params", helpers.Error(err))
+		return nil
+	}
+
 	p := &Params{}
 	hasFilter := false
 
-	if v, ok := toStringSlice(merged["ignorePrefixes"]); ok && len(v) > 0 {
-		p.IgnorePrefixes = trimTrailingSlash(v)
+	if len(raw.IgnorePrefixes) > 0 {
+		p.IgnorePrefixes = trimTrailingSlash(raw.IgnorePrefixes)
 		hasFilter = true
 	}
 
-	if v, ok := toStringSlice(merged["includePrefixes"]); ok && len(v) > 0 {
-		p.IncludePrefixes = trimTrailingSlash(v)
+	if len(raw.IncludePrefixes) > 0 {
+		p.IncludePrefixes = trimTrailingSlash(raw.IncludePrefixes)
 		hasFilter = true
 	}
 
-	if v, ok := toUint16Slice(merged["ports"]); ok && len(v) > 0 {
-		p.Ports = v
+	if len(raw.Ports) > 0 {
+		p.Ports = raw.Ports
 		hasFilter = true
 	}
 
-	if v, ok := merged["direction"].(string); ok && v != "" {
-		p.Dir = parseDirection(strings.ToLower(v))
+	if raw.Direction != "" {
+		p.Dir = parseDirection(strings.ToLower(raw.Direction))
 		if p.Dir != DirNone {
 			hasFilter = true
 		}
 	}
 
-	if v, ok := toStringSlice(merged["methods"]); ok && len(v) > 0 {
-		for _, m := range v {
+	if len(raw.Methods) > 0 {
+		for _, m := range raw.Methods {
 			p.MethodMask |= methodToBit(strings.ToUpper(m))
 		}
 		if p.MethodMask != 0 {
@@ -198,74 +222,6 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 		}
 	}
 	return false
-}
-
-func toStringSlice(v interface{}) ([]string, bool) {
-	if v == nil {
-		return nil, false
-	}
-	switch val := v.(type) {
-	case []interface{}:
-		result := make([]string, 0, len(val))
-		for _, item := range val {
-			if s, ok := item.(string); ok {
-				result = append(result, s)
-			}
-		}
-		return result, len(result) > 0
-	case []string:
-		cp := make([]string, len(val))
-		copy(cp, val)
-		return cp, len(val) > 0
-	}
-	return nil, false
-}
-
-func toUint16Slice(v interface{}) ([]uint16, bool) {
-	if v == nil {
-		return nil, false
-	}
-	switch vals := v.(type) {
-	case []interface{}:
-		result := make([]uint16, 0, len(vals))
-		for _, item := range vals {
-			if p, ok := toUint16(item); ok {
-				result = append(result, p)
-			}
-		}
-		return result, len(result) > 0
-	case []int:
-		result := make([]uint16, 0, len(vals))
-		for _, n := range vals {
-			if n >= 0 && n <= 65535 {
-				result = append(result, uint16(n))
-			}
-		}
-		return result, len(result) > 0
-	case []uint16:
-		cp := make([]uint16, len(vals))
-		copy(cp, vals)
-		return cp, len(vals) > 0
-	}
-	return nil, false
-}
-
-func toUint16(v interface{}) (uint16, bool) {
-	switch n := v.(type) {
-	case int:
-		if n >= 0 && n <= 65535 {
-			return uint16(n), true
-		}
-	case int64:
-		if n >= 0 && n <= 65535 {
-			return uint16(n), true
-		}
-	case float64:
-		if n >= 0 && n <= 65535 && math.Trunc(n) == n {
-			return uint16(n), true
-		}
-	}
-	return 0, false
 }
 
 func trimTrailingSlash(prefixes []string) []string {
