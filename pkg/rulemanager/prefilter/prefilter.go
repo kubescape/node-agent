@@ -1,6 +1,7 @@
 package prefilter
 
 import (
+	"math"
 	"slices"
 	"strings"
 )
@@ -228,8 +229,16 @@ func toUint16Slice(v interface{}) ([]uint16, bool) {
 	case []interface{}:
 		result := make([]uint16, 0, len(vals))
 		for _, item := range vals {
-			if f, ok := item.(float64); ok && f >= 0 && f <= 65535 {
-				result = append(result, uint16(f))
+			if p, ok := toUint16(item); ok {
+				result = append(result, p)
+			}
+		}
+		return result, len(result) > 0
+	case []int:
+		result := make([]uint16, 0, len(vals))
+		for _, n := range vals {
+			if n >= 0 && n <= 65535 {
+				result = append(result, uint16(n))
 			}
 		}
 		return result, len(result) > 0
@@ -239,6 +248,24 @@ func toUint16Slice(v interface{}) ([]uint16, bool) {
 		return cp, len(vals) > 0
 	}
 	return nil, false
+}
+
+func toUint16(v interface{}) (uint16, bool) {
+	switch n := v.(type) {
+	case int:
+		if n >= 0 && n <= 65535 {
+			return uint16(n), true
+		}
+	case int64:
+		if n >= 0 && n <= 65535 {
+			return uint16(n), true
+		}
+	case float64:
+		if n >= 0 && n <= 65535 && math.Trunc(n) == n {
+			return uint16(n), true
+		}
+	}
+	return 0, false
 }
 
 func trimTrailingSlash(prefixes []string) []string {
