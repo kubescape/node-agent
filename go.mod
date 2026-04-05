@@ -12,6 +12,7 @@ require (
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cenkalti/backoff/v5 v5.0.3
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cilium/ebpf v0.20.0
 	github.com/crewjam/rfc5424 v0.1.0
 	github.com/cyphar/filepath-securejoin v0.6.0
@@ -156,7 +157,6 @@ require (
 	github.com/bodgit/windows v1.0.1 // indirect
 	github.com/briandowns/spinner v1.23.2 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
-	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.3.1 // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
 	github.com/charmbracelet/x/ansi v0.9.3 // indirect
