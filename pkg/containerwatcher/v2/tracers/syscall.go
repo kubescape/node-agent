@@ -128,12 +128,14 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	syscallsBuffer := event.GetSyscalls()
 	for _, syscall := range decodeSyscalls(syscallsBuffer) {
 		st.eventCallback(&utils.DatasourceEvent{
-			Data:       event.Data, // WARNING we pass the original data here, not a DeepCopy
+			Data:       event.Datasource.DeepCopy(event.Data),
 			Datasource: event.Datasource,
 			EventType:  event.EventType,
 			Syscall:    syscall,
 		}, containerID, processID)
 	}
+	// Release the original deep-copied data since each sub-event now has its own copy
+	event.Release()
 }
 
 func decodeSyscalls(syscallsBuffer []byte) []string {
