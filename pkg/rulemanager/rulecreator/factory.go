@@ -92,11 +92,11 @@ func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 
 func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
 	var rules []typesv1.Rule
-	for _, rule := range r.Rules {
-		if rule.Prefilter == nil {
-			rule.Prefilter = prefilter.ParseWithDefaults(rule.State, nil)
+	for i := range r.Rules {
+		if r.Rules[i].Prefilter == nil {
+			r.Rules[i].Prefilter = prefilter.ParseWithDefaults(r.Rules[i].State, nil)
 		}
-		rules = append(rules, rule)
+		rules = append(rules, r.Rules[i])
 	}
 	return rules
 }
