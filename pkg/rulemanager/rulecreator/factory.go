@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/kubescape/node-agent/pkg/rulemanager/prefilter"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -92,6 +93,9 @@ func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
 	var rules []typesv1.Rule
 	for _, rule := range r.Rules {
+		if rule.Prefilter == nil {
+			rule.Prefilter = prefilter.ParseWithDefaults(rule.State, nil)
+		}
 		rules = append(rules, rule)
 	}
 	return rules
