@@ -397,7 +397,7 @@ func (e *DatasourceEvent) GetEventType() EventType {
 
 func (e *DatasourceEvent) GetExePath() string {
 	exepath, _ := e.getFieldAccessor("exepath").String(e.Data)
-	return exepath
+	return NormalizePath(exepath)
 }
 
 func (e *DatasourceEvent) GetExitCode() uint32 {
@@ -439,7 +439,7 @@ func (e *DatasourceEvent) GetFullPath() string {
 	if path == "" {
 		path, _ = e.getFieldAccessor("fname").String(e.Data)
 	}
-	return path
+	return NormalizePath(path)
 }
 
 func (e *DatasourceEvent) GetGid() *uint32 {
@@ -490,7 +490,7 @@ func (e *DatasourceEvent) GetNamespace() string {
 
 func (e *DatasourceEvent) GetNewPath() string {
 	newPath, _ := e.getFieldAccessor("newpath").String(e.Data)
-	return newPath
+	return NormalizePath(newPath)
 }
 
 func (e *DatasourceEvent) GetNumAnswers() int {
@@ -500,7 +500,7 @@ func (e *DatasourceEvent) GetNumAnswers() int {
 
 func (e *DatasourceEvent) GetOldPath() string {
 	oldPath, _ := e.getFieldAccessor("oldpath").String(e.Data)
-	return oldPath
+	return NormalizePath(oldPath)
 }
 
 func (e *DatasourceEvent) GetOpcode() int {
@@ -526,7 +526,7 @@ func (e *DatasourceEvent) GetPath() string {
 		return e.GetFullPath()
 	}
 	path, _ := e.getFieldAccessor("fname").String(e.Data)
-	return path
+	return NormalizePath(path)
 }
 
 func (e *DatasourceEvent) GetPcomm() string {
