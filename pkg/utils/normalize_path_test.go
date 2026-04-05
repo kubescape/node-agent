@@ -41,6 +41,16 @@ func TestNormalizePath(t *testing.T) {
 			expected: "/proc/46/fd/3",
 		},
 		{
+			name:     "terminal headless proc fd path",
+			input:    "/46/fd",
+			expected: "/proc/46/fd",
+		},
+		{
+			name:     "terminal headless proc task path",
+			input:    "/46/task",
+			expected: "/proc/46/task",
+		},
+		{
 			name:     "relative path (not dot)",
 			input:    "usr/bin/ls",
 			expected: "/usr/bin/ls",

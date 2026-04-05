@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var headlessProcRegex = regexp.MustCompile(`^/\d+/(task|fd)/`)
+var headlessProcRegex = regexp.MustCompile(`^/\d+/(task|fd)(/|$)`)
 
 // NormalizePath normalizes a path by:
 // 1. Prepending "/proc" to "headless" proc paths (e.g. /46/task/46/fd -> /proc/46/task/46/fd)
