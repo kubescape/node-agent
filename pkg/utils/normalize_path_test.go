@@ -2,8 +2,6 @@ package utils
 
 import (
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestNormalizePath(t *testing.T) {
@@ -66,8 +64,9 @@ func TestNormalizePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NormalizePath(tt.input)
-			assert.Equal(t, tt.expected, got)
+			if got := NormalizePath(tt.input); got != tt.expected {
+				t.Errorf("NormalizePath(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
 		})
 	}
 }
