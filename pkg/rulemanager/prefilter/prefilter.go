@@ -121,12 +121,12 @@ func ParseWithDefaults(ruleState map[string]any, bindingParams map[string]any) *
 	hasFilter := false
 
 	if v, ok := toStringSlice(merged["ignorePrefixes"]); ok && len(v) > 0 {
-		p.IgnorePrefixes = ensureTrailingSlash(v)
+		p.IgnorePrefixes = trimTrailingSlash(v)
 		hasFilter = true
 	}
 
 	if v, ok := toStringSlice(merged["includePrefixes"]); ok && len(v) > 0 {
-		p.IncludePrefixes = ensureTrailingSlash(v)
+		p.IncludePrefixes = trimTrailingSlash(v)
 		hasFilter = true
 	}
 
@@ -165,6 +165,7 @@ func (p *Params) ShouldSkip(e EventFields) bool {
 		return false
 	}
 
+	// Skip only when both sides are determinate and they disagree.
 	if p.Dir != DirNone && e.Dir != DirNone && e.Dir != p.Dir {
 		return true
 	}
@@ -191,7 +192,7 @@ func (p *Params) ShouldSkip(e EventFields) bool {
 
 func hasAnyPrefix(s string, prefixes []string) bool {
 	for _, p := range prefixes {
-		if strings.HasPrefix(s, p) {
+		if s == p || (len(s) > len(p) && s[len(p)] == '/' && s[:len(p)] == p) {
 			return true
 		}
 	}
@@ -240,14 +241,10 @@ func toUint16Slice(v interface{}) ([]uint16, bool) {
 	return nil, false
 }
 
-func ensureTrailingSlash(prefixes []string) []string {
+func trimTrailingSlash(prefixes []string) []string {
 	result := make([]string, len(prefixes))
 	for i, p := range prefixes {
-		if !strings.HasSuffix(p, "/") {
-			result[i] = p + "/"
-		} else {
-			result[i] = p
-		}
+		result[i] = strings.TrimRight(p, "/")
 	}
 	return result
 }

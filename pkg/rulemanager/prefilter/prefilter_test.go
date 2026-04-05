@@ -21,7 +21,12 @@ func TestParseWithDefaults(t *testing.T) {
 		{
 			name:          "binding params only — ignorePrefixes",
 			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/tmp", "/var/log"}},
-			expect:        &Params{IgnorePrefixes: []string{"/tmp/", "/var/log/"}},
+			expect:        &Params{IgnorePrefixes: []string{"/tmp", "/var/log"}},
+		},
+		{
+			name:          "trailing slash stripped from prefix",
+			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/tmp/", "/var/log/"}},
+			expect:        &Params{IgnorePrefixes: []string{"/tmp", "/var/log"}},
 		},
 		{
 			name:      "rule state only — direction and methods",
@@ -38,7 +43,7 @@ func TestParseWithDefaults(t *testing.T) {
 			name:          "merge: state has direction, binding has prefixes",
 			ruleState:     map[string]any{"direction": "inbound", "methods": []interface{}{"POST"}},
 			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/tmp"}},
-			expect:        &Params{Dir: DirInbound, MethodMask: MethodPOST, IgnorePrefixes: []string{"/tmp/"}},
+			expect:        &Params{Dir: DirInbound, MethodMask: MethodPOST, IgnorePrefixes: []string{"/tmp"}},
 		},
 		{
 			name:          "ports (float64 from JSON)",
@@ -59,7 +64,7 @@ func TestParseWithDefaults(t *testing.T) {
 			name:          "non-filterable in state, filterable in binding",
 			ruleState:     map[string]any{"enforceArgs": true},
 			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/tmp"}},
-			expect:        &Params{IgnorePrefixes: []string{"/tmp/"}},
+			expect:        &Params{IgnorePrefixes: []string{"/tmp"}},
 		},
 	}
 
@@ -88,19 +93,21 @@ func TestShouldSkip(t *testing.T) {
 		{"empty params", &Params{}, EventFields{Path: "/etc/passwd"}, false},
 
 		// --- ignorePrefixes ---
-		{"ignore match /tmp/", &Params{IgnorePrefixes: []string{"/tmp/", "/var/log/"}}, EventFields{Path: "/tmp/foo.txt"}, true},
-		{"ignore match /var/log/", &Params{IgnorePrefixes: []string{"/tmp/", "/var/log/"}}, EventFields{Path: "/var/log/syslog"}, true},
-		{"ignore no match", &Params{IgnorePrefixes: []string{"/tmp/", "/var/log/"}}, EventFields{Path: "/etc/passwd"}, false},
-		{"ignore directory boundary", &Params{IgnorePrefixes: []string{"/tmp/"}}, EventFields{Path: "/tmpfiles/secret"}, false},
-		{"ignore empty path skipped", &Params{IgnorePrefixes: []string{"/tmp/"}}, EventFields{}, false},
+		{"ignore match /tmp", &Params{IgnorePrefixes: []string{"/tmp", "/var/log"}}, EventFields{Path: "/tmp/foo.txt"}, true},
+		{"ignore match /var/log", &Params{IgnorePrefixes: []string{"/tmp", "/var/log"}}, EventFields{Path: "/var/log/syslog"}, true},
+		{"ignore exact match", &Params{IgnorePrefixes: []string{"/etc/passwd"}}, EventFields{Path: "/etc/passwd"}, true},
+		{"ignore no match", &Params{IgnorePrefixes: []string{"/tmp", "/var/log"}}, EventFields{Path: "/etc/passwd"}, false},
+		{"ignore directory boundary", &Params{IgnorePrefixes: []string{"/tmp"}}, EventFields{Path: "/tmpfiles/secret"}, false},
+		{"ignore empty path skipped", &Params{IgnorePrefixes: []string{"/tmp"}}, EventFields{}, false},
 
 		// --- includePrefixes ---
-		{"include match", &Params{IncludePrefixes: []string{"/etc/", "/usr/"}}, EventFields{Path: "/etc/passwd"}, false},
-		{"include no match", &Params{IncludePrefixes: []string{"/etc/", "/usr/"}}, EventFields{Path: "/tmp/foo.txt"}, true},
+		{"include match", &Params{IncludePrefixes: []string{"/etc", "/usr"}}, EventFields{Path: "/etc/passwd"}, false},
+		{"include exact match", &Params{IncludePrefixes: []string{"/etc/passwd"}}, EventFields{Path: "/etc/passwd"}, false},
+		{"include no match", &Params{IncludePrefixes: []string{"/etc", "/usr"}}, EventFields{Path: "/tmp/foo.txt"}, true},
 
 		// --- both prefixes (ignore wins) ---
-		{"both: ignored subdir", &Params{IncludePrefixes: []string{"/etc/"}, IgnorePrefixes: []string{"/etc/default/"}}, EventFields{Path: "/etc/default/grub"}, true},
-		{"both: included not ignored", &Params{IncludePrefixes: []string{"/etc/"}, IgnorePrefixes: []string{"/etc/default/"}}, EventFields{Path: "/etc/passwd"}, false},
+		{"both: ignored subdir", &Params{IncludePrefixes: []string{"/etc"}, IgnorePrefixes: []string{"/etc/default"}}, EventFields{Path: "/etc/default/grub"}, true},
+		{"both: included not ignored", &Params{IncludePrefixes: []string{"/etc"}, IgnorePrefixes: []string{"/etc/default"}}, EventFields{Path: "/etc/passwd"}, false},
 
 		// --- direction ---
 		{"direction match", &Params{Dir: DirInbound}, EventFields{Dir: DirInbound}, false},
@@ -126,9 +133,9 @@ func TestShouldSkip(t *testing.T) {
 		{"HTTP both pass", &Params{Dir: DirInbound, MethodMask: MethodPOST | MethodPUT}, EventFields{Dir: DirInbound, MethodBit: MethodPOST}, false},
 
 		// --- combined: file path include + ignore ---
-		{"file: not in include", &Params{IncludePrefixes: []string{"/etc/"}, IgnorePrefixes: []string{"/etc/default/"}}, EventFields{Path: "/tmp/foo"}, true},
-		{"file: in include but ignored", &Params{IncludePrefixes: []string{"/etc/"}, IgnorePrefixes: []string{"/etc/default/"}}, EventFields{Path: "/etc/default/grub"}, true},
-		{"file: in include not ignored", &Params{IncludePrefixes: []string{"/etc/"}, IgnorePrefixes: []string{"/etc/default/"}}, EventFields{Path: "/etc/shadow"}, false},
+		{"file: not in include", &Params{IncludePrefixes: []string{"/etc"}, IgnorePrefixes: []string{"/etc/default"}}, EventFields{Path: "/tmp/foo"}, true},
+		{"file: in include but ignored", &Params{IncludePrefixes: []string{"/etc"}, IgnorePrefixes: []string{"/etc/default"}}, EventFields{Path: "/etc/default/grub"}, true},
+		{"file: in include not ignored", &Params{IncludePrefixes: []string{"/etc"}, IgnorePrefixes: []string{"/etc/default"}}, EventFields{Path: "/etc/shadow"}, false},
 	}
 
 	for _, tt := range tests {
@@ -142,7 +149,7 @@ func BenchmarkShouldSkip_EarlyExit(b *testing.B) {
 	p := &Params{
 		Dir:            DirInbound,
 		MethodMask:     MethodPOST | MethodPUT,
-		IgnorePrefixes: []string{"/tmp/", "/var/log/"},
+		IgnorePrefixes: []string{"/tmp", "/var/log"},
 	}
 	e := EventFields{Path: "/etc/passwd", Dir: DirOutbound, MethodBit: MethodGET}
 	b.ResetTimer()
@@ -155,7 +162,7 @@ func BenchmarkShouldSkip_FullScan(b *testing.B) {
 	p := &Params{
 		Dir:            DirInbound,
 		MethodMask:     MethodPOST | MethodPUT,
-		IgnorePrefixes: []string{"/tmp/", "/var/log/"},
+		IgnorePrefixes: []string{"/tmp", "/var/log"},
 	}
 	e := EventFields{Path: "/etc/passwd", Dir: DirInbound, MethodBit: MethodPOST}
 	b.ResetTimer()
