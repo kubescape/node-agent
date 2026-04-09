@@ -29,6 +29,7 @@ GADGET_TRACER_MAP(events, 1024 * 256);
 // Define a tracer
 GADGET_TRACER(symlink, events, event);
 
+#ifndef __TARGET_ARCH_arm64
 SEC("tracepoint/syscalls/sys_enter_symlink")
 int enter_symlink(struct syscall_trace_enter *ctx)
 {
@@ -75,6 +76,7 @@ int enter_symlink(struct syscall_trace_enter *ctx)
 
     return 0;
 }
+#endif
 
 SEC("tracepoint/syscalls/sys_enter_symlinkat")
 int enter_symlinkat(struct syscall_trace_enter *ctx)

@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
@@ -19,6 +20,7 @@ import (
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/aquilax/truncate"
+	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/cenkalti/backoff/v5"
 	securejoin "github.com/cyphar/filepath-securejoin"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -51,11 +53,22 @@ import (
 )
 
 const (
-	digestDelim                      = "@"
-	NodeNameMetadataKey              = "kubescape.io/node-name"
-	ScannerMemoryLimitAnnotation     = "kubescape.io/scanner-memory-limit"
-	maxScanRetries                   = 3
+	digestDelim                   = "@"
+	NodeNameMetadataKey           = "kubescape.io/node-name"
+	ScannerMemoryLimitAnnotation  = "kubescape.io/scanner-memory-limit"
+	maxScanRetries                = 3
+	scannerReadinessCheckInterval = 5 * time.Second
+	maxPendingScans               = 1000
 )
+
+// pendingScan holds the data needed to retry a container scan after the sidecar becomes ready.
+type pendingScan struct {
+	notif       containercollection.PubSubEvent
+	mounts      []string
+	imageStatus *runtime.ImageStatusResponse
+	imageTag    string
+	imageID     string
+}
 
 type SbomManager struct {
 	appFs              afero.Fs
@@ -72,11 +85,15 @@ type SbomManager struct {
 	scannerClient      sbomscanner.SBOMScannerClient
 	scannerMemLimit    int64
 	scanRetries        map[string]int // safe without mutex: only accessed from pool workers (pool size 1)
+	pendingScans       map[string]pendingScan
+	pendingOrder       []string
+	pendingMu          sync.Mutex
+	failureReporter    sbommanager.SbomFailureReporter
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
-func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient) (*SbomManager, error) {
+func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter) (*SbomManager, error) {
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
 	if !exists {
@@ -101,7 +118,7 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		scannerMemLimit, _ = strconv.ParseInt(memStr, 10, 64)
 	}
 
-	return &SbomManager{
+	sm := &SbomManager{
 		appFs:              afero.NewOsFs(),
 		cfg:                cfg,
 		ctx:                ctx,
@@ -116,7 +133,13 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		scannerClient:      scannerClient,
 		scannerMemLimit:    scannerMemLimit,
 		scanRetries:        make(map[string]int),
-	}, nil
+		pendingScans:       make(map[string]pendingScan),
+		failureReporter:    failureReporter,
+	}
+	if scannerClient != nil {
+		sm.startScannerReadinessWatcher()
+	}
+	return sm, nil
 }
 
 func (s *SbomManager) getImageStatus(imageID string) (*runtime.ImageStatusResponse, error) {
@@ -213,31 +236,35 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 			helpers.String("container ID", notif.Container.Runtime.ContainerID))
 		return
 	}
+	s.processContainerWithMetadata(notif, mounts, imageStatus, sharedData.ImageTag, sharedData.ImageID)
+}
+
+func (s *SbomManager) processContainerWithMetadata(notif containercollection.PubSubEvent, mounts []string, imageStatus *runtime.ImageStatusResponse, imageTag, imageID string) {
 	// prepare SBOM name
-	sbomName, err := names.ImageInfoToSlug(sharedData.ImageTag, sharedData.ImageID)
+	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate SBOM name",
 			helpers.Error(err),
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", sharedData.ImageTag),
-			helpers.String("imageDigest", sharedData.ImageID))
+			helpers.String("imageName", imageTag),
+			helpers.String("imageDigest", imageID))
 		return
 	}
 	// try to create a SBOM with initializing status to reserve our slot
-	imageID := normalizeImageID(sharedData.ImageTag, sharedData.ImageID)
+	normalizedID := normalizeImageID(imageTag, imageID)
 	wipSbom := &v1beta1.SBOMSyft{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sbomName,
 			Annotations: map[string]string{
-				helpersv1.ImageIDMetadataKey:     imageID,
-				helpersv1.ImageTagMetadataKey:    sharedData.ImageTag,
+				helpersv1.ImageIDMetadataKey:     normalizedID,
+				helpersv1.ImageTagMetadataKey:    imageTag,
 				helpersv1.StatusMetadataKey:      helpersv1.Initializing,
 				NodeNameMetadataKey:              s.cfg.NodeName,
 				helpersv1.ToolVersionMetadataKey: s.version,
 			},
-			Labels: labelsFromImageID(imageID),
+			Labels: labelsFromImageID(normalizedID),
 		},
 	}
 	wipSbom, err = s.storageClient.CreateSBOM(wipSbom)
@@ -352,8 +379,8 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 		scanCtx, scanCancel := context.WithTimeout(s.ctx, scanTimeout)
 		defer scanCancel()
 		result, scanErr := s.scannerClient.CreateSBOM(scanCtx, sbomscanner.ScanRequest{
-			ImageID:             imageID,
-			ImageTag:            sharedData.ImageTag,
+			ImageID:             normalizedID,
+			ImageTag:            imageTag,
 			LayerPaths:          mounts,
 			ImageStatus:         imageStatusBytes,
 			MaxImageSize:        s.cfg.MaxImageSize,
@@ -368,7 +395,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 				sbomScanDuration.WithLabelValues("oom_killed").Observe(scanDuration)
 				sbomScannerRestartsTotal.Inc()
 				sbomScannerReady.Set(0)
-				s.handleScannerCrash(sbomName, wipSbom, notif, scanErr)
+				s.handleScannerCrash(sbomName, wipSbom, notif, scanErr, imageTag, imageID)
 				return
 			}
 			sbomScanTotal.WithLabelValues("error").Inc()
@@ -379,6 +406,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
+			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)
 			return
 		}
 		sbomScanTotal.WithLabelValues("success").Inc()
@@ -387,13 +415,32 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 		syftDoc = result.SyftDocument
 	} else if s.scannerClient != nil {
 		sbomScannerReady.Set(0)
-		// sidecar configured but not ready — skip, will retry on next container event
-		logger.L().Debug("SbomManager - scanner sidecar not ready, will retry later",
+		// sidecar configured but not ready — queue for retry when it becomes ready
+		logger.L().Debug("SbomManager - scanner sidecar not ready, queuing scan for retry",
 			helpers.String("sbomName", sbomName))
+		s.pendingMu.Lock()
+		key := sbomName + "|" + normalizedID
+		if _, ok := s.pendingScans[key]; !ok {
+			if len(s.pendingOrder) >= maxPendingScans {
+				// evict oldest
+				oldestKey := s.pendingOrder[0]
+				s.pendingOrder = s.pendingOrder[1:]
+				delete(s.pendingScans, oldestKey)
+			}
+			s.pendingOrder = append(s.pendingOrder, key)
+		}
+		s.pendingScans[key] = pendingScan{
+			notif:       notif,
+			mounts:      mounts,
+			imageStatus: imageStatus,
+			imageTag:    imageTag,
+			imageID:     imageID,
+		}
+		s.pendingMu.Unlock()
 		return
 	} else {
 		// in-process fallback (current behavior)
-		src, srcErr := syftutil.NewSource(sharedData.ImageTag, sharedData.ImageID, imageID, imageStatus, mounts, s.cfg.MaxImageSize)
+		src, srcErr := syftutil.NewSource(imageTag, imageID, normalizedID, imageStatus, mounts, s.cfg.MaxImageSize)
 		if srcErr != nil {
 			logger.L().Ctx(s.ctx).Error("SbomManager - failed to create image source",
 				helpers.Error(srcErr),
@@ -404,7 +451,14 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 			if errors.Is(srcErr, syftutil.ErrImageTooLarge) {
 				delete(wipSbom.Annotations, NodeNameMetadataKey)
 				wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
-				_, _ = s.storageClient.ReplaceSBOM(wipSbom)
+				if _, replaceErr := s.storageClient.ReplaceSBOM(wipSbom); replaceErr != nil {
+					logger.L().Ctx(s.ctx).Error("SbomManager - failed to persist TooLarge SBOM",
+						helpers.Error(replaceErr),
+						helpers.String("sbomName", sbomName))
+				}
+				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonImageTooLarge, srcErr)
+			} else {
+				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, srcErr)
 			}
 			return
 		}
@@ -422,6 +476,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
+			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, syftErr)
 			return
 		}
 		v1beta1.StripSBOM(syftSBOM)
@@ -448,6 +503,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
 		// clear the spec
 		wipSbom.Spec = v1beta1.SBOMSyftSpec{}
+		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMTooLarge, nil)
 	} else {
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Learning
 	}
@@ -460,6 +516,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
 			helpers.String("sbomName", sbomName))
+		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMStorageFailed, err)
 		return
 	}
 	logger.L().Debug("SbomManager - saved SBOM after successful processing",
@@ -478,7 +535,7 @@ func (s *SbomManager) waitForSharedContainerData(containerID string) (*objectcac
 	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
 }
 
-func (s *SbomManager) handleScannerCrash(sbomName string, wipSbom *v1beta1.SBOMSyft, notif containercollection.PubSubEvent, scanErr error) {
+func (s *SbomManager) handleScannerCrash(sbomName string, wipSbom *v1beta1.SBOMSyft, notif containercollection.PubSubEvent, scanErr error, imageTag, imageID string) {
 	s.scanRetries[sbomName]++
 	retryCount := s.scanRetries[sbomName]
 
@@ -500,10 +557,91 @@ func (s *SbomManager) handleScannerCrash(sbomName string, wipSbom *v1beta1.SBOMS
 			logger.L().Error("SbomManager - failed to mark SBOM as TooLarge after scanner crashes",
 				helpers.Error(replaceErr),
 				helpers.String("sbomName", sbomName))
-			return
 		}
+		// Report OOM regardless of persist success — the user should know the scan failed
+		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonScannerOOMKilled, scanErr)
 		delete(s.scanRetries, sbomName)
 	}
+}
+
+func (s *SbomManager) startScannerReadinessWatcher() {
+	go func() {
+		ticker := time.NewTicker(scannerReadinessCheckInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				s.pendingMu.Lock()
+				hasWork := len(s.pendingOrder) > 0
+				s.pendingMu.Unlock()
+				if !hasWork || !s.scannerClient.Ready() {
+					continue
+				}
+				s.drainPendingScans()
+			}
+		}
+	}()
+}
+
+func (s *SbomManager) drainPendingScans() {
+	s.pendingMu.Lock()
+	pendingOrder := s.pendingOrder
+	pendingScans := s.pendingScans
+	s.pendingOrder = nil
+	s.pendingScans = make(map[string]pendingScan)
+	s.pendingMu.Unlock()
+
+	if len(pendingOrder) == 0 {
+		return
+	}
+
+	logger.L().Debug("SbomManager - scanner sidecar ready, resubmitting queued scans",
+		helpers.Int("count", len(pendingOrder)))
+
+	for _, key := range pendingOrder {
+		scan := pendingScans[key]
+		s.pool.Submit(func() {
+			s.processContainerWithMetadata(scan.notif, scan.mounts, scan.imageStatus, scan.imageTag, scan.imageID)
+		}, utils.FuncName(s.processContainerWithMetadata))
+	}
+}
+
+// reportFailure sends a scan failure report to the backend via the failure reporter.
+// Fire-and-forget: errors are logged, never propagated. Safe to call with nil reporter.
+func (s *SbomManager) reportFailure(notif containercollection.PubSubEvent, imageTag, imageID, reason string, scanErr error) {
+	if s.failureReporter == nil {
+		return
+	}
+
+	report := scanfailure.ScanFailureReport{
+		ImageTag:      imageTag,
+		ImageHash:     imageID,
+		FailureCase:   scanfailure.ScanFailureSBOMGeneration,
+		FailureReason: reason,
+		Timestamp:     time.Now(),
+		Workloads: []scanfailure.WorkloadIdentifier{{
+			Namespace:     notif.Container.K8s.Namespace,
+			WorkloadKind:  "Pod",
+			WorkloadName:  notif.Container.K8s.PodName,
+			ContainerName: notif.Container.K8s.ContainerName,
+		}},
+	}
+	if scanErr != nil {
+		report.Error = scanErr.Error()
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := s.failureReporter.ReportSbomFailure(ctx, report); err != nil {
+			logger.L().Warning("failed to report SBOM failure",
+				helpers.Error(err),
+				helpers.String("reason", reason),
+				helpers.String("imageTag", imageTag))
+		}
+	}()
 }
 
 func labelsFromImageID(imageID string) map[string]string {
@@ -582,4 +720,3 @@ func sanitize(s string) string {
 	}
 	return s2
 }
-

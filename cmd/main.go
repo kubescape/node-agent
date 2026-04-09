@@ -91,10 +91,12 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}
 
+	var accessKey string
 	if credentials, err := beUtils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
 		logger.L().Warning("failed to load credentials", helpers.Error(err))
 	} else {
 		clusterData.AccountID = credentials.Account
+		accessKey = credentials.AccessKey
 		logger.L().Info("credentials loaded", helpers.Int("accountLength", len(credentials.Account)))
 	}
 
@@ -391,10 +393,17 @@ func main() {
 		}
 	}
 
+	// Create scan failure reporter (sends SBOM failures to careportreceiver for user notifications)
+	var failureReporter sbommanager.SbomFailureReporter
+	if services, svcErr := config.LoadServiceURLs("/etc/config/services.json"); svcErr == nil && services.GetReportReceiverHttpUrl() != "" {
+		failureReporter = sbommanagerv1.NewHTTPSbomFailureReporter(services.GetReportReceiverHttpUrl(), accessKey, clusterData.AccountID, clusterData.ClusterName)
+		logger.L().Info("scan failure reporting enabled", helpers.String("eventReceiverURL", services.GetReportReceiverHttpUrl()))
+	}
+
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient
 	if cfg.EnableSbomGeneration {
-		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache, scannerClient)
+		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache, scannerClient, failureReporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
 		}

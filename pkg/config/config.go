@@ -1,12 +1,16 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/kubescape/backend/pkg/servicediscovery"
+	"github.com/kubescape/backend/pkg/servicediscovery/schema"
+	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
@@ -143,6 +147,10 @@ type FIMExportersConfig struct {
 
 // LoadConfig reads configuration from file or environment variables.
 func LoadConfig(path string) (Config, error) {
+	return LoadConfigOptional(path, true)
+}
+
+func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.AddConfigPath(path)
 	viper.SetConfigName("config")
 	viper.SetConfigType("json")
@@ -224,14 +232,15 @@ func LoadConfig(path string) (Config, error) {
 
 	viper.AutomaticEnv()
 
-	err := viper.ReadInConfig()
-	if err != nil {
-		return Config{}, err
+	if err := viper.ReadInConfig(); err != nil {
+		var notFound viper.ConfigFileNotFoundError
+		if !(errors.As(err, &notFound) && !errNotFound) {
+			return Config{}, err
+		}
 	}
 
 	var config Config
-	err = viper.Unmarshal(&config)
-	if err != nil {
+	if err := viper.Unmarshal(&config); err != nil {
 		return Config{}, err
 	}
 
@@ -293,6 +302,15 @@ func (c *Config) SkipNamespace(ns string) bool {
 		}
 	}
 	return false
+}
+
+func LoadServiceURLs(filePath string) (schema.IBackendServices, error) {
+	if pathFromEnv, present := os.LookupEnv("SERVICES"); present {
+		filePath = pathFromEnv
+	}
+	return servicediscovery.GetServices(
+		servicediscoveryv2.NewServiceDiscoveryFileV2(filePath),
+	)
 }
 
 type OrderedEventQueueConfig struct {
