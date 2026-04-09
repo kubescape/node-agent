@@ -1,6 +1,11 @@
 package dedupcache
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+)
 
 // DedupCache is a lock-free, fixed-size deduplication cache.
 // Each slot packs a 48-bit key and 16-bit expiry bucket into a single atomic uint64.
@@ -13,7 +18,15 @@ type DedupCache struct {
 
 // NewDedupCache creates a cache with 2^slotsExponent slots.
 // Each slot is 8 bytes; e.g. exponent 18 = 262,144 slots = 2 MB.
+// slotsExponent is clamped to [10, 30] (1 KB to 8 GB).
 func NewDedupCache(slotsExponent uint8) *DedupCache {
+	const minExponent, maxExponent, defaultExponent = 10, 30, 18
+	if slotsExponent < minExponent || slotsExponent > maxExponent {
+		logger.L().Warning("slotsExponent out of range, using default",
+			helpers.Int("requested", int(slotsExponent)),
+			helpers.Int("default", defaultExponent))
+		slotsExponent = defaultExponent
+	}
 	size := uint64(1) << slotsExponent
 	return &DedupCache{
 		slots: make([]atomic.Uint64, size),
@@ -38,7 +51,7 @@ func (c *DedupCache) CheckAndSet(key uint64, ttlBuckets uint16, currentBucket ui
 
 	stored := c.slots[idx].Load()
 	storedKey, storedExpiry := unpack(stored)
-	if storedKey == (key & 0xFFFFFFFFFFFF0000) && storedExpiry > currentBucket {
+	if storedKey == (key & 0xFFFFFFFFFFFF0000) && int16(storedExpiry-currentBucket) > 0 {
 		return true // duplicate
 	}
 

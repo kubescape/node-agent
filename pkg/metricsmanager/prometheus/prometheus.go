@@ -397,5 +397,5 @@ func (p *PrometheusMetric) ReportDedupEvent(eventType utils.EventType, duplicate
 	if duplicate {
 		result = "deduplicated"
 	}
-	p.dedupEventCounter.With(prometheus.Labels{eventTypeLabel: string(eventType), "result": result}).Inc()
+	p.dedupEventCounter.WithLabelValues(string(eventType), result).Inc()
 }

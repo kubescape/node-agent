@@ -84,7 +84,7 @@ Event counters are consistent between runs, confirming the load simulator produc
 ## Reproducing
 
 ```bash
-cd perfornamce
+cd benchmark
 ./dedup-bench.sh quay.io/kubescape/node-agent:v0.3.71 quay.io/kubescape/node-agent:test
 ```
 

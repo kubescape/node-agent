@@ -243,6 +243,12 @@ func LoadConfig(path string) (Config, error) {
 			config.SeccompProfileBackend, SeccompBackendStorage, SeccompBackendCRD)
 	}
 
+	// Validate eventDedup slotsExponent range
+	if config.EventDedup.Enabled && (config.EventDedup.SlotsExponent < 10 || config.EventDedup.SlotsExponent > 30) {
+		return Config{}, fmt.Errorf("invalid eventDedup.slotsExponent value: %d (must be between 10 and 30)",
+			config.EventDedup.SlotsExponent)
+	}
+
 	return config, nil
 }
 

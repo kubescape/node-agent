@@ -27,12 +27,20 @@ func writeUint16(h *xxhash.Digest, v uint16) {
 	h.Write(buf[:])
 }
 
+// writeString writes a length-prefixed string to the hash digest.
+// The uint32 length prefix prevents collisions between adjacent variable-length strings
+// (e.g. host="fo"+path="o/bar" vs host="foo"+path="/bar").
+func writeString(h *xxhash.Digest, s string) {
+	writeUint32(h, uint32(len(s)))
+	h.WriteString(s)
+}
+
 // ComputeOpenKey computes a dedup key for open events.
 func ComputeOpenKey(mntns uint64, pid uint32, path string, flagsRaw uint32) uint64 {
 	h := xxhash.New()
 	writeUint64(h, mntns)
 	writeUint32(h, pid)
-	h.WriteString(path)
+	writeString(h, path)
 	writeUint32(h, flagsRaw)
 	return h.Sum64()
 }
@@ -42,9 +50,9 @@ func ComputeNetworkKey(mntns uint64, pid uint32, dstAddr string, dstPort uint16,
 	h := xxhash.New()
 	writeUint64(h, mntns)
 	writeUint32(h, pid)
-	h.WriteString(dstAddr)
+	writeString(h, dstAddr)
 	writeUint16(h, dstPort)
-	h.WriteString(proto)
+	writeString(h, proto)
 	return h.Sum64()
 }
 
@@ -53,7 +61,7 @@ func ComputeNetworkKey(mntns uint64, pid uint32, dstAddr string, dstPort uint16,
 func ComputeDNSKey(mntns uint64, dnsName string) uint64 {
 	h := xxhash.New()
 	writeUint64(h, mntns)
-	h.WriteString(dnsName)
+	writeString(h, dnsName)
 	return h.Sum64()
 }
 
@@ -62,8 +70,8 @@ func ComputeCapabilitiesKey(mntns uint64, pid uint32, capability string, syscall
 	h := xxhash.New()
 	writeUint64(h, mntns)
 	writeUint32(h, pid)
-	h.WriteString(capability)
-	h.WriteString(syscall)
+	writeString(h, capability)
+	writeString(h, syscall)
 	return h.Sum64()
 }
 
@@ -72,11 +80,11 @@ func ComputeHTTPKey(mntns uint64, pid uint32, direction string, method string, h
 	h := xxhash.New()
 	writeUint64(h, mntns)
 	writeUint32(h, pid)
-	h.WriteString(direction)
-	h.WriteString(method)
-	h.WriteString(host)
-	h.WriteString(path)
-	h.WriteString(rawQuery)
+	writeString(h, direction)
+	writeString(h, method)
+	writeString(h, host)
+	writeString(h, path)
+	writeString(h, rawQuery)
 	return h.Sum64()
 }
 
@@ -84,7 +92,7 @@ func ComputeHTTPKey(mntns uint64, pid uint32, direction string, method string, h
 func ComputeSSHKey(mntns uint64, dstIP string, dstPort uint16) uint64 {
 	h := xxhash.New()
 	writeUint64(h, mntns)
-	h.WriteString(dstIP)
+	writeString(h, dstIP)
 	writeUint16(h, dstPort)
 	return h.Sum64()
 }
@@ -94,8 +102,8 @@ func ComputeSymlinkKey(mntns uint64, pid uint32, oldPath string, newPath string)
 	h := xxhash.New()
 	writeUint64(h, mntns)
 	writeUint32(h, pid)
-	h.WriteString(oldPath)
-	h.WriteString(newPath)
+	writeString(h, oldPath)
+	writeString(h, newPath)
 	return h.Sum64()
 }
 
@@ -104,8 +112,8 @@ func ComputeHardlinkKey(mntns uint64, pid uint32, oldPath string, newPath string
 	h := xxhash.New()
 	writeUint64(h, mntns)
 	writeUint32(h, pid)
-	h.WriteString(oldPath)
-	h.WriteString(newPath)
+	writeString(h, oldPath)
+	writeString(h, newPath)
 	return h.Sum64()
 }
 
@@ -114,7 +122,7 @@ func ComputePtraceKey(mntns uint64, pid uint32, exePath string) uint64 {
 	h := xxhash.New()
 	writeUint64(h, mntns)
 	writeUint32(h, pid)
-	h.WriteString(exePath)
+	writeString(h, exePath)
 	return h.Sum64()
 }
 
@@ -123,6 +131,6 @@ func ComputeSyscallKey(mntns uint64, pid uint32, syscall string) uint64 {
 	h := xxhash.New()
 	writeUint64(h, mntns)
 	writeUint32(h, pid)
-	h.WriteString(syscall)
+	writeString(h, syscall)
 	return h.Sum64()
 }

@@ -64,6 +64,7 @@ type EventHandlerFactory struct {
 	cfg                      config.Config
 	containerCollection      *containercollection.ContainerCollection
 	containerCache           *maps.SafeMap[string, *containercollection.Container] // Cache for container lookups
+	containerProfileManager  containerprofilemanager.ContainerProfileManagerClient
 	dedupCache               *dedupcache.DedupCache
 	metrics                  metricsmanager.MetricsManager
 	dedupSkipSet             map[Manager]struct{} // Managers to skip when event is duplicate
@@ -91,6 +92,7 @@ func NewEventHandlerFactory(
 		cfg:                      cfg,
 		containerCollection:      containerCollection,
 		containerCache:           &maps.SafeMap[string, *containercollection.Container]{},
+		containerProfileManager:  containerProfileManager,
 		dedupCache:               dedupCache,
 		metrics:                  metrics,
 		dedupSkipSet:             make(map[Manager]struct{}),
@@ -98,10 +100,6 @@ func NewEventHandlerFactory(
 
 	// Create adapters for managers that don't implement the Manager interface directly
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
-		// check for dropped events
-		if event.HasDroppedEvents() {
-			containerProfileManager.ReportDroppedEvent(event.GetContainerID())
-		}
 		// ContainerProfileManager has specific methods for different event types
 		switch eventType {
 		case utils.CapabilitiesEventType:
@@ -246,7 +244,7 @@ func computeEventDedupKey(enrichedEvent *events.EnrichedEvent) (key uint64, ttl 
 				pid = ee.GetPID()
 			}
 			req := e.GetRequest()
-			if req == nil {
+			if req == nil || req.URL == nil {
 				return 0, 0, false
 			}
 			return dedupcache.ComputeHTTPKey(mntns, pid, string(e.GetDirection()), req.Method, req.Host, req.URL.Path, req.URL.RawQuery), dedupTTLHTTP, true
@@ -318,6 +316,11 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 			}
 			ehf.metrics.ReportDedupEvent(enrichedEvent.Event.GetEventType(), duplicate)
 		}
+	}
+
+	// Always report dropped events regardless of dedup status
+	if enrichedEvent.Event.HasDroppedEvents() {
+		ehf.containerProfileManager.ReportDroppedEvent(enrichedEvent.Event.GetContainerID())
 	}
 
 	// Get handlers for this event type

@@ -78,6 +78,32 @@ func TestComputeSSHKey_Deterministic(t *testing.T) {
 	}
 }
 
+func TestComputeCapabilitiesKey_NoAdjacentStringCollision(t *testing.T) {
+	// Without length-prefix, "CAP_NET" + "RAWsocket" could collide with "CAP_NETR" + "AWsocket"
+	k1 := ComputeCapabilitiesKey(100, 1, "CAP_NET", "RAWsocket")
+	k2 := ComputeCapabilitiesKey(100, 1, "CAP_NETR", "AWsocket")
+	if k1 == k2 {
+		t.Fatal("adjacent string collision: length-prefix should prevent this")
+	}
+}
+
+func TestComputeHTTPKey_NoAdjacentStringCollision(t *testing.T) {
+	// host="fo" + path="o/bar" vs host="foo" + path="/bar"
+	k1 := ComputeHTTPKey(100, 1, "outbound", "GET", "fo", "o/bar", "")
+	k2 := ComputeHTTPKey(100, 1, "outbound", "GET", "foo", "/bar", "")
+	if k1 == k2 {
+		t.Fatal("adjacent string collision: length-prefix should prevent this")
+	}
+}
+
+func TestComputeSymlinkKey_NoAdjacentStringCollision(t *testing.T) {
+	k1 := ComputeSymlinkKey(100, 1, "/tmp/a", "b/link")
+	k2 := ComputeSymlinkKey(100, 1, "/tmp/ab", "/link")
+	if k1 == k2 {
+		t.Fatal("adjacent string collision: length-prefix should prevent this")
+	}
+}
+
 func TestComputeCapabilitiesKey_Deterministic(t *testing.T) {
 	k1 := ComputeCapabilitiesKey(100, 1, "CAP_NET_RAW", "socket")
 	k2 := ComputeCapabilitiesKey(100, 1, "CAP_NET_RAW", "socket")

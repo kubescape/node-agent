@@ -66,7 +66,7 @@ check_prerequisites() {
     if [[ ! -d "$venv_dir" ]]; then
         log "Creating Python venv and installing dependencies..."
         python3 -m venv "$venv_dir"
-        "$venv_dir/bin/pip" install pandas matplotlib requests
+        "$venv_dir/bin/pip" install -r "$SCRIPT_DIR/requirements.txt"
     fi
     # Use the venv python for the rest of the script
     export PATH="${venv_dir}/bin:${PATH}"
@@ -338,8 +338,12 @@ os.makedirs(output_dir, exist_ok=True)
 for name, query in queries.items():
     try:
         resp = requests.get(f'{url}/api/v1/query', params={'query': query, 'time': end.isoformat()}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get('status') != 'success':
+            print(f'Warning: {name}: Prometheus returned status={data.get("status")}')
         with open(os.path.join(output_dir, f'{name}.json'), 'w') as f:
-            json.dump(resp.json(), f, indent=2)
+            json.dump(data, f, indent=2)
         print(f'Collected {name}')
     except Exception as e:
         print(f'Warning: {name}: {e}')

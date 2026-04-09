@@ -86,6 +86,40 @@ func TestCheckAndSet_PackUnpack(t *testing.T) {
 	}
 }
 
+func TestCheckAndSet_Uint16WrapAround(t *testing.T) {
+	c := NewDedupCache(10)
+
+	key := uint64(0xDEADBEEF12340000)
+	ttl := uint16(156) // ~10s
+
+	// Insert near the uint16 max boundary
+	nearMax := uint16(65500)
+	if c.CheckAndSet(key, ttl, nearMax) {
+		t.Fatal("expected false on first insert near wrap boundary")
+	}
+
+	// Expiry = 65500 + 156 = 65656, which wraps to 65656 - 65536 = 120
+	// Check at nearMax+1: should still be duplicate (expiry hasn't been reached)
+	if !c.CheckAndSet(key, ttl, nearMax+1) {
+		t.Fatal("expected duplicate just after insert near wrap boundary")
+	}
+
+	// Check after wrap: bucket 0 is past nearMax but before wrapped expiry (120)
+	if !c.CheckAndSet(key, ttl, 0) {
+		t.Fatal("expected duplicate at bucket 0 (after wrap, before expiry)")
+	}
+
+	// Check at bucket 100: still before wrapped expiry of 120
+	if !c.CheckAndSet(key, ttl, 100) {
+		t.Fatal("expected duplicate at bucket 100 (before wrapped expiry 120)")
+	}
+
+	// Check at bucket 121: past the wrapped expiry of 120
+	if c.CheckAndSet(key, ttl, 121) {
+		t.Fatal("expected not duplicate past wrapped expiry")
+	}
+}
+
 func TestCheckAndSet_ConcurrentHammer(t *testing.T) {
 	c := NewDedupCache(14) // 16384 slots
 
