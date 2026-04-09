@@ -80,6 +80,7 @@ func TestLoadConfig(t *testing.T) {
 				},
 				WorkerPoolSize:     3000,
 				EventBatchSize:     15000,
+				EventDedup:         EventDedupConfig{Enabled: true, SlotsExponent: 18},
 				WorkerChannelSize:  750000,
 				BlockEvents:        false,
 				ProcfsScanInterval: 30 * time.Second,

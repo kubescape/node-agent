@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: load-simulator
+spec:
+  selector:
+    matchLabels:
+      app: load-simulator
+  template:
+    metadata:
+      labels:
+        app: load-simulator
+    spec:
+      containers:
+        - name: load-simulator
+          image: quay.io/benarmosec/load-simulator-f866d4884d08e4a0d1907b094978b48d
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - mountPath: /etc/config
+              name: config-volume
+      volumes:
+        - name: config-volume
+          configMap:
+            name: config
