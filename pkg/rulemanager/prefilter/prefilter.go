@@ -190,13 +190,12 @@ func (p *Params) ShouldSkip(e EventFields) bool {
 		return false
 	}
 
-	// Skip only when both sides are determinate and they disagree.
 	if p.Dir != DirNone && e.Dir != DirNone && e.Dir != p.Dir {
-		return true
+		return true // pass through if event field is indeterminate
 	}
 
 	if p.MethodMask != 0 && e.MethodBit != 0 && p.MethodMask&e.MethodBit == 0 {
-		return true
+		return true // pass through if event field is indeterminate
 	}
 
 	if e.Path != "" {
