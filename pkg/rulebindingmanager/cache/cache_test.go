@@ -1059,8 +1059,8 @@ func TestCreateRulePrefilter(t *testing.T) {
 					"includePrefixes": []interface{}{"/etc"},
 				},
 			},
-			wantIgnore: []string{"/tmp/", "/var/log/"},
-			wantIncl:   []string{"/etc/"},
+			wantIgnore: []string{"/tmp", "/var/log"},
+			wantIncl:   []string{"/etc"},
 		},
 		{
 			name:    "nil parameters produce nil prefilter",

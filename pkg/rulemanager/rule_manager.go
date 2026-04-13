@@ -478,7 +478,6 @@ func extractEventFields(event utils.K8sEvent) prefilter.EventFields {
 		if e, ok := event.(utils.HttpEvent); ok {
 			f.SetDirection(string(e.GetDirection()))
 			f.DstPort = e.GetDstPort()
-			f.PortEligible = true
 			if req := e.GetRequest(); req != nil {
 				f.SetMethod(req.Method)
 			}
