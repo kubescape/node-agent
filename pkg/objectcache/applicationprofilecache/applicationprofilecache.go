@@ -212,9 +212,9 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			// If we have a "new" container (seen from start) and the profile is partial,
 			// skip it - we don't want to use partial profiles for containers we're tracking from the start
 			if hasNewContainer && profile.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial {
-				logger.L().Debug("skipping partial profile for container seen from start",
-					helpers.String("workloadID", workloadID),
-					helpers.String("namespace", namespace))
+				logger.L().Debug("updateAllProfiles: skipping partial profile for new container",
+					helpers.String("profileName", profile.Name),
+					helpers.String("workloadID", workloadID))
 				continue
 			}
 
@@ -237,6 +237,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				logger.L().Error("failed to get application profile",
 					helpers.String("workloadID", workloadID),
 					helpers.String("namespace", namespace),
+					helpers.String("profileName", profile.Name),
 					helpers.Error(err))
 				// Update the profile state to indicate an error
 				profileState.Error = err
@@ -245,7 +246,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			}
 
 			apc.workloadIDToProfile.Set(workloadID, fullProfile)
-			logger.L().Debug("updated profile in cache",
+			logger.L().Debug("application profile downloaded, starting anomaly detection",
 				helpers.String("workloadID", workloadID),
 				helpers.String("namespace", namespace),
 				helpers.String("status", profile.Annotations[helpersv1.StatusMetadataKey]),
@@ -411,13 +412,16 @@ func (apc *ApplicationProfileCacheImpl) ContainerCallback(notif containercollect
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		if utils.IsHostContainer(notif.Container) {
-			return
+			notif.Container.K8s.Namespace = "host"
 		}
 		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
 		go apc.addContainerWithTimeout(notif.Container)
 	case containercollection.EventTypeRemoveContainer:
+		if utils.IsHostContainer(notif.Container) {
+			notif.Container.K8s.Namespace = "host"
+		}
 		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
@@ -535,7 +539,7 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 				}
 				// Update the profile in the cache
 				apc.workloadIDToProfile.Set(workloadID, fullProfile)
-				logger.L().Debug("added user-defined profile to cache",
+				logger.L().Debug("user-defined application profile downloaded, starting anomaly detection",
 					helpers.String("containerID", containerID),
 					helpers.String("workloadID", workloadID),
 					helpers.String("namespace", container.K8s.Namespace),
