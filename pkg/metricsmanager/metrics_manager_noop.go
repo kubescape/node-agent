@@ -21,3 +21,4 @@ func (m *MetricsNoop) ReportRuleAlert(_ string)                                 
 func (m *MetricsNoop) ReportRuleEvaluationTime(_ string, _ utils.EventType, _ time.Duration) {}
 func (m *MetricsNoop) ReportContainerStart()                                                {}
 func (m *MetricsNoop) ReportContainerStop()                                                 {}
+func (m *MetricsNoop) ReportDedupEvent(_ utils.EventType, _ bool)                           {}
