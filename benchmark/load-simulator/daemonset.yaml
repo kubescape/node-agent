@@ -14,6 +14,7 @@ spec:
       containers:
         - name: load-simulator
           image: quay.io/armosec/load-simulator:v2@sha256:43fd31ec3f86d318629e437bdf8c2859176f6131078798fcf322f93d29ad051b
+          imagePullPolicy: IfNotPresent
           resources:
             requests:
               cpu: 100m

@@ -29,6 +29,7 @@ WARMUP_SECONDS=120         # 2 minutes
 METRICS_DURATION=10        # minutes (matches LOAD_DURATION, excludes warmup)
 PROM_LOCAL_PORT=9090
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOAD_SIM_IMAGE="quay.io/armosec/load-simulator:v2"
 OUTPUT_BASE="${OUTPUT_DIR:-${SCRIPT_DIR}/dedup-bench-output}"
 
 PORT_FORWARD_PID=""
@@ -393,6 +394,14 @@ main() {
 
     # --- Cluster & infrastructure ---
     create_kind_cluster
+
+    # Pre-pull load simulator image and load into kind to avoid pull timeouts
+    if ! docker image inspect "$LOAD_SIM_IMAGE" &>/dev/null; then
+        log "Pulling load simulator image..."
+        docker pull "$LOAD_SIM_IMAGE"
+    fi
+    load_image "$LOAD_SIM_IMAGE"
+
     install_prometheus
 
     # --- BEFORE run ---
