@@ -266,7 +266,7 @@ EOF
 
 remove_load_simulator() {
     log "Removing load simulator..."
-    kubectl delete namespace load-simulator --wait=false 2>/dev/null || true
+    kubectl delete namespace load-simulator --wait=true --timeout=120s 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------

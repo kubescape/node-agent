@@ -193,7 +193,8 @@ func NewEventHandlerFactory(
 
 	// Populate dedupSkipSet: managers that skip processing when event is duplicate.
 	// RuleManager checks enrichedEvent.Duplicate internally.
-	factory.dedupSkipSet[containerProfileAdapter] = struct{}{}
+	// Note: containerProfileAdapter is NOT in dedupSkipSet because the profile
+	// needs to see all events (e.g. HTTP endpoint headers from repeated requests).
 	factory.dedupSkipSet[malwareManager] = struct{}{}
 
 	return factory
