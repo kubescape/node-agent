@@ -5,6 +5,16 @@ on:
     paths-ignore:
       - '*.md'
       - '.github/workflows/*'
+  workflow_dispatch:
+    inputs:
+      before_image:
+        description: 'Before image (baseline). Defaults to latest release.'
+        required: false
+        type: string
+      after_image:
+        description: 'After image (candidate). Defaults to building from source.'
+        required: false
+        type: string
   workflow_call:
     inputs:
       after_image:
