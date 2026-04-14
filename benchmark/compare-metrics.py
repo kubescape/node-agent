@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SIGNIFICANT_THRESHOLD = 10.0  # percent change considered significant
+SIGNIFICANT_THRESHOLD = 10.0  # percent change that triggers quality gate failure
 
 
 def load_csv(directory: Path, name: str) -> pd.DataFrame:
@@ -254,6 +254,34 @@ def _extract_counters(data: dict | None) -> dict[str, float]:
 
 
 # ---------------------------------------------------------------
+#  Quality gate
+# ---------------------------------------------------------------
+
+def check_degradation(before_dir: Path, after_dir: Path, threshold: float) -> list[str]:
+    """Return list of failure messages for metrics that degraded beyond threshold."""
+    before_cpu = compute_resource_stats(load_csv(before_dir, "cpu_metrics.csv"))
+    after_cpu = compute_resource_stats(load_csv(after_dir, "cpu_metrics.csv"))
+    before_mem = compute_resource_stats(load_csv(before_dir, "memory_metrics.csv"))
+    after_mem = compute_resource_stats(load_csv(after_dir, "memory_metrics.csv"))
+
+    checks = [
+        ("Avg CPU", before_cpu["avg"], after_cpu["avg"]),
+        ("Peak CPU", before_cpu["peak"], after_cpu["peak"]),
+        ("Avg Memory", before_mem["avg"], after_mem["avg"]),
+        ("Peak Memory", before_mem["peak"], after_mem["peak"]),
+    ]
+
+    failures = []
+    for label, before, after in checks:
+        if before == 0:
+            continue
+        pct = (after - before) / before * 100
+        if pct > threshold:
+            failures.append(f"{label}: +{pct:.1f}% (before={before:.3f}, after={after:.3f}, threshold={threshold}%)")
+    return failures
+
+
+# ---------------------------------------------------------------
 #  Main
 # ---------------------------------------------------------------
 
@@ -266,6 +294,17 @@ def main() -> None:
         choices=["text", "markdown"],
         default="text",
         help="Output format (default: text)",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit with code 1 if any node-agent metric degrades beyond threshold",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=SIGNIFICANT_THRESHOLD,
+        help=f"Degradation threshold in percent (default: {SIGNIFICANT_THRESHOLD}%%)",
     )
     parser.add_argument("before_dir", type=Path, help="Directory with before metrics")
     parser.add_argument("after_dir", type=Path, help="Directory with after metrics")
@@ -293,6 +332,16 @@ def main() -> None:
         print_event_comparison_text(args.before_dir, args.after_dir)
         print("=" * 61)
         print()
+
+    if args.check:
+        failures = check_degradation(args.before_dir, args.after_dir, args.threshold)
+        if failures:
+            print("QUALITY GATE FAILED: Performance degradation detected", file=sys.stderr)
+            for f in failures:
+                print(f"  - {f}", file=sys.stderr)
+            sys.exit(1)
+        else:
+            print(f"Quality gate passed: no metric degraded beyond {args.threshold}%", file=sys.stderr)
 
 
 if __name__ == "__main__":

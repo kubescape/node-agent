@@ -110,6 +110,13 @@ jobs:
             "${{ github.workspace }}/benchmark-output/before" \
             "${{ github.workspace }}/benchmark-output/after" > report.md || true
 
+      - name: Quality gate - check for performance degradation
+        if: always()
+        run: |
+          python3 benchmark/compare-metrics.py --check \
+            "${{ github.workspace }}/benchmark-output/before" \
+            "${{ github.workspace }}/benchmark-output/after"
+
       - name: Comment on PR
         uses: peter-evans/create-or-update-comment@v4
         if: github.event_name == 'pull_request' && always()
