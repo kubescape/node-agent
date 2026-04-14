@@ -227,7 +227,7 @@ func (e *StructEvent) GetEventType() EventType {
 }
 
 func (e *StructEvent) GetExePath() string {
-	return e.ExePath
+	return NormalizePath(e.ExePath)
 }
 
 func (e *StructEvent) GetExitCode() uint32 {
@@ -247,7 +247,7 @@ func (e *StructEvent) GetFlagsRaw() uint32 {
 }
 
 func (e *StructEvent) GetFullPath() string {
-	return e.FullPath
+	return NormalizePath(e.FullPath)
 }
 
 func (e *StructEvent) GetGid() *uint32 {
@@ -279,7 +279,7 @@ func (e *StructEvent) GetNamespace() string {
 }
 
 func (e *StructEvent) GetNewPath() string {
-	return e.NewPath
+	return NormalizePath(e.NewPath)
 }
 
 func (e *StructEvent) GetNumAnswers() int {
@@ -287,7 +287,7 @@ func (e *StructEvent) GetNumAnswers() int {
 }
 
 func (e *StructEvent) GetOldPath() string {
-	return e.OldPath
+	return NormalizePath(e.OldPath)
 }
 
 func (e *StructEvent) GetOpcode() int {
@@ -311,7 +311,7 @@ func (e *StructEvent) GetPath() string {
 	if e.FullPathTracing {
 		return e.GetFullPath()
 	}
-	return e.Path
+	return NormalizePath(e.Path)
 }
 
 func (e *StructEvent) GetPcomm() string {
