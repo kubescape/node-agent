@@ -202,9 +202,9 @@ jobs:
             -f "client_payload[systests_branch]=${{ inputs.SYSTEM_TESTS_BRANCH }}" \
             -f "client_payload[in_cluster_chart_branch]=${{ inputs.HELM_BRANCH }}" \
             -f "client_payload[ks_branch]=release" \
-            -f "client_payload[charts_name]=kubescape-operator" \
-            -f "client_payload[charts_repo]=kubescape/helm-charts"
-          
+            -f "client_payload[charts_repo]=kubescape/helm-charts" \
+            -f "client_payload[component_image_tags]=${{ inputs.COMPONENT_NAME }}-tag=${{ needs.docker-build.outputs.IMAGE_TAG_PRERELEASE }}"
+
           echo "Dispatch completed"
 
       - name: Find E2E workflow run

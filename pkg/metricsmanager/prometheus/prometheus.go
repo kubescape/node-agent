@@ -41,8 +41,9 @@ type PrometheusMetric struct {
 	ebpfKmodCounter       prometheus.Counter
 	ebpfUnshareCounter    prometheus.Counter
 	ebpfBpfCounter        prometheus.Counter
-	ruleCounter           *prometheus.CounterVec
-	alertCounter          *prometheus.CounterVec
+	ruleCounter            *prometheus.CounterVec
+	rulePrefilteredCounter *prometheus.CounterVec
+	alertCounter           *prometheus.CounterVec
 	ruleEvaluationTime    *prometheus.HistogramVec
 
 	// Program ID metrics
@@ -63,8 +64,9 @@ type PrometheusMetric struct {
 	dedupEventCounter *prometheus.CounterVec
 
 	// Cache to avoid allocating Labels maps on every call
-	ruleCounterCache  map[string]prometheus.Counter
-	alertCounterCache map[string]prometheus.Counter
+	ruleCounterCache          map[string]prometheus.Counter
+	rulePrefilteredCounterCache map[string]prometheus.Counter
+	alertCounterCache         map[string]prometheus.Counter
 	counterCacheMutex sync.RWMutex
 }
 
@@ -142,6 +144,10 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Name: "node_agent_rule_counter",
 			Help: "The total number of rules processed by the engine",
 		}, []string{prometheusRuleIdLabel}),
+		rulePrefilteredCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "node_agent_rule_prefiltered_total",
+			Help: "Total number of rule evaluations skipped by pre-filter",
+		}, []string{prometheusRuleIdLabel}),
 		alertCounter: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "node_agent_alert_counter",
 			Help: "The total number of alerts sent by the engine",
@@ -210,8 +216,9 @@ func NewPrometheusMetric() *PrometheusMetric {
 		}, []string{eventTypeLabel, "result"}),
 
 		// Initialize counter caches
-		ruleCounterCache:  make(map[string]prometheus.Counter),
-		alertCounterCache: make(map[string]prometheus.Counter),
+		ruleCounterCache:            make(map[string]prometheus.Counter),
+		rulePrefilteredCounterCache: make(map[string]prometheus.Counter),
+		alertCounterCache:           make(map[string]prometheus.Counter),
 	}
 }
 
@@ -234,6 +241,7 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.ebpfRandomXCounter)
 	prometheus.Unregister(p.ebpfFailedCounter)
 	prometheus.Unregister(p.ruleCounter)
+	prometheus.Unregister(p.rulePrefilteredCounter)
 	prometheus.Unregister(p.alertCounter)
 	prometheus.Unregister(p.ruleEvaluationTime)
 	prometheus.Unregister(p.ebpfSymlinkCounter)
@@ -350,6 +358,31 @@ func (p *PrometheusMetric) getCachedAlertCounter(ruleID string) prometheus.Count
 
 func (p *PrometheusMetric) ReportRuleProcessed(ruleID string) {
 	p.getCachedRuleCounter(ruleID).Inc()
+}
+
+func (p *PrometheusMetric) getCachedRulePrefilteredCounter(ruleName string) prometheus.Counter {
+	p.counterCacheMutex.RLock()
+	counter, exists := p.rulePrefilteredCounterCache[ruleName]
+	p.counterCacheMutex.RUnlock()
+
+	if exists {
+		return counter
+	}
+
+	p.counterCacheMutex.Lock()
+	defer p.counterCacheMutex.Unlock()
+
+	if counter, exists := p.rulePrefilteredCounterCache[ruleName]; exists {
+		return counter
+	}
+
+	counter = p.rulePrefilteredCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleName})
+	p.rulePrefilteredCounterCache[ruleName] = counter
+	return counter
+}
+
+func (p *PrometheusMetric) ReportRulePrefiltered(ruleName string) {
+	p.getCachedRulePrefilteredCounter(ruleName).Inc()
 }
 
 func (p *PrometheusMetric) ReportRuleAlert(ruleID string) {

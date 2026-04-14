@@ -166,6 +166,12 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mounts: %w", err)
 	}
+	if len(mounts) == 0 {
+		// No overlay mount found — container is using a non-overlay snapshotter (e.g. ZFS, btrfs).
+		// /proc/<pid>/root is a kernel-provided path that exposes the container's merged root
+		// filesystem on the host regardless of the underlying snapshotter.
+		return []string{filepath.Join(s.procDir, pid, "root")}, nil
+	}
 	for _, option := range strings.Split(mounts[0].VFSOptions, ",") {
 		if strings.HasPrefix(option, "lowerdir=") {
 			var volumes []string
