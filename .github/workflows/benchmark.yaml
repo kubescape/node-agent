@@ -31,9 +31,6 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-large
-    permissions:
-      pull-requests: write
-      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -130,6 +127,7 @@ jobs:
       - name: Comment on PR
         uses: peter-evans/create-or-update-comment@v4
         if: github.event_name == 'pull_request' && always()
+        continue-on-error: true
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body-path: report.md
