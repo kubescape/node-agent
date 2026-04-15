@@ -564,6 +564,10 @@ func Test_11_EndpointTest(t *testing.T) {
 		_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", fmt.Sprintf("http://127.0.0.1:80/users/%d", i)}, "")
 	}
 
+	// Wait for dedup cache entries to expire (~2s TTL) so the next requests
+	// with different headers are not deduplicated before reaching the profile.
+	time.Sleep(3 * time.Second)
+
 	// Merge headers
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80/users/99", "--header", "Connection:1234r"}, "")
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80/users/12", "--header", "Connection:ziz"}, "")

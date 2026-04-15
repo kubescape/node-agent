@@ -60,6 +60,9 @@ type PrometheusMetric struct {
 	containerStartCounter prometheus.Counter
 	containerStopCounter  prometheus.Counter
 
+	// Dedup metrics
+	dedupEventCounter *prometheus.CounterVec
+
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache          map[string]prometheus.Counter
 	rulePrefilteredCounterCache map[string]prometheus.Counter
@@ -206,6 +209,12 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Help: "The total number of container stop events",
 		}),
 
+		// Dedup metrics
+		dedupEventCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "node_agent_dedup_events_total",
+			Help: "Total number of events processed by the dedup layer",
+		}, []string{eventTypeLabel, "result"}),
+
 		// Initialize counter caches
 		ruleCounterCache:            make(map[string]prometheus.Counter),
 		rulePrefilteredCounterCache: make(map[string]prometheus.Counter),
@@ -246,6 +255,7 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.ebpfBpfCounter)
 	prometheus.Unregister(p.containerStartCounter)
 	prometheus.Unregister(p.containerStopCounter)
+	prometheus.Unregister(p.dedupEventCounter)
 	// Unregister program ID metrics
 	prometheus.Unregister(p.programRuntimeGauge)
 	prometheus.Unregister(p.programRunCountGauge)
@@ -413,4 +423,12 @@ func (p *PrometheusMetric) ReportContainerStart() {
 
 func (p *PrometheusMetric) ReportContainerStop() {
 	p.containerStopCounter.Inc()
+}
+
+func (p *PrometheusMetric) ReportDedupEvent(eventType utils.EventType, duplicate bool) {
+	result := "passed"
+	if duplicate {
+		result = "deduplicated"
+	}
+	p.dedupEventCounter.WithLabelValues(string(eventType), result).Inc()
 }

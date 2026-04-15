@@ -336,6 +336,14 @@ jobs:
           path: failed_*.txt
           retention-days: 7
 
+  benchmark:
+    needs: docker-build
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'release') }}
+    uses: ./.github/workflows/benchmark.yaml
+    with:
+      after_image: ${{ inputs.IMAGE_NAME }}:${{ needs.docker-build.outputs.IMAGE_TAG_PRERELEASE }}
+    secrets: inherit
+
   create-release-and-retag:
     if: ${{ contains(github.event.pull_request.labels.*.name, 'release') && always() && contains(needs.*.result, 'success') && !(contains(needs.*.result, 'failure')) && !(contains (needs.*.result,'cancelled')) || inputs.FORCE }}
     name: Docker retag and create release

@@ -65,3 +65,5 @@ func (m *MetricsMock) ReportRulePrefiltered(ruleName string) {}
 func (m *MetricsMock) ReportContainerStart() {}
 
 func (m *MetricsMock) ReportContainerStop() {}
+
+func (m *MetricsMock) ReportDedupEvent(eventType utils.EventType, duplicate bool) {}

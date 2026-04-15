@@ -19,4 +19,5 @@ type MetricsManager interface {
 	//ReportEbpfStats(stats *top.Event[toptypes.Stats])
 	ReportContainerStart()
 	ReportContainerStop()
+	ReportDedupEvent(eventType utils.EventType, duplicate bool)
 }

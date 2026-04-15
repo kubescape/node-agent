@@ -1,0 +1,144 @@
+name: Performance Benchmark
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - '*.md'
+      - '.github/workflows/*'
+  workflow_dispatch:
+    inputs:
+      before_image:
+        description: 'Before image (baseline). Defaults to latest release.'
+        required: false
+        type: string
+      after_image:
+        description: 'After image (candidate). Defaults to building from source.'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      after_image:
+        required: true
+        type: string
+      before_image:
+        required: false
+        type: string
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-large
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install Kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Install Helm
+        run: |
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Resolve before image
+        id: before-image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ -n "${{ inputs.before_image }}" ]]; then
+            echo "BEFORE_IMAGE=${{ inputs.before_image }}" >> "$GITHUB_OUTPUT"
+          else
+            LATEST_TAG=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name')
+            echo "BEFORE_IMAGE=quay.io/kubescape/node-agent:${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build after image
+        id: after-image
+        if: ${{ !inputs.after_image }}
+        run: |
+          curl https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.48.1/ig_0.48.1_amd64.deb -LO && sudo dpkg -i ig_0.48.1_amd64.deb
+          make gadgets
+          make binary
+          make docker-build IMAGE=quay.io/kubescape/node-agent TAG=bench-${{ github.sha }}
+          echo "AFTER_IMAGE=quay.io/kubescape/node-agent:bench-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set after image from input
+        id: after-image-input
+        if: ${{ inputs.after_image }}
+        run: |
+          echo "AFTER_IMAGE=${{ inputs.after_image }}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine after image
+        id: resolve-after
+        run: |
+          AFTER="${{ steps.after-image.outputs.AFTER_IMAGE || steps.after-image-input.outputs.AFTER_IMAGE }}"
+          echo "AFTER_IMAGE=${AFTER}" >> "$GITHUB_OUTPUT"
+
+      - name: Load after image into Kind
+        if: ${{ !inputs.after_image }}
+        run: |
+          # Kind cluster is created by dedup-bench.sh, but we need to pre-load the image
+          # The script's load_image function handles this automatically
+          echo "After image will be loaded by dedup-bench.sh"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install -r benchmark/requirements.txt
+
+      - name: Run benchmark
+        env:
+          BEFORE_IMAGE: ${{ steps.before-image.outputs.BEFORE_IMAGE }}
+          AFTER_IMAGE: ${{ steps.resolve-after.outputs.AFTER_IMAGE }}
+          OUTPUT_DIR: ${{ github.workspace }}/benchmark-output
+        run: |
+          chmod +x benchmark/dedup-bench.sh
+          benchmark/dedup-bench.sh "$BEFORE_IMAGE" "$AFTER_IMAGE"
+
+      - name: Generate markdown report
+        if: always()
+        run: |
+          python3 benchmark/compare-metrics.py --format markdown \
+            "${{ github.workspace }}/benchmark-output/before" \
+            "${{ github.workspace }}/benchmark-output/after" > report.md || true
+
+      - name: Quality gate - check for performance degradation
+        if: always()
+        run: |
+          python3 benchmark/compare-metrics.py --check \
+            "${{ github.workspace }}/benchmark-output/before" \
+            "${{ github.workspace }}/benchmark-output/after"
+
+      - name: Comment on PR
+        uses: peter-evans/create-or-update-comment@v4
+        if: github.event_name == 'pull_request' && always()
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: report.md
+          comment-tag: benchmark-results
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: ${{ github.workspace }}/benchmark-output/
+          retention-days: 30
