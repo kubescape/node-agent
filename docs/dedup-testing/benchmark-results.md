@@ -75,11 +75,25 @@ Event counters are consistent between runs, confirming the load simulator produc
 
 ## Analysis
 
-- The dedup cache reduces **avg CPU by ~16%** and **peak CPU by ~29%** under sustained load (~1,100 events/sec).
-- Memory impact is negligible (~1%) since the dedup cache uses a fixed-size, lock-free array (2 MiB for 2^18 slots at 8 bytes each).
+- The dedup cache reduces **avg CPU by ~13-16%** and **peak CPU by ~14-29%** under sustained load (~1,100 events/sec) on local hardware.
+- Memory impact is negligible locally (~1-8%) since the dedup cache uses a fixed-size, lock-free array (2 MiB for 2^18 slots at 8 bytes each).
 - High-frequency event types benefit most: **network (98.9%)**, **http (98.6%)**, and **open (91.3%)** dedup ratios.
 - Events with unique keys per occurrence (dns, hardlink, symlink) show 0% dedup, which is expected.
-- The CPU savings come from skipping CEL rule evaluation on deduplicated events. The eBPF ingestion and event enrichment cost (which dominates baseline CPU) is unchanged.
+- The CPU savings come from skipping CEL rule evaluation and container profile processing on deduplicated events. The eBPF ingestion and event enrichment cost (which dominates baseline CPU) is unchanged.
+
+## CI vs Local Results
+
+The CI benchmark (GitHub Actions `ubuntu-large` runners) consistently shows smaller CPU improvements (~4-7%) compared to local runs (~13-16%). This was verified by running the same benchmark with the same v0.3.71 baseline on both environments:
+
+| Metric | Local (laptop) | CI (`ubuntu-large`) |
+|--------|:-:|:-:|
+| Avg CPU delta | **-12.6%** | -3.7% |
+| Peak CPU delta | **-14.2%** | -8.2% |
+| Avg Memory delta | -7.7% | -22.4% |
+
+The CPU difference is environmental: CI runners have more CPU headroom and lower baseline utilization per core, so the rule evaluation cost saved by dedup is a smaller fraction of total CPU. The dedup ratios and event counts are consistent across both environments, confirming the dedup logic is working identically — only the relative CPU impact differs.
+
+The CI quality gate is set to 10% degradation threshold, which is appropriate for that environment.
 
 ## Reproducing
 
