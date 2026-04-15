@@ -1,3 +1,5 @@
+// Package dedupcache provides a lock-free, fixed-size deduplication cache
+// for high-throughput eBPF event filtering before CEL rule evaluation.
 package dedupcache
 
 import (
