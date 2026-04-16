@@ -331,17 +331,25 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 
 // ContainerCallback handles container lifecycle events
 func (nnc *NetworkNeighborhoodCacheImpl) ContainerCallback(notif containercollection.PubSubEvent) {
+	isHost := utils.IsHostContainer(notif.Container)
+	namespace := notif.Container.K8s.Namespace
+	if isHost {
+		namespace = "host"
+	}
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if utils.IsHostContainer(notif.Container) {
+		if !isHost && nnc.cfg.IgnoreContainer(namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
-		if nnc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
-			return
+		container := notif.Container
+		if isHost {
+			containerCopy := *notif.Container
+			containerCopy.K8s.Namespace = namespace
+			container = &containerCopy
 		}
-		go nnc.addContainerWithTimeout(notif.Container)
+		go nnc.addContainerWithTimeout(container)
 	case containercollection.EventTypeRemoveContainer:
-		if nnc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+		if !isHost && nnc.cfg.IgnoreContainer(namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
 		go nnc.deleteContainer(notif.Container.Runtime.ContainerID)

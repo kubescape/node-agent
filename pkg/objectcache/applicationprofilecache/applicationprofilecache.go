@@ -409,20 +409,25 @@ func (apc *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, co
 
 // ContainerCallback handles container lifecycle events
 func (apc *ApplicationProfileCacheImpl) ContainerCallback(notif containercollection.PubSubEvent) {
+	isHost := utils.IsHostContainer(notif.Container)
+	namespace := notif.Container.K8s.Namespace
+	if isHost {
+		namespace = "host"
+	}
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if utils.IsHostContainer(notif.Container) {
-			notif.Container.K8s.Namespace = "host"
-		}
-		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+		if !isHost && apc.cfg.IgnoreContainer(namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
-		go apc.addContainerWithTimeout(notif.Container)
-	case containercollection.EventTypeRemoveContainer:
-		if utils.IsHostContainer(notif.Container) {
-			notif.Container.K8s.Namespace = "host"
+		container := notif.Container
+		if isHost {
+			containerCopy := *notif.Container
+			containerCopy.K8s.Namespace = namespace
+			container = &containerCopy
 		}
-		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+		go apc.addContainerWithTimeout(container)
+	case containercollection.EventTypeRemoveContainer:
+		if !isHost && apc.cfg.IgnoreContainer(namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
 		go apc.deleteContainer(notif.Container.Runtime.ContainerID)
