@@ -49,7 +49,6 @@ func (ma *ManagerAdapter) ReportEvent(eventType utils.EventType, event utils.K8s
 const (
 	dedupTTLOpen         uint16 = 156 // 10s
 	dedupTTLNetwork      uint16 = 78  // 5s
-	dedupTTLDNS          uint16 = 156 // 10s
 	dedupTTLCapabilities uint16 = 156 // 10s
 	dedupTTLHTTP         uint16 = 31  // 2s
 	dedupTTLSSH          uint16 = 156 // 10s
@@ -228,10 +227,9 @@ func computeEventDedupKey(enrichedEvent *events.EnrichedEvent) (key uint64, ttl 
 			dst := e.GetDstEndpoint()
 			return dedupcache.ComputeNetworkKey(mntns, pid, dst.Addr, e.GetDstPort(), e.GetProto()), dedupTTLNetwork, true
 		}
-	case utils.DnsEventType:
-		if e, ok := event.(utils.DNSEvent); ok {
-			return dedupcache.ComputeDNSKey(mntns, e.GetDNSName()), dedupTTLDNS, true
-		}
+	// DNS events are not deduplicated: the system resolver cache already
+	// limits DNS traffic at the network layer, so events reaching the eBPF
+	// tracer are almost always unique.
 	case utils.CapabilitiesEventType:
 		if e, ok := event.(utils.CapabilitiesEvent); ok {
 			pid := uint32(0)
