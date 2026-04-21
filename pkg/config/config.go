@@ -10,7 +10,7 @@ import (
 
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
-	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
+	servicediscoveryv3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
@@ -304,13 +304,12 @@ func (c *Config) SkipNamespace(ns string) bool {
 	return false
 }
 
-func LoadServiceURLs(filePath string) (schema.IBackendServices, error) {
-	if pathFromEnv, present := os.LookupEnv("SERVICES"); present {
-		filePath = pathFromEnv
+func LoadServiceURLs(apiURL string) (schema.IBackendServices, error) {
+	client, err := servicediscoveryv3.NewServiceDiscoveryClientV3(apiURL)
+	if err != nil {
+		return nil, err
 	}
-	return servicediscovery.GetServices(
-		servicediscoveryv2.NewServiceDiscoveryFileV2(filePath),
-	)
+	return servicediscovery.GetServices(client)
 }
 
 type OrderedEventQueueConfig struct {
