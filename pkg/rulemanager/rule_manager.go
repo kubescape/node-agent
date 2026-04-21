@@ -485,6 +485,9 @@ func extractEventFields(event utils.K8sEvent) prefilter.EventFields {
 	case utils.ExecveEventType:
 		if e, ok := event.(utils.ExecEvent); ok {
 			f.Path = e.GetExePath()
+			f.ParentExePath = e.GetParentExePath()
+			f.Comm = e.GetComm()
+			f.Pcomm = e.GetPcomm()
 		}
 	case utils.HTTPEventType:
 		if e, ok := event.(utils.HttpEvent); ok {
