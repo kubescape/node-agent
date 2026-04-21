@@ -258,7 +258,8 @@ func TestShouldSkip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.params.ShouldSkip(tt.event))
+			event := tt.event
+			assert.Equal(t, tt.want, tt.params.ShouldSkip(&event))
 		})
 	}
 }
@@ -272,7 +273,7 @@ func BenchmarkShouldSkip_EarlyExit(b *testing.B) {
 	e := EventFields{Path: "/etc/passwd", Dir: DirOutbound, MethodBit: MethodGET}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p.ShouldSkip(e)
+		p.ShouldSkip(&e)
 	}
 }
 
@@ -285,6 +286,6 @@ func BenchmarkShouldSkip_FullScan(b *testing.B) {
 	e := EventFields{Path: "/etc/passwd", Dir: DirInbound, MethodBit: MethodPOST}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p.ShouldSkip(e)
+		p.ShouldSkip(&e)
 	}
 }

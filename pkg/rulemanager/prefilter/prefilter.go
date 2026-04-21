@@ -241,9 +241,9 @@ func buildProcessMap(entries []rawProcessEntry, field string) map[processKey]str
 }
 
 // ShouldSkip returns true if the event should be skipped.
-// Hot path — integer/bitmask comparisons only, no allocations.
+// Hot path — takes *EventFields to avoid copying the struct per call.
 // Safe to call on nil receiver (returns false).
-func (p *Params) ShouldSkip(e EventFields) bool {
+func (p *Params) ShouldSkip(e *EventFields) bool {
 	if p == nil {
 		return false
 	}

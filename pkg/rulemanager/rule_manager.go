@@ -235,7 +235,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			if !eventFields.Extracted {
 				eventFields = extractEventFields(enrichedEvent.Event)
 			}
-			if rule.Prefilter.ShouldSkip(eventFields) {
+			if rule.Prefilter.ShouldSkip(&eventFields) {
 				rm.metrics.ReportRulePrefiltered(rule.Name)
 				continue
 			}
