@@ -23,6 +23,6 @@ type MetricsManager interface {
 	ReportContainerProfileLegacyLoad(kind, completeness string)
 	SetContainerProfileCacheEntries(kind string, count float64)
 	ReportContainerProfileCacheHit(hit bool)
-	ReportContainerProfileReconcilerDuration(duration time.Duration)
+	ReportContainerProfileReconcilerDuration(phase string, duration time.Duration)
 	ReportContainerProfileReconcilerEviction(reason string)
 }

@@ -68,7 +68,7 @@ func (c *ContainerProfileCacheImpl) tickLoop(ctx context.Context) {
 					helpers.Int("pending_before", pendingBefore),
 					helpers.Int("pending_after", pendingAfter))
 			}
-			c.metricsManager.ReportContainerProfileReconcilerDuration(time.Since(start))
+			c.metricsManager.ReportContainerProfileReconcilerDuration("evict", time.Since(start))
 			if c.refreshInProgress.CompareAndSwap(false, true) {
 				go func() {
 					defer c.refreshInProgress.Store(false)
@@ -196,7 +196,7 @@ func isContainerRunning(pod *corev1.Pod, e *CachedContainerProfile, id string) b
 func (c *ContainerProfileCacheImpl) refreshAllEntries(ctx context.Context) {
 	start := time.Now()
 	defer func() {
-		c.metricsManager.ReportContainerProfileReconcilerDuration(time.Since(start))
+		c.metricsManager.ReportContainerProfileReconcilerDuration("refresh", time.Since(start))
 	}()
 	// Snapshot first to avoid holding SafeMap's RLock while refreshOneEntry
 	// writes back via Set (which needs the write lock).
@@ -355,6 +355,17 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 ) {
 	pod := c.k8sObjectCache.GetPod(prev.Namespace, prev.PodName)
 
+	// Backfill PodUID when the entry was originally added before the pod
+	// appeared in the k8s cache. An empty PodUID on a pre-running init
+	// container (where the pod-status ContainerID is also empty) makes
+	// isContainerTerminated's (Name, PodUID) fallback match zero and treat
+	// the entry as terminated on the next eviction pass. Healing it here
+	// lets the next reconcileOnce correctly classify the container.
+	podUID := prev.PodUID
+	if podUID == "" && pod != nil {
+		podUID = string(pod.UID)
+	}
+
 	// When the consolidated CP is absent but we still have user-managed /
 	// user-defined overlays to project, synthesize an empty base so
 	// downstream state display is sensible.
@@ -408,7 +419,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		ContainerName:   prev.ContainerName,
 		PodName:         prev.PodName,
 		Namespace:       prev.Namespace,
-		PodUID:          prev.PodUID,
+		PodUID:          podUID,
 		WorkloadID:      prev.WorkloadID,
 		CPName:          prev.CPName,
 		WorkloadName:    prev.WorkloadName,

@@ -401,6 +401,13 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData)
+	// Override CPName with the real consolidated-CP slug. buildEntry sets
+	// CPName from cp.Name, but when cp was synthesized above (no consolidated
+	// CP in storage yet), cp.Name is the workloadName/overlayName — NOT the
+	// GetSlug(false) name refreshOneEntry must GET. Without this override,
+	// refresh queries the synthetic name, always 404s, and the fast-skip
+	// keeps the synthetic entry forever (stored RV is "" == absent-match).
+	entry.CPName = cpName
 	// Fill in user-managed bookkeeping so refreshOneEntry can re-fetch these
 	// sources on every tick. WorkloadName is the "ug-" lookup prefix.
 	entry.WorkloadName = workloadName

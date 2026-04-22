@@ -67,7 +67,7 @@ type PrometheusMetric struct {
 	cpCacheLegacyLoadsCounter      *prometheus.CounterVec
 	cpCacheEntriesGauge            *prometheus.GaugeVec
 	cpCacheHitCounter              *prometheus.CounterVec
-	cpReconcilerDurationHistogram  prometheus.Histogram
+	cpReconcilerDurationHistogram  *prometheus.HistogramVec
 	cpReconcilerEvictionsCounter   *prometheus.CounterVec
 
 	// Cache to avoid allocating Labels maps on every call
@@ -235,11 +235,11 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Name: "nodeagent_containerprofile_cache_hit_total",
 			Help: "Total number of ContainerProfile cache lookups by result.",
 		}, []string{"result"}),
-		cpReconcilerDurationHistogram: promauto.NewHistogram(prometheus.HistogramOpts{
+		cpReconcilerDurationHistogram: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "nodeagent_containerprofile_reconciler_duration_seconds",
-			Help:    "Duration of ContainerProfile reconciler ticks in seconds.",
+			Help:    "Duration of ContainerProfile reconciler phases in seconds.",
 			Buckets: prometheus.DefBuckets,
-		}),
+		}, []string{"phase"}),
 		cpReconcilerEvictionsCounter: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "nodeagent_containerprofile_reconciler_evictions_total",
 			Help: "Total number of ContainerProfile cache evictions by reason.",
@@ -484,8 +484,8 @@ func (p *PrometheusMetric) ReportContainerProfileCacheHit(hit bool) {
 	p.cpCacheHitCounter.WithLabelValues(result).Inc()
 }
 
-func (p *PrometheusMetric) ReportContainerProfileReconcilerDuration(duration time.Duration) {
-	p.cpReconcilerDurationHistogram.Observe(duration.Seconds())
+func (p *PrometheusMetric) ReportContainerProfileReconcilerDuration(phase string, duration time.Duration) {
+	p.cpReconcilerDurationHistogram.WithLabelValues(phase).Observe(duration.Seconds())
 }
 
 func (p *PrometheusMetric) ReportContainerProfileReconcilerEviction(reason string) {
