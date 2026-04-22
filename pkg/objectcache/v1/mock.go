@@ -15,7 +15,20 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// RuleObjectCacheMock implementation as provided
+// RuleObjectCacheMock is a test double for RuleObjectCache.
+//
+// Setter partition contract — SetApplicationProfile and SetNetworkNeighborhood
+// both write into cpByContainerName entries but own non-overlapping fields:
+//
+//	SetApplicationProfile  → Architectures, Capabilities, Execs, Opens, Syscalls,
+//	                          SeccompProfile, Endpoints, ImageID, ImageTag,
+//	                          PolicyByRuleId, IdentifiedCallStacks
+//	SetNetworkNeighborhood → LabelSelector, Ingress, Egress
+//
+// Calling both setters produces a fully-populated ContainerProfile with no
+// field conflict. Both setters apply a first-container-wins rule for r.cp
+// (backward-compat pointer for single-container tests); the per-container map
+// cpByContainerName is authoritative for multi-container tests.
 type RuleObjectCacheMock struct {
 	profile                 *v1beta1.ApplicationProfile
 	podSpec                 *corev1.PodSpec
