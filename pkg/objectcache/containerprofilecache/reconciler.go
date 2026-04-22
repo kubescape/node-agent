@@ -161,9 +161,13 @@ func isContainerTerminated(pod *corev1.Pod, e *CachedContainerProfile, id string
 			return s.State.Terminated != nil
 		}
 	}
-	// Container not found in any status list at all: this happens when the
-	// pod has been fully restarted and the old container's status was
-	// reaped. Treat as terminated.
+	// Container not found in any status list. If no statuses have been
+	// published yet (kubelet lag on a brand-new pod), do NOT evict — the
+	// empty list is indistinguishable from a fully-reaped container otherwise.
+	if len(statuses) == 0 {
+		return false
+	}
+	// Statuses were published but this container is absent: it was reaped.
 	return true
 }
 

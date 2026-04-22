@@ -7,12 +7,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// CreateContainerProfileDirect directly creates the profile without queuing
-// This implements the ProfileCreator interface
 func (sc *Storage) GetContainerProfile(namespace, name string) (*v1beta1.ContainerProfile, error) {
 	return sc.storageClient.ContainerProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
+// CreateContainerProfileDirect directly creates the profile without queuing.
+// This implements the ProfileCreator interface.
 func (sc *Storage) CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error {
 	// Apply name modifications if needed (keeping your existing logic)
 	// sc.modifyNameP(&profile.Name)

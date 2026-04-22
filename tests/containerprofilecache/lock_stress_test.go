@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	cpc "github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
@@ -115,16 +116,12 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 						Shared:        true,
 					})
 				} else {
-					// Evict path: drive the reconciler with a pod that has
-					// no matching running container so it evicts `id`.
-					// We use ReconcileOnce with a context that's already
-					// cancelled so it processes only one step, or we just
-					// read + check — but the cleanest is to seed a
-					// terminating pod and call ReconcileOnce.
-					//
-					// Simpler: directly call GetContainerProfile to stress
-					// concurrent reads interleaved with writes.
-					_ = cache.GetContainerProfile(id)
+					// Evict path: use the production remove-event path so
+					// deleteContainer and per-container locking are exercised.
+					cache.ContainerCallback(containercollection.PubSubEvent{
+						Type:      containercollection.EventTypeRemoveContainer,
+						Container: makeTestContainer(id, podName, namespace, "container"),
+					})
 				}
 				time.Sleep(time.Millisecond * time.Duration(r.Intn(2)))
 			}

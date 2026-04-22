@@ -162,9 +162,10 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 		}
 		go c.addContainerWithTimeout(container)
 	case containercollection.EventTypeRemoveContainer:
-		if !isHost && c.cfg.IgnoreContainer(namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
-			return
-		}
+		// Skip the ignore check on Remove: a container added before its pod
+		// labels matched the ignore filter would otherwise leak in the cache.
+		// The reconciler eviction path is the safety net, but a Remove event
+		// should always clean up regardless of current label state.
 		go c.deleteContainer(notif.Container.Runtime.ContainerID)
 	}
 }
@@ -394,13 +395,14 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// This is what Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest
 	// exercise: rules must alert on events absent from the merged base+user-managed
 	// profile.
-	if userManagedAP != nil || userManagedNN != nil {
+	userManagedApplied := userManagedAP != nil || userManagedNN != nil
+	if userManagedApplied {
 		projected, warnings := projectUserProfiles(cp, userManagedAP, userManagedNN, pod, container.Runtime.ContainerName)
 		cp = projected
 		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
 	}
 
-	entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData)
+	entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData, userManagedApplied)
 	// Override CPName with the real consolidated-CP slug. buildEntry sets
 	// CPName from cp.Name, but when cp was synthesized above (no consolidated
 	// CP in storage yet), cp.Name is the workloadName/overlayName — NOT the
@@ -454,6 +456,7 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 	pod *corev1.Pod,
 	container *containercollection.Container,
 	sharedData *objectcache.WatchedContainerData,
+	userManagedApplied bool,
 ) *CachedContainerProfile {
 	entry := &CachedContainerProfile{
 		ContainerName: container.Runtime.ContainerName,
@@ -467,10 +470,9 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 		entry.PodUID = string(pod.UID)
 	}
 
-	if userAP == nil && userNN == nil {
-		// Fast path: share the storage-fetched pointer. Do NOT mutate cp;
-		// the call-stack tree is built from cp.Spec.IdentifiedCallStacks
-		// but the slice is not cleared (read-only invariant).
+	if userAP == nil && userNN == nil && !userManagedApplied {
+		// Fast path: share the storage-fetched pointer. Profile is the raw
+		// storage object — callers must not mutate it.
 		entry.Profile = cp
 		entry.Shared = true
 	} else {

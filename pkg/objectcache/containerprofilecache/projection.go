@@ -74,6 +74,10 @@ func projectUserProfiles(
 // (mergeContainer), applied here to a single-container ContainerProfile
 // instead of a full ApplicationProfile.
 func mergeApplicationProfile(projected *v1beta1.ContainerProfile, userAP *v1beta1.ApplicationProfile, pod *corev1.Pod, containerName string) []string {
+	// Defensive copy: slices inside matched (e.g. Execs[i].Args, Opens[i].Flags,
+	// Endpoints[i].Methods) would otherwise alias the caller's CRD object and
+	// could change if the CRD is refreshed concurrently.
+	userAP = userAP.DeepCopy()
 	if matched := findUserAPContainer(userAP, containerName); matched != nil {
 		projected.Spec.Capabilities = append(projected.Spec.Capabilities, matched.Capabilities...)
 		projected.Spec.Execs = append(projected.Spec.Execs, matched.Execs...)
@@ -104,6 +108,9 @@ func mergeApplicationProfile(projected *v1beta1.ContainerProfile, userAP *v1beta
 // (performMerge, mergeContainer, mergeNetworkNeighbors) applied to a single
 // container's rules on a ContainerProfile.
 func mergeNetworkNeighborhood(projected *v1beta1.ContainerProfile, userNN *v1beta1.NetworkNeighborhood, pod *corev1.Pod, containerName string) []string {
+	// Defensive copy: neighbor slices (DNSNames, Ports, MatchExpressions) and
+	// LabelSelector.MatchExpressions would otherwise alias the caller's CRD.
+	userNN = userNN.DeepCopy()
 	if matched := findUserNNContainer(userNN, containerName); matched != nil {
 		projected.Spec.Ingress = mergeNetworkNeighbors(projected.Spec.Ingress, matched.Ingress)
 		projected.Spec.Egress = mergeNetworkNeighbors(projected.Spec.Egress, matched.Egress)

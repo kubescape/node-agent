@@ -3,6 +3,7 @@ package objectcache
 
 import (
 	"context"
+	"errors"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
@@ -26,7 +27,7 @@ func (cp *ContainerProfileCacheMock) GetContainerProfile(_ string) *v1beta1.Cont
 }
 
 func (cp *ContainerProfileCacheMock) GetContainerProfileState(_ string) *ProfileState {
-	return nil
+	return &ProfileState{Error: errors.New("mock: profile not found")}
 }
 
 func (cp *ContainerProfileCacheMock) GetCallStackSearchTree(_ string) *callstackcache.CallStackSearchTree {

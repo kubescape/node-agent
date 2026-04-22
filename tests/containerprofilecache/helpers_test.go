@@ -64,12 +64,6 @@ func newFakeStorage(cp *v1beta1.ContainerProfile) *stubStorage {
 	return &stubStorage{cp: cp}
 }
 
-func (s *stubStorage) setCP(cp *v1beta1.ContainerProfile) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cp = cp
-}
-
 func (s *stubStorage) GetContainerProfile(_, _ string) (*v1beta1.ContainerProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
