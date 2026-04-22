@@ -75,8 +75,6 @@ type CachedContainerProfile struct {
 
 	Shared          bool   // true iff Profile is the shared storage-fetched pointer (read-only)
 	RV              string // ContainerProfile resourceVersion at last load
-	WorkloadAPRV    string // workload-level AP resourceVersion at last projection, "" if not fetched
-	WorkloadNNRV    string // workload-level NN resourceVersion at last projection, "" if not fetched
 	UserManagedAPRV string // user-managed AP (ug-<workload>) RV at last projection, "" if absent
 	UserManagedNNRV string // user-managed NN (ug-<workload>) RV at last projection, "" if absent
 	UserAPRV        string // user-AP (label-referenced) resourceVersion at last projection, "" if no overlay
@@ -267,12 +265,12 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 ) bool {
 	ns := container.K8s.Namespace
 
-	// Fetch consolidated CP. Current storage (see
-	// .omc/plans/containerprofile-cache-component-test-findings.md §6) does
-	// not expose a queryable consolidated CP at this name; we treat a 404 as
-	// "not yet" and fall back to the workload-level AP/NN read below. Kept
-	// for forward-compat: once the storage-side PR lands that publishes the
-	// consolidated CP, this path becomes the primary source.
+	// Fetch consolidated ContainerProfile. The storage server aggregates the
+	// per-tick time-series CPs (written by containerprofilemanager at names
+	// ending in a random UUID suffix) into a consolidated CP at the stable
+	// name returned by GetSlug(false). Until that aggregation runs the Get
+	// returns 404 — we record pending and the reconciler retries on each
+	// tick.
 	cp, err := c.storageClient.GetContainerProfile(ns, cpName)
 	if err != nil {
 		logger.L().Debug("ContainerProfile not yet available",
@@ -281,28 +279,6 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			helpers.String("name", cpName),
 			helpers.Error(err))
 		cp = nil
-	}
-
-	// Fetch the workload-level AP and NN (the server-side aggregation that
-	// legacy caches read as their primary source). These are the stable
-	// "ready / complete" surface in the current storage.
-	workloadAP, err := c.storageClient.GetApplicationProfile(ns, workloadName)
-	if err != nil {
-		logger.L().Debug("workload ApplicationProfile not yet available",
-			helpers.String("containerID", containerID),
-			helpers.String("namespace", ns),
-			helpers.String("name", workloadName),
-			helpers.Error(err))
-		workloadAP = nil
-	}
-	workloadNN, err := c.storageClient.GetNetworkNeighborhood(ns, workloadName)
-	if err != nil {
-		logger.L().Debug("workload NetworkNeighborhood not yet available",
-			helpers.String("containerID", containerID),
-			helpers.String("namespace", ns),
-			helpers.String("name", workloadName),
-			helpers.Error(err))
-		workloadNN = nil
 	}
 
 	// Fetch user-managed AP / NN published at "ug-<workloadName>". Legacy
@@ -335,21 +311,15 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
-	// Fix (reviewer #3): if the available workload profile is still Partial
-	// and this container is not PreRunning (i.e. we saw it start fresh after
-	// the agent was already up), the partial view belongs to a PREVIOUS
-	// container incarnation. Legacy caches explicitly deleted such partials
-	// on restart so rule evaluation fell through to "no profile" until a new
-	// Full profile arrived. Mirror that: keep pending, retry each tick.
+	// Fix (reviewer #3): if the consolidated CP is still Partial and this
+	// container is not PreRunning (i.e. we saw it start fresh after the
+	// agent was already up), the partial view belongs to a PREVIOUS container
+	// incarnation. Legacy caches explicitly deleted such partials on restart
+	// so rule evaluation fell through to "no profile" until a new Full
+	// profile arrived. Mirror that: keep pending, retry each tick.
 	if !sharedData.PreRunningContainer {
 		if cp != nil && cp.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial {
 			cp = nil
-		}
-		if workloadAP != nil && workloadAP.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial {
-			workloadAP = nil
-		}
-		if workloadNN != nil && workloadNN.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial {
-			workloadNN = nil
 		}
 	}
 
@@ -385,36 +355,26 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	// Need SOMETHING to cache. If we have nothing, stay pending and retry.
-	if cp == nil && workloadAP == nil && workloadNN == nil && userManagedAP == nil && userManagedNN == nil && userAP == nil && userNN == nil {
+	if cp == nil && userManagedAP == nil && userManagedNN == nil && userAP == nil && userNN == nil {
 		return false
 	}
 
 	// When no consolidated CP is available, synthesize an empty CP named
 	// after the workload so downstream state display is sensible. Projection
-	// below merges workloadAP + workloadNN + user overlay onto this base.
+	// below merges user-managed + user-defined overlay onto this base.
 	if cp == nil {
 		syntheticName := workloadName
 		if syntheticName == "" {
 			syntheticName = overlayName
 		}
-		synthAnnot := map[string]string{}
-		// Prefer workload profile completion/status for ProfileState display;
-		// fall back to "complete" when we only have user-authored data.
-		if workloadAP != nil {
-			synthAnnot[helpersv1.CompletionMetadataKey] = workloadAP.Annotations[helpersv1.CompletionMetadataKey]
-			synthAnnot[helpersv1.StatusMetadataKey] = workloadAP.Annotations[helpersv1.StatusMetadataKey]
-		} else if workloadNN != nil {
-			synthAnnot[helpersv1.CompletionMetadataKey] = workloadNN.Annotations[helpersv1.CompletionMetadataKey]
-			synthAnnot[helpersv1.StatusMetadataKey] = workloadNN.Annotations[helpersv1.StatusMetadataKey]
-		} else {
-			synthAnnot[helpersv1.CompletionMetadataKey] = helpersv1.Full
-			synthAnnot[helpersv1.StatusMetadataKey] = helpersv1.Completed
-		}
 		cp = &v1beta1.ContainerProfile{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        syntheticName,
-				Namespace:   ns,
-				Annotations: synthAnnot,
+				Name:      syntheticName,
+				Namespace: ns,
+				Annotations: map[string]string{
+					helpersv1.CompletionMetadataKey: helpersv1.Full,
+					helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				},
 			},
 		}
 	}
@@ -427,16 +387,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			helpers.String("podName", container.K8s.PodName))
 	}
 
-	// Pre-project workload-level AP/NN onto the base CP. This is the primary
-	// data source while the storage-side consolidated CP isn't publicly
-	// queryable. projectUserProfiles merges the matching container's fields
-	// from AP/NN into the CP spec.
-	if workloadAP != nil || workloadNN != nil {
-		projected, _ := projectUserProfiles(cp, workloadAP, workloadNN, pod, container.Runtime.ContainerName)
-		cp = projected
-	}
-
-	// Additional projection pass for user-managed profiles (published at the
+	// User-managed projection pass (published at the
 	// "ug-<workloadName>" well-known name). Legacy caches auto-merged these
 	// in handleUserManagedProfile after detecting the managed-by annotation;
 	// here we always union in whatever's published at the convention name.
@@ -450,15 +401,9 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData)
-	// Fill in workload/user-managed bookkeeping so refreshOneEntry can
-	// re-fetch these sources on every tick.
+	// Fill in user-managed bookkeeping so refreshOneEntry can re-fetch these
+	// sources on every tick. WorkloadName is the "ug-" lookup prefix.
 	entry.WorkloadName = workloadName
-	if workloadAP != nil {
-		entry.WorkloadAPRV = workloadAP.ResourceVersion
-	}
-	if workloadNN != nil {
-		entry.WorkloadNNRV = workloadNN.ResourceVersion
-	}
 	if userManagedAP != nil {
 		entry.UserManagedAPRV = userManagedAP.ResourceVersion
 	}

@@ -277,17 +277,9 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(_ context.Context, id string
 			helpers.Error(err))
 		cp = nil
 	}
-	var workloadAP *v1beta1.ApplicationProfile
-	var workloadNN *v1beta1.NetworkNeighborhood
 	var userManagedAP *v1beta1.ApplicationProfile
 	var userManagedNN *v1beta1.NetworkNeighborhood
 	if e.WorkloadName != "" {
-		if ap, aerr := c.storageClient.GetApplicationProfile(ns, e.WorkloadName); aerr == nil {
-			workloadAP = ap
-		}
-		if nn, nerr := c.storageClient.GetNetworkNeighborhood(ns, e.WorkloadName); nerr == nil {
-			workloadNN = nn
-		}
 		ugAPName := helpersv1.UserApplicationProfilePrefix + e.WorkloadName
 		if ap, aerr := c.storageClient.GetApplicationProfile(ns, ugAPName); aerr == nil {
 			userManagedAP = ap
@@ -314,8 +306,6 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(_ context.Context, id string
 	// this avoids spurious rebuilds when an optional source is still missing,
 	// as long as it was also missing at the last build.
 	if rvsMatchCP(cp, e.RV) &&
-		rvsMatchAP(workloadAP, e.WorkloadAPRV) &&
-		rvsMatchNN(workloadNN, e.WorkloadNNRV) &&
 		rvsMatchAP(userManagedAP, e.UserManagedAPRV) &&
 		rvsMatchNN(userManagedNN, e.UserManagedNNRV) &&
 		rvsMatchAP(userAP, e.UserAPRV) &&
@@ -323,7 +313,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(_ context.Context, id string
 		return
 	}
 
-	c.rebuildEntryFromSources(id, e, cp, workloadAP, workloadNN, userManagedAP, userManagedNN, userAP, userNN)
+	c.rebuildEntryFromSources(id, e, cp, userManagedAP, userManagedNN, userAP, userNN)
 }
 
 // rvsMatchCP, rvsMatchAP, rvsMatchNN return true when either (a) the object is
@@ -349,17 +339,15 @@ func rvsMatchNN(obj *v1beta1.NetworkNeighborhood, rv string) bool {
 }
 
 // rebuildEntryFromSources constructs a fresh CachedContainerProfile from the
-// given sources and stores it under `id`. Applies the same projection ladder
-// as tryPopulateEntry: base CP (or synthesized) → workload AP+NN →
-// user-managed (ug-) AP+NN → label-referenced user overlay AP+NN.
+// given sources and stores it under `id`. Applies the projection ladder from
+// tryPopulateEntry: base CP (or synthesized) → user-managed (ug-) AP+NN →
+// label-referenced user overlay AP+NN.
 //
 // Called by the reconciler when any input ResourceVersion has changed.
 func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	id string,
 	prev *CachedContainerProfile,
 	cp *v1beta1.ContainerProfile,
-	workloadAP *v1beta1.ApplicationProfile,
-	workloadNN *v1beta1.NetworkNeighborhood,
 	userManagedAP *v1beta1.ApplicationProfile,
 	userManagedNN *v1beta1.NetworkNeighborhood,
 	userAP *v1beta1.ApplicationProfile,
@@ -367,52 +355,37 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 ) {
 	pod := c.k8sObjectCache.GetPod(prev.Namespace, prev.PodName)
 
-	// When the consolidated CP is absent, synthesize an empty base carrying
-	// the workload AP/NN's completion/status (or "full"/"completed" as a
-	// final fallback) so downstream state display is sensible.
+	// When the consolidated CP is absent but we still have user-managed /
+	// user-defined overlays to project, synthesize an empty base so
+	// downstream state display is sensible.
 	effectiveCP := cp
 	if effectiveCP == nil {
-		synthAnnot := map[string]string{}
-		switch {
-		case workloadAP != nil:
-			synthAnnot[helpersv1.CompletionMetadataKey] = workloadAP.Annotations[helpersv1.CompletionMetadataKey]
-			synthAnnot[helpersv1.StatusMetadataKey] = workloadAP.Annotations[helpersv1.StatusMetadataKey]
-		case workloadNN != nil:
-			synthAnnot[helpersv1.CompletionMetadataKey] = workloadNN.Annotations[helpersv1.CompletionMetadataKey]
-			synthAnnot[helpersv1.StatusMetadataKey] = workloadNN.Annotations[helpersv1.StatusMetadataKey]
-		default:
-			synthAnnot[helpersv1.CompletionMetadataKey] = helpersv1.Full
-			synthAnnot[helpersv1.StatusMetadataKey] = helpersv1.Completed
-		}
 		syntheticName := prev.WorkloadName
 		if syntheticName == "" {
 			syntheticName = prev.CPName
 		}
 		effectiveCP = &v1beta1.ContainerProfile{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        syntheticName,
-				Namespace:   prev.Namespace,
-				Annotations: synthAnnot,
+				Name:      syntheticName,
+				Namespace: prev.Namespace,
+				Annotations: map[string]string{
+					helpersv1.CompletionMetadataKey: helpersv1.Full,
+					helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				},
 			},
 		}
 	}
 
-	// Ladder pass #1: workload-level AP + NN.
 	projected := effectiveCP
-	if workloadAP != nil || workloadNN != nil {
-		p, _ := projectUserProfiles(projected, workloadAP, workloadNN, pod, prev.ContainerName)
-		projected = p
-	}
-	// Ladder pass #2: user-managed "ug-" AP + NN.
+	// Ladder pass #1: user-managed "ug-" AP + NN.
 	if userManagedAP != nil || userManagedNN != nil {
 		p, warnings := projectUserProfiles(projected, userManagedAP, userManagedNN, pod, prev.ContainerName)
 		projected = p
 		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
 	}
-	// Ladder pass #3: label-referenced user overlay AP + NN.
+	// Ladder pass #2: label-referenced user overlay AP + NN.
 	shared := userAP == nil && userNN == nil &&
 		userManagedAP == nil && userManagedNN == nil &&
-		workloadAP == nil && workloadNN == nil &&
 		cp != nil
 	var userWarnings []partialProfileWarning
 	if userAP != nil || userNN != nil {
@@ -441,8 +414,6 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		WorkloadName:    prev.WorkloadName,
 		Shared:          shared,
 		RV:              rvOfCP(cp),
-		WorkloadAPRV:    rvOfAP(workloadAP),
-		WorkloadNNRV:    rvOfNN(workloadNN),
 		UserManagedAPRV: rvOfAP(userManagedAP),
 		UserManagedNNRV: rvOfNN(userManagedNN),
 		UserAPRV:        rvOfAP(userAP),

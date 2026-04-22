@@ -858,16 +858,15 @@ func primePreRunningSharedData(t *testing.T, k8s *objectcache.K8sObjectCacheMock
 	k8s.SetSharedContainerData(containerID, existing)
 }
 
-// TestWorkloadAPMerged_AndRefreshUpdatesStatus exercises Fix B (the
-// component-test regression behind Test_17_ApCompletedToPartialUpdateTest /
-// Test_19_AlertOnPartialProfileTest): at addContainer time the workload-level
-// AP may still be in Status="ready"; the cache must re-fetch it on each tick
-// so a later "ready" -> "completed" transition propagates to the cached
-// ProfileState, which in turn flips fail_on_profile from false to true.
-func TestWorkloadAPMerged_AndRefreshUpdatesStatus(t *testing.T) {
-	// Base CP absent (404). Workload-level AP starts in Status=ready.
-	workloadAP := &v1beta1.ApplicationProfile{
+// TestRefreshUpdatesCPStatus exercises the refresh path: at addContainer
+// time the consolidated CP may still be in Status="ready"; the cache must
+// re-fetch it on each tick so a later "ready" -> "completed" transition
+// propagates to the cached ProfileState, which in turn flips fail_on_profile
+// from false to true (Test_17 / Test_19 semantics).
+func TestRefreshUpdatesCPStatus(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-ready",
 			Namespace:       "default",
 			ResourceVersion: "1",
 			Annotations: map[string]string{
@@ -875,31 +874,24 @@ func TestWorkloadAPMerged_AndRefreshUpdatesStatus(t *testing.T) {
 				helpersv1.StatusMetadataKey:     helpersv1.Learning, // "ready"
 			},
 		},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{{
-				Name:         "nginx",
-				Capabilities: []string{"SYS_PTRACE"},
-			}},
-		},
 	}
-	client := &fakeProfileClient{cp: nil, cpErr: assertErrNotFound("no-base"), ap: workloadAP}
+	client := &fakeProfileClient{cp: cp}
 	c, k8s := newTestCache(t, client)
 
-	id := "container-ap-ready"
+	id := "container-cp-ready"
 	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
 
 	entry, ok := c.entries.Load(id)
-	require.True(t, ok, "entry populated from workload AP even when base CP absent")
+	require.True(t, ok, "entry populated from CP")
 	require.NotNil(t, entry.State)
 	assert.Equal(t, helpersv1.Learning, entry.State.Status,
-		"Status must reflect the workload AP at add time (ready / learning)")
-	assert.NotEmpty(t, entry.WorkloadName, "WorkloadName must be populated so refresh can re-fetch")
-	assert.Equal(t, "1", entry.WorkloadAPRV, "WorkloadAPRV must be captured at add time")
+		"Status reflects the CP at add time (ready / learning)")
 
-	// Storage transitions to Status=completed with a new RV.
-	client.ap = &v1beta1.ApplicationProfile{
+	// Storage transitions CP to Status=completed.
+	client.cp = &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-ready",
 			Namespace:       "default",
 			ResourceVersion: "2",
 			Annotations: map[string]string{
@@ -907,36 +899,28 @@ func TestWorkloadAPMerged_AndRefreshUpdatesStatus(t *testing.T) {
 				helpersv1.StatusMetadataKey:     helpersv1.Completed,
 			},
 		},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{{
-				Name:         "nginx",
-				Capabilities: []string{"SYS_PTRACE"},
-			}},
-		},
 	}
 
-	// Single refresh tick must pick up the new workload AP RV and update Status.
 	c.refreshAllEntries(context.Background())
 
 	stored, ok := c.entries.Load(id)
 	require.True(t, ok)
 	require.NotNil(t, stored.State)
 	assert.Equal(t, helpersv1.Completed, stored.State.Status,
-		"refresh must propagate workload AP Status=completed into ProfileState")
-	assert.Equal(t, "2", stored.WorkloadAPRV, "refresh must record the new workload AP RV")
+		"refresh propagates CP Status=completed into ProfileState")
+	assert.Equal(t, "2", stored.RV, "refresh records the new CP RV")
 }
 
-// TestUserManagedProfileMerged exercises Fix A (the component-test regression
-// behind Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest):
-// the cache must merge a user-managed AP published at "ug-<workloadName>" on
-// top of the base + workload-level profiles. Anomalies NOT in the union of
-// base + user-managed should produce alerts; anomalies present in either
-// source should not.
+// TestUserManagedProfileMerged exercises the user-managed merge path
+// (Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest):
+// a user-managed AP published at "ug-<workloadName>" is merged on top of
+// the base CP. Anomalies NOT in the union of base + user-managed should
+// produce alerts; anomalies present in either source should not.
 func TestUserManagedProfileMerged(t *testing.T) {
-	// Base CP absent; workload AP has exec "/bin/X"; user-managed AP
-	// (returned by the fake when name starts with "ug-") adds exec "/bin/Y".
-	workloadAP := &v1beta1.ApplicationProfile{
+	// Base CP has exec "/bin/X"; user-managed AP adds "/bin/Y".
+	cp := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-base",
 			Namespace:       "default",
 			ResourceVersion: "1",
 			Annotations: map[string]string{
@@ -944,11 +928,8 @@ func TestUserManagedProfileMerged(t *testing.T) {
 				helpersv1.StatusMetadataKey:     helpersv1.Completed,
 			},
 		},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{{
-				Name:  "nginx",
-				Execs: []v1beta1.ExecCalls{{Path: "/bin/X"}},
-			}},
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{{Path: "/bin/X"}},
 		},
 	}
 	userManagedAP := &v1beta1.ApplicationProfile{
@@ -969,9 +950,7 @@ func TestUserManagedProfileMerged(t *testing.T) {
 		},
 	}
 	client := &fakeProfileClient{
-		cp:            nil,
-		cpErr:         assertErrNotFound("no-base"),
-		ap:            workloadAP,
+		cp:            cp,
 		userManagedAP: userManagedAP,
 	}
 	c, k8s := newTestCache(t, client)
