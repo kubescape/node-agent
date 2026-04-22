@@ -24,7 +24,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
+	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"

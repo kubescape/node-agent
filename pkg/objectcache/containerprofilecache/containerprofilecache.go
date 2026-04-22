@@ -17,7 +17,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
+	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/resourcelocks"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"

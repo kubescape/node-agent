@@ -8,7 +8,7 @@ import (
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
+	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -68,10 +68,6 @@ func (r *RuleObjectCacheMock) SetApplicationProfile(profile *v1beta1.Application
 	r.cp.Spec.ImageTag = c.ImageTag
 	r.cp.Spec.PolicyByRuleId = c.PolicyByRuleId
 	r.cp.Spec.IdentifiedCallStacks = c.IdentifiedCallStacks
-}
-
-func (r *RuleObjectCacheMock) ApplicationProfileCache() objectcache.ApplicationProfileCache {
-	return r
 }
 
 func (r *RuleObjectCacheMock) GetContainerProfile(containerID string) *v1beta1.ContainerProfile {
@@ -144,10 +140,6 @@ func (r *RuleObjectCacheMock) DeleteSharedContainerData(containerID string) {
 }
 
 func (r *RuleObjectCacheMock) K8sObjectCache() objectcache.K8sObjectCache {
-	return r
-}
-
-func (r *RuleObjectCacheMock) NetworkNeighborhoodCache() objectcache.NetworkNeighborhoodCache {
 	return r
 }
 

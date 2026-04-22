@@ -5,7 +5,7 @@ import (
 	"context"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
+	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
