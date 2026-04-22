@@ -40,10 +40,10 @@ import (
 
 func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 	const (
-		id            = "race-container"
-		numReaders    = 50
-		testDuration  = 500 * time.Millisecond
-		rpcBudgetMs   = 100 * time.Millisecond
+		id           = "race-container"
+		numReaders   = 50
+		testDuration = 500 * time.Millisecond
+		rpcBudgetMs  = 100 * time.Millisecond
 	)
 
 	// cpV1 — what is seeded initially (RV="1")

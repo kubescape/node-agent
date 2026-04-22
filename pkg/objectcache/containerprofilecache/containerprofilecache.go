@@ -28,7 +28,12 @@ import (
 
 // defaultReconcileInterval is the fallback refresh cadence when
 // config.ProfilesCacheRefreshRate is zero.
-const defaultReconcileInterval = 30 * time.Second
+// defaultStorageRPCBudget is the per-call timeout applied by refreshRPC when
+// config.StorageRPCBudget is zero.
+const (
+	defaultReconcileInterval  = 30 * time.Second
+	defaultStorageRPCBudget   = 5 * time.Second
+)
 
 // namespacedName is a minimal identifier for a legacy user-authored CRD
 // (ApplicationProfile / NetworkNeighborhood) overlaid on a ContainerProfile.
@@ -126,7 +131,7 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 	}
 	rpcBudget := cfg.StorageRPCBudget
 	if rpcBudget <= 0 {
-		rpcBudget = 5 * time.Second
+		rpcBudget = defaultStorageRPCBudget
 	}
 	return &ContainerProfileCacheImpl{
 		cfg:            cfg,

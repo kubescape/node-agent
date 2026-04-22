@@ -263,12 +263,10 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	// while the storage-side consolidated CP remains unpublished.
 	var cp *v1beta1.ContainerProfile
 	var cpErr error
-	if rpcErr := c.refreshRPC(ctx, func(rctx context.Context) error {
+	_ = c.refreshRPC(ctx, func(rctx context.Context) error {
 		cp, cpErr = c.storageClient.GetContainerProfile(rctx, ns, e.CPName)
 		return cpErr
-	}); rpcErr != nil && cpErr == nil {
-		cpErr = rpcErr
-	}
+	})
 	if cpErr != nil {
 		// If the previous entry was built off a real CP (non-empty RV), a
 		// CP fetch error on this tick is transient — keep the entry as-is.

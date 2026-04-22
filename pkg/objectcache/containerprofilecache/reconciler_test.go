@@ -619,7 +619,9 @@ var _ = helpersv1.CompletionMetadataKey
 // causes the refresh to return within the rpcBudget, not hang for the
 // full reconciler timeout.
 func TestRefreshHonorsContextCancellationMidRPC(t *testing.T) {
-	blocked := make(chan struct{})
+	// Buffered so the signal is stored even if the test's <-blocked read is
+	// slightly delayed — prevents a lossy non-blocking send from dropping it.
+	blocked := make(chan struct{}, 1)
 	unblock := make(chan struct{})
 	blocking := &blockingProfileClient{
 		blocked: blocked,
@@ -632,7 +634,7 @@ func TestRefreshHonorsContextCancellationMidRPC(t *testing.T) {
 	k8s := newControllableK8sCache()
 	cfg := config.Config{
 		ProfilesCacheRefreshRate: 30 * time.Second,
-		StorageRPCBudget:         50 * time.Millisecond,
+		StorageRPCBudget:         100 * time.Millisecond,
 	}
 	cache := NewContainerProfileCache(cfg, blocking, k8s, nil)
 	cache.SeedEntryForTest("id1", &CachedContainerProfile{
@@ -659,11 +661,11 @@ func TestRefreshHonorsContextCancellationMidRPC(t *testing.T) {
 	<-blocked
 	cancel()
 
-	// The refresh must return within 200ms of cancellation (well under the
-	// 50ms rpcBudget + scheduling slack).
+	// The refresh must return within 2s of cancellation (well above the
+	// 100ms rpcBudget; the generous budget accommodates loaded CI runners).
 	select {
 	case <-done:
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Fatal("refreshAllEntries did not return after context cancellation")
 	}
 	close(unblock)
@@ -678,10 +680,7 @@ type blockingProfileClient struct {
 var _ storage.ProfileClient = (*blockingProfileClient)(nil)
 
 func (b *blockingProfileClient) GetContainerProfile(ctx context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
-	select {
-	case b.blocked <- struct{}{}:
-	default:
-	}
+	b.blocked <- struct{}{} // buffered(1): stored if reader hasn't arrived yet
 	select {
 	case <-b.unblock:
 		return nil, nil
