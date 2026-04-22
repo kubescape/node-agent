@@ -559,3 +559,76 @@ func (f *failingProfileClient) ListNetworkNeighborhoods(_ string, _ int64, _ str
 // containerprofilecache.go (used by some entries). Import explicitly so the
 // file compiles without the import when those constants aren't dereferenced.
 var _ = helpersv1.CompletionMetadataKey
+
+// TestRetryPendingEntries_CPCreatedAfterAdd exercises the bug that slipped
+// through PR #788 component tests: at EventTypeAddContainer the CP may not
+// yet be in storage (it is created asynchronously by containerprofilemanager
+// after observing the container). The new cache must retry per reconciler
+// tick; otherwise the container is permanently absent from the cache and
+// rule evaluation short-circuits as "no profile".
+func TestRetryPendingEntries_CPCreatedAfterAdd(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-pending",
+			Namespace:       "default",
+			ResourceVersion: "1",
+		},
+	}
+
+	// Start with storage returning 404 for the initial GET.
+	client := &fakeProfileClient{cp: nil, cpErr: assertErrNotFound("cp-pending")}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-pending"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+
+	// addContainer: sees 404 -> pending bookkeeping, not an entry.
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+	assert.Nil(t, c.GetContainerProfile(id), "no entry before CP exists in storage")
+	assert.Equal(t, 1, c.pending.Len(), "container recorded as pending")
+
+	// Storage creates the CP asynchronously (60s after start in real runs).
+	client.cp = cp
+	client.cpErr = nil
+
+	// Simulate one reconciler tick. retryPendingEntries iterates pending and
+	// promotes on successful GET.
+	c.retryPendingEntries(context.Background())
+
+	assert.NotNil(t, c.GetContainerProfile(id), "entry promoted after CP appears")
+	assert.Equal(t, 0, c.pending.Len(), "pending drained on successful promotion")
+	// Exactly two GETs: one from addContainer (404), one from retry (200).
+	assert.Equal(t, 2, client.getCPCalls, "retry should only re-GET once per tick")
+}
+
+// TestRetryPendingEntries_PodGoneIsGCed exercises the pending GC: a container
+// whose pod stops before the CP ever shows up must not retry forever.
+func TestRetryPendingEntries_PodGoneIsGCed(t *testing.T) {
+	client := &fakeProfileClient{cp: nil, cpErr: assertErrNotFound("cp-missing")}
+	c, k8s := newTestCache(t, client)
+	// Cast to the concrete mock to access internal setters. K8sObjectCacheMock
+	// returns nil from GetPod by default, which is exactly what we need: the
+	// GC branch in reconcileOnce treats "no pod" as a signal that the
+	// container is gone.
+	_ = k8s
+
+	id := "container-dead-pod"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+	require.Equal(t, 1, c.pending.Len())
+
+	// One reconciler pass with a nil-returning GetPod drops the pending entry.
+	c.reconcileOnce(context.Background())
+
+	assert.Equal(t, 0, c.pending.Len(), "pending entry GC'd when pod is gone")
+}
+
+// assertErrNotFound is a minimal non-nil error for GET failures in tests.
+// Using a sentinel keeps the test readable without pulling in apierrors.
+func assertErrNotFound(name string) error {
+	return &testNotFoundErr{name: name}
+}
+
+type testNotFoundErr struct{ name string }
+
+func (e *testNotFoundErr) Error() string { return "container profile " + e.name + ": not found" }

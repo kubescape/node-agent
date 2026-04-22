@@ -46,6 +46,7 @@ func (c *ContainerProfileCacheImpl) tickLoop(ctx context.Context) {
 		case <-ticker.C:
 			start := time.Now()
 			c.reconcileOnce(ctx)
+			c.retryPendingEntries(ctx)
 			c.metricsManager.ReportContainerProfileReconcilerDuration(time.Since(start))
 			if c.refreshInProgress.CompareAndSwap(false, true) {
 				go func() {
@@ -82,7 +83,41 @@ func (c *ContainerProfileCacheImpl) reconcileOnce(ctx context.Context) {
 		// See deleteContainer comment on why we don't ReleaseLock here.
 		c.metricsManager.ReportContainerProfileReconcilerEviction("pod_stopped")
 	}
+
+	// GC pending entries whose container is no longer running. Mirrors the
+	// eviction path for live entries so we don't retry forever on terminated
+	// containers that never had their CP written to storage.
+	var pendingToDrop []string
+	c.pending.Range(func(id string, p *pendingContainer) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		ns := p.container.K8s.Namespace
+		podName := p.container.K8s.PodName
+		pod := c.k8sObjectCache.GetPod(ns, podName)
+		if pod == nil {
+			pendingToDrop = append(pendingToDrop, id)
+			return true
+		}
+		// Build a minimal placeholder to reuse isContainerRunning's lookup logic.
+		placeholder := &CachedContainerProfile{
+			ContainerName: p.container.Runtime.ContainerName,
+			PodUID:        string(pod.UID),
+		}
+		if !isContainerRunning(pod, placeholder, id) {
+			pendingToDrop = append(pendingToDrop, id)
+		}
+		return true
+	})
+	for _, id := range pendingToDrop {
+		c.containerLocks.WithLock(id, func() {
+			c.pending.Delete(id)
+		})
+		c.metricsManager.ReportContainerProfileReconcilerEviction("pending_pod_stopped")
+	}
+
 	c.metricsManager.SetContainerProfileCacheEntries("total", float64(c.entries.Len()))
+	c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))
 }
 
 // isContainerRunning reports whether the container identified by `id` (the
@@ -303,4 +338,43 @@ func rvOrEmpty(obj interface {
 		return v.ResourceVersion
 	}
 	return obj.GetResourceVersion()
+}
+
+// retryPendingEntries re-issues GetContainerProfile for every containerID that
+// was seen on ContainerCallback(Add) but whose CP was not yet in storage. On
+// success the entry is promoted into the main cache and removed from pending.
+// Exposed for tests.
+//
+// This preserves the legacy-cache behavior where the periodic "ListProfiles"
+// tick recovered containers whose CP showed up after container-start. Without
+// this retry, a container whose CP is created asynchronously (the normal
+// path, since containerprofilemanager creates the CP after observing behavior)
+// would never enter the cache. See component-test regression analysis at
+// .omc/plans/containerprofile-cache-component-test-findings.md.
+func (c *ContainerProfileCacheImpl) retryPendingEntries(ctx context.Context) {
+	type snap struct {
+		id string
+		p  *pendingContainer
+	}
+	var work []snap
+	c.pending.Range(func(id string, p *pendingContainer) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		work = append(work, snap{id: id, p: p})
+		return true
+	})
+	for _, w := range work {
+		if ctx.Err() != nil {
+			return
+		}
+		c.containerLocks.WithLock(w.id, func() {
+			// Double-check pending still contains this id (could have been
+			// promoted or dropped by a concurrent path).
+			if _, still := c.pending.Load(w.id); !still {
+				return
+			}
+			c.tryPopulateEntry(w.id, w.p.container, w.p.sharedData, w.p.cpName)
+		})
+	}
 }

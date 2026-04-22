@@ -72,10 +72,23 @@ type CachedContainerProfile struct {
 	UserNNRV string // user-NN resourceVersion at last projection, "" if no overlay
 }
 
+// pendingContainer captures the minimum state needed to retry the initial
+// ContainerProfile GET when the CP is not yet in storage at addContainer time.
+// The reconciler iterates pending each tick, re-issues the GET, and promotes
+// the entry to `entries` on success. Component-tests regression (PR #788)
+// showed the legacy periodic-scan path was load-bearing; this is its
+// equivalent in the point-lookup model.
+type pendingContainer struct {
+	container  *containercollection.Container
+	sharedData *objectcache.WatchedContainerData
+	cpName     string
+}
+
 // ContainerProfileCacheImpl is the unified container-keyed cache for ContainerProfile objects.
 type ContainerProfileCacheImpl struct {
 	cfg            config.Config
 	entries        maps.SafeMap[string, *CachedContainerProfile]
+	pending        maps.SafeMap[string, *pendingContainer]
 	containerLocks *resourcelocks.ResourceLocks
 	storageClient  storage.ProfileClient
 	k8sObjectCache objectcache.K8sObjectCache
@@ -195,69 +208,94 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 			return err
 		}
 
-		cp, err := c.storageClient.GetContainerProfile(container.K8s.Namespace, cpName)
-		if err != nil {
-			logger.L().Debug("ContainerProfile not yet available",
-				helpers.String("containerID", containerID),
-				helpers.String("namespace", container.K8s.Namespace),
-				helpers.String("name", cpName),
-				helpers.Error(err))
-			return nil
+		if populated := c.tryPopulateEntry(containerID, container, sharedData, cpName); !populated {
+			// CP not yet in storage. Record a pending entry; the reconciler
+			// will retry each tick until the CP shows up or the container
+			// stops. This preserves the legacy periodic-scan recovery that
+			// kicked in when a CP was created after container-start.
+			c.pending.Set(containerID, &pendingContainer{
+				container:  container,
+				sharedData: sharedData,
+				cpName:     cpName,
+			})
+			c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))
 		}
-		if cp == nil {
-			logger.L().Debug("ContainerProfile missing from storage",
-				helpers.String("containerID", containerID),
-				helpers.String("namespace", container.K8s.Namespace),
-				helpers.String("name", cpName))
-			return nil
-		}
-
-		// Optionally load user-authored legacy CRDs when pod carries the
-		// UserDefinedProfileMetadataKey label.
-		var userAP *v1beta1.ApplicationProfile
-		var userNN *v1beta1.NetworkNeighborhood
-		if overlayName, ok := container.K8s.PodLabels[helpersv1.UserDefinedProfileMetadataKey]; ok && overlayName != "" {
-			if ap, err := c.storageClient.GetApplicationProfile(container.K8s.Namespace, overlayName); err == nil {
-				userAP = ap
-			} else {
-				logger.L().Debug("user-defined ApplicationProfile not available",
-					helpers.String("containerID", containerID),
-					helpers.String("namespace", container.K8s.Namespace),
-					helpers.String("name", overlayName),
-					helpers.Error(err))
-			}
-			if nn, err := c.storageClient.GetNetworkNeighborhood(container.K8s.Namespace, overlayName); err == nil {
-				userNN = nn
-			} else {
-				logger.L().Debug("user-defined NetworkNeighborhood not available",
-					helpers.String("containerID", containerID),
-					helpers.String("namespace", container.K8s.Namespace),
-					helpers.String("name", overlayName),
-					helpers.Error(err))
-			}
-		}
-
-		pod := c.k8sObjectCache.GetPod(container.K8s.Namespace, container.K8s.PodName)
-		if pod == nil {
-			logger.L().Debug("pod not found in k8s cache; skipping pod-aware merge checks",
-				helpers.String("containerID", containerID),
-				helpers.String("namespace", container.K8s.Namespace),
-				helpers.String("podName", container.K8s.PodName))
-		}
-
-		entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData)
-		c.entries.Set(containerID, entry)
-		c.metricsManager.SetContainerProfileCacheEntries("container", float64(c.entries.Len()))
-
-		logger.L().Debug("ContainerProfileCache - container added",
-			helpers.String("containerID", containerID),
-			helpers.String("namespace", container.K8s.Namespace),
-			helpers.String("podName", container.K8s.PodName),
-			helpers.String("cpName", cpName),
-			helpers.String("shared", fmt.Sprintf("%v", entry.Shared)))
-
 		return nil
 	})
+}
+
+// tryPopulateEntry issues the CP GET (plus any user-AP/NN overlay) and
+// installs the cache entry on success. Returns true iff an entry was
+// installed. Must be called while holding containerLocks.WithLock(id).
+func (c *ContainerProfileCacheImpl) tryPopulateEntry(
+	containerID string,
+	container *containercollection.Container,
+	sharedData *objectcache.WatchedContainerData,
+	cpName string,
+) bool {
+	cp, err := c.storageClient.GetContainerProfile(container.K8s.Namespace, cpName)
+	if err != nil {
+		logger.L().Debug("ContainerProfile not yet available; will retry on reconciler tick",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", container.K8s.Namespace),
+			helpers.String("name", cpName),
+			helpers.Error(err))
+		return false
+	}
+	if cp == nil {
+		logger.L().Debug("ContainerProfile missing from storage; will retry on reconciler tick",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", container.K8s.Namespace),
+			helpers.String("name", cpName))
+		return false
+	}
+
+	// Optionally load user-authored legacy CRDs when pod carries the
+	// UserDefinedProfileMetadataKey label.
+	var userAP *v1beta1.ApplicationProfile
+	var userNN *v1beta1.NetworkNeighborhood
+	if overlayName, ok := container.K8s.PodLabels[helpersv1.UserDefinedProfileMetadataKey]; ok && overlayName != "" {
+		if ap, err := c.storageClient.GetApplicationProfile(container.K8s.Namespace, overlayName); err == nil {
+			userAP = ap
+		} else {
+			logger.L().Debug("user-defined ApplicationProfile not available",
+				helpers.String("containerID", containerID),
+				helpers.String("namespace", container.K8s.Namespace),
+				helpers.String("name", overlayName),
+				helpers.Error(err))
+		}
+		if nn, err := c.storageClient.GetNetworkNeighborhood(container.K8s.Namespace, overlayName); err == nil {
+			userNN = nn
+		} else {
+			logger.L().Debug("user-defined NetworkNeighborhood not available",
+				helpers.String("containerID", containerID),
+				helpers.String("namespace", container.K8s.Namespace),
+				helpers.String("name", overlayName),
+				helpers.Error(err))
+		}
+	}
+
+	pod := c.k8sObjectCache.GetPod(container.K8s.Namespace, container.K8s.PodName)
+	if pod == nil {
+		logger.L().Debug("pod not found in k8s cache; skipping pod-aware merge checks",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", container.K8s.Namespace),
+			helpers.String("podName", container.K8s.PodName))
+	}
+
+	entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData)
+	c.entries.Set(containerID, entry)
+	c.pending.Delete(containerID)
+	c.metricsManager.SetContainerProfileCacheEntries("container", float64(c.entries.Len()))
+	c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))
+
+	logger.L().Debug("ContainerProfileCache - container added",
+		helpers.String("containerID", containerID),
+		helpers.String("namespace", container.K8s.Namespace),
+		helpers.String("podName", container.K8s.PodName),
+		helpers.String("cpName", cpName),
+		helpers.String("shared", fmt.Sprintf("%v", entry.Shared)))
+	return true
 }
 
 // buildEntry constructs a CachedContainerProfile, choosing the fast-path
@@ -334,8 +372,10 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 func (c *ContainerProfileCacheImpl) deleteContainer(id string) {
 	c.containerLocks.WithLock(id, func() {
 		c.entries.Delete(id)
+		c.pending.Delete(id)
 	})
 	c.metricsManager.SetContainerProfileCacheEntries("container", float64(c.entries.Len()))
+	c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))
 }
 
 // GetContainerProfile returns the cached ContainerProfile pointer for a
