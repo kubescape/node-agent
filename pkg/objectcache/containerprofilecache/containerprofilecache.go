@@ -399,5 +399,19 @@ func (c *ContainerProfileCacheImpl) waitForSharedContainerData(containerID strin
 	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
 }
 
+// ReconcileOnce is an exported thin wrapper around reconcileOnce for use by
+// out-of-package integration tests (e.g. tests/containerprofilecache/).
+// Production code should use tickLoop / Start.
+func (c *ContainerProfileCacheImpl) ReconcileOnce(ctx context.Context) {
+	c.reconcileOnce(ctx)
+}
+
+// SeedEntryForTest directly inserts a CachedContainerProfile entry keyed by
+// containerID. Intended exclusively for out-of-package integration tests that
+// cannot call the internal addContainer path. Do not call from production code.
+func (c *ContainerProfileCacheImpl) SeedEntryForTest(containerID string, entry *CachedContainerProfile) {
+	c.entries.Set(containerID, entry)
+}
+
 // Ensure ContainerProfileCacheImpl implements the ContainerProfileCache interface.
 var _ objectcache.ContainerProfileCache = (*ContainerProfileCacheImpl)(nil)

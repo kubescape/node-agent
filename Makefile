@@ -11,6 +11,10 @@ TAG?=test
 binary:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) ./cmd/main.go
 
+.PHONY: check-legacy-packages
+check-legacy-packages:
+	go test ./tests/containerprofilecache -run TestLegacyPackagesDeleted
+
 docker-build-only:
 	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
 
