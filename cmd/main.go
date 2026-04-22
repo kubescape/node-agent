@@ -46,6 +46,7 @@ import (
 	nodeprofilemanagerv1 "github.com/kubescape/node-agent/pkg/nodeprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache"
+	"github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
 	"github.com/kubescape/node-agent/pkg/objectcache/dnscache"
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
@@ -303,10 +304,13 @@ func main() {
 		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient, k8sObjectCache)
 		nnc.Start(ctx)
 
+		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, prometheusExporter)
+		cpc.Start(ctx)
+
 		dc := dnscache.NewDnsCache(dnsResolver)
 
 		// create object cache
-		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
+		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, cpc, dc)
 
 		ruleCooldown := rulecooldown.NewRuleCooldown(cfg.RuleCoolDown)
 
@@ -330,8 +334,9 @@ func main() {
 		ruleManager = rulemanager.CreateRuleManagerMock()
 		apc := &objectcache.ApplicationProfileCacheMock{}
 		nnc := &objectcache.NetworkNeighborhoodCacheMock{}
+		cpc := &objectcache.ContainerProfileCacheMock{}
 		dc := &objectcache.DnsCacheMock{}
-		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
+		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, cpc, dc)
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 	}
 

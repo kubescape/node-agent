@@ -4,6 +4,7 @@ type ObjectCache interface {
 	K8sObjectCache() K8sObjectCache
 	ApplicationProfileCache() ApplicationProfileCache
 	NetworkNeighborhoodCache() NetworkNeighborhoodCache
+	ContainerProfileCache() ContainerProfileCache
 	DnsCache() DnsCache
 }
 
@@ -24,6 +25,10 @@ func (om *ObjectCacheMock) ApplicationProfileCache() ApplicationProfileCache {
 }
 func (om *ObjectCacheMock) NetworkNeighborhoodCache() NetworkNeighborhoodCache {
 	return &NetworkNeighborhoodCacheMock{}
+}
+
+func (om *ObjectCacheMock) ContainerProfileCache() ContainerProfileCache {
+	return &ContainerProfileCacheMock{}
 }
 
 func (om *ObjectCacheMock) DnsCache() DnsCache {

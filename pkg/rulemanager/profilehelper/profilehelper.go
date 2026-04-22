@@ -9,6 +9,25 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// GetContainerProfile returns the ContainerProfile for a containerID plus its
+// SyncChecksumMetadataKey annotation. This is the forward API; legacy callers
+// go through the shims below until step 6c deletes them.
+func GetContainerProfile(objectCache objectcache.ObjectCache, containerID string) (*v1beta1.ContainerProfile, string, error) {
+	cpc := objectCache.ContainerProfileCache()
+	if cpc == nil {
+		return nil, "", errors.New("no container profile cache available")
+	}
+	cp := cpc.GetContainerProfile(containerID)
+	if cp == nil {
+		return nil, "", errors.New("no profile available")
+	}
+	return cp, cp.Annotations[helpers.SyncChecksumMetadataKey], nil
+}
+
+// GetApplicationProfile returns the legacy ApplicationProfile for compatibility
+// with callers that have not yet moved to GetContainerProfile.
+//
+// Deprecated: removed in step 6c. Prefer GetContainerProfile.
 func GetApplicationProfile(containerID string, objectCache objectcache.ObjectCache) (*v1beta1.ApplicationProfile, error) {
 	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(containerID)
 	if ap == nil {
@@ -17,6 +36,10 @@ func GetApplicationProfile(containerID string, objectCache objectcache.ObjectCac
 	return ap, nil
 }
 
+// GetNetworkNeighborhood returns the legacy NetworkNeighborhood for
+// compatibility with callers that have not yet moved to GetContainerProfile.
+//
+// Deprecated: removed in step 6c. Prefer GetContainerProfile.
 func GetNetworkNeighborhood(containerID string, objectCache objectcache.ObjectCache) (*v1beta1.NetworkNeighborhood, error) {
 	nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(containerID)
 	if nn == nil {
@@ -92,40 +115,61 @@ func GetPodSpec(objectCache objectcache.ObjectCache, containerID string) (*corev
 	return podSpec, nil
 }
 
+// GetContainerApplicationProfile synthesizes a per-container
+// ApplicationProfileContainer from the unified ContainerProfile for this
+// container. Consensus delta #2: this is a CP→legacy-shape field mapping, NOT
+// an alias — callers get the same fields they used to read off the legacy AP.
+//
+// Deprecated: removed in step 6c. Prefer GetContainerProfile.
 func GetContainerApplicationProfile(objectCache objectcache.ObjectCache, containerID string) (v1beta1.ApplicationProfileContainer, string, error) {
-	ap, err := GetApplicationProfile(containerID, objectCache)
-	if err != nil {
-		return v1beta1.ApplicationProfileContainer{}, "", err
+	cpc := objectCache.ContainerProfileCache()
+	if cpc == nil {
+		return v1beta1.ApplicationProfileContainer{}, "", errors.New("no container profile cache available")
 	}
-
+	cp := cpc.GetContainerProfile(containerID)
+	if cp == nil {
+		return v1beta1.ApplicationProfileContainer{}, "", errors.New("no profile available")
+	}
 	containerName := GetContainerName(objectCache, containerID)
 	if containerName == "" {
 		return v1beta1.ApplicationProfileContainer{}, "", errors.New("container name not found")
 	}
-
-	container, err := GetContainerFromApplicationProfile(ap, containerName)
-	if err != nil {
-		return v1beta1.ApplicationProfileContainer{}, "", err
-	}
-
-	return container, ap.Annotations[helpers.SyncChecksumMetadataKey], nil
+	return v1beta1.ApplicationProfileContainer{
+		Name:                 containerName,
+		Capabilities:         cp.Spec.Capabilities,
+		Execs:                cp.Spec.Execs,
+		Opens:                cp.Spec.Opens,
+		Syscalls:             cp.Spec.Syscalls,
+		SeccompProfile:       cp.Spec.SeccompProfile,
+		Endpoints:            cp.Spec.Endpoints,
+		ImageID:              cp.Spec.ImageID,
+		ImageTag:             cp.Spec.ImageTag,
+		PolicyByRuleId:       cp.Spec.PolicyByRuleId,
+		IdentifiedCallStacks: cp.Spec.IdentifiedCallStacks,
+	}, cp.Annotations[helpers.SyncChecksumMetadataKey], nil
 }
 
+// GetContainerNetworkNeighborhood synthesizes a per-container
+// NetworkNeighborhoodContainer from the unified ContainerProfile for this
+// container. Consensus delta #2: CP→legacy-shape field mapping.
+//
+// Deprecated: removed in step 6c. Prefer GetContainerProfile.
 func GetContainerNetworkNeighborhood(objectCache objectcache.ObjectCache, containerID string) (v1beta1.NetworkNeighborhoodContainer, error) {
-	nn, err := GetNetworkNeighborhood(containerID, objectCache)
-	if err != nil {
-		return v1beta1.NetworkNeighborhoodContainer{}, err
+	cpc := objectCache.ContainerProfileCache()
+	if cpc == nil {
+		return v1beta1.NetworkNeighborhoodContainer{}, errors.New("no container profile cache available")
 	}
-
+	cp := cpc.GetContainerProfile(containerID)
+	if cp == nil {
+		return v1beta1.NetworkNeighborhoodContainer{}, errors.New("no profile available")
+	}
 	containerName := GetContainerName(objectCache, containerID)
 	if containerName == "" {
 		return v1beta1.NetworkNeighborhoodContainer{}, errors.New("container name not found")
 	}
-
-	container, err := GetContainerFromNetworkNeighborhood(nn, containerName)
-	if err != nil {
-		return v1beta1.NetworkNeighborhoodContainer{}, err
-	}
-
-	return container, nil
+	return v1beta1.NetworkNeighborhoodContainer{
+		Name:    containerName,
+		Ingress: cp.Spec.Ingress,
+		Egress:  cp.Spec.Egress,
+	}, nil
 }

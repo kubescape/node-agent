@@ -20,6 +20,7 @@ type RuleObjectCacheMock struct {
 	podSpec                 *corev1.PodSpec
 	podStatus               *corev1.PodStatus
 	nn                      *v1beta1.NetworkNeighborhood
+	cp                      *v1beta1.ContainerProfile
 	dnsCache                map[string]string
 	ContainerIDToSharedData *maps.SafeMap[string, *objectcache.WatchedContainerData]
 }
@@ -37,6 +38,24 @@ func (r *RuleObjectCacheMock) SetApplicationProfile(profile *v1beta1.Application
 }
 
 func (r *RuleObjectCacheMock) ApplicationProfileCache() objectcache.ApplicationProfileCache {
+	return r
+}
+
+func (r *RuleObjectCacheMock) GetContainerProfile(string) *v1beta1.ContainerProfile {
+	return r.cp
+}
+
+func (r *RuleObjectCacheMock) SetContainerProfile(cp *v1beta1.ContainerProfile) {
+	r.cp = cp
+}
+
+func (r *RuleObjectCacheMock) GetContainerProfileState(_ string) *objectcache.ProfileState {
+	return nil
+}
+
+func (r *RuleObjectCacheMock) Start(_ context.Context) {}
+
+func (r *RuleObjectCacheMock) ContainerProfileCache() objectcache.ContainerProfileCache {
 	return r
 }
 
