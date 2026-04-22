@@ -2,6 +2,8 @@
 package objectcache
 
 import (
+	"context"
+
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -12,6 +14,7 @@ type ContainerProfileCache interface {
 	GetContainerProfileState(containerID string) *ProfileState
 	GetCallStackSearchTree(containerID string) *callstackcache.CallStackSearchTree
 	ContainerCallback(notif containercollection.PubSubEvent)
+	Start(ctx context.Context)
 }
 
 var _ ContainerProfileCache = (*ContainerProfileCacheMock)(nil)
@@ -31,4 +34,7 @@ func (cp *ContainerProfileCacheMock) GetCallStackSearchTree(_ string) *callstack
 }
 
 func (cp *ContainerProfileCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {
+}
+
+func (cp *ContainerProfileCacheMock) Start(_ context.Context) {
 }
