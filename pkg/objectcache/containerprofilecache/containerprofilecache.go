@@ -61,6 +61,11 @@ type CachedContainerProfile struct {
 	UserAPRef *namespacedName
 	UserNNRef *namespacedName
 
+	// CPName is the storage name of the ContainerProfile. Populated at
+	// addContainer time so the reconciler can re-fetch without re-querying
+	// shared data (which may have been evicted from K8sObjectCache by then).
+	CPName string
+
 	Shared   bool   // true iff Profile is the shared storage-fetched pointer (read-only)
 	RV       string // ContainerProfile resourceVersion at last load
 	UserAPRV string // user-AP resourceVersion at last projection, "" if no overlay
@@ -105,11 +110,12 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 	}
 }
 
-// Start begins the periodic reconciler. The actual reconcile loop is wired in
-// step 5 of the migration; for now Start is a no-op placeholder so callers
-// (main.go) can wire the cache today without blocking on the reconciler.
-func (c *ContainerProfileCacheImpl) Start(_ context.Context) {
-	// reconciler wired in step 5
+// Start begins the periodic reconciler goroutine. The loop evicts entries
+// whose container is no longer Running and refreshes live entries' base CP +
+// user AP/NN overlays. See reconciler.go for the tick loop and RPC-cost
+// characterization.
+func (c *ContainerProfileCacheImpl) Start(ctx context.Context) {
+	go c.tickLoop(ctx)
 }
 
 // ContainerCallback handles container lifecycle events (add/remove). Mirrors
@@ -269,6 +275,7 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 		PodName:       container.K8s.PodName,
 		Namespace:     container.K8s.Namespace,
 		WorkloadID:    sharedData.Wlid + "/" + sharedData.InstanceID.GetTemplateHash(),
+		CPName:        cp.Name,
 		RV:            cp.ResourceVersion,
 	}
 	if pod != nil {
