@@ -162,8 +162,11 @@ func newEntry(cp *v1beta1.ContainerProfile, containerName, podName, namespace, p
 	}
 }
 
-// TestReconcilerEvictsWhenPodMissing — entry whose pod returns nil is evicted.
-func TestReconcilerEvictsWhenPodMissing(t *testing.T) {
+// TestReconcilerKeepsEntryWhenPodMissing — entry whose pod returns nil is
+// retained (not evicted). The k8s pod cache routinely lags container events
+// on busy nodes; evicting on "pod not found" churned every entry per tick.
+// Cleanup for terminated containers flows through deleteContainer.
+func TestReconcilerKeepsEntryWhenPodMissing(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache() // GetPod returns nil for everything
@@ -175,8 +178,59 @@ func TestReconcilerEvictsWhenPodMissing(t *testing.T) {
 
 	c.reconcileOnce(context.Background())
 
-	assert.Nil(t, c.GetContainerProfile(id), "entry must be evicted when pod is missing")
+	assert.NotNil(t, c.GetContainerProfile(id), "entry must be retained when pod is missing from cache")
+	assert.Equal(t, 0, metrics.eviction("pod_stopped"), "no eviction when pod is absent")
+}
+
+// TestReconcilerEvictsTerminatedContainer — entry whose container has
+// clearly transitioned to Terminated state IS evicted.
+func TestReconcilerEvictsTerminatedContainer(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	client := &countingProfileClient{cp: cp}
+	k8s := newControllableK8sCache()
+	id := "terminated123"
+	k8s.setPod("default", "nginx-abc", &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "nginx-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:        "nginx",
+			ContainerID: "containerd://" + id,
+			State:       corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+		}}},
+	})
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, k8s, metrics)
+	c.entries.Set(id, newEntry(cp, "nginx", "nginx-abc", "default", "uid-1"))
+
+	c.reconcileOnce(context.Background())
+
+	assert.Nil(t, c.GetContainerProfile(id), "terminated container entry must be evicted")
 	assert.Equal(t, 1, metrics.eviction("pod_stopped"), "should report one eviction")
+}
+
+// TestReconcilerKeepsWaitingContainer — entry whose container is in Waiting
+// state (e.g. newly-started or pre-running init container with empty ID)
+// must NOT be evicted.
+func TestReconcilerKeepsWaitingContainer(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	client := &countingProfileClient{cp: cp}
+	k8s := newControllableK8sCache()
+	id := "waitingabc"
+	k8s.setPod("default", "nginx-abc", &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "nginx-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:        "nginx",
+			ContainerID: "containerd://" + id,
+			State:       corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+		}}},
+	})
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, k8s, metrics)
+	c.entries.Set(id, newEntry(cp, "nginx", "nginx-abc", "default", "uid-1"))
+
+	c.reconcileOnce(context.Background())
+
+	assert.NotNil(t, c.GetContainerProfile(id), "waiting container entry must be retained")
+	assert.Equal(t, 0, metrics.eviction("pod_stopped"), "no eviction for Waiting state")
 }
 
 // TestReconcilerKeepsRunningContainer — entry is kept when pod has a Running

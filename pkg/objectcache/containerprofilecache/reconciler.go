@@ -89,10 +89,19 @@ func (c *ContainerProfileCacheImpl) reconcileOnce(ctx context.Context) {
 		}
 		pod := c.k8sObjectCache.GetPod(e.Namespace, e.PodName)
 		if pod == nil {
-			toEvict = append(toEvict, id)
+			// Pod not yet in k8s cache (or briefly absent during watch
+			// resync). Do NOT evict — the pod cache routinely lags the
+			// ContainerCallback Add events by tens of seconds on busy nodes,
+			// and evicting here would churn every entry every tick until the
+			// cache catches up. Cleanup for terminated containers flows
+			// through deleteContainer on EventTypeRemoveContainer.
 			return true
 		}
-		if !isContainerRunning(pod, e, id) { // delta #1: three-arg signature
+		// Only evict when the pod IS in cache AND the container has clearly
+		// exited (Terminated state). "Not yet Running" (Waiting state) is
+		// NOT a reason to evict — init containers and pre-running containers
+		// legitimately pass through Waiting before transitioning to Running.
+		if isContainerTerminated(pod, e, id) {
 			toEvict = append(toEvict, id)
 		}
 		return true
@@ -128,6 +137,36 @@ func (c *ContainerProfileCacheImpl) reconcileOnce(ctx context.Context) {
 // status (kubelet hasn't published it yet). In that case we fall back to
 // matching on (Name, PodUID) so we don't prematurely evict the entry the
 // instant it's populated.
+// isContainerTerminated reports whether the container identified by `id` or
+// by (e.ContainerName, e.PodUID) has a Terminated state in the pod's
+// container/initContainer/ephemeralContainer statuses. This is stricter than
+// "not Running": a container in Waiting state is NOT considered terminated.
+// Used by reconcileOnce as the eviction signal.
+func isContainerTerminated(pod *corev1.Pod, e *CachedContainerProfile, id string) bool {
+	statuses := make([]corev1.ContainerStatus, 0,
+		len(pod.Status.ContainerStatuses)+
+			len(pod.Status.InitContainerStatuses)+
+			len(pod.Status.EphemeralContainerStatuses))
+	statuses = append(statuses, pod.Status.ContainerStatuses...)
+	statuses = append(statuses, pod.Status.InitContainerStatuses...)
+	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
+	for _, s := range statuses {
+		if s.ContainerID == "" {
+			if s.Name == e.ContainerName && string(pod.UID) == e.PodUID {
+				return s.State.Terminated != nil
+			}
+			continue
+		}
+		if utils.TrimRuntimePrefix(s.ContainerID) == id {
+			return s.State.Terminated != nil
+		}
+	}
+	// Container not found in any status list at all: this happens when the
+	// pod has been fully restarted and the old container's status was
+	// reaped. Treat as terminated.
+	return true
+}
+
 func isContainerRunning(pod *corev1.Pod, e *CachedContainerProfile, id string) bool {
 	statuses := make([]corev1.ContainerStatus, 0,
 		len(pod.Status.ContainerStatuses)+
