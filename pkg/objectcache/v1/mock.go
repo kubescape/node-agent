@@ -35,13 +35,54 @@ func (r *RuleObjectCacheMock) GetCallStackSearchTree(string) *callstackcache.Cal
 
 func (r *RuleObjectCacheMock) SetApplicationProfile(profile *v1beta1.ApplicationProfile) {
 	r.profile = profile
+	// Also project AP fields into the unified ContainerProfile so tests that
+	// exercise GetContainerProfile (via profilehelper) observe the same data.
+	// Takes the first available container across Containers/InitContainers/
+	// EphemeralContainers.
+	if profile == nil {
+		return
+	}
+	var c *v1beta1.ApplicationProfileContainer
+	switch {
+	case len(profile.Spec.Containers) > 0:
+		c = &profile.Spec.Containers[0]
+	case len(profile.Spec.InitContainers) > 0:
+		c = &profile.Spec.InitContainers[0]
+	case len(profile.Spec.EphemeralContainers) > 0:
+		c = &profile.Spec.EphemeralContainers[0]
+	}
+	if c == nil {
+		return
+	}
+	if r.cp == nil {
+		r.cp = &v1beta1.ContainerProfile{}
+	}
+	r.cp.Spec.Architectures = profile.Spec.Architectures
+	r.cp.Spec.Capabilities = c.Capabilities
+	r.cp.Spec.Execs = c.Execs
+	r.cp.Spec.Opens = c.Opens
+	r.cp.Spec.Syscalls = c.Syscalls
+	r.cp.Spec.SeccompProfile = c.SeccompProfile
+	r.cp.Spec.Endpoints = c.Endpoints
+	r.cp.Spec.ImageID = c.ImageID
+	r.cp.Spec.ImageTag = c.ImageTag
+	r.cp.Spec.PolicyByRuleId = c.PolicyByRuleId
+	r.cp.Spec.IdentifiedCallStacks = c.IdentifiedCallStacks
 }
 
 func (r *RuleObjectCacheMock) ApplicationProfileCache() objectcache.ApplicationProfileCache {
 	return r
 }
 
-func (r *RuleObjectCacheMock) GetContainerProfile(string) *v1beta1.ContainerProfile {
+func (r *RuleObjectCacheMock) GetContainerProfile(containerID string) *v1beta1.ContainerProfile {
+	// Mirror the legacy helper behaviour: if the test did not register shared
+	// data for this container ID, there is no profile to return. This keeps
+	// "invalid container ID" tests working after the shim migration.
+	if r.ContainerIDToSharedData != nil && containerID != "" {
+		if _, ok := r.ContainerIDToSharedData.Load(containerID); !ok {
+			return nil
+		}
+	}
 	return r.cp
 }
 
@@ -116,6 +157,31 @@ func (r *RuleObjectCacheMock) GetNetworkNeighborhood(string) *v1beta1.NetworkNei
 
 func (r *RuleObjectCacheMock) SetNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood) {
 	r.nn = nn
+	// Also project NN fields into the unified ContainerProfile so tests that
+	// exercise GetContainerProfile (via profilehelper) observe the same data.
+	// Takes the first available container across Containers/InitContainers/
+	// EphemeralContainers.
+	if nn == nil {
+		return
+	}
+	var c *v1beta1.NetworkNeighborhoodContainer
+	switch {
+	case len(nn.Spec.Containers) > 0:
+		c = &nn.Spec.Containers[0]
+	case len(nn.Spec.InitContainers) > 0:
+		c = &nn.Spec.InitContainers[0]
+	case len(nn.Spec.EphemeralContainers) > 0:
+		c = &nn.Spec.EphemeralContainers[0]
+	}
+	if c == nil {
+		return
+	}
+	if r.cp == nil {
+		r.cp = &v1beta1.ContainerProfile{}
+	}
+	r.cp.Spec.LabelSelector = nn.Spec.LabelSelector
+	r.cp.Spec.Ingress = c.Ingress
+	r.cp.Spec.Egress = c.Egress
 }
 
 func (r *RuleObjectCacheMock) DnsCache() objectcache.DnsCache {

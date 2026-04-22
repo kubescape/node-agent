@@ -24,12 +24,12 @@ func (l *nnLibrary) wasAddressInEgress(containerID, address ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(address)
 	}
 
-	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, egress := range container.Egress {
+	for _, egress := range cp.Spec.Egress {
 		if egress.IPAddress == addressStr {
 			return types.Bool(true)
 		}
@@ -52,12 +52,12 @@ func (l *nnLibrary) wasAddressInIngress(containerID, address ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(address)
 	}
 
-	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ingress := range container.Ingress {
+	for _, ingress := range cp.Spec.Ingress {
 		if ingress.IPAddress == addressStr {
 			return types.Bool(true)
 		}
@@ -80,12 +80,12 @@ func (l *nnLibrary) isDomainInEgress(containerID, domain ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(domain)
 	}
 
-	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, egress := range container.Egress {
+	for _, egress := range cp.Spec.Egress {
 		if slices.Contains(egress.DNSNames, domainStr) || egress.DNS == domainStr {
 			return types.Bool(true)
 		}
@@ -108,12 +108,12 @@ func (l *nnLibrary) isDomainInIngress(containerID, domain ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(domain)
 	}
 
-	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ingress := range container.Ingress {
+	for _, ingress := range cp.Spec.Ingress {
 		if slices.Contains(ingress.DNSNames, domainStr) {
 			return types.Bool(true)
 		}
@@ -144,12 +144,12 @@ func (l *nnLibrary) wasAddressPortProtocolInEgress(containerID, address, port, p
 		return types.MaybeNoSuchOverloadErr(protocol)
 	}
 
-	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, egress := range container.Egress {
+	for _, egress := range cp.Spec.Egress {
 		if egress.IPAddress == addressStr {
 			for _, portInfo := range egress.Ports {
 				if portInfo.Protocol == v1beta1.Protocol(protocolStr) && portInfo.Port != nil && *portInfo.Port == int32(portInt) {
@@ -184,12 +184,12 @@ func (l *nnLibrary) wasAddressPortProtocolInIngress(containerID, address, port, 
 		return types.MaybeNoSuchOverloadErr(protocol)
 	}
 
-	container, err := profilehelper.GetContainerNetworkNeighborhood(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ingress := range container.Ingress {
+	for _, ingress := range cp.Spec.Ingress {
 		if ingress.IPAddress == addressStr {
 			for _, portInfo := range ingress.Ports {
 				if portInfo.Protocol == v1beta1.Protocol(protocolStr) && portInfo.Port != nil && *portInfo.Port == int32(portInt) {

@@ -23,12 +23,12 @@ func (l *apLibrary) wasSyscallUsed(containerID, syscallName ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(syscallName)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	if slices.Contains(container.Syscalls, syscallNameStr) {
+	if slices.Contains(cp.Spec.Syscalls, syscallNameStr) {
 		return types.Bool(true)
 	}
 

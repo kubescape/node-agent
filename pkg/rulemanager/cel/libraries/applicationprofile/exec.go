@@ -32,14 +32,14 @@ func (l *apLibrary) wasExecuted(containerID, path ref.Val) ref.Val {
 		return types.Bool(true)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		// Return a special error that will NOT be cached, allowing retry when profile becomes available.
 		// The caller should convert this to false after the cache layer.
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, exec := range container.Execs {
+	for _, exec := range cp.Spec.Execs {
 		if exec.Path == pathStr {
 			return types.Bool(true)
 		}
@@ -77,14 +77,14 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.Bool(true)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		// Return a special error that will NOT be cached, allowing retry when profile becomes available.
 		// The caller should convert this to false after the cache layer.
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, exec := range container.Execs {
+	for _, exec := range cp.Spec.Execs {
 		if exec.Path == pathStr {
 			if slices.Compare(exec.Args, celArgs) == 0 {
 				return types.Bool(true)
