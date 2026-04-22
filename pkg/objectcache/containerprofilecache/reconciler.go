@@ -36,6 +36,8 @@ func (c *ContainerProfileCacheImpl) tickLoop(ctx context.Context) {
 	if c.reconcileEvery == 0 {
 		c.reconcileEvery = defaultReconcileInterval
 	}
+	logger.L().Info("ContainerProfileCache reconciler started",
+		helpers.String("interval", c.reconcileEvery.String()))
 	ticker := time.NewTicker(c.reconcileEvery)
 	defer ticker.Stop()
 	for {
@@ -45,8 +47,17 @@ func (c *ContainerProfileCacheImpl) tickLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			start := time.Now()
+			entriesBefore := c.entries.Len()
+			pendingBefore := c.pending.Len()
 			c.reconcileOnce(ctx)
 			c.retryPendingEntries(ctx)
+			if pendingBefore > 0 || entriesBefore != c.entries.Len() {
+				logger.L().Debug("ContainerProfileCache reconciler tick",
+					helpers.Int("entries_before", entriesBefore),
+					helpers.Int("entries_after", c.entries.Len()),
+					helpers.Int("pending_before", pendingBefore),
+					helpers.Int("pending_after", c.pending.Len()))
+			}
 			c.metricsManager.ReportContainerProfileReconcilerDuration(time.Since(start))
 			if c.refreshInProgress.CompareAndSwap(false, true) {
 				go func() {
