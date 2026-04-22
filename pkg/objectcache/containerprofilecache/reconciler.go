@@ -290,33 +290,61 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	var userManagedNN *v1beta1.NetworkNeighborhood
 	if e.WorkloadName != "" {
 		ugAPName := helpersv1.UserApplicationProfilePrefix + e.WorkloadName
+		var userManagedAPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			var aerr error
-			userManagedAP, aerr = c.storageClient.GetApplicationProfile(rctx, ns, ugAPName)
-			return aerr
+			userManagedAP, userManagedAPErr = c.storageClient.GetApplicationProfile(rctx, ns, ugAPName)
+			return userManagedAPErr
 		})
+		if userManagedAPErr != nil && e.UserManagedAPRV != "" {
+			logger.L().Debug("refreshOneEntry: user-managed AP fetch failed; keeping cached entry",
+				helpers.String("containerID", id),
+				helpers.String("name", ugAPName),
+				helpers.Error(userManagedAPErr))
+			return
+		}
 		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + e.WorkloadName
+		var userManagedNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			var nerr error
-			userManagedNN, nerr = c.storageClient.GetNetworkNeighborhood(rctx, ns, ugNNName)
-			return nerr
+			userManagedNN, userManagedNNErr = c.storageClient.GetNetworkNeighborhood(rctx, ns, ugNNName)
+			return userManagedNNErr
 		})
+		if userManagedNNErr != nil && e.UserManagedNNRV != "" {
+			logger.L().Debug("refreshOneEntry: user-managed NN fetch failed; keeping cached entry",
+				helpers.String("containerID", id),
+				helpers.String("name", ugNNName),
+				helpers.Error(userManagedNNErr))
+			return
+		}
 	}
 	var userAP *v1beta1.ApplicationProfile
 	var userNN *v1beta1.NetworkNeighborhood
 	if e.UserAPRef != nil {
+		var userAPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			var aerr error
-			userAP, aerr = c.storageClient.GetApplicationProfile(rctx, e.UserAPRef.Namespace, e.UserAPRef.Name)
-			return aerr
+			userAP, userAPErr = c.storageClient.GetApplicationProfile(rctx, e.UserAPRef.Namespace, e.UserAPRef.Name)
+			return userAPErr
 		})
+		if userAPErr != nil && e.UserAPRV != "" {
+			logger.L().Debug("refreshOneEntry: user-defined AP fetch failed; keeping cached entry",
+				helpers.String("containerID", id),
+				helpers.String("name", e.UserAPRef.Name),
+				helpers.Error(userAPErr))
+			return
+		}
 	}
 	if e.UserNNRef != nil {
+		var userNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			var nerr error
-			userNN, nerr = c.storageClient.GetNetworkNeighborhood(rctx, e.UserNNRef.Namespace, e.UserNNRef.Name)
-			return nerr
+			userNN, userNNErr = c.storageClient.GetNetworkNeighborhood(rctx, e.UserNNRef.Namespace, e.UserNNRef.Name)
+			return userNNErr
 		})
+		if userNNErr != nil && e.UserNNRV != "" {
+			logger.L().Debug("refreshOneEntry: user-defined NN fetch failed; keeping cached entry",
+				helpers.String("containerID", id),
+				helpers.String("name", e.UserNNRef.Name),
+				helpers.Error(userNNErr))
+			return
+		}
 	}
 
 	// Fast-skip when nothing changed. We match "absent" (nil) with empty RV:

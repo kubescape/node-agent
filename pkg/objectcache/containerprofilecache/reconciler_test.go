@@ -555,6 +555,142 @@ func TestRefreshNoEntryWhenCPGetFails(t *testing.T) {
 	assert.Same(t, entry, stored, "entry pointer must not change when CP fetch fails")
 }
 
+// TestRefreshPreservesEntryOnTransientOverlayError — overlay fetch errors must
+// not strip overlay data from the cache. If a user-managed or user-defined
+// AP/NN GET returns an error while the entry already has a non-empty cached RV
+// for that overlay, refreshOneEntry must keep the old entry unchanged (same
+// pointer) rather than rebuilding without the overlay and clearing its RV.
+// Regression test for the refreshRPC timeout → silent nil → spurious rebuild path.
+func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "100"},
+		Spec:       v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
+	}
+
+	type overlayFields struct {
+		workloadName    string
+		userManagedAPRV string
+		userManagedNNRV string
+		userAPRef       *namespacedName
+		userAPRV        string
+		userNNRef       *namespacedName
+		userNNRV        string
+	}
+	tests := []struct {
+		name    string
+		apErr   bool
+		nnErr   bool
+		overlay overlayFields
+	}{
+		{
+			name:  "user-managed AP timeout preserves entry",
+			apErr: true,
+			overlay: overlayFields{
+				workloadName:    "nginx",
+				userManagedAPRV: "9",
+			},
+		},
+		{
+			name:  "user-managed NN timeout preserves entry",
+			nnErr: true,
+			overlay: overlayFields{
+				workloadName:    "nginx",
+				userManagedNNRV: "7",
+			},
+		},
+		{
+			name:  "user-defined AP timeout preserves entry",
+			apErr: true,
+			overlay: overlayFields{
+				userAPRef: &namespacedName{Namespace: "default", Name: "override"},
+				userAPRV:  "50",
+			},
+		},
+		{
+			name:  "user-defined NN timeout preserves entry",
+			nnErr: true,
+			overlay: overlayFields{
+				userNNRef: &namespacedName{Namespace: "default", Name: "override"},
+				userNNRV:  "60",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			apErr := error(nil)
+			if tc.apErr {
+				apErr = assertErr{}
+			}
+			nnErr := error(nil)
+			if tc.nnErr {
+				nnErr = assertErr{}
+			}
+			client := &overlayErrorClient{cp: cp, apErr: apErr, nnErr: nnErr}
+			k8s := newControllableK8sCache()
+			c := newReconcilerCache(t, client, k8s, nil)
+
+			id := "c1"
+			entry := &CachedContainerProfile{
+				Profile:         cp,
+				State:           &objectcache.ProfileState{Name: cp.Name},
+				ContainerName:   "nginx",
+				PodName:         "nginx-abc",
+				Namespace:       "default",
+				PodUID:          "uid-1",
+				CPName:          "cp",
+				RV:              "100",
+				WorkloadName:    tc.overlay.workloadName,
+				UserManagedAPRV: tc.overlay.userManagedAPRV,
+				UserManagedNNRV: tc.overlay.userManagedNNRV,
+				UserAPRef:       tc.overlay.userAPRef,
+				UserAPRV:        tc.overlay.userAPRV,
+				UserNNRef:       tc.overlay.userNNRef,
+				UserNNRV:        tc.overlay.userNNRV,
+				Shared:          false,
+			}
+			c.entries.Set(id, entry)
+
+			c.refreshAllEntries(context.Background())
+
+			stored, ok := c.entries.Load(id)
+			require.True(t, ok, "overlay error must not delete the entry")
+			assert.Same(t, entry, stored, "entry pointer must not change when overlay fetch fails transiently")
+			// Overlay RVs must be unchanged (not cleared to "").
+			assert.Equal(t, tc.overlay.userManagedAPRV, stored.UserManagedAPRV)
+			assert.Equal(t, tc.overlay.userManagedNNRV, stored.UserManagedNNRV)
+			assert.Equal(t, tc.overlay.userAPRV, stored.UserAPRV)
+			assert.Equal(t, tc.overlay.userNNRV, stored.UserNNRV)
+		})
+	}
+}
+
+// overlayErrorClient returns a valid CP but fails AP/NN calls with the
+// configured errors. Used to test overlay error-preservation logic.
+type overlayErrorClient struct {
+	cp    *v1beta1.ContainerProfile
+	apErr error
+	nnErr error
+}
+
+var _ storage.ProfileClient = (*overlayErrorClient)(nil)
+
+func (o *overlayErrorClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
+	return o.cp, nil
+}
+func (o *overlayErrorClient) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
+	return nil, o.apErr
+}
+func (o *overlayErrorClient) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
+	return nil, o.nnErr
+}
+func (o *overlayErrorClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
+	return &v1beta1.ApplicationProfileList{}, nil
+}
+func (o *overlayErrorClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
+	return &v1beta1.NetworkNeighborhoodList{}, nil
+}
+
 // --- helpers ---
 
 // itoa is a local int-to-string so tests don't pull in strconv just for one
