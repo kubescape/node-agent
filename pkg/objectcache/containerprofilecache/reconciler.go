@@ -17,7 +17,6 @@ package containerprofilecache
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -80,7 +79,7 @@ func (c *ContainerProfileCacheImpl) reconcileOnce(ctx context.Context) {
 		c.containerLocks.WithLock(id, func() {
 			c.entries.Delete(id)
 		})
-		c.containerLocks.ReleaseLock(id)
+		// See deleteContainer comment on why we don't ReleaseLock here.
 		c.metricsManager.ReportContainerProfileReconcilerEviction("pod_stopped")
 	}
 	c.metricsManager.SetContainerProfileCacheEntries("total", float64(c.entries.Len()))
@@ -237,29 +236,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntry(
 		projected, warnings = projectUserProfiles(cp, userAP, userNN, pod, prev.ContainerName)
 	}
 
-	// Emit full-load + partial-warning + deprecation WARN metrics consistently
-	// with buildEntry's overlay path.
-	partialByKind := map[string]struct{}{}
-	for _, w := range warnings {
-		partialByKind[w.Kind] = struct{}{}
-		c.metricsManager.ReportContainerProfileLegacyLoad(w.Kind, completenessPartial)
-		c.reportDeprecationWarn(w.Kind, w.Namespace, w.Name, w.ResourceVersion,
-			fmt.Sprintf("pod has containers missing from user CRD: %v", w.MissingContainers))
-	}
-	if userAP != nil {
-		if _, partial := partialByKind[kindApplication]; !partial {
-			c.metricsManager.ReportContainerProfileLegacyLoad(kindApplication, completenessFull)
-		}
-		c.reportDeprecationWarn(kindApplication, userAP.Namespace, userAP.Name, userAP.ResourceVersion,
-			"user-authored ApplicationProfile merged into ContainerProfile")
-	}
-	if userNN != nil {
-		if _, partial := partialByKind[kindNetwork]; !partial {
-			c.metricsManager.ReportContainerProfileLegacyLoad(kindNetwork, completenessFull)
-		}
-		c.reportDeprecationWarn(kindNetwork, userNN.Namespace, userNN.Name, userNN.ResourceVersion,
-			"user-authored NetworkNeighborhood merged into ContainerProfile")
-	}
+	c.emitOverlayMetrics(userAP, userNN, warnings)
 
 	// Rebuild the call-stack search tree from the projected profile.
 	tree := callstackcache.NewCallStackSearchTree()

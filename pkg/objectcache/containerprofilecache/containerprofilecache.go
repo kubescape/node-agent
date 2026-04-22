@@ -302,28 +302,7 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 			entry.UserNNRV = userNN.ResourceVersion
 		}
 
-		// Emit full-load metrics + partial-warnings + deprecation WARNs.
-		partialByKind := map[string]struct{}{}
-		for _, w := range warnings {
-			partialByKind[w.Kind] = struct{}{}
-			c.metricsManager.ReportContainerProfileLegacyLoad(w.Kind, completenessPartial)
-			c.reportDeprecationWarn(w.Kind, w.Namespace, w.Name, w.ResourceVersion,
-				fmt.Sprintf("pod has containers missing from user CRD: %v", w.MissingContainers))
-		}
-		if userAP != nil {
-			if _, partial := partialByKind[kindApplication]; !partial {
-				c.metricsManager.ReportContainerProfileLegacyLoad(kindApplication, completenessFull)
-			}
-			c.reportDeprecationWarn(kindApplication, userAP.Namespace, userAP.Name, userAP.ResourceVersion,
-				"user-authored ApplicationProfile merged into ContainerProfile")
-		}
-		if userNN != nil {
-			if _, partial := partialByKind[kindNetwork]; !partial {
-				c.metricsManager.ReportContainerProfileLegacyLoad(kindNetwork, completenessFull)
-			}
-			c.reportDeprecationWarn(kindNetwork, userNN.Namespace, userNN.Name, userNN.ResourceVersion,
-				"user-authored NetworkNeighborhood merged into ContainerProfile")
-		}
+		c.emitOverlayMetrics(userAP, userNN, warnings)
 	}
 
 	// Build call-stack search tree from entry.Profile.Spec.IdentifiedCallStacks.
@@ -346,13 +325,16 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 	return entry
 }
 
-// deleteContainer removes a container entry and cleans up its per-container
-// lock. Critic #2: lock-release happens after the WithLock critical section.
+// deleteContainer removes a container entry. The per-container lock entry is
+// intentionally NOT released: Phase-4 review flagged a race where a concurrent
+// addContainer can hold a reference to the old mutex while a subsequent
+// GetLock creates a new one, breaking mutual exclusion. Memory cost is bounded
+// by the node's container-ID churn (live containers + recently-deleted), so
+// keeping stale lock entries is cheaper than getting the atomic-release right.
 func (c *ContainerProfileCacheImpl) deleteContainer(id string) {
 	c.containerLocks.WithLock(id, func() {
 		c.entries.Delete(id)
 	})
-	c.containerLocks.ReleaseLock(id)
 	c.metricsManager.SetContainerProfileCacheEntries("container", float64(c.entries.Len()))
 }
 

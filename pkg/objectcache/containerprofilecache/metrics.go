@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 // Kind labels for ReportContainerProfileLegacyLoad and related metrics.
@@ -31,4 +32,35 @@ func (c *ContainerProfileCacheImpl) reportDeprecationWarn(kind, namespace, name,
 		helpers.String("name", name),
 		helpers.String("resourceVersion", rv),
 		helpers.String("reason", reason))
+}
+
+// emitOverlayMetrics fires the per-kind completeness metric + deprecation WARN
+// once per (kind, namespace, name, rv). Shared by addContainer's buildEntry
+// and the reconciler's rebuildEntry so the two stay in lockstep.
+func (c *ContainerProfileCacheImpl) emitOverlayMetrics(
+	userAP *v1beta1.ApplicationProfile,
+	userNN *v1beta1.NetworkNeighborhood,
+	warnings []partialProfileWarning,
+) {
+	partialByKind := map[string]struct{}{}
+	for _, w := range warnings {
+		partialByKind[w.Kind] = struct{}{}
+		c.metricsManager.ReportContainerProfileLegacyLoad(w.Kind, completenessPartial)
+		c.reportDeprecationWarn(w.Kind, w.Namespace, w.Name, w.ResourceVersion,
+			fmt.Sprintf("pod has containers missing from user CRD: %v", w.MissingContainers))
+	}
+	if userAP != nil {
+		if _, partial := partialByKind[kindApplication]; !partial {
+			c.metricsManager.ReportContainerProfileLegacyLoad(kindApplication, completenessFull)
+		}
+		c.reportDeprecationWarn(kindApplication, userAP.Namespace, userAP.Name, userAP.ResourceVersion,
+			"user-authored ApplicationProfile merged into ContainerProfile")
+	}
+	if userNN != nil {
+		if _, partial := partialByKind[kindNetwork]; !partial {
+			c.metricsManager.ReportContainerProfileLegacyLoad(kindNetwork, completenessFull)
+		}
+		c.reportDeprecationWarn(kindNetwork, userNN.Namespace, userNN.Name, userNN.ResourceVersion,
+			"user-authored NetworkNeighborhood merged into ContainerProfile")
+	}
 }

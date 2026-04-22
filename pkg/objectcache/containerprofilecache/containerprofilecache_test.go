@@ -190,7 +190,11 @@ func TestDeleteContainer_LockAndCleanup(t *testing.T) {
 
 	c.deleteContainer(id)
 	assert.Nil(t, c.GetContainerProfile(id), "entry must be gone after delete")
-	assert.False(t, c.containerLocks.HasLock(id), "lock must be released after delete")
+	// Phase-4 review fix: deleteContainer intentionally does NOT release the
+	// lock to avoid a race where a concurrent addContainer could hold a
+	// reference to a mutex that another caller re-creates after Delete.
+	// Memory cost is bounded by live+recently-deleted container IDs.
+	assert.True(t, c.containerLocks.HasLock(id), "lock is retained by design after delete")
 }
 
 // TestContainerCallback_IgnoredContainer verifies IgnoreContainer short-circuits
