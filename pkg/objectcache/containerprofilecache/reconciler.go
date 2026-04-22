@@ -95,37 +95,15 @@ func (c *ContainerProfileCacheImpl) reconcileOnce(ctx context.Context) {
 		c.metricsManager.ReportContainerProfileReconcilerEviction("pod_stopped")
 	}
 
-	// GC pending entries whose container is no longer running. Mirrors the
-	// eviction path for live entries so we don't retry forever on terminated
-	// containers that never had their CP written to storage.
-	var pendingToDrop []string
-	c.pending.Range(func(id string, p *pendingContainer) bool {
-		if ctx.Err() != nil {
-			return false
-		}
-		ns := p.container.K8s.Namespace
-		podName := p.container.K8s.PodName
-		pod := c.k8sObjectCache.GetPod(ns, podName)
-		if pod == nil {
-			pendingToDrop = append(pendingToDrop, id)
-			return true
-		}
-		// Build a minimal placeholder to reuse isContainerRunning's lookup logic.
-		placeholder := &CachedContainerProfile{
-			ContainerName: p.container.Runtime.ContainerName,
-			PodUID:        string(pod.UID),
-		}
-		if !isContainerRunning(pod, placeholder, id) {
-			pendingToDrop = append(pendingToDrop, id)
-		}
-		return true
-	})
-	for _, id := range pendingToDrop {
-		c.containerLocks.WithLock(id, func() {
-			c.pending.Delete(id)
-		})
-		c.metricsManager.ReportContainerProfileReconcilerEviction("pending_pod_stopped")
-	}
+	// NOTE: we intentionally do NOT GC pending entries based on pod state.
+	// A previous version dropped pending entries when GetPod returned nil or
+	// the container wasn't yet Running — but the k8s pod cache and container
+	// statuses lag the containerwatcher Add event by tens of seconds on busy
+	// nodes, so the GC dropped every pending entry before retries had a
+	// chance to succeed. Cleanup for terminated containers flows through
+	// deleteContainer (EventTypeRemoveContainer) which clears both entries
+	// and pending atomically. Memory growth from stuck-pending entries is
+	// bounded by the node's container churn.
 
 	c.metricsManager.SetContainerProfileCacheEntries("total", float64(c.entries.Len()))
 	c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))

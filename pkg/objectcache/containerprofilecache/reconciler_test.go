@@ -601,26 +601,33 @@ func TestRetryPendingEntries_CPCreatedAfterAdd(t *testing.T) {
 	assert.Equal(t, 2, client.getCPCalls, "retry should only re-GET once per tick")
 }
 
-// TestRetryPendingEntries_PodGoneIsGCed exercises the pending GC: a container
-// whose pod stops before the CP ever shows up must not retry forever.
-func TestRetryPendingEntries_PodGoneIsGCed(t *testing.T) {
+// TestPendingEntriesAreNotGCedBeforeRetry verifies we no longer drop pending
+// entries from reconcileOnce. The component-tests regression (CI run
+// 24781030436 on ce329196) showed the k8s pod cache and container statuses
+// lag the containerwatcher Add event by tens of seconds on busy nodes, so a
+// pod-state-driven GC dropped every pending entry before retries had a
+// chance to succeed. Cleanup now flows exclusively through deleteContainer.
+func TestPendingEntriesAreNotGCedBeforeRetry(t *testing.T) {
 	client := &fakeProfileClient{cp: nil, cpErr: assertErrNotFound("cp-missing")}
 	c, k8s := newTestCache(t, client)
-	// Cast to the concrete mock to access internal setters. K8sObjectCacheMock
-	// returns nil from GetPod by default, which is exactly what we need: the
-	// GC branch in reconcileOnce treats "no pod" as a signal that the
-	// container is gone.
 	_ = k8s
 
-	id := "container-dead-pod"
+	id := "container-pending"
 	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
 	require.Equal(t, 1, c.pending.Len())
 
-	// One reconciler pass with a nil-returning GetPod drops the pending entry.
-	c.reconcileOnce(context.Background())
+	// Several reconciler passes with nil-returning GetPod must leave the
+	// pending entry in place so retry has a chance to succeed once profile
+	// data shows up in storage.
+	for range 3 {
+		c.reconcileOnce(context.Background())
+	}
+	assert.Equal(t, 1, c.pending.Len(), "pending entry retained across reconcile ticks")
 
-	assert.Equal(t, 0, c.pending.Len(), "pending entry GC'd when pod is gone")
+	// Only deleteContainer clears pending.
+	c.deleteContainer(id)
+	assert.Equal(t, 0, c.pending.Len(), "deleteContainer clears pending")
 }
 
 // assertErrNotFound is a minimal non-nil error for GET failures in tests.
