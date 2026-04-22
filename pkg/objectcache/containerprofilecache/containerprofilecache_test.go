@@ -31,6 +31,15 @@ type fakeProfileClient struct {
 	apErr error
 	nnErr error
 
+	// userManagedAP / userManagedNN, when non-nil, are returned for any
+	// GetApplicationProfile / GetNetworkNeighborhood whose name starts with
+	// the "ug-" prefix (the convention used by legacy user-managed profiles).
+	// This lets tests exercise the user-managed merge path added for
+	// Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest
+	// without fighting the overlayOnly restriction.
+	userManagedAP *v1beta1.ApplicationProfile
+	userManagedNN *v1beta1.NetworkNeighborhood
+
 	// overlayOnly, if non-empty, restricts ap/nn returns to only the given
 	// name; other names return (nil, nil). Tests that mix workload-AP/NN
 	// with overlay-AP/NN use this to keep the fixture scoped.
@@ -42,12 +51,18 @@ type fakeProfileClient struct {
 var _ storage.ProfileClient = (*fakeProfileClient)(nil)
 
 func (f *fakeProfileClient) GetApplicationProfile(_, name string) (*v1beta1.ApplicationProfile, error) {
+	if len(name) >= 3 && name[:3] == helpersv1.UserApplicationProfilePrefix {
+		return f.userManagedAP, nil
+	}
 	if f.overlayOnly != "" && name != f.overlayOnly {
 		return nil, nil
 	}
 	return f.ap, f.apErr
 }
 func (f *fakeProfileClient) GetNetworkNeighborhood(_, name string) (*v1beta1.NetworkNeighborhood, error) {
+	if len(name) >= 3 && name[:3] == helpersv1.UserNetworkNeighborhoodPrefix {
+		return f.userManagedNN, nil
+	}
 	if f.overlayOnly != "" && name != f.overlayOnly {
 		return nil, nil
 	}

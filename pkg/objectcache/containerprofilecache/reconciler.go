@@ -4,15 +4,17 @@
 // loop. Each tick it:
 //   1. reconcileOnce: evicts cache entries whose pod is gone or whose
 //      container is no longer Running.
-//   2. refreshAllEntries (single-flight via atomic flag): re-fetches CP + any
-//      user-authored AP/NN overlay and rebuilds the projection iff any
-//      resourceVersion changed. Fast-skip when CP + userAP + userNN RVs all
-//      match what's already cached.
+//   2. refreshAllEntries (single-flight via atomic flag): re-fetches the
+//      consolidated CP, the workload-level AP+NN, the user-managed
+//      "ug-<workload>" AP+NN, and any label-referenced user AP/NN overlay,
+//      then rebuilds the projection iff any resourceVersion changed. Fast-skip
+//      when every RV matches what's already cached.
 //
-// RPC cost @ 300 containers / 30s cadence: ≤10 RPC/s steady-state (CP Get
-// only); ≤20 RPC/s when every entry has both user-AP + user-NN overlay (worst
-// case: 3 gets × 300 entries / 30s = 30 RPC/s). Overlay load is typically a
-// small fraction of pods in production deployments. (delta #7)
+// RPC cost @ 300 containers / 30s cadence steady-state: up to 7 gets per
+// entry per tick (CP + 3×AP + 3×NN). At 300 entries that's 70 RPC/s in the
+// worst case, dropping close to 0 once fast-skip catches on. Most entries
+// carry only workload-level AP+NN, so the common case is 3 RPC/tick per
+// entry = 30 RPC/s.
 package containerprofilecache
 
 import (
@@ -27,6 +29,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // tickLoop drives the reconciler. Evict runs synchronously on the tick;
@@ -51,12 +54,19 @@ func (c *ContainerProfileCacheImpl) tickLoop(ctx context.Context) {
 			pendingBefore := c.pending.Len()
 			c.reconcileOnce(ctx)
 			c.retryPendingEntries(ctx)
-			if pendingBefore > 0 || entriesBefore != c.entries.Len() {
+			// Emit the debug breadcrumb only when something actually moved:
+			// entries delta != 0 OR pending delta != 0. Keeping the log gated
+			// avoids flooding the journal with identical zero-delta ticks while
+			// still leaving the observability hook for the test-regression
+			// investigations that motivated the log.
+			entriesAfter := c.entries.Len()
+			pendingAfter := c.pending.Len()
+			if entriesBefore != entriesAfter || pendingBefore != pendingAfter {
 				logger.L().Debug("ContainerProfileCache reconciler tick",
 					helpers.Int("entries_before", entriesBefore),
-					helpers.Int("entries_after", c.entries.Len()),
+					helpers.Int("entries_after", entriesAfter),
 					helpers.Int("pending_before", pendingBefore),
-					helpers.Int("pending_after", c.pending.Len()))
+					helpers.Int("pending_after", pendingAfter))
 			}
 			c.metricsManager.ReportContainerProfileReconcilerDuration(time.Since(start))
 			if c.refreshInProgress.CompareAndSwap(false, true) {
@@ -174,64 +184,80 @@ func (c *ContainerProfileCacheImpl) refreshAllEntries(ctx context.Context) {
 }
 
 // refreshOneEntry refreshes a single cache entry under the per-container lock.
-// On any non-fatal error (CP fetch failure) we keep the existing entry — the
-// next tick will retry.
+// Re-fetches ALL sources the entry was originally built from (consolidated CP,
+// workload-level AP/NN, user-managed AP/NN at "ug-<workloadName>", and any
+// label-referenced user AP/NN overlay) and rebuilds the projection if ANY
+// ResourceVersion changed. Keeping the existing entry on fetch errors is fine:
+// the next tick will retry.
+//
+// Rebuild on refresh applies the same projection ladder as tryPopulateEntry:
+//
+//	base CP → workload AP+NN → user-managed (ug-) AP+NN → user overlay AP+NN.
+//
+// We intentionally DO NOT re-apply the partial-on-non-PreRunning gate here:
+// any entry that survived addContainer already passed that gate (or was
+// PreRunning), so refresh can accept partial profiles freely. (Fix B for
+// Test_17 / Test_19: the workload AP/NN must be re-fetched each tick so a
+// "ready" -> "completed" transition propagates to ProfileState.Status, which
+// in turn promotes fail_on_profile from false to true.)
 func (c *ContainerProfileCacheImpl) refreshOneEntry(_ context.Context, id string, e *CachedContainerProfile) {
 	// Resurrection guard (reviewer #1): refreshAllEntries snapshots entries
 	// without holding containerLocks, so a concurrent deleteContainer /
 	// reconcile-evict may have removed the entry between snapshot and lock
-	// acquisition. If so, bail; otherwise rebuildEntry's c.entries.Set would
+	// acquisition. If so, bail; otherwise the rebuild's c.entries.Set would
 	// resurrect a dead container.
 	if _, still := c.entries.Load(id); !still {
 		return
 	}
-	cp, err := c.storageClient.GetContainerProfile(e.Namespace, e.CPName)
+
+	ns := e.Namespace
+
+	// Re-fetch all sources. CP fetch errors (including 404) are treated as
+	// "not available right now" — mirroring tryPopulateEntry's behavior. We
+	// leave cp=nil and rely on the RV-match fast-skip below to preserve the
+	// existing entry when nothing has changed. This is what lets refresh
+	// pick up workload-level AP/NN transitions ("ready" -> "completed") even
+	// while the storage-side consolidated CP remains unpublished.
+	cp, err := c.storageClient.GetContainerProfile(ns, e.CPName)
 	if err != nil {
-		logger.L().Debug("refreshOneEntry: failed to re-fetch CP; keeping cached entry",
+		// If the previous entry was built off a real CP (non-empty RV), a
+		// CP fetch error on this tick is transient — keep the entry as-is.
+		// If the entry never had a CP (RV == "", pure workload/user-managed
+		// build), treat the error as 404 and let workload/user-managed
+		// re-fetches drive any refresh.
+		if e.RV != "" {
+			logger.L().Debug("refreshOneEntry: CP fetch failed; keeping cached entry",
+				helpers.String("containerID", id),
+				helpers.String("cpName", e.CPName),
+				helpers.Error(err))
+			return
+		}
+		logger.L().Debug("refreshOneEntry: CP fetch failed (no prior CP); treating as not-available",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName),
 			helpers.Error(err))
-		return
+		cp = nil
 	}
-	if cp == nil {
-		logger.L().Debug("refreshOneEntry: CP missing from storage; keeping cached entry",
-			helpers.String("containerID", id),
-			helpers.String("cpName", e.CPName))
-		return
+	var workloadAP *v1beta1.ApplicationProfile
+	var workloadNN *v1beta1.NetworkNeighborhood
+	var userManagedAP *v1beta1.ApplicationProfile
+	var userManagedNN *v1beta1.NetworkNeighborhood
+	if e.WorkloadName != "" {
+		if ap, aerr := c.storageClient.GetApplicationProfile(ns, e.WorkloadName); aerr == nil {
+			workloadAP = ap
+		}
+		if nn, nerr := c.storageClient.GetNetworkNeighborhood(ns, e.WorkloadName); nerr == nil {
+			workloadNN = nn
+		}
+		ugAPName := helpersv1.UserApplicationProfilePrefix + e.WorkloadName
+		if ap, aerr := c.storageClient.GetApplicationProfile(ns, ugAPName); aerr == nil {
+			userManagedAP = ap
+		}
+		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + e.WorkloadName
+		if nn, nerr := c.storageClient.GetNetworkNeighborhood(ns, ugNNName); nerr == nil {
+			userManagedNN = nn
+		}
 	}
-
-	// Fast-skip (delta #4): if CP RV unchanged AND neither overlay present,
-	// no work to do. With overlays present, also confirm their RVs before
-	// skipping.
-	if cp.ResourceVersion == e.RV {
-		if e.UserAPRef == nil && e.UserNNRef == nil {
-			return
-		}
-		var apRV, nnRV string
-		var userAP *v1beta1.ApplicationProfile
-		var userNN *v1beta1.NetworkNeighborhood
-		if e.UserAPRef != nil {
-			if ap, aerr := c.storageClient.GetApplicationProfile(e.UserAPRef.Namespace, e.UserAPRef.Name); aerr == nil && ap != nil {
-				apRV = ap.ResourceVersion
-				userAP = ap
-			}
-		}
-		if e.UserNNRef != nil {
-			if nn, nerr := c.storageClient.GetNetworkNeighborhood(e.UserNNRef.Namespace, e.UserNNRef.Name); nerr == nil && nn != nil {
-				nnRV = nn.ResourceVersion
-				userNN = nn
-			}
-		}
-		if apRV == e.UserAPRV && nnRV == e.UserNNRV {
-			return
-		}
-		// Something in the overlay changed — rebuild using the fetches we
-		// already have to avoid a second RPC round-trip.
-		c.rebuildEntry(id, e, cp, userAP, userNN)
-		return
-	}
-
-	// Base CP changed — rebuild with fresh overlay fetches too.
 	var userAP *v1beta1.ApplicationProfile
 	var userNN *v1beta1.NetworkNeighborhood
 	if e.UserAPRef != nil {
@@ -244,31 +270,118 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(_ context.Context, id string
 			userNN = nn
 		}
 	}
-	c.rebuildEntry(id, e, cp, userAP, userNN)
+
+	// Fast-skip when nothing changed. We match "absent" (nil) with empty RV:
+	// this avoids spurious rebuilds when an optional source is still missing,
+	// as long as it was also missing at the last build.
+	if rvsMatchCP(cp, e.RV) &&
+		rvsMatchAP(workloadAP, e.WorkloadAPRV) &&
+		rvsMatchNN(workloadNN, e.WorkloadNNRV) &&
+		rvsMatchAP(userManagedAP, e.UserManagedAPRV) &&
+		rvsMatchNN(userManagedNN, e.UserManagedNNRV) &&
+		rvsMatchAP(userAP, e.UserAPRV) &&
+		rvsMatchNN(userNN, e.UserNNRV) {
+		return
+	}
+
+	c.rebuildEntryFromSources(id, e, cp, workloadAP, workloadNN, userManagedAP, userManagedNN, userAP, userNN)
 }
 
-// rebuildEntry constructs a fresh CachedContainerProfile from the given
-// inputs and stores it under `id`. Called by the reconciler when any input
-// ResourceVersion has changed.
-func (c *ContainerProfileCacheImpl) rebuildEntry(
+// rvsMatchCP, rvsMatchAP, rvsMatchNN return true when either (a) the object is
+// absent and the stored RV is empty, or (b) the object is present and its RV
+// matches the stored RV. This lets fast-skip treat "still missing" as a match.
+func rvsMatchCP(obj *v1beta1.ContainerProfile, rv string) bool {
+	if obj == nil {
+		return rv == ""
+	}
+	return obj.ResourceVersion == rv
+}
+func rvsMatchAP(obj *v1beta1.ApplicationProfile, rv string) bool {
+	if obj == nil {
+		return rv == ""
+	}
+	return obj.ResourceVersion == rv
+}
+func rvsMatchNN(obj *v1beta1.NetworkNeighborhood, rv string) bool {
+	if obj == nil {
+		return rv == ""
+	}
+	return obj.ResourceVersion == rv
+}
+
+// rebuildEntryFromSources constructs a fresh CachedContainerProfile from the
+// given sources and stores it under `id`. Applies the same projection ladder
+// as tryPopulateEntry: base CP (or synthesized) → workload AP+NN →
+// user-managed (ug-) AP+NN → label-referenced user overlay AP+NN.
+//
+// Called by the reconciler when any input ResourceVersion has changed.
+func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	id string,
 	prev *CachedContainerProfile,
 	cp *v1beta1.ContainerProfile,
+	workloadAP *v1beta1.ApplicationProfile,
+	workloadNN *v1beta1.NetworkNeighborhood,
+	userManagedAP *v1beta1.ApplicationProfile,
+	userManagedNN *v1beta1.NetworkNeighborhood,
 	userAP *v1beta1.ApplicationProfile,
 	userNN *v1beta1.NetworkNeighborhood,
 ) {
 	pod := c.k8sObjectCache.GetPod(prev.Namespace, prev.PodName)
 
-	shared := userAP == nil && userNN == nil
-	var projected *v1beta1.ContainerProfile
-	var warnings []partialProfileWarning
-	if shared {
-		projected = cp
-	} else {
-		projected, warnings = projectUserProfiles(cp, userAP, userNN, pod, prev.ContainerName)
+	// When the consolidated CP is absent, synthesize an empty base carrying
+	// the workload AP/NN's completion/status (or "full"/"completed" as a
+	// final fallback) so downstream state display is sensible.
+	effectiveCP := cp
+	if effectiveCP == nil {
+		synthAnnot := map[string]string{}
+		switch {
+		case workloadAP != nil:
+			synthAnnot[helpersv1.CompletionMetadataKey] = workloadAP.Annotations[helpersv1.CompletionMetadataKey]
+			synthAnnot[helpersv1.StatusMetadataKey] = workloadAP.Annotations[helpersv1.StatusMetadataKey]
+		case workloadNN != nil:
+			synthAnnot[helpersv1.CompletionMetadataKey] = workloadNN.Annotations[helpersv1.CompletionMetadataKey]
+			synthAnnot[helpersv1.StatusMetadataKey] = workloadNN.Annotations[helpersv1.StatusMetadataKey]
+		default:
+			synthAnnot[helpersv1.CompletionMetadataKey] = helpersv1.Full
+			synthAnnot[helpersv1.StatusMetadataKey] = helpersv1.Completed
+		}
+		syntheticName := prev.WorkloadName
+		if syntheticName == "" {
+			syntheticName = prev.CPName
+		}
+		effectiveCP = &v1beta1.ContainerProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        syntheticName,
+				Namespace:   prev.Namespace,
+				Annotations: synthAnnot,
+			},
+		}
 	}
 
-	c.emitOverlayMetrics(userAP, userNN, warnings)
+	// Ladder pass #1: workload-level AP + NN.
+	projected := effectiveCP
+	if workloadAP != nil || workloadNN != nil {
+		p, _ := projectUserProfiles(projected, workloadAP, workloadNN, pod, prev.ContainerName)
+		projected = p
+	}
+	// Ladder pass #2: user-managed "ug-" AP + NN.
+	if userManagedAP != nil || userManagedNN != nil {
+		p, warnings := projectUserProfiles(projected, userManagedAP, userManagedNN, pod, prev.ContainerName)
+		projected = p
+		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
+	}
+	// Ladder pass #3: label-referenced user overlay AP + NN.
+	shared := userAP == nil && userNN == nil &&
+		userManagedAP == nil && userManagedNN == nil &&
+		workloadAP == nil && workloadNN == nil &&
+		cp != nil
+	var userWarnings []partialProfileWarning
+	if userAP != nil || userNN != nil {
+		p, w := projectUserProfiles(projected, userAP, userNN, pod, prev.ContainerName)
+		projected = p
+		userWarnings = w
+	}
+	c.emitOverlayMetrics(userAP, userNN, userWarnings)
 
 	// Rebuild the call-stack search tree from the projected profile.
 	tree := callstackcache.NewCallStackSearchTree()
@@ -277,19 +390,24 @@ func (c *ContainerProfileCacheImpl) rebuildEntry(
 	}
 
 	newEntry := &CachedContainerProfile{
-		Profile:       projected,
-		State:         &objectcache.ProfileState{Completion: cp.Annotations[helpersv1.CompletionMetadataKey], Status: cp.Annotations[helpersv1.StatusMetadataKey], Name: cp.Name},
-		CallStackTree: tree,
-		ContainerName: prev.ContainerName,
-		PodName:       prev.PodName,
-		Namespace:     prev.Namespace,
-		PodUID:        prev.PodUID,
-		WorkloadID:    prev.WorkloadID,
-		CPName:        cp.Name,
-		Shared:        shared,
-		RV:            cp.ResourceVersion,
-		UserAPRV:      rvOrEmpty(userAP),
-		UserNNRV:      rvOrEmpty(userNN),
+		Profile:         projected,
+		State:           &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
+		CallStackTree:   tree,
+		ContainerName:   prev.ContainerName,
+		PodName:         prev.PodName,
+		Namespace:       prev.Namespace,
+		PodUID:          prev.PodUID,
+		WorkloadID:      prev.WorkloadID,
+		CPName:          prev.CPName,
+		WorkloadName:    prev.WorkloadName,
+		Shared:          shared,
+		RV:              rvOfCP(cp),
+		WorkloadAPRV:    rvOfAP(workloadAP),
+		WorkloadNNRV:    rvOfNN(workloadNN),
+		UserManagedAPRV: rvOfAP(userManagedAP),
+		UserManagedNNRV: rvOfNN(userManagedNN),
+		UserAPRV:        rvOfAP(userAP),
+		UserNNRV:        rvOfNN(userNN),
 	}
 	if userAP != nil {
 		newEntry.UserAPRef = &namespacedName{Namespace: userAP.Namespace, Name: userAP.Name}
@@ -307,34 +425,26 @@ func (c *ContainerProfileCacheImpl) rebuildEntry(
 	c.entries.Set(id, newEntry)
 }
 
-// rvOrEmpty returns the object's ResourceVersion, or "" if the object is nil.
-// Used by refresh to record the RVs tied to the newly-built projection.
-func rvOrEmpty(obj interface {
-	GetResourceVersion() string
-}) string {
-	// Typed-nil guard: callers pass concrete pointer types that may be nil;
-	// Go's nil-interface trap means a nil *v1beta1.ApplicationProfile wrapped
-	// in the metav1.Object interface is not == nil. Check via reflection-lite:
-	if obj == nil {
+// rvOfCP / rvOfAP / rvOfNN return the object's ResourceVersion or "" when nil.
+// Separate typed versions avoid the Go nil-interface trap where a typed-nil
+// pointer wrapped in an interface is not == nil.
+func rvOfCP(o *v1beta1.ContainerProfile) string {
+	if o == nil {
 		return ""
 	}
-	// The concrete types here are *v1beta1.ApplicationProfile and
-	// *v1beta1.NetworkNeighborhood. Both return "" from GetResourceVersion
-	// when their ObjectMeta is zero, but we want to return "" for a nil
-	// pointer specifically. Narrow the check:
-	switch v := obj.(type) {
-	case *v1beta1.ApplicationProfile:
-		if v == nil {
-			return ""
-		}
-		return v.ResourceVersion
-	case *v1beta1.NetworkNeighborhood:
-		if v == nil {
-			return ""
-		}
-		return v.ResourceVersion
+	return o.ResourceVersion
+}
+func rvOfAP(o *v1beta1.ApplicationProfile) string {
+	if o == nil {
+		return ""
 	}
-	return obj.GetResourceVersion()
+	return o.ResourceVersion
+}
+func rvOfNN(o *v1beta1.NetworkNeighborhood) string {
+	if o == nil {
+		return ""
+	}
+	return o.ResourceVersion
 }
 
 // retryPendingEntries re-issues GetContainerProfile for every containerID that

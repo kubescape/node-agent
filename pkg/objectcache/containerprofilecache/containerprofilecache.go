@@ -67,10 +67,20 @@ type CachedContainerProfile struct {
 	// shared data (which may have been evicted from K8sObjectCache by then).
 	CPName string
 
-	Shared   bool   // true iff Profile is the shared storage-fetched pointer (read-only)
-	RV       string // ContainerProfile resourceVersion at last load
-	UserAPRV string // user-AP resourceVersion at last projection, "" if no overlay
-	UserNNRV string // user-NN resourceVersion at last projection, "" if no overlay
+	// WorkloadName is the per-workload slug used to fetch the workload-level
+	// ApplicationProfile / NetworkNeighborhood (primary data source while the
+	// storage-side consolidated CP isn't publicly queryable) and, with the
+	// "ug-" prefix, the user-managed AP/NN. Populated at addContainer time.
+	WorkloadName string
+
+	Shared          bool   // true iff Profile is the shared storage-fetched pointer (read-only)
+	RV              string // ContainerProfile resourceVersion at last load
+	WorkloadAPRV    string // workload-level AP resourceVersion at last projection, "" if not fetched
+	WorkloadNNRV    string // workload-level NN resourceVersion at last projection, "" if not fetched
+	UserManagedAPRV string // user-managed AP (ug-<workload>) RV at last projection, "" if absent
+	UserManagedNNRV string // user-managed NN (ug-<workload>) RV at last projection, "" if absent
+	UserAPRV        string // user-AP (label-referenced) resourceVersion at last projection, "" if no overlay
+	UserNNRV        string // user-NN (label-referenced) resourceVersion at last projection, "" if no overlay
 }
 
 // pendingContainer captures the minimum state needed to retry the initial
@@ -295,6 +305,36 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		workloadNN = nil
 	}
 
+	// Fetch user-managed AP / NN published at "ug-<workloadName>". Legacy
+	// caches auto-detected these via the `kubescape.io/managed-by: User`
+	// annotation and merged them on top of the base profile; we read them
+	// directly by their well-known name instead, avoiding a List and an
+	// annotation filter. Both are optional: nil on 404.
+	var userManagedAP *v1beta1.ApplicationProfile
+	var userManagedNN *v1beta1.NetworkNeighborhood
+	if workloadName != "" {
+		ugName := helpersv1.UserApplicationProfilePrefix + workloadName
+		if ap, uerr := c.storageClient.GetApplicationProfile(ns, ugName); uerr == nil {
+			userManagedAP = ap
+		} else {
+			logger.L().Debug("user-managed ApplicationProfile not available",
+				helpers.String("containerID", containerID),
+				helpers.String("namespace", ns),
+				helpers.String("name", ugName),
+				helpers.Error(uerr))
+		}
+		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + workloadName
+		if nn, uerr := c.storageClient.GetNetworkNeighborhood(ns, ugNNName); uerr == nil {
+			userManagedNN = nn
+		} else {
+			logger.L().Debug("user-managed NetworkNeighborhood not available",
+				helpers.String("containerID", containerID),
+				helpers.String("namespace", ns),
+				helpers.String("name", ugNNName),
+				helpers.Error(uerr))
+		}
+	}
+
 	// Fix (reviewer #3): if the available workload profile is still Partial
 	// and this container is not PreRunning (i.e. we saw it start fresh after
 	// the agent was already up), the partial view belongs to a PREVIOUS
@@ -345,7 +385,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	// Need SOMETHING to cache. If we have nothing, stay pending and retry.
-	if cp == nil && workloadAP == nil && workloadNN == nil && userAP == nil && userNN == nil {
+	if cp == nil && workloadAP == nil && workloadNN == nil && userManagedAP == nil && userManagedNN == nil && userAP == nil && userNN == nil {
 		return false
 	}
 
@@ -396,7 +436,35 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		cp = projected
 	}
 
+	// Additional projection pass for user-managed profiles (published at the
+	// "ug-<workloadName>" well-known name). Legacy caches auto-merged these
+	// in handleUserManagedProfile after detecting the managed-by annotation;
+	// here we always union in whatever's published at the convention name.
+	// This is what Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest
+	// exercise: rules must alert on events absent from the merged base+user-managed
+	// profile.
+	if userManagedAP != nil || userManagedNN != nil {
+		projected, warnings := projectUserProfiles(cp, userManagedAP, userManagedNN, pod, container.Runtime.ContainerName)
+		cp = projected
+		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
+	}
+
 	entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData)
+	// Fill in workload/user-managed bookkeeping so refreshOneEntry can
+	// re-fetch these sources on every tick.
+	entry.WorkloadName = workloadName
+	if workloadAP != nil {
+		entry.WorkloadAPRV = workloadAP.ResourceVersion
+	}
+	if workloadNN != nil {
+		entry.WorkloadNNRV = workloadNN.ResourceVersion
+	}
+	if userManagedAP != nil {
+		entry.UserManagedAPRV = userManagedAP.ResourceVersion
+	}
+	if userManagedNN != nil {
+		entry.UserManagedNNRV = userManagedNN.ResourceVersion
+	}
 
 	// Fix (reviewer #2): when the overlay label is set, record UserAPRef /
 	// UserNNRef even if the initial fetch failed. The refresh loop uses
