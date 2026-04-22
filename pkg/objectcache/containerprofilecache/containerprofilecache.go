@@ -615,5 +615,20 @@ func (c *ContainerProfileCacheImpl) WarmContainerLocksForTest(ids []string) {
 	}
 }
 
+// SeedEntryWithOverlayForTest seeds a CachedContainerProfile entry with user
+// AP and NN overlay refs set. Used by out-of-package integration tests that
+// need to exercise the refresh overlay path but cannot construct the internal
+// namespacedName type directly. Pass empty strings to leave refs nil.
+// Do not call from production code.
+func (c *ContainerProfileCacheImpl) SeedEntryWithOverlayForTest(containerID string, entry *CachedContainerProfile, apNS, apName, nnNS, nnName string) {
+	if apName != "" {
+		entry.UserAPRef = &namespacedName{Namespace: apNS, Name: apName}
+	}
+	if nnName != "" {
+		entry.UserNNRef = &namespacedName{Namespace: nnNS, Name: nnName}
+	}
+	c.entries.Set(containerID, entry)
+}
+
 // Ensure ContainerProfileCacheImpl implements the ContainerProfileCache interface.
 var _ objectcache.ContainerProfileCache = (*ContainerProfileCacheImpl)(nil)
