@@ -50,7 +50,7 @@ type fakeProfileClient struct {
 
 var _ storage.ProfileClient = (*fakeProfileClient)(nil)
 
-func (f *fakeProfileClient) GetApplicationProfile(_, name string) (*v1beta1.ApplicationProfile, error) {
+func (f *fakeProfileClient) GetApplicationProfile(_ context.Context, _, name string) (*v1beta1.ApplicationProfile, error) {
 	if len(name) >= 3 && name[:3] == helpersv1.UserApplicationProfilePrefix {
 		return f.userManagedAP, nil
 	}
@@ -59,7 +59,7 @@ func (f *fakeProfileClient) GetApplicationProfile(_, name string) (*v1beta1.Appl
 	}
 	return f.ap, f.apErr
 }
-func (f *fakeProfileClient) GetNetworkNeighborhood(_, name string) (*v1beta1.NetworkNeighborhood, error) {
+func (f *fakeProfileClient) GetNetworkNeighborhood(_ context.Context, _, name string) (*v1beta1.NetworkNeighborhood, error) {
 	if len(name) >= 3 && name[:3] == helpersv1.UserNetworkNeighborhoodPrefix {
 		return f.userManagedNN, nil
 	}
@@ -68,14 +68,14 @@ func (f *fakeProfileClient) GetNetworkNeighborhood(_, name string) (*v1beta1.Net
 	}
 	return f.nn, f.nnErr
 }
-func (f *fakeProfileClient) GetContainerProfile(_, _ string) (*v1beta1.ContainerProfile, error) {
+func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	f.getCPCalls++
 	return f.cp, f.cpErr
 }
-func (f *fakeProfileClient) ListApplicationProfiles(_ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
+func (f *fakeProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
 	return &v1beta1.ApplicationProfileList{}, nil
 }
-func (f *fakeProfileClient) ListNetworkNeighborhoods(_ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
+func (f *fakeProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
 	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 

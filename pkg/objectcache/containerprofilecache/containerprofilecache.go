@@ -105,6 +105,7 @@ type ContainerProfileCacheImpl struct {
 	metricsManager metricsmanager.MetricsManager
 
 	reconcileEvery    time.Duration
+	rpcBudget         time.Duration
 	refreshInProgress atomic.Bool
 
 	// deprecationDedup tracks (kind|ns/name@rv) keys to emit one WARN log
@@ -123,6 +124,10 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 	if metricsManager == nil {
 		metricsManager = metricsmanager.NewMetricsNoop()
 	}
+	rpcBudget := cfg.StorageRPCBudget
+	if rpcBudget <= 0 {
+		rpcBudget = 5 * time.Second
+	}
 	return &ContainerProfileCacheImpl{
 		cfg:            cfg,
 		containerLocks: resourcelocks.New(),
@@ -130,7 +135,16 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 		k8sObjectCache: k8sObjectCache,
 		metricsManager: metricsManager,
 		reconcileEvery: reconcileEvery,
+		rpcBudget:      rpcBudget,
 	}
+}
+
+// refreshRPC calls fn with a context bounded by c.rpcBudget, enforcing a
+// per-call SLO so a slow API server cannot stall a full reconciler burst.
+func (c *ContainerProfileCacheImpl) refreshRPC(ctx context.Context, fn func(context.Context) error) error {
+	rpcCtx, cancel := context.WithTimeout(ctx, c.rpcBudget)
+	defer cancel()
+	return fn(rpcCtx)
 }
 
 // Start begins the periodic reconciler goroutine. The loop evicts entries
@@ -236,7 +250,7 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 			return err
 		}
 
-		if populated := c.tryPopulateEntry(containerID, container, sharedData, cpName, workloadName); !populated {
+		if populated := c.tryPopulateEntry(ctx, containerID, container, sharedData, cpName, workloadName); !populated {
 			// No profile data available yet (neither consolidated CP nor
 			// workload AP/NN have landed in storage). Record a pending entry;
 			// the reconciler will retry each tick until data shows up or the
@@ -259,6 +273,7 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 // installs the cache entry on success. Returns true iff an entry was
 // installed. Must be called while holding containerLocks.WithLock(id).
 func (c *ContainerProfileCacheImpl) tryPopulateEntry(
+	ctx context.Context,
 	containerID string,
 	container *containercollection.Container,
 	sharedData *objectcache.WatchedContainerData,
@@ -272,7 +287,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// name returned by GetSlug(false). Until that aggregation runs the Get
 	// returns 404 — we record pending and the reconciler retries on each
 	// tick.
-	cp, err := c.storageClient.GetContainerProfile(ns, cpName)
+	cp, err := c.storageClient.GetContainerProfile(ctx, ns, cpName)
 	if err != nil {
 		logger.L().Debug("ContainerProfile not yet available",
 			helpers.String("containerID", containerID),
@@ -291,7 +306,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	var userManagedNN *v1beta1.NetworkNeighborhood
 	if workloadName != "" {
 		ugName := helpersv1.UserApplicationProfilePrefix + workloadName
-		if ap, uerr := c.storageClient.GetApplicationProfile(ns, ugName); uerr == nil {
+		if ap, uerr := c.storageClient.GetApplicationProfile(ctx, ns, ugName); uerr == nil {
 			userManagedAP = ap
 		} else {
 			logger.L().Debug("user-managed ApplicationProfile not available",
@@ -301,7 +316,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 				helpers.Error(uerr))
 		}
 		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + workloadName
-		if nn, uerr := c.storageClient.GetNetworkNeighborhood(ns, ugNNName); uerr == nil {
+		if nn, uerr := c.storageClient.GetNetworkNeighborhood(ctx, ns, ugNNName); uerr == nil {
 			userManagedNN = nn
 		} else {
 			logger.L().Debug("user-managed NetworkNeighborhood not available",
@@ -335,7 +350,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	var userNN *v1beta1.NetworkNeighborhood
 	overlayName, hasOverlay := container.K8s.PodLabels[helpersv1.UserDefinedProfileMetadataKey]
 	if hasOverlay && overlayName != "" {
-		if ap, err := c.storageClient.GetApplicationProfile(ns, overlayName); err == nil {
+		if ap, err := c.storageClient.GetApplicationProfile(ctx, ns, overlayName); err == nil {
 			userAP = ap
 		} else {
 			logger.L().Debug("user-defined ApplicationProfile not available",
@@ -344,7 +359,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 				helpers.String("name", overlayName),
 				helpers.Error(err))
 		}
-		if nn, err := c.storageClient.GetNetworkNeighborhood(ns, overlayName); err == nil {
+		if nn, err := c.storageClient.GetNetworkNeighborhood(ctx, ns, overlayName); err == nil {
 			userNN = nn
 		} else {
 			logger.L().Debug("user-defined NetworkNeighborhood not available",

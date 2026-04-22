@@ -3,6 +3,7 @@
 package containerprofilecache_integration
 
 import (
+	"context"
 	"sync"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -64,29 +65,29 @@ func newFakeStorage(cp *v1beta1.ContainerProfile) *stubStorage {
 	return &stubStorage{cp: cp}
 }
 
-func (s *stubStorage) GetContainerProfile(_, _ string) (*v1beta1.ContainerProfile, error) {
+func (s *stubStorage) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.cp, nil
 }
 
-func (s *stubStorage) GetApplicationProfile(_, _ string) (*v1beta1.ApplicationProfile, error) {
+func (s *stubStorage) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.ap, nil
 }
 
-func (s *stubStorage) GetNetworkNeighborhood(_, _ string) (*v1beta1.NetworkNeighborhood, error) {
+func (s *stubStorage) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.nn, nil
 }
 
-func (s *stubStorage) ListApplicationProfiles(_ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
+func (s *stubStorage) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
 	return &v1beta1.ApplicationProfileList{}, nil
 }
 
-func (s *stubStorage) ListNetworkNeighborhoods(_ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
+func (s *stubStorage) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
 	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 

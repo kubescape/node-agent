@@ -243,7 +243,7 @@ func (c *ContainerProfileCacheImpl) refreshAllEntries(ctx context.Context) {
 // Test_17 / Test_19: the workload AP/NN must be re-fetched each tick so a
 // "ready" -> "completed" transition propagates to ProfileState.Status, which
 // in turn promotes fail_on_profile from false to true.)
-func (c *ContainerProfileCacheImpl) refreshOneEntry(_ context.Context, id string, e *CachedContainerProfile) {
+func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id string, e *CachedContainerProfile) {
 	// Resurrection guard (reviewer #1): refreshAllEntries snapshots entries
 	// without holding containerLocks, so a concurrent deleteContainer /
 	// reconcile-evict may have removed the entry between snapshot and lock
@@ -261,8 +261,15 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(_ context.Context, id string
 	// existing entry when nothing has changed. This is what lets refresh
 	// pick up workload-level AP/NN transitions ("ready" -> "completed") even
 	// while the storage-side consolidated CP remains unpublished.
-	cp, err := c.storageClient.GetContainerProfile(ns, e.CPName)
-	if err != nil {
+	var cp *v1beta1.ContainerProfile
+	var cpErr error
+	if rpcErr := c.refreshRPC(ctx, func(rctx context.Context) error {
+		cp, cpErr = c.storageClient.GetContainerProfile(rctx, ns, e.CPName)
+		return cpErr
+	}); rpcErr != nil && cpErr == nil {
+		cpErr = rpcErr
+	}
+	if cpErr != nil {
 		// If the previous entry was built off a real CP (non-empty RV), a
 		// CP fetch error on this tick is transient — keep the entry as-is.
 		// If the entry never had a CP (RV == "", pure workload/user-managed
@@ -272,38 +279,46 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(_ context.Context, id string
 			logger.L().Debug("refreshOneEntry: CP fetch failed; keeping cached entry",
 				helpers.String("containerID", id),
 				helpers.String("cpName", e.CPName),
-				helpers.Error(err))
+				helpers.Error(cpErr))
 			return
 		}
 		logger.L().Debug("refreshOneEntry: CP fetch failed (no prior CP); treating as not-available",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName),
-			helpers.Error(err))
+			helpers.Error(cpErr))
 		cp = nil
 	}
 	var userManagedAP *v1beta1.ApplicationProfile
 	var userManagedNN *v1beta1.NetworkNeighborhood
 	if e.WorkloadName != "" {
 		ugAPName := helpersv1.UserApplicationProfilePrefix + e.WorkloadName
-		if ap, aerr := c.storageClient.GetApplicationProfile(ns, ugAPName); aerr == nil {
-			userManagedAP = ap
-		}
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			var aerr error
+			userManagedAP, aerr = c.storageClient.GetApplicationProfile(rctx, ns, ugAPName)
+			return aerr
+		})
 		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + e.WorkloadName
-		if nn, nerr := c.storageClient.GetNetworkNeighborhood(ns, ugNNName); nerr == nil {
-			userManagedNN = nn
-		}
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			var nerr error
+			userManagedNN, nerr = c.storageClient.GetNetworkNeighborhood(rctx, ns, ugNNName)
+			return nerr
+		})
 	}
 	var userAP *v1beta1.ApplicationProfile
 	var userNN *v1beta1.NetworkNeighborhood
 	if e.UserAPRef != nil {
-		if ap, aerr := c.storageClient.GetApplicationProfile(e.UserAPRef.Namespace, e.UserAPRef.Name); aerr == nil {
-			userAP = ap
-		}
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			var aerr error
+			userAP, aerr = c.storageClient.GetApplicationProfile(rctx, e.UserAPRef.Namespace, e.UserAPRef.Name)
+			return aerr
+		})
 	}
 	if e.UserNNRef != nil {
-		if nn, nerr := c.storageClient.GetNetworkNeighborhood(e.UserNNRef.Namespace, e.UserNNRef.Name); nerr == nil {
-			userNN = nn
-		}
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			var nerr error
+			userNN, nerr = c.storageClient.GetNetworkNeighborhood(rctx, e.UserNNRef.Namespace, e.UserNNRef.Name)
+			return nerr
+		})
 	}
 
 	// Fast-skip when nothing changed. We match "absent" (nil) with empty RV:
@@ -506,7 +521,7 @@ func (c *ContainerProfileCacheImpl) retryPendingEntries(ctx context.Context) {
 			if _, still := c.pending.Load(w.id); !still {
 				return
 			}
-			c.tryPopulateEntry(w.id, w.p.container, w.p.sharedData, w.p.cpName, w.p.workloadName)
+			c.tryPopulateEntry(ctx, w.id, w.p.container, w.p.sharedData, w.p.cpName, w.p.workloadName)
 		})
 	}
 }

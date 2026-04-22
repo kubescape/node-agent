@@ -75,22 +75,22 @@ type countingProfileClient struct {
 
 var _ storage.ProfileClient = (*countingProfileClient)(nil)
 
-func (f *countingProfileClient) GetContainerProfile(_, _ string) (*v1beta1.ContainerProfile, error) {
+func (f *countingProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	f.cpCalls.Add(1)
 	return f.cp, nil
 }
-func (f *countingProfileClient) GetApplicationProfile(_, _ string) (*v1beta1.ApplicationProfile, error) {
+func (f *countingProfileClient) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
 	f.apCalls.Add(1)
 	return f.ap, nil
 }
-func (f *countingProfileClient) GetNetworkNeighborhood(_, _ string) (*v1beta1.NetworkNeighborhood, error) {
+func (f *countingProfileClient) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
 	f.nnCalls.Add(1)
 	return f.nn, nil
 }
-func (f *countingProfileClient) ListApplicationProfiles(_ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
+func (f *countingProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
 	return &v1beta1.ApplicationProfileList{}, nil
 }
-func (f *countingProfileClient) ListNetworkNeighborhoods(_ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
+func (f *countingProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
 	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 
@@ -593,19 +593,19 @@ type failingProfileClient struct {
 
 var _ storage.ProfileClient = (*failingProfileClient)(nil)
 
-func (f *failingProfileClient) GetContainerProfile(_, _ string) (*v1beta1.ContainerProfile, error) {
+func (f *failingProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	return nil, f.cpErr
 }
-func (f *failingProfileClient) GetApplicationProfile(_, _ string) (*v1beta1.ApplicationProfile, error) {
+func (f *failingProfileClient) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
 	return nil, nil
 }
-func (f *failingProfileClient) GetNetworkNeighborhood(_, _ string) (*v1beta1.NetworkNeighborhood, error) {
+func (f *failingProfileClient) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
 	return nil, nil
 }
-func (f *failingProfileClient) ListApplicationProfiles(_ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
+func (f *failingProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
 	return &v1beta1.ApplicationProfileList{}, nil
 }
-func (f *failingProfileClient) ListNetworkNeighborhoods(_ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
+func (f *failingProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
 	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 
@@ -613,6 +613,94 @@ func (f *failingProfileClient) ListNetworkNeighborhoods(_ string, _ int64, _ str
 // containerprofilecache.go (used by some entries). Import explicitly so the
 // file compiles without the import when those constants aren't dereferenced.
 var _ = helpersv1.CompletionMetadataKey
+
+// TestRefreshHonorsContextCancellationMidRPC verifies that a context
+// cancellation while refreshOneEntry is blocked in GetContainerProfile
+// causes the refresh to return within the rpcBudget, not hang for the
+// full reconciler timeout.
+func TestRefreshHonorsContextCancellationMidRPC(t *testing.T) {
+	blocked := make(chan struct{})
+	unblock := make(chan struct{})
+	blocking := &blockingProfileClient{
+		blocked: blocked,
+		unblock: unblock,
+	}
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "cp-1", Namespace: "default", ResourceVersion: "42"},
+	}
+	// Seed an existing entry so refreshOneEntry attempts a CP re-fetch.
+	k8s := newControllableK8sCache()
+	cfg := config.Config{
+		ProfilesCacheRefreshRate: 30 * time.Second,
+		StorageRPCBudget:         50 * time.Millisecond,
+	}
+	cache := NewContainerProfileCache(cfg, blocking, k8s, nil)
+	cache.SeedEntryForTest("id1", &CachedContainerProfile{
+		Profile:       cp,
+		State:         &objectcache.ProfileState{Name: cp.Name},
+		ContainerName: "c1",
+		PodName:       "pod1",
+		Namespace:     "default",
+		PodUID:        "uid1",
+		CPName:        "cp-1",
+		RV:            "old-rv", // differs from cp.RV so fast-skip is skipped
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cache.refreshAllEntries(ctx)
+	}()
+
+	// Wait for the RPC to block, then cancel the context.
+	<-blocked
+	cancel()
+
+	// The refresh must return within 200ms of cancellation (well under the
+	// 50ms rpcBudget + scheduling slack).
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("refreshAllEntries did not return after context cancellation")
+	}
+	close(unblock)
+}
+
+// blockingProfileClient blocks GetContainerProfile until unblocked.
+type blockingProfileClient struct {
+	blocked chan struct{}
+	unblock chan struct{}
+}
+
+var _ storage.ProfileClient = (*blockingProfileClient)(nil)
+
+func (b *blockingProfileClient) GetContainerProfile(ctx context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
+	select {
+	case b.blocked <- struct{}{}:
+	default:
+	}
+	select {
+	case <-b.unblock:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+func (b *blockingProfileClient) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
+	return nil, nil
+}
+func (b *blockingProfileClient) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
+	return nil, nil
+}
+func (b *blockingProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
+	return &v1beta1.ApplicationProfileList{}, nil
+}
+func (b *blockingProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
+	return &v1beta1.NetworkNeighborhoodList{}, nil
+}
 
 // TestRetryPendingEntries_CPCreatedAfterAdd exercises the bug that slipped
 // through PR #788 component tests: at EventTypeAddContainer the CP may not
