@@ -35,6 +35,15 @@ func (sc *StorageHttpClientMock) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SB
 	return SBOM, nil
 }
 
+func (sc *StorageHttpClientMock) GetContainerProfile(namespace, name string) (*v1beta1.ContainerProfile, error) {
+	for _, p := range sc.ContainerProfiles {
+		if p != nil && p.Namespace == namespace && p.Name == name {
+			return p, nil
+		}
+	}
+	return nil, nil
+}
+
 func (sc *StorageHttpClientMock) GetApplicationProfile(_, _ string) (*spdxv1beta1.ApplicationProfile, error) {
 	//TODO implement me
 	panic("implement me")

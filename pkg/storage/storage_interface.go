@@ -10,6 +10,7 @@ import (
 type ProfileClient interface {
 	GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error)
 	GetNetworkNeighborhood(namespace, name string) (*v1beta1.NetworkNeighborhood, error)
+	GetContainerProfile(namespace, name string) (*v1beta1.ContainerProfile, error)
 	ListApplicationProfiles(namespace string, limit int64, cont string) (*v1beta1.ApplicationProfileList, error)
 	ListNetworkNeighborhoods(namespace string, limit int64, cont string) (*v1beta1.NetworkNeighborhoodList, error)
 }

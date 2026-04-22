@@ -22,3 +22,8 @@ func (m *MetricsNoop) ReportRuleEvaluationTime(_ string, _ utils.EventType, _ ti
 func (m *MetricsNoop) ReportContainerStart()                                                {}
 func (m *MetricsNoop) ReportContainerStop()                                                 {}
 func (m *MetricsNoop) ReportDedupEvent(_ utils.EventType, _ bool)                           {}
+func (m *MetricsNoop) ReportContainerProfileLegacyLoad(_, _ string)                        {}
+func (m *MetricsNoop) SetContainerProfileCacheEntries(_ string, _ float64)                 {}
+func (m *MetricsNoop) ReportContainerProfileCacheHit(_ bool)                               {}
+func (m *MetricsNoop) ReportContainerProfileReconcilerDuration(_ time.Duration)            {}
+func (m *MetricsNoop) ReportContainerProfileReconcilerEviction(_ string)                   {}

@@ -63,6 +63,13 @@ type PrometheusMetric struct {
 	// Dedup metrics
 	dedupEventCounter *prometheus.CounterVec
 
+	// ContainerProfile cache metrics
+	cpCacheLegacyLoadsCounter      *prometheus.CounterVec
+	cpCacheEntriesGauge            *prometheus.GaugeVec
+	cpCacheHitCounter              *prometheus.CounterVec
+	cpReconcilerDurationHistogram  prometheus.Histogram
+	cpReconcilerEvictionsCounter   *prometheus.CounterVec
+
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache          map[string]prometheus.Counter
 	rulePrefilteredCounterCache map[string]prometheus.Counter
@@ -215,6 +222,29 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Help: "Total number of events processed by the dedup layer",
 		}, []string{eventTypeLabel, "result"}),
 
+		// ContainerProfile cache metrics
+		cpCacheLegacyLoadsCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "nodeagent_user_profile_legacy_loads_total",
+			Help: "Number of times a user-authored legacy ApplicationProfile or NetworkNeighborhood was loaded into the ContainerProfileCache; will be removed in a future release.",
+		}, []string{"kind", "completeness"}),
+		cpCacheEntriesGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "nodeagent_containerprofile_cache_entries",
+			Help: "Current number of cached ContainerProfile entries per kind.",
+		}, []string{"kind"}),
+		cpCacheHitCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "nodeagent_containerprofile_cache_hit_total",
+			Help: "Total number of ContainerProfile cache lookups by result.",
+		}, []string{"result"}),
+		cpReconcilerDurationHistogram: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "nodeagent_containerprofile_reconciler_duration_seconds",
+			Help:    "Duration of ContainerProfile reconciler ticks in seconds.",
+			Buckets: prometheus.DefBuckets,
+		}),
+		cpReconcilerEvictionsCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "nodeagent_containerprofile_reconciler_evictions_total",
+			Help: "Total number of ContainerProfile cache evictions by reason.",
+		}, []string{"reason"}),
+
 		// Initialize counter caches
 		ruleCounterCache:            make(map[string]prometheus.Counter),
 		rulePrefilteredCounterCache: make(map[string]prometheus.Counter),
@@ -256,6 +286,11 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.containerStartCounter)
 	prometheus.Unregister(p.containerStopCounter)
 	prometheus.Unregister(p.dedupEventCounter)
+	prometheus.Unregister(p.cpCacheLegacyLoadsCounter)
+	prometheus.Unregister(p.cpCacheEntriesGauge)
+	prometheus.Unregister(p.cpCacheHitCounter)
+	prometheus.Unregister(p.cpReconcilerDurationHistogram)
+	prometheus.Unregister(p.cpReconcilerEvictionsCounter)
 	// Unregister program ID metrics
 	prometheus.Unregister(p.programRuntimeGauge)
 	prometheus.Unregister(p.programRunCountGauge)
@@ -431,4 +466,28 @@ func (p *PrometheusMetric) ReportDedupEvent(eventType utils.EventType, duplicate
 		result = "deduplicated"
 	}
 	p.dedupEventCounter.WithLabelValues(string(eventType), result).Inc()
+}
+
+func (p *PrometheusMetric) ReportContainerProfileLegacyLoad(kind, completeness string) {
+	p.cpCacheLegacyLoadsCounter.WithLabelValues(kind, completeness).Inc()
+}
+
+func (p *PrometheusMetric) SetContainerProfileCacheEntries(kind string, count float64) {
+	p.cpCacheEntriesGauge.WithLabelValues(kind).Set(count)
+}
+
+func (p *PrometheusMetric) ReportContainerProfileCacheHit(hit bool) {
+	result := "hit"
+	if !hit {
+		result = "miss"
+	}
+	p.cpCacheHitCounter.WithLabelValues(result).Inc()
+}
+
+func (p *PrometheusMetric) ReportContainerProfileReconcilerDuration(duration time.Duration) {
+	p.cpReconcilerDurationHistogram.Observe(duration.Seconds())
+}
+
+func (p *PrometheusMetric) ReportContainerProfileReconcilerEviction(reason string) {
+	p.cpReconcilerEvictionsCounter.WithLabelValues(reason).Inc()
 }
