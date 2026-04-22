@@ -71,6 +71,9 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 	// Pre-warm all internal SafeMap instances before the concurrent phase to
 	// avoid triggering the goradd/maps nil-check-before-lock initialization
 	// race (pre-existing upstream bug in SafeMap.Load / SafeMap.Len).
+	// WarmContainerLocksForTest pre-initialises the containerLocks SafeMap;
+	// SeedEntryForTest pre-initialises the entries SafeMap.
+	cache.WarmContainerLocksForTest(containerIDs)
 	for _, id := range containerIDs {
 		cache.SeedEntryForTest(id, &cpc.CachedContainerProfile{
 			Profile:       cp,

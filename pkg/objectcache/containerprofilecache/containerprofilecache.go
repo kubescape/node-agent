@@ -599,5 +599,21 @@ func (c *ContainerProfileCacheImpl) SeedEntryForTest(containerID string, entry *
 	c.entries.Set(containerID, entry)
 }
 
+// RefreshAllEntriesForTest is an exported thin wrapper around refreshAllEntries
+// for use by out-of-package integration tests. Do not call from production code.
+func (c *ContainerProfileCacheImpl) RefreshAllEntriesForTest(ctx context.Context) {
+	c.refreshAllEntries(ctx)
+}
+
+// WarmContainerLocksForTest acquires and immediately releases each container
+// lock, initialising the internal SafeMap so concurrent callers don't trigger
+// the goradd/maps nil-check-before-lock initialisation race (pre-existing
+// upstream bug in SafeMap v1.3.0). Do not call from production code.
+func (c *ContainerProfileCacheImpl) WarmContainerLocksForTest(ids []string) {
+	for _, id := range ids {
+		c.containerLocks.WithLock(id, func() {})
+	}
+}
+
 // Ensure ContainerProfileCacheImpl implements the ContainerProfileCache interface.
 var _ objectcache.ContainerProfileCache = (*ContainerProfileCacheImpl)(nil)
