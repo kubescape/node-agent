@@ -188,6 +188,14 @@ func (c *ContainerProfileCacheImpl) refreshAllEntries(ctx context.Context) {
 // On any non-fatal error (CP fetch failure) we keep the existing entry — the
 // next tick will retry.
 func (c *ContainerProfileCacheImpl) refreshOneEntry(_ context.Context, id string, e *CachedContainerProfile) {
+	// Resurrection guard (reviewer #1): refreshAllEntries snapshots entries
+	// without holding containerLocks, so a concurrent deleteContainer /
+	// reconcile-evict may have removed the entry between snapshot and lock
+	// acquisition. If so, bail; otherwise rebuildEntry's c.entries.Set would
+	// resurrect a dead container.
+	if _, still := c.entries.Load(id); !still {
+		return
+	}
 	cp, err := c.storageClient.GetContainerProfile(e.Namespace, e.CPName)
 	if err != nil {
 		logger.L().Debug("refreshOneEntry: failed to re-fetch CP; keeping cached entry",

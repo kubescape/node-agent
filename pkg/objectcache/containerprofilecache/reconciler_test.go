@@ -632,3 +632,167 @@ func assertErrNotFound(name string) error {
 type testNotFoundErr struct{ name string }
 
 func (e *testNotFoundErr) Error() string { return "container profile " + e.name + ": not found" }
+
+// TestPartialCP_NonPreRunning_StaysPending verifies that a CP marked partial
+// is NOT cached when the container is not PreRunning (i.e. started after the
+// agent was up). Legacy caches explicitly deleted partials on restart; we
+// mirror that by staying pending until the CP becomes Full.
+func TestPartialCP_NonPreRunning_StaysPending(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-partial",
+			Namespace:       "default",
+			ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Partial,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+	}
+	client := &fakeProfileClient{cp: cp}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-partial-restart"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	// sharedData.PreRunningContainer is false by default → this simulates a
+	// fresh container start observed by a running agent.
+
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+	assert.Nil(t, c.GetContainerProfile(id), "partial CP must not populate cache on fresh container")
+	assert.Equal(t, 1, c.pending.Len(), "partial-on-restart stays pending")
+
+	// Simulate the CP becoming Full (new agent-side aggregation round).
+	cp.Annotations[helpersv1.CompletionMetadataKey] = helpersv1.Full
+	cp.ResourceVersion = "2"
+	c.retryPendingEntries(context.Background())
+
+	assert.NotNil(t, c.GetContainerProfile(id), "Full CP promotes pending entry")
+	assert.Equal(t, 0, c.pending.Len(), "pending drained on Full")
+}
+
+// TestPartialCP_PreRunning_Accepted verifies the inverse: when the agent
+// restarts (all containers become PreRunning), we accept even a partial CP so
+// rule evaluation can still alert on out-of-profile behavior (Test_19
+// semantics).
+func TestPartialCP_PreRunning_Accepted(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-partial-prerunning",
+			Namespace:       "default",
+			ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Partial,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+	}
+	client := &fakeProfileClient{cp: cp}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-partial-prerunning"
+	// Mark PreRunning so the partial is accepted.
+	primePreRunningSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+	assert.NotNil(t, c.GetContainerProfile(id), "partial CP accepted for PreRunning container")
+	assert.Equal(t, 0, c.pending.Len(), "not pending when accepted")
+}
+
+// TestOverlayLabel_TransientFetchFailure_RefsRetained verifies that when
+// UserDefinedProfileMetadataKey is set but the user-AP/NN fetch fails, the
+// entry still records UserAPRef / UserNNRef so the refresh loop can re-fetch
+// on subsequent ticks instead of permanently dropping the overlay.
+func TestOverlayLabel_TransientFetchFailure_RefsRetained(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "cp-with-overlay", Namespace: "default", ResourceVersion: "1"},
+	}
+	// Overlay fetch returns an error; the base CP is fine.
+	client := &fakeProfileClient{cp: cp, apErr: assertErrNotFound("override"), nnErr: assertErrNotFound("override")}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-transient-overlay"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+
+	// Build the container with the overlay label set.
+	ct := eventContainer(id)
+	ct.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "override"}
+
+	require.NoError(t, c.addContainer(ct, context.Background()))
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok, "entry stored with base CP even if overlay fetch failed")
+	require.NotNil(t, entry.UserAPRef, "UserAPRef retained for refresh retry")
+	require.NotNil(t, entry.UserNNRef, "UserNNRef retained for refresh retry")
+	assert.Equal(t, "override", entry.UserAPRef.Name)
+	assert.Equal(t, "override", entry.UserNNRef.Name)
+}
+
+// TestRefreshDoesNotResurrectDeletedEntry verifies the Phase-4 reviewer race:
+// refreshAllEntries snapshots entries without a lock; if deleteContainer
+// removes the entry before refreshOneEntry takes the lock, the refresh must
+// NOT re-insert it.
+func TestRefreshDoesNotResurrectDeletedEntry(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "cp-resurrect", Namespace: "default", ResourceVersion: "1"},
+	}
+	client := &fakeProfileClient{cp: cp}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-resurrect"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+	require.NotNil(t, c.GetContainerProfile(id))
+
+	// Simulate the race: snapshot the entry, delete, then call refreshOneEntry.
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	c.deleteContainer(id)
+	require.Nil(t, c.GetContainerProfile(id), "entry gone after delete")
+
+	// Refresh for the deleted id must bail instead of resurrecting.
+	c.containerLocks.WithLock(id, func() {
+		c.refreshOneEntry(context.Background(), id, entry)
+	})
+
+	assert.Nil(t, c.GetContainerProfile(id), "refresh must not resurrect deleted entry")
+}
+
+// TestUserDefinedProfileOnly_NoBaseCP verifies that a container with only a
+// user-defined AP/NN (no base CP yet) still gets a cache entry, mirroring the
+// legacy behavior where user-defined profiles were stored directly.
+func TestUserDefinedProfileOnly_NoBaseCP(t *testing.T) {
+	userAP := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "user-override", Namespace: "default", ResourceVersion: "10"},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{Name: "nginx", Capabilities: []string{"CAP_NET_ADMIN"}},
+			},
+		},
+	}
+	// Base CP fetch fails (404); only the overlay exists.
+	client := &fakeProfileClient{cp: nil, cpErr: assertErrNotFound("no-base"), ap: userAP}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-user-only"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	ct := eventContainer(id)
+	ct.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "user-override"}
+
+	require.NoError(t, c.addContainer(ct, context.Background()))
+
+	cached := c.GetContainerProfile(id)
+	require.NotNil(t, cached, "entry populated from user-AP even without base CP")
+	// The synthesized CP + projection should carry the user AP's capabilities.
+	assert.Contains(t, cached.Spec.Capabilities, "CAP_NET_ADMIN")
+}
+
+// primePreRunningSharedData is a variant of primeSharedData that sets the
+// PreRunningContainer flag.
+func primePreRunningSharedData(t *testing.T, k8s *objectcache.K8sObjectCacheMock, containerID, wlid string) {
+	t.Helper()
+	primeSharedData(t, k8s, containerID, wlid)
+	existing := k8s.GetSharedContainerData(containerID)
+	require.NotNil(t, existing)
+	existing.PreRunningContainer = true
+	k8s.SetSharedContainerData(containerID, existing)
+}

@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // defaultReconcileInterval is the fallback refresh cadence when
@@ -200,7 +201,14 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 			return err
 		}
 
-		cpName, err := sharedData.InstanceID.GetOneTimeSlug(false)
+		// GetSlug(false) returns the DETERMINISTIC consolidated-profile slug
+		// (stable across agent restarts). containerprofilemanager writes
+		// per-tick time-series CPs via GetOneTimeSlug(false) (fresh UUID each
+		// call); the storage server consolidates them into a single CP at the
+		// GetSlug(false) name for the agent to read. PR #788 initially used
+		// GetOneTimeSlug here and every GET 404'd forever — see
+		// .omc/plans/containerprofile-cache-component-test-findings.md.
+		cpName, err := sharedData.InstanceID.GetSlug(false)
 		if err != nil {
 			logger.L().Error("failed to compute container profile slug",
 				helpers.String("containerID", containerID),
@@ -233,45 +241,88 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	sharedData *objectcache.WatchedContainerData,
 	cpName string,
 ) bool {
-	cp, err := c.storageClient.GetContainerProfile(container.K8s.Namespace, cpName)
+	ns := container.K8s.Namespace
+
+	// Fetch base CP. err/404 is non-fatal; we may still populate from a
+	// user-authored overlay when the label is present.
+	cp, err := c.storageClient.GetContainerProfile(ns, cpName)
 	if err != nil {
-		logger.L().Debug("ContainerProfile not yet available; will retry on reconciler tick",
+		logger.L().Debug("ContainerProfile not yet available",
 			helpers.String("containerID", containerID),
-			helpers.String("namespace", container.K8s.Namespace),
+			helpers.String("namespace", ns),
 			helpers.String("name", cpName),
 			helpers.Error(err))
-		return false
-	}
-	if cp == nil {
-		logger.L().Debug("ContainerProfile missing from storage; will retry on reconciler tick",
-			helpers.String("containerID", containerID),
-			helpers.String("namespace", container.K8s.Namespace),
-			helpers.String("name", cpName))
-		return false
+		cp = nil
 	}
 
-	// Optionally load user-authored legacy CRDs when pod carries the
-	// UserDefinedProfileMetadataKey label.
+	// Fix (reviewer #3): if the consolidated CP exists but is still Partial
+	// and this container is not PreRunning (i.e. we saw it start fresh after
+	// the agent was already up), the partial view belongs to a PREVIOUS
+	// container incarnation. Legacy caches explicitly deleted such partials
+	// on restart so rule evaluation fell through to "no profile" until a new
+	// Full profile arrived. Mirror that: keep pending, retry each tick.
+	if cp != nil &&
+		cp.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial &&
+		!sharedData.PreRunningContainer {
+		logger.L().Debug("ContainerProfile is Partial and container is not PreRunning; waiting for Full",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", ns),
+			helpers.String("name", cpName))
+		cp = nil
+	}
+
+	// Fetch user-authored legacy CRDs when the pod carries the
+	// UserDefinedProfileMetadataKey label. Fix (reviewer #2): fetch
+	// independently of the base-CP result, so a container that only has a
+	// user-defined profile still gets a cache entry. Recording the refs is
+	// gated on successful fetch here (otherwise the projection has no data
+	// to merge); the reconciler's refresh path re-fetches on each tick so
+	// transient failures are recovered.
 	var userAP *v1beta1.ApplicationProfile
 	var userNN *v1beta1.NetworkNeighborhood
-	if overlayName, ok := container.K8s.PodLabels[helpersv1.UserDefinedProfileMetadataKey]; ok && overlayName != "" {
-		if ap, err := c.storageClient.GetApplicationProfile(container.K8s.Namespace, overlayName); err == nil {
+	overlayName, hasOverlay := container.K8s.PodLabels[helpersv1.UserDefinedProfileMetadataKey]
+	if hasOverlay && overlayName != "" {
+		if ap, err := c.storageClient.GetApplicationProfile(ns, overlayName); err == nil {
 			userAP = ap
 		} else {
 			logger.L().Debug("user-defined ApplicationProfile not available",
 				helpers.String("containerID", containerID),
-				helpers.String("namespace", container.K8s.Namespace),
+				helpers.String("namespace", ns),
 				helpers.String("name", overlayName),
 				helpers.Error(err))
 		}
-		if nn, err := c.storageClient.GetNetworkNeighborhood(container.K8s.Namespace, overlayName); err == nil {
+		if nn, err := c.storageClient.GetNetworkNeighborhood(ns, overlayName); err == nil {
 			userNN = nn
 		} else {
 			logger.L().Debug("user-defined NetworkNeighborhood not available",
 				helpers.String("containerID", containerID),
-				helpers.String("namespace", container.K8s.Namespace),
+				helpers.String("namespace", ns),
 				helpers.String("name", overlayName),
 				helpers.Error(err))
+		}
+	}
+
+	// Need SOMETHING to cache. If we have nothing (no base CP, no user CRDs),
+	// stay pending and retry on the next tick.
+	if cp == nil && userAP == nil && userNN == nil {
+		return false
+	}
+
+	// User-defined-only path: synthesize an empty base CP so projection has
+	// something to merge into. The synthesized CP carries a name/namespace
+	// for ProfileState display and a completion=complete annotation so rule
+	// evaluation treats it as authoritative (matching legacy behavior where
+	// user-authored profiles were stored directly).
+	if cp == nil {
+		cp = &v1beta1.ContainerProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      overlayName,
+				Namespace: ns,
+				Annotations: map[string]string{
+					helpersv1.CompletionMetadataKey: helpersv1.Full,
+					helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				},
+			},
 		}
 	}
 
@@ -284,6 +335,20 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData)
+
+	// Fix (reviewer #2): when the overlay label is set, record UserAPRef /
+	// UserNNRef even if the initial fetch failed. The refresh loop uses
+	// these refs to re-fetch on every tick; without them, a transient 404
+	// at add time would permanently lose the overlay.
+	if hasOverlay && overlayName != "" {
+		if entry.UserAPRef == nil {
+			entry.UserAPRef = &namespacedName{Namespace: ns, Name: overlayName}
+		}
+		if entry.UserNNRef == nil {
+			entry.UserNNRef = &namespacedName{Namespace: ns, Name: overlayName}
+		}
+	}
+
 	c.entries.Set(containerID, entry)
 	c.pending.Delete(containerID)
 	c.metricsManager.SetContainerProfileCacheEntries("container", float64(c.entries.Len()))
