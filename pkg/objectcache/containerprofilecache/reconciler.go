@@ -382,7 +382,7 @@ func (c *ContainerProfileCacheImpl) retryPendingEntries(ctx context.Context) {
 			if _, still := c.pending.Load(w.id); !still {
 				return
 			}
-			c.tryPopulateEntry(w.id, w.p.container, w.p.sharedData, w.p.cpName)
+			c.tryPopulateEntry(w.id, w.p.container, w.p.sharedData, w.p.cpName, w.p.workloadName)
 		})
 	}
 }

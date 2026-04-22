@@ -25,21 +25,32 @@ import (
 // pointer equality).
 type fakeProfileClient struct {
 	cp    *v1beta1.ContainerProfile
-	ap    *v1beta1.ApplicationProfile
+	ap    *v1beta1.ApplicationProfile // returned for Get by ap.Name match (or any if overlayOnly is empty)
 	nn    *v1beta1.NetworkNeighborhood
 	cpErr error
 	apErr error
 	nnErr error
+
+	// overlayOnly, if non-empty, restricts ap/nn returns to only the given
+	// name; other names return (nil, nil). Tests that mix workload-AP/NN
+	// with overlay-AP/NN use this to keep the fixture scoped.
+	overlayOnly string
 
 	getCPCalls int
 }
 
 var _ storage.ProfileClient = (*fakeProfileClient)(nil)
 
-func (f *fakeProfileClient) GetApplicationProfile(_, _ string) (*v1beta1.ApplicationProfile, error) {
+func (f *fakeProfileClient) GetApplicationProfile(_, name string) (*v1beta1.ApplicationProfile, error) {
+	if f.overlayOnly != "" && name != f.overlayOnly {
+		return nil, nil
+	}
 	return f.ap, f.apErr
 }
-func (f *fakeProfileClient) GetNetworkNeighborhood(_, _ string) (*v1beta1.NetworkNeighborhood, error) {
+func (f *fakeProfileClient) GetNetworkNeighborhood(_, name string) (*v1beta1.NetworkNeighborhood, error) {
+	if f.overlayOnly != "" && name != f.overlayOnly {
+		return nil, nil
+	}
 	return f.nn, f.nnErr
 }
 func (f *fakeProfileClient) GetContainerProfile(_, _ string) (*v1beta1.ContainerProfile, error) {
@@ -151,7 +162,7 @@ func TestOverlayPath_DeepCopies(t *testing.T) {
 			}},
 		},
 	}
-	client := &fakeProfileClient{cp: cp, ap: userAP}
+	client := &fakeProfileClient{cp: cp, ap: userAP, overlayOnly: "override"}
 	c, k8s := newTestCache(t, client)
 
 	id := "container-overlay"
