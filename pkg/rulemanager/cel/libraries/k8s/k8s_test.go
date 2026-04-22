@@ -61,7 +61,7 @@ func TestK8sLibrary(t *testing.T) {
 
 	// Add the pod to the cache directly
 	k8sObjCache.AddHandler(context.Background(), testPod)
-	objectCache := objectcache.NewObjectCache(k8sObjCache, nil, nil, nil, nil)
+	objectCache := objectcache.NewObjectCache(k8sObjCache, nil, nil)
 	env, err := cel.NewEnv(
 		cel.Variable("event", cel.AnyType),
 		K8s(objectCache.K8sObjectCache(), config.Config{}),
@@ -134,7 +134,7 @@ func TestK8sLibraryGetContainerByName(t *testing.T) {
 
 	// Add the pod to the cache directly
 	k8sObjCache.AddHandler(context.Background(), testPod)
-	objectCache := objectcache.NewObjectCache(k8sObjCache, nil, nil, nil, nil)
+	objectCache := objectcache.NewObjectCache(k8sObjCache, nil, nil)
 	env, err := cel.NewEnv(
 		cel.Variable("event", cel.AnyType),
 		K8s(objectCache.K8sObjectCache(), config.Config{}),
