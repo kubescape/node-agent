@@ -74,7 +74,11 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to create constant folding optimizer: %w", err)
 	}
-	staticOptimizer := cel.NewStaticOptimizer(folder)
+	setMembership, err := ext.NewSetMembershipOptimizer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create set membership optimizer: %w", err)
+	}
+	staticOptimizer := cel.NewStaticOptimizer(folder, setMembership)
 
 	c := &CEL{
 		env:             env,
