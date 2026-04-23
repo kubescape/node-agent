@@ -99,9 +99,9 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(numWorkers)
 	for w := 0; w < numWorkers; w++ {
-		go func() {
+		go func(worker int) {
 			defer wg.Done()
-			r := rand.New(rand.NewSource(time.Now().UnixNano()))
+			r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(worker)))
 			for iter := 0; iter < numIters; iter++ {
 				if ctx.Err() != nil {
 					return
@@ -131,7 +131,7 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 				}
 				time.Sleep(time.Millisecond * time.Duration(r.Intn(2)))
 			}
-		}()
+		}(w)
 	}
 
 	done := make(chan struct{})
