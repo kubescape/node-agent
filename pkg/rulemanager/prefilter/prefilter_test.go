@@ -113,6 +113,38 @@ func TestParseWithDefaults(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "excludeProcesses path normalized (trailing slash, missing leading slash, redundant segments)",
+			bindingParams: map[string]any{
+				"excludeProcesses": []interface{}{
+					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd/"},
+					map[string]interface{}{"name": "rpm", "path": "usr/bin/rpm"},
+					map[string]interface{}{"name": "curl", "path": "/usr/./bin/curl"},
+				},
+			},
+			expect: &Params{
+				ExcludeProcesses: map[processKey]struct{}{
+					{Name: "dockerd", Path: "/usr/bin/dockerd"}: {},
+					{Name: "rpm", Path: "/usr/bin/rpm"}:         {},
+					{Name: "curl", Path: "/usr/bin/curl"}:       {},
+				},
+			},
+		},
+		{
+			name: "excludeProcesses path that normalizes to root is dropped",
+			bindingParams: map[string]any{
+				"excludeProcesses": []interface{}{
+					map[string]interface{}{"name": "wildcard", "path": "."},
+					map[string]interface{}{"name": "root", "path": "/"},
+					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd"},
+				},
+			},
+			expect: &Params{
+				ExcludeProcesses: map[processKey]struct{}{
+					{Name: "dockerd", Path: "/usr/bin/dockerd"}: {},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -7,6 +7,7 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 // Direction represents an HTTP traffic direction as a compact integer.
@@ -214,8 +215,9 @@ func ParseWithDefaults(ruleState map[string]any, bindingParams map[string]any) *
 }
 
 // buildProcessMap converts a list of (name, path) entries to a lookup map.
-// Entries missing either field are dropped; a single aggregated warning is
-// emitted if any were dropped. Returns nil when no valid entries remain.
+// Entries with a missing name or a path that normalizes to empty or "/" are
+// dropped; a single aggregated warning is emitted if any were dropped.
+// Returns nil when no valid entries remain.
 func buildProcessMap(entries []rawProcessEntry, field string) map[processKey]struct{} {
 	if len(entries) == 0 {
 		return nil
@@ -223,14 +225,15 @@ func buildProcessMap(entries []rawProcessEntry, field string) map[processKey]str
 	m := make(map[processKey]struct{}, len(entries))
 	dropped := 0
 	for _, entry := range entries {
-		if entry.Name == "" || entry.Path == "" {
+		normalized := utils.NormalizePath(entry.Path)
+		if entry.Name == "" || normalized == "" || normalized == "/" {
 			dropped++
 			continue
 		}
-		m[processKey{Name: entry.Name, Path: entry.Path}] = struct{}{}
+		m[processKey{Name: entry.Name, Path: normalized}] = struct{}{}
 	}
 	if dropped > 0 {
-		logger.L().Warning("prefilter: dropped entries with empty name or path",
+		logger.L().Warning("prefilter: dropped entries with missing name or invalid path",
 			helpers.String("field", field),
 			helpers.Int("dropped", dropped))
 	}
