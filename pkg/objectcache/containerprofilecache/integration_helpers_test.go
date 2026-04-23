@@ -1,6 +1,6 @@
-// Package containerprofilecache_integration provides integration/acceptance tests
-// for the ContainerProfile cache unification (plan v2 §2.7 + §2.8 step 9).
-package containerprofilecache_integration
+// Integration/acceptance tests for the ContainerProfile cache unification
+// (plan v2 §2.7 + §2.8 step 9). Shared test helpers for this package.
+package containerprofilecache_test
 
 import (
 	"context"

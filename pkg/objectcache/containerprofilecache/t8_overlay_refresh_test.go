@@ -1,4 +1,4 @@
-package containerprofilecache_integration
+package containerprofilecache_test
 
 // TestT8_EndToEndRefreshUpdatesProjection mirrors the same-named unit test from
 // reconciler_test.go using only the public / test-helper API so it can live at

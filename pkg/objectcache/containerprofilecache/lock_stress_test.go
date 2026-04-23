@@ -1,4 +1,4 @@
-package containerprofilecache_integration
+package containerprofilecache_test
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package containerprofilecache_integration
+package containerprofilecache_test
 
 // TestSharedPointerReadersDoNotCorruptCache — PR 3 Part A.
 //

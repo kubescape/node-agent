@@ -1,4 +1,4 @@
-package containerprofilecache_integration
+package containerprofilecache_test
 
 import (
 	"strings"
@@ -21,7 +21,7 @@ func TestLegacyPackagesDeleted(t *testing.T) {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedImports | packages.NeedDeps,
 		// Load from the module root so that ./... expands correctly.
-		Dir: "../..",
+		Dir: "../../..",
 	}
 
 	pkgs, err := packages.Load(cfg, "./...")

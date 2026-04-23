@@ -1,11 +1,8 @@
 package containerprofilecache
 
-// testing.go — test-support helpers exported for use by out-of-package
-// integration tests (tests/containerprofilecache/). Not intended for
-// production callers; the *ForTest naming convention enforces that by
-// convention. These live in a non-_test.go file because export_test.go
-// is only compiled when running tests in the same directory and is
-// therefore invisible to test packages in other directories.
+// export_test.go exposes internal symbols to the containerprofilecache_test
+// package (the *_test.go files in this directory). Compiled only during
+// `go test`; never included in the production binary.
 
 import "context"
 
