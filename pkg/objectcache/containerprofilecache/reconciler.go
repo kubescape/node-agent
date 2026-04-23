@@ -302,6 +302,9 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 				helpers.Error(userManagedAPErr))
 			return
 		}
+		if userManagedAPErr != nil {
+			userManagedAP = nil // k8s client returns non-nil zero-value on 404; treat as absent
+		}
 		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + e.WorkloadName
 		var userManagedNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
@@ -314,6 +317,9 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 				helpers.String("name", ugNNName),
 				helpers.Error(userManagedNNErr))
 			return
+		}
+		if userManagedNNErr != nil {
+			userManagedNN = nil
 		}
 	}
 	var userAP *v1beta1.ApplicationProfile
@@ -331,6 +337,9 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 				helpers.Error(userAPErr))
 			return
 		}
+		if userAPErr != nil {
+			userAP = nil
+		}
 	}
 	if e.UserNNRef != nil {
 		var userNNErr error
@@ -344,6 +353,9 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 				helpers.String("name", e.UserNNRef.Name),
 				helpers.Error(userNNErr))
 			return
+		}
+		if userNNErr != nil {
+			userNN = nil
 		}
 	}
 
