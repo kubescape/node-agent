@@ -72,8 +72,11 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 	// avoid triggering the goradd/maps nil-check-before-lock initialization
 	// race (pre-existing upstream bug in SafeMap.Load / SafeMap.Len).
 	// WarmContainerLocksForTest pre-initialises the containerLocks SafeMap;
-	// SeedEntryForTest pre-initialises the entries SafeMap.
+	// SeedEntryForTest pre-initialises the entries SafeMap;
+	// WarmPendingForTest pre-initialises the pending SafeMap (touched by
+	// deleteContainer via ContainerCallback(EventTypeRemoveContainer)).
 	cache.WarmContainerLocksForTest(containerIDs)
+	cache.WarmPendingForTest(containerIDs)
 	for _, id := range containerIDs {
 		cache.SeedEntryForTest(id, &cpc.CachedContainerProfile{
 			Profile:       cp,
@@ -144,10 +147,14 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 		t.Fatal("TestLockStressAddEvictInterleaved timed out after 5s")
 	}
 
-	// Goroutine count should stay near baseline — no Start() was called so
-	// there is no tickLoop goroutine, and SeedEntryForTest + GetContainerProfile
-	// are synchronous.
-	runtime.Gosched()
+	// ContainerCallback(EventTypeRemoveContainer) spawns go deleteContainer(...)
+	// asynchronously, so those goroutines may still be running immediately after
+	// wg.Wait(). Poll briefly until they drain before asserting goroutine count.
+	drainDeadline := time.Now().Add(200 * time.Millisecond)
+	for runtime.NumGoroutine() > baseline+10 && time.Now().Before(drainDeadline) {
+		runtime.Gosched()
+		time.Sleep(5 * time.Millisecond)
+	}
 	runtime.GC()
 	assert.LessOrEqual(t, runtime.NumGoroutine(), baseline+10,
 		"goroutine count should stay near baseline (no leaked goroutines)")

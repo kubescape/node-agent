@@ -224,24 +224,24 @@ func NewPrometheusMetric() *PrometheusMetric {
 
 		// ContainerProfile cache metrics
 		cpCacheLegacyLoadsCounter: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "nodeagent_user_profile_legacy_loads_total",
+			Name: "node_agent_user_profile_legacy_loads_total",
 			Help: "Number of times a user-authored legacy ApplicationProfile or NetworkNeighborhood was loaded into the ContainerProfileCache; will be removed in a future release.",
 		}, []string{"kind", "completeness"}),
 		cpCacheEntriesGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "nodeagent_containerprofile_cache_entries",
+			Name: "node_agent_containerprofile_cache_entries",
 			Help: "Current number of cached ContainerProfile entries per kind.",
 		}, []string{"kind"}),
 		cpCacheHitCounter: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "nodeagent_containerprofile_cache_hit_total",
+			Name: "node_agent_containerprofile_cache_hit_total",
 			Help: "Total number of ContainerProfile cache lookups by result.",
 		}, []string{"result"}),
 		cpReconcilerDurationHistogram: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "nodeagent_containerprofile_reconciler_duration_seconds",
+			Name:    "node_agent_containerprofile_reconciler_duration_seconds",
 			Help:    "Duration of ContainerProfile reconciler phases in seconds.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"phase"}),
 		cpReconcilerEvictionsCounter: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "nodeagent_containerprofile_reconciler_evictions_total",
+			Name: "node_agent_containerprofile_reconciler_evictions_total",
 			Help: "Total number of ContainerProfile cache evictions by reason.",
 		}, []string{"reason"}),
 

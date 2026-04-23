@@ -292,13 +292,20 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// name returned by GetSlug(false). Until that aggregation runs the Get
 	// returns 404 — we record pending and the reconciler retries on each
 	// tick.
-	cp, err := c.storageClient.GetContainerProfile(ctx, ns, cpName)
-	if err != nil {
+	var (
+		cp    *v1beta1.ContainerProfile
+		cpErr error
+	)
+	_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+		cp, cpErr = c.storageClient.GetContainerProfile(rctx, ns, cpName)
+		return cpErr
+	})
+	if cpErr != nil {
 		logger.L().Debug("ContainerProfile not yet available",
 			helpers.String("containerID", containerID),
 			helpers.String("namespace", ns),
 			helpers.String("name", cpName),
-			helpers.Error(err))
+			helpers.Error(cpErr))
 		cp = nil
 	}
 
@@ -311,24 +318,32 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	var userManagedNN *v1beta1.NetworkNeighborhood
 	if workloadName != "" {
 		ugName := helpersv1.UserApplicationProfilePrefix + workloadName
-		if ap, uerr := c.storageClient.GetApplicationProfile(ctx, ns, ugName); uerr == nil {
-			userManagedAP = ap
-		} else {
+		var ugAPErr error
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			userManagedAP, ugAPErr = c.storageClient.GetApplicationProfile(rctx, ns, ugName)
+			return ugAPErr
+		})
+		if ugAPErr != nil {
 			logger.L().Debug("user-managed ApplicationProfile not available",
 				helpers.String("containerID", containerID),
 				helpers.String("namespace", ns),
 				helpers.String("name", ugName),
-				helpers.Error(uerr))
+				helpers.Error(ugAPErr))
+			userManagedAP = nil
 		}
 		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + workloadName
-		if nn, uerr := c.storageClient.GetNetworkNeighborhood(ctx, ns, ugNNName); uerr == nil {
-			userManagedNN = nn
-		} else {
+		var ugNNErr error
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			userManagedNN, ugNNErr = c.storageClient.GetNetworkNeighborhood(rctx, ns, ugNNName)
+			return ugNNErr
+		})
+		if ugNNErr != nil {
 			logger.L().Debug("user-managed NetworkNeighborhood not available",
 				helpers.String("containerID", containerID),
 				helpers.String("namespace", ns),
 				helpers.String("name", ugNNName),
-				helpers.Error(uerr))
+				helpers.Error(ugNNErr))
+			userManagedNN = nil
 		}
 	}
 
@@ -355,23 +370,31 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	var userNN *v1beta1.NetworkNeighborhood
 	overlayName, hasOverlay := container.K8s.PodLabels[helpersv1.UserDefinedProfileMetadataKey]
 	if hasOverlay && overlayName != "" {
-		if ap, err := c.storageClient.GetApplicationProfile(ctx, ns, overlayName); err == nil {
-			userAP = ap
-		} else {
+		var userAPErr error
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			userAP, userAPErr = c.storageClient.GetApplicationProfile(rctx, ns, overlayName)
+			return userAPErr
+		})
+		if userAPErr != nil {
 			logger.L().Debug("user-defined ApplicationProfile not available",
 				helpers.String("containerID", containerID),
 				helpers.String("namespace", ns),
 				helpers.String("name", overlayName),
-				helpers.Error(err))
+				helpers.Error(userAPErr))
+			userAP = nil
 		}
-		if nn, err := c.storageClient.GetNetworkNeighborhood(ctx, ns, overlayName); err == nil {
-			userNN = nn
-		} else {
+		var userNNErr error
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			userNN, userNNErr = c.storageClient.GetNetworkNeighborhood(rctx, ns, overlayName)
+			return userNNErr
+		})
+		if userNNErr != nil {
 			logger.L().Debug("user-defined NetworkNeighborhood not available",
 				helpers.String("containerID", containerID),
 				helpers.String("namespace", ns),
 				helpers.String("name", overlayName),
-				helpers.Error(err))
+				helpers.Error(userNNErr))
+			userNN = nil
 		}
 	}
 
@@ -617,6 +640,18 @@ func (c *ContainerProfileCacheImpl) RefreshAllEntriesForTest(ctx context.Context
 func (c *ContainerProfileCacheImpl) WarmContainerLocksForTest(ids []string) {
 	for _, id := range ids {
 		c.containerLocks.WithLock(id, func() {})
+	}
+}
+
+// WarmPendingForTest initialises the internal pending SafeMap by writing then
+// deleting a nil entry for each id, ensuring the map is non-nil before the
+// concurrent phase. Prevents the goradd/maps nil-check-before-lock
+// initialisation race in SafeMap.Len / SafeMap.Delete. Do not call from
+// production code.
+func (c *ContainerProfileCacheImpl) WarmPendingForTest(ids []string) {
+	for _, id := range ids {
+		c.pending.Set(id, nil)
+		c.pending.Delete(id)
 	}
 }
 
