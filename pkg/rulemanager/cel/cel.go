@@ -148,7 +148,10 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) createEvalContext(event *events.EnrichedEvent) map[string]any {
+// CreateEvalContext builds a CEL evaluation context for the given event.
+// The returned map is safe to reuse across multiple sequential EvaluateRuleWithContext
+// calls for the same event — program.Eval reads but does not mutate it.
+func (c *CEL) CreateEvalContext(event *events.EnrichedEvent) map[string]any {
 	eventType := event.Event.GetEventType()
 
 	// Apply event converter if one is registered, otherwise cast to CelEvent
@@ -197,8 +200,14 @@ func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[stri
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
 	eventType := event.Event.GetEventType()
-	evalContext := c.createEvalContext(event)
+	evalContext := c.CreateEvalContext(event)
+	return c.EvaluateRuleWithContext(evalContext, eventType, expressions)
+}
 
+// EvaluateRuleWithContext evaluates expressions against a pre-built evaluation context.
+// Callers who process multiple rules for the same event should build the context once
+// via CreateEvalContext and reuse it here to avoid per-rule allocation.
+func (c *CEL) EvaluateRuleWithContext(evalContext map[string]any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
 		if expression.EventType != eventType {
 			continue
@@ -227,7 +236,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 }
 
 func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
-	evalContext := c.createEvalContext(event)
+	evalContext := c.CreateEvalContext(event)
 
 	out, err := c.evaluateProgramWithContext(expression, evalContext)
 	if err != nil {
