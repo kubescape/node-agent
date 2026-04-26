@@ -31,12 +31,6 @@ type CelEventImpl struct {
 	CelEvent
 }
 
-// HttpRequestAccessor provides access to HTTP request fields
-// It's a lightweight wrapper around CelEvent that avoids allocations
-type HttpRequestAccessor struct {
-	HttpEvent CelEvent
-}
-
 var isSet = ref.FieldTester(func(target any) bool {
 	x := target.(*xcel.Object[CelEvent])
 	if x.Raw == nil {
@@ -46,24 +40,20 @@ var isSet = ref.FieldTester(func(target any) bool {
 })
 
 var requestIsSet = ref.FieldTester(func(target any) bool {
-	x := target.(*xcel.Object[HttpRequestAccessor])
-	if x.Raw.HttpEvent == nil {
+	x := target.(*xcel.Object[CelEvent])
+	if x.Raw == nil {
 		return false
 	}
-	req := x.Raw.HttpEvent.GetRequest()
-	return req != nil
+	return x.Raw.GetRequest() != nil
 })
 
 var urlIsSet = ref.FieldTester(func(target any) bool {
-	x := target.(*xcel.Object[HttpRequestAccessor])
-	if x.Raw.HttpEvent == nil {
+	x := target.(*xcel.Object[CelEvent])
+	if x.Raw == nil {
 		return false
 	}
-	req := x.Raw.HttpEvent.GetRequest()
-	if req == nil || req.URL == nil {
-		return false
-	}
-	return req.URL.String() != ""
+	req := x.Raw.GetRequest()
+	return req != nil && req.URL != nil
 })
 
 var CelFields = map[string]*celtypes.FieldType{
@@ -419,7 +409,10 @@ var CelFields = map[string]*celtypes.FieldType{
 			return x.Raw.GetUid(), nil
 		}),
 	},
-	// HTTP request nested object (no allocation - just wraps the event)
+	// HTTP request nested object - returns the same *xcel.Object[CelEvent] so
+	// HttpRequestFields can read x.Raw.GetRequest() without allocating a wrapper.
+	// CEL field dispatch uses the bound FieldType (HttpRequest), not the runtime
+	// Go type, so no separate Go-type registration is needed.
 	"request": {
 		Type:  nil, // Will be set during registration
 		IsSet: isSet,
@@ -428,10 +421,7 @@ var CelFields = map[string]*celtypes.FieldType{
 			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}
-			// Return a wrapped accessor - xcel.NewObject is lightweight (just pointer wrapping)
-			accessor := HttpRequestAccessor{HttpEvent: x.Raw}
-			obj, _ := xcel.NewObject(accessor)
-			return obj, nil
+			return target, nil
 		}),
 	},
 	"direction": {
@@ -453,11 +443,11 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 		Type:  celtypes.MapType,
 		IsSet: requestIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil {
 				return req.Header, nil
 			}
@@ -468,11 +458,11 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 		Type:  celtypes.StringType,
 		IsSet: requestIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil {
 				return req.Host, nil
 			}
@@ -483,11 +473,11 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 		Type:  celtypes.StringType,
 		IsSet: requestIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil {
 				return req.Method, nil
 			}
@@ -498,11 +488,11 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 		Type:  celtypes.StringType,
 		IsSet: urlIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil && req.URL != nil {
 				return req.URL.String(), nil
 			}
@@ -513,11 +503,11 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 		Type:  celtypes.StringType,
 		IsSet: urlIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil && req.URL != nil {
 				return req.URL.Path, nil
 			}
@@ -528,17 +518,17 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 		Type:  celtypes.StringType,
 		IsSet: requestIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
 				return nil, fmt.Errorf("celval: object is nil")
 			}
 			// Try GetBuf() first (for eBPF events)
-			buf := x.Raw.HttpEvent.GetBuf()
+			buf := x.Raw.GetBuf()
 			if len(buf) > 0 {
 				return string(buf), nil
 			}
 			// Fallback to reading from Request.Body (for test events)
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil && req.Body != nil {
 				// Read with size limit (10MB) and restore body for downstream readers
 				const maxBodySize = 10 * 1024 * 1024 // 10MB
