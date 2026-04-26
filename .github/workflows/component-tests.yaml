@@ -71,7 +71,12 @@ jobs:
           Test_21_AlertOnPartialThenLearnNetworkTest,
           Test_22_AlertOnPartialNetworkProfileTest,
           Test_23_RuleCooldownTest,
-          Test_24_ProcessTreeDepthTest
+          Test_24_ProcessTreeDepthTest,
+          Test_27_ApplicationProfileOpens,
+          Test_28_UserDefinedNetworkNeighborhood,
+          Test_29_SignedApplicationProfile,
+          Test_30_TamperedSignedProfiles,
+          Test_31_TamperDetectionAlert
         ]
     steps:
       - name: Checkout code
