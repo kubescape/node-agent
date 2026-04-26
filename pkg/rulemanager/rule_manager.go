@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"runtime/pprof"
+	"strconv"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -210,6 +211,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	eventType := enrichedEvent.Event.GetEventType()
 
 	var eventFields prefilter.EventFields
+	var evalContext map[string]any
 
 	for _, rule := range rules {
 		if !rule.Enabled {
@@ -245,11 +247,15 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			continue
 		}
 
+		if evalContext == nil {
+			evalContext = rm.celEvaluator.CreateEvalContext(enrichedEvent)
+		}
+
 		startTime := time.Now()
 		var shouldAlert bool
 		var err error
 		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
-			shouldAlert, err = rm.celEvaluator.EvaluateRule(enrichedEvent, ruleExpressions)
+			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
 		})
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.Name, eventType, evaluationTime)
@@ -305,9 +311,11 @@ func (rm *RuleManager) enrichEventWithContext(enrichedEvent *events.EnrichedEven
 	}
 	if contextInfo, found := rm.mntnsRegistry.Lookup(mntnsID); found {
 		enrichedEvent.SourceContext = contextInfo
-		logger.L().Debug("RuleManager - enriched event with context",
-			helpers.String("mntns", fmt.Sprintf("%d", mntnsID)),
-			helpers.String("context", string(contextInfo.Context())))
+		if logger.L().GetLevel() == helpers.DebugLevel.String() {
+			logger.L().Debug("RuleManager - enriched event with context",
+				helpers.String("mntns", strconv.FormatUint(mntnsID, 10)),
+				helpers.String("context", string(contextInfo.Context())))
+		}
 	}
 }
 
@@ -362,22 +370,28 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	creator := rm.ruleBindingCache.GetRuleCreator()
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
+	enrichedEvent := &events.EnrichedEvent{Event: event}
+	var evalContext map[string]any
+
 	for _, rule := range rules {
 		if !rule.SupportPolicy {
 			continue
 		}
 
-		enrichedEvent := &events.EnrichedEvent{Event: event}
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
 			continue
+		}
+
+		if evalContext == nil {
+			evalContext = rm.celEvaluator.CreateEvalContext(enrichedEvent)
 		}
 
 		startTime := time.Now()
 		var shouldAlert bool
 		var err error
 		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
-			shouldAlert, err = rm.celEvaluator.EvaluateRule(enrichedEvent, ruleExpressions)
+			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
 		})
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.ID, eventType, evaluationTime)
