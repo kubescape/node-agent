@@ -34,6 +34,7 @@ type CEL struct {
 	ta              xcel.TypeAdapter
 	tp              *xcel.TypeProvider
 	eventConverters map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent
+	staticOptimizer *cel.StaticOptimizer
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
@@ -68,6 +69,17 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	if err != nil {
 		return nil, err
 	}
+
+	folder, err := cel.NewConstantFoldingOptimizer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create constant folding optimizer: %w", err)
+	}
+	setMembership, err := ext.NewSetMembershipOptimizer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create set membership optimizer: %w", err)
+	}
+	staticOptimizer := cel.NewStaticOptimizer(folder, setMembership)
+
 	c := &CEL{
 		env:             env,
 		objectCache:     objectCache,
@@ -75,6 +87,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		ta:              ta,
 		tp:              tp,
 		eventConverters: make(map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent),
+		staticOptimizer: staticOptimizer,
 	}
 
 	return c, nil
@@ -95,6 +108,13 @@ func (c *CEL) registerExpression(expression string) error {
 		c.programCache[expression] = nil
 		logger.L().Warning("CEL expression disabled: failed to compile", helpers.String("expression", expression), helpers.Error(issues.Err()))
 		return fmt.Errorf("failed to compile expression: %s", issues.Err())
+	}
+
+	optAst, optIssues := c.staticOptimizer.Optimize(c.env, ast)
+	if optIssues != nil && optIssues.Err() != nil {
+		logger.L().Warning("CEL static optimization failed, falling back to unoptimized AST", helpers.String("expression", expression), helpers.Error(optIssues.Err()))
+	} else {
+		ast = optAst
 	}
 
 	program, err := c.env.Program(ast, cel.EvalOptions(cel.OptOptimize))
@@ -128,7 +148,10 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) createEvalContext(event *events.EnrichedEvent) map[string]any {
+// CreateEvalContext builds a CEL evaluation context for the given event.
+// The returned map is safe to reuse across multiple sequential EvaluateRuleWithContext
+// calls for the same event — program.Eval reads but does not mutate it.
+func (c *CEL) CreateEvalContext(event *events.EnrichedEvent) map[string]any {
 	eventType := event.Event.GetEventType()
 
 	// Apply event converter if one is registered, otherwise cast to CelEvent
@@ -177,8 +200,14 @@ func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[stri
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
 	eventType := event.Event.GetEventType()
-	evalContext := c.createEvalContext(event)
+	evalContext := c.CreateEvalContext(event)
+	return c.EvaluateRuleWithContext(evalContext, eventType, expressions)
+}
 
+// EvaluateRuleWithContext evaluates expressions against a pre-built evaluation context.
+// Callers who process multiple rules for the same event should build the context once
+// via CreateEvalContext and reuse it here to avoid per-rule allocation.
+func (c *CEL) EvaluateRuleWithContext(evalContext map[string]any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
 		if expression.EventType != eventType {
 			continue
@@ -207,7 +236,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 }
 
 func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
-	evalContext := c.createEvalContext(event)
+	evalContext := c.CreateEvalContext(event)
 
 	out, err := c.evaluateProgramWithContext(expression, evalContext)
 	if err != nil {

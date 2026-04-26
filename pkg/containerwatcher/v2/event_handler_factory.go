@@ -1,12 +1,16 @@
 package containerwatcher
 
 import (
+	"context"
+	"runtime/pprof"
+
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/dedupcache"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
@@ -41,6 +45,19 @@ func (ma *ManagerAdapter) ReportEvent(eventType utils.EventType, event utils.K8s
 	ma.reportEventFunc(eventType, event)
 }
 
+// TTL constants for dedup windows in 64ms buckets.
+const (
+	dedupTTLOpen         uint16 = 156 // 10s
+	dedupTTLNetwork      uint16 = 78  // 5s
+	dedupTTLCapabilities uint16 = 156 // 10s
+	dedupTTLHTTP         uint16 = 31  // 2s
+	dedupTTLSSH          uint16 = 156 // 10s
+	dedupTTLSymlink      uint16 = 156 // 10s
+	dedupTTLHardlink     uint16 = 156 // 10s
+	dedupTTLPtrace       uint16 = 156 // 10s
+	dedupTTLSyscall      uint16 = 78  // 5s
+)
+
 // EventHandlerFactory manages the mapping of event types to their managers
 type EventHandlerFactory struct {
 	handlers                 map[utils.EventType][]Manager
@@ -49,6 +66,10 @@ type EventHandlerFactory struct {
 	cfg                      config.Config
 	containerCollection      *containercollection.ContainerCollection
 	containerCache           *maps.SafeMap[string, *containercollection.Container] // Cache for container lookups
+	containerProfileManager  containerprofilemanager.ContainerProfileManagerClient
+	dedupCache               *dedupcache.DedupCache
+	metrics                  metricsmanager.MetricsManager
+	dedupSkipSet             map[Manager]struct{} // Managers to skip when event is duplicate
 }
 
 // NewEventHandlerFactory creates a new event handler factory
@@ -64,6 +85,7 @@ func NewEventHandlerFactory(
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	rulePolicyReporter *rulepolicy.RulePolicyReporter,
+	dedupCache *dedupcache.DedupCache,
 ) *EventHandlerFactory {
 	factory := &EventHandlerFactory{
 		handlers:                 make(map[utils.EventType][]Manager),
@@ -72,14 +94,14 @@ func NewEventHandlerFactory(
 		cfg:                      cfg,
 		containerCollection:      containerCollection,
 		containerCache:           &maps.SafeMap[string, *containercollection.Container]{},
+		containerProfileManager:  containerProfileManager,
+		dedupCache:               dedupCache,
+		metrics:                  metrics,
+		dedupSkipSet:             make(map[Manager]struct{}),
 	}
 
 	// Create adapters for managers that don't implement the Manager interface directly
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
-		// check for dropped events
-		if event.HasDroppedEvents() {
-			containerProfileManager.ReportDroppedEvent(event.GetContainerID())
-		}
 		// ContainerProfileManager has specific methods for different event types
 		switch eventType {
 		case utils.CapabilitiesEventType:
@@ -137,7 +159,7 @@ func NewEventHandlerFactory(
 			}
 		case utils.IoUringEventType:
 			if iouringEvent, ok := event.(utils.IOUring); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.GetContainerID(), iouringEvent.GetIdentifier())
+				rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.GetContainerID(), iouringEvent.GetComm())
 			}
 		}
 	})
@@ -168,7 +190,105 @@ func NewEventHandlerFactory(
 		rulePolicyAdapter,
 	)
 
+	// Populate dedupSkipSet: managers that skip processing when event is duplicate.
+	// RuleManager checks enrichedEvent.Duplicate internally.
+	factory.dedupSkipSet[containerProfileAdapter] = struct{}{}
+	factory.dedupSkipSet[malwareManager] = struct{}{}
+
 	return factory
+}
+
+// computeEventDedupKey computes a dedup key and TTL for the given event.
+// Returns shouldDedup=false for event types that must not be deduplicated.
+func computeEventDedupKey(enrichedEvent *events.EnrichedEvent) (key uint64, ttl uint16, shouldDedup bool) {
+	event := enrichedEvent.Event
+	mntns := enrichedEvent.MountNamespaceID
+	if mntns == 0 {
+		if ee, ok := event.(utils.EnrichEvent); ok {
+			mntns = ee.GetMountNsID()
+		}
+	}
+
+	switch event.GetEventType() {
+	case utils.OpenEventType:
+		if e, ok := event.(utils.OpenEvent); ok {
+			pid := uint32(0)
+			if ee, ok := event.(utils.EnrichEvent); ok {
+				pid = ee.GetPID()
+			}
+			return dedupcache.ComputeOpenKey(mntns, pid, e.GetPath(), e.GetFlagsRaw()), dedupTTLOpen, true
+		}
+	case utils.NetworkEventType:
+		if e, ok := event.(utils.NetworkEvent); ok {
+			pid := uint32(0)
+			if ee, ok := event.(utils.EnrichEvent); ok {
+				pid = ee.GetPID()
+			}
+			dst := e.GetDstEndpoint()
+			return dedupcache.ComputeNetworkKey(mntns, pid, dst.Addr, e.GetDstPort(), e.GetProto()), dedupTTLNetwork, true
+		}
+	// DNS events are not deduplicated: the system resolver cache already
+	// limits DNS traffic at the network layer, so events reaching the eBPF
+	// tracer are almost always unique.
+	case utils.CapabilitiesEventType:
+		if e, ok := event.(utils.CapabilitiesEvent); ok {
+			pid := uint32(0)
+			if ee, ok := event.(utils.EnrichEvent); ok {
+				pid = ee.GetPID()
+			}
+			return dedupcache.ComputeCapabilitiesKey(mntns, pid, e.GetCapability(), e.GetSyscall()), dedupTTLCapabilities, true
+		}
+	case utils.HTTPEventType:
+		if e, ok := event.(utils.HttpEvent); ok {
+			pid := uint32(0)
+			if ee, ok := event.(utils.EnrichEvent); ok {
+				pid = ee.GetPID()
+			}
+			req := e.GetRequest()
+			if req == nil || req.URL == nil {
+				return 0, 0, false
+			}
+			return dedupcache.ComputeHTTPKey(mntns, pid, string(e.GetDirection()), req.Method, req.Host, req.URL.Path, req.URL.RawQuery), dedupTTLHTTP, true
+		}
+	case utils.SSHEventType:
+		if e, ok := event.(utils.SshEvent); ok {
+			return dedupcache.ComputeSSHKey(mntns, e.GetDstIP(), e.GetDstPort()), dedupTTLSSH, true
+		}
+	case utils.SymlinkEventType:
+		if e, ok := event.(utils.LinkEvent); ok {
+			pid := uint32(0)
+			if ee, ok := event.(utils.EnrichEvent); ok {
+				pid = ee.GetPID()
+			}
+			return dedupcache.ComputeSymlinkKey(mntns, pid, e.GetOldPath(), e.GetNewPath()), dedupTTLSymlink, true
+		}
+	case utils.HardlinkEventType:
+		if e, ok := event.(utils.LinkEvent); ok {
+			pid := uint32(0)
+			if ee, ok := event.(utils.EnrichEvent); ok {
+				pid = ee.GetPID()
+			}
+			return dedupcache.ComputeHardlinkKey(mntns, pid, e.GetOldPath(), e.GetNewPath()), dedupTTLHardlink, true
+		}
+	case utils.PtraceEventType:
+		if e, ok := event.(utils.PtraceEvent); ok {
+			pid := uint32(0)
+			if ee, ok := event.(utils.EnrichEvent); ok {
+				pid = ee.GetPID()
+			}
+			return dedupcache.ComputePtraceKey(mntns, pid, e.GetExePath()), dedupTTLPtrace, true
+		}
+	case utils.SyscallEventType:
+		if e, ok := event.(utils.SyscallEvent); ok {
+			pid := uint32(0)
+			if ee, ok := event.(utils.EnrichEvent); ok {
+				pid = ee.GetPID()
+			}
+			return dedupcache.ComputeSyscallKey(mntns, pid, e.GetSyscall()), dedupTTLSyscall, true
+		}
+	}
+	// exec, exit, fork, randomx, kmod, bpf, unshare, iouring — no dedup
+	return 0, 0, false
 }
 
 // ProcessEvent processes an event through all registered handlers
@@ -187,6 +307,23 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		return
 	}
 
+	// Dedup check: compute key and check cache before dispatching to handlers
+	if ehf.dedupCache != nil {
+		key, ttl, shouldDedup := computeEventDedupKey(enrichedEvent)
+		if shouldDedup {
+			duplicate := ehf.dedupCache.CheckAndSet(key, ttl, enrichedEvent.DedupBucket)
+			if duplicate {
+				enrichedEvent.Duplicate = true
+			}
+			ehf.metrics.ReportDedupEvent(enrichedEvent.Event.GetEventType(), duplicate)
+		}
+	}
+
+	// Always report dropped events regardless of dedup status
+	if enrichedEvent.Event.HasDroppedEvents() {
+		ehf.containerProfileManager.ReportDroppedEvent(enrichedEvent.Event.GetContainerID())
+	}
+
 	// Get handlers for this event type
 	eventType := enrichedEvent.Event.GetEventType()
 	handlers, exists := ehf.handlers[eventType]
@@ -194,17 +331,24 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		return
 	}
 
-	// Process event through each handler
-	for _, handler := range handlers {
-		if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
-			enrichedHandler.ReportEnrichedEvent(enrichedEvent)
-		} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
-			handler.ReportEvent(eventType, enrichedEvent.Event)
+	pprof.Do(context.Background(), pprof.Labels("event", string(eventType)), func(_ context.Context) {
+		// Process event through each handler
+		for _, handler := range handlers {
+			if enrichedEvent.Duplicate {
+				if _, skip := ehf.dedupSkipSet[handler]; skip {
+					continue
+				}
+			}
+			if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
+				enrichedHandler.ReportEnrichedEvent(enrichedEvent)
+			} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
+				handler.ReportEvent(eventType, enrichedEvent.Event)
+			}
 		}
-	}
 
-	// Report to third-party event receivers
-	ehf.reportEventToThirdPartyTracers(enrichedEvent)
+		// Report to third-party event receivers
+		ehf.reportEventToThirdPartyTracers(enrichedEvent)
+	})
 }
 
 // registerHandlers registers all handlers for different event types

@@ -1,12 +1,16 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/kubescape/backend/pkg/servicediscovery"
+	"github.com/kubescape/backend/pkg/servicediscovery/schema"
+	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
@@ -24,6 +28,12 @@ const (
 const NodeNameEnvVar = "NODE_NAME"
 const PodNameEnvVar = "POD_NAME"
 const NamespaceEnvVar = "NAMESPACE_NAME"
+
+// EventDedupConfig controls eBPF event deduplication before CEL rule evaluation.
+type EventDedupConfig struct {
+	Enabled       bool  `mapstructure:"enabled"`
+	SlotsExponent uint8 `mapstructure:"slotsExponent"`
+}
 
 type Config struct {
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
@@ -71,6 +81,7 @@ type Config struct {
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
+	EventDedup                     EventDedupConfig                     `mapstructure:"eventDedup"`
 	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
 	ExcludeLabels                  map[string][]string                  `mapstructure:"excludeLabels"`
 	ExcludeNamespaces              []string                             `mapstructure:"excludeNamespaces"`
@@ -137,6 +148,10 @@ type FIMExportersConfig struct {
 
 // LoadConfig reads configuration from file or environment variables.
 func LoadConfig(path string) (Config, error) {
+	return LoadConfigOptional(path, true)
+}
+
+func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.AddConfigPath(path)
 	viper.SetConfigName("config")
 	viper.SetConfigType("json")
@@ -185,6 +200,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ignoreRuleBindings", false)
 	viper.SetDefault("enableSignatureVerification", false)
 
+	viper.SetDefault("eventDedup::enabled", true)
+	viper.SetDefault("eventDedup::slotsExponent", 18)
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
@@ -218,14 +235,15 @@ func LoadConfig(path string) (Config, error) {
 	viper.AutomaticEnv()
 	_ = viper.BindEnv("enableSignatureVerification", "ENABLE_SIGNATURE_VERIFICATION")
 
-	err := viper.ReadInConfig()
-	if err != nil {
-		return Config{}, err
+	if err := viper.ReadInConfig(); err != nil {
+		var notFound viper.ConfigFileNotFoundError
+		if !(errors.As(err, &notFound) && !errNotFound) {
+			return Config{}, err
+		}
 	}
 
 	var config Config
-	err = viper.Unmarshal(&config)
-	if err != nil {
+	if err := viper.Unmarshal(&config); err != nil {
 		return Config{}, err
 	}
 
@@ -235,6 +253,12 @@ func LoadConfig(path string) (Config, error) {
 		config.SeccompProfileBackend != SeccompBackendCRD {
 		return Config{}, fmt.Errorf("invalid seccompProfileBackend value: %q (must be %q or %q)",
 			config.SeccompProfileBackend, SeccompBackendStorage, SeccompBackendCRD)
+	}
+
+	// Validate eventDedup slotsExponent range
+	if config.EventDedup.Enabled && (config.EventDedup.SlotsExponent < 10 || config.EventDedup.SlotsExponent > 30) {
+		return Config{}, fmt.Errorf("invalid eventDedup.slotsExponent value: %d (must be between 10 and 30)",
+			config.EventDedup.SlotsExponent)
 	}
 
 	return config, nil
@@ -281,6 +305,15 @@ func (c *Config) SkipNamespace(ns string) bool {
 		}
 	}
 	return false
+}
+
+func LoadServiceURLs(filePath string) (schema.IBackendServices, error) {
+	if pathFromEnv, present := os.LookupEnv("SERVICES"); present {
+		filePath = pathFromEnv
+	}
+	return servicediscovery.GetServices(
+		servicediscoveryv2.NewServiceDiscoveryFileV2(filePath),
+	)
 }
 
 type OrderedEventQueueConfig struct {

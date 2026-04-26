@@ -13,9 +13,11 @@ type MetricsManager interface {
 	ReportEvent(eventType utils.EventType)
 	ReportFailedEvent()
 	ReportRuleProcessed(ruleID string)
+	ReportRulePrefiltered(ruleName string)
 	ReportRuleAlert(ruleID string)
 	ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration)
 	//ReportEbpfStats(stats *top.Event[toptypes.Stats])
 	ReportContainerStart()
 	ReportContainerStop()
+	ReportDedupEvent(eventType utils.EventType, duplicate bool)
 }

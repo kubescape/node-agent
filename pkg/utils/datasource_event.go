@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -396,7 +397,7 @@ func (e *DatasourceEvent) GetEventType() EventType {
 
 func (e *DatasourceEvent) GetExePath() string {
 	exepath, _ := e.getFieldAccessor("exepath").String(e.Data)
-	return exepath
+	return NormalizePath(exepath)
 }
 
 func (e *DatasourceEvent) GetExitCode() uint32 {
@@ -409,13 +410,28 @@ func (e *DatasourceEvent) GetExtra() interface{} {
 }
 
 func (e *DatasourceEvent) GetFlags() []string {
-	flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
-	return decodeOpenFlags(flags)
+	switch e.EventType {
+	case IoUringEventType:
+		flags, _ := e.getFieldAccessor("flags").Uint32(e.Data)
+		if flags == 0 {
+			return nil
+		}
+		return []string{strconv.FormatUint(uint64(flags), 10)}
+	default:
+		flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
+		return decodeOpenFlags(flags)
+	}
 }
 
 func (e *DatasourceEvent) GetFlagsRaw() uint32 {
-	flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
-	return uint32(flags)
+	switch e.EventType {
+	case IoUringEventType:
+		flags, _ := e.getFieldAccessor("flags").Uint32(e.Data)
+		return flags
+	default:
+		flags, _ := e.getFieldAccessor("flags_raw").Int32(e.Data)
+		return uint32(flags)
+	}
 }
 
 func (e *DatasourceEvent) GetFullPath() string {
@@ -423,7 +439,7 @@ func (e *DatasourceEvent) GetFullPath() string {
 	if path == "" {
 		path, _ = e.getFieldAccessor("fname").String(e.Data)
 	}
-	return path
+	return NormalizePath(path)
 }
 
 func (e *DatasourceEvent) GetGid() *uint32 {
@@ -474,7 +490,7 @@ func (e *DatasourceEvent) GetNamespace() string {
 
 func (e *DatasourceEvent) GetNewPath() string {
 	newPath, _ := e.getFieldAccessor("newpath").String(e.Data)
-	return newPath
+	return NormalizePath(newPath)
 }
 
 func (e *DatasourceEvent) GetNumAnswers() int {
@@ -484,7 +500,7 @@ func (e *DatasourceEvent) GetNumAnswers() int {
 
 func (e *DatasourceEvent) GetOldPath() string {
 	oldPath, _ := e.getFieldAccessor("oldpath").String(e.Data)
-	return oldPath
+	return NormalizePath(oldPath)
 }
 
 func (e *DatasourceEvent) GetOpcode() int {
@@ -510,7 +526,7 @@ func (e *DatasourceEvent) GetPath() string {
 		return e.GetFullPath()
 	}
 	path, _ := e.getFieldAccessor("fname").String(e.Data)
-	return path
+	return NormalizePath(path)
 }
 
 func (e *DatasourceEvent) GetPcomm() string {

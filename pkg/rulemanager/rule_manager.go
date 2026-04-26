@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"runtime/pprof"
+	"strconv"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -25,6 +27,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
+	"github.com/kubescape/node-agent/pkg/rulemanager/prefilter"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
@@ -146,6 +149,9 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
+	if enrichedEvent.Duplicate {
+		return
+	}
 	rm.enrichEventWithContext(enrichedEvent)
 
 	var profileExists bool
@@ -203,6 +209,10 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	}
 
 	eventType := enrichedEvent.Event.GetEventType()
+
+	var eventFields prefilter.EventFields
+	var evalContext map[string]any
+
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
@@ -222,12 +232,31 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			continue
 		}
 
+		// Pre-filter: skip CEL evaluation if parsed parameters exclude this event.
+		if rule.Prefilter != nil {
+			if !eventFields.Extracted {
+				eventFields = extractEventFields(enrichedEvent.Event)
+			}
+			if rule.Prefilter.ShouldSkip(eventFields) {
+				rm.metrics.ReportRulePrefiltered(rule.Name)
+				continue
+			}
+		}
+
 		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
 			continue
 		}
 
+		if evalContext == nil {
+			evalContext = rm.celEvaluator.CreateEvalContext(enrichedEvent)
+		}
+
 		startTime := time.Now()
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, rule.Expressions.RuleExpression)
+		var shouldAlert bool
+		var err error
+		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
+			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
+		})
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.Name, eventType, evaluationTime)
 
@@ -282,9 +311,11 @@ func (rm *RuleManager) enrichEventWithContext(enrichedEvent *events.EnrichedEven
 	}
 	if contextInfo, found := rm.mntnsRegistry.Lookup(mntnsID); found {
 		enrichedEvent.SourceContext = contextInfo
-		logger.L().Debug("RuleManager - enriched event with context",
-			helpers.String("mntns", fmt.Sprintf("%d", mntnsID)),
-			helpers.String("context", string(contextInfo.Context())))
+		if logger.L().GetLevel() == helpers.DebugLevel.String() {
+			logger.L().Debug("RuleManager - enriched event with context",
+				helpers.String("mntns", strconv.FormatUint(mntnsID, 10)),
+				helpers.String("context", string(contextInfo.Context())))
+		}
 	}
 }
 
@@ -339,19 +370,29 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	creator := rm.ruleBindingCache.GetRuleCreator()
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
+	enrichedEvent := &events.EnrichedEvent{Event: event}
+	var evalContext map[string]any
+
 	for _, rule := range rules {
 		if !rule.SupportPolicy {
 			continue
 		}
 
-		enrichedEvent := &events.EnrichedEvent{Event: event}
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
 			continue
 		}
 
+		if evalContext == nil {
+			evalContext = rm.celEvaluator.CreateEvalContext(enrichedEvent)
+		}
+
 		startTime := time.Now()
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, ruleExpressions)
+		var shouldAlert bool
+		var err error
+		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
+			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
+		})
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.ID, eventType, evaluationTime)
 
@@ -442,6 +483,44 @@ func (rm *RuleManager) evaluateHTTPPayloadState(state map[string]any, enrichedEv
 	stateCopy["payload"] = payloadValue
 
 	return stateCopy
+}
+
+// extractEventFields extracts pre-filterable fields from an event.
+// Called lazily on first rule with a prefilter — the returned value type is
+// reused across all remaining rules.
+func extractEventFields(event utils.K8sEvent) prefilter.EventFields {
+	f := prefilter.EventFields{Extracted: true}
+
+	switch event.GetEventType() {
+	case utils.OpenEventType:
+		if e, ok := event.(utils.OpenEvent); ok {
+			f.Path = e.GetPath()
+		}
+	case utils.ExecveEventType:
+		if e, ok := event.(utils.ExecEvent); ok {
+			f.Path = e.GetExePath()
+		}
+	case utils.HTTPEventType:
+		if e, ok := event.(utils.HttpEvent); ok {
+			f.SetDirection(string(e.GetDirection()))
+			f.DstPort = e.GetDstPort()
+			if req := e.GetRequest(); req != nil {
+				f.SetMethod(req.Method)
+			}
+		}
+	case utils.NetworkEventType:
+		if e, ok := event.(utils.NetworkEvent); ok {
+			f.DstPort = e.GetDstPort()
+			f.PortEligible = true
+		}
+	case utils.SSHEventType:
+		if e, ok := event.(utils.SshEvent); ok {
+			f.DstPort = e.GetDstPort()
+			f.PortEligible = true
+		}
+	}
+
+	return f
 }
 
 func cloneState(state map[string]any) map[string]any {

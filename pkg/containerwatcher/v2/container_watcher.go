@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/dedupcache"
 	"github.com/kubescape/node-agent/pkg/containerwatcher/v2/tracers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -32,7 +33,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
-	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/workerpool"
 	"github.com/panjf2000/ants/v2"
 )
@@ -137,6 +137,12 @@ func CreateContainerWatcher(
 
 	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, containerProfileManager)
 
+	// Create dedup cache if enabled
+	var dedupCache *dedupcache.DedupCache
+	if cfg.EventDedup.Enabled {
+		dedupCache = dedupcache.NewDedupCache(cfg.EventDedup.SlotsExponent)
+	}
+
 	// Create event handler factory
 	eventHandlerFactory := NewEventHandlerFactory(
 		cfg,
@@ -150,6 +156,7 @@ func CreateContainerWatcher(
 		thirdPartyTracers.ThirdPartyEventReceivers,
 		thirdPartyEnricher,
 		rulePolicyReporter,
+		dedupCache,
 	)
 
 	// Create event enricher
@@ -159,9 +166,7 @@ func CreateContainerWatcher(
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
 		enrichedEvent := i.(*events.EnrichedEvent)
 		eventHandlerFactory.ProcessEvent(enrichedEvent)
-		if enrichedEvent.Event.GetEventType() != utils.SyscallEventType {
-			enrichedEvent.Event.Release() // at this time we should not need the event anymore
-		}
+		enrichedEvent.Event.Release() // at this time we should not need the event anymore
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating worker pool: %w", err)
@@ -462,6 +467,7 @@ func (cw *ContainerWatcher) processQueueBatch() {
 
 func (cw *ContainerWatcher) enrichAndProcess(entry EventEntry) {
 	enrichedEvent := cw.eventEnricher.EnrichEvents(entry)
+	enrichedEvent.DedupBucket = uint16(time.Now().UnixNano() / (64 * 1_000_000))
 
 	select {
 	case cw.workerChan <- enrichedEvent:

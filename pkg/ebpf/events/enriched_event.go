@@ -33,4 +33,9 @@ type EnrichedEvent struct {
 	// This uniquely identifies the container/host and is used for context lookup.
 	// May be 0 if unavailable.
 	MountNamespaceID uint64
+	// Duplicate is set by the dedup check in EventHandlerFactory.ProcessEvent().
+	// Consumers that respect this flag skip processing for deduplicated events.
+	Duplicate bool
+	// DedupBucket is the current time expressed in 64ms buckets, cached per batch tick.
+	DedupBucket uint16
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/prefilter"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	rulemanagertypesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -400,14 +401,19 @@ func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule)
 func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []rulemanagertypesv1.Rule {
 	if r.RuleID != "" {
 		rule := c.ruleCreator.CreateRuleByID(r.RuleID)
+		rule.Prefilter = prefilter.ParseWithDefaults(rule.State, r.Parameters)
 		return []rulemanagertypesv1.Rule{rule}
 	}
 	if r.RuleName != "" {
 		rule := c.ruleCreator.CreateRuleByName(r.RuleName)
+		rule.Prefilter = prefilter.ParseWithDefaults(rule.State, r.Parameters)
 		return []rulemanagertypesv1.Rule{rule}
 	}
 	if len(r.RuleTags) > 0 {
 		rules := c.ruleCreator.CreateRulesByTags(r.RuleTags)
+		for i := range rules {
+			rules[i].Prefilter = prefilter.ParseWithDefaults(rules[i].State, r.Parameters)
+		}
 		return rules
 	}
 

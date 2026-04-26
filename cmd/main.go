@@ -63,6 +63,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
+	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	seccompmanagerv1 "github.com/kubescape/node-agent/pkg/seccompmanager/v1"
 	"github.com/kubescape/node-agent/pkg/storage/v1"
@@ -90,10 +91,12 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}
 
+	var accessKey string
 	if credentials, err := beUtils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
 		logger.L().Warning("failed to load credentials", helpers.Error(err))
 	} else {
 		clusterData.AccountID = credentials.Account
+		accessKey = credentials.AccessKey
 		logger.L().Info("credentials loaded", helpers.Int("accountLength", len(credentials.Account)))
 	}
 
@@ -177,7 +180,7 @@ func main() {
 	if cfg.EnablePrometheusExporter {
 		prometheusExporter = metricprometheus.NewPrometheusMetric()
 	} else {
-		prometheusExporter = metricsmanager.NewMetricsMock()
+		prometheusExporter = metricsmanager.NewMetricsNoop()
 	}
 
 	// Create watchers
@@ -381,10 +384,26 @@ func main() {
 	logger.L().Info("IG Kubernetes client created", helpers.Interface("client", igK8sClient))
 	logger.L().Info("detected container runtime", helpers.String("containerRuntime", igK8sClient.RuntimeConfig.Name.String()))
 
+	// Create the SBOM scanner sidecar client (if configured)
+	var scannerClient sbomscanner.SBOMScannerClient
+	if socket, ok := os.LookupEnv("SBOM_SCANNER_SOCKET"); ok {
+		scannerClient, err = sbomscanner.NewSBOMScannerClient(socket)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("SBOM scanner sidecar not available, falling back to in-process scanning", helpers.Error(err))
+		}
+	}
+
+	// Create scan failure reporter (sends SBOM failures to careportreceiver for user notifications)
+	var failureReporter sbommanager.SbomFailureReporter
+	if services, svcErr := config.LoadServiceURLs("/etc/config/services.json"); svcErr == nil && services.GetReportReceiverHttpUrl() != "" {
+		failureReporter = sbommanagerv1.NewHTTPSbomFailureReporter(services.GetReportReceiverHttpUrl(), accessKey, clusterData.AccountID, clusterData.ClusterName)
+		logger.L().Info("scan failure reporting enabled", helpers.String("eventReceiverURL", services.GetReportReceiverHttpUrl()))
+	}
+
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient
 	if cfg.EnableSbomGeneration {
-		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache)
+		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache, scannerClient, failureReporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
 		}

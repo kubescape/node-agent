@@ -12,18 +12,15 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
-	"github.com/anchore/syft/syft/file"
-	"github.com/anchore/syft/syft/format"
-	"github.com/anchore/syft/syft/format/syftjson"
-	"github.com/anchore/syft/syft/format/syftjson/model"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
-	"github.com/anchore/syft/syft/sbom"
 	"github.com/aquilax/truncate"
+	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/cenkalti/backoff/v5"
 	securejoin "github.com/cyphar/filepath-securejoin"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -37,6 +34,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
+	"github.com/kubescape/node-agent/pkg/sbommanager/v1/syftutil"
+	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -54,9 +53,22 @@ import (
 )
 
 const (
-	digestDelim         = "@"
-	NodeNameMetadataKey = "kubescape.io/node-name"
+	digestDelim                   = "@"
+	NodeNameMetadataKey           = "kubescape.io/node-name"
+	ScannerMemoryLimitAnnotation  = "kubescape.io/scanner-memory-limit"
+	maxScanRetries                = 3
+	scannerReadinessCheckInterval = 5 * time.Second
+	maxPendingScans               = 1000
 )
+
+// pendingScan holds the data needed to retry a container scan after the sidecar becomes ready.
+type pendingScan struct {
+	notif       containercollection.PubSubEvent
+	mounts      []string
+	imageStatus *runtime.ImageStatusResponse
+	imageTag    string
+	imageID     string
+}
 
 type SbomManager struct {
 	appFs              afero.Fs
@@ -70,11 +82,18 @@ type SbomManager struct {
 	processing         mapset.Set[string]
 	storageClient      storage.SbomClient
 	version            string
+	scannerClient      sbomscanner.SBOMScannerClient
+	scannerMemLimit    int64
+	scanRetries        map[string]int // safe without mutex: only accessed from pool workers (pool size 1)
+	pendingScans       map[string]pendingScan
+	pendingOrder       []string
+	pendingMu          sync.Mutex
+	failureReporter    sbommanager.SbomFailureReporter
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
-func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache) (*SbomManager, error) {
+func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter) (*SbomManager, error) {
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
 	if !exists {
@@ -94,7 +113,12 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 			return d.DialContext(ctx, "unix", socketPath)
 		}),
 	)
-	return &SbomManager{
+	var scannerMemLimit int64
+	if memStr, ok := os.LookupEnv("SCANNER_MEMORY_LIMIT"); ok {
+		scannerMemLimit, _ = strconv.ParseInt(memStr, 10, 64)
+	}
+
+	sm := &SbomManager{
 		appFs:              afero.NewOsFs(),
 		cfg:                cfg,
 		ctx:                ctx,
@@ -106,7 +130,16 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		processing:         mapset.NewSet[string](),
 		storageClient:      storageClient,
 		version:            packageVersion("github.com/anchore/syft"),
-	}, nil
+		scannerClient:      scannerClient,
+		scannerMemLimit:    scannerMemLimit,
+		scanRetries:        make(map[string]int),
+		pendingScans:       make(map[string]pendingScan),
+		failureReporter:    failureReporter,
+	}
+	if scannerClient != nil {
+		sm.startScannerReadinessWatcher()
+	}
+	return sm, nil
 }
 
 func (s *SbomManager) getImageStatus(imageID string) (*runtime.ImageStatusResponse, error) {
@@ -132,6 +165,12 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mounts: %w", err)
+	}
+	if len(mounts) == 0 {
+		// No overlay mount found — container is using a non-overlay snapshotter (e.g. ZFS, btrfs).
+		// /proc/<pid>/root is a kernel-provided path that exposes the container's merged root
+		// filesystem on the host regardless of the underlying snapshotter.
+		return []string{filepath.Join(s.procDir, pid, "root")}, nil
 	}
 	for _, option := range strings.Split(mounts[0].VFSOptions, ",") {
 		if strings.HasPrefix(option, "lowerdir=") {
@@ -203,31 +242,35 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 			helpers.String("container ID", notif.Container.Runtime.ContainerID))
 		return
 	}
+	s.processContainerWithMetadata(notif, mounts, imageStatus, sharedData.ImageTag, sharedData.ImageID)
+}
+
+func (s *SbomManager) processContainerWithMetadata(notif containercollection.PubSubEvent, mounts []string, imageStatus *runtime.ImageStatusResponse, imageTag, imageID string) {
 	// prepare SBOM name
-	sbomName, err := names.ImageInfoToSlug(sharedData.ImageTag, sharedData.ImageID)
+	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate SBOM name",
 			helpers.Error(err),
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", sharedData.ImageTag),
-			helpers.String("imageDigest", sharedData.ImageID))
+			helpers.String("imageName", imageTag),
+			helpers.String("imageDigest", imageID))
 		return
 	}
 	// try to create a SBOM with initializing status to reserve our slot
-	imageID := normalizeImageID(sharedData.ImageTag, sharedData.ImageID)
+	normalizedID := normalizeImageID(imageTag, imageID)
 	wipSbom := &v1beta1.SBOMSyft{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sbomName,
 			Annotations: map[string]string{
-				helpersv1.ImageIDMetadataKey:     imageID,
-				helpersv1.ImageTagMetadataKey:    sharedData.ImageTag,
+				helpersv1.ImageIDMetadataKey:     normalizedID,
+				helpersv1.ImageTagMetadataKey:    imageTag,
 				helpersv1.StatusMetadataKey:      helpersv1.Initializing,
 				NodeNameMetadataKey:              s.cfg.NodeName,
 				helpersv1.ToolVersionMetadataKey: s.version,
 			},
-			Labels: labelsFromImageID(imageID),
+			Labels: labelsFromImageID(normalizedID),
 		},
 	}
 	wipSbom, err = s.storageClient.CreateSBOM(wipSbom)
@@ -247,6 +290,15 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 		}
 		switch {
 		case wipSbom.Annotations[helpersv1.StatusMetadataKey] == helpersv1.TooLarge:
+			if recordedLimit := wipSbom.Annotations[ScannerMemoryLimitAnnotation]; recordedLimit != "" {
+				if recordedLimit != fmt.Sprintf("%d", s.scannerMemLimit) && s.scannerMemLimit > 0 {
+					logger.L().Debug("SbomManager - scanner memory limit changed, retrying previously failed SBOM",
+						helpers.String("sbomName", sbomName),
+						helpers.String("recordedLimit", recordedLimit),
+						helpers.Int("currentLimit", int(s.scannerMemLimit)))
+					break
+				}
+			}
 			logger.L().Debug("SbomManager - image is too large for SBOM processing, skipping",
 				helpers.String("namespace", notif.Container.K8s.Namespace),
 				helpers.String("pod", notif.Container.K8s.PodName),
@@ -316,49 +368,133 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 	// track SBOM as processing in internal state to prevent concurrent processing
 	s.processing.Add(sbomName)
 	defer s.processing.Remove(sbomName)
-	// prepare image source
-	src, err := NewSource(sharedData.ImageTag, sharedData.ImageID, imageID, imageStatus, mounts, s.cfg.MaxImageSize)
-	if err != nil {
-		logger.L().Ctx(s.ctx).Error("SbomManager - failed to create image source",
-			helpers.Error(err),
-			helpers.String("namespace", notif.Container.K8s.Namespace),
-			helpers.String("pod", notif.Container.K8s.PodName),
-			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("sbomName", sbomName))
-		if errors.Is(err, ErrImageTooLarge) {
-			delete(wipSbom.Annotations, NodeNameMetadataKey)
-			wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
-			_, _ = s.storageClient.ReplaceSBOM(wipSbom)
+	var syftDoc v1beta1.SyftDocument
+	scanStart := time.Now()
+
+	if s.scannerClient != nil && s.scannerClient.Ready() {
+		sbomScannerReady.Set(1)
+		// sidecar path: delegate SBOM creation to the scanner sidecar
+		imageStatusBytes, marshalErr := json.Marshal(imageStatus)
+		if marshalErr != nil {
+			logger.L().Ctx(s.ctx).Error("SbomManager - failed to marshal image status",
+				helpers.Error(marshalErr),
+				helpers.String("sbomName", sbomName))
+			return
 		}
-		return
-	}
-	// create the SBOM
-	cfg := syft.DefaultCreateSBOMConfig()
-	cfg.ToolName = "syft"
-	cfg.ToolVersion = s.version
-	if s.cfg.EnableEmbeddedSboms {
-		// ask Syft to also scan the image for embedded SBOMs
-		cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
-	}
-	syftSBOM, err := syft.CreateSBOM(context.Background(), src, cfg)
-	if err != nil {
-		logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate SBOM",
-			helpers.Error(err),
-			helpers.String("namespace", notif.Container.K8s.Namespace),
-			helpers.String("pod", notif.Container.K8s.PodName),
-			helpers.String("container", notif.Container.K8s.ContainerName),
+		scanTimeout := 16 * time.Minute // slightly longer than server-side timeout as a transport-level safety net
+		scanCtx, scanCancel := context.WithTimeout(s.ctx, scanTimeout)
+		defer scanCancel()
+		result, scanErr := s.scannerClient.CreateSBOM(scanCtx, sbomscanner.ScanRequest{
+			ImageID:             normalizedID,
+			ImageTag:            imageTag,
+			LayerPaths:          mounts,
+			ImageStatus:         imageStatusBytes,
+			MaxImageSize:        s.cfg.MaxImageSize,
+			MaxSBOMSize:         int32(s.cfg.MaxSBOMSize),
+			EnableEmbeddedSBOMs: s.cfg.EnableEmbeddedSboms,
+			Timeout:             15 * time.Minute,
+		})
+		if scanErr != nil {
+			scanDuration := time.Since(scanStart).Seconds()
+			if errors.Is(scanErr, sbomscanner.ErrScannerCrashed) {
+				sbomScanTotal.WithLabelValues("oom_killed").Inc()
+				sbomScanDuration.WithLabelValues("oom_killed").Observe(scanDuration)
+				sbomScannerRestartsTotal.Inc()
+				sbomScannerReady.Set(0)
+				s.handleScannerCrash(sbomName, wipSbom, notif, scanErr, imageTag, imageID)
+				return
+			}
+			sbomScanTotal.WithLabelValues("error").Inc()
+			sbomScanDuration.WithLabelValues("error").Observe(scanDuration)
+			logger.L().Ctx(s.ctx).Error("SbomManager - sidecar scan failed",
+				helpers.Error(scanErr),
+				helpers.String("namespace", notif.Container.K8s.Namespace),
+				helpers.String("pod", notif.Container.K8s.PodName),
+				helpers.String("container", notif.Container.K8s.ContainerName),
+				helpers.String("sbomName", sbomName))
+			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)
+			return
+		}
+		sbomScanTotal.WithLabelValues("success").Inc()
+		sbomScanDuration.WithLabelValues("success").Observe(time.Since(scanStart).Seconds())
+		delete(s.scanRetries, sbomName)
+		syftDoc = result.SyftDocument
+	} else if s.scannerClient != nil {
+		sbomScannerReady.Set(0)
+		// sidecar configured but not ready — queue for retry when it becomes ready
+		logger.L().Debug("SbomManager - scanner sidecar not ready, queuing scan for retry",
 			helpers.String("sbomName", sbomName))
-		// TODO we could save the error in a status field
+		s.pendingMu.Lock()
+		key := sbomName + "|" + normalizedID
+		if _, ok := s.pendingScans[key]; !ok {
+			if len(s.pendingOrder) >= maxPendingScans {
+				// evict oldest
+				oldestKey := s.pendingOrder[0]
+				s.pendingOrder = s.pendingOrder[1:]
+				delete(s.pendingScans, oldestKey)
+			}
+			s.pendingOrder = append(s.pendingOrder, key)
+		}
+		s.pendingScans[key] = pendingScan{
+			notif:       notif,
+			mounts:      mounts,
+			imageStatus: imageStatus,
+			imageTag:    imageTag,
+			imageID:     imageID,
+		}
+		s.pendingMu.Unlock()
 		return
+	} else {
+		// in-process fallback (current behavior)
+		src, srcErr := syftutil.NewSource(imageTag, imageID, normalizedID, imageStatus, mounts, s.cfg.MaxImageSize)
+		if srcErr != nil {
+			logger.L().Ctx(s.ctx).Error("SbomManager - failed to create image source",
+				helpers.Error(srcErr),
+				helpers.String("namespace", notif.Container.K8s.Namespace),
+				helpers.String("pod", notif.Container.K8s.PodName),
+				helpers.String("container", notif.Container.K8s.ContainerName),
+				helpers.String("sbomName", sbomName))
+			if errors.Is(srcErr, syftutil.ErrImageTooLarge) {
+				delete(wipSbom.Annotations, NodeNameMetadataKey)
+				wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
+				if _, replaceErr := s.storageClient.ReplaceSBOM(wipSbom); replaceErr != nil {
+					logger.L().Ctx(s.ctx).Error("SbomManager - failed to persist TooLarge SBOM",
+						helpers.Error(replaceErr),
+						helpers.String("sbomName", sbomName))
+				}
+				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonImageTooLarge, srcErr)
+			} else {
+				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, srcErr)
+			}
+			return
+		}
+		sbomCfg := syft.DefaultCreateSBOMConfig()
+		sbomCfg.ToolName = "syft"
+		sbomCfg.ToolVersion = s.version
+		if s.cfg.EnableEmbeddedSboms {
+			sbomCfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
+		}
+		syftSBOM, syftErr := syft.CreateSBOM(context.Background(), src, sbomCfg)
+		if syftErr != nil {
+			logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate SBOM",
+				helpers.Error(syftErr),
+				helpers.String("namespace", notif.Container.K8s.Namespace),
+				helpers.String("pod", notif.Container.K8s.PodName),
+				helpers.String("container", notif.Container.K8s.ContainerName),
+				helpers.String("sbomName", sbomName))
+			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, syftErr)
+			return
+		}
+		v1beta1.StripSBOM(syftSBOM)
+		syftDoc = syftutil.ToSyftDocument(syftSBOM)
 	}
-	// strip the SBOM to reduce size
-	v1beta1.StripSBOM(syftSBOM)
+
 	// prepare the SBOM
 	delete(wipSbom.Annotations, NodeNameMetadataKey)
 	wipSbom.Spec.Metadata.Report.CreatedAt = wipSbom.CreationTimestamp
 	wipSbom.Spec.Metadata.Tool.Name = "syft"
 	wipSbom.Spec.Metadata.Tool.Version = s.version
-	wipSbom.Spec.Syft = toSyftDocument(syftSBOM)
+	wipSbom.Spec.Syft = syftDoc
 	// check the size of the SBOM
 	sz := size.Of(wipSbom)
 	wipSbom.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
@@ -373,6 +509,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
 		// clear the spec
 		wipSbom.Spec = v1beta1.SBOMSyftSpec{}
+		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMTooLarge, nil)
 	} else {
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Learning
 	}
@@ -385,6 +522,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
 			helpers.String("sbomName", sbomName))
+		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMStorageFailed, err)
 		return
 	}
 	logger.L().Debug("SbomManager - saved SBOM after successful processing",
@@ -403,12 +541,113 @@ func (s *SbomManager) waitForSharedContainerData(containerID string) (*objectcac
 	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
 }
 
-func formatSBOM(s sbom.SBOM) ([]byte, error) {
-	bytes, err := format.Encode(s, syftjson.NewFormatEncoder())
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode SBOM: %w", err)
+func (s *SbomManager) handleScannerCrash(sbomName string, wipSbom *v1beta1.SBOMSyft, notif containercollection.PubSubEvent, scanErr error, imageTag, imageID string) {
+	s.scanRetries[sbomName]++
+	retryCount := s.scanRetries[sbomName]
+
+	logger.L().Error("SbomManager - SBOM scanner sidecar crashed during scan",
+		helpers.Error(scanErr),
+		helpers.String("namespace", notif.Container.K8s.Namespace),
+		helpers.String("pod", notif.Container.K8s.PodName),
+		helpers.String("container", notif.Container.K8s.ContainerName),
+		helpers.String("sbomName", sbomName),
+		helpers.Int("retryCount", retryCount),
+		helpers.Int("maxRetries", maxScanRetries))
+
+	if retryCount >= maxScanRetries {
+		delete(wipSbom.Annotations, NodeNameMetadataKey)
+		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
+		wipSbom.Annotations[ScannerMemoryLimitAnnotation] = fmt.Sprintf("%d", s.scannerMemLimit)
+		wipSbom.Spec = v1beta1.SBOMSyftSpec{}
+		if _, replaceErr := s.storageClient.ReplaceSBOM(wipSbom); replaceErr != nil {
+			logger.L().Error("SbomManager - failed to mark SBOM as TooLarge after scanner crashes",
+				helpers.Error(replaceErr),
+				helpers.String("sbomName", sbomName))
+		}
+		// Report OOM regardless of persist success — the user should know the scan failed
+		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonScannerOOMKilled, scanErr)
+		delete(s.scanRetries, sbomName)
 	}
-	return bytes, nil
+}
+
+func (s *SbomManager) startScannerReadinessWatcher() {
+	go func() {
+		ticker := time.NewTicker(scannerReadinessCheckInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				s.pendingMu.Lock()
+				hasWork := len(s.pendingOrder) > 0
+				s.pendingMu.Unlock()
+				if !hasWork || !s.scannerClient.Ready() {
+					continue
+				}
+				s.drainPendingScans()
+			}
+		}
+	}()
+}
+
+func (s *SbomManager) drainPendingScans() {
+	s.pendingMu.Lock()
+	pendingOrder := s.pendingOrder
+	pendingScans := s.pendingScans
+	s.pendingOrder = nil
+	s.pendingScans = make(map[string]pendingScan)
+	s.pendingMu.Unlock()
+
+	if len(pendingOrder) == 0 {
+		return
+	}
+
+	logger.L().Debug("SbomManager - scanner sidecar ready, resubmitting queued scans",
+		helpers.Int("count", len(pendingOrder)))
+
+	for _, key := range pendingOrder {
+		scan := pendingScans[key]
+		s.pool.Submit(func() {
+			s.processContainerWithMetadata(scan.notif, scan.mounts, scan.imageStatus, scan.imageTag, scan.imageID)
+		}, utils.FuncName(s.processContainerWithMetadata))
+	}
+}
+
+// reportFailure sends a scan failure report to the backend via the failure reporter.
+// Fire-and-forget: errors are logged, never propagated. Safe to call with nil reporter.
+func (s *SbomManager) reportFailure(notif containercollection.PubSubEvent, imageTag, imageID, reason string, scanErr error) {
+	if s.failureReporter == nil {
+		return
+	}
+
+	report := scanfailure.ScanFailureReport{
+		ImageTag:      imageTag,
+		ImageHash:     imageID,
+		FailureCase:   scanfailure.ScanFailureSBOMGeneration,
+		FailureReason: reason,
+		Timestamp:     time.Now(),
+		Workloads: []scanfailure.WorkloadIdentifier{{
+			Namespace:     notif.Container.K8s.Namespace,
+			WorkloadKind:  "Pod",
+			WorkloadName:  notif.Container.K8s.PodName,
+			ContainerName: notif.Container.K8s.ContainerName,
+		}},
+	}
+	if scanErr != nil {
+		report.Error = scanErr.Error()
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := s.failureReporter.ReportSbomFailure(ctx, report); err != nil {
+			logger.L().Warning("failed to report SBOM failure",
+				helpers.Error(err),
+				helpers.String("reason", reason),
+				helpers.String("imageTag", imageTag))
+		}
+	}()
 }
 
 func labelsFromImageID(imageID string) map[string]string {
@@ -486,202 +725,4 @@ func sanitize(s string) string {
 		return s2[:len(s2)-1]
 	}
 	return s2
-}
-
-func toCPEs(c []model.CPE) v1beta1.CPEs {
-	cpes := make(v1beta1.CPEs, len(c))
-	for i := range c {
-		cpes[i] = v1beta1.CPE(c[i])
-	}
-	return cpes
-}
-
-func toDigests(d []file.Digest) []v1beta1.Digest {
-	digests := make([]v1beta1.Digest, len(d))
-	for i := range d {
-		digests[i].Algorithm = d[i].Algorithm
-		digests[i].Value = d[i].Value
-	}
-	return digests
-}
-
-func toELFSecurityFeatures(f *file.ELFSecurityFeatures) *v1beta1.ELFSecurityFeatures {
-	if f == nil {
-		return nil
-	}
-	return &v1beta1.ELFSecurityFeatures{
-		SymbolTableStripped:           f.SymbolTableStripped,
-		StackCanary:                   f.StackCanary,
-		NoExecutable:                  f.NoExecutable,
-		RelocationReadOnly:            v1beta1.RelocationReadOnly(f.RelocationReadOnly),
-		PositionIndependentExecutable: f.PositionIndependentExecutable,
-		DynamicSharedObject:           f.DynamicSharedObject,
-		LlvmSafeStack:                 f.LlvmSafeStack,
-		LlvmControlFlowIntegrity:      f.LlvmControlFlowIntegrity,
-		ClangFortifySource:            f.ClangFortifySource,
-	}
-}
-
-func toExecutable(e *file.Executable) *v1beta1.Executable {
-	if e == nil {
-		return nil
-	}
-	return &v1beta1.Executable{
-		Format:              v1beta1.ExecutableFormat(e.Format),
-		HasExports:          e.HasExports,
-		HasEntrypoint:       e.HasEntrypoint,
-		ImportedLibraries:   e.ImportedLibraries,
-		ELFSecurityFeatures: toELFSecurityFeatures(e.ELFSecurityFeatures),
-	}
-}
-
-func toFileLicenseEvidence(e *model.FileLicenseEvidence) *v1beta1.FileLicenseEvidence {
-	if e == nil {
-		return nil
-	}
-	return &v1beta1.FileLicenseEvidence{
-		Confidence: int64(e.Confidence),
-		Offset:     int64(e.Offset),
-		Extent:     int64(e.Extent),
-	}
-}
-
-func toFileLicenses(l []model.FileLicense) []v1beta1.FileLicense {
-	licenses := make([]v1beta1.FileLicense, len(l))
-	for i := range l {
-		licenses[i].Value = l[i].Value
-		licenses[i].SPDXExpression = l[i].SPDXExpression
-		licenses[i].Type = v1beta1.LicenseType(l[i].Type)
-		licenses[i].Evidence = toFileLicenseEvidence(l[i].Evidence)
-	}
-	return licenses
-}
-
-func toFileMetadataEntry(m *model.FileMetadataEntry) *v1beta1.FileMetadataEntry {
-	if m == nil {
-		return nil
-	}
-	return &v1beta1.FileMetadataEntry{
-		Mode:            int64(m.Mode),
-		Type:            m.Type,
-		LinkDestination: m.LinkDestination,
-		UserID:          int64(m.UserID),
-		GroupID:         int64(m.GroupID),
-		MIMEType:        m.MIMEType,
-		Size_:           m.Size,
-	}
-}
-
-func toLicenses(l []model.License) v1beta1.Licenses {
-	licenses := make(v1beta1.Licenses, len(l))
-	for i := range l {
-		licenses[i].Value = l[i].Value
-		licenses[i].SPDXExpression = l[i].SPDXExpression
-		licenses[i].Type = v1beta1.LicenseType(l[i].Type)
-		licenses[i].URLs = l[i].URLs
-		licenses[i].Locations = toLocations(l[i].Locations)
-	}
-	return licenses
-}
-
-func toLocations(l []file.Location) []v1beta1.Location {
-	locations := make([]v1beta1.Location, len(l))
-	for i := range l {
-		locations[i].Coordinates = v1beta1.Coordinates(l[i].Coordinates)
-		locations[i].VirtualPath = l[i].AccessPath
-		locations[i].RealPath = l[i].RealPath
-		locations[i].Annotations = l[i].Annotations
-	}
-	return locations
-}
-
-func toSyftDocument(sbomSBOM *sbom.SBOM) v1beta1.SyftDocument {
-	doc := syftjson.ToFormatModel(*sbomSBOM, syftjson.EncoderConfig{
-		Pretty: false,
-		Legacy: false,
-	})
-	configuration, _ := json.Marshal(doc.Descriptor.Configuration)
-	metadata, _ := json.Marshal(doc.Source.Metadata)
-	syftDocument := v1beta1.SyftDocument{
-		Artifacts:             toSyftPackages(doc.Artifacts),
-		ArtifactRelationships: toSyftRelationships(doc.ArtifactRelationships),
-		Files:                 make([]v1beta1.SyftFile, len(doc.Files)),
-		SyftSource: v1beta1.SyftSource{
-			ID:       doc.Source.ID,
-			Name:     doc.Source.Name,
-			Version:  doc.Source.Version,
-			Type:     doc.Source.Type,
-			Metadata: metadata,
-		},
-		Distro: v1beta1.LinuxRelease{
-			PrettyName:       doc.Distro.PrettyName,
-			Name:             doc.Distro.Name,
-			ID:               doc.Distro.ID,
-			IDLike:           v1beta1.IDLikes(doc.Distro.IDLike),
-			Version:          doc.Distro.Version,
-			VersionID:        doc.Distro.VersionID,
-			VersionCodename:  doc.Distro.VersionCodename,
-			BuildID:          doc.Distro.BuildID,
-			ImageID:          doc.Distro.ImageID,
-			ImageVersion:     doc.Distro.ImageVersion,
-			Variant:          doc.Distro.Variant,
-			VariantID:        doc.Distro.VariantID,
-			HomeURL:          doc.Distro.HomeURL,
-			SupportURL:       doc.Distro.SupportURL,
-			BugReportURL:     doc.Distro.BugReportURL,
-			PrivacyPolicyURL: doc.Distro.PrivacyPolicyURL,
-			CPEName:          doc.Distro.CPEName,
-			SupportEnd:       doc.Distro.SupportEnd,
-		},
-		SyftDescriptor: v1beta1.SyftDescriptor{
-			Name:          doc.Descriptor.Name,
-			Version:       doc.Descriptor.Version,
-			Configuration: configuration,
-		},
-		Schema: v1beta1.Schema{
-			Version: doc.Schema.Version,
-			URL:     doc.Schema.URL,
-		},
-	}
-	// convert files
-	for i := range doc.Files {
-		syftDocument.Files[i].ID = doc.Files[i].ID
-		syftDocument.Files[i].Location.RealPath = doc.Files[i].Location.RealPath
-		syftDocument.Files[i].Location.FileSystemID = doc.Files[i].Location.FileSystemID
-		syftDocument.Files[i].Metadata = toFileMetadataEntry(doc.Files[i].Metadata)
-		syftDocument.Files[i].Contents = doc.Files[i].Contents
-		syftDocument.Files[i].Digests = toDigests(doc.Files[i].Digests)
-		syftDocument.Files[i].Licenses = toFileLicenses(doc.Files[i].Licenses)
-		syftDocument.Files[i].Executable = toExecutable(doc.Files[i].Executable)
-	}
-	return syftDocument
-}
-
-func toSyftPackages(p []model.Package) []v1beta1.SyftPackage {
-	packages := make([]v1beta1.SyftPackage, len(p))
-	for i := range p {
-		packages[i].ID = p[i].ID
-		packages[i].Name = p[i].Name
-		packages[i].Version = p[i].Version
-		packages[i].Type = string(p[i].Type)
-		packages[i].FoundBy = p[i].FoundBy
-		packages[i].Locations = toLocations(p[i].Locations)
-		packages[i].Licenses = toLicenses(p[i].Licenses)
-		packages[i].Language = string(p[i].Language)
-		packages[i].CPEs = toCPEs(p[i].CPEs)
-		packages[i].PURL = p[i].PURL
-		packages[i].Metadata, _ = json.Marshal(p[i].Metadata)
-		packages[i].MetadataType = p[i].MetadataType
-	}
-	return packages
-}
-
-func toSyftRelationships(r []model.Relationship) []v1beta1.SyftRelationship {
-	relationships := make([]v1beta1.SyftRelationship, len(r))
-	for i := range r {
-		relationships[i].Parent = r[i].Parent
-		relationships[i].Child = r[i].Child
-		relationships[i].Type = r[i].Type
-	}
-	return relationships
 }

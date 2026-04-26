@@ -15,4 +15,4 @@ spec:
   rules:
     - ruleName: "Malicious SSH Connection"
       parameters:
-        allowedPorts: [22, 2222]
+        ports: [22, 2222]

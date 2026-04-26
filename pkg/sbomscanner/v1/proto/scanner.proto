@@ -1,0 +1,32 @@
+syntax = "proto3";
+package sbomscanner.v1;
+
+option go_package = "github.com/kubescape/node-agent/pkg/sbomscanner/v1/proto";
+
+service SBOMScanner {
+  rpc CreateSBOM(CreateSBOMRequest) returns (CreateSBOMResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message CreateSBOMRequest {
+  string image_id = 1;
+  string image_tag = 2;
+  repeated string layer_paths = 3;
+  bytes image_status = 4;
+  int64 max_image_size = 5;
+  int32 max_sbom_size = 6;
+  bool enable_embedded_sboms = 7;
+  int64 timeout_seconds = 8;
+}
+
+message CreateSBOMResponse {
+  bytes sbom_document = 1;
+  int64 sbom_size = 2;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string version = 1;
+  bool ready = 2;
+}
