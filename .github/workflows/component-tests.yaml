@@ -51,10 +51,10 @@ on:
         required: true
         default: 'latest'
       STORAGE_REF:
-        description: 'Branch/tag/commit of k8sstormcenter/storage to use (leave empty to keep go.mod default)'
+        description: 'Commit SHA of k8sstormcenter/storage to use (leave empty to resolve current main HEAD at runtime)'
         type: string
         required: false
-        default: 'a042ebaa0ec9280d69eac81b5eeaa4d0dfd1c558'
+        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -138,11 +138,50 @@ jobs:
           echo "Installing IG version: ${IG_VERSION}"
           curl -sL https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-${IG_ARCH}-${IG_VERSION}.tar.gz | sudo tar -C /usr/local/bin -xzf - ig
           sudo chmod +x /usr/local/bin/ig
+
+      # Resolve the storage commit SHA once and use the same one for the
+      # image build AND the test runner (output downstream). Without this,
+      # the docker image and the test binary can compile against different
+      # storage versions when their go.mod replace directives drift.
+      - name: Resolve storage ref
+        id: resolve-storage
+        env:
+          STORAGE_REF_INPUT: ${{ inputs.STORAGE_REF }}
+        run: |
+          STORAGE_REF="${STORAGE_REF_INPUT}"
+          if [ -z "${STORAGE_REF}" ]; then
+            STORAGE_REF=$(git ls-remote https://github.com/k8sstormcenter/storage refs/heads/main | awk '{print $1}')
+            echo "Resolved k8sstormcenter/storage main to: ${STORAGE_REF}"
+          else
+            echo "Using supplied STORAGE_REF: ${STORAGE_REF}"
+          fi
+          echo "storage_ref=${STORAGE_REF}" >> "$GITHUB_OUTPUT"
+          echo "storage_short=${STORAGE_REF:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Pin storage version for image build
+        env:
+          STORAGE_REF: ${{ steps.resolve-storage.outputs.storage_ref }}
+          GOFLAGS: ""
+        run: |
+          echo "Replacing github.com/kubescape/storage with github.com/k8sstormcenter/storage@${STORAGE_REF}"
+          go mod edit -replace "github.com/kubescape/storage=github.com/k8sstormcenter/storage@${STORAGE_REF}"
+          go mod tidy
+          echo "Resolved storage version:"
+          grep "k8sstormcenter/storage" go.sum | head -1
+
       - name: Build the Image and Push to GHCR
         id: build-and-push-image
         run: |
           COMMIT_HASH=$(git rev-parse --short HEAD)
-          export IMAGE_TAG=test-${COMMIT_HASH}
+          STORAGE_SHORT="${{ steps.resolve-storage.outputs.storage_short }}"
+          # Image tag encodes both node-agent and storage SHAs so the same
+          # source pair always produces the same artifact and can be cached.
+          export IMAGE_TAG=test-${COMMIT_HASH}-s${STORAGE_SHORT}
           export IMAGE_REPO=ghcr.io/${{ github.repository_owner }}/node-agent
           echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
           export IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/node-agent:${IMAGE_TAG}
@@ -151,6 +190,7 @@ jobs:
     outputs:
       image_tag: ${{ steps.build-and-push-image.outputs.image_tag }}
       image_repo: ${{ steps.build-and-push-image.outputs.image_repo }}
+      storage_ref: ${{ steps.resolve-storage.outputs.storage_ref }}
 
   # -------------------------------------------------------------------
   # Component tests.
@@ -274,12 +314,15 @@ jobs:
         run: |
           sudo sh -c "ulimit -l unlimited"
       - name: Update storage dependency
-        #if: ${{ inputs.STORAGE_REF != '' && inputs.STORAGE_REF != 'latest' }}
         env:
-          STORAGE_REF: ${{ inputs.STORAGE_REF || 'a042ebaa0ec9280d69eac81b5eeaa4d0dfd1c558' }}
+          STORAGE_REF: ${{ needs.build-and-push-image.outputs.storage_ref || inputs.STORAGE_REF }}
           GONOSUMCHECK: "*"
           GOFLAGS: ""
         run: |
+          if [ -z "${STORAGE_REF}" ]; then
+            STORAGE_REF=$(git ls-remote https://github.com/k8sstormcenter/storage refs/heads/main | awk '{print $1}')
+            echo "Resolved k8sstormcenter/storage main to: ${STORAGE_REF}"
+          fi
           echo "Replacing github.com/kubescape/storage with github.com/k8sstormcenter/storage@${STORAGE_REF}"
           go mod edit -replace "github.com/kubescape/storage=github.com/k8sstormcenter/storage@${STORAGE_REF}"
           go mod tidy
