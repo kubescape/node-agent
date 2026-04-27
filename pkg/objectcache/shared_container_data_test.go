@@ -2,6 +2,7 @@ package objectcache
 
 import (
 	"testing"
+	"time"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/stretchr/testify/assert"
@@ -51,6 +52,7 @@ func Test_GetLabels(t *testing.T) {
 				"kubescape.io/workload-api-version":    "v1",
 				"kubescape.io/workload-container-name": "redis",
 				"kubescape.io/workload-kind":           "Deployment",
+				"kubescape.io/learning-period":         "0s",
 				"kubescape.io/workload-name":           "redis",
 				"kubescape.io/workload-namespace":      "aaa",
 			},
@@ -67,6 +69,7 @@ func Test_GetLabels(t *testing.T) {
 			want: map[string]string{
 				"kubescape.io/workload-api-version": "v1",
 				"kubescape.io/workload-kind":        "Deployment",
+				"kubescape.io/learning-period":      "0s",
 				"kubescape.io/workload-name":        "redis",
 				"kubescape.io/workload-namespace":   "aaa",
 			},
@@ -76,6 +79,39 @@ func Test_GetLabels(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := GetLabels(nil, tt.args.watchedContainer, tt.args.stripContainer)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func Test_formatDuration(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{
+			d:    5 * time.Minute,
+			want: "5m",
+		},
+		{
+			d:    1*time.Hour + 30*time.Minute,
+			want: "1h30m",
+		},
+		{
+			d:    45 * time.Second,
+			want: "45s",
+		},
+		{
+			d:    1*time.Hour + 30*time.Second,
+			want: "1h30s",
+		},
+		{
+			d:    1 * time.Hour,
+			want: "1h",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.d.String(), func(t *testing.T) {
+			assert.Equal(t, tt.want, formatDuration(tt.d))
 		})
 	}
 }

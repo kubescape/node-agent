@@ -159,6 +159,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 
 	// Setup monitoring timer
 	sniffingTime := cpm.calculateSniffingTime(container)
+	sharedData.LearningPeriod = sniffingTime
 	timer := time.AfterFunc(sniffingTime, func() {
 		cpm.handleContainerMaxTime(container)
 	})
