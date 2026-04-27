@@ -2211,9 +2211,9 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 				Labels: map[string]string{
 					helpersv1.ApiGroupMetadataKey:   "apps",
 					helpersv1.ApiVersionMetadataKey: "v1",
-					helpersv1.KindMetadataKey:       "Deployment",
-					helpersv1.NameMetadataKey:       "curl-28",
-					helpersv1.NamespaceMetadataKey:  ns.Name,
+					helpersv1.RelatedKindMetadataKey:       "Deployment",
+					helpersv1.RelatedNameMetadataKey:       "curl-28",
+					helpersv1.RelatedNamespaceMetadataKey:  ns.Name,
 				},
 			},
 			Spec: v1beta1.NetworkNeighborhoodSpec{
@@ -2836,8 +2836,8 @@ func Test_30_TamperedSignedProfiles(t *testing.T) {
 					helpersv1.CompletionMetadataKey: helpersv1.Full,
 				},
 				Labels: map[string]string{
-					helpersv1.KindMetadataKey: "Deployment",
-					helpersv1.NameMetadataKey: "tamper-test",
+					helpersv1.RelatedKindMetadataKey: "Deployment",
+					helpersv1.RelatedNameMetadataKey: "tamper-test",
 				},
 			},
 			Spec: v1beta1.NetworkNeighborhoodSpec{
