@@ -2,7 +2,7 @@ package utils
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 
@@ -10,6 +10,11 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/picatz/xcel"
 )
+
+// errCelObjectNil is returned by FieldGetter callbacks when the underlying
+// event is nil. Reused across all getters to avoid per-call error allocation
+// on the CEL hot path.
+var errCelObjectNil = errors.New("celval: object is nil")
 
 type CelEvent interface {
 	CapabilitiesEvent
@@ -31,12 +36,6 @@ type CelEventImpl struct {
 	CelEvent
 }
 
-// HttpRequestAccessor provides access to HTTP request fields
-// It's a lightweight wrapper around CelEvent that avoids allocations
-type HttpRequestAccessor struct {
-	HttpEvent CelEvent
-}
-
 var isSet = ref.FieldTester(func(target any) bool {
 	x := target.(*xcel.Object[CelEvent])
 	if x.Raw == nil {
@@ -46,24 +45,20 @@ var isSet = ref.FieldTester(func(target any) bool {
 })
 
 var requestIsSet = ref.FieldTester(func(target any) bool {
-	x := target.(*xcel.Object[HttpRequestAccessor])
-	if x.Raw.HttpEvent == nil {
+	x := target.(*xcel.Object[CelEvent])
+	if x.Raw == nil {
 		return false
 	}
-	req := x.Raw.HttpEvent.GetRequest()
-	return req != nil
+	return x.Raw.GetRequest() != nil
 })
 
 var urlIsSet = ref.FieldTester(func(target any) bool {
-	x := target.(*xcel.Object[HttpRequestAccessor])
-	if x.Raw.HttpEvent == nil {
+	x := target.(*xcel.Object[CelEvent])
+	if x.Raw == nil {
 		return false
 	}
-	req := x.Raw.HttpEvent.GetRequest()
-	if req == nil || req.URL == nil {
-		return false
-	}
-	return req.URL.String() != ""
+	req := x.Raw.GetRequest()
+	return req != nil && req.URL != nil
 })
 
 var CelFields = map[string]*celtypes.FieldType{
@@ -73,7 +68,7 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
 			return x.Raw.GetArgs(), nil
 		}),
@@ -84,9 +79,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetAttrSize(), nil
+			return celtypes.Uint(x.Raw.GetAttrSize()), nil
 		}),
 	},
 	"capName": {
@@ -95,9 +90,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetCapability(), nil
+			return celtypes.String(x.Raw.GetCapability()), nil
 		}),
 	},
 	"cmd": {
@@ -106,9 +101,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetCmd(), nil
+			return celtypes.Uint(x.Raw.GetCmd()), nil
 		}),
 	},
 	"comm": {
@@ -117,9 +112,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetComm(), nil
+			return celtypes.String(x.Raw.GetComm()), nil
 		}),
 	},
 	"containerId": {
@@ -128,9 +123,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetContainerID(), nil
+			return celtypes.String(x.Raw.GetContainerID()), nil
 		}),
 	},
 	"containerName": {
@@ -139,9 +134,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetContainer(), nil
+			return celtypes.String(x.Raw.GetContainer()), nil
 		}),
 	},
 	"cwd": {
@@ -150,9 +145,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetCwd(), nil
+			return celtypes.String(x.Raw.GetCwd()), nil
 		}),
 	},
 	"dstAddr": {
@@ -161,9 +156,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetDstEndpoint().Addr, nil
+			return celtypes.String(x.Raw.GetDstEndpoint().Addr), nil
 		}),
 	},
 	"dstIp": {
@@ -172,9 +167,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetDstIP(), nil
+			return celtypes.String(x.Raw.GetDstIP()), nil
 		}),
 	},
 	"dstPort": {
@@ -183,9 +178,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return int(x.Raw.GetDstPort()), nil
+			return celtypes.Int(x.Raw.GetDstPort()), nil
 		}),
 	},
 	"exepath": {
@@ -194,9 +189,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetExePath(), nil
+			return celtypes.String(x.Raw.GetExePath()), nil
 		}),
 	},
 	"flags": {
@@ -205,7 +200,7 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
 			return x.Raw.GetFlags(), nil
 		}),
@@ -216,9 +211,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return int(x.Raw.GetFlagsRaw()), nil
+			return celtypes.Int(x.Raw.GetFlagsRaw()), nil
 		}),
 	},
 	"module": {
@@ -227,9 +222,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetModule(), nil
+			return celtypes.String(x.Raw.GetModule()), nil
 		}),
 	},
 	"name": {
@@ -238,9 +233,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetDNSName(), nil
+			return celtypes.String(x.Raw.GetDNSName()), nil
 		}),
 	},
 	"namespace": {
@@ -249,9 +244,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetNamespace(), nil
+			return celtypes.String(x.Raw.GetNamespace()), nil
 		}),
 	},
 	"newPath": {
@@ -260,9 +255,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetNewPath(), nil
+			return celtypes.String(x.Raw.GetNewPath()), nil
 		}),
 	},
 	"oldPath": {
@@ -271,9 +266,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetOldPath(), nil
+			return celtypes.String(x.Raw.GetOldPath()), nil
 		}),
 	},
 	"opcode": {
@@ -282,9 +277,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetOpcode(), nil
+			return celtypes.Int(x.Raw.GetOpcode()), nil
 		}),
 	},
 	"path": {
@@ -293,9 +288,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetPath(), nil
+			return celtypes.String(x.Raw.GetPath()), nil
 		}),
 	},
 	"pcomm": {
@@ -304,9 +299,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetPcomm(), nil
+			return celtypes.String(x.Raw.GetPcomm()), nil
 		}),
 	},
 	"pid": {
@@ -315,9 +310,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetPID(), nil
+			return celtypes.Uint(x.Raw.GetPID()), nil
 		}),
 	},
 	"pktType": {
@@ -326,9 +321,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetPktType(), nil
+			return celtypes.String(x.Raw.GetPktType()), nil
 		}),
 	},
 	"podName": {
@@ -337,9 +332,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetPod(), nil
+			return celtypes.String(x.Raw.GetPod()), nil
 		}),
 	},
 	"ppid": {
@@ -348,9 +343,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetPpid(), nil
+			return celtypes.Uint(x.Raw.GetPpid()), nil
 		}),
 	},
 	"proto": {
@@ -359,9 +354,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetProto(), nil
+			return celtypes.String(x.Raw.GetProto()), nil
 		}),
 	},
 	"pupperlayer": {
@@ -370,9 +365,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetPupperLayer(), nil
+			return celtypes.Bool(x.Raw.GetPupperLayer()), nil
 		}),
 	},
 	"srcPort": {
@@ -381,9 +376,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return int(x.Raw.GetSrcPort()), nil
+			return celtypes.Int(x.Raw.GetSrcPort()), nil
 		}),
 	},
 	"syscallName": {
@@ -392,9 +387,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetSyscall(), nil
+			return celtypes.String(x.Raw.GetSyscall()), nil
 		}),
 	},
 	"upperlayer": {
@@ -403,9 +398,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return x.Raw.GetUpperLayer(), nil
+			return celtypes.Bool(x.Raw.GetUpperLayer()), nil
 		}),
 	},
 	"uid": {
@@ -414,24 +409,24 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
 			return x.Raw.GetUid(), nil
 		}),
 	},
-	// HTTP request nested object (no allocation - just wraps the event)
+	// HTTP request nested object - returns the same *xcel.Object[CelEvent] so
+	// HttpRequestFields can read x.Raw.GetRequest() without allocating a wrapper.
+	// CEL field dispatch uses the bound FieldType (HttpRequest), not the runtime
+	// Go type, so no separate Go-type registration is needed.
 	"request": {
 		Type:  nil, // Will be set during registration
 		IsSet: isSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			// Return a wrapped accessor - xcel.NewObject is lightweight (just pointer wrapping)
-			accessor := HttpRequestAccessor{HttpEvent: x.Raw}
-			obj, _ := xcel.NewObject(accessor)
-			return obj, nil
+			return target, nil
 		}),
 	},
 	"direction": {
@@ -440,9 +435,9 @@ var CelFields = map[string]*celtypes.FieldType{
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
 			x := target.(*xcel.Object[CelEvent])
 			if x.Raw == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+				return nil, errCelObjectNil
 			}
-			return string(x.Raw.GetDirection()), nil
+			return celtypes.String(x.Raw.GetDirection()), nil
 		}),
 	},
 }
@@ -453,11 +448,11 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 		Type:  celtypes.MapType,
 		IsSet: requestIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil {
 				return req.Header, nil
 			}
@@ -468,77 +463,77 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 		Type:  celtypes.StringType,
 		IsSet: requestIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil {
-				return req.Host, nil
+				return celtypes.String(req.Host), nil
 			}
-			return "", nil
+			return celtypes.String(""), nil
 		}),
 	},
 	"method": {
 		Type:  celtypes.StringType,
 		IsSet: requestIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil {
-				return req.Method, nil
+				return celtypes.String(req.Method), nil
 			}
-			return "", nil
+			return celtypes.String(""), nil
 		}),
 	},
 	"url": {
 		Type:  celtypes.StringType,
 		IsSet: urlIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil && req.URL != nil {
-				return req.URL.String(), nil
+				return celtypes.String(req.URL.String()), nil
 			}
-			return "", nil
+			return celtypes.String(""), nil
 		}),
 	},
 	"path": {
 		Type:  celtypes.StringType,
 		IsSet: urlIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
 			}
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil && req.URL != nil {
-				return req.URL.Path, nil
+				return celtypes.String(req.URL.Path), nil
 			}
-			return "", nil
+			return celtypes.String(""), nil
 		}),
 	},
 	"body": {
 		Type:  celtypes.StringType,
 		IsSet: requestIsSet,
 		GetFrom: ref.FieldGetter(func(target any) (any, error) {
-			x := target.(*xcel.Object[HttpRequestAccessor])
-			if x.Raw.HttpEvent == nil {
-				return nil, fmt.Errorf("celval: object is nil")
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
 			}
 			// Try GetBuf() first (for eBPF events)
-			buf := x.Raw.HttpEvent.GetBuf()
+			buf := x.Raw.GetBuf()
 			if len(buf) > 0 {
-				return string(buf), nil
+				return celtypes.String(buf), nil
 			}
 			// Fallback to reading from Request.Body (for test events)
-			req := x.Raw.HttpEvent.GetRequest()
+			req := x.Raw.GetRequest()
 			if req != nil && req.Body != nil {
 				// Read with size limit (10MB) and restore body for downstream readers
 				const maxBodySize = 10 * 1024 * 1024 // 10MB
@@ -549,9 +544,9 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 				if err != nil {
 					return "", err
 				}
-				return string(bodyBytes), nil
+				return celtypes.String(bodyBytes), nil
 			}
-			return "", nil
+			return celtypes.String(""), nil
 		}),
 	},
 }

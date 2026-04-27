@@ -400,6 +400,11 @@ func (e *DatasourceEvent) GetExePath() string {
 	return NormalizePath(exepath)
 }
 
+func (e *DatasourceEvent) GetParentExePath() string {
+	exepath, _ := e.getFieldAccessor("parent_exepath").String(e.Data)
+	return NormalizePath(exepath)
+}
+
 func (e *DatasourceEvent) GetExitCode() uint32 {
 	exitCode, _ := e.getFieldAccessor("exit_code").Uint32(e.Data)
 	return exitCode

@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -43,11 +44,13 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	eventObj, eventTyp := xcel.NewObject(&utils.CelEventImpl{})
 	xcel.RegisterObject(ta, tp, eventObj, eventTyp, utils.CelFields)
 
-	// Register the nested request accessor type
-	requestObj, requestTyp := xcel.NewObject(utils.HttpRequestAccessor{})
-	xcel.RegisterObject(ta, tp, requestObj, requestTyp, utils.HttpRequestFields)
-
-	// Set the request field's type now that requestTyp is available
+	// Register a virtual CEL "HttpRequest" type backed by HttpRequestFields.
+	// No Go-type binding: the request getter returns the same *xcel.Object[CelEvent]
+	// as the parent event, so HttpRequestFields read x.Raw.GetRequest() directly
+	// without allocating a wrapper per access.
+	requestTyp := cel.ObjectType("HttpRequest", traits.ReceiverType)
+	xcel.RegisterType(tp, requestTyp)
+	xcel.RegisterStructType(tp, requestTyp.TypeName(), utils.HttpRequestFields)
 	utils.CelFields["request"].Type = requestTyp
 
 	envOptions := []cel.EnvOption{

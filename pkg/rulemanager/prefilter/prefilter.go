@@ -7,6 +7,7 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 // Direction represents an HTTP traffic direction as a compact integer.
@@ -70,15 +71,20 @@ func methodToBit(method string) MethodMask {
 }
 
 // EventFields holds event data extracted once per event for pre-filtering.
-// Passed by value (stack-allocated, ~28 bytes) — extracted once before the
-// rule loop, reused across all rules.
+// Passed by value, stack-allocated, extracted once before the rule loop and
+// reused across all rules.
 type EventFields struct {
-	Path         string     // file/exec path (empty if not applicable)
-	DstPort      uint16     // destination port from network/SSH event
-	Dir          Direction  // pre-computed from HTTP direction string
-	MethodBit    MethodMask // pre-computed from HTTP method string
-	PortEligible bool       // true for SSH/network events (port filter applies)
-	Extracted    bool       // true after extractEventFields has run
+	Path string // file path (open) or exe path (exec); empty otherwise
+	// Exec-only fields; empty for other event types.
+	// Comm and Pcomm are kernel-truncated to 15 chars.
+	ParentExePath string
+	Comm          string
+	Pcomm         string
+	DstPort       uint16     // destination port from network/SSH event
+	Dir           Direction  // pre-computed from HTTP direction string
+	MethodBit     MethodMask // pre-computed from HTTP method string
+	PortEligible  bool       // true for SSH/network events (port filter applies)
+	Extracted     bool       // true after extractEventFields has run
 }
 
 // SetDirection converts a direction string to its compact representation.
@@ -91,25 +97,41 @@ func (f *EventFields) SetMethod(method string) {
 	f.MethodBit = methodToBit(method)
 }
 
+// processKey pairs a kernel-truncated process name with its full exe path.
+// Both fields must match for an exclude entry to suppress an event.
+type processKey struct {
+	Name string
+	Path string
+}
+
 // Params holds parsed, typed parameters for cheap pre-CEL filtering.
 // Parsed once at rule binding time. A non-nil *Params always has at least
 // one active filter.
 type Params struct {
-	IgnorePrefixes  []string   // open, exec — skip if path starts with prefix
-	IncludePrefixes []string   // open, exec — skip if path does NOT match any prefix
-	Ports           []uint16   // SSH, network — skip if port is NOT in list
-	Dir             Direction  // HTTP — DirInbound or DirOutbound
-	MethodMask      MethodMask // HTTP — bitmask of allowed methods
+	IgnorePrefixes         []string                // open, exec — skip if path starts with prefix
+	IncludePrefixes        []string                // open, exec — skip if path does NOT match any prefix
+	ExcludeProcesses       map[processKey]struct{} // exec — skip if (comm, exepath) matches
+	ExcludeParentProcesses map[processKey]struct{} // exec — skip if (pcomm, parent_exepath) matches
+	Ports                  []uint16                // SSH, network — skip if port is NOT in list
+	Dir                    Direction               // HTTP — DirInbound or DirOutbound
+	MethodMask             MethodMask              // HTTP — bitmask of allowed methods
+}
+
+type rawProcessEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 // rawParams is the JSON/YAML-decodable shape of pre-filter parameters.
 // encoding/json handles all numeric type coercion (float64, int, int64, etc.)
 type rawParams struct {
-	IgnorePrefixes  []string `json:"ignorePrefixes"`
-	IncludePrefixes []string `json:"includePrefixes"`
-	Ports           []uint16 `json:"ports"`
-	Direction       string   `json:"direction"`
-	Methods         []string `json:"methods"`
+	IgnorePrefixes         []string          `json:"ignorePrefixes"`
+	IncludePrefixes        []string          `json:"includePrefixes"`
+	Ports                  []uint16          `json:"ports"`
+	Direction              string            `json:"direction"`
+	Methods                []string          `json:"methods"`
+	ExcludeProcesses       []rawProcessEntry `json:"excludeProcesses"`
+	ExcludeParentProcesses []rawProcessEntry `json:"excludeParentProcesses"`
 }
 
 // ParseWithDefaults merges pre-filter parameters from two sources:
@@ -176,16 +198,55 @@ func ParseWithDefaults(ruleState map[string]any, bindingParams map[string]any) *
 		}
 	}
 
+	if m := buildProcessMap(raw.ExcludeProcesses, "excludeProcesses"); m != nil {
+		p.ExcludeProcesses = m
+		hasFilter = true
+	}
+
+	if m := buildProcessMap(raw.ExcludeParentProcesses, "excludeParentProcesses"); m != nil {
+		p.ExcludeParentProcesses = m
+		hasFilter = true
+	}
+
 	if !hasFilter {
 		return nil
 	}
 	return p
 }
 
+// buildProcessMap converts a list of (name, path) entries to a lookup map.
+// Entries with a missing name or a path that normalizes to empty or "/" are
+// dropped; a single aggregated warning is emitted if any were dropped.
+// Returns nil when no valid entries remain.
+func buildProcessMap(entries []rawProcessEntry, field string) map[processKey]struct{} {
+	if len(entries) == 0 {
+		return nil
+	}
+	m := make(map[processKey]struct{}, len(entries))
+	dropped := 0
+	for _, entry := range entries {
+		normalized := utils.NormalizePath(entry.Path)
+		if entry.Name == "" || normalized == "" || normalized == "/" {
+			dropped++
+			continue
+		}
+		m[processKey{Name: entry.Name, Path: normalized}] = struct{}{}
+	}
+	if dropped > 0 {
+		logger.L().Warning("prefilter: dropped entries with missing name or invalid path",
+			helpers.String("field", field),
+			helpers.Int("dropped", dropped))
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
 // ShouldSkip returns true if the event should be skipped.
-// Hot path — integer/bitmask comparisons only, no allocations.
+// Hot path — takes *EventFields to avoid copying the struct per call.
 // Safe to call on nil receiver (returns false).
-func (p *Params) ShouldSkip(e EventFields) bool {
+func (p *Params) ShouldSkip(e *EventFields) bool {
 	if p == nil {
 		return false
 	}
@@ -209,6 +270,18 @@ func (p *Params) ShouldSkip(e EventFields) bool {
 
 	if e.PortEligible && len(p.Ports) > 0 && !slices.Contains(p.Ports, e.DstPort) {
 		return true
+	}
+
+	if len(p.ExcludeProcesses) > 0 && e.Comm != "" && e.Path != "" {
+		if _, ok := p.ExcludeProcesses[processKey{Name: e.Comm, Path: e.Path}]; ok {
+			return true
+		}
+	}
+
+	if len(p.ExcludeParentProcesses) > 0 && e.Pcomm != "" && e.ParentExePath != "" {
+		if _, ok := p.ExcludeParentProcesses[processKey{Name: e.Pcomm, Path: e.ParentExePath}]; ok {
+			return true
+		}
 	}
 
 	return false
