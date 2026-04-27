@@ -95,6 +95,7 @@ type ExecEvent interface {
 	GetArgs() []string
 	GetCwd() string
 	GetExePath() string
+	GetParentExePath() string
 	GetPupperLayer() bool
 	GetUpperLayer() bool
 }

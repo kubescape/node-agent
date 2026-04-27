@@ -59,6 +59,7 @@ type StructEvent struct {
 	Pod                  string                  `json:"pod,omitempty" yaml:"pod,omitempty"`
 	PodHostIP            string                  `json:"podHostIP,omitempty" yaml:"podHostIP,omitempty"`
 	PodLabels            map[string]string       `json:"podLabels,omitempty" yaml:"podLabels,omitempty"`
+	ParentExePath        string                  `json:"parentExePath,omitempty" yaml:"parentExePath,omitempty"`
 	Ppid                 uint32                  `json:"ppid,omitempty" yaml:"ppid,omitempty"`
 	Proto                string                  `json:"proto,omitempty" yaml:"proto,omitempty"`
 	Ptid                 uint64                  `json:"ptid,omitempty" yaml:"ptid,omitempty"`
@@ -228,6 +229,10 @@ func (e *StructEvent) GetEventType() EventType {
 
 func (e *StructEvent) GetExePath() string {
 	return NormalizePath(e.ExePath)
+}
+
+func (e *StructEvent) GetParentExePath() string {
+	return NormalizePath(e.ParentExePath)
 }
 
 func (e *StructEvent) GetExitCode() uint32 {

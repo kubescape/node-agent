@@ -71,6 +71,80 @@ func TestParseWithDefaults(t *testing.T) {
 			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/tmp"}},
 			expect:        &Params{IgnorePrefixes: []string{"/tmp"}},
 		},
+		{
+			name: "excludeProcesses parsed",
+			bindingParams: map[string]any{
+				"excludeProcesses": []interface{}{
+					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd"},
+				},
+			},
+			expect: &Params{
+				ExcludeProcesses: map[processKey]struct{}{
+					{Name: "dockerd", Path: "/usr/bin/dockerd"}: {},
+				},
+			},
+		},
+		{
+			name: "excludeParentProcesses parsed with multiple entries",
+			bindingParams: map[string]any{
+				"excludeParentProcesses": []interface{}{
+					map[string]interface{}{"name": "inspectorssmplu", "path": "/usr/bin/inspector-ssm-plugin"},
+					map[string]interface{}{"name": "ssm-agent-worke", "path": "/usr/bin/ssm-agent-worker"},
+				},
+			},
+			expect: &Params{
+				ExcludeParentProcesses: map[processKey]struct{}{
+					{Name: "inspectorssmplu", Path: "/usr/bin/inspector-ssm-plugin"}: {},
+					{Name: "ssm-agent-worke", Path: "/usr/bin/ssm-agent-worker"}:     {},
+				},
+			},
+		},
+		{
+			name: "excludeProcesses mixed valid and invalid entries",
+			bindingParams: map[string]any{
+				"excludeProcesses": []interface{}{
+					map[string]interface{}{"name": "", "path": "/usr/bin/foo"},
+					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd"},
+				},
+			},
+			expect: &Params{
+				ExcludeProcesses: map[processKey]struct{}{
+					{Name: "dockerd", Path: "/usr/bin/dockerd"}: {},
+				},
+			},
+		},
+		{
+			name: "excludeProcesses path normalized (trailing slash, missing leading slash, redundant segments)",
+			bindingParams: map[string]any{
+				"excludeProcesses": []interface{}{
+					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd/"},
+					map[string]interface{}{"name": "rpm", "path": "usr/bin/rpm"},
+					map[string]interface{}{"name": "curl", "path": "/usr/./bin/curl"},
+				},
+			},
+			expect: &Params{
+				ExcludeProcesses: map[processKey]struct{}{
+					{Name: "dockerd", Path: "/usr/bin/dockerd"}: {},
+					{Name: "rpm", Path: "/usr/bin/rpm"}:         {},
+					{Name: "curl", Path: "/usr/bin/curl"}:       {},
+				},
+			},
+		},
+		{
+			name: "excludeProcesses path that normalizes to root is dropped",
+			bindingParams: map[string]any{
+				"excludeProcesses": []interface{}{
+					map[string]interface{}{"name": "wildcard", "path": "."},
+					map[string]interface{}{"name": "root", "path": "/"},
+					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd"},
+				},
+			},
+			expect: &Params{
+				ExcludeProcesses: map[processKey]struct{}{
+					{Name: "dockerd", Path: "/usr/bin/dockerd"}: {},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -142,11 +216,82 @@ func TestShouldSkip(t *testing.T) {
 		{"file: not in include", &Params{IncludePrefixes: []string{"/etc"}, IgnorePrefixes: []string{"/etc/default"}}, EventFields{Path: "/tmp/foo"}, true},
 		{"file: in include but ignored", &Params{IncludePrefixes: []string{"/etc"}, IgnorePrefixes: []string{"/etc/default"}}, EventFields{Path: "/etc/default/grub"}, true},
 		{"file: in include not ignored", &Params{IncludePrefixes: []string{"/etc"}, IgnorePrefixes: []string{"/etc/default"}}, EventFields{Path: "/etc/shadow"}, false},
+
+		// --- excludeProcesses (comm + exepath pair) ---
+		{
+			"excludeProcesses: both match",
+			&Params{ExcludeProcesses: map[processKey]struct{}{{Name: "dockerd", Path: "/usr/bin/dockerd"}: {}}},
+			EventFields{Comm: "dockerd", Path: "/usr/bin/dockerd"},
+			true,
+		},
+		{
+			"excludeProcesses: comm matches but path differs (anti-spoof)",
+			&Params{ExcludeProcesses: map[processKey]struct{}{{Name: "dockerd", Path: "/usr/bin/dockerd"}: {}}},
+			EventFields{Comm: "dockerd", Path: "/tmp/attacker/dockerd"},
+			false,
+		},
+		{
+			"excludeProcesses: path matches but comm differs",
+			&Params{ExcludeProcesses: map[processKey]struct{}{{Name: "dockerd", Path: "/usr/bin/dockerd"}: {}}},
+			EventFields{Comm: "rpm", Path: "/usr/bin/dockerd"},
+			false,
+		},
+		{
+			"excludeProcesses: empty comm on event (no skip)",
+			&Params{ExcludeProcesses: map[processKey]struct{}{{Name: "dockerd", Path: "/usr/bin/dockerd"}: {}}},
+			EventFields{Path: "/usr/bin/dockerd"},
+			false,
+		},
+		{
+			"excludeProcesses: empty path on event (no skip)",
+			&Params{ExcludeProcesses: map[processKey]struct{}{{Name: "dockerd", Path: "/usr/bin/dockerd"}: {}}},
+			EventFields{Comm: "dockerd"},
+			false,
+		},
+
+		// --- excludeParentProcesses (pcomm + parent_exepath pair) ---
+		{
+			"excludeParentProcesses: both match (R1058 ssm-agent-worker)",
+			&Params{ExcludeParentProcesses: map[processKey]struct{}{{Name: "ssm-agent-worke", Path: "/usr/bin/ssm-agent-worker"}: {}}},
+			EventFields{Pcomm: "ssm-agent-worke", ParentExePath: "/usr/bin/ssm-agent-worker"},
+			true,
+		},
+		{
+			"excludeParentProcesses: pcomm matches but parent path differs",
+			&Params{ExcludeParentProcesses: map[processKey]struct{}{{Name: "ssm-agent-worke", Path: "/usr/bin/ssm-agent-worker"}: {}}},
+			EventFields{Pcomm: "ssm-agent-worke", ParentExePath: "/tmp/fake"},
+			false,
+		},
+		{
+			"excludeParentProcesses: empty pcomm on event (no skip)",
+			&Params{ExcludeParentProcesses: map[processKey]struct{}{{Name: "ssm-agent-worke", Path: "/usr/bin/ssm-agent-worker"}: {}}},
+			EventFields{ParentExePath: "/usr/bin/ssm-agent-worker"},
+			false,
+		},
+		{
+			"excludeProcesses and excludeParentProcesses: neither matches",
+			&Params{
+				ExcludeProcesses:       map[processKey]struct{}{{Name: "dockerd", Path: "/usr/bin/dockerd"}: {}},
+				ExcludeParentProcesses: map[processKey]struct{}{{Name: "ssm-agent-worke", Path: "/usr/bin/ssm-agent-worker"}: {}},
+			},
+			EventFields{Comm: "rpm", Path: "/usr/bin/rpm", Pcomm: "bash", ParentExePath: "/bin/bash"},
+			false,
+		},
+		{
+			"excludeProcesses does not fire when path is an unrelated file (open event shape)",
+			&Params{
+				IgnorePrefixes:   []string{"/tmp"},
+				ExcludeProcesses: map[processKey]struct{}{{Name: "dockerd", Path: "/usr/bin/dockerd"}: {}},
+			},
+			EventFields{Path: "/etc/passwd", Comm: "rpm"},
+			false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.params.ShouldSkip(tt.event))
+			event := tt.event
+			assert.Equal(t, tt.want, tt.params.ShouldSkip(&event))
 		})
 	}
 }
@@ -160,7 +305,7 @@ func BenchmarkShouldSkip_EarlyExit(b *testing.B) {
 	e := EventFields{Path: "/etc/passwd", Dir: DirOutbound, MethodBit: MethodGET}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p.ShouldSkip(e)
+		p.ShouldSkip(&e)
 	}
 }
 
@@ -173,6 +318,6 @@ func BenchmarkShouldSkip_FullScan(b *testing.B) {
 	e := EventFields{Path: "/etc/passwd", Dir: DirInbound, MethodBit: MethodPOST}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p.ShouldSkip(e)
+		p.ShouldSkip(&e)
 	}
 }

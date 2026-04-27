@@ -237,7 +237,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			if !eventFields.Extracted {
 				eventFields = extractEventFields(enrichedEvent.Event)
 			}
-			if rule.Prefilter.ShouldSkip(eventFields) {
+			if rule.Prefilter.ShouldSkip(&eventFields) {
 				rm.metrics.ReportRulePrefiltered(rule.Name)
 				continue
 			}
@@ -499,6 +499,9 @@ func extractEventFields(event utils.K8sEvent) prefilter.EventFields {
 	case utils.ExecveEventType:
 		if e, ok := event.(utils.ExecEvent); ok {
 			f.Path = e.GetExePath()
+			f.ParentExePath = e.GetParentExePath()
+			f.Comm = e.GetComm()
+			f.Pcomm = e.GetPcomm()
 		}
 	case utils.HTTPEventType:
 		if e, ok := event.(utils.HttpEvent); ok {

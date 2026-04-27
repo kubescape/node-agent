@@ -27,6 +27,23 @@ func TestExtractEventFields(t *testing.T) {
 			expect: prefilter.EventFields{Path: "/usr/bin/curl", Extracted: true},
 		},
 		{
+			name: "exec event extracts process fields for exclude prefilter",
+			event: &utils.StructEvent{
+				EventType:     utils.ExecveEventType,
+				ExePath:       "/usr/bin/rpm",
+				ParentExePath: "/usr/bin/inspector-ssm-plugin",
+				Comm:          "rpm",
+				Pcomm:         "inspectorssmplu",
+			},
+			expect: prefilter.EventFields{
+				Path:          "/usr/bin/rpm",
+				ParentExePath: "/usr/bin/inspector-ssm-plugin",
+				Comm:          "rpm",
+				Pcomm:         "inspectorssmplu",
+				Extracted:     true,
+			},
+		},
+		{
 			name:   "HTTP event extracts direction, method, port",
 			event:  &utils.StructEvent{EventType: utils.HTTPEventType, Direction: consts.Inbound, DstPort: 8080, Request: &http.Request{Method: "POST"}},
 			expect: prefilter.EventFields{Dir: prefilter.DirInbound, MethodBit: prefilter.MethodPOST, DstPort: 8080, Extracted: true},
