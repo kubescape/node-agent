@@ -82,6 +82,7 @@ type WatchedContainerData struct {
 	CurrentReportTimestamp  time.Time
 	UserDefinedProfile      string
 	LabelOverrides          map[string]string // optional label overrides applied after GetLabels()
+	LearningPeriod          time.Duration
 }
 
 type ContainerInfo struct {
@@ -90,31 +91,19 @@ type ContainerInfo struct {
 	ImageID  string
 }
 
+func formatDuration(d time.Duration) string {
+	s := d.String()
+	s = strings.Replace(s, "m0s", "m", 1)
+	s = strings.Replace(s, "h0m", "h", 1)
+	return s
+}
+
 func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *WatchedContainerData, stripContainer bool) map[string]string {
 	labels := watchedContainer.InstanceID.GetLabels()
-	for i := range labels {
-		if labels[i] == "" || (stripContainer && i == helpersv1.ContainerNameMetadataKey) {
-			delete(labels, i)
-			continue
-		}
-		if errs := content.IsLabelValue(labels[i]); len(errs) != 0 {
-			logger.L().Debug("GetLabels - label is not valid", helpers.String("label", labels[i]))
-			for j := range errs {
-				logger.L().Debug("GetLabels - label err description", helpers.String("Err: ", errs[j]))
-			}
-			delete(labels, i)
-		}
-	}
+	labels[helpersv1.LearningPeriodMetadataKey] = formatDuration(watchedContainer.LearningPeriod)
 	// Apply label overrides
 	for k, v := range watchedContainer.LabelOverrides {
-		if v == "" {
-			delete(labels, k)
-		} else if errs := content.IsLabelValue(v); len(errs) != 0 {
-			logger.L().Warning("GetLabels - label override value is not valid, skipping", helpers.String("key", k), helpers.String("value", v))
-			delete(labels, k)
-		} else {
-			labels[k] = v
-		}
+		labels[k] = v
 	}
 	if watchedContainer.ParentResourceVersion != "" {
 		labels[helpersv1.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
@@ -132,6 +121,20 @@ func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *Watched
 		}
 		if region := cloudMetadata.Region; region != "" {
 			labels[helpersv1.RegionMetadataKey] = region
+		}
+	}
+	// Sanitize labels
+	for i := range labels {
+		if labels[i] == "" || (stripContainer && i == helpersv1.ContainerNameMetadataKey) {
+			delete(labels, i)
+			continue
+		}
+		if errs := content.IsLabelValue(labels[i]); len(errs) != 0 {
+			logger.L().Debug("GetLabels - label is not valid", helpers.String("label", labels[i]))
+			for j := range errs {
+				logger.L().Debug("GetLabels - label err description", helpers.String("Err: ", errs[j]))
+			}
+			delete(labels, i)
 		}
 	}
 	return labels
