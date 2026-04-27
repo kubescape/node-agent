@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/hostsensor"
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -23,6 +25,32 @@ var kubeletConfigDefaultPathList = []string{
 var kubeletKubeConfigDefaultPathList = []string{
 	"/etc/kubernetes/kubelet.conf",
 	"/var/lib/kubelet/kubeconfig",
+}
+
+var kubeletServiceFilePaths = []string{
+	"/etc/systemd/system/kubelet.service",
+	"/usr/lib/systemd/system/kubelet.service",
+	"/lib/systemd/system/kubelet.service",
+}
+
+const kubeletServiceDropInDir = "/etc/systemd/system/kubelet.service.d"
+
+// kubeletConfigYAML is a minimal subset of KubeletConfiguration for CA file extraction.
+type kubeletConfigYAML struct {
+	Authentication struct {
+		X509 struct {
+			ClientCAFile string `json:"clientCAFile"`
+		} `json:"x509"`
+	} `json:"authentication"`
+}
+
+// extractClientCAFromKubeletConfig parses kubelet config YAML and returns the clientCAFile path.
+func extractClientCAFromKubeletConfig(content []byte) (string, error) {
+	var cfg kubeletConfigYAML
+	if err := yaml.Unmarshal(content, &cfg); err != nil {
+		return "", fmt.Errorf("failed to parse kubelet config: %w", err)
+	}
+	return cfg.Authentication.X509.ClientCAFile, nil
 }
 
 // KubeletInfoSensor implements the Sensor interface for kubelet info data
@@ -73,12 +101,31 @@ func (s *KubeletInfoSensor) Sense() (interface{}, error) {
 		ret.KubeConfigFile = makeContaineredFileInfoFromListVerbose(ctx, kubeletProcess, kubeletKubeConfigDefaultPathList, true, helpers.String("in", "SenseKubeletInfo"))
 	}
 
-	// Client CA
+	// Client CA: check cmdLine first, then fall back to kubelet config YAML
 	if caFilePath, ok := kubeletProcess.GetArg(kubeletClientCAArgName); ok {
 		ret.ClientCAFile = makeContaineredFileInfoVerbose(ctx, kubeletProcess, caFilePath, false, helpers.String("in", "SenseKubeletInfo"))
+	} else if ret.ConfigFile != nil && len(ret.ConfigFile.Content) > 0 {
+		if caFilePath, err := extractClientCAFromKubeletConfig(ret.ConfigFile.Content); err != nil {
+			logger.L().Debug("failed to extract clientCAFile from kubelet config", helpers.String("in", "SenseKubeletInfo"), helpers.Error(err))
+		} else if caFilePath != "" {
+			ret.ClientCAFile = makeContaineredFileInfoVerbose(ctx, kubeletProcess, caFilePath, false, helpers.String("in", "SenseKubeletInfo"))
+		}
 	}
 
 	ret.CmdLine = kubeletProcess.RawCmd()
+
+	// Service files: main unit file and drop-in directory
+	for _, svcPath := range kubeletServiceFilePaths {
+		if fi := makeHostFileInfoVerbose(ctx, svcPath, false); fi != nil {
+			ret.ServiceFiles = append(ret.ServiceFiles, *fi)
+			break
+		}
+	}
+	if dropIns, err := makeHostDirFilesInfoVerbose(ctx, kubeletServiceDropInDir, false, 0); err == nil {
+		for _, fi := range dropIns {
+			ret.ServiceFiles = append(ret.ServiceFiles, *fi)
+		}
+	}
 
 	return &ret, nil
 }
