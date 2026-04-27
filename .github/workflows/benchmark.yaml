@@ -57,10 +57,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Baseline = latest UPSTREAM release. Our fork doesn't tag releases,
+          # so querying ${{ github.repository }} gives 404. Comparing against
+          # upstream is also the meaningful baseline for performance work.
           if [[ -n "${{ inputs.before_image }}" ]]; then
             echo "BEFORE_IMAGE=${{ inputs.before_image }}" >> "$GITHUB_OUTPUT"
           else
-            LATEST_TAG=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name')
+            LATEST_TAG=$(gh api repos/kubescape/node-agent/releases/latest --jq '.tag_name')
             echo "BEFORE_IMAGE=quay.io/kubescape/node-agent:${LATEST_TAG}" >> "$GITHUB_OUTPUT"
           fi
 
