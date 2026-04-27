@@ -25,12 +25,12 @@ func (l *apLibrary) wasPathOpened(containerID, path ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, open := range container.Opens {
+	for _, open := range cp.Spec.Opens {
 		if dynamicpathdetector.CompareDynamic(open.Path, pathStr) {
 			return types.Bool(true)
 		}
@@ -59,12 +59,12 @@ func (l *apLibrary) wasPathOpenedWithFlags(containerID, path, flags ref.Val) ref
 		return types.NewErr("failed to parse flags: %v", err)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, open := range container.Opens {
+	for _, open := range cp.Spec.Opens {
 		if dynamicpathdetector.CompareDynamic(open.Path, pathStr) {
 			if compareOpenFlags(celFlags, open.Flags) {
 				return types.Bool(true)
@@ -89,12 +89,12 @@ func (l *apLibrary) wasPathOpenedWithSuffix(containerID, suffix ref.Val) ref.Val
 		return types.MaybeNoSuchOverloadErr(suffix)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, open := range container.Opens {
+	for _, open := range cp.Spec.Opens {
 		if strings.HasSuffix(open.Path, suffixStr) {
 			return types.Bool(true)
 		}
@@ -117,12 +117,12 @@ func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val
 		return types.MaybeNoSuchOverloadErr(prefix)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, open := range container.Opens {
+	for _, open := range cp.Spec.Opens {
 		if strings.HasPrefix(open.Path, prefixStr) {
 			return types.Bool(true)
 		}

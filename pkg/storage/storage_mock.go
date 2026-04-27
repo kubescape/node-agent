@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"context"
+
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
@@ -35,12 +37,21 @@ func (sc *StorageHttpClientMock) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SB
 	return SBOM, nil
 }
 
-func (sc *StorageHttpClientMock) GetApplicationProfile(_, _ string) (*spdxv1beta1.ApplicationProfile, error) {
+func (sc *StorageHttpClientMock) GetContainerProfile(_ context.Context, namespace, name string) (*v1beta1.ContainerProfile, error) {
+	for _, p := range sc.ContainerProfiles {
+		if p != nil && p.Namespace == namespace && p.Name == name {
+			return p, nil
+		}
+	}
+	return nil, nil
+}
+
+func (sc *StorageHttpClientMock) GetApplicationProfile(_ context.Context, _, _ string) (*spdxv1beta1.ApplicationProfile, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (sc *StorageHttpClientMock) GetNetworkNeighborhood(_, _ string) (*spdxv1beta1.NetworkNeighborhood, error) {
+func (sc *StorageHttpClientMock) GetNetworkNeighborhood(_ context.Context, _, _ string) (*spdxv1beta1.NetworkNeighborhood, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -52,12 +63,12 @@ func (sc *StorageHttpClientMock) GetStorageClient() beta1.SpdxV1beta1Interface {
 	return nil
 }
 
-func (sc *StorageHttpClientMock) ListApplicationProfiles(namespace string, limit int64, cont string) (*spdxv1beta1.ApplicationProfileList, error) {
+func (sc *StorageHttpClientMock) ListApplicationProfiles(_ context.Context, namespace string, limit int64, cont string) (*spdxv1beta1.ApplicationProfileList, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (sc *StorageHttpClientMock) ListNetworkNeighborhoods(namespace string, limit int64, cont string) (*spdxv1beta1.NetworkNeighborhoodList, error) {
+func (sc *StorageHttpClientMock) ListNetworkNeighborhoods(_ context.Context, namespace string, limit int64, cont string) (*spdxv1beta1.NetworkNeighborhoodList, error) {
 	//TODO implement me
 	panic("implement me")
 }

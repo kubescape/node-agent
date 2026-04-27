@@ -9,58 +9,19 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func GetApplicationProfile(containerID string, objectCache objectcache.ObjectCache) (*v1beta1.ApplicationProfile, error) {
-	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(containerID)
-	if ap == nil {
-		return nil, errors.New("no profile available")
+// GetContainerProfile returns the ContainerProfile for a containerID plus its
+// SyncChecksumMetadataKey annotation. This is the forward API; legacy callers
+// go through the shims below until step 6c deletes them.
+func GetContainerProfile(objectCache objectcache.ObjectCache, containerID string) (*v1beta1.ContainerProfile, string, error) {
+	cpc := objectCache.ContainerProfileCache()
+	if cpc == nil {
+		return nil, "", errors.New("no container profile cache available")
 	}
-	return ap, nil
-}
-
-func GetNetworkNeighborhood(containerID string, objectCache objectcache.ObjectCache) (*v1beta1.NetworkNeighborhood, error) {
-	nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(containerID)
-	if nn == nil {
-		return nil, errors.New("no profile available")
+	cp := cpc.GetContainerProfile(containerID)
+	if cp == nil {
+		return nil, "", errors.New("no profile available")
 	}
-	return nn, nil
-}
-
-func GetContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
-	for _, s := range ap.Spec.Containers {
-		if s.Name == containerName {
-			return s, nil
-		}
-	}
-	for _, s := range ap.Spec.InitContainers {
-		if s.Name == containerName {
-			return s, nil
-		}
-	}
-	for _, s := range ap.Spec.EphemeralContainers {
-		if s.Name == containerName {
-			return s, nil
-		}
-	}
-	return v1beta1.ApplicationProfileContainer{}, errors.New("container not found")
-}
-
-func GetContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (v1beta1.NetworkNeighborhoodContainer, error) {
-	for _, c := range nn.Spec.Containers {
-		if c.Name == containerName {
-			return c, nil
-		}
-	}
-	for _, c := range nn.Spec.InitContainers {
-		if c.Name == containerName {
-			return c, nil
-		}
-	}
-	for _, c := range nn.Spec.EphemeralContainers {
-		if c.Name == containerName {
-			return c, nil
-		}
-	}
-	return v1beta1.NetworkNeighborhoodContainer{}, errors.New("container not found")
+	return cp, cp.Annotations[helpers.SyncChecksumMetadataKey], nil
 }
 
 func GetContainerName(objectCache objectcache.ObjectCache, containerID string) string {
@@ -92,40 +53,3 @@ func GetPodSpec(objectCache objectcache.ObjectCache, containerID string) (*corev
 	return podSpec, nil
 }
 
-func GetContainerApplicationProfile(objectCache objectcache.ObjectCache, containerID string) (v1beta1.ApplicationProfileContainer, string, error) {
-	ap, err := GetApplicationProfile(containerID, objectCache)
-	if err != nil {
-		return v1beta1.ApplicationProfileContainer{}, "", err
-	}
-
-	containerName := GetContainerName(objectCache, containerID)
-	if containerName == "" {
-		return v1beta1.ApplicationProfileContainer{}, "", errors.New("container name not found")
-	}
-
-	container, err := GetContainerFromApplicationProfile(ap, containerName)
-	if err != nil {
-		return v1beta1.ApplicationProfileContainer{}, "", err
-	}
-
-	return container, ap.Annotations[helpers.SyncChecksumMetadataKey], nil
-}
-
-func GetContainerNetworkNeighborhood(objectCache objectcache.ObjectCache, containerID string) (v1beta1.NetworkNeighborhoodContainer, error) {
-	nn, err := GetNetworkNeighborhood(containerID, objectCache)
-	if err != nil {
-		return v1beta1.NetworkNeighborhoodContainer{}, err
-	}
-
-	containerName := GetContainerName(objectCache, containerID)
-	if containerName == "" {
-		return v1beta1.NetworkNeighborhoodContainer{}, errors.New("container name not found")
-	}
-
-	container, err := GetContainerFromNetworkNeighborhood(nn, containerName)
-	if err != nil {
-		return v1beta1.NetworkNeighborhoodContainer{}, err
-	}
-
-	return container, nil
-}

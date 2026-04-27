@@ -20,12 +20,12 @@ func NewRulePolicyValidator(objectCache objectcache.ObjectCache) *RulePolicyVali
 	}
 }
 
-func (v *RulePolicyValidator) Validate(ruleId string, process string, ap *v1beta1.ApplicationProfileContainer) (bool, error) {
-	if _, ok := ap.PolicyByRuleId[ruleId]; !ok {
+func (v *RulePolicyValidator) Validate(ruleId string, process string, cp *v1beta1.ContainerProfile) (bool, error) {
+	if _, ok := cp.Spec.PolicyByRuleId[ruleId]; !ok {
 		return false, nil
 	}
 
-	if policy, ok := ap.PolicyByRuleId[ruleId]; ok {
+	if policy, ok := cp.Spec.PolicyByRuleId[ruleId]; ok {
 		if policy.AllowedContainer || slices.Contains(policy.AllowedProcesses, process) {
 			return true, nil
 		}

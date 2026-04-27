@@ -106,6 +106,7 @@ type Config struct {
 	ProcfsPidScanInterval          time.Duration                        `mapstructure:"procfsPidScanInterval"`
 	ProcfsScanInterval             time.Duration                        `mapstructure:"procfsScanInterval"`
 	ProfilesCacheRefreshRate       time.Duration                        `mapstructure:"profilesCacheRefreshRate"`
+	StorageRPCBudget               time.Duration                        `mapstructure:"storageRPCBudget"`
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig      `mapstructure:"ruleCooldown"`
 	TestMode                       bool                                 `mapstructure:"testMode"`
 	UpdateDataPeriod               time.Duration                        `mapstructure:"updateDataPeriod"`

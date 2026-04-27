@@ -28,12 +28,12 @@ func (l *apLibrary) wasEndpointAccessed(containerID, endpoint ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(endpoint)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range container.Endpoints {
+	for _, ep := range cp.Spec.Endpoints {
 		if dynamicpathdetector.CompareDynamic(ep.Endpoint, endpointStr) {
 			return types.Bool(true)
 		}
@@ -61,12 +61,12 @@ func (l *apLibrary) wasEndpointAccessedWithMethod(containerID, endpoint, method 
 		return types.MaybeNoSuchOverloadErr(method)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range container.Endpoints {
+	for _, ep := range cp.Spec.Endpoints {
 		if dynamicpathdetector.CompareDynamic(ep.Endpoint, endpointStr) {
 			if slices.Contains(ep.Methods, methodStr) {
 				return types.Bool(true)
@@ -97,12 +97,12 @@ func (l *apLibrary) wasEndpointAccessedWithMethods(containerID, endpoint, method
 		return types.NewErr("failed to parse methods: %v", err)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range container.Endpoints {
+	for _, ep := range cp.Spec.Endpoints {
 		if dynamicpathdetector.CompareDynamic(ep.Endpoint, endpointStr) {
 			for _, method := range celMethods {
 				if slices.Contains(ep.Methods, method) {
@@ -130,12 +130,12 @@ func (l *apLibrary) wasEndpointAccessedWithPrefix(containerID, prefix ref.Val) r
 		return types.MaybeNoSuchOverloadErr(prefix)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range container.Endpoints {
+	for _, ep := range cp.Spec.Endpoints {
 		if strings.HasPrefix(ep.Endpoint, prefixStr) {
 			return types.Bool(true)
 		}
@@ -159,12 +159,12 @@ func (l *apLibrary) wasEndpointAccessedWithSuffix(containerID, suffix ref.Val) r
 		return types.MaybeNoSuchOverloadErr(suffix)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range container.Endpoints {
+	for _, ep := range cp.Spec.Endpoints {
 		if strings.HasSuffix(ep.Endpoint, suffixStr) {
 			return types.Bool(true)
 		}
@@ -189,12 +189,12 @@ func (l *apLibrary) wasHostAccessed(containerID, host ref.Val) ref.Val {
 	}
 
 	// Check HTTP endpoints for host access
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range container.Endpoints {
+	for _, ep := range cp.Spec.Endpoints {
 		// Parse the endpoint URL to extract host
 		if parsedURL, err := url.Parse(ep.Endpoint); err == nil && parsedURL.Host != "" {
 			if parsedURL.Host == hostStr || parsedURL.Hostname() == hostStr {

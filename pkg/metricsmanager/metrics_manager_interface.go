@@ -20,4 +20,9 @@ type MetricsManager interface {
 	ReportContainerStart()
 	ReportContainerStop()
 	ReportDedupEvent(eventType utils.EventType, duplicate bool)
+	ReportContainerProfileLegacyLoad(kind, completeness string)
+	SetContainerProfileCacheEntries(kind string, count float64)
+	ReportContainerProfileCacheHit(hit bool)
+	ReportContainerProfileReconcilerDuration(phase string, duration time.Duration)
+	ReportContainerProfileReconcilerEviction(reason string)
 }
