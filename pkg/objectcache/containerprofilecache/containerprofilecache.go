@@ -45,14 +45,13 @@ type namespacedName struct {
 // CachedContainerProfile is the per-container cache entry. One entry per live
 // containerID, populated on ContainerCallback (Add) and removed on Remove.
 //
-// Profile may be the raw storage-fetched pointer (Shared=true, fast path) or
-// a DeepCopy with user-authored AP/NN overlays merged in (Shared=false).
-// entry.Profile is read-only once stored; storage.ProfileClient returns
-// fresh-decoded objects per call (thin wrapper over client-go typed client)
-// so shared aliasing is safe.
+// Projected holds the compact projected form built by Apply(). The raw
+// ContainerProfile is not retained after projection — only the compact form is
+// stored so the raw pointer can be GC'd.
 type CachedContainerProfile struct {
-	Profile       *v1beta1.ContainerProfile
-	State         *objectcache.ProfileState
+	Projected *objectcache.ProjectedContainerProfile
+	SpecHash  string // mirrors Projected.SpecHash; used for staleness checks
+	State     *objectcache.ProfileState
 	CallStackTree *callstackcache.CallStackSearchTree
 
 	ContainerName string
@@ -78,7 +77,6 @@ type CachedContainerProfile struct {
 	// "ug-" prefix, the user-managed AP/NN. Populated at addContainer time.
 	WorkloadName string
 
-	Shared          bool   // true iff Profile is the shared storage-fetched pointer (read-only)
 	RV              string // ContainerProfile resourceVersion at last load
 	UserManagedAPRV string // user-managed AP (ug-<workload>) RV at last projection, "" if absent
 	UserManagedNNRV string // user-managed NN (ug-<workload>) RV at last projection, "" if absent
@@ -116,6 +114,13 @@ type ContainerProfileCacheImpl struct {
 	// deprecationDedup tracks (kind|ns/name@rv) keys to emit one WARN log
 	// per legacy CRD resource-version across the process lifetime.
 	deprecationDedup sync.Map
+
+	// Projection spec — installed by SetProjectionSpec when rulemanager loads rules.
+	currentSpecMu  sync.RWMutex
+	currentSpec    *objectcache.RuleProjectionSpec
+	specGeneration atomic.Int64 // bumped on each distinct spec hash change
+	nudge          chan struct{} // buffered cap 1; signals reconciler on spec change
+	refreshPending atomic.Bool  // set when a nudge arrives while refresh is running
 }
 
 // NewContainerProfileCache creates a new ContainerProfileCacheImpl.
@@ -141,6 +146,7 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 		metricsManager: metricsManager,
 		reconcileEvery: reconcileEvery,
 		rpcBudget:      rpcBudget,
+		nudge:          make(chan struct{}, 1),
 	}
 }
 
@@ -445,7 +451,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
 	}
 
-	entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData, userManagedApplied)
+	entry := c.buildEntry(cp, userAP, userNN, pod, container, sharedData)
 	// Override CPName with the real consolidated-CP slug. buildEntry sets
 	// CPName from cp.Name, but when cp was synthesized above (no consolidated
 	// CP in storage yet), cp.Name is the workloadName/overlayName — NOT the
@@ -485,13 +491,14 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		helpers.String("containerID", containerID),
 		helpers.String("namespace", container.K8s.Namespace),
 		helpers.String("podName", container.K8s.PodName),
-		helpers.String("cpName", cpName),
-		helpers.String("shared", fmt.Sprintf("%v", entry.Shared)))
+		helpers.String("cpName", cpName))
 	return true
 }
 
-// buildEntry constructs a CachedContainerProfile, choosing the fast-path
-// (shared pointer, no user overlay) or projection path (DeepCopy + merge).
+// buildEntry constructs a CachedContainerProfile by applying user overlays then
+// projecting the merged profile under the current spec. The raw profile pointer
+// is released after projection; only the compact ProjectedContainerProfile is
+// stored.
 func (c *ContainerProfileCacheImpl) buildEntry(
 	cp *v1beta1.ContainerProfile,
 	userAP *v1beta1.ApplicationProfile,
@@ -499,7 +506,6 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 	pod *corev1.Pod,
 	container *containercollection.Container,
 	sharedData *objectcache.WatchedContainerData,
-	userManagedApplied bool,
 ) *CachedContainerProfile {
 	entry := &CachedContainerProfile{
 		ContainerName: container.Runtime.ContainerName,
@@ -513,16 +519,11 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 		entry.PodUID = string(pod.UID)
 	}
 
-	if userAP == nil && userNN == nil && !userManagedApplied {
-		// Fast path: share the storage-fetched pointer. Profile is the raw
-		// storage object — callers must not mutate it.
-		entry.Profile = cp
-		entry.Shared = true
-	} else {
-		projected, warnings := projectUserProfiles(cp, userAP, userNN, pod, container.Runtime.ContainerName)
-		entry.Profile = projected
-		entry.Shared = false
-
+	// Apply label-referenced user overlay (if any).
+	userMerged := cp
+	if userAP != nil || userNN != nil {
+		merged, warnings := projectUserProfiles(cp, userAP, userNN, pod, container.Runtime.ContainerName)
+		userMerged = merged
 		if userAP != nil {
 			entry.UserAPRef = &namespacedName{Namespace: userAP.Namespace, Name: userAP.Name}
 			entry.UserAPRV = userAP.ResourceVersion
@@ -531,19 +532,21 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 			entry.UserNNRef = &namespacedName{Namespace: userNN.Namespace, Name: userNN.Name}
 			entry.UserNNRV = userNN.ResourceVersion
 		}
-
 		c.emitOverlayMetrics(userAP, userNN, warnings)
 	}
 
-	// Build call-stack search tree from entry.Profile.Spec.IdentifiedCallStacks.
-	// Shared path: do not mutate the storage-fetched pointer; call stacks
-	// stay in the profile but are never read through Profile (only through
-	// CallStackTree).
+	// Build call-stack search tree.
 	tree := callstackcache.NewCallStackSearchTree()
-	for _, stack := range entry.Profile.Spec.IdentifiedCallStacks {
+	for _, stack := range userMerged.Spec.IdentifiedCallStacks {
 		tree.AddCallStack(stack)
 	}
 	entry.CallStackTree = tree
+
+	// Project under the current spec.
+	spec := c.snapshotSpec()
+	projected := Apply(spec, userMerged, tree)
+	entry.Projected = projected
+	entry.SpecHash = projected.SpecHash
 
 	// ProfileState from CP annotations (Completion/Status) + Name.
 	entry.State = &objectcache.ProfileState{
@@ -570,15 +573,49 @@ func (c *ContainerProfileCacheImpl) deleteContainer(id string) {
 	c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))
 }
 
-// GetContainerProfile returns the cached ContainerProfile pointer for a
-// container, or nil if there is no entry. Reports a cache-hit metric.
-func (c *ContainerProfileCacheImpl) GetContainerProfile(containerID string) *v1beta1.ContainerProfile {
-	if entry, ok := c.entries.Load(containerID); ok && entry != nil && entry.Profile != nil {
+// GetProjectedContainerProfile returns the projected profile for a container,
+// or nil if there is no entry. Reports a cache-hit metric.
+func (c *ContainerProfileCacheImpl) GetProjectedContainerProfile(containerID string) *objectcache.ProjectedContainerProfile {
+	if entry, ok := c.entries.Load(containerID); ok && entry != nil && entry.Projected != nil {
 		c.metricsManager.ReportContainerProfileCacheHit(true)
-		return entry.Profile
+		return entry.Projected
 	}
 	c.metricsManager.ReportContainerProfileCacheHit(false)
 	return nil
+}
+
+// SetProjectionSpec installs a new compiled spec. Idempotent: no-op when the
+// spec hash matches the currently-installed one. On change: stores the spec,
+// bumps specGeneration, and sends a non-blocking nudge to the reconciler.
+// Never blocks on the reconciler (rulemanager calls this inline).
+func (c *ContainerProfileCacheImpl) SetProjectionSpec(spec objectcache.RuleProjectionSpec) {
+	c.currentSpecMu.Lock()
+	if c.currentSpec != nil && c.currentSpec.Hash == spec.Hash {
+		c.currentSpecMu.Unlock()
+		return
+	}
+	c.currentSpec = &spec
+	c.currentSpecMu.Unlock()
+
+	c.specGeneration.Add(1)
+
+	if c.cfg.ProfileProjection.DetailedMetricsEnabled {
+		c.metricsManager.IncProjectionSpecHashChange()
+	}
+
+	select {
+	case c.nudge <- struct{}{}:
+	default:
+	}
+}
+
+// snapshotSpec returns a pointer to the currently-installed spec under RLock.
+// Returns nil when no spec has been installed yet; Apply treats nil as an
+// empty spec (all surfaces drop everything).
+func (c *ContainerProfileCacheImpl) snapshotSpec() *objectcache.RuleProjectionSpec {
+	c.currentSpecMu.RLock()
+	defer c.currentSpecMu.RUnlock()
+	return c.currentSpec
 }
 
 // GetContainerProfileState returns the cached ProfileState for a container

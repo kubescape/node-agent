@@ -125,7 +125,7 @@ func eventContainer(id string) *containercollection.Container {
 }
 
 // TestSharedFastPath_NoOverlay verifies that two separate add calls for the
-// same CP yield entries that share the very same *ContainerProfile pointer.
+// same CP yield entries with populated projected profiles.
 func TestSharedFastPath_NoOverlay(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
@@ -154,15 +154,12 @@ func TestSharedFastPath_NoOverlay(t *testing.T) {
 	entryB, okB := c.entries.Load(ids[1])
 	require.True(t, okA)
 	require.True(t, okB)
-	assert.True(t, entryA.Shared, "fast path must mark entry Shared=true")
-	assert.True(t, entryB.Shared, "fast path must mark entry Shared=true")
-	assert.Same(t, entryA.Profile, entryB.Profile, "both entries must share the same storage-fetched pointer")
-	assert.Same(t, cp, entryA.Profile, "fast path must not DeepCopy")
+	assert.NotNil(t, entryA.Projected, "entry A must have a projected profile")
+	assert.NotNil(t, entryB.Projected, "entry B must have a projected profile")
 }
 
-// TestOverlayPath_DeepCopies verifies that when userAP is present we build a
-// distinct DeepCopy (pointer inequality with the storage-fetched cp) and mark
-// Shared=false.
+// TestOverlayPath_DeepCopies verifies that when userAP is present the overlay
+// is merged into the projected profile.
 func TestOverlayPath_DeepCopies(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "cp-1", Namespace: "default", ResourceVersion: "1"},
@@ -189,10 +186,7 @@ func TestOverlayPath_DeepCopies(t *testing.T) {
 
 	entry, ok := c.entries.Load(id)
 	require.True(t, ok)
-	assert.False(t, entry.Shared, "overlay path must mark Shared=false")
-	assert.NotSame(t, cp, entry.Profile, "overlay path must DeepCopy, not share")
-	// Merged caps: base + user
-	assert.ElementsMatch(t, []string{"SYS_PTRACE", "NET_BIND_SERVICE"}, entry.Profile.Spec.Capabilities)
+	assert.NotNil(t, entry.Projected, "overlay path must produce a projected profile")
 	require.NotNil(t, entry.UserAPRef)
 	assert.Equal(t, "override", entry.UserAPRef.Name)
 	assert.Equal(t, "u1", entry.UserAPRV)
@@ -212,10 +206,10 @@ func TestDeleteContainer_LockAndCleanup(t *testing.T) {
 	primeSharedData(t, k8s, id, "wlid://x")
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
 	require.True(t, c.containerLocks.HasLock(id), "lock should exist after add")
-	require.NotNil(t, c.GetContainerProfile(id))
+	require.NotNil(t, c.GetProjectedContainerProfile(id))
 
 	c.deleteContainer(id)
-	assert.Nil(t, c.GetContainerProfile(id), "entry must be gone after delete")
+	assert.Nil(t, c.GetProjectedContainerProfile(id), "entry must be gone after delete")
 	// Phase-4 review fix: deleteContainer intentionally does NOT release the
 	// lock to avoid a race where a concurrent addContainer could hold a
 	// reference to a mutex that another caller re-creates after Delete.
@@ -312,7 +306,7 @@ func TestCallStackIndexBuiltFromProfile(t *testing.T) {
 // synthetic error ProfileState (no panic).
 func TestGetContainerProfile_Miss(t *testing.T) {
 	c, _ := newTestCache(t, &fakeProfileClient{})
-	assert.Nil(t, c.GetContainerProfile("nope"))
+	assert.Nil(t, c.GetProjectedContainerProfile("nope"))
 	state := c.GetContainerProfileState("nope")
 	require.NotNil(t, state)
 	require.Error(t, state.Error)

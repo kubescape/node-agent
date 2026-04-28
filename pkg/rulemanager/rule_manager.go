@@ -24,6 +24,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
@@ -108,7 +109,91 @@ func CreateRuleManager(
 		detectorManager:     detectorManager,
 	}
 
+	// Compile the initial projection spec and start a goroutine that
+	// recompiles whenever rule bindings change.
+	r.recompileProjectionSpec()
+	specNotify := make(chan bindingcache.RuleBindingNotify, 10)
+	ruleBindingCache.AddNotifier(&specNotify)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-specNotify:
+				r.recompileProjectionSpec()
+			}
+		}
+	}()
+
 	return r, nil
+}
+
+// recompileProjectionSpec compiles a RuleProjectionSpec from all currently
+// loaded rules and installs it on the ContainerProfileCache. Also runs
+// soft-launch validation: rules with profileDependency>0 but no
+// profileDataRequired emit an ERROR log (not rejected in default soft mode).
+func (rm *RuleManager) recompileProjectionSpec() {
+	rules := rm.ruleBindingCache.GetRuleCreator().CreateAllRules()
+
+	// Soft-launch validation: rules with profileDependency>0 but no
+	// profileDataRequired will receive an empty projection. Emit an ERROR
+	// log and increment the metric; reject (filter out) only in strict mode.
+	filtered := rules[:0]
+	for _, r := range rules {
+		if r.ProfileDependency > 0 && r.ProfileDataRequired == nil {
+			logger.L().Error("rule has profileDependency but no profileDataRequired — projection will be empty for this rule",
+				helpers.String("ruleID", r.ID),
+				helpers.Int("profileDependency", int(r.ProfileDependency)))
+			rm.metrics.IncMissingProfileDataRequired(r.ID)
+			if rm.cfg.ProfileProjection.StrictValidation {
+				continue
+			}
+		}
+		filtered = append(filtered, r)
+	}
+	rules = filtered
+
+	// Count rules with no profileDataRequired (pure event-shape rules).
+	var undeclaredCount float64
+	var undeclaredIDs []string
+	for _, r := range rules {
+		if r.ProfileDataRequired == nil {
+			undeclaredCount++
+			undeclaredIDs = append(undeclaredIDs, r.ID)
+		}
+	}
+	rm.metrics.SetProjectionUndeclaredRules(undeclaredCount)
+
+	spec := containerprofilecache.CompileSpec(rules)
+
+	if rm.cfg.ProfileProjection.DetailedMetricsEnabled {
+		rm.metrics.IncProjectionSpecCompile()
+		rm.metrics.SetProjectionUndeclaredRulesDetail(undeclaredIDs)
+		type namedField struct {
+			name  string
+			field *objectcache.FieldSpec
+		}
+		fields := []namedField{
+			{"opens", &spec.Opens},
+			{"execs", &spec.Execs},
+			{"capabilities", &spec.Capabilities},
+			{"syscalls", &spec.Syscalls},
+			{"endpoints", &spec.Endpoints},
+			{"egressDomains", &spec.EgressDomains},
+			{"egressAddresses", &spec.EgressAddresses},
+			{"ingressDomains", &spec.IngressDomains},
+			{"ingressAddresses", &spec.IngressAddresses},
+		}
+		for _, nf := range fields {
+			rm.metrics.SetProjectionSpecPatterns(nf.name, "prefix", float64(len(nf.field.Prefixes)))
+			rm.metrics.SetProjectionSpecPatterns(nf.name, "suffix", float64(len(nf.field.Suffixes)))
+			rm.metrics.SetProjectionSpecPatterns(nf.name, "exact", float64(len(nf.field.Exact)))
+			rm.metrics.SetProjectionSpecPatterns(nf.name, "contains", float64(len(nf.field.Contains)))
+			rm.metrics.SetProjectionSpecAllField(nf.name, nf.field.All)
+		}
+	}
+
+	rm.objectCache.ContainerProfileCache().SetProjectionSpec(spec)
 }
 
 func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string) {
@@ -200,7 +285,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
-	_, apChecksum, err := profilehelper.GetContainerProfile(rm.objectCache, enrichedEvent.ContainerID)
+	_, apChecksum, err := profilehelper.GetProjectedContainerProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil
 
 	// Early exit if monitoring is disabled for this context - skip rule evaluation
@@ -345,12 +430,9 @@ func (rm *RuleManager) HasApplicableRuleBindings(namespace, name string) bool {
 
 func (rm *RuleManager) HasFinalApplicationProfile(pod *corev1.Pod) bool {
 	for _, c := range utils.GetContainerStatuses(pod.Status) {
-		cp := rm.objectCache.ContainerProfileCache().GetContainerProfile(utils.TrimRuntimePrefix(c.ContainerID))
-		if cp != nil {
-			if status, ok := cp.Annotations[helpersv1.StatusMetadataKey]; ok {
-				// in theory, only completed profiles are stored in cache, but we check anyway
-				return status == helpersv1.Completed
-			}
+		state := rm.objectCache.ContainerProfileCache().GetContainerProfileState(utils.TrimRuntimePrefix(c.ContainerID))
+		if state != nil && state.Error == nil {
+			return state.Status == helpersv1.Completed && state.Completion == helpersv1.Full
 		}
 	}
 	return false
@@ -410,7 +492,7 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 }
 
 func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEvent, containerID string) bool {
-	cp, _, err := profilehelper.GetContainerProfile(rm.objectCache, containerID)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(rm.objectCache, containerID)
 	if err != nil {
 		return false
 	}

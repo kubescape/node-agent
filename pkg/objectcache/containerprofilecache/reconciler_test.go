@@ -150,7 +150,7 @@ func newReconcilerCache(t *testing.T, client storage.ProfileClient, k8s objectca
 // addContainer (which requires priming shared data + instance-id machinery).
 func newEntry(cp *v1beta1.ContainerProfile, containerName, podName, namespace, podUID string) *CachedContainerProfile {
 	return &CachedContainerProfile{
-		Profile:       cp,
+		Projected:     Apply(nil, cp, nil),
 		State:         &objectcache.ProfileState{Name: cp.Name},
 		ContainerName: containerName,
 		PodName:       podName,
@@ -158,7 +158,6 @@ func newEntry(cp *v1beta1.ContainerProfile, containerName, podName, namespace, p
 		PodUID:        podUID,
 		CPName:        cp.Name,
 		RV:            cp.ResourceVersion,
-		Shared:        true,
 	}
 }
 
@@ -178,7 +177,7 @@ func TestReconcilerKeepsEntryWhenPodMissing(t *testing.T) {
 
 	c.reconcileOnce(context.Background())
 
-	assert.NotNil(t, c.GetContainerProfile(id), "entry must be retained when pod is missing from cache")
+	assert.NotNil(t, c.GetProjectedContainerProfile(id), "entry must be retained when pod is missing from cache")
 	assert.Equal(t, 0, metrics.eviction("pod_stopped"), "no eviction when pod is absent")
 }
 
@@ -203,7 +202,7 @@ func TestReconcilerEvictsTerminatedContainer(t *testing.T) {
 
 	c.reconcileOnce(context.Background())
 
-	assert.Nil(t, c.GetContainerProfile(id), "terminated container entry must be evicted")
+	assert.Nil(t, c.GetProjectedContainerProfile(id), "terminated container entry must be evicted")
 	assert.Equal(t, 1, metrics.eviction("pod_stopped"), "should report one eviction")
 }
 
@@ -229,7 +228,7 @@ func TestReconcilerKeepsWaitingContainer(t *testing.T) {
 
 	c.reconcileOnce(context.Background())
 
-	assert.NotNil(t, c.GetContainerProfile(id), "waiting container entry must be retained")
+	assert.NotNil(t, c.GetProjectedContainerProfile(id), "waiting container entry must be retained")
 	assert.Equal(t, 0, metrics.eviction("pod_stopped"), "no eviction for Waiting state")
 }
 
@@ -254,7 +253,7 @@ func TestReconcilerKeepsRunningContainer(t *testing.T) {
 
 	c.reconcileOnce(context.Background())
 
-	assert.NotNil(t, c.GetContainerProfile(id), "running container entry must remain")
+	assert.NotNil(t, c.GetProjectedContainerProfile(id), "running container entry must remain")
 	assert.Equal(t, 0, metrics.eviction("pod_stopped"), "should not evict a running entry")
 }
 
@@ -355,7 +354,7 @@ func TestRefreshFastSkipWhenAllRVsMatch(t *testing.T) {
 
 	id := "c1"
 	entry := &CachedContainerProfile{
-		Profile:       cp,
+		Projected:     Apply(nil, cp, nil),
 		State:         &objectcache.ProfileState{Name: cp.Name},
 		ContainerName: "nginx",
 		PodName:       "nginx-abc",
@@ -364,13 +363,11 @@ func TestRefreshFastSkipWhenAllRVsMatch(t *testing.T) {
 		CPName:        "cp",
 		UserAPRef:     &namespacedName{Namespace: "default", Name: "override"},
 		UserNNRef:     &namespacedName{Namespace: "default", Name: "override"},
-		Shared:        false,
 		RV:            "100",
 		UserAPRV:      "50",
 		UserNNRV:      "60",
 	}
 	c.entries.Set(id, entry)
-	beforeProfilePtr := entry.Profile
 
 	c.refreshAllEntries(context.Background())
 
@@ -383,7 +380,6 @@ func TestRefreshFastSkipWhenAllRVsMatch(t *testing.T) {
 	require.True(t, ok)
 	// Same pointer: the entry was NOT rebuilt.
 	assert.Same(t, entry, stored, "entry must not be replaced on fast-skip")
-	assert.Same(t, beforeProfilePtr, stored.Profile, "Profile pointer must not change on fast-skip")
 	// No legacy-load metric emitted on fast-skip.
 	assert.Equal(t, 0, metrics.legacyLoad(kindApplication, completenessFull))
 	assert.Equal(t, 0, metrics.legacyLoad(kindNetwork, completenessFull))
@@ -412,7 +408,7 @@ func TestRefreshRebuildsOnUserAPChange(t *testing.T) {
 
 	id := "c1"
 	entry := &CachedContainerProfile{
-		Profile:       cp,
+		Projected:     Apply(nil, cp, nil),
 		State:         &objectcache.ProfileState{Name: cp.Name},
 		ContainerName: "nginx",
 		PodName:       "nginx-abc",
@@ -420,19 +416,26 @@ func TestRefreshRebuildsOnUserAPChange(t *testing.T) {
 		PodUID:        "uid-1",
 		CPName:        "cp",
 		UserAPRef:     &namespacedName{Namespace: "default", Name: "override"},
-		Shared:        false,
 		RV:            "100",
 		UserAPRV:      "50", // stale: storage now returns 51
 	}
 	c.entries.Set(id, entry)
 
+	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
+		Capabilities: objectcache.FieldSpec{InUse: true, All: true},
+		Hash:         "test-caps",
+	})
 	c.refreshAllEntries(context.Background())
 
 	stored, ok := c.entries.Load(id)
 	require.True(t, ok)
 	assert.NotSame(t, entry, stored, "entry must be replaced when user-AP RV changes")
 	assert.Equal(t, "51", stored.UserAPRV, "new UserAPRV must be recorded")
-	assert.ElementsMatch(t, []string{"SYS_PTRACE", "NET_BIND_SERVICE"}, stored.Profile.Spec.Capabilities,
+	caps := make([]string, 0, len(stored.Projected.Capabilities.Values))
+	for cap := range stored.Projected.Capabilities.Values {
+		caps = append(caps, cap)
+	}
+	assert.ElementsMatch(t, []string{"SYS_PTRACE", "NET_BIND_SERVICE"}, caps,
 		"rebuilt projection must include merged overlay capabilities")
 }
 
@@ -459,7 +462,6 @@ func TestRefreshRebuildsOnCPChange(t *testing.T) {
 	stored, ok := c.entries.Load(id)
 	require.True(t, ok)
 	assert.Equal(t, "101", stored.RV, "RV must update to the fresh CP's version")
-	assert.Same(t, cp, stored.Profile, "shared fast-path: fresh CP pointer stored directly")
 }
 
 // TestT8_EndToEndRefreshUpdatesProjection — delta #5. Mutate the user-AP in
@@ -486,12 +488,9 @@ func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
 	metrics := newCountingMetrics()
 	c := newReconcilerCache(t, client, k8s, metrics)
 
-	// Initial entry built from base CP + overlay: use addContainer's private
-	// buildEntry logic via projectUserProfiles directly, then seed.
-	initialProjected, _ := projectUserProfiles(cp, ap, nil, nil, "nginx")
 	id := "c1"
 	entry := &CachedContainerProfile{
-		Profile:       initialProjected,
+		Projected:     Apply(nil, cp, nil),
 		State:         &objectcache.ProfileState{Name: cp.Name},
 		ContainerName: "nginx",
 		PodName:       "nginx-abc",
@@ -499,7 +498,6 @@ func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
 		PodUID:        "uid-1",
 		CPName:        "cp",
 		UserAPRef:     &namespacedName{Namespace: "default", Name: "override"},
-		Shared:        false,
 		RV:            "100",
 		UserAPRV:      "50",
 	}
@@ -516,6 +514,10 @@ func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
 		},
 	}
 
+	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
+		Execs: objectcache.FieldSpec{InUse: true, All: true},
+		Hash:  "test-execs",
+	})
 	c.refreshAllEntries(context.Background())
 
 	stored, ok := c.entries.Load(id)
@@ -524,8 +526,8 @@ func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
 
 	// The projection must include the new exec (merged on top of the base CP's exec).
 	var paths []string
-	for _, e := range stored.Profile.Spec.Execs {
-		paths = append(paths, e.Path)
+	for path := range stored.Projected.Execs.Values {
+		paths = append(paths, path)
 	}
 	assert.Contains(t, paths, "/bin/base", "base CP exec must be preserved")
 	assert.Contains(t, paths, "/bin/new", "new user-AP exec must be projected into the cache")
@@ -632,7 +634,7 @@ func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
 
 			id := "c1"
 			entry := &CachedContainerProfile{
-				Profile:         cp,
+				Projected:       Apply(nil, cp, nil),
 				State:           &objectcache.ProfileState{Name: cp.Name},
 				ContainerName:   "nginx",
 				PodName:         "nginx-abc",
@@ -647,7 +649,6 @@ func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
 				UserAPRV:        tc.overlay.userAPRV,
 				UserNNRef:       tc.overlay.userNNRef,
 				UserNNRV:        tc.overlay.userNNRV,
-				Shared:          false,
 			}
 			c.entries.Set(id, entry)
 
@@ -774,7 +775,7 @@ func TestRefreshHonorsContextCancellationMidRPC(t *testing.T) {
 	}
 	cache := NewContainerProfileCache(cfg, blocking, k8s, nil)
 	cache.SeedEntryForTest("id1", &CachedContainerProfile{
-		Profile:       cp,
+		Projected:     Apply(nil, cp, nil),
 		State:         &objectcache.ProfileState{Name: cp.Name},
 		ContainerName: "c1",
 		PodName:       "pod1",
@@ -861,7 +862,7 @@ func TestRetryPendingEntries_CPCreatedAfterAdd(t *testing.T) {
 
 	// addContainer: sees 404 -> pending bookkeeping, not an entry.
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
-	assert.Nil(t, c.GetContainerProfile(id), "no entry before CP exists in storage")
+	assert.Nil(t, c.GetProjectedContainerProfile(id), "no entry before CP exists in storage")
 	assert.Equal(t, 1, c.pending.Len(), "container recorded as pending")
 
 	// Storage creates the CP asynchronously (60s after start in real runs).
@@ -872,7 +873,7 @@ func TestRetryPendingEntries_CPCreatedAfterAdd(t *testing.T) {
 	// promotes on successful GET.
 	c.retryPendingEntries(context.Background())
 
-	assert.NotNil(t, c.GetContainerProfile(id), "entry promoted after CP appears")
+	assert.NotNil(t, c.GetProjectedContainerProfile(id), "entry promoted after CP appears")
 	assert.Equal(t, 0, c.pending.Len(), "pending drained on successful promotion")
 	// Exactly two GETs: one from addContainer (404), one from retry (200).
 	assert.Equal(t, 2, client.getCPCalls, "retry should only re-GET once per tick")
@@ -942,7 +943,7 @@ func TestPartialCP_NonPreRunning_StaysPending(t *testing.T) {
 	// fresh container start observed by a running agent.
 
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
-	assert.Nil(t, c.GetContainerProfile(id), "partial CP must not populate cache on fresh container")
+	assert.Nil(t, c.GetProjectedContainerProfile(id), "partial CP must not populate cache on fresh container")
 	assert.Equal(t, 1, c.pending.Len(), "partial-on-restart stays pending")
 
 	// Simulate the CP becoming Full (new agent-side aggregation round).
@@ -950,7 +951,7 @@ func TestPartialCP_NonPreRunning_StaysPending(t *testing.T) {
 	cp.ResourceVersion = "2"
 	c.retryPendingEntries(context.Background())
 
-	assert.NotNil(t, c.GetContainerProfile(id), "Full CP promotes pending entry")
+	assert.NotNil(t, c.GetProjectedContainerProfile(id), "Full CP promotes pending entry")
 	assert.Equal(t, 0, c.pending.Len(), "pending drained on Full")
 }
 
@@ -978,7 +979,7 @@ func TestPartialCP_PreRunning_Accepted(t *testing.T) {
 	primePreRunningSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
 
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
-	assert.NotNil(t, c.GetContainerProfile(id), "partial CP accepted for PreRunning container")
+	assert.NotNil(t, c.GetProjectedContainerProfile(id), "partial CP accepted for PreRunning container")
 	assert.Equal(t, 0, c.pending.Len(), "not pending when accepted")
 }
 
@@ -1025,20 +1026,20 @@ func TestRefreshDoesNotResurrectDeletedEntry(t *testing.T) {
 	id := "container-resurrect"
 	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
-	require.NotNil(t, c.GetContainerProfile(id))
+	require.NotNil(t, c.GetProjectedContainerProfile(id))
 
 	// Simulate the race: snapshot the entry, delete, then call refreshOneEntry.
 	entry, ok := c.entries.Load(id)
 	require.True(t, ok)
 	c.deleteContainer(id)
-	require.Nil(t, c.GetContainerProfile(id), "entry gone after delete")
+	require.Nil(t, c.GetProjectedContainerProfile(id), "entry gone after delete")
 
 	// Refresh for the deleted id must bail instead of resurrecting.
 	c.containerLocks.WithLock(id, func() {
 		c.refreshOneEntry(context.Background(), id, entry)
 	})
 
-	assert.Nil(t, c.GetContainerProfile(id), "refresh must not resurrect deleted entry")
+	assert.Nil(t, c.GetProjectedContainerProfile(id), "refresh must not resurrect deleted entry")
 }
 
 // TestUserDefinedProfileOnly_NoBaseCP verifies that a container with only a
@@ -1057,6 +1058,12 @@ func TestUserDefinedProfileOnly_NoBaseCP(t *testing.T) {
 	client := &fakeProfileClient{cp: nil, cpErr: assertErrNotFound("no-base"), ap: userAP}
 	c, k8s := newTestCache(t, client)
 
+	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
+		Capabilities: objectcache.FieldSpec{InUse: true, All: true},
+		Execs:        objectcache.FieldSpec{InUse: true, All: true},
+		Hash:         "user-only-test",
+	})
+
 	id := "container-user-only"
 	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
 	ct := eventContainer(id)
@@ -1064,10 +1071,11 @@ func TestUserDefinedProfileOnly_NoBaseCP(t *testing.T) {
 
 	require.NoError(t, c.addContainer(ct, context.Background()))
 
-	cached := c.GetContainerProfile(id)
+	cached := c.GetProjectedContainerProfile(id)
 	require.NotNil(t, cached, "entry populated from user-AP even without base CP")
 	// The synthesized CP + projection should carry the user AP's capabilities.
-	assert.Contains(t, cached.Spec.Capabilities, "CAP_NET_ADMIN")
+	_, hasCap := cached.Capabilities.Values["CAP_NET_ADMIN"]
+	assert.True(t, hasCap, "projected entry must contain CAP_NET_ADMIN from user-AP")
 }
 
 // primePreRunningSharedData is a variant of primeSharedData that sets the
@@ -1178,22 +1186,66 @@ func TestUserManagedProfileMerged(t *testing.T) {
 	}
 	c, k8s := newTestCache(t, client)
 
+	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
+		Execs: objectcache.FieldSpec{InUse: true, All: true},
+		Hash:  "user-managed-test",
+	})
+
 	id := "container-user-managed"
 	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
 
-	cached := c.GetContainerProfile(id)
+	cached := c.GetProjectedContainerProfile(id)
 	require.NotNil(t, cached, "entry populated")
-	var paths []string
-	for _, e := range cached.Spec.Execs {
-		paths = append(paths, e.Path)
-	}
-	assert.Contains(t, paths, "/bin/X", "base workload AP exec must be present")
-	assert.Contains(t, paths, "/bin/Y", "user-managed (ug-) AP exec must be merged in")
+	_, hasX := cached.Execs.Values["/bin/X"]
+	_, hasY := cached.Execs.Values["/bin/Y"]
+	assert.True(t, hasX, "base workload AP exec must be present")
+	assert.True(t, hasY, "user-managed (ug-) AP exec must be merged in")
 
 	// Verify the RV was captured so a later user-managed update would trigger
 	// a refresh rebuild.
 	entry, ok := c.entries.Load(id)
 	require.True(t, ok)
 	assert.Equal(t, "9", entry.UserManagedAPRV, "UserManagedAPRV recorded at add time")
+}
+
+// TestSpecChange_TriggersReprojection — T5 nudge integration.
+//
+// After SetProjectionSpec is called with a new spec, RefreshAllEntriesForTest
+// re-projects existing entries under the new spec. Without the nudge mechanism
+// tests cannot wait for the background goroutine, so we drive it explicitly.
+func TestSpecChange_TriggersReprojection(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"},
+		Spec: v1beta1.ContainerProfileSpec{
+			Capabilities: []string{"SYS_PTRACE", "NET_ADMIN"},
+		},
+	}
+	client := &countingProfileClient{cp: cp}
+	k8s := newControllableK8sCache()
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, k8s, metrics)
+
+	id := "c-reproj"
+	// Seed with nil spec — capabilities will be dropped.
+	entry := newEntry(cp, "nginx", "nginx-abc", "default", "uid-1")
+	c.entries.Set(id, entry)
+
+	before := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, before)
+	assert.Empty(t, before.Capabilities.Values, "nil spec → no capabilities retained")
+
+	// Install a spec that accepts all capabilities.
+	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
+		Capabilities: objectcache.FieldSpec{InUse: true, All: true},
+		Hash:         "caps-all",
+	})
+
+	// Simulate what the nudge-triggered goroutine does.
+	c.refreshAllEntries(context.Background())
+
+	after := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, after)
+	assert.Contains(t, after.Capabilities.Values, "SYS_PTRACE", "after spec change → SYS_PTRACE projected")
+	assert.Contains(t, after.Capabilities.Values, "NET_ADMIN", "after spec change → NET_ADMIN projected")
 }

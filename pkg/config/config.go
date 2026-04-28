@@ -30,6 +30,15 @@ const PodNameEnvVar = "POD_NAME"
 const NamespaceEnvVar = "NAMESPACE_NAME"
 
 // EventDedupConfig controls eBPF event deduplication before CEL rule evaluation.
+// ProfileProjectionConfig controls rule-aware profile projection behaviour.
+type ProfileProjectionConfig struct {
+	// DetailedMetricsEnabled enables per-rule stale-entry and literal-miss counters.
+	DetailedMetricsEnabled bool `mapstructure:"detailedMetricsEnabled"`
+	// StrictValidation rejects rules with profileDependency>0 but no profileDataRequired.
+	// Defaults to false (soft mode: log + metric only).
+	StrictValidation bool `mapstructure:"strictValidation"`
+}
+
 type EventDedupConfig struct {
 	Enabled       bool  `mapstructure:"enabled"`
 	SlotsExponent uint8 `mapstructure:"slotsExponent"`
@@ -105,6 +114,7 @@ type Config struct {
 	PodName                        string                               `mapstructure:"podName"`
 	ProcfsPidScanInterval          time.Duration                        `mapstructure:"procfsPidScanInterval"`
 	ProcfsScanInterval             time.Duration                        `mapstructure:"procfsScanInterval"`
+	ProfileProjection              ProfileProjectionConfig              `mapstructure:"profileProjection"`
 	ProfilesCacheRefreshRate       time.Duration                        `mapstructure:"profilesCacheRefreshRate"`
 	StorageRPCBudget               time.Duration                        `mapstructure:"storageRPCBudget"`
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig      `mapstructure:"ruleCooldown"`

@@ -2,11 +2,12 @@ package applicationprofile
 
 import (
 	"net/url"
-	"slices"
 	"strings"
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/celparse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
@@ -28,13 +29,18 @@ func (l *apLibrary) wasEndpointAccessed(containerID, endpoint ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(endpoint)
 	}
 
-	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range cp.Spec.Endpoints {
-		if dynamicpathdetector.CompareDynamic(ep.Endpoint, endpointStr) {
+	for ep := range cp.Endpoints.Values {
+		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
+			return types.Bool(true)
+		}
+	}
+	for _, ep := range cp.Endpoints.Patterns {
+		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
 			return types.Bool(true)
 		}
 	}
@@ -56,21 +62,24 @@ func (l *apLibrary) wasEndpointAccessedWithMethod(containerID, endpoint, method 
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(endpoint)
 	}
-	methodStr, ok := method.Value().(string)
-	if !ok {
+	if _, ok := method.Value().(string); !ok {
 		return types.MaybeNoSuchOverloadErr(method)
 	}
 
-	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range cp.Spec.Endpoints {
-		if dynamicpathdetector.CompareDynamic(ep.Endpoint, endpointStr) {
-			if slices.Contains(ep.Methods, methodStr) {
-				return types.Bool(true)
-			}
+	// EndpointMethodsByPath is out of scope for v1 — check path membership only.
+	for ep := range cp.Endpoints.Values {
+		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
+			return types.Bool(true)
+		}
+	}
+	for _, ep := range cp.Endpoints.Patterns {
+		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
+			return types.Bool(true)
 		}
 	}
 
@@ -92,23 +101,24 @@ func (l *apLibrary) wasEndpointAccessedWithMethods(containerID, endpoint, method
 		return types.MaybeNoSuchOverloadErr(endpoint)
 	}
 
-	celMethods, err := celparse.ParseList[string](methods)
-	if err != nil {
+	if _, err := celparse.ParseList[string](methods); err != nil {
 		return types.NewErr("failed to parse methods: %v", err)
 	}
 
-	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range cp.Spec.Endpoints {
-		if dynamicpathdetector.CompareDynamic(ep.Endpoint, endpointStr) {
-			for _, method := range celMethods {
-				if slices.Contains(ep.Methods, method) {
-					return types.Bool(true)
-				}
-			}
+	// EndpointMethodsByPath is out of scope for v1 — check path membership only.
+	for ep := range cp.Endpoints.Values {
+		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
+			return types.Bool(true)
+		}
+	}
+	for _, ep := range cp.Endpoints.Patterns {
+		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
+			return types.Bool(true)
 		}
 	}
 
@@ -130,18 +140,34 @@ func (l *apLibrary) wasEndpointAccessedWithPrefix(containerID, prefix ref.Val) r
 		return types.MaybeNoSuchOverloadErr(prefix)
 	}
 
-	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range cp.Spec.Endpoints {
-		if strings.HasPrefix(ep.Endpoint, prefixStr) {
-			return types.Bool(true)
+	if cp.Endpoints.All {
+		// All entries retained — scan to check for the prefix.
+		for ep := range cp.Endpoints.Values {
+			if strings.HasPrefix(ep, prefixStr) {
+				return types.Bool(true)
+			}
 		}
+		for _, ep := range cp.Endpoints.Patterns {
+			if strings.HasPrefix(ep, prefixStr) {
+				return types.Bool(true)
+			}
+		}
+		return types.Bool(false)
 	}
-
-	return types.Bool(false)
+	// Projection applied — PrefixHits is authoritative; absent key = undeclared.
+	hit, declared := cp.Endpoints.PrefixHits[prefixStr]
+	if !declared {
+		if l.metrics != nil {
+			l.metrics.IncProjectionUndeclaredLiteral("ap.was_endpoint_accessed_with_prefix")
+		}
+		return types.Bool(false)
+	}
+	return types.Bool(hit)
 }
 
 // wasEndpointAccessedWithSuffix checks if any HTTP endpoint with the specified suffix was accessed
@@ -159,18 +185,34 @@ func (l *apLibrary) wasEndpointAccessedWithSuffix(containerID, suffix ref.Val) r
 		return types.MaybeNoSuchOverloadErr(suffix)
 	}
 
-	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range cp.Spec.Endpoints {
-		if strings.HasSuffix(ep.Endpoint, suffixStr) {
-			return types.Bool(true)
+	if cp.Endpoints.All {
+		// All entries retained — scan to check for the suffix.
+		for ep := range cp.Endpoints.Values {
+			if strings.HasSuffix(ep, suffixStr) {
+				return types.Bool(true)
+			}
 		}
+		for _, ep := range cp.Endpoints.Patterns {
+			if strings.HasSuffix(ep, suffixStr) {
+				return types.Bool(true)
+			}
+		}
+		return types.Bool(false)
 	}
-
-	return types.Bool(false)
+	// Projection applied — SuffixHits is authoritative; absent key = undeclared.
+	hit, declared := cp.Endpoints.SuffixHits[suffixStr]
+	if !declared {
+		if l.metrics != nil {
+			l.metrics.IncProjectionUndeclaredLiteral("ap.was_endpoint_accessed_with_suffix")
+		}
+		return types.Bool(false)
+	}
+	return types.Bool(hit)
 }
 
 // wasHostAccessed checks if a specific host was accessed via HTTP endpoints or network connections
@@ -189,20 +231,33 @@ func (l *apLibrary) wasHostAccessed(containerID, host ref.Val) ref.Val {
 	}
 
 	// Check HTTP endpoints for host access
-	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for _, ep := range cp.Spec.Endpoints {
+	if !cp.Endpoints.All {
+		// Only a subset of endpoints is retained — results may not reflect the full profile.
+		logger.L().Debug("was_host_accessed called with Endpoints.All=false; results limited to projected subset",
+			helpers.String("containerID", containerIDStr),
+			helpers.String("host", hostStr))
+	}
+	allEndpoints := make([]string, 0, len(cp.Endpoints.Values)+len(cp.Endpoints.Patterns))
+	for ep := range cp.Endpoints.Values {
+		allEndpoints = append(allEndpoints, ep)
+	}
+	allEndpoints = append(allEndpoints, cp.Endpoints.Patterns...)
+
+	for _, ep := range allEndpoints {
 		// Parse the endpoint URL to extract host
-		if parsedURL, err := url.Parse(ep.Endpoint); err == nil && parsedURL.Host != "" {
+		if parsedURL, err := url.Parse(ep); err == nil && parsedURL.Host != "" {
 			if parsedURL.Host == hostStr || parsedURL.Hostname() == hostStr {
 				return types.Bool(true)
 			}
 		}
-		// Also check if the endpoint contains the host as a substring (for cases where it's not a full URL)
-		if strings.Contains(ep.Endpoint, hostStr) {
+		// For non-URL endpoints check for a whole-token match so that a short
+		// host like "api" does not match path segments like "/v1/api/users".
+		if ep == hostStr || strings.HasPrefix(ep, hostStr+"/") || strings.HasPrefix(ep, hostStr+":") {
 			return types.Bool(true)
 		}
 	}

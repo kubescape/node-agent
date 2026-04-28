@@ -28,7 +28,7 @@ func newCPCForEvictionTest(storage *stubStorage, k8s *stubK8sCache) *cpc.Contain
 // using the exported SeedEntryForTest hook.
 func seedEntry(cache *cpc.ContainerProfileCacheImpl, containerID string, cp *v1beta1.ContainerProfile, containerName, podName, namespace, podUID string) {
 	entry := &cpc.CachedContainerProfile{
-		Profile:       cp,
+		Projected:     cpc.Apply(nil, cp, nil),
 		State:         &objectcache.ProfileState{Name: cp.Name},
 		ContainerName: containerName,
 		PodName:       podName,
@@ -36,7 +36,6 @@ func seedEntry(cache *cpc.ContainerProfileCacheImpl, containerID string, cp *v1b
 		PodUID:        podUID,
 		CPName:        cp.Name,
 		RV:            cp.ResourceVersion,
-		Shared:        true,
 	}
 	cache.SeedEntryForTest(containerID, entry)
 }
@@ -73,8 +72,8 @@ func TestInitContainerEvictionViaRemoveEvent(t *testing.T) {
 	seedEntry(cache, initID, cp, initName, podName, namespace, podUID)
 	seedEntry(cache, regID, cp, regularName, podName, namespace, podUID)
 
-	assert.NotNil(t, cache.GetContainerProfile(initID), "init container must be cached before eviction")
-	assert.NotNil(t, cache.GetContainerProfile(regID), "regular container must be cached before eviction")
+	assert.NotNil(t, cache.GetProjectedContainerProfile(initID), "init container must be cached before eviction")
+	assert.NotNil(t, cache.GetProjectedContainerProfile(regID), "regular container must be cached before eviction")
 
 	// Fire remove event for init container only. deleteContainer runs in a
 	// goroutine; wait for it to complete.
@@ -85,11 +84,11 @@ func TestInitContainerEvictionViaRemoveEvent(t *testing.T) {
 
 	// deleteContainer goroutine is very fast (just a map delete + lock release).
 	assert.Eventually(t, func() bool {
-		return cache.GetContainerProfile(initID) == nil
+		return cache.GetProjectedContainerProfile(initID) == nil
 	}, 3*time.Second, 10*time.Millisecond, "init container entry must be evicted after RemoveContainer event")
 
 	// Regular container must survive.
-	assert.NotNil(t, cache.GetContainerProfile(regID), "regular container entry must remain after init eviction")
+	assert.NotNil(t, cache.GetProjectedContainerProfile(regID), "regular container entry must remain after init eviction")
 }
 
 // TestMissedRemoveEventEvictedByReconciler — T2b.
@@ -131,7 +130,7 @@ func TestMissedRemoveEventEvictedByReconciler(t *testing.T) {
 
 	// Seed init container entry directly.
 	seedEntry(cache, initID, cp, initName, podName, namespace, podUID)
-	assert.NotNil(t, cache.GetContainerProfile(initID), "init container must be seeded before reconciler test")
+	assert.NotNil(t, cache.GetProjectedContainerProfile(initID), "init container must be seeded before reconciler test")
 
 	// Simulate init container finishing: flip status to Terminated, no remove event.
 	terminatedPod := makeTestPod(podName, namespace, podUID,
@@ -149,6 +148,6 @@ func TestMissedRemoveEventEvictedByReconciler(t *testing.T) {
 	// Drive the reconciler directly — no tick loop running, no goroutines.
 	cache.ReconcileOnce(context.Background())
 
-	assert.Nil(t, cache.GetContainerProfile(initID),
+	assert.Nil(t, cache.GetProjectedContainerProfile(initID),
 		"reconciler must evict init container entry when pod status shows Terminated")
 }

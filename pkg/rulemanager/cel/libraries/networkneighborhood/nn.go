@@ -6,28 +6,36 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
-func New(objectCache objectcache.ObjectCache, config config.Config) libraries.Library {
-	return &nnLibrary{
+func New(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) libraries.Library {
+	lib := &nnLibrary{
 		objectCache: objectCache,
 		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
 			MaxSize: config.CelConfigCache.MaxSize,
 			TTL:     config.CelConfigCache.TTL,
 		}),
 	}
+	if len(mm) > 0 && mm[0] != nil {
+		lib.metrics = mm[0]
+		lib.detailedMetrics = config.ProfileProjection.DetailedMetricsEnabled
+	}
+	return lib
 }
 
-func NN(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption {
-	return cel.Lib(New(objectCache, config))
+func NN(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) cel.EnvOption {
+	return cel.Lib(New(objectCache, config, mm...))
 }
 
 type nnLibrary struct {
-	objectCache   objectcache.ObjectCache
-	functionCache *cache.FunctionCache
+	objectCache     objectcache.ObjectCache
+	functionCache   *cache.FunctionCache
+	metrics         metricsmanager.MetricsManager
+	detailedMetrics bool
 }
 
 func (l *nnLibrary) LibraryName() string {
@@ -47,10 +55,13 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("nn.was_address_in_egress")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasAddressInEgress(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_egress")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_egress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -63,10 +74,13 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("nn.was_address_in_ingress")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasAddressInIngress(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_ingress")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_ingress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -79,10 +93,13 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("nn.is_domain_in_egress")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.isDomainInEgress(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_egress")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_egress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -95,10 +112,13 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("nn.is_domain_in_ingress")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.isDomainInIngress(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_ingress")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_ingress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -111,10 +131,13 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 4 {
 						return types.NewErr("expected 4 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("nn.was_address_port_protocol_in_egress")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasAddressPortProtocolInEgress(args[0], args[1], args[2], args[3])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_egress")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_egress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2], values[3])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -127,10 +150,13 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 4 {
 						return types.NewErr("expected 4 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("nn.was_address_port_protocol_in_ingress")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasAddressPortProtocolInIngress(args[0], args[1], args[2], args[3])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_ingress")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_ingress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2], values[3])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),

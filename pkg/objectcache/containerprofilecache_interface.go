@@ -7,13 +7,17 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
+// ContainerProfileCache is the interface satisfied by ContainerProfileCacheImpl
+// and its test mocks. GetProjectedContainerProfile replaces the former
+// GetContainerProfile — callers receive the compact projected form instead of
+// the raw CRD pointer.
 type ContainerProfileCache interface {
-	GetContainerProfile(containerID string) *v1beta1.ContainerProfile
+	GetProjectedContainerProfile(containerID string) *ProjectedContainerProfile
 	GetContainerProfileState(containerID string) *ProfileState
 	GetCallStackSearchTree(containerID string) *callstackcache.CallStackSearchTree
+	SetProjectionSpec(spec RuleProjectionSpec)
 	ContainerCallback(notif containercollection.PubSubEvent)
 	Start(ctx context.Context)
 }
@@ -22,7 +26,7 @@ var _ ContainerProfileCache = (*ContainerProfileCacheMock)(nil)
 
 type ContainerProfileCacheMock struct{}
 
-func (cp *ContainerProfileCacheMock) GetContainerProfile(_ string) *v1beta1.ContainerProfile {
+func (cp *ContainerProfileCacheMock) GetProjectedContainerProfile(_ string) *ProjectedContainerProfile {
 	return nil
 }
 
@@ -34,8 +38,8 @@ func (cp *ContainerProfileCacheMock) GetCallStackSearchTree(_ string) *callstack
 	return nil
 }
 
-func (cp *ContainerProfileCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {
-}
+func (cp *ContainerProfileCacheMock) SetProjectionSpec(_ RuleProjectionSpec) {}
 
-func (cp *ContainerProfileCacheMock) Start(_ context.Context) {
-}
+func (cp *ContainerProfileCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {}
+
+func (cp *ContainerProfileCacheMock) Start(_ context.Context) {}
