@@ -68,7 +68,9 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 // raw profile. isPathSurface enables retention of dynamic-segment entries.
 func projectField(spec objectcache.FieldSpec, rawEntries []string, isPathSurface bool) objectcache.ProjectedField {
 	if !spec.InUse {
-		return objectcache.ProjectedField{}
+		// No rule declared a requirement for this field — pass all raw entries
+		// through so existing rules that omit profileDataRequired keep working.
+		spec.All = true
 	}
 
 	pf := objectcache.ProjectedField{

@@ -63,7 +63,8 @@ func TestApply_NilCP(t *testing.T) {
 }
 
 // TestApply_NilSpec verifies that Apply with a nil spec returns a non-nil
-// ProjectedContainerProfile with an empty SpecHash and no projected data.
+// ProjectedContainerProfile with an empty SpecHash and all data passed through
+// (InUse=false → pass-through so existing rules without profileDataRequired work).
 func TestApply_NilSpec(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
 		Spec: v1beta1.ContainerProfileSpec{
@@ -74,9 +75,9 @@ func TestApply_NilSpec(t *testing.T) {
 
 	require.NotNil(t, pcp)
 	assert.Empty(t, pcp.SpecHash)
-	// No field should have data because spec is nil → zero spec → InUse=false everywhere.
-	assert.Nil(t, pcp.Capabilities.Values)
-	assert.False(t, pcp.Capabilities.All)
+	// InUse=false → pass-through: all entries retained.
+	assert.Contains(t, pcp.Capabilities.Values, "SYS_PTRACE")
+	assert.True(t, pcp.Capabilities.All)
 }
 
 // TestApply_AllSurfaces verifies that when all surfaces have All=true, the
@@ -221,12 +222,12 @@ func TestApply_DynamicRetentionWhenInUse(t *testing.T) {
 	assert.True(t, hasPasswd, "/etc/passwd should still be in Values")
 }
 
-// TestApply_DynamicNotRetainedWhenNotInUse verifies that when InUse=false,
-// dynamic paths are not included in anything.
-func TestApply_DynamicNotRetainedWhenNotInUse(t *testing.T) {
+// TestApply_DynamicRetainedInPassThrough verifies that when InUse=false,
+// dynamic paths are retained in Patterns (pass-through mode).
+func TestApply_DynamicRetainedInPassThrough(t *testing.T) {
 	dynamicPath := "/proc/" + dynamicpathdetector.DynamicIdentifier + "/maps"
 	spec := &objectcache.RuleProjectionSpec{
-		// Opens.InUse is false (zero value)
+		// Opens.InUse is false (zero value) → pass-through
 	}
 	cp := &v1beta1.ContainerProfile{
 		Spec: v1beta1.ContainerProfileSpec{
@@ -239,8 +240,8 @@ func TestApply_DynamicNotRetainedWhenNotInUse(t *testing.T) {
 	pcp := Apply(spec, cp, nil)
 	require.NotNil(t, pcp)
 
-	assert.Empty(t, pcp.Opens.Patterns, "dynamic path should NOT be in Patterns when InUse=false")
-	assert.Nil(t, pcp.Opens.Values, "Values should be nil when InUse=false")
+	assert.Contains(t, pcp.Opens.Patterns, dynamicPath, "dynamic path retained in Patterns when InUse=false (pass-through)")
+	assert.True(t, pcp.Opens.All, "All=true when InUse=false (pass-through)")
 }
 
 // TestApply_PrefixHitsCoverAllDeclared verifies that PrefixHits is populated

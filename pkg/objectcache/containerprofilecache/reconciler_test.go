@@ -1227,13 +1227,14 @@ func TestSpecChange_TriggersReprojection(t *testing.T) {
 	c := newReconcilerCache(t, client, k8s, metrics)
 
 	id := "c-reproj"
-	// Seed with nil spec — capabilities will be dropped.
+	// Seed with nil spec — InUse=false means pass-through: all entries retained.
 	entry := newEntry(cp, "nginx", "nginx-abc", "default", "uid-1")
 	c.entries.Set(id, entry)
 
 	before := c.GetProjectedContainerProfile(id)
 	require.NotNil(t, before)
-	assert.Empty(t, before.Capabilities.Values, "nil spec → no capabilities retained")
+	assert.Contains(t, before.Capabilities.Values, "SYS_PTRACE", "nil spec → pass-through, capabilities retained")
+	assert.Contains(t, before.Capabilities.Values, "NET_ADMIN", "nil spec → pass-through, capabilities retained")
 
 	// Install a spec that accepts all capabilities.
 	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
