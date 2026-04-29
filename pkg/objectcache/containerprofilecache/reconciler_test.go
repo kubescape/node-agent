@@ -1233,6 +1233,7 @@ func TestSpecChange_TriggersReprojection(t *testing.T) {
 
 	before := c.GetProjectedContainerProfile(id)
 	require.NotNil(t, before)
+	assert.Empty(t, before.SpecHash, "nil spec → SpecHash is empty")
 	assert.Contains(t, before.Capabilities.Values, "SYS_PTRACE", "nil spec → pass-through, capabilities retained")
 	assert.Contains(t, before.Capabilities.Values, "NET_ADMIN", "nil spec → pass-through, capabilities retained")
 
@@ -1247,6 +1248,7 @@ func TestSpecChange_TriggersReprojection(t *testing.T) {
 
 	after := c.GetProjectedContainerProfile(id)
 	require.NotNil(t, after)
+	assert.Equal(t, "caps-all", after.SpecHash, "after spec change → SpecHash updated, proving reprojection occurred")
 	assert.Contains(t, after.Capabilities.Values, "SYS_PTRACE", "after spec change → SYS_PTRACE projected")
 	assert.Contains(t, after.Capabilities.Values, "NET_ADMIN", "after spec change → NET_ADMIN projected")
 }

@@ -14,7 +14,8 @@ import (
 
 // Apply transforms a raw ContainerProfile into a ProjectedContainerProfile
 // under the given spec. Pure function: no I/O, no mutation of inputs.
-// If spec is nil, a zero-spec (no surfaces InUse) is used — all data dropped.
+// If spec is nil, a zero-spec is used — InUse=false on every field triggers
+// pass-through, retaining all raw data.
 // callStackTree is built by the caller and passed in so Apply stays a pure
 // data transform.
 func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, callStackTree *callstackcache.CallStackSearchTree) *objectcache.ProjectedContainerProfile {
@@ -94,8 +95,8 @@ func projectField(spec objectcache.FieldSpec, rawEntries []string, isPathSurface
 		isDynamic := isPathSurface && containsDynamicSegment(e)
 
 		if isDynamic {
-			// Dynamic entries go to Patterns regardless of spec content, as
-			// long as the surface is in use (checked above).
+			// Dynamic entries always go to Patterns on path surfaces (both
+			// pass-through and explicit InUse modes).
 			if !seen[e] {
 				seen[e] = true
 				pf.Patterns = append(pf.Patterns, e)
