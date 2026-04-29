@@ -717,9 +717,6 @@ func packageVersion(name string) string {
 	if ok {
 		for _, dep := range bi.Deps {
 			if dep.Path == name {
-				if dep.Replace != nil && dep.Replace.Version != "" {
-					return dep.Replace.Version
-				}
 				return dep.Version
 			}
 		}
