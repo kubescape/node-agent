@@ -120,6 +120,13 @@ func CreateRuleManager(
 			case <-ctx.Done():
 				return
 			case <-specNotify:
+				// Drain any additional pending notifications so a burst of
+				// rule-binding updates triggers only one recompile rather than
+				// one per message (which would also risk filling the channel
+				// and blocking AddHandler / RefreshRules callers).
+				for len(specNotify) > 0 {
+					<-specNotify
+				}
 				r.recompileProjectionSpec()
 			}
 		}

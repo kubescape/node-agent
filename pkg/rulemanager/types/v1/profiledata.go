@@ -78,6 +78,40 @@ type PatternObject struct {
 	Contains string `json:"contains,omitempty" yaml:"contains,omitempty"`
 }
 
+var patternObjectKnownFields = map[string]bool{
+	"exact": true, "prefix": true, "suffix": true, "contains": true,
+}
+
+// UnmarshalJSON rejects unknown fields in a PatternObject so typos in rule
+// YAML/JSON are caught at load time rather than silently ignored.
+func (p *PatternObject) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for k := range raw {
+		if !patternObjectKnownFields[k] {
+			return fmt.Errorf("PatternObject: unknown field %q", k)
+		}
+	}
+	type plain PatternObject
+	return json.Unmarshal(data, (*plain)(p))
+}
+
+// UnmarshalYAML rejects unknown fields in a PatternObject.
+func (p *PatternObject) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i < len(value.Content)-1; i += 2 {
+			key := value.Content[i].Value
+			if !patternObjectKnownFields[key] {
+				return fmt.Errorf("PatternObject: unknown field %q", key)
+			}
+		}
+	}
+	type plain PatternObject
+	return value.Decode((*plain)(p))
+}
+
 // validate checks that exactly one field is set.
 func (p PatternObject) validate() error {
 	count := 0

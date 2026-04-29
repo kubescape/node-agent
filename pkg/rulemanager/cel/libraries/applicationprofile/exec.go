@@ -70,7 +70,10 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	// args projection (ExecArgsByPath) is out of scope for v1; degrade to path-only matching.
+	// v1 limitation for rule authors: wasExecutedWithArgs is currently equivalent
+	// to wasExecuted — the args list is validated but not matched against. Any
+	// execution of the given path returns true regardless of its arguments. Full
+	// argument matching (ExecArgsByPath) will be added in a future version.
 	_ = args
 	if _, err := celparse.ParseList[string](args); err != nil {
 		return types.NewErr("failed to parse args: %v", err)

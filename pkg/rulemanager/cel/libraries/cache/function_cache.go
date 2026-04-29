@@ -99,7 +99,10 @@ func HashForContainerProfile(oc objectcache.ObjectCache) func([]ref.Val) string 
 		if pcp == nil {
 			return ""
 		}
-		return pcp.SpecHash
+		// Include SyncChecksum so the key changes when profile content is updated
+		// under the same projection spec, preventing stale cached results after
+		// the profile learns new paths/execs/etc.
+		return pcp.SpecHash + "|" + pcp.SyncChecksum
 	}
 }
 
