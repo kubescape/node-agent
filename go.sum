@@ -179,8 +179,6 @@ github.com/anchore/packageurl-go v0.1.1-0.20250220190351-d62adb6e1115 h1:ZyRCmiE
 github.com/anchore/packageurl-go v0.1.1-0.20250220190351-d62adb6e1115/go.mod h1:KoYIv7tdP5+CC9VGkeZV4/vGCKsY55VvoG+5dadg4YI=
 github.com/anchore/stereoscope v0.1.9 h1:Nhvk8g6PRx9ubaJU4asAhD3fGcY5HKXZCDGkxI2e0sI=
 github.com/anchore/stereoscope v0.1.9/go.mod h1:YkrCtDgz7A+w6Ggd0yxU9q58CerqQFwYARS+F2RvLQQ=
-github.com/anchore/syft v1.32.0 h1:JcX9W+P/Xjv5DNg3TNBtwiEyZommuTaP16/NC9r0Yfo=
-github.com/anchore/syft v1.32.0/go.mod h1:E6Kd4iBM2ljUOUQvSt7hVK6vBwaHkMXwcvBZmGMSY5o=
 github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883/go.mod h1:rCTlJbsFo29Kk6CurOXKm700vrz8f0KW0JNfpkRJY/8=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
@@ -889,6 +887,8 @@ github.com/kubescape/k8s-interface v0.0.207 h1:jX+EqZLjSArw4xa+XMvjnnoK0Q8IxdD2t
 github.com/kubescape/k8s-interface v0.0.207/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
 github.com/kubescape/storage v0.0.258 h1:0mL0z3dAmtP1qup7VgoEgwLgbBSROu5oOusBAPeMmus=
 github.com/kubescape/storage v0.0.258/go.mod h1:VHs+xQzvZKE2lJDN8rR1sFmTa43N6XJAcatZ249gviU=
+github.com/kubescape/syft v1.32.0-ks.2 h1:xdUksUmKEyyVKsTfJDYW8Z5HawVJtelsUolPOsWtDx0=
+github.com/kubescape/syft v1.32.0-ks.2/go.mod h1:E6Kd4iBM2ljUOUQvSt7hVK6vBwaHkMXwcvBZmGMSY5o=
 github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf h1:hI0jVwrB6fT4GJWvuUjzObfci1CUknrZdRHfnRVtKM0=
 github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf/go.mod h1:Il5baM40PV9cTt4OGdLMeTRRAai3TMfvImu31itIeCM=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
