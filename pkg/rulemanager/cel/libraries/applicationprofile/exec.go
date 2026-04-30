@@ -1,8 +1,6 @@
 package applicationprofile
 
 import (
-	"slices"
-
 	"github.com/google/cel-go/common/types"
 
 	"github.com/google/cel-go/common/types/ref"
@@ -11,6 +9,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/celparse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
 func (l *apLibrary) wasExecuted(containerID, path ref.Val) ref.Val {
@@ -85,10 +84,8 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 	}
 
 	for _, exec := range cp.Spec.Execs {
-		if exec.Path == pathStr {
-			if slices.Compare(exec.Args, celArgs) == 0 {
-				return types.Bool(true)
-			}
+		if exec.Path == pathStr && dynamicpathdetector.CompareExecArgs(exec.Args, celArgs) {
+			return types.Bool(true)
 		}
 	}
 
