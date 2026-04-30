@@ -297,6 +297,11 @@ func main() {
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
 		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, prometheusExporter)
+		// Wire R1016 tamper alerts: when a user-defined AP/NN overlay is
+		// loaded but its signature no longer verifies, the CP cache emits
+		// "Signed profile tampered" through this exporter. Optional —
+		// nil-safe inside the cache.
+		cpc.SetTamperAlertExporter(exporter)
 		cpc.Start(ctx)
 		logger.L().Info("ContainerProfileCache active; legacy AP/NN caches removed")
 
