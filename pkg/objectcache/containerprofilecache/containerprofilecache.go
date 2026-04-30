@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -31,8 +32,8 @@ import (
 // defaultStorageRPCBudget is the per-call timeout applied by refreshRPC when
 // config.StorageRPCBudget is zero.
 const (
-	defaultReconcileInterval  = 30 * time.Second
-	defaultStorageRPCBudget   = 5 * time.Second
+	defaultReconcileInterval = 30 * time.Second
+	defaultStorageRPCBudget  = 5 * time.Second
 )
 
 // namespacedName is a minimal identifier for a legacy user-authored CRD
@@ -49,9 +50,9 @@ type namespacedName struct {
 // ContainerProfile is not retained after projection — only the compact form is
 // stored so the raw pointer can be GC'd.
 type CachedContainerProfile struct {
-	Projected *objectcache.ProjectedContainerProfile
-	SpecHash  string // mirrors Projected.SpecHash; used for staleness checks
-	State     *objectcache.ProfileState
+	Projected     *objectcache.ProjectedContainerProfile
+	SpecHash      string // mirrors Projected.SpecHash; used for staleness checks
+	State         *objectcache.ProfileState
 	CallStackTree *callstackcache.CallStackSearchTree
 
 	ContainerName string
@@ -118,9 +119,9 @@ type ContainerProfileCacheImpl struct {
 	// Projection spec — installed by SetProjectionSpec when rulemanager loads rules.
 	currentSpecMu  sync.RWMutex
 	currentSpec    *objectcache.RuleProjectionSpec
-	specGeneration atomic.Int64 // bumped on each distinct spec hash change
+	specGeneration atomic.Int64  // bumped on each distinct spec hash change
 	nudge          chan struct{} // buffered cap 1; signals reconciler on spec change
-	refreshPending atomic.Bool  // set when a nudge arrives while refresh is running
+	refreshPending atomic.Bool   // set when a nudge arrives while refresh is running
 }
 
 // NewContainerProfileCache creates a new ContainerProfileCacheImpl.
@@ -148,6 +149,10 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 		rpcBudget:      rpcBudget,
 		nudge:          make(chan struct{}, 1),
 	}
+}
+
+func shouldLogOptionalUserManagedFetchError(err error) bool {
+	return err != nil && !apierrors.IsNotFound(err)
 }
 
 // refreshRPC calls fn with a context bounded by c.rpcBudget, enforcing a
@@ -330,11 +335,13 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			return ugAPErr
 		})
 		if ugAPErr != nil {
-			logger.L().Debug("user-managed ApplicationProfile not available",
-				helpers.String("containerID", containerID),
-				helpers.String("namespace", ns),
-				helpers.String("name", ugName),
-				helpers.Error(ugAPErr))
+			if shouldLogOptionalUserManagedFetchError(ugAPErr) {
+				logger.L().Debug("failed to fetch user-managed ApplicationProfile",
+					helpers.String("containerID", containerID),
+					helpers.String("namespace", ns),
+					helpers.String("name", ugName),
+					helpers.Error(ugAPErr))
+			}
 			userManagedAP = nil
 		}
 		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + workloadName
@@ -344,11 +351,13 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			return ugNNErr
 		})
 		if ugNNErr != nil {
-			logger.L().Debug("user-managed NetworkNeighborhood not available",
-				helpers.String("containerID", containerID),
-				helpers.String("namespace", ns),
-				helpers.String("name", ugNNName),
-				helpers.Error(ugNNErr))
+			if shouldLogOptionalUserManagedFetchError(ugNNErr) {
+				logger.L().Debug("failed to fetch user-managed NetworkNeighborhood",
+					helpers.String("containerID", containerID),
+					helpers.String("namespace", ns),
+					helpers.String("name", ugNNName),
+					helpers.Error(ugNNErr))
+			}
 			userManagedNN = nil
 		}
 	}

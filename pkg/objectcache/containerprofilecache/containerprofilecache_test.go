@@ -17,7 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // fakeProfileClient is a minimal storage.ProfileClient stub for tests. It
@@ -49,6 +51,14 @@ type fakeProfileClient struct {
 }
 
 var _ storage.ProfileClient = (*fakeProfileClient)(nil)
+
+func TestShouldLogOptionalUserManagedFetchError(t *testing.T) {
+	assert.False(t, shouldLogOptionalUserManagedFetchError(nil))
+	assert.False(t, shouldLogOptionalUserManagedFetchError(
+		apierrors.NewNotFound(schema.GroupResource{Group: "softwarecomposition.kubescape.io", Resource: "applicationprofiles"}, "ug-nginx"),
+	))
+	assert.True(t, shouldLogOptionalUserManagedFetchError(errors.New("boom")))
+}
 
 func (f *fakeProfileClient) GetApplicationProfile(_ context.Context, _, name string) (*v1beta1.ApplicationProfile, error) {
 	if len(name) >= 3 && name[:3] == helpersv1.UserApplicationProfilePrefix {
