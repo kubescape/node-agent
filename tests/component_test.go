@@ -2175,9 +2175,15 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		k8sClient := k8sinterface.NewKubernetesApi()
 		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
+		// Upstream ContainerProfileCache (kubescape/node-agent#788) reads ONE
+		// pod label `kubescape.io/user-defined-profile=<name>` and uses
+		// <name> as the lookup key for BOTH the user AP and the user NN.
+		// AP and NN MUST therefore share that single name.
+		const overlayName = "curl-28-overlay"
+
 		ap := &v1beta1.ApplicationProfile{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "curl-ap",
+				Name:      overlayName,
 				Namespace: ns.Name,
 			},
 			Spec: v1beta1.ApplicationProfileSpec{
@@ -2201,7 +2207,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 
 		nn := &v1beta1.NetworkNeighborhood{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "curl-nn",
+				Name:      overlayName,
 				Namespace: ns.Name,
 				Annotations: map[string]string{
 					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
@@ -2244,8 +2250,8 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		require.NoError(t, err, "create NN")
 
 		require.Eventually(t, func() bool {
-			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), "curl-ap", v1.GetOptions{})
-			_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), "curl-nn", v1.GetOptions{})
+			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
+			_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
 			return apErr == nil && nnErr == nil
 		}, 30*time.Second, 1*time.Second, "AP+NN must be in storage before pod deploy")
 

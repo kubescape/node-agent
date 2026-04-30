@@ -13,8 +13,11 @@ spec:
     metadata:
       labels:
         app: curl-28
-        kubescape.io/user-defined-network: curl-nn
-        kubescape.io/user-defined-profile: curl-ap
+        # Upstream ContainerProfileCache (kubescape/node-agent#788) reads ONE
+        # label and uses its value as the name of BOTH the user-defined
+        # ApplicationProfile and the user-defined NetworkNeighborhood. The
+        # AP and NN below MUST share the same name as this label value.
+        kubescape.io/user-defined-profile: curl-28-overlay
     spec:
       containers:
       - name: curl
