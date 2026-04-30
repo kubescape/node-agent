@@ -3311,14 +3311,20 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 					{
 						Name: "curl",
 						Execs: []v1beta1.ExecCalls{
+							// IMPORTANT: argv[0] in the eBPF-captured event is
+							// the FULL exec path (see Test_27's wildcard YAML
+							// fixture for the same convention). Profile arg
+							// vectors must include argv[0] as full path so the
+							// matcher's first-position literal compare hits.
+							//
 							// pod startup: sleep <anything>
-							{Path: "/bin/sleep", Args: []string{"sleep", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/sleep", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
 							// sh -c <anything trailing>
-							{Path: "/bin/sh", Args: []string{"sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/sh", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
 							// echo hello <anything trailing>
-							{Path: "/bin/echo", Args: []string{"echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/echo", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
 							// curl -s <one URL>
-							{Path: "/usr/bin/curl", Args: []string{"curl", "-s", dynamicpathdetector.DynamicIdentifier}},
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier}},
 						},
 						Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev", "execve"},
 					},
