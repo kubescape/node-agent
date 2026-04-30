@@ -59,7 +59,11 @@ func (c *ContainerProfileCacheImpl) verifyUserApplicationProfile(profile *v1beta
 	if !signature.IsSigned(adapter) {
 		return true
 	}
-	if err := signature.VerifyObject(adapter); err != nil {
+	// AllowUntrusted: accept self-signed/local-CA signatures as long as the
+	// signature itself verifies against the cert in the annotations. We only
+	// want to flag actual tampering, not the absence of a Sigstore Fulcio
+	// trust chain. Matches `cmd/sign-object`'s default verifier.
+	if err := signature.VerifyObjectAllowUntrusted(adapter); err != nil {
 		logger.L().Warning("user-defined ApplicationProfile signature verification failed (tamper detected)",
 			helpers.String("profile", profile.Name),
 			helpers.String("namespace", profile.Namespace),
@@ -82,7 +86,7 @@ func (c *ContainerProfileCacheImpl) verifyUserNetworkNeighborhood(nn *v1beta1.Ne
 	if !signature.IsSigned(adapter) {
 		return true
 	}
-	if err := signature.VerifyObject(adapter); err != nil {
+	if err := signature.VerifyObjectAllowUntrusted(adapter); err != nil {
 		logger.L().Warning("user-defined NetworkNeighborhood signature verification failed (tamper detected)",
 			helpers.String("profile", nn.Name),
 			helpers.String("namespace", nn.Namespace),
