@@ -2972,34 +2972,35 @@ func Test_30_TamperedSignedProfiles(t *testing.T) {
 			path.Join(utils.CurrentDir(), "resources/curl-signed-deployment.yaml"))
 		require.NoError(t, err)
 		require.NoError(t, wl.WaitForReady(80))
-		time.Sleep(15 * time.Second) // let node-agent load profiles
 
-		// Execute nslookup — the attacker added this to the whitelist.
-		// With enforcement OFF: profile is loaded despite invalid signature,
-		// so nslookup is "allowed" and R0001 should NOT fire for it.
-		wl.ExecIntoPod([]string{"nslookup", "ebpf.io"}, "curl")
-
-		// Execute wget — NOT in the AP (even after tampering).
-		wl.ExecIntoPod([]string{"wget", "-qO-", "--timeout=5", "http://ebpf.io"}, "curl")
-
-		// Wait for alerts.
+		// Drive the unexpected exec inside Eventually so cache-load latency
+		// is absorbed by retries instead of a blind sleep. Same pattern as
+		// Test_29 (signed AP, anomalous exec) — without it, the first exec
+		// can land before the CP cache projects the user-defined AP, the
+		// rule manager evaluates against an empty baseline, and R0001 never
+		// fires within the polling window.
+		//
+		// wget is NOT in the AP (even after the attacker added nslookup), so
+		// once the cache loads, every wget exec produces an R0001 alert.
 		var alerts []testutils.Alert
 		require.Eventually(t, func() bool {
+			wl.ExecIntoPod([]string{"wget", "-qO-", "--timeout=2", "http://ebpf.io"}, "curl")
 			alerts, err = testutils.GetAlerts(ns.Name)
-			if err != nil || len(alerts) == 0 {
+			if err != nil {
 				return false
 			}
 			for _, a := range alerts {
-				if a.Labels["rule_id"] == "R0001" {
+				if a.Labels["rule_id"] == "R0001" && a.Labels["comm"] == "wget" {
 					return true
 				}
 			}
 			return false
-		}, 60*time.Second, 5*time.Second, "wget not in tampered AP must fire R0001")
+		}, 120*time.Second, 10*time.Second,
+			"wget not in tampered AP must fire R0001 — proves tampered profile was loaded (enforcement off)")
 
+		// Settle so any pending alerts flush, then dump for diagnostics.
 		time.Sleep(10 * time.Second)
 		alerts, _ = testutils.GetAlerts(ns.Name)
-
 		t.Logf("=== %d alerts ===", len(alerts))
 		for i, a := range alerts {
 			t.Logf("  [%d] %s(%s) comm=%s container=%s",
@@ -3007,25 +3008,14 @@ func Test_30_TamperedSignedProfiles(t *testing.T) {
 				a.Labels["comm"], a.Labels["container_name"])
 		}
 
-		// R0001 must have fired (tampered profile was loaded and used).
-		r0001Count := 0
-		for _, a := range alerts {
-			if a.Labels["rule_id"] == "R0001" {
-				r0001Count++
-			}
-		}
-		require.Greater(t, r0001Count, 0,
-			"R0001 must fire — proves tampered profile was loaded (enableSignatureVerification=false)")
-
-		// No dedicated tamper-detection alert exists (no R-number for this).
 		// With enableSignatureVerification=true:
-		//   - The tampered AP would be rejected (verifyApplicationProfile returns error)
-		//   - ProfileState.Status would be set to "verification-failed"
-		//   - The pod would have no baseline → no anomaly rules fire
+		//   - The tampered AP would be rejected (verifyUserApplicationProfile returns false)
+		//   - The pod would have no baseline → no anomaly rules fire for wget
 		//   - System fails OPEN (attacker evades detection by tampering the profile)
-		//   - NOTE: user-defined NNs in addContainer() are NOT verified (known gap)
-		t.Log("NOTE: No tamper-detection alert rule exists. With enableSignatureVerification=true,")
-		t.Log("      the tampered profile would be silently rejected. No R-number fires for tampering.")
+		//   - NOTE: user-defined NNs are not yet gated on the same flag (known gap)
+		// R1016 ("Signed profile tampered") fires regardless of the flag — that
+		// path is handled by Test_31.
+		t.Log("With enableSignatureVerification=true, the tampered profile would be silently rejected.")
 	})
 }
 
