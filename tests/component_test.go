@@ -2259,7 +2259,15 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
 		require.NoError(t, err)
 		require.NoError(t, wl.WaitForReady(80))
-		time.Sleep(15 * time.Second) // let node-agent load profiles
+		// Cache-load latency on the upstream ContainerProfileCache is bursty
+		// — 15s is enough on a quiet runner but not on a loaded one. The
+		// failure mode is alert metadata `errorMessage:"waiting for profile
+		// update"`, which means the rule manager evaluated against an
+		// unloaded NN and fired R0005/R0011 spuriously. 30s covers the
+		// observed worst-case in CI without pushing total test time too
+		// far. Real fix would be to poll a cache-loaded signal, but no
+		// such signal is exposed today.
+		time.Sleep(30 * time.Second)
 		return wl
 	}
 
@@ -2671,7 +2679,7 @@ func Test_29_SignedApplicationProfile(t *testing.T) {
 						{Path: "/bin/sleep"},
 						{Path: "/usr/bin/curl"},
 					},
-					Syscalls: []string{"socket", "connect", "read", "write", "close", "openat"},
+					Syscalls: []string{"close", "connect", "openat", "read", "socket", "write"},
 				},
 			},
 		},
@@ -2926,7 +2934,7 @@ func Test_30_TamperedSignedProfiles(t *testing.T) {
 							{Path: "/bin/sleep"},
 							{Path: "/usr/bin/curl"},
 						},
-						Syscalls: []string{"socket", "connect", "read", "write", "close", "openat"},
+						Syscalls: []string{"close", "connect", "openat", "read", "socket", "write"},
 					},
 				},
 			},
@@ -3049,8 +3057,18 @@ func Test_31_TamperDetectionAlert(t *testing.T) {
 	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
 	// signSignedAP returns a signed ApplicationProfile in nsName under name.
+	//
+	// IMPORTANT: storage's PreSave runs DeflateSortString on Syscalls and
+	// DeflateSortString on Capabilities, which sorts + dedupes those
+	// slices. The signed content must already be in storage's normalised
+	// form, otherwise the post-store AP that the node-agent verifies
+	// has a different content hash than what was signed → tamper detected
+	// → R1016 fires incorrectly even on an untampered profile. Pre-sort
+	// here so storage's normalisation is a no-op on round-trip.
 	signSignedAP := func(t *testing.T, nsName, name string) *v1beta1.ApplicationProfile {
 		t.Helper()
+		// Already in storage's sorted/deduped form: alphabetical, unique.
+		syscalls := []string{"close", "connect", "openat", "read", "socket", "write"}
 		ap := &v1beta1.ApplicationProfile{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nsName},
 			Spec: v1beta1.ApplicationProfileSpec{
@@ -3061,7 +3079,7 @@ func Test_31_TamperDetectionAlert(t *testing.T) {
 							{Path: "/bin/sleep"},
 							{Path: "/usr/bin/curl"},
 						},
-						Syscalls: []string{"socket", "connect", "read", "write", "close", "openat"},
+						Syscalls: syscalls,
 					},
 				},
 			},
