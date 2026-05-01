@@ -16,7 +16,7 @@ spec:
         # sourcecode: node-agent/tests/images/malicious-app
         image: quay.io/kubescape/node-agent:maliciousapp6
         imagePullPolicy: Always
-        workingDir: /app
+        workingDir: /var/log
         env:
           - name: WAIT_FOR_SIGTERM
             value: "true"
@@ -26,14 +26,10 @@ spec:
           capabilities:
             add: ["IPC_OWNER"]
         volumeMounts:
-          - mountPath: /app
-            name: malicious-app-workdir
           - mountPath: /podmount
             name: mount-for-alert
       restartPolicy: Never
       volumes:
-      - name: malicious-app-workdir
-        emptyDir: {}
       - name: mount-for-alert
         emptyDir: {}
   backoffLimit: 1
