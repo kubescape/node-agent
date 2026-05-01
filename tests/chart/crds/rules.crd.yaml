@@ -75,6 +75,10 @@ spec:
                         type: integer
                         enum: [0, 1, 2]
                         description: "Profile dependency level (0=Required, 1=Optional, 2=NotRequired)"
+                      profileDataRequired:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        description: "Per-rule profile fields required for rule-aware projection."
                       severity:
                         type: integer
                         description: "Severity level of the rule"
@@ -91,6 +95,19 @@ spec:
                         type: object
                         additionalProperties: true
                         description: "State information for the rule"
+                      agentVersionRequirement:
+                        type: string
+                        description: "Agent version requirement to evaluate this rule (supports semver ranges like ~1.0, >=1.2.0, etc.)"
+                      isTriggerAlert:
+                        type: boolean
+                        description: "Whether the rule is a trigger alert"
+                        default: true
+                      mitreTechnique:
+                        type: string
+                        description: "MITRE technique associated with the rule"
+                      mitreTactic:
+                        type: string
+                        description: "MITRE tactic associated with the rule"
                     required:
                       - enabled
                       - id
@@ -100,7 +117,9 @@ spec:
                       - profileDependency
                       - severity
                       - supportPolicy
-                      - tags
+                      - isTriggerAlert
+                      - mitreTechnique
+                      - mitreTactic
               required:
                 - rules
       subresources:

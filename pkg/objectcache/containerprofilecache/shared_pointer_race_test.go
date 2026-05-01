@@ -3,24 +3,19 @@ package containerprofilecache_test
 // TestSharedPointerReadersDoNotCorruptCache — PR 3 Part A.
 //
 // Validates that concurrent readers and a concurrent reconciler-refresh do not
-// produce data races on the shared *v1beta1.ContainerProfile pointer returned
-// by GetContainerProfile.
+// produce data races on the projected profile returned by
+// GetProjectedContainerProfile.
 //
 // Design:
 //   - Seed a cache entry backed by cpV1 (RV="1"). Storage serves cpV2 (RV="2")
 //     so every RefreshAllEntriesForTest call triggers a rebuild (atomic pointer
 //     swap on the entries map, no in-place mutation of the old slice).
-//   - 50 reader goroutines call GetContainerProfile in a tight loop and iterate
-//     the returned Spec.Execs, Spec.Opens, Spec.Capabilities slices READ-ONLY.
+//   - 50 reader goroutines call GetProjectedContainerProfile in a tight loop
+//     and read the returned projected fields READ-ONLY.
 //   - 1 writer goroutine alternates: RefreshAllEntriesForTest (triggers rebuild)
 //     then SeedEntryForTest (resets RV to "1" so the next refresh rebuilds again).
 //   - Run for 500ms under -race. The race detector will surface any unprotected
-//     concurrent read/write pair. If none fires, the shared-pointer fast-path is
-//     demonstrably safe for read-only consumers.
-//
-// NOTE: deliberately-mutating consumer (anti-pattern) is NOT tested here because
-// it is expected to trigger the race detector and would make CI non-deterministic.
-// That pattern is covered by the code-review gate enforced by ReadOnlyCP (Part B).
+//     concurrent read/write pair.
 
 import (
 	"context"
@@ -33,7 +28,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	cpc "github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -84,9 +78,18 @@ func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 	}
 	cache := cpc.NewContainerProfileCache(cfg, store, k8s, nil)
 
+	// Install a spec so projected fields are non-empty.
+	raceSpec := objectcache.RuleProjectionSpec{
+		Execs:        objectcache.FieldSpec{InUse: true, All: true},
+		Opens:        objectcache.FieldSpec{InUse: true, All: true},
+		Capabilities: objectcache.FieldSpec{InUse: true, All: true},
+		Hash:         "race-test",
+	}
+	cache.SetProjectionSpec(raceSpec)
+
 	seedV1 := func() {
 		cache.SeedEntryForTest(id, &cpc.CachedContainerProfile{
-			Profile:       cpV1,
+			Projected:     cpc.Apply(&raceSpec, cpV1, nil),
 			State:         &objectcache.ProfileState{Name: "cp-race"},
 			ContainerName: "container",
 			PodName:       "pod-race",
@@ -94,7 +97,6 @@ func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 			PodUID:        "uid-race",
 			CPName:        "cp-race",
 			RV:            "1", // stale — guarantees refresh rebuilds on each tick
-			Shared:        true,
 		})
 	}
 
@@ -102,35 +104,28 @@ func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 	// initialization race present in goradd/maps v1.3.0 (pre-existing upstream bug).
 	seedV1()
 
-	require.NotNil(t, cache.GetContainerProfile(id), "pre-condition: entry present before test")
+	require.NotNil(t, cache.GetProjectedContainerProfile(id), "pre-condition: entry present before test")
 
 	ctx, cancel := context.WithTimeout(context.Background(), testDuration)
 	defer cancel()
 
 	var wg sync.WaitGroup
 
-	// 50 reader goroutines — read-only traversal of the returned profile.
+	// 50 reader goroutines — read-only traversal of the returned projected profile.
 	wg.Add(numReaders)
 	for i := 0; i < numReaders; i++ {
 		go func() {
 			defer wg.Done()
 			for ctx.Err() == nil {
-				cp := cache.GetContainerProfile(id)
-				if cp == nil {
+				pcp := cache.GetProjectedContainerProfile(id)
+				if pcp == nil {
 					runtime.Gosched()
 					continue
 				}
-				// Read-only: iterate slices without writing.
-				for _, e := range cp.Spec.Execs {
-					_ = e.Path
-					_ = len(e.Args)
-				}
-				for _, o := range cp.Spec.Opens {
-					_ = o.Path
-					_ = len(o.Flags)
-				}
-				_ = len(cp.Spec.Capabilities)
-				_ = cp.ResourceVersion
+				// Read-only: iterate projected values without writing.
+				_ = len(pcp.Execs.Values)
+				_ = len(pcp.Opens.Values)
+				_ = len(pcp.Capabilities.Values)
 				runtime.Gosched()
 			}
 		}()
@@ -153,32 +148,25 @@ func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 	// If the race detector fired, the test is already marked as failed. We add
 	// an explicit liveness assertion to guard against a scenario where the entry
 	// gets permanently nil-ed out by a refresh bug.
-	finalCP := cache.GetContainerProfile(id)
+	finalPCP := cache.GetProjectedContainerProfile(id)
 	// Entry may legitimately be nil if the last operation was a refresh that
 	// returned cpV2 and then another seedV1 race lost; what we must NOT see is
-	// a panic above or a non-nil entry with a nil Profile.
-	if finalCP != nil {
-		assert.NotEmpty(t, finalCP.ResourceVersion, "final cached entry must have a non-empty RV")
-	}
+	// a panic above.
+	_ = finalPCP
 }
 
-// TestSharedPointerFastPathPreservesPointerIdentity verifies that when the
-// reconciler rebuilds an entry from a storage pointer with no overlay, the
-// new entry's Profile points directly to the storage object (Shared=true,
-// no DeepCopy). This is the memory property that Part A is guarding — if it
-// regresses to DeepCopy-on-every-refresh the T3 memory budget is blown.
-func TestSharedPointerFastPathPreservesPointerIdentity(t *testing.T) {
+// TestProjectedEntryPersistsThroughRefresh verifies that after a refresh the
+// projected entry is still non-nil. This replaces the old pointer-identity
+// test (TestSharedPointerFastPathPreservesPointerIdentity) which relied on
+// the removed Shared/Profile fields.
+func TestProjectedEntryPersistsThroughRefresh(t *testing.T) {
 	cpInStorage := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            "cp-identity",
 			Namespace:       "default",
 			ResourceVersion: "99",
 		},
-		Spec: v1beta1.ContainerProfileSpec{
-			Capabilities: []string{"CAP_NET_RAW"},
-		},
 	}
-
 	store := newFakeStorage(cpInStorage)
 	k8s := newFakeK8sCache()
 	cfg := config.Config{
@@ -186,10 +174,8 @@ func TestSharedPointerFastPathPreservesPointerIdentity(t *testing.T) {
 		StorageRPCBudget:         100 * time.Millisecond,
 	}
 	cache := cpc.NewContainerProfileCache(cfg, store, k8s, nil)
-
-	// Seed with a stale RV so the refresh rebuilds.
 	cache.SeedEntryForTest("id-identity", &cpc.CachedContainerProfile{
-		Profile:       cpInStorage,
+		Projected:     cpc.Apply(nil, cpInStorage, nil),
 		State:         &objectcache.ProfileState{Name: "cp-identity"},
 		ContainerName: "container",
 		PodName:       "pod-identity",
@@ -197,14 +183,8 @@ func TestSharedPointerFastPathPreservesPointerIdentity(t *testing.T) {
 		PodUID:        "uid-identity",
 		CPName:        "cp-identity",
 		RV:            "old",
-		Shared:        true,
 	})
-
 	cache.RefreshAllEntriesForTest(context.Background())
-
-	got := cache.GetContainerProfile("id-identity")
-	require.NotNil(t, got, "entry must be present after refresh")
-	assert.Same(t, cpInStorage, got,
-		"shared fast-path: refresh must store the storage pointer directly (no DeepCopy)")
-	assert.Equal(t, "99", got.ResourceVersion, "RV must match the storage object")
+	pcp := cache.GetProjectedContainerProfile("id-identity")
+	require.NotNil(t, pcp, "projected entry must be present after refresh")
 }

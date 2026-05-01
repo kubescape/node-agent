@@ -100,20 +100,22 @@ func TestWasAddressPortProtocolInEgress(t *testing.T) {
 			expectedResult: true,
 		},
 		{
+			// v1 degradation: port/protocol projection is out of scope; address-only matching.
 			name:           "Invalid port",
 			containerID:    "test-container-id",
 			address:        "192.168.1.100",
 			port:           9999,
 			protocol:       "TCP",
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
+			// v1 degradation: port/protocol projection is out of scope; address-only matching.
 			name:           "Invalid protocol",
 			containerID:    "test-container-id",
 			address:        "192.168.1.100",
 			port:           80,
 			protocol:       "UDP",
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
 			name:           "Invalid address",
@@ -235,20 +237,22 @@ func TestWasAddressPortProtocolInIngress(t *testing.T) {
 			expectedResult: true,
 		},
 		{
+			// v1 degradation: port/protocol projection is out of scope; address-only matching.
 			name:           "Invalid port",
 			containerID:    "test-container-id",
 			address:        "172.16.0.10",
 			port:           9999,
 			protocol:       "TCP",
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
+			// v1 degradation: port/protocol projection is out of scope; address-only matching.
 			name:           "Invalid protocol",
 			containerID:    "test-container-id",
 			address:        "172.16.0.10",
 			port:           8080,
 			protocol:       "UDP",
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
 			name:           "Invalid address",
@@ -404,21 +408,20 @@ func TestWasAddressPortProtocolWithNilPort(t *testing.T) {
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
 
-	// Test egress with nil port
+	// v1 degradation: address-only matching; nil port in profile no longer checked.
 	result := lib.wasAddressPortProtocolInEgress(
 		types.String("test-container-id"),
 		types.String("192.168.1.100"),
 		types.Int(80),
 		types.String("TCP"),
 	)
-	assert.Equal(t, types.Bool(false), result)
+	assert.Equal(t, types.Bool(true), result)
 
-	// Test ingress with nil port
 	result = lib.wasAddressPortProtocolInIngress(
 		types.String("test-container-id"),
 		types.String("172.16.0.10"),
 		types.Int(8080),
 		types.String("TCP"),
 	)
-	assert.Equal(t, types.Bool(false), result)
+	assert.Equal(t, types.Bool(true), result)
 }

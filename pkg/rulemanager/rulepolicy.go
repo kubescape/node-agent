@@ -7,7 +7,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/contextdetection"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 type RulePolicyValidator struct {
@@ -20,17 +19,17 @@ func NewRulePolicyValidator(objectCache objectcache.ObjectCache) *RulePolicyVali
 	}
 }
 
-func (v *RulePolicyValidator) Validate(ruleId string, process string, cp *v1beta1.ContainerProfile) (bool, error) {
-	if _, ok := cp.Spec.PolicyByRuleId[ruleId]; !ok {
+func (v *RulePolicyValidator) Validate(ruleId string, process string, pcp *objectcache.ProjectedContainerProfile) (bool, error) {
+	if pcp == nil {
 		return false, nil
 	}
-
-	if policy, ok := cp.Spec.PolicyByRuleId[ruleId]; ok {
-		if policy.AllowedContainer || slices.Contains(policy.AllowedProcesses, process) {
-			return true, nil
-		}
+	policy, ok := pcp.PolicyByRuleId[ruleId]
+	if !ok {
+		return false, nil
 	}
-
+	if policy.AllowedContainer || slices.Contains(policy.AllowedProcesses, process) {
+		return true, nil
+	}
 	return false, nil
 }
 

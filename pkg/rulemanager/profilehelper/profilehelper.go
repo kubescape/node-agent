@@ -3,25 +3,22 @@ package profilehelper
 import (
 	"errors"
 
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 )
 
-// GetContainerProfile returns the ContainerProfile for a containerID plus its
-// SyncChecksumMetadataKey annotation. This is the forward API; legacy callers
-// go through the shims below until step 6c deletes them.
-func GetContainerProfile(objectCache objectcache.ObjectCache, containerID string) (*v1beta1.ContainerProfile, string, error) {
+// GetProjectedContainerProfile returns the ProjectedContainerProfile for a containerID plus its
+// SyncChecksum annotation value.
+func GetProjectedContainerProfile(objectCache objectcache.ObjectCache, containerID string) (*objectcache.ProjectedContainerProfile, string, error) {
 	cpc := objectCache.ContainerProfileCache()
 	if cpc == nil {
 		return nil, "", errors.New("no container profile cache available")
 	}
-	cp := cpc.GetContainerProfile(containerID)
-	if cp == nil {
+	pcp := cpc.GetProjectedContainerProfile(containerID)
+	if pcp == nil {
 		return nil, "", errors.New("no profile available")
 	}
-	return cp, cp.Annotations[helpers.SyncChecksumMetadataKey], nil
+	return pcp, pcp.SyncChecksum, nil
 }
 
 func GetContainerName(objectCache objectcache.ObjectCache, containerID string) string {
@@ -52,4 +49,3 @@ func GetPodSpec(objectCache objectcache.ObjectCache, containerID string) (*corev
 
 	return podSpec, nil
 }
-

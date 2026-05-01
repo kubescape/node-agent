@@ -36,7 +36,8 @@ data:
         "celConfigCache": {
             "maxSize": {{ .Values.nodeAgent.config.celConfigCache.maxSize }},
             "ttl": "{{ .Values.nodeAgent.config.celConfigCache.ttl }}"
-        }
+        },
+        "profileProjection": {{- .Values.nodeAgent.config.profileProjection | toJson }}
     }
 ---
 {{- if eq .Values.capabilities.malwareDetection "enable" }}
