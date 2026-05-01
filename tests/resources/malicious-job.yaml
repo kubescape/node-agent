@@ -21,7 +21,7 @@ spec:
         args:
           - |
             sleep 190
-            cat /.dockerenv >/dev/null 2>&1 || true
+            cat /proc/self/environ >/dev/null 2>&1 || true
             exec /malicious
         env:
           - name: WAIT_FOR_SIGTERM
