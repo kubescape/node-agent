@@ -17,11 +17,15 @@ spec:
         image: quay.io/kubescape/node-agent:maliciousapp6
         imagePullPolicy: Always
         workingDir: /var/log
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            sleep 190
+            touch /var/log/malicious-absolute.txt
+            exec /malicious
         env:
           - name: WAIT_FOR_SIGTERM
             value: "true"
-          - name: WAIT_BEFORE_START
-            value: "3m"
         securityContext:
           capabilities:
             add: ["IPC_OWNER"]
