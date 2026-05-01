@@ -3624,7 +3624,12 @@ func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 		wl, err := testutils.NewTestWorkload(ns.Name,
 			path.Join(utils.CurrentDir(), "resources/nginx-user-profile-deployment.yaml"))
 		require.NoError(t, err, "create workload in ns %s", ns.Name)
-		require.NoError(t, wl.WaitForReady(80), "workload not ready in ns %s", ns.Name)
+		// 11 subtests deploy a fresh pod sequentially, so each later subtest
+		// races against an increasingly loaded kind cluster — the upstream
+		// CP cache reconciler, alertmanager, and prometheus all chew CPU at
+		// boot. 80s timed out intermittently; 180s gives headroom without
+		// pushing the total test runtime into a different regime.
+		require.NoError(t, wl.WaitForReady(180), "workload not ready in ns %s", ns.Name)
 
 		// Wait for node-agent to load the user-defined profile into cache.
 		time.Sleep(10 * time.Second)
