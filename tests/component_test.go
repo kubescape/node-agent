@@ -3613,6 +3613,15 @@ func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 		why         string // contract pinned by this case
 	}{
 		// ─── Trailing-`*` anchoring (the security fix) ──────────────
+		//
+		// IMPORTANT: R0002's CEL ruleExpression has a strict prefix
+		// filter (event.path.startsWith('/etc/'), startsWith('/var/log/'),
+		// etc. — all with trailing slash). Bare `/etc` and `/var/log`
+		// don't match those prefixes, so the rule never evaluates on
+		// them and the matcher's anchoring contract stays invisible at
+		// runtime. Probe one level deeper instead — `/etc/ssl` IS under
+		// the `/etc/` monitored prefix, so R0002 CAN see whether a
+		// `/etc/ssl/*` profile entry matches the bare `/etc/ssl` parent.
 		{
 			name:        "trailing_star_matches_immediate_child",
 			profilePath: "/etc/*",
@@ -3628,27 +3637,27 @@ func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 			why:         "/etc/* matches a multi-segment path under /etc (mid-path zero-or-more)",
 		},
 		{
-			name:        "trailing_star_does_not_match_bare_parent",
-			profilePath: "/etc/*",
-			filePath:    "/etc",
+			name:        "trailing_star_does_not_match_bare_parent_under_monitored_prefix",
+			profilePath: "/etc/ssl/*",
+			filePath:    "/etc/ssl",
 			expectAlert: true,
-			why:         "/etc/* must NOT match the bare /etc directory itself — closes R0002 blind spot for parent-of-profiled-dir tampering",
+			why:         "/etc/ssl/* must NOT match the bare /etc/ssl directory itself — pins the security fix at a path R0002's prefix filter can observe",
 		},
 		{
 			name:        "deep_prefix_trailing_star_does_not_match_parent",
-			profilePath: "/var/log/*",
-			filePath:    "/var/log",
+			profilePath: "/etc/ssl/certs/*",
+			filePath:    "/etc/ssl/certs",
 			expectAlert: true,
-			why:         "Same anchoring rule applies at any depth: /var/log/* does NOT match /var/log",
+			why:         "Same anchoring rule, deeper: /etc/ssl/certs/* does NOT match /etc/ssl/certs",
 		},
 
 		// ─── DynamicIdentifier (⋯) exactly-one ──────────────────────
 		{
-			name:        "ellipsis_pin_one_segment_then_literal",
-			profilePath: "/proc/" + dynamicpathdetector.DynamicIdentifier + "/cmdline",
-			filePath:    "/proc/cmdline",
+			name:        "ellipsis_requires_one_segment_not_zero",
+			profilePath: "/etc/passwd/" + dynamicpathdetector.DynamicIdentifier,
+			filePath:    "/etc/passwd",
 			expectAlert: true,
-			why:         "⋯ consumes EXACTLY ONE segment; /proc/⋯/cmdline must NOT match /proc/cmdline (zero between)",
+			why:         "⋯ consumes EXACTLY ONE segment; /etc/passwd/⋯ requires one more, /etc/passwd alone has zero past — must fire R0002",
 		},
 
 		// ─── Mixed ⋯/* combinations ─────────────────────────────────
@@ -3683,11 +3692,11 @@ func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 			why:         "/etc/*/* matches /etc/ssl/openssl.cnf (mid-* consumes one, trailing-* consumes one)",
 		},
 		{
-			name:        "double_trailing_does_not_match_parent",
-			profilePath: "/etc/*/*",
-			filePath:    "/etc",
+			name:        "double_trailing_does_not_match_parent_under_monitored_prefix",
+			profilePath: "/etc/ssl/*/*",
+			filePath:    "/etc/ssl",
 			expectAlert: true,
-			why:         "/etc/*/* requires at least one segment past /etc; bare /etc must NOT match",
+			why:         "/etc/ssl/*/* requires at least one segment past /etc/ssl; bare /etc/ssl must NOT match (probed under /etc/ so R0002 sees it)",
 		},
 
 		// ─── splitPath trailing-slash normalisation ─────────────────
