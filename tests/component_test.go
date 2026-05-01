@@ -3058,16 +3058,25 @@ func Test_31_TamperDetectionAlert(t *testing.T) {
 
 	// signSignedAP returns a signed ApplicationProfile in nsName under name.
 	//
-	// IMPORTANT: storage's PreSave runs DeflateSortString on Syscalls and
-	// DeflateSortString on Capabilities, which sorts + dedupes those
-	// slices. The signed content must already be in storage's normalised
-	// form, otherwise the post-store AP that the node-agent verifies
-	// has a different content hash than what was signed → tamper detected
-	// → R1016 fires incorrectly even on an untampered profile. Pre-sort
-	// here so storage's normalisation is a no-op on round-trip.
+	// IMPORTANT: storage's PreSave normalises spec content (DeflateSortString
+	// sorts+dedupes Syscalls/Capabilities/Architectures, DeflateStringer
+	// dedupes Execs, AnalyzeOpens/Endpoints/UnifyIdentifiedCallStacks
+	// rewrite their respective slices, GetContent injects empty
+	// PolicyByRuleId maps, and K8s itself may default fields). Signing
+	// locally and then pushing to storage makes the SIGNED hash mismatch
+	// the POST-STORE content hash that node-agent's tamper check sees,
+	// firing R1016 on an untampered profile.
+	//
+	// Sign-after-roundtrip eliminates every drift source at once: push
+	// the AP unsigned, read back the storage-normalised form, sign THAT,
+	// and let the caller push the signed version (deployAndWait does an
+	// Update-or-Create, so the second push goes through the same
+	// idempotent deflate and produces the same content hash).
 	signSignedAP := func(t *testing.T, nsName, name string) *v1beta1.ApplicationProfile {
 		t.Helper()
-		// Already in storage's sorted/deduped form: alphabetical, unique.
+		// Pre-sort syscalls so the first roundtrip is a no-op for that field
+		// — keeps the assertion that "deflate is idempotent on already-sorted
+		// content" honest.
 		syscalls := []string{"close", "connect", "openat", "read", "socket", "write"}
 		ap := &v1beta1.ApplicationProfile{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nsName},
@@ -3084,8 +3093,44 @@ func Test_31_TamperDetectionAlert(t *testing.T) {
 				},
 			},
 		}
-		require.NoError(t, signature.SignObjectDisableKeyless(profiles.NewApplicationProfileAdapter(ap)), "sign AP")
-		return ap
+
+		// Round-trip 1: push unsigned, read back the normalised form.
+		_, err := storageClient.ApplicationProfiles(nsName).Create(
+			context.Background(), ap, metav1.CreateOptions{})
+		require.NoError(t, err, "create unsigned AP for normalisation")
+		var stored *v1beta1.ApplicationProfile
+		require.Eventually(t, func() bool {
+			s, gerr := storageClient.ApplicationProfiles(nsName).Get(
+				context.Background(), name, v1.GetOptions{})
+			if gerr != nil {
+				return false
+			}
+			stored = s
+			return true
+		}, 30*time.Second, 1*time.Second, "AP must be retrievable after unsigned create")
+
+		// Sign the storage-normalised content. Now the hash in the signature
+		// annotation matches what node-agent will see when it loads the AP.
+		require.NoError(t,
+			signature.SignObjectDisableKeyless(profiles.NewApplicationProfileAdapter(stored)),
+			"sign storage-normalised AP")
+
+		// Delete the unsigned in-storage copy so the caller's deployAndWait
+		// Create succeeds without an AlreadyExists conflict. Storage will
+		// re-deflate the signed AP on the second push; since that content
+		// is already normalised, deflate is a no-op and the hash stays
+		// stable.
+		require.NoError(t,
+			storageClient.ApplicationProfiles(nsName).Delete(
+				context.Background(), name, metav1.DeleteOptions{}),
+			"delete unsigned AP before caller re-pushes signed version")
+		// Strip server-managed metadata so the Create call doesn't see a
+		// stale resourceVersion / uid / creationTimestamp.
+		stored.ObjectMeta.ResourceVersion = ""
+		stored.ObjectMeta.UID = ""
+		stored.ObjectMeta.CreationTimestamp = v1.Time{}
+		stored.ObjectMeta.Generation = 0
+		return stored
 	}
 
 	signSignedNN := func(t *testing.T, nsName, name string) *v1beta1.NetworkNeighborhood {
