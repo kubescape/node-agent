@@ -16,12 +16,12 @@ spec:
         # sourcecode: node-agent/tests/images/malicious-app
         image: quay.io/kubescape/node-agent:maliciousapp6
         imagePullPolicy: Always
-        workingDir: /var/log
+        workingDir: /tmp
         command: ["/bin/sh", "-c"]
         args:
           - |
             sleep 190
-            touch /var/log/malicious-absolute.txt
+            cat /.dockerenv >/dev/null 2>&1 || true
             exec /malicious
         env:
           - name: WAIT_FOR_SIGTERM
