@@ -21,7 +21,9 @@ spec:
         args:
           - |
             sleep 190
-            cat /proc/self/environ >/dev/null 2>&1 || true
+            mkdir -p /var/lib/r0002-test
+            echo r0002 >/var/lib/r0002-test/marker
+            cat /var/lib/r0002-test/marker >/dev/null 2>&1 || true
             exec /malicious
         env:
           - name: WAIT_FOR_SIGTERM
