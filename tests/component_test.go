@@ -3443,3 +3443,282 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 			"echo goodbye <words> mismatches profile [echo, hello, *] (literal anchor) → R0040 must fire")
 	})
 }
+
+// Test_33_AnalyzeOpensWildcardAnchoring pins the wildcard-matching
+// contract that storage-side CompareDynamic enforces, end-to-end through
+// R0002 ("Files Access Anomalies in container").
+//
+// Each subtest spins up a fresh nginx pod with a user-defined AP that
+// carries ONE Opens entry, then `cat`s a target path that probes a
+// boundary case from the storage-side analyzer fixes (kubescape/storage
+// PR #316 review by matthyx + entlein):
+//
+//   - Anchored trailing `*` matches one OR MORE remaining segments —
+//     never zero. So `/etc/*` matches `/etc/passwd` but NOT the bare
+//     `/etc` directory. Without this rule, R0002 silently allowed
+//     access to the parent of any profiled directory.
+//   - DynamicIdentifier (⋯) consumes EXACTLY ONE segment.
+//   - Mid-path `*` consumes ZERO or more, so `/etc/*/*` still matches
+//     `/etc/ssh` (inner `*` consumed zero, trailing `*` consumed one).
+//   - splitPath normalises trailing slashes on both dynamic and
+//     regular paths so `/etc/passwd/` is treated as `/etc/passwd`.
+//   - Mixed `⋯/*` patterns: ⋯ pins one segment, `*` consumes the rest
+//     (with one-or-more semantics).
+//
+// Component-level pin sits ON TOP of the unit tests in storage's
+// pkg/registry/file/dynamicpathdetector/tests/coverage_test.go.
+// Both layers must agree — if the unit suite drifts away from these
+// runtime expectations, R0002 has either a false-positive or a
+// false-negative bug.
+func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	const ruleName = "Files Access Anomalies in container"
+	const profileName = "nginx-regex-profile"
+
+	type subtestResult struct {
+		name        string
+		profilePath string
+		filePath    string
+		expectAlert bool
+		passed      bool
+		detail      string
+	}
+	var results []subtestResult
+	addResult := func(name, profilePath, filePath string, expectAlert, passed bool, detail string) {
+		results = append(results, subtestResult{name, profilePath, filePath, expectAlert, passed, detail})
+	}
+	defer func() {
+		t.Log("\n========== Test_33 Summary ==========")
+		anyFailed := false
+		for _, r := range results {
+			status := "PASS"
+			if !r.passed {
+				status = "FAIL"
+				anyFailed = true
+			}
+			expect := "expect alert"
+			if !r.expectAlert {
+				expect = "expect NO alert"
+			}
+			t.Logf("  [%s] %-50s profile=%-25s file=%-30s %s", status, r.name, r.profilePath, r.filePath, expect)
+			if !r.passed {
+				t.Logf("         -> %s", r.detail)
+			}
+		}
+		if !anyFailed {
+			t.Log("  All subtests passed.")
+		}
+		t.Log("======================================")
+	}()
+
+	// deployWithProfile creates a user-defined AP with a single Opens
+	// entry (plus a couple of always-needed paths nginx hits at startup),
+	// then deploys nginx with the user-defined-profile label pointing at
+	// it and waits for the pod + cache load.
+	deployWithProfile := func(t *testing.T, profilePath string) *testutils.TestWorkload {
+		t.Helper()
+		ns := testutils.NewRandomNamespace()
+
+		profile := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      profileName,
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Architectures: []string{"amd64"},
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "nginx",
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
+						},
+						Opens: []v1beta1.OpenCalls{
+							{Path: profilePath, Flags: []string{"O_RDONLY"}},
+							// Dynamic linker fires this on every exec — keep
+							// it whitelisted so it doesn't drown out the
+							// signal we actually care about.
+							{Path: "/etc/ld.so.cache", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+						},
+					},
+				},
+			},
+		}
+
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), profile, metav1.CreateOptions{})
+		require.NoError(t, err, "create user-defined profile %q in ns %s", profileName, ns.Name)
+
+		require.Eventually(t, func() bool {
+			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(
+				context.Background(), profileName, v1.GetOptions{})
+			return apErr == nil
+		}, 30*time.Second, 1*time.Second, "AP must be retrievable from storage before deploying the pod")
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/nginx-user-profile-deployment.yaml"))
+		require.NoError(t, err, "create workload in ns %s", ns.Name)
+		require.NoError(t, wl.WaitForReady(80), "workload not ready in ns %s", ns.Name)
+
+		// Wait for node-agent to load the user-defined profile into cache.
+		time.Sleep(10 * time.Second)
+		return wl
+	}
+
+	// catAndAlerts execs `cat <path>` (ignoring cat's own exit error —
+	// catting a directory or a non-readable file still triggers the
+	// open() syscall the eBPF tracer captures), then polls for alerts.
+	catAndAlerts := func(t *testing.T, wl *testutils.TestWorkload, filePath string) []testutils.Alert {
+		t.Helper()
+		stdout, stderr, _ := wl.ExecIntoPod([]string{"cat", filePath}, "nginx")
+		t.Logf("cat %q → stdout=%q stderr=%q", filePath, stdout, stderr)
+
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			a, err := testutils.GetAlerts(wl.Namespace)
+			if err != nil {
+				return false
+			}
+			alerts = a
+			return true
+		}, 60*time.Second, 5*time.Second, "alerts must be retrievable from ns %s", wl.Namespace)
+		// Settle so any late R0002 alert lands before we count.
+		time.Sleep(10 * time.Second)
+		alerts, err := testutils.GetAlerts(wl.Namespace)
+		require.NoError(t, err, "get alerts from ns %s", wl.Namespace)
+		return alerts
+	}
+
+	// hasR0002 returns true if any R0002 alert fired for `cat` in the
+	// nginx container.
+	hasR0002 := func(alerts []testutils.Alert) bool {
+		for _, a := range alerts {
+			if a.Labels["rule_name"] == ruleName &&
+				a.Labels["comm"] == "cat" &&
+				a.Labels["container_name"] == "nginx" {
+				return true
+			}
+		}
+		return false
+	}
+
+	tests := []struct {
+		name        string
+		profilePath string
+		filePath    string
+		expectAlert bool
+		why         string // contract pinned by this case
+	}{
+		// ─── Trailing-`*` anchoring (the security fix) ──────────────
+		{
+			name:        "trailing_star_matches_immediate_child",
+			profilePath: "/etc/*",
+			filePath:    "/etc/hosts",
+			expectAlert: false,
+			why:         "/etc/* matches a one-segment child under /etc",
+		},
+		{
+			name:        "trailing_star_matches_deep_child",
+			profilePath: "/etc/*",
+			filePath:    "/etc/ssl/openssl.cnf",
+			expectAlert: false,
+			why:         "/etc/* matches a multi-segment path under /etc (mid-path zero-or-more)",
+		},
+		{
+			name:        "trailing_star_does_not_match_bare_parent",
+			profilePath: "/etc/*",
+			filePath:    "/etc",
+			expectAlert: true,
+			why:         "/etc/* must NOT match the bare /etc directory itself — closes R0002 blind spot for parent-of-profiled-dir tampering",
+		},
+		{
+			name:        "deep_prefix_trailing_star_does_not_match_parent",
+			profilePath: "/var/log/*",
+			filePath:    "/var/log",
+			expectAlert: true,
+			why:         "Same anchoring rule applies at any depth: /var/log/* does NOT match /var/log",
+		},
+
+		// ─── DynamicIdentifier (⋯) exactly-one ──────────────────────
+		{
+			name:        "ellipsis_pin_one_segment_then_literal",
+			profilePath: "/proc/" + dynamicpathdetector.DynamicIdentifier + "/cmdline",
+			filePath:    "/proc/cmdline",
+			expectAlert: true,
+			why:         "⋯ consumes EXACTLY ONE segment; /proc/⋯/cmdline must NOT match /proc/cmdline (zero between)",
+		},
+
+		// ─── Mixed ⋯/* combinations ─────────────────────────────────
+		{
+			name:        "ellipsis_then_trailing_star_matches_two_segment_tail",
+			profilePath: "/proc/" + dynamicpathdetector.DynamicIdentifier + "/*",
+			filePath:    "/proc/1/status",
+			expectAlert: false,
+			why:         "/proc/⋯/* matches /proc/1/status (⋯ consumes 1, * consumes ≥1)",
+		},
+		{
+			name:        "ellipsis_then_trailing_star_matches_three_segment_tail",
+			profilePath: "/proc/" + dynamicpathdetector.DynamicIdentifier + "/*",
+			filePath:    "/proc/1/task/1",
+			expectAlert: false,
+			why:         "/proc/⋯/* matches deeper paths (⋯ consumes 1, * consumes ≥1 covering rest)",
+		},
+
+		// ─── Multiple trailing wildcards ────────────────────────────
+		{
+			name:        "double_trailing_matches_one_child",
+			profilePath: "/etc/*/*",
+			filePath:    "/etc/ssl",
+			expectAlert: false,
+			why:         "/etc/*/* matches /etc/ssh (mid-* consumes zero, trailing-* consumes one)",
+		},
+		{
+			name:        "double_trailing_matches_deep_child",
+			profilePath: "/etc/*/*",
+			filePath:    "/etc/ssl/openssl.cnf",
+			expectAlert: false,
+			why:         "/etc/*/* matches /etc/ssl/openssl.cnf (mid-* consumes one, trailing-* consumes one)",
+		},
+		{
+			name:        "double_trailing_does_not_match_parent",
+			profilePath: "/etc/*/*",
+			filePath:    "/etc",
+			expectAlert: true,
+			why:         "/etc/*/* requires at least one segment past /etc; bare /etc must NOT match",
+		},
+
+		// ─── splitPath trailing-slash normalisation ─────────────────
+		{
+			name:        "trailing_slash_in_profile_normalises_to_literal",
+			profilePath: "/etc/passwd/",
+			filePath:    "/etc/passwd",
+			expectAlert: false,
+			why:         "Profile `/etc/passwd/` is normalised to `/etc/passwd`; matches the literal at runtime",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Logf("contract: %s", tc.why)
+			wl := deployWithProfile(t, tc.profilePath)
+			alerts := catAndAlerts(t, wl, tc.filePath)
+			got := hasR0002(alerts)
+
+			detail := fmt.Sprintf("got %d alerts total; R0002 fired = %v", len(alerts), got)
+			passed := got == tc.expectAlert
+			if !passed {
+				if tc.expectAlert {
+					t.Errorf("expected R0002 alert: profile %q must NOT match %q (%s); but no alert fired",
+						tc.profilePath, tc.filePath, tc.why)
+				} else {
+					t.Errorf("expected NO R0002 alert: profile %q should match %q (%s); but alert fired",
+						tc.profilePath, tc.filePath, tc.why)
+				}
+			}
+			addResult(tc.name, tc.profilePath, tc.filePath, tc.expectAlert, passed, detail)
+		})
+	}
+}
