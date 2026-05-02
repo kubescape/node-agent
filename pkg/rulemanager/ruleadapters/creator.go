@@ -145,7 +145,7 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 
 	switch profileType {
 	case armotypes.ApplicationProfile:
-		state := objectCache.ApplicationProfileCache().GetApplicationProfileState(triggerEvent.GetContainerID())
+		state := objectCache.ContainerProfileCache().GetContainerProfileState(triggerEvent.GetContainerID())
 		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
 				Status:            state.Status,
@@ -162,7 +162,7 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 		}
 
 	case armotypes.NetworkProfile:
-		state := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhoodState(triggerEvent.GetContainerID())
+		state := objectCache.ContainerProfileCache().GetContainerProfileState(triggerEvent.GetContainerID())
 		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
 				Status:            state.Status,

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/cataloging"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/kubescape/go-logger"
@@ -59,6 +60,13 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	cfg := syft.DefaultCreateSBOMConfig()
 	cfg.ToolName = "syft"
 	cfg.ToolVersion = s.version
+	cfg = cfg.WithCatalogerSelection(
+		cataloging.NewSelectionRequest().WithRemovals(
+			"file-digest-cataloger",
+			"file-metadata-cataloger",
+			"file-executable-cataloger",
+		),
+	)
 	if req.EnableEmbeddedSboms {
 		cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 	}

@@ -23,12 +23,12 @@ func (l *apLibrary) wasCapabilityUsed(containerID, capabilityName ref.Val) ref.V
 		return types.MaybeNoSuchOverloadErr(capabilityName)
 	}
 
-	container, _, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	if slices.Contains(container.Capabilities, capabilityNameStr) {
+	if slices.Contains(cp.Spec.Capabilities, capabilityNameStr) {
 		return types.Bool(true)
 	}
 

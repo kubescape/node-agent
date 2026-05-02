@@ -200,7 +200,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
-	_, apChecksum, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
+	_, apChecksum, err := profilehelper.GetContainerProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil
 
 	// Early exit if monitoring is disabled for this context - skip rule evaluation
@@ -345,9 +345,9 @@ func (rm *RuleManager) HasApplicableRuleBindings(namespace, name string) bool {
 
 func (rm *RuleManager) HasFinalApplicationProfile(pod *corev1.Pod) bool {
 	for _, c := range utils.GetContainerStatuses(pod.Status) {
-		ap := rm.objectCache.ApplicationProfileCache().GetApplicationProfile(utils.TrimRuntimePrefix(c.ContainerID))
-		if ap != nil {
-			if status, ok := ap.Annotations[helpersv1.StatusMetadataKey]; ok {
+		cp := rm.objectCache.ContainerProfileCache().GetContainerProfile(utils.TrimRuntimePrefix(c.ContainerID))
+		if cp != nil {
+			if status, ok := cp.Annotations[helpersv1.StatusMetadataKey]; ok {
 				// in theory, only completed profiles are stored in cache, but we check anyway
 				return status == helpersv1.Completed
 			}
@@ -410,12 +410,12 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 }
 
 func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEvent, containerID string) bool {
-	ap, _, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, containerID)
+	cp, _, err := profilehelper.GetContainerProfile(rm.objectCache, containerID)
 	if err != nil {
 		return false
 	}
 
-	allowed, err := rm.rulePolicyValidator.Validate(rule.ID, event.(utils.EnrichEvent).GetComm(), &ap)
+	allowed, err := rm.rulePolicyValidator.Validate(rule.ID, event.(utils.EnrichEvent).GetComm(), cp)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to validate rule policy", helpers.Error(err))
 		return false

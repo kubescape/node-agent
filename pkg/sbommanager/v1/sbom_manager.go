@@ -17,6 +17,7 @@ import (
 
 	"github.com/DmitriyVTitov/size"
 	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/cataloging"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/aquilax/truncate"
@@ -471,6 +472,13 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 		sbomCfg := syft.DefaultCreateSBOMConfig()
 		sbomCfg.ToolName = "syft"
 		sbomCfg.ToolVersion = s.version
+		sbomCfg = sbomCfg.WithCatalogerSelection(
+			cataloging.NewSelectionRequest().WithRemovals(
+				"file-digest-cataloger",
+				"file-metadata-cataloger",
+				"file-executable-cataloger",
+			),
+		)
 		if s.cfg.EnableEmbeddedSboms {
 			sbomCfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 		}

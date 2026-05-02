@@ -2,24 +2,40 @@ package objectcache
 
 import (
 	"context"
+	"errors"
 
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
+	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// RuleObjectCacheMock implementation as provided
+// RuleObjectCacheMock is a test double for RuleObjectCache.
+//
+// Setter partition contract — SetApplicationProfile and SetNetworkNeighborhood
+// both write into cpByContainerName entries but own non-overlapping fields:
+//
+//	SetApplicationProfile  → Architectures, Capabilities, Execs, Opens, Syscalls,
+//	                          SeccompProfile, Endpoints, ImageID, ImageTag,
+//	                          PolicyByRuleId, IdentifiedCallStacks
+//	SetNetworkNeighborhood → LabelSelector, Ingress, Egress
+//
+// Calling both setters produces a fully-populated ContainerProfile with no
+// field conflict. Both setters apply a first-container-wins rule for r.cp
+// (backward-compat pointer for single-container tests); the per-container map
+// cpByContainerName is authoritative for multi-container tests.
 type RuleObjectCacheMock struct {
 	profile                 *v1beta1.ApplicationProfile
 	podSpec                 *corev1.PodSpec
 	podStatus               *corev1.PodStatus
 	nn                      *v1beta1.NetworkNeighborhood
+	cp                      *v1beta1.ContainerProfile
+	cpByContainerName       map[string]*v1beta1.ContainerProfile
 	dnsCache                map[string]string
 	ContainerIDToSharedData *maps.SafeMap[string, *objectcache.WatchedContainerData]
 }
@@ -34,9 +50,78 @@ func (r *RuleObjectCacheMock) GetCallStackSearchTree(string) *callstackcache.Cal
 
 func (r *RuleObjectCacheMock) SetApplicationProfile(profile *v1beta1.ApplicationProfile) {
 	r.profile = profile
+	if profile == nil {
+		return
+	}
+	if r.cpByContainerName == nil {
+		r.cpByContainerName = make(map[string]*v1beta1.ContainerProfile)
+	}
+	apply := func(c *v1beta1.ApplicationProfileContainer) {
+		cp, ok := r.cpByContainerName[c.Name]
+		if !ok {
+			cp = &v1beta1.ContainerProfile{}
+			r.cpByContainerName[c.Name] = cp
+		}
+		cp.Spec.Architectures = profile.Spec.Architectures
+		cp.Spec.Capabilities = c.Capabilities
+		cp.Spec.Execs = c.Execs
+		cp.Spec.Opens = c.Opens
+		cp.Spec.Syscalls = c.Syscalls
+		cp.Spec.SeccompProfile = c.SeccompProfile
+		cp.Spec.Endpoints = c.Endpoints
+		cp.Spec.ImageID = c.ImageID
+		cp.Spec.ImageTag = c.ImageTag
+		cp.Spec.PolicyByRuleId = c.PolicyByRuleId
+		cp.Spec.IdentifiedCallStacks = c.IdentifiedCallStacks
+	}
+	for i := range profile.Spec.Containers {
+		apply(&profile.Spec.Containers[i])
+	}
+	for i := range profile.Spec.InitContainers {
+		apply(&profile.Spec.InitContainers[i])
+	}
+	for i := range profile.Spec.EphemeralContainers {
+		apply(&profile.Spec.EphemeralContainers[i])
+	}
+	// r.cp = first container's entry (backward compat for single-container tests).
+	switch {
+	case len(profile.Spec.Containers) > 0:
+		r.cp = r.cpByContainerName[profile.Spec.Containers[0].Name]
+	case len(profile.Spec.InitContainers) > 0:
+		r.cp = r.cpByContainerName[profile.Spec.InitContainers[0].Name]
+	case len(profile.Spec.EphemeralContainers) > 0:
+		r.cp = r.cpByContainerName[profile.Spec.EphemeralContainers[0].Name]
+	}
 }
 
-func (r *RuleObjectCacheMock) ApplicationProfileCache() objectcache.ApplicationProfileCache {
+func (r *RuleObjectCacheMock) GetContainerProfile(containerID string) *v1beta1.ContainerProfile {
+	if r.ContainerIDToSharedData != nil && containerID != "" {
+		data, ok := r.ContainerIDToSharedData.Load(containerID)
+		if !ok {
+			return nil
+		}
+		// Resolve the per-container profile via the registered InstanceID so
+		// multi-container tests get the correct container's profile.
+		if data != nil && data.InstanceID != nil {
+			if cp, found := r.cpByContainerName[data.InstanceID.GetContainerName()]; found {
+				return cp
+			}
+		}
+	}
+	return r.cp
+}
+
+func (r *RuleObjectCacheMock) SetContainerProfile(cp *v1beta1.ContainerProfile) {
+	r.cp = cp
+}
+
+func (r *RuleObjectCacheMock) GetContainerProfileState(_ string) *objectcache.ProfileState {
+	return &objectcache.ProfileState{Error: errors.New("mock: profile not found")}
+}
+
+func (r *RuleObjectCacheMock) Start(_ context.Context) {}
+
+func (r *RuleObjectCacheMock) ContainerProfileCache() objectcache.ContainerProfileCache {
 	return r
 }
 
@@ -87,16 +172,46 @@ func (r *RuleObjectCacheMock) K8sObjectCache() objectcache.K8sObjectCache {
 	return r
 }
 
-func (r *RuleObjectCacheMock) NetworkNeighborhoodCache() objectcache.NetworkNeighborhoodCache {
-	return r
-}
-
 func (r *RuleObjectCacheMock) GetNetworkNeighborhood(string) *v1beta1.NetworkNeighborhood {
 	return r.nn
 }
 
 func (r *RuleObjectCacheMock) SetNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood) {
 	r.nn = nn
+	if nn == nil {
+		return
+	}
+	if r.cpByContainerName == nil {
+		r.cpByContainerName = make(map[string]*v1beta1.ContainerProfile)
+	}
+	apply := func(c *v1beta1.NetworkNeighborhoodContainer) {
+		cp, ok := r.cpByContainerName[c.Name]
+		if !ok {
+			cp = &v1beta1.ContainerProfile{}
+			r.cpByContainerName[c.Name] = cp
+		}
+		cp.Spec.LabelSelector = nn.Spec.LabelSelector
+		cp.Spec.Ingress = c.Ingress
+		cp.Spec.Egress = c.Egress
+	}
+	for i := range nn.Spec.Containers {
+		apply(&nn.Spec.Containers[i])
+	}
+	for i := range nn.Spec.InitContainers {
+		apply(&nn.Spec.InitContainers[i])
+	}
+	for i := range nn.Spec.EphemeralContainers {
+		apply(&nn.Spec.EphemeralContainers[i])
+	}
+	// r.cp = first container's entry (backward compat for single-container tests).
+	switch {
+	case len(nn.Spec.Containers) > 0:
+		r.cp = r.cpByContainerName[nn.Spec.Containers[0].Name]
+	case len(nn.Spec.InitContainers) > 0:
+		r.cp = r.cpByContainerName[nn.Spec.InitContainers[0].Name]
+	case len(nn.Spec.EphemeralContainers) > 0:
+		r.cp = r.cpByContainerName[nn.Spec.EphemeralContainers[0].Name]
+	}
 }
 
 func (r *RuleObjectCacheMock) DnsCache() objectcache.DnsCache {

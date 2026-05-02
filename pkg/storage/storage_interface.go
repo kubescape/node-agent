@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"context"
+
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -8,10 +10,11 @@ import (
 )
 
 type ProfileClient interface {
-	GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error)
-	GetNetworkNeighborhood(namespace, name string) (*v1beta1.NetworkNeighborhood, error)
-	ListApplicationProfiles(namespace string, limit int64, cont string) (*v1beta1.ApplicationProfileList, error)
-	ListNetworkNeighborhoods(namespace string, limit int64, cont string) (*v1beta1.NetworkNeighborhoodList, error)
+	GetApplicationProfile(ctx context.Context, namespace, name string) (*v1beta1.ApplicationProfile, error)
+	GetNetworkNeighborhood(ctx context.Context, namespace, name string) (*v1beta1.NetworkNeighborhood, error)
+	GetContainerProfile(ctx context.Context, namespace, name string) (*v1beta1.ContainerProfile, error)
+	ListApplicationProfiles(ctx context.Context, namespace string, limit int64, cont string) (*v1beta1.ApplicationProfileList, error)
+	ListNetworkNeighborhoods(ctx context.Context, namespace string, limit int64, cont string) (*v1beta1.NetworkNeighborhoodList, error)
 }
 
 // ProfileCreator defines the interface for creating container profiles
