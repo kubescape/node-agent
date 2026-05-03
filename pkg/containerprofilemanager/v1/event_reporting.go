@@ -32,17 +32,33 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 	cpm.logEventError(err, "capability", containerID)
 }
 
+// resolveExecPath derives the path to record for an exec event. It is kept
+// symmetric with the rule-side resolver in
+// pkg/rulemanager/cel/libraries/parse/parse.go (parse.get_exec_path): prefer
+// the kernel-authoritative exepath, then argv[0] when non-empty, then comm.
+// Using args[0] unconditionally produces an empty Path when the syscall has
+// an empty pathname (fexecve / execveat AT_EMPTY_PATH — the libpam helper
+// invocation pattern), while the rule-side resolver falls back to comm —
+// leaving the AP entry unreachable to ap.was_executed and producing spurious
+// "Unexpected process launched" alerts.
+func resolveExecPath(exepath, comm string, args []string) string {
+	if exepath != "" {
+		return exepath
+	}
+	if len(args) > 0 && args[0] != "" {
+		return args[0]
+	}
+	return comm
+}
+
 // ReportFileExec reports a file execution event for a container
 func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event utils.ExecEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.execs == nil {
 			data.execs = &maps.SafeMap[string, []string]{}
 		}
-		path := event.GetComm()
 		args := event.GetArgs()
-		if len(args) > 0 {
-			path = args[0]
-		}
+		path := resolveExecPath(event.GetExePath(), event.GetComm(), args)
 
 		// Use SHA256 hash of the exec to identify it uniquely
 		execIdentifier := utils.CalculateSHA256FileExecHash(path, args)
