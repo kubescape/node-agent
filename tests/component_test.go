@@ -1206,7 +1206,7 @@ func Test_17_ApCompletedToPartialUpdateTest(t *testing.T) {
 
 	time.Sleep(30 * time.Second)
 
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
+	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "cat /run/secrets/kubernetes.io/serviceaccount/token >/dev/null"}, "")
 	require.NoError(t, err)
 
 	time.Sleep(30 * time.Second)
@@ -1214,7 +1214,7 @@ func Test_17_ApCompletedToPartialUpdateTest(t *testing.T) {
 	alerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Error getting alerts")
 
-	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
+	testutils.AssertContains(t, alerts, "Unexpected service account token access", "cat", "nginx", []bool{true})
 }
 
 func Test_18_ShortLivedJobTest(t *testing.T) {

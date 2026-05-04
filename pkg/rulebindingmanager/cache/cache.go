@@ -187,12 +187,19 @@ func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 
 func (c *RBCache) RefreshRuleBindingsRules() {
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
 	for _, rbName := range c.rbNameToRB.Keys() {
 		rb := c.rbNameToRB.Get(rbName)
 		c.rbNameToRules.Set(rbName, c.createRules(rb.Spec.Rules))
 	}
 	logger.L().Info("RBCache - refreshed rule bindings rules", helpers.Int("ruleBindings", len(c.rbNameToRB.Keys())))
+	// Snapshot notifiers while holding the lock, then release before sending to
+	// avoid blocking cache operations if any notifier channel is full.
+	notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
+	copy(notifiers, c.notifiers)
+	c.mutex.Unlock()
+	for _, n := range notifiers {
+		*n <- rulebindingmanager.RuleBindingNotify{}
+	}
 }
 
 // ----------------- RuleBinding manager methods -----------------

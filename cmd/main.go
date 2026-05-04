@@ -309,7 +309,7 @@ func main() {
 
 		adapterFactory := ruleadapters.NewEventRuleAdapterFactory()
 
-		celEvaluator, err := cel.NewCEL(objCache, cfg)
+		celEvaluator, err := cel.NewCEL(objCache, cfg, prometheusExporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating CEL evaluator", helpers.Error(err))
 		}

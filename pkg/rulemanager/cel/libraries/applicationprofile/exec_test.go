@@ -200,11 +200,12 @@ func TestExecWithArgsInProfile(t *testing.T) {
 			expectedResult: true,
 		},
 		{
+			// v1 degradation: args projection is out of scope; path-only matching.
 			name:           "Path matches but args don't match",
 			containerID:    "test-container-id",
 			path:           "/bin/ls",
 			args:           []string{"-la", "/home"},
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
 			name:           "Path doesn't exist",
@@ -228,11 +229,12 @@ func TestExecWithArgsInProfile(t *testing.T) {
 			expectedResult: true,
 		},
 		{
+			// v1 degradation: args projection is out of scope; path-only matching.
 			name:           "Empty args list",
 			containerID:    "test-container-id",
 			path:           "/bin/ls",
 			args:           []string{},
-			expectedResult: false,
+			expectedResult: true,
 		},
 	}
 

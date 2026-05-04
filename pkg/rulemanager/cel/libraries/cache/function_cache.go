@@ -8,6 +8,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 )
 
 // ProfileNotAvailableErr is a sentinel error message used to indicate that a profile
@@ -78,9 +79,42 @@ func NewFunctionCache(config FunctionCacheConfig) *FunctionCache {
 
 type CelFunction func(...ref.Val) ref.Val
 
-func (fc *FunctionCache) WithCache(fn CelFunction, functionName string) CelFunction {
+// HashForContainerProfile returns a function that extracts the SpecHash of the
+// projected profile for the containerID in values[0]. Passing this to WithCache
+// ensures cached results are invalidated whenever the projection spec changes.
+func HashForContainerProfile(oc objectcache.ObjectCache) func([]ref.Val) string {
+	return func(values []ref.Val) string {
+		if len(values) == 0 || oc == nil {
+			return ""
+		}
+		containerIDStr, ok := values[0].Value().(string)
+		if !ok {
+			return ""
+		}
+		cpc := oc.ContainerProfileCache()
+		if cpc == nil {
+			return ""
+		}
+		pcp := cpc.GetProjectedContainerProfile(containerIDStr)
+		if pcp == nil {
+			return ""
+		}
+		// Include SyncChecksum so the key changes when profile content is updated
+		// under the same projection spec, preventing stale cached results after
+		// the profile learns new paths/execs/etc.
+		return pcp.SpecHash + "|" + pcp.SyncChecksum
+	}
+}
+
+// WithCache wraps fn with an LRU result cache keyed by functionName + arguments.
+// extraKeyFn, if provided, is called with the argument slice and its return value
+// is appended to the key — use HashForContainerProfile to invalidate on spec changes.
+func (fc *FunctionCache) WithCache(fn CelFunction, functionName string, extraKeyFn ...func([]ref.Val) string) CelFunction {
 	return func(values ...ref.Val) ref.Val {
 		key := fc.generateCacheKey(functionName, values...)
+		for _, fn := range extraKeyFn {
+			key += "|" + fn(values)
+		}
 
 		if cached, found := fc.cache.Get(key); found {
 			return cached

@@ -16,11 +16,18 @@ spec:
         # sourcecode: node-agent/tests/images/malicious-app
         image: quay.io/kubescape/node-agent:maliciousapp6
         imagePullPolicy: Always
+        workingDir: /tmp
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            sleep 190
+            mkdir -p /var/lib/r0002-test
+            echo r0002 >/var/lib/r0002-test/marker
+            cat /var/lib/r0002-test/marker >/dev/null 2>&1 || true
+            exec /malicious
         env:
           - name: WAIT_FOR_SIGTERM
             value: "true"
-          - name: WAIT_BEFORE_START
-            value: "3m"
         securityContext:
           capabilities:
             add: ["IPC_OWNER"]

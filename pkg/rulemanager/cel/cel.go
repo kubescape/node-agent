@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
@@ -38,7 +39,7 @@ type CEL struct {
 	staticOptimizer *cel.StaticOptimizer
 }
 
-func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
+func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metricsmanager.MetricsManager) (*CEL, error) {
 	ta, tp := xcel.NewTypeAdapter(), xcel.NewTypeProvider()
 
 	eventObj, eventTyp := xcel.NewObject(&utils.CelEventImpl{})
@@ -61,8 +62,8 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),
 		k8s.K8s(objectCache.K8sObjectCache(), cfg),
-		applicationprofile.AP(objectCache, cfg),
-		networkneighborhood.NN(objectCache, cfg),
+		applicationprofile.AP(objectCache, cfg, mm...),
+		networkneighborhood.NN(objectCache, cfg, mm...),
 		parse.Parse(cfg),
 		net.Net(cfg),
 		process.Process(cfg),

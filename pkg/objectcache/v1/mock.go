@@ -3,6 +3,7 @@ package objectcache
 import (
 	"context"
 	"errors"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -38,6 +39,9 @@ type RuleObjectCacheMock struct {
 	cpByContainerName       map[string]*v1beta1.ContainerProfile
 	dnsCache                map[string]string
 	ContainerIDToSharedData *maps.SafeMap[string, *objectcache.WatchedContainerData]
+
+	projectionSpecMu sync.RWMutex
+	projectionSpec   objectcache.RuleProjectionSpec
 }
 
 func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.ApplicationProfile {
@@ -109,6 +113,129 @@ func (r *RuleObjectCacheMock) GetContainerProfile(containerID string) *v1beta1.C
 		}
 	}
 	return r.cp
+}
+
+func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *objectcache.ProjectedContainerProfile {
+	cp := r.GetContainerProfile(containerID)
+	if cp == nil {
+		return nil
+	}
+	r.projectionSpecMu.RLock()
+	spec := r.projectionSpec
+	r.projectionSpecMu.RUnlock()
+	// When no spec has been installed (Hash==""), expose all raw data so
+	// single-surface unit tests that never call SetProjectionSpec still work.
+	// When a spec is installed, only populate surfaces that are InUse, matching
+	// production behaviour where unrequested fields are dropped by Apply().
+	specInstalled := spec.Hash != ""
+
+	pcp := &objectcache.ProjectedContainerProfile{
+		PolicyByRuleId: cp.Spec.PolicyByRuleId,
+		SpecHash:       spec.Hash,
+	}
+
+	if (!specInstalled || spec.Capabilities.InUse) && len(cp.Spec.Capabilities) > 0 {
+		pcp.Capabilities.All = true
+		pcp.Capabilities.Values = make(map[string]struct{}, len(cp.Spec.Capabilities))
+		for _, c := range cp.Spec.Capabilities {
+			pcp.Capabilities.Values[c] = struct{}{}
+		}
+	}
+
+	if (!specInstalled || spec.Syscalls.InUse) && len(cp.Spec.Syscalls) > 0 {
+		pcp.Syscalls.All = true
+		pcp.Syscalls.Values = make(map[string]struct{}, len(cp.Spec.Syscalls))
+		for _, s := range cp.Spec.Syscalls {
+			pcp.Syscalls.Values[s] = struct{}{}
+		}
+	}
+
+	if (!specInstalled || spec.Execs.InUse) && len(cp.Spec.Execs) > 0 {
+		pcp.Execs.All = true
+		pcp.Execs.Values = make(map[string]struct{}, len(cp.Spec.Execs))
+		for _, e := range cp.Spec.Execs {
+			pcp.Execs.Values[e.Path] = struct{}{}
+		}
+	}
+
+	if (!specInstalled || spec.Opens.InUse) && len(cp.Spec.Opens) > 0 {
+		pcp.Opens.All = true
+		pcp.Opens.Values = make(map[string]struct{}, len(cp.Spec.Opens))
+		for _, o := range cp.Spec.Opens {
+			pcp.Opens.Values[o.Path] = struct{}{}
+		}
+	}
+
+	if (!specInstalled || spec.Endpoints.InUse) && len(cp.Spec.Endpoints) > 0 {
+		pcp.Endpoints.All = true
+		pcp.Endpoints.Values = make(map[string]struct{}, len(cp.Spec.Endpoints))
+		for _, e := range cp.Spec.Endpoints {
+			pcp.Endpoints.Values[e.Endpoint] = struct{}{}
+		}
+	}
+
+	// Egress addresses and domains — All=true: all observed entries are retained.
+	if !specInstalled || spec.EgressAddresses.InUse || spec.EgressDomains.InUse {
+		for _, n := range cp.Spec.Egress {
+			if (!specInstalled || spec.EgressAddresses.InUse) && n.IPAddress != "" {
+				if pcp.EgressAddresses.Values == nil {
+					pcp.EgressAddresses.All = true
+					pcp.EgressAddresses.Values = make(map[string]struct{})
+				}
+				pcp.EgressAddresses.Values[n.IPAddress] = struct{}{}
+			}
+			if !specInstalled || spec.EgressDomains.InUse {
+				domains := n.DNSNames
+				if n.DNS != "" {
+					domains = append([]string{n.DNS}, domains...)
+				}
+				for _, d := range domains {
+					if pcp.EgressDomains.Values == nil {
+						pcp.EgressDomains.All = true
+						pcp.EgressDomains.Values = make(map[string]struct{})
+					}
+					pcp.EgressDomains.Values[d] = struct{}{}
+				}
+			}
+		}
+	}
+
+	// Ingress addresses and domains — All=true: all observed entries are retained.
+	if !specInstalled || spec.IngressAddresses.InUse || spec.IngressDomains.InUse {
+		for _, n := range cp.Spec.Ingress {
+			if (!specInstalled || spec.IngressAddresses.InUse) && n.IPAddress != "" {
+				if pcp.IngressAddresses.Values == nil {
+					pcp.IngressAddresses.All = true
+					pcp.IngressAddresses.Values = make(map[string]struct{})
+				}
+				pcp.IngressAddresses.Values[n.IPAddress] = struct{}{}
+			}
+			if !specInstalled || spec.IngressDomains.InUse {
+				if n.DNS != "" {
+					if pcp.IngressDomains.Values == nil {
+						pcp.IngressDomains.All = true
+						pcp.IngressDomains.Values = make(map[string]struct{})
+					}
+					pcp.IngressDomains.Values[n.DNS] = struct{}{}
+				}
+				for _, d := range n.DNSNames {
+					if pcp.IngressDomains.Values == nil {
+						pcp.IngressDomains.All = true
+						pcp.IngressDomains.Values = make(map[string]struct{})
+					}
+					pcp.IngressDomains.Values[d] = struct{}{}
+				}
+			}
+		}
+	}
+
+	return pcp
+}
+
+func (r *RuleObjectCacheMock) SetProjectionSpec(spec objectcache.RuleProjectionSpec) {
+	r.projectionSpecMu.Lock()
+	r.projectionSpec = spec
+	r.projectionSpecMu.Unlock()
 }
 
 func (r *RuleObjectCacheMock) SetContainerProfile(cp *v1beta1.ContainerProfile) {

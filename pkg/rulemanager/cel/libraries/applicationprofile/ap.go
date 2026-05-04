@@ -6,30 +6,38 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
-func New(objectCache objectcache.ObjectCache, config config.Config) libraries.Library {
-	return &apLibrary{
+func New(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) libraries.Library {
+	lib := &apLibrary{
 		objectCache: objectCache,
 		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
 			MaxSize: config.CelConfigCache.MaxSize,
 			TTL:     config.CelConfigCache.TTL,
 		}),
-		preStopCache: GetPreStopHookCache(),
+		preStopCache:    GetPreStopHookCache(),
+		detailedMetrics: config.ProfileProjection.DetailedMetricsEnabled,
 	}
+	if len(mm) > 0 {
+		lib.metrics = mm[0]
+	}
+	return lib
 }
 
-func AP(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption {
-	return cel.Lib(New(objectCache, config))
+func AP(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) cel.EnvOption {
+	return cel.Lib(New(objectCache, config, mm...))
 }
 
 type apLibrary struct {
-	objectCache   objectcache.ObjectCache
-	functionCache *cache.FunctionCache
-	preStopCache  *PreStopHookCache
+	objectCache     objectcache.ObjectCache
+	functionCache   *cache.FunctionCache
+	preStopCache    *PreStopHookCache
+	metrics         metricsmanager.MetricsManager
+	detailedMetrics bool
 }
 
 func (l *apLibrary) LibraryName() string {
@@ -49,10 +57,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_executed")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasExecuted(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					// Convert "profile not available" error to false after cache layer
 					// This ensures: 1) error is not cached, 2) rule evaluation continues normally
@@ -67,10 +78,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_executed_with_args")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasExecutedWithArgs(args[0], args[1], args[2])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed_with_args")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed_with_args", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2])
 					// Convert "profile not available" error to false after cache layer
 					// This ensures: 1) error is not cached, 2) rule evaluation continues normally
@@ -85,10 +99,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_path_opened")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasPathOpened(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -101,10 +118,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_path_opened_with_flags")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasPathOpenedWithFlags(args[0], args[1], args[2])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_flags")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_flags", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -117,10 +137,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_path_opened_with_suffix")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasPathOpenedWithSuffix(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_suffix")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_suffix", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -133,10 +156,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_path_opened_with_prefix")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasPathOpenedWithPrefix(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_prefix")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_prefix", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -149,10 +175,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_syscall_used")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasSyscallUsed(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_syscall_used")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_syscall_used", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -165,10 +194,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_capability_used")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasCapabilityUsed(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_capability_used")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_capability_used", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -181,10 +213,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_endpoint_accessed")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessed(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -197,10 +232,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_endpoint_accessed_with_method")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessedWithMethod(args[0], args[1], args[2])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_method")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_method", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -213,10 +251,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_endpoint_accessed_with_methods")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessedWithMethods(args[0], args[1], args[2])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_methods")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_methods", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -229,10 +270,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_endpoint_accessed_with_prefix")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessedWithPrefix(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_prefix")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_prefix", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -245,10 +289,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_endpoint_accessed_with_suffix")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessedWithSuffix(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_suffix")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_suffix", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -261,10 +308,13 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("ap.was_host_accessed")
+					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasHostAccessed(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_host_accessed")
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_host_accessed", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),

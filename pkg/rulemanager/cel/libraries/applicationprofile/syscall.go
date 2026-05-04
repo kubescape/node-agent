@@ -1,8 +1,6 @@
 package applicationprofile
 
 import (
-	"slices"
-
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
@@ -23,12 +21,12 @@ func (l *apLibrary) wasSyscallUsed(containerID, syscallName ref.Val) ref.Val {
 		return types.MaybeNoSuchOverloadErr(syscallName)
 	}
 
-	cp, _, err := profilehelper.GetContainerProfile(l.objectCache, containerIDStr)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	if slices.Contains(cp.Spec.Syscalls, syscallNameStr) {
+	if _, ok := cp.Syscalls.Values[syscallNameStr]; ok {
 		return types.Bool(true)
 	}
 

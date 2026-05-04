@@ -25,6 +25,7 @@ type Rule struct {
 	Description             string                      `json:"description" yaml:"description"`
 	Expressions             RuleExpressions             `json:"expressions" yaml:"expressions"`
 	ProfileDependency       armotypes.ProfileDependency `json:"profileDependency" yaml:"profileDependency"`
+	ProfileDataRequired     *ProfileDataRequired        `json:"profileDataRequired,omitempty" yaml:"profileDataRequired,omitempty"`
 	Severity                int                         `json:"severity" yaml:"severity"`
 	SupportPolicy           bool                        `json:"supportPolicy" yaml:"supportPolicy"`
 	Tags                    []string                    `json:"tags" yaml:"tags"`
@@ -33,7 +34,7 @@ type Rule struct {
 	IsTriggerAlert          bool                        `json:"isTriggerAlert" yaml:"isTriggerAlert"`
 	MitreTactic             string                      `json:"mitreTactic" yaml:"mitreTactic"`
 	MitreTechnique          string                      `json:"mitreTechnique" yaml:"mitreTechnique"`
-	Prefilter               *prefilter.Params  `json:"-" yaml:"-"`
+	Prefilter               *prefilter.Params           `json:"-" yaml:"-"`
 }
 
 type RuleExpressions struct {
