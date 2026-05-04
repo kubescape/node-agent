@@ -507,4 +507,4 @@ replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspe
 
 replace github.com/cilium/ebpf => github.com/matthyx/ebpf v0.0.0-20260421101317-8a32d06def6c
 
-replace github.com/kubescape/storage => github.com/k8sstormcenter/storage v0.0.240-0.20260501173152-4ab95fb87ba2
+replace github.com/kubescape/storage => github.com/k8sstormcenter/storage v0.0.240-0.20260503184242-43795bb4f0b6
