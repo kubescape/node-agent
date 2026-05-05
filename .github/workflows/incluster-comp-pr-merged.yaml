@@ -78,13 +78,13 @@ jobs:
       #   if: github.ref == 'master'
       #   run: exit -1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         name: Checkout
         with:
           fetch-depth: 0
         #   submodules: recursive
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         name: Installing go
         with:
           go-version: "${{ inputs.GO_VERSION }}"
@@ -96,10 +96,10 @@ jobs:
         run: make gadgets
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Set prerelease image tag
         id: image-prerelease-tag
@@ -110,14 +110,14 @@ jobs:
         run: go test -exec sudo -v ./...
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: build/Dockerfile
@@ -129,7 +129,7 @@ jobs:
           push: true
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@main
+        uses: sigstore/cosign-installer@b5e753ae2d39589c7b38850b463739151fc67f07 # main
         with:
           cosign-release: "v2.2.2"
 
@@ -177,7 +177,7 @@ jobs:
 
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
           app-id: ${{ secrets.E2E_DISPATCH_APP_ID }}
           private-key: ${{ secrets.E2E_DISPATCH_APP_PRIVATE_KEY }}
@@ -330,7 +330,7 @@ jobs:
 
       - name: Upload failed step logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: failed-e2e-logs-attempt-${{ github.run_attempt }}
           path: failed_*.txt
@@ -355,10 +355,10 @@ jobs:
       contents: write
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -379,7 +379,7 @@ jobs:
 
       - name: Create Release
         id: create_release
-        uses: ncipollo/release-action@v1
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ inputs.IMAGE_TAG }}
@@ -390,7 +390,7 @@ jobs:
 
       - name: Trigger helm chart workflow
         if: ${{ inputs.TRIGGER_HELM_CICD == true }}
-        uses: benc-uk/workflow-dispatch@v1
+        uses: benc-uk/workflow-dispatch@7a027648b88c2413826b6ddd6c76114894dc5ec4 # v1
         with:
           workflow: 00-cicd.yaml
           repo: kubescape/helm-charts

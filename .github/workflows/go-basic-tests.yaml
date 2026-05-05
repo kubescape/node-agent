@@ -79,11 +79,11 @@ jobs:
     #   matrix:
     #     os: ${{ fromJSON(needs.Setup-Environment.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         name: Setup Go
         with:
           go-version: '${{ inputs.GO_VERSION }}'
@@ -104,17 +104,17 @@ jobs:
 
       - name: Initialize CodeQL
         continue-on-error: true
-        uses: github/codeql-action/init@v2
+        uses: github/codeql-action/init@b8d3b6e8af63cde30bdc382c0bc28114f4346c88 # v2
         with:
           languages: go
 
       - name: Autobuild
         continue-on-error: true
-        uses: github/codeql-action/autobuild@v2
+        uses: github/codeql-action/autobuild@b8d3b6e8af63cde30bdc382c0bc28114f4346c88 # v2
 
       - name: Perform CodeQL Analysis
         continue-on-error: true
-        uses: github/codeql-action/analyze@v2
+        uses: github/codeql-action/analyze@b8d3b6e8af63cde30bdc382c0bc28114f4346c88 # v2
 
       # - name: Test go build
       #   run: go build -v ${{ inputs.BUILD_PATH }}
