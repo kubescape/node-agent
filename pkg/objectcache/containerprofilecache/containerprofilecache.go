@@ -344,6 +344,9 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			}
 			userManagedAP = nil
 		}
+		if userManagedAP != nil && !c.verifyApplicationProfile(userManagedAP, "user-managed ApplicationProfile") {
+			userManagedAP = nil
+		}
 		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + workloadName
 		var ugNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
@@ -358,6 +361,9 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 					helpers.String("name", ugNNName),
 					helpers.Error(ugNNErr))
 			}
+			userManagedNN = nil
+		}
+		if userManagedNN != nil && !c.verifyNetworkNeighborhood(userManagedNN, "user-managed NetworkNeighborhood") {
 			userManagedNN = nil
 		}
 	}
@@ -398,6 +404,9 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 				helpers.Error(userAPErr))
 			userAP = nil
 		}
+		if userAP != nil && !c.verifyApplicationProfile(userAP, "user-defined ApplicationProfile") {
+			userAP = nil
+		}
 		var userNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
 			userNN, userNNErr = c.storageClient.GetNetworkNeighborhood(rctx, ns, overlayName)
@@ -409,6 +418,9 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 				helpers.String("namespace", ns),
 				helpers.String("name", overlayName),
 				helpers.Error(userNNErr))
+			userNN = nil
+		}
+		if userNN != nil && !c.verifyNetworkNeighborhood(userNN, "user-defined NetworkNeighborhood") {
 			userNN = nil
 		}
 	}

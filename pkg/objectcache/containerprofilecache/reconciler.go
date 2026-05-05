@@ -341,6 +341,12 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		if userManagedAPErr != nil {
 			userManagedAP = nil // k8s client returns non-nil zero-value on 404; treat as absent
 		}
+		if userManagedAP != nil && !c.verifyApplicationProfile(userManagedAP, "user-managed ApplicationProfile") {
+			if e.UserManagedAPRV != "" {
+				return // keep previously-verified cached entry; treat tampered update like a fetch error
+			}
+			userManagedAP = nil
+		}
 		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + e.WorkloadName
 		var userManagedNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
@@ -355,6 +361,12 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			return
 		}
 		if userManagedNNErr != nil {
+			userManagedNN = nil
+		}
+		if userManagedNN != nil && !c.verifyNetworkNeighborhood(userManagedNN, "user-managed NetworkNeighborhood") {
+			if e.UserManagedNNRV != "" {
+				return // keep previously-verified cached entry; treat tampered update like a fetch error
+			}
 			userManagedNN = nil
 		}
 	}
@@ -376,6 +388,12 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		if userAPErr != nil {
 			userAP = nil
 		}
+		if userAP != nil && !c.verifyApplicationProfile(userAP, "user-defined ApplicationProfile") {
+			if e.UserAPRV != "" {
+				return // keep previously-verified cached entry; treat tampered update like a fetch error
+			}
+			userAP = nil
+		}
 	}
 	if e.UserNNRef != nil {
 		var userNNErr error
@@ -391,6 +409,12 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			return
 		}
 		if userNNErr != nil {
+			userNN = nil
+		}
+		if userNN != nil && !c.verifyNetworkNeighborhood(userNN, "user-defined NetworkNeighborhood") {
+			if e.UserNNRV != "" {
+				return // keep previously-verified cached entry; treat tampered update like a fetch error
+			}
 			userNN = nil
 		}
 	}
