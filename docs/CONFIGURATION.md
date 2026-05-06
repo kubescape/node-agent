@@ -191,7 +191,7 @@ These environment variables are read directly (not through config file):
 {
   "exporters": {
     "httpExporterConfig": {
-      "url": "https://api.example.com/v1/runtimealerts",
+      "url": "https://api.example.com",
       "headers": [
         {"key": "Authorization", "value": "Bearer <token>"}
       ],
@@ -221,11 +221,13 @@ These environment variables are read directly (not through config file):
 
 Controls which fields are included in the JSON payload sent to the HTTP endpoint. Useful for reducing payload size or stripping sensitive data before it leaves the cluster.
 
+> **Scope:** the filter is applied at the HTTP transport layer and affects all payloads sent through this exporter, including runtime alerts, malware alerts, and FIM events. If you need different filtering per payload type, use separate exporter instances with different configs.
+
 ```json
 {
   "exporters": {
     "httpExporterConfig": {
-      "url": "https://api.example.com/v1/runtimealerts",
+      "url": "https://api.example.com",
       "eventFieldFilter": {
         "denyList": ["spec.processTree", "spec.cloudMetadata"]
       }
@@ -441,7 +443,7 @@ These flags disable specific tracers (useful for debugging):
   "networkServiceEnabled": true,
   "exporters": {
     "httpExporterConfig": {
-      "url": "https://kubescape-backend.example.com/v1/runtimealerts",
+      "url": "https://kubescape-backend.example.com",
       "eventFieldFilter": {
         "denyList": ["spec.processTree", "spec.cloudMetadata"]
       }
@@ -474,7 +476,7 @@ These flags disable specific tracers (useful for debugging):
   },
   "exporters": {
     "httpExporterConfig": {
-      "url": "https://api.example.com/v1/runtimealerts",
+      "url": "https://api.example.com",
       "enableAlertBulking": true,
       "bulkMaxAlerts": 100,
       "bulkTimeoutSeconds": 5,
@@ -527,7 +529,7 @@ These flags disable specific tracers (useful for debugging):
   },
   "exporters": {
     "httpExporterConfig": {
-      "url": "https://api.example.com/v1/runtimealerts",
+      "url": "https://api.example.com",
       "enableAlertBulking": true,
       "bulkMaxAlerts": 200,
       "bulkTimeoutSeconds": 3,
