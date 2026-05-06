@@ -36,6 +36,10 @@ on:
       GITGUARDIAN_API_KEY:
         required: false
 
+# Default to read-only at the workflow level (least privilege per Scorecard).
+# Jobs that need elevated scopes override below.
+permissions: read-all
+
 jobs:
   Check-secret:
     name: check if secrets are set
@@ -72,6 +76,15 @@ jobs:
     name: Create cross-platform build
     # needs: [ Setup-Environment ]
     runs-on: ubuntu-latest
+    # Override read-all to let github/codeql-action/analyze upload its
+    # SARIF results — without security-events:write the upload silently
+    # fails (masked by continue-on-error on the CodeQL steps).
+    # NOTE: this is a workflow_call reusable, so the caller must ALSO
+    # grant security-events:write — pr-created.yaml's pr-created job
+    # already does. CodeRabbit PR #39 finding (go-basic-tests.yaml:41).
+    permissions:
+      contents: read
+      security-events: write
     env:
       GITHUB_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       CGO_ENABLED: ${{ inputs.CGO_ENABLED }}

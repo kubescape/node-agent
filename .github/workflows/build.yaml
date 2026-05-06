@@ -18,6 +18,10 @@ on:
         default: false
         description: "Build for both amd64 and arm64"
 
+# Default to read-only at the workflow level (least privilege per Scorecard).
+# Jobs that need elevated scopes override below.
+permissions: read-all
+
 jobs:
   build:
     runs-on: ubuntu-latest

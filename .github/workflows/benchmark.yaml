@@ -24,6 +24,10 @@ on:
         required: false
         type: string
 
+# Default to read-only at the workflow level (least privilege per Scorecard).
+# Jobs that need elevated scopes override below.
+permissions: read-all
+
 concurrency:
   group: benchmark-${{ github.ref }}
   cancel-in-progress: true
@@ -31,6 +35,14 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
+    # Override read-all to keep the 'Comment on PR' step working — the
+    # peter-evans/create-or-update-comment action requires both
+    # issues:write and pull-requests:write to post benchmark results.
+    # CodeRabbit PR #39 finding (benchmark.yaml:29).
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

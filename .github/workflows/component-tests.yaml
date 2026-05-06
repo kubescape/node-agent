@@ -60,6 +60,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Default to read-only at the workflow level (least privilege per Scorecard).
+# Jobs that need elevated scopes override below.
+permissions: read-all
+
 jobs:
   # -------------------------------------------------------------------
   # Detect what changed to decide whether an image rebuild is needed.

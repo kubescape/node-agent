@@ -10,6 +10,10 @@ on:
 
   workflow_dispatch:
 
+# Default to read-only at the workflow level (least privilege per Scorecard).
+# Jobs that need elevated scopes override below.
+permissions: read-all
+
 jobs:
   reset-run-number:
     runs-on: ubuntu-latest
