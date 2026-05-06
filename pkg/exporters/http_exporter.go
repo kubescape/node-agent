@@ -60,6 +60,8 @@ type HTTPExporterConfig struct {
 	BulkMaxRetries       int `json:"bulkMaxRetries"`       // Default: 3
 	BulkRetryBaseDelayMs int `json:"bulkRetryBaseDelayMs"` // Default: 1000ms
 	BulkRetryMaxDelayMs  int `json:"bulkRetryMaxDelayMs"`  // Default: 30000ms
+	// Event field filter configuration
+	EventFieldFilter *EventFieldFilterConfig `json:"eventFieldFilter,omitempty"`
 }
 
 type HTTPExporter struct {
@@ -73,6 +75,7 @@ type HTTPExporter struct {
 	cloudMetadata       *armotypes.CloudMetadata
 	bulkManager         *AlertBulkManager
 	alertSourcePlatform armotypes.AlertSourcePlatform
+	fieldFilter         *EventFieldFilter
 }
 
 type alertMetrics struct {
@@ -112,6 +115,7 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		alertMetrics:        &alertMetrics{},
 		cloudMetadata:       cloudMetadata,
 		alertSourcePlatform: alertSourcePlatform,
+		fieldFilter:         NewEventFieldFilter(config.EventFieldFilter),
 	}
 
 	// Initialize bulk manager if bulking is enabled
@@ -400,6 +404,13 @@ func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload interface{})
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	if e.fieldFilter != nil {
+		body, err = e.fieldFilter.FilterJSON(body)
+		if err != nil {
+			return fmt.Errorf("failed to apply field filter: %w", err)
+		}
 	}
 
 	var url string
