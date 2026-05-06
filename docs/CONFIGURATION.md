@@ -192,11 +192,15 @@ These environment variables are read directly (not through config file):
   "exporters": {
     "httpExporterConfig": {
       "url": "https://api.example.com/v1/runtimealerts",
-      "headers": {
-        "Authorization": "Bearer <token>"
-      },
+      "headers": [
+        {"key": "Authorization", "value": "Bearer <token>"}
+      ],
       "timeoutSeconds": 5,
-      "method": "POST"
+      "method": "POST",
+      "maxAlertsPerMinute": 100,
+      "eventFieldFilter": {
+        "denyList": ["spec.processTree", "spec.cloudMetadata"]
+      }
     }
   }
 }
@@ -204,10 +208,52 @@ These environment variables are read directly (not through config file):
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `exporters::httpExporterConfig::url` | string | - | HTTP endpoint URL |
-| `exporters::httpExporterConfig::headers` | map | `{}` | HTTP headers |
-| `exporters::httpExporterConfig::timeoutSeconds` | int | `5` | Request timeout |
-| `exporters::httpExporterConfig::method` | string | `POST` | HTTP method |
+| `exporters::httpExporterConfig::url` | string | - | HTTP endpoint URL (required) |
+| `exporters::httpExporterConfig::path` | string | `/v1/runtimealerts` | Path appended to URL |
+| `exporters::httpExporterConfig::headers` | []`{key, value}` | `[]` | HTTP request headers |
+| `exporters::httpExporterConfig::queryParams` | []`{key, value}` | `[]` | URL query parameters; set value to `"<env>"` to read from env var |
+| `exporters::httpExporterConfig::timeoutSeconds` | int | `5` | Request timeout in seconds |
+| `exporters::httpExporterConfig::method` | string | `POST` | HTTP method (`POST` or `PUT`) |
+| `exporters::httpExporterConfig::maxAlertsPerMinute` | int | `100` | Rate limit; sends a limit-reached alert when exceeded |
+| `exporters::httpExporterConfig::eventFieldFilter` | object | - | Field-level filter applied to every outgoing payload (see below) |
+
+##### Event Field Filter
+
+Controls which fields are included in the JSON payload sent to the HTTP endpoint. Useful for reducing payload size or stripping sensitive data before it leaves the cluster.
+
+```json
+{
+  "exporters": {
+    "httpExporterConfig": {
+      "url": "https://api.example.com/v1/runtimealerts",
+      "eventFieldFilter": {
+        "denyList": ["spec.processTree", "spec.cloudMetadata"]
+      }
+    }
+  }
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `eventFieldFilter::allowList` | []string | Keep only these fields; all others are dropped. Takes precedence over `denyList`. |
+| `eventFieldFilter::denyList` | []string | Remove these fields; all others are kept. Ignored if `allowList` is set. |
+
+Both lists support dot notation for nested fields (e.g. `spec.processTree`) and fields inside slices (e.g. `spec.alerts.severity`). If neither list is set, the filter is disabled and the full payload is sent.
+
+**DenyList example** — strip process tree and cloud metadata to reduce payload size:
+```json
+"eventFieldFilter": {
+  "denyList": ["spec.processTree", "spec.cloudMetadata"]
+}
+```
+
+**AllowList example** — send only the fields your backend needs:
+```json
+"eventFieldFilter": {
+  "allowList": ["kind", "apiVersion", "metadata", "spec.alerts"]
+}
+```
 
 #### AlertManager Exporter
 
@@ -395,7 +441,10 @@ These flags disable specific tracers (useful for debugging):
   "networkServiceEnabled": true,
   "exporters": {
     "httpExporterConfig": {
-      "url": "https://kubescape-backend.example.com/v1/runtimealerts"
+      "url": "https://kubescape-backend.example.com/v1/runtimealerts",
+      "eventFieldFilter": {
+        "denyList": ["spec.processTree", "spec.cloudMetadata"]
+      }
     }
   }
 }
@@ -428,7 +477,10 @@ These flags disable specific tracers (useful for debugging):
       "url": "https://api.example.com/v1/runtimealerts",
       "enableAlertBulking": true,
       "bulkMaxAlerts": 100,
-      "bulkTimeoutSeconds": 5
+      "bulkTimeoutSeconds": 5,
+      "eventFieldFilter": {
+        "denyList": ["spec.processTree", "spec.cloudMetadata"]
+      }
     },
     "alertManagerExporterUrls": [
       "alertmanager.monitoring.svc.cluster.local:9093"
