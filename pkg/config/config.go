@@ -10,7 +10,7 @@ import (
 
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
-	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
+	servicediscoveryv3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
@@ -315,13 +315,39 @@ func (c *Config) SkipNamespace(ns string) bool {
 	return false
 }
 
-func LoadServiceURLs(filePath string) (schema.IBackendServices, error) {
+const serviceDiscoveryTimeout = 10 * time.Second
+
+func LoadServiceURLs(apiURL string) (schema.IBackendServices, error) {
+	// Preserve backward compatibility with sidecar/file-based deployments.
+	// SERVICES env var or the default mount path takes priority over API discovery.
+	filePath := "/etc/config/services.json"
 	if pathFromEnv, present := os.LookupEnv("SERVICES"); present {
 		filePath = pathFromEnv
 	}
-	return servicediscovery.GetServices(
-		servicediscoveryv2.NewServiceDiscoveryFileV2(filePath),
-	)
+	if _, statErr := os.Stat(filePath); statErr == nil {
+		return servicediscovery.GetServices(servicediscoveryv3.NewServiceDiscoveryFileV3(filePath))
+	}
+
+	client, err := servicediscoveryv3.NewServiceDiscoveryClientV3(apiURL)
+	if err != nil {
+		return nil, err
+	}
+
+	type result struct {
+		svc schema.IBackendServices
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		svc, svcErr := servicediscovery.GetServices(client)
+		ch <- result{svc, svcErr}
+	}()
+	select {
+	case r := <-ch:
+		return r.svc, r.err
+	case <-time.After(serviceDiscoveryTimeout):
+		return nil, fmt.Errorf("service discovery timed out after %s", serviceDiscoveryTimeout)
+	}
 }
 
 type OrderedEventQueueConfig struct {
