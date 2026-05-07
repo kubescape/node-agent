@@ -248,3 +248,71 @@ func TestFilterJSON_AllowListSliceField(t *testing.T) {
 	assert.Nil(t, spec["processTree"])
 	assert.Nil(t, spec["cloudMetadata"])
 }
+
+
+func TestFilterJSON_InvalidJSON_ReturnsError(t *testing.T) {
+	f := NewEventFieldFilter(&EventFieldFilterConfig{
+		DenyList: []string{"spec.processTree"},
+	})
+
+	_, err := f.FilterJSON([]byte(`{not valid json`))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "field filter: failed to unmarshal")
+}
+
+func TestFilterJSON_AllowListSliceField_OmitsEmptyItems(t *testing.T) {
+	// When an allow list targets a sub-field inside a slice, items that
+	// have none of the allowed fields should be omitted from the output.
+	f := NewEventFieldFilter(&EventFieldFilterConfig{
+		AllowList: []string{"kind", "spec.alerts.message"},
+	})
+
+	input := map[string]any{
+		"kind": "RuntimeAlerts",
+		"spec": map[string]any{
+			"alerts": []any{
+				map[string]any{"ruleID": "R0001", "message": "alert 1"},
+				map[string]any{"ruleID": "R0002", "severity": 5}, // no "message" → empty after filter
+				map[string]any{"message": "alert 3", "severity": 3},
+			},
+		},
+	}
+	data, _ := json.Marshal(input)
+
+	result, err := f.FilterJSON(data)
+	require.NoError(t, err)
+
+	var output map[string]any
+	err = json.Unmarshal(result, &output)
+	require.NoError(t, err)
+
+	spec := output["spec"].(map[string]any)
+	alerts := spec["alerts"].([]any)
+
+	// Second item had no "message", so it's omitted
+	require.Len(t, alerts, 2)
+	assert.Equal(t, "alert 1", alerts[0].(map[string]any)["message"])
+	assert.Equal(t, "alert 3", alerts[1].(map[string]any)["message"])
+}
+
+func TestFilterJSON_NoHTMLEscaping(t *testing.T) {
+	// json.Marshal escapes <, >, & but our filter should not
+	f := NewEventFieldFilter(&EventFieldFilterConfig{
+		DenyList: []string{"extra"},
+	})
+
+	input := map[string]any{
+		"message": "process > limit & value < threshold",
+		"extra":   "removed",
+	}
+	data, _ := json.Marshal(input)
+
+	result, err := f.FilterJSON(data)
+	require.NoError(t, err)
+
+	// The output should contain literal <, >, & not escaped unicode
+	assert.Contains(t, string(result), `process > limit & value < threshold`)
+	assert.NotContains(t, string(result), `\u003c`)
+	assert.NotContains(t, string(result), `\u003e`)
+	assert.NotContains(t, string(result), `\u0026`)
+}

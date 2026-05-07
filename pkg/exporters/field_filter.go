@@ -68,7 +68,13 @@ func (f *EventFieldFilter) FilterJSON(data []byte) ([]byte, error) {
 		}
 	}
 
-	return json.Marshal(m)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(m); err != nil {
+		return nil, fmt.Errorf("field filter: failed to marshal: %w", err)
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 func applyAllowList(m map[string]any, allowSet map[string]struct{}) map[string]any {
@@ -98,12 +104,15 @@ func applyAllowList(m map[string]any, allowSet map[string]struct{}) map[string]a
 			if nested, ok := val.(map[string]any); ok {
 				result[topKey] = applyAllowList(nested, subSet)
 			} else if slice, ok := val.([]any); ok {
-				newSlice := make([]any, len(slice))
-				for i, item := range slice {
+				newSlice := make([]any, 0, len(slice))
+				for _, item := range slice {
 					if itemMap, ok := item.(map[string]any); ok {
-						newSlice[i] = applyAllowList(itemMap, subSet)
+						filtered := applyAllowList(itemMap, subSet)
+						if len(filtered) > 0 {
+							newSlice = append(newSlice, filtered)
+						}
 					} else {
-						newSlice[i] = item
+						newSlice = append(newSlice, item)
 					}
 				}
 				result[topKey] = newSlice
