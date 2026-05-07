@@ -42,8 +42,8 @@ func TestFilterJSON_AllowListNestedField(t *testing.T) {
 	input := map[string]any{
 		"kind": "RuntimeAlerts",
 		"spec": map[string]any{
-			"alerts":      []any{"alert1"},
-			"processTree": map[string]any{"pid": 1234},
+			"alerts":        []any{"alert1"},
+			"processTree":   map[string]any{"pid": 1234},
 			"cloudMetadata": map[string]any{"region": "us-east-1"},
 		},
 	}
@@ -144,8 +144,11 @@ func TestFilterJSON_DenyListNestedField(t *testing.T) {
 }
 
 func TestFilterJSON_AllowListTakesPrecedence(t *testing.T) {
+	// "ruleID" is in BOTH lists. If allowList takes precedence, it must be kept
+	// (allowList wins, denyList is ignored entirely). If denyList were also applied,
+	// "ruleID" would be removed, proving precedence didn't hold.
 	f := NewEventFieldFilter(&EventFieldFilterConfig{
-		AllowList: []string{"message"},
+		AllowList: []string{"message", "ruleID"},
 		DenyList:  []string{"ruleID"},
 	})
 
@@ -164,10 +167,9 @@ func TestFilterJSON_AllowListTakesPrecedence(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "test", output["message"])
-	assert.Nil(t, output["ruleID"])
-	assert.Nil(t, output["extra"])
+	assert.Equal(t, "R0001", output["ruleID"], "ruleID kept because allowList takes precedence over denyList")
+	assert.Nil(t, output["extra"], "extra dropped (not in allowList)")
 }
-
 
 func TestFilterJSON_DenyListSliceField(t *testing.T) {
 	f := NewEventFieldFilter(&EventFieldFilterConfig{
@@ -249,7 +251,6 @@ func TestFilterJSON_AllowListSliceField(t *testing.T) {
 	assert.Nil(t, spec["cloudMetadata"])
 }
 
-
 func TestFilterJSON_InvalidJSON_ReturnsError(t *testing.T) {
 	f := NewEventFieldFilter(&EventFieldFilterConfig{
 		DenyList: []string{"spec.processTree"},
@@ -315,4 +316,63 @@ func TestFilterJSON_NoHTMLEscaping(t *testing.T) {
 	assert.NotContains(t, string(result), `\u003c`)
 	assert.NotContains(t, string(result), `\u003e`)
 	assert.NotContains(t, string(result), `\u0026`)
+}
+
+func TestFilterJSON_AllowList_ScalarLeaf_MapToScalar(t *testing.T) {
+	// Allow path ends at a scalar inside a nested map — must be kept, not silently dropped.
+	f := NewEventFieldFilter(&EventFieldFilterConfig{
+		AllowList: []string{"spec.processTree.pid"},
+	})
+
+	input := map[string]any{
+		"spec": map[string]any{
+			"processTree": map[string]any{
+				"pid":  1234,
+				"comm": "sh",
+			},
+		},
+	}
+	data, _ := json.Marshal(input)
+
+	result, err := f.FilterJSON(data)
+	require.NoError(t, err)
+
+	var output map[string]any
+	require.NoError(t, json.Unmarshal(result, &output))
+
+	pt := output["spec"].(map[string]any)["processTree"].(map[string]any)
+	assert.NotNil(t, pt["pid"], "scalar pid kept")
+	assert.Nil(t, pt["comm"], "comm dropped")
+}
+
+func TestFilterJSON_AllowList_ScalarLeaf_InsideSlice(t *testing.T) {
+	// Allow path ends at a scalar inside each slice element — must be kept.
+	f := NewEventFieldFilter(&EventFieldFilterConfig{
+		AllowList: []string{"spec.alerts.severity"},
+	})
+
+	input := map[string]any{
+		"spec": map[string]any{
+			"alerts": []any{
+				map[string]any{"ruleID": "R0001", "message": "msg1", "severity": 5},
+				map[string]any{"ruleID": "R0002", "message": "msg2", "severity": 7},
+			},
+		},
+	}
+	data, _ := json.Marshal(input)
+
+	result, err := f.FilterJSON(data)
+	require.NoError(t, err)
+
+	var output map[string]any
+	require.NoError(t, json.Unmarshal(result, &output))
+
+	alerts := output["spec"].(map[string]any)["alerts"].([]any)
+	require.Len(t, alerts, 2)
+	for i, a := range alerts {
+		alert := a.(map[string]any)
+		assert.NotNil(t, alert["severity"], "alert[%d]: severity kept", i)
+		assert.Nil(t, alert["ruleID"], "alert[%d]: ruleID dropped", i)
+		assert.Nil(t, alert["message"], "alert[%d]: message dropped", i)
+	}
 }

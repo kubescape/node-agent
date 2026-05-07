@@ -116,6 +116,9 @@ func applyAllowList(m map[string]any, allowSet map[string]struct{}) map[string]a
 					}
 				}
 				result[topKey] = newSlice
+			} else {
+				// scalar value (string, number, bool) — keep it as-is
+				result[topKey] = val
 			}
 		}
 	}
