@@ -31,6 +31,46 @@ spec:
           - "exec"
           - "applicationprofile"
           - "context:kubernetes"
+      # ---------------------------------------------------------------
+      # R0040 — Unexpected process arguments
+      #
+      # Additive companion to R0001. Fires only when:
+      #   1. The exec'd path IS in the user-defined ApplicationProfile
+      #      (so R0001 stays silent), AND
+      #   2. The runtime arg vector does NOT match any profile entry's
+      #      arg pattern via dynamicpathdetector.CompareExecArgs.
+      #
+      # Profile arg vectors may carry wildcard tokens:
+      #   "⋯" — exactly one position; "*" — zero or more trailing args.
+      # Anything else is literal-equality.
+      #
+      # Use case: a profile entry like {Path: "/bin/sh", Args: ["-c", "*"]}
+      # allows `sh -c <anything>` but flags `sh -x <anything>` as drift.
+      # ---------------------------------------------------------------
+      - name: "Unexpected process arguments"
+        enabled: true
+        id: "R0040"
+        description: "Process path is allowed by profile but argument vector does not match any profile entry's arg pattern (literal or wildcard ⋯/*)"
+        expressions:
+          message: "'Unexpected process arguments: ' + event.comm + ' with PID ' + string(event.pid)"
+          uniqueId: "event.comm + '_' + event.exepath"
+          ruleExpression:
+            - eventType: "exec"
+              expression: >
+                ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm)) &&
+                !ap.was_executed_with_args(event.containerId, parse.get_exec_path(event.args, event.comm), event.args)
+        profileDependency: 0
+        severity: 1
+        supportPolicy: false
+        isTriggerAlert: true
+        mitreTactic: "TA0002"
+        mitreTechnique: "T1059"
+        tags:
+          - "anomaly"
+          - "process"
+          - "exec"
+          - "applicationprofile"
+          - "context:kubernetes"
       - name: "Files Access Anomalies in container"
         enabled: true
         id: "R0002"

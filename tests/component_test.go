@@ -2175,9 +2175,15 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		k8sClient := k8sinterface.NewKubernetesApi()
 		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
+		// Upstream ContainerProfileCache (kubescape/node-agent#788) reads ONE
+		// pod label `kubescape.io/user-defined-profile=<name>` and uses
+		// <name> as the lookup key for BOTH the user AP and the user NN.
+		// AP and NN MUST therefore share that single name.
+		const overlayName = "curl-28-overlay"
+
 		ap := &v1beta1.ApplicationProfile{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "curl-ap",
+				Name:      overlayName,
 				Namespace: ns.Name,
 			},
 			Spec: v1beta1.ApplicationProfileSpec{
@@ -2201,7 +2207,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 
 		nn := &v1beta1.NetworkNeighborhood{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "curl-nn",
+				Name:      overlayName,
 				Namespace: ns.Name,
 				Annotations: map[string]string{
 					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
@@ -2244,8 +2250,8 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		require.NoError(t, err, "create NN")
 
 		require.Eventually(t, func() bool {
-			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), "curl-ap", v1.GetOptions{})
-			_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), "curl-nn", v1.GetOptions{})
+			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
+			_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
 			return apErr == nil && nnErr == nil
 		}, 30*time.Second, 1*time.Second, "AP+NN must be in storage before pod deploy")
 
@@ -2253,7 +2259,15 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
 		require.NoError(t, err)
 		require.NoError(t, wl.WaitForReady(80))
-		time.Sleep(15 * time.Second) // let node-agent load profiles
+		// Cache-load latency on the upstream ContainerProfileCache is bursty
+		// — 15s is enough on a quiet runner but not on a loaded one. The
+		// failure mode is alert metadata `errorMessage:"waiting for profile
+		// update"`, which means the rule manager evaluated against an
+		// unloaded NN and fired R0005/R0011 spuriously. 30s covers the
+		// observed worst-case in CI without pushing total test time too
+		// far. Real fix would be to poll a cache-loaded signal, but no
+		// such signal is exposed today.
+		time.Sleep(30 * time.Second)
 		return wl
 	}
 
@@ -2665,7 +2679,7 @@ func Test_29_SignedApplicationProfile(t *testing.T) {
 						{Path: "/bin/sleep"},
 						{Path: "/usr/bin/curl"},
 					},
-					Syscalls: []string{"socket", "connect", "read", "write", "close", "openat"},
+					Syscalls: []string{"close", "connect", "openat", "read", "socket", "write"},
 				},
 			},
 		},
@@ -2920,7 +2934,7 @@ func Test_30_TamperedSignedProfiles(t *testing.T) {
 							{Path: "/bin/sleep"},
 							{Path: "/usr/bin/curl"},
 						},
-						Syscalls: []string{"socket", "connect", "read", "write", "close", "openat"},
+						Syscalls: []string{"close", "connect", "openat", "read", "socket", "write"},
 					},
 				},
 			},
@@ -2966,34 +2980,35 @@ func Test_30_TamperedSignedProfiles(t *testing.T) {
 			path.Join(utils.CurrentDir(), "resources/curl-signed-deployment.yaml"))
 		require.NoError(t, err)
 		require.NoError(t, wl.WaitForReady(80))
-		time.Sleep(15 * time.Second) // let node-agent load profiles
 
-		// Execute nslookup — the attacker added this to the whitelist.
-		// With enforcement OFF: profile is loaded despite invalid signature,
-		// so nslookup is "allowed" and R0001 should NOT fire for it.
-		wl.ExecIntoPod([]string{"nslookup", "ebpf.io"}, "curl")
-
-		// Execute wget — NOT in the AP (even after tampering).
-		wl.ExecIntoPod([]string{"wget", "-qO-", "--timeout=5", "http://ebpf.io"}, "curl")
-
-		// Wait for alerts.
+		// Drive the unexpected exec inside Eventually so cache-load latency
+		// is absorbed by retries instead of a blind sleep. Same pattern as
+		// Test_29 (signed AP, anomalous exec) — without it, the first exec
+		// can land before the CP cache projects the user-defined AP, the
+		// rule manager evaluates against an empty baseline, and R0001 never
+		// fires within the polling window.
+		//
+		// wget is NOT in the AP (even after the attacker added nslookup), so
+		// once the cache loads, every wget exec produces an R0001 alert.
 		var alerts []testutils.Alert
 		require.Eventually(t, func() bool {
+			wl.ExecIntoPod([]string{"wget", "-qO-", "--timeout=2", "http://ebpf.io"}, "curl")
 			alerts, err = testutils.GetAlerts(ns.Name)
-			if err != nil || len(alerts) == 0 {
+			if err != nil {
 				return false
 			}
 			for _, a := range alerts {
-				if a.Labels["rule_id"] == "R0001" {
+				if a.Labels["rule_id"] == "R0001" && a.Labels["comm"] == "wget" {
 					return true
 				}
 			}
 			return false
-		}, 60*time.Second, 5*time.Second, "wget not in tampered AP must fire R0001")
+		}, 120*time.Second, 10*time.Second,
+			"wget not in tampered AP must fire R0001 — proves tampered profile was loaded (enforcement off)")
 
+		// Settle so any pending alerts flush, then dump for diagnostics.
 		time.Sleep(10 * time.Second)
 		alerts, _ = testutils.GetAlerts(ns.Name)
-
 		t.Logf("=== %d alerts ===", len(alerts))
 		for i, a := range alerts {
 			t.Logf("  [%d] %s(%s) comm=%s container=%s",
@@ -3001,153 +3016,786 @@ func Test_30_TamperedSignedProfiles(t *testing.T) {
 				a.Labels["comm"], a.Labels["container_name"])
 		}
 
-		// R0001 must have fired (tampered profile was loaded and used).
-		r0001Count := 0
-		for _, a := range alerts {
-			if a.Labels["rule_id"] == "R0001" {
-				r0001Count++
-			}
-		}
-		require.Greater(t, r0001Count, 0,
-			"R0001 must fire — proves tampered profile was loaded (enableSignatureVerification=false)")
-
-		// No dedicated tamper-detection alert exists (no R-number for this).
 		// With enableSignatureVerification=true:
-		//   - The tampered AP would be rejected (verifyApplicationProfile returns error)
-		//   - ProfileState.Status would be set to "verification-failed"
-		//   - The pod would have no baseline → no anomaly rules fire
+		//   - The tampered AP would be rejected (verifyUserApplicationProfile returns false)
+		//   - The pod would have no baseline → no anomaly rules fire for wget
 		//   - System fails OPEN (attacker evades detection by tampering the profile)
-		//   - NOTE: user-defined NNs in addContainer() are NOT verified (known gap)
-		t.Log("NOTE: No tamper-detection alert rule exists. With enableSignatureVerification=true,")
-		t.Log("      the tampered profile would be silently rejected. No R-number fires for tampering.")
+		//   - NOTE: user-defined NNs are not yet gated on the same flag (known gap)
+		// R1016 ("Signed profile tampered") fires regardless of the flag — that
+		// path is handled by Test_31.
+		t.Log("With enableSignatureVerification=true, the tampered profile would be silently rejected.")
 	})
 }
 
-// Test_31_TamperDetectionAlert verifies that R1016 fires when a previously
-// signed ApplicationProfile has been tampered with (signature is stale).
+// Test_31_TamperDetectionAlert verifies that R1016 "Signed profile tampered"
+// fires when a previously signed ApplicationProfile or NetworkNeighborhood
+// has been tampered with (signature annotations stale relative to the
+// resource bytes).
 //
-// This test proves the new tamper-detection alerting:
-//   - Sign an AP, push to storage
-//   - Tamper the AP in storage (modify spec, keep stale signature annotations)
-//   - Deploy a pod referencing the tampered profile
-//   - R1016 "Signed profile tampered" must fire
+// Coverage:
+//   31a — tampered AP fires R1016 (the original scenario; regression-pinned
+//         after upstream PR #788's cache rewrite re-wired alert emission).
+//   31b — untampered signed AP does NOT fire R1016 (negative; signature
+//         verifies cleanly so no alert).
+//   31c — unsigned AP does NOT fire R1016 (signing is opt-in; not-signed
+//         is not the same as tampered).
+//   31d — tampered NN fires R1016 via the parallel NN code path (different
+//         storage call, same emission contract).
 //
-// R1016 fires regardless of enableSignatureVerification setting.
-// The detection happens in the AP cache when it loads the profile.
+// All four subtests share signSignedAP / signSignedNN helpers; each subtest
+// uses its own namespace + its own AP/NN name to avoid alert cross-talk
+// between scenarios.
+//
+// R1016 fires regardless of cfg.EnableSignatureVerification: the alert is
+// always emitted on tamper; the flag only gates whether the cache also
+// rejects the load.
 func Test_31_TamperDetectionAlert(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
-	ns := testutils.NewRandomNamespace()
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
-	// ── 1. Build and sign an ApplicationProfile ──
-	ap := &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "signed-ap",
-			Namespace: ns.Name,
-		},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{
-				{
-					Name: "curl",
-					Execs: []v1beta1.ExecCalls{
-						{Path: "/bin/sleep"},
-						{Path: "/usr/bin/curl"},
+	// signSignedAP returns a signed ApplicationProfile in nsName under name.
+	//
+	// IMPORTANT: storage's PreSave normalises spec content (DeflateSortString
+	// sorts+dedupes Syscalls/Capabilities/Architectures, DeflateStringer
+	// dedupes Execs, AnalyzeOpens/Endpoints/UnifyIdentifiedCallStacks
+	// rewrite their respective slices, GetContent injects empty
+	// PolicyByRuleId maps, and K8s itself may default fields). Signing
+	// locally and then pushing to storage makes the SIGNED hash mismatch
+	// the POST-STORE content hash that node-agent's tamper check sees,
+	// firing R1016 on an untampered profile.
+	//
+	// Sign-after-roundtrip eliminates every drift source at once: push
+	// the AP unsigned, read back the storage-normalised form, sign THAT,
+	// and let the caller push the signed version (deployAndWait does an
+	// Update-or-Create, so the second push goes through the same
+	// idempotent deflate and produces the same content hash).
+	signSignedAP := func(t *testing.T, nsName, name string) *v1beta1.ApplicationProfile {
+		t.Helper()
+		// Pre-sort syscalls so the first roundtrip is a no-op for that field
+		// — keeps the assertion that "deflate is idempotent on already-sorted
+		// content" honest.
+		syscalls := []string{"close", "connect", "openat", "read", "socket", "write"}
+		ap := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nsName},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "curl",
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/bin/sleep"},
+							{Path: "/usr/bin/curl"},
+						},
+						Syscalls: syscalls,
 					},
-					Syscalls: []string{"socket", "connect", "read", "write", "close", "openat"},
 				},
 			},
-		},
+		}
+
+		// Round-trip 1: push unsigned, read back the normalised form.
+		_, err := storageClient.ApplicationProfiles(nsName).Create(
+			context.Background(), ap, metav1.CreateOptions{})
+		require.NoError(t, err, "create unsigned AP for normalisation")
+		var stored *v1beta1.ApplicationProfile
+		require.Eventually(t, func() bool {
+			s, gerr := storageClient.ApplicationProfiles(nsName).Get(
+				context.Background(), name, v1.GetOptions{})
+			if gerr != nil {
+				return false
+			}
+			stored = s
+			return true
+		}, 30*time.Second, 1*time.Second, "AP must be retrievable after unsigned create")
+
+		// Sign the storage-normalised content. Now the hash in the signature
+		// annotation matches what node-agent will see when it loads the AP.
+		require.NoError(t,
+			signature.SignObjectDisableKeyless(profiles.NewApplicationProfileAdapter(stored)),
+			"sign storage-normalised AP")
+
+		// Delete the unsigned in-storage copy so the caller's deployAndWait
+		// Create succeeds without an AlreadyExists conflict. Storage will
+		// re-deflate the signed AP on the second push; since that content
+		// is already normalised, deflate is a no-op and the hash stays
+		// stable.
+		require.NoError(t,
+			storageClient.ApplicationProfiles(nsName).Delete(
+				context.Background(), name, metav1.DeleteOptions{}),
+			"delete unsigned AP before caller re-pushes signed version")
+		// Strip server-managed metadata so the Create call doesn't see a
+		// stale resourceVersion / uid / creationTimestamp.
+		stored.ObjectMeta.ResourceVersion = ""
+		stored.ObjectMeta.UID = ""
+		stored.ObjectMeta.CreationTimestamp = v1.Time{}
+		stored.ObjectMeta.Generation = 0
+		return stored
 	}
 
-	apAdapter := profiles.NewApplicationProfileAdapter(ap)
-	require.NoError(t, signature.SignObjectDisableKeyless(apAdapter), "sign AP")
-	require.True(t, signature.IsSigned(apAdapter), "AP must be signed")
-	require.NoError(t, signature.VerifyObjectAllowUntrusted(apAdapter),
-		"signature must verify immediately after signing")
-	t.Log("AP signed successfully")
-
-	// ── 2. Tamper the AP (add unauthorized exec path) ──
-	ap.Spec.Containers[0].Execs = append(ap.Spec.Containers[0].Execs,
-		v1beta1.ExecCalls{Path: "/usr/bin/nslookup"})
-
-	// Verify the signature is now invalid
-	tamperedAdapter := profiles.NewApplicationProfileAdapter(ap)
-	require.Error(t, signature.VerifyObjectAllowUntrusted(tamperedAdapter),
-		"tampered AP must fail verification")
-	require.True(t, signature.IsSigned(tamperedAdapter),
-		"tampered AP must still have signature annotations (stale)")
-	t.Log("AP tampered — signature is stale")
-
-	// ── 3. Push tampered AP to storage ──
-	_, err := storageClient.ApplicationProfiles(ns.Name).Create(
-		context.Background(), ap, metav1.CreateOptions{})
-	require.NoError(t, err, "push tampered AP to storage")
-
-	// Verify it's stored with stale signature
-	require.Eventually(t, func() bool {
-		stored, getErr := storageClient.ApplicationProfiles(ns.Name).Get(
-			context.Background(), "signed-ap", v1.GetOptions{})
-		if getErr != nil {
-			return false
+	signSignedNN := func(t *testing.T, nsName, name string) *v1beta1.NetworkNeighborhood {
+		t.Helper()
+		nn := &v1beta1.NetworkNeighborhood{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: nsName},
+			Spec: v1beta1.NetworkNeighborhoodSpec{
+				LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "curl-signed"}},
+				Containers: []v1beta1.NetworkNeighborhoodContainer{
+					{Name: "curl"},
+				},
+			},
 		}
-		storedAdapter := profiles.NewApplicationProfileAdapter(stored)
-		return signature.IsSigned(storedAdapter) &&
-			signature.VerifyObjectAllowUntrusted(storedAdapter) != nil
-	}, 30*time.Second, 1*time.Second, "stored AP must have stale signature")
-	t.Log("Tampered AP stored with stale signature")
+		require.NoError(t, signature.SignObjectDisableKeyless(profiles.NewNetworkNeighborhoodAdapter(nn)), "sign NN")
+		return nn
+	}
 
-	// ── 4. Deploy pod referencing the tampered profile ──
-	wl, err := testutils.NewTestWorkload(ns.Name,
-		path.Join(utils.CurrentDir(), "resources/curl-signed-deployment.yaml"))
-	require.NoError(t, err)
-	require.NoError(t, wl.WaitForReady(80))
-	t.Log("Pod deployed, waiting for cache to detect tamper...")
-
-	// ── 5. Wait for R1016 "Signed profile tampered" alert ──
-	// The AP cache's addContainer or periodicUpdate will detect the tampered
-	// signature and emit R1016 via the exporter.
-	var alerts []testutils.Alert
-	require.Eventually(t, func() bool {
-		alerts, err = testutils.GetAlerts(ns.Name)
-		if err != nil || len(alerts) == 0 {
-			return false
+	// deployAndWait pushes the AP (and optionally NN) into storage, then
+	// deploys curl-signed-deployment.yaml and waits for it to come up. The
+	// deployment YAML uses kubescape.io/user-defined-profile=signed-ap as
+	// its label, so AP+NN names must equal "signed-ap" for the upstream
+	// CP cache to pick them up.
+	deployAndWait := func(t *testing.T, ns testutils.TestNamespace, ap *v1beta1.ApplicationProfile, nn *v1beta1.NetworkNeighborhood) *testutils.TestWorkload {
+		t.Helper()
+		if ap != nil {
+			_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+				context.Background(), ap, metav1.CreateOptions{})
+			require.NoError(t, err, "push AP to storage")
 		}
+		if nn != nil {
+			_, err := storageClient.NetworkNeighborhoods(ns.Name).Create(
+				context.Background(), nn, metav1.CreateOptions{})
+			require.NoError(t, err, "push NN to storage")
+		}
+		require.Eventually(t, func() bool {
+			if ap != nil {
+				if _, err := storageClient.ApplicationProfiles(ns.Name).Get(
+					context.Background(), ap.Name, v1.GetOptions{}); err != nil {
+					return false
+				}
+			}
+			if nn != nil {
+				if _, err := storageClient.NetworkNeighborhoods(ns.Name).Get(
+					context.Background(), nn.Name, v1.GetOptions{}); err != nil {
+					return false
+				}
+			}
+			return true
+		}, 30*time.Second, 1*time.Second, "AP/NN must be in storage before pod deploy")
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/curl-signed-deployment.yaml"))
+		require.NoError(t, err)
+		require.NoError(t, wl.WaitForReady(80))
+		return wl
+	}
+
+	countR1016 := func(t *testing.T, nsName string, settle time.Duration) int {
+		t.Helper()
+		// Allow node-agent to load the profile and for any alert to flush.
+		time.Sleep(settle)
+		alerts, err := testutils.GetAlerts(nsName)
+		if err != nil {
+			t.Logf("GetAlerts error: %v", err)
+			return 0
+		}
+		n := 0
 		for _, a := range alerts {
 			if a.Labels["rule_id"] == "R1016" {
+				n++
+				assert.Equal(t, "Signed profile tampered", a.Labels["rule_name"],
+					"R1016 alert must have correct rule name")
+				assert.Equal(t, nsName, a.Labels["namespace"],
+					"R1016 alert must have correct namespace")
+			}
+		}
+		t.Logf("[%s] R1016 count = %d (out of %d alerts)", nsName, n, len(alerts))
+		return n
+	}
+
+	// -----------------------------------------------------------------
+	// 31a — tampered AP fires R1016
+	// -----------------------------------------------------------------
+	t.Run("tampered_user_defined_AP_fires_R1016", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		ap := signSignedAP(t, ns.Name, "signed-ap")
+		// Tamper after signing: append an unauthorized exec entry. The
+		// signature annotations stay (stale).
+		ap.Spec.Containers[0].Execs = append(ap.Spec.Containers[0].Execs,
+			v1beta1.ExecCalls{Path: "/usr/bin/nslookup"})
+		require.Error(t,
+			signature.VerifyObjectAllowUntrusted(profiles.NewApplicationProfileAdapter(ap)),
+			"tampered AP must fail verification")
+
+		_ = deployAndWait(t, ns, ap, nil)
+
+		require.Eventually(t, func() bool {
+			alerts, _ := testutils.GetAlerts(ns.Name)
+			for _, a := range alerts {
+				if a.Labels["rule_id"] == "R1016" {
+					return true
+				}
+			}
+			return false
+		}, 120*time.Second, 5*time.Second, "tampered AP must produce R1016")
+
+		require.Greater(t, countR1016(t, ns.Name, 5*time.Second), 0)
+	})
+
+	// -----------------------------------------------------------------
+	// 31b — untampered signed AP must NOT fire R1016
+	// -----------------------------------------------------------------
+	t.Run("untampered_signed_AP_no_R1016", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		ap := signSignedAP(t, ns.Name, "signed-ap")
+		// Don't tamper. Signature verifies cleanly.
+		require.NoError(t,
+			signature.VerifyObjectAllowUntrusted(profiles.NewApplicationProfileAdapter(ap)),
+			"untampered signed AP must verify")
+
+		_ = deployAndWait(t, ns, ap, nil)
+		// Wait for cache load to happen (cache picks it up within ~15s).
+		assert.Equal(t, 0, countR1016(t, ns.Name, 30*time.Second),
+			"untampered signed AP must NOT fire R1016")
+	})
+
+	// -----------------------------------------------------------------
+	// 31c — unsigned AP must NOT fire R1016 (signing is opt-in)
+	// -----------------------------------------------------------------
+	t.Run("unsigned_AP_no_R1016", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		ap := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{Name: "signed-ap", Namespace: ns.Name},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "curl",
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/bin/sleep"},
+						},
+						Syscalls: []string{"socket"},
+					},
+				},
+			},
+		}
+		require.False(t,
+			signature.IsSigned(profiles.NewApplicationProfileAdapter(ap)),
+			"unsigned AP must not have signature annotations")
+
+		_ = deployAndWait(t, ns, ap, nil)
+		assert.Equal(t, 0, countR1016(t, ns.Name, 30*time.Second),
+			"unsigned AP must NOT fire R1016 — not-signed is not the same as tampered")
+	})
+
+	// -----------------------------------------------------------------
+	// 31d — tampered NN fires R1016 via the NN code path
+	// -----------------------------------------------------------------
+	t.Run("tampered_user_defined_NN_fires_R1016", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		// Untampered AP (matched on name to the pod label) so the AP path
+		// stays silent and we know any R1016 came from the NN path.
+		ap := signSignedAP(t, ns.Name, "signed-ap")
+		nn := signSignedNN(t, ns.Name, "signed-ap")
+		// Tamper the NN: add a container the original signature didn't cover.
+		nn.Spec.Containers = append(nn.Spec.Containers,
+			v1beta1.NetworkNeighborhoodContainer{Name: "drift"})
+		require.Error(t,
+			signature.VerifyObjectAllowUntrusted(profiles.NewNetworkNeighborhoodAdapter(nn)),
+			"tampered NN must fail verification")
+
+		_ = deployAndWait(t, ns, ap, nn)
+
+		require.Eventually(t, func() bool {
+			alerts, _ := testutils.GetAlerts(ns.Name)
+			for _, a := range alerts {
+				if a.Labels["rule_id"] == "R1016" {
+					return true
+				}
+			}
+			return false
+		}, 120*time.Second, 5*time.Second, "tampered NN must produce R1016")
+
+		require.Greater(t, countR1016(t, ns.Name, 5*time.Second), 0)
+	})
+
+}
+
+// ---------------------------------------------------------------------------
+// Test_32_UnexpectedProcessArguments — component test for the wildcard-aware
+// exec-argument matching (R0040). Each subtest gets its own namespace so
+// alerts don't cross-contaminate.
+//
+// AP overlay declares 4 allowed exec patterns for the curl pod:
+//
+//   /bin/sleep    [sleep, *]              — pod startup, must stay silent
+//   /bin/sh       [sh, -c, *]             — sh -c <anything>
+//   /bin/echo     [echo, hello, *]        — echo hello <anything trailing>
+//   /usr/bin/curl [curl, -s, ⋯]           — curl -s <one-arg>
+//
+// Profile loaded into the new ContainerProfileCache via the unified
+// kubescape.io/user-defined-profile=<name> label. The exec.go CEL function
+// routes ap.was_executed_with_args through dynamicpathdetector.CompareExecArgs.
+//
+// R0040 ("Unexpected process arguments") fires when:
+//   - the exec'd path IS in the profile (R0001 silent), AND
+//   - the runtime arg vector does NOT match any profile entry's pattern.
+//
+// Each subtest exec's a single command, then asserts presence/absence of
+// R0040 only. R0001 / R0005 / R0011 may also fire on unrelated paths or
+// network egress; those are not what this test is gating.
+// ---------------------------------------------------------------------------
+func Test_32_UnexpectedProcessArguments(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	const overlayName = "curl-32-overlay"
+
+	setup := func(t *testing.T) *testutils.TestWorkload {
+		t.Helper()
+		ns := testutils.NewRandomNamespace()
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+		ap := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      overlayName,
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "curl",
+						Execs: []v1beta1.ExecCalls{
+							// IMPORTANT: argv[0] in the eBPF-captured event is
+							// the FULL exec path (see Test_27's wildcard YAML
+							// fixture for the same convention). Profile arg
+							// vectors must include argv[0] as full path so the
+							// matcher's first-position literal compare hits.
+							//
+							// pod startup: sleep <anything>
+							{Path: "/bin/sleep", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
+							// sh -c <anything trailing>
+							{Path: "/bin/sh", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+							// echo hello <anything trailing>
+							{Path: "/bin/echo", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+							// curl -s <one URL>
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier}},
+						},
+						Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev", "execve"},
+					},
+				},
+			},
+		}
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), ap, metav1.CreateOptions{})
+		require.NoError(t, err, "create AP")
+
+		require.Eventually(t, func() bool {
+			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(
+				context.Background(), overlayName, v1.GetOptions{})
+			return apErr == nil
+		}, 30*time.Second, 1*time.Second, "AP must be in storage before pod deploy")
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/curl-exec-arg-wildcards-deployment.yaml"))
+		require.NoError(t, err)
+		require.NoError(t, wl.WaitForReady(80))
+		// let node-agent load the user AP into the CP cache
+		time.Sleep(15 * time.Second)
+		return wl
+	}
+
+	countByRule := func(alerts []testutils.Alert, ruleID string) int {
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID {
+				n++
+			}
+		}
+		return n
+	}
+
+	waitAlerts := func(t *testing.T, ns string) []testutils.Alert {
+		t.Helper()
+		var alerts []testutils.Alert
+		var err error
+		require.Eventually(t, func() bool {
+			alerts, err = testutils.GetAlerts(ns)
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "must be able to fetch alerts")
+		// settle time for any in-flight alerts
+		time.Sleep(10 * time.Second)
+		alerts, _ = testutils.GetAlerts(ns)
+		return alerts
+	}
+
+	logAlerts := func(t *testing.T, alerts []testutils.Alert) {
+		t.Helper()
+		for i, a := range alerts {
+			t.Logf("  [%d] %s(%s) comm=%s container=%s",
+				i, a.Labels["rule_name"], a.Labels["rule_id"],
+				a.Labels["comm"], a.Labels["container_name"])
+		}
+	}
+
+	// -----------------------------------------------------------------
+	// 32a. sh -c <anything>  — argv [sh, -c, "echo hi"] matches
+	//      profile [sh, -c, *]. R0040 must NOT fire.
+	// -----------------------------------------------------------------
+	t.Run("sh_dash_c_matches_wildcard_trailing", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"sh", "-c", "echo hi"}, "curl")
+		t.Logf("sh -c 'echo hi' → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+			"sh -c <cmd> matches profile [sh, -c, *] — R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32b. sh -x <anything>  — argv [sh, -x, "echo hi"] does NOT match
+	//      profile [sh, -c, *] (literal anchor `-c` mismatch). Path
+	//      /bin/sh IS in profile so R0001 stays silent. R0040 must fire.
+	// -----------------------------------------------------------------
+	t.Run("sh_dash_x_mismatches_R0040", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"sh", "-x", "echo hi"}, "curl")
+		t.Logf("sh -x 'echo hi' → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		require.Greater(t, countByRule(alerts, "R0040"), 0,
+			"sh -x mismatches profile [sh, -c, *] → R0040 must fire")
+	})
+
+	// -----------------------------------------------------------------
+	// 32c. echo hello <anything> — argv [echo, hello, world, from, test]
+	//      matches profile [echo, hello, *]. R0040 must NOT fire.
+	// -----------------------------------------------------------------
+	t.Run("echo_hello_matches_wildcard_trailing", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"echo", "hello", "world", "from", "test"}, "curl")
+		t.Logf("echo hello world from test → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+			"echo hello <words> matches profile [echo, hello, *] — R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32d. echo goodbye <anything> — argv [echo, goodbye, world] does
+	//      NOT match profile [echo, hello, *] (literal anchor `hello`
+	//      mismatch). R0040 must fire.
+	// -----------------------------------------------------------------
+	t.Run("echo_goodbye_mismatches_R0040", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"echo", "goodbye", "world"}, "curl")
+		t.Logf("echo goodbye world → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		require.Greater(t, countByRule(alerts, "R0040"), 0,
+			"echo goodbye <words> mismatches profile [echo, hello, *] (literal anchor) → R0040 must fire")
+	})
+}
+
+// Test_33_AnalyzeOpensWildcardAnchoring pins the wildcard-matching
+// contract that storage-side CompareDynamic enforces, end-to-end through
+// R0002 ("Files Access Anomalies in container").
+//
+// Each subtest spins up a fresh nginx pod with a user-defined AP that
+// carries ONE Opens entry, then `cat`s a target path that probes a
+// boundary case from the storage-side analyzer fixes (kubescape/storage
+// PR #316 review by matthyx + entlein):
+//
+//   - Anchored trailing `*` matches one OR MORE remaining segments —
+//     never zero. So `/etc/*` matches `/etc/passwd` but NOT the bare
+//     `/etc` directory. Without this rule, R0002 silently allowed
+//     access to the parent of any profiled directory.
+//   - DynamicIdentifier (⋯) consumes EXACTLY ONE segment.
+//   - Mid-path `*` consumes ZERO or more, so `/etc/*/*` still matches
+//     `/etc/ssh` (inner `*` consumed zero, trailing `*` consumed one).
+//   - splitPath normalises trailing slashes on both dynamic and
+//     regular paths so `/etc/passwd/` is treated as `/etc/passwd`.
+//   - Mixed `⋯/*` patterns: ⋯ pins one segment, `*` consumes the rest
+//     (with one-or-more semantics).
+//
+// Component-level pin sits ON TOP of the unit tests in storage's
+// pkg/registry/file/dynamicpathdetector/tests/coverage_test.go.
+// Both layers must agree — if the unit suite drifts away from these
+// runtime expectations, R0002 has either a false-positive or a
+// false-negative bug.
+func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	const ruleName = "Files Access Anomalies in container"
+	const profileName = "nginx-regex-profile"
+
+	type subtestResult struct {
+		name        string
+		profilePath string
+		filePath    string
+		expectAlert bool
+		passed      bool
+		detail      string
+	}
+	var results []subtestResult
+	addResult := func(name, profilePath, filePath string, expectAlert, passed bool, detail string) {
+		results = append(results, subtestResult{name, profilePath, filePath, expectAlert, passed, detail})
+	}
+	defer func() {
+		t.Log("\n========== Test_33 Summary ==========")
+		anyFailed := false
+		for _, r := range results {
+			status := "PASS"
+			if !r.passed {
+				status = "FAIL"
+				anyFailed = true
+			}
+			expect := "expect alert"
+			if !r.expectAlert {
+				expect = "expect NO alert"
+			}
+			t.Logf("  [%s] %-50s profile=%-25s file=%-30s %s", status, r.name, r.profilePath, r.filePath, expect)
+			if !r.passed {
+				t.Logf("         -> %s", r.detail)
+			}
+		}
+		if !anyFailed {
+			t.Log("  All subtests passed.")
+		}
+		t.Log("======================================")
+	}()
+
+	// deployWithProfile creates a user-defined AP with a single Opens
+	// entry (plus a couple of always-needed paths nginx hits at startup),
+	// then deploys nginx with the user-defined-profile label pointing at
+	// it and waits for the pod + cache load.
+	deployWithProfile := func(t *testing.T, profilePath string) *testutils.TestWorkload {
+		t.Helper()
+		ns := testutils.NewRandomNamespace()
+
+		profile := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      profileName,
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Architectures: []string{"amd64"},
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "nginx",
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/bin/cat", Args: []string{"/bin/cat"}},
+						},
+						Opens: []v1beta1.OpenCalls{
+							{Path: profilePath, Flags: []string{"O_RDONLY"}},
+							// Dynamic linker fires this on every exec — keep
+							// it whitelisted so it doesn't drown out the
+							// signal we actually care about.
+							{Path: "/etc/ld.so.cache", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
+						},
+					},
+				},
+			},
+		}
+
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), profile, metav1.CreateOptions{})
+		require.NoError(t, err, "create user-defined profile %q in ns %s", profileName, ns.Name)
+
+		require.Eventually(t, func() bool {
+			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(
+				context.Background(), profileName, v1.GetOptions{})
+			return apErr == nil
+		}, 30*time.Second, 1*time.Second, "AP must be retrievable from storage before deploying the pod")
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/nginx-user-profile-deployment.yaml"))
+		require.NoError(t, err, "create workload in ns %s", ns.Name)
+		// 11 subtests deploy a fresh pod sequentially, so each later subtest
+		// races against an increasingly loaded kind cluster — the upstream
+		// CP cache reconciler, alertmanager, and prometheus all chew CPU at
+		// boot. 80s timed out intermittently; 180s gives headroom without
+		// pushing the total test runtime into a different regime.
+		require.NoError(t, wl.WaitForReady(180), "workload not ready in ns %s", ns.Name)
+
+		// Wait for node-agent to load the user-defined profile into cache.
+		time.Sleep(10 * time.Second)
+		return wl
+	}
+
+	// catAndAlerts execs `cat <path>` (ignoring cat's own exit error —
+	// catting a directory or a non-readable file still triggers the
+	// open() syscall the eBPF tracer captures), then polls for alerts.
+	catAndAlerts := func(t *testing.T, wl *testutils.TestWorkload, filePath string) []testutils.Alert {
+		t.Helper()
+		stdout, stderr, _ := wl.ExecIntoPod([]string{"cat", filePath}, "nginx")
+		t.Logf("cat %q → stdout=%q stderr=%q", filePath, stdout, stderr)
+
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			a, err := testutils.GetAlerts(wl.Namespace)
+			if err != nil {
+				return false
+			}
+			alerts = a
+			return true
+		}, 60*time.Second, 5*time.Second, "alerts must be retrievable from ns %s", wl.Namespace)
+		// Settle so any late R0002 alert lands before we count.
+		time.Sleep(10 * time.Second)
+		alerts, err := testutils.GetAlerts(wl.Namespace)
+		require.NoError(t, err, "get alerts from ns %s", wl.Namespace)
+		return alerts
+	}
+
+	// hasR0002 returns true if any R0002 alert fired for `cat` in the
+	// nginx container.
+	hasR0002 := func(alerts []testutils.Alert) bool {
+		for _, a := range alerts {
+			if a.Labels["rule_name"] == ruleName &&
+				a.Labels["comm"] == "cat" &&
+				a.Labels["container_name"] == "nginx" {
 				return true
 			}
 		}
 		return false
-	}, 120*time.Second, 5*time.Second, "R1016 must fire for tampered signed AP")
-
-	// ── 6. Log all alerts for debugging ──
-	time.Sleep(5 * time.Second)
-	alerts, _ = testutils.GetAlerts(ns.Name)
-
-	t.Logf("=== %d alerts ===", len(alerts))
-	for i, a := range alerts {
-		t.Logf("  [%d] %s(%s) comm=%s container=%s",
-			i, a.Labels["rule_name"], a.Labels["rule_id"],
-			a.Labels["comm"], a.Labels["container_name"])
 	}
 
-	// Verify R1016 alert details
-	r1016Count := 0
-	for _, a := range alerts {
-		if a.Labels["rule_id"] == "R1016" {
-			r1016Count++
-			assert.Equal(t, "Signed profile tampered", a.Labels["rule_name"],
-				"R1016 alert must have correct rule name")
-			assert.Equal(t, ns.Name, a.Labels["namespace"],
-				"R1016 alert must have correct namespace")
-			t.Logf("R1016 alert: rule_name=%s namespace=%s severity=%s",
-				a.Labels["rule_name"], a.Labels["namespace"], a.Labels["severity"])
-		}
+	tests := []struct {
+		name        string
+		profilePath string
+		filePath    string
+		expectAlert bool
+		why         string // contract pinned by this case
+	}{
+		// ─── Trailing-`*` anchoring (the security fix) ──────────────
+		//
+		// IMPORTANT: R0002's CEL ruleExpression has a strict prefix
+		// filter (event.path.startsWith('/etc/'), startsWith('/var/log/'),
+		// etc. — all with trailing slash). Bare `/etc` and `/var/log`
+		// don't match those prefixes, so the rule never evaluates on
+		// them and the matcher's anchoring contract stays invisible at
+		// runtime. Probe one level deeper instead — `/etc/ssl` IS under
+		// the `/etc/` monitored prefix, so R0002 CAN see whether a
+		// `/etc/ssl/*` profile entry matches the bare `/etc/ssl` parent.
+		{
+			name:        "trailing_star_matches_immediate_child",
+			profilePath: "/etc/*",
+			filePath:    "/etc/hosts",
+			expectAlert: false,
+			why:         "/etc/* matches a one-segment child under /etc",
+		},
+		{
+			name:        "trailing_star_matches_deep_child",
+			profilePath: "/etc/*",
+			filePath:    "/etc/ssl/openssl.cnf",
+			expectAlert: false,
+			why:         "/etc/* matches a multi-segment path under /etc (mid-path zero-or-more)",
+		},
+		{
+			name:        "trailing_star_does_not_match_bare_parent_under_monitored_prefix",
+			profilePath: "/etc/ssl/*",
+			filePath:    "/etc/ssl",
+			expectAlert: true,
+			why:         "/etc/ssl/* must NOT match the bare /etc/ssl directory itself — pins the security fix at a path R0002's prefix filter can observe",
+		},
+		{
+			name:        "deep_prefix_trailing_star_does_not_match_parent",
+			profilePath: "/etc/ssl/certs/*",
+			filePath:    "/etc/ssl/certs",
+			expectAlert: true,
+			why:         "Same anchoring rule, deeper: /etc/ssl/certs/* does NOT match /etc/ssl/certs",
+		},
+
+		// ─── DynamicIdentifier (⋯) exactly-one ──────────────────────
+		{
+			name:        "ellipsis_requires_one_segment_not_zero",
+			profilePath: "/etc/passwd/" + dynamicpathdetector.DynamicIdentifier,
+			filePath:    "/etc/passwd",
+			expectAlert: true,
+			why:         "⋯ consumes EXACTLY ONE segment; /etc/passwd/⋯ requires one more, /etc/passwd alone has zero past — must fire R0002",
+		},
+
+		// ─── Mixed ⋯/* combinations ─────────────────────────────────
+		{
+			name:        "ellipsis_then_trailing_star_matches_two_segment_tail",
+			profilePath: "/proc/" + dynamicpathdetector.DynamicIdentifier + "/*",
+			filePath:    "/proc/1/status",
+			expectAlert: false,
+			why:         "/proc/⋯/* matches /proc/1/status (⋯ consumes 1, * consumes ≥1)",
+		},
+		{
+			name:        "ellipsis_then_trailing_star_matches_three_segment_tail",
+			profilePath: "/proc/" + dynamicpathdetector.DynamicIdentifier + "/*",
+			filePath:    "/proc/1/task/1",
+			expectAlert: false,
+			why:         "/proc/⋯/* matches deeper paths (⋯ consumes 1, * consumes ≥1 covering rest)",
+		},
+
+		// ─── Multiple trailing wildcards ────────────────────────────
+		{
+			name:        "double_trailing_matches_one_child",
+			profilePath: "/etc/*/*",
+			filePath:    "/etc/ssl",
+			expectAlert: false,
+			why:         "/etc/*/* matches /etc/ssh (mid-* consumes zero, trailing-* consumes one)",
+		},
+		{
+			name:        "double_trailing_matches_deep_child",
+			profilePath: "/etc/*/*",
+			filePath:    "/etc/ssl/openssl.cnf",
+			expectAlert: false,
+			why:         "/etc/*/* matches /etc/ssl/openssl.cnf (mid-* consumes one, trailing-* consumes one)",
+		},
+		{
+			name:        "double_trailing_does_not_match_parent_under_monitored_prefix",
+			profilePath: "/etc/ssl/*/*",
+			filePath:    "/etc/ssl",
+			expectAlert: true,
+			why:         "/etc/ssl/*/* requires at least one segment past /etc/ssl; bare /etc/ssl must NOT match (probed under /etc/ so R0002 sees it)",
+		},
+
+		// ─── splitPath trailing-slash normalisation ─────────────────
+		{
+			name:        "trailing_slash_in_profile_normalises_to_literal",
+			profilePath: "/etc/passwd/",
+			filePath:    "/etc/passwd",
+			expectAlert: false,
+			why:         "Profile `/etc/passwd/` is normalised to `/etc/passwd`; matches the literal at runtime",
+		},
 	}
-	require.Greater(t, r1016Count, 0,
-		"R1016 must fire — proves tamper detection alerting works")
-	t.Log("Tamper detection alerting verified successfully")
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Logf("contract: %s", tc.why)
+			wl := deployWithProfile(t, tc.profilePath)
+			alerts := catAndAlerts(t, wl, tc.filePath)
+			got := hasR0002(alerts)
+
+			detail := fmt.Sprintf("got %d alerts total; R0002 fired = %v", len(alerts), got)
+			passed := got == tc.expectAlert
+			if !passed {
+				if tc.expectAlert {
+					t.Errorf("expected R0002 alert: profile %q must NOT match %q (%s); but no alert fired",
+						tc.profilePath, tc.filePath, tc.why)
+				} else {
+					t.Errorf("expected NO R0002 alert: profile %q should match %q (%s); but alert fired",
+						tc.profilePath, tc.filePath, tc.why)
+				}
+			}
+			addResult(tc.name, tc.profilePath, tc.filePath, tc.expectAlert, passed, detail)
+		})
+	}
 }

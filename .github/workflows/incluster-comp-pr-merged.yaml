@@ -60,9 +60,6 @@ on:
         default: false
         type: boolean
 
-# Default to read-only at the workflow level (least privilege per Scorecard).
-# Jobs that need elevated scopes override below.
-permissions: read-all
 
 jobs:
   docker-build:

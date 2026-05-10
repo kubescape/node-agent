@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
@@ -109,6 +110,11 @@ type ContainerProfileCacheImpl struct {
 	k8sObjectCache objectcache.K8sObjectCache
 	metricsManager metricsmanager.MetricsManager
 
+	// tamperAlertExporter receives R1016 "Signed profile tampered" alerts
+	// when a user-supplied AP/NN overlay fails signature verification. Set
+	// after construction via SetTamperAlertExporter; nil disables alerting.
+	tamperAlertExporter exporters.Exporter
+
 	reconcileEvery    time.Duration
 	rpcBudget         time.Duration
 	refreshInProgress atomic.Bool
@@ -116,6 +122,14 @@ type ContainerProfileCacheImpl struct {
 	// deprecationDedup tracks (kind|ns/name@rv) keys to emit one WARN log
 	// per legacy CRD resource-version across the process lifetime.
 	deprecationDedup sync.Map
+
+	// tamperEmitted dedup R1016 alerts: only emit once per
+	// (kind|ns/name@resourceVersion). Without this, the cache refresh loop
+	// would re-emit on every reconcile cycle, once per container reference.
+	// A re-tamper at a new resourceVersion still alerts because the key
+	// changes; verification passing again clears the entry so future
+	// transitions can re-alert.
+	tamperEmitted sync.Map
 }
 
 // NewContainerProfileCache creates a new ContainerProfileCacheImpl.
@@ -383,6 +397,12 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 				helpers.Error(userAPErr))
 			userAP = nil
 		}
+		// Re-verify the user-supplied AP signature on every load. Emits
+		// R1016 if the profile is signed but tampered. Does not gate
+		// loading unless cfg.EnableSignatureVerification is true.
+		if userAP != nil && !c.verifyUserApplicationProfile(userAP, sharedData.Wlid) {
+			userAP = nil
+		}
 		var userNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
 			userNN, userNNErr = c.storageClient.GetNetworkNeighborhood(rctx, ns, overlayName)
@@ -394,6 +414,10 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 				helpers.String("namespace", ns),
 				helpers.String("name", overlayName),
 				helpers.Error(userNNErr))
+			userNN = nil
+		}
+		// Same tamper-check on the NN side.
+		if userNN != nil && !c.verifyUserNetworkNeighborhood(userNN, sharedData.Wlid) {
 			userNN = nil
 		}
 	}

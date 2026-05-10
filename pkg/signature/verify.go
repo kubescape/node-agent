@@ -64,7 +64,11 @@ func VerifyObject(obj SignableObject, opts ...VerifyOption) error {
 			helpers.String("name", obj.GetName()),
 			helpers.String("error", verifyErr.Error()))
 
-		return fmt.Errorf("signature verification failed: %w", verifyErr)
+		// Wrap with the ErrSignatureMismatch sentinel so callers can
+		// distinguish actual tamper from operational errors (hash
+		// computation, verifier construction) returned above.
+		// errors.Is(err, ErrSignatureMismatch) is the canonical check.
+		return fmt.Errorf("%w: %w", ErrSignatureMismatch, verifyErr)
 	}
 
 	logger.L().Info("Successfully verified object signature",

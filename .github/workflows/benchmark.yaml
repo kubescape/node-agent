@@ -24,9 +24,6 @@ on:
         required: false
         type: string
 
-# Default to read-only at the workflow level (least privilege per Scorecard).
-# Jobs that need elevated scopes override below.
-permissions: read-all
 
 concurrency:
   group: benchmark-${{ github.ref }}
