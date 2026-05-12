@@ -778,7 +778,7 @@ func (e *DatasourceEvent) IsDir() bool {
 
 func (e *DatasourceEvent) MakeHttpEvent(request *http.Request, direction consts.NetworkDirection) HttpEvent {
 	return &DatasourceEvent{
-		Data:       e.Data,
+		Data:       e.Datasource.DeepCopy(e.Data),
 		Datasource: e.Datasource,
 		Direction:  direction,
 		EventType:  e.EventType,
