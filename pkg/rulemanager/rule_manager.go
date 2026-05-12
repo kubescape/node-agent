@@ -143,20 +143,28 @@ func (rm *RuleManager) recompileProjectionSpec() {
 	rules := rm.ruleBindingCache.GetRuleCreator().CreateAllRules()
 
 	// Soft-launch validation: rules with profileDependency>0 but no
-	// profileDataRequired will receive an empty projection. Emit an ERROR
-	// log and increment the metric; reject (filter out) only in strict mode.
+	// profileDataRequired will receive an empty projection. Emit a DEBUG log
+	// per rule and increment the metric; reject (filter out) only in strict mode.
+	// A WARNING is emitted after the loop if no rule declares profileDataRequired,
+	// which likely means the deployed CRD is outdated.
 	filtered := rules[:0]
+	var missingIDs []string
 	for _, r := range rules {
 		if r.ProfileDependency > 0 && r.ProfileDataRequired == nil {
-			logger.L().Error("rule has profileDependency but no profileDataRequired — projection will be empty for this rule",
+			logger.L().Debug("rule has profileDependency but no profileDataRequired — projection will be empty for this rule",
 				helpers.String("ruleID", r.ID),
 				helpers.Int("profileDependency", int(r.ProfileDependency)))
 			rm.metrics.IncMissingProfileDataRequired(r.ID)
+			missingIDs = append(missingIDs, r.ID)
 			if rm.cfg.ProfileProjection.StrictValidation {
 				continue
 			}
 		}
 		filtered = append(filtered, r)
+	}
+	if len(missingIDs) > 0 && len(missingIDs) == len(rules) {
+		logger.L().Warning("no rule declares profileDataRequired — the deployed rules CRD may be outdated",
+			helpers.Int("affectedRules", len(missingIDs)))
 	}
 	rules = filtered
 
