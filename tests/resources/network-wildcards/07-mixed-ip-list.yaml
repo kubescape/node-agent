@@ -1,0 +1,36 @@
+# Fixture 07 — mixed list (literal + CIDR + sentinel)
+#
+# Edge case:    a single ipAddresses[] list mixes all three forms
+# Expects:
+#               "10.1.2.3"      → matches via 10.0.0.0/8
+#               "162.0.217.171" → matches via the literal
+#               "8.8.8.8"       → matches via the `*` sentinel
+#               (this fixture intentionally has an unconstrained `*` because
+#               of the sentinel — the literal and CIDR are illustrative)
+# Match path:   ANY entry matches → match passes (logical OR)
+# Spec ref:     §5.7 algorithm "for each entry e in profile.ipAddresses"
+# Test value:   exercises the loop ordering and short-circuit-on-first-match
+#               behaviour
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-07-mixed-ip-list
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-07
+  containers:
+  - name: client
+    egress:
+    - identifier: mixed-shapes
+      type: external
+      ipAddresses:
+        - "162.0.217.171"     # IPv4 literal
+        - "10.0.0.0/8"        # IPv4 CIDR
+        - "2001:db8::/32"     # IPv6 CIDR
+        - "*"                 # any (sentinel — overrides everything; here for test)
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

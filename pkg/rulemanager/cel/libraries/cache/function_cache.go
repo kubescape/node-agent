@@ -84,7 +84,7 @@ type CelFunction func(...ref.Val) ref.Val
 // ensures cached results are invalidated whenever the projection spec changes.
 func HashForContainerProfile(oc objectcache.ObjectCache) func([]ref.Val) string {
 	return func(values []ref.Val) string {
-		if len(values) == 0 || oc == nil {
+		if len(values) == 0 || values[0] == nil || oc == nil {
 			return ""
 		}
 		containerIDStr, ok := values[0].Value().(string)

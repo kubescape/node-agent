@@ -1,0 +1,54 @@
+# Fixture 20 — multi-container pod with different rules per container
+#
+# Edge case:    a single NetworkNeighborhood applies to a multi-container pod;
+#               each container has its own egress/ingress block; the verifier
+#               MUST scope matching by container ID (not pod ID)
+# Expects:
+#   container "frontend" can hit *.example.com. but NOT 10.0.0.0/8;
+#   container "sidecar"  can hit 10.0.0.0/8     but NOT *.example.com.;
+#   if the verifier conflates containers, both restrictions collapse to "either"
+#   and the test fails
+# Match path:   nn.* CEL functions resolve the ContainerProfile by containerID,
+#               so the matchers operate on the ALREADY-scoped Spec.Egress slice
+# Spec ref:     §4.2 container entry — each container is independently profiled
+#
+# This is also the most realistic deployment shape: a frontend that calls
+# external APIs plus an in-cluster sidecar that talks to DBs/caches.
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-20-multi-container
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-20
+  containers:
+  - name: frontend
+    egress:
+    - identifier: external-api
+      type: external
+      dnsNames:
+        - "*.example.com."          # leading-* RFC 4592
+        - "api.partner.io."         # literal
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}
+  - name: sidecar
+    egress:
+    - identifier: in-cluster-services
+      type: internal
+      ipAddresses:
+        - "10.0.0.0/8"              # cluster pod CIDR
+        - "172.16.0.0/12"           # alt cluster service CIDR
+      ports:
+        - {name: TCP-6379, protocol: TCP, port: 6379}    # redis
+        - {name: TCP-5432, protocol: TCP, port: 5432}    # postgres
+    ingress:
+    - identifier: from-frontend
+      type: internal
+      ipAddresses:
+        - "10.244.0.0/16"           # narrower — only the frontend pod's CIDR
+      ports:
+        - {name: TCP-9090, protocol: TCP, port: 9090}    # sidecar metrics

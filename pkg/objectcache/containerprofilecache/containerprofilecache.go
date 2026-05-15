@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
@@ -122,6 +123,12 @@ type ContainerProfileCacheImpl struct {
 	specGeneration atomic.Int64  // bumped on each distinct spec hash change
 	nudge          chan struct{} // buffered cap 1; signals reconciler on spec change
 	refreshPending atomic.Bool   // set when a nudge arrives while refresh is running
+
+	// Tamper detection state (fork-only). See tamper_alert.go for the full
+	// description; reintroduced here on top of upstream's reshape so the
+	// legacy R1016 "Signed profile tampered" wiring keeps working.
+	tamperAlertExporter exporters.Exporter
+	tamperEmitted       sync.Map // tamperKey -> struct{}
 }
 
 // NewContainerProfileCache creates a new ContainerProfileCacheImpl.
@@ -398,6 +405,13 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 				helpers.Error(userAPErr))
 			userAP = nil
 		}
+		// Tamper detection: re-verify the signature on every load. Emits R1016
+		// when a signed overlay's signature no longer matches (i.e. content
+		// has been mutated post-sign). No-op when the overlay is unsigned or
+		// the tamper-alert exporter has not been wired.
+		if userAP != nil {
+			c.verifyUserApplicationProfile(userAP, sharedData.Wlid)
+		}
 		var userNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
 			userNN, userNNErr = c.storageClient.GetNetworkNeighborhood(rctx, ns, overlayName)
@@ -410,6 +424,9 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 				helpers.String("name", overlayName),
 				helpers.Error(userNNErr))
 			userNN = nil
+		}
+		if userNN != nil {
+			c.verifyUserNetworkNeighborhood(userNN, sharedData.Wlid)
 		}
 	}
 

@@ -1,0 +1,29 @@
+# Fixture 09 — DNS literal
+#
+# Edge case:    plain FQDN, byte-equality after trailing-dot normalisation
+# Expects:      observed "api.stripe.com." matches; "api.stripe.com" matches
+#               (both forms equivalent); "v1.api.stripe.com." does NOT
+# Match path:   normalise trailing dot on both profile entry and observed name,
+#               then byte-equality
+# Spec ref:     §5.8 "Literal" row, plus the trailing-dot normalisation paragraph
+# RFC ref:      RFC 1035 § 3.1 (FQDN syntax)
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-09-dns-literal
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-09
+  containers:
+  - name: client
+    egress:
+    - identifier: stripe-api-literal
+      type: external
+      dnsNames:
+        - "api.stripe.com."
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

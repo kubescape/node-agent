@@ -1,0 +1,46 @@
+# Fixture 12 — DNS trailing wildcard `<prefix>.*`
+#
+# Edge case:    one OR MORE labels after the prefix (NEVER zero)
+# Expects:
+#   observed "mycorp.com.api."                  → match (one label after)
+#   observed "mycorp.com.api.v1."               → match (two labels after)
+#   observed "mycorp.com.api.v1.eu-west-1."     → match (three labels after)
+#   observed "mycorp.com."                      → NO match (apex — zero labels;
+#                                                   trailing `*` requires ≥1)
+# Match path:   label-split + recursive matcher with one-or-more-segment
+#               semantic on trailing `*`. Same defensive arity rule as paths
+#               (§5.1) — closes the apex blind spot.
+# Spec ref:     §5.8 "<prefix>.*" row, "one or more labels (never zero)"
+#
+# IMPORTANT clarification on label order:
+#   DNS names are read LEFT-TO-RIGHT but their label hierarchy goes
+#   RIGHT-TO-LEFT (the rightmost label is the TLD). So for `mycorp.com.*`,
+#   the `*` sits in the LEFTMOST positions of any matching name. This
+#   is opposite to the path convention. Both conventions agree that the
+#   `*` consumes "1+ tokens at the variable end" — they just differ on
+#   which end is variable.
+#
+# Producers should usually prefer `*.mycorp.com.` (leading-`*` per
+# RFC 4592) for "any subdomain" intent, since that's the standardised
+# form. The trailing form documented here is for cases where the
+# variable hierarchy is on the LEFT of a fixed registry suffix.
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-12-dns-trailing-star
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-12
+  containers:
+  - name: client
+    egress:
+    - identifier: mycorp-anything-deeper
+      type: external
+      dnsNames:
+        - "mycorp.com.*"
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

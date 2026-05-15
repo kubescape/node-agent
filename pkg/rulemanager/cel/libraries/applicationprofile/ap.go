@@ -111,25 +111,6 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
-		"ap.was_path_opened_with_flags": {
-			cel.Overload(
-				"ap_was_path_opened_with_flags", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
-				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
-					if len(values) != 3 {
-						return types.NewErr("expected 3 arguments, got %d", len(values))
-					}
-					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_path_opened_with_flags")
-					}
-					wrapperFunc := func(args ...ref.Val) ref.Val {
-						return l.wasPathOpenedWithFlags(args[0], args[1], args[2])
-					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_flags", cache.HashForContainerProfile(l.objectCache))
-					result := cachedFunc(values[0], values[1], values[2])
-					return cache.ConvertProfileNotAvailableErrToBool(result, false)
-				}),
-			),
-		},
 		"ap.was_path_opened_with_suffix": {
 			cel.Overload(
 				"ap_was_path_opened_with_suffix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
@@ -354,9 +335,6 @@ func (e *apCostEstimator) EstimateCallCost(function, overloadID string, target *
 	case "ap.was_path_opened":
 		// Cache lookup + O(n) linear search + dynamic path comparison
 		cost = 25
-	case "ap.was_path_opened_with_flags":
-		// Cache lookup + O(n) search + dynamic path comparison + O(f*p) flag comparison
-		cost = 40
 	case "ap.was_path_opened_with_suffix":
 		// Cache lookup + O(n) linear search + O(n*len(suffix)) string suffix checks
 		cost = 20

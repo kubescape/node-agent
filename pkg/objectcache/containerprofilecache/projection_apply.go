@@ -44,30 +44,37 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 	}
 
 	// Project each data surface.
+	// The third arg classifies an entry as "dynamic" — routes it to Patterns
+	// rather than Values. Path surfaces use the ⋯ DynamicIdentifier marker;
+	// network surfaces accept CIDRs, '*' sentinels, and DNS wildcard tokens
+	// per the v0.0.2 spec (matched at runtime by storage's networkmatch).
 	opensPaths := extractOpensPaths(cp)
-	pcp.Opens = projectField(s.Opens, opensPaths, true)
+	pcp.Opens = projectField(s.Opens, opensPaths, containsDynamicSegment)
 
 	execsPaths := extractExecsPaths(cp)
-	pcp.Execs = projectField(s.Execs, execsPaths, true)
+	pcp.Execs = projectField(s.Execs, execsPaths, containsDynamicSegment)
+	pcp.ExecsByPath = extractExecsByPath(cp)
 
 	endpointPaths := extractEndpointPaths(cp)
-	pcp.Endpoints = projectField(s.Endpoints, endpointPaths, true)
+	pcp.Endpoints = projectField(s.Endpoints, endpointPaths, containsDynamicSegment)
 
-	pcp.Capabilities = projectField(s.Capabilities, cp.Spec.Capabilities, false)
-	pcp.Syscalls = projectField(s.Syscalls, cp.Spec.Syscalls, false)
+	pcp.Capabilities = projectField(s.Capabilities, cp.Spec.Capabilities, nil)
+	pcp.Syscalls = projectField(s.Syscalls, cp.Spec.Syscalls, nil)
 
-	pcp.EgressDomains = projectField(s.EgressDomains, extractEgressDomains(cp), false)
-	pcp.EgressAddresses = projectField(s.EgressAddresses, extractEgressAddresses(cp), false)
+	pcp.EgressDomains = projectField(s.EgressDomains, extractEgressDomains(cp), isNetworkDNSWildcard)
+	pcp.EgressAddresses = projectField(s.EgressAddresses, extractEgressAddresses(cp), isNetworkIPWildcard)
 
-	pcp.IngressDomains = projectField(s.IngressDomains, extractIngressDomains(cp), false)
-	pcp.IngressAddresses = projectField(s.IngressAddresses, extractIngressAddresses(cp), false)
+	pcp.IngressDomains = projectField(s.IngressDomains, extractIngressDomains(cp), isNetworkDNSWildcard)
+	pcp.IngressAddresses = projectField(s.IngressAddresses, extractIngressAddresses(cp), isNetworkIPWildcard)
 
 	return pcp
 }
 
 // projectField is the per-surface transform. rawEntries are strings from the
-// raw profile. isPathSurface enables retention of dynamic-segment entries.
-func projectField(spec objectcache.FieldSpec, rawEntries []string, isPathSurface bool) objectcache.ProjectedField {
+// raw profile. isDynamic, if non-nil, is called per entry: returning true
+// routes the entry to Patterns rather than Values (cache-miss path runs the
+// matcher rather than a map lookup).
+func projectField(spec objectcache.FieldSpec, rawEntries []string, isDynamic func(string) bool) objectcache.ProjectedField {
 	if !spec.InUse {
 		// No rule declared a requirement for this field — pass all raw entries
 		// through so existing rules that omit profileDataRequired keep working.
@@ -92,9 +99,9 @@ func projectField(spec objectcache.FieldSpec, rawEntries []string, isPathSurface
 	seen := make(map[string]bool) // for Patterns dedup
 
 	for _, e := range rawEntries {
-		isDynamic := isPathSurface && containsDynamicSegment(e)
+		dynamic := isDynamic != nil && isDynamic(e)
 
-		if isDynamic {
+		if dynamic {
 			// Dynamic entries always go to Patterns on path surfaces (both
 			// pass-through and explicit InUse modes).
 			if !seen[e] {
@@ -148,6 +155,42 @@ func containsDynamicSegment(e string) bool {
 	return strings.Contains(e, dynamicpathdetector.DynamicIdentifier)
 }
 
+// isNetworkIPWildcard reports whether an IP-surface entry is a v0.0.2
+// pattern (CIDR membership, '*' any-IP sentinel, or DynamicIdentifier).
+// Literal IPv4/IPv6 addresses are NOT patterns; they go to Values for
+// the cheap map lookup path. Spec §5.7.
+func isNetworkIPWildcard(e string) bool {
+	if e == "" {
+		return false
+	}
+	if e == "*" {
+		return true
+	}
+	if strings.Contains(e, "/") {
+		return true
+	}
+	if strings.Contains(e, dynamicpathdetector.DynamicIdentifier) {
+		return true
+	}
+	return false
+}
+
+// isNetworkDNSWildcard reports whether a DNS-surface entry uses any of
+// the v0.0.2 wildcard tokens — leading '*' (RFC 4592), mid '⋯', trailing
+// '*'. Literal FQDNs go to Values. Spec §5.8.
+func isNetworkDNSWildcard(e string) bool {
+	if e == "" {
+		return false
+	}
+	if strings.Contains(e, "*") {
+		return true
+	}
+	if strings.Contains(e, dynamicpathdetector.DynamicIdentifier) {
+		return true
+	}
+	return false
+}
+
 // --- Field extractors ---
 
 func extractOpensPaths(cp *v1beta1.ContainerProfile) []string {
@@ -164,6 +207,32 @@ func extractExecsPaths(cp *v1beta1.ContainerProfile) []string {
 		paths[i] = e.Path
 	}
 	return paths
+}
+
+// extractExecsByPath builds the path → args map used by the exec-args
+// wildcard matcher (CompareExecArgs). Multiple ExecCalls entries with the
+// same Path collapse to the last seen; this matches the prior fork-only
+// behavior. nil-Args entries are stored as empty slices, which
+// CompareExecArgs treats as "no argv constraint".
+//
+// Args slices are CLONED rather than aliased — Apply is contract-bound to
+// be a pure transform, and an alias would let consumers mutate the source
+// profile by editing the projected map. (CR #43 finding on this file.)
+func extractExecsByPath(cp *v1beta1.ContainerProfile) map[string][]string {
+	if len(cp.Spec.Execs) == 0 {
+		return nil
+	}
+	m := make(map[string][]string, len(cp.Spec.Execs))
+	for _, e := range cp.Spec.Execs {
+		if e.Args == nil {
+			m[e.Path] = []string{}
+			continue
+		}
+		cloned := make([]string, len(e.Args))
+		copy(cloned, e.Args)
+		m[e.Path] = cloned
+	}
+	return m
 }
 
 func extractEndpointPaths(cp *v1beta1.ContainerProfile) []string {
@@ -191,6 +260,9 @@ func extractEgressAddresses(cp *v1beta1.ContainerProfile) []string {
 		if n.IPAddress != "" {
 			addrs = append(addrs, n.IPAddress)
 		}
+		// v0.0.2 IPAddresses[] — list form supporting CIDRs and '*' sentinel.
+		// Same semantics as the deprecated singular IPAddress, just plural.
+		addrs = append(addrs, n.IPAddresses...)
 	}
 	return addrs
 }
@@ -212,6 +284,7 @@ func extractIngressAddresses(cp *v1beta1.ContainerProfile) []string {
 		if n.IPAddress != "" {
 			addrs = append(addrs, n.IPAddress)
 		}
+		addrs = append(addrs, n.IPAddresses...)
 	}
 	return addrs
 }

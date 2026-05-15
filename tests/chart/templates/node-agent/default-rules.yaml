@@ -1,7 +1,7 @@
 apiVersion: kubescape.io/v1
 kind: Rules
 metadata:
-  name: kubescape-rules
+  name: default-rules
   namespace: kubescape
   annotations:
     kubescape.io/namespace: kubescape
@@ -18,7 +18,7 @@ spec:
           uniqueId: "event.comm + '_' + event.exepath"
           ruleExpression:
             - eventType: "exec"
-              expression: "!ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm))"
+              expression: "!ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath))"
         profileDependency: 0
         profileDataRequired:
           execs: all
@@ -28,11 +28,51 @@ spec:
         mitreTactic: "TA0002"
         mitreTechnique: "T1059"
         tags:
-          - "context:kubernetes"
           - "anomaly"
           - "process"
           - "exec"
           - "applicationprofile"
+          - "context:kubernetes"
+      # ---------------------------------------------------------------
+      # R0040 — Unexpected process arguments
+      #
+      # Additive companion to R0001. Fires only when:
+      #   1. The exec'd path IS in the user-defined ApplicationProfile
+      #      (so R0001 stays silent), AND
+      #   2. The runtime arg vector does NOT match any profile entry's
+      #      arg pattern via dynamicpathdetector.CompareExecArgs.
+      #
+      # Profile arg vectors may carry wildcard tokens:
+      #   "⋯" — exactly one position; "*" — zero or more trailing args.
+      # Anything else is literal-equality.
+      #
+      # Use case: a profile entry like {Path: "/bin/sh", Args: ["-c", "*"]}
+      # allows `sh -c <anything>` but flags `sh -x <anything>` as drift.
+      # ---------------------------------------------------------------
+      - name: "Unexpected process arguments"
+        enabled: true
+        id: "R0040"
+        description: "Process path is allowed by profile but argument vector does not match any profile entry's arg pattern (literal or wildcard ⋯/*)"
+        expressions:
+          message: "'Unexpected process arguments: ' + event.comm + ' with PID ' + string(event.pid)"
+          uniqueId: "event.comm + '_' + parse.get_exec_path(event.args, event.comm, event.exepath)"
+          ruleExpression:
+            - eventType: "exec"
+              expression: >
+                ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath)) &&
+                !ap.was_executed_with_args(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath), event.args)
+        profileDependency: 0
+        severity: 1
+        supportPolicy: false
+        isTriggerAlert: true
+        mitreTactic: "TA0002"
+        mitreTechnique: "T1059"
+        tags:
+          - "anomaly"
+          - "process"
+          - "exec"
+          - "applicationprofile"
+          - "context:kubernetes"
       - name: "Files Access Anomalies in container"
         enabled: true
         id: "R0002"
@@ -82,11 +122,11 @@ spec:
         mitreTactic: "TA0009"
         mitreTechnique: "T1005"
         tags:
-          - "context:kubernetes"
           - "anomaly"
           - "file"
           - "open"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Syscalls Anomalies in container"
         enabled: true
         id: "R0003"
@@ -106,10 +146,10 @@ spec:
         mitreTactic: "TA0002"
         mitreTechnique: "T1059"
         tags:
-          - "context:kubernetes"
           - "anomaly"
           - "syscall"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Linux Capabilities Anomalies in container"
         enabled: true
         id: "R0004"
@@ -129,10 +169,10 @@ spec:
         mitreTactic: "TA0002"
         mitreTechnique: "T1059"
         tags:
-          - "context:kubernetes"
           - "anomaly"
           - "capabilities"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "DNS Anomalies in container"
         enabled: true
         id: "R0005"
@@ -148,14 +188,14 @@ spec:
           egressDomains: all
         severity: 1
         supportPolicy: false
-        isTriggerAlert: false
+        isTriggerAlert: true
         mitreTactic: "TA0011"
         mitreTechnique: "T1071.004"
         tags:
-          - "context:kubernetes"
           - "dns"
           - "anomaly"
           - "networkprofile"
+          - "context:kubernetes"
       - name: "Unexpected service account token access"
         enabled: true
         id: "R0006"
@@ -185,10 +225,10 @@ spec:
         mitreTactic: "TA0006"
         mitreTechnique: "T1528"
         tags:
-          - "context:kubernetes"
           - "anomaly"
           - "serviceaccount"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Workload uses Kubernetes API unexpectedly"
         enabled: true
         id: "R0007"
@@ -198,7 +238,7 @@ spec:
           uniqueId: "eventType == 'exec' ? 'exec_' + event.comm : 'network_' + event.dstAddr"
           ruleExpression:
             - eventType: "exec"
-              expression: "(event.comm == 'kubectl' || event.exepath.endsWith('/kubectl')) && !ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm))"
+              expression: "(event.comm == 'kubectl' || event.exepath.endsWith('/kubectl')) && !ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath))"
             - eventType: "network"
               expression: "event.pktType == 'OUTGOING' && k8s.is_api_server_address(event.dstAddr) && !nn.was_address_in_egress(event.containerId, event.dstAddr)"
         profileDependency: 0
@@ -211,18 +251,18 @@ spec:
         mitreTactic: "TA0008"
         mitreTechnique: "T1210"
         tags:
-          - "context:kubernetes"
           - "exec"
           - "network"
           - "anomaly"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Read Environment Variables from procfs"
         enabled: true
         id: "R0008"
         description: "Detecting reading environment variables from procfs."
         expressions:
           message: "'Reading environment variables from procfs: ' + event.path + ' by process ' + event.comm"
-          uniqueId: "event.comm"
+          uniqueId: "event.comm + '_' + event.path"
           ruleExpression:
             - eventType: "open"
               expression: >
@@ -242,11 +282,11 @@ spec:
         mitreTactic: "TA0006"
         mitreTechnique: "T1552.001"
         tags:
-          - "context:kubernetes"
           - "anomaly"
           - "procfs"
           - "environment"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "eBPF Program Load"
         enabled: true
         id: "R0009"
@@ -267,11 +307,10 @@ spec:
         mitreTactic: "TA0005"
         mitreTechnique: "T1218"
         tags:
-          - "context:kubernetes"
-          - "context:host"
           - "bpf"
           - "ebpf"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Unexpected Sensitive File Access"
         enabled: true
         id: "R0010"
@@ -292,13 +331,12 @@ spec:
         mitreTactic: "TA0006"
         mitreTechnique: "T1005"
         tags:
-          - "context:kubernetes"
-          - "context:host"
           - "files"
           - "anomaly"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Unexpected Egress Network Traffic"
-        enabled: false
+        enabled: true
         id: "R0011"
         description: "Detecting unexpected egress network traffic that is not whitelisted by application profile."
         expressions:
@@ -312,15 +350,15 @@ spec:
           egressAddresses: all
         severity: 5 # Medium
         supportPolicy: false
-        isTriggerAlert: false
+        isTriggerAlert: true
         mitreTactic: "TA0010"
         mitreTechnique: "T1041"
         tags:
-          - "context:kubernetes"
           - "whitelisted"
           - "network"
           - "anomaly"
           - "networkprofile"
+          - "context:kubernetes"
       - name: "Process executed from malicious source"
         enabled: true
         id: "R1000"
@@ -333,7 +371,7 @@ spec:
               expression: >
                 (event.exepath == '/dev/shm' || event.exepath.startsWith('/dev/shm/')) ||
                 (event.cwd == '/dev/shm' || event.cwd.startsWith('/dev/shm/') ||
-                (parse.get_exec_path(event.args, event.comm).startsWith('/dev/shm/')))
+                (parse.get_exec_path(event.args, event.comm, event.exepath).startsWith('/dev/shm/')))
         profileDependency: 2
         severity: 8
         supportPolicy: false
@@ -341,11 +379,10 @@ spec:
         mitreTactic: "TA0002"
         mitreTechnique: "T1059"
         tags:
-          - "context:kubernetes"
-          - "context:host"
           - "exec"
           - "signature"
           - "malicious"
+          - "context:kubernetes"
       - name: "Drifted process executed"
         enabled: true
         id: "R1001"
@@ -358,7 +395,7 @@ spec:
               expression: >
                 (event.upperlayer == true ||
                  event.pupperlayer == true) &&
-                !ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm))
+                !ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath))
         profileDependency: 1
         profileDataRequired:
           execs: all
@@ -368,12 +405,12 @@ spec:
         mitreTactic: "TA0005"
         mitreTechnique: "T1036"
         tags:
-          - "context:kubernetes"
           - "exec"
           - "malicious"
           - "binary"
           - "base image"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Process tries to load a kernel module"
         enabled: true
         id: "R1002"
@@ -391,12 +428,11 @@ spec:
         mitreTactic: "TA0005"
         mitreTechnique: "T1547.006"
         tags:
-          - "context:kubernetes"
-          - "context:host"
           - "kmod"
           - "kernel"
           - "module"
           - "load"
+          - "context:kubernetes"
       - name: "Disallowed ssh connection"
         enabled: false
         id: "R1003"
@@ -416,12 +452,12 @@ spec:
         mitreTactic: "TA0008"
         mitreTechnique: "T1021.001"
         tags:
-          - "context:kubernetes"
           - "ssh"
           - "connection"
           - "port"
           - "malicious"
           - "networkprofile"
+          - "context:kubernetes"
       - name: "Process executed from mount"
         enabled: true
         id: "R1004"
@@ -431,7 +467,7 @@ spec:
           uniqueId: "event.comm"
           ruleExpression:
             - eventType: "exec"
-              expression: "!ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm)) && k8s.get_container_mount_paths(event.namespace, event.podName, event.containerName).exists(mount, event.exepath.startsWith(mount) || parse.get_exec_path(event.args, event.comm).startsWith(mount))"
+              expression: "!ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath)) && k8s.get_container_mount_paths(event.namespace, event.podName, event.containerName).exists(mount, event.exepath.startsWith(mount) || parse.get_exec_path(event.args, event.comm, event.exepath).startsWith(mount))"
         profileDependency: 1
         profileDataRequired:
           execs: all
@@ -441,10 +477,10 @@ spec:
         mitreTactic: "TA0002"
         mitreTechnique: "T1059"
         tags:
-          - "context:kubernetes"
           - "exec"
           - "mount"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Fileless execution detected"
         enabled: true
         id: "R1005"
@@ -462,11 +498,10 @@ spec:
         mitreTactic: "TA0005"
         mitreTechnique: "T1055"
         tags:
-          - "context:kubernetes"
-          - "context:host"
           - "fileless"
           - "execution"
           - "malicious"
+          - "context:kubernetes"
       - name: "Process tries to escape container"
         enabled: true
         id: "R1006"
@@ -487,12 +522,12 @@ spec:
         mitreTactic: "TA0004"
         mitreTechnique: "T1611"
         tags:
-          - "context:kubernetes"
           - "unshare"
           - "escape"
           - "unshare"
           - "anomaly"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Crypto miner launched"
         enabled: true
         id: "R1007"
@@ -510,10 +545,10 @@ spec:
         mitreTactic: "TA0040"
         mitreTechnique: "T1496"
         tags:
-          - "context:kubernetes"
           - "crypto"
           - "miners"
           - "malicious"
+          - "context:kubernetes"
       - name: "Crypto Mining Domain Communication"
         enabled: true
         id: "R1008"
@@ -531,13 +566,12 @@ spec:
         mitreTactic: "TA0011"
         mitreTechnique: "T1071.004"
         tags:
-          - "context:kubernetes"
-          - "context:host"
           - "network"
           - "crypto"
           - "miners"
           - "malicious"
           - "dns"
+          - "context:kubernetes"
       - name: "Crypto Mining Related Port Communication"
         enabled: true
         id: "R1009"
@@ -561,13 +595,12 @@ spec:
         mitreTactic: "TA0011"
         mitreTechnique: "T1071"
         tags:
-          - "context:kubernetes"
-          - "context:host"
           - "network"
           - "crypto"
           - "miners"
           - "malicious"
           - "networkprofile"
+          - "context:kubernetes"
       - name: "Soft link created over sensitive file"
         enabled: true
         id: "R1010"
@@ -589,11 +622,10 @@ spec:
         mitreTactic: "TA0006"
         mitreTechnique: "T1005"
         tags:
-          - "context:kubernetes"
-          - "context:host"
           - "anomaly"
           - "symlink"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "ld_preload hooks technique detected"
         enabled: false
         id: "R1011"
@@ -616,10 +648,10 @@ spec:
         mitreTactic: "TA0005"
         mitreTechnique: "T1574.006"
         tags:
-          - "context:kubernetes"
           - "exec"
           - "malicious"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Hard link created over sensitive file"
         enabled: true
         id: "R1012"
@@ -641,10 +673,10 @@ spec:
         mitreTactic: "TA0006"
         mitreTechnique: "T1005"
         tags:
-          - "context:kubernetes"
           - "files"
           - "malicious"
           - "applicationprofile"
+          - "context:kubernetes"
       - name: "Malicious Ptrace Usage"
         enabled: true
         id: "R1015"
@@ -662,10 +694,9 @@ spec:
         mitreTactic: "TA0005"
         mitreTechnique: "T1622"
         tags:
-          - "context:kubernetes"
-          - "context:host"
           - "process"
           - "malicious"
+          - "context:kubernetes"
       - name: "Unexpected io_uring Operation Detected"
         enabled: true
         id: "R1030"
@@ -685,7 +716,25 @@ spec:
         mitreTactic: "TA0002"
         mitreTechnique: "T1218"
         tags:
-          - "context:kubernetes"
           - "syscalls"
           - "io_uring"
           - "applicationprofile"
+          - "context:kubernetes"
+      - name: "Signed profile tampered"
+        enabled: true
+        id: "R1016"
+        description: "Detects when a previously signed ApplicationProfile or NetworkNeighborhood has been tampered with (signature no longer valid)."
+        expressions:
+          message: "'Signed profile tampered'"
+          uniqueId: "'R1016'"
+          ruleExpression: []
+        profileDependency: 2
+        severity: 10
+        supportPolicy: false
+        isTriggerAlert: false
+        mitreTactic: "TA0005"
+        mitreTechnique: "T1565"
+        tags:
+          - "integrity"
+          - "signature"
+          - "tamper"

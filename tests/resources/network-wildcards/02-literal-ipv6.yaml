@@ -1,0 +1,27 @@
+# Fixture 02 — IPv6 literal, canonicalisation
+#
+# Edge case:    IPv6 literal, both compressed and expanded forms MUST compare equal
+# Expects:      "2001:db8::1", "2001:0db8:0000:0000:0000:0000:0000:0001",
+#               and "2001:DB8::1" all match each other
+# Match path:   net.ParseIP(...) normalises before .Equal() — verifier responsibility
+# Spec ref:     §5.7 — "textual canonicalisation is the verifier's responsibility"
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-02-literal-ipv6
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-02
+  containers:
+  - name: client
+    egress:
+    - identifier: literal-ipv6
+      type: external
+      ipAddresses:
+        - "2001:db8::1"
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

@@ -1,0 +1,49 @@
+##
+## User-defined NetworkNeighborhood for Test_28.
+##
+## Referenced directly from a pod via the label:
+##   kubescape.io/user-defined-network: fusioncore-network
+##
+## Carries "kubescape.io/managed-by: User" annotation and workload
+## labels to match the schema the node-agent cache expects.
+##
+## Modeled after a real auto-learned NN from curlimages/curl:8.5.0.
+##
+## Usage:
+##   sed "s/{{NAMESPACE}}/$NS/g" known-network-neighborhood.yaml \
+##     | kubectl apply -f -
+##
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: fusioncore-network
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    kubescape.io/managed-by: User
+    kubescape.io/status: completed
+    kubescape.io/completion: complete
+  labels:
+    kubescape.io/workload-api-group: apps
+    kubescape.io/workload-api-version: v1
+    kubescape.io/workload-kind: Deployment
+    kubescape.io/workload-name: curl-fusioncore-deployment
+    kubescape.io/workload-namespace: "{{NAMESPACE}}"
+spec:
+  matchLabels:
+    app: curl-fusioncore-28-1
+  containers:
+  - name: curl
+    ingress: []
+    egress:
+    - dns: fusioncore.ai.
+      dnsNames:
+      - fusioncore.ai.
+      identifier: a5e64ff1db824089b1706ac872303e55075f92cf6a652b5272f06c3a2b9e8d10
+      ipAddress: 162.0.217.171
+      namespaceSelector: null
+      podSelector: null
+      ports:
+      - name: TCP-80
+        port: 80
+        protocol: TCP
+      type: external

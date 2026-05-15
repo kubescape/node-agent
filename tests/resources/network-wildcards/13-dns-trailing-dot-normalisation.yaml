@@ -1,0 +1,39 @@
+# Fixture 13 — trailing-dot normalisation
+#
+# Edge case:    DNS literals MUST compare equal whether or not the trailing
+#               dot is present, on either side
+# Expects (with profile entry "api.stripe.com." — WITH dot):
+#   observed "api.stripe.com."   → match
+#   observed "api.stripe.com"    → match (verifier normalises)
+# Expects (with profile entry "api.stripe.com" — WITHOUT dot):
+#   observed "api.stripe.com."   → match
+#   observed "api.stripe.com"    → match
+# Match path:   verifier MUST canonicalise both sides before comparison
+#               (e.g. always append "." if missing)
+# Spec ref:     §5.8 "Trailing-dot normalisation" paragraph
+# Producer guidance: emit the trailing dot — it's the FQDN-canonical form per
+#                    RFC 1035. But verifiers MUST accept either.
+#
+# This fixture deliberately mixes both forms in dnsNames[] to ensure the
+# normalisation runs on profile-side entries, not just observed names.
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-13-dns-trailing-dot
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-13
+  containers:
+  - name: client
+    egress:
+    - identifier: mixed-trailing-dot-forms
+      type: external
+      dnsNames:
+        - "api.stripe.com."     # canonical FQDN form
+        - "api.github.com"      # without trailing dot — equivalent
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}
