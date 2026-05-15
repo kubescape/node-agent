@@ -45,6 +45,26 @@ func TestResolveExecPath(t *testing.T) {
 			args:    []string{"sshd", "-i"},
 			want:    "/usr/bin/curl",
 		},
+		{
+			// Busybox symlink: kernel resolves /bin/sh → /bin/busybox and
+			// reports exepath=/bin/busybox, but argv[0] preserves the
+			// symlink-as-invoked form (/bin/sh). User-authored profiles
+			// list /bin/sh (matching how people think). Recording side
+			// MUST record /bin/sh so rule-side parse.get_exec_path's
+			// matching precedence (same convention) finds the entry.
+			name:    "busybox symlink — argv[0] absolute /bin/sh, exepath /bin/busybox",
+			exepath: "/bin/busybox",
+			comm:    "sh",
+			args:    []string{"/bin/sh", "-c", "echo hi"},
+			want:    "/bin/sh",
+		},
+		{
+			name:    "busybox symlink — argv[0] /usr/bin/nslookup, exepath /bin/busybox",
+			exepath: "/bin/busybox",
+			comm:    "nslookup",
+			args:    []string{"/usr/bin/nslookup", "example.com"},
+			want:    "/usr/bin/nslookup",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
