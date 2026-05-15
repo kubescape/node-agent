@@ -1,0 +1,34 @@
+# Fixture 06 — RFC-aligned alternatives to the `*` sentinel
+#
+# Edge case:    `0.0.0.0/0` (RFC 4632 — all IPv4) and `::/0` (RFC 4291 — all IPv6)
+#               MUST behave identically to `*`
+# Expects:      observed "1.2.3.4" matches via 0.0.0.0/0;
+#               observed "2001:db8::1" matches via ::/0
+# Match path:   regular CIDR matching — no special casing needed
+# Spec ref:     §5.7 — "*" sentinel "is sugar for the union of 0.0.0.0/0 + ::/0"
+# Why both forms exist:
+#               Producers who prefer standards-compliant CIDR over our `*`
+#               sugar can express "any IP" via these two CIDRs and the
+#               document will be accepted by tooling that doesn't recognise
+#               the `*` sentinel.
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-06-any-as-cidr
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-06
+  containers:
+  - name: client
+    egress:
+    - identifier: any-via-cidrs
+      type: external
+      ipAddresses:
+        - "0.0.0.0/0"
+        - "::/0"
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

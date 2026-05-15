@@ -1,0 +1,26 @@
+# Fixture 04 — IPv6 CIDR
+#
+# Edge case:    IPv6 CIDR matching
+# Expects:      observed "2001:db8::1" matches; "2001:db9::1" does NOT
+# Match path:   same code path as IPv4 CIDR — net.ParseCIDR recognises both
+# Spec ref:     §5.7 "CIDR" row, second example
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-04-cidr-ipv6
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-04
+  containers:
+  - name: client
+    egress:
+    - identifier: rfc3849-doc-prefix
+      type: external
+      ipAddresses:
+        - "2001:db8::/32"
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

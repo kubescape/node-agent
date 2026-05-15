@@ -1,0 +1,35 @@
+# Fixture 10 — DNS leading wildcard `*.<suffix>`
+#
+# Edge case:    RFC 4592 wildcard label — exactly ONE label before the suffix
+# Expects:
+#   observed "api.example.com."          → match (one label "api")
+#   observed "webhooks.example.com."     → match (one label "webhooks")
+#   observed "v1.api.example.com."       → NO match (two labels — leading * is exactly one)
+#   observed "example.com."              → NO match (apex — leading * requires at least one)
+#   observed ".example.com."              → NO match (empty label — invalid DNS)
+# Match path:   label-split + per-position match using the same recursive
+#               matcher as path wildcards (`compareLabels`)
+# Spec ref:     §5.8 "*.<suffix>" row + the rationale block
+# RFC ref:      RFC 4592 (DNS wildcard match) — "exactly one label" is the
+#               only ratified wildcard form; bind/coredns/cilium/k8s ingress
+#               all honour this convention
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-10-dns-leading-wildcard
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-10
+  containers:
+  - name: client
+    egress:
+    - identifier: example-com-subdomains
+      type: external
+      dnsNames:
+        - "*.example.com."
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}
