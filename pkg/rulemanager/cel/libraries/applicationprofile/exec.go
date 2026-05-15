@@ -70,12 +70,11 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	// v1 limitation for rule authors: wasExecutedWithArgs is currently equivalent
-	// to wasExecuted — the args list is validated but not matched against. Any
-	// execution of the given path returns true regardless of its arguments. Full
-	// argument matching (ExecArgsByPath) will be added in a future version.
-	_ = args
-	if _, err := celparse.ParseList[string](args); err != nil {
+	// Parse the runtime args list from CEL. Empty list is valid ("exec'd
+	// with no args") and matches a profile entry whose Args is also empty
+	// or absent (empty profile Args = "no argv constraint").
+	runtimeArgs, err := celparse.ParseList[string](args)
+	if err != nil {
 		return types.NewErr("failed to parse args: %v", err)
 	}
 
@@ -84,20 +83,37 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.Bool(true)
 	}
 
-	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
-	if err != nil {
+	cp, _, perr := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
+	if perr != nil {
 		// Return a special error that will NOT be cached, allowing retry when profile becomes available.
 		// The caller should convert this to false after the cache layer.
-		return cache.NewProfileNotAvailableErr("%v", err)
+		return cache.NewProfileNotAvailableErr("%v", perr)
 	}
 
+	// Exact path match: walk the profile's Args for that path via
+	// CompareExecArgs (handles ⋯ single-arg and * zero-or-more tokens).
 	if _, ok := cp.Execs.Values[pathStr]; ok {
-		return types.Bool(true)
+		if profileArgs, ok := cp.ExecsByPath[pathStr]; ok {
+			if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+				return types.Bool(true)
+			}
+		} else {
+			// No ExecsByPath entry for this path — back-compat: treat as
+			// "no argv constraint", match.
+			return types.Bool(true)
+		}
 	}
-	// Check Patterns (dynamic-segment entries).
+	// Pattern path match: dynamic-segment paths in cp.Execs.Patterns.
+	// Args matching mirrors the exact-path case.
 	for _, execPath := range cp.Execs.Patterns {
 		if dynamicpathdetector.CompareDynamic(execPath, pathStr) {
-			return types.Bool(true)
+			if profileArgs, ok := cp.ExecsByPath[execPath]; ok {
+				if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+					return types.Bool(true)
+				}
+			} else {
+				return types.Bool(true)
+			}
 		}
 	}
 

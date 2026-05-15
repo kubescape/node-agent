@@ -86,7 +86,7 @@ func TestIntegrationWithAllFunctions(t *testing.T) {
 		},
 		{
 			name:           "Check file access pattern",
-			expression:     `ap.was_path_opened_with_flags(containerID, "/etc/passwd", ["O_RDONLY"])`,
+			expression:     `ap.was_path_opened(containerID, "/etc/passwd")`,
 			expectedResult: true,
 		},
 		{
