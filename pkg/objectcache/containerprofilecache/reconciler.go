@@ -48,7 +48,28 @@ func (c *ContainerProfileCacheImpl) tickLoop(ctx context.Context) {
 		case <-ctx.Done():
 			logger.L().Info("ContainerProfileCache reconciler stopped")
 			return
+		case <-c.nudge:
+			// Spec changed — re-project all entries immediately without
+			// waiting for the next periodic tick. Use trailing-edge consolidation:
+			// mark pending so that if a refresh is already running it will
+			// re-run once after it finishes, preventing entries from staying on
+			// an old spec for up to one full reconcile interval.
+			if c.cfg.ProfileProjection.DetailedMetricsEnabled {
+				c.metricsManager.IncProjectionReconcileTriggered("nudge")
+			}
+			c.refreshPending.Store(true)
+			if c.refreshInProgress.CompareAndSwap(false, true) {
+				go func() {
+					defer c.refreshInProgress.Store(false)
+					for c.refreshPending.Swap(false) {
+						c.refreshAllEntries(ctx)
+					}
+				}()
+			}
 		case <-ticker.C:
+			if c.cfg.ProfileProjection.DetailedMetricsEnabled {
+				c.metricsManager.IncProjectionReconcileTriggered("tick")
+			}
 			start := time.Now()
 			entriesBefore := c.entries.Len()
 			pendingBefore := c.pending.Len()
@@ -224,6 +245,21 @@ func (c *ContainerProfileCacheImpl) refreshAllEntries(ctx context.Context) {
 			c.refreshOneEntry(ctx, w.id, w.e)
 		})
 	}
+
+	c.currentSpecMu.RLock()
+	var currentHash string
+	if c.currentSpec != nil {
+		currentHash = c.currentSpec.Hash
+	}
+	c.currentSpecMu.RUnlock()
+	var stale float64
+	c.entries.Range(func(_ string, e *CachedContainerProfile) bool {
+		if e.SpecHash != currentHash {
+			stale++
+		}
+		return true
+	})
+	c.metricsManager.SetProjectionStaleEntries(stale)
 }
 
 // refreshOneEntry refreshes a single cache entry under the per-container lock.
@@ -361,12 +397,19 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 
 	// Fast-skip when nothing changed. We match "absent" (nil) with empty RV:
 	// this avoids spurious rebuilds when an optional source is still missing,
-	// as long as it was also missing at the last build.
+	// as long as it was also missing at the last build. Also skip when the
+	// projection spec hash matches: if neither the data nor the spec changed,
+	// the projected output would be identical.
+	currentSpecHash := ""
+	if spec := c.snapshotSpec(); spec != nil {
+		currentSpecHash = spec.Hash
+	}
 	if rvsMatchCP(cp, e.RV) &&
 		rvsMatchAP(userManagedAP, e.UserManagedAPRV) &&
 		rvsMatchNN(userManagedNN, e.UserManagedNNRV) &&
 		rvsMatchAP(userAP, e.UserAPRV) &&
-		rvsMatchNN(userNN, e.UserNNRV) {
+		rvsMatchNN(userNN, e.UserNNRV) &&
+		e.SpecHash == currentSpecHash {
 		return
 	}
 
@@ -452,9 +495,6 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
 	}
 	// Ladder pass #2: label-referenced user overlay AP + NN.
-	shared := userAP == nil && userNN == nil &&
-		userManagedAP == nil && userManagedNN == nil &&
-		cp != nil
 	var userWarnings []partialProfileWarning
 	if userAP != nil || userNN != nil {
 		p, w := projectUserProfiles(projected, userAP, userNN, pod, prev.ContainerName)
@@ -469,9 +509,19 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		tree.AddCallStack(stack)
 	}
 
+	// Project under the current spec.
+	spec := c.snapshotSpec()
+	applyStart := time.Now()
+	projectedCP := Apply(spec, projected, tree)
+	if c.cfg.ProfileProjection.DetailedMetricsEnabled {
+		c.metricsManager.ObserveProjectionApplyDuration(time.Since(applyStart))
+		c.observeMemoryMetrics(projected, projectedCP)
+	}
+
 	newEntry := &CachedContainerProfile{
-		Profile:         projected,
-		State:           &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
+		Projected: projectedCP,
+		SpecHash:  projectedCP.SpecHash,
+		State:     &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
 		CallStackTree:   tree,
 		ContainerName:   prev.ContainerName,
 		PodName:         prev.PodName,
@@ -480,7 +530,6 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		WorkloadID:      prev.WorkloadID,
 		CPName:          prev.CPName,
 		WorkloadName:    prev.WorkloadName,
-		Shared:          shared,
 		RV:              rvOfCP(cp),
 		UserManagedAPRV: rvOfAP(userManagedAP),
 		UserManagedNNRV: rvOfNN(userManagedNN),
@@ -523,6 +572,50 @@ func rvOfNN(o *v1beta1.NetworkNeighborhood) string {
 		return ""
 	}
 	return o.ResourceVersion
+}
+
+// observeMemoryMetrics records per-field entry counts, retention ratios, and
+// total byte sizes for the raw vs projected profile. Called only when
+// DetailedMetricsEnabled is true.
+func (c *ContainerProfileCacheImpl) observeMemoryMetrics(raw *v1beta1.ContainerProfile, pcp *objectcache.ProjectedContainerProfile) {
+	type pair struct {
+		name string
+		raw  []string
+		proj objectcache.ProjectedField
+	}
+	pairs := []pair{
+		{"opens", extractOpensPaths(raw), pcp.Opens},
+		{"execs", extractExecsPaths(raw), pcp.Execs},
+		{"endpoints", extractEndpointPaths(raw), pcp.Endpoints},
+		{"capabilities", raw.Spec.Capabilities, pcp.Capabilities},
+		{"syscalls", raw.Spec.Syscalls, pcp.Syscalls},
+		{"egress_domains", extractEgressDomains(raw), pcp.EgressDomains},
+		{"egress_addresses", extractEgressAddresses(raw), pcp.EgressAddresses},
+		{"ingress_domains", extractIngressDomains(raw), pcp.IngressDomains},
+		{"ingress_addresses", extractIngressAddresses(raw), pcp.IngressAddresses},
+	}
+
+	var rawBytes, projBytes float64
+	for _, p := range pairs {
+		rawCount := float64(len(p.raw))
+		retainedCount := float64(len(p.proj.Values) + len(p.proj.Patterns))
+		for _, s := range p.raw {
+			rawBytes += float64(len(s))
+		}
+		for s := range p.proj.Values {
+			projBytes += float64(len(s))
+		}
+		for _, s := range p.proj.Patterns {
+			projBytes += float64(len(s))
+		}
+		c.metricsManager.ObserveProfileEntriesRaw(p.name, rawCount)
+		c.metricsManager.ObserveProfileEntriesRetained(p.name, retainedCount)
+		if rawCount > 0 {
+			c.metricsManager.ObserveProfileRetentionRatio(p.name, retainedCount/rawCount)
+		}
+	}
+	c.metricsManager.ObserveProfileRawSize(rawBytes)
+	c.metricsManager.ObserveProfileProjectedSize(projBytes)
 }
 
 // retryPendingEntries re-issues GetContainerProfile for every containerID that

@@ -25,7 +25,7 @@ require (
 	github.com/go-openapi/strfmt v0.26.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/cel-go v0.26.1
-	github.com/google/go-containerregistry v0.21.2
+	github.com/google/go-containerregistry v0.21.3
 	github.com/google/uuid v1.6.0
 	github.com/goradd/maps v1.3.0
 	github.com/grafana/pyroscope-go v1.2.2
@@ -35,7 +35,7 @@ require (
 	github.com/joncrlsn/dque v0.0.0-20241024143830-7723fd131a64
 	github.com/kubescape/backend v0.0.39
 	github.com/kubescape/go-logger v0.0.28
-	github.com/kubescape/k8s-interface v0.0.208
+	github.com/kubescape/k8s-interface v0.0.207
 	github.com/kubescape/storage v0.0.258
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
@@ -48,10 +48,10 @@ require (
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/procfs v0.19.2
-	github.com/sigstore/cosign/v3 v3.0.5
+	github.com/sigstore/cosign/v3 v3.0.6
 	github.com/sigstore/fulcio v1.8.5
 	github.com/sigstore/rekor v1.5.1
-	github.com/sigstore/sigstore v1.10.4
+	github.com/sigstore/sigstore v1.10.5
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/viper v1.21.0
@@ -65,10 +65,11 @@ require (
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/mcuadros/go-syslog.v2 v2.3.0
+	gopkg.in/yaml.v3 v3.0.1
 	istio.io/pkg v0.0.0-20231221211216-7635388a563e
-	k8s.io/api v0.35.1
-	k8s.io/apimachinery v0.35.1
-	k8s.io/client-go v0.35.1
+	k8s.io/api v0.35.3
+	k8s.io/apimachinery v0.35.3
+	k8s.io/client-go v0.35.3
 	k8s.io/cri-api v0.35.0
 	k8s.io/kubectl v0.34.1
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
@@ -167,7 +168,7 @@ require (
 	github.com/bodgit/sevenzip v1.6.1 // indirect
 	github.com/bodgit/windows v1.0.1 // indirect
 	github.com/briandowns/spinner v1.23.2 // indirect
-	github.com/buildkite/agent/v3 v3.115.4 // indirect
+	github.com/buildkite/agent/v3 v3.118.0 // indirect
 	github.com/buildkite/go-pipeline v0.16.0 // indirect
 	github.com/buildkite/interpolate v0.1.5 // indirect
 	github.com/buildkite/roko v1.4.0 // indirect
@@ -273,7 +274,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/btree v1.1.3 // indirect
-	github.com/google/certificate-transparency-go v1.3.2 // indirect
+	github.com/google/certificate-transparency-go v1.3.3 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
@@ -298,7 +299,7 @@ require (
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/iancoleman/strcase v0.3.0 // indirect
 	github.com/in-toto/attestation v1.1.2 // indirect
-	github.com/in-toto/in-toto-golang v0.9.0 // indirect
+	github.com/in-toto/in-toto-golang v0.10.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/jedisct1/go-minisign v0.0.0-20230811132847-661be99b8267 // indirect
@@ -310,7 +311,7 @@ require (
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
-	github.com/letsencrypt/boulder v0.20251110.0 // indirect
+	github.com/letsencrypt/boulder v0.20260223.0 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mackerelio/go-osstat v0.2.5 // indirect
@@ -331,6 +332,7 @@ require (
 	github.com/moby/locker v1.0.1 // indirect
 	github.com/moby/moby v28.5.2+incompatible // indirect
 	github.com/moby/spdystream v0.5.1 // indirect
+	github.com/moby/sys/atomicwriter v0.1.0 // indirect
 	github.com/moby/sys/sequential v0.6.0 // indirect
 	github.com/moby/sys/signal v0.7.1 // indirect
 	github.com/moby/sys/user v0.4.0 // indirect
@@ -395,9 +397,9 @@ require (
 	github.com/shibumi/go-pathspec v1.3.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sigstore/protobuf-specs v0.5.0 // indirect
-	github.com/sigstore/rekor-tiles/v2 v2.2.0 // indirect
+	github.com/sigstore/rekor-tiles/v2 v2.2.1 // indirect
 	github.com/sigstore/sigstore-go v1.1.4 // indirect
-	github.com/sigstore/timestamp-authority/v2 v2.0.4 // indirect
+	github.com/sigstore/timestamp-authority/v2 v2.0.5 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/sorairolake/lzip-go v0.3.8 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
@@ -442,9 +444,9 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/otelslog v0.18.0 // indirect
-	go.opentelemetry.io/contrib/detectors/gcp v1.39.0 // indirect
+	go.opentelemetry.io/contrib/detectors/gcp v1.40.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.63.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.68.0 // indirect
 	go.opentelemetry.io/contrib/processors/minsev v0.16.0 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
@@ -483,7 +485,6 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.35.0 // indirect
 	k8s.io/apiserver v0.35.0 // indirect
 	k8s.io/cli-runtime v0.35.0 // indirect
@@ -507,4 +508,10 @@ replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspe
 
 replace github.com/cilium/ebpf => github.com/matthyx/ebpf v0.0.0-20260421101317-8a32d06def6c
 
-replace github.com/kubescape/storage => github.com/k8sstormcenter/storage v0.0.240-0.20260509184329-a7e6234349ab
+replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
+
+replace github.com/kubescape/storage => github.com/k8sstormcenter/storage v0.0.240-0.20260513133617-b23d85f00f6a
+
+replace github.com/anchore/stereoscope => github.com/anchore/stereoscope v0.1.9-0.20250826202322-ef061ea78385
+
+replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1

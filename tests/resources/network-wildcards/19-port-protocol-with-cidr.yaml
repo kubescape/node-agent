@@ -1,0 +1,41 @@
+# Fixture 19 — port + protocol + CIDR composed match
+#
+# Edge case:    nn.was_address_port_protocol_in_egress matcher — the granular
+#               variant that requires IP+port+protocol all to match within
+#               the same NetworkNeighbor entry
+# Expects:
+#   observed (10.1.2.3, 443, TCP)   → match (both CIDR and port match within entry)
+#   observed (10.1.2.3, 80, TCP)    → NO match (CIDR ok but port mismatch)
+#   observed (192.168.1.1, 443, TCP)→ NO match (port ok but CIDR mismatch)
+#   observed (10.1.2.3, 443, UDP)   → NO match (CIDR + port ok but protocol mismatch)
+# Match path:   for each NetworkNeighbor:
+#                 if MatchIP(entry.IPs, observed) && entry contains matching
+#                 (port, protocol) tuple → true
+# Spec ref:     §4.7 ports[] row — name + protocol + port (uint16 nullable)
+#
+# This fixture validates that the new IP-matcher integration preserves the
+# port-protocol grouping contract — a CIDR match alone isn't sufficient
+# unless the entry's ports list also contains the (port, protocol) pair.
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-19-port-proto-cidr
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-19
+  containers:
+  - name: client
+    egress:
+    - identifier: tls-only-class-a
+      type: internal
+      ipAddresses:
+        - "10.0.0.0/8"
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}
+        # Note: no UDP entry, no port-80 entry — only TCP/443 within this CIDR.
+        # A request to (10.1.2.3, 80, TCP) should NOT match because the
+        # port-protocol filter is per-NetworkNeighbor-entry, not global.

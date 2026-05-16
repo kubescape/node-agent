@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -21,6 +23,87 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
+
+// TestDispatchNonBlocking_DropOnFull pins the shared invariant for ALL
+// fan-out sites: when a notifier channel is full, the helper drops the
+// message and continues. This is the core building block for the
+// AddHandler / ModifyHandler / DeleteHandler / RefreshRuleBindingsRules
+// non-blocking-fanout contract. CodeRabbit PR #43 cache.go:215 — the
+// previous fix only made RefreshRuleBindingsRules non-blocking; without
+// extracting a shared helper, each handler had to be patched
+// individually and drift was inevitable. The helper test below pins the
+// drop-on-full behaviour at the lowest common layer.
+func TestDispatchNonBlocking_DropOnFull(t *testing.T) {
+	// Two channels: one saturated, one empty.
+	full := make(chan rulebindingmanager.RuleBindingNotify, 1)
+	full <- rulebindingmanager.RuleBindingNotify{}
+	empty := make(chan rulebindingmanager.RuleBindingNotify, 1)
+
+	notifiers := []*chan rulebindingmanager.RuleBindingNotify{&full, &empty}
+	msgs := []rulebindingmanager.RuleBindingNotify{{}}
+
+	done := make(chan struct{})
+	go func() {
+		dispatchNonBlocking(notifiers, msgs, "test")
+		close(done)
+	}()
+	select {
+	case <-done:
+		// non-blocking — correct
+	case <-time.After(2 * time.Second):
+		t.Fatalf("dispatchNonBlocking blocked on a saturated subscriber — drop-on-full contract violated")
+	}
+
+	require.Len(t, full, 1, "saturated channel should still hold its pre-loaded message (drop policy)")
+	require.Len(t, empty, 1, "empty channel should have received the pulse")
+}
+
+// TestRefreshRuleBindingsRules_NonBlockingFanout pins the contract from
+// the CodeRabbit PR #43 review (cache.go:202): a slow or backlogged
+// subscriber MUST NOT stall the refresh-rules path. Blocking sends would
+// deadlock RefreshRuleBindingsRules behind any single stuck subscriber,
+// which gates every binding change agent-wide.
+//
+// Setup: 3 notifier channels, all with buffer size 1. Fill one to capacity
+// (simulates a subscriber that hasn't drained the previous pulse). Call
+// RefreshRuleBindingsRules; assert it returns within a small budget and
+// that the two un-full channels each received one notification.
+func TestRefreshRuleBindingsRules_NonBlockingFanout(t *testing.T) {
+	c := &RBCache{}
+
+	// 3 buffered channels; saturate the first so a blocking send on it
+	// would hang the test.
+	ch1 := make(chan rulebindingmanager.RuleBindingNotify, 1)
+	ch1 <- rulebindingmanager.RuleBindingNotify{} // full
+	ch2 := make(chan rulebindingmanager.RuleBindingNotify, 1)
+	ch3 := make(chan rulebindingmanager.RuleBindingNotify, 1)
+
+	c.notifiers = []*chan rulebindingmanager.RuleBindingNotify{&ch1, &ch2, &ch3}
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.RefreshRuleBindingsRules()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// returned in time — non-blocking fan-out works.
+	case <-time.After(2 * time.Second):
+		t.Fatalf("RefreshRuleBindingsRules blocked on a full subscriber channel — non-blocking send contract violated")
+	}
+	wg.Wait()
+
+	// ch1 stays at capacity (the new pulse was dropped — expected); the
+	// pre-loaded message is still there. ch2 and ch3 must each have
+	// received the new pulse.
+	require.Len(t, ch1, 1, "full ch1 should still hold its pre-loaded message (drop-on-full policy)")
+	require.Len(t, ch2, 1, "ch2 should have received the refresh pulse")
+	require.Len(t, ch3, 1, "ch3 should have received the refresh pulse")
+}
 
 func TestRuntimeObjAddHandler(t *testing.T) {
 	type rules struct {

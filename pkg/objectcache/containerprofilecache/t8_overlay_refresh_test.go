@@ -75,9 +75,8 @@ func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
 
 	const id = "c1"
 	// Seed a projected entry with a stale UserAPRV so refresh sees the RV change.
-	// The Profile here is just the base CP; the reconciler will re-project on refresh.
 	cache.SeedEntryWithOverlayForTest(id, &cpc.CachedContainerProfile{
-		Profile:       cp,
+		Projected:     cpc.Apply(nil, cp, nil),
 		State:         &objectcache.ProfileState{Name: cp.Name},
 		ContainerName: "nginx",
 		PodName:       "nginx-abc",
@@ -86,7 +85,6 @@ func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
 		CPName:        "cp",
 		RV:            "100",
 		UserAPRV:      "50", // stale — triggers rebuild when storage returns RV=51
-		Shared:        false,
 	}, "default", "override", "", "")
 
 	// Advance storage to apV2 (RV=51). The reconciler will see the RV mismatch
@@ -95,14 +93,18 @@ func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
 	store.ap = apV2
 	store.mu.Unlock()
 
+	cache.SetProjectionSpec(objectcache.RuleProjectionSpec{
+		Execs: objectcache.FieldSpec{InUse: true, All: true},
+		Hash:  "test-execs",
+	})
 	cache.RefreshAllEntriesForTest(context.Background())
 
-	stored := cache.GetContainerProfile(id)
-	require.NotNil(t, stored, "entry must remain after refresh")
+	pcp := cache.GetProjectedContainerProfile(id)
+	require.NotNil(t, pcp, "entry must remain after refresh")
 
 	var paths []string
-	for _, e := range stored.Spec.Execs {
-		paths = append(paths, e.Path)
+	for path := range pcp.Execs.Values {
+		paths = append(paths, path)
 	}
 	assert.Contains(t, paths, "/bin/base", "base CP exec must be preserved after overlay refresh")
 	assert.Contains(t, paths, "/bin/new", "new user-AP exec must appear in the rebuilt projection")

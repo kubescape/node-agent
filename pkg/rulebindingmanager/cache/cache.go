@@ -117,82 +117,118 @@ func (c *RBCache) AddNotifier(n *chan rulebindingmanager.RuleBindingNotify) {
 
 // ------------------ watcher.Watcher methods -----------------------
 
+// AddHandler / ModifyHandler / DeleteHandler structure: take the
+// mutex, mutate the cache + build the rbs slice, release the mutex,
+// then fan out NON-blocking. Holding the lock during fan-out (the
+// pre-fix shape) deadlocks every cache operation behind any single
+// stuck subscriber. CodeRabbit PR #43 cache.go:215 — the
+// non-blocking fix was previously only on RefreshRuleBindingsRules;
+// this extends it to all three k8s-event handlers.
+
 func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
 	var rbs []rulebindingmanager.RuleBindingNotify
-
 	if pod, ok := obj.(*corev1.Pod); ok {
 		rbs = c.addPod(ctx, pod)
 	} else if un, ok := obj.(*unstructured.Unstructured); ok {
 		ruleBinding, err := unstructuredToRuleBinding(un)
 		if err != nil {
 			logger.L().Warning("RBCache - failed to convert unstructured to rule binding", helpers.Error(err))
+			c.mutex.Unlock()
 			return
 		}
 		rbs = c.addRuleBinding(ruleBinding)
 	}
-	// notify
-	for n := range c.notifiers {
-		for i := range rbs {
-			*c.notifiers[n] <- rbs[i]
-		}
-	}
+	notifiers := c.snapshotNotifiersLocked()
+	c.mutex.Unlock()
+	dispatchNonBlocking(notifiers, rbs, "AddHandler notify")
 }
 
 func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
 	var rbs []rulebindingmanager.RuleBindingNotify
-
 	if pod, ok := obj.(*corev1.Pod); ok {
 		rbs = c.addPod(ctx, pod)
 	} else if un, ok := obj.(*unstructured.Unstructured); ok {
 		ruleBinding, err := unstructuredToRuleBinding(un)
 		if err != nil {
 			logger.L().Warning("RBCache - failed to convert unstructured to rule binding", helpers.Error(err))
+			c.mutex.Unlock()
 			return
 		}
 		rbs = c.modifiedRuleBinding(ruleBinding)
 	}
-	// notify
-	for n := range c.notifiers {
-		for i := range rbs {
-			*c.notifiers[n] <- rbs[i]
-		}
-	}
+	notifiers := c.snapshotNotifiersLocked()
+	c.mutex.Unlock()
+	dispatchNonBlocking(notifiers, rbs, "ModifyHandler notify")
 }
 
 func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
 	var rbs []rulebindingmanager.RuleBindingNotify
-
 	if pod, ok := obj.(*corev1.Pod); ok {
 		c.deletePod(uniqueName(pod))
 	} else if un, ok := obj.(*unstructured.Unstructured); ok {
 		rbs = c.deleteRuleBinding(uniqueName(un))
 	}
-
-	// notify
-	for n := range c.notifiers {
-		for i := range rbs {
-			*c.notifiers[n] <- rbs[i]
-		}
-	}
+	notifiers := c.snapshotNotifiersLocked()
+	c.mutex.Unlock()
+	dispatchNonBlocking(notifiers, rbs, "DeleteHandler notify")
 }
 
 func (c *RBCache) RefreshRuleBindingsRules() {
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
 	for _, rbName := range c.rbNameToRB.Keys() {
 		rb := c.rbNameToRB.Get(rbName)
 		c.rbNameToRules.Set(rbName, c.createRules(rb.Spec.Rules))
 	}
 	logger.L().Info("RBCache - refreshed rule bindings rules", helpers.Int("ruleBindings", len(c.rbNameToRB.Keys())))
+	notifiers := c.snapshotNotifiersLocked()
+	c.mutex.Unlock()
+	// Single coalesced pulse — refresh notifications are idempotent.
+	dispatchNonBlocking(notifiers, []rulebindingmanager.RuleBindingNotify{{}}, "refresh pulse")
+}
+
+// snapshotNotifiersLocked returns a defensive copy of c.notifiers.
+// Must be called with c.mutex held; releases the contract back to the
+// caller without taking new locks.
+func (c *RBCache) snapshotNotifiersLocked() []*chan rulebindingmanager.RuleBindingNotify {
+	notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
+	copy(notifiers, c.notifiers)
+	return notifiers
+}
+
+// dispatchNonBlocking fans out msgs to every snapshotted notifier with a
+// non-blocking send. Drop-on-full is safe because subscribers' reconcile
+// loops are idempotent — a missed pulse will be re-sent by the next
+// add/modify/delete/refresh event. CodeRabbit PR #43 review on
+// cache.go:202 + cache.go:215 — the previous implementation only made
+// RefreshRuleBindingsRules non-blocking; the add/modify/delete handlers
+// (lines 137-139, 161-163, 181-183) still did blocking sends while
+// holding c.mutex. A single stuck subscriber could deadlock the whole
+// cache. Funnel ALL fan-out through this helper for symmetry.
+func dispatchNonBlocking(notifiers []*chan rulebindingmanager.RuleBindingNotify, msgs []rulebindingmanager.RuleBindingNotify, ctxLabel string) {
+	for _, n := range notifiers {
+		for _, msg := range msgs {
+			select {
+			case *n <- msg:
+			default:
+				logger.L().Debug("RBCache - notifier channel full, dropping "+ctxLabel,
+					helpers.Int("notifierIndex", indexOfNotifier(notifiers, n)))
+			}
+		}
+	}
+}
+
+// indexOfNotifier returns the position of n in the slice, or -1. Used only
+// for the diagnostic log emitted on a dropped non-blocking notifier send.
+func indexOfNotifier(notifiers []*chan rulebindingmanager.RuleBindingNotify, n *chan rulebindingmanager.RuleBindingNotify) int {
+	for i, x := range notifiers {
+		if x == n {
+			return i
+		}
+	}
+	return -1
 }
 
 // ----------------- RuleBinding manager methods -----------------

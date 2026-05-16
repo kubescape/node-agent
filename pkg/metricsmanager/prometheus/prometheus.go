@@ -70,6 +70,29 @@ type PrometheusMetric struct {
 	cpReconcilerDurationHistogram  *prometheus.HistogramVec
 	cpReconcilerEvictionsCounter   *prometheus.CounterVec
 
+	// Profile projection metrics — always-on
+	cpProjectionMissingDeclCounter      *prometheus.CounterVec
+	cpProjectionUndeclaredLiteralCounter *prometheus.CounterVec
+	cpProjectionStaleEntriesGauge        prometheus.Gauge
+	cpProjectionUndeclaredRulesGauge     prometheus.Gauge
+
+	// Profile projection metrics — detailed (gated by caller checking detailedMetricsEnabled)
+	cpProjectionSpecCompileCounter        prometheus.Counter
+	cpProjectionSpecHashChangeCounter     prometheus.Counter
+	cpProjectionSpecPatternsGauge         *prometheus.GaugeVec
+	cpProjectionSpecAllFieldsGauge        *prometheus.GaugeVec
+	cpProjectionApplyDurationHistogram    prometheus.Histogram
+	cpProjectionReconcileTriggeredCounter *prometheus.CounterVec
+	cpHelperCallCounter                   *prometheus.CounterVec
+	cpProjectionUndeclaredRulesListGauge  *prometheus.GaugeVec
+
+	// Memory-savings metrics — detailed
+	cpProfileRawSizeHistogram         prometheus.Histogram
+	cpProfileProjectedSizeHistogram   prometheus.Histogram
+	cpProfileEntriesRawHistogram      *prometheus.HistogramVec
+	cpProfileEntriesRetainedHistogram *prometheus.HistogramVec
+	cpProfileRetentionRatioHistogram  *prometheus.HistogramVec
+
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache          map[string]prometheus.Counter
 	rulePrefilteredCounterCache map[string]prometheus.Counter
@@ -245,6 +268,86 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Help: "Total number of ContainerProfile cache evictions by reason.",
 		}, []string{"reason"}),
 
+		// Profile projection metrics — always-on
+		cpProjectionMissingDeclCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "rule_load_rejected_missing_declaration_total",
+			Help: "Total rules with profileDependency>0 but no profileDataRequired declaration.",
+		}, []string{"rule_id"}),
+		cpProjectionUndeclaredLiteralCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "rule_projection_undeclared_literal_total",
+			Help: "Total literal values evaluated against a projected field that was not declared.",
+		}, []string{"helper"}),
+		cpProjectionStaleEntriesGauge: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "rule_projection_stale_entries",
+			Help: "Current number of projected cache entries whose spec hash is stale.",
+		}),
+		cpProjectionUndeclaredRulesGauge: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "rule_projection_undeclared_rules",
+			Help: "Currently-loaded rules with no profileDataRequired field.",
+		}),
+
+		// Profile projection metrics — detailed
+		cpProjectionSpecCompileCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "rule_projection_spec_compile_total",
+			Help: "Total number of times the projection spec was compiled.",
+		}),
+		cpProjectionSpecHashChangeCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "rule_projection_spec_hash_changes_total",
+			Help: "Total number of times the projection spec hash changed.",
+		}),
+		cpProjectionSpecPatternsGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "rule_projection_spec_patterns",
+			Help: "Number of patterns per field and kind in the current projection spec.",
+		}, []string{"field", "kind"}),
+		cpProjectionSpecAllFieldsGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "rule_projection_spec_all_fields",
+			Help: "Whether a projection spec field has All=true (1) or not (0).",
+		}, []string{"field"}),
+		cpProjectionApplyDurationHistogram: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "rule_projection_apply_duration_seconds",
+			Help:    "Duration of profile projection Apply calls in seconds.",
+			Buckets: prometheus.DefBuckets,
+		}),
+		cpProjectionReconcileTriggeredCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "rule_projection_reconcile_triggered_total",
+			Help: "Total number of projection reconcile triggers by type.",
+		}, []string{"trigger"}),
+		cpHelperCallCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "rule_helper_call_total",
+			Help: "Total number of profile-helper CEL function calls.",
+		}, []string{"helper"}),
+		cpProjectionUndeclaredRulesListGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "rule_projection_undeclared_rules_list",
+			Help: "Per-rule gauge (1) for each rule currently loaded without a profileDataRequired declaration.",
+		}, []string{"rule_id"}),
+
+		// Memory-savings metrics — detailed
+		cpProfileRawSizeHistogram: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "profile_raw_size_bytes",
+			Help:    "Approximate byte size of raw ContainerProfile string data before projection.",
+			Buckets: []float64{0, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304},
+		}),
+		cpProfileProjectedSizeHistogram: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "profile_projected_size_bytes",
+			Help:    "Approximate byte size of projected ContainerProfile string data after projection.",
+			Buckets: []float64{0, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304},
+		}),
+		cpProfileEntriesRawHistogram: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "profile_entries_raw_total",
+			Help:    "Number of entries per field in the raw profile before projection.",
+			Buckets: []float64{0, 1, 5, 10, 50, 100, 500, 1000, 5000},
+		}, []string{"field"}),
+		cpProfileEntriesRetainedHistogram: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "profile_entries_retained_total",
+			Help:    "Number of entries per field retained after projection.",
+			Buckets: []float64{0, 1, 5, 10, 50, 100, 500, 1000, 5000},
+		}, []string{"field"}),
+		cpProfileRetentionRatioHistogram: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "profile_retention_ratio",
+			Help:    "Fraction of entries retained per field after projection (retained/raw).",
+			Buckets: []float64{0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0},
+		}, []string{"field"}),
+
 		// Initialize counter caches
 		ruleCounterCache:            make(map[string]prometheus.Counter),
 		rulePrefilteredCounterCache: make(map[string]prometheus.Counter),
@@ -291,6 +394,23 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.cpCacheHitCounter)
 	prometheus.Unregister(p.cpReconcilerDurationHistogram)
 	prometheus.Unregister(p.cpReconcilerEvictionsCounter)
+	prometheus.Unregister(p.cpProjectionMissingDeclCounter)
+	prometheus.Unregister(p.cpProjectionUndeclaredLiteralCounter)
+	prometheus.Unregister(p.cpProjectionStaleEntriesGauge)
+	prometheus.Unregister(p.cpProjectionUndeclaredRulesGauge)
+	prometheus.Unregister(p.cpProjectionSpecCompileCounter)
+	prometheus.Unregister(p.cpProjectionSpecHashChangeCounter)
+	prometheus.Unregister(p.cpProjectionSpecPatternsGauge)
+	prometheus.Unregister(p.cpProjectionSpecAllFieldsGauge)
+	prometheus.Unregister(p.cpProjectionApplyDurationHistogram)
+	prometheus.Unregister(p.cpProjectionReconcileTriggeredCounter)
+	prometheus.Unregister(p.cpHelperCallCounter)
+	prometheus.Unregister(p.cpProjectionUndeclaredRulesListGauge)
+	prometheus.Unregister(p.cpProfileRawSizeHistogram)
+	prometheus.Unregister(p.cpProfileProjectedSizeHistogram)
+	prometheus.Unregister(p.cpProfileEntriesRawHistogram)
+	prometheus.Unregister(p.cpProfileEntriesRetainedHistogram)
+	prometheus.Unregister(p.cpProfileRetentionRatioHistogram)
 	// Unregister program ID metrics
 	prometheus.Unregister(p.programRuntimeGauge)
 	prometheus.Unregister(p.programRunCountGauge)
@@ -490,4 +610,63 @@ func (p *PrometheusMetric) ReportContainerProfileReconcilerDuration(phase string
 
 func (p *PrometheusMetric) ReportContainerProfileReconcilerEviction(reason string) {
 	p.cpReconcilerEvictionsCounter.WithLabelValues(reason).Inc()
+}
+
+func (p *PrometheusMetric) IncMissingProfileDataRequired(ruleID string) {
+	p.cpProjectionMissingDeclCounter.WithLabelValues(ruleID).Inc()
+}
+func (p *PrometheusMetric) IncProjectionUndeclaredLiteral(helper string) {
+	p.cpProjectionUndeclaredLiteralCounter.WithLabelValues(helper).Inc()
+}
+func (p *PrometheusMetric) SetProjectionStaleEntries(count float64) {
+	p.cpProjectionStaleEntriesGauge.Set(count)
+}
+func (p *PrometheusMetric) SetProjectionUndeclaredRules(count float64) {
+	p.cpProjectionUndeclaredRulesGauge.Set(count)
+}
+func (p *PrometheusMetric) IncProjectionSpecCompile() {
+	p.cpProjectionSpecCompileCounter.Inc()
+}
+func (p *PrometheusMetric) IncProjectionSpecHashChange() {
+	p.cpProjectionSpecHashChangeCounter.Inc()
+}
+func (p *PrometheusMetric) SetProjectionSpecPatterns(field, kind string, count float64) {
+	p.cpProjectionSpecPatternsGauge.WithLabelValues(field, kind).Set(count)
+}
+func (p *PrometheusMetric) SetProjectionSpecAllField(field string, isAll bool) {
+	v := float64(0)
+	if isAll {
+		v = 1
+	}
+	p.cpProjectionSpecAllFieldsGauge.WithLabelValues(field).Set(v)
+}
+func (p *PrometheusMetric) ObserveProjectionApplyDuration(d time.Duration) {
+	p.cpProjectionApplyDurationHistogram.Observe(d.Seconds())
+}
+func (p *PrometheusMetric) IncProjectionReconcileTriggered(trigger string) {
+	p.cpProjectionReconcileTriggeredCounter.WithLabelValues(trigger).Inc()
+}
+func (p *PrometheusMetric) IncHelperCall(helper string) {
+	p.cpHelperCallCounter.WithLabelValues(helper).Inc()
+}
+func (p *PrometheusMetric) SetProjectionUndeclaredRulesDetail(ruleIDs []string) {
+	p.cpProjectionUndeclaredRulesListGauge.Reset()
+	for _, id := range ruleIDs {
+		p.cpProjectionUndeclaredRulesListGauge.WithLabelValues(id).Set(1)
+	}
+}
+func (p *PrometheusMetric) ObserveProfileRawSize(bytes float64) {
+	p.cpProfileRawSizeHistogram.Observe(bytes)
+}
+func (p *PrometheusMetric) ObserveProfileProjectedSize(bytes float64) {
+	p.cpProfileProjectedSizeHistogram.Observe(bytes)
+}
+func (p *PrometheusMetric) ObserveProfileEntriesRaw(field string, count float64) {
+	p.cpProfileEntriesRawHistogram.WithLabelValues(field).Observe(count)
+}
+func (p *PrometheusMetric) ObserveProfileEntriesRetained(field string, count float64) {
+	p.cpProfileEntriesRetainedHistogram.WithLabelValues(field).Observe(count)
+}
+func (p *PrometheusMetric) ObserveProfileRetentionRatio(field string, ratio float64) {
+	p.cpProfileRetentionRatioHistogram.WithLabelValues(field).Observe(ratio)
 }

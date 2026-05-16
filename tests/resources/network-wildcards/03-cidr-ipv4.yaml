@@ -1,0 +1,28 @@
+# Fixture 03 — IPv4 CIDR
+#
+# Edge case:    a single CIDR block covers a range of IPs
+# Expects:      observed "10.0.0.1" matches; "10.255.255.254" matches;
+#               "11.0.0.1" does NOT match
+# Match path:   net.ParseCIDR("10.0.0.0/8") → *IPNet; IPNet.Contains(observed)
+# Perf:         compile once at profile-load, reuse the *IPNet on every event
+# Spec ref:     §5.7 "CIDR" row
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-03-cidr-ipv4
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-03
+  containers:
+  - name: client
+    egress:
+    - identifier: rfc1918-class-a
+      type: internal
+      ipAddresses:
+        - "10.0.0.0/8"
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

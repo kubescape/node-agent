@@ -14,13 +14,41 @@ package containerprofilecache
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	rmtypes "github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/signature"
 	"github.com/kubescape/node-agent/pkg/signature/profiles"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// captureExporter records every SendRuleAlert call for assertion in tests.
+// The interface is exporters.Exporter — only SendRuleAlert needs real
+// behaviour here; the rest are no-ops for the unit-test scope.
+type captureExporter struct {
+	mu     sync.Mutex
+	alerts []rmtypes.RuleFailure
+}
+
+func (e *captureExporter) SendRuleAlert(r rmtypes.RuleFailure) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.alerts = append(e.alerts, r)
+}
+func (e *captureExporter) SendMalwareAlert(_ malwaremanager.MalwareResult) {}
+func (e *captureExporter) SendFimAlerts(_ []hostfimsensor.FimEvent)         {}
+func (e *captureExporter) ruleAlerts() []rmtypes.RuleFailure {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]rmtypes.RuleFailure, len(e.alerts))
+	copy(out, e.alerts)
+	return out
+}
 
 // TestVerifyClassification_TamperPopulatesDedupMap confirms that an
 // ErrSignatureMismatch-wrapped error is treated as a real tamper:
@@ -161,3 +189,163 @@ func TestVerifyAP_TamperedProfile_PopulatesDedupMap(t *testing.T) {
 		t.Errorf("tamperEmitted still has key %q after a successful re-verify at the same RV; the verify-clean path must Delete it", key)
 	}
 }
+
+// TestVerifyAP_TamperedProfile_EmitsR1016ViaExporter pins the wiring
+// contract that was missing before: verifyUserApplicationProfile must
+// invoke the wired tamperAlertExporter exactly once per tamper event,
+// with a properly-shaped R1016 RuleFailure. Without this, the
+// SetTamperAlertExporter plumbing landed but the alert never reached
+// the exporter because the verify method was orphan code, never
+// invoked from production (the bug that caused
+// Test_31_TamperDetectionAlert to fail at the integration level).
+func TestVerifyAP_TamperedProfile_EmitsR1016ViaExporter(t *testing.T) {
+	profile := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "tampered-emit",
+			Namespace:       "test-ns",
+			ResourceVersion: "1",
+			UID:             "ap-uid-emit",
+		},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{{Name: "test"}},
+		},
+	}
+
+	adapter := profiles.NewApplicationProfileAdapter(profile)
+	if err := signature.SignObjectDisableKeyless(adapter); err != nil {
+		t.Fatalf("sign profile: %v", err)
+	}
+	profile.Spec.Containers[0].Name = "MUTATED"
+
+	exporter := &captureExporter{}
+	c := &ContainerProfileCacheImpl{}
+	c.SetTamperAlertExporter(exporter)
+
+	c.verifyUserApplicationProfile(profile, "wlid://test/cluster/ns/Pod/p")
+
+	alerts := exporter.ruleAlerts()
+	if len(alerts) != 1 {
+		t.Fatalf("exporter received %d alerts; want exactly 1", len(alerts))
+	}
+	a := alerts[0]
+	if got := a.GetBaseRuntimeAlert().AlertName; got != "Signed profile tampered" {
+		t.Errorf("AlertName=%q; want %q", got, "Signed profile tampered")
+	}
+	if got := a.GetRuleId(); got != "R1016" {
+		t.Errorf("RuleId=%q; want R1016", got)
+	}
+	if got := a.GetRuntimeAlertK8sDetails().Namespace; got != "test-ns" {
+		t.Errorf("Namespace=%q; want test-ns", got)
+	}
+
+	// Second call same RV: dedup must hold — exporter sees no new alert.
+	c.verifyUserApplicationProfile(profile, "wlid://test/cluster/ns/Pod/p")
+	if got := len(exporter.ruleAlerts()); got != 1 {
+		t.Errorf("after dedup-tracked re-call, exporter has %d alerts; want 1", got)
+	}
+
+	// Bump RV: tamperKey changes → dedup map is keyed on (kind, ns, name, RV)
+	// so the bumped RV must produce a fresh alert.
+	profile.ResourceVersion = "2"
+	c.verifyUserApplicationProfile(profile, "wlid://test/cluster/ns/Pod/p")
+	if got := len(exporter.ruleAlerts()); got != 2 {
+		t.Errorf("after RV bump, exporter has %d alerts; want 2", got)
+	}
+}
+
+// TestVerifyAP_OperationalError_DoesNotEmit pins the inverse contract:
+// when verification fails with a non-tamper error (hash compute,
+// verifier construction, decode), the exporter must NOT receive an
+// R1016 — operational errors are logged and either dropped or surfaced
+// via strict-mode loading refusal, but never as a tamper alert.
+func TestVerifyAP_OperationalError_DoesNotEmit(t *testing.T) {
+	// Construct an AP with an UNSIGNED-looking annotation set so
+	// IsSigned returns false — verify exits early without invoking the
+	// cosign path at all. Confirms the unsigned short-circuit emits
+	// nothing.
+	profile := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "unsigned",
+			Namespace:       "test-ns",
+			ResourceVersion: "1",
+		},
+	}
+
+	exporter := &captureExporter{}
+	c := &ContainerProfileCacheImpl{}
+	c.SetTamperAlertExporter(exporter)
+
+	c.verifyUserApplicationProfile(profile, "wlid://test/cluster/ns/Pod/p")
+	if got := len(exporter.ruleAlerts()); got != 0 {
+		t.Errorf("unsigned AP produced %d R1016 alerts; want 0", got)
+	}
+}
+
+// TestVerifyAP_StrictMode_ReturnsFalseOnTamper pins CodeRabbit upstream
+// PR #808 / containerprofilecache.go:414 (Major). The fix wires the
+// verifyUserApplicationProfile boolean result into the caller so that
+// in EnableSignatureVerification=true (strict) mode a tampered overlay
+// is NOT merged into the projected profile. This unit-level test pins
+// the verifier's strict-mode return contract; the call-site honors the
+// return value (drop tampered overlay → userAP = nil).
+func TestVerifyAP_StrictMode_ReturnsFalseOnTamper(t *testing.T) {
+	profile := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "tampered-strict",
+			Namespace:       "test-ns",
+			ResourceVersion: "1",
+			UID:             "ap-uid-strict",
+		},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{{Name: "test"}},
+		},
+	}
+
+	adapter := profiles.NewApplicationProfileAdapter(profile)
+	if err := signature.SignObjectDisableKeyless(adapter); err != nil {
+		t.Fatalf("sign profile: %v", err)
+	}
+	profile.Spec.Containers[0].Name = "TAMPERED"
+
+	// Strict mode: EnableSignatureVerification = true
+	c := &ContainerProfileCacheImpl{
+		cfg: config.Config{EnableSignatureVerification: true},
+	}
+	ok := c.verifyUserApplicationProfile(profile, "wlid://test/cluster/ns/Pod/p")
+	if ok {
+		t.Errorf("verify returned true on tampered profile in strict mode; expected false (caller drops overlay)")
+	}
+}
+
+// TestVerifyNN_StrictMode_ReturnsFalseOnTamper — symmetric pin for the
+// NetworkNeighborhood overlay verification path.
+func TestVerifyNN_StrictMode_ReturnsFalseOnTamper(t *testing.T) {
+	nn := &v1beta1.NetworkNeighborhood{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "tampered-strict-nn",
+			Namespace:       "test-ns",
+			ResourceVersion: "1",
+			UID:             "nn-uid-strict",
+		},
+		Spec: v1beta1.NetworkNeighborhoodSpec{
+			Containers: []v1beta1.NetworkNeighborhoodContainer{{Name: "test"}},
+		},
+	}
+
+	adapter := profiles.NewNetworkNeighborhoodAdapter(nn)
+	if err := signature.SignObjectDisableKeyless(adapter); err != nil {
+		t.Fatalf("sign nn: %v", err)
+	}
+	nn.Spec.Containers[0].Name = "TAMPERED"
+
+	c := &ContainerProfileCacheImpl{
+		cfg: config.Config{EnableSignatureVerification: true},
+	}
+	ok := c.verifyUserNetworkNeighborhood(nn, "wlid://test/cluster/ns/Pod/p")
+	if ok {
+		t.Errorf("verify returned true on tampered nn in strict mode; expected false (caller drops overlay)")
+	}
+}
+
+// cfgRef is a minimal config shim for the strict-mode tests. Mirrors the
+// concrete config.Config struct shape only in the field the verifier reads.

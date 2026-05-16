@@ -1,0 +1,41 @@
+# Fixture 11 — DNS mid-label `⋯` (DynamicIdentifier)
+#
+# Edge case:    exactly ONE label between two static segments
+#               (the user's `svc.*.kubernetes.io.` use case, spelt with ⋯
+#                because mid-label `*` is non-standard)
+# Expects:
+#   observed "svc.kube-system.cluster.local."   → match
+#   observed "svc.default.cluster.local."       → match
+#   observed "svc.cluster.local."               → NO match (zero labels in slot)
+#   observed "svc.a.b.cluster.local."           → NO match (two labels — ⋯ is exactly one)
+# Match path:   label-split + the existing dynamicpathdetector.CompareDynamic
+#               (DNS labels and path segments are structurally identical)
+# Spec ref:     §5.8 "<a>.⋯.<b>" row — "DynamicIdentifier — exactly one label"
+# Why this exists:
+#   RFC 4592 only standardises LEADING wildcards. Mid-label `*` is non-standard
+#   (cilium uses regex; bind/coredns reject it). v0.0.2 uses `⋯` (our token,
+#   from path/argv wildcards) for mid positions so the wire format never
+#   claims false RFC 4592 compliance.
+# Token reminder:
+#   `⋯` is U+22EF (MIDLINE HORIZONTAL ELLIPSIS) — ONE Unicode codepoint.
+#   It is NOT three ASCII periods (`...`).
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-11-dns-mid-ellipsis
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-11
+  containers:
+  - name: dns-client
+    egress:
+    - identifier: cluster-svc-resolution
+      type: internal
+      dnsNames:
+        - "svc.⋯.cluster.local."
+      ports:
+        - {name: UDP-53, protocol: UDP, port: 53}

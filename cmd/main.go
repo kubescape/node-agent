@@ -297,10 +297,14 @@ func main() {
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
 		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, prometheusExporter)
-		// Wire R1016 tamper alerts: when a user-defined AP/NN overlay is
-		// loaded but its signature no longer verifies, the CP cache emits
-		// "Signed profile tampered" through this exporter. Optional —
-		// nil-safe inside the cache.
+		// Wire the rule-alert exporter into the tamper-detection path so R1016
+		// ('Signed profile tampered') alerts actually reach alertmanager when
+		// a user-defined ApplicationProfile or NetworkNeighborhood fails its
+		// signature check. Without this call, tamper detection logs the
+		// failure but no alert is emitted — Test_31_TamperDetectionAlert
+		// catches the gap. (Lost during the merge/upstream-profile-rearch
+		// rebase; pkg/objectcache/containerprofilecache/tamper_alert.go has
+		// the receiver method.)
 		cpc.SetTamperAlertExporter(exporter)
 		cpc.Start(ctx)
 		logger.L().Info("ContainerProfileCache active; legacy AP/NN caches removed")
@@ -314,7 +318,7 @@ func main() {
 
 		adapterFactory := ruleadapters.NewEventRuleAdapterFactory()
 
-		celEvaluator, err := cel.NewCEL(objCache, cfg)
+		celEvaluator, err := cel.NewCEL(objCache, cfg, prometheusExporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating CEL evaluator", helpers.Error(err))
 		}
@@ -396,9 +400,17 @@ func main() {
 
 	// Create scan failure reporter (sends SBOM failures to careportreceiver for user notifications)
 	var failureReporter sbommanager.SbomFailureReporter
-	if services, svcErr := config.LoadServiceURLs("/etc/config/services.json"); svcErr == nil && services.GetReportReceiverHttpUrl() != "" {
-		failureReporter = sbommanagerv1.NewHTTPSbomFailureReporter(services.GetReportReceiverHttpUrl(), accessKey, clusterData.AccountID, clusterData.ClusterName)
-		logger.L().Info("scan failure reporting enabled", helpers.String("eventReceiverURL", services.GetReportReceiverHttpUrl()))
+	apiURL := os.Getenv("API_URL")
+	if apiURL == "" {
+		apiURL = "api.armosec.io"
+	}
+	if services, svcErr := config.LoadServiceURLs(apiURL); svcErr != nil {
+		logger.L().Ctx(ctx).Warning("scan failure reporting disabled: LoadServiceURLs failed", helpers.String("apiURL", apiURL), helpers.Error(svcErr))
+	} else if url := services.GetReportReceiverHttpUrl(); url == "" {
+		logger.L().Ctx(ctx).Warning("scan failure reporting disabled: empty report receiver URL", helpers.String("apiURL", apiURL))
+	} else {
+		failureReporter = sbommanagerv1.NewHTTPSbomFailureReporter(url, accessKey, clusterData.AccountID, clusterData.ClusterName)
+		logger.L().Info("scan failure reporting enabled", helpers.String("eventReceiverURL", url))
 	}
 
 	// Create the SBOM manager

@@ -79,7 +79,7 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 	cache.WarmPendingForTest(containerIDs)
 	for _, id := range containerIDs {
 		cache.SeedEntryForTest(id, &cpc.CachedContainerProfile{
-			Profile:       cp,
+			Projected:     cpc.Apply(nil, cp, nil),
 			State:         &objectcache.ProfileState{Name: cp.Name},
 			ContainerName: "container",
 			PodName:       podName,
@@ -87,7 +87,6 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 			PodUID:        podUID,
 			CPName:        cp.Name,
 			RV:            cp.ResourceVersion,
-			Shared:        true,
 		})
 	}
 
@@ -111,7 +110,7 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 					// Add path: seed entry directly (no goroutine spawn,
 					// no backoff, no storage RPC — pure lock stress).
 					cache.SeedEntryForTest(id, &cpc.CachedContainerProfile{
-						Profile:       cp,
+						Projected:     cpc.Apply(nil, cp, nil),
 						State:         &objectcache.ProfileState{Name: cp.Name},
 						ContainerName: "container",
 						PodName:       podName,
@@ -119,7 +118,6 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 						PodUID:        podUID,
 						CPName:        cp.Name,
 						RV:            cp.ResourceVersion,
-						Shared:        true,
 					})
 				} else {
 					// Evict path: use the production remove-event path so

@@ -3,6 +3,7 @@ package objectcache
 import (
 	"context"
 	"errors"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -38,6 +39,9 @@ type RuleObjectCacheMock struct {
 	cpByContainerName       map[string]*v1beta1.ContainerProfile
 	dnsCache                map[string]string
 	ContainerIDToSharedData *maps.SafeMap[string, *objectcache.WatchedContainerData]
+
+	projectionSpecMu sync.RWMutex
+	projectionSpec   objectcache.RuleProjectionSpec
 }
 
 func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.ApplicationProfile {
@@ -109,6 +113,219 @@ func (r *RuleObjectCacheMock) GetContainerProfile(containerID string) *v1beta1.C
 		}
 	}
 	return r.cp
+}
+
+func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *objectcache.ProjectedContainerProfile {
+	cp := r.GetContainerProfile(containerID)
+	if cp == nil {
+		return nil
+	}
+	r.projectionSpecMu.RLock()
+	spec := r.projectionSpec
+	r.projectionSpecMu.RUnlock()
+	// When no spec has been installed (Hash==""), expose all raw data so
+	// single-surface unit tests that never call SetProjectionSpec still work.
+	// When a spec is installed, only populate surfaces that are InUse, matching
+	// production behaviour where unrequested fields are dropped by Apply().
+	specInstalled := spec.Hash != ""
+
+	pcp := &objectcache.ProjectedContainerProfile{
+		PolicyByRuleId: cp.Spec.PolicyByRuleId,
+		SpecHash:       spec.Hash,
+	}
+
+	if (!specInstalled || spec.Capabilities.InUse) && len(cp.Spec.Capabilities) > 0 {
+		pcp.Capabilities.All = true
+		pcp.Capabilities.Values = make(map[string]struct{}, len(cp.Spec.Capabilities))
+		for _, c := range cp.Spec.Capabilities {
+			pcp.Capabilities.Values[c] = struct{}{}
+		}
+	}
+
+	if (!specInstalled || spec.Syscalls.InUse) && len(cp.Spec.Syscalls) > 0 {
+		pcp.Syscalls.All = true
+		pcp.Syscalls.Values = make(map[string]struct{}, len(cp.Spec.Syscalls))
+		for _, s := range cp.Spec.Syscalls {
+			pcp.Syscalls.Values[s] = struct{}{}
+		}
+	}
+
+	if (!specInstalled || spec.Execs.InUse) && len(cp.Spec.Execs) > 0 {
+		pcp.Execs.Values = make(map[string]struct{}, len(cp.Spec.Execs))
+		// Route dynamic-segment paths to Patterns so dynamicpathdetector
+		// can match them; literals to Values for the fast map lookup.
+		for _, e := range cp.Spec.Execs {
+			if mockContainsDynamicSegment(e.Path) {
+				pcp.Execs.Patterns = append(pcp.Execs.Patterns, e.Path)
+			} else {
+				pcp.Execs.Values[e.Path] = struct{}{}
+			}
+		}
+		if len(pcp.Execs.Values) == 0 {
+			pcp.Execs.Values = nil
+		}
+		// ExecsByPath: carry per-path Args so the exec-args wildcard matcher
+		// (was_executed_with_args / CompareExecArgs) keeps working.
+		pcp.ExecsByPath = make(map[string][]string, len(cp.Spec.Execs))
+		for _, e := range cp.Spec.Execs {
+			if e.Args == nil {
+				pcp.ExecsByPath[e.Path] = []string{}
+				continue
+			}
+			pcp.ExecsByPath[e.Path] = e.Args
+		}
+	}
+
+	if (!specInstalled || spec.Opens.InUse) && len(cp.Spec.Opens) > 0 {
+		pcp.Opens.All = true
+		pcp.Opens.Values = make(map[string]struct{}, len(cp.Spec.Opens))
+		for _, o := range cp.Spec.Opens {
+			pcp.Opens.Values[o.Path] = struct{}{}
+		}
+	}
+
+	if (!specInstalled || spec.Endpoints.InUse) && len(cp.Spec.Endpoints) > 0 {
+		pcp.Endpoints.All = true
+		pcp.Endpoints.Values = make(map[string]struct{}, len(cp.Spec.Endpoints))
+		for _, e := range cp.Spec.Endpoints {
+			pcp.Endpoints.Values[e.Endpoint] = struct{}{}
+		}
+	}
+
+	// Egress addresses and domains — All=true: all observed entries are retained.
+	// v0.0.2 wildcards (CIDRs, '*' sentinel, leading-*/mid-⋯/trailing-*) get
+	// routed to Patterns rather than Values so the runtime CEL helpers can
+	// pass them through networkmatch on the cache-miss path.
+	if !specInstalled || spec.EgressAddresses.InUse || spec.EgressDomains.InUse {
+		for _, n := range cp.Spec.Egress {
+			if !specInstalled || spec.EgressAddresses.InUse {
+				addrs := make([]string, 0, len(n.IPAddresses)+1)
+				if n.IPAddress != "" {
+					addrs = append(addrs, n.IPAddress)
+				}
+				addrs = append(addrs, n.IPAddresses...)
+				for _, a := range addrs {
+					ensureProjectedAllInit(&pcp.EgressAddresses)
+					if mockIsNetworkIPWildcard(a) {
+						pcp.EgressAddresses.Patterns = append(pcp.EgressAddresses.Patterns, a)
+					} else {
+						pcp.EgressAddresses.Values[a] = struct{}{}
+					}
+				}
+			}
+			if !specInstalled || spec.EgressDomains.InUse {
+				domains := n.DNSNames
+				if n.DNS != "" {
+					domains = append([]string{n.DNS}, domains...)
+				}
+				for _, d := range domains {
+					ensureProjectedAllInit(&pcp.EgressDomains)
+					if mockIsNetworkDNSWildcard(d) {
+						pcp.EgressDomains.Patterns = append(pcp.EgressDomains.Patterns, d)
+					} else {
+						pcp.EgressDomains.Values[d] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
+	// Ingress addresses and domains — same shape as egress above.
+	if !specInstalled || spec.IngressAddresses.InUse || spec.IngressDomains.InUse {
+		for _, n := range cp.Spec.Ingress {
+			if !specInstalled || spec.IngressAddresses.InUse {
+				addrs := make([]string, 0, len(n.IPAddresses)+1)
+				if n.IPAddress != "" {
+					addrs = append(addrs, n.IPAddress)
+				}
+				addrs = append(addrs, n.IPAddresses...)
+				for _, a := range addrs {
+					ensureProjectedAllInit(&pcp.IngressAddresses)
+					if mockIsNetworkIPWildcard(a) {
+						pcp.IngressAddresses.Patterns = append(pcp.IngressAddresses.Patterns, a)
+					} else {
+						pcp.IngressAddresses.Values[a] = struct{}{}
+					}
+				}
+			}
+			if !specInstalled || spec.IngressDomains.InUse {
+				domains := n.DNSNames
+				if n.DNS != "" {
+					domains = append([]string{n.DNS}, domains...)
+				}
+				for _, d := range domains {
+					ensureProjectedAllInit(&pcp.IngressDomains)
+					if mockIsNetworkDNSWildcard(d) {
+						pcp.IngressDomains.Patterns = append(pcp.IngressDomains.Patterns, d)
+					} else {
+						pcp.IngressDomains.Values[d] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
+	return pcp
+}
+
+// ensureProjectedAllInit allocates the Values map on first use.
+// Does NOT set All=true — that flag is the projection's "match any input"
+// sentinel set by rule declarations, not a comprehensiveness hint.
+// (Prior mock code conflated the two; matchIPField/matchDNSField correctly
+// short-circuit on All=true so we MUST NOT set it here.)
+func ensureProjectedAllInit(pf *objectcache.ProjectedField) {
+	if pf.Values == nil {
+		pf.Values = make(map[string]struct{})
+	}
+}
+
+// mockIsNetworkIPWildcard duplicates containerprofilecache.isNetworkIPWildcard
+// because the mock is in a separate package and we don't want to introduce
+// an import dependency on the production cache implementation here.
+// Kept in sync with the production classifier — see containerprofilecache/projection_apply.go.
+func mockIsNetworkIPWildcard(e string) bool {
+	if e == "" || e == "*" {
+		return e == "*"
+	}
+	if len(e) > 0 {
+		for _, r := range e {
+			if r == '/' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mockContainsDynamicSegment recognises the path-wildcard token used by
+// dynamicpathdetector (single Unicode codepoint U+22EF). Kept in sync with
+// containerprofilecache.containsDynamicSegment.
+func mockContainsDynamicSegment(e string) bool {
+	for _, r := range e {
+		if r == '⋯' {
+			return true
+		}
+	}
+	return false
+}
+
+// mockIsNetworkDNSWildcard duplicates containerprofilecache.isNetworkDNSWildcard.
+func mockIsNetworkDNSWildcard(e string) bool {
+	if e == "" {
+		return false
+	}
+	for _, r := range e {
+		if r == '*' || r == '⋯' {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *RuleObjectCacheMock) SetProjectionSpec(spec objectcache.RuleProjectionSpec) {
+	r.projectionSpecMu.Lock()
+	r.projectionSpec = spec
+	r.projectionSpecMu.Unlock()
 }
 
 func (r *RuleObjectCacheMock) SetContainerProfile(cp *v1beta1.ContainerProfile) {
