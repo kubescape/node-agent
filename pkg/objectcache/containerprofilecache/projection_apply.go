@@ -49,6 +49,7 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 
 	execsPaths := extractExecsPaths(cp)
 	pcp.Execs = projectField(s.Execs, execsPaths, true)
+	pcp.ExecsByPath = extractExecsByPath(cp)
 
 	endpointPaths := extractEndpointPaths(cp)
 	pcp.Endpoints = projectField(s.Endpoints, endpointPaths, true)
@@ -164,6 +165,33 @@ func extractExecsPaths(cp *v1beta1.ContainerProfile) []string {
 		paths[i] = e.Path
 	}
 	return paths
+}
+
+// extractExecsByPath builds the path → args map used by exec-args
+// matchers (e.g. dynamicpathdetector.CompareExecArgs in node-agent#807).
+// Multiple ExecCalls entries with the same Path collapse to the last
+// seen. nil-Args entries are stored as empty slices; downstream
+// matchers distinguish "absent key" (path not in the profile at all)
+// from "present with empty slice" (path captured but ran with no args).
+//
+// Args slices are CLONED rather than aliased — Apply is contract-bound
+// to be a pure transform, and an alias would let consumers mutate the
+// source profile by editing the projected map.
+func extractExecsByPath(cp *v1beta1.ContainerProfile) map[string][]string {
+	if len(cp.Spec.Execs) == 0 {
+		return nil
+	}
+	m := make(map[string][]string, len(cp.Spec.Execs))
+	for _, e := range cp.Spec.Execs {
+		if e.Args == nil {
+			m[e.Path] = []string{}
+			continue
+		}
+		cloned := make([]string, len(e.Args))
+		copy(cloned, e.Args)
+		m[e.Path] = cloned
+	}
+	return m
 }
 
 func extractEndpointPaths(cp *v1beta1.ContainerProfile) []string {
