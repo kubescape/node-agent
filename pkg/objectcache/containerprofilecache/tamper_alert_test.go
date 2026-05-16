@@ -17,6 +17,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	rmtypes "github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -279,3 +280,72 @@ func TestVerifyAP_OperationalError_DoesNotEmit(t *testing.T) {
 		t.Errorf("unsigned AP produced %d R1016 alerts; want 0", got)
 	}
 }
+
+// TestVerifyAP_StrictMode_ReturnsFalseOnTamper pins CodeRabbit upstream
+// PR #808 / containerprofilecache.go:414 (Major). The fix wires the
+// verifyUserApplicationProfile boolean result into the caller so that
+// in EnableSignatureVerification=true (strict) mode a tampered overlay
+// is NOT merged into the projected profile. This unit-level test pins
+// the verifier's strict-mode return contract; the call-site honors the
+// return value (drop tampered overlay → userAP = nil).
+func TestVerifyAP_StrictMode_ReturnsFalseOnTamper(t *testing.T) {
+	profile := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "tampered-strict",
+			Namespace:       "test-ns",
+			ResourceVersion: "1",
+			UID:             "ap-uid-strict",
+		},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{{Name: "test"}},
+		},
+	}
+
+	adapter := profiles.NewApplicationProfileAdapter(profile)
+	if err := signature.SignObjectDisableKeyless(adapter); err != nil {
+		t.Fatalf("sign profile: %v", err)
+	}
+	profile.Spec.Containers[0].Name = "TAMPERED"
+
+	// Strict mode: EnableSignatureVerification = true
+	c := &ContainerProfileCacheImpl{
+		cfg: config.Config{EnableSignatureVerification: true},
+	}
+	ok := c.verifyUserApplicationProfile(profile, "wlid://test/cluster/ns/Pod/p")
+	if ok {
+		t.Errorf("verify returned true on tampered profile in strict mode; expected false (caller drops overlay)")
+	}
+}
+
+// TestVerifyNN_StrictMode_ReturnsFalseOnTamper — symmetric pin for the
+// NetworkNeighborhood overlay verification path.
+func TestVerifyNN_StrictMode_ReturnsFalseOnTamper(t *testing.T) {
+	nn := &v1beta1.NetworkNeighborhood{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "tampered-strict-nn",
+			Namespace:       "test-ns",
+			ResourceVersion: "1",
+			UID:             "nn-uid-strict",
+		},
+		Spec: v1beta1.NetworkNeighborhoodSpec{
+			Containers: []v1beta1.NetworkNeighborhoodContainer{{Name: "test"}},
+		},
+	}
+
+	adapter := profiles.NewNetworkNeighborhoodAdapter(nn)
+	if err := signature.SignObjectDisableKeyless(adapter); err != nil {
+		t.Fatalf("sign nn: %v", err)
+	}
+	nn.Spec.Containers[0].Name = "TAMPERED"
+
+	c := &ContainerProfileCacheImpl{
+		cfg: config.Config{EnableSignatureVerification: true},
+	}
+	ok := c.verifyUserNetworkNeighborhood(nn, "wlid://test/cluster/ns/Pod/p")
+	if ok {
+		t.Errorf("verify returned true on tampered nn in strict mode; expected false (caller drops overlay)")
+	}
+}
+
+// cfgRef is a minimal config shim for the strict-mode tests. Mirrors the
+// concrete config.Config struct shape only in the field the verifier reads.

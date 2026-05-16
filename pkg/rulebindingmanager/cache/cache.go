@@ -137,7 +137,7 @@ func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 			c.mutex.Unlock()
 			return
 		}
-		rbs = c.addRuleBinding(ctx, ruleBinding)
+		rbs = c.addRuleBinding(ruleBinding)
 	}
 	notifiers := c.snapshotNotifiersLocked()
 	c.mutex.Unlock()
@@ -156,20 +156,20 @@ func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 			c.mutex.Unlock()
 			return
 		}
-		rbs = c.modifiedRuleBinding(ctx, ruleBinding)
+		rbs = c.modifiedRuleBinding(ruleBinding)
 	}
 	notifiers := c.snapshotNotifiersLocked()
 	c.mutex.Unlock()
 	dispatchNonBlocking(notifiers, rbs, "ModifyHandler notify")
 }
 
-func (c *RBCache) DeleteHandler(ctx context.Context, obj runtime.Object) {
+func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 	c.mutex.Lock()
 	var rbs []rulebindingmanager.RuleBindingNotify
 	if pod, ok := obj.(*corev1.Pod); ok {
 		c.deletePod(uniqueName(pod))
 	} else if un, ok := obj.(*unstructured.Unstructured); ok {
-		rbs = c.deleteRuleBinding(ctx, uniqueName(un))
+		rbs = c.deleteRuleBinding(uniqueName(un))
 	}
 	notifiers := c.snapshotNotifiersLocked()
 	c.mutex.Unlock()
@@ -234,11 +234,7 @@ func indexOfNotifier(notifiers []*chan rulebindingmanager.RuleBindingNotify, n *
 // ----------------- RuleBinding manager methods -----------------
 
 // AddRuleBinding adds a rule binding to the cache
-// addRuleBinding propagates ctx through the K8s List calls so the
-// watcher can cancel in-flight work. CodeRabbit PR #43 cache.go:176
-// (Major): previously used context.Background() for the namespaces +
-// pods list, which leaked goroutines past watch-context cancellation.
-func (c *RBCache) addRuleBinding(ctx context.Context, ruleBinding *typesv1.RuntimeAlertRuleBinding) []rulebindingmanager.RuleBindingNotify {
+func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) []rulebindingmanager.RuleBindingNotify {
 	var rbs []rulebindingmanager.RuleBindingNotify
 	rbName := uniqueName(ruleBinding)
 	logger.L().Info("RBCache - ruleBinding added/modified", helpers.String("name", rbName))
@@ -267,7 +263,7 @@ func (c *RBCache) addRuleBinding(ctx context.Context, ruleBinding *typesv1.Runti
 
 	var namespaces *corev1.NamespaceList
 	// if ruleBinding.GetNamespace() == "" {
-	namespaces, err = c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: nsSelectorStr})
+	namespaces, err = c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: nsSelectorStr})
 	if err != nil {
 		logger.L().Warning("RBCache - failed to list namespaces", helpers.String("ruleBiding", rbName), helpers.String("nsSelector", nsSelectorStr), helpers.Error(err))
 		return rbs
@@ -282,7 +278,7 @@ func (c *RBCache) addRuleBinding(ctx context.Context, ruleBinding *typesv1.Runti
 			LabelSelector: podSelectorStr,
 			FieldSelector: "spec.nodeName=" + c.nodeName,
 		}
-		pods, err := c.k8sClient.GetKubernetesClient().CoreV1().Pods(ns.GetName()).List(ctx, lp)
+		pods, err := c.k8sClient.GetKubernetesClient().CoreV1().Pods(ns.GetName()).List(context.Background(), lp)
 		if err != nil {
 			logger.L().Warning("RBCache - failed to list pods", helpers.String("ruleBiding", rbName), helpers.String("podSelector", podSelectorStr), helpers.Error(err))
 			return rbs
@@ -309,12 +305,7 @@ func (c *RBCache) addRuleBinding(ctx context.Context, ruleBinding *typesv1.Runti
 	}
 	return rbs
 }
-// deleteRuleBinding accepts ctx for parity with addRuleBinding (uniform
-// handler signatures) and future-proofs against the helper growing K8s
-// API calls. RuleBindingNotifierImplWithK8s currently uses an internal
-// context; if it ever takes one, ctx is already threaded.
-// CodeRabbit PR #43 cache.go:176.
-func (c *RBCache) deleteRuleBinding(_ context.Context, uniqueName string) []rulebindingmanager.RuleBindingNotify {
+func (c *RBCache) deleteRuleBinding(uniqueName string) []rulebindingmanager.RuleBindingNotify {
 	logger.L().Info("RBCache - ruleBinding deleted", helpers.String("name", uniqueName))
 	var rbs []rulebindingmanager.RuleBindingNotify
 
@@ -349,9 +340,9 @@ func (c *RBCache) deleteRuleBinding(_ context.Context, uniqueName string) []rule
 	return rbs
 }
 
-func (c *RBCache) modifiedRuleBinding(ctx context.Context, ruleBinding *typesv1.RuntimeAlertRuleBinding) []rulebindingmanager.RuleBindingNotify {
-	rbsD := c.deleteRuleBinding(ctx, uniqueName(ruleBinding))
-	rbsA := c.addRuleBinding(ctx, ruleBinding)
+func (c *RBCache) modifiedRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) []rulebindingmanager.RuleBindingNotify {
+	rbsD := c.deleteRuleBinding(uniqueName(ruleBinding))
+	rbsA := c.addRuleBinding(ruleBinding)
 
 	return diff(rbsD, rbsA)
 }
