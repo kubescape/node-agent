@@ -409,8 +409,17 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		// when a signed overlay's signature no longer matches (i.e. content
 		// has been mutated post-sign). No-op when the overlay is unsigned or
 		// the tamper-alert exporter has not been wired.
+		// CodeRabbit upstream PR #808 / containerprofilecache.go:414 (Major):
+		// when EnableSignatureVerification=true and the overlay fails
+		// verification, verifyUserApplicationProfile returns false. Drop the
+		// failed overlay before merging so a tampered profile does not
+		// silently project into the cache. In permissive mode the verifier
+		// always returns true and the overlay still merges (alert-only
+		// behaviour preserved).
 		if userAP != nil {
-			c.verifyUserApplicationProfile(userAP, sharedData.Wlid)
+			if !c.verifyUserApplicationProfile(userAP, sharedData.Wlid) {
+				userAP = nil
+			}
 		}
 		var userNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
@@ -426,7 +435,9 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			userNN = nil
 		}
 		if userNN != nil {
-			c.verifyUserNetworkNeighborhood(userNN, sharedData.Wlid)
+			if !c.verifyUserNetworkNeighborhood(userNN, sharedData.Wlid) {
+				userNN = nil
+			}
 		}
 	}
 

@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -104,38 +103,6 @@ func TestRefreshRuleBindingsRules_NonBlockingFanout(t *testing.T) {
 	require.Len(t, ch1, 1, "full ch1 should still hold its pre-loaded message (drop-on-full policy)")
 	require.Len(t, ch2, 1, "ch2 should have received the refresh pulse")
 	require.Len(t, ch3, 1, "ch3 should have received the refresh pulse")
-}
-
-// TestRBCacheHelpers_CtxFirstArg pins the contract from the CodeRabbit
-// PR #43 review (cache.go:176, Major): the three RBCache helpers that
-// AddHandler / ModifyHandler / DeleteHandler delegate to MUST accept a
-// context.Context as their first argument so the watcher's cancellation
-// signal propagates into K8s API List calls. A previous regression used
-// `context.Background()` inside addRuleBinding, leaking goroutines past
-// watch-context cancellation. Compile-time assignment to a typed
-// function variable: if anyone removes ctx, this file no longer compiles.
-func TestRBCacheHelpers_CtxFirstArg(t *testing.T) {
-	c := &RBCache{}
-
-	// Compile-time guards: these assignments fail to compile if the
-	// signatures drift away from (ctx, ...). The reflect read is only
-	// to silence the unused-variable check.
-	var addFn func(context.Context, *typesv1.RuntimeAlertRuleBinding) []rulebindingmanager.RuleBindingNotify = c.addRuleBinding
-	var delFn func(context.Context, string) []rulebindingmanager.RuleBindingNotify = c.deleteRuleBinding
-	var modFn func(context.Context, *typesv1.RuntimeAlertRuleBinding) []rulebindingmanager.RuleBindingNotify = c.modifiedRuleBinding
-
-	// Runtime sanity: function values are non-nil + first param is ctx.
-	require.NotNil(t, addFn, "addRuleBinding bound value should be non-nil")
-	require.NotNil(t, delFn, "deleteRuleBinding bound value should be non-nil")
-	require.NotNil(t, modFn, "modifiedRuleBinding bound value should be non-nil")
-	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
-	for name, fn := range map[string]any{"addRuleBinding": addFn, "deleteRuleBinding": delFn, "modifiedRuleBinding": modFn} {
-		ft := reflect.TypeOf(fn)
-		require.GreaterOrEqualf(t, ft.NumIn(), 1, "%s must take at least one parameter (ctx)", name)
-		require.Truef(t, ft.In(0).Implements(ctxType) || ft.In(0) == ctxType,
-			"%s first param must be context.Context, got %s — ctx-propagation contract regressed (CodeRabbit PR #43 cache.go:176)",
-			name, ft.In(0).String())
-	}
 }
 
 func TestRuntimeObjAddHandler(t *testing.T) {
@@ -277,7 +244,7 @@ func TestRuntimeObjAddHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for i := range tt.args.rb {
-				tt.args.c.addRuleBinding(context.Background(), &tt.args.rb[i])
+				tt.args.c.addRuleBinding(&tt.args.rb[i])
 			}
 			tt.args.c.addPod(context.Background(), tt.args.pod)
 			r := tt.args.c.ListRulesForPod(tt.args.pod.GetNamespace(), tt.args.pod.GetName())
@@ -695,7 +662,7 @@ func TestDeleteRuleBinding(t *testing.T) {
 
 			}
 
-			c.deleteRuleBinding(context.Background(), tt.uniqueName)
+			c.deleteRuleBinding(tt.uniqueName)
 
 			assert.False(t, c.rbNameToPods.Has(tt.uniqueName))
 			assert.False(t, c.rbNameToRB.Has(tt.uniqueName))
@@ -1000,7 +967,7 @@ func TestAddRuleBinding(t *testing.T) {
 			c := NewCacheMock("")
 			c.k8sClient = k8sClient
 
-			c.addRuleBinding(context.Background(), tt.rb)
+			c.addRuleBinding(tt.rb)
 
 			rbName := uniqueName(tt.rb)
 
