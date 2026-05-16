@@ -46,6 +46,13 @@ func (l *apLibrary) wasPathOpened(containerID, path ref.Val) ref.Val {
 	return types.Bool(false)
 }
 
+// wasPathOpenedWithFlags answers whether the projected ApplicationProfile
+// contains an open-entry whose path matches the given path. The flags
+// argument is parsed and validated for shape but is not used for matching
+// in v1 — the OpenFlagsByPath projection slice is out of scope for v1
+// (composite-key projection would balloon the cache footprint). When the
+// flags-projection slice is added in a future spec revision, this helper
+// becomes the path-AND-flag matcher and v1 callers continue to work.
 func (l *apLibrary) wasPathOpenedWithFlags(containerID, path, flags ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
@@ -105,13 +112,17 @@ func (l *apLibrary) wasPathOpenedWithSuffix(containerID, suffix ref.Val) ref.Val
 	}
 
 	if cp.Opens.All {
-		// All entries retained — scan to check for the suffix.
+		// All entries retained (no rule declared SuffixHits-style
+		// projection). Scan ONLY concrete entries in Values — Patterns
+		// contain wildcard tokens ('*' / '⋯') whose text doesn't safely
+		// answer suffix questions. CodeRabbit PR #43 open.go:79: a
+		// retained Pattern like "/var/log/pods/*/volumes/..." doesn't
+		// end with the concrete suffix "foo.log", but the concrete open
+		// it stands in for might — strings.HasSuffix on the pattern
+		// text returns false and produces a false negative. Patterns
+		// are inherently wildcard-shaped; concrete-path semantics live
+		// in Values (and in SuffixHits when projection is active).
 		for openPath := range cp.Opens.Values {
-			if strings.HasSuffix(openPath, suffixStr) {
-				return types.Bool(true)
-			}
-		}
-		for _, openPath := range cp.Opens.Patterns {
 			if strings.HasSuffix(openPath, suffixStr) {
 				return types.Bool(true)
 			}
@@ -149,13 +160,14 @@ func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val
 	}
 
 	if cp.Opens.All {
-		// All entries retained — scan to check for the prefix.
+		// All entries retained — scan ONLY Values (concrete paths).
+		// Patterns contain wildcard tokens whose text doesn't safely
+		// answer prefix questions; a pattern starting with "/var/⋯/log"
+		// matches concrete paths starting with "/var/anything/log" but
+		// strings.HasPrefix against the pattern text returns false for
+		// "/var/foo/log...". Same fix as wasPathOpenedWithSuffix above.
+		// CodeRabbit PR #43 open.go:79 (Also applies to 111-123).
 		for openPath := range cp.Opens.Values {
-			if strings.HasPrefix(openPath, prefixStr) {
-				return types.Bool(true)
-			}
-		}
-		for _, openPath := range cp.Opens.Patterns {
 			if strings.HasPrefix(openPath, prefixStr) {
 				return types.Bool(true)
 			}
