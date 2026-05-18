@@ -93,6 +93,7 @@ func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedCon
 		watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
+		cpm.notifyCompleted(watchedContainer.ContainerID)
 		return file.ObjectTooLargeError
 	} else if err.Error() == file.ObjectCompletedError.Error() {
 		watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)

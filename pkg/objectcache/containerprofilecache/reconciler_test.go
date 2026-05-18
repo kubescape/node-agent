@@ -1194,6 +1194,56 @@ func TestTooLargeCP_Accepted(t *testing.T) {
 	assert.Equal(t, "2", stored2.RV, "RV updated on refresh")
 }
 
+// TestNotifyContainerTerminal_TooLarge verifies the fast-path promotion for a
+// container whose CP becomes TooLarge. Without waiting for the 30s reconciler
+// tick, NotifyContainerCompleted must promote the pending entry immediately once
+// the TooLarge CP is visible in storage.
+func TestNotifyContainerTerminal_TooLarge(t *testing.T) {
+	// Start with no CP in storage so the container stays pending.
+	client := &fakeProfileClient{cp: nil}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-too-large-notify"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+
+	assert.Equal(t, 1, c.pending.Len(), "container is pending while CP absent")
+	_, ok := c.entries.Load(id)
+	assert.False(t, ok, "no entry while CP absent")
+
+	// Storage now has a TooLarge terminal CP.
+	client.cp = &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-too-large",
+			Namespace:       "default",
+			ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Partial,
+				helpersv1.StatusMetadataKey:     helpersv1.TooLarge,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{{Path: "/bin/sh"}},
+		},
+	}
+
+	// Simulate the notification fired by containerprofilemanager on TooLarge.
+	// The goroutine launched by NotifyContainerCompleted must promote the entry
+	// without the caller needing to wait for the 30s periodic tick.
+	c.NotifyContainerCompleted(id)
+
+	// Allow the notification goroutine to run (first attempt is immediate).
+	assert.Eventually(t, func() bool {
+		_, ok := c.entries.Load(id)
+		return ok
+	}, 2*time.Second, 10*time.Millisecond, "entry promoted via notification, no 30s tick needed")
+
+	assert.Equal(t, 0, c.pending.Len(), "pending cleared after TooLarge promotion")
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Equal(t, helpersv1.TooLarge, stored.State.Status)
+}
+
 // TestUserManagedProfileMerged exercises the user-managed merge path
 // (Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest):
 // a user-managed AP published at "ug-<workloadName>" is merged on top of
