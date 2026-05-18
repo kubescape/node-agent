@@ -139,16 +139,24 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 	if rpcBudget <= 0 {
 		rpcBudget = defaultStorageRPCBudget
 	}
-	return &ContainerProfileCacheImpl{
-		cfg:               cfg,
-		containerLocks:    resourcelocks.New(),
-		storageClient:     storageClient,
-		k8sObjectCache:    k8sObjectCache,
-		metricsManager:    metricsManager,
+	c := &ContainerProfileCacheImpl{
+		cfg:            cfg,
+		containerLocks: resourcelocks.New(),
+		storageClient:  storageClient,
+		k8sObjectCache: k8sObjectCache,
+		metricsManager: metricsManager,
 		reconcileEvery: reconcileEvery,
 		rpcBudget:      rpcBudget,
-		nudge:             make(chan struct{}, 1),
+		nudge:          make(chan struct{}, 1),
 	}
+	// Pre-initialize SafeMap internal maps: Load() reads m.items == nil without
+	// a lock while Set() writes m.items under a write lock, causing a data race
+	// on the first concurrent access to a zero-value SafeMap.
+	c.entries.Set("", nil)
+	c.entries.Delete("")
+	c.pending.Set("", nil)
+	c.pending.Delete("")
+	return c
 }
 
 func shouldLogOptionalUserManagedFetchError(err error) bool {
