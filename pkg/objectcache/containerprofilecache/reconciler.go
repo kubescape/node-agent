@@ -2,13 +2,13 @@
 //
 // The reconciler is the safety-net eviction path AND the freshness refresh
 // loop. Each tick it:
-//   1. reconcileOnce: evicts cache entries whose pod is gone or whose
-//      container is no longer Running.
-//   2. refreshAllEntries (single-flight via atomic flag): re-fetches the
-//      consolidated CP, the workload-level AP+NN, the user-managed
-//      "ug-<workload>" AP+NN, and any label-referenced user AP/NN overlay,
-//      then rebuilds the projection iff any resourceVersion changed. Fast-skip
-//      when every RV matches what's already cached.
+//  1. reconcileOnce: evicts cache entries whose pod is gone or whose
+//     container is no longer Running.
+//  2. refreshAllEntries (single-flight via atomic flag): re-fetches the
+//     consolidated CP, the workload-level AP+NN, the user-managed
+//     "ug-<workload>" AP+NN, and any label-referenced user AP/NN overlay,
+//     then rebuilds the projection iff any resourceVersion changed. Fast-skip
+//     when every RV matches what's already cached.
 //
 // RPC cost @ 300 containers / 30s cadence steady-state: up to 7 gets per
 // entry per tick (CP + 3×AP + 3×NN). At 300 entries that's 70 RPC/s in the
@@ -273,12 +273,9 @@ func (c *ContainerProfileCacheImpl) refreshAllEntries(ctx context.Context) {
 //
 //	base CP → workload AP+NN → user-managed (ug-) AP+NN → user overlay AP+NN.
 //
-// We intentionally DO NOT re-apply the partial-on-non-PreRunning gate here:
-// any entry that survived addContainer already passed that gate (or was
-// PreRunning), so refresh can accept partial profiles freely. (Fix B for
-// Test_17 / Test_19: the workload AP/NN must be re-fetched each tick so a
-// "ready" -> "completed" transition propagates to ProfileState.Status, which
-// in turn promotes fail_on_profile from false to true.)
+// The completed-only gate is re-applied here: if the CP regresses to a
+// non-Completed status we keep the existing cached entry rather than
+// projecting stale/incomplete data.
 func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id string, e *CachedContainerProfile) {
 	// Resurrection guard (reviewer #1): refreshAllEntries snapshots entries
 	// without holding containerLocks, so a concurrent deleteContainer /
@@ -321,6 +318,13 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			helpers.String("cpName", e.CPName),
 			helpers.Error(cpErr))
 		cp = nil
+	}
+	if cp != nil && cp.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
+		logger.L().Debug("refreshOneEntry: CP status not completed; keeping cached entry",
+			helpers.String("containerID", id),
+			helpers.String("cpName", e.CPName),
+			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
+		return
 	}
 	var userManagedAP *v1beta1.ApplicationProfile
 	var userManagedNN *v1beta1.NetworkNeighborhood
@@ -519,9 +523,9 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	newEntry := &CachedContainerProfile{
-		Projected: projectedCP,
-		SpecHash:  projectedCP.SpecHash,
-		State:     &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
+		Projected:       projectedCP,
+		SpecHash:        projectedCP.SpecHash,
+		State:           &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
 		CallStackTree:   tree,
 		ContainerName:   prev.ContainerName,
 		PodName:         prev.PodName,

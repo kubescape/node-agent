@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	cpc "github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
@@ -29,6 +30,7 @@ func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
 			Name:            "cp",
 			Namespace:       "default",
 			ResourceVersion: "100",
+			Annotations:     map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
 		},
 		Spec: v1beta1.ContainerProfileSpec{
 			Execs: []v1beta1.ExecCalls{{Path: "/bin/base", Args: []string{"a"}}},

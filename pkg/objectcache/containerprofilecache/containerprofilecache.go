@@ -362,16 +362,16 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
-	// Fix (reviewer #3): if the consolidated CP is still Partial and this
-	// container is not PreRunning (i.e. we saw it start fresh after the
-	// agent was already up), the partial view belongs to a PREVIOUS container
-	// incarnation. Legacy caches explicitly deleted such partials on restart
-	// so rule evaluation fell through to "no profile" until a new Full
-	// profile arrived. Mirror that: keep pending, retry each tick.
-	if !sharedData.PreRunningContainer {
-		if cp != nil && cp.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial {
-			cp = nil
-		}
+	// Only cache profiles whose status is Completed. Completion (Partial/Full)
+	// is about data coverage and does not affect caching eligibility.
+	// Return false (not nil) so the synthetic-CP fallback below does not run
+	// and inadvertently cache via an overlay when the real CP is not yet done.
+	if cp != nil && cp.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
+		logger.L().Debug("tryPopulateEntry: CP status not completed; keeping pending",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", ns),
+			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
+		return false
 	}
 
 	// Fetch user-authored legacy CRDs when the pod carries the
