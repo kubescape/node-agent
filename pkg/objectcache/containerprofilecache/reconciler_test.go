@@ -1148,6 +1148,52 @@ func TestRefreshUpdatesCPStatus(t *testing.T) {
 	assert.Equal(t, "2", stored.RV, "RV recorded from the completed CP")
 }
 
+// TestTooLargeCP_Accepted verifies that a CP with Status=TooLarge is treated
+// as a terminal state and cached immediately, not kept in the pending queue.
+// TooLarge profiles have truncated but valid data that the rule engine should
+// use for detection; rejecting them would leave the container permanently
+// pending since the manager never transitions TooLarge → Completed.
+func TestTooLargeCP_Accepted(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-too-large",
+			Namespace:       "default",
+			ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Partial,
+				helpersv1.StatusMetadataKey:     helpersv1.TooLarge,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{{Path: "/bin/sh"}},
+		},
+	}
+	client := &fakeProfileClient{cp: cp}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-too-large"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok, "TooLarge CP must populate cache entry immediately")
+	assert.Equal(t, 0, c.pending.Len(), "no pending entry when Status=TooLarge")
+	require.NotNil(t, stored.State)
+	assert.Equal(t, helpersv1.TooLarge, stored.State.Status, "ProfileState reflects TooLarge status")
+	assert.Equal(t, "1", stored.RV, "RV recorded from the too-large CP")
+
+	// refreshOneEntry must also accept TooLarge on subsequent ticks.
+	cp2 := cp.DeepCopy()
+	cp2.ResourceVersion = "2"
+	cp2.Spec.Execs = append(cp2.Spec.Execs, v1beta1.ExecCalls{Path: "/usr/bin/id"})
+	client.cp = cp2
+	c.refreshAllEntries(context.Background())
+
+	stored2, ok := c.entries.Load(id)
+	require.True(t, ok, "entry survives refresh with TooLarge status")
+	assert.Equal(t, "2", stored2.RV, "RV updated on refresh")
+}
+
 // TestUserManagedProfileMerged exercises the user-managed merge path
 // (Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest):
 // a user-managed AP published at "ug-<workloadName>" is merged on top of

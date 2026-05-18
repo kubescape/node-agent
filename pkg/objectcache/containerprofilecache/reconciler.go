@@ -323,8 +323,8 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			helpers.Error(cpErr))
 		cp = nil
 	}
-	if cp != nil && cp.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
-		logger.L().Debug("refreshOneEntry: CP status not completed; keeping cached entry",
+	if cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
+		logger.L().Debug("refreshOneEntry: CP status not terminal; keeping cached entry",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName),
 			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))

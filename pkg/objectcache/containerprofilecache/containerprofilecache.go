@@ -362,12 +362,13 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
-	// Only cache profiles whose status is Completed. Completion (Partial/Full)
-	// is about data coverage and does not affect caching eligibility.
-	// Return false (not nil) so the synthetic-CP fallback below does not run
-	// and inadvertently cache via an overlay when the real CP is not yet done.
-	if cp != nil && cp.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
-		logger.L().Debug("tryPopulateEntry: CP status not completed; keeping pending",
+	// Only cache profiles whose status is terminal (Completed or TooLarge).
+	// Learning/ready profiles are still being written; caching them would let
+	// rules fire against incomplete data. TooLarge is terminal: the manager
+	// stopped collecting but the truncated data is still valid for detection.
+	// Return false so the synthetic-CP fallback below does not bypass the gate.
+	if cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
+		logger.L().Debug("tryPopulateEntry: CP status not terminal; keeping pending",
 			helpers.String("containerID", containerID),
 			helpers.String("namespace", ns),
 			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
@@ -690,6 +691,17 @@ func (c *ContainerProfileCacheImpl) NotifyContainerCompleted(containerID string)
 			}
 		}
 	}()
+}
+
+// isTerminalCPStatus reports whether the CP status annotation value represents
+// a terminal state that the cache should accept. Terminal states are:
+//   - Completed: learning period finished normally.
+//   - TooLarge: manager stopped collecting because the profile grew too large;
+//     the truncated data is still valid for rule evaluation.
+//
+// Learning ("ready") is not terminal — the CP is still being written.
+func isTerminalCPStatus(status string) bool {
+	return status == helpersv1.Completed || status == helpersv1.TooLarge
 }
 
 // Ensure ContainerProfileCacheImpl implements the ContainerProfileCache interface.
