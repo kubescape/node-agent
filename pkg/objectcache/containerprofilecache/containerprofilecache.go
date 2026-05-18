@@ -108,8 +108,8 @@ type ContainerProfileCacheImpl struct {
 	k8sObjectCache objectcache.K8sObjectCache
 	metricsManager metricsmanager.MetricsManager
 
-	reconcileEvery    time.Duration
-	rpcBudget         time.Duration
+	reconcileEvery time.Duration
+	rpcBudget      time.Duration
 	refreshInProgress atomic.Bool
 
 	// deprecationDedup tracks (kind|ns/name@rv) keys to emit one WARN log
@@ -140,14 +140,14 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 		rpcBudget = defaultStorageRPCBudget
 	}
 	return &ContainerProfileCacheImpl{
-		cfg:            cfg,
-		containerLocks: resourcelocks.New(),
-		storageClient:  storageClient,
-		k8sObjectCache: k8sObjectCache,
-		metricsManager: metricsManager,
+		cfg:               cfg,
+		containerLocks:    resourcelocks.New(),
+		storageClient:     storageClient,
+		k8sObjectCache:    k8sObjectCache,
+		metricsManager:    metricsManager,
 		reconcileEvery: reconcileEvery,
 		rpcBudget:      rpcBudget,
-		nudge:          make(chan struct{}, 1),
+		nudge:             make(chan struct{}, 1),
 	}
 }
 
@@ -657,6 +657,39 @@ func (c *ContainerProfileCacheImpl) waitForSharedContainerData(containerID strin
 		}
 		return nil, fmt.Errorf("container %s not found in shared data", containerID)
 	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
+}
+
+// NotifyContainerCompleted is called by containerprofilemanager when it writes a
+// CP with status="completed". If the container is still pending it launches a
+// bounded retry goroutine (up to 5 attempts × 3 s) so the cache entry is
+// promoted within seconds of the consolidation cycle completing, without waiting
+// for the next 30 s reconciler tick.
+func (c *ContainerProfileCacheImpl) NotifyContainerCompleted(containerID string) {
+	p, pending := c.pending.Load(containerID)
+	if !pending {
+		return
+	}
+	go func() {
+		for i := 0; i < 5; i++ {
+			if i > 0 {
+				time.Sleep(3 * time.Second)
+			}
+			if _, still := c.pending.Load(containerID); !still {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), c.rpcBudget)
+			var promoted bool
+			c.containerLocks.WithLock(containerID, func() {
+				if _, still := c.pending.Load(containerID); still {
+					promoted = c.tryPopulateEntry(ctx, containerID, p.container, p.sharedData, p.cpName, p.workloadName)
+				}
+			})
+			cancel()
+			if promoted {
+				return
+			}
+		}
+	}()
 }
 
 // Ensure ContainerProfileCacheImpl implements the ContainerProfileCache interface.

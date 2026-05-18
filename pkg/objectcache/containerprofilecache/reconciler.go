@@ -32,8 +32,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// tickLoop drives the reconciler. Evict runs synchronously on the tick;
-// refresh runs on a single-flight goroutine guarded by refreshInProgress so a
+// tickLoop drives the reconciler. Each tick it evicts terminated containers,
+// retries pending entries, and refreshes all cached entries. Pending-entry
+// retries are also triggered immediately via NotifyContainerCompleted when the
+// containerprofilemanager writes a CP with status="completed".
+//
+// Refresh runs on a single-flight goroutine guarded by refreshInProgress so a
 // slow refresh never stacks.
 func (c *ContainerProfileCacheImpl) tickLoop(ctx context.Context) {
 	if c.reconcileEvery == 0 {

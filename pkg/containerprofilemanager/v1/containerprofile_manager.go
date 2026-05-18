@@ -92,6 +92,18 @@ type ContainerProfileManager struct {
 	hostProfile   *v1beta1.ContainerProfile
 	hostProfileMu sync.RWMutex
 	hostID        string
+
+	completionNotifier objectcache.CompletionNotifier
+}
+
+func (cpm *ContainerProfileManager) SetCompletionNotifier(n objectcache.CompletionNotifier) {
+	cpm.completionNotifier = n
+}
+
+func (cpm *ContainerProfileManager) notifyCompleted(containerID string) {
+	if cpm.completionNotifier != nil {
+		cpm.completionNotifier.NotifyContainerCompleted(containerID)
+	}
 }
 
 // NewContainerProfileManager creates a new container profile manager
