@@ -47,6 +47,9 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 						helpers.String("status", string(watchedContainer.GetStatus())),
 						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
+				if watchedContainer.GetStatus() == objectcache.WatchedContainerStatusCompleted {
+					cpm.notifyCompleted(watchedContainer.ContainerID)
+				}
 				// Signal ack to lifecycle goroutine
 				if watchedContainer.AckChan != nil {
 					watchedContainer.AckChan <- struct{}{}

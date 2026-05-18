@@ -1244,6 +1244,48 @@ func TestNotifyContainerTerminal_TooLarge(t *testing.T) {
 	assert.Equal(t, helpersv1.TooLarge, stored.State.Status)
 }
 
+// TestNotifyContainerTerminal_Completed verifies the fast-path promotion for a
+// container that exits normally (ContainerHasTerminatedError with
+// Status=Completed). The notification goroutine must promote the pending entry
+// without waiting for the 30s reconciler tick.
+func TestNotifyContainerTerminal_Completed(t *testing.T) {
+	// No CP yet — container stays pending.
+	client := &fakeProfileClient{cp: nil}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-normal-exit"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+
+	assert.Equal(t, 1, c.pending.Len(), "container pending while CP absent")
+
+	// Simulate the lifecycle: container exits → CP written with Status=Completed.
+	client.cp = &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-exited",
+			Namespace:       "default",
+			ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+	}
+
+	// Simulate what monitorContainer now does on ContainerHasTerminatedError.
+	c.NotifyContainerCompleted(id)
+
+	assert.Eventually(t, func() bool {
+		_, ok := c.entries.Load(id)
+		return ok
+	}, 2*time.Second, 10*time.Millisecond, "entry promoted via notification without 30s tick")
+
+	assert.Equal(t, 0, c.pending.Len(), "pending cleared after normal-exit promotion")
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Equal(t, helpersv1.Completed, stored.State.Status)
+}
+
 // TestUserManagedProfileMerged exercises the user-managed merge path
 // (Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest):
 // a user-managed AP published at "ug-<workloadName>" is merged on top of
