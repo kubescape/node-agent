@@ -298,6 +298,9 @@ func main() {
 
 		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, prometheusExporter)
 		cpc.Start(ctx)
+		if cpm, ok := containerProfileManager.(*containerprofilemanagerv1.ContainerProfileManager); ok {
+			cpm.SetCompletionNotifier(cpc)
+		}
 		logger.L().Info("ContainerProfileCache active; legacy AP/NN caches removed")
 
 		dc := dnscache.NewDnsCache(dnsResolver)

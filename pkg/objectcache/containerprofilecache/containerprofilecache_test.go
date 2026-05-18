@@ -172,8 +172,11 @@ func TestSharedFastPath_NoOverlay(t *testing.T) {
 // is merged into the projected profile.
 func TestOverlayPath_DeepCopies(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp-1", Namespace: "default", ResourceVersion: "1"},
-		Spec:       v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp-1", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
 	}
 	userAP := &v1beta1.ApplicationProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "u1"},
@@ -207,7 +210,10 @@ func TestOverlayPath_DeepCopies(t *testing.T) {
 // fresh mutex.
 func TestDeleteContainer_LockAndCleanup(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp-delete", Namespace: "default", ResourceVersion: "1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp-delete", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
 	}
 	client := &fakeProfileClient{cp: cp}
 	c, k8s := newTestCache(t, client)
@@ -283,7 +289,10 @@ func TestContainerCallback_HostContainer(t *testing.T) {
 // GetCallStackSearchTree.
 func TestCallStackIndexBuiltFromProfile(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp-stack", Namespace: "default", ResourceVersion: "1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp-stack", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
 		Spec: v1beta1.ContainerProfileSpec{
 			IdentifiedCallStacks: []v1beta1.IdentifiedCallStack{
 				{

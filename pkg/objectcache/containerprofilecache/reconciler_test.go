@@ -344,7 +344,10 @@ func TestReconcilerExitsOnCtxCancel(t *testing.T) {
 // TestRefreshFastSkipWhenAllRVsMatch — delta #4. When CP RV and both overlay
 // RVs match the cached values, refreshOneEntry returns without rebuilding.
 func TestRefreshFastSkipWhenAllRVsMatch(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "100"}}
+	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{
+		Name: "cp", Namespace: "default", ResourceVersion: "100",
+		Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+	}}
 	ap := &v1beta1.ApplicationProfile{ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "50"}}
 	nn := &v1beta1.NetworkNeighborhood{ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "60"}}
 	client := &countingProfileClient{cp: cp, ap: ap, nn: nn}
@@ -389,8 +392,11 @@ func TestRefreshFastSkipWhenAllRVsMatch(t *testing.T) {
 // a newer AP RV and rebuilds.
 func TestRefreshRebuildsOnUserAPChange(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "100"},
-		Spec:       v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp", Namespace: "default", ResourceVersion: "100",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
 	}
 	ap := &v1beta1.ApplicationProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "51"},
@@ -442,8 +448,11 @@ func TestRefreshRebuildsOnUserAPChange(t *testing.T) {
 // TestRefreshRebuildsOnCPChange — CP RV changed; entry rebuilds with fresh CP.
 func TestRefreshRebuildsOnCPChange(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "101"},
-		Spec:       v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp", Namespace: "default", ResourceVersion: "101",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
 	}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
@@ -469,7 +478,10 @@ func TestRefreshRebuildsOnCPChange(t *testing.T) {
 // reflects the new execs AND that the legacy-load metric was re-emitted.
 func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "100"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp", Namespace: "default", ResourceVersion: "100",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
 		Spec: v1beta1.ContainerProfileSpec{
 			Execs: []v1beta1.ExecCalls{{Path: "/bin/base", Args: []string{"a"}}},
 		},
@@ -850,6 +862,7 @@ func TestRetryPendingEntries_CPCreatedAfterAdd(t *testing.T) {
 			Name:            "cp-pending",
 			Namespace:       "default",
 			ResourceVersion: "1",
+			Annotations:     map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
 		},
 	}
 
@@ -918,11 +931,10 @@ type testNotFoundErr struct{ name string }
 
 func (e *testNotFoundErr) Error() string { return "container profile " + e.name + ": not found" }
 
-// TestPartialCP_NonPreRunning_StaysPending verifies that a CP marked partial
-// is NOT cached when the container is not PreRunning (i.e. started after the
-// agent was up). Legacy caches explicitly deleted partials on restart; we
-// mirror that by staying pending until the CP becomes Full.
-func TestPartialCP_NonPreRunning_StaysPending(t *testing.T) {
+// TestPartialCP_Accepted verifies that a CP with Status=Completed is cached
+// regardless of its Completion value (Partial or Full). Completion describes
+// data coverage, not caching eligibility — only Status matters.
+func TestPartialCP_Accepted(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            "cp-partial",
@@ -937,28 +949,16 @@ func TestPartialCP_NonPreRunning_StaysPending(t *testing.T) {
 	client := &fakeProfileClient{cp: cp}
 	c, k8s := newTestCache(t, client)
 
-	id := "container-partial-restart"
+	id := "container-partial"
 	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
-	// sharedData.PreRunningContainer is false by default → this simulates a
-	// fresh container start observed by a running agent.
 
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
-	assert.Nil(t, c.GetProjectedContainerProfile(id), "partial CP must not populate cache on fresh container")
-	assert.Equal(t, 1, c.pending.Len(), "partial-on-restart stays pending")
-
-	// Simulate the CP becoming Full (new agent-side aggregation round).
-	cp.Annotations[helpersv1.CompletionMetadataKey] = helpersv1.Full
-	cp.ResourceVersion = "2"
-	c.retryPendingEntries(context.Background())
-
-	assert.NotNil(t, c.GetProjectedContainerProfile(id), "Full CP promotes pending entry")
-	assert.Equal(t, 0, c.pending.Len(), "pending drained on Full")
+	assert.NotNil(t, c.GetProjectedContainerProfile(id), "Partial+Completed CP must be accepted into cache")
+	assert.Equal(t, 0, c.pending.Len(), "not pending when Status=Completed")
 }
 
-// TestPartialCP_PreRunning_Accepted verifies the inverse: when the agent
-// restarts (all containers become PreRunning), we accept even a partial CP so
-// rule evaluation can still alert on out-of-profile behavior (Test_19
-// semantics).
+// TestPartialCP_PreRunning_Accepted verifies that PreRunning containers also
+// accept a partial CP when Status=Completed (same rule as non-PreRunning).
 func TestPartialCP_PreRunning_Accepted(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
@@ -989,7 +989,10 @@ func TestPartialCP_PreRunning_Accepted(t *testing.T) {
 // on subsequent ticks instead of permanently dropping the overlay.
 func TestOverlayLabel_TransientFetchFailure_RefsRetained(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp-with-overlay", Namespace: "default", ResourceVersion: "1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp-with-overlay", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
 	}
 	// Overlay fetch returns an error; the base CP is fine.
 	client := &fakeProfileClient{cp: cp, apErr: assertErrNotFound("override"), nnErr: assertErrNotFound("override")}
@@ -1018,7 +1021,10 @@ func TestOverlayLabel_TransientFetchFailure_RefsRetained(t *testing.T) {
 // NOT re-insert it.
 func TestRefreshDoesNotResurrectDeletedEntry(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp-resurrect", Namespace: "default", ResourceVersion: "1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp-resurrect", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
 	}
 	client := &fakeProfileClient{cp: cp}
 	c, k8s := newTestCache(t, client)
@@ -1102,7 +1108,7 @@ func TestRefreshUpdatesCPStatus(t *testing.T) {
 			ResourceVersion: "1",
 			Annotations: map[string]string{
 				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Learning, // "ready"
+				helpersv1.StatusMetadataKey:     helpersv1.Learning, // not yet completed
 			},
 		},
 	}
@@ -1113,11 +1119,11 @@ func TestRefreshUpdatesCPStatus(t *testing.T) {
 	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
 	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
 
-	entry, ok := c.entries.Load(id)
-	require.True(t, ok, "entry populated from CP")
-	require.NotNil(t, entry.State)
-	assert.Equal(t, helpersv1.Learning, entry.State.Status,
-		"Status reflects the CP at add time (ready / learning)")
+	// A CP with a non-Completed status must not be accepted into the cache;
+	// the container stays pending until the CP transitions to Completed.
+	_, ok := c.entries.Load(id)
+	assert.False(t, ok, "non-completed CP must not populate cache entry")
+	assert.Equal(t, 1, c.pending.Len(), "container stays pending while CP status is learning")
 
 	// Storage transitions CP to Status=completed.
 	client.cp = &v1beta1.ContainerProfile{
@@ -1132,14 +1138,152 @@ func TestRefreshUpdatesCPStatus(t *testing.T) {
 		},
 	}
 
-	c.refreshAllEntries(context.Background())
+	c.retryPendingEntries(context.Background())
 
 	stored, ok := c.entries.Load(id)
-	require.True(t, ok)
+	require.True(t, ok, "entry populated after CP becomes completed")
 	require.NotNil(t, stored.State)
 	assert.Equal(t, helpersv1.Completed, stored.State.Status,
-		"refresh propagates CP Status=completed into ProfileState")
-	assert.Equal(t, "2", stored.RV, "refresh records the new CP RV")
+		"ProfileState reflects Completed status")
+	assert.Equal(t, "2", stored.RV, "RV recorded from the completed CP")
+}
+
+// TestTooLargeCP_Accepted verifies that a CP with Status=TooLarge is treated
+// as a terminal state and cached immediately, not kept in the pending queue.
+// TooLarge profiles have truncated but valid data that the rule engine should
+// use for detection; rejecting them would leave the container permanently
+// pending since the manager never transitions TooLarge → Completed.
+func TestTooLargeCP_Accepted(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-too-large",
+			Namespace:       "default",
+			ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Partial,
+				helpersv1.StatusMetadataKey:     helpersv1.TooLarge,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{{Path: "/bin/sh"}},
+		},
+	}
+	client := &fakeProfileClient{cp: cp}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-too-large"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok, "TooLarge CP must populate cache entry immediately")
+	assert.Equal(t, 0, c.pending.Len(), "no pending entry when Status=TooLarge")
+	require.NotNil(t, stored.State)
+	assert.Equal(t, helpersv1.TooLarge, stored.State.Status, "ProfileState reflects TooLarge status")
+	assert.Equal(t, "1", stored.RV, "RV recorded from the too-large CP")
+
+	// refreshOneEntry must also accept TooLarge on subsequent ticks.
+	cp2 := cp.DeepCopy()
+	cp2.ResourceVersion = "2"
+	cp2.Spec.Execs = append(cp2.Spec.Execs, v1beta1.ExecCalls{Path: "/usr/bin/id"})
+	client.cp = cp2
+	c.refreshAllEntries(context.Background())
+
+	stored2, ok := c.entries.Load(id)
+	require.True(t, ok, "entry survives refresh with TooLarge status")
+	assert.Equal(t, "2", stored2.RV, "RV updated on refresh")
+}
+
+// TestNotifyContainerTerminal_TooLarge verifies the fast-path promotion for a
+// container whose CP becomes TooLarge. Without waiting for the 30s reconciler
+// tick, NotifyContainerCompleted must promote the pending entry immediately once
+// the TooLarge CP is visible in storage.
+func TestNotifyContainerTerminal_TooLarge(t *testing.T) {
+	// Start with no CP in storage so the container stays pending.
+	client := &fakeProfileClient{cp: nil}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-too-large-notify"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+
+	assert.Equal(t, 1, c.pending.Len(), "container is pending while CP absent")
+	_, ok := c.entries.Load(id)
+	assert.False(t, ok, "no entry while CP absent")
+
+	// Storage now has a TooLarge terminal CP.
+	client.cp = &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-too-large",
+			Namespace:       "default",
+			ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Partial,
+				helpersv1.StatusMetadataKey:     helpersv1.TooLarge,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{{Path: "/bin/sh"}},
+		},
+	}
+
+	// Simulate the notification fired by containerprofilemanager on TooLarge.
+	// The goroutine launched by NotifyContainerCompleted must promote the entry
+	// without the caller needing to wait for the 30s periodic tick.
+	c.NotifyContainerCompleted(id)
+
+	// Allow the notification goroutine to run (first attempt is immediate).
+	assert.Eventually(t, func() bool {
+		_, ok := c.entries.Load(id)
+		return ok
+	}, 2*time.Second, 10*time.Millisecond, "entry promoted via notification, no 30s tick needed")
+
+	assert.Equal(t, 0, c.pending.Len(), "pending cleared after TooLarge promotion")
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Equal(t, helpersv1.TooLarge, stored.State.Status)
+}
+
+// TestNotifyContainerTerminal_Completed verifies the fast-path promotion for a
+// container that exits normally (ContainerHasTerminatedError with
+// Status=Completed). The notification goroutine must promote the pending entry
+// without waiting for the 30s reconciler tick.
+func TestNotifyContainerTerminal_Completed(t *testing.T) {
+	// No CP yet — container stays pending.
+	client := &fakeProfileClient{cp: nil}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-normal-exit"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+
+	assert.Equal(t, 1, c.pending.Len(), "container pending while CP absent")
+
+	// Simulate the lifecycle: container exits → CP written with Status=Completed.
+	client.cp = &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-exited",
+			Namespace:       "default",
+			ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+	}
+
+	// Simulate what monitorContainer now does on ContainerHasTerminatedError.
+	c.NotifyContainerCompleted(id)
+
+	assert.Eventually(t, func() bool {
+		_, ok := c.entries.Load(id)
+		return ok
+	}, 2*time.Second, 10*time.Millisecond, "entry promoted via notification without 30s tick")
+
+	assert.Equal(t, 0, c.pending.Len(), "pending cleared after normal-exit promotion")
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Equal(t, helpersv1.Completed, stored.State.Status)
 }
 
 // TestUserManagedProfileMerged exercises the user-managed merge path
@@ -1216,7 +1360,10 @@ func TestUserManagedProfileMerged(t *testing.T) {
 // tests cannot wait for the background goroutine, so we drive it explicitly.
 func TestSpecChange_TriggersReprojection(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
 		Spec: v1beta1.ContainerProfileSpec{
 			Capabilities: []string{"SYS_PTRACE", "NET_ADMIN"},
 		},

@@ -108,8 +108,8 @@ type ContainerProfileCacheImpl struct {
 	k8sObjectCache objectcache.K8sObjectCache
 	metricsManager metricsmanager.MetricsManager
 
-	reconcileEvery    time.Duration
-	rpcBudget         time.Duration
+	reconcileEvery time.Duration
+	rpcBudget      time.Duration
 	refreshInProgress atomic.Bool
 
 	// deprecationDedup tracks (kind|ns/name@rv) keys to emit one WARN log
@@ -139,7 +139,7 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 	if rpcBudget <= 0 {
 		rpcBudget = defaultStorageRPCBudget
 	}
-	return &ContainerProfileCacheImpl{
+	c := &ContainerProfileCacheImpl{
 		cfg:            cfg,
 		containerLocks: resourcelocks.New(),
 		storageClient:  storageClient,
@@ -149,6 +149,14 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 		rpcBudget:      rpcBudget,
 		nudge:          make(chan struct{}, 1),
 	}
+	// Pre-initialize SafeMap internal maps: Load() reads m.items == nil without
+	// a lock while Set() writes m.items under a write lock, causing a data race
+	// on the first concurrent access to a zero-value SafeMap.
+	c.entries.Set("", nil)
+	c.entries.Delete("")
+	c.pending.Set("", nil)
+	c.pending.Delete("")
+	return c
 }
 
 func shouldLogOptionalUserManagedFetchError(err error) bool {
@@ -362,16 +370,17 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
-	// Fix (reviewer #3): if the consolidated CP is still Partial and this
-	// container is not PreRunning (i.e. we saw it start fresh after the
-	// agent was already up), the partial view belongs to a PREVIOUS container
-	// incarnation. Legacy caches explicitly deleted such partials on restart
-	// so rule evaluation fell through to "no profile" until a new Full
-	// profile arrived. Mirror that: keep pending, retry each tick.
-	if !sharedData.PreRunningContainer {
-		if cp != nil && cp.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Partial {
-			cp = nil
-		}
+	// Only cache profiles whose status is terminal (Completed or TooLarge).
+	// Learning/ready profiles are still being written; caching them would let
+	// rules fire against incomplete data. TooLarge is terminal: the manager
+	// stopped collecting but the truncated data is still valid for detection.
+	// Return false so the synthetic-CP fallback below does not bypass the gate.
+	if cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
+		logger.L().Debug("tryPopulateEntry: CP status not terminal; keeping pending",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", ns),
+			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
+		return false
 	}
 
 	// Fetch user-authored legacy CRDs when the pod carries the
@@ -657,6 +666,50 @@ func (c *ContainerProfileCacheImpl) waitForSharedContainerData(containerID strin
 		}
 		return nil, fmt.Errorf("container %s not found in shared data", containerID)
 	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
+}
+
+// NotifyContainerCompleted is called by containerprofilemanager when it writes a
+// CP with status="completed". If the container is still pending it launches a
+// bounded retry goroutine (up to 5 attempts × 3 s) so the cache entry is
+// promoted within seconds of the consolidation cycle completing, without waiting
+// for the next 30 s reconciler tick.
+func (c *ContainerProfileCacheImpl) NotifyContainerCompleted(containerID string) {
+	p, pending := c.pending.Load(containerID)
+	if !pending {
+		return
+	}
+	go func() {
+		for i := 0; i < 20; i++ {
+			if i > 0 {
+				time.Sleep(3 * time.Second)
+			}
+			if _, still := c.pending.Load(containerID); !still {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), c.rpcBudget)
+			var promoted bool
+			c.containerLocks.WithLock(containerID, func() {
+				if _, still := c.pending.Load(containerID); still {
+					promoted = c.tryPopulateEntry(ctx, containerID, p.container, p.sharedData, p.cpName, p.workloadName)
+				}
+			})
+			cancel()
+			if promoted {
+				return
+			}
+		}
+	}()
+}
+
+// isTerminalCPStatus reports whether the CP status annotation value represents
+// a terminal state that the cache should accept. Terminal states are:
+//   - Completed: learning period finished normally.
+//   - TooLarge: manager stopped collecting because the profile grew too large;
+//     the truncated data is still valid for rule evaluation.
+//
+// Learning ("ready") is not terminal — the CP is still being written.
+func isTerminalCPStatus(status string) bool {
+	return status == helpersv1.Completed || status == helpersv1.TooLarge
 }
 
 // Ensure ContainerProfileCacheImpl implements the ContainerProfileCache interface.

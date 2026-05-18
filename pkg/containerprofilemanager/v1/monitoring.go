@@ -47,6 +47,9 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 						helpers.String("status", string(watchedContainer.GetStatus())),
 						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
+				if watchedContainer.GetStatus() == objectcache.WatchedContainerStatusCompleted {
+					cpm.notifyCompleted(watchedContainer.ContainerID)
+				}
 				// Signal ack to lifecycle goroutine
 				if watchedContainer.AckChan != nil {
 					watchedContainer.AckChan <- struct{}{}
@@ -63,6 +66,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 						helpers.String("status", string(watchedContainer.GetStatus())),
 						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
+				cpm.notifyCompleted(watchedContainer.ContainerID)
 				// Signal ack to lifecycle goroutine
 				if watchedContainer.AckChan != nil {
 					watchedContainer.AckChan <- struct{}{}
@@ -92,11 +96,13 @@ func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedCon
 		watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
+		cpm.notifyCompleted(watchedContainer.ContainerID)
 		return file.ObjectTooLargeError
 	} else if err.Error() == file.ObjectCompletedError.Error() {
 		watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
+		cpm.notifyCompleted(watchedContainer.ContainerID)
 		return file.ObjectCompletedError
 	} else {
 		logger.L().Error("failed to save container profile", helpers.Error(err),
