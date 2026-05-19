@@ -4,11 +4,11 @@ import (
 	"context"
 	"net/http"
 	_ "net/http/pprof"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
@@ -26,6 +26,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/cloudmetadata"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	containerprofilemanagerv1 "github.com/kubescape/node-agent/pkg/containerprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -99,15 +100,26 @@ func main() {
 		logger.L().Info("credentials loaded", helpers.Int("accountLength", len(credentials.Account)))
 	}
 
-	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
-	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
-		ctx = logger.InitOtel("node-agent",
-			os.Getenv("RELEASE"),
-			clusterData.AccountID,
-			clusterData.ClusterName,
-			url.URL{Host: otelHost})
-		defer logger.ShutdownOtel(ctx)
+	otelShutdown, err := otelsetup.InitProviders(ctx, otelsetup.ProviderConfig{
+		ServiceName:    "node-agent",
+		ServiceVersion: os.Getenv("RELEASE"),
+		NodeName:       os.Getenv("NODE_NAME"),
+		PodName:        os.Getenv("POD_NAME"),
+		Namespace:      os.Getenv("NAMESPACE_NAME"),
+		ClusterName:    os.Getenv("CLUSTER_NAME"),
+		AccountID:      clusterData.AccountID,
+		AccessKey:      accessKey,
+	})
+	if err != nil {
+		logger.L().Warning("OTEL init failed, running without telemetry", helpers.Error(err))
 	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if otelShutdown != nil {
+			_ = otelShutdown(shutdownCtx)
+		}
+	}()
 
 	// Check if we need to validate the kernel version.
 	if os.Getenv("SKIP_KERNEL_VERSION_CHECK") == "" {
@@ -176,7 +188,7 @@ func main() {
 
 	// Create Prometheus metrics exporter
 	var prometheusExporter metricsmanager.MetricsManager
-	if cfg.EnablePrometheusExporter {
+	if cfg.EnableMetricsExporter {
 		prometheusExporter = metricprometheus.NewPrometheusMetric()
 	} else {
 		prometheusExporter = metricsmanager.NewMetricsNoop()

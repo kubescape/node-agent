@@ -86,7 +86,14 @@ These environment variables are read directly (not through config file):
 | `CONFIG_DIR` | Configuration directory path | No (default: `/etc/config`) |
 | `SKIP_KERNEL_VERSION_CHECK` | Skip kernel validation | No |
 | `ENABLE_PROFILER` | Enable pprof on port 6060 | No |
-| `OTEL_COLLECTOR_SVC` | OpenTelemetry collector (e.g., `otel-collector:4317`) | No |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (e.g., `otel.armosec.io:4317`). When unset, all telemetry is silently discarded (no-op). | No |
+| `OTEL_METRICS_EXPORTER` | Metrics exporter: `otlp` (push to collector) or `prometheus` (expose `:8080/metrics`). Defaults to `otlp` when endpoint is set, `none` otherwise. | No |
+| `OTEL_TRACES_EXPORTER` | Traces exporter: `otlp` or `none`. Defaults to `otlp` when endpoint is set, `none` otherwise. | No |
+| `OTEL_SLOW_EVAL_THRESHOLD_MS` | Rule evaluations exceeding this threshold (ms) emit a trace span. Default: `5`. | No |
+| `ARMO_OTEL_AUTH` | Set to `true` to force ARMO authentication headers (`X-API-Key`, `X-Customer-GUID`) for any OTLP endpoint (useful when running a local ARMO-compatible collector). | No |
+| `ENABLE_DEBUG_LISTENER` | Set to `true` to enable the debug HTTP listener (ring-buffer flush, log-level override) on `localhost:6062`. Inactive by default. | No |
+| `OTEL_DEBUG_PORT` | Port for the debug listener when `ENABLE_DEBUG_LISTENER=true`. Default: `6062`. | No |
+| `OTEL_COLLECTOR_SVC` | **Deprecated** — alias for `OTEL_EXPORTER_OTLP_ENDPOINT`. Will be removed in a future release. | No |
 | `PYROSCOPE_SERVER_SVC` | Pyroscope server address | No |
 | `APPLICATION_NAME` | Application name for Pyroscope | No (default: `node-agent`) |
 | `RELEASE` | Release version for telemetry | No |
@@ -94,6 +101,31 @@ These environment variables are read directly (not through config file):
 | `QUEUE_DIR` | Directory for persistent queue | No |
 | `MAX_QUEUE_SIZE` | Maximum queue size | No |
 | `TEST_NAMESPACE` | Override namespace in tests | No |
+
+### OTEL Notes
+
+**ARMO back office (SigNoz) authentication:** When `OTEL_EXPORTER_OTLP_ENDPOINT=otel.armosec.io:4317`,
+the agent automatically injects `X-API-Key` and `X-Customer-GUID` gRPC metadata headers sourced from
+`/etc/credentials`. Credentials are read once at startup; agent restart is required if credentials are
+rotated at runtime (known v1 limitation).
+
+**Ring buffer (retroactive log export):** When `ENABLE_DEBUG_LISTENER=true`, the agent keeps the last
+7,500 log records in memory. A `POST localhost:6062/debug/flush-ring-buffer` call re-emits them through
+the OTLP log pipeline. The ring buffer is only active when `KS_LOGGER_NAME=slog`; it is silently
+inactive with the default prettylogger/zaplogger frontend.
+
+**Kubernetes event correlation — cross-repo dependency (operator PR, not yet implemented)**
+
+K8s events (OOMKilled, Evicted, CrashLoopBackOff, NodeMemoryPressure, pod rescheduling) are collected
+by the **operator**, which runs once per cluster and pushes OTLP logs to `otel.armosec.io:4317` using
+the same API credentials. Correlation is automatic via shared `k8s.node.name`, `k8s.pod.name`,
+`k8s.namespace.name` resource attributes — no node-agent configuration change required.
+
+Until the operator PR ships, node-agent ACs 1–9 are independent and all pass without K8s event
+correlation. The ARMO back office dashboard renders correctly using node-agent signals only; K8s event
+correlation is an upgrade, not a dependency.
+
+---
 
 ## Configuration File Options
 

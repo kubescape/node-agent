@@ -44,6 +44,7 @@ import (
 	"github.com/moby/sys/mountinfo"
 	"github.com/opencontainers/go-digest"
 	"github.com/spf13/afero"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -113,6 +114,7 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 			d := net.Dialer{Timeout: 2 * time.Second}
 			return d.DialContext(ctx, "unix", socketPath)
 		}),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
 	var scannerMemLimit int64
 	if memStr, ok := os.LookupEnv("SCANNER_MEMORY_LIMIT"); ok {

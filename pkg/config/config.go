@@ -81,7 +81,7 @@ type Config struct {
 	EnableNetworkTracing           bool                                 `mapstructure:"networkServiceEnabled"`
 	EnableNodeProfile              bool                                 `mapstructure:"nodeProfileServiceEnabled"`
 	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
-	EnablePrometheusExporter       bool                                 `mapstructure:"prometheusExporterEnabled"`
+	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
 	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
 	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`

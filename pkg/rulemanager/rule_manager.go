@@ -11,6 +11,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -32,11 +33,14 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	corev1 "k8s.io/api/core/v1"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -64,6 +68,7 @@ type RuleManager struct {
 	rulePolicyValidator  *RulePolicyValidator
 	mntnsRegistry        contextdetection.Registry
 	detectorManager      *detectors.DetectorManager
+	alertLogDedup        *expirable.LRU[string, struct{}]
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -107,6 +112,7 @@ func CreateRuleManager(
 		rulePolicyValidator: rulePolicyValidator,
 		mntnsRegistry:       mntnsRegistry,
 		detectorManager:     detectorManager,
+		alertLogDedup:       expirable.NewLRU[string, struct{}](1000, nil, 60*time.Second),
 	}
 
 	// Compile the initial projection spec and start a goroutine that
@@ -360,6 +366,20 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.Name, eventType, evaluationTime)
 
+		// Slow-path tracing: only emit a span when evaluation exceeded the threshold.
+		// This protects the hot path from unconditional tracing overhead on millions of events/sec.
+		if evaluationTime >= otelsetup.SlowEvalThreshold() {
+			_, span := otelsetup.Tracer().Start(rm.ctx, "rule.evaluate",
+				trace.WithAttributes(
+					attribute.String("rule.id", rule.ID),
+					attribute.String("event.type", string(eventType)),
+					attribute.String("container.id", enrichedEvent.ContainerID),
+					attribute.Float64("eval.duration_ms", float64(evaluationTime.Milliseconds())),
+					attribute.Bool("alert_fired", shouldAlert),
+				))
+			span.End()
+		}
+
 		if err != nil {
 			logger.L().Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
 			continue
@@ -371,6 +391,26 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				state = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
 			}
 			rm.metrics.ReportRuleAlert(rule.Name)
+			// Emit structured OTEL log record for every alert; dedup within 60s window to
+			// prevent log floods from repeated rule firings against the same rule+container pair.
+			dedupKey := rule.ID + "|" + enrichedEvent.ContainerID
+			if !rm.alertLogDedup.Contains(dedupKey) {
+				rm.alertLogDedup.Add(dedupKey, struct{}{})
+				var image, containerName string
+				if enrichable, ok := enrichedEvent.Event.(utils.EnrichEvent); ok {
+					image = enrichable.GetContainerImage()
+					containerName = enrichable.GetContainer()
+				}
+				otelsetup.EmitAlertLogRecord(rm.ctx, otelsetup.AlertLogAttrs{
+					RuleID:        rule.ID,
+					AlertType:     rule.Name,
+					ContainerName: containerName,
+					Namespace:     namespace,
+					PodName:       pod,
+					Image:         image,
+					EventType:     string(eventType),
+				})
+			}
 			message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))

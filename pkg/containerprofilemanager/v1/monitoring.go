@@ -18,6 +18,12 @@ import (
 
 // monitorContainer monitors a container and saves its profile periodically
 func (cpm *ContainerProfileManager) monitorContainer(container *containercollection.Container, watchedContainer *objectcache.WatchedContainerData) error {
+	cpm.lifecycleTracker.OnLearningStarted(
+		watchedContainer.ContainerID,
+		container.K8s.Namespace,
+		container.K8s.PodName,
+		container.Runtime.ContainerImageName,
+	)
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
@@ -50,6 +56,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				if watchedContainer.GetStatus() == objectcache.WatchedContainerStatusCompleted {
 					cpm.notifyCompleted(watchedContainer.ContainerID)
 				}
+				cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "terminated")
 				// Signal ack to lifecycle goroutine
 				if watchedContainer.AckChan != nil {
 					watchedContainer.AckChan <- struct{}{}
@@ -67,6 +74,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
 				cpm.notifyCompleted(watchedContainer.ContainerID)
+				cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "completed")
 				// Signal ack to lifecycle goroutine
 				if watchedContainer.AckChan != nil {
 					watchedContainer.AckChan <- struct{}{}
@@ -97,12 +105,14 @@ func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedCon
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
 		cpm.notifyCompleted(watchedContainer.ContainerID)
+		cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "too_large")
 		return file.ObjectTooLargeError
 	} else if err.Error() == file.ObjectCompletedError.Error() {
 		watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
 		cpm.notifyCompleted(watchedContainer.ContainerID)
+		cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "completed")
 		return file.ObjectCompletedError
 	} else {
 		logger.L().Error("failed to save container profile", helpers.Error(err),
@@ -202,6 +212,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		containerData.emptyEvents()
 		return err
 	}
+
+	cpm.lifecycleTracker.OnEntrySaved(watchedContainer.ContainerID)
 
 	logger.L().Debug("container profile saved successfully",
 		helpers.String("containerID", watchedContainer.ContainerID),
