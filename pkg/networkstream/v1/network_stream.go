@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	timeoutDefaultSeconds = 5 // Default timeout for HTTP requests if not set in the config
+	timeoutDefaultSeconds = 30 // Default timeout for HTTP requests if not set in the config
 )
 
 type NetworkStream struct {
@@ -187,10 +187,8 @@ func (ns *NetworkStream) Start() {
 				// Remove process tree from events (to reduce size)
 				removeProcessTreeFromEvents(&ns.networkEventsStorage)
 
-				// Send the network events to the exporter
-				if err := ns.sendNetworkEvent(&ns.networkEventsStorage); err != nil {
-					logger.L().Error("NetworkStream - failed to send network events", helpers.Error(err))
-				}
+				// Snapshot for HTTP send — allows releasing the lock before the network call
+				snapshot := snapshotNetworkStream(&ns.networkEventsStorage)
 
 				// Clear the storage
 				for entityId := range ns.networkEventsStorage.Entities {
@@ -206,6 +204,11 @@ func (ns *NetworkStream) Start() {
 					Outbound: make(map[string]armotypes.NetworkStreamEvent),
 				}
 				ns.eventsStorageMutex.Unlock()
+
+				// Send the snapshot outside the lock so event recording is never stalled by I/O
+				if err := ns.sendNetworkEvent(snapshot); err != nil {
+					logger.L().Error("NetworkStream - failed to send network events", helpers.Error(err))
+				}
 				logger.L().Debug("NetworkStream - sent network events")
 			}
 		}
@@ -452,6 +455,7 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *armotypes.NetworkStream
 
 	if isEmptyNetworkStream(networkStream) {
 		logger.L().Debug("no events in network stream, skipping")
+		return nil
 	}
 
 	// create a GenericCRD with NetworkStream as Spec
@@ -524,6 +528,21 @@ func removeProcessTreeFromEvents(networkStream *armotypes.NetworkStream) {
 		}
 		networkStream.Entities[entityId] = entity
 	}
+}
+
+// snapshotNetworkStream returns a new NetworkStream with an independent Entities map so that
+// the caller can release eventsStorageMutex before the HTTP send. A new map is required because
+// the clearing loop replaces entity structs in the live Entities map; copying the entity structs
+// by value is sufficient because the clearing loop never mutates the old Inbound/Outbound maps
+// in place — it allocates new ones and assigns them to the new struct.
+func snapshotNetworkStream(src *armotypes.NetworkStream) *armotypes.NetworkStream {
+	dst := &armotypes.NetworkStream{
+		Entities: make(map[string]armotypes.NetworkStreamEntity, len(src.Entities)),
+	}
+	for entityID, entity := range src.Entities {
+		dst.Entities[entityID] = entity // struct copy; Inbound/Outbound map pointers are safe to share
+	}
+	return dst
 }
 
 func (ns *NetworkStream) getProcessTreeByPid(pid uint32, comm string, processTree *armotypes.ProcessTree) *armotypes.ProcessTree {
