@@ -103,10 +103,10 @@ func main() {
 	otelShutdown, err := otelsetup.InitProviders(ctx, otelsetup.ProviderConfig{
 		ServiceName:    "node-agent",
 		ServiceVersion: os.Getenv("RELEASE"),
-		NodeName:       os.Getenv("NODE_NAME"),
-		PodName:        os.Getenv("POD_NAME"),
-		Namespace:      os.Getenv("NAMESPACE_NAME"),
-		ClusterName:    os.Getenv("CLUSTER_NAME"),
+		NodeName:       cfg.NodeName,
+		PodName:        cfg.PodName,
+		Namespace:      cfg.NamespaceName,
+		ClusterName:    clusterData.ClusterName,
 		AccountID:      clusterData.AccountID,
 		AccessKey:      accessKey,
 	})

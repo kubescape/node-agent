@@ -182,8 +182,11 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 	// --- TracerProvider ---------------------------------------------------
 	var tp *sdktrace.TracerProvider
 	if traceEndpoint != "" {
-		traceOpts := []otlptracegrpc.Option{
-			otlptracegrpc.WithEndpoint(traceEndpoint),
+		var traceOpts []otlptracegrpc.Option
+		if strings.Contains(traceEndpoint, "://") {
+			traceOpts = append(traceOpts, otlptracegrpc.WithEndpointURL(traceEndpoint))
+		} else {
+			traceOpts = append(traceOpts, otlptracegrpc.WithEndpoint(traceEndpoint))
 		}
 		if len(traceHeaders) > 0 {
 			traceOpts = append(traceOpts, otlptracegrpc.WithHeaders(traceHeaders))
@@ -206,8 +209,11 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 	ringBuf := &RingBufferLogProcessor{}
 	var logProvider *sdklog.LoggerProvider
 	if logEndpoint != "" {
-		logOpts := []otlploggrpc.Option{
-			otlploggrpc.WithEndpoint(logEndpoint),
+		var logOpts []otlploggrpc.Option
+		if strings.Contains(logEndpoint, "://") {
+			logOpts = append(logOpts, otlploggrpc.WithEndpointURL(logEndpoint))
+		} else {
+			logOpts = append(logOpts, otlploggrpc.WithEndpoint(logEndpoint))
 		}
 		if len(logHeaders) > 0 {
 			logOpts = append(logOpts, otlploggrpc.WithHeaders(logHeaders))
@@ -237,8 +243,11 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 				"X-Customer-GUID": cfg.AccountID,
 			}
 		}
-		metricOpts := []otlpmetricgrpc.Option{
-			otlpmetricgrpc.WithEndpoint(metricEndpoint),
+		var metricOpts []otlpmetricgrpc.Option
+		if strings.Contains(metricEndpoint, "://") {
+			metricOpts = append(metricOpts, otlpmetricgrpc.WithEndpointURL(metricEndpoint))
+		} else {
+			metricOpts = append(metricOpts, otlpmetricgrpc.WithEndpoint(metricEndpoint))
 		}
 		if len(metricHeaders) > 0 {
 			metricOpts = append(metricOpts, otlpmetricgrpc.WithHeaders(metricHeaders))
@@ -284,8 +293,8 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 
 	// Combined shutdown with a fresh 5s timeout (callers' ctx may already be
 	// cancelled when defer fires, which would skip flushing).
-	shutdown = func(c context.Context) error {
-		shutdownCtx, cancel := context.WithTimeout(c, 5*time.Second)
+	shutdown = func(_ context.Context) error {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		var tpErr, logErr, mpErr, debugErr error
 		if tp != nil {

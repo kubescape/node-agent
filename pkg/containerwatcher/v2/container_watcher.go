@@ -498,6 +498,7 @@ func (cw *ContainerWatcher) enrichAndProcess(entry EventEntry) {
 					attribute.String("reason", "worker_channel_full"),
 				),
 			)
+			enrichedEvent.Event.Release()
 		}
 	}
 }

@@ -154,8 +154,8 @@ func TestProfileLifecycleTracker_CapEviction(t *testing.T) {
 // --- SlowEvalThreshold ---
 
 func TestSlowEvalThreshold_Default(t *testing.T) {
-	// Before InitProviders is called the threshold should be 0 (uninitialized).
-	// After a simulated init it should reflect the configured value.
+	prev := slowEvalThresholdNs.Load()
+	t.Cleanup(func() { slowEvalThresholdNs.Store(prev) })
 	slowEvalThresholdNs.Store(5 * int64(time.Millisecond))
 	assert.Equal(t, 5*time.Millisecond, SlowEvalThreshold())
 }
