@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	rbtypes "github.com/kubescape/node-agent/pkg/rulebindingmanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/rulemanager/prefilter"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
@@ -126,6 +127,9 @@ func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 	if pod, ok := obj.(*corev1.Pod); ok {
 		rbs = c.addPod(ctx, pod)
 	} else if un, ok := obj.(*unstructured.Unstructured); ok {
+		if un.GetKind() != "" && un.GetKind() != rbtypes.RuntimeRuleBindingAlertKind {
+			return
+		}
 		ruleBinding, err := unstructuredToRuleBinding(un)
 		if err != nil {
 			logger.L().Warning("RBCache - failed to convert unstructured to rule binding", helpers.Error(err))
@@ -150,6 +154,9 @@ func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 	if pod, ok := obj.(*corev1.Pod); ok {
 		rbs = c.addPod(ctx, pod)
 	} else if un, ok := obj.(*unstructured.Unstructured); ok {
+		if un.GetKind() != "" && un.GetKind() != rbtypes.RuntimeRuleBindingAlertKind {
+			return
+		}
 		ruleBinding, err := unstructuredToRuleBinding(un)
 		if err != nil {
 			logger.L().Warning("RBCache - failed to convert unstructured to rule binding", helpers.Error(err))

@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"strconv"
 	"strings"
 
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
@@ -27,7 +28,28 @@ func uniqueName(obj metav1.Object) string {
 
 func unstructuredToRuleBinding(obj *unstructured.Unstructured) (*typesv1.RuntimeAlertRuleBinding, error) {
 	rb := &typesv1.RuntimeAlertRuleBinding{}
-	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, rb); err != nil {
+
+	objCopy := obj.DeepCopy()
+	// severity may be stored as int64 in the CRD but the Go type is string; coerce it
+	if rules, ok, _ := unstructured.NestedSlice(objCopy.Object, "spec", "rules"); ok {
+		for i, r := range rules {
+			rule, ok := r.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch v := rule["severity"].(type) {
+			case int64:
+				rule["severity"] = strconv.FormatInt(v, 10)
+				rules[i] = rule
+			case float64:
+				rule["severity"] = strconv.FormatInt(int64(v), 10)
+				rules[i] = rule
+			}
+		}
+		_ = unstructured.SetNestedSlice(objCopy.Object, rules, "spec", "rules")
+	}
+
+	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(objCopy.Object, rb); err != nil {
 		return nil, err
 	}
 	return rb, nil

@@ -68,6 +68,28 @@ func TestUnstructuredToRuleBinding(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Test with int64 severity",
+			obj: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "RuntimeAlertRuleBinding",
+					"metadata": map[string]any{
+						"name":      "rule-1",
+						"namespace": "default",
+					},
+					"spec": map[string]any{
+						"rules": []any{
+							map[string]any{
+								"ruleName": "rule-1",
+								"severity": int64(5),
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "Test with invalid rule binding",
 			obj: &unstructured.Unstructured{
 				Object: map[string]interface{}{
