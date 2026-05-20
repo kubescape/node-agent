@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime/pprof"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -69,6 +70,7 @@ type RuleManager struct {
 	mntnsRegistry        contextdetection.Registry
 	detectorManager      *detectors.DetectorManager
 	alertLogDedup        *expirable.LRU[string, struct{}]
+	alertLogDedupMu      sync.Mutex
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -394,8 +396,13 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			// Emit structured OTEL log record for every alert; dedup within 60s window to
 			// prevent log floods from repeated rule firings against the same rule+container pair.
 			dedupKey := rule.ID + "|" + enrichedEvent.ContainerID
-			if !rm.alertLogDedup.Contains(dedupKey) {
+			rm.alertLogDedupMu.Lock()
+			alreadySeen := rm.alertLogDedup.Contains(dedupKey)
+			if !alreadySeen {
 				rm.alertLogDedup.Add(dedupKey, struct{}{})
+			}
+			rm.alertLogDedupMu.Unlock()
+			if !alreadySeen {
 				var image, containerName string
 				if enrichable, ok := enrichedEvent.Event.(utils.EnrichEvent); ok {
 					image = enrichable.GetContainerImage()

@@ -138,12 +138,13 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 		return func(context.Context) error { return nil }, nil
 	}
 
-	traceIsARMO := isARMOEndpoint(traceEndpoint)
-	logIsARMO := isARMOEndpoint(logEndpoint)
+	traceIsARMO := traceEndpoint != "" && isARMOEndpoint(traceEndpoint)
+	logIsARMO := logEndpoint != "" && isARMOEndpoint(logEndpoint)
+	metricIsARMO := metricEndpoint != "" && isARMOEndpoint(metricEndpoint)
 
 	// ARMO endpoint without credentials -> force no-op to prevent silent
 	// 401 retry storms.
-	if (traceIsARMO || logIsARMO) && cfg.AccessKey == "" {
+	if (traceIsARMO || logIsARMO || metricIsARMO) && cfg.AccessKey == "" {
 		logger.L().Warning("ARMO OTEL endpoint configured but no credentials; telemetry disabled")
 		otel.SetTracerProvider(tracenoop.NewTracerProvider())
 		otel.SetTextMapPropagator(propagation.TraceContext{})
@@ -179,75 +180,89 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 	}
 
 	// --- TracerProvider ---------------------------------------------------
-	traceOpts := []otlptracegrpc.Option{
-		otlptracegrpc.WithEndpoint(traceEndpoint),
+	var tp *sdktrace.TracerProvider
+	if traceEndpoint != "" {
+		traceOpts := []otlptracegrpc.Option{
+			otlptracegrpc.WithEndpoint(traceEndpoint),
+		}
+		if len(traceHeaders) > 0 {
+			traceOpts = append(traceOpts, otlptracegrpc.WithHeaders(traceHeaders))
+		}
+		spanExporter, err := otlptracegrpc.New(ctx, traceOpts...)
+		if err != nil {
+			return nil, err
+		}
+		tp = sdktrace.NewTracerProvider(
+			sdktrace.WithBatcher(spanExporter),
+			sdktrace.WithResource(res),
+		)
+		otel.SetTracerProvider(tp)
+	} else {
+		otel.SetTracerProvider(tracenoop.NewTracerProvider())
 	}
-	if len(traceHeaders) > 0 {
-		traceOpts = append(traceOpts, otlptracegrpc.WithHeaders(traceHeaders))
-	}
-	spanExporter, err := otlptracegrpc.New(ctx, traceOpts...)
-	if err != nil {
-		return nil, err
-	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(spanExporter),
-		sdktrace.WithResource(res),
-	)
-	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	// --- LoggerProvider ---------------------------------------------------
-	logOpts := []otlploggrpc.Option{
-		otlploggrpc.WithEndpoint(logEndpoint),
-	}
-	if len(logHeaders) > 0 {
-		logOpts = append(logOpts, otlploggrpc.WithHeaders(logHeaders))
-	}
-	logExporter, err := otlploggrpc.New(ctx, logOpts...)
-	if err != nil {
-		// Best effort: shut down the trace provider we already installed
-		// before returning the error to the caller.
-		_ = tp.Shutdown(ctx)
-		return nil, err
-	}
 	ringBuf := &RingBufferLogProcessor{}
-	logProvider := sdklog.NewLoggerProvider(
-		sdklog.WithResource(res),
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
-		sdklog.WithProcessor(ringBuf),
-	)
-	global.SetLoggerProvider(logProvider)
+	var logProvider *sdklog.LoggerProvider
+	if logEndpoint != "" {
+		logOpts := []otlploggrpc.Option{
+			otlploggrpc.WithEndpoint(logEndpoint),
+		}
+		if len(logHeaders) > 0 {
+			logOpts = append(logOpts, otlploggrpc.WithHeaders(logHeaders))
+		}
+		logExporter, err := otlploggrpc.New(ctx, logOpts...)
+		if err != nil {
+			if tp != nil {
+				_ = tp.Shutdown(ctx)
+			}
+			return nil, err
+		}
+		logProvider = sdklog.NewLoggerProvider(
+			sdklog.WithResource(res),
+			sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
+			sdklog.WithProcessor(ringBuf),
+		)
+		global.SetLoggerProvider(logProvider)
+	}
 
 	// --- MeterProvider -------------------------------------------
-	metricEndpoint = coalesce(os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"), baseEndpoint)
-	var metricHeaders map[string]string
-	if isARMOEndpoint(metricEndpoint) {
-		metricHeaders = map[string]string{
-			"X-API-Key":       cfg.AccessKey,
-			"X-Customer-GUID": cfg.AccountID,
+	var mp *sdkmetric.MeterProvider
+	if metricEndpoint != "" {
+		var metricHeaders map[string]string
+		if metricIsARMO {
+			metricHeaders = map[string]string{
+				"X-API-Key":       cfg.AccessKey,
+				"X-Customer-GUID": cfg.AccountID,
+			}
 		}
+		metricOpts := []otlpmetricgrpc.Option{
+			otlpmetricgrpc.WithEndpoint(metricEndpoint),
+		}
+		if len(metricHeaders) > 0 {
+			metricOpts = append(metricOpts, otlpmetricgrpc.WithHeaders(metricHeaders))
+		}
+		metricExporter, err := otlpmetricgrpc.New(ctx, metricOpts...)
+		if err != nil {
+			if tp != nil {
+				_ = tp.Shutdown(ctx)
+			}
+			if logProvider != nil {
+				_ = logProvider.Shutdown(ctx)
+			}
+			return nil, err
+		}
+		mp = sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)),
+			sdkmetric.WithResource(res),
+		)
+		otel.SetMeterProvider(mp)
 	}
-	metricOpts := []otlpmetricgrpc.Option{
-		otlpmetricgrpc.WithEndpoint(metricEndpoint),
-	}
-	if len(metricHeaders) > 0 {
-		metricOpts = append(metricOpts, otlpmetricgrpc.WithHeaders(metricHeaders))
-	}
-	metricExporter, err := otlpmetricgrpc.New(ctx, metricOpts...)
-	if err != nil {
-		_ = tp.Shutdown(ctx)
-		_ = logProvider.Shutdown(ctx)
-		return nil, err
-	}
-	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)),
-		sdkmetric.WithResource(res),
-	)
-	otel.SetMeterProvider(mp)
 
 	// --- Debug HTTP listener (gated) --------------------------------------
 	var debugSrv *http.Server
-	if os.Getenv("ENABLE_DEBUG_LISTENER") == "true" {
+	if os.Getenv("ENABLE_DEBUG_LISTENER") == "true" && logProvider != nil {
 		port := coalesce(os.Getenv("OTEL_DEBUG_PORT"), "6062")
 		l := logProvider.Logger("node-agent/ringbuf")
 		mux := http.NewServeMux()
@@ -272,16 +287,20 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 	shutdown = func(c context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(c, 5*time.Second)
 		defer cancel()
-		var debugErr error
+		var tpErr, logErr, mpErr, debugErr error
+		if tp != nil {
+			tpErr = tp.Shutdown(shutdownCtx)
+		}
+		if logProvider != nil {
+			logErr = logProvider.Shutdown(shutdownCtx)
+		}
+		if mp != nil {
+			mpErr = mp.Shutdown(shutdownCtx)
+		}
 		if debugSrv != nil {
 			debugErr = debugSrv.Shutdown(shutdownCtx)
 		}
-		return errors.Join(
-			tp.Shutdown(shutdownCtx),
-			logProvider.Shutdown(shutdownCtx),
-			mp.Shutdown(shutdownCtx),
-			debugErr,
-		)
+		return errors.Join(tpErr, logErr, mpErr, debugErr)
 	}
 	return shutdown, nil
 }
