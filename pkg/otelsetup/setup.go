@@ -171,6 +171,8 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName(cfg.ServiceName),
+		semconv.ServiceVersion(cfg.ServiceVersion),
+		semconv.K8SClusterName(cfg.ClusterName),
 		semconv.K8SNodeName(cfg.NodeName),
 		semconv.K8SPodName(cfg.PodName),
 		semconv.K8SNamespaceName(cfg.Namespace),
