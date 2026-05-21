@@ -397,9 +397,19 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				state = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
 			}
 			rm.metrics.ReportRuleAlert(rule.ID)
-			// Emit structured OTEL log record for every alert; dedup within 60s window to
-			// prevent log floods from repeated rule firings against the same rule+container pair.
-			dedupKey := rule.ID + "|" + enrichedEvent.ContainerID
+			message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
+			if err != nil {
+				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
+				continue
+			}
+
+			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
+				continue
+			}
+
+			// Emit OTEL log after cooldown so suppressed alerts are not recorded.
+			// Dedup key includes eventType to avoid collapsing distinct alert types.
+			dedupKey := rule.ID + "|" + enrichedEvent.ContainerID + "|" + string(eventType)
 			rm.alertLogDedupMu.Lock()
 			alreadySeen := rm.alertLogDedup.Contains(dedupKey)
 			if !alreadySeen {
@@ -421,15 +431,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 					Image:         image,
 					EventType:     string(eventType),
 				})
-			}
-			message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
-			if err != nil {
-				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
-				continue
-			}
-
-			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
-				continue
 			}
 
 			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum, state)

@@ -517,16 +517,13 @@ func main() {
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 	sig := <-shutdown
 
-	// Exit with success
 	switch sig {
 	case os.Interrupt:
 		logger.L().Info("Received interrupt signal")
-		os.Exit(utils.ExitCodeSuccess)
 	case syscall.SIGTERM:
 		logger.L().Info("Received SIGTERM signal")
-		os.Exit(utils.ExitCodeSuccess)
 	default:
 		logger.L().Info("Received unknown signal")
-		os.Exit(utils.ExitCodeError)
 	}
+	// Return normally so deferred OTEL shutdown flushes traces/metrics/logs.
 }
