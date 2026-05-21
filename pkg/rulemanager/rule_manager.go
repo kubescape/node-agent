@@ -41,6 +41,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -379,6 +380,9 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 					attribute.Float64("eval.duration_ms", float64(evaluationTime.Milliseconds())),
 					attribute.Bool("alert_fired", shouldAlert),
 				))
+			if err != nil {
+				span.SetStatus(codes.Error, err.Error())
+			}
 			span.End()
 		}
 
