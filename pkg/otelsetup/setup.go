@@ -168,8 +168,7 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 	}
 
 	// Resource attributes shared by every signal.
-	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
-		semconv.SchemaURL,
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
 		semconv.ServiceName(cfg.ServiceName),
 		semconv.ServiceVersion(cfg.ServiceVersion),
 		semconv.K8SClusterName(cfg.ClusterName),
