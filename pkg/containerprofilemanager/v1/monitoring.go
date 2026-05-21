@@ -183,6 +183,10 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 				helpersv1.ReportSeriesIdMetadataKey:          watchedContainer.SeriesID,
 				helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
 				helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
+				helpersv1.OtelSpanIDMetadataKey:              cpm.lifecycleTracker.LearningSpanID(watchedContainer.ContainerID),
+				// Full W3C traceparent so kubescape/storage can create a properly
+				// parented child span for the aggregation step.
+				helpersv1.OtelTraceparentMetadataKey: cpm.lifecycleTracker.LearningTraceparent(watchedContainer.ContainerID),
 			},
 			Labels: objectcache.GetLabels(cpm.cloudMetadata, watchedContainer, false),
 		},
@@ -213,7 +217,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		return err
 	}
 
-	cpm.lifecycleTracker.OnEntrySaved(watchedContainer.ContainerID)
+	cpm.lifecycleTracker.OnEntrySaved(watchedContainer.ContainerID, containerData.droppedEvents)
 
 	logger.L().Debug("container profile saved successfully",
 		helpers.String("containerID", watchedContainer.ContainerID),
