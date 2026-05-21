@@ -133,11 +133,11 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
 	isOK, err := ame.client.Alert.PostAlerts(params)
 	if err != nil {
-		logger.L().Warning("AlertManagerExporter.SendRuleAlert - error sending alert", helpers.Error(err))
+		logger.L().Ctx(context.Background()).Warning("AlertManagerExporter.SendRuleAlert - error sending alert", helpers.Error(err))
 		return
 	}
 	if isOK == nil {
-		logger.L().Warning("AlertManagerExporter.SendRuleAlert - alert was not sent successfully")
+		logger.L().Ctx(context.Background()).Warning("AlertManagerExporter.SendRuleAlert - alert was not sent successfully")
 		return
 	}
 }
@@ -182,11 +182,11 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 	params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
 	isOK, err := ame.client.Alert.PostAlerts(params)
 	if err != nil {
-		logger.L().Warning("AlertManagerExporter.SendMalwareAlert - error sending alert", helpers.Error(err))
+		logger.L().Ctx(context.Background()).Warning("AlertManagerExporter.SendMalwareAlert - error sending alert", helpers.Error(err))
 		return
 	}
 	if isOK == nil {
-		logger.L().Warning("AlertManagerExporter.SendMalwareAlert - alert was not sent successfully")
+		logger.L().Ctx(context.Background()).Warning("AlertManagerExporter.SendMalwareAlert - alert was not sent successfully")
 		return
 	}
 }

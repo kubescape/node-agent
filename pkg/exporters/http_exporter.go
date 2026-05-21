@@ -191,7 +191,7 @@ func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	defer cancel()
 
 	if err := e.sendRuleAlertWithContext(ctx, failedRule); err != nil {
-		logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send rule alert", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("HTTPExporter.SendRuleAlert - failed to send rule alert", helpers.Error(err))
 	}
 }
 
@@ -229,7 +229,7 @@ func (e *HTTPExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	defer cancel()
 
 	if err := e.sendFimAlertsWithContext(ctx, fimEvents); err != nil {
-		logger.L().Warning("HTTPExporter.SendFimAlerts - failed to send FIM alerts", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("HTTPExporter.SendFimAlerts - failed to send FIM alerts", helpers.Error(err))
 	}
 }
 
@@ -506,7 +506,7 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		},
 	}
 
-	logger.L().Warning("Alert limit reached",
+	logger.L().Ctx(ctx).Warning("Alert limit reached",
 		helpers.Int("alerts", e.alertMetrics.count),
 		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 

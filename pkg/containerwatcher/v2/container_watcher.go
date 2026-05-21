@@ -483,12 +483,12 @@ func (cw *ContainerWatcher) enrichAndProcess(entry EventEntry) {
 	case cw.workerChan <- enrichedEvent:
 	default:
 		if cw.cfg.BlockEvents {
-			logger.L().Warning("ContainerWatcher - Worker channel full, blocking until space available",
+			logger.L().Ctx(context.Background()).Warning("ContainerWatcher - Worker channel full, blocking until space available",
 				helpers.String("eventType", string(entry.EventType)),
 				helpers.String("containerID", entry.ContainerID))
 			cw.workerChan <- enrichedEvent
 		} else {
-			logger.L().Warning("ContainerWatcher - Worker channel full, dropping event",
+			logger.L().Ctx(context.Background()).Warning("ContainerWatcher - Worker channel full, dropping event",
 				helpers.String("eventType", string(entry.EventType)),
 				helpers.String("containerID", entry.ContainerID))
 			cw.ebpfDropCounter.Add(context.Background(),

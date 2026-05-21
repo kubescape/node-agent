@@ -383,7 +383,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		if err != nil {
-			logger.L().Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
+			logger.L().Ctx(rm.ctx).Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
 			continue
 		}
 
@@ -541,7 +541,7 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 		rm.metrics.ReportRuleEvaluationTime(rule.ID, eventType, evaluationTime)
 
 		if err != nil {
-			logger.L().Error("RuleManager.EvaluatePolicyRulesForEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
+			logger.L().Ctx(rm.ctx).Error("RuleManager.EvaluatePolicyRulesForEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
 			continue
 		}
 
@@ -581,11 +581,11 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.Eve
 func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent, rule typesv1.Rule) (string, string, error) {
 	message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
 	if err != nil {
-		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
+		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
 	uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
 	if err != nil {
-		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
+		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}
 
 	uniqueID = hashStringToMD5(uniqueID)
