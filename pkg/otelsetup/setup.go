@@ -189,6 +189,9 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 		} else {
 			traceOpts = append(traceOpts, otlptracegrpc.WithEndpoint(traceEndpoint))
 		}
+		if !strings.HasPrefix(traceEndpoint, "https://") {
+			traceOpts = append(traceOpts, otlptracegrpc.WithInsecure())
+		}
 		if len(traceHeaders) > 0 {
 			traceOpts = append(traceOpts, otlptracegrpc.WithHeaders(traceHeaders))
 		}
@@ -215,6 +218,9 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 			logOpts = append(logOpts, otlploggrpc.WithEndpointURL(logEndpoint))
 		} else {
 			logOpts = append(logOpts, otlploggrpc.WithEndpoint(logEndpoint))
+		}
+		if !strings.HasPrefix(logEndpoint, "https://") {
+			logOpts = append(logOpts, otlploggrpc.WithInsecure())
 		}
 		if len(logHeaders) > 0 {
 			logOpts = append(logOpts, otlploggrpc.WithHeaders(logHeaders))
@@ -249,6 +255,9 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 			metricOpts = append(metricOpts, otlpmetricgrpc.WithEndpointURL(metricEndpoint))
 		} else {
 			metricOpts = append(metricOpts, otlpmetricgrpc.WithEndpoint(metricEndpoint))
+		}
+		if !strings.HasPrefix(metricEndpoint, "https://") {
+			metricOpts = append(metricOpts, otlpmetricgrpc.WithInsecure())
 		}
 		if len(metricHeaders) > 0 {
 			metricOpts = append(metricOpts, otlpmetricgrpc.WithHeaders(metricHeaders))
