@@ -40,7 +40,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
-	metricprometheus "github.com/kubescape/node-agent/pkg/metricsmanager/prometheus"
+	otelmetrics "github.com/kubescape/node-agent/pkg/metricsmanager/otel"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	networkstreamv1 "github.com/kubescape/node-agent/pkg/networkstream/v1"
 	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
@@ -186,12 +186,14 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
 
-	// Create Prometheus metrics exporter
-	var prometheusExporter metricsmanager.MetricsManager
+	// Create metrics provider (OTEL SDK; Prometheus scrape endpoint started by otelsetup
+	// when OTEL_METRICS_EXPORTER=prometheus; OTLP push when OTEL_EXPORTER_OTLP_ENDPOINT set).
+	// MUST be constructed after otelsetup.InitProviders() so the global MeterProvider is set.
+	var metricsProvider metricsmanager.MetricsManager
 	if cfg.EnableMetricsExporter {
-		prometheusExporter = metricprometheus.NewPrometheusMetric()
+		metricsProvider = otelmetrics.NewOTELMetricsManager()
 	} else {
-		prometheusExporter = metricsmanager.NewMetricsNoop()
+		metricsProvider = metricsmanager.NewMetricsNoop()
 	}
 
 	// Create watchers
@@ -308,7 +310,7 @@ func main() {
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
-		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, prometheusExporter)
+		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, metricsProvider)
 		cpc.Start(ctx)
 		if cpm, ok := containerProfileManager.(*containerprofilemanagerv1.ContainerProfileManager); ok {
 			cpm.SetCompletionNotifier(cpc)
@@ -324,7 +326,7 @@ func main() {
 
 		adapterFactory := ruleadapters.NewEventRuleAdapterFactory()
 
-		celEvaluator, err := cel.NewCEL(objCache, cfg, prometheusExporter)
+		celEvaluator, err := cel.NewCEL(objCache, cfg, metricsProvider)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating CEL evaluator", helpers.Error(err))
 		}
@@ -333,7 +335,7 @@ func main() {
 
 		// create runtimeDetection managers
 		agentVersion := os.Getenv("AGENT_VERSION")
-		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory, celEvaluator, mntnsRegistry, agentVersion)
+		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, metricsProvider, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory, celEvaluator, mntnsRegistry, agentVersion)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -370,7 +372,7 @@ func main() {
 	if cfg.EnableMalwareDetection {
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent)
-		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, prometheusExporter, k8sObjectCache)
+		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, metricsProvider, k8sObjectCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
 		}
@@ -446,7 +448,7 @@ func main() {
 
 	// Create the container handler
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
-		igK8sClient, dnsManagerClient, prometheusExporter, ruleManager,
+		igK8sClient, dnsManagerClient, metricsProvider, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil,
 		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, thirdPartyTracers)
 	if err != nil {
@@ -460,8 +462,8 @@ func main() {
 	// Start the networkStream
 	networkStreamClient.Start()
 
-	// Start the prometheusExporter
-	prometheusExporter.Start()
+	// Start the metrics provider
+	metricsProvider.Start()
 
 	// Start the host sensor manager
 	if err = hostSensorManager.Start(ctx); err != nil {

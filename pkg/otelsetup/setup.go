@@ -7,16 +7,25 @@ package otelsetup
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"os"
 	"strconv"
 	"sync/atomic"
 	"time"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	gotelsetup "github.com/kubescape/go-logger/otelsetup"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
+	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
 	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -52,6 +61,8 @@ func Meter() metric.Meter {
 
 // InitProviders initialises OTEL providers via the shared go-logger package
 // and resolves the node-agent-specific slow-evaluation threshold.
+// When OTEL_METRICS_EXPORTER=prometheus, a Prometheus scrape endpoint is
+// started on :8080/metrics in addition to (or instead of) OTLP metric export.
 func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(context.Context) error, err error) {
 	thresholdMs := int64(5)
 	if v := os.Getenv("OTEL_SLOW_EVAL_THRESHOLD_MS"); v != "" {
@@ -61,7 +72,73 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 	}
 	slowEvalThresholdNs.Store(thresholdMs * int64(time.Millisecond))
 
-	return gotelsetup.InitProviders(ctx, cfg)
+	baseShutdown, err := gotelsetup.InitProviders(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Prometheus metrics mode: set up a scrape endpoint and override the
+	// MeterProvider. This is mutually exclusive with OTLP metric push — when
+	// OTEL_METRICS_EXPORTER=prometheus is set, the OTLP metric exporter that
+	// go-logger may have configured is replaced by the prometheus reader.
+	if os.Getenv("OTEL_METRICS_EXPORTER") == "prometheus" {
+		promShutdown, perr := initPrometheusMeterProvider(cfg)
+		if perr != nil {
+			_ = baseShutdown(ctx)
+			return nil, perr
+		}
+		return func(ctx context.Context) error {
+			return errors.Join(baseShutdown(ctx), promShutdown(ctx))
+		}, nil
+	}
+
+	return baseShutdown, nil
+}
+
+// initPrometheusMeterProvider creates a prometheus.Exporter-backed MeterProvider,
+// registers it as the global provider, and starts an HTTP server on :8080/metrics.
+// Returns a shutdown func that stops the HTTP server and flushes the provider.
+func initPrometheusMeterProvider(cfg ProviderConfig) (func(context.Context) error, error) {
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
+		semconv.ServiceName(cfg.ServiceName),
+		semconv.ServiceVersion(cfg.ServiceVersion),
+		semconv.K8SClusterName(cfg.ClusterName),
+		semconv.K8SNodeName(cfg.NodeName),
+		semconv.K8SPodName(cfg.PodName),
+		semconv.K8SNamespaceName(cfg.Namespace),
+	))
+	if err != nil {
+		return nil, err
+	}
+
+	promExp, err := promexporter.New()
+	if err != nil {
+		return nil, err
+	}
+
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(promExp),
+		sdkmetric.WithResource(res),
+	)
+	otel.SetMeterProvider(mp)
+
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	srv := &http.Server{
+		Addr:              ":8080",
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		if serr := srv.ListenAndServe(); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
+			logger.L().Warning("otelsetup: prometheus metrics server stopped", helpers.Error(serr))
+		}
+	}()
+
+	return func(ctx context.Context) error {
+		_ = srv.Shutdown(ctx)
+		return mp.Shutdown(ctx)
+	}, nil
 }
 
 // AlertLogAttrs is the structured attribute payload for EmitAlertLogRecord.

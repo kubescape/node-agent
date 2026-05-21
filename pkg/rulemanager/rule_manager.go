@@ -347,7 +347,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				eventFields = extractEventFields(enrichedEvent.Event)
 			}
 			if rule.Prefilter.ShouldSkip(&eventFields) {
-				rm.metrics.ReportRulePrefiltered(rule.Name)
+				rm.metrics.ReportRulePrefiltered(rule.ID)
 				continue
 			}
 		}
@@ -367,7 +367,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
 		})
 		evaluationTime := time.Since(startTime)
-		rm.metrics.ReportRuleEvaluationTime(rule.Name, eventType, evaluationTime)
+		rm.metrics.ReportRuleEvaluationTime(rule.ID, eventType, evaluationTime)
 
 		// Slow-path tracing: only emit a span when evaluation exceeded the threshold.
 		// This protects the hot path from unconditional tracing overhead on millions of events/sec.
@@ -396,7 +396,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			if eventType == utils.HTTPEventType { // TODO: Manage state evaluation in a better way (this is abuse of the state map, we need a better way to pass payloads from rules.)
 				state = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
 			}
-			rm.metrics.ReportRuleAlert(rule.Name)
+			rm.metrics.ReportRuleAlert(rule.ID)
 			// Emit structured OTEL log record for every alert; dedup within 60s window to
 			// prevent log floods from repeated rule firings against the same rule+container pair.
 			dedupKey := rule.ID + "|" + enrichedEvent.ContainerID
@@ -445,7 +445,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			ruleFailure.SetWorkloadDetails(details)
 			rm.exporter.SendRuleAlert(ruleFailure)
 		}
-		rm.metrics.ReportRuleProcessed(rule.Name)
+		rm.metrics.ReportRuleProcessed(rule.ID)
 	}
 }
 
