@@ -96,12 +96,13 @@ func (t *ProfileLifecycleTracker) LearningTraceparent(containerID string) string
 func (t *ProfileLifecycleTracker) OnEntrySaved(containerID string, hasDropped bool) {
 	t.mu.Lock()
 	ctx, ok := t.ctxs[containerID]
+	if !ok {
+		t.mu.Unlock()
+		return
+	}
 	t.counts[containerID]++
 	count := t.counts[containerID]
 	t.mu.Unlock()
-	if !ok {
-		return
-	}
 	if count != 1 && count%10 != 0 && !hasDropped {
 		return
 	}

@@ -8,6 +8,8 @@ package otelsetup
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -122,15 +124,19 @@ func initPrometheusMeterProvider(cfg ProviderConfig) (func(context.Context) erro
 	)
 	otel.SetMeterProvider(mp)
 
+	ln, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		return nil, fmt.Errorf("otelsetup: prometheus metrics listener: %w", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	srv := &http.Server{
-		Addr:              ":8080",
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
-		if serr := srv.ListenAndServe(); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
+		if serr := srv.Serve(ln); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
 			logger.L().Warning("otelsetup: prometheus metrics server stopped", helpers.Error(serr))
 		}
 	}()
