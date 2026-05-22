@@ -95,6 +95,8 @@ These environment variables are read directly (not through config file):
 | `PYROSCOPE_SERVER_SVC` | Pyroscope server address | No |
 | `APPLICATION_NAME` | Application name for Pyroscope | No (default: `node-agent`) |
 | `RELEASE` | Release version for telemetry | No |
+| `KS_LOGGER_LEVEL` | Log level: `debug`, `info`, `warning`, `error`. Default: `info`. When `debug`, enables the ring-buffer flush endpoint. | No |
+| `KS_LOGGER_NAME` | Logger output format: `zap` (structured JSON) or `pretty` (human-readable). Default: `zap`. | No |
 | `MULTIPLY` | Enable pod multiplication (testing) | No |
 | `QUEUE_DIR` | Directory for persistent queue | No |
 | `MAX_QUEUE_SIZE` | Maximum queue size | No |

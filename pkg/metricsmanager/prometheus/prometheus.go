@@ -453,6 +453,11 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.programMapCountGauge)
 	prometheus.Unregister(p.programCpuUsageGauge)
 	prometheus.Unregister(p.programPerCpuUsageGauge)
+	prometheus.Unregister(p.sbomScanCounter)
+	prometheus.Unregister(p.alertSuppressedCounter)
+	prometheus.Unregister(p.sbomScanDuration)
+	prometheus.Unregister(p.sbomRestarts)
+	prometheus.Unregister(p.sbomReady)
 }
 
 func (p *PrometheusMetric) ReportEvent(eventType utils.EventType) {

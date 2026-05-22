@@ -148,8 +148,7 @@ func initPrometheusMeterProvider(cfg ProviderConfig) (func(context.Context) erro
 	}()
 
 	return func(ctx context.Context) error {
-		_ = srv.Shutdown(ctx)
-		return mp.Shutdown(ctx)
+		return errors.Join(srv.Shutdown(ctx), mp.Shutdown(ctx))
 	}, nil
 }
 

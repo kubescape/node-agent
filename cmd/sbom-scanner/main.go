@@ -58,9 +58,11 @@ func main() {
 		}()
 	}
 
-	// Emit Go runtime metrics only when an OTEL endpoint is configured;
+	// Emit Go runtime metrics only when metrics collection is configured;
 	// avoids ~2–3 KB/hr of metric volume for deployments without telemetry.
-	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" ||
+		os.Getenv("OTEL_METRICS_EXPORTER") != "" ||
+		os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != "" {
 		if err := goruntime.Start(goruntime.WithMinimumReadMemStatsInterval(30 * time.Second)); err != nil {
 			logger.L().Warning("sbom-scanner: Go runtime metrics unavailable", helpers.Error(err))
 		}
