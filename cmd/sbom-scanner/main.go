@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/otelsetup"
@@ -23,8 +24,19 @@ import (
 func main() {
 	ctx := context.Background()
 
+	// Load ARMO credentials from /etc/credentials (same source as the main agent).
+	// Fall back to env vars so the binary stays functional in non-ARMO deployments.
+	accountID := os.Getenv("ACCOUNT_ID")
+	accessKey := os.Getenv("ACCESS_KEY")
+	if creds, err := beUtils.LoadCredentialsFromFile("/etc/credentials"); err == nil {
+		accountID = creds.Account
+		accessKey = creds.AccessKey
+	}
+
 	// Initialize OTEL providers from standard env vars (OTEL_EXPORTER_OTLP_ENDPOINT etc.).
 	// Gracefully degrades to no-op when endpoint is not configured.
+	// When OTEL_METRICS_EXPORTER=prometheus and :8080 is already owned by the main
+	// agent container, InitProviders soft-fails the listener and keeps traces/logs.
 	otelShutdown, err := otelsetup.InitProviders(ctx, otelsetup.ProviderConfig{
 		ServiceName:    "sbom-scanner",
 		ServiceVersion: os.Getenv("RELEASE"),
@@ -32,8 +44,8 @@ func main() {
 		PodName:        os.Getenv("POD_NAME"),
 		Namespace:      os.Getenv("NAMESPACE"),
 		ClusterName:    os.Getenv("CLUSTER_NAME"),
-		AccountID:      os.Getenv("ACCOUNT_ID"),
-		AccessKey:      os.Getenv("ACCESS_KEY"),
+		AccountID:      accountID,
+		AccessKey:      accessKey,
 	})
 	if err != nil {
 		logger.L().Warning("sbom-scanner: OTEL init failed, running without telemetry", helpers.Error(err))

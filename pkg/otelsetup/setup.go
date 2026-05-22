@@ -86,8 +86,11 @@ func InitProviders(ctx context.Context, cfg ProviderConfig) (shutdown func(conte
 	if os.Getenv("OTEL_METRICS_EXPORTER") == "prometheus" {
 		promShutdown, perr := initPrometheusMeterProvider(cfg)
 		if perr != nil {
-			_ = baseShutdown(ctx)
-			return nil, perr
+			// Soft-fail: port conflict (e.g. sidecar process when main agent owns :8080)
+			// or other listener issue. Traces and logs from baseShutdown are preserved;
+			// only metrics are unavailable.
+			logger.L().Warning("otelsetup: Prometheus metrics listener unavailable, continuing without metrics", helpers.Error(perr))
+			return baseShutdown, nil
 		}
 		return func(ctx context.Context) error {
 			return errors.Join(baseShutdown(ctx), promShutdown(ctx))
