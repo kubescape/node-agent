@@ -1,6 +1,7 @@
 package otelmetrics
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -30,12 +31,12 @@ func BenchmarkReportRuleEvaluationTime(b *testing.B) {
 
 	// Warm the cache for the key under test so the benchmark measures the
 	// cached fast path, not the first-call allocation.
-	m.ReportRuleEvaluationTime("R1001", utils.ExecveEventType, 3*time.Millisecond)
+	m.ReportRuleEvaluationTime(context.Background(), "R1001", utils.ExecveEventType, 3*time.Millisecond)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		m.ReportRuleEvaluationTime("R1001", utils.ExecveEventType, 3*time.Millisecond)
+		m.ReportRuleEvaluationTime(context.Background(), "R1001", utils.ExecveEventType, 3*time.Millisecond)
 	}
 }
 

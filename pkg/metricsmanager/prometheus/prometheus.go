@@ -1,6 +1,7 @@
 package metricsmanager
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -544,7 +545,7 @@ func (p *PrometheusMetric) ReportRuleAlert(ruleID string) {
 	p.getCachedAlertCounter(ruleID).Inc()
 }
 
-func (p *PrometheusMetric) ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration) {
+func (p *PrometheusMetric) ReportRuleEvaluationTime(_ context.Context, ruleID string, eventType utils.EventType, duration time.Duration) {
 	labels := prometheus.Labels{
 		prometheusRuleIdLabel: ruleID,
 		eventTypeLabel:        string(eventType),

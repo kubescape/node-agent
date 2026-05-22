@@ -1,6 +1,7 @@
 package metricsmanager
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 
@@ -52,7 +53,7 @@ func (m *MetricsMock) ReportRuleAlert(ruleID string) {
 	m.RuleAlertCounter.Set(ruleID, m.RuleAlertCounter.Get(ruleID)+1)
 }
 
-func (m *MetricsMock) ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration) {
+func (m *MetricsMock) ReportRuleEvaluationTime(_ context.Context, ruleID string, eventType utils.EventType, duration time.Duration) {
 	key := ruleID + ":" + string(eventType)
 	m.RuleEvaluationTime.Set(key, duration)
 }

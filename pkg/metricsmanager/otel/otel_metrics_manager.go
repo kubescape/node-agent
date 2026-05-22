@@ -271,8 +271,8 @@ func (m *OTELMetricsManager) ReportRuleAlert(ruleID string) {
 	m.alertTotal.Add(context.Background(), 1, m.ruleIDOption(ruleID))
 }
 
-func (m *OTELMetricsManager) ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration) {
-	m.ruleEvalDuration.Record(context.Background(), duration.Seconds(), m.ruleEvalOption(ruleID, eventType))
+func (m *OTELMetricsManager) ReportRuleEvaluationTime(ctx context.Context, ruleID string, eventType utils.EventType, duration time.Duration) {
+	m.ruleEvalDuration.Record(ctx, duration.Seconds(), m.ruleEvalOption(ruleID, eventType))
 }
 
 func (m *OTELMetricsManager) ReportContainerStart() {

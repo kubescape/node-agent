@@ -1,6 +1,7 @@
 package metricsmanager
 
 import (
+	"context"
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -15,7 +16,7 @@ type MetricsManager interface {
 	ReportRuleProcessed(ruleID string)
 	ReportRulePrefiltered(ruleName string)
 	ReportRuleAlert(ruleID string)
-	ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration)
+	ReportRuleEvaluationTime(ctx context.Context, ruleID string, eventType utils.EventType, duration time.Duration)
 	//ReportEbpfStats(stats *top.Event[toptypes.Stats])
 	ReportContainerStart()
 	ReportContainerStop()

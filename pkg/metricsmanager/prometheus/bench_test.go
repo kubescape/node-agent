@@ -1,6 +1,7 @@
 package metricsmanager
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -25,12 +26,12 @@ func getBenchPM() *PrometheusMetric {
 // ns/op × 1.1 (per Phase 2 plan hard gate).
 func BenchmarkReportRuleEvaluationTime(b *testing.B) {
 	pm := getBenchPM()
-	pm.ReportRuleEvaluationTime("R1001", utils.ExecveEventType, 3*time.Millisecond) // warm cache
+	pm.ReportRuleEvaluationTime(context.Background(), "R1001", utils.ExecveEventType, 3*time.Millisecond) // warm cache
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		pm.ReportRuleEvaluationTime("R1001", utils.ExecveEventType, 3*time.Millisecond)
+		pm.ReportRuleEvaluationTime(context.Background(), "R1001", utils.ExecveEventType, 3*time.Millisecond)
 	}
 }
 
