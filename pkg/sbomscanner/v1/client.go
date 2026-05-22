@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	pb "github.com/kubescape/node-agent/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -30,6 +31,7 @@ func NewSBOMScannerClient(socketPath string) (SBOMScannerClient, error) {
 	target := fmt.Sprintf("unix://%s", socketPath)
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client: %w", err)

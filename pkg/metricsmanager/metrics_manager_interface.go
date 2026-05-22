@@ -49,4 +49,10 @@ type MetricsManager interface {
 	ObserveProfileEntriesRaw(field string, count float64)
 	ObserveProfileEntriesRetained(field string, count float64)
 	ObserveProfileRetentionRatio(field string, ratio float64)
+
+	// SBOM scan metrics.
+	ReportSBOMScan(status string)
+	ObserveSBOMScanDuration(status string, d time.Duration)
+	ReportSBOMScannerRestart()
+	SetSBOMScannerReady(ready bool)
 }

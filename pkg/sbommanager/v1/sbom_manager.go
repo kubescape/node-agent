@@ -33,6 +33,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager/v1/syftutil"
@@ -91,11 +92,12 @@ type SbomManager struct {
 	pendingOrder       []string
 	pendingMu          sync.Mutex
 	failureReporter    sbommanager.SbomFailureReporter
+	metrics            metricsmanager.MetricsManager
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
-func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter) (*SbomManager, error) {
+func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter, metrics metricsmanager.MetricsManager) (*SbomManager, error) {
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
 	if !exists {
@@ -138,6 +140,7 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		scanRetries:        make(map[string]int),
 		pendingScans:       make(map[string]pendingScan),
 		failureReporter:    failureReporter,
+		metrics:            metrics,
 	}
 	if scannerClient != nil {
 		sm.startScannerReadinessWatcher()
@@ -375,7 +378,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 	scanStart := time.Now()
 
 	if s.scannerClient != nil && s.scannerClient.Ready() {
-		sbomScannerReady.Set(1)
+		s.metrics.SetSBOMScannerReady(true)
 		// sidecar path: delegate SBOM creation to the scanner sidecar
 		imageStatusBytes, marshalErr := json.Marshal(imageStatus)
 		if marshalErr != nil {
@@ -398,17 +401,17 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 			Timeout:             15 * time.Minute,
 		})
 		if scanErr != nil {
-			scanDuration := time.Since(scanStart).Seconds()
+			scanDuration := time.Since(scanStart)
 			if errors.Is(scanErr, sbomscanner.ErrScannerCrashed) {
-				sbomScanTotal.WithLabelValues("oom_killed").Inc()
-				sbomScanDuration.WithLabelValues("oom_killed").Observe(scanDuration)
-				sbomScannerRestartsTotal.Inc()
-				sbomScannerReady.Set(0)
+				s.metrics.ReportSBOMScan("oom_killed")
+				s.metrics.ObserveSBOMScanDuration("oom_killed", scanDuration)
+				s.metrics.ReportSBOMScannerRestart()
+				s.metrics.SetSBOMScannerReady(false)
 				s.handleScannerCrash(sbomName, wipSbom, notif, scanErr, imageTag, imageID)
 				return
 			}
-			sbomScanTotal.WithLabelValues("error").Inc()
-			sbomScanDuration.WithLabelValues("error").Observe(scanDuration)
+			s.metrics.ReportSBOMScan("error")
+			s.metrics.ObserveSBOMScanDuration("error", scanDuration)
 			logger.L().Ctx(s.ctx).Error("SbomManager - sidecar scan failed",
 				helpers.Error(scanErr),
 				helpers.String("namespace", notif.Container.K8s.Namespace),
@@ -418,12 +421,12 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)
 			return
 		}
-		sbomScanTotal.WithLabelValues("success").Inc()
-		sbomScanDuration.WithLabelValues("success").Observe(time.Since(scanStart).Seconds())
+		s.metrics.ReportSBOMScan("success")
+		s.metrics.ObserveSBOMScanDuration("success", time.Since(scanStart))
 		delete(s.scanRetries, sbomName)
 		syftDoc = result.SyftDocument
 	} else if s.scannerClient != nil {
-		sbomScannerReady.Set(0)
+		s.metrics.SetSBOMScannerReady(false)
 		// sidecar configured but not ready — queue for retry when it becomes ready
 		logger.L().Debug("SbomManager - scanner sidecar not ready, queuing scan for retry",
 			helpers.String("sbomName", sbomName))

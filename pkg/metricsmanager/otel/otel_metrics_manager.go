@@ -63,6 +63,12 @@ type OTELMetricsManager struct {
 	profileEntriesRetained metric.Float64Histogram
 	profileRetentionRatio  metric.Float64Histogram
 
+	// SBOM scan metrics
+	sbomScanTotal    metric.Int64Counter
+	sbomScanDuration metric.Float64Histogram
+	sbomRestarts     metric.Int64Counter
+	sbomReady        metric.Float64Gauge
+
 	// Attribute-set caches: mandatory on the hot path to avoid per-call allocations.
 	// Each cache maps a string key → metric.MeasurementOption (pre-built attribute set).
 	ruleIDCache    sync.Map // ruleID → MeasurementOption (rule_id attribute)
@@ -187,6 +193,17 @@ func NewOTELMetricsManager() *OTELMetricsManager {
 		"Entries per field after projection (dev-only)", "{entry}", entryBuckets)
 	m.profileRetentionRatio = mustHistogram("node_agent.profile.retention_ratio",
 		"Entry retention ratio per field after projection (dev-only)", "1", ratioBuckets)
+
+	// SBOM scan buckets: covers 1s–15min (scans can take several minutes for large images).
+	sbomBuckets := []float64{1, 2, 5, 10, 30, 60, 120, 300, 600, 900}
+	m.sbomScanTotal = mustCounter("node_agent.sbom.scan.total",
+		"Total SBOM scan attempts by status (success/error/oom_killed)")
+	m.sbomScanDuration = mustHistogram("node_agent.sbom.scan.duration",
+		"SBOM scan duration by status", "s", sbomBuckets)
+	m.sbomRestarts = mustCounter("node_agent.sbom.scanner.restarts.total",
+		"Total SBOM scanner sidecar restarts detected via connection loss")
+	m.sbomReady = mustGauge("node_agent.sbom.scanner.ready",
+		"Whether the SBOM scanner sidecar is ready (1=ready, 0=not ready)")
 
 	return m
 }
@@ -433,4 +450,24 @@ func (m *OTELMetricsManager) ObserveProfileRetentionRatio(field string, ratio fl
 	m.profileRetentionRatio.Record(context.Background(), ratio, metric.WithAttributes(
 		attribute.String("field", field),
 	))
+}
+
+func (m *OTELMetricsManager) ReportSBOMScan(status string) {
+	m.sbomScanTotal.Add(context.Background(), 1, metric.WithAttributes(attribute.String("status", status)))
+}
+
+func (m *OTELMetricsManager) ObserveSBOMScanDuration(status string, d time.Duration) {
+	m.sbomScanDuration.Record(context.Background(), d.Seconds(), metric.WithAttributes(attribute.String("status", status)))
+}
+
+func (m *OTELMetricsManager) ReportSBOMScannerRestart() {
+	m.sbomRestarts.Add(context.Background(), 1)
+}
+
+func (m *OTELMetricsManager) SetSBOMScannerReady(ready bool) {
+	v := 0.0
+	if ready {
+		v = 1.0
+	}
+	m.sbomReady.Record(context.Background(), v)
 }

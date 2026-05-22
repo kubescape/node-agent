@@ -45,3 +45,7 @@ func (m *MetricsNoop) ObserveProfileProjectedSize(_ float64)             {}
 func (m *MetricsNoop) ObserveProfileEntriesRaw(_ string, _ float64)     {}
 func (m *MetricsNoop) ObserveProfileEntriesRetained(_ string, _ float64) {}
 func (m *MetricsNoop) ObserveProfileRetentionRatio(_ string, _ float64)  {}
+func (m *MetricsNoop) ReportSBOMScan(_ string)                           {}
+func (m *MetricsNoop) ObserveSBOMScanDuration(_ string, _ time.Duration) {}
+func (m *MetricsNoop) ReportSBOMScannerRestart()                         {}
+func (m *MetricsNoop) SetSBOMScannerReady(_ bool)                        {}

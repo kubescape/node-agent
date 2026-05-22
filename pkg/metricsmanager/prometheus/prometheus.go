@@ -94,6 +94,12 @@ type PrometheusMetric struct {
 	cpProfileEntriesRetainedHistogram *prometheus.HistogramVec
 	cpProfileRetentionRatioHistogram  *prometheus.HistogramVec
 
+	// SBOM scan metrics
+	sbomScanCounter  *prometheus.CounterVec
+	sbomScanDuration *prometheus.HistogramVec
+	sbomRestarts     prometheus.Counter
+	sbomReady        prometheus.Gauge
+
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache          map[string]prometheus.Counter
 	rulePrefilteredCounterCache map[string]prometheus.Counter
@@ -348,6 +354,25 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Help:    "Fraction of entries retained per field after projection (retained/raw).",
 			Buckets: []float64{0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0},
 		}, []string{"field"}),
+
+		// SBOM scan metrics
+		sbomScanCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "sbom_scan_total",
+			Help: "Total SBOM scan attempts",
+		}, []string{"status"}),
+		sbomScanDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "sbom_scan_duration_seconds",
+			Help:    "SBOM scan duration in seconds",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 12),
+		}, []string{"status"}),
+		sbomRestarts: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "sbom_scanner_restarts_total",
+			Help: "Total number of SBOM scanner sidecar restarts detected via connection loss",
+		}),
+		sbomReady: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "sbom_scanner_ready",
+			Help: "Whether the SBOM scanner sidecar is connected and healthy (1=ready, 0=not ready)",
+		}),
 
 		// Initialize counter caches
 		ruleCounterCache:            make(map[string]prometheus.Counter),
@@ -670,4 +695,24 @@ func (p *PrometheusMetric) ObserveProfileEntriesRetained(field string, count flo
 }
 func (p *PrometheusMetric) ObserveProfileRetentionRatio(field string, ratio float64) {
 	p.cpProfileRetentionRatioHistogram.WithLabelValues(field).Observe(ratio)
+}
+
+func (p *PrometheusMetric) ReportSBOMScan(status string) {
+	p.sbomScanCounter.WithLabelValues(status).Inc()
+}
+
+func (p *PrometheusMetric) ObserveSBOMScanDuration(status string, d time.Duration) {
+	p.sbomScanDuration.WithLabelValues(status).Observe(d.Seconds())
+}
+
+func (p *PrometheusMetric) ReportSBOMScannerRestart() {
+	p.sbomRestarts.Inc()
+}
+
+func (p *PrometheusMetric) SetSBOMScannerReady(ready bool) {
+	if ready {
+		p.sbomReady.Set(1)
+	} else {
+		p.sbomReady.Set(0)
+	}
 }

@@ -90,3 +90,7 @@ func (m *MetricsMock) ObserveProfileProjectedSize(_ float64)             {}
 func (m *MetricsMock) ObserveProfileEntriesRaw(_ string, _ float64)     {}
 func (m *MetricsMock) ObserveProfileEntriesRetained(_ string, _ float64) {}
 func (m *MetricsMock) ObserveProfileRetentionRatio(_ string, _ float64)  {}
+func (m *MetricsMock) ReportSBOMScan(_ string)                           {}
+func (m *MetricsMock) ObserveSBOMScanDuration(_ string, _ time.Duration) {}
+func (m *MetricsMock) ReportSBOMScannerRestart()                         {}
+func (m *MetricsMock) SetSBOMScannerReady(_ bool)                        {}

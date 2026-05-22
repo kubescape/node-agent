@@ -415,7 +415,7 @@ func main() {
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient
 	if cfg.EnableSbomGeneration {
-		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache, scannerClient, failureReporter)
+		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache, scannerClient, failureReporter, metricsProvider)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
 		}
