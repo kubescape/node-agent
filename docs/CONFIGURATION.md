@@ -90,8 +90,7 @@ These environment variables are read directly (not through config file):
 | `OTEL_METRICS_EXPORTER` | Metrics exporter: `otlp` (push to collector) or `prometheus` (expose `:8080/metrics`). Defaults to `otlp` when endpoint is set, `none` otherwise. | No |
 | `OTEL_TRACES_EXPORTER` | Traces exporter: `otlp` or `none`. Defaults to `otlp` when endpoint is set, `none` otherwise. | No |
 | `OTEL_SLOW_EVAL_THRESHOLD_MS` | Rule evaluations exceeding this threshold (ms) emit a trace span. Default: `5`. | No |
-| `ENABLE_DEBUG_LISTENER` | Set to `true` to enable the debug HTTP listener (ring-buffer flush, log-level override) on `localhost:6062`. Inactive by default. | No |
-| `OTEL_DEBUG_PORT` | Port for the debug listener when `ENABLE_DEBUG_LISTENER=true`. Default: `6062`. | No |
+| `OTEL_DEBUG_PORT` | Port for the debug listener when `KS_LOGGER_LEVEL=debug`. Default: `6062`. | No |
 | `OTEL_COLLECTOR_SVC` | **Deprecated** — alias for `OTEL_EXPORTER_OTLP_ENDPOINT`. Will be removed in a future release. | No |
 | `PYROSCOPE_SERVER_SVC` | Pyroscope server address | No |
 | `APPLICATION_NAME` | Application name for Pyroscope | No (default: `node-agent`) |
@@ -109,10 +108,11 @@ outbound OTLP RPC, regardless of endpoint hostname. This applies to any collecto
 self-hosted, or otherwise. Credentials are read once at startup; agent restart is required if credentials
 are rotated at runtime (known v1 limitation).
 
-**Ring buffer (retroactive log export):** When `ENABLE_DEBUG_LISTENER=true`, the agent keeps the last
-7,500 log records in memory. A `POST localhost:6062/debug/flush-ring-buffer` call re-emits them through
-the OTLP log pipeline. The ring buffer is only active when `KS_LOGGER_NAME=slog`; it is silently
-inactive with the default prettylogger/zaplogger frontend.
+**Ring buffer (retroactive log export):** When `KS_LOGGER_LEVEL=debug`, the agent keeps the last
+7,500 log records in memory and activates a flush endpoint at `localhost:6062/debug/flush-ring-buffer`
+(port configurable via `OTEL_DEBUG_PORT`). A `POST` to that endpoint re-emits all buffered records
+through the OTLP log pipeline — useful for recovering startup logs that were emitted before the OTLP
+exporter finished connecting. The ring buffer is cleared after flushing; a second call emits nothing.
 
 **Kubernetes event correlation — cross-repo dependency (operator PR, not yet implemented)**
 
