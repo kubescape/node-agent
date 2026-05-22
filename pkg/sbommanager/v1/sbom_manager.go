@@ -98,6 +98,9 @@ type SbomManager struct {
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
 func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter, metrics metricsmanager.MetricsManager) (*SbomManager, error) {
+	if metrics == nil {
+		metrics = &metricsmanager.MetricsNoop{}
+	}
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
 	if !exists {
