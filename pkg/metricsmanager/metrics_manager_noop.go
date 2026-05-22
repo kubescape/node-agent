@@ -49,3 +49,4 @@ func (m *MetricsNoop) ReportSBOMScan(_ string)                           {}
 func (m *MetricsNoop) ObserveSBOMScanDuration(_ string, _ time.Duration) {}
 func (m *MetricsNoop) ReportSBOMScannerRestart()                         {}
 func (m *MetricsNoop) SetSBOMScannerReady(_ bool)                        {}
+func (m *MetricsNoop) ReportAlertSuppressed(_, _ string)                 {}

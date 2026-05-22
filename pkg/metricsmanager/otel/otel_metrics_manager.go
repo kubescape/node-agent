@@ -69,6 +69,9 @@ type OTELMetricsManager struct {
 	sbomRestarts     metric.Int64Counter
 	sbomReady        metric.Float64Gauge
 
+	// Alert suppression funnel
+	alertSuppressedTotal metric.Int64Counter
+
 	// Attribute-set caches: mandatory on the hot path to avoid per-call allocations.
 	// Each cache maps a string key → metric.MeasurementOption (pre-built attribute set).
 	ruleIDCache    sync.Map // ruleID → MeasurementOption (rule_id attribute)
@@ -204,6 +207,9 @@ func NewOTELMetricsManager() *OTELMetricsManager {
 		"Total SBOM scanner sidecar restarts detected via connection loss")
 	m.sbomReady = mustGauge("node_agent.sbom.scanner.ready",
 		"Whether the SBOM scanner sidecar is ready (1=ready, 0=not ready)")
+
+	m.alertSuppressedTotal = mustCounter("node_agent.alert.suppressed.total",
+		"Total alerts suppressed before delivery, labeled by rule_id and reason")
 
 	return m
 }
@@ -470,4 +476,11 @@ func (m *OTELMetricsManager) SetSBOMScannerReady(ready bool) {
 		v = 1.0
 	}
 	m.sbomReady.Record(context.Background(), v)
+}
+
+func (m *OTELMetricsManager) ReportAlertSuppressed(ruleID, reason string) {
+	m.alertSuppressedTotal.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("rule_id", ruleID),
+		attribute.String("reason", reason),
+	))
 }

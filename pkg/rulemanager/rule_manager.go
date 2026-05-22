@@ -302,6 +302,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	}
 
 	if len(rules) == 0 {
+		rm.metrics.ReportAlertSuppressed("", "no_rules_for_pod")
 		return
 	}
 
@@ -333,6 +334,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		// Skip profile dependency checks for non-K8s contexts (profiles are K8s-specific)
 		// Only K8s contexts should enforce profile dependencies
 		if isK8sContext && !profileExists && rule.ProfileDependency == armotypes.Required {
+			rm.metrics.ReportAlertSuppressed(rule.ID, "profile_incomplete")
 			continue
 		}
 
@@ -353,6 +355,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
+			rm.metrics.ReportAlertSuppressed(rule.ID, "policy")
 			continue
 		}
 
@@ -389,6 +392,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 		if err != nil {
 			logger.L().Ctx(rm.ctx).Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
+			rm.metrics.ReportAlertSuppressed(rule.ID, "eval_error")
 			continue
 		}
 
@@ -405,6 +409,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
+				rm.metrics.ReportAlertSuppressed(rule.ID, "cooldown")
 				continue
 			}
 

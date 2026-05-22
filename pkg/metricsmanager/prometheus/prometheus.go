@@ -100,6 +100,9 @@ type PrometheusMetric struct {
 	sbomRestarts     prometheus.Counter
 	sbomReady        prometheus.Gauge
 
+	// Alert suppression funnel
+	alertSuppressedCounter *prometheus.CounterVec
+
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache          map[string]prometheus.Counter
 	rulePrefilteredCounterCache map[string]prometheus.Counter
@@ -360,6 +363,10 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Name: "sbom_scan_total",
 			Help: "Total SBOM scan attempts",
 		}, []string{"status"}),
+		alertSuppressedCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "node_agent_alert_suppressed_total",
+			Help: "Total alerts suppressed before delivery, labeled by rule_id and reason",
+		}, []string{prometheusRuleIdLabel, "reason"}),
 		sbomScanDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "sbom_scan_duration_seconds",
 			Help:    "SBOM scan duration in seconds",
@@ -715,4 +722,8 @@ func (p *PrometheusMetric) SetSBOMScannerReady(ready bool) {
 	} else {
 		p.sbomReady.Set(0)
 	}
+}
+
+func (p *PrometheusMetric) ReportAlertSuppressed(ruleID, reason string) {
+	p.alertSuppressedCounter.WithLabelValues(ruleID, reason).Inc()
 }

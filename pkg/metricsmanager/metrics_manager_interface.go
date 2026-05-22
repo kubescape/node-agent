@@ -55,4 +55,7 @@ type MetricsManager interface {
 	ObserveSBOMScanDuration(status string, d time.Duration)
 	ReportSBOMScannerRestart()
 	SetSBOMScannerReady(ready bool)
+
+	// Alert suppression funnel — counts how many alerts were dropped and why.
+	ReportAlertSuppressed(ruleID, reason string)
 }
