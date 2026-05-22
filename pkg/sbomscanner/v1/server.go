@@ -86,12 +86,14 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		))
 	syftSBOM, err := syft.CreateSBOM(scanCtx, src, cfg)
 	gort.ReadMemStats(&memAfter)
-	heapBefore := float64(memBefore.HeapAlloc) / (1024 * 1024)
-	heapAfter := float64(memAfter.HeapAlloc) / (1024 * 1024)
+	// TotalAlloc is monotonically increasing (cumulative bytes allocated),
+	// so the delta is always ≥ 0 even when GC runs mid-scan.
+	totalBefore := float64(memBefore.TotalAlloc) / (1024 * 1024)
+	totalAfter := float64(memAfter.TotalAlloc) / (1024 * 1024)
 	scanSpan.SetAttributes(
-		attribute.Float64("heap.alloc.before_mb", heapBefore),
-		attribute.Float64("heap.alloc.after_mb", heapAfter),
-		attribute.Float64("heap.alloc.delta_mb", heapAfter-heapBefore),
+		attribute.Float64("alloc.total.before_mb", totalBefore),
+		attribute.Float64("alloc.total.after_mb", totalAfter),
+		attribute.Float64("alloc.total.delta_mb", totalAfter-totalBefore),
 	)
 	if err != nil {
 		scanSpan.SetStatus(otelcodes.Error, err.Error())
