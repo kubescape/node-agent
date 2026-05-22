@@ -116,8 +116,16 @@ func initPrometheusMeterProvider(cfg ProviderConfig) (func(context.Context) erro
 		return nil, err
 	}
 
+	// Bind the port before touching the global MeterProvider so a port-conflict
+	// error leaves the existing provider intact (the sidecar soft-fail path).
+	ln, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		return nil, fmt.Errorf("otelsetup: prometheus metrics listener: %w", err)
+	}
+
 	promExp, err := promexporter.New()
 	if err != nil {
+		_ = ln.Close()
 		return nil, err
 	}
 
@@ -126,11 +134,6 @@ func initPrometheusMeterProvider(cfg ProviderConfig) (func(context.Context) erro
 		sdkmetric.WithResource(res),
 	)
 	otel.SetMeterProvider(mp)
-
-	ln, err := net.Listen("tcp", ":8080")
-	if err != nil {
-		return nil, fmt.Errorf("otelsetup: prometheus metrics listener: %w", err)
-	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
