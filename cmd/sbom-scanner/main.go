@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	goruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"google.golang.org/grpc"
+	grpcstats "google.golang.org/grpc/stats"
 	_ "modernc.org/sqlite"
 )
 
@@ -64,7 +65,11 @@ func main() {
 		logger.L().Fatal("failed to listen on socket", helpers.Error(err), helpers.String("path", socketPath))
 	}
 
-	srv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	srv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler(
+		otelgrpc.WithFilter(func(info *grpcstats.RPCTagInfo) bool {
+			return info.FullMethodName != pb.SBOMScanner_Health_FullMethodName
+		}),
+	)))
 	pb.RegisterSBOMScannerServer(srv, sbomscanner.NewScannerServer())
 
 	sigCh := make(chan os.Signal, 1)
