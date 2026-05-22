@@ -90,7 +90,6 @@ These environment variables are read directly (not through config file):
 | `OTEL_METRICS_EXPORTER` | Metrics exporter: `otlp` (push to collector) or `prometheus` (expose `:8080/metrics`). Defaults to `otlp` when endpoint is set, `none` otherwise. | No |
 | `OTEL_TRACES_EXPORTER` | Traces exporter: `otlp` or `none`. Defaults to `otlp` when endpoint is set, `none` otherwise. | No |
 | `OTEL_SLOW_EVAL_THRESHOLD_MS` | Rule evaluations exceeding this threshold (ms) emit a trace span. Default: `5`. | No |
-| `ARMO_OTEL_AUTH` | Set to `true` to force ARMO authentication headers (`X-API-Key`, `X-Customer-GUID`) for any OTLP endpoint (useful when running a local ARMO-compatible collector). | No |
 | `ENABLE_DEBUG_LISTENER` | Set to `true` to enable the debug HTTP listener (ring-buffer flush, log-level override) on `localhost:6062`. Inactive by default. | No |
 | `OTEL_DEBUG_PORT` | Port for the debug listener when `ENABLE_DEBUG_LISTENER=true`. Default: `6062`. | No |
 | `OTEL_COLLECTOR_SVC` | **Deprecated** — alias for `OTEL_EXPORTER_OTLP_ENDPOINT`. Will be removed in a future release. | No |
@@ -104,10 +103,11 @@ These environment variables are read directly (not through config file):
 
 ### OTEL Notes
 
-**ARMO back office (SigNoz) authentication:** When `OTEL_EXPORTER_OTLP_ENDPOINT=otel.armosec.io:4317`,
-the agent automatically injects `X-API-Key` and `X-Customer-GUID` gRPC metadata headers sourced from
-`/etc/credentials`. Credentials are read once at startup; agent restart is required if credentials are
-rotated at runtime (known v1 limitation).
+**Authentication headers:** When credentials are present in `/etc/credentials` (or via `ACCOUNT_ID` /
+`ACCESS_KEY` env vars), `X-API-Key` and `X-Customer-GUID` gRPC metadata headers are injected for every
+outbound OTLP RPC, regardless of endpoint hostname. This applies to any collector — ARMO back office,
+self-hosted, or otherwise. Credentials are read once at startup; agent restart is required if credentials
+are rotated at runtime (known v1 limitation).
 
 **Ring buffer (retroactive log export):** When `ENABLE_DEBUG_LISTENER=true`, the agent keeps the last
 7,500 log records in memory. A `POST localhost:6062/debug/flush-ring-buffer` call re-emits them through
