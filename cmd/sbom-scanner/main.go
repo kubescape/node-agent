@@ -1,20 +1,49 @@
 package main
 
 import (
+	"context"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
 	pb "github.com/kubescape/node-agent/pkg/sbomscanner/v1/proto"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	_ "modernc.org/sqlite"
 )
 
 func main() {
+	ctx := context.Background()
+
+	// Initialize OTEL providers from standard env vars (OTEL_EXPORTER_OTLP_ENDPOINT etc.).
+	// Gracefully degrades to no-op when endpoint is not configured.
+	otelShutdown, err := otelsetup.InitProviders(ctx, otelsetup.ProviderConfig{
+		ServiceName:    "sbom-scanner",
+		ServiceVersion: os.Getenv("RELEASE"),
+		NodeName:       os.Getenv("NODE_NAME"),
+		PodName:        os.Getenv("POD_NAME"),
+		Namespace:      os.Getenv("NAMESPACE"),
+		ClusterName:    os.Getenv("CLUSTER_NAME"),
+		AccountID:      os.Getenv("ACCOUNT_ID"),
+		AccessKey:      os.Getenv("ACCESS_KEY"),
+	})
+	if err != nil {
+		logger.L().Warning("sbom-scanner: OTEL init failed, running without telemetry", helpers.Error(err))
+	}
+	if otelShutdown != nil {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = otelShutdown(shutdownCtx)
+		}()
+	}
+
 	socketPath := os.Getenv("SOCKET_PATH")
 	if socketPath == "" {
 		socketPath = "/sbom-comm/scanner.sock"
@@ -28,7 +57,7 @@ func main() {
 		logger.L().Fatal("failed to listen on socket", helpers.Error(err), helpers.String("path", socketPath))
 	}
 
-	srv := grpc.NewServer()
+	srv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
 	pb.RegisterSBOMScannerServer(srv, sbomscanner.NewScannerServer())
 
 	sigCh := make(chan os.Signal, 1)
