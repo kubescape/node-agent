@@ -77,7 +77,8 @@ type OTELMetricsManager struct {
 	ruleIDCache    sync.Map // ruleID → MeasurementOption (rule_id attribute)
 	ruleEvalCache  sync.Map // ruleID+"\x00"+eventType → MeasurementOption (rule_id + event_type)
 	eventTypeCache sync.Map // eventType string → MeasurementOption (event_type attribute)
-	dedupCache     sync.Map // eventType+"\x00"+result → MeasurementOption (event_type + result)
+	dedupCache      sync.Map // eventType+"\x00"+result → MeasurementOption (event_type + result)
+	suppressedCache sync.Map // ruleID+"\x00"+reason → MeasurementOption (rule_id + reason)
 
 	// SetProjectionUndeclaredRulesDetail tracks the current rule ID set so that
 	// removed rules can be zeroed out on the next call (no Reset() in OTEL gauges).
@@ -478,9 +479,19 @@ func (m *OTELMetricsManager) SetSBOMScannerReady(ready bool) {
 	m.sbomReady.Record(context.Background(), v)
 }
 
-func (m *OTELMetricsManager) ReportAlertSuppressed(ruleID, reason string) {
-	m.alertSuppressedTotal.Add(context.Background(), 1, metric.WithAttributes(
+func (m *OTELMetricsManager) suppressedOption(ruleID, reason string) metric.MeasurementOption {
+	key := ruleID + "\x00" + reason
+	if v, ok := m.suppressedCache.Load(key); ok {
+		return v.(metric.MeasurementOption)
+	}
+	opt := metric.WithAttributeSet(attribute.NewSet(
 		attribute.String("rule_id", ruleID),
 		attribute.String("reason", reason),
 	))
+	m.suppressedCache.Store(key, opt)
+	return opt
+}
+
+func (m *OTELMetricsManager) ReportAlertSuppressed(ruleID, reason string) {
+	m.alertSuppressedTotal.Add(context.Background(), 1, m.suppressedOption(ruleID, reason))
 }
