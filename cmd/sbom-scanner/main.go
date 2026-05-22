@@ -46,10 +46,12 @@ func main() {
 		}()
 	}
 
-	// Emit Go runtime metrics (heap_alloc, GC, goroutines) every 30s so
-	// syft memory spikes are visible in SigNoz alongside scan traces.
-	if err := goruntime.Start(goruntime.WithMinimumReadMemStatsInterval(30 * time.Second)); err != nil {
-		logger.L().Warning("sbom-scanner: Go runtime metrics unavailable", helpers.Error(err))
+	// Emit Go runtime metrics only when an OTEL endpoint is configured;
+	// avoids ~2–3 KB/hr of metric volume for deployments without telemetry.
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
+		if err := goruntime.Start(goruntime.WithMinimumReadMemStatsInterval(30 * time.Second)); err != nil {
+			logger.L().Warning("sbom-scanner: Go runtime metrics unavailable", helpers.Error(err))
+		}
 	}
 
 	socketPath := os.Getenv("SOCKET_PATH")
