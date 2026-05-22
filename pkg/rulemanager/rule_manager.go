@@ -422,15 +422,26 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 					image = enrichable.GetContainerImage()
 					containerName = enrichable.GetContainer()
 				}
-				otelsetup.EmitAlertLogRecord(rm.ctx, otelsetup.AlertLogAttrs{
+				alertCtx, alertSpan := otelsetup.Tracer().Start(rm.ctx, "rule.alert",
+					trace.WithAttributes(
+						attribute.String("rule.id", rule.ID),
+						attribute.String("rule.name", rule.Name),
+						attribute.String("k8s.namespace.name", namespace),
+						attribute.String("k8s.pod.name", pod),
+						attribute.String("container.id", enrichedEvent.ContainerID),
+						attribute.String("event.type", string(eventType)),
+					))
+				otelsetup.EmitAlertLogRecord(alertCtx, otelsetup.AlertLogAttrs{
 					RuleID:        rule.ID,
 					AlertType:     rule.Name,
+					ContainerID:   enrichedEvent.ContainerID,
 					ContainerName: containerName,
 					Namespace:     namespace,
 					PodName:       pod,
 					Image:         image,
 					EventType:     string(eventType),
 				})
+				alertSpan.End()
 			}
 
 			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum, state)

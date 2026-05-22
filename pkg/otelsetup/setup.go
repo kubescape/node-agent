@@ -152,6 +152,7 @@ func initPrometheusMeterProvider(cfg ProviderConfig) (func(context.Context) erro
 type AlertLogAttrs struct {
 	RuleID           string
 	AlertType        string
+	ContainerID      string
 	ContainerName    string
 	Namespace        string
 	PodName          string
@@ -174,6 +175,7 @@ func EmitAlertLogRecord(ctx context.Context, attrs AlertLogAttrs) {
 	r.AddAttributes(
 		otellog.String("rule_id", attrs.RuleID),
 		otellog.String("alert_type", attrs.AlertType),
+		otellog.String("container.id", attrs.ContainerID),
 		otellog.String("container_name", attrs.ContainerName),
 		otellog.String("namespace", attrs.Namespace),
 		otellog.String("pod_name", attrs.PodName),
