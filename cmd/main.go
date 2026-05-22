@@ -39,7 +39,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/hostsensormanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
-	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	otelmetrics "github.com/kubescape/node-agent/pkg/metricsmanager/otel"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	networkstreamv1 "github.com/kubescape/node-agent/pkg/networkstream/v1"
@@ -189,12 +188,8 @@ func main() {
 	// Create metrics provider (OTEL SDK; Prometheus scrape endpoint started by otelsetup
 	// when OTEL_METRICS_EXPORTER=prometheus; OTLP push when OTEL_EXPORTER_OTLP_ENDPOINT set).
 	// MUST be constructed after otelsetup.InitProviders() so the global MeterProvider is set.
-	var metricsProvider metricsmanager.MetricsManager
-	if cfg.EnableMetricsExporter {
-		metricsProvider = otelmetrics.NewOTELMetricsManager()
-	} else {
-		metricsProvider = metricsmanager.NewMetricsNoop()
-	}
+	// Always use the OTEL impl — the SDK's own no-op providers handle the "no endpoint" case.
+	metricsProvider := otelmetrics.NewOTELMetricsManager()
 
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.GetStorageClient(), cfg.SkipNamespace)
