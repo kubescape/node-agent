@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	gort "runtime"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -75,12 +76,23 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 	}
 
+	var memBefore, memAfter gort.MemStats
+	gort.ReadMemStats(&memBefore)
+
 	scanCtx, scanSpan := otelsetup.Tracer().Start(ctx, "sbom.scan",
 		trace.WithAttributes(
 			attribute.String("image.tag", req.ImageTag),
 			attribute.String("image.id", req.ImageId),
 		))
 	syftSBOM, err := syft.CreateSBOM(scanCtx, src, cfg)
+	gort.ReadMemStats(&memAfter)
+	heapBefore := float64(memBefore.HeapAlloc) / (1024 * 1024)
+	heapAfter := float64(memAfter.HeapAlloc) / (1024 * 1024)
+	scanSpan.SetAttributes(
+		attribute.Float64("heap.alloc.before_mb", heapBefore),
+		attribute.Float64("heap.alloc.after_mb", heapAfter),
+		attribute.Float64("heap.alloc.delta_mb", heapAfter-heapBefore),
+	)
 	if err != nil {
 		scanSpan.SetStatus(otelcodes.Error, err.Error())
 	}

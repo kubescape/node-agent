@@ -14,6 +14,7 @@ import (
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
 	pb "github.com/kubescape/node-agent/pkg/sbomscanner/v1/proto"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	goruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"google.golang.org/grpc"
 	_ "modernc.org/sqlite"
 )
@@ -42,6 +43,12 @@ func main() {
 			defer cancel()
 			_ = otelShutdown(shutdownCtx)
 		}()
+	}
+
+	// Emit Go runtime metrics (heap_alloc, GC, goroutines) every 30s so
+	// syft memory spikes are visible in SigNoz alongside scan traces.
+	if err := goruntime.Start(goruntime.WithMinimumReadMemStatsInterval(30 * time.Second)); err != nil {
+		logger.L().Warning("sbom-scanner: Go runtime metrics unavailable", helpers.Error(err))
 	}
 
 	socketPath := os.Getenv("SOCKET_PATH")
