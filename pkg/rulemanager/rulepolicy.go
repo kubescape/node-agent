@@ -42,10 +42,16 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 		currentContext = contextInfo.Context()
 	}
 
+	// container is a meta-context that matches kubernetes and container contexts
+	isContainerContext := currentContext == contextdetection.Kubernetes || currentContext == contextdetection.Container
+
 	var hasContextTags bool
 	for _, tag := range rule.Tags {
 		if ctx, found := strings.CutPrefix(tag, "context:"); found {
 			if ctx == string(currentContext) {
+				return true
+			}
+			if ctx == string(contextdetection.Container) && isContainerContext {
 				return true
 			}
 			hasContextTags = true
