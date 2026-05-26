@@ -247,8 +247,11 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mo
 }
 
 func (s *SbomManager) processContainerWithMetadata(notif containercollection.PubSubEvent, mounts []string, imageStatus *runtime.ImageStatusResponse, imageTag, imageID string) {
-	// prepare SBOM name
-	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
+	// prepare SBOM name — keyed on (digest, syftVersion). Two tag aliases of
+	// the same image (different tags, same digest) collapse to one SBOM; the
+	// original tag is preserved as the ImageTagMetadataKey annotation below.
+	normalizedID := normalizeImageID(imageTag, imageID)
+	sbomName, err := names.ImageInfoToSlug(s.version, normalizedID)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate SBOM name",
 			helpers.Error(err),
@@ -260,7 +263,6 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 		return
 	}
 	// try to create a SBOM with initializing status to reserve our slot
-	normalizedID := normalizeImageID(imageTag, imageID)
 	wipSbom := &v1beta1.SBOMSyft{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sbomName,
