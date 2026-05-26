@@ -42,8 +42,9 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 		currentContext = contextInfo.Context()
 	}
 
-	// container is a meta-context matching any containerized workload (kubernetes, container, ecs)
+	// container is a meta-context matching any containerized workload (kubernetes, standalone, container, ecs)
 	isContainerContext := currentContext == contextdetection.Kubernetes ||
+		currentContext == contextdetection.Standalone ||
 		currentContext == contextdetection.Container ||
 		currentContext == contextdetection.ECS
 
