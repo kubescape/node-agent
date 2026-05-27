@@ -5203,3 +5203,231 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 // Both layers must agree — if the unit suite drifts away from these
 // runtime expectations, R0002 has either a false-positive or a
 // false-negative bug.
+func Test_32_UnexpectedProcessArguments(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	const overlayName = "curl-32-overlay"
+
+	setup := func(t *testing.T) *testutils.TestWorkload {
+		t.Helper()
+		ns := testutils.NewRandomNamespace()
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+		ap := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      overlayName,
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "curl",
+						Execs: []v1beta1.ExecCalls{
+							// Profile shape: Path AND Args[0] both use the
+							// absolute-path symlink form (/bin/sh,
+							// /usr/bin/nslookup, ...). With the symlink-
+							// faithful precedence in parse.get_exec_path
+							// (fix 9a6eb359), the rule queries the
+							// symlink-as-invoked path that the kernel
+							// preserves in argv[0]. Recording-side
+							// resolveExecPath uses the same precedence so
+							// auto-learned profiles get the same key.
+							//
+							// Storage's CompareExecArgs is a strict
+							// positional compare — no special argv[0]
+							// normalisation — so Args[0] MUST be the same
+							// string as runtime argv[0]. For
+							// kubectl-exec'd processes that's the absolute
+							// path the caller invoked.
+							//
+							// pod startup: sleep <anything>
+							{Path: "/bin/sleep", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
+							// sh -c <anything trailing>
+							{Path: "/bin/sh", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+							// echo hello <anything trailing>
+							{Path: "/bin/echo", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+							// curl -s <one URL>
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier}},
+						},
+						Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev", "execve"},
+					},
+				},
+			},
+		}
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), ap, metav1.CreateOptions{})
+		require.NoError(t, err, "create AP")
+
+		require.Eventually(t, func() bool {
+			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(
+				context.Background(), overlayName, v1.GetOptions{})
+			return apErr == nil
+		}, 30*time.Second, 1*time.Second, "AP must be in storage before pod deploy")
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/curl-exec-arg-wildcards-deployment.yaml"))
+		require.NoError(t, err)
+		require.NoError(t, wl.WaitForReady(80))
+		// let node-agent load the user AP into the CP cache
+		time.Sleep(15 * time.Second)
+		return wl
+	}
+
+	countByRule := func(alerts []testutils.Alert, ruleID string) int {
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID {
+				n++
+			}
+		}
+		return n
+	}
+
+	waitAlerts := func(t *testing.T, ns string) []testutils.Alert {
+		t.Helper()
+		var alerts []testutils.Alert
+		var err error
+		require.Eventually(t, func() bool {
+			alerts, err = testutils.GetAlerts(ns)
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "must be able to fetch alerts")
+		// settle time for any in-flight alerts
+		time.Sleep(10 * time.Second)
+		alerts, _ = testutils.GetAlerts(ns)
+		return alerts
+	}
+
+	logAlerts := func(t *testing.T, alerts []testutils.Alert) {
+		t.Helper()
+		for i, a := range alerts {
+			t.Logf("  [%d] %s(%s) comm=%s container=%s",
+				i, a.Labels["rule_name"], a.Labels["rule_id"],
+				a.Labels["comm"], a.Labels["container_name"])
+		}
+	}
+
+	// R0001 silence is a precondition for every subtest below: it means
+	// parse.get_exec_path resolved to the profile's Path key, so R0040
+	// gets to evaluate its argv comparison cleanly. A non-zero R0001 for
+	// the test binary's comm means the recording / capture / resolution
+	// chain dropped event.exepath — that's a separate bug (track it in
+	// the recording side, not in R0040), and asserting it here fails the
+	// subtest on the right axis instead of polluting the R0040 signal.
+	assertR0001Silent := func(t *testing.T, alerts []testutils.Alert, comm string) {
+		t.Helper()
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == "R0001" && a.Labels["comm"] == comm {
+				n++
+			}
+		}
+		require.Zero(t, n,
+			"R0001 precondition: path resolution failed for comm=%q. "+
+				"parse.get_exec_path either didn't receive event.exepath or "+
+				"profile Path doesn't match its return value. Fix capture-side "+
+				"exepath before reading R0040 results from this subtest.", comm)
+	}
+
+	// -----------------------------------------------------------------
+	// 32a. sh -c <anything>  — argv [sh, -c, "echo hi"] matches
+	//      profile [sh, -c, *]. R0040 must NOT fire.
+	// -----------------------------------------------------------------
+	t.Run("sh_dash_c_matches_wildcard_trailing", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"sh", "-c", "echo hi"}, "curl")
+		t.Logf("sh -c 'echo hi' → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		assertR0001Silent(t, alerts, "sh")
+		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+			"sh -c <cmd> matches profile [sh, -c, *] — R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32b. sh -x <anything>  — argv [sh, -x, "echo hi"] does NOT match
+	//      profile [sh, -c, *] (literal anchor `-c` mismatch). Path
+	//      /bin/sh IS in profile so R0001 stays silent. R0040 must fire.
+	// -----------------------------------------------------------------
+	t.Run("sh_dash_x_mismatches_R0040", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"sh", "-x", "echo hi"}, "curl")
+		t.Logf("sh -x 'echo hi' → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		assertR0001Silent(t, alerts, "sh")
+		require.Greater(t, countByRule(alerts, "R0040"), 0,
+			"sh -x mismatches profile [sh, -c, *] → R0040 must fire")
+	})
+
+	// -----------------------------------------------------------------
+	// 32c. echo hello <anything> — argv [echo, hello, world, from, test]
+	//      matches profile [echo, hello, *]. R0040 must NOT fire.
+	// -----------------------------------------------------------------
+	t.Run("echo_hello_matches_wildcard_trailing", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"echo", "hello", "world", "from", "test"}, "curl")
+		t.Logf("echo hello world from test → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		assertR0001Silent(t, alerts, "echo")
+		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+			"echo hello <words> matches profile [echo, hello, *] — R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32d. echo goodbye <anything> — argv [echo, goodbye, world] does
+	//      NOT match profile [echo, hello, *] (literal anchor `hello`
+	//      mismatch). R0040 must fire.
+	// -----------------------------------------------------------------
+	t.Run("echo_goodbye_mismatches_R0040", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"echo", "goodbye", "world"}, "curl")
+		t.Logf("echo goodbye world → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		assertR0001Silent(t, alerts, "echo")
+		require.Greater(t, countByRule(alerts, "R0040"), 0,
+			"echo goodbye <words> mismatches profile [echo, hello, *] (literal anchor) → R0040 must fire")
+	})
+}
+
+// Test_33_AnalyzeOpensWildcardAnchoring pins the wildcard-matching
+// contract that storage-side CompareDynamic enforces, end-to-end through
+// R0002 ("Files Access Anomalies in container").
+//
+// Each subtest spins up a fresh nginx pod with a user-defined AP that
+// carries ONE Opens entry, then `cat`s a target path that probes a
+// boundary case from the storage-side analyzer fixes (kubescape/storage
+// PR #316 review by matthyx + entlein):
+//
+//   - Anchored trailing `*` matches one OR MORE remaining segments —
+//     never zero. So `/etc/*` matches `/etc/passwd` but NOT the bare
+//     `/etc` directory. Without this rule, R0002 silently allowed
+//     access to the parent of any profiled directory.
+//   - DynamicIdentifier (⋯) consumes EXACTLY ONE segment.
+//   - Mid-path `*` consumes ZERO or more, so `/etc/*/*` still matches
+//     `/etc/ssh` (inner `*` consumed zero, trailing `*` consumed one).
+//   - splitPath normalises trailing slashes on both dynamic and
+//     regular paths so `/etc/passwd/` is treated as `/etc/passwd`.
+//   - Mixed `⋯/*` patterns: ⋯ pins one segment, `*` consumes the rest
+//     (with one-or-more semantics).
+//
+// Component-level pin sits ON TOP of the unit tests in storage's
+// pkg/registry/file/dynamicpathdetector/tests/coverage_test.go.
+// Both layers must agree — if the unit suite drifts away from these
+// runtime expectations, R0002 has either a false-positive or a
+// false-negative bug.
