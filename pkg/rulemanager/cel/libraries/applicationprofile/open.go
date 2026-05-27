@@ -113,17 +113,31 @@ func (l *apLibrary) wasPathOpenedWithSuffix(containerID, suffix ref.Val) ref.Val
 
 	if cp.Opens.All {
 		// All entries retained (no rule declared SuffixHits-style
-		// projection). Scan ONLY concrete entries in Values — Patterns
-		// contain wildcard tokens ('*' / '⋯') whose text doesn't safely
-		// answer suffix questions. CodeRabbit PR #43 open.go:79: a
-		// retained Pattern like "/var/log/pods/*/volumes/..." doesn't
-		// end with the concrete suffix "foo.log", but the concrete open
-		// it stands in for might — strings.HasSuffix on the pattern
-		// text returns false and produces a false negative. Patterns
-		// are inherently wildcard-shaped; concrete-path semantics live
-		// in Values (and in SuffixHits when projection is active).
+		// projection). Scan concrete entries in Values first — exact
+		// strings.HasSuffix is correct for those.
 		for openPath := range cp.Opens.Values {
 			if strings.HasSuffix(openPath, suffixStr) {
+				return types.Bool(true)
+			}
+		}
+		// Patterns hold dynamic entries (containing `*` / `⋯`). We
+		// can't run strings.HasSuffix on the raw pattern text — a
+		// pattern like "/var/log/pods/*/volumes/..." has wildcard
+		// tokens that don't textually end with "foo.log" even though
+		// its concrete realisations might. Matthias upstream PR #811
+		// review: a NARROWER fallback is the answer here — split off
+		// the pattern's concrete tail (the literal text after the
+		// last wildcard segment) and only check HasSuffix against
+		// that. If the pattern ends in a wildcard segment, the tail
+		// is empty and concrete realisations could match ANY suffix —
+		// be permissive (return true) to avoid the false-negative on
+		// rules that omit profileDataRequired.opens.
+		for _, openPattern := range cp.Opens.Patterns {
+			tail := patternConcreteSuffix(openPattern)
+			if tail == "" {
+				return types.Bool(true)
+			}
+			if strings.HasSuffix(tail, suffixStr) {
 				return types.Bool(true)
 			}
 		}
@@ -160,15 +174,24 @@ func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val
 	}
 
 	if cp.Opens.All {
-		// All entries retained — scan ONLY Values (concrete paths).
-		// Patterns contain wildcard tokens whose text doesn't safely
-		// answer prefix questions; a pattern starting with "/var/⋯/log"
-		// matches concrete paths starting with "/var/anything/log" but
-		// strings.HasPrefix against the pattern text returns false for
-		// "/var/foo/log...". Same fix as wasPathOpenedWithSuffix above.
-		// CodeRabbit PR #43 open.go:79 (Also applies to 111-123).
+		// All entries retained. Scan concrete entries in Values first —
+		// exact strings.HasPrefix is correct for those.
 		for openPath := range cp.Opens.Values {
 			if strings.HasPrefix(openPath, prefixStr) {
+				return types.Bool(true)
+			}
+		}
+		// Patterns: same narrower-fallback strategy as the suffix path.
+		// Split off the pattern's concrete head (the literal text
+		// BEFORE the first wildcard segment). If the pattern starts
+		// with a wildcard, concrete realisations could match ANY
+		// prefix — be permissive. Matthias upstream PR #811 review.
+		for _, openPattern := range cp.Opens.Patterns {
+			head := patternConcretePrefix(openPattern)
+			if head == "" {
+				return types.Bool(true)
+			}
+			if strings.HasPrefix(head, prefixStr) {
 				return types.Bool(true)
 			}
 		}
@@ -183,5 +206,79 @@ func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val
 		return types.Bool(false)
 	}
 	return types.Bool(hit)
+}
+
+// patternConcreteSuffix returns the literal text at the tail of a
+// wildcard-bearing path pattern, dropped to start after the LAST
+// wildcard segment's trailing `/`. Returns the input unchanged when
+// no wildcard segments are present, or "" when the pattern ends in
+// a wildcard segment (concrete realisations could match any suffix).
+//
+// Examples:
+//
+//	"/var/log/⋯/foo.log"  →  "foo.log"   (last wildcard `⋯`, concrete tail follows)
+//	"/var/log/pods/*"     →  ""          (trailing wildcard, permissive caller)
+//	"/var/log/foo.log"    →  "/var/log/foo.log"  (no wildcards, whole pattern)
+//	"*"                   →  ""          (lone wildcard)
+//
+// Matthias upstream PR #811 review.
+func patternConcreteSuffix(p string) string {
+	lastWildEnd := -1
+	i := 0
+	for i < len(p) {
+		segStart := i
+		for i < len(p) && p[i] != '/' {
+			i++
+		}
+		seg := p[segStart:i]
+		if seg == "*" || seg == dynamicpathdetector.DynamicIdentifier {
+			lastWildEnd = i
+		}
+		if i < len(p) {
+			i++ // skip `/`
+		}
+	}
+	if lastWildEnd < 0 {
+		return p
+	}
+	if lastWildEnd >= len(p) {
+		return ""
+	}
+	// lastWildEnd points at the `/` after the wildcard segment. Keep
+	// the slash so callers querying with leading-slash suffixes match
+	// correctly (every concrete realisation has that slash too).
+	return p[lastWildEnd:]
+}
+
+// patternConcretePrefix is the mirror of patternConcreteSuffix —
+// returns the literal text at the HEAD of the pattern up to (but not
+// including) the first wildcard segment. Returns the input unchanged
+// when no wildcard segments are present, or "" when the pattern starts
+// with a wildcard segment.
+//
+// Matthias upstream PR #811 review.
+func patternConcretePrefix(p string) string {
+	i := 0
+	for i < len(p) {
+		segStart := i
+		for i < len(p) && p[i] != '/' {
+			i++
+		}
+		seg := p[segStart:i]
+		if seg == "*" || seg == dynamicpathdetector.DynamicIdentifier {
+			if segStart == 0 {
+				return ""
+			}
+			// segStart is at the wildcard segment; the byte BEFORE it
+			// is the `/` separator. Keep the slash in the returned
+			// prefix so callers querying with trailing-slash prefixes
+			// match (every concrete realisation has that slash too).
+			return p[:segStart]
+		}
+		if i < len(p) {
+			i++ // skip `/`
+		}
+	}
+	return p
 }
 
