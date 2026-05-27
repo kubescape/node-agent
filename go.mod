@@ -467,7 +467,7 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20260421100818-fd383d3d7db4
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20260513134836-aa8a4c2613db
 
 replace github.com/cilium/ebpf => github.com/matthyx/ebpf v0.0.0-20260421101317-8a32d06def6c
 
