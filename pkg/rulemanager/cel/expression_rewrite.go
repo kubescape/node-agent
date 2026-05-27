@@ -17,10 +17,10 @@ var twoArgEventGetExecPath = regexp.MustCompile(`\bparse\.get_exec_path\(\s*even
 // `[^,)]+` halts at the first comma, so a 3-arg call does not match.
 var anyTwoArgGetExecPath = regexp.MustCompile(`\bparse\.get_exec_path\([^,)]+,\s*[^,)]+\)`)
 
-// rewriteDeprecatedHelpers upgrades known-deprecated helper call sites in a
-// CEL expression to their safer current form. Returns the rewritten
-// expression plus operator-visible notices describing each rewrite or
-// remaining concern.
+// rewriteDeprecatedHelpers is a compatibility shim that auto-upgrades
+// deprecated 2-arg parse.get_exec_path calls to the safer 3-arg form.
+// Returns the rewritten expression plus operator-visible notices
+// describing each rewrite or remaining concern.
 //
 // Today this handles ONE rewrite: the 2-arg parse.get_exec_path against
 // the event variable. The 2-arg overload returns argv[0] (or comm) which
@@ -36,6 +36,24 @@ var anyTwoArgGetExecPath = regexp.MustCompile(`\bparse\.get_exec_path\([^,)]+,\s
 // preserving. Non-canonical 2-arg calls (custom identifiers or literals)
 // cannot be auto-upgraded; they surface a notice so operators can migrate
 // manually.
+//
+// IMPLEMENTATION NOTE: this is intentionally a text-level regex rewrite,
+// not an AST transform. The theoretical risk of mutating a string
+// literal that happens to contain the exact 2-arg call pattern (e.g.
+// `event.message == "parse.get_exec_path(event.args, event.comm)"`) is
+// accepted as negligible: CEL security-rule expressions do not embed
+// the helper's call form as a literal, and the alternative (CEL parser
+// dependency at this layer + AST walker + serializer) is disproportionate
+// to the risk. If a future need surfaces a real-world false-rewrite,
+// upgrade to AST-based transformation then.
+//
+// DEPRECATION NOTICE: the 2-arg parse.get_exec_path overload is
+// deprecated. This shim auto-upgrades calls at registration time so
+// operators who upgrade the node-agent binary without updating their
+// RuleBindings retain the kernel-authoritative behaviour. The shim and
+// the 2-arg overload itself will be removed in a future major version;
+// migrate RuleBindings to call the 3-arg form explicitly to avoid the
+// removal cliff.
 func rewriteDeprecatedHelpers(expression string) (string, []string) {
 	var notices []string
 
@@ -44,7 +62,7 @@ func rewriteDeprecatedHelpers(expression string) (string, []string) {
 		expression = twoArgEventGetExecPath.ReplaceAllString(expression,
 			"parse.get_exec_path(event.args, event.comm, event.exepath)")
 		notices = append(notices, fmt.Sprintf(
-			"auto-rewrote 2-arg parse.get_exec_path → 3-arg with event.exepath fallback; the 2-arg form trusts argv[0] which is user-controllable and bypassable via `exec -a <allowed-path> <real-binary>`. Update RuleBindings to call the 3-arg form explicitly. Original expression: %q",
+			"[DEPRECATED, to be removed in a future major release] auto-rewrote 2-arg parse.get_exec_path → 3-arg with event.exepath fallback; the 2-arg form trusts argv[0] which is user-controllable and bypassable via `exec -a <allowed-path> <real-binary>`. Update RuleBindings to call the 3-arg form explicitly. Original expression: %q",
 			original))
 	}
 

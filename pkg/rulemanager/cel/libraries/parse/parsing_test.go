@@ -140,10 +140,11 @@ func TestParseLibraryErrorCases(t *testing.T) {
 // rule-side resolver MUST agree with pkg/containerprofilemanager/v1/
 // event_reporting.go:resolveExecPath. That recording function uses
 //   1. exepath (kernel-authoritative)
-//   2. argv[0] when non-empty
+//   2. argv[0] when non-empty AND exepath empty (fexecve / AT_EMPTY_PATH)
 //   3. comm
 // in that precedence order — so the path stored in the ApplicationProfile
-// is whatever the kernel reports.
+// is whatever the kernel reports, and argv[0] is only consulted when the
+// kernel itself could not report an exepath.
 //
 // If the rule side ignores exepath, the profile entry written under
 // "/bin/sh" becomes unreachable when the runtime queries with the rule's
