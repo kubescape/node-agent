@@ -1,0 +1,31 @@
+# Fixture 05 — `*` sentinel for ANY IP
+#
+# Edge case:    a single "*" entry — matches any IPv4 or IPv6 address
+# Expects:      every observed IP matches; this is permissive-mode profiling
+# Match path:   compileIP("*") returns isAny=true; runtime short-circuits
+# Spec ref:     §5.7 "* (any-IP sentinel)" row + the warning at the bottom
+# Operations:   strongly DISCOURAGED outside development profiles —
+#               equivalent to disabling egress filtering for this workload.
+#               Producers should normally enumerate concrete IPs/CIDRs.
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-05-any-sentinel
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+    # Make the operational risk explicit:
+    sbob.io/discouraged-wildcards: "ipAddresses-any-sentinel"
+spec:
+  matchLabels:
+    app: nw-05
+  containers:
+  - name: client
+    egress:
+    - identifier: any-ip-development-profile
+      type: external
+      ipAddresses:
+        - "*"
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

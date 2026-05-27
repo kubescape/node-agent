@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-miner-deployment
+  labels:
+    app: k8s-miner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-miner
+  template:
+    metadata:
+      labels:
+        app: k8s-miner
+        kubescape.io/user-defined-profile: crypto2
+    spec:
+      containers:
+      - name: k8s-miner
+        image: docker.io/amitschendel/crypto-miner-1
+        imagePullPolicy: Always
+        workingDir: /usr/app/src
+        command: ["./xmrig"]
+        args: ["--bench", "1M"]

@@ -228,7 +228,7 @@ func main() {
 		ruleBindingCache = rulebindingcachev1.NewCache(cfg, k8sClient, ruleCreator)
 		rulesWatcher := ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
 			ruleBindingCache.RefreshRuleBindingsRules()
-		})
+		}, &cfg)
 		dWatcher.AddAdaptor(rulesWatcher)
 	}
 
@@ -297,6 +297,15 @@ func main() {
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
 		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, prometheusExporter)
+		// Wire the rule-alert exporter into the tamper-detection path so R1016
+		// ('Signed profile tampered') alerts actually reach alertmanager when
+		// a user-defined ApplicationProfile or NetworkNeighborhood fails its
+		// signature check. Without this call, tamper detection logs the
+		// failure but no alert is emitted — Test_31_TamperDetectionAlert
+		// catches the gap. (Lost during the merge/upstream-profile-rearch
+		// rebase; pkg/objectcache/containerprofilecache/tamper_alert.go has
+		// the receiver method.)
+		cpc.SetTamperAlertExporter(exporter)
 		cpc.Start(ctx)
 		if cpm, ok := containerProfileManager.(*containerprofilemanagerv1.ContainerProfileManager); ok {
 			cpm.SetCompletionNotifier(cpc)
@@ -398,9 +407,13 @@ func main() {
 	if apiURL == "" {
 		apiURL = "api.armosec.io"
 	}
-	if services, svcErr := config.LoadServiceURLs(apiURL); svcErr == nil && services.GetReportReceiverHttpUrl() != "" {
-		failureReporter = sbommanagerv1.NewHTTPSbomFailureReporter(services.GetReportReceiverHttpUrl(), accessKey, clusterData.AccountID, clusterData.ClusterName)
-		logger.L().Info("scan failure reporting enabled", helpers.String("eventReceiverURL", services.GetReportReceiverHttpUrl()))
+	if services, svcErr := config.LoadServiceURLs(apiURL); svcErr != nil {
+		logger.L().Ctx(ctx).Warning("scan failure reporting disabled: LoadServiceURLs failed", helpers.String("apiURL", apiURL), helpers.Error(svcErr))
+	} else if url := services.GetReportReceiverHttpUrl(); url == "" {
+		logger.L().Ctx(ctx).Warning("scan failure reporting disabled: empty report receiver URL", helpers.String("apiURL", apiURL))
+	} else {
+		failureReporter = sbommanagerv1.NewHTTPSbomFailureReporter(url, accessKey, clusterData.AccountID, clusterData.ClusterName)
+		logger.L().Info("scan failure reporting enabled", helpers.String("eventReceiverURL", url))
 	}
 
 	// Create the SBOM manager

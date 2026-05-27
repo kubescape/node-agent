@@ -1,0 +1,55 @@
+# Fixture 18 — Kubernetes service-FQDN resolution via mid-`⋯`
+#
+# Edge case:    The user's specific case from the v0.0.2 design discussion.
+#               In Kubernetes, services are resolved as
+#               <svc-name>.<namespace>.svc.cluster.local.
+#               A workload that wants to permit "any namespace's <known>
+#               service" should match exactly one label between fixed
+#               anchors.
+# Expects:
+#   observed "redis.production.svc.cluster.local."   → NO match (we anchored on `redis`,
+#                                                       and only the namespace label is
+#                                                       wildcarded)
+#   observed "redis.staging.svc.cluster.local."      → NO match (same — we'd need
+#                                                       a different fixture for "any svc
+#                                                       in any ns")
+#   observed "kubernetes.default.svc.cluster.local." → match (one label "default")
+# Match path:   label-split + recursive matcher; `⋯` consumes exactly one
+#               label between two fixed segments
+# Spec ref:     §5.8 "<a>.⋯.<b>" row, the example uses this exact pattern
+#
+# Why `⋯` and not `*`:
+#   RFC 4592 only standardises *.<suffix>. Mid-label `*` is non-standard
+#   (cilium uses regex; bind/coredns reject it). v0.0.2 uses `⋯` (DynamicIdentifier,
+#   the project's existing token from path/argv wildcards) for mid positions.
+#
+# Hardcoded short-circuit removal candidate:
+#   The default rule R0005 currently has a hardcoded
+#   `!event.name.endsWith('.svc.cluster.local.')` short-circuit. With this
+#   fixture's mid-⋯ form, that hardcode becomes profile-expressible — a
+#   future PR can REMOVE the rule-side short-circuit and let producers
+#   declare the equivalent via this NN.
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-18-cluster-dns-mid-ellipsis
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-18
+  containers:
+  - name: dns-client
+    egress:
+    - identifier: any-namespace-kubernetes-svc
+      type: internal
+      dnsNames:
+        - "kubernetes.⋯.svc.cluster.local."
+        # ↑ matches kubernetes.default.svc.cluster.local. exactly,
+        #   parametric on the namespace label. Use one entry per
+        #   service the workload calls; the wildcard is on the
+        #   namespace position, not the service name.
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

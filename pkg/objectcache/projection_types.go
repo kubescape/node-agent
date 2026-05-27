@@ -54,6 +54,13 @@ type ProjectedContainerProfile struct {
 	IngressDomains   ProjectedField
 	IngressAddresses ProjectedField
 
+	// ExecsByPath carries the per-Path Args slice from cp.Spec.Execs so
+	// the v0.0.2 exec-args wildcard matching (dynamicpathdetector.CompareExecArgs)
+	// can run against the projected profile. Keyed by Exec.Path (matches the
+	// key used in Execs.Values / Execs.Patterns). Upstream projection-v1
+	// dropped argv matching as "future work"; this re-adds it on the fork.
+	ExecsByPath map[string][]string
+
 	SpecHash       string
 	SyncChecksum   string
 	PolicyByRuleId map[string]v1beta1.RulePolicy
