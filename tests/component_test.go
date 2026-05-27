@@ -2059,3 +2059,493 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 // pushes it to storage, verifies the signature survives the round-trip,
 // deploys a pod referencing the signed profile, and asserts that executing
 // a binary NOT in the profile fires R0001 (Unexpected process launched).
+func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	// setup creates a namespace with user-defined AP + NN + pod.
+	// The NN allows only fusioncore.ai (162.0.217.171) on TCP/80.
+	setup := func(t *testing.T) *testutils.TestWorkload {
+		t.Helper()
+		ns := testutils.NewRandomNamespace()
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+		// Upstream ContainerProfileCache (kubescape/node-agent#788) reads ONE
+		// pod label `kubescape.io/user-defined-profile=<name>` and uses
+		// <name> as the lookup key for BOTH the user AP and the user NN.
+		// AP and NN MUST therefore share that single name.
+		const overlayName = "curl-28-overlay"
+
+		ap := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      overlayName,
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "curl",
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/bin/sleep"},
+							{Path: "/usr/bin/curl"},
+							{Path: "/usr/bin/nslookup"},
+							{Path: "/usr/bin/wget"},
+						},
+						Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev"},
+					},
+				},
+			},
+		}
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), ap, metav1.CreateOptions{})
+		require.NoError(t, err, "create AP")
+
+		nn := &v1beta1.NetworkNeighborhood{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      overlayName,
+				Namespace: ns.Name,
+				Annotations: map[string]string{
+					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
+					helpersv1.StatusMetadataKey:     helpersv1.Completed,
+					helpersv1.CompletionMetadataKey: helpersv1.Full,
+				},
+				Labels: map[string]string{
+					helpersv1.ApiGroupMetadataKey:   "apps",
+					helpersv1.ApiVersionMetadataKey: "v1",
+					helpersv1.RelatedKindMetadataKey:       "Deployment",
+					helpersv1.RelatedNameMetadataKey:       "curl-28",
+					helpersv1.RelatedNamespaceMetadataKey:  ns.Name,
+				},
+			},
+			Spec: v1beta1.NetworkNeighborhoodSpec{
+				LabelSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "curl-28"},
+				},
+				Containers: []v1beta1.NetworkNeighborhoodContainer{
+					{
+						Name: "curl",
+						Egress: []v1beta1.NetworkNeighbor{
+							{
+								Identifier: "fusioncore-egress",
+								Type:       "external",
+								DNS:        "fusioncore.ai.",
+								DNSNames:   []string{"fusioncore.ai."},
+								IPAddress:  "162.0.217.171",
+								Ports: []v1beta1.NetworkPort{
+									{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(
+			context.Background(), nn, metav1.CreateOptions{})
+		require.NoError(t, err, "create NN")
+
+		require.Eventually(t, func() bool {
+			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
+			_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
+			return apErr == nil && nnErr == nil
+		}, 30*time.Second, 1*time.Second, "AP+NN must be in storage before pod deploy")
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
+		require.NoError(t, err)
+		require.NoError(t, wl.WaitForReady(80))
+		// Cache-load latency on the upstream ContainerProfileCache is bursty
+		// — 15s is enough on a quiet runner but not on a loaded one. The
+		// failure mode is alert metadata `errorMessage:"waiting for profile
+		// update"`, which means the rule manager evaluated against an
+		// unloaded NN and fired R0005/R0011 spuriously. 30s covers the
+		// observed worst-case in CI without pushing total test time too
+		// far. Real fix would be to poll a cache-loaded signal, but no
+		// such signal is exposed today.
+		time.Sleep(30 * time.Second)
+		return wl
+	}
+
+	countByRule := func(alerts []testutils.Alert, ruleID string) int {
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID {
+				n++
+			}
+		}
+		return n
+	}
+
+	waitAlerts := func(t *testing.T, ns string) []testutils.Alert {
+		t.Helper()
+		var alerts []testutils.Alert
+		var err error
+		require.Eventually(t, func() bool {
+			alerts, err = testutils.GetAlerts(ns)
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "must be able to fetch alerts")
+		// Extra settle time for remaining alerts.
+		time.Sleep(10 * time.Second)
+		alerts, _ = testutils.GetAlerts(ns)
+		return alerts
+	}
+
+	logAlerts := func(t *testing.T, alerts []testutils.Alert) {
+		t.Helper()
+		for i, a := range alerts {
+			t.Logf("  [%d] %s(%s) comm=%s container=%s",
+				i, a.Labels["rule_name"], a.Labels["rule_id"],
+				a.Labels["comm"], a.Labels["container_name"])
+		}
+	}
+
+	// ---------------------------------------------------------------
+	// 28a. Allowed traffic — fusioncore.ai is in the NN.
+	//      No R0005 (DNS) and no R0011 (egress) expected.
+	// ---------------------------------------------------------------
+	t.Run("allowed_fusioncore_no_alert", func(t *testing.T) {
+		wl := setup(t)
+
+		// DNS lookup via nslookup (domain in NN).
+		stdout, stderr, err := wl.ExecIntoPod([]string{"nslookup", "fusioncore.ai"}, "curl")
+		t.Logf("nslookup fusioncore.ai → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		// HTTP via curl (domain + IP in NN).
+		stdout, stderr, err = wl.ExecIntoPod([]string{"curl", "-sm5", "http://fusioncore.ai"}, "curl")
+		t.Logf("curl fusioncore.ai → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		assert.Equal(t, 0, countByRule(alerts, "R0005"),
+			"fusioncore.ai is in NN — should NOT fire R0005")
+		assert.Equal(t, 0, countByRule(alerts, "R0011"),
+			"fusioncore.ai IP is in NN — should NOT fire R0011")
+	})
+
+	// ---------------------------------------------------------------
+	// 28b. Unknown domains — domains NOT in the NN → R0005.
+	//      Uses both nslookup (pure DNS) and curl (DNS + TCP).
+	// ---------------------------------------------------------------
+	t.Run("unknown_domain_R0005", func(t *testing.T) {
+		wl := setup(t)
+
+		// nslookup generates a DNS query without any TCP connection.
+		wl.ExecIntoPod([]string{"nslookup", "google.com"}, "curl")
+		// curl resolves + connects.
+		wl.ExecIntoPod([]string{"curl", "-sm5", "http://ebpf.io"}, "curl")
+		wl.ExecIntoPod([]string{"curl", "-sm5", "http://cloudflare.com"}, "curl")
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		require.Greater(t, countByRule(alerts, "R0005"), 0,
+			"unknown domains must fire R0005")
+	})
+
+	// ---------------------------------------------------------------
+	// 28c. Unknown IPs — raw IP egress NOT in the NN → R0011.
+	// ---------------------------------------------------------------
+	t.Run("unknown_ip_R0011", func(t *testing.T) {
+		wl := setup(t)
+
+		wl.ExecIntoPod([]string{"curl", "-sm5", "http://8.8.8.8"}, "curl")
+		wl.ExecIntoPod([]string{"curl", "-sm5", "http://1.1.1.1"}, "curl")
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		require.Greater(t, countByRule(alerts, "R0011"), 0,
+			"IPs not in NN must fire R0011")
+	})
+
+	// ---------------------------------------------------------------
+	// 28d. MITM — DNS spoofing simulation.
+	//      fusioncore.ai is an allowed domain but the IP is spoofed.
+	//
+	//      Step 1: nslookup fusioncore.ai (legitimate DNS, no alert).
+	//      Step 2: curl --resolve fusioncore.ai:80:8.8.4.4
+	//              Simulates a DNS MITM returning a different IP.
+	//              The domain is allowed but the connection goes to
+	//              8.8.4.4 (not 162.0.217.171) → R0011.
+	// ---------------------------------------------------------------
+	t.Run("mitm_spoofed_ip_R0011", func(t *testing.T) {
+		wl := setup(t)
+
+		// Step 1: Legitimate DNS lookup — no alert expected.
+		wl.ExecIntoPod([]string{"nslookup", "fusioncore.ai"}, "curl")
+
+		// Step 2: MITM — domain resolves to spoofed IP 8.8.4.4.
+		// curl --resolve skips DNS and connects directly to the
+		// spoofed IP, simulating what happens after DNS poisoning.
+		stdout, stderr, err := wl.ExecIntoPod(
+			[]string{"curl", "-sm5", "--resolve", "fusioncore.ai:80:8.8.4.4", "http://fusioncore.ai"}, "curl")
+		t.Logf("curl MITM → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		require.Greater(t, countByRule(alerts, "R0011"), 0,
+			"MITM: fusioncore.ai allowed but spoofed IP 8.8.4.4 must fire R0011")
+	})
+
+	// ---------------------------------------------------------------
+	// 28e. MITM — real CoreDNS poisoning via template plugin.
+	//      Poisons CoreDNS so fusioncore.ai resolves to 8.8.4.4
+	//      instead of the legitimate 162.0.217.171.
+	//
+	//      nslookup triggers the poisoned DNS response.
+	//      R0005 does NOT fire: fusioncore.ai is in the NN egress
+	//      list and BusyBox nslookup does NOT do PTR reverse-lookups.
+	//      R0011 does NOT fire: no TCP egress (DNS is UDP to cluster
+	//      DNS which is a private IP filtered by is_private_ip).
+	//
+	//      This documents a detection gap: pure DNS MITM (without
+	//      subsequent TCP to the spoofed IP) is invisible to both
+	//      R0005 and R0011 when the domain is already whitelisted.
+	//
+	//      NOTE: this subtest MUST run last — it modifies the
+	//      cluster-wide CoreDNS configmap.
+	// ---------------------------------------------------------------
+	t.Run("mitm_coredns_poisoning", func(t *testing.T) {
+		wl := setup(t)
+		ctx := context.Background()
+		k8sClient := k8sinterface.NewKubernetesApi()
+
+		// ── Back up original CoreDNS Corefile ──
+		cm, err := k8sClient.KubernetesClient.CoreV1().
+			ConfigMaps("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+		require.NoError(t, err, "get coredns configmap")
+		originalCorefile := cm.Data["Corefile"]
+
+		restartAndWaitCoreDNS := func() {
+			deploy, err := k8sClient.KubernetesClient.AppsV1().
+				Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+			require.NoError(t, err, "get coredns deployment")
+			if deploy.Spec.Template.ObjectMeta.Annotations == nil {
+				deploy.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+			}
+			deploy.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+			_, err = k8sClient.KubernetesClient.AppsV1().
+				Deployments("kube-system").Update(ctx, deploy, metav1.UpdateOptions{})
+			require.NoError(t, err, "restart coredns")
+
+			require.Eventually(t, func() bool {
+				d, err := k8sClient.KubernetesClient.AppsV1().
+					Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+				if err != nil || d.Spec.Replicas == nil {
+					return false
+				}
+				return d.Status.ReadyReplicas == *d.Spec.Replicas &&
+					d.Status.UpdatedReplicas == *d.Spec.Replicas
+			}, 60*time.Second, 2*time.Second, "coredns must become ready")
+		}
+
+		// ── Restore CoreDNS on cleanup (best-effort) ──
+		t.Cleanup(func() {
+			t.Log("cleanup: restoring CoreDNS Corefile")
+			cm, err := k8sClient.KubernetesClient.CoreV1().
+				ConfigMaps("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+			if err != nil {
+				t.Logf("cleanup: get coredns cm: %v", err)
+				return
+			}
+			cm.Data["Corefile"] = originalCorefile
+			if _, err := k8sClient.KubernetesClient.CoreV1().
+				ConfigMaps("kube-system").Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+				t.Logf("cleanup: update coredns cm: %v", err)
+				return
+			}
+			deploy, err := k8sClient.KubernetesClient.AppsV1().
+				Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+			if err != nil {
+				t.Logf("cleanup: get coredns deploy: %v", err)
+				return
+			}
+			if deploy.Spec.Template.ObjectMeta.Annotations == nil {
+				deploy.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+			}
+			deploy.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+			if _, err := k8sClient.KubernetesClient.AppsV1().
+				Deployments("kube-system").Update(ctx, deploy, metav1.UpdateOptions{}); err != nil {
+				t.Logf("cleanup: restart coredns: %v", err)
+			}
+		})
+
+		// ── Poison CoreDNS: fusioncore.ai → 8.8.4.4 ──
+		poisoned := strings.Replace(originalCorefile,
+			"forward .",
+			"template IN A fusioncore.ai {\n        answer \"fusioncore.ai. 60 IN A 8.8.4.4\"\n        fallthrough\n    }\n    forward .",
+			1)
+		require.NotEqual(t, originalCorefile, poisoned, "template injection must modify Corefile")
+
+		cm.Data["Corefile"] = poisoned
+		_, err = k8sClient.KubernetesClient.CoreV1().
+			ConfigMaps("kube-system").Update(ctx, cm, metav1.UpdateOptions{})
+		require.NoError(t, err, "apply poisoned Corefile")
+		restartAndWaitCoreDNS()
+
+		// Verify poisoned DNS returns the spoofed IP.
+		require.Eventually(t, func() bool {
+			stdout, _, _ := wl.ExecIntoPod([]string{"nslookup", "fusioncore.ai"}, "curl")
+			return strings.Contains(stdout, "8.8.4.4")
+		}, 30*time.Second, 3*time.Second, "poisoned CoreDNS must return 8.8.4.4 for fusioncore.ai")
+
+		// ── Trigger alerts ──
+		// nslookup does DNS only (no TCP egress).
+		// BusyBox nslookup does NOT do PTR reverse-lookups on result IPs.
+		stdout, stderr, err := wl.ExecIntoPod([]string{"nslookup", "fusioncore.ai"}, "curl")
+		t.Logf("nslookup (poisoned) → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		// R0005 does NOT fire: fusioncore.ai is already in the NN
+		// egress list, and BusyBox nslookup does NOT perform PTR
+		// reverse-lookups on result IPs, so no unknown domain is queried.
+		assert.Equal(t, 0, countByRule(alerts, "R0005"),
+			"DNS MITM: domain is in NN and no PTR lookup — R0005 should not fire")
+
+		// R0011 does NOT fire: nslookup generates only DNS (UDP)
+		// traffic to the cluster DNS service, which is a private IP
+		// excluded by is_private_ip().
+		assert.Equal(t, 0, countByRule(alerts, "R0011"),
+			"DNS MITM: nslookup has no TCP egress — R0011 should not fire")
+	})
+
+	// ---------------------------------------------------------------
+	// 28f. MITM — CoreDNS poisoning with TCP egress.
+	//      Same CoreDNS poisoning as 28e, but now fusioncore.ai
+	//      resolves to 128.130.194.56 (a routable IP that accepts
+	//      TCP on port 80).  curl generates a real TCP connection
+	//      to the spoofed IP.
+	//
+	//      Expected:
+	//        R0005 = 0 — domain is in NN, no PTR reverse-lookup.
+	//        R0011 fires — TCP egress to 128.130.194.56 which is
+	//                       NOT in the NN (NN only has 162.0.217.171).
+	//
+	//      NOTE: runs after 28e; modifies cluster-wide CoreDNS.
+	// ---------------------------------------------------------------
+	t.Run("mitm_coredns_poisoning_tcp", func(t *testing.T) {
+		wl := setup(t)
+		ctx := context.Background()
+		k8sClient := k8sinterface.NewKubernetesApi()
+
+		// ── Back up original CoreDNS Corefile ──
+		cm, err := k8sClient.KubernetesClient.CoreV1().
+			ConfigMaps("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+		require.NoError(t, err, "get coredns configmap")
+		originalCorefile := cm.Data["Corefile"]
+
+		restartAndWaitCoreDNS := func() {
+			deploy, err := k8sClient.KubernetesClient.AppsV1().
+				Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+			require.NoError(t, err, "get coredns deployment")
+			if deploy.Spec.Template.ObjectMeta.Annotations == nil {
+				deploy.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+			}
+			deploy.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+			_, err = k8sClient.KubernetesClient.AppsV1().
+				Deployments("kube-system").Update(ctx, deploy, metav1.UpdateOptions{})
+			require.NoError(t, err, "restart coredns")
+
+			require.Eventually(t, func() bool {
+				d, err := k8sClient.KubernetesClient.AppsV1().
+					Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+				if err != nil || d.Spec.Replicas == nil {
+					return false
+				}
+				return d.Status.ReadyReplicas == *d.Spec.Replicas &&
+					d.Status.UpdatedReplicas == *d.Spec.Replicas
+			}, 60*time.Second, 2*time.Second, "coredns must become ready")
+		}
+
+		// ── Restore CoreDNS on cleanup (best-effort) ──
+		t.Cleanup(func() {
+			t.Log("cleanup: restoring CoreDNS Corefile")
+			cm, err := k8sClient.KubernetesClient.CoreV1().
+				ConfigMaps("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+			if err != nil {
+				t.Logf("cleanup: get coredns cm: %v", err)
+				return
+			}
+			cm.Data["Corefile"] = originalCorefile
+			if _, err := k8sClient.KubernetesClient.CoreV1().
+				ConfigMaps("kube-system").Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+				t.Logf("cleanup: update coredns cm: %v", err)
+				return
+			}
+			deploy, err := k8sClient.KubernetesClient.AppsV1().
+				Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+			if err != nil {
+				t.Logf("cleanup: get coredns deploy: %v", err)
+				return
+			}
+			if deploy.Spec.Template.ObjectMeta.Annotations == nil {
+				deploy.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+			}
+			deploy.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+			if _, err := k8sClient.KubernetesClient.AppsV1().
+				Deployments("kube-system").Update(ctx, deploy, metav1.UpdateOptions{}); err != nil {
+				t.Logf("cleanup: restart coredns: %v", err)
+			}
+		})
+
+		// ── Poison CoreDNS: fusioncore.ai → 128.130.194.56 ──
+		poisoned := strings.Replace(originalCorefile,
+			"forward .",
+			"template IN A fusioncore.ai {\n        answer \"fusioncore.ai. 60 IN A 128.130.194.56\"\n        fallthrough\n    }\n    forward .",
+			1)
+		require.NotEqual(t, originalCorefile, poisoned, "template injection must modify Corefile")
+
+		cm.Data["Corefile"] = poisoned
+		_, err = k8sClient.KubernetesClient.CoreV1().
+			ConfigMaps("kube-system").Update(ctx, cm, metav1.UpdateOptions{})
+		require.NoError(t, err, "apply poisoned Corefile")
+		restartAndWaitCoreDNS()
+
+		// Verify poisoned DNS returns the spoofed IP.
+		require.Eventually(t, func() bool {
+			stdout, _, _ := wl.ExecIntoPod([]string{"nslookup", "fusioncore.ai"}, "curl")
+			return strings.Contains(stdout, "128.130.194.56")
+		}, 30*time.Second, 3*time.Second, "poisoned CoreDNS must return 128.130.194.56 for fusioncore.ai")
+
+		// ── Trigger alerts ──
+		// curl resolves fusioncore.ai → 128.130.194.56 (poisoned)
+		// then opens a TCP connection to 128.130.194.56:80.
+		stdout, stderr, err := wl.ExecIntoPod(
+			[]string{"curl", "-sm5", "http://fusioncore.ai"}, "curl")
+		t.Logf("curl (poisoned DNS) → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		// R0005 does NOT fire: fusioncore.ai is already in the NN
+		// egress list, and curl (like BusyBox nslookup) does NOT
+		// perform PTR reverse-lookups on resolved IPs.
+		assert.Equal(t, 0, countByRule(alerts, "R0005"),
+			"DNS MITM: domain is in NN and no PTR lookup — R0005 should not fire")
+
+		// R0011 fires: TCP egress to 128.130.194.56 which is NOT
+		// in the NN (NN only allows 162.0.217.171).
+		require.Greater(t, countByRule(alerts, "R0011"), 0,
+			"DNS MITM: TCP to spoofed IP 128.130.194.56 must fire R0011")
+	})
+}
+
+// Test_29_SignedApplicationProfile verifies that a cryptographically signed
+// ApplicationProfile can be pushed to storage, loaded by node-agent, and
+// used for anomaly detection just like any other user-defined profile.
+//
+// The test signs an AP with key-based ECDSA (no OIDC/Sigstore needed),
+// pushes it to storage, verifies the signature survives the round-trip,
+// deploys a pod referencing the signed profile, and asserts that executing
+// a binary NOT in the profile fires R0001 (Unexpected process launched).
