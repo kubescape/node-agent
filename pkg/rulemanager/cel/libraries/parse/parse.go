@@ -29,54 +29,38 @@ func (l *parseLibrary) getExecPath(args ref.Val, comm ref.Val) ref.Val {
 	return types.String(commStr)
 }
 
-// getExecPathWithExePath is the 3-arg overload that resolves the exec
-// path with symlink-faithful precedence:
+// getExecPathWithExePath resolves the exec path symmetrically with the
+// recording side's resolveExecPath in
+// pkg/containerprofilemanager/v1/event_reporting.go. Precedence:
 //
-//   1. argv[0] when it's an absolute path (`/...`) — preserves symlink
-//      identity as invoked (e.g. busybox-based images where /bin/sh,
-//      /usr/bin/nslookup, /bin/echo are all symlinks to /bin/busybox;
-//      argv[0] carries the symlink form, exepath carries the kernel-
-//      resolved target). User-authored profiles list the symlink form,
-//      and the recording side (resolveExecPath in
-//      pkg/containerprofilemanager/v1/event_reporting.go) uses the same
-//      precedence so profile.Path matches what rules query.
+//   1. exepath — kernel-authoritative; the only spoof-resistant source.
+//      argv[0] is user-controllable (man 3 exec) even when absolute, so
+//      a process can lie about its identity via `exec -a /bin/sh sleep`
+//      while /proc/<pid>/exe stays /usr/bin/sleep. Trusting absolute
+//      argv[0] would let that lie pass an ap.was_executed check for
+//      /bin/sh.
 //
-//   2. exepath when argv[0] is bare (e.g. "sh", "curl") or empty — the
-//      kernel-authoritative path is the right tiebreaker here, and
-//      preserves the existing argv[0]-spoofing protection: an attacker
-//      passing a misleading bare argv[0] (e.g. argv[0]="sshd" while
-//      actually exec'ing /usr/bin/curl) gets resolved to the real
-//      exepath, not the bare lie. The "absolute path → trust argv[0]"
-//      rule is safe because the kernel only exposes an absolute argv[0]
-//      when execve was called with that exact path (modulo symlinks
-//      that the kernel itself follows transparently).
+//   2. argv[0] when non-empty AND exepath empty (fexecve / execveat
+//      AT_EMPTY_PATH — the libpam helper invocation pattern; defers to
+//      the 2-arg fallback below).
 //
-//   3. argv[0] when bare AND exepath empty (fexecve / AT_EMPTY_PATH).
+//   3. comm as final fallback (also via 2-arg).
 //
-//   4. comm as final fallback.
-//
-// This closes the spurious-R0001 gap on busybox-based containers AND
-// the prior fork-shell case where event.exepath was the only source.
+// This closes the fork-shell mismatch — `sh -c …` records /bin/sh on
+// the recording side and the rule side now queries /bin/sh too — while
+// preserving the kernel-authoritative argv[0]-spoofing protection that
+// the prior absolute-argv[0]-wins tier had eroded.
 func (l *parseLibrary) getExecPathWithExePath(args ref.Val, comm ref.Val, exepath ref.Val) ref.Val {
 	exepathStr, ok := exepath.Value().(string)
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(exepath)
 	}
 
-	argsList, err := celparse.ParseList[string](args)
-	if err == nil && len(argsList) > 0 {
-		argv0 := argsList[0]
-		// Tier 1: absolute argv[0] wins. Symlink-faithful.
-		if len(argv0) > 0 && argv0[0] == '/' {
-			return types.String(argv0)
-		}
-	}
-
-	// Tier 2: kernel-authoritative exepath when argv[0] is bare/empty.
 	if exepathStr != "" {
 		return types.String(exepathStr)
 	}
 
-	// Tiers 3+4: defer to 2-arg fallback (argv[0]-bare → comm).
+	// exepath empty (fexecve / AT_EMPTY_PATH) — fall back to argv[0],
+	// then comm, via the 2-arg path.
 	return l.getExecPath(args, comm)
 }

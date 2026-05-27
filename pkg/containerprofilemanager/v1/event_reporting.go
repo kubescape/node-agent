@@ -32,37 +32,31 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 	cpm.logEventError(err, "capability", containerID)
 }
 
-// resolveExecPath derives the path to record for an exec event. It is kept
-// symmetric with the rule-side resolver in
-// pkg/rulemanager/cel/libraries/parse/parse.go (parse.get_exec_path): prefer
-// the kernel-authoritative exepath, then argv[0] when non-empty, then comm.
-// Using args[0] unconditionally produces an empty Path when the syscall has
-// an empty pathname (fexecve / execveat AT_EMPTY_PATH — the libpam helper
-// invocation pattern), while the rule-side resolver falls back to comm —
-// leaving the AP entry unreachable to ap.was_executed and producing spurious
-// "Unexpected process launched" alerts.
 // resolveExecPath chooses the canonical recorded path for an exec event.
+//
 // Precedence (kept symmetric with the rule-side
 // pkg/rulemanager/cel/libraries/parse/parse.go::getExecPathWithExePath
 // — divergence here would let runtime queries miss profile entries that
 // were recorded under a different key):
 //
-//  1. argv[0] when it's an absolute path (`/...`) — symlink-faithful.
-//     In busybox-based images every utility (sh, echo, nslookup, ...)
-//     is a symlink to /bin/busybox. The kernel-resolved exepath is
-//     /bin/busybox, but argv[0] preserves the symlink form a user
-//     invoked. Users author profile.Path with the symlink form, so
-//     we record the same.
-//  2. exepath when argv[0] is bare or empty — kernel-authoritative
-//     wins. Preserves argv[0]-spoofing protection: an attacker passing
-//     argv[0]="sshd" while exec'ing /usr/bin/curl gets resolved to the
-//     real exepath rather than the bare lie.
-//  3. argv[0] when bare and exepath empty (fexecve / AT_EMPTY_PATH).
-//  4. comm as last resort.
+//  1. exepath — kernel-authoritative; the only spoof-resistant source.
+//     argv[0] is user-controllable (man 3 exec: argv[0] is convention,
+//     not enforced) even when absolute, so it cannot be the recorded
+//     identity for security-relevant lookups. Repro: `exec -a /bin/sh
+//     sleep 2` yields cmdline=/bin/sh while /proc/<pid>/exe stays
+//     /usr/bin/sleep — recording argv[0] would let a process masquerade
+//     as any allowed absolute path.
+//  2. argv[0] when non-empty AND exepath empty (fexecve / execveat
+//     AT_EMPTY_PATH — the libpam helper invocation pattern).
+//  3. comm as last resort.
+//
+// Busybox-image consequence: utilities like /bin/sh, /usr/bin/nslookup
+// are symlinks to /bin/busybox. exepath resolves to /bin/busybox, so
+// that's the recorded identity. User-authored profiles for busybox
+// images must list /bin/busybox (not the symlink form) — the prior
+// "absolute argv[0] wins" tier was an earlier experimental design that
+// re-opened argv[0] spoofing and has been reverted.
 func resolveExecPath(exepath, comm string, args []string) string {
-	if len(args) > 0 && len(args[0]) > 0 && args[0][0] == '/' {
-		return args[0]
-	}
 	if exepath != "" {
 		return exepath
 	}
