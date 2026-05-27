@@ -46,7 +46,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			switch {
 			case errors.Is(err, ContainerHasTerminatedError):
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
-					logger.L().Ctx(cpm.ctx).Error("failed to save container profile on termination", helpers.Error(err),
+					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on termination", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
 						helpers.String("containerName", container.Runtime.ContainerName),
 						helpers.String("workloadID", watchedContainer.Wlid),
@@ -66,7 +66,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			case errors.Is(err, ContainerReachedMaxTime):
 				watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
-					logger.L().Ctx(cpm.ctx).Error("failed to save container profile on max time", helpers.Error(err),
+					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on max time", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
 						helpers.String("containerName", container.Runtime.ContainerName),
 						helpers.String("workloadID", watchedContainer.Wlid),
@@ -115,7 +115,7 @@ func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedCon
 		cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "completed")
 		return file.ObjectCompletedError
 	} else {
-		logger.L().Ctx(cpm.ctx).Error("failed to save container profile", helpers.Error(err),
+		logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile", helpers.Error(err),
 			helpers.String("containerID", watchedContainer.ContainerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("workloadID", watchedContainer.Wlid),
@@ -142,7 +142,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 
 	slug, err := watchedContainer.InstanceID.GetOneTimeSlug(false)
 	if err != nil {
-		logger.L().Ctx(cpm.ctx).Error("failed to get slug for container profile", helpers.Error(err))
+		logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to get slug for container profile", helpers.Error(err))
 		return err
 	}
 

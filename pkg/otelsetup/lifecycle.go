@@ -89,6 +89,20 @@ func (t *ProfileLifecycleTracker) LearningTraceparent(containerID string) string
 	return carrier["traceparent"]
 }
 
+// LearningCtx returns the context carrying the active learning span for the
+// given container, or context.Background() if no span is tracked. Pass this
+// to logger.L().Ctx(...) at error sites so the log record inherits the
+// learning span's trace_id/span_id for span↔log correlation.
+func (t *ProfileLifecycleTracker) LearningCtx(containerID string) context.Context {
+	t.mu.Lock()
+	ctx, ok := t.ctxs[containerID]
+	t.mu.Unlock()
+	if !ok {
+		return context.Background()
+	}
+	return ctx
+}
+
 // OnEntrySaved emits an immediate child span when a checkpoint profile is
 // shipped, subject to M2 throttling: spans are emitted on the first snapshot,
 // every 10th, and any snapshot that had dropped events. This keeps span

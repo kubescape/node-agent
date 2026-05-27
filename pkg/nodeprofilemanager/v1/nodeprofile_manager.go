@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -18,6 +19,9 @@ import (
 	"github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/net/context"
 	v1 "k8s.io/api/core/v1"
 )
@@ -60,12 +64,21 @@ func (n *NodeProfileManager) Start(ctx context.Context) {
 			profile, err := n.getProfile()
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("NodeProfileManager - get profile", helpers.Error(err))
-			} else {
-				err := n.sendProfile(profile)
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("NodeProfileManager - send profile", helpers.Error(err))
-				}
+				continue
 			}
+			// Wrap the send in a span so the failure warning below inherits
+			// trace_id/span_id (span↔log correlation). One span per
+			// NodeProfileInterval per node-agent pod.
+			sendCtx, span := otelsetup.Tracer().Start(ctx, "nodeprofile.send",
+				trace.WithAttributes(
+					attribute.String("http.url", n.config.Exporters.HTTPExporterConfig.URL+"/v1/nodeprofiles"),
+					attribute.Int("pod.count", len(profile.PodStatuses)),
+				))
+			if err := n.sendProfile(profile); err != nil {
+				span.SetStatus(codes.Error, err.Error())
+				logger.L().Ctx(sendCtx).Warning("NodeProfileManager - send profile", helpers.Error(err))
+			}
+			span.End()
 		}
 	}()
 }

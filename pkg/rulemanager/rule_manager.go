@@ -372,6 +372,9 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		evaluationTime := time.Since(startTime)
 		// Slow-path tracing: only emit a span when evaluation exceeded the threshold.
 		// This protects the hot path from unconditional tracing overhead on millions of events/sec.
+		// errCtx tracks the spanned context (when a rule.evaluate span fires) so the
+		// failure log below inherits its trace_id/span_id — otherwise falls back to rm.ctx.
+		errCtx := rm.ctx
 		if evaluationTime >= otelsetup.SlowEvalThreshold() {
 			evalCtx, span := otelsetup.Tracer().Start(rm.ctx, "rule.evaluate",
 				trace.WithAttributes(
@@ -386,12 +389,13 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 			rm.metrics.ReportRuleEvaluationTime(evalCtx, rule.ID, eventType, evaluationTime)
 			span.End()
+			errCtx = evalCtx
 		} else {
 			rm.metrics.ReportRuleEvaluationTime(rm.ctx, rule.ID, eventType, evaluationTime)
 		}
 
 		if err != nil {
-			logger.L().Ctx(rm.ctx).Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
+			logger.L().Ctx(errCtx).Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
 			rm.metrics.ReportAlertSuppressed(rule.ID, "eval_error")
 			continue
 		}
