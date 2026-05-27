@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -71,6 +72,10 @@ type OTELMetricsManager struct {
 
 	// Alert suppression funnel
 	alertSuppressedTotal metric.Int64Counter
+
+	// Live container count — incremented on start, decremented on stop.
+	// Exposed as node_agent.container.count observable gauge.
+	containerCount atomic.Int64
 
 	// Attribute-set caches: mandatory on the hot path to avoid per-call allocations.
 	// Each cache maps a string key → metric.MeasurementOption (pre-built attribute set).
@@ -212,6 +217,8 @@ func NewOTELMetricsManager() *OTELMetricsManager {
 	m.alertSuppressedTotal = mustCounter("node_agent.alert.suppressed.total",
 		"Total alerts suppressed before delivery, labeled by rule_id and reason")
 
+	registerResourceMetrics(meter, &m.containerCount)
+
 	return m
 }
 
@@ -301,10 +308,12 @@ func (m *OTELMetricsManager) ReportRuleEvaluationTime(ctx context.Context, ruleI
 
 func (m *OTELMetricsManager) ReportContainerStart() {
 	m.containerStartTotal.Add(context.Background(), 1)
+	m.containerCount.Add(1)
 }
 
 func (m *OTELMetricsManager) ReportContainerStop() {
 	m.containerStopTotal.Add(context.Background(), 1)
+	m.containerCount.Add(-1)
 }
 
 func (m *OTELMetricsManager) ReportDedupEvent(eventType utils.EventType, duplicate bool) {

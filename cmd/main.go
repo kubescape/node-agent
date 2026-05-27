@@ -23,6 +23,7 @@ import (
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	goruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/cloudmetadata"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -119,6 +120,16 @@ func main() {
 			_ = otelShutdown(shutdownCtx)
 		}
 	}()
+
+	// Emit Go runtime metrics only when metrics collection is configured;
+	// avoids ~2–3 KB/hr of metric volume for deployments without telemetry.
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" ||
+		os.Getenv("OTEL_METRICS_EXPORTER") != "" ||
+		os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != "" {
+		if err := goruntime.Start(goruntime.WithMinimumReadMemStatsInterval(30 * time.Second)); err != nil {
+			logger.L().Warning("node-agent: Go runtime metrics unavailable", helpers.Error(err))
+		}
+	}
 
 	// Check if we need to validate the kernel version.
 	if os.Getenv("SKIP_KERNEL_VERSION_CHECK") == "" {
