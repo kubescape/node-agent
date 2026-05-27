@@ -1,14 +1,20 @@
 package otelsetup
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/log/global"
+	"go.opentelemetry.io/otel/log/logtest"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // newTestTracerProvider installs an in-memory tracer provider and returns the
@@ -105,6 +111,93 @@ func TestProfileLifecycleTracker_EndWithoutStart(t *testing.T) {
 		tracker.OnLearningEnded("nonexistent", "completed")
 	})
 	assert.Empty(t, rec.Ended(), "no spans should be emitted for unknown container")
+}
+
+// TestProfileLifecycleTracker_LearningCtx asserts that LearningCtx returns
+// the same SpanContext as the active learning span, so logs emitted via
+// logger.L().Ctx(LearningCtx(cid)) inherit the learning trace's IDs.
+func TestProfileLifecycleTracker_LearningCtx(t *testing.T) {
+	rec, cleanup := newTestTracerProvider(t)
+	defer cleanup()
+
+	tracker := NewProfileLifecycleTracker()
+	tracker.OnLearningStarted("cid-x", "ns", "pod", "img:latest")
+	defer tracker.OnLearningEnded("cid-x", "completed")
+
+	ctx := tracker.LearningCtx("cid-x")
+	sc := trace.SpanContextFromContext(ctx)
+	require.True(t, sc.IsValid(), "LearningCtx must carry a valid SpanContext")
+
+	// Cross-check against the recorded learning span's SpanID via a child span.
+	_, child := otel.Tracer("test").Start(ctx, "child")
+	child.End()
+	tracker.OnLearningEnded("cid-x", "completed")
+
+	spans := rec.Ended()
+	require.Len(t, spans, 2)
+	// Last is the parent learning span; child should reference it.
+	var parent, kid trace.SpanContext
+	for _, s := range spans {
+		if s.Name() == "container.profile.learning" {
+			parent = s.SpanContext()
+		}
+		if s.Name() == "child" {
+			kid = s.Parent()
+		}
+	}
+	assert.Equal(t, parent.SpanID(), kid.SpanID(), "child span's parent must be the learning span")
+	assert.Equal(t, parent.TraceID(), sc.TraceID(), "LearningCtx TraceID must match learning span")
+}
+
+// TestProfileLifecycleTracker_LearningCtx_UnknownContainer asserts that an
+// unknown containerID yields a background ctx, not a nil one — keeps log call
+// sites safe.
+func TestProfileLifecycleTracker_LearningCtx_UnknownContainer(t *testing.T) {
+	tracker := NewProfileLifecycleTracker()
+	ctx := tracker.LearningCtx("nonexistent")
+	require.NotNil(t, ctx)
+	assert.False(t, trace.SpanContextFromContext(ctx).IsValid())
+}
+
+// TestZapWarning_AttachesSpanContext is the end-to-end proof: a Warning
+// emitted via logger.L().Ctx(spanCtx) reaches the OTEL Logs SDK with the
+// span's trace_id/span_id propagated through ctx — which is what ClickHouse
+// stamps onto trace_id / span_id columns.
+func TestZapWarning_AttachesSpanContext(t *testing.T) {
+	// 1. Install a span recorder so we have a real span to link against.
+	_, cleanup := newTestTracerProvider(t)
+	defer cleanup()
+
+	// 2. Install an in-memory log recorder as the global LoggerProvider
+	// BEFORE constructing the zap logger — otelzap captures the provider
+	// at construction time.
+	logRec := logtest.NewRecorder()
+	prevLogProvider := global.GetLoggerProvider()
+	global.SetLoggerProvider(logRec)
+	defer global.SetLoggerProvider(prevLogProvider)
+
+	// 3. Switch go-logger to zap so logger.L() routes warnings through
+	// otelzap → the global LoggerProvider we just installed.
+	logger.InitLogger("zap")
+	defer logger.InitLogger("none")
+
+	// 4. Start a span and emit a warning bound to its ctx.
+	ctx, span := otel.Tracer("test").Start(context.Background(), "outer")
+	logger.L().Ctx(ctx).Warning("correlated warning", helpers.String("k", "v"))
+	span.End()
+
+	// 5. Find the emitted record and confirm its ctx carries the span.
+	var found bool
+	for _, records := range logRec.Result() {
+		for _, r := range records {
+			emittedSC := trace.SpanContextFromContext(r.Context)
+			if emittedSC.SpanID() == span.SpanContext().SpanID() {
+				found = true
+				assert.Equal(t, span.SpanContext().TraceID(), emittedSC.TraceID())
+			}
+		}
+	}
+	assert.True(t, found, "no log record carried the span's SpanID — span↔log correlation broken")
 }
 
 func TestProfileLifecycleTracker_CapEviction(t *testing.T) {
