@@ -354,9 +354,9 @@ func (r *RuleFailureCreator) setContextSpecificFields(ruleFailure *types.Generic
 			k8sDetails.NodeName = hostname
 		}
 
-	case contextdetection.Standalone:
-		ruleFailure.SetSourceContext(contextdetection.Standalone)
-		// For Standalone context, populate container-specific fields in RuntimeAlertK8sDetails
+	case contextdetection.Standalone, contextdetection.Container, contextdetection.ECS:
+		ruleFailure.SetSourceContext(sourceContextType)
+		// For containerized contexts, populate container-specific fields in RuntimeAlertK8sDetails
 		if k8sDetails.ContainerID == "" {
 			k8sDetails.ContainerID = enrichedEvent.ContainerID
 		}

@@ -10,6 +10,8 @@ const (
 	Kubernetes EventSourceContext = "kubernetes"
 	Host       EventSourceContext = "host"
 	Standalone EventSourceContext = "standalone"
+	Container  EventSourceContext = "container"
+	ECS        EventSourceContext = "ecs"
 )
 
 type ContextInfo interface {

@@ -42,10 +42,19 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 		currentContext = contextInfo.Context()
 	}
 
+	// container is a meta-context matching any containerized workload (kubernetes, standalone, container, ecs)
+	isContainerContext := currentContext == contextdetection.Kubernetes ||
+		currentContext == contextdetection.Standalone ||
+		currentContext == contextdetection.Container ||
+		currentContext == contextdetection.ECS
+
 	var hasContextTags bool
 	for _, tag := range rule.Tags {
 		if ctx, found := strings.CutPrefix(tag, "context:"); found {
 			if ctx == string(currentContext) {
+				return true
+			}
+			if ctx == string(contextdetection.Container) && isContainerContext {
 				return true
 			}
 			hasContextTags = true
