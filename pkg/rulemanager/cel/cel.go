@@ -106,17 +106,26 @@ func (c *CEL) registerExpression(expression string) error {
 		return nil
 	}
 
-	ast, issues := c.env.Compile(expression)
+	// Auto-rewrite deprecated helper call sites (e.g. 2-arg get_exec_path
+	// → 3-arg) for operators who upgrade the node-agent binary without
+	// updating their RuleBindings. Each rewrite surfaces a notice; this
+	// runs once per unique expression because of the cache check above.
+	compileExpr, notices := rewriteDeprecatedHelpers(expression)
+	for _, n := range notices {
+		logger.L().Warning("CEL expression: deprecated form", helpers.String("notice", n))
+	}
+
+	ast, issues := c.env.Compile(compileExpr)
 	if issues != nil {
 		// Cache nil to prevent repeated compilation attempts for invalid expressions
 		c.programCache[expression] = nil
-		logger.L().Warning("CEL expression disabled: failed to compile", helpers.String("expression", expression), helpers.Error(issues.Err()))
+		logger.L().Warning("CEL expression disabled: failed to compile", helpers.String("expression", compileExpr), helpers.Error(issues.Err()))
 		return fmt.Errorf("failed to compile expression: %s", issues.Err())
 	}
 
 	optAst, optIssues := c.staticOptimizer.Optimize(c.env, ast)
 	if optIssues != nil && optIssues.Err() != nil {
-		logger.L().Warning("CEL static optimization failed, falling back to unoptimized AST", helpers.String("expression", expression), helpers.Error(optIssues.Err()))
+		logger.L().Warning("CEL static optimization failed, falling back to unoptimized AST", helpers.String("expression", compileExpr), helpers.Error(optIssues.Err()))
 	} else {
 		ast = optAst
 	}
@@ -125,7 +134,7 @@ func (c *CEL) registerExpression(expression string) error {
 	if err != nil {
 		// Cache nil to prevent repeated program creation attempts
 		c.programCache[expression] = nil
-		logger.L().Warning("CEL expression disabled: failed to create program", helpers.String("expression", expression), helpers.Error(err))
+		logger.L().Warning("CEL expression disabled: failed to create program", helpers.String("expression", compileExpr), helpers.Error(err))
 		return fmt.Errorf("failed to create program: %s", err)
 	}
 

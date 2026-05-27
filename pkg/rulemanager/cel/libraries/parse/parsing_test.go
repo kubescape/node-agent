@@ -196,39 +196,39 @@ func TestGetExecPath_SymmetryWithRecordingSide(t *testing.T) {
 			expected: "/bin/sh",
 		},
 		{
-			// Busybox-style symlink case: the user runs `/bin/sh` which is
-			// a symlink to `/bin/busybox`. Inspektor Gadget's eBPF tracer
-			// reports exepath as the kernel-resolved binary (`/bin/busybox`)
-			// while argv[0] preserves the symlink-as-invoked form
-			// (`/bin/sh`). User-authored profiles list the symlink form
-			// (which is what people think of), and the recording side's
-			// resolveExecPath records the same form when argv[0] is
-			// absolute. Rule-side resolution MUST match so ap.was_executed
-			// finds the profile entry on busybox-based images.
-			//
-			// Precedence: absolute-argv[0] > exepath > bare-argv[0] > comm.
-			// argv[0] being absolute is the signal that the symlink form
-			// is intentional and present at exec time; bare argv[0] is
-			// just a shell convention and the kernel-authoritative exepath
-			// should win (preserving the existing argv[0]-spoofing
-			// protection where attackers pass a misleading bare argv[0]).
-			name:     "busybox symlink — argv[0] /bin/sh absolute, exepath /bin/busybox",
+			// Busybox-style symlink case: the user runs `/bin/sh` which
+			// is a symlink to `/bin/busybox`. The kernel-resolved exepath
+			// is `/bin/busybox`. The rule side queries the same identity
+			// the recording side stored — exepath — so user-authored
+			// profiles on busybox images must list `/bin/busybox`. Trusting
+			// the absolute argv[0] here would let `exec -a /bin/sh sleep`
+			// pass an ap.was_executed check for `/bin/sh`.
+			name:     "busybox symlink — exepath /bin/busybox wins over argv[0]=/bin/sh",
 			expr:     "parse.get_exec_path(['/bin/sh', '-c', 'echo hi'], 'sh', '/bin/busybox')",
-			expected: "/bin/sh",
+			expected: "/bin/busybox",
 		},
 		{
-			name:     "busybox symlink — nslookup absolute, exepath /bin/busybox",
+			name:     "busybox symlink — exepath /bin/busybox wins over argv[0]=/usr/bin/nslookup",
 			expr:     "parse.get_exec_path(['/usr/bin/nslookup', 'example.com'], 'nslookup', '/bin/busybox')",
-			expected: "/usr/bin/nslookup",
+			expected: "/bin/busybox",
 		},
 		{
-			// Negative case: argv[0] bare → exepath still wins. This
-			// preserves the argv[0] spoofing protection in the test above
-			// ("argv[0] spoofing"), where a bare argv[0]='sshd' was being
-			// rejected in favour of the kernel-authoritative exepath.
-			name:     "bare argv[0] keeps spoof protection — exepath wins",
+			// Bare-argv[0] spoof — exepath still wins.
+			name:     "bare argv[0] spoof — exepath wins",
 			expr:     "parse.get_exec_path(['sshd', '-i'], 'curl', '/usr/bin/curl')",
 			expected: "/usr/bin/curl",
+		},
+		{
+			// Absolute argv[0] spoof — `exec -a /bin/sh sleep 2`.
+			// Process lies about its identity via an allowed absolute
+			// argv[0]; the real exe is /usr/bin/sleep. Rule-side resolver
+			// MUST anchor on kernel-authoritative exepath, mirroring
+			// resolveExecPath so ap.was_executed lookups reflect the
+			// real binary. Regression pin for matthyx blocker on PR #805
+			// (2026-05-27).
+			name:     "absolute argv[0] spoof — exec -a /bin/sh sleep",
+			expr:     "parse.get_exec_path(['/bin/sh', '2'], 'sleep', '/usr/bin/sleep')",
+			expected: "/usr/bin/sleep",
 		},
 	}
 
