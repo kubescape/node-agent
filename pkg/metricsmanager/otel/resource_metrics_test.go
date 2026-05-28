@@ -14,17 +14,28 @@ func TestParseSelfCgroupV2(t *testing.T) {
 		name    string
 		content string
 		want    string
+		wantOK  bool
 	}{
-		{"host ns full path", "0::/kubepods.slice/kubepods-burstable.slice/pod.slice/cri-containerd-abc.scope", "/kubepods.slice/kubepods-burstable.slice/pod.slice/cri-containerd-abc.scope"},
-		{"private ns root yields empty", "0::/", ""},
-		{"v1 lines only", "12:memory:/kubepods/pod\n11:cpu:/kubepods/pod", ""},
-		{"empty", "", ""},
+		{"host ns full path", "0::/kubepods.slice/kubepods-burstable.slice/pod.slice/cri-containerd-abc.scope", "/kubepods.slice/kubepods-burstable.slice/pod.slice/cri-containerd-abc.scope", true},
+		{"private ns root", "0::/", "/", true},
+		{"v1 lines only", "12:memory:/kubepods/pod\n11:cpu:/kubepods/pod", "", false},
+		{"empty", "", "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, parseSelfCgroupV2(tt.content))
+			got, ok := parseSelfCgroupV2(tt.content)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantOK, ok)
 		})
 	}
+}
+
+// TestNamespaceRootJoin documents that the "0::/" namespace-root case collapses
+// to cgroupRoot itself — the sidecar's own-namespaced-mount read path.
+func TestNamespaceRootJoin(t *testing.T) {
+	rel, ok := parseSelfCgroupV2("0::/")
+	require.True(t, ok)
+	assert.Equal(t, "/sys/fs/cgroup", filepath.Join(cgroupRoot, rel))
 }
 
 func TestParseCgroupMemValue(t *testing.T) {

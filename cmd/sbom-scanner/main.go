@@ -11,6 +11,7 @@ import (
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	otelmetrics "github.com/kubescape/node-agent/pkg/metricsmanager/otel"
 	"github.com/kubescape/node-agent/pkg/otelsetup"
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
 	pb "github.com/kubescape/node-agent/pkg/sbomscanner/v1/proto"
@@ -66,6 +67,11 @@ func main() {
 		if err := goruntime.Start(goruntime.WithMinimumReadMemStatsInterval(30 * time.Second)); err != nil {
 			logger.L().Warning("sbom-scanner: Go runtime metrics unavailable", helpers.Error(err))
 		}
+		// Per-process memory gauges (rss + cgroup usage/limit), same as the main
+		// agent. The sidecar mounts its own namespaced /sys/fs/cgroup (no host
+		// override), so the cgroup resolver reads the namespace root directly —
+		// no container ID needed.
+		otelmetrics.RegisterProcessMemoryMetrics(otelsetup.Meter(), "")
 	}
 
 	socketPath := os.Getenv("SOCKET_PATH")

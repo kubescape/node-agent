@@ -21,30 +21,13 @@ const cgroupRoot = "/sys/fs/cgroup"
 // host-level resource. Called once from NewOTELMetricsManager; panics on
 // instrument creation failure (same policy as mustCounter/mustGauge).
 func registerResourceMetrics(meter metric.Meter, containerCount *atomic.Int64, ownContainerID string) {
+	// Per-process memory gauges (rss + cgroup usage/limit) — shared with the
+	// sbom-scanner sidecar so both containers report the same memory signals.
+	RegisterProcessMemoryMetrics(meter, ownContainerID)
+
 	hostMemTotal := readHostMemTotalBytes()
 	hostCPUCount := int64(runtime.NumCPU())
 
-	rssGauge, err := meter.Int64ObservableGauge("node_agent.process.memory.rss_bytes",
-		metric.WithDescription("Process RSS (resident set size) from /proc/self/status"),
-		metric.WithUnit("By"),
-	)
-	if err != nil {
-		panic("otelmetrics: gauge node_agent.process.memory.rss_bytes: " + err.Error())
-	}
-	cgroupMemGauge, err := meter.Int64ObservableGauge("node_agent.process.memory.cgroup_bytes",
-		metric.WithDescription("Container memory usage from cgroupv2 memory.current or cgroupv1 memory.usage_in_bytes"),
-		metric.WithUnit("By"),
-	)
-	if err != nil {
-		panic("otelmetrics: gauge node_agent.process.memory.cgroup_bytes: " + err.Error())
-	}
-	cgroupLimitGauge, err := meter.Int64ObservableGauge("node_agent.process.memory.cgroup_limit_bytes",
-		metric.WithDescription("Container memory limit from cgroupv2 memory.max or cgroupv1 memory.limit_in_bytes (0 = unlimited). Pair with cgroup_bytes for OOM headroom."),
-		metric.WithUnit("By"),
-	)
-	if err != nil {
-		panic("otelmetrics: gauge node_agent.process.memory.cgroup_limit_bytes: " + err.Error())
-	}
 	hostMemGauge, err := meter.Int64ObservableGauge("node_agent.host.memory.total_bytes",
 		metric.WithDescription("Host total physical memory from /proc/meminfo MemTotal"),
 		metric.WithUnit("By"),
@@ -66,15 +49,53 @@ func registerResourceMetrics(meter metric.Meter, containerCount *atomic.Int64, o
 	}
 
 	_, _ = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
-		o.ObserveInt64(rssGauge, readProcessRSSBytes())
-		cur, lim := readCgroupMem(ownContainerID)
-		o.ObserveInt64(cgroupMemGauge, cur)
-		o.ObserveInt64(cgroupLimitGauge, lim)
 		o.ObserveInt64(hostMemGauge, hostMemTotal)
 		o.ObserveInt64(hostCPUGauge, hostCPUCount)
 		o.ObserveInt64(containerCountGauge, containerCount.Load())
 		return nil
-	}, rssGauge, cgroupMemGauge, cgroupLimitGauge, hostMemGauge, hostCPUGauge, containerCountGauge)
+	}, hostMemGauge, hostCPUGauge, containerCountGauge)
+}
+
+// RegisterProcessMemoryMetrics registers the per-process/per-container memory
+// gauges — rss_bytes, cgroup_bytes, cgroup_limit_bytes — on the given meter.
+// Both the main agent and the sbom-scanner sidecar call this so each container
+// reports its own memory usage and limit (distinguished downstream by
+// service.name). ownContainerID, when non-empty, lets the cgroup resolver find
+// the correct scope under a host-mounted cgroup tree (the main-agent topology);
+// pass "" for containers that mount their own namespaced /sys/fs/cgroup (the
+// sidecar), where a direct read of the namespace root works.
+//
+// MUST be called after otelsetup.InitProviders so the real MeterProvider is set.
+func RegisterProcessMemoryMetrics(meter metric.Meter, ownContainerID string) {
+	rssGauge, err := meter.Int64ObservableGauge("node_agent.process.memory.rss_bytes",
+		metric.WithDescription("Process RSS (resident set size) from /proc/self/status"),
+		metric.WithUnit("By"),
+	)
+	if err != nil {
+		panic("otelmetrics: gauge node_agent.process.memory.rss_bytes: " + err.Error())
+	}
+	cgroupMemGauge, err := meter.Int64ObservableGauge("node_agent.process.memory.cgroup_bytes",
+		metric.WithDescription("Container memory usage from cgroupv2 memory.current or cgroupv1 memory.usage_in_bytes"),
+		metric.WithUnit("By"),
+	)
+	if err != nil {
+		panic("otelmetrics: gauge node_agent.process.memory.cgroup_bytes: " + err.Error())
+	}
+	cgroupLimitGauge, err := meter.Int64ObservableGauge("node_agent.process.memory.cgroup_limit_bytes",
+		metric.WithDescription("Container memory limit from cgroupv2 memory.max or cgroupv1 memory.limit_in_bytes (0 = unlimited). Pair with cgroup_bytes for OOM headroom."),
+		metric.WithUnit("By"),
+	)
+	if err != nil {
+		panic("otelmetrics: gauge node_agent.process.memory.cgroup_limit_bytes: " + err.Error())
+	}
+
+	_, _ = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		o.ObserveInt64(rssGauge, readProcessRSSBytes())
+		cur, lim := readCgroupMem(ownContainerID)
+		o.ObserveInt64(cgroupMemGauge, cur)
+		o.ObserveInt64(cgroupLimitGauge, lim)
+		return nil
+	}, rssGauge, cgroupMemGauge, cgroupLimitGauge)
 }
 
 func readProcessRSSBytes() int64 {
@@ -135,8 +156,12 @@ func readCgroupMem(ownContainerID string) (current, limit int64) {
 //     /proc/self/cgroup is "0::/", and /proc/self/mountinfo is polluted with
 //     every other container's ID via shared mount propagation of /host.
 //  2. Join /proc/self/cgroup with the cgroup root; use it if memory.current
-//     exists there (cgroup namespace is the host's, or /sys/fs/cgroup is the
-//     container's own namespaced mount).
+//     exists there. This covers both the host cgroup namespace (rel is the full
+//     path) and a container's own namespaced /sys/fs/cgroup mount, where
+//     /proc/self/cgroup is "0::/" and the namespace root (cgroupRoot itself) is
+//     the container's own cgroup — the sbom-scanner sidecar topology. The main
+//     agent overrides /sys/fs/cgroup with the host tree, whose root has no
+//     memory.current, so this path no-ops there and strategy 1 wins.
 //  3. cgroupv1 fixed mount layout.
 func resolveCgroupMemoryPaths(ownContainerID string) (current, max string) {
 	if ownContainerID != "" {
@@ -144,8 +169,9 @@ func resolveCgroupMemoryPaths(ownContainerID string) (current, max string) {
 			return filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.max")
 		}
 	}
-	// cgroupv2 fast path.
-	if rel := parseSelfCgroupV2(readFileString("/proc/self/cgroup")); rel != "" {
+	// cgroupv2: join /proc/self/cgroup with the root. filepath.Join collapses
+	// the "0::/" namespace-root case to cgroupRoot itself.
+	if rel, ok := parseSelfCgroupV2(readFileString("/proc/self/cgroup")); ok {
 		dir := filepath.Join(cgroupRoot, rel)
 		if fileExists(filepath.Join(dir, "memory.current")) {
 			return filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.max")
@@ -158,19 +184,16 @@ func resolveCgroupMemoryPaths(ownContainerID string) (current, max string) {
 	return "", ""
 }
 
-// parseSelfCgroupV2 returns the cgroup v2 relative path from the "0::<path>"
-// line of /proc/self/cgroup, or "" if absent or at the namespace root ("/").
-func parseSelfCgroupV2(content string) string {
+// parseSelfCgroupV2 returns the cgroup v2 path from the "0::<path>" line of
+// /proc/self/cgroup and ok=true when that line is present (path may be "/", the
+// namespace root). ok=false means no cgroupv2 line (e.g. cgroupv1-only).
+func parseSelfCgroupV2(content string) (string, bool) {
 	for _, line := range strings.Split(content, "\n") {
 		if strings.HasPrefix(line, "0::") {
-			rel := strings.TrimPrefix(line, "0::")
-			if rel == "/" {
-				return ""
-			}
-			return rel
+			return strings.TrimPrefix(line, "0::"), true
 		}
 	}
-	return ""
+	return "", false
 }
 
 // findCgroupScopeDir walks the cgroup tree for a "*<id>*.scope" directory.
