@@ -167,29 +167,36 @@ func extractExecsPaths(cp *v1beta1.ContainerProfile) []string {
 	return paths
 }
 
-// extractExecsByPath builds the path → args map used by exec-args
-// matchers (e.g. dynamicpathdetector.CompareExecArgs in node-agent#807).
-// Multiple ExecCalls entries with the same Path collapse to the last
-// seen. nil-Args entries are stored as empty slices; downstream
-// matchers distinguish "absent key" (path not in the profile at all)
-// from "present with empty slice" (path captured but ran with no args).
+// extractExecsByPath builds the path → []argv-vectors map used by
+// exec-args matchers (e.g. dynamicpathdetector.CompareExecArgs in
+// node-agent#807). Multiple ExecCalls entries with the same Path
+// APPEND to the per-path list — overlay merge in
+// mergeApplicationProfile (storage) legitimately produces several
+// ExecCalls per path, each with a distinct argv shape, and the
+// consumer must accept any of them (matthyx review on PR #807,
+// 2026-05-28).
+//
+// nil-Args entries are stored as empty-but-non-nil slices so the
+// downstream matcher distinguishes "present with empty args" (a
+// deliberate must-be-empty constraint) from "absent" (no key).
 //
 // Args slices are CLONED rather than aliased — Apply is contract-bound
 // to be a pure transform, and an alias would let consumers mutate the
 // source profile by editing the projected map.
-func extractExecsByPath(cp *v1beta1.ContainerProfile) map[string][]string {
+func extractExecsByPath(cp *v1beta1.ContainerProfile) map[string][][]string {
 	if len(cp.Spec.Execs) == 0 {
 		return nil
 	}
-	m := make(map[string][]string, len(cp.Spec.Execs))
+	m := make(map[string][][]string, len(cp.Spec.Execs))
 	for _, e := range cp.Spec.Execs {
+		var entry []string
 		if e.Args == nil {
-			m[e.Path] = []string{}
-			continue
+			entry = []string{}
+		} else {
+			entry = make([]string, len(e.Args))
+			copy(entry, e.Args)
 		}
-		cloned := make([]string, len(e.Args))
-		copy(cloned, e.Args)
-		m[e.Path] = cloned
+		m[e.Path] = append(m[e.Path], entry)
 	}
 	return m
 }
