@@ -72,7 +72,7 @@ jobs:
           Test_22_AlertOnPartialNetworkProfileTest,
           Test_23_RuleCooldownTest,
           Test_24_ProcessTreeDepthTest,
-          Test_27_ApplicationProfileOpens # for PRs 807 this is the only component test to add
+          Test_32_UnexpectedProcessArguments
         ]
     steps:
       - name: Checkout code
