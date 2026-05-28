@@ -37,8 +37,11 @@ type NodeProfileManager struct {
 }
 
 func NewNodeProfileManager(config config.Config, clusterData armometadata.ClusterConfig, nodeName string, k8sObjectCache objectcache.K8sObjectCache, ruleManager rulemanager.RuleManagerClient, cloudMetadata *armotypes.CloudMetadata) *NodeProfileManager {
+	// Keep the 5s default when timeoutSeconds is unset (0): a zero http.Client
+	// Timeout means no timeout, which lets a hung POST block the sequential
+	// send loop for hours (observed via the nodeprofile.send span).
 	timeoutSeconds := 5
-	if config.Exporters.HTTPExporterConfig != nil {
+	if config.Exporters.HTTPExporterConfig != nil && config.Exporters.HTTPExporterConfig.TimeoutSeconds > 0 {
 		timeoutSeconds = config.Exporters.HTTPExporterConfig.TimeoutSeconds
 	}
 	return &NodeProfileManager{
