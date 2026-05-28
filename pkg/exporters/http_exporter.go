@@ -14,6 +14,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	"github.com/kubescape/go-logger"
@@ -73,6 +74,7 @@ type HTTPExporter struct {
 	cloudMetadata       *armotypes.CloudMetadata
 	bulkManager         *AlertBulkManager
 	alertSourcePlatform armotypes.AlertSourcePlatform
+	metrics             metricsmanager.MetricsManager
 }
 
 type alertMetrics struct {
@@ -96,9 +98,14 @@ type HTTPAlertsListSpec struct {
 }
 
 // NewHTTPExporter creates a new HTTPExporter instance
-func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *armotypes.CloudMetadata, clusterUID string, alertSourcePlatform armotypes.AlertSourcePlatform) (*HTTPExporter, error) {
+func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *armotypes.CloudMetadata, clusterUID string, alertSourcePlatform armotypes.AlertSourcePlatform, metricsOpt ...metricsmanager.MetricsManager) (*HTTPExporter, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	var metrics metricsmanager.MetricsManager = metricsmanager.NewMetricsNoop()
+	if len(metricsOpt) > 0 && metricsOpt[0] != nil {
+		metrics = metricsOpt[0]
 	}
 
 	exporter := &HTTPExporter{
@@ -112,6 +119,7 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		alertMetrics:        &alertMetrics{},
 		cloudMetadata:       cloudMetadata,
 		alertSourcePlatform: alertSourcePlatform,
+		metrics:             metrics,
 	}
 
 	// Initialize bulk manager if bulking is enabled
@@ -171,6 +179,7 @@ func (config *HTTPExporterConfig) Validate() error {
 func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	// Check if alert limit is reached first
 	if e.shouldSendLimitAlert() {
+		e.metrics.ReportAlertSuppressed(failedRule.GetRuleId(), "rate_limit")
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
 		defer cancel()
 		if err := e.sendAlertLimitReached(ctx); err != nil {
@@ -191,7 +200,7 @@ func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	defer cancel()
 
 	if err := e.sendRuleAlertWithContext(ctx, failedRule); err != nil {
-		logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send rule alert", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("HTTPExporter.SendRuleAlert - failed to send rule alert", helpers.Error(err))
 	}
 }
 
@@ -199,6 +208,7 @@ func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 func (e *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	// Check if alert limit is reached first
 	if e.shouldSendLimitAlert() {
+		e.metrics.ReportAlertSuppressed(malwareRuleID, "rate_limit")
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
 		defer cancel()
 		if err := e.sendAlertLimitReached(ctx); err != nil {
@@ -229,7 +239,7 @@ func (e *HTTPExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	defer cancel()
 
 	if err := e.sendFimAlertsWithContext(ctx, fimEvents); err != nil {
-		logger.L().Warning("HTTPExporter.SendFimAlerts - failed to send FIM alerts", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("HTTPExporter.SendFimAlerts - failed to send FIM alerts", helpers.Error(err))
 	}
 }
 
@@ -506,7 +516,7 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		},
 	}
 
-	logger.L().Warning("Alert limit reached",
+	logger.L().Ctx(ctx).Warning("Alert limit reached",
 		helpers.Int("alerts", e.alertMetrics.count),
 		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 

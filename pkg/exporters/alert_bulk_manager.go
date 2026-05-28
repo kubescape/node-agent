@@ -424,7 +424,7 @@ func (abm *AlertBulkManager) processSendQueueItem(item *bulkQueueItem) {
 
 		// Failed - check if should retry
 		if item.retryCount >= abm.maxRetries {
-			logger.L().Error("Bulk send failed after max retries",
+			logger.L().Ctx(context.Background()).Error("Bulk send failed after max retries",
 				helpers.String("containerID", item.containerID),
 				helpers.Int("alertCount", len(item.alerts)),
 				helpers.Int("retries", item.retryCount),
@@ -493,7 +493,7 @@ func (abm *AlertBulkManager) drainSendQueue() {
 			case abm.sendQueue <- item:
 				// Enqueued successfully
 			default:
-				logger.L().Warning("Queue full during drain, dropping bulk",
+				logger.L().Ctx(context.Background()).Warning("Queue full during drain, dropping bulk",
 					helpers.String("containerID", containerID),
 					helpers.Int("alertCount", len(alerts)))
 			}
@@ -516,7 +516,7 @@ func (abm *AlertBulkManager) drainSendQueue() {
 		case <-timeout:
 			remaining := len(abm.sendQueue)
 			if remaining > 0 {
-				logger.L().Warning("Timeout draining send queue",
+				logger.L().Ctx(context.Background()).Warning("Timeout draining send queue",
 					helpers.Int("remainingItems", remaining))
 			}
 			return

@@ -86,14 +86,48 @@ These environment variables are read directly (not through config file):
 | `CONFIG_DIR` | Configuration directory path | No (default: `/etc/config`) |
 | `SKIP_KERNEL_VERSION_CHECK` | Skip kernel validation | No |
 | `ENABLE_PROFILER` | Enable pprof on port 6060 | No |
-| `OTEL_COLLECTOR_SVC` | OpenTelemetry collector (e.g., `otel-collector:4317`) | No |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (e.g., `otel.armosec.io:4317`). When unset, all telemetry is silently discarded (no-op). | No |
+| `OTEL_METRICS_EXPORTER` | Metrics exporter: `otlp` (push to collector) or `prometheus` (expose `:8080/metrics`). Defaults to `otlp` when endpoint is set, `none` otherwise. | No |
+| `OTEL_TRACES_EXPORTER` | Traces exporter: `otlp` or `none`. Defaults to `otlp` when endpoint is set, `none` otherwise. | No |
+| `OTEL_SLOW_EVAL_THRESHOLD_MS` | Rule evaluations exceeding this threshold (ms) emit a trace span. Default: `5`. | No |
+| `OTEL_DEBUG_PORT` | Port for the debug listener when `KS_LOGGER_LEVEL=debug`. Default: `6062`. | No |
+| `OTEL_COLLECTOR_SVC` | **Deprecated** — alias for `OTEL_EXPORTER_OTLP_ENDPOINT`. Will be removed in a future release. | No |
 | `PYROSCOPE_SERVER_SVC` | Pyroscope server address | No |
 | `APPLICATION_NAME` | Application name for Pyroscope | No (default: `node-agent`) |
 | `RELEASE` | Release version for telemetry | No |
+| `KS_LOGGER_LEVEL` | Log level: `debug`, `info`, `warning`, `error`. Default: `info`. When `debug`, enables the ring-buffer flush endpoint. | No |
+| `KS_LOGGER_NAME` | Logger output format: `zap` (structured JSON) or `pretty` (human-readable). Default: `zap`. | No |
 | `MULTIPLY` | Enable pod multiplication (testing) | No |
 | `QUEUE_DIR` | Directory for persistent queue | No |
 | `MAX_QUEUE_SIZE` | Maximum queue size | No |
 | `TEST_NAMESPACE` | Override namespace in tests | No |
+
+### OTEL Notes
+
+**Authentication headers:** When credentials are present in `/etc/credentials` (or via `ACCOUNT_ID` /
+`ACCESS_KEY` env vars), `X-API-Key` and `X-Customer-GUID` gRPC metadata headers are injected for every
+outbound OTLP RPC, regardless of endpoint hostname. This applies to any collector — ARMO back office,
+self-hosted, or otherwise. Credentials are read once at startup; agent restart is required if credentials
+are rotated at runtime (known v1 limitation).
+
+**Ring buffer (retroactive log export):** When `KS_LOGGER_LEVEL=debug`, the agent keeps the last
+7,500 log records in memory and activates a flush endpoint at `localhost:6062/debug/flush-ring-buffer`
+(port configurable via `OTEL_DEBUG_PORT`). A `POST` to that endpoint re-emits all buffered records
+through the OTLP log pipeline — useful for recovering startup logs that were emitted before the OTLP
+exporter finished connecting. The ring buffer is cleared after flushing; a second call emits nothing.
+
+**Kubernetes event correlation — cross-repo dependency (operator PR, not yet implemented)**
+
+K8s events (OOMKilled, Evicted, CrashLoopBackOff, NodeMemoryPressure, pod rescheduling) are collected
+by the **operator**, which runs once per cluster and pushes OTLP logs to `otel.armosec.io:4317` using
+the same API credentials. Correlation is automatic via shared `k8s.node.name`, `k8s.pod.name`,
+`k8s.namespace.name` resource attributes — no node-agent configuration change required.
+
+Until the operator PR ships, node-agent ACs 1–9 are independent and all pass without K8s event
+correlation. The ARMO back office dashboard renders correctly using node-agent signals only; K8s event
+correlation is an upgrade, not a dependency.
+
+---
 
 ## Configuration File Options
 

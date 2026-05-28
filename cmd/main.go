@@ -4,11 +4,11 @@ import (
 	"context"
 	"net/http"
 	_ "net/http/pprof"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
@@ -38,8 +38,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/hostsensormanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
-	"github.com/kubescape/node-agent/pkg/metricsmanager"
-	metricprometheus "github.com/kubescape/node-agent/pkg/metricsmanager/prometheus"
+	otelmetrics "github.com/kubescape/node-agent/pkg/metricsmanager/otel"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	networkstreamv1 "github.com/kubescape/node-agent/pkg/networkstream/v1"
 	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
@@ -49,6 +48,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/dnscache"
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
@@ -70,6 +70,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/validator"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
+	goruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func main() {
@@ -99,14 +101,35 @@ func main() {
 		logger.L().Info("credentials loaded", helpers.Int("accountLength", len(credentials.Account)))
 	}
 
-	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
-	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
-		ctx = logger.InitOtel("node-agent",
-			os.Getenv("RELEASE"),
-			clusterData.AccountID,
-			clusterData.ClusterName,
-			url.URL{Host: otelHost})
-		defer logger.ShutdownOtel(ctx)
+	otelShutdown, err := otelsetup.InitProviders(ctx, otelsetup.ProviderConfig{
+		ServiceName:    "node-agent",
+		ServiceVersion: os.Getenv("RELEASE"),
+		NodeName:       cfg.NodeName,
+		PodName:        cfg.PodName,
+		Namespace:      cfg.NamespaceName,
+		ClusterName:    clusterData.ClusterName,
+		AccountID:      clusterData.AccountID,
+		AccessKey:      accessKey,
+	})
+	if err != nil {
+		logger.L().Warning("OTEL init failed, running without telemetry", helpers.Error(err))
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if otelShutdown != nil {
+			_ = otelShutdown(shutdownCtx)
+		}
+	}()
+
+	// Emit Go runtime metrics only when metrics collection is configured;
+	// avoids ~2–3 KB/hr of metric volume for deployments without telemetry.
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" ||
+		os.Getenv("OTEL_METRICS_EXPORTER") != "" ||
+		os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != "" {
+		if err := goruntime.Start(goruntime.WithMinimumReadMemStatsInterval(30 * time.Second)); err != nil {
+			logger.L().Warning("node-agent: Go runtime metrics unavailable", helpers.Error(err))
+		}
 	}
 
 	// Check if we need to validate the kernel version.
@@ -174,13 +197,11 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
 
-	// Create Prometheus metrics exporter
-	var prometheusExporter metricsmanager.MetricsManager
-	if cfg.EnablePrometheusExporter {
-		prometheusExporter = metricprometheus.NewPrometheusMetric()
-	} else {
-		prometheusExporter = metricsmanager.NewMetricsNoop()
-	}
+	// Create metrics provider (OTEL SDK; Prometheus scrape endpoint started by otelsetup
+	// when OTEL_METRICS_EXPORTER=prometheus; OTLP push when OTEL_EXPORTER_OTLP_ENDPOINT set).
+	// MUST be constructed after otelsetup.InitProviders() so the global MeterProvider is set.
+	// Always use the OTEL impl — the SDK's own no-op providers handle the "no endpoint" case.
+	metricsProvider := otelmetrics.NewOTELMetricsManager(resolveOwnContainerID(ctx, k8sClient))
 
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.GetStorageClient(), cfg.SkipNamespace)
@@ -290,13 +311,13 @@ func main() {
 
 	if cfg.EnableRuntimeDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider)
 		dWatcher.AddAdaptor(ruleBindingCache)
 
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
-		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, prometheusExporter)
+		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, metricsProvider)
 		cpc.Start(ctx)
 		if cpm, ok := containerProfileManager.(*containerprofilemanagerv1.ContainerProfileManager); ok {
 			cpm.SetCompletionNotifier(cpc)
@@ -312,7 +333,7 @@ func main() {
 
 		adapterFactory := ruleadapters.NewEventRuleAdapterFactory()
 
-		celEvaluator, err := cel.NewCEL(objCache, cfg, prometheusExporter)
+		celEvaluator, err := cel.NewCEL(objCache, cfg, metricsProvider)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating CEL evaluator", helpers.Error(err))
 		}
@@ -321,7 +342,7 @@ func main() {
 
 		// create runtimeDetection managers
 		agentVersion := os.Getenv("AGENT_VERSION")
-		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory, celEvaluator, mntnsRegistry, agentVersion)
+		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, metricsProvider, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory, celEvaluator, mntnsRegistry, agentVersion)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -357,8 +378,8 @@ func main() {
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent)
-		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, prometheusExporter, k8sObjectCache)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider)
+		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, metricsProvider, k8sObjectCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
 		}
@@ -406,7 +427,7 @@ func main() {
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient
 	if cfg.EnableSbomGeneration {
-		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache, scannerClient, failureReporter)
+		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache, scannerClient, failureReporter, metricsProvider)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
 		}
@@ -419,7 +440,7 @@ func main() {
 	if cfg.EnableFIM {
 		// Initialize FIM-specific exporters
 		fimExportersConfig := cfg.FIM.GetFIMExportersConfig()
-		fimExporter := exporters.InitExporters(fimExportersConfig, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent)
+		fimExporter := exporters.InitExporters(fimExportersConfig, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider)
 
 		fimManager, err = fimmanager.NewFIMManager(cfg, clusterData.ClusterName, fimExporter, cloudMetadata)
 		if err != nil {
@@ -434,7 +455,7 @@ func main() {
 
 	// Create the container handler
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
-		igK8sClient, dnsManagerClient, prometheusExporter, ruleManager,
+		igK8sClient, dnsManagerClient, metricsProvider, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil,
 		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, thirdPartyTracers)
 	if err != nil {
@@ -448,8 +469,8 @@ func main() {
 	// Start the networkStream
 	networkStreamClient.Start()
 
-	// Start the prometheusExporter
-	prometheusExporter.Start()
+	// Start the metrics provider
+	metricsProvider.Start()
 
 	// Start the host sensor manager
 	if err = hostSensorManager.Start(ctx); err != nil {
@@ -503,16 +524,42 @@ func main() {
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 	sig := <-shutdown
 
-	// Exit with success
 	switch sig {
 	case os.Interrupt:
 		logger.L().Info("Received interrupt signal")
-		os.Exit(utils.ExitCodeSuccess)
 	case syscall.SIGTERM:
 		logger.L().Info("Received SIGTERM signal")
-		os.Exit(utils.ExitCodeSuccess)
 	default:
 		logger.L().Info("Received unknown signal")
-		os.Exit(utils.ExitCodeError)
 	}
+	// Return normally so deferred OTEL shutdown flushes traces/metrics/logs.
+}
+
+// resolveOwnContainerID returns node-agent's own container ID via the k8s API
+// (using the Downward-API POD_NAME / NAMESPACE_NAME env), or "" if it cannot be
+// determined. The cgroup memory gauges use it to locate the correct container
+// scope in the host-mounted cgroup tree; "" makes them fall back to /proc-based
+// resolution. Best-effort: a failure here only degrades those gauges.
+func resolveOwnContainerID(ctx context.Context, k8sClient *k8sinterface.KubernetesApi) string {
+	const containerName = "node-agent"
+	podName, namespace := os.Getenv("POD_NAME"), os.Getenv("NAMESPACE_NAME")
+	if podName == "" || namespace == "" {
+		return ""
+	}
+	pod, err := k8sClient.GetKubernetesClient().CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		logger.L().Warning("resolveOwnContainerID - failed to get own pod, cgroup memory gauges will fall back",
+			helpers.Error(err), helpers.String("pod", podName), helpers.String("namespace", namespace))
+		return ""
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name == containerName {
+			// ContainerID is "<runtime>://<id>", e.g. "containerd://9103ee5f..."
+			if i := strings.LastIndex(cs.ContainerID, "/"); i >= 0 {
+				return cs.ContainerID[i+1:]
+			}
+			return cs.ContainerID
+		}
+	}
+	return ""
 }

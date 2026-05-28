@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"runtime/pprof"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -32,11 +34,15 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	corev1 "k8s.io/api/core/v1"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -64,6 +70,8 @@ type RuleManager struct {
 	rulePolicyValidator  *RulePolicyValidator
 	mntnsRegistry        contextdetection.Registry
 	detectorManager      *detectors.DetectorManager
+	alertLogDedup        *expirable.LRU[string, struct{}]
+	alertLogDedupMu      sync.Mutex
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -107,6 +115,7 @@ func CreateRuleManager(
 		rulePolicyValidator: rulePolicyValidator,
 		mntnsRegistry:       mntnsRegistry,
 		detectorManager:     detectorManager,
+		alertLogDedup:       expirable.NewLRU[string, struct{}](1000, nil, 60*time.Second),
 	}
 
 	// Compile the initial projection spec and start a goroutine that
@@ -293,6 +302,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	}
 
 	if len(rules) == 0 {
+		rm.metrics.ReportAlertSuppressed("", "no_rules_for_pod")
 		return
 	}
 
@@ -324,6 +334,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		// Skip profile dependency checks for non-K8s contexts (profiles are K8s-specific)
 		// Only K8s contexts should enforce profile dependencies
 		if isK8sContext && !profileExists && rule.ProfileDependency == armotypes.Required {
+			rm.metrics.ReportAlertSuppressed(rule.ID, "profile_incomplete")
 			continue
 		}
 
@@ -338,12 +349,13 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				eventFields = extractEventFields(enrichedEvent.Event)
 			}
 			if rule.Prefilter.ShouldSkip(&eventFields) {
-				rm.metrics.ReportRulePrefiltered(rule.Name)
+				rm.metrics.ReportRulePrefiltered(rule.ID)
 				continue
 			}
 		}
 
 		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
+			rm.metrics.ReportAlertSuppressed(rule.ID, "policy")
 			continue
 		}
 
@@ -358,10 +370,33 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
 		})
 		evaluationTime := time.Since(startTime)
-		rm.metrics.ReportRuleEvaluationTime(rule.Name, eventType, evaluationTime)
+		// Slow-path tracing: only emit a span when evaluation exceeded the threshold.
+		// This protects the hot path from unconditional tracing overhead on millions of events/sec.
+		// errCtx tracks the spanned context (when a rule.evaluate span fires) so the
+		// failure log below inherits its trace_id/span_id — otherwise falls back to rm.ctx.
+		errCtx := rm.ctx
+		if evaluationTime >= otelsetup.SlowEvalThreshold() {
+			evalCtx, span := otelsetup.Tracer().Start(rm.ctx, "rule.evaluate",
+				trace.WithAttributes(
+					attribute.String("rule.id", rule.ID),
+					attribute.String("event.type", string(eventType)),
+					attribute.String("container.id", enrichedEvent.ContainerID),
+					attribute.Float64("eval.duration_ms", float64(evaluationTime.Milliseconds())),
+					attribute.Bool("alert_fired", shouldAlert),
+				))
+			if err != nil {
+				span.SetStatus(codes.Error, err.Error())
+			}
+			rm.metrics.ReportRuleEvaluationTime(evalCtx, rule.ID, eventType, evaluationTime)
+			span.End()
+			errCtx = evalCtx
+		} else {
+			rm.metrics.ReportRuleEvaluationTime(rm.ctx, rule.ID, eventType, evaluationTime)
+		}
 
 		if err != nil {
-			logger.L().Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
+			logger.L().Ctx(errCtx).Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
+			rm.metrics.ReportAlertSuppressed(rule.ID, "eval_error")
 			continue
 		}
 
@@ -370,7 +405,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			if eventType == utils.HTTPEventType { // TODO: Manage state evaluation in a better way (this is abuse of the state map, we need a better way to pass payloads from rules.)
 				state = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
 			}
-			rm.metrics.ReportRuleAlert(rule.Name)
+			rm.metrics.ReportRuleAlert(rule.ID)
 			message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
@@ -378,7 +413,45 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
+				rm.metrics.ReportAlertSuppressed(rule.ID, "cooldown")
 				continue
+			}
+
+			// Emit OTEL log after cooldown so suppressed alerts are not recorded.
+			// Dedup key includes eventType to avoid collapsing distinct alert types.
+			dedupKey := rule.ID + "|" + enrichedEvent.ContainerID + "|" + string(eventType)
+			rm.alertLogDedupMu.Lock()
+			alreadySeen := rm.alertLogDedup.Contains(dedupKey)
+			if !alreadySeen {
+				rm.alertLogDedup.Add(dedupKey, struct{}{})
+			}
+			rm.alertLogDedupMu.Unlock()
+			if !alreadySeen {
+				var image, containerName string
+				if enrichable, ok := enrichedEvent.Event.(utils.EnrichEvent); ok {
+					image = enrichable.GetContainerImage()
+					containerName = enrichable.GetContainer()
+				}
+				alertCtx, alertSpan := otelsetup.Tracer().Start(rm.ctx, "rule.alert",
+					trace.WithAttributes(
+						attribute.String("rule.id", rule.ID),
+						attribute.String("rule.name", rule.Name),
+						attribute.String("k8s.namespace.name", namespace),
+						attribute.String("k8s.pod.name", pod),
+						attribute.String("container.id", enrichedEvent.ContainerID),
+						attribute.String("event.type", string(eventType)),
+					))
+				otelsetup.EmitAlertLogRecord(alertCtx, otelsetup.AlertLogAttrs{
+					RuleID:        rule.ID,
+					AlertType:     rule.Name,
+					ContainerID:   enrichedEvent.ContainerID,
+					ContainerName: containerName,
+					Namespace:     namespace,
+					PodName:       pod,
+					Image:         image,
+					EventType:     string(eventType),
+				})
+				alertSpan.End()
 			}
 
 			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum, state)
@@ -394,7 +467,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			ruleFailure.SetWorkloadDetails(details)
 			rm.exporter.SendRuleAlert(ruleFailure)
 		}
-		rm.metrics.ReportRuleProcessed(rule.Name)
+		rm.metrics.ReportRuleProcessed(rule.ID)
 	}
 }
 
@@ -491,10 +564,10 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
 		})
 		evaluationTime := time.Since(startTime)
-		rm.metrics.ReportRuleEvaluationTime(rule.ID, eventType, evaluationTime)
+		rm.metrics.ReportRuleEvaluationTime(rm.ctx, rule.ID, eventType, evaluationTime)
 
 		if err != nil {
-			logger.L().Error("RuleManager.EvaluatePolicyRulesForEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
+			logger.L().Ctx(rm.ctx).Error("RuleManager.EvaluatePolicyRulesForEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
 			continue
 		}
 
@@ -534,11 +607,11 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.Eve
 func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent, rule typesv1.Rule) (string, string, error) {
 	message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
 	if err != nil {
-		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
+		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
 	uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
 	if err != nil {
-		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
+		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}
 
 	uniqueID = hashStringToMD5(uniqueID)

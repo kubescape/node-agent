@@ -1,6 +1,7 @@
 package metricsmanager
 
 import (
+	"context"
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -15,7 +16,7 @@ type MetricsManager interface {
 	ReportRuleProcessed(ruleID string)
 	ReportRulePrefiltered(ruleName string)
 	ReportRuleAlert(ruleID string)
-	ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration)
+	ReportRuleEvaluationTime(ctx context.Context, ruleID string, eventType utils.EventType, duration time.Duration)
 	//ReportEbpfStats(stats *top.Event[toptypes.Stats])
 	ReportContainerStart()
 	ReportContainerStop()
@@ -48,4 +49,13 @@ type MetricsManager interface {
 	ObserveProfileEntriesRaw(field string, count float64)
 	ObserveProfileEntriesRetained(field string, count float64)
 	ObserveProfileRetentionRatio(field string, ratio float64)
+
+	// SBOM scan metrics.
+	ReportSBOMScan(status string)
+	ObserveSBOMScanDuration(status string, d time.Duration)
+	ReportSBOMScannerRestart()
+	SetSBOMScannerReady(ready bool)
+
+	// Alert suppression funnel — counts how many alerts were dropped and why.
+	ReportAlertSuppressed(ruleID, reason string)
 }

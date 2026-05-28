@@ -1,6 +1,7 @@
 package metricsmanager
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 
@@ -52,7 +53,7 @@ func (m *MetricsMock) ReportRuleAlert(ruleID string) {
 	m.RuleAlertCounter.Set(ruleID, m.RuleAlertCounter.Get(ruleID)+1)
 }
 
-func (m *MetricsMock) ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration) {
+func (m *MetricsMock) ReportRuleEvaluationTime(_ context.Context, ruleID string, eventType utils.EventType, duration time.Duration) {
 	key := ruleID + ":" + string(eventType)
 	m.RuleEvaluationTime.Set(key, duration)
 }
@@ -89,3 +90,8 @@ func (m *MetricsMock) ObserveProfileProjectedSize(_ float64)             {}
 func (m *MetricsMock) ObserveProfileEntriesRaw(_ string, _ float64)     {}
 func (m *MetricsMock) ObserveProfileEntriesRetained(_ string, _ float64) {}
 func (m *MetricsMock) ObserveProfileRetentionRatio(_ string, _ float64)  {}
+func (m *MetricsMock) ReportSBOMScan(_ string)                           {}
+func (m *MetricsMock) ObserveSBOMScanDuration(_ string, _ time.Duration) {}
+func (m *MetricsMock) ReportSBOMScannerRestart()                         {}
+func (m *MetricsMock) SetSBOMScannerReady(_ bool)                        {}
+func (m *MetricsMock) ReportAlertSuppressed(_, _ string)                 {}

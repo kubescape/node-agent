@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	gort "runtime"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -14,9 +15,13 @@ import (
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/sbommanager/v1/syftutil"
 	pb "github.com/kubescape/node-agent/pkg/sbomscanner/v1/proto"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
@@ -71,7 +76,29 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 		cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 	}
 
-	syftSBOM, err := syft.CreateSBOM(ctx, src, cfg)
+	var memBefore, memAfter gort.MemStats
+	gort.ReadMemStats(&memBefore)
+
+	scanCtx, scanSpan := otelsetup.Tracer().Start(ctx, "sbom.scan",
+		trace.WithAttributes(
+			attribute.String("image.tag", req.ImageTag),
+			attribute.String("image.id", req.ImageId),
+		))
+	syftSBOM, err := syft.CreateSBOM(scanCtx, src, cfg)
+	gort.ReadMemStats(&memAfter)
+	// TotalAlloc is monotonically increasing (cumulative bytes allocated),
+	// so the delta is always ≥ 0 even when GC runs mid-scan.
+	totalBefore := float64(memBefore.TotalAlloc) / (1024 * 1024)
+	totalAfter := float64(memAfter.TotalAlloc) / (1024 * 1024)
+	scanSpan.SetAttributes(
+		attribute.Float64("alloc.total.before_mb", totalBefore),
+		attribute.Float64("alloc.total.after_mb", totalAfter),
+		attribute.Float64("alloc.total.delta_mb", totalAfter-totalBefore),
+	)
+	if err != nil {
+		scanSpan.SetStatus(otelcodes.Error, err.Error())
+	}
+	scanSpan.End()
 	if err != nil {
 		if ctx.Err() == context.Canceled {
 			return nil, status.Error(codes.Canceled, "scan canceled")

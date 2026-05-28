@@ -1,6 +1,7 @@
 package metricsmanager
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -92,6 +93,15 @@ type PrometheusMetric struct {
 	cpProfileEntriesRawHistogram      *prometheus.HistogramVec
 	cpProfileEntriesRetainedHistogram *prometheus.HistogramVec
 	cpProfileRetentionRatioHistogram  *prometheus.HistogramVec
+
+	// SBOM scan metrics
+	sbomScanCounter  *prometheus.CounterVec
+	sbomScanDuration *prometheus.HistogramVec
+	sbomRestarts     prometheus.Counter
+	sbomReady        prometheus.Gauge
+
+	// Alert suppression funnel
+	alertSuppressedCounter *prometheus.CounterVec
 
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache          map[string]prometheus.Counter
@@ -348,6 +358,29 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Buckets: []float64{0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0},
 		}, []string{"field"}),
 
+		// SBOM scan metrics
+		sbomScanCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "sbom_scan_total",
+			Help: "Total SBOM scan attempts",
+		}, []string{"status"}),
+		alertSuppressedCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "node_agent_alert_suppressed_total",
+			Help: "Total alerts suppressed before delivery, labeled by rule_id and reason",
+		}, []string{prometheusRuleIdLabel, "reason"}),
+		sbomScanDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "sbom_scan_duration_seconds",
+			Help:    "SBOM scan duration in seconds",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 12),
+		}, []string{"status"}),
+		sbomRestarts: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "sbom_scanner_restarts_total",
+			Help: "Total number of SBOM scanner sidecar restarts detected via connection loss",
+		}),
+		sbomReady: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "sbom_scanner_ready",
+			Help: "Whether the SBOM scanner sidecar is connected and healthy (1=ready, 0=not ready)",
+		}),
+
 		// Initialize counter caches
 		ruleCounterCache:            make(map[string]prometheus.Counter),
 		rulePrefilteredCounterCache: make(map[string]prometheus.Counter),
@@ -420,6 +453,11 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.programMapCountGauge)
 	prometheus.Unregister(p.programCpuUsageGauge)
 	prometheus.Unregister(p.programPerCpuUsageGauge)
+	prometheus.Unregister(p.sbomScanCounter)
+	prometheus.Unregister(p.alertSuppressedCounter)
+	prometheus.Unregister(p.sbomScanDuration)
+	prometheus.Unregister(p.sbomRestarts)
+	prometheus.Unregister(p.sbomReady)
 }
 
 func (p *PrometheusMetric) ReportEvent(eventType utils.EventType) {
@@ -544,7 +582,7 @@ func (p *PrometheusMetric) ReportRuleAlert(ruleID string) {
 	p.getCachedAlertCounter(ruleID).Inc()
 }
 
-func (p *PrometheusMetric) ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration) {
+func (p *PrometheusMetric) ReportRuleEvaluationTime(_ context.Context, ruleID string, eventType utils.EventType, duration time.Duration) {
 	labels := prometheus.Labels{
 		prometheusRuleIdLabel: ruleID,
 		eventTypeLabel:        string(eventType),
@@ -669,4 +707,28 @@ func (p *PrometheusMetric) ObserveProfileEntriesRetained(field string, count flo
 }
 func (p *PrometheusMetric) ObserveProfileRetentionRatio(field string, ratio float64) {
 	p.cpProfileRetentionRatioHistogram.WithLabelValues(field).Observe(ratio)
+}
+
+func (p *PrometheusMetric) ReportSBOMScan(status string) {
+	p.sbomScanCounter.WithLabelValues(status).Inc()
+}
+
+func (p *PrometheusMetric) ObserveSBOMScanDuration(status string, d time.Duration) {
+	p.sbomScanDuration.WithLabelValues(status).Observe(d.Seconds())
+}
+
+func (p *PrometheusMetric) ReportSBOMScannerRestart() {
+	p.sbomRestarts.Inc()
+}
+
+func (p *PrometheusMetric) SetSBOMScannerReady(ready bool) {
+	if ready {
+		p.sbomReady.Set(1)
+	} else {
+		p.sbomReady.Set(0)
+	}
+}
+
+func (p *PrometheusMetric) ReportAlertSuppressed(ruleID, reason string) {
+	p.alertSuppressedCounter.WithLabelValues(ruleID, reason).Inc()
 }

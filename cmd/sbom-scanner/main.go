@@ -1,48 +1,30 @@
 package main
 
 import (
-	"net"
+	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
+	beUtils "github.com/kubescape/backend/pkg/utils"
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
-	pb "github.com/kubescape/node-agent/pkg/sbomscanner/v1/proto"
-	"google.golang.org/grpc"
 	_ "modernc.org/sqlite"
 )
 
 func main() {
-	socketPath := os.Getenv("SOCKET_PATH")
-	if socketPath == "" {
-		socketPath = "/sbom-comm/scanner.sock"
+	ctx := context.Background()
+
+	// Load ARMO credentials from /etc/credentials (same source as the main agent).
+	// Fall back to env vars so the binary stays functional in non-ARMO deployments.
+	accountID := os.Getenv("ACCOUNT_ID")
+	accessKey := os.Getenv("ACCESS_KEY")
+	if creds, err := beUtils.LoadCredentialsFromFile("/etc/credentials"); err == nil {
+		if creds.Account != "" {
+			accountID = creds.Account
+		}
+		if creds.AccessKey != "" {
+			accessKey = creds.AccessKey
+		}
 	}
 
-	// Remove stale socket file from a previous run
-	os.Remove(socketPath)
-
-	lis, err := net.Listen("unix", socketPath)
-	if err != nil {
-		logger.L().Fatal("failed to listen on socket", helpers.Error(err), helpers.String("path", socketPath))
-	}
-
-	srv := grpc.NewServer()
-	pb.RegisterSBOMScannerServer(srv, sbomscanner.NewScannerServer())
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-
-	go func() {
-		sig := <-sigCh
-		logger.L().Info("received signal, shutting down", helpers.String("signal", sig.String()))
-		srv.GracefulStop()
-		os.Remove(socketPath)
-	}()
-
-	logger.L().Info("SBOM scanner sidecar started", helpers.String("socket", socketPath))
-	if err := srv.Serve(lis); err != nil {
-		logger.L().Fatal("gRPC server failed", helpers.Error(err))
-	}
+	// Run the reusable SBOM scanner server
+	sbomscanner.RunServer(ctx, accountID, accessKey)
 }

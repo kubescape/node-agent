@@ -18,6 +18,12 @@ import (
 
 // monitorContainer monitors a container and saves its profile periodically
 func (cpm *ContainerProfileManager) monitorContainer(container *containercollection.Container, watchedContainer *objectcache.WatchedContainerData) error {
+	cpm.lifecycleTracker.OnLearningStarted(
+		watchedContainer.ContainerID,
+		container.K8s.Namespace,
+		container.K8s.PodName,
+		container.Runtime.ContainerImageName,
+	)
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
@@ -40,7 +46,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			switch {
 			case errors.Is(err, ContainerHasTerminatedError):
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
-					logger.L().Error("failed to save container profile on termination", helpers.Error(err),
+					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on termination", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
 						helpers.String("containerName", container.Runtime.ContainerName),
 						helpers.String("workloadID", watchedContainer.Wlid),
@@ -50,6 +56,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				if watchedContainer.GetStatus() == objectcache.WatchedContainerStatusCompleted {
 					cpm.notifyCompleted(watchedContainer.ContainerID)
 				}
+				cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "terminated")
 				// Signal ack to lifecycle goroutine
 				if watchedContainer.AckChan != nil {
 					watchedContainer.AckChan <- struct{}{}
@@ -59,7 +66,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			case errors.Is(err, ContainerReachedMaxTime):
 				watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
-					logger.L().Error("failed to save container profile on max time", helpers.Error(err),
+					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on max time", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
 						helpers.String("containerName", container.Runtime.ContainerName),
 						helpers.String("workloadID", watchedContainer.Wlid),
@@ -67,6 +74,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
 				cpm.notifyCompleted(watchedContainer.ContainerID)
+				cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "completed")
 				// Signal ack to lifecycle goroutine
 				if watchedContainer.AckChan != nil {
 					watchedContainer.AckChan <- struct{}{}
@@ -97,15 +105,17 @@ func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedCon
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
 		cpm.notifyCompleted(watchedContainer.ContainerID)
+		cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "too_large")
 		return file.ObjectTooLargeError
 	} else if err.Error() == file.ObjectCompletedError.Error() {
 		watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
 		cpm.notifyCompleted(watchedContainer.ContainerID)
+		cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "completed")
 		return file.ObjectCompletedError
 	} else {
-		logger.L().Error("failed to save container profile", helpers.Error(err),
+		logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile", helpers.Error(err),
 			helpers.String("containerID", watchedContainer.ContainerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("workloadID", watchedContainer.Wlid),
@@ -132,7 +142,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 
 	slug, err := watchedContainer.InstanceID.GetOneTimeSlug(false)
 	if err != nil {
-		logger.L().Error("failed to get slug for container profile", helpers.Error(err))
+		logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to get slug for container profile", helpers.Error(err))
 		return err
 	}
 
@@ -173,6 +183,10 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 				helpersv1.ReportSeriesIdMetadataKey:          watchedContainer.SeriesID,
 				helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
 				helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
+				helpersv1.OtelSpanIDMetadataKey:              cpm.lifecycleTracker.LearningSpanID(watchedContainer.ContainerID),
+				// Full W3C traceparent so kubescape/storage can create a properly
+				// parented child span for the aggregation step.
+				helpersv1.OtelTraceparentMetadataKey: cpm.lifecycleTracker.LearningTraceparent(watchedContainer.ContainerID),
 			},
 			Labels: objectcache.GetLabels(cpm.cloudMetadata, watchedContainer, false),
 		},
@@ -202,6 +216,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		containerData.emptyEvents()
 		return err
 	}
+
+	cpm.lifecycleTracker.OnEntrySaved(watchedContainer.ContainerID, containerData.droppedEvents)
 
 	logger.L().Debug("container profile saved successfully",
 		helpers.String("containerID", watchedContainer.ContainerID),
