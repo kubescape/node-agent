@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -21,7 +20,7 @@ const cgroupRoot = "/sys/fs/cgroup"
 // registerResourceMetrics wires up observable gauges for process-level and
 // host-level resource. Called once from NewOTELMetricsManager; panics on
 // instrument creation failure (same policy as mustCounter/mustGauge).
-func registerResourceMetrics(meter metric.Meter, containerCount *atomic.Int64) {
+func registerResourceMetrics(meter metric.Meter, containerCount *atomic.Int64, ownContainerID string) {
 	hostMemTotal := readHostMemTotalBytes()
 	hostCPUCount := int64(runtime.NumCPU())
 
@@ -68,7 +67,7 @@ func registerResourceMetrics(meter metric.Meter, containerCount *atomic.Int64) {
 
 	_, _ = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		o.ObserveInt64(rssGauge, readProcessRSSBytes())
-		cur, lim := readCgroupMem()
+		cur, lim := readCgroupMem(ownContainerID)
 		o.ObserveInt64(cgroupMemGauge, cur)
 		o.ObserveInt64(cgroupLimitGauge, lim)
 		o.ObserveInt64(hostMemGauge, hostMemTotal)
@@ -107,9 +106,9 @@ var (
 // readCgroupMem returns the process's cgroup memory usage and limit in bytes
 // (limit 0 = unlimited / unresolved). Paths are resolved once and cached since
 // a process never changes cgroup.
-func readCgroupMem() (current, limit int64) {
+func readCgroupMem(ownContainerID string) (current, limit int64) {
 	cgroupResolveOnce.Do(func() {
-		cgroupCurrentPath, cgroupMaxPath = resolveCgroupMemoryPaths()
+		cgroupCurrentPath, cgroupMaxPath = resolveCgroupMemoryPaths(ownContainerID)
 	})
 	if cgroupCurrentPath != "" {
 		if data, err := os.ReadFile(cgroupCurrentPath); err == nil {
@@ -129,23 +128,26 @@ func readCgroupMem() (current, limit int64) {
 // node-agent runs with a private cgroup namespace (so /proc/self/cgroup
 // reports "0::/") while bind-mounting the host's /sys/fs/cgroup over its own,
 // so the namespaced path cannot be joined with the host tree — reading the
-// fixed root path yields 0. Two strategies, fast path first:
-//  1. Join /proc/self/cgroup with the cgroup root; use it if memory.current
-//     exists there (works when the cgroup namespace is the host's, or when
-//     /sys/fs/cgroup is the container's own namespaced mount).
-//  2. Derive our container ID from /proc/self/mountinfo and find the matching
-//     *.scope directory in the host cgroup tree (the node-agent topology).
-func resolveCgroupMemoryPaths() (current, max string) {
+// fixed root path yields 0. Strategies, in order:
+//  1. If our own container ID is known (resolved from the k8s API at startup),
+//     find the matching *.scope directory in the host cgroup tree. This is the
+//     node-agent topology. Self-discovery from /proc is unreliable here:
+//     /proc/self/cgroup is "0::/", and /proc/self/mountinfo is polluted with
+//     every other container's ID via shared mount propagation of /host.
+//  2. Join /proc/self/cgroup with the cgroup root; use it if memory.current
+//     exists there (cgroup namespace is the host's, or /sys/fs/cgroup is the
+//     container's own namespaced mount).
+//  3. cgroupv1 fixed mount layout.
+func resolveCgroupMemoryPaths(ownContainerID string) (current, max string) {
+	if ownContainerID != "" {
+		if dir := findCgroupScopeDir(cgroupRoot, ownContainerID); dir != "" {
+			return filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.max")
+		}
+	}
 	// cgroupv2 fast path.
 	if rel := parseSelfCgroupV2(readFileString("/proc/self/cgroup")); rel != "" {
 		dir := filepath.Join(cgroupRoot, rel)
 		if fileExists(filepath.Join(dir, "memory.current")) {
-			return filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.max")
-		}
-	}
-	// cgroupv2 fallback: own container ID → scope dir in the host tree.
-	for _, id := range containerIDsFromMountinfo(readFileString("/proc/self/mountinfo")) {
-		if dir := findCgroupScopeDir(cgroupRoot, id); dir != "" {
 			return filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.max")
 		}
 	}
@@ -169,23 +171,6 @@ func parseSelfCgroupV2(content string) string {
 		}
 	}
 	return ""
-}
-
-var containerID64Re = regexp.MustCompile(`[0-9a-f]{64}`)
-
-// containerIDsFromMountinfo extracts candidate 64-hex container IDs from
-// /proc/self/mountinfo content, in first-seen order. The container's own ID
-// appears in the runtime-managed mounts (/etc/hosts, /dev/termination-log, …).
-func containerIDsFromMountinfo(content string) []string {
-	seen := make(map[string]struct{})
-	var out []string
-	for _, m := range containerID64Re.FindAllString(content, -1) {
-		if _, ok := seen[m]; !ok {
-			seen[m] = struct{}{}
-			out = append(out, m)
-		}
-	}
-	return out
 }
 
 // findCgroupScopeDir walks the cgroup tree for a "*<id>*.scope" directory.

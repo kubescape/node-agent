@@ -79,9 +79,9 @@ type OTELMetricsManager struct {
 
 	// Attribute-set caches: mandatory on the hot path to avoid per-call allocations.
 	// Each cache maps a string key → metric.MeasurementOption (pre-built attribute set).
-	ruleIDCache    sync.Map // ruleID → MeasurementOption (rule_id attribute)
-	ruleEvalCache  sync.Map // ruleID+"\x00"+eventType → MeasurementOption (rule_id + event_type)
-	eventTypeCache sync.Map // eventType string → MeasurementOption (event_type attribute)
+	ruleIDCache     sync.Map // ruleID → MeasurementOption (rule_id attribute)
+	ruleEvalCache   sync.Map // ruleID+"\x00"+eventType → MeasurementOption (rule_id + event_type)
+	eventTypeCache  sync.Map // eventType string → MeasurementOption (event_type attribute)
 	dedupCache      sync.Map // eventType+"\x00"+result → MeasurementOption (event_type + result)
 	suppressedCache sync.Map // ruleID+"\x00"+reason → MeasurementOption (rule_id + reason)
 
@@ -94,7 +94,12 @@ type OTELMetricsManager struct {
 // NewOTELMetricsManager constructs a fully-initialised OTELMetricsManager.
 // MUST be called after otelsetup.InitProviders() so that otelsetup.Meter()
 // returns the real MeterProvider, not the SDK no-op.
-func NewOTELMetricsManager() *OTELMetricsManager {
+//
+// ownContainerID is this agent's own container ID (from the k8s API); it lets
+// the cgroup memory gauges resolve the correct container scope under the
+// host-mounted cgroup tree. Pass "" when unknown — the gauges then fall back to
+// /proc-based resolution and report 0 if that fails.
+func NewOTELMetricsManager(ownContainerID string) *OTELMetricsManager {
 	meter := otelsetup.Meter()
 	m := &OTELMetricsManager{
 		undeclaredRulesSet: make(map[string]struct{}),
@@ -217,7 +222,7 @@ func NewOTELMetricsManager() *OTELMetricsManager {
 	m.alertSuppressedTotal = mustCounter("node_agent.alert.suppressed.total",
 		"Total alerts suppressed before delivery, labeled by rule_id and reason")
 
-	registerResourceMetrics(meter, &m.containerCount)
+	registerResourceMetrics(meter, &m.containerCount, ownContainerID)
 
 	return m
 }

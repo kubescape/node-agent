@@ -27,22 +27,6 @@ func TestParseSelfCgroupV2(t *testing.T) {
 	}
 }
 
-func TestContainerIDsFromMountinfo(t *testing.T) {
-	const id = "7f02ad57ea37fcb9865756e13350dc7835862dfeac35a65ed1315df24c83ae19"
-	// Mimics the runtime-managed mounts that embed the container ID, with the
-	// same ID repeated across several lines (must be deduped, order preserved).
-	content := "" +
-		"2065 2050 0:28 / /sys/fs/cgroup ro - cgroup2 cgroup2 rw\n" +
-		"2066 2050 259:1 /var/lib/kubelet/pods/uid/etc-hosts /etc/hosts rw\n" +
-		"2067 2050 259:1 /run/containerd/io.containerd.grpc.v1.cri/sandboxes/" + id + "/hostname /etc/hostname rw\n" +
-		"2068 2050 259:1 /var/lib/containerd/io.containerd.grpc.v1.cri/containers/" + id + "/rootfs / rw\n"
-	got := containerIDsFromMountinfo(content)
-	require.Len(t, got, 1, "the single container ID must be deduped to one entry")
-	assert.Equal(t, id, got[0])
-
-	assert.Empty(t, containerIDsFromMountinfo("no hex here\nshort abc123"))
-}
-
 func TestParseCgroupMemValue(t *testing.T) {
 	assert.Equal(t, int64(295608320), parseCgroupMemValue("295608320\n"))
 	assert.Equal(t, int64(0), parseCgroupMemValue("max"), "cgroupv2 unlimited sentinel → 0")

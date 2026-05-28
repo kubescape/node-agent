@@ -23,11 +23,9 @@ import (
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	goruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/cloudmetadata"
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	containerprofilemanagerv1 "github.com/kubescape/node-agent/pkg/containerprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -50,6 +48,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/dnscache"
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
@@ -71,6 +70,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/validator"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
+	goruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func main() {
@@ -200,7 +201,7 @@ func main() {
 	// when OTEL_METRICS_EXPORTER=prometheus; OTLP push when OTEL_EXPORTER_OTLP_ENDPOINT set).
 	// MUST be constructed after otelsetup.InitProviders() so the global MeterProvider is set.
 	// Always use the OTEL impl — the SDK's own no-op providers handle the "no endpoint" case.
-	metricsProvider := otelmetrics.NewOTELMetricsManager()
+	metricsProvider := otelmetrics.NewOTELMetricsManager(resolveOwnContainerID(ctx, k8sClient))
 
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.GetStorageClient(), cfg.SkipNamespace)
@@ -532,4 +533,33 @@ func main() {
 		logger.L().Info("Received unknown signal")
 	}
 	// Return normally so deferred OTEL shutdown flushes traces/metrics/logs.
+}
+
+// resolveOwnContainerID returns node-agent's own container ID via the k8s API
+// (using the Downward-API POD_NAME / NAMESPACE_NAME env), or "" if it cannot be
+// determined. The cgroup memory gauges use it to locate the correct container
+// scope in the host-mounted cgroup tree; "" makes them fall back to /proc-based
+// resolution. Best-effort: a failure here only degrades those gauges.
+func resolveOwnContainerID(ctx context.Context, k8sClient *k8sinterface.KubernetesApi) string {
+	const containerName = "node-agent"
+	podName, namespace := os.Getenv("POD_NAME"), os.Getenv("NAMESPACE_NAME")
+	if podName == "" || namespace == "" {
+		return ""
+	}
+	pod, err := k8sClient.GetKubernetesClient().CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		logger.L().Warning("resolveOwnContainerID - failed to get own pod, cgroup memory gauges will fall back",
+			helpers.Error(err), helpers.String("pod", podName), helpers.String("namespace", namespace))
+		return ""
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name == containerName {
+			// ContainerID is "<runtime>://<id>", e.g. "containerd://9103ee5f..."
+			if i := strings.LastIndex(cs.ContainerID, "/"); i >= 0 {
+				return cs.ContainerID[i+1:]
+			}
+			return cs.ContainerID
+		}
+	}
+	return ""
 }

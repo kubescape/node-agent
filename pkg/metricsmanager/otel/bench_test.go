@@ -27,7 +27,7 @@ func setupBenchmarkMeterProvider() {
 // ns/op ≤ 1.1× Prometheus impl (run with -benchmem to verify).
 func BenchmarkReportRuleEvaluationTime(b *testing.B) {
 	setupBenchmarkMeterProvider()
-	m := NewOTELMetricsManager()
+	m := NewOTELMetricsManager("")
 
 	// Warm the cache for the key under test so the benchmark measures the
 	// cached fast path, not the first-call allocation.
@@ -44,7 +44,7 @@ func BenchmarkReportRuleEvaluationTime(b *testing.B) {
 // eBPF events counter with a cached event_type attribute set.
 func BenchmarkReportEvent(b *testing.B) {
 	setupBenchmarkMeterProvider()
-	m := NewOTELMetricsManager()
+	m := NewOTELMetricsManager("")
 	m.ReportEvent(utils.ExecveEventType) // warm cache
 
 	b.ResetTimer()
@@ -58,7 +58,7 @@ func BenchmarkReportEvent(b *testing.B) {
 // counter with a cached rule_id attribute set.
 func BenchmarkReportRuleAlert(b *testing.B) {
 	setupBenchmarkMeterProvider()
-	m := NewOTELMetricsManager()
+	m := NewOTELMetricsManager("")
 	m.ReportRuleAlert("R1001") // warm cache
 
 	b.ResetTimer()
