@@ -433,20 +433,23 @@ func TestApply_ExecsByPath_PopulatesFromSpec(t *testing.T) {
 	require.NotNil(t, pcp)
 	require.NotNil(t, pcp.ExecsByPath, "ExecsByPath must be populated")
 
-	// last write wins for duplicate Path
-	assert.Equal(t, []string{"-x", "later"}, pcp.ExecsByPath["/bin/sh"],
-		"duplicate Path: last ExecCalls entry should win")
+	// Duplicate Path: BOTH ExecCalls entries appended in source order —
+	// merged profiles can carry multiple argv variants for the same
+	// executable path (matthyx review on PR #807, 2026-05-28).
+	assert.Equal(t, [][]string{{"-c", "echo hi"}, {"-x", "later"}}, pcp.ExecsByPath["/bin/sh"],
+		"duplicate Path: every ExecCalls entry must be appended, not collapsed")
 
-	// nil Args → empty (non-nil) slice
+	// nil Args → list containing one empty-but-non-nil slice
 	got, present := pcp.ExecsByPath["/bin/echo"]
 	require.True(t, present, "/bin/echo must be present even with nil Args")
-	require.NotNil(t, got, "/bin/echo Args nil source must project as non-nil empty slice")
-	assert.Empty(t, got, "/bin/echo nil-Args must project as empty slice")
+	require.Len(t, got, 1, "/bin/echo with one nil-Args ExecCalls must project as a one-element list")
+	require.NotNil(t, got[0], "/bin/echo Args nil source must project as non-nil empty slice")
+	assert.Empty(t, got[0], "/bin/echo nil-Args must project as empty slice")
 
 	// CLONED-slice invariant: mutating the projection must not affect
 	// the source ContainerProfile spec.
-	sourceCopy := append([]string{}, cp.Spec.Execs[2].Args...) // current "/bin/sh"
-	pcp.ExecsByPath["/bin/sh"][0] = "MUTATED"
+	sourceCopy := append([]string{}, cp.Spec.Execs[2].Args...) // current "/bin/sh" second entry
+	pcp.ExecsByPath["/bin/sh"][1][0] = "MUTATED"
 	assert.Equal(t, sourceCopy, cp.Spec.Execs[2].Args,
 		"mutating the projected slice must not propagate to the source profile (cloned, not aliased)")
 }

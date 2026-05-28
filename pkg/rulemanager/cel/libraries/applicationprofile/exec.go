@@ -120,9 +120,11 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 	// omit the ExecsByPath entry (rare) or use an explicit `*`
 	// wildcard token in Args.
 	if _, ok := cp.Execs.Values[pathStr]; ok {
-		if profileArgs, ok := cp.ExecsByPath[pathStr]; ok {
-			if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
-				return types.Bool(true)
+		if vectors, ok := cp.ExecsByPath[pathStr]; ok {
+			for _, profileArgs := range vectors {
+				if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+					return types.Bool(true)
+				}
 			}
 		} else {
 			// State 2: ExecsByPath absent → back-compat "no argv constraint".
@@ -130,12 +132,15 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		}
 	}
 	// Pattern path match: dynamic-segment paths in cp.Execs.Patterns.
-	// Args matching mirrors the exact-path case.
+	// Args matching mirrors the exact-path case — match against any
+	// argv vector recorded for that pattern key.
 	for _, execPath := range cp.Execs.Patterns {
 		if dynamicpathdetector.CompareDynamic(execPath, pathStr) {
-			if profileArgs, ok := cp.ExecsByPath[execPath]; ok {
-				if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
-					return types.Bool(true)
+			if vectors, ok := cp.ExecsByPath[execPath]; ok {
+				for _, profileArgs := range vectors {
+					if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+						return types.Bool(true)
+					}
 				}
 			} else {
 				return types.Bool(true)
