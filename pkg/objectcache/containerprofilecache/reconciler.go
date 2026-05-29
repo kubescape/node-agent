@@ -366,35 +366,52 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			userManagedNN = nil
 		}
 	}
+	// Determine the user-defined overlay name. Prefer the ref already stored
+	// on the entry (set when addContainer saw the label at container-start).
+	// If absent, re-read the current pod labels: IG enrichment can populate
+	// the `kubescape.io/user-defined-profile` label AFTER addContainer's
+	// initial fire, and without re-checking here a container whose label
+	// propagated late would never get its overlay merged. Test_32 race:
+	// curl-32-overlay AP exists in storage, but the cached entry was built
+	// before the label was visible, so was_executed misses /bin/sh and
+	// R0001 fires.
+	var overlayName, overlayNS string
+	if e.UserAPRef != nil {
+		overlayName = e.UserAPRef.Name
+		overlayNS = e.UserAPRef.Namespace
+	} else if pod := c.k8sObjectCache.GetPod(e.Namespace, e.PodName); pod != nil {
+		if v, ok := pod.Labels[helpersv1.UserDefinedProfileMetadataKey]; ok && v != "" {
+			overlayName = v
+			overlayNS = e.Namespace
+		}
+	}
 	var userAP *v1beta1.ApplicationProfile
 	var userNN *v1beta1.NetworkNeighborhood
-	if e.UserAPRef != nil {
+	if overlayName != "" {
 		var userAPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userAP, userAPErr = c.storageClient.GetApplicationProfile(rctx, e.UserAPRef.Namespace, e.UserAPRef.Name)
+			userAP, userAPErr = c.storageClient.GetApplicationProfile(rctx, overlayNS, overlayName)
 			return userAPErr
 		})
 		if userAPErr != nil && e.UserAPRV != "" {
 			logger.L().Debug("refreshOneEntry: user-defined AP fetch failed; keeping cached entry",
 				helpers.String("containerID", id),
-				helpers.String("name", e.UserAPRef.Name),
+				helpers.String("name", overlayName),
 				helpers.Error(userAPErr))
 			return
 		}
 		if userAPErr != nil {
 			userAP = nil
 		}
-	}
-	if e.UserNNRef != nil {
 		var userNNErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userNN, userNNErr = c.storageClient.GetNetworkNeighborhood(rctx, e.UserNNRef.Namespace, e.UserNNRef.Name)
+			userNN, userNNErr = c.storageClient.GetNetworkNeighborhood(rctx, overlayNS, overlayName)
 			return userNNErr
 		})
 		if userNNErr != nil && e.UserNNRV != "" {
 			logger.L().Debug("refreshOneEntry: user-defined NN fetch failed; keeping cached entry",
 				helpers.String("containerID", id),
-				helpers.String("name", e.UserNNRef.Name),
+				helpers.String("name", overlayName),
 				helpers.Error(userNNErr))
 			return
 		}
