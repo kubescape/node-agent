@@ -1662,6 +1662,23 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 							{Path: "/bin/echo", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
 							// curl -s <one URL>
 							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier}},
+							// Busybox-symlink mirror entries. The curl image's
+							// /bin/{sleep,sh,echo} are symlinks to /bin/busybox,
+							// so the kernel's resolved /proc/<pid>/exe — what
+							// IG captures as event.exepath — is /bin/busybox.
+							// parse.get_exec_path(args, comm, exepath) returns
+							// exepath first, so ap.was_executed queries arrive
+							// at the rule keyed on /bin/busybox, not the
+							// symlink form. Without a matching profile entry
+							// keyed on /bin/busybox, R0001 fires before R0040
+							// ever evaluates and the test trips its R0001
+							// precondition. The symlink-form entries above are
+							// retained for environments where exepath resolves
+							// to the as-invoked path (non-symlinked utilities;
+							// fexecve / argv[0] fallback in resolveExecPath).
+							{Path: "/bin/busybox", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
 						},
 						Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev", "execve"},
 					},
@@ -1762,14 +1779,21 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	})
 
 	// -----------------------------------------------------------------
-	// 32b. sh -x <anything>  — argv [sh, -x, "echo hi"] does NOT match
-	//      profile [sh, -c, *] (literal anchor `-c` mismatch). Path
-	//      /bin/sh IS in profile so R0001 stays silent. R0040 must fire.
+	// 32b. sh -x -c <cmd>  — argv [sh, -x, -c, "echo hi"] does NOT match
+	//      profile [sh, -c, *] (literal anchor `-c` at position 1 mismatches
+	//      `-x`). Path /bin/sh (or /bin/busybox) IS in profile so R0001
+	//      stays silent. R0040 must fire.
+	//
+	//      Earlier shape `sh -x "echo hi"` exited 2 (busybox sh tried to
+	//      open "echo hi" as a script file) — kubectl exec returned an
+	//      error and require.NoError tripped before R0040 could be read.
+	//      Adding -c keeps sh's invocation valid while preserving the
+	//      argv-shape mismatch that exercises R0040.
 	// -----------------------------------------------------------------
 	t.Run("sh_dash_x_mismatches_R0040", func(t *testing.T) {
 		wl := setup(t)
-		stdout, stderr, err := wl.ExecIntoPod([]string{"sh", "-x", "echo hi"}, "curl")
-		t.Logf("sh -x 'echo hi' → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"sh", "-x", "-c", "echo hi"}, "curl")
+		t.Logf("sh -x -c 'echo hi' → err=%v stdout=%q stderr=%q", err, stdout, stderr)
 		require.NoError(t, err)
 
 		alerts := waitAlerts(t, wl.Namespace)
