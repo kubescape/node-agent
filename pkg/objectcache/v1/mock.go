@@ -153,8 +153,17 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 	if (!specInstalled || spec.Execs.InUse) && len(cp.Spec.Execs) > 0 {
 		pcp.Execs.All = true
 		pcp.Execs.Values = make(map[string]struct{}, len(cp.Spec.Execs))
+		pcp.ExecsByPath = make(map[string][][]string, len(cp.Spec.Execs))
 		for _, e := range cp.Spec.Execs {
 			pcp.Execs.Values[e.Path] = struct{}{}
+			var entry []string
+			if e.Args == nil {
+				entry = []string{}
+			} else {
+				entry = make([]string, len(e.Args))
+				copy(entry, e.Args)
+			}
+			pcp.ExecsByPath[e.Path] = append(pcp.ExecsByPath[e.Path], entry)
 		}
 	}
 

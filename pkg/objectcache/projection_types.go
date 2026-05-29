@@ -54,6 +54,18 @@ type ProjectedContainerProfile struct {
 	IngressDomains   ProjectedField
 	IngressAddresses ProjectedField
 
+	// ExecsByPath carries the per-Path Args slices from cp.Spec.Execs so
+	// downstream consumers (ap.was_executed_with_args + R0040) can run
+	// argv-vector matching against the projected profile. Keyed by
+	// Exec.Path (same key used in Execs.Values / Execs.Patterns); the
+	// value is a LIST of argv vectors because a merged profile can carry
+	// multiple ExecCalls entries with the same Path and different argv
+	// shapes — overlay merge appends rather than replaces, and the
+	// consumer matches if ANY vector matches the runtime args.
+	// Empty/absent key means "no argv constraint" (back-compat for
+	// pre-projection profiles).
+	ExecsByPath map[string][][]string
+
 	SpecHash       string
 	SyncChecksum   string
 	PolicyByRuleId map[string]v1beta1.RulePolicy
