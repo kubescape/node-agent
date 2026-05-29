@@ -1399,3 +1399,93 @@ func TestSpecChange_TriggersReprojection(t *testing.T) {
 	assert.Contains(t, after.Capabilities.Values, "SYS_PTRACE", "after spec change → SYS_PTRACE projected")
 	assert.Contains(t, after.Capabilities.Values, "NET_ADMIN", "after spec change → NET_ADMIN projected")
 }
+
+// TestRefreshPicksUpLabelAppearingAfterAdd pins the fix for the user-defined-
+// profile late-label race. When addContainer fires before the IG enrichment
+// has populated the kubescape.io/user-defined-profile label on the container
+// event, the initial entry is built with UserAPRef=nil. Without the fix, the
+// reconciler's per-tick refresh would forever skip the user overlay fetch
+// (guarded by `if e.UserAPRef != nil`), even after the label later appears in
+// the k8s pod cache. The fix has refreshOneEntry re-read the pod labels and
+// pick up a newly-visible overlay reference. Surface symptom this guards
+// against: Test_32_UnexpectedProcessArguments seeing R0001 fire because
+// /bin/sh isn't in the cached projection's Execs.
+func TestRefreshPicksUpLabelAppearingAfterAdd(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "base-cp", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
+		// Base CP has NO exec entries — only the late-arriving overlay can
+		// satisfy was_executed(/bin/sh).
+	}
+	overlay := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "curl-overlay", Namespace: "default", ResourceVersion: "42"},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{{
+				Name: "curl",
+				Execs: []v1beta1.ExecCalls{
+					{Path: "/bin/sh", Args: []string{"/bin/sh", "-c"}},
+				},
+			}},
+		},
+	}
+	client := &countingProfileClient{cp: cp, ap: overlay}
+	k8s := newControllableK8sCache()
+	c := newReconcilerCache(t, client, k8s, newCountingMetrics())
+
+	// Project execs (so the projection's Execs.Values is populated rather
+	// than collapsed by the projection-spec gating).
+	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
+		Execs: objectcache.FieldSpec{InUse: true, All: true},
+	})
+
+	const id = "container-late-label"
+	const podName = "curl-32-abcdef"
+	const ns = "default"
+
+	// Seed an entry as if addContainer ran BEFORE the label was visible: no
+	// UserAPRef, no UserAPRV. Mirrors what tryPopulateEntry's buildEntry
+	// would have produced if container.K8s.PodLabels was empty at the time.
+	entry := newEntry(cp, "curl", podName, ns, "uid-1")
+	entry.WorkloadName = "curl-32"
+	c.entries.Set(id, entry)
+
+	// Pre-fix verification: the cached projection has no execs (base CP is
+	// empty), so was_executed-style lookups would miss /bin/sh.
+	before := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, before)
+	assert.NotContains(t, before.Execs.Values, "/bin/sh",
+		"pre-fix sanity: base-only entry doesn't see /bin/sh")
+	require.Nil(t, entry.UserAPRef, "pre-fix sanity: entry has no overlay ref yet")
+
+	// Label propagates: pod appears in the k8s cache WITH the
+	// user-defined-profile label pointing at curl-overlay.
+	k8s.setPod(ns, podName, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: podName, Namespace: ns, UID: types.UID("uid-1"),
+			Labels: map[string]string{
+				helpersv1.UserDefinedProfileMetadataKey: "curl-overlay",
+			},
+		},
+	})
+
+	// Run one refresh tick.
+	c.containerLocks.WithLock(id, func() {
+		current, _ := c.entries.Load(id)
+		c.refreshOneEntry(context.Background(), id, current)
+	})
+
+	// Post-fix: refresh re-read pod labels, fetched the overlay, merged it
+	// into the projection, and recorded UserAPRef on the new entry so future
+	// ticks fast-path through it.
+	after := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, after)
+	assert.Contains(t, after.Execs.Values, "/bin/sh",
+		"overlay execs must merge into projection after label appears")
+	newEntry, ok := c.entries.Load(id)
+	require.True(t, ok, "entry still present after refresh")
+	require.NotNil(t, newEntry.UserAPRef, "UserAPRef recorded so subsequent ticks skip the GetPod re-read")
+	assert.Equal(t, "curl-overlay", newEntry.UserAPRef.Name)
+	assert.Equal(t, ns, newEntry.UserAPRef.Namespace)
+}
