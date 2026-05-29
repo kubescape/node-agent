@@ -119,7 +119,6 @@ func (c *RBCache) AddNotifier(n *chan rulebindingmanager.RuleBindingNotify) {
 
 func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
 
 	var rbs []rulebindingmanager.RuleBindingNotify
 
@@ -129,21 +128,28 @@ func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 		ruleBinding, err := unstructuredToRuleBinding(un)
 		if err != nil {
 			logger.L().Warning("RBCache - failed to convert unstructured to rule binding", helpers.Error(err))
+			c.mutex.Unlock()
 			return
 		}
 		rbs = c.addRuleBinding(ruleBinding)
 	}
+
+	// Snapshot notifiers while holding the lock, then release before sending to
+	// avoid blocking cache operations if any notifier channel is full.
+	notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
+	copy(notifiers, c.notifiers)
+	c.mutex.Unlock()
+
 	// notify
-	for n := range c.notifiers {
+	for n := range notifiers {
 		for i := range rbs {
-			*c.notifiers[n] <- rbs[i]
+			*notifiers[n] <- rbs[i]
 		}
 	}
 }
 
 func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
 
 	var rbs []rulebindingmanager.RuleBindingNotify
 
@@ -153,21 +159,28 @@ func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 		ruleBinding, err := unstructuredToRuleBinding(un)
 		if err != nil {
 			logger.L().Warning("RBCache - failed to convert unstructured to rule binding", helpers.Error(err))
+			c.mutex.Unlock()
 			return
 		}
 		rbs = c.modifiedRuleBinding(ruleBinding)
 	}
+
+	// Snapshot notifiers while holding the lock, then release before sending to
+	// avoid blocking cache operations if any notifier channel is full.
+	notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
+	copy(notifiers, c.notifiers)
+	c.mutex.Unlock()
+
 	// notify
-	for n := range c.notifiers {
+	for n := range notifiers {
 		for i := range rbs {
-			*c.notifiers[n] <- rbs[i]
+			*notifiers[n] <- rbs[i]
 		}
 	}
 }
 
 func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 	c.mutex.Lock()
-	defer c.mutex.Unlock()
 
 	var rbs []rulebindingmanager.RuleBindingNotify
 
@@ -177,10 +190,16 @@ func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 		rbs = c.deleteRuleBinding(uniqueName(un))
 	}
 
+	// Snapshot notifiers while holding the lock, then release before sending to
+	// avoid blocking cache operations if any notifier channel is full.
+	notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
+	copy(notifiers, c.notifiers)
+	c.mutex.Unlock()
+
 	// notify
-	for n := range c.notifiers {
+	for n := range notifiers {
 		for i := range rbs {
-			*c.notifiers[n] <- rbs[i]
+			*notifiers[n] <- rbs[i]
 		}
 	}
 }
