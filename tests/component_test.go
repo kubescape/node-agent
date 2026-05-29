@@ -1750,6 +1750,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		wl := setup(t)
 		stdout, stderr, err := wl.ExecIntoPod([]string{"sh", "-c", "echo hi"}, "curl")
 		t.Logf("sh -c 'echo hi' → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		require.NoError(t, err)
 
 		alerts := waitAlerts(t, wl.Namespace)
 		t.Logf("=== %d alerts ===", len(alerts))
@@ -1769,6 +1770,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		wl := setup(t)
 		stdout, stderr, err := wl.ExecIntoPod([]string{"sh", "-x", "echo hi"}, "curl")
 		t.Logf("sh -x 'echo hi' → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		require.NoError(t, err)
 
 		alerts := waitAlerts(t, wl.Namespace)
 		t.Logf("=== %d alerts ===", len(alerts))
@@ -1787,6 +1789,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		wl := setup(t)
 		stdout, stderr, err := wl.ExecIntoPod([]string{"echo", "hello", "world", "from", "test"}, "curl")
 		t.Logf("echo hello world from test → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		require.NoError(t, err)
 
 		alerts := waitAlerts(t, wl.Namespace)
 		t.Logf("=== %d alerts ===", len(alerts))
@@ -1806,6 +1809,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		wl := setup(t)
 		stdout, stderr, err := wl.ExecIntoPod([]string{"echo", "goodbye", "world"}, "curl")
 		t.Logf("echo goodbye world → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		require.NoError(t, err)
 
 		alerts := waitAlerts(t, wl.Namespace)
 		t.Logf("=== %d alerts ===", len(alerts))
