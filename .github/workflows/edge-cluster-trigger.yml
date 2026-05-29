@@ -1,0 +1,95 @@
+# Trigger a SovereignSOC ADO edge-cluster lifecycle run.
+# Smoke test for the GH→ADO trigger path. Once stable, this can be folded
+# into component-tests.yaml as a pre-step that resets the target cluster
+# before component tests run against it.
+#
+# Setup contract (k8sstormcenter/actions repo + SovereignSOC docs):
+#   secrets.ADO_PAT       — PAT with Build:Read & Execute
+#   vars.ADO_ORG          — AustrianDataLab
+#   vars.ADO_PROJECT      — SovereignSOC
+#   vars.ADO_PIPELINE_EDGE — pipeline definition ID for edge-cluster.yml
+name: edge-cluster-trigger
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster:
+        description: 'Edge cluster slot'
+        required: true
+        default: 'edge4'
+        type: choice
+        options:
+          - edge4
+          - k3s-1
+          - k3s-2
+          - rocky-1
+      action:
+        description: 'Lifecycle action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - create
+          - delete
+          - reset
+      os:
+        description: 'Base OS'
+        required: true
+        default: 'ubuntu'
+        type: choice
+        options:
+          - ubuntu
+          - rocky
+      wait:
+        description: 'Wait for ADO run to complete'
+        required: true
+        default: 'true'
+        type: boolean
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard — config sanity
+        env:
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+          ADO_ORG: ${{ vars.ADO_ORG }}
+          ADO_PROJECT: ${{ vars.ADO_PROJECT }}
+          ADO_PIPELINE_EDGE: ${{ vars.ADO_PIPELINE_EDGE }}
+        run: |
+          missing=()
+          [[ -n "$ADO_PAT" ]]           || missing+=("secrets.ADO_PAT")
+          [[ -n "$ADO_ORG" ]]           || missing+=("vars.ADO_ORG")
+          [[ -n "$ADO_PROJECT" ]]       || missing+=("vars.ADO_PROJECT")
+          [[ -n "$ADO_PIPELINE_EDGE" ]] || missing+=("vars.ADO_PIPELINE_EDGE")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Missing required config: ${missing[*]}"
+            echo "Set them per docs at k8sstormcenter/actions/trigger-ado-pipeline/README.md"
+            exit 1
+          fi
+          echo "✔ All required config present"
+
+      - id: ado
+        uses: k8sstormcenter/actions/trigger-ado-pipeline@main
+        with:
+          org:         ${{ vars.ADO_ORG }}
+          project:     ${{ vars.ADO_PROJECT }}
+          pipeline_id: ${{ vars.ADO_PIPELINE_EDGE }}
+          pat:         ${{ secrets.ADO_PAT }}
+          cluster:     ${{ inputs.cluster }}
+          action:      ${{ inputs.action }}
+          os:          ${{ inputs.os }}
+          wait:        ${{ inputs.wait }}
+          timeout:     '1800'
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### ADO run" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- cluster: \`${{ inputs.cluster }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- action:  \`${{ inputs.action }}\`"  >> "$GITHUB_STEP_SUMMARY"
+          echo "- run id:  ${{ steps.ado.outputs.run_id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- url:     ${{ steps.ado.outputs.run_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- result:  ${{ steps.ado.outputs.result }}" >> "$GITHUB_STEP_SUMMARY"
