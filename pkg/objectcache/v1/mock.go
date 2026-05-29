@@ -154,16 +154,15 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 		pcp.Execs.All = true
 		pcp.Execs.Values = make(map[string]struct{}, len(cp.Spec.Execs))
 		pcp.ExecsByPath = make(map[string][][]string, len(cp.Spec.Execs))
+		pcp.ExecsByPath = make(map[string][][]string, len(cp.Spec.Execs))
 		for _, e := range cp.Spec.Execs {
 			pcp.Execs.Values[e.Path] = struct{}{}
-			// Mirror containerprofilecache.Apply's extractExecsByPath:
-			// append each ExecCalls entry as its own argv vector,
-			// nil-Args projects to a non-nil empty slice.
 			var entry []string
-			if e.Args != nil {
-				entry = append([]string(nil), e.Args...)
-			} else {
+			if e.Args == nil {
 				entry = []string{}
+			} else {
+				entry = make([]string, len(e.Args))
+				copy(entry, e.Args)
 			}
 			pcp.ExecsByPath[e.Path] = append(pcp.ExecsByPath[e.Path], entry)
 		}

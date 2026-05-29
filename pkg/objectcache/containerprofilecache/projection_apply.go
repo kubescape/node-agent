@@ -50,6 +50,7 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 	execsPaths := extractExecsPaths(cp)
 	pcp.Execs = projectField(s.Execs, execsPaths, true)
 	pcp.ExecsByPath = extractExecsByPath(cp)
+	pcp.ExecsByPath = extractExecsByPath(cp)
 
 	endpointPaths := extractEndpointPaths(cp)
 	pcp.Endpoints = projectField(s.Endpoints, endpointPaths, true)
@@ -168,13 +169,12 @@ func extractExecsPaths(cp *v1beta1.ContainerProfile) []string {
 }
 
 // extractExecsByPath builds the path → []argv-vectors map used by
-// exec-args matchers (e.g. dynamicpathdetector.CompareExecArgs in
-// node-agent#807). Multiple ExecCalls entries with the same Path
-// APPEND to the per-path list — overlay merge in
-// mergeApplicationProfile (storage) legitimately produces several
-// ExecCalls per path, each with a distinct argv shape, and the
-// consumer must accept any of them (matthyx review on PR #807,
-// 2026-05-28).
+// argv-aware matchers (ap.was_executed_with_args via
+// dynamicpathdetector.CompareExecArgs in storage). Multiple ExecCalls
+// entries with the same Path APPEND to the per-path list: overlay merge
+// in projectUserProfiles legitimately produces several ExecCalls per
+// path, each with a distinct argv shape, and the consumer must accept
+// any of them.
 //
 // nil-Args entries are stored as empty-but-non-nil slices so the
 // downstream matcher distinguishes "present with empty args" (a
