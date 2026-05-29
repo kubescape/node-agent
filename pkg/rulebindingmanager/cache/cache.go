@@ -31,34 +31,63 @@ import (
 var _ rulebindingmanager.RuleBindingCache = (*RBCache)(nil)
 var _ watcher.Adaptor = (*RBCache)(nil)
 
+type pendingNotification struct {
+	notifiers []*chan rulebindingmanager.RuleBindingNotify
+	events    []rulebindingmanager.RuleBindingNotify
+}
+
 type RBCache struct {
-	config         config.Config
-	nodeName       string
-	k8sClient      k8sclient.K8sClientInterface
-	allPods        mapset.Set[string]                                    // set of all pods (also pods without rules)
-	podToRBNames   maps.SafeMap[string, mapset.Set[string]]              // podID -> []rule binding names
-	rbNameToRB     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding] // rule binding name -> rule binding
-	rbNameToRules  maps.SafeMap[string, []rulemanagertypesv1.Rule]       // rule binding name -> []created rules
-	rbNameToPods   maps.SafeMap[string, mapset.Set[string]]              // rule binding name -> podIDs
-	ruleCreator    rulecreator.RuleCreator
-	watchResources []watcher.WatchResource
-	notifiers      []*chan rulebindingmanager.RuleBindingNotify
-	mutex          sync.RWMutex
-	rulesForPod    *expirable.LRU[string, []rulemanagertypesv1.Rule]
+	config            config.Config
+	nodeName          string
+	k8sClient         k8sclient.K8sClientInterface
+	allPods           mapset.Set[string]                                    // set of all pods (also pods without rules)
+	podToRBNames      maps.SafeMap[string, mapset.Set[string]]              // podID -> []rule binding names
+	rbNameToRB        maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding] // rule binding name -> rule binding
+	rbNameToRules     maps.SafeMap[string, []rulemanagertypesv1.Rule]       // rule binding name -> []created rules
+	rbNameToPods      maps.SafeMap[string, mapset.Set[string]]              // rule binding name -> podIDs
+	ruleCreator       rulecreator.RuleCreator
+	watchResources    []watcher.WatchResource
+	notifiers         []*chan rulebindingmanager.RuleBindingNotify
+	mutex             sync.RWMutex
+	rulesForPod       *expirable.LRU[string, []rulemanagertypesv1.Rule]
+	notificationQueue chan pendingNotification
 }
 
 func NewCache(config config.Config, k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator) *RBCache {
-	return &RBCache{
-		config:         config,
-		nodeName:       config.NodeName,
-		k8sClient:      k8sClient,
-		ruleCreator:    ruleCreator,
-		allPods:        mapset.NewSet[string](),
-		rbNameToRB:     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
-		podToRBNames:   maps.SafeMap[string, mapset.Set[string]]{},
-		rbNameToPods:   maps.SafeMap[string, mapset.Set[string]]{},
-		watchResources: resourcesToWatch(config.NodeName),
-		rulesForPod:    expirable.NewLRU[string, []rulemanagertypesv1.Rule](1000, nil, 5*time.Second),
+	c := &RBCache{
+		config:            config,
+		nodeName:          config.NodeName,
+		k8sClient:         k8sClient,
+		ruleCreator:       ruleCreator,
+		allPods:           mapset.NewSet[string](),
+		rbNameToRB:        maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
+		podToRBNames:      maps.SafeMap[string, mapset.Set[string]]{},
+		rbNameToPods:      maps.SafeMap[string, mapset.Set[string]]{},
+		watchResources:    resourcesToWatch(config.NodeName),
+		rulesForPod:       expirable.NewLRU[string, []rulemanagertypesv1.Rule](1000, nil, 5*time.Second),
+		notificationQueue: make(chan pendingNotification, 10000),
+	}
+	go c.processNotifications()
+	return c
+}
+
+func (c *RBCache) processNotifications() {
+	for pn := range c.notificationQueue {
+		for _, n := range pn.notifiers {
+			for _, event := range pn.events {
+				select {
+				case *n <- event:
+				default:
+					timer := time.NewTimer(100 * time.Millisecond)
+					select {
+					case *n <- event:
+						timer.Stop()
+					case <-timer.C:
+						logger.L().Error("RBCache - notifier is slow or blocked, dropping notification", helpers.Interface("event", event))
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -137,10 +166,14 @@ func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 		}
 		rbs = c.addRuleBinding(ruleBinding)
 	}
-	// notify
-	for n := range c.notifiers {
-		for i := range rbs {
-			*c.notifiers[n] <- rbs[i]
+
+	if len(c.notifiers) > 0 && len(rbs) > 0 {
+		notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
+		copy(notifiers, c.notifiers)
+		select {
+		case c.notificationQueue <- pendingNotification{notifiers: notifiers, events: rbs}:
+		default:
+			logger.L().Error("RBCache - notification queue full, dropping notifications", helpers.Int("size", len(c.notificationQueue)))
 		}
 	}
 }
@@ -164,10 +197,14 @@ func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 		}
 		rbs = c.modifiedRuleBinding(ruleBinding)
 	}
-	// notify
-	for n := range c.notifiers {
-		for i := range rbs {
-			*c.notifiers[n] <- rbs[i]
+
+	if len(c.notifiers) > 0 && len(rbs) > 0 {
+		notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
+		copy(notifiers, c.notifiers)
+		select {
+		case c.notificationQueue <- pendingNotification{notifiers: notifiers, events: rbs}:
+		default:
+			logger.L().Error("RBCache - notification queue full, dropping notifications", helpers.Int("size", len(c.notificationQueue)))
 		}
 	}
 }
@@ -184,28 +221,35 @@ func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 		rbs = c.deleteRuleBinding(uniqueName(un))
 	}
 
-	// notify
-	for n := range c.notifiers {
-		for i := range rbs {
-			*c.notifiers[n] <- rbs[i]
+	if len(c.notifiers) > 0 && len(rbs) > 0 {
+		notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
+		copy(notifiers, c.notifiers)
+		select {
+		case c.notificationQueue <- pendingNotification{notifiers: notifiers, events: rbs}:
+		default:
+			logger.L().Error("RBCache - notification queue full, dropping notifications", helpers.Int("size", len(c.notificationQueue)))
 		}
 	}
 }
 
 func (c *RBCache) RefreshRuleBindingsRules() {
 	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	for _, rbName := range c.rbNameToRB.Keys() {
 		rb := c.rbNameToRB.Get(rbName)
 		c.rbNameToRules.Set(rbName, c.createRules(rb.Spec.Rules))
 	}
 	logger.L().Info("RBCache - refreshed rule bindings rules", helpers.Int("ruleBindings", len(c.rbNameToRB.Keys())))
-	// Snapshot notifiers while holding the lock, then release before sending to
-	// avoid blocking cache operations if any notifier channel is full.
-	notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
-	copy(notifiers, c.notifiers)
-	c.mutex.Unlock()
-	for _, n := range notifiers {
-		*n <- rulebindingmanager.RuleBindingNotify{}
+
+	if len(c.notifiers) > 0 {
+		notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))
+		copy(notifiers, c.notifiers)
+		select {
+		case c.notificationQueue <- pendingNotification{notifiers: notifiers, events: []rulebindingmanager.RuleBindingNotify{{}}}:
+		default:
+			logger.L().Error("RBCache - notification queue full, dropping refresh notification")
+		}
 	}
 }
 
