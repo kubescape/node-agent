@@ -1,6 +1,8 @@
 package applicationprofile
 
 import (
+	"strings"
+
 	"github.com/google/cel-go/common/types"
 
 	"github.com/google/cel-go/common/types/ref"
@@ -109,13 +111,16 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 	//        composite ExecsByPath surface.
 	//
 	//  3. Path in Values, PRESENT in ExecsByPath:
-	//        Walk each profile argv vector with CompareExecArgs (handles
+	//        Walk each profile argv vector with argvVectorMatches (handles
 	//        DynamicIdentifier "⋯" and WildcardIdentifier "*"). Match if
-	//        ANY vector matches.
+	//        ANY vector matches. NOTE: per-vector matching uses
+	//        argvVectorMatches, NOT dynamicpathdetector.CompareExecArgs
+	//        directly — see the helper's doc for why an empty recorded
+	//        vector must not act as a wildcard here.
 	if _, ok := cp.Execs.Values[pathStr]; ok {
 		if vectors, ok := cp.ExecsByPath[pathStr]; ok {
 			for _, profileArgs := range vectors {
-				if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+				if argvVectorMatches(profileArgs, runtimeArgs) {
 					return types.Bool(true)
 				}
 			}
@@ -141,7 +146,7 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		if dynamicpathdetector.CompareDynamic(execPath, pathStr) {
 			if vectors, ok := cp.ExecsByPath[execPath]; ok {
 				for _, profileArgs := range vectors {
-					if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+					if argvVectorMatches(profileArgs, runtimeArgs) {
 						return types.Bool(true)
 					}
 				}
@@ -156,6 +161,97 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 	}
 
 	return types.Bool(false)
+}
+
+// argvVectorMatches reports whether ONE profile argv vector matches the
+// runtime args. It is a PATH-AWARE superset of
+// dynamicpathdetector.CompareExecArgs, composed from the primitives storage
+// v0.0.278 already exports (CompareDynamic, WildcardIdentifier,
+// DynamicIdentifier). Token semantics, anchored at both ends:
+//
+//   - "*"  (WildcardIdentifier)      — matches ZERO or more consecutive args.
+//   - "⋯"  (bare DynamicIdentifier)  — matches EXACTLY ONE arg, any value.
+//   - an arg that CONTAINS "⋯" but is not the bare token — a dynamic PATH;
+//     compared against the runtime arg with dynamicpathdetector.CompareDynamic
+//     (segment-wise, "⋯" = one path segment). This is the postgres /
+//     versioned-binary case: profile argv[0]
+//     "/usr/lib/postgresql/⋯/bin/postgres" must match the runtime
+//     "/usr/lib/postgresql/16/bin/postgres". CompareExecArgs alone does only
+//     literal "==" per position, so it never matched such args.
+//   - anything else — literal string equality.
+//
+// Empty-vector semantics: an empty profile vector matches ONLY an empty
+// runtime argv. A recorder/synthetic "ran with no args" entry must NOT act
+// as a wildcard — otherwise it poisons the multi-vector OR in
+// wasExecutedWithArgs and R0040 never fires (the #805 production failure).
+// This falls out naturally from the anchored base case below, so no special
+// guard is needed.
+//
+// Backtracking over "*" is memoised on (profileIndex, runtimeIndex) to stay
+// quadratic, mirroring storage's matchExecArgsStrict.
+func argvVectorMatches(profileArgs, runtimeArgs []string) bool {
+	memo := make(map[[2]int]bool, (len(profileArgs)+1)*(len(runtimeArgs)+1))
+	seen := make(map[[2]int]bool, (len(profileArgs)+1)*(len(runtimeArgs)+1))
+
+	var match func(pi, ri int) bool
+	match = func(pi, ri int) bool {
+		key := [2]int{pi, ri}
+		if seen[key] {
+			return memo[key]
+		}
+		seen[key] = true
+
+		// Profile fully consumed → runtime must also be fully consumed
+		// (anchored). With pi==0 this is the empty-vector case: empty
+		// profile matches only empty runtime.
+		if pi == len(profileArgs) {
+			memo[key] = ri == len(runtimeArgs)
+			return memo[key]
+		}
+
+		head := profileArgs[pi]
+
+		if head == dynamicpathdetector.WildcardIdentifier {
+			// Absorb 0..remaining runtime args into "*", first split wins.
+			for k := ri; k <= len(runtimeArgs); k++ {
+				if match(pi+1, k) {
+					memo[key] = true
+					return true
+				}
+			}
+			memo[key] = false
+			return false
+		}
+
+		// A non-wildcard head needs a runtime arg to consume.
+		if ri == len(runtimeArgs) {
+			memo[key] = false
+			return false
+		}
+
+		if argTokenMatches(head, runtimeArgs[ri]) {
+			memo[key] = match(pi+1, ri+1)
+			return memo[key]
+		}
+
+		memo[key] = false
+		return false
+	}
+
+	return match(0, 0)
+}
+
+// argTokenMatches compares ONE profile arg token against ONE runtime arg.
+// Bare "⋯" matches any single arg; an arg embedding "⋯" is a dynamic path
+// matched segment-wise via CompareDynamic; everything else is literal.
+func argTokenMatches(profileArg, runtimeArg string) bool {
+	if profileArg == dynamicpathdetector.DynamicIdentifier {
+		return true // bare ⋯ — exactly one arg, any value
+	}
+	if strings.Contains(profileArg, dynamicpathdetector.DynamicIdentifier) {
+		return dynamicpathdetector.CompareDynamic(profileArg, runtimeArg)
+	}
+	return profileArg == runtimeArg
 }
 
 func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {

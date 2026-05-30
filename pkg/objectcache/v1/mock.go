@@ -3,6 +3,7 @@ package objectcache
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,6 +14,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -156,7 +158,18 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 		pcp.ExecsByPath = make(map[string][][]string, len(cp.Spec.Execs))
 		pcp.ExecsByPath = make(map[string][][]string, len(cp.Spec.Execs))
 		for _, e := range cp.Spec.Execs {
-			pcp.Execs.Values[e.Path] = struct{}{}
+			// Mirror the real projectField routing: a path with a dynamic
+			// segment ("⋯") goes to Patterns (matched via CompareDynamic);
+			// a regular path goes to Values (exact lookup). ExecsByPath is
+			// keyed by the literal e.Path either way (same as the real
+			// extractExecsByPath). Without this split a ⋯-path (e.g. the
+			// versioned postgres binary) would land in Values and never
+			// reach the pattern branch of wasExecutedWithArgs.
+			if strings.Contains(e.Path, dynamicpathdetector.DynamicIdentifier) {
+				pcp.Execs.Patterns = append(pcp.Execs.Patterns, e.Path)
+			} else {
+				pcp.Execs.Values[e.Path] = struct{}{}
+			}
 			var entry []string
 			if e.Args == nil {
 				entry = []string{}

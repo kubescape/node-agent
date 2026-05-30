@@ -576,3 +576,108 @@ func TestExecWithArgsBusyboxMultiVector(t *testing.T) {
 		})
 	}
 }
+
+// TestExecWithArgsEmptyVectorDoesNotPoisonMatch reproduces the production
+// failure that survived the first ExecsByPath wiring: R0040 stayed silent on
+// every argv mismatch in #805 CT runs through the "side-effects" tip.
+//
+// In a real merged profile the SAME path can carry both a constrained vector
+// (from the user-defined ApplicationProfile, e.g. [echo, hello, *]) AND a
+// bare vector with no args (from the recorder, or a synthesised base CP, e.g.
+// /bin/busybox observed with empty Args). extractExecsByPath stores the bare
+// entry as an empty []string{}.
+//
+// dynamicpathdetector.CompareExecArgs treats an EMPTY profile vector as "no
+// argv constraint" and returns true for ANY runtime args. When
+// wasExecutedWithArgs ORs across every vector for the path, that one empty
+// vector short-circuits the whole match to true — so !was_executed_with_args
+// is always false and R0040 never fires, even for argv vectors that match
+// none of the constrained entries. The fix (argvVectorMatches) treats an
+// empty recorded vector as "ran with no args" (matches only empty runtime).
+func TestExecWithArgsEmptyVectorDoesNotPoisonMatch(t *testing.T) {
+	objCache := objectcachev1.RuleObjectCacheMock{
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+	}
+	objCache.SetSharedContainerData("test-container-id", &objectcache.WatchedContainerData{
+		ContainerType: objectcache.Container,
+		ContainerInfos: map[objectcache.ContainerType][]objectcache.ContainerInfo{
+			objectcache.Container: {{Name: "test-container"}},
+		},
+	})
+
+	profile := &v1beta1.ApplicationProfile{}
+	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
+		Name: "test-container",
+		Execs: []v1beta1.ExecCalls{
+			// Bare recorder/synthetic entry: same path, NO args. This is the
+			// poison vector — present in real merged profiles, absent from
+			// the clean multi-vector test above.
+			{Path: "/bin/busybox", Args: nil},
+			// User-defined constrained vectors.
+			{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+			{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+		},
+	})
+	objCache.SetApplicationProfile(profile)
+
+	env, err := cel.NewEnv(
+		cel.Variable("containerID", cel.StringType),
+		cel.Variable("path", cel.StringType),
+		cel.Variable("args", cel.ListType(cel.StringType)),
+		AP(&objCache, config.Config{}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create env: %v", err)
+	}
+
+	testCases := []struct {
+		name           string
+		args           []string
+		expectedResult bool
+	}{
+		{
+			name:           "echo goodbye still mismatches despite bare poison vector",
+			args:           []string{"/bin/echo", "goodbye", "world"},
+			expectedResult: false,
+		},
+		{
+			name:           "sh -x -c still mismatches despite bare poison vector",
+			args:           []string{"/bin/sh", "-x", "-c", "echo hi"},
+			expectedResult: false,
+		},
+		{
+			name:           "echo hello still matches its constrained vector",
+			args:           []string{"/bin/echo", "hello", "world"},
+			expectedResult: true,
+		},
+		{
+			name:           "no-args invocation matches the bare vector",
+			args:           []string{},
+			expectedResult: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, issues := env.Compile(`ap.was_executed_with_args(containerID, path, args)`)
+			if issues != nil {
+				t.Fatalf("failed to compile expression: %v", issues.Err())
+			}
+			prog, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("failed to create program: %v", err)
+			}
+			result, _, err := prog.Eval(map[string]any{
+				"containerID": "test-container-id",
+				"path":        "/bin/busybox",
+				"args":        tc.args,
+			})
+			if err != nil {
+				t.Fatalf("failed to evaluate expression: %v", err)
+			}
+			assert.Equal(t, tc.expectedResult, result.Value().(bool),
+				"ap.was_executed_with_args(/bin/busybox, %v) — empty recorded vector must not poison the multi-vector OR",
+				tc.args)
+		})
+	}
+}

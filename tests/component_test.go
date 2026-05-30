@@ -1578,24 +1578,27 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 //
 // AP overlay declares 4 allowed exec patterns for the curl pod. Profile
 // shape:
-//   - Path   = full kernel-resolved exec path (used by parse.get_exec_path
-//              + ap.was_executed for path-level matching)
-//   - Args[0] = ABSOLUTE invoking path (e.g. "/bin/sh"). Matches runtime
-//              argv[0] as captured by eBPF after the symlink-faithful
-//              precedence fix (parse.get_exec_path / resolveExecPath
-//              prefer absolute argv[0] over kernel exepath when argv[0]
-//              starts with "/"). Recording side records the same form
-//              via the matching precedence in
-//              pkg/containerprofilemanager/v1/event_reporting.go::
-//              resolveExecPath, so profile.Args[0] agrees with what
-//              CompareExecArgs compares against at rule-eval time. See
-//              pkg/rulemanager/cel/libraries/parse/parse.go for the
-//              live precedence definition.
 //
-//   /bin/sleep    [/bin/sleep, *]              — pod startup, must stay silent
-//   /bin/sh       [/bin/sh, -c, *]             — sh -c <anything>
-//   /bin/echo     [/bin/echo, hello, *]        — echo hello <anything trailing>
-//   /usr/bin/curl [/usr/bin/curl, -s, ⋯]       — curl -s <one-arg>
+//   - Path   = full kernel-resolved exec path (used by parse.get_exec_path
+//
+//   - ap.was_executed for path-level matching)
+//
+//   - Args[0] = ABSOLUTE invoking path (e.g. "/bin/sh"). Matches runtime
+//     argv[0] as captured by eBPF after the symlink-faithful
+//     precedence fix (parse.get_exec_path / resolveExecPath
+//     prefer absolute argv[0] over kernel exepath when argv[0]
+//     starts with "/"). Recording side records the same form
+//     via the matching precedence in
+//     pkg/containerprofilemanager/v1/event_reporting.go::
+//     resolveExecPath, so profile.Args[0] agrees with what
+//     CompareExecArgs compares against at rule-eval time. See
+//     pkg/rulemanager/cel/libraries/parse/parse.go for the
+//     live precedence definition.
+//
+//     /bin/sleep    [/bin/sleep, *]              — pod startup, must stay silent
+//     /bin/sh       [/bin/sh, -c, *]             — sh -c <anything>
+//     /bin/echo     [/bin/echo, hello, *]        — echo hello <anything trailing>
+//     /usr/bin/curl [/usr/bin/curl, -s, ⋯]       — curl -s <one-arg>
 //
 // Profile loaded into the new ContainerProfileCache via the unified
 // kubescape.io/user-defined-profile=<name> label. The exec.go CEL function
@@ -1843,6 +1846,53 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		assertR0001Silent(t, alerts, "echo")
 		require.Greater(t, countByRule(alerts, "R0040"), 0,
 			"echo goodbye <words> mismatches profile [echo, hello, *] (literal anchor) → R0040 must fire")
+	})
+
+	// -----------------------------------------------------------------
+	// 32e. curl -s <one URL> — the NON-symlinked binary (curl is a real
+	//      binary in curlimages/curl, not a busybox applet) with an
+	//      ELLIPSIS profile: [curl, -s, ⋯]. ⋯ matches EXACTLY ONE arg, so
+	//      `curl -s <single url>` matches → R0040 silent.
+	//
+	//      A file:// URL is used so curl reads a local file and exits 0
+	//      regardless of cluster egress — the test pins argv matching, not
+	//      network reachability.
+	// -----------------------------------------------------------------
+	t.Run("curl_dash_s_one_url_matches_ellipsis", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/hostname"}, "curl")
+		t.Logf("curl -s file:///etc/hostname → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		require.NoError(t, err)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		assertR0001Silent(t, alerts, "curl")
+		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+			"curl -s <one url> matches profile [curl, -s, ⋯] — R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32f. curl -s <two URLs> — argv [curl, -s, url1, url2] does NOT match
+	//      profile [curl, -s, ⋯] because ⋯ consumes EXACTLY ONE arg, not
+	//      two. R0040 must fire. Pins the ⋯ (DynamicIdentifier) arity on
+	//      the non-symlinked path. Both file:// URLs are readable so curl
+	//      still exits 0.
+	// -----------------------------------------------------------------
+	t.Run("curl_dash_s_two_urls_mismatches_R0040", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/hostname", "file:///etc/hosts"}, "curl")
+		t.Logf("curl -s <two urls> → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		require.NoError(t, err)
+
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+
+		assertR0001Silent(t, alerts, "curl")
+		require.Greater(t, countByRule(alerts, "R0040"), 0,
+			"curl -s <two urls> exceeds the single-arg ⋯ in profile [curl, -s, ⋯] → R0040 must fire")
 	})
 }
 
