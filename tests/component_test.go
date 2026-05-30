@@ -1693,18 +1693,57 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 			context.Background(), ap, metav1.CreateOptions{})
 		require.NoError(t, err, "create AP")
 
+		// User-supplied SBOB pattern (mirrors Test_28): the pod carries BOTH
+		// kubescape.io/user-defined-profile and kubescape.io/user-defined-network.
+		// Node-agent uses the single overlay name as the lookup key for BOTH
+		// the user ApplicationProfile and the user NetworkNeighborhood, so the
+		// NN must exist under the same name and be created before the pod.
+		// User-authored objects carry managed-by=User + a terminal
+		// status/completion and the workload-binding labels.
+		nn := &v1beta1.NetworkNeighborhood{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      overlayName,
+				Namespace: ns.Name,
+				Annotations: map[string]string{
+					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
+					helpersv1.StatusMetadataKey:     helpersv1.Completed,
+					helpersv1.CompletionMetadataKey: helpersv1.Full,
+				},
+				Labels: map[string]string{
+					helpersv1.ApiGroupMetadataKey:         "apps",
+					helpersv1.ApiVersionMetadataKey:       "v1",
+					helpersv1.RelatedKindMetadataKey:      "Deployment",
+					helpersv1.RelatedNameMetadataKey:      "curl-32",
+					helpersv1.RelatedNamespaceMetadataKey: ns.Name,
+				},
+			},
+			Spec: v1beta1.NetworkNeighborhoodSpec{
+				LabelSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "curl-32"},
+				},
+				Containers: []v1beta1.NetworkNeighborhoodContainer{
+					{Name: "curl"},
+				},
+			},
+		}
+		_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(
+			context.Background(), nn, metav1.CreateOptions{})
+		require.NoError(t, err, "create NN")
+
 		require.Eventually(t, func() bool {
 			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(
 				context.Background(), overlayName, v1.GetOptions{})
-			return apErr == nil
-		}, 30*time.Second, 1*time.Second, "AP must be in storage before pod deploy")
+			_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(
+				context.Background(), overlayName, v1.GetOptions{})
+			return apErr == nil && nnErr == nil
+		}, 30*time.Second, 1*time.Second, "AP+NN must be in storage before pod deploy")
 
 		wl, err := testutils.NewTestWorkload(ns.Name,
 			path.Join(utils.CurrentDir(), "resources/curl-exec-arg-wildcards-deployment.yaml"))
 		require.NoError(t, err)
 		require.NoError(t, wl.WaitForReady(80))
-		// let node-agent load the user AP into the CP cache
-		time.Sleep(15 * time.Second)
+		// let node-agent load the user AP+NN into the CP cache
+		time.Sleep(30 * time.Second)
 		return wl
 	}
 

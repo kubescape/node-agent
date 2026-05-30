@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/google/cel-go/common/types"
-
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
