@@ -4,7 +4,7 @@
 ## ContainerProfileCache (kubescape/node-agent#788). The label value
 ## must match the name of BOTH the user ApplicationProfile and (when
 ## present) the user NetworkNeighborhood. The test creates only the AP
-## with that name; the NN side is intentionally absent.
+## with that name; both the user AP and the user NN use it.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,6 +21,7 @@ spec:
       labels:
         app: curl-32
         kubescape.io/user-defined-profile: curl-32-overlay
+        kubescape.io/user-defined-network: curl-32-overlay
     spec:
       containers:
       - name: curl

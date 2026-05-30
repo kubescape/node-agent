@@ -15,6 +15,7 @@ spec:
         - "kubeconfig"
   rules:
     - ruleName: "Unexpected process launched"
+    - ruleName: "Unexpected process arguments"
     - ruleName: "Files Access Anomalies in container"
     - ruleName: "Syscalls Anomalies in container"
     - ruleName: "Linux Capabilities Anomalies in container"
