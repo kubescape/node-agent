@@ -332,8 +332,8 @@ spec:
             - eventType: "exec"
               expression: >
                 (event.exepath == '/dev/shm' || event.exepath.startsWith('/dev/shm/')) ||
-                (event.cwd == '/dev/shm' || event.cwd.startsWith('/dev/shm/') ||
-                (parse.get_exec_path(event.args, event.comm, event.exepath).startsWith('/dev/shm/')))
+                (event.cwd == '/dev/shm' || event.cwd.startsWith('/dev/shm/')) ||
+                (event.args.size() > 0 && (event.args[0] == '/dev/shm' || event.args[0].startsWith('/dev/shm/')))
         profileDependency: 2
         severity: 8
         supportPolicy: false
@@ -694,8 +694,8 @@ spec:
         id: "R0040"
         description: "Detects an exec event whose path IS in the profile but whose argv vector does not match any recorded argv pattern for that path. Consumes ap.was_executed_with_args, which walks the ExecsByPath projection surface added by node-agent#807 and delegates argv comparison to dynamicpathdetector.CompareExecArgs (storage). Stays silent when the path is unknown (R0001 covers that case) and when the argv vector matches any recorded pattern (including the trailing-wildcard form `[…, *]`)."
         expressions:
-          message: "'Unexpected process arguments: ' + event.comm + ' with PID ' + string(event.pid) + ' argv=' + string(event.args)"
-          uniqueId: "event.comm + '_' + event.exepath + '_' + string(event.args)"
+          message: "'Unexpected process arguments: ' + event.comm + ' with PID ' + string(event.pid) + ' argv=' + event.args.map(a, string(a)).join(' ')"
+          uniqueId: "event.comm + '_' + event.exepath + '_' + event.args.map(a, string(a)).join(' ')"
           ruleExpression:
             - eventType: "exec"
               expression: "ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath)) && !ap.was_executed_with_args(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath), event.args)"
