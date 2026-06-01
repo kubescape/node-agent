@@ -483,3 +483,9 @@ replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
 replace github.com/anchore/stereoscope => github.com/anchore/stereoscope v0.1.9
 
 replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1
+
+// TEMP (remove before NA #805 final): pin storage to the fork commit that
+// carries the dynamicpathdetector.MatchExecArgs path-aware argv matcher
+// (embedded "⋯"/"*" path tokens) moved out of NA into storage. Swap for the
+// real released tag once the storage PR merges.
+replace github.com/kubescape/storage => github.com/k8sstormcenter/storage v0.0.240-0.20260601171344-787cc4376971
