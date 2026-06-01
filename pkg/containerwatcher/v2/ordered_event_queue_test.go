@@ -119,8 +119,8 @@ func TestOrderedEventQueue_FullQueueAlert(t *testing.T) {
 		t.Fatal("Expected full queue alert but didn't receive one")
 	}
 
-	// Verify all events are still in queue (including overflow event)
-	assert.Equal(t, 4, queue.Size())
+	// Verify queue size remains capped (overflow event is dropped)
+	assert.Equal(t, 3, queue.Size())
 }
 
 func TestOrderedEventQueue_BasicOperations(t *testing.T) {
