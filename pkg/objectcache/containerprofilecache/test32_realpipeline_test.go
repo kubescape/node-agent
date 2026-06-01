@@ -138,7 +138,7 @@ func keysOf(m map[string]struct{}) []string {
 //
 // The test drives the REAL projectUserProfiles → Apply merge, then shows the
 // raw-CompareExecArgs walk (deployed behaviour) returns the WRONG answer and
-// the argvVectorMatches walk (the fix) returns the RIGHT answer.
+// the MatchExecArgs (strict) walk (the fix) returns the RIGHT answer.
 func TestTest32_BaseCPBareVectorPoisonsR0040(t *testing.T) {
 	const wild = dynamicpathdetector.WildcardIdentifier
 
@@ -208,7 +208,7 @@ func TestTest32_BaseCPBareVectorPoisonsR0040(t *testing.T) {
 		}
 		return false
 	}
-	fixedWalk := func(runtimeArgs []string) bool { // argvVectorMatches behaviour
+	fixedWalk := func(runtimeArgs []string) bool { // MatchExecArgs(strict) behaviour
 		for _, pv := range vectors {
 			if len(pv) == 0 {
 				if len(runtimeArgs) == 0 {

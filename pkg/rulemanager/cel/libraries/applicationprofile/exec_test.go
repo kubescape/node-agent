@@ -475,10 +475,11 @@ func TestExecWithArgsCompilation(t *testing.T) {
 //     "last-write-wins" concern CodeRabbit/matthyx raised on PR #807).
 //
 // Test_32 has 4 subtests; this pins the contract for each:
-//   sh_dash_c_matches_wildcard_trailing — argv matches profile [sh, -c, *].
-//   sh_dash_x_mismatches_R0040          — argv mismatches at literal anchor.
-//   echo_hello_matches_wildcard_trailing — argv matches profile [echo, hello, *].
-//   echo_goodbye_mismatches_R0040       — argv mismatches at literal "hello".
+//
+//	sh_dash_c_matches_wildcard_trailing — argv matches profile [sh, -c, *].
+//	sh_dash_x_mismatches_R0040          — argv mismatches at literal anchor.
+//	echo_hello_matches_wildcard_trailing — argv matches profile [echo, hello, *].
+//	echo_goodbye_mismatches_R0040       — argv mismatches at literal "hello".
 func TestExecWithArgsBusyboxMultiVector(t *testing.T) {
 	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
@@ -592,7 +593,7 @@ func TestExecWithArgsBusyboxMultiVector(t *testing.T) {
 // wasExecutedWithArgs ORs across every vector for the path, that one empty
 // vector short-circuits the whole match to true — so !was_executed_with_args
 // is always false and R0040 never fires, even for argv vectors that match
-// none of the constrained entries. The fix (argvVectorMatches) treats an
+// none of the constrained entries. The fix (dynamicpathdetector.MatchExecArgs, strict) treats an
 // empty recorded vector as "ran with no args" (matches only empty runtime).
 func TestExecWithArgsEmptyVectorDoesNotPoisonMatch(t *testing.T) {
 	objCache := objectcachev1.RuleObjectCacheMock{
