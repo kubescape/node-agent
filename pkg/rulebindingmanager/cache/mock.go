@@ -12,13 +12,16 @@ import (
 )
 
 func NewCacheMock(nodeName string) *RBCache {
-	return &RBCache{
-		nodeName:     nodeName,
-		allPods:      mapset.NewSet[string](),
-		k8sClient:    k8sinterface.NewKubernetesApiMock(),
-		ruleCreator:  &rulecreator.RuleCreatorMock{},
-		podToRBNames: maps.SafeMap[string, mapset.Set[string]]{},
-		rbNameToPods: maps.SafeMap[string, mapset.Set[string]]{},
-		rulesForPod:  expirable.NewLRU[string, []rulemanagertypesv1.Rule](1000, nil, 60*time.Second),
+	c := &RBCache{
+		nodeName:          nodeName,
+		allPods:           mapset.NewSet[string](),
+		k8sClient:         k8sinterface.NewKubernetesApiMock(),
+		ruleCreator:       &rulecreator.RuleCreatorMock{},
+		podToRBNames:      maps.SafeMap[string, mapset.Set[string]]{},
+		rbNameToPods:      maps.SafeMap[string, mapset.Set[string]]{},
+		rulesForPod:       expirable.NewLRU[string, []rulemanagertypesv1.Rule](1000, nil, 60*time.Second),
+		notificationQueue: make(chan pendingNotification, 10000),
 	}
+	go c.processNotifications()
+	return c
 }

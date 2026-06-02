@@ -36,6 +36,22 @@ func (oeq *OrderedEventQueue) GetFullQueueAlertChannel() <-chan struct{} {
 }
 
 func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event utils.K8sEvent, containerID string, processID uint32) {
+	if int(oeq.eventQueue.Size()) >= oeq.maxBufferSize {
+		logger.L().Warning("Ordered event queue - Event queue full, dropping event to prevent OOM",
+			helpers.String("eventType", string(eventType)),
+			helpers.String("containerID", containerID),
+			helpers.Int("queueSize", int(oeq.eventQueue.Size())),
+			helpers.Int("maxBufferSize", oeq.maxBufferSize))
+
+		select {
+		case oeq.fullQueueAlert <- struct{}{}:
+		default:
+		}
+
+		event.Release()
+		return
+	}
+
 	timestamp := time.Unix(0, int64(event.GetTimestamp()))
 
 	eventEntry := EventEntry{
@@ -48,17 +64,6 @@ func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event ut
 
 	priority := timestamp.UnixNano()
 	oeq.eventQueue.Push(eventEntry, priority)
-
-	if oeq.eventQueue.Size() >= uint(oeq.maxBufferSize) {
-		logger.L().Warning("Ordered event queue - Event queue full, sending processing alert",
-			helpers.Int("queueSize", int(oeq.eventQueue.Size())),
-			helpers.Int("maxBufferSize", oeq.maxBufferSize))
-
-		select {
-		case oeq.fullQueueAlert <- struct{}{}:
-		default:
-		}
-	}
 }
 
 func (oeq *OrderedEventQueue) PopEvent() (EventEntry, bool) {
