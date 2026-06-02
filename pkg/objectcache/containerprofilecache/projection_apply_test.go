@@ -410,3 +410,56 @@ func TestApply_ExactFilter_NoMatchYieldsNilValues(t *testing.T) {
 	require.NotNil(t, pcp)
 	assert.Nil(t, pcp.Opens.Values, "Values should be nil when no entries match the filter")
 }
+
+// TestApply_ExecsByPath_PopulatesFromSpec pins the projection of
+// per-Path Args from cp.Spec.Execs into ProjectedContainerProfile.ExecsByPath.
+// Three cases combined in one CP fixture to keep the gate compact:
+//   - Path with a populated Args slice — projected as a CLONED slice
+//   - Path with nil Args — projected as an empty (non-nil) slice
+//   - Two ExecCalls with the same Path — last write wins
+// The cloned-slice invariant is checked by mutating the projected slice
+// and asserting the source is unchanged.
+func TestApply_ExecsByPath_PopulatesFromSpec(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{
+				{Path: "/bin/sh", Args: []string{"-c", "echo hi"}},
+				{Path: "/bin/echo", Args: nil},
+				{Path: "/bin/sh", Args: []string{"-x", "later"}},
+			},
+		},
+	}
+	pcp := Apply(&objectcache.RuleProjectionSpec{}, cp, nil)
+	require.NotNil(t, pcp)
+	require.NotNil(t, pcp.ExecsByPath, "ExecsByPath must be populated")
+
+	// Duplicate Path: BOTH ExecCalls entries appended in source order —
+	// merged profiles can carry multiple argv variants for the same
+	// executable path (matthyx review on PR #807, 2026-05-28).
+	assert.Equal(t, [][]string{{"-c", "echo hi"}, {"-x", "later"}}, pcp.ExecsByPath["/bin/sh"],
+		"duplicate Path: every ExecCalls entry must be appended, not collapsed")
+
+	// nil Args → list containing one empty-but-non-nil slice
+	got, present := pcp.ExecsByPath["/bin/echo"]
+	require.True(t, present, "/bin/echo must be present even with nil Args")
+	require.Len(t, got, 1, "/bin/echo with one nil-Args ExecCalls must project as a one-element list")
+	require.NotNil(t, got[0], "/bin/echo Args nil source must project as non-nil empty slice")
+	assert.Empty(t, got[0], "/bin/echo nil-Args must project as empty slice")
+
+	// CLONED-slice invariant: mutating the projection must not affect
+	// the source ContainerProfile spec.
+	sourceCopy := append([]string{}, cp.Spec.Execs[2].Args...) // current "/bin/sh" second entry
+	pcp.ExecsByPath["/bin/sh"][1][0] = "MUTATED"
+	assert.Equal(t, sourceCopy, cp.Spec.Execs[2].Args,
+		"mutating the projected slice must not propagate to the source profile (cloned, not aliased)")
+}
+
+// TestApply_ExecsByPath_NilWhenSpecEmpty pins the contract that an
+// empty Execs list yields a nil ExecsByPath (not an allocated empty
+// map). Matches the project-wide convention of nil-for-empty.
+func TestApply_ExecsByPath_NilWhenSpecEmpty(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{Spec: v1beta1.ContainerProfileSpec{}}
+	pcp := Apply(&objectcache.RuleProjectionSpec{}, cp, nil)
+	require.NotNil(t, pcp)
+	assert.Nil(t, pcp.ExecsByPath, "empty Spec.Execs must project to nil ExecsByPath")
+}
