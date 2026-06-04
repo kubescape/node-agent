@@ -1,0 +1,26 @@
+# Fixture 01 — IPv4 literal in ipAddresses[]
+#
+# Edge case:    single IPv4 literal in the new plural field
+# Expects:      observed IP "162.0.217.171" matches; "162.0.217.172" does NOT
+# Match path:   networkmatch.MatchIP(["162.0.217.171"], observed) → true iff equal
+# Spec ref:     §5.7 "IPv4 / IPv6 literal" row
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-01-literal-ipv4
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-01
+  containers:
+  - name: client
+    egress:
+    - identifier: literal-ipv4
+      type: external
+      ipAddresses:
+        - "162.0.217.171"
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}
