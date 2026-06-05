@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
+	k8stesting "k8s.io/client-go/testing"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -62,7 +63,18 @@ func startTest(t *testing.T, tc testObj) {
 
 	k8sClient := k8sinterface.NewKubernetesApiMock()
 	k8sClient.KubernetesClient = fake.NewClientset()
-	storageClient := storagefake.NewSimpleClientset(tc.preCreatedObjects...).SpdxV1beta1()
+	storageFakeClientset := storagefake.NewSimpleClientset(tc.preCreatedObjects...)
+	// client-go >= v0.36 fake tracker rejects non-integer resource versions, but the
+	// watcher uses the storage-specific "fullSpec" value - bypass the list options to
+	// keep the traditional watch behavior (no replay of existing objects)
+	storageFakeClientset.PrependWatchReactor("*", func(action k8stesting.Action) (bool, watch.Interface, error) {
+		w, err := storageFakeClientset.Tracker().Watch(action.GetResource(), action.GetNamespace())
+		if err != nil {
+			return false, nil, err
+		}
+		return true, w, nil
+	})
+	storageClient := storageFakeClientset.SpdxV1beta1()
 
 	wh := NewWatchHandler(k8sClient, storageClient, func(s string) bool {
 		return false
