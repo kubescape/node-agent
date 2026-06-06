@@ -33,6 +33,7 @@ jobs:
       packages: write
       contents: write
       pull-requests: read
+      attestations: write  # required by actions/attest-build-provenance in the shared workflow
     uses: ./.github/workflows/incluster-comp-pr-merged.yaml
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/node-agent

@@ -72,6 +72,7 @@ jobs:
       packages: write
       contents: read
       pull-requests: read
+      attestations: write  # required by actions/attest-build-provenance
 
     steps:
       # - name: Exit if not on master branch
@@ -117,6 +118,7 @@ jobs:
           password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -127,6 +129,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           push: true
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ inputs.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
       - name: Install cosign
         uses: sigstore/cosign-installer@main
