@@ -131,7 +131,7 @@ jobs:
           push: true
 
       - name: Attest image provenance
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
         with:
           subject-name: ${{ inputs.IMAGE_NAME }}
           subject-digest: ${{ steps.build.outputs.digest }}
