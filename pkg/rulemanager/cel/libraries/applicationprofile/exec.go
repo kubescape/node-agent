@@ -2,7 +2,6 @@ package applicationprofile
 
 import (
 	"github.com/google/cel-go/common/types"
-
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -70,12 +69,11 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	// v1 limitation for rule authors: wasExecutedWithArgs is currently equivalent
-	// to wasExecuted — the args list is validated but not matched against. Any
-	// execution of the given path returns true regardless of its arguments. Full
-	// argument matching (ExecArgsByPath) will be added in a future version.
-	_ = args
-	if _, err := celparse.ParseList[string](args); err != nil {
+	// Parse the runtime args list from CEL. Empty list is valid ("exec'd
+	// with no args") and matches a profile entry whose Args is also empty
+	// or absent (empty profile Args = "no argv constraint").
+	runtimeArgs, err := celparse.ParseList[string](args)
+	if err != nil {
 		return types.NewErr("failed to parse args: %v", err)
 	}
 
@@ -84,20 +82,62 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.Bool(true)
 	}
 
-	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
-	if err != nil {
+	cp, _, perr := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
+	if perr != nil {
 		// Return a special error that will NOT be cached, allowing retry when profile becomes available.
 		// The caller should convert this to false after the cache layer.
-		return cache.NewProfileNotAvailableErr("%v", err)
+		return cache.NewProfileNotAvailableErr("%v", perr)
 	}
 
+	// Exact path match. ExecsByPath absent-vs-empty asymmetry: three states.
+	//
+	//  1. Path absent from cp.Execs.Values:
+	//        Profile doesn't allow this exec at all → fall through to
+	//        the pattern-match loop, then to false.
+	//
+	//  2. Path in Values, ABSENT from ExecsByPath (map lookup ok=false):
+	//        Legacy / pre-args-projection profiles. Treated as
+	//        "no argv constraint" — back-compat MATCH any args.
+	//        This is the intentional fallback for profiles compiled
+	//        against older storage versions that didn't populate the
+	//        composite ExecsByPath surface.
+	//
+	//  3. Path in Values, PRESENT in ExecsByPath:
+	//        Match each recorded argv vector with
+	//        dynamicpathdetector.MatchExecArgs(profileArgs, true, runtimeArgs).
+	//        argsRequired=true selects storage's STRICT anchored matcher:
+	//        an empty recorded vector matches ONLY an empty runtime argv, so
+	//        a recorder/synthetic "ran with no args" entry does NOT act as a
+	//        wildcard and poison the multi-vector OR (the #805 production
+	//        failure). The matcher handles WildcardIdentifier "*", bare
+	//        DynamicIdentifier "⋯", and embedded-⋯ path tokens (the postgres
+	//        versioned-binary case) — see storage's compare_exec_args.go.
 	if _, ok := cp.Execs.Values[pathStr]; ok {
-		return types.Bool(true)
+		if vectors, ok := cp.ExecsByPath[pathStr]; ok {
+			for _, profileArgs := range vectors {
+				if dynamicpathdetector.MatchExecArgs(profileArgs, true, runtimeArgs) {
+					return types.Bool(true)
+				}
+			}
+		} else {
+			// State 2: ExecsByPath absent → back-compat "no argv constraint".
+			return types.Bool(true)
+		}
 	}
-	// Check Patterns (dynamic-segment entries).
+	// Pattern path match: dynamic-segment paths in cp.Execs.Patterns.
+	// Args matching mirrors the exact-path case — match against any
+	// argv vector recorded for that pattern key.
 	for _, execPath := range cp.Execs.Patterns {
 		if dynamicpathdetector.CompareDynamic(execPath, pathStr) {
-			return types.Bool(true)
+			if vectors, ok := cp.ExecsByPath[execPath]; ok {
+				for _, profileArgs := range vectors {
+					if dynamicpathdetector.MatchExecArgs(profileArgs, true, runtimeArgs) {
+						return types.Bool(true)
+					}
+				}
+			} else {
+				return types.Bool(true)
+			}
 		}
 	}
 

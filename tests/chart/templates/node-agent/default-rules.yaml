@@ -18,7 +18,7 @@ spec:
           uniqueId: "event.comm + '_' + event.exepath"
           ruleExpression:
             - eventType: "exec"
-              expression: "!ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm))"
+              expression: "!ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath))"
         profileDependency: 0
         profileDataRequired:
           execs: all
@@ -198,7 +198,7 @@ spec:
           uniqueId: "eventType == 'exec' ? 'exec_' + event.comm : 'network_' + event.dstAddr"
           ruleExpression:
             - eventType: "exec"
-              expression: "(event.comm == 'kubectl' || event.exepath.endsWith('/kubectl')) && !ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm))"
+              expression: "(event.comm == 'kubectl' || event.exepath.endsWith('/kubectl')) && !ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath))"
             - eventType: "network"
               expression: "event.pktType == 'OUTGOING' && k8s.is_api_server_address(event.dstAddr) && !nn.was_address_in_egress(event.containerId, event.dstAddr)"
         profileDependency: 0
@@ -332,8 +332,8 @@ spec:
             - eventType: "exec"
               expression: >
                 (event.exepath == '/dev/shm' || event.exepath.startsWith('/dev/shm/')) ||
-                (event.cwd == '/dev/shm' || event.cwd.startsWith('/dev/shm/') ||
-                (parse.get_exec_path(event.args, event.comm).startsWith('/dev/shm/')))
+                (event.cwd == '/dev/shm' || event.cwd.startsWith('/dev/shm/')) ||
+                (event.args.size() > 0 && (event.args[0] == '/dev/shm' || event.args[0].startsWith('/dev/shm/')))
         profileDependency: 2
         severity: 8
         supportPolicy: false
@@ -358,7 +358,7 @@ spec:
               expression: >
                 (event.upperlayer == true ||
                  event.pupperlayer == true) &&
-                !ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm))
+                !ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath))
         profileDependency: 1
         profileDataRequired:
           execs: all
@@ -431,7 +431,7 @@ spec:
           uniqueId: "event.comm"
           ruleExpression:
             - eventType: "exec"
-              expression: "!ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm)) && k8s.get_container_mount_paths(event.namespace, event.podName, event.containerName).exists(mount, event.exepath.startsWith(mount) || parse.get_exec_path(event.args, event.comm).startsWith(mount))"
+              expression: "!ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath)) && k8s.get_container_mount_paths(event.namespace, event.podName, event.containerName).exists(mount, event.exepath.startsWith(mount) || parse.get_exec_path(event.args, event.comm, event.exepath).startsWith(mount))"
         profileDependency: 1
         profileDataRequired:
           execs: all
@@ -688,4 +688,28 @@ spec:
           - "context:kubernetes"
           - "syscalls"
           - "io_uring"
+          - "applicationprofile"
+      - name: "Unexpected process arguments"
+        enabled: true
+        id: "R0040"
+        description: "Detects an exec event whose path IS in the profile but whose argv vector does not match any recorded argv pattern for that path. Consumes ap.was_executed_with_args, which walks the ExecsByPath projection surface added by node-agent#807 and delegates argv comparison to dynamicpathdetector.CompareExecArgs (storage). Stays silent when the path is unknown (R0001 covers that case) and when the argv vector matches any recorded pattern (including the trailing-wildcard form `[…, *]`)."
+        expressions:
+          message: "'Unexpected process arguments: ' + event.comm + ' with PID ' + string(event.pid) + ' argv=' + event.args.map(a, string(a)).join(' ')"
+          uniqueId: "event.comm + '_' + event.exepath + '_' + event.args.map(a, string(a)).join(' ')"
+          ruleExpression:
+            - eventType: "exec"
+              expression: "ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath)) && !ap.was_executed_with_args(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath), event.args)"
+        profileDependency: 0
+        profileDataRequired:
+          execs: all
+        severity: 3
+        supportPolicy: false
+        isTriggerAlert: true
+        mitreTactic: "TA0002"
+        mitreTechnique: "T1059"
+        tags:
+          - "context:kubernetes"
+          - "anomaly"
+          - "process"
+          - "exec"
           - "applicationprofile"
