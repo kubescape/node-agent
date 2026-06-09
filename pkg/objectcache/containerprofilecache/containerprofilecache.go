@@ -311,6 +311,13 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// name returned by GetSlug(false). Until that aggregation runs the Get
 	// returns 404 — we record pending and the reconciler retries on each
 	// tick.
+	//
+	// When ServerSideUserManagedMerge is enabled, this GET also transparently
+	// returns the user-managed (ug-) overlay already merged in: storage#319's
+	// merged-first read path serves the merged CP when an overlay exists and
+	// falls back to the observed CP otherwise. That merge is GET-only (not
+	// List/Watch), and this cache is GET-driven, so the merged view is always
+	// observed. See config.ProfileProjectionConfig.ServerSideUserManagedMerge.
 	var (
 		cp    *v1beta1.ContainerProfile
 		cpErr error
@@ -333,9 +340,15 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// annotation and merged them on top of the base profile; we read them
 	// directly by their well-known name instead, avoiding a List and an
 	// annotation filter. Both are optional: nil on 404.
+	//
+	// Skipped entirely when ServerSideUserManagedMerge is enabled: the CP fetched
+	// above already has the ug- overlay merged in server-side (storage#319), so
+	// re-fetching and re-projecting it here would be redundant work. Leaving
+	// userManagedAP/NN nil makes the projection pass and RV bookkeeping below
+	// no-op naturally.
 	var userManagedAP *v1beta1.ApplicationProfile
 	var userManagedNN *v1beta1.NetworkNeighborhood
-	if workloadName != "" {
+	if !c.cfg.ProfileProjection.ServerSideUserManagedMerge && workloadName != "" {
 		ugName := helpersv1.UserApplicationProfilePrefix + workloadName
 		var ugAPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {

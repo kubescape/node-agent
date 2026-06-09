@@ -1353,6 +1353,64 @@ func TestUserManagedProfileMerged(t *testing.T) {
 	assert.Equal(t, "9", entry.UserManagedAPRV, "UserManagedAPRV recorded at add time")
 }
 
+// TestServerSideMerge_RefreshSkipsUgRefetch verifies the refresh path honors
+// ServerSideUserManagedMerge: when a cached entry is refreshed, the reconciler
+// re-fetches the (server-merged) CP but does NOT re-fetch the ug- AP/NN. A CP
+// RV bump forces a rebuild so we exercise the full ladder, not just the
+// fast-skip.
+func TestServerSideMerge_RefreshSkipsUgRefetch(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp", Namespace: "default", ResourceVersion: "200", // bumped vs seeded RV=100
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: "/bin/base"}, {Path: "/bin/server-ug"}}},
+	}
+	userManagedAP := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "ug-nginx", Namespace: "default", ResourceVersion: "9"},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{{
+				Name:  "nginx",
+				Execs: []v1beta1.ExecCalls{{Path: "/bin/client-only"}},
+			}},
+		},
+	}
+	client := &fakeProfileClient{cp: cp, userManagedAP: userManagedAP}
+	k8s := &objectcache.K8sObjectCacheMock{}
+	c := NewContainerProfileCache(serverSideMergeConfig(), client, k8s, nil)
+	c.SetProjectionSpec(execSpec())
+
+	id := "c1"
+	c.entries.Set(id, &CachedContainerProfile{
+		Projected:     Apply(nil, cp, nil),
+		State:         &objectcache.ProfileState{Name: cp.Name},
+		ContainerName: "nginx",
+		PodName:       "nginx-abc",
+		Namespace:     "default",
+		PodUID:        "uid-1",
+		CPName:        "cp",
+		WorkloadName:  "nginx", // would drive ug- lookups when the flag is OFF
+		RV:            "100",   // stale vs CP RV=200 → forces rebuild
+	})
+
+	c.refreshAllEntries(context.Background())
+
+	assert.Equal(t, 0, client.ugAPCalls, "refresh must not re-fetch ug- AP under the flag")
+	assert.Equal(t, 0, client.ugNNCalls, "refresh must not re-fetch ug- NN under the flag")
+
+	cached := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, cached)
+	_, hasServerUg := cached.Execs.Values["/bin/server-ug"]
+	_, hasClientOnly := cached.Execs.Values["/bin/client-only"]
+	assert.True(t, hasServerUg, "rebuilt projection must include the server-merged ug- exec")
+	assert.False(t, hasClientOnly, "rebuilt projection must NOT include client-only ug- exec")
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Equal(t, "200", entry.RV, "rebuild picked up the new CP RV")
+	assert.Empty(t, entry.UserManagedAPRV, "UserManagedAPRV stays empty under the flag")
+}
+
 // TestSpecChange_TriggersReprojection — T5 nudge integration.
 //
 // After SetProjectionSpec is called with a new spec, RefreshAllEntriesForTest
