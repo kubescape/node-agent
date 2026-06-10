@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -540,7 +541,197 @@ func Test_10_MalwareDetectionTest(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, len(expectedMalwares), len(malwaresDetected), "Expected %d malwares to be detected, but got %d malwares", len(expectedMalwares), len(malwaresDetected))
+		assert.Equal(t, len(expectedMalwares), len(malwaresDetected),
+			"Expected %d malwares to be detected, but got %d", len(expectedMalwares), len(malwaresDetected))
+	})
+
+	// ---------------------------------------------------------------
+	// 10b. Behavioral rule detection with empty user-defined AP.
+	//      The miner starts immediately; because the AP declares nothing,
+	//      every exec, DNS lookup, and network connection is anomalous.
+	//
+	//      Expected rules:
+	//        R0001: Unexpected process launched (every exec)
+	//        R0003: Syscalls Anomalies (empty syscall list)
+	//
+	//      Rules that MAY fire depending on network conditions:
+	//        R0005: DNS Anomalies (requires DNS responses with answers;
+	//               trace_dns drops NXDOMAIN, so behind a firewall these
+	//               won't arrive)
+	//        R1008: Crypto Mining Domain Communication (same DNS dependency)
+	//        R1009: Crypto Mining Related Port Communication (requires TCP
+	//               connectivity to mining pool ports 3333/45700)
+	//        R1007: Crypto miner launched via randomx (amd64 only)
+	//
+	//      Race condition note: the node-agent fetches the user-defined AP
+	//      from storage asynchronously after detecting the container. Events
+	//      arriving before the fetch completes see profileExists=false,
+	//      causing Required rules (R0001 etc.) to be skipped. The miner's
+	//      initial exec happens during this window — so we must exec into
+	//      the pod AFTER the profile is cached to generate observable exec
+	//      events.
+	// ---------------------------------------------------------------
+	t.Run("empty_profile_rules", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+		// Create an ApplicationProfile with an empty container entry for k8s-miner.
+		// The container name must match the pod's container so
+		// GetContainerFromApplicationProfile finds it. With no execs, syscalls,
+		// opens, or capabilities listed, every operation is anomalous.
+		ap := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "crypto2",
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{Name: "k8s-miner"},
+				},
+			},
+		}
+
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), ap, metav1.CreateOptions{})
+		require.NoError(t, err, "create empty AP in storage")
+
+		require.Eventually(t, func() bool {
+			_, getErr := storageClient.ApplicationProfiles(ns.Name).Get(
+				context.Background(), "crypto2", v1.GetOptions{})
+			return getErr == nil
+		}, 30*time.Second, 1*time.Second, "empty AP must be stored")
+
+		// Deploy crypto miner with user-defined profile label.
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/crypto-miner-deployment.yaml"))
+		require.NoError(t, err)
+		require.NoError(t, wl.WaitForReady(80))
+		t.Log("Crypto miner pod is ready")
+
+		// Wait for node-agent to fetch the user-defined AP from storage and
+		// cache it. The miner's initial execve races with this fetch, so
+		// R0001 is skipped for that event. Syscalls keep flowing, so R0003
+		// fires once the profile is cached.
+		time.Sleep(20 * time.Second)
+
+		// Exec into the pod to generate post-profile-load events:
+		//   exec event → R0001 (cat not in empty AP)
+		//   open event → R0002 (/etc/hostname starts with /etc/)
+		stdout, stderr, execErr := wl.ExecIntoPod([]string{"cat", "/etc/hostname"}, "k8s-miner")
+		t.Logf("exec cat /etc/hostname: err=%v stdout=%q stderr=%q", execErr, stdout, stderr)
+
+		// Collect alerts — R0001 must appear from the exec above.
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			alerts, err = testutils.GetAlerts(ns.Name)
+			if err != nil || len(alerts) == 0 {
+				return false
+			}
+			for _, a := range alerts {
+				if a.Labels["rule_id"] == "R0001" {
+					return true
+				}
+			}
+			return false
+		}, 120*time.Second, 10*time.Second, "expected R0001 alert from exec with empty AP")
+
+		time.Sleep(15 * time.Second)
+		alerts, _ = testutils.GetAlerts(ns.Name)
+
+		t.Logf("=== %d alerts ===", len(alerts))
+		for i, a := range alerts {
+			t.Logf("  [%d] %s(%s) comm=%s container=%s",
+				i, a.Labels["rule_name"], a.Labels["rule_id"],
+				a.Labels["comm"], a.Labels["container_name"])
+		}
+
+		rulesSeen := map[string]bool{}
+		for _, a := range alerts {
+			rulesSeen[a.Labels["rule_id"]] = true
+		}
+
+		// These rules must fire with an empty AP — every operation is anomalous.
+		assert.True(t, rulesSeen["R0001"],
+			"R0001 (Unexpected process launched) must fire — cat exec not in empty AP")
+		assert.True(t, rulesSeen["R0002"],
+			"R0002 (Files Access Anomalies) must fire — /etc/hostname not in empty AP opens")
+		assert.True(t, rulesSeen["R0003"],
+			"R0003 (Syscalls Anomalies) must fire — miner syscalls not in empty AP")
+		assert.True(t, rulesSeen["R0004"],
+			"R0004 (Linux Capabilities Anomalies) must fire — capabilities not in empty AP")
+
+		// DNS/network rules depend on the miner resolving pool domains and
+		// establishing TCP connections. In sandboxed/firewalled environments
+		// these won't fire: trace_dns drops NXDOMAIN, and TCP to mining
+		// ports is blocked. Log what fired for visibility.
+		for _, entry := range []struct {
+			id, desc string
+		}{
+			{"R0005", "DNS Anomalies"},
+			{"R1007", "Crypto miner launched via randomx"},
+			{"R1008", "Crypto Mining Domain Communication"},
+			{"R1009", "Crypto Mining Related Port Communication"},
+		} {
+			if rulesSeen[entry.id] {
+				t.Logf("%s (%s) fired", entry.id, entry.desc)
+			}
+		}
+	})
+
+	// ---------------------------------------------------------------
+	// 10c. RandomX detection (R1007) via xmrig benchmark mode.
+	//      Uses --bench 1M which runs RandomX hashing without a pool
+	//      connection, reliably triggering the x86 FPU tracepoint
+	//      that the randomx eBPF gadget monitors.
+	//      x86_64 (amd64) only — the gadget is disabled on arm64.
+	// ---------------------------------------------------------------
+	t.Run("randomx_bench", func(t *testing.T) {
+		if runtime.GOARCH != "amd64" {
+			t.Skip("randomx tracer is x86_64 only")
+		}
+
+		ns := testutils.NewRandomNamespace()
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/crypto-miner-deployment.yaml"))
+		require.NoError(t, err)
+		require.NoError(t, wl.WaitForReady(80))
+		t.Log("xmrig benchmark pod is ready, waiting for RandomX FPU events...")
+
+		// xmrig needs ~5s to init the RandomX dataset, then starts hashing.
+		// The eBPF gadget needs 5 FPU events within 5s to fire.
+		// Give it 30s total.
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			alerts, err = testutils.GetAlerts(ns.Name)
+			if err != nil || len(alerts) == 0 {
+				return false
+			}
+			for _, a := range alerts {
+				if a.Labels["rule_id"] == "R1007" {
+					return true
+				}
+			}
+			return false
+		}, 120*time.Second, 10*time.Second, "expected R1007 (RandomX crypto miner) from xmrig --bench")
+
+		alerts, _ = testutils.GetAlerts(ns.Name)
+		t.Logf("=== %d alerts ===", len(alerts))
+		for i, a := range alerts {
+			t.Logf("  [%d] %s(%s) comm=%s container=%s",
+				i, a.Labels["rule_name"], a.Labels["rule_id"],
+				a.Labels["comm"], a.Labels["container_name"])
+		}
+
+		rulesSeen := map[string]bool{}
+		for _, a := range alerts {
+			rulesSeen[a.Labels["rule_id"]] = true
+		}
+
+		assert.True(t, rulesSeen["R1007"],
+			"R1007 (Crypto miner launched via randomx) must fire — xmrig benchmark runs RandomX hashing")
+	})
 }
 
 func Test_11_EndpointTest(t *testing.T) {
