@@ -17,14 +17,15 @@ func makeRule(pdr *typesv1.ProfileDataRequired) typesv1.Rule {
 	}
 }
 
-// fieldReqAll returns a FieldRequirement that requests all entries.
-func fieldReqAll() typesv1.FieldRequirement {
-	return typesv1.FieldRequirement{Declared: true, All: true}
+// fieldReqAll returns a FieldRequirement that requests all entries. A non-nil
+// pointer marks the surface as declared (the old Declared bool's role).
+func fieldReqAll() *typesv1.FieldRequirement {
+	return &typesv1.FieldRequirement{All: true}
 }
 
 // fieldReqPatterns returns a FieldRequirement with the supplied patterns.
-func fieldReqPatterns(patterns ...typesv1.PatternObject) typesv1.FieldRequirement {
-	return typesv1.FieldRequirement{Declared: true, Patterns: patterns}
+func fieldReqPatterns(patterns ...typesv1.PatternObject) *typesv1.FieldRequirement {
+	return &typesv1.FieldRequirement{Patterns: patterns}
 }
 
 func exactPattern(path string) typesv1.PatternObject {
