@@ -65,6 +65,7 @@ type Config struct {
 	DRandomx                       bool                                 `mapstructure:"dRandomx"`
 	DSeccomp                       bool                                 `mapstructure:"dSeccomp"`
 	DSsh                           bool                                 `mapstructure:"dSsh"`
+	DSsl                           bool                                 `mapstructure:"dSsl"`
 	DSymlink                       bool                                 `mapstructure:"dSymlink"`
 	DTop                           bool                                 `mapstructure:"dTop"`
 	DUnshare                       bool                                 `mapstructure:"dUnshare"`
@@ -85,6 +86,7 @@ type Config struct {
 	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
 	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
+	EnableSslTracing               bool                                 `mapstructure:"sslTracingEnabled"`
 	HostMonitoringEnabled          bool                                 `mapstructure:"hostMonitoringEnabled"`
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`

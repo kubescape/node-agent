@@ -11,6 +11,7 @@
       "runtimeDetectionEnabled": "false",
       "nodeProfileServiceEnabled": "false",
       "httpDetectionEnabled": "false",
+      "sslTracingEnabled": "false",
       "nodeProfileInterval": "1m",
       "seccompServiceEnabled": "false",
       "enableEmbeddedSBOMs": "false",

@@ -34,6 +34,7 @@ func TestLoadConfig(t *testing.T) {
 				EnableNetworkTracing:           false,
 				EnableNodeProfile:              false,
 				EnableHttpDetection:            false,
+				EnableSslTracing:               false,
 				EnableHostMalwareSensor:        false,
 				EnableHostNetworkSensor:        false,
 				EnableFIM:                      true,
