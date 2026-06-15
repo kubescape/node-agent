@@ -69,12 +69,9 @@ type Config struct {
 	DTop                           bool                                 `mapstructure:"dTop"`
 	DUnshare                       bool                                 `mapstructure:"dUnshare"`
 	EnableApplicationProfile       bool                                 `mapstructure:"applicationProfileServiceEnabled"`
-	EnableBackendStorage           bool                                 `mapstructure:"backendStorageEnabled"`
 	EnableEmbeddedSboms            bool                                 `mapstructure:"enableEmbeddedSBOMs"`
 	EnableFIM                      bool                                 `mapstructure:"fimEnabled"`
 	EnableFullPathTracing          bool                                 `mapstructure:"fullPathTracingEnabled"`
-	EnableHostMalwareSensor        bool                                 `mapstructure:"hostMalwareSensorEnabled"`
-	EnableHostNetworkSensor        bool                                 `mapstructure:"hostNetworkSensorEnabled"`
 	EnableHttpDetection            bool                                 `mapstructure:"httpDetectionEnabled"`
 	EnableMalwareDetection         bool                                 `mapstructure:"malwareDetectionEnabled"`
 	EnableNetworkStreaming         bool                                 `mapstructure:"networkStreamingEnabled"`
@@ -118,7 +115,6 @@ type Config struct {
 	ProfilesCacheRefreshRate       time.Duration                        `mapstructure:"profilesCacheRefreshRate"`
 	StorageRPCBudget               time.Duration                        `mapstructure:"storageRPCBudget"`
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig      `mapstructure:"ruleCooldown"`
-	TestMode                       bool                                 `mapstructure:"testMode"`
 	UpdateDataPeriod               time.Duration                        `mapstructure:"updateDataPeriod"`
 	WorkerChannelSize              int                                  `mapstructure:"workerChannelSize"`
 	WorkerPoolSize                 int                                  `mapstructure:"workerPoolSize"`
@@ -179,15 +175,12 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("namespaceName", os.Getenv(NamespaceEnvVar))
 	viper.SetDefault("nodeName", os.Getenv(NodeNameEnvVar))
 	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))
-	viper.SetDefault("hostMalwareSensorEnabled", false)
-	viper.SetDefault("hostNetworkSensorEnabled", false)
 	viper.SetDefault("fimEnabled", false)
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
 	viper.SetDefault("workerPoolSize", 3000)
 	viper.SetDefault("eventBatchSize", 15000)
-	viper.SetDefault("testMode", false)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
 	viper.SetDefault("ruleCooldown::ruleCooldownDuration", 1*time.Hour)
