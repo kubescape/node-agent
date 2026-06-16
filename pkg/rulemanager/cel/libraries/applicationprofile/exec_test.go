@@ -476,9 +476,9 @@ func TestExecWithArgsCompilation(t *testing.T) {
 //
 // Test_32 has 4 subtests; this pins the contract for each:
 //
-//	sh_dash_c_matches_wildcard_trailing — argv matches profile [sh, -c, *].
+//	sh_dash_c_matches_wildcard_trailing — argv matches profile [sh, -c, ⋯⋯].
 //	sh_dash_x_mismatches_R0040          — argv mismatches at literal anchor.
-//	echo_hello_matches_wildcard_trailing — argv matches profile [echo, hello, *].
+//	echo_hello_matches_wildcard_trailing — argv matches profile [echo, hello, ⋯⋯].
 //	echo_goodbye_mismatches_R0040       — argv mismatches at literal "hello".
 func TestExecWithArgsBusyboxMultiVector(t *testing.T) {
 	objCache := objectcachev1.RuleObjectCacheMock{
@@ -499,9 +499,9 @@ func TestExecWithArgsBusyboxMultiVector(t *testing.T) {
 			// shapes. The projection layer appends them all into
 			// ExecsByPath["/bin/busybox"]; the matcher walks every
 			// vector and accepts if ANY matches.
-			{Path: "/bin/busybox", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
-			{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
-			{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+			{Path: "/bin/busybox", Args: []string{"/bin/sleep", dynamicpathdetector.ExecArgsWildcard}},
+			{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.ExecArgsWildcard}},
+			{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.ExecArgsWildcard}},
 		},
 	})
 	objCache.SetApplicationProfile(profile)
@@ -583,7 +583,7 @@ func TestExecWithArgsBusyboxMultiVector(t *testing.T) {
 // every argv mismatch in #805 CT runs through the "side-effects" tip.
 //
 // In a real merged profile the SAME path can carry both a constrained vector
-// (from the user-defined ApplicationProfile, e.g. [echo, hello, *]) AND a
+// (from the user-defined ApplicationProfile, e.g. [echo, hello, ⋯⋯]) AND a
 // bare vector with no args (from the recorder, or a synthesised base CP, e.g.
 // /bin/busybox observed with empty Args). extractExecsByPath stores the bare
 // entry as an empty []string{}.
@@ -615,8 +615,8 @@ func TestExecWithArgsEmptyVectorDoesNotPoisonMatch(t *testing.T) {
 			// the clean multi-vector test above.
 			{Path: "/bin/busybox", Args: nil},
 			// User-defined constrained vectors.
-			{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
-			{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+			{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.ExecArgsWildcard}},
+			{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.ExecArgsWildcard}},
 		},
 	})
 	objCache.SetApplicationProfile(profile)

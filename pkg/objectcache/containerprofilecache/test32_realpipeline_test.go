@@ -24,7 +24,7 @@ import (
 // R0040 silence comes from the projection (missing/empty vector) or from
 // somewhere else (capture-side args).
 func TestTest32_RealProjectionPipeline(t *testing.T) {
-	const wild = dynamicpathdetector.WildcardIdentifier
+	const wild = dynamicpathdetector.ExecArgsWildcard
 
 	// curl-32-overlay user AP. Container name MUST be "nginx" to match the
 	// InstanceID that primeSharedData/eventContainer build. The argv shapes
@@ -140,7 +140,7 @@ func keysOf(m map[string]struct{}) []string {
 // raw-CompareExecArgs walk (deployed behaviour) returns the WRONG answer and
 // the MatchExecArgs (strict) walk (the fix) returns the RIGHT answer.
 func TestTest32_BaseCPBareVectorPoisonsR0040(t *testing.T) {
-	const wild = dynamicpathdetector.WildcardIdentifier
+	const wild = dynamicpathdetector.ExecArgsWildcard
 
 	// Base consolidated CP: the recorded /bin/busybox startup exec, bare args.
 	baseCP := &v1beta1.ContainerProfile{

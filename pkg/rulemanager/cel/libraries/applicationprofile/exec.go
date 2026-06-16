@@ -114,9 +114,11 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 	//        an empty recorded vector matches ONLY an empty runtime argv, so
 	//        a recorder/synthetic "ran with no args" entry does NOT act as a
 	//        wildcard and poison the multi-vector OR (the #805 production
-	//        failure). The matcher handles WildcardIdentifier "*", bare
-	//        DynamicIdentifier "⋯", and embedded-⋯ path tokens (the postgres
-	//        versioned-binary case) — see storage's compare_exec_args.go.
+	//        failure). In exec args the wildcards are dedicated sentinels:
+	//        ExecArgsWildcard "⋯⋯" (zero-or-more whole args), DynamicIdentifier
+	//        "⋯" (one arg / one embedded segment — the postgres versioned-binary
+	//        case); a "*" is a LITERAL character, never a wildcard — see
+	//        storage's compare_exec_args.go.
 	if _, ok := cp.Execs.Values[pathStr]; ok {
 		if vectors, ok := cp.ExecsByPath[pathStr]; ok {
 			for _, profileArgs := range vectors {

@@ -1595,10 +1595,13 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 //     pkg/rulemanager/cel/libraries/parse/parse.go for the
 //     live precedence definition.
 //
-//     /bin/sleep    [/bin/sleep, *]              — pod startup, must stay silent
-//     /bin/sh       [/bin/sh, -c, *]             — sh -c <anything>
-//     /bin/echo     [/bin/echo, hello, *]        — echo hello <anything trailing>
+//     /bin/sleep    [/bin/sleep, ⋯⋯]              — pod startup, must stay silent
+//     /bin/sh       [/bin/sh, -c, ⋯⋯]             — sh -c <anything>
+//     /bin/echo     [/bin/echo, hello, ⋯⋯]        — echo hello <anything trailing>
 //     /usr/bin/curl [/usr/bin/curl, -s, ⋯]       — curl -s <one-arg>
+//     /usr/bin/curl [/usr/bin/curl, -s, ⋯, file:///etc/hosts, file:///etc/hostname]
+//                                                — ⋯ mid-vector: one arg, then
+//                                                  literal anchors must match
 //
 // Profile loaded into the new ContainerProfileCache via the unified
 // kubescape.io/user-defined-profile=<name> label. The exec.go CEL function
@@ -1659,13 +1662,19 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 							// path the caller invoked.
 							//
 							// pod startup: sleep <anything>
-							{Path: "/bin/sleep", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/sleep", Args: []string{"/bin/sleep", dynamicpathdetector.ExecArgsWildcard}},
 							// sh -c <anything trailing>
-							{Path: "/bin/sh", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/sh", Args: []string{"/bin/sh", "-c", dynamicpathdetector.ExecArgsWildcard}},
 							// echo hello <anything trailing>
-							{Path: "/bin/echo", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/echo", Args: []string{"/bin/echo", "hello", dynamicpathdetector.ExecArgsWildcard}},
 							// curl -s <one URL>
 							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier}},
+							// curl -s <one URL> file:///etc/hosts file:///etc/hostname
+							// — a ⋯ in a NON-trailing position: it matches exactly
+							// one arg, and the LITERAL args after it must still
+							// anchor. (file:// URLs are used as the post-⋯ literals
+							// so curl reads local files and exits 0.)
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier, "file:///etc/hosts", "file:///etc/hostname"}},
 							// Busybox-symlink mirror entries. The curl image's
 							// /bin/{sleep,sh,echo} are symlinks to /bin/busybox,
 							// so the kernel's resolved /proc/<pid>/exe — what
@@ -1680,9 +1689,17 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 							// retained for environments where exepath resolves
 							// to the as-invoked path (non-symlinked utilities;
 							// fexecve / argv[0] fallback in resolveExecPath).
-							{Path: "/bin/busybox", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
-							{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
-							{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/busybox", Args: []string{"/bin/sleep", dynamicpathdetector.ExecArgsWildcard}},
+							{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.ExecArgsWildcard}},
+							{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.ExecArgsWildcard}},
+							// Literal "*" arg: echo invoked with a GENUINE literal "*"
+							// (e.g. an unexpanded glob), recorded verbatim. Under the
+							// symbol contract a "*" in argv is DATA, not a wildcard, so
+							// this entry matches ONLY `echo star *` and must NOT broaden
+							// to `echo star <other>`. CT-level mirror of storage's
+							// TestAP_LiteralStarVsDynamic. (busybox + symlink forms.)
+							{Path: "/bin/echo", Args: []string{"/bin/echo", "star", "*"}},
+							{Path: "/bin/busybox", Args: []string{"/bin/echo", "star", "*"}},
 						},
 						Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev", "execve"},
 					},
@@ -1804,7 +1821,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 
 	// -----------------------------------------------------------------
 	// 32a. sh -c <anything>  — argv [sh, -c, "echo hi"] matches
-	//      profile [sh, -c, *]. R0040 must NOT fire.
+	//      profile [sh, -c, ⋯⋯]. R0040 must NOT fire.
 	// -----------------------------------------------------------------
 	t.Run("sh_dash_c_matches_wildcard_trailing", func(t *testing.T) {
 		wl := setup(t)
@@ -1821,12 +1838,12 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "sh")
 		assert.Equal(t, 0, countByRule(alerts, "R0040"),
-			"sh -c <cmd> matches profile [sh, -c, *]: R0040 must stay silent")
+			"sh -c <cmd> matches profile [sh, -c, ⋯⋯]: R0040 must stay silent")
 	})
 
 	// -----------------------------------------------------------------
 	// 32b. sh -x -c <cmd>  — argv [sh, -x, -c, "echo hi"] does NOT match
-	//      profile [sh, -c, *] (literal anchor `-c` at position 1 mismatches
+	//      profile [sh, -c, ⋯⋯] (literal anchor `-c` at position 1 mismatches
 	//      `-x`). Path /bin/sh (or /bin/busybox) IS in profile so R0001
 	//      stays silent. R0040 must fire.
 	//
@@ -1851,17 +1868,17 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 			}
 			alerts = waitAlerts(t, wl.Namespace)
 			return countByRule(alerts, "R0040") > 0
-		}, 120*time.Second, 10*time.Second, "sh -x mismatches profile [sh, -c, *]: R0040 must fire")
+		}, 120*time.Second, 10*time.Second, "sh -x mismatches profile [sh, -c, ⋯⋯]: R0040 must fire")
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "sh")
 		require.Greater(t, countByRule(alerts, "R0040"), 0,
-			"sh -x mismatches profile [sh, -c, *]: R0040 must fire")
+			"sh -x mismatches profile [sh, -c, ⋯⋯]: R0040 must fire")
 	})
 
 	// -----------------------------------------------------------------
 	// 32c. echo hello <anything> — argv [echo, hello, world, from, test]
-	//      matches profile [echo, hello, *]. R0040 must NOT fire.
+	//      matches profile [echo, hello, ⋯⋯]. R0040 must NOT fire.
 	// -----------------------------------------------------------------
 	t.Run("echo_hello_matches_wildcard_trailing", func(t *testing.T) {
 		wl := setup(t)
@@ -1878,12 +1895,12 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "echo")
 		assert.Equal(t, 0, countByRule(alerts, "R0040"),
-			"echo hello <words> matches profile [echo, hello, *]: R0040 must stay silent")
+			"echo hello <words> matches profile [echo, hello, ⋯⋯]: R0040 must stay silent")
 	})
 
 	// -----------------------------------------------------------------
 	// 32d. echo goodbye <anything> — argv [echo, goodbye, world] does
-	//      NOT match profile [echo, hello, *] (literal anchor `hello`
+	//      NOT match profile [echo, hello, ⋯⋯] (literal anchor `hello`
 	//      mismatch). R0040 must fire.
 	// -----------------------------------------------------------------
 	t.Run("echo_goodbye_mismatches_R0040", func(t *testing.T) {
@@ -1901,12 +1918,12 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 			}
 			alerts = waitAlerts(t, wl.Namespace)
 			return countByRule(alerts, "R0040") > 0
-		}, 120*time.Second, 10*time.Second, "echo goodbye <words> mismatches profile [echo, hello, *] (literal anchor): R0040 must fire")
+		}, 120*time.Second, 10*time.Second, "echo goodbye <words> mismatches profile [echo, hello, ⋯⋯] (literal anchor): R0040 must fire")
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "echo")
 		require.Greater(t, countByRule(alerts, "R0040"), 0,
-			"echo goodbye <words> mismatches profile [echo, hello, *] (literal anchor): R0040 must fire")
+			"echo goodbye <words> mismatches profile [echo, hello, ⋯⋯] (literal anchor): R0040 must fire")
 	})
 
 	// -----------------------------------------------------------------
@@ -1965,6 +1982,105 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		assertR0001Silent(t, alerts, "curl")
 		require.Greater(t, countByRule(alerts, "R0040"), 0,
 			"curl -s <two urls> exceeds the single-arg dyn token in profile [curl, -s, dyn]: R0040 must fire")
+	})
+
+	// -----------------------------------------------------------------
+	// 32g. echo star <other> — argv [echo, star, boom] does NOT match
+	//      profile [echo, star, *] because the profile's "*" is a LITERAL
+	//      character, not a wildcard. The path IS in profile (R0001 silent)
+	//      but the argv mismatches at position 2 → R0040 must fire. This is
+	//      the core symbol-contract guard: a recorded literal "*" must NOT
+	//      broaden to an arbitrary arg (the over-broadening that blocked the
+	//      merge). Mirrors storage's TestAP_LiteralStarVsDynamic.
+	// -----------------------------------------------------------------
+	t.Run("echo_literal_star_does_not_broaden_R0040", func(t *testing.T) {
+		wl := setup(t)
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"echo", "star", "boom"}, "curl")
+			if err != nil {
+				return false
+			}
+			alerts = waitAlerts(t, wl.Namespace)
+			return countByRule(alerts, "R0040") > 0
+		}, 120*time.Second, 10*time.Second, "echo star boom mismatches profile [echo, star, *] (literal star, no broaden): R0040 must fire")
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "echo")
+		require.Greater(t, countByRule(alerts, "R0040"), 0,
+			"echo star boom mismatches profile [echo, star, *] (literal star, no broaden): R0040 must fire")
+	})
+
+	// -----------------------------------------------------------------
+	// 32h. echo star "*" — argv [echo, star, *] (a genuine literal "*"
+	//      argument, passed unexpanded via exec, no shell) DOES match
+	//      profile [echo, star, *] exactly. R0040 must stay silent. Pins the
+	//      other half of the literal-"*" contract: data matches its own
+	//      value verbatim.
+	// -----------------------------------------------------------------
+	t.Run("echo_literal_star_matches_itself", func(t *testing.T) {
+		wl := setup(t)
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"echo", "star", "*"}, "curl")
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "exec must run")
+		time.Sleep(20 * time.Second)
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "echo")
+		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+			"echo star * matches profile [echo, star, *] (literal): R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32i. curl -s <one URL> file:///etc/hosts file:///etc/hostname —
+	//      argv [curl, -s, <url>, file:///etc/hosts, file:///etc/hostname]
+	//      matches profile [curl, -s, ⋯, file:///etc/hosts,
+	//      file:///etc/hostname]. The ⋯ sits MID-VECTOR: it consumes exactly
+	//      the one <url> arg, and the two LITERAL args after it anchor. All
+	//      three URLs are readable file:// paths so curl exits 0. R0040 must
+	//      stay silent.
+	// -----------------------------------------------------------------
+	t.Run("curl_dash_s_mid_ellipsis_then_literals_matches", func(t *testing.T) {
+		wl := setup(t)
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/group", "file:///etc/hosts", "file:///etc/hostname"}, "curl")
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "exec must run")
+		time.Sleep(20 * time.Second)
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "curl")
+		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+			"curl -s <url> file:///etc/hosts file:///etc/hostname matches profile [curl, -s, ⋯, <lit>, <lit>]: R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32j. curl -s <one URL> file:///etc/hosts file:///etc/group — the LAST
+	//      literal mismatches the profile's anchor (profile ends
+	//      file:///etc/hostname, runtime ends file:///etc/group). The ⋯ and
+	//      the first literal still match, so this pins that literals AFTER a
+	//      mid-vector ⋯ are enforced — a mismatch there fires R0040. All URLs
+	//      are readable so curl exits 0; only the argv shape differs.
+	// -----------------------------------------------------------------
+	t.Run("curl_dash_s_mid_ellipsis_trailing_literal_mismatch_R0040", func(t *testing.T) {
+		wl := setup(t)
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/group", "file:///etc/hosts", "file:///etc/group"}, "curl")
+			if err != nil {
+				return false
+			}
+			alerts = waitAlerts(t, wl.Namespace)
+			return countByRule(alerts, "R0040") > 0
+		}, 120*time.Second, 10*time.Second, "curl trailing literal mismatches profile [curl, -s, ⋯, <lit>, file:///etc/hostname]: R0040 must fire")
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "curl")
+		require.Greater(t, countByRule(alerts, "R0040"), 0,
+			"curl trailing literal mismatches profile [curl, -s, ⋯, <lit>, file:///etc/hostname]: R0040 must fire")
 	})
 }
 
