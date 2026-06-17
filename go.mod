@@ -481,3 +481,4 @@ replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
 replace github.com/anchore/stereoscope => github.com/anchore/stereoscope v0.1.9
 
 replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1
+replace github.com/kubescape/storage => github.com/kubescape/storage v0.0.258
