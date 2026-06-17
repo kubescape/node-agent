@@ -131,6 +131,7 @@ require (
 	github.com/anchore/go-version v1.2.2-0.20210903204242-51efa5b487c4 // indirect
 	github.com/anchore/packageurl-go v0.1.1-0.20250220190351-d62adb6e1115 // indirect
 	github.com/anchore/stereoscope v0.1.22 // indirect
+	github.com/anchore/stereoscope v0.1.22 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
@@ -169,6 +170,7 @@ require (
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/bodgit/plumbing v1.3.0 // indirect
 	github.com/bodgit/sevenzip v1.6.1 // indirect
 	github.com/bodgit/windows v1.0.1 // indirect
@@ -184,8 +186,9 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/cncf/xds/go v0.0.0-20251210132809-ee656c7534f5 // indirect
 	github.com/containerd/cgroups/v3 v3.1.2 // indirect
-	github.com/containerd/containerd v1.7.30 // indirect
+	github.com/containerd/containerd v1.7.32 // indirect
 	github.com/containerd/containerd/api v1.10.0 // indirect
+	github.com/containerd/containerd/v2 v2.2.1 // indirect
 	github.com/containerd/continuity v0.4.5 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
@@ -193,6 +196,7 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/nri v0.11.0 // indirect
 	github.com/containerd/platforms v1.0.0-rc.2 // indirect
+	github.com/containerd/plugin v1.0.0 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.18.2 // indirect
 	github.com/containerd/ttrpc v1.2.7 // indirect
 	github.com/containerd/typeurl/v2 v2.2.3 // indirect
@@ -225,7 +229,9 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
+	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/gammazero/deque v1.0.0 // indirect
+	github.com/github/go-spdx/v2 v2.4.0 // indirect
 	github.com/github/go-spdx/v2 v2.4.0 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.7 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
