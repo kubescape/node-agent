@@ -131,7 +131,6 @@ require (
 	github.com/anchore/go-version v1.2.2-0.20210903204242-51efa5b487c4 // indirect
 	github.com/anchore/packageurl-go v0.1.1-0.20250220190351-d62adb6e1115 // indirect
 	github.com/anchore/stereoscope v0.1.22 // indirect
-	github.com/anchore/stereoscope v0.1.22 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
@@ -169,7 +168,6 @@ require (
 	github.com/blakesmith/ar v0.0.0-20190502131153-809d4375e1fb // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
-	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/bodgit/plumbing v1.3.0 // indirect
 	github.com/bodgit/sevenzip v1.6.1 // indirect
@@ -227,9 +225,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/gammazero/deque v1.0.0 // indirect
-	github.com/github/go-spdx/v2 v2.4.0 // indirect
 	github.com/github/go-spdx/v2 v2.4.0 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.7 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
@@ -486,7 +482,4 @@ replace github.com/anchore/stereoscope => github.com/anchore/stereoscope v0.1.9
 
 replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1
 
-replace github.com/anchore/stereoscope => github.com/anchore/stereoscope v0.1.9
-
-replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1
-replace github.com/kubescape/storage => github.com/kubescape/storage v0.0.258
+replace github.com/kubescape/storage => github.com/k8sstormcenter/storage v0.0.240-0.20260616161021-35603aca572b

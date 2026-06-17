@@ -74,11 +74,6 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 	// or absent (empty profile Args = "no argv constraint").
 	runtimeArgs, err := celparse.ParseList[string](args)
 	if err != nil {
-	// Parse the runtime args list from CEL. Empty list is valid ("exec'd
-	// with no args") and matches a profile entry whose Args is also empty
-	// or absent (empty profile Args = "no argv constraint").
-	runtimeArgs, err := celparse.ParseList[string](args)
-	if err != nil {
 		return types.NewErr("failed to parse args: %v", err)
 	}
 
@@ -123,16 +118,6 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		if vectors, ok := cp.ExecsByPath[pathStr]; ok {
 			for _, profileArgs := range vectors {
 				if dynamicpathdetector.MatchExecArgs(profileArgs, true, runtimeArgs) {
-					return types.Bool(true)
-				}
-			}
-		} else {
-			// State 2: ExecsByPath absent → back-compat "no argv constraint".
-			return types.Bool(true)
-		}
-		if vectors, ok := cp.ExecsByPath[pathStr]; ok {
-			for _, profileArgs := range vectors {
-				if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
 					return types.Bool(true)
 				}
 			}

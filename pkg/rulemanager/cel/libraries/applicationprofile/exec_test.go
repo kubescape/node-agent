@@ -314,13 +314,13 @@ func TestExecWithArgsNoProfile(t *testing.T) {
 // TestExecWithArgsWildcardInProfile exercises wildcard tokens inside a
 // user-defined ApplicationProfile's exec arg vector:
 //
-//	"⋯" (DynamicIdentifier)  — matches exactly one argument position.
-//	"*" (WildcardIdentifier) — matches zero or more consecutive args.
+//	"⋯"  (DynamicIdentifier) — matches exactly one argument position.
+//	"⋯⋯" (ExecArgsWildcard)  — matches zero or more consecutive args.
+//	"*"                      — a literal "*" (never a wildcard in exec args).
 //
 // The runtime exec arg vector is matched against the profile via
-// dynamicpathdetector.CompareExecArgs (added in
-// k8sstormcenter/storage#23 — the matcher that this CEL function now
-// routes through instead of slices.Compare).
+// dynamicpathdetector.MatchExecArgs — the matcher that this CEL function
+// routes through instead of slices.Compare.
 func TestExecWithArgsWildcardInProfile(t *testing.T) {
 	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
@@ -349,7 +349,7 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 			// sh -c with any trailing payload (zero or more args).
 			{
 				Path: "/bin/sh",
-				Args: []string{"-c", "*"},
+				Args: []string{"-c", dynamicpathdetector.ExecArgsWildcard},
 			},
 			// ls -l in any directory — single trailing position.
 			{
@@ -359,7 +359,7 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 			// echo with any number of greeting words after a literal anchor.
 			{
 				Path: "/bin/echo",
-				Args: []string{"hello", "*"},
+				Args: []string{"hello", dynamicpathdetector.ExecArgsWildcard},
 			},
 		},
 	})
