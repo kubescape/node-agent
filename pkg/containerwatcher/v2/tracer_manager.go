@@ -22,8 +22,12 @@ import (
 // Key implementation detail: Tracers spawn goroutines in Start() for eBPF loading.
 // Without controlled startup, all tracers load concurrently, causing kernel memory pressure.
 type TracerManager struct {
-	cfg               config.Config
-	tracers           map[utils.EventType]containerwatcher.TracerInterface
+	cfg config.Config
+	// tracers is keyed by tracer name, NOT event type: multiple tracers can share
+	// an event type (e.g. trace_ssl and trace_http both emit HTTPEventType), and
+	// keying by event type made the second registration silently overwrite the
+	// first, so only one of them ever started.
+	tracers           map[string]containerwatcher.TracerInterface
 	tracerFactory     containerwatcher.TracerFactoryInterface
 	thirdPartyTracers []containerwatcher.TracerInterface
 }
@@ -31,22 +35,29 @@ type TracerManager struct {
 func NewTracerManager(cfg config.Config, tracerFactory containerwatcher.TracerFactoryInterface) *TracerManager {
 	return &TracerManager{
 		cfg:               cfg,
-		tracers:           make(map[utils.EventType]containerwatcher.TracerInterface),
+		tracers:           make(map[string]containerwatcher.TracerInterface),
 		tracerFactory:     tracerFactory,
 		thirdPartyTracers: make([]containerwatcher.TracerInterface, 0),
 	}
 }
 
 func (tm *TracerManager) RegisterTracer(tracer containerwatcher.TracerInterface) {
-	tm.tracers[tracer.GetEventType()] = tracer
+	tm.tracers[tracer.GetName()] = tracer
 }
 
+// GetTracer returns the first registered tracer for the given event type. With
+// the name-keyed map a type can have more than one tracer; this returns any one
+// of them, which is sufficient for the unique types it is used with (procfs).
 func (tm *TracerManager) GetTracer(eventType utils.EventType) (containerwatcher.TracerInterface, bool) {
-	tracer, exists := tm.tracers[eventType]
-	return tracer, exists
+	for _, tracer := range tm.tracers {
+		if tracer.GetEventType() == eventType {
+			return tracer, true
+		}
+	}
+	return nil, false
 }
 
-func (tm *TracerManager) GetAllTracers() map[utils.EventType]containerwatcher.TracerInterface {
+func (tm *TracerManager) GetAllTracers() map[string]containerwatcher.TracerInterface {
 	return tm.tracers
 }
 
@@ -140,7 +151,7 @@ func (tm *TracerManager) StopAllTracers() error {
 // enrich process info before procfs has completed its initial scan.
 func (tm *TracerManager) startProcfsTracer(ctx context.Context) error {
 	if tracer, exists := tm.GetTracer(utils.ProcfsEventType); exists {
-		delete(tm.tracers, utils.ProcfsEventType)
+		delete(tm.tracers, tracer.GetName())
 		if tracer.IsEnabled(tm.cfg) {
 			logger.L().Info("Starting procfs tracer before other tracers")
 			if err := tracer.Start(ctx); err != nil {
