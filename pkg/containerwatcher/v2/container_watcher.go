@@ -8,9 +8,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
-	"github.com/kubescape/node-agent/pkg/otelsetup"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
@@ -22,8 +19,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	"github.com/kubescape/node-agent/pkg/dedupcache"
 	"github.com/kubescape/node-agent/pkg/containerwatcher/v2/tracers"
+	"github.com/kubescape/node-agent/pkg/dedupcache"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
@@ -31,6 +28,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
@@ -38,6 +36,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	"github.com/kubescape/workerpool"
 	"github.com/panjf2000/ants/v2"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // ContainerWatcher represents the new container watcher implementation
@@ -47,6 +47,7 @@ type ContainerWatcher struct {
 	cfg               config.Config
 	containerSelector containercollection.ContainerSelector
 	ctx               context.Context
+	cancel            context.CancelFunc
 	clusterName       string
 	agentStartTime    time.Time
 
@@ -284,7 +285,10 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("container watcher is already running")
 	}
 
-	cw.ctx = ctx
+	// Derive a cancelable context so Stop() can actually terminate the producer
+	// (eventProcessingLoop) and consumer (workerPoolLoop) goroutines, which both
+	// select on cw.ctx.Done(). The parent ctx is honored too.
+	cw.ctx, cw.cancel = context.WithCancel(ctx)
 
 	go func() {
 		// Read from the container EOL notification channel and call unregisterContainer
@@ -368,6 +372,15 @@ func (cw *ContainerWatcher) Stop() {
 
 	logger.L().Info("Stopping ContainerWatcher...")
 
+	// Cancel cw.ctx first so the producer (eventProcessingLoop) and consumer
+	// (workerPoolLoop) goroutines return before we tear down the resources they
+	// use (worker pool, channels). Without this, Stop() is only safe because its
+	// sole caller runs immediately before process exit; called mid-process it
+	// would leak both goroutines and silently drop events on the released pool.
+	if cw.cancel != nil {
+		cw.cancel()
+	}
+
 	// Stop container manager
 	cw.StopContainerCollection()
 
@@ -378,10 +391,11 @@ func (cw *ContainerWatcher) Stop() {
 
 	cw.gadgetRuntime.Close()
 
-	// Close worker channel to signal worker goroutine to stop
-	if cw.workerChan != nil {
-		close(cw.workerChan)
-	}
+	// workerChan is intentionally not closed: the consumer (workerPoolLoop) and
+	// producer (eventProcessingLoop -> enrichAndProcess) already exit on
+	// cw.ctx.Done() (cancelled above), so closing is unnecessary — and unsafe,
+	// since a send racing the close panics with "send on closed channel". The
+	// channel is garbage collected with the ContainerWatcher.
 
 	// Stop worker pool
 	if cw.workerPool != nil {
@@ -486,7 +500,13 @@ func (cw *ContainerWatcher) enrichAndProcess(entry EventEntry) {
 			logger.L().Ctx(context.Background()).Warning("ContainerWatcher - Worker channel full, blocking until space available",
 				helpers.String("eventType", string(entry.EventType)),
 				helpers.String("containerID", entry.ContainerID))
-			cw.workerChan <- enrichedEvent
+			// ctx-aware so a full channel does not block forever once the
+			// consumer has exited on shutdown (cw.ctx cancelled).
+			select {
+			case cw.workerChan <- enrichedEvent:
+			case <-cw.ctx.Done():
+				enrichedEvent.Event.Release()
+			}
 		} else {
 			logger.L().Ctx(context.Background()).Warning("ContainerWatcher - Worker channel full, dropping event",
 				helpers.String("eventType", string(entry.EventType)),
