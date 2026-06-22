@@ -44,6 +44,13 @@ type EventDedupConfig struct {
 	SlotsExponent uint8 `mapstructure:"slotsExponent"`
 }
 
+// AlertDeduplicationConfig is a master switch that bypasses all sensor-side alert
+// deduplication and cooldown. Off by default; intended for high-volume
+// security-testing (DAST) use cases.
+type AlertDeduplicationConfig struct {
+	Bypass bool `mapstructure:"bypass"`
+}
+
 type Config struct {
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
@@ -86,6 +93,7 @@ type Config struct {
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
+	AlertDeduplication             AlertDeduplicationConfig             `mapstructure:"alertDeduplication"`
 	EventDedup                     EventDedupConfig                     `mapstructure:"eventDedup"`
 	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
 	ExcludeLabels                  map[string][]string                  `mapstructure:"excludeLabels"`
@@ -204,6 +212,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 
 	viper.SetDefault("eventDedup::enabled", true)
 	viper.SetDefault("eventDedup::slotsExponent", 18)
+	viper.SetDefault("alertDeduplication::bypass", false)
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
@@ -254,6 +263,14 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 		config.SeccompProfileBackend != SeccompBackendCRD {
 		return Config{}, fmt.Errorf("invalid seccompProfileBackend value: %q (must be %q or %q)",
 			config.SeccompProfileBackend, SeccompBackendStorage, SeccompBackendCRD)
+	}
+
+	// High-volume security testing (DAST): a single master switch that bypasses ALL sensor-side suppression.
+	// It forces the existing event-dedup and rule-cooldown switches off, so the
+	// downstream code paths (container watcher, rule manager) need no changes.
+	if config.AlertDeduplication.Bypass {
+		config.EventDedup.Enabled = false
+		config.RuleCoolDown.OnProfileFailure = false
 	}
 
 	// Validate eventDedup slotsExponent range

@@ -583,6 +583,34 @@ func TestGetFIMPathConfigs(t *testing.T) {
 	assert.False(t, pathConfig.OnMove)
 }
 
+func TestLoadConfig_AlertDeduplicationBypass(t *testing.T) {
+	viper.Reset()
+	dir := t.TempDir()
+	cfg := `{"alertDeduplication": {"bypass": true}, "eventDedup": {"enabled": true, "slotsExponent": 18}, "ruleCooldown": {"ruleCooldownOnProfileFailure": true}}`
+	require.NoError(t, os.WriteFile(dir+"/config.json", []byte(cfg), 0644))
+
+	config, err := LoadConfigOptional(dir, false)
+	require.NoError(t, err)
+
+	assert.True(t, config.AlertDeduplication.Bypass)
+	assert.False(t, config.EventDedup.Enabled, "bypass must disable event dedup")
+	assert.False(t, config.RuleCoolDown.OnProfileFailure, "bypass must disable rule cooldown")
+}
+
+func TestLoadConfig_NoBypassByDefault(t *testing.T) {
+	viper.Reset()
+	dir := t.TempDir()
+	cfg := `{"eventDedup": {"enabled": true, "slotsExponent": 18}, "ruleCooldown": {"ruleCooldownOnProfileFailure": true}}`
+	require.NoError(t, os.WriteFile(dir+"/config.json", []byte(cfg), 0644))
+
+	config, err := LoadConfigOptional(dir, false)
+	require.NoError(t, err)
+
+	assert.False(t, config.AlertDeduplication.Bypass)
+	assert.True(t, config.EventDedup.Enabled)
+	assert.True(t, config.RuleCoolDown.OnProfileFailure)
+}
+
 func TestGetFIMExportersConfig(t *testing.T) {
 	// Create a temporary config file
 	tempDir := t.TempDir()
@@ -639,4 +667,16 @@ func TestGetFIMExportersConfig(t *testing.T) {
 	assert.Equal(t, "udp://syslog:514", exportersConfig.SyslogExporter)
 	assert.Len(t, exportersConfig.AlertManagerExporterUrls, 1)
 	assert.Equal(t, "http://alertmanager:9093", exportersConfig.AlertManagerExporterUrls[0])
+}
+
+func TestLoadConfig_BypassSkipsSlotsExponentValidation(t *testing.T) {
+	viper.Reset()
+	dir := t.TempDir()
+	// slotsExponent 5 is out of range, but bypass disables eventDedup, so load must succeed.
+	cfg := `{"alertDeduplication": {"bypass": true}, "eventDedup": {"enabled": true, "slotsExponent": 5}}`
+	require.NoError(t, os.WriteFile(dir+"/config.json", []byte(cfg), 0644))
+
+	config, err := LoadConfigOptional(dir, false)
+	require.NoError(t, err, "bypass must skip slotsExponent validation")
+	assert.False(t, config.EventDedup.Enabled)
 }
