@@ -31,7 +31,8 @@ func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEv
 			helpers.String("containerID", notif.Container.Runtime.ContainerID))
 		// avoid loops when the container is being removed
 		if notif.Type == containercollection.EventTypeAddContainer {
-			cw.unregisterContainer(notif.Container)
+			// ignored containers must be dropped regardless of rule bindings / runtime detection
+			cw.removeContainer(notif.Container)
 		}
 		return
 	}
@@ -196,6 +197,15 @@ func (cw *ContainerWatcher) unregisterContainer(container *containercollection.C
 	// 1. Runtime detection is disabled, OR
 	// 2. Rule bindings have been initialized AND this pod is not in ruleManagedPods
 	if cw.cfg.EnableRuntimeDetection {
+		// When rule bindings are ignored, every pod is effectively rule-managed
+		// (all rules apply to all pods), so the container must keep being monitored.
+		if cw.cfg.IgnoreRuleBindings {
+			logger.L().Debug("ContainerWatcher - container should still be monitored for runtime detection (rule bindings ignored)",
+				helpers.String("container ID", container.Runtime.ContainerID),
+				helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName),
+			)
+			return
+		}
 		// If the pod is currently in ruleManagedPods, it should still be monitored
 		if cw.ruleManagedPods.Contains(k8sPodID) {
 			logger.L().Debug("ContainerWatcher - container should still be monitored for runtime detection (in ruleManagedPods)",
@@ -217,6 +227,13 @@ func (cw *ContainerWatcher) unregisterContainer(container *containercollection.C
 		// meaning rule bindings exist but don't apply to this pod - proceed with unregistration
 	}
 
+	cw.removeContainer(container)
+}
+
+// removeContainer removes a container from monitoring unconditionally, releasing
+// its collection entry and shared cache data. Use this when the container must be
+// dropped regardless of rule bindings or runtime detection (e.g. ignored containers).
+func (cw *ContainerWatcher) removeContainer(container *containercollection.Container) {
 	logger.L().Debug("ContainerWatcher - stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
 
 	cw.containerCollection.RemoveContainer(container.Runtime.ContainerID)

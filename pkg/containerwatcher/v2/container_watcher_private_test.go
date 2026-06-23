@@ -133,6 +133,7 @@ func TestUnregisterContainer(t *testing.T) {
 		expectedContainers      []string
 		enableRuntimeDetection  bool
 		ruleBindingsInitialized bool
+		ignoreRuleBindings      bool
 	}{
 		{
 			name:                    "Test unregister container with runtime detection enabled and bindings initialized",
@@ -223,12 +224,28 @@ func TestUnregisterContainer(t *testing.T) {
 			enableRuntimeDetection:  true,
 			ruleBindingsInitialized: true,
 		},
+		{
+			name:                    "Test keep container when rule bindings are ignored",
+			unregisterContainer:     "container1",
+			unregisterContainersPod: "pod1",
+			podToContainers: map[string][]string{
+				"pod1": {"container1"},
+				"pod2": {"container2"},
+			},
+			// pod is not rule-managed and bindings are initialized, but IgnoreRuleBindings
+			// means all rules apply to all pods, so the container must be kept.
+			preRuleManagedPods:      []string{},
+			expectedContainers:      []string{"container1", "container2"},
+			enableRuntimeDetection:  true,
+			ruleBindingsInitialized: true,
+			ignoreRuleBindings:      true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ncw := ContainerWatcher{
-				cfg:                     config.Config{EnableRuntimeDetection: tt.enableRuntimeDetection},
+				cfg:                     config.Config{EnableRuntimeDetection: tt.enableRuntimeDetection, IgnoreRuleBindings: tt.ignoreRuleBindings},
 				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
 				ruleBindingsInitialized: tt.ruleBindingsInitialized,
 				containerCollection:     &containercollection.ContainerCollection{},

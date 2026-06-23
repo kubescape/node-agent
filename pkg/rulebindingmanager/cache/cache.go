@@ -63,7 +63,7 @@ func NewCache(config config.Config, k8sClient k8sclient.K8sClientInterface, rule
 		rbNameToRB:        maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
 		podToRBNames:      maps.SafeMap[string, mapset.Set[string]]{},
 		rbNameToPods:      maps.SafeMap[string, mapset.Set[string]]{},
-		watchResources:    resourcesToWatch(config.NodeName),
+		watchResources:    resourcesToWatch(config.NodeName, config.IgnoreRuleBindings),
 		rulesForPod:       expirable.NewLRU[string, []rulemanagertypesv1.Rule](1000, nil, 5*time.Second),
 		notificationQueue: make(chan pendingNotification, 10000),
 	}
@@ -154,6 +154,11 @@ func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	if pod, ok := obj.(*corev1.Pod); ok {
+		// When rule bindings are ignored, pod->binding bookkeeping is never read
+		// (ListRulesForPod resolves rules directly from the rule creator), so skip it.
+		if c.config.IgnoreRuleBindings {
+			return
+		}
 		rbs = c.addPod(ctx, pod)
 	} else if un, ok := obj.(*unstructured.Unstructured); ok {
 		if un.GetKind() != "" && un.GetKind() != rbtypes.RuntimeRuleBindingAlertKind {
@@ -185,6 +190,11 @@ func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	if pod, ok := obj.(*corev1.Pod); ok {
+		// When rule bindings are ignored, pod->binding bookkeeping is never read
+		// (ListRulesForPod resolves rules directly from the rule creator), so skip it.
+		if c.config.IgnoreRuleBindings {
+			return
+		}
 		rbs = c.addPod(ctx, pod)
 	} else if un, ok := obj.(*unstructured.Unstructured); ok {
 		if un.GetKind() != "" && un.GetKind() != rbtypes.RuntimeRuleBindingAlertKind {
@@ -216,6 +226,10 @@ func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	if pod, ok := obj.(*corev1.Pod); ok {
+		// When rule bindings are ignored, pod->binding bookkeeping is never populated, so skip it.
+		if c.config.IgnoreRuleBindings {
+			return
+		}
 		c.deletePod(uniqueName(pod))
 	} else if un, ok := obj.(*unstructured.Unstructured); ok {
 		rbs = c.deleteRuleBinding(uniqueName(un))
@@ -236,11 +250,17 @@ func (c *RBCache) RefreshRuleBindingsRules() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	for _, rbName := range c.rbNameToRB.Keys() {
-		rb := c.rbNameToRB.Get(rbName)
-		c.rbNameToRules.Set(rbName, c.createRules(rb.Spec.Rules))
+	// When rule bindings are ignored, ListRulesForPod resolves rules directly from
+	// the rule creator (CreateAllRules), so there are no per-binding rules to rebuild.
+	// We still notify downstream consumers so they react to the underlying rule change
+	// (e.g. RuleManager recompiling the profile projection spec).
+	if !c.config.IgnoreRuleBindings {
+		for _, rbName := range c.rbNameToRB.Keys() {
+			rb := c.rbNameToRB.Get(rbName)
+			c.rbNameToRules.Set(rbName, c.createRules(rb.Spec.Rules))
+		}
+		logger.L().Info("RBCache - refreshed rule bindings rules", helpers.Int("ruleBindings", len(c.rbNameToRB.Keys())))
 	}
-	logger.L().Info("RBCache - refreshed rule bindings rules", helpers.Int("ruleBindings", len(c.rbNameToRB.Keys())))
 
 	if len(c.notifiers) > 0 {
 		notifiers := make([]*chan rulebindingmanager.RuleBindingNotify, len(c.notifiers))

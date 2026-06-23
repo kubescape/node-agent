@@ -55,7 +55,7 @@ func unstructuredToRuleBinding(obj *unstructured.Unstructured) (*typesv1.Runtime
 	return rb, nil
 }
 
-func resourcesToWatch(nodeName string) []watcher.WatchResource {
+func resourcesToWatch(nodeName string, ignoreRuleBindings bool) []watcher.WatchResource {
 	var w []watcher.WatchResource
 
 	// add pod
@@ -70,9 +70,13 @@ func resourcesToWatch(nodeName string) []watcher.WatchResource {
 	)
 	w = append(w, p)
 
-	// add rule binding
-	rb := watcher.NewWatchResource(typesv1.RuleBindingAlertGvr, metav1.ListOptions{})
-	w = append(w, rb)
+	// When rule bindings are ignored, all rules apply to all pods, so there is no
+	// reason to watch (and react to) RuntimeAlertRuleBinding objects.
+	if !ignoreRuleBindings {
+		// add rule binding
+		rb := watcher.NewWatchResource(typesv1.RuleBindingAlertGvr, metav1.ListOptions{})
+		w = append(w, rb)
+	}
 
 	return w
 }
