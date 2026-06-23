@@ -160,7 +160,7 @@ correlation is an upgrade, not a dependency.
 | `fullPathTracingEnabled` | bool | `true` | Include full executable paths |
 | `enableEmbeddedSBOMs` | bool | `false` | Use embedded SBOMs from images |
 | `partialProfileGenerationEnabled` | bool | `true` | Allow partial profile generation |
-| `ignoreRuleBindings` | bool | `false` | Apply all rules regardless of bindings |
+| `ignoreRuleBindings` | bool | `false` | Apply all rules to all pods regardless of bindings. When enabled, RuntimeAlertRuleBinding objects are not watched, every monitored container is kept for runtime detection, and per-pod binding bookkeeping is skipped (rules are resolved directly from the rule creator). |
 
 ### Timing & Performance
 

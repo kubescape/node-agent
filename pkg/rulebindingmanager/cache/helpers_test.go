@@ -13,8 +13,9 @@ import (
 
 func TestResourcesToWatch(t *testing.T) {
 	tests := []struct {
-		name     string
-		nodeName string
+		name               string
+		nodeName           string
+		ignoreRuleBindings bool
 	}{
 		{
 			name:     "Test with valid node name",
@@ -24,19 +25,29 @@ func TestResourcesToWatch(t *testing.T) {
 			name:     "Test with empty node name",
 			nodeName: "",
 		},
+		{
+			name:               "Test with rule bindings ignored",
+			nodeName:           "node-1",
+			ignoreRuleBindings: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := resourcesToWatch(tt.nodeName)
-
-			assert.Equal(t, 2, len(result))
+			result := resourcesToWatch(tt.nodeName, tt.ignoreRuleBindings)
 
 			podResource := result[0]
 			assert.Equal(t, "v1", podResource.GroupVersionResource().Version)
 			assert.Equal(t, "pods", podResource.GroupVersionResource().Resource)
 			assert.Equal(t, "spec.nodeName="+tt.nodeName, podResource.ListOptions().FieldSelector)
 
+			if tt.ignoreRuleBindings {
+				// rule bindings are not watched when ignored
+				assert.Equal(t, 1, len(result))
+				return
+			}
+
+			assert.Equal(t, 2, len(result))
 			rbResource := result[1]
 			assert.Equal(t, typesv1.RuleBindingAlertGvr, rbResource.GroupVersionResource())
 			assert.Equal(t, metav1.ListOptions{}, rbResource.ListOptions())
