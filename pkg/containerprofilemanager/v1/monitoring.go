@@ -24,9 +24,17 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 		container.K8s.PodName,
 		container.Runtime.ContainerImageName,
 	)
+	// DIAGNOSTIC (temporary): confirm the per-container monitor/flush loop started.
+	logger.L().Info("DIAG monitorContainer STARTED",
+		helpers.String("containerID", watchedContainer.ContainerID),
+		helpers.String("podName", container.K8s.PodName))
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
+			// DIAGNOSTIC (temporary): confirm the flush ticker actually fired.
+			logger.L().Info("DIAG monitorContainer TICK",
+				helpers.String("containerID", watchedContainer.ContainerID),
+				helpers.String("podName", container.K8s.PodName))
 			// Adjust ticker after first tick for faster initial updates
 			if !watchedContainer.InitialDelayExpired {
 				watchedContainer.InitialDelayExpired = true

@@ -86,6 +86,13 @@ func (cw *ContainerWatcher) setSharedWatchedContainerData(container *containerco
 	err := backoff.Retry(func() error {
 		data, err := cw.getSharedWatchedContainerData(container)
 		if err != nil {
+			// DIAGNOSTIC (temporary): surface the per-retry failure that the
+			// backoff otherwise swallows, so we can see why monitoring never starts.
+			logger.L().Info("DIAG getSharedWatchedContainerData failed",
+				helpers.String("containerID", container.Runtime.ContainerID),
+				helpers.String("podName", container.K8s.PodName),
+				helpers.String("namespace", container.K8s.Namespace),
+				helpers.Error(err))
 			return err
 		}
 		if data == nil {
@@ -105,6 +112,10 @@ func (cw *ContainerWatcher) setSharedWatchedContainerData(container *containerco
 		return
 	}
 
+	// DIAGNOSTIC (temporary): confirm the shared data was set (unblocks monitoring).
+	logger.L().Info("DIAG SetSharedContainerData reached",
+		helpers.String("containerID", container.Runtime.ContainerID),
+		helpers.String("podName", container.K8s.PodName))
 	cw.objectCache.K8sObjectCache().SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 }
 
