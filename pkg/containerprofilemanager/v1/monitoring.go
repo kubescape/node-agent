@@ -162,6 +162,15 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		watchedContainer.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial)
 	}
 
+	// DIAGNOSTIC (temporary): callstack count present in data at flush time, plus
+	// the gating flags, to see whether identified call stacks reach the patch.
+	logger.L().Debug("DIAG saveProfile",
+		helpers.String("containerID", watchedContainer.ContainerID),
+		helpers.Int("callStacks", len(containerData.getCallStacks())),
+		helpers.Int("opens", len(containerData.getOpens())),
+		helpers.Interface("forceSend", forceSend),
+		helpers.Interface("isEmpty", containerData.isEmpty()))
+
 	if containerData.isEmpty() && !forceSend { // TODO: Also check if the seccomp profile is new (currently not implemented)
 		return nil
 	}

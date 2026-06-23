@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -18,6 +19,9 @@ import (
 )
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
+
+// reportCSLogN samples the temporary callstack-store diagnostic.
+var reportCSLogN atomic.Uint64
 
 // ReportCapability reports a capability event for a container
 func (cpm *ContainerProfileManager) ReportCapability(containerID, capability string) {
@@ -220,6 +224,7 @@ func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowe
 
 // ReportIdentifiedCallStack reports a call stack for a container
 func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string, callStack *v1beta1.IdentifiedCallStack) {
+	var stored, total int
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.callStacks == nil {
 			data.callStacks = &maps.SafeMap[string, *v1beta1.IdentifiedCallStack]{}
@@ -230,13 +235,25 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 
 		// Check if we already have this call stack
 		if data.callStacks.Has(callStackIdentifier) {
+			total = data.callStacks.Len()
 			return 0, nil
 		}
 
 		// Add to call stacks map
 		data.callStacks.Set(callStackIdentifier, callStack)
+		stored = 1
+		total = data.callStacks.Len()
 		return size.Of(callStack), nil
 	})
+
+	// DIAGNOSTIC (temporary): sample callstack-store outcome to see if/where it lands.
+	if reportCSLogN.Add(1)%200 == 0 {
+		logger.L().Debug("DIAG reportCallStack",
+			helpers.String("containerID", containerID),
+			helpers.Int("storedNew", stored),
+			helpers.Int("totalInData", total),
+			helpers.Interface("err", err))
+	}
 
 	cpm.logEventError(err, "callstack", containerID)
 }
