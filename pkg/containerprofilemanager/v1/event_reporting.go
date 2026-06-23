@@ -23,6 +23,9 @@ var procRegex = regexp.MustCompile(`^/proc/\d+`)
 // reportCSLogN samples the temporary callstack-store diagnostic.
 var reportCSLogN atomic.Uint64
 
+// reportOpenLogN samples the temporary file-open recording diagnostic.
+var reportOpenLogN atomic.Uint64
+
 // ReportCapability reports a capability event for a container
 func (cpm *ContainerProfileManager) ReportCapability(containerID, capability string) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
@@ -112,6 +115,15 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event uti
 
 		return size.Of(path) + size.Of(flags), nil
 	})
+
+	// DIAGNOSTIC (temporary): does the container-profile-manager actually receive
+	// + record opens, or is the container not registered (ErrContainerNotFound)?
+	if reportOpenLogN.Add(1)%50 == 0 {
+		logger.L().Info("DIAG reportFileOpen",
+			helpers.String("containerID", containerID),
+			helpers.String("path", event.GetPath()),
+			helpers.Interface("err", err))
+	}
 
 	cpm.logEventError(err, "file open", containerID)
 }
