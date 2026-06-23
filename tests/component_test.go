@@ -1628,7 +1628,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 
 	const overlayName = "curl-32-overlay"
 
-	setup := func(t *testing.T) *testutils.TestWorkload {
+	setup := func(t *testing.T) (*testutils.TestWorkload, int) {
 		t.Helper()
 		ns := testutils.NewRandomNamespace()
 		k8sClient := k8sinterface.NewKubernetesApi()
@@ -1759,9 +1759,45 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 			path.Join(utils.CurrentDir(), "resources/curl-exec-arg-wildcards-deployment.yaml"))
 		require.NoError(t, err)
 		require.NoError(t, wl.WaitForReady(80))
-		// let node-agent load the user AP+NN into the CP cache
-		time.Sleep(30 * time.Second)
-		return wl
+
+		// Deterministic profile-load gate (replaces a fixed sleep that raced the
+		// asynchronous overlay load). node-agent must observe the pod, resolve
+		// the kubescape.io/user-defined-profile annotation to UserAPRef, fetch
+		// the user AP and build the projection before the argv-comparison rule
+		// (R0040) can evaluate at all; until then refreshOneEntry reports the CP
+		// "not-available" and R0040 is suppressed — which makes every POSITIVE
+		// subtest pass VACUOUSLY (no profile -> no R0040 -> ==0) and every
+		// NEGATIVE subtest time out. The fixed 30s sleep did not reliably cover
+		// that window (observed: all negatives failing on a slow load).
+		//
+		// The canary is a deterministic argv MISMATCH: [echo, <probe>] matches
+		// neither [echo, hello, ⋯⋯] nor [echo, star, *], so once the overlay is
+		// projected it MUST fire R0040. R0040's cooldown key is uniqueId =
+		// comm+exepath+argv, so this distinct argv never suppresses a subtest's
+		// own R0040. We retry until it fires, then return the post-gate R0040
+		// count as a baseline so subtests assert on the DELTA, not absolutes —
+		// closing the vacuous-positive hole.
+		countR0040 := func(alerts []testutils.Alert) int {
+			n := 0
+			for _, a := range alerts {
+				if a.Labels["rule_id"] == "R0040" {
+					n++
+				}
+			}
+			return n
+		}
+		require.Eventually(t, func() bool {
+			if _, _, err := wl.ExecIntoPod([]string{"echo", "__profile_probe__"}, "curl"); err != nil {
+				return false
+			}
+			alerts, _ := testutils.GetAlerts(ns.Name)
+			return countR0040(alerts) > 0
+		}, 180*time.Second, 10*time.Second,
+			"user overlay must project (canary R0040 must fire) before subtests run")
+		// settle so all in-flight canary alerts are counted into the baseline
+		time.Sleep(10 * time.Second)
+		alerts, _ := testutils.GetAlerts(ns.Name)
+		return wl, countR0040(alerts)
 	}
 
 	countByRule := func(alerts []testutils.Alert, ruleID string) int {
@@ -1824,7 +1860,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      profile [sh, -c, ⋯⋯]. R0040 must NOT fire.
 	// -----------------------------------------------------------------
 	t.Run("sh_dash_c_matches_wildcard_trailing", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		// Warm the cache: retry the exec until it runs cleanly so the user
 		// overlay is loaded, then settle and assert R0040 stays silent
 		// (mirrors Test_28 no-alert idiom). A matching argv must not alert.
@@ -1837,7 +1873,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "sh")
-		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
 			"sh -c <cmd> matches profile [sh, -c, ⋯⋯]: R0040 must stay silent")
 	})
 
@@ -1854,7 +1890,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      argv-shape mismatch that exercises R0040.
 	// -----------------------------------------------------------------
 	t.Run("sh_dash_x_mismatches_R0040", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		// Retry the trigger until node-agent has loaded the user overlay
 		// into the ContainerProfileCache and R0040 fires. The overlay loads
 		// asynchronously, so a single exec can race the load and the
@@ -1867,12 +1903,12 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 				return false
 			}
 			alerts = waitAlerts(t, wl.Namespace)
-			return countByRule(alerts, "R0040") > 0
+			return countByRule(alerts, "R0040") > base
 		}, 120*time.Second, 10*time.Second, "sh -x mismatches profile [sh, -c, ⋯⋯]: R0040 must fire")
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "sh")
-		require.Greater(t, countByRule(alerts, "R0040"), 0,
+		require.Greater(t, countByRule(alerts, "R0040"), base,
 			"sh -x mismatches profile [sh, -c, ⋯⋯]: R0040 must fire")
 	})
 
@@ -1881,7 +1917,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      matches profile [echo, hello, ⋯⋯]. R0040 must NOT fire.
 	// -----------------------------------------------------------------
 	t.Run("echo_hello_matches_wildcard_trailing", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		// Warm the cache: retry the exec until it runs cleanly so the user
 		// overlay is loaded, then settle and assert R0040 stays silent
 		// (mirrors Test_28 no-alert idiom). A matching argv must not alert.
@@ -1894,7 +1930,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "echo")
-		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
 			"echo hello <words> matches profile [echo, hello, ⋯⋯]: R0040 must stay silent")
 	})
 
@@ -1904,7 +1940,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      mismatch). R0040 must fire.
 	// -----------------------------------------------------------------
 	t.Run("echo_goodbye_mismatches_R0040", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		// Retry the trigger until node-agent has loaded the user overlay
 		// into the ContainerProfileCache and R0040 fires. The overlay loads
 		// asynchronously, so a single exec can race the load and the
@@ -1917,12 +1953,12 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 				return false
 			}
 			alerts = waitAlerts(t, wl.Namespace)
-			return countByRule(alerts, "R0040") > 0
+			return countByRule(alerts, "R0040") > base
 		}, 120*time.Second, 10*time.Second, "echo goodbye <words> mismatches profile [echo, hello, ⋯⋯] (literal anchor): R0040 must fire")
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "echo")
-		require.Greater(t, countByRule(alerts, "R0040"), 0,
+		require.Greater(t, countByRule(alerts, "R0040"), base,
 			"echo goodbye <words> mismatches profile [echo, hello, ⋯⋯] (literal anchor): R0040 must fire")
 	})
 
@@ -1937,7 +1973,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      network reachability.
 	// -----------------------------------------------------------------
 	t.Run("curl_dash_s_one_url_matches_ellipsis", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		// Warm the cache: retry the exec until it runs cleanly so the user
 		// overlay is loaded, then settle and assert R0040 stays silent
 		// (mirrors Test_28 no-alert idiom). A matching argv must not alert.
@@ -1950,7 +1986,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "curl")
-		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
 			"curl -s <one url> matches profile [curl, -s, dyn]: R0040 must stay silent")
 	})
 
@@ -1962,7 +1998,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      still exits 0.
 	// -----------------------------------------------------------------
 	t.Run("curl_dash_s_two_urls_mismatches_R0040", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		// Retry the trigger until node-agent has loaded the user overlay
 		// into the ContainerProfileCache and R0040 fires. The overlay loads
 		// asynchronously, so a single exec can race the load and the
@@ -1975,12 +2011,12 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 				return false
 			}
 			alerts = waitAlerts(t, wl.Namespace)
-			return countByRule(alerts, "R0040") > 0
+			return countByRule(alerts, "R0040") > base
 		}, 120*time.Second, 10*time.Second, "curl -s <two urls> exceeds the single-arg dyn token in profile [curl, -s, dyn]: R0040 must fire")
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "curl")
-		require.Greater(t, countByRule(alerts, "R0040"), 0,
+		require.Greater(t, countByRule(alerts, "R0040"), base,
 			"curl -s <two urls> exceeds the single-arg dyn token in profile [curl, -s, dyn]: R0040 must fire")
 	})
 
@@ -1994,7 +2030,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      merge). Mirrors storage's TestAP_LiteralStarVsDynamic.
 	// -----------------------------------------------------------------
 	t.Run("echo_literal_star_does_not_broaden_R0040", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		var alerts []testutils.Alert
 		require.Eventually(t, func() bool {
 			_, _, err := wl.ExecIntoPod([]string{"echo", "star", "boom"}, "curl")
@@ -2002,12 +2038,12 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 				return false
 			}
 			alerts = waitAlerts(t, wl.Namespace)
-			return countByRule(alerts, "R0040") > 0
+			return countByRule(alerts, "R0040") > base
 		}, 120*time.Second, 10*time.Second, "echo star boom mismatches profile [echo, star, *] (literal star, no broaden): R0040 must fire")
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "echo")
-		require.Greater(t, countByRule(alerts, "R0040"), 0,
+		require.Greater(t, countByRule(alerts, "R0040"), base,
 			"echo star boom mismatches profile [echo, star, *] (literal star, no broaden): R0040 must fire")
 	})
 
@@ -2019,7 +2055,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      value verbatim.
 	// -----------------------------------------------------------------
 	t.Run("echo_literal_star_matches_itself", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		require.Eventually(t, func() bool {
 			_, _, err := wl.ExecIntoPod([]string{"echo", "star", "*"}, "curl")
 			return err == nil
@@ -2029,7 +2065,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "echo")
-		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
 			"echo star * matches profile [echo, star, *] (literal): R0040 must stay silent")
 	})
 
@@ -2043,7 +2079,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      stay silent.
 	// -----------------------------------------------------------------
 	t.Run("curl_dash_s_mid_ellipsis_then_literals_matches", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		require.Eventually(t, func() bool {
 			_, _, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/group", "file:///etc/hosts", "file:///etc/hostname"}, "curl")
 			return err == nil
@@ -2053,7 +2089,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "curl")
-		assert.Equal(t, 0, countByRule(alerts, "R0040"),
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
 			"curl -s <url> file:///etc/hosts file:///etc/hostname matches profile [curl, -s, ⋯, <lit>, <lit>]: R0040 must stay silent")
 	})
 
@@ -2066,7 +2102,7 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      are readable so curl exits 0; only the argv shape differs.
 	// -----------------------------------------------------------------
 	t.Run("curl_dash_s_mid_ellipsis_trailing_literal_mismatch_R0040", func(t *testing.T) {
-		wl := setup(t)
+		wl, base := setup(t)
 		var alerts []testutils.Alert
 		require.Eventually(t, func() bool {
 			_, _, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/group", "file:///etc/hosts", "file:///etc/group"}, "curl")
@@ -2074,12 +2110,12 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 				return false
 			}
 			alerts = waitAlerts(t, wl.Namespace)
-			return countByRule(alerts, "R0040") > 0
+			return countByRule(alerts, "R0040") > base
 		}, 120*time.Second, 10*time.Second, "curl trailing literal mismatches profile [curl, -s, ⋯, <lit>, file:///etc/hostname]: R0040 must fire")
 		t.Logf("=== %d alerts ===", len(alerts))
 		logAlerts(t, alerts)
 		assertR0001Silent(t, alerts, "curl")
-		require.Greater(t, countByRule(alerts, "R0040"), 0,
+		require.Greater(t, countByRule(alerts, "R0040"), base,
 			"curl trailing literal mismatches profile [curl, -s, ⋯, <lit>, file:///etc/hostname]: R0040 must fire")
 	})
 }
