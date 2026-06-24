@@ -610,7 +610,7 @@ func TestLoadConfig_NoBypassByDefault(t *testing.T) {
 	assert.False(t, config.AlertDeduplication.Bypass)
 	assert.True(t, config.EventDedup.Enabled)
 	assert.False(t, config.RuleCoolDown.Disabled)
-	assert.True(t, config.RuleCoolDown.OnProfileFailure)
+	assert.True(t, config.RuleCoolDown.OnProfileFailure) //nolint:staticcheck // SA1019: intentionally asserting deprecated field is preserved for backward compatibility
 	assert.True(t, config.FIM.DedupConfig.DedupEnabled, "without bypass, configured suppression is preserved")
 }
 

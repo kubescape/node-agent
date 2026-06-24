@@ -248,7 +248,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 
 	if err := viper.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
-		if !(errors.As(err, &notFound) && !errNotFound) {
+		if !errors.As(err, &notFound) || errNotFound {
 			return Config{}, err
 		}
 	}
