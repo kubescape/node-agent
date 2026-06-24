@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
@@ -269,4 +270,12 @@ func protoNumToString(protoNum uint16) string {
 	default:
 		return ""
 	}
+}
+
+// DirectionFromPktType maps an Inspektor Gadget packet type string to a NetworkDirection
+func DirectionFromPktType(pktType string) consts.NetworkDirection {
+	if strings.EqualFold(pktType, OutgoingPktType) {
+		return consts.Outbound
+	}
+	return consts.Inbound
 }
