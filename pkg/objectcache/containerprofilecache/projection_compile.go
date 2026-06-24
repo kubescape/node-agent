@@ -54,9 +54,12 @@ func CompileSpec(rules []typesv1.Rule) objectcache.RuleProjectionSpec {
 	return spec
 }
 
-// mergeField unions one rule's FieldRequirement into the accumulator FieldSpec.
-func mergeField(dst *objectcache.FieldSpec, src typesv1.FieldRequirement) {
-	if !src.Declared {
+// mergeField unions one rule's profile-data field into the accumulator
+// FieldSpec. src is nil when the rule does not declare this surface (the role
+// the old FieldRequirement.Declared bool played before the schema moved to
+// armoapi-go).
+func mergeField(dst *objectcache.FieldSpec, src *typesv1.FieldRequirement) {
+	if src == nil {
 		return
 	}
 	dst.InUse = true
