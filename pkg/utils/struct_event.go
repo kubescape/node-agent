@@ -154,6 +154,9 @@ func (e *StructEvent) GetCwd() string {
 }
 
 func (e *StructEvent) GetDirection() consts.NetworkDirection {
+	if e.Direction == "" && e.EventType == NetworkEventType {
+		return DirectionFromPktType(e.GetPktType())
+	}
 	return e.Direction
 }
 
