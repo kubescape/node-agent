@@ -44,6 +44,13 @@ type EventDedupConfig struct {
 	SlotsExponent uint8 `mapstructure:"slotsExponent"`
 }
 
+// AlertDeduplicationConfig is a master switch that bypasses all sensor-side alert
+// deduplication and cooldown. Off by default; intended for high-volume
+// security-testing (DAST) use cases.
+type AlertDeduplicationConfig struct {
+	Bypass bool `mapstructure:"bypass"`
+}
+
 type Config struct {
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
@@ -86,6 +93,7 @@ type Config struct {
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
+	AlertDeduplication             AlertDeduplicationConfig             `mapstructure:"alertDeduplication"`
 	EventDedup                     EventDedupConfig                     `mapstructure:"eventDedup"`
 	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
 	ExcludeLabels                  map[string][]string                  `mapstructure:"excludeLabels"`
@@ -183,6 +191,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("eventBatchSize", 15000)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
+	viper.SetDefault("ruleCooldown::ruleCooldownDisabled", false)
 	viper.SetDefault("ruleCooldown::ruleCooldownDuration", 1*time.Hour)
 	viper.SetDefault("ruleCooldown::ruleCooldownAfterCount", 1)
 	viper.SetDefault("ruleCooldown::ruleCooldownOnProfileFailure", true) // NOTE: this is deprecated.
@@ -204,6 +213,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 
 	viper.SetDefault("eventDedup::enabled", true)
 	viper.SetDefault("eventDedup::slotsExponent", 18)
+	viper.SetDefault("alertDeduplication::bypass", false)
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
@@ -238,7 +248,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 
 	if err := viper.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
-		if !(errors.As(err, &notFound) && !errNotFound) {
+		if !errors.As(err, &notFound) || errNotFound {
 			return Config{}, err
 		}
 	}
@@ -254,6 +264,16 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 		config.SeccompProfileBackend != SeccompBackendCRD {
 		return Config{}, fmt.Errorf("invalid seccompProfileBackend value: %q (must be %q or %q)",
 			config.SeccompProfileBackend, SeccompBackendStorage, SeccompBackendCRD)
+	}
+
+	// High-volume security testing (DAST): a single master switch that bypasses ALL sensor-side suppression.
+	// It forces every suppression switch off — eBPF event dedup, rule cooldown, and
+	// host-FIM event dedup — so the downstream code paths (container watcher, rule
+	// manager, FIM sensor) need no changes.
+	if config.AlertDeduplication.Bypass {
+		config.EventDedup.Enabled = false
+		config.RuleCoolDown.Disabled = true
+		config.FIM.DedupConfig.DedupEnabled = false
 	}
 
 	// Validate eventDedup slotsExponent range

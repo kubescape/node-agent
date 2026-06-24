@@ -133,6 +133,28 @@ func TestShouldCooldown(t *testing.T) {
 			iterations:       3,
 			profileFailure:   true,
 		},
+		{
+			name: "no cooldown when Disabled is true",
+			config: RuleCooldownConfig{
+				Disabled:           true,
+				CooldownDuration:   1 * time.Hour,
+				CooldownAfterCount: 3,
+				OnProfileFailure:   true,
+				MaxSize:            1000,
+			},
+			ruleFailure: &types.GenericRuleFailure{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
+					UniqueID: "test-alert-disabled",
+				},
+				RuntimeProcessDetails: armotypes.ProcessTree{
+					ContainerID: "test-container-disabled",
+				},
+			},
+			expectedCooldown: false,
+			expectedCount:    1,
+			iterations:       5,
+			profileFailure:   false,
+		},
 	}
 
 	for _, tt := range tests {
