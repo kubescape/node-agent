@@ -586,7 +586,7 @@ func TestGetFIMPathConfigs(t *testing.T) {
 func TestLoadConfig_AlertDeduplicationBypass(t *testing.T) {
 	viper.Reset()
 	dir := t.TempDir()
-	cfg := `{"alertDeduplication": {"bypass": true}, "eventDedup": {"enabled": true, "slotsExponent": 18}, "ruleCooldown": {"ruleCooldownOnProfileFailure": true}}`
+	cfg := `{"alertDeduplication": {"bypass": true}, "eventDedup": {"enabled": true, "slotsExponent": 18}, "ruleCooldown": {"ruleCooldownOnProfileFailure": true}, "fim": {"dedupConfig": {"dedupEnabled": true}}}`
 	require.NoError(t, os.WriteFile(dir+"/config.json", []byte(cfg), 0644))
 
 	config, err := LoadConfigOptional(dir, false)
@@ -594,13 +594,14 @@ func TestLoadConfig_AlertDeduplicationBypass(t *testing.T) {
 
 	assert.True(t, config.AlertDeduplication.Bypass)
 	assert.False(t, config.EventDedup.Enabled, "bypass must disable event dedup")
-	assert.False(t, config.RuleCoolDown.OnProfileFailure, "bypass must disable rule cooldown")
+	assert.True(t, config.RuleCoolDown.Disabled, "bypass must disable rule cooldown")
+	assert.False(t, config.FIM.DedupConfig.DedupEnabled, "bypass must disable host-FIM event dedup")
 }
 
 func TestLoadConfig_NoBypassByDefault(t *testing.T) {
 	viper.Reset()
 	dir := t.TempDir()
-	cfg := `{"eventDedup": {"enabled": true, "slotsExponent": 18}, "ruleCooldown": {"ruleCooldownOnProfileFailure": true}}`
+	cfg := `{"eventDedup": {"enabled": true, "slotsExponent": 18}, "ruleCooldown": {"ruleCooldownOnProfileFailure": true}, "fim": {"dedupConfig": {"dedupEnabled": true}}}`
 	require.NoError(t, os.WriteFile(dir+"/config.json", []byte(cfg), 0644))
 
 	config, err := LoadConfigOptional(dir, false)
@@ -608,7 +609,9 @@ func TestLoadConfig_NoBypassByDefault(t *testing.T) {
 
 	assert.False(t, config.AlertDeduplication.Bypass)
 	assert.True(t, config.EventDedup.Enabled)
+	assert.False(t, config.RuleCoolDown.Disabled)
 	assert.True(t, config.RuleCoolDown.OnProfileFailure)
+	assert.True(t, config.FIM.DedupConfig.DedupEnabled, "without bypass, configured suppression is preserved")
 }
 
 func TestGetFIMExportersConfig(t *testing.T) {
