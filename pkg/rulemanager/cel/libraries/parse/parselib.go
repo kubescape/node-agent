@@ -47,6 +47,17 @@ func (l *parseLibrary) Declarations() map[string][]cel.FunctionOpt {
 					return l.getExecPath(values[0], values[1])
 				}),
 			),
+			cel.Overload(
+				"parse_get_exec_path_with_exepath",
+				[]*cel.Type{cel.ListType(cel.StringType), cel.StringType, cel.StringType},
+				cel.StringType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 3 {
+						return types.NewErr("expected 3 arguments, got %d", len(values))
+					}
+					return l.getExecPathWithExePath(values[0], values[1], values[2])
+				}),
+			),
 		},
 	}
 }
