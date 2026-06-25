@@ -21,6 +21,7 @@ import (
 
 const (
 	healthCheckTimeout = 5 * time.Second
+	MaxgRPCMessageSize = 128 * 1024 * 1024
 )
 
 type sbomScannerClient struct {
@@ -37,6 +38,10 @@ func NewSBOMScannerClient(socketPath string) (SBOMScannerClient, error) {
 				return info.FullMethodName != pb.SBOMScanner_Health_FullMethodName
 			}),
 		)),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(MaxgRPCMessageSize),
+			grpc.MaxCallSendMsgSize(MaxgRPCMessageSize),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client: %w", err)

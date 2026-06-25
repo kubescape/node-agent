@@ -44,12 +44,19 @@ func startIntegrationServer(t *testing.T) (SBOMScannerClient, *grpc.Server, stri
 	lis, err := net.Listen("unix", sock)
 	require.NoError(t, err)
 
-	srv := grpc.NewServer()
+	srv := grpc.NewServer(
+		grpc.MaxRecvMsgSize(MaxgRPCMessageSize),
+		grpc.MaxSendMsgSize(MaxgRPCMessageSize),
+	)
 	pb.RegisterSBOMScannerServer(srv, NewScannerServer())
 	go srv.Serve(lis)
 
 	conn, err := grpc.NewClient("unix://"+sock,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(MaxgRPCMessageSize),
+			grpc.MaxCallSendMsgSize(MaxgRPCMessageSize),
+		),
 	)
 	require.NoError(t, err)
 
