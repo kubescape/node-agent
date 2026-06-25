@@ -49,6 +49,7 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 
 	execsPaths := extractExecsPaths(cp)
 	pcp.Execs = projectField(s.Execs, execsPaths, true)
+	pcp.ExecsByPath = extractExecsByPath(cp)
 
 	endpointPaths := extractEndpointPaths(cp)
 	pcp.Endpoints = projectField(s.Endpoints, endpointPaths, true)
@@ -164,6 +165,40 @@ func extractExecsPaths(cp *v1beta1.ContainerProfile) []string {
 		paths[i] = e.Path
 	}
 	return paths
+}
+
+// extractExecsByPath builds the path → []argv-vectors map used by
+// exec-args matchers (e.g. dynamicpathdetector.CompareExecArgs in
+// node-agent#807). Multiple ExecCalls entries with the same Path
+// APPEND to the per-path list — overlay merge in
+// mergeApplicationProfile (storage) legitimately produces several
+// ExecCalls per path, each with a distinct argv shape, and the
+// consumer must accept any of them (matthyx review on PR #807,
+// 2026-05-28).
+//
+// nil-Args entries are stored as empty-but-non-nil slices so the
+// downstream matcher distinguishes "present with empty args" (a
+// deliberate must-be-empty constraint) from "absent" (no key).
+//
+// Args slices are CLONED rather than aliased — Apply is contract-bound
+// to be a pure transform, and an alias would let consumers mutate the
+// source profile by editing the projected map.
+func extractExecsByPath(cp *v1beta1.ContainerProfile) map[string][][]string {
+	if len(cp.Spec.Execs) == 0 {
+		return nil
+	}
+	m := make(map[string][][]string, len(cp.Spec.Execs))
+	for _, e := range cp.Spec.Execs {
+		var entry []string
+		if e.Args == nil {
+			entry = []string{}
+		} else {
+			entry = make([]string, len(e.Args))
+			copy(entry, e.Args)
+		}
+		m[e.Path] = append(m[e.Path], entry)
+	}
+	return m
 }
 
 func extractEndpointPaths(cp *v1beta1.ContainerProfile) []string {

@@ -54,6 +54,19 @@ type ProjectedContainerProfile struct {
 	IngressDomains   ProjectedField
 	IngressAddresses ProjectedField
 
+	// ExecsByPath carries the per-Path Args slices from cp.Spec.Execs so
+	// downstream consumers (e.g. dynamicpathdetector.CompareExecArgs used
+	// by R0040 in node-agent#807) can run wildcard-aware argv matching
+	// against the projected profile. Keyed by Exec.Path (same key used
+	// in Execs.Values / Execs.Patterns); the value is a LIST of argv
+	// vectors because a merged profile can contain multiple ExecCalls
+	// entries with the same Path and different argv shapes — overlay
+	// merge appends rather than replaces (mergeApplicationProfile in
+	// storage). A consumer matches if ANY argv vector in the list
+	// matches the runtime args. Empty/absent value means "no argv
+	// constraint" (back-compat for pre-projection profiles).
+	ExecsByPath map[string][][]string
+
 	SpecHash       string
 	SyncChecksum   string
 	PolicyByRuleId map[string]v1beta1.RulePolicy

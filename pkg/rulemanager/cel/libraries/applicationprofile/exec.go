@@ -70,12 +70,11 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	// v1 limitation for rule authors: wasExecutedWithArgs is currently equivalent
-	// to wasExecuted — the args list is validated but not matched against. Any
-	// execution of the given path returns true regardless of its arguments. Full
-	// argument matching (ExecArgsByPath) will be added in a future version.
-	_ = args
-	if _, err := celparse.ParseList[string](args); err != nil {
+	// Parse the runtime args list from CEL. Empty list is valid ("exec'd
+	// with no args") and matches a profile entry whose Args is also empty
+	// or absent (empty profile Args = "no argv constraint").
+	runtimeArgs, err := celparse.ParseList[string](args)
+	if err != nil {
 		return types.NewErr("failed to parse args: %v", err)
 	}
 
@@ -84,20 +83,68 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.Bool(true)
 	}
 
-	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
-	if err != nil {
+	cp, _, perr := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
+	if perr != nil {
 		// Return a special error that will NOT be cached, allowing retry when profile becomes available.
 		// The caller should convert this to false after the cache layer.
-		return cache.NewProfileNotAvailableErr("%v", err)
+		return cache.NewProfileNotAvailableErr("%v", perr)
 	}
 
+	// Exact path match: walk the profile's Args for that path via
+	// CompareExecArgs (handles ⋯ single-arg and * zero-or-more tokens).
+	//
+	// ExecsByPath absent-vs-empty asymmetry — CodeRabbit upstream PR
+	// #807 finding #8. Three states to distinguish:
+	//
+	//   1. Path absent from cp.Execs.Values:
+	//        Profile doesn't allow this exec at all → fall through to
+	//        the pattern-match loop, then to false.
+	//
+	//   2. Path in Values, ABSENT from ExecsByPath (map lookup ok=false):
+	//        Legacy / pre-args-projection profiles. Treated as
+	//        "no argv constraint" — back-compat MATCH any args.
+	//        This is the intentional fallback for profiles compiled
+	//        against older storage versions that didn't populate the
+	//        composite ExecsByPath surface.
+	//
+	//   3. Path in Values, PRESENT in ExecsByPath with an EMPTY arg
+	//      list ([]):
+	//        Profile explicitly captured "this path ran with no args".
+	//        CompareExecArgs matches only when runtimeArgs is also
+	//        empty. NOT a back-compat fallback — a deliberately tight
+	//        constraint authored by the profile producer.
+	//
+	// The distinction matters for rule-author intuition: producing a
+	// signed profile that lists `{Path: /usr/bin/foo, Args: []}` is a
+	// CONSTRAINT, not a wildcard. Authors who want "any args" must
+	// omit the ExecsByPath entry (rare) or use an explicit `*`
+	// wildcard token in Args.
 	if _, ok := cp.Execs.Values[pathStr]; ok {
-		return types.Bool(true)
+		if vectors, ok := cp.ExecsByPath[pathStr]; ok {
+			for _, profileArgs := range vectors {
+				if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+					return types.Bool(true)
+				}
+			}
+		} else {
+			// State 2: ExecsByPath absent → back-compat "no argv constraint".
+			return types.Bool(true)
+		}
 	}
-	// Check Patterns (dynamic-segment entries).
+	// Pattern path match: dynamic-segment paths in cp.Execs.Patterns.
+	// Args matching mirrors the exact-path case — match against any
+	// argv vector recorded for that pattern key.
 	for _, execPath := range cp.Execs.Patterns {
 		if dynamicpathdetector.CompareDynamic(execPath, pathStr) {
-			return types.Bool(true)
+			if vectors, ok := cp.ExecsByPath[execPath]; ok {
+				for _, profileArgs := range vectors {
+					if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+						return types.Bool(true)
+					}
+				}
+			} else {
+				return types.Bool(true)
+			}
 		}
 	}
 
