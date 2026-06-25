@@ -71,11 +71,15 @@ func RunServer(ctx context.Context, accountID, accessKey string) {
 		logger.L().Fatal("failed to listen on socket", helpers.Error(err), helpers.String("path", socketPath))
 	}
 
-	srv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler(
-		otelgrpc.WithFilter(func(info *grpcstats.RPCTagInfo) bool {
-			return info.FullMethodName != pb.SBOMScanner_Health_FullMethodName
-		}),
-	)))
+	srv := grpc.NewServer(
+		grpc.MaxRecvMsgSize(MaxgRPCMessageSize),
+		grpc.MaxSendMsgSize(MaxgRPCMessageSize),
+		grpc.StatsHandler(otelgrpc.NewServerHandler(
+			otelgrpc.WithFilter(func(info *grpcstats.RPCTagInfo) bool {
+				return info.FullMethodName != pb.SBOMScanner_Health_FullMethodName
+			}),
+		)),
+	)
 	pb.RegisterSBOMScannerServer(srv, NewScannerServer())
 
 	sigCh := make(chan os.Signal, 1)
