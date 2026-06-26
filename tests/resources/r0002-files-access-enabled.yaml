@@ -1,0 +1,57 @@
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  name: r0002-files-access-enabled
+  namespace: kubescape
+  labels:
+    app: kubescape
+spec:
+  rules:
+  - name: Files Access Anomalies in container
+    enabled: true
+    id: R0002
+    description: Detects unexpected file access that is not in the baseline
+    expressions:
+      message: '''Unexpected file access detected: '' + event.comm + '' with PID ''
+        + string(event.pid) + '' to '' + event.path'
+      uniqueId: event.comm + '_' + event.path
+      ruleExpression:
+      - eventType: open
+        expression: "(event.path.startsWith('/etc/') || event.path.startsWith('/var/log/')\
+          \ || event.path.startsWith('/var/run/') || event.path.startsWith('/run/')\
+          \ || event.path.startsWith('/var/spool/cron/') || event.path.startsWith('/var/www/')\
+          \ || event.path.startsWith('/var/lib/') || event.path.startsWith('/opt/')\
+          \ || event.path.startsWith('/usr/local/') || event.path.startsWith('/app/')\
+          \ || event.path == '/.dockerenv' || event.path == '/proc/self/environ')\
+          \ && !(event.path.startsWith('/run/secrets/kubernetes.io/serviceaccount')\
+          \ ||\n  event.path.startsWith('/var/run/secrets/kubernetes.io/serviceaccount')\
+          \ ||\n  event.path.startsWith('/tmp'))\n&& !ap.was_path_opened(event.containerId,\
+          \ event.path)\n"
+    profileDependency: 0
+    profileDataRequired:
+      opens:
+      - prefix: /etc/
+      - prefix: /var/log/
+      - prefix: /var/run/
+      - prefix: /run/
+      - prefix: /var/spool/cron/
+      - prefix: /var/www/
+      - prefix: /var/lib/
+      - prefix: /opt/
+      - prefix: /usr/local/
+      - prefix: /app/
+      - exact: /.dockerenv
+      - exact: /proc/self/environ
+    severity: 1
+    supportPolicy: false
+    isTriggerAlert: false
+    mitreTactic: TA0009
+    mitreTechnique: T1005
+    tags:
+    - context:kubernetes
+    - context:container
+    - anomaly
+    - file
+    - open
+    - applicationprofile
+

@@ -1588,6 +1588,19 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
+	// R0002 ("Files Access Anomalies in container") ships disabled in the
+	// bundle (rulelibrary default). Enable it for THIS test's cluster only by
+	// applying an override Rules CRD — without touching default-rules.yaml. The
+	// rules-watcher filters disabled rules before its per-ID merge, so it skips
+	// the disabled bundle copy and uses this enabled one. Each component-test
+	// matrix job runs on its own cluster, so this stays isolated.
+	r0002Override := path.Join(utils.CurrentDir(), "resources/r0002-files-access-enabled.yaml")
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", r0002Override),
+		"enable R0002 override")
+	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", r0002Override)
+	// allow the rules-watcher to pick up the newly enabled rule
+	time.Sleep(10 * time.Second)
+
 	const ruleName = "Files Access Anomalies in container"
 	const profileName = "nginx-regex-profile"
 
@@ -2268,11 +2281,11 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 							// path the caller invoked.
 							//
 							// pod startup: sleep <anything>
-							{Path: "/bin/sleep", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/sleep", Args: []string{"/bin/sleep", dynamicpathdetector.ExecArgsWildcard}},
 							// sh -c <anything trailing>
-							{Path: "/bin/sh", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/sh", Args: []string{"/bin/sh", "-c", dynamicpathdetector.ExecArgsWildcard}},
 							// echo hello <anything trailing>
-							{Path: "/bin/echo", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/echo", Args: []string{"/bin/echo", "hello", dynamicpathdetector.ExecArgsWildcard}},
 							// curl -s <one URL>
 							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier}},
 							// curl -s <one URL> file:///etc/hosts file:///etc/hostname
@@ -2295,9 +2308,9 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 							// retained for environments where exepath resolves
 							// to the as-invoked path (non-symlinked utilities;
 							// fexecve / argv[0] fallback in resolveExecPath).
-							{Path: "/bin/busybox", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
-							{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
-							{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/busybox", Args: []string{"/bin/sleep", dynamicpathdetector.ExecArgsWildcard}},
+							{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.ExecArgsWildcard}},
+							{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.ExecArgsWildcard}},
 							// Literal "*" arg: echo invoked with a GENUINE literal "*"
 							// (e.g. an unexpanded glob), recorded verbatim. Under the
 							// symbol contract a "*" in argv is DATA, not a wildcard, so
@@ -2636,13 +2649,6 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      merge). Mirrors storage's TestAP_LiteralStarVsDynamic.
 	// -----------------------------------------------------------------
 	t.Run("echo_literal_star_does_not_broaden_R0040", func(t *testing.T) {
-		// Pinned storage (v0.0.278) treats "*" (WildcardIdentifier) as a
-		// zero-or-more exec-args wildcard, so a literal "*" arg DOES broaden
-		// the match. The "*"-is-literal semantics this case asserts arrived in
-		// storage v0.0.287 (ExecArgsWildcard "⋯⋯"). Re-enable together with the
-		// coordinated storage v0.0.278 -> v0.0.287 bump (which also rewrites
-		// exec_test.go's "*" cases).
-		t.Skip("requires storage v0.0.287  '*'-is-literal semantics; main pins v0.0.278 where '*' is a wildcard")
 		wl, base := setup(t)
 		var alerts []testutils.Alert
 		require.Eventually(t, func() bool {
