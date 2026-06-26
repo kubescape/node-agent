@@ -115,9 +115,28 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "nginx", []string{"ebpf.io."}, []string{})
 }
 
+// enableR0002ForTest applies an override Rules CRD that enables R0002 ("Files
+// Access Anomalies in container") — which ships disabled in the bundle
+// (rulelibrary default) — for the calling test's cluster only, without
+// modifying tests/chart/templates/node-agent/default-rules.yaml. The
+// rules-watcher filters disabled rules before its per-ID merge, so it uses this
+// enabled copy in place of the disabled bundle one. Each component-test matrix
+// job runs on its own cluster, so this stays isolated. Use as:
+//
+//	defer enableR0002ForTest(t)()
+func enableR0002ForTest(t *testing.T) func() {
+	t.Helper()
+	override := path.Join(utils.CurrentDir(), "resources/r0002-files-access-enabled.yaml")
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", override), "enable R0002 override")
+	// allow the rules-watcher to pick up the newly enabled rule
+	time.Sleep(10 * time.Second)
+	return func() { testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", override) }
+}
+
 func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
+	defer enableR0002ForTest(t)()
 
 	// Create a random namespace
 	ns := testutils.NewRandomNamespace()
@@ -1587,19 +1606,7 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 func Test_27_ApplicationProfileOpens(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
-
-	// R0002 ("Files Access Anomalies in container") ships disabled in the
-	// bundle (rulelibrary default). Enable it for THIS test's cluster only by
-	// applying an override Rules CRD — without touching default-rules.yaml. The
-	// rules-watcher filters disabled rules before its per-ID merge, so it skips
-	// the disabled bundle copy and uses this enabled one. Each component-test
-	// matrix job runs on its own cluster, so this stays isolated.
-	r0002Override := path.Join(utils.CurrentDir(), "resources/r0002-files-access-enabled.yaml")
-	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", r0002Override),
-		"enable R0002 override")
-	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", r0002Override)
-	// allow the rules-watcher to pick up the newly enabled rule
-	time.Sleep(10 * time.Second)
+	defer enableR0002ForTest(t)()
 
 	const ruleName = "Files Access Anomalies in container"
 	const profileName = "nginx-regex-profile"
