@@ -2,6 +2,7 @@ package cooldownqueue
 
 import (
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -55,6 +56,48 @@ func TestCooldownQueue_Enqueue(t *testing.T) {
 			})
 			assert.Equal(t, tt.outEvents, outEvents)
 		})
+	}
+}
+
+// TestCooldownQueue_StopDuringEviction verifies that calling Stop() while the TTL
+// evicter goroutine is firing eviction callbacks does not cause a "send on closed
+// channel" panic (issue: armosec/private-node-agent#368).
+func TestCooldownQueue_StopDuringEviction(t *testing.T) {
+	// Use a very short cooldown so that items expire (and the eviction callback
+	// fires) almost immediately.
+	const shortCooldown = 10 * time.Millisecond
+	const shortInterval = 5 * time.Millisecond
+
+	for i := 0; i < 50; i++ {
+		q := NewCooldownQueue[watch.Event](shortCooldown, shortInterval)
+
+		// Enqueue an event so there is something to evict.
+		q.Enqueue(podAdded, watcher.MakeEventKey(podAdded))
+
+		// Drain the result channel in a separate goroutine so the callback is
+		// not blocked on an unread receiver when we call Stop().
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			//nolint:revive // intentionally drain all events without processing them to unblock the relay goroutine
+			for range q.ResultChan() {
+			}
+		}()
+
+		// Sleep briefly so the TTL evicter goroutine is likely firing
+		// concurrently with the Stop() call below.
+		time.Sleep(shortCooldown / 2)
+
+		// Must not panic.
+		assert.NotPanics(t, func() { q.Stop() })
+
+		// Keep this iteration alive long enough for the stopped queue's expired
+		// item to reach the eviction callback, so the final iteration still
+		// exercises the post-Stop eviction path.
+		time.Sleep(shortCooldown + shortInterval)
+
+		wg.Wait()
 	}
 }
 
