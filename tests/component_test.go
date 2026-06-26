@@ -148,7 +148,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		"Syscalls Anomalies in container":           false,
 		"Linux Capabilities Anomalies in container": false,
 		"Workload uses Kubernetes API unexpectedly": false,
-		"Process executed from malicious source":    false,
+		"Process Executed from /dev/shm":            false,
 		"Process tries to load a kernel module":     false,
 		"Drifted process executed":                  false,
 		"Process executed from mount":               false,
@@ -164,7 +164,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		"Syscalls Anomalies in container":           {true},
 		"Linux Capabilities Anomalies in container": {true},
 		"Workload uses Kubernetes API unexpectedly": {true},
-		"Process executed from malicious source":    {false},
+		"Process Executed from /dev/shm":            {false},
 		"Process tries to load a kernel module":     {false},
 		"Drifted process executed":                  {true},
 		"Process executed from mount":               {true},
@@ -2636,6 +2636,13 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	//      merge). Mirrors storage's TestAP_LiteralStarVsDynamic.
 	// -----------------------------------------------------------------
 	t.Run("echo_literal_star_does_not_broaden_R0040", func(t *testing.T) {
+		// Pinned storage (v0.0.278) treats "*" (WildcardIdentifier) as a
+		// zero-or-more exec-args wildcard, so a literal "*" arg DOES broaden
+		// the match. The "*"-is-literal semantics this case asserts arrived in
+		// storage v0.0.287 (ExecArgsWildcard "⋯⋯"). Re-enable together with the
+		// coordinated storage v0.0.278 -> v0.0.287 bump (which also rewrites
+		// exec_test.go's "*" cases).
+		t.Skip("requires storage v0.0.287  '*'-is-literal semantics; main pins v0.0.278 where '*' is a wildcard")
 		wl, base := setup(t)
 		var alerts []testutils.Alert
 		require.Eventually(t, func() bool {
