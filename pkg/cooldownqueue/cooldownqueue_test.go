@@ -92,6 +92,11 @@ func TestCooldownQueue_StopDuringEviction(t *testing.T) {
 		// Must not panic.
 		assert.NotPanics(t, func() { q.Stop() })
 
+		// Keep this iteration alive long enough for the stopped queue's expired
+		// item to reach the eviction callback, so the final iteration still
+		// exercises the post-Stop eviction path.
+		time.Sleep(shortCooldown + shortInterval)
+
 		wg.Wait()
 	}
 }

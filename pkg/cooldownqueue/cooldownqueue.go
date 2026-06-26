@@ -94,9 +94,9 @@ func (q *CooldownQueue[T]) Enqueue(e T, key string) {
 	q.seenEvents.Set(key, e)
 }
 
-// Stop signals the queue to shut down. The result channel is closed by the
-// relay goroutine once all in-flight sends have drained, unblocking any
-// for-range consumer.
+// Stop signals the queue to shut down. The relay goroutine closes the result
+// channel after observing done; pending evictions not yet forwarded by then
+// may be dropped, unblocking any for-range consumer.
 func (q *CooldownQueue[T]) Stop() {
 	if q.closed.Swap(true) {
 		return // already stopped
