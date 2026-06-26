@@ -1,0 +1,58 @@
+# Fixture 17 — realistic Stripe API integration
+#
+# Edge case:    end-to-end realistic profile for a workload that calls
+#               Stripe (well-known external SaaS) plus cluster DNS
+# Demonstrates:
+#   - egress[] with multiple entries (external + internal)
+#   - ipAddresses[] with both literal and CIDR
+#   - dnsNames[] with literal AND leading wildcard (RFC 4592)
+#   - selectors-based internal entry (auto-translated to NetworkPolicy;
+#     not consulted by R0005/R0011 runtime — see §4.7 caveat)
+#   - port specifications
+# Expects:
+#   POST https://api.stripe.com (resolved to one of Stripe's IPs)  → match
+#   POST https://files.stripe.com (matches *.stripe.com.)           → match
+#   POST https://api.example.com                                    → NO match
+#   UDP to kube-dns:53                                              → match (NetworkPolicy)
+#                                                                     but R0011/R0005
+#                                                                     don't consult selectors
+#                                                                     — see §4.7 note
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-17-realistic-stripe
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: payment-service
+  containers:
+  - name: payment-app
+    egress:
+    - identifier: stripe-api
+      type: external
+      ipAddresses:
+        - "162.0.217.171"     # Stripe public IP example
+        - "163.0.0.0/16"      # Stripe routing range — for completeness
+      dnsNames:
+        - "api.stripe.com."
+        - "*.stripe.com."     # leading-* RFC 4592 — covers files.stripe.com.,
+                              # webhooks.stripe.com., billing.stripe.com.
+                              # but NOT v1.api.stripe.com. (two labels deep)
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}
+    - identifier: cluster-dns
+      type: internal
+      # Selector-based entry — auto-translates to a NetworkPolicy egress rule
+      # that K8s enforces. Note: R0005/R0011 runtime matchers do NOT consult
+      # selectors as of v0.0.2 — they only walk ipAddresses/dnsNames.
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+      ports:
+        - {name: UDP-53, protocol: UDP, port: 53}

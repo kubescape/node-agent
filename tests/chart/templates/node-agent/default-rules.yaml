@@ -305,7 +305,7 @@ spec:
           - "anomaly"
           - "applicationprofile"
       - name: "Unexpected Egress Network Traffic"
-        enabled: false
+        enabled: true
         id: "R0011"
         description: "Detecting unexpected egress network traffic that is not whitelisted by application profile."
         expressions:

@@ -1,0 +1,38 @@
+# Fixture 16 — NONE egress (declared zero-egress traffic)
+#
+# Edge case:    egress: [] explicit empty list — declares "this workload
+#               makes ZERO outbound network connections"
+# Expects:      verifier emits net.egress_unexpected on the FIRST observed
+#               outgoing connection (any IP, any DNS, any port)
+# Spec ref:     §5.4 NONE semantic — "explicit empty list = declared
+#               zero-activity, hard violation on first observation"
+# Distinction from absent:
+#   `egress:` MISSING from the doc        = NULL (verifier-defined posture)
+#   `egress: []`                          = NONE (zero-traffic contract)
+#   This fixture pins the latter.
+#
+# Producer use case:
+#   A worker pod that should ONLY accept inbound work and never reach out.
+#   A locked-down database whose only legitimate traffic is the ingress
+#   replication stream.
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-16-egress-none
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+spec:
+  matchLabels:
+    app: nw-16
+  containers:
+  - name: locked-down-worker
+    egress: []        # NONE — any outbound traffic is a violation
+    ingress:
+    - identifier: control-plane-only
+      type: internal
+      ipAddresses:
+        - "10.0.0.1"
+      ports:
+        - {name: TCP-9000, protocol: TCP, port: 9000}

@@ -188,12 +188,18 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 	// Egress addresses and domains — All=true: all observed entries are retained.
 	if !specInstalled || spec.EgressAddresses.InUse || spec.EgressDomains.InUse {
 		for _, n := range cp.Spec.Egress {
-			if (!specInstalled || spec.EgressAddresses.InUse) && n.IPAddress != "" {
-				if pcp.EgressAddresses.Values == nil {
-					pcp.EgressAddresses.All = true
-					pcp.EgressAddresses.Values = make(map[string]struct{})
+			if !specInstalled || spec.EgressAddresses.InUse {
+				addrs := n.IPAddresses
+				if n.IPAddress != "" {
+					addrs = append([]string{n.IPAddress}, addrs...)
 				}
-				pcp.EgressAddresses.Values[n.IPAddress] = struct{}{}
+				for _, a := range addrs {
+					if pcp.EgressAddresses.Values == nil {
+						pcp.EgressAddresses.All = true
+						pcp.EgressAddresses.Values = make(map[string]struct{})
+					}
+					pcp.EgressAddresses.Values[a] = struct{}{}
+				}
 			}
 			if !specInstalled || spec.EgressDomains.InUse {
 				domains := n.DNSNames
@@ -214,12 +220,18 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 	// Ingress addresses and domains — All=true: all observed entries are retained.
 	if !specInstalled || spec.IngressAddresses.InUse || spec.IngressDomains.InUse {
 		for _, n := range cp.Spec.Ingress {
-			if (!specInstalled || spec.IngressAddresses.InUse) && n.IPAddress != "" {
-				if pcp.IngressAddresses.Values == nil {
-					pcp.IngressAddresses.All = true
-					pcp.IngressAddresses.Values = make(map[string]struct{})
+			if !specInstalled || spec.IngressAddresses.InUse {
+				addrs := n.IPAddresses
+				if n.IPAddress != "" {
+					addrs = append([]string{n.IPAddress}, addrs...)
 				}
-				pcp.IngressAddresses.Values[n.IPAddress] = struct{}{}
+				for _, a := range addrs {
+					if pcp.IngressAddresses.Values == nil {
+						pcp.IngressAddresses.All = true
+						pcp.IngressAddresses.Values = make(map[string]struct{})
+					}
+					pcp.IngressAddresses.Values[a] = struct{}{}
+				}
 			}
 			if !specInstalled || spec.IngressDomains.InUse {
 				if n.DNS != "" {
