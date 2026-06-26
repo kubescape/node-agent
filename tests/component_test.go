@@ -1961,9 +1961,6 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	})
 }
 
-
-
-
 func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
@@ -2229,4 +2226,502 @@ func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 			addResult(tc.name, tc.profilePath, tc.filePath, tc.expectAlert, passed, detail)
 		})
 	}
+}
+
+func Test_32_UnexpectedProcessArguments(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	const overlayName = "curl-32-overlay"
+
+	setup := func(t *testing.T) (*testutils.TestWorkload, int) {
+		t.Helper()
+		ns := testutils.NewRandomNamespace()
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+		ap := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      overlayName,
+				Namespace: ns.Name,
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "curl",
+						Execs: []v1beta1.ExecCalls{
+							// Profile shape: Path AND Args[0] both use the
+							// absolute-path symlink form (/bin/sh,
+							// /usr/bin/nslookup, ...). With the symlink-
+							// faithful precedence in parse.get_exec_path
+							// (fix 9a6eb359), the rule queries the
+							// symlink-as-invoked path that the kernel
+							// preserves in argv[0]. Recording-side
+							// resolveExecPath uses the same precedence so
+							// auto-learned profiles get the same key.
+							//
+							// Storage's CompareExecArgs is a strict
+							// positional compare — no special argv[0]
+							// normalisation — so Args[0] MUST be the same
+							// string as runtime argv[0]. For
+							// kubectl-exec'd processes that's the absolute
+							// path the caller invoked.
+							//
+							// pod startup: sleep <anything>
+							{Path: "/bin/sleep", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
+							// sh -c <anything trailing>
+							{Path: "/bin/sh", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+							// echo hello <anything trailing>
+							{Path: "/bin/echo", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+							// curl -s <one URL>
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier}},
+							// curl -s <one URL> file:///etc/hosts file:///etc/hostname
+							// — a ⋯ in a NON-trailing position: it matches exactly
+							// one arg, and the LITERAL args after it must still
+							// anchor. (file:// URLs are used as the post-⋯ literals
+							// so curl reads local files and exits 0.)
+							{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier, "file:///etc/hosts", "file:///etc/hostname"}},
+							// Busybox-symlink mirror entries. The curl image's
+							// /bin/{sleep,sh,echo} are symlinks to /bin/busybox,
+							// so the kernel's resolved /proc/<pid>/exe — what
+							// IG captures as event.exepath — is /bin/busybox.
+							// parse.get_exec_path(args, comm, exepath) returns
+							// exepath first, so ap.was_executed queries arrive
+							// at the rule keyed on /bin/busybox, not the
+							// symlink form. Without a matching profile entry
+							// keyed on /bin/busybox, R0001 fires before R0040
+							// ever evaluates and the test trips its R0001
+							// precondition. The symlink-form entries above are
+							// retained for environments where exepath resolves
+							// to the as-invoked path (non-symlinked utilities;
+							// fexecve / argv[0] fallback in resolveExecPath).
+							{Path: "/bin/busybox", Args: []string{"/bin/sleep", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.WildcardIdentifier}},
+							{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.WildcardIdentifier}},
+							// Literal "*" arg: echo invoked with a GENUINE literal "*"
+							// (e.g. an unexpanded glob), recorded verbatim. Under the
+							// symbol contract a "*" in argv is DATA, not a wildcard, so
+							// this entry matches ONLY `echo star *` and must NOT broaden
+							// to `echo star <other>`. CT-level mirror of storage's
+							// TestAP_LiteralStarVsDynamic. (busybox + symlink forms.)
+							{Path: "/bin/echo", Args: []string{"/bin/echo", "star", "*"}},
+							{Path: "/bin/busybox", Args: []string{"/bin/echo", "star", "*"}},
+						},
+						Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev", "execve"},
+					},
+				},
+			},
+		}
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
+			context.Background(), ap, metav1.CreateOptions{})
+		require.NoError(t, err, "create AP")
+
+		// User-supplied SBOB pattern (mirrors Test_28): the pod carries BOTH
+		// kubescape.io/user-defined-profile and kubescape.io/user-defined-network.
+		// Node-agent uses the single overlay name as the lookup key for BOTH
+		// the user ApplicationProfile and the user NetworkNeighborhood, so the
+		// NN must exist under the same name and be created before the pod.
+		// User-authored objects carry managed-by=User + a terminal
+		// status/completion and the workload-binding labels.
+		nn := &v1beta1.NetworkNeighborhood{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      overlayName,
+				Namespace: ns.Name,
+				Annotations: map[string]string{
+					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
+					helpersv1.StatusMetadataKey:     helpersv1.Completed,
+					helpersv1.CompletionMetadataKey: helpersv1.Full,
+				},
+				Labels: map[string]string{
+					helpersv1.ApiGroupMetadataKey:         "apps",
+					helpersv1.ApiVersionMetadataKey:       "v1",
+					helpersv1.RelatedKindMetadataKey:      "Deployment",
+					helpersv1.RelatedNameMetadataKey:      "curl-32",
+					helpersv1.RelatedNamespaceMetadataKey: ns.Name,
+				},
+			},
+			Spec: v1beta1.NetworkNeighborhoodSpec{
+				LabelSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "curl-32"},
+				},
+				Containers: []v1beta1.NetworkNeighborhoodContainer{
+					{Name: "curl"},
+				},
+			},
+		}
+		_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(
+			context.Background(), nn, metav1.CreateOptions{})
+		require.NoError(t, err, "create NN")
+
+		require.Eventually(t, func() bool {
+			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(
+				context.Background(), overlayName, v1.GetOptions{})
+			_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(
+				context.Background(), overlayName, v1.GetOptions{})
+			return apErr == nil && nnErr == nil
+		}, 30*time.Second, 1*time.Second, "AP+NN must be in storage before pod deploy")
+
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/curl-exec-arg-wildcards-deployment.yaml"))
+		require.NoError(t, err)
+		require.NoError(t, wl.WaitForReady(80))
+
+		// Deterministic profile-load gate (replaces a fixed sleep that raced the
+		// asynchronous overlay load). node-agent must observe the pod, resolve
+		// the kubescape.io/user-defined-profile annotation to UserAPRef, fetch
+		// the user AP and build the projection before the argv-comparison rule
+		// (R0040) can evaluate at all; until then refreshOneEntry reports the CP
+		// "not-available" and R0040 is suppressed — which makes every POSITIVE
+		// subtest pass VACUOUSLY (no profile -> no R0040 -> ==0) and every
+		// NEGATIVE subtest time out. The fixed 30s sleep did not reliably cover
+		// that window (observed: all negatives failing on a slow load).
+		//
+		// The canary is a deterministic argv MISMATCH: [echo, <probe>] matches
+		// neither [echo, hello, ⋯⋯] nor [echo, star, *], so once the overlay is
+		// projected it MUST fire R0040. R0040's cooldown key is uniqueId =
+		// comm+exepath+argv, so this distinct argv never suppresses a subtest's
+		// own R0040. We retry until it fires, then return the post-gate R0040
+		// count as a baseline so subtests assert on the DELTA, not absolutes —
+		// closing the vacuous-positive hole.
+		countR0040 := func(alerts []testutils.Alert) int {
+			n := 0
+			for _, a := range alerts {
+				if a.Labels["rule_id"] == "R0040" {
+					n++
+				}
+			}
+			return n
+		}
+		require.Eventually(t, func() bool {
+			if _, _, err := wl.ExecIntoPod([]string{"echo", "__profile_probe__"}, "curl"); err != nil {
+				return false
+			}
+			alerts, _ := testutils.GetAlerts(ns.Name)
+			return countR0040(alerts) > 0
+		}, 180*time.Second, 10*time.Second,
+			"user overlay must project (canary R0040 must fire) before subtests run")
+		// settle so all in-flight canary alerts are counted into the baseline
+		time.Sleep(10 * time.Second)
+		alerts, _ := testutils.GetAlerts(ns.Name)
+		return wl, countR0040(alerts)
+	}
+
+	countByRule := func(alerts []testutils.Alert, ruleID string) int {
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID {
+				n++
+			}
+		}
+		return n
+	}
+
+	waitAlerts := func(t *testing.T, ns string) []testutils.Alert {
+		t.Helper()
+		var alerts []testutils.Alert
+		var err error
+		require.Eventually(t, func() bool {
+			alerts, err = testutils.GetAlerts(ns)
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "must be able to fetch alerts")
+		// settle time for any in-flight alerts
+		time.Sleep(10 * time.Second)
+		alerts, _ = testutils.GetAlerts(ns)
+		return alerts
+	}
+
+	logAlerts := func(t *testing.T, alerts []testutils.Alert) {
+		t.Helper()
+		for i, a := range alerts {
+			t.Logf("  [%d] %s(%s) comm=%s container=%s",
+				i, a.Labels["rule_name"], a.Labels["rule_id"],
+				a.Labels["comm"], a.Labels["container_name"])
+		}
+	}
+
+	// R0001 silence is a precondition for every subtest below: it means
+	// parse.get_exec_path resolved to the profile's Path key, so R0040
+	// gets to evaluate its argv comparison cleanly. A non-zero R0001 for
+	// the test binary's comm means the recording / capture / resolution
+	// chain dropped event.exepath — that's a separate bug (track it in
+	// the recording side, not in R0040), and asserting it here fails the
+	// subtest on the right axis instead of polluting the R0040 signal.
+	assertR0001Silent := func(t *testing.T, alerts []testutils.Alert, comm string) {
+		t.Helper()
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == "R0001" && a.Labels["comm"] == comm {
+				n++
+			}
+		}
+		require.Zero(t, n,
+			"R0001 precondition: path resolution failed for comm=%q. "+
+				"parse.get_exec_path either didn't receive event.exepath or "+
+				"profile Path doesn't match its return value. Fix capture-side "+
+				"exepath before reading R0040 results from this subtest.", comm)
+	}
+
+	// -----------------------------------------------------------------
+	// 32a. sh -c <anything>  — argv [sh, -c, "echo hi"] matches
+	//      profile [sh, -c, ⋯⋯]. R0040 must NOT fire.
+	// -----------------------------------------------------------------
+	t.Run("sh_dash_c_matches_wildcard_trailing", func(t *testing.T) {
+		wl, base := setup(t)
+		// Warm the cache: retry the exec until it runs cleanly so the user
+		// overlay is loaded, then settle and assert R0040 stays silent
+		// (mirrors Test_28 no-alert idiom). A matching argv must not alert.
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"sh", "-c", "echo hi"}, "curl")
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "exec must run")
+		time.Sleep(20 * time.Second)
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "sh")
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
+			"sh -c <cmd> matches profile [sh, -c, ⋯⋯]: R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32b. sh -x -c <cmd>  — argv [sh, -x, -c, "echo hi"] does NOT match
+	//      profile [sh, -c, ⋯⋯] (literal anchor `-c` at position 1 mismatches
+	//      `-x`). Path /bin/sh (or /bin/busybox) IS in profile so R0001
+	//      stays silent. R0040 must fire.
+	//
+	//      Earlier shape `sh -x "echo hi"` exited 2 (busybox sh tried to
+	//      open "echo hi" as a script file) — kubectl exec returned an
+	//      error and require.NoError tripped before R0040 could be read.
+	//      Adding -c keeps sh's invocation valid while preserving the
+	//      argv-shape mismatch that exercises R0040.
+	// -----------------------------------------------------------------
+	t.Run("sh_dash_x_mismatches_R0040", func(t *testing.T) {
+		wl, base := setup(t)
+		// Retry the trigger until node-agent has loaded the user overlay
+		// into the ContainerProfileCache and R0040 fires. The overlay loads
+		// asynchronously, so a single exec can race the load and the
+		// profile-dependent rule is suppressed (mirrors Test_28). The
+		// command is idempotent, so re-exec is side-effect-free.
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"sh", "-x", "-c", "echo hi"}, "curl")
+			if err != nil {
+				return false
+			}
+			alerts = waitAlerts(t, wl.Namespace)
+			return countByRule(alerts, "R0040") > base
+		}, 120*time.Second, 10*time.Second, "sh -x mismatches profile [sh, -c, ⋯⋯]: R0040 must fire")
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "sh")
+		require.Greater(t, countByRule(alerts, "R0040"), base,
+			"sh -x mismatches profile [sh, -c, ⋯⋯]: R0040 must fire")
+	})
+
+	// -----------------------------------------------------------------
+	// 32c. echo hello <anything> — argv [echo, hello, world, from, test]
+	//      matches profile [echo, hello, ⋯⋯]. R0040 must NOT fire.
+	// -----------------------------------------------------------------
+	t.Run("echo_hello_matches_wildcard_trailing", func(t *testing.T) {
+		wl, base := setup(t)
+		// Warm the cache: retry the exec until it runs cleanly so the user
+		// overlay is loaded, then settle and assert R0040 stays silent
+		// (mirrors Test_28 no-alert idiom). A matching argv must not alert.
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"echo", "hello", "world", "from", "test"}, "curl")
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "exec must run")
+		time.Sleep(20 * time.Second)
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "echo")
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
+			"echo hello <words> matches profile [echo, hello, ⋯⋯]: R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32d. echo goodbye <anything> — argv [echo, goodbye, world] does
+	//      NOT match profile [echo, hello, ⋯⋯] (literal anchor `hello`
+	//      mismatch). R0040 must fire.
+	// -----------------------------------------------------------------
+	t.Run("echo_goodbye_mismatches_R0040", func(t *testing.T) {
+		wl, base := setup(t)
+		// Retry the trigger until node-agent has loaded the user overlay
+		// into the ContainerProfileCache and R0040 fires. The overlay loads
+		// asynchronously, so a single exec can race the load and the
+		// profile-dependent rule is suppressed (mirrors Test_28). The
+		// command is idempotent, so re-exec is side-effect-free.
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"echo", "goodbye", "world"}, "curl")
+			if err != nil {
+				return false
+			}
+			alerts = waitAlerts(t, wl.Namespace)
+			return countByRule(alerts, "R0040") > base
+		}, 120*time.Second, 10*time.Second, "echo goodbye <words> mismatches profile [echo, hello, ⋯⋯] (literal anchor): R0040 must fire")
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "echo")
+		require.Greater(t, countByRule(alerts, "R0040"), base,
+			"echo goodbye <words> mismatches profile [echo, hello, ⋯⋯] (literal anchor): R0040 must fire")
+	})
+
+	// -----------------------------------------------------------------
+	// 32e. curl -s <one URL> — the NON-symlinked binary (curl is a real
+	//      binary in curlimages/curl, not a busybox applet) with an
+	//      ELLIPSIS profile: [curl, -s, ⋯]. ⋯ matches EXACTLY ONE arg, so
+	//      `curl -s <single url>` matches → R0040 silent.
+	//
+	//      A file:// URL is used so curl reads a local file and exits 0
+	//      regardless of cluster egress — the test pins argv matching, not
+	//      network reachability.
+	// -----------------------------------------------------------------
+	t.Run("curl_dash_s_one_url_matches_ellipsis", func(t *testing.T) {
+		wl, base := setup(t)
+		// Warm the cache: retry the exec until it runs cleanly so the user
+		// overlay is loaded, then settle and assert R0040 stays silent
+		// (mirrors Test_28 no-alert idiom). A matching argv must not alert.
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/hostname"}, "curl")
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "exec must run")
+		time.Sleep(20 * time.Second)
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "curl")
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
+			"curl -s <one url> matches profile [curl, -s, dyn]: R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32f. curl -s <two URLs> — argv [curl, -s, url1, url2] does NOT match
+	//      profile [curl, -s, ⋯] because ⋯ consumes EXACTLY ONE arg, not
+	//      two. R0040 must fire. Pins the ⋯ (DynamicIdentifier) arity on
+	//      the non-symlinked path. Both file:// URLs are readable so curl
+	//      still exits 0.
+	// -----------------------------------------------------------------
+	t.Run("curl_dash_s_two_urls_mismatches_R0040", func(t *testing.T) {
+		wl, base := setup(t)
+		// Retry the trigger until node-agent has loaded the user overlay
+		// into the ContainerProfileCache and R0040 fires. The overlay loads
+		// asynchronously, so a single exec can race the load and the
+		// profile-dependent rule is suppressed (mirrors Test_28). The
+		// command is idempotent, so re-exec is side-effect-free.
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/hostname", "file:///etc/hosts"}, "curl")
+			if err != nil {
+				return false
+			}
+			alerts = waitAlerts(t, wl.Namespace)
+			return countByRule(alerts, "R0040") > base
+		}, 120*time.Second, 10*time.Second, "curl -s <two urls> exceeds the single-arg dyn token in profile [curl, -s, dyn]: R0040 must fire")
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "curl")
+		require.Greater(t, countByRule(alerts, "R0040"), base,
+			"curl -s <two urls> exceeds the single-arg dyn token in profile [curl, -s, dyn]: R0040 must fire")
+	})
+
+	// -----------------------------------------------------------------
+	// 32g. echo star <other> — argv [echo, star, boom] does NOT match
+	//      profile [echo, star, *] because the profile's "*" is a LITERAL
+	//      character, not a wildcard. The path IS in profile (R0001 silent)
+	//      but the argv mismatches at position 2 → R0040 must fire. This is
+	//      the core symbol-contract guard: a recorded literal "*" must NOT
+	//      broaden to an arbitrary arg (the over-broadening that blocked the
+	//      merge). Mirrors storage's TestAP_LiteralStarVsDynamic.
+	// -----------------------------------------------------------------
+	t.Run("echo_literal_star_does_not_broaden_R0040", func(t *testing.T) {
+		wl, base := setup(t)
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"echo", "star", "boom"}, "curl")
+			if err != nil {
+				return false
+			}
+			alerts = waitAlerts(t, wl.Namespace)
+			return countByRule(alerts, "R0040") > base
+		}, 120*time.Second, 10*time.Second, "echo star boom mismatches profile [echo, star, *] (literal star, no broaden): R0040 must fire")
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "echo")
+		require.Greater(t, countByRule(alerts, "R0040"), base,
+			"echo star boom mismatches profile [echo, star, *] (literal star, no broaden): R0040 must fire")
+	})
+
+	// -----------------------------------------------------------------
+	// 32h. echo star "*" — argv [echo, star, *] (a genuine literal "*"
+	//      argument, passed unexpanded via exec, no shell) DOES match
+	//      profile [echo, star, *] exactly. R0040 must stay silent. Pins the
+	//      other half of the literal-"*" contract: data matches its own
+	//      value verbatim.
+	// -----------------------------------------------------------------
+	t.Run("echo_literal_star_matches_itself", func(t *testing.T) {
+		wl, base := setup(t)
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"echo", "star", "*"}, "curl")
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "exec must run")
+		time.Sleep(20 * time.Second)
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "echo")
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
+			"echo star * matches profile [echo, star, *] (literal): R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32i. curl -s <one URL> file:///etc/hosts file:///etc/hostname —
+	//      argv [curl, -s, <url>, file:///etc/hosts, file:///etc/hostname]
+	//      matches profile [curl, -s, ⋯, file:///etc/hosts,
+	//      file:///etc/hostname]. The ⋯ sits MID-VECTOR: it consumes exactly
+	//      the one <url> arg, and the two LITERAL args after it anchor. All
+	//      three URLs are readable file:// paths so curl exits 0. R0040 must
+	//      stay silent.
+	// -----------------------------------------------------------------
+	t.Run("curl_dash_s_mid_ellipsis_then_literals_matches", func(t *testing.T) {
+		wl, base := setup(t)
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/group", "file:///etc/hosts", "file:///etc/hostname"}, "curl")
+			return err == nil
+		}, 60*time.Second, 5*time.Second, "exec must run")
+		time.Sleep(20 * time.Second)
+		alerts := waitAlerts(t, wl.Namespace)
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "curl")
+		assert.Equal(t, base, countByRule(alerts, "R0040"),
+			"curl -s <url> file:///etc/hosts file:///etc/hostname matches profile [curl, -s, ⋯, <lit>, <lit>]: R0040 must stay silent")
+	})
+
+	// -----------------------------------------------------------------
+	// 32j. curl -s <one URL> file:///etc/hosts file:///etc/group — the LAST
+	//      literal mismatches the profile's anchor (profile ends
+	//      file:///etc/hostname, runtime ends file:///etc/group). The ⋯ and
+	//      the first literal still match, so this pins that literals AFTER a
+	//      mid-vector ⋯ are enforced — a mismatch there fires R0040. All URLs
+	//      are readable so curl exits 0; only the argv shape differs.
+	// -----------------------------------------------------------------
+	t.Run("curl_dash_s_mid_ellipsis_trailing_literal_mismatch_R0040", func(t *testing.T) {
+		wl, base := setup(t)
+		var alerts []testutils.Alert
+		require.Eventually(t, func() bool {
+			_, _, err := wl.ExecIntoPod([]string{"curl", "-s", "file:///etc/group", "file:///etc/hosts", "file:///etc/group"}, "curl")
+			if err != nil {
+				return false
+			}
+			alerts = waitAlerts(t, wl.Namespace)
+			return countByRule(alerts, "R0040") > base
+		}, 120*time.Second, 10*time.Second, "curl trailing literal mismatches profile [curl, -s, ⋯, <lit>, file:///etc/hostname]: R0040 must fire")
+		t.Logf("=== %d alerts ===", len(alerts))
+		logAlerts(t, alerts)
+		assertR0001Silent(t, alerts, "curl")
+		require.Greater(t, countByRule(alerts, "R0040"), base,
+			"curl trailing literal mismatches profile [curl, -s, ⋯, <lit>, file:///etc/hostname]: R0040 must fire")
+	})
 }

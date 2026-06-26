@@ -1,0 +1,29 @@
+## Curl pod for Test_32_UnexpectedProcessArguments.
+##
+## Carries the unified user-defined-profile label used by upstream's
+## ContainerProfileCache (kubescape/node-agent#788). The label value
+## must match the name of BOTH the user ApplicationProfile and (when
+## present) the user NetworkNeighborhood. The test creates only the AP
+## with that name; both the user AP and the user NN use it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: curl-32
+  name: curl-32
+spec:
+  selector:
+    matchLabels:
+      app: curl-32
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: curl-32
+        kubescape.io/user-defined-profile: curl-32-overlay
+        kubescape.io/user-defined-network: curl-32-overlay
+    spec:
+      containers:
+      - name: curl
+        image: docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058
+        command: ["sleep", "infinity"]
