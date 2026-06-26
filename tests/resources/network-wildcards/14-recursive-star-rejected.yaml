@@ -1,0 +1,38 @@
+# Fixture 14 — `**` recursive wildcard MUST be rejected
+#
+# Edge case:    a producer attempts to use the recursive `**` wildcard
+# Expects:      apiserver admission strategy REJECTS the document at write time
+#               (kubectl apply returns an error; nothing is persisted)
+# Match path:   N/A — never reaches a runtime matcher
+# Spec ref:     §5.8 last row "** (recursive zero-or-more) — NOT in v0.0.2"
+#               and "Empty / ** rejection" paragraph
+# Why deferred to v0.0.3:
+#   `**` semantics need careful design — should it match zero labels?
+#   how does it interact with leading/trailing `*`? Reserve the syntax now
+#   so producers don't accidentally rely on a future behaviour change.
+#
+# This fixture is INTENTIONALLY INVALID. The component test should:
+#   1. Attempt `kubectl apply -f 14-recursive-star-rejected.yaml`
+#   2. Assert the command fails with a validation error
+#   3. Assert no NetworkNeighborhood named `nw-14-recursive-rejected` exists
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: NetworkNeighborhood
+metadata:
+  name: nw-14-recursive-rejected
+  namespace: "{{NAMESPACE}}"
+  annotations:
+    sbob.io/spec-version: "0.0.2"
+    sbob.io/expected-admission: "rejected"
+spec:
+  matchLabels:
+    app: nw-14
+  containers:
+  - name: client
+    egress:
+    - identifier: invalid-recursive
+      type: external
+      dnsNames:
+        - "**.example.com."     # INVALID — admission MUST reject
+      ports:
+        - {name: TCP-443, protocol: TCP, port: 443}

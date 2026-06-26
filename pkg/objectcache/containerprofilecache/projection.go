@@ -313,6 +313,19 @@ func mergeNetworkNeighbor(normal, user v1beta1.NetworkNeighbor) v1beta1.NetworkN
 	if user.IPAddress != "" {
 		merged.IPAddress = user.IPAddress
 	}
+	if len(user.IPAddresses) > 0 {
+		ipSet := make(map[string]struct{})
+		for _, ip := range merged.IPAddresses {
+			ipSet[ip] = struct{}{}
+		}
+		for _, ip := range user.IPAddresses {
+			ipSet[ip] = struct{}{}
+		}
+		merged.IPAddresses = make([]string, 0, len(ipSet))
+		for ip := range ipSet {
+			merged.IPAddresses = append(merged.IPAddresses, ip)
+		}
+	}
 	if user.Type != "" {
 		merged.Type = user.Type
 	}
