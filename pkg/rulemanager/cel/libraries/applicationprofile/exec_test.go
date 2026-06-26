@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -309,8 +310,11 @@ func TestExecWithArgsNoProfile(t *testing.T) {
 // TestExecWithArgsWildcardInProfile exercises wildcard tokens inside a
 // user-defined ApplicationProfile's exec arg vector:
 //
-//	"⋯" (DynamicIdentifier)  — matches exactly one argument position.
-//	"*" (WildcardIdentifier) — matches zero or more consecutive args.
+//	"⋯"  (DynamicIdentifier) — matches exactly one argument position.
+//	"⋯⋯" (ExecArgsWildcard)  — matches zero or more consecutive args.
+//
+// As of storage v0.0.287 the exec-args zero-or-more wildcard is "⋯⋯"
+// (ExecArgsWildcard); "*" is a literal character in exec args.
 //
 // The runtime exec arg vector is matched against the profile via
 // dynamicpathdetector.CompareExecArgs (added in
@@ -344,7 +348,7 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 			// sh -c with any trailing payload (zero or more args).
 			{
 				Path: "/bin/sh",
-				Args: []string{"-c", "*"},
+				Args: []string{"-c", dynamicpathdetector.ExecArgsWildcard},
 			},
 			// ls -l in any directory — single trailing position.
 			{
@@ -354,7 +358,7 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 			// echo with any number of greeting words after a literal anchor.
 			{
 				Path: "/bin/echo",
-				Args: []string{"hello", "*"},
+				Args: []string{"hello", dynamicpathdetector.ExecArgsWildcard},
 			},
 		},
 	})
@@ -385,7 +389,7 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 		// sh -c with arbitrary trailing payload
 		{"sh -c with single command", "/bin/sh", []string{"-c", "echo hi"}, true},
 		{"sh -c with multi-token command", "/bin/sh", []string{"-c", "while", "true;", "do", "sleep", "1;", "done"}, true},
-		{"sh -c with no trailing args (* matches zero)", "/bin/sh", []string{"-c"}, true},
+		{"sh -c with no trailing args (⋯⋯ matches zero)", "/bin/sh", []string{"-c"}, true},
 		{"sh -x — wrong flag", "/bin/sh", []string{"-x", "echo hi"}, false},
 
 		// ls -l in any directory

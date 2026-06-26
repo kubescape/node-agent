@@ -1,0 +1,74 @@
+# User ApplicationProfile fixture for exec-arg wildcard CTs (Test_32 family).
+#
+# Encodes the exec-arg wildcard contract enforced by storage's
+# dynamicpathdetector.MatchExecArgs (see compare_exec_args.go). The tokens are
+# dedicated, collision-free sentinels — a "*" in argv is a LITERAL character,
+# NEVER a wildcard:
+#
+#   "⋯"  (U+22EF)       matches exactly ONE whole arg, or one embedded segment.
+#   "⋯⋯" (U+22EF x2)    matches ZERO-OR-MORE whole trailing args (positional).
+#   "*"                 a literal "*" — matches only itself, does NOT broaden.
+#
+# YAML note: "*" MUST be quoted ("*") — bare * is a YAML alias indicator. The
+# ⋯ runes are plain UTF-8 and need no quoting but are quoted here for clarity.
+#
+# This is the YAML equivalent of Test_32_UnexpectedProcessArguments's inline AP.
+# Apply with the workload label kubescape.io/user-defined-profile=curl-32-overlay
+# (see resources/curl-exec-arg-wildcards-deployment.yaml). Substitute {namespace}
+# for the test namespace, or set it explicitly.
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ApplicationProfile
+metadata:
+  name: curl-32-overlay
+  namespace: "{namespace}"
+  resourceVersion: "1"
+  annotations:
+    kubescape.io/managed-by: User
+spec:
+  architectures: ["amd64"]
+  containers:
+  - name: curl
+    imageID: ""
+    imageTag: ""
+    capabilities: []
+    opens: []
+    syscalls: []
+    endpoints: []
+    execs:
+    # sleep <anything>  — ⋯⋯ absorbs zero-or-more trailing args.
+    - path: /bin/sleep
+      args: ["/bin/sleep", "⋯⋯"]
+    # sh -c <anything trailing>  — literal anchor "-c", then ⋯⋯.
+    - path: /bin/sh
+      args: ["/bin/sh", "-c", "⋯⋯"]
+    # echo hello <anything trailing>  — literal anchor "hello", then ⋯⋯.
+    - path: /bin/echo
+      args: ["/bin/echo", "hello", "⋯⋯"]
+    # curl -s <exactly one arg>  — ⋯ matches one arg, not two.
+    - path: /usr/bin/curl
+      args: ["/usr/bin/curl", "-s", "⋯"]
+    # curl -s <one arg> <lit> <lit>  — ⋯ MID-VECTOR: one arg, then the literal
+    # args after it must anchor (a mismatch on a trailing literal fires R0040).
+    - path: /usr/bin/curl
+      args: ["/usr/bin/curl", "-s", "⋯", "file:///etc/hosts", "file:///etc/hostname"]
+    # echo star <LITERAL star>  — "*" is data: matches only `echo star *`,
+    # must NOT broaden to `echo star <other>` (the threat-model guard).
+    - path: /bin/echo
+      args: ["/bin/echo", "star", "*"]
+    # Busybox-symlink mirror entries: the curl image's /bin/{sleep,sh,echo}
+    # are symlinks to /bin/busybox, so the kernel exepath the rule queries is
+    # /bin/busybox. Without these, R0001 fires before R0040 can evaluate.
+    - path: /bin/busybox
+      args: ["/bin/sleep", "⋯⋯"]
+    - path: /bin/busybox
+      args: ["/bin/sh", "-c", "⋯⋯"]
+    - path: /bin/busybox
+      args: ["/bin/echo", "hello", "⋯⋯"]
+    - path: /bin/busybox
+      args: ["/bin/echo", "star", "*"]
+    seccompProfile:
+      spec:
+        defaultAction: ""
+  initContainers: []
+  ephemeralContainers: []
+status: {}
