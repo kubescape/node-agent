@@ -48,6 +48,10 @@ type fakeProfileClient struct {
 	overlayOnly string
 
 	getCPCalls int
+	// ugAPCalls / ugNNCalls count GETs for "ug-"-prefixed names so tests can
+	// assert that the client-side user-managed fetch is (or isn't) issued.
+	ugAPCalls int
+	ugNNCalls int
 }
 
 var _ storage.ProfileClient = (*fakeProfileClient)(nil)
@@ -62,6 +66,7 @@ func TestShouldLogOptionalUserManagedFetchError(t *testing.T) {
 
 func (f *fakeProfileClient) GetApplicationProfile(_ context.Context, _, name string) (*v1beta1.ApplicationProfile, error) {
 	if len(name) >= 3 && name[:3] == helpersv1.UserApplicationProfilePrefix {
+		f.ugAPCalls++
 		return f.userManagedAP, nil
 	}
 	if f.overlayOnly != "" && name != f.overlayOnly {
@@ -71,6 +76,7 @@ func (f *fakeProfileClient) GetApplicationProfile(_ context.Context, _, name str
 }
 func (f *fakeProfileClient) GetNetworkNeighborhood(_ context.Context, _, name string) (*v1beta1.NetworkNeighborhood, error) {
 	if len(name) >= 3 && name[:3] == helpersv1.UserNetworkNeighborhoodPrefix {
+		f.ugNNCalls++
 		return f.userManagedNN, nil
 	}
 	if f.overlayOnly != "" && name != f.overlayOnly {
@@ -89,12 +95,26 @@ func (f *fakeProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string
 	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 
-// newTestCache returns a cache wired with an in-memory K8sObjectCacheMock.
+// newTestCache returns a cache wired with an in-memory K8sObjectCacheMock and
+// the default config (client-side ug- merge enabled).
 func newTestCache(t *testing.T, client storage.ProfileClient) (*ContainerProfileCacheImpl, *objectcache.K8sObjectCacheMock) {
 	t.Helper()
+	return newTestCacheWithConfig(t, client, config.Config{ProfilesCacheRefreshRate: 30 * time.Second})
+}
+
+// newTestCacheWithConfig is newTestCache with a caller-supplied config, used by
+// the ServerSideUserManagedMerge tests to flip ProfileProjection settings.
+func newTestCacheWithConfig(t *testing.T, client storage.ProfileClient, cfg config.Config) (*ContainerProfileCacheImpl, *objectcache.K8sObjectCacheMock) {
+	t.Helper()
 	k8s := &objectcache.K8sObjectCacheMock{}
-	cfg := config.Config{ProfilesCacheRefreshRate: 30 * time.Second}
 	return NewContainerProfileCache(cfg, client, k8s, nil), k8s
+}
+
+// serverSideMergeConfig returns a config with ServerSideUserManagedMerge on.
+func serverSideMergeConfig() config.Config {
+	cfg := config.Config{ProfilesCacheRefreshRate: 30 * time.Second}
+	cfg.ProfileProjection.ServerSideUserManagedMerge = true
+	return cfg
 }
 
 // primeSharedData stashes a WatchedContainerData so waitForSharedContainerData
@@ -329,6 +349,157 @@ func TestGetContainerProfile_Miss(t *testing.T) {
 	state := c.GetContainerProfileState("nope")
 	require.NotNil(t, state)
 	require.Error(t, state.Error)
+}
+
+// execSpec is the projection spec used by the ServerSideUserManagedMerge tests:
+// project all execs so merged paths surface in Projected.Execs.Values.
+func execSpec() objectcache.RuleProjectionSpec {
+	return objectcache.RuleProjectionSpec{
+		Execs: objectcache.FieldSpec{InUse: true, All: true},
+		Hash:  "server-side-merge-test",
+	}
+}
+
+// TestServerSideMerge_SkipsUgFetch verifies that with ServerSideUserManagedMerge
+// enabled, addContainer does NOT issue the client-side "ug-" AP/NN GETs and does
+// NOT client-merge them. The ug- exception must instead arrive via the
+// server-merged CP returned by GetContainerProfile.
+func TestServerSideMerge_SkipsUgFetch(t *testing.T) {
+	// CP simulates storage#319's merged-first GET: /bin/base (observed) plus
+	// /bin/server-ug (already merged from the ug- overlay server-side).
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cp-base",
+			Namespace:       "default",
+			ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{{Path: "/bin/base"}, {Path: "/bin/server-ug"}},
+		},
+	}
+	// This ug- AP must NEVER be fetched/merged client-side under the flag. Its
+	// distinctive exec (/bin/client-only) is the canary: if it shows up in the
+	// projection, the client-side merge wrongly ran.
+	userManagedAP := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "ug-nginx", Namespace: "default", ResourceVersion: "9"},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{{
+				Name:  "nginx",
+				Execs: []v1beta1.ExecCalls{{Path: "/bin/client-only"}},
+			}},
+		},
+	}
+	client := &fakeProfileClient{cp: cp, userManagedAP: userManagedAP}
+	c, k8s := newTestCacheWithConfig(t, client, serverSideMergeConfig())
+	c.SetProjectionSpec(execSpec())
+
+	id := "container-server-side"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+
+	cached := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, cached)
+	_, hasBase := cached.Execs.Values["/bin/base"]
+	_, hasServerUg := cached.Execs.Values["/bin/server-ug"]
+	_, hasClientOnly := cached.Execs.Values["/bin/client-only"]
+	assert.True(t, hasBase, "base CP exec must be present")
+	assert.True(t, hasServerUg, "server-merged ug- exec must be present (came via the CP GET)")
+	assert.False(t, hasClientOnly, "client-side ug- merge must NOT run under ServerSideUserManagedMerge")
+
+	assert.Equal(t, 0, client.ugAPCalls, "no client-side ug- AP fetch under the flag")
+	assert.Equal(t, 0, client.ugNNCalls, "no client-side ug- NN fetch under the flag")
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Empty(t, entry.UserManagedAPRV, "UserManagedAPRV must stay empty under the flag")
+	assert.Empty(t, entry.UserManagedNNRV, "UserManagedNNRV must stay empty under the flag")
+}
+
+// TestServerSideMerge_LabelOverlayStillApplies verifies that the label-driven
+// user-defined overlay (pass 2) is unaffected by ServerSideUserManagedMerge:
+// it is a separate, still-client-side feature.
+func TestServerSideMerge_LabelOverlayStillApplies(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp-1", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: "/bin/base"}}},
+	}
+	userAP := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "u1"},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{{
+				Name:  "nginx",
+				Execs: []v1beta1.ExecCalls{{Path: "/bin/overlay"}},
+			}},
+		},
+	}
+	client := &fakeProfileClient{cp: cp, ap: userAP, overlayOnly: "override"}
+	c, k8s := newTestCacheWithConfig(t, client, serverSideMergeConfig())
+	c.SetProjectionSpec(execSpec())
+
+	id := "container-overlay-flagged"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	ev := eventContainer(id)
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "override"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	cached := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, cached)
+	_, hasBase := cached.Execs.Values["/bin/base"]
+	_, hasOverlay := cached.Execs.Values["/bin/overlay"]
+	assert.True(t, hasBase, "base CP exec must be present")
+	assert.True(t, hasOverlay, "label-driven user-defined overlay must still merge under the flag")
+
+	assert.Equal(t, 0, client.ugAPCalls, "label overlay must not trigger ug- fetches")
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	require.NotNil(t, entry.UserAPRef, "user-defined overlay ref must be recorded")
+	assert.Equal(t, "override", entry.UserAPRef.Name)
+}
+
+// TestClientSideMerge_DefaultFetchesUg pins the default (flag-off) behavior:
+// the client-side ug- fetch IS issued and merged. This is the safety baseline
+// that ServerSideUserManagedMerge opts out of.
+func TestClientSideMerge_DefaultFetchesUg(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp-base", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: "/bin/base"}}},
+	}
+	userManagedAP := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "ug-nginx", Namespace: "default", ResourceVersion: "9"},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{{
+				Name:  "nginx",
+				Execs: []v1beta1.ExecCalls{{Path: "/bin/client-merged"}},
+			}},
+		},
+	}
+	client := &fakeProfileClient{cp: cp, userManagedAP: userManagedAP}
+	c, k8s := newTestCache(t, client) // default config: flag OFF
+	c.SetProjectionSpec(execSpec())
+
+	id := "container-default"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
+
+	cached := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, cached)
+	_, hasClientMerged := cached.Execs.Values["/bin/client-merged"]
+	assert.True(t, hasClientMerged, "default behavior must client-merge the ug- AP")
+	assert.Greater(t, client.ugAPCalls, 0, "default behavior must fetch the ug- AP")
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Equal(t, "9", entry.UserManagedAPRV, "default behavior records UserManagedAPRV")
 }
 
 // TestStorageError_NoEntry ensures storage errors don't panic and don't
