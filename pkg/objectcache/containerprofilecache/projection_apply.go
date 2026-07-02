@@ -143,10 +143,19 @@ func projectField(spec objectcache.FieldSpec, rawEntries []string, isPathSurface
 	return pf
 }
 
-// containsDynamicSegment reports whether e contains the dynamic-path marker.
-// Always references the constant from the storage package; never hardcodes the glyph.
+// containsDynamicSegment reports whether e contains a wildcard-path marker —
+// either the one-segment DynamicIdentifier ("⋯") OR the zero-or-more
+// WildcardIdentifier ("*"). On path surfaces both are dynamic and must be
+// routed to Patterns, never treated as literal Values. Omitting "*" here
+// silently misclassifies entries like "/etc/ssl/*" as literals; that happens
+// to be harmless for was_path_opened (both Values and Patterns are matched via
+// CompareDynamic), but it is wrong for any consumer that treats Values as exact
+// membership and it drops "*"-only entries a rule needs when spec.All is false
+// and no prefix/suffix matcher retains them. Always reference the storage
+// constants; never hardcode the glyphs.
 func containsDynamicSegment(e string) bool {
-	return strings.Contains(e, dynamicpathdetector.DynamicIdentifier)
+	return strings.Contains(e, dynamicpathdetector.DynamicIdentifier) ||
+		strings.Contains(e, dynamicpathdetector.WildcardIdentifier)
 }
 
 // --- Field extractors ---
