@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -90,30 +91,47 @@ func (c *CRDSeccompProfileClient) GetSeccompProfile(namespace, name string) (*v1
 
 // convertingWatch wraps a watch.Interface to convert unstructured objects to typed SeccompProfile objects
 type convertingWatch struct {
-	source  watch.Interface
-	result  chan watch.Event
-	stopped bool
+	source   watch.Interface
+	result   chan watch.Event
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 func newConvertingWatch(source watch.Interface) *convertingWatch {
 	cw := &convertingWatch{
 		source: source,
 		result: make(chan watch.Event),
+		done:   make(chan struct{}),
 	}
 	go cw.run()
 	return cw
+}
+
+// send forwards ev to the consumer, aborting if Stop() has been called so run()
+// can never park forever on an unread result channel. Returns false if shutdown won.
+func (cw *convertingWatch) send(ev watch.Event) bool {
+	select {
+	case cw.result <- ev:
+		return true
+	case <-cw.done:
+		return false
+	}
 }
 
 func (cw *convertingWatch) run() {
 	defer close(cw.result)
 	for event := range cw.source.ResultChan() {
 		if event.Type == watch.Error {
-			cw.result <- event
+			if !cw.send(event) {
+				return
+			}
 			continue
 		}
 
 		if event.Object == nil {
-			cw.result <- event
+			if !cw.send(event) {
+				return
+			}
 			continue
 		}
 
@@ -121,30 +139,32 @@ func (cw *convertingWatch) run() {
 		unstructuredObj, ok := event.Object.(runtime.Unstructured)
 		if !ok {
 			// If it's already typed, pass through
-			cw.result <- event
+			if !cw.send(event) {
+				return
+			}
 			continue
 		}
 
 		profile := &v1beta1.SeccompProfile{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredObj.UnstructuredContent(), profile); err != nil {
 			// On conversion error, send an error event
-			cw.result <- watch.Event{
-				Type:   watch.Error,
-				Object: event.Object,
+			if !cw.send(watch.Event{Type: watch.Error, Object: event.Object}) {
+				return
 			}
 			continue
 		}
 
-		cw.result <- watch.Event{
-			Type:   event.Type,
-			Object: profile,
+		if !cw.send(watch.Event{Type: event.Type, Object: profile}) {
+			return
 		}
 	}
 }
 
 func (cw *convertingWatch) Stop() {
-	cw.source.Stop()
-	cw.stopped = true
+	cw.stopOnce.Do(func() {
+		close(cw.done)
+		cw.source.Stop()
+	})
 }
 
 func (cw *convertingWatch) ResultChan() <-chan watch.Event {
