@@ -289,3 +289,33 @@ func TestSeccompProfileWatcher_ReListsAndBacksOffOnError(t *testing.T) {
 	// still separates cleanly from the pre-fix hot loop.
 	assert.Less(t, watchCount, 20, "retry loop must back off, not hot-spin")
 }
+
+// TestSeccompProfileWatcher_StopInterruptsBackoff proves that Stop() interrupts
+// an in-progress backoff sleep in watchWithRetry, rather than making the caller
+// wait out the full backoff interval (up to MaxInterval=60s) before shutting down.
+func TestSeccompProfileWatcher_StopInterruptsBackoff(t *testing.T) {
+	client := &erroringClient{}
+	watcher := NewSeccompProfileWatcher(client, newTrackingSeccompManagerMock())
+
+	done := make(chan struct{})
+	go func() {
+		watcher.watchWithRetry(context.Background())
+		close(done)
+	}()
+
+	// Wait until the loop has hit the client at least once, so it is in (or about
+	// to enter) the backoff sleep after the watch error event.
+	assert.Eventually(t, func() bool {
+		list, _ := client.counts()
+		return list >= 1
+	}, 3*time.Second, 10*time.Millisecond, "watcher must re-List after a watch.Error before we stop it")
+
+	watcher.Stop()
+
+	select {
+	case <-done:
+		// good: watchWithRetry returned promptly
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("watchWithRetry did not return within 200ms of Stop(); backoff sleep is not cancellable")
+	}
+}

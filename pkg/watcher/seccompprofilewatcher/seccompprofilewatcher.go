@@ -113,7 +113,13 @@ func (w *SeccompProfileWatcherImpl) watchWithRetry(ctx context.Context) {
 			logger.L().Ctx(ctx).Debug("SeccompProfileWatcher - watch error, retrying",
 				helpers.Error(err),
 				helpers.String("retryIn", delay.String()))
-			time.Sleep(delay)
+			select {
+			case <-time.After(delay):
+			case <-w.stopCh:
+				return
+			case <-ctx.Done():
+				return
+			}
 			continue
 		}
 
@@ -140,7 +146,13 @@ func (w *SeccompProfileWatcherImpl) watchWithRetry(ctx context.Context) {
 			delay := b.NextBackOff()
 			logger.L().Ctx(ctx).Debug("SeccompProfileWatcher - watch error event, re-listing and backing off",
 				helpers.String("retryIn", delay.String()))
-			time.Sleep(delay)
+			select {
+			case <-time.After(delay):
+			case <-w.stopCh:
+				return
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }
