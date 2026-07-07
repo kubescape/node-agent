@@ -319,3 +319,55 @@ func TestSeccompProfileWatcher_StopInterruptsBackoff(t *testing.T) {
 		t.Fatal("watchWithRetry did not return within 200ms of Stop(); backoff sleep is not cancellable")
 	}
 }
+
+// closingClient is a SeccompProfileClient whose watches close immediately with no
+// event delivered (a clean close before any progress). It counts watch attempts so
+// we can prove the retry loop backs off instead of hot-spinning on repeated closes.
+type closingClient struct {
+	mu         sync.Mutex
+	watchCalls int
+}
+
+var _ storage.SeccompProfileClient = (*closingClient)(nil)
+
+func (c *closingClient) WatchSeccompProfiles(_ string, _ metav1.ListOptions) (watch.Interface, error) {
+	c.mu.Lock()
+	c.watchCalls++
+	c.mu.Unlock()
+	ch := make(chan watch.Event)
+	close(ch) // clean close, no event => processEvents returns exitChannelClosed with empty RV
+	return &testWatch{events: ch}, nil
+}
+
+func (c *closingClient) ListSeccompProfiles(_ string, _ metav1.ListOptions) (*v1beta1api.SeccompProfileList, error) {
+	return &v1beta1api.SeccompProfileList{}, nil
+}
+
+func (c *closingClient) GetSeccompProfile(_ string, _ string) (*v1beta1api.SeccompProfile, error) {
+	return nil, nil
+}
+
+func (c *closingClient) watches() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.watchCalls
+}
+
+// TestSeccompProfileWatcher_BacksOffOnCleanCloseWithoutEvents proves that when a
+// watch closes cleanly before delivering any event (resourceVersion never advances),
+// the retry loop backs off instead of resetting backoff and re-watching immediately.
+func TestSeccompProfileWatcher_BacksOffOnCleanCloseWithoutEvents(t *testing.T) {
+	client := &closingClient{}
+	watcher := NewSeccompProfileWatcher(client, newTrackingSeccompManagerMock())
+
+	go watcher.watchWithRetry(context.Background())
+
+	// Let it run a fixed window, then stop and assert it did NOT hot-spin.
+	time.Sleep(time.Second)
+	watcher.Stop()
+
+	// Pre-fix: exitChannelClosed with an empty RV calls b.Reset() and reopens with
+	// zero delay -> hundreds/thousands of watch attempts. Post-fix: each no-progress
+	// close backs off (>=~250ms), so a ~1s window yields only a handful.
+	assert.Less(t, client.watches(), 20, "retry loop must back off on repeated clean closes, not hot-spin")
+}

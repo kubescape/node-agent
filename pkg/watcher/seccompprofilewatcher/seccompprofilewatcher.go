@@ -129,12 +129,26 @@ func (w *SeccompProfileWatcherImpl) watchWithRetry(ctx context.Context) {
 		case exitStopped:
 			return
 		case exitChannelClosed:
-			// Clean close (e.g. server rotated the watch). Resume from the last
-			// good RV; no re-List and no backoff penalty since we made progress.
 			if resourceVersion != "" {
+				// Made progress before the close (e.g. server rotated the watch after
+				// delivering events). Resume from the last good RV and reset backoff.
 				opts.ResourceVersion = resourceVersion
+				b.Reset()
+				continue
 			}
-			b.Reset()
+			// Clean close before any event: the CRD watch path can close without a
+			// watch.Error on disconnects/timeouts. Resetting backoff here would let
+			// repeated instant closes hot-spin, so back off before retrying instead.
+			delay := b.NextBackOff()
+			logger.L().Ctx(ctx).Debug("SeccompProfileWatcher - watch closed before any event, backing off",
+				helpers.String("retryIn", delay.String()))
+			select {
+			case <-time.After(delay):
+			case <-w.stopCh:
+				return
+			case <-ctx.Done():
+				return
+			}
 		case exitErrorEvent:
 			// The RV is poisoned (e.g. 410 Expired after etcd compaction). Drop it
 			// and re-List to recover a fresh RV, then back off before re-watching so
