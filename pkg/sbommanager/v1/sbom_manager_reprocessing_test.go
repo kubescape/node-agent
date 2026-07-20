@@ -131,7 +131,6 @@ func newTestManagerWithScannerErr(fake *fakeSbomClient, version string, scannerE
 		scannerClient:  &fakeScannerClient{err: scannerErr},
 		metrics:        metricsmanager.NewMetricsNoop(),
 		version:        version,
-		scanRetries:    make(map[string]int),
 		failureRetries: newFailureRetries(),
 	}
 }
@@ -145,7 +144,6 @@ func newTestManagerInProcess(fake *fakeSbomClient, version string, maxImageSize 
 		processing:     mapset.NewSet[string](),
 		storageClient:  fake,
 		version:        version,
-		scanRetries:    make(map[string]int),
 		failureRetries: newFailureRetries(),
 	}
 }
@@ -326,6 +324,79 @@ func Test_processContainerWithMetadata_PreservesContentOnScannerCrash(t *testing
 	assert.Equal(t, helpersv1.Incomplete, raw.Annotations[helpersv1.StatusMetadataKey], "content-bearing SBOMs must never be pinned TooLarge, a storage-layer one-way door")
 	assert.Equal(t, 1, fake.patchCalls, "only the maxScanRetries-th consecutive crash marks Incomplete; later attempts must skip")
 	assert.Equal(t, 0, fake.replaceCalls, "scanner-crash marking must never use a full ReplaceSBOM")
+}
+
+// alternatingScannerClient is a sbomscanner.SBOMScannerClient that alternates its returned
+// error between a generic error and sbomscanner.ErrScannerCrashed on successive CreateSBOM
+// calls (even calls -> generic error, odd calls -> scanner crash). It lets a test drive
+// processContainerWithMetadata through mixed failure categories in a deterministic order.
+type alternatingScannerClient struct {
+	calls int
+}
+
+func (a *alternatingScannerClient) CreateSBOM(_ context.Context, _ sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+	a.calls++
+	if a.calls%2 == 0 {
+		return nil, errors.New("scan failed")
+	}
+	return nil, sbomscanner.ErrScannerCrashed
+}
+func (a *alternatingScannerClient) Ready() bool  { return true }
+func (a *alternatingScannerClient) Close() error { return nil }
+
+// Test_processContainerWithMetadata_MixedFailureCategoriesShareBudget is the regression test for
+// issue #856. Before the fix, generic failures and scanner crashes each had an independent
+// counter compared against maxScanRetries, so an image alternating between the two categories
+// could take up to 5-6 attempts before reaching a terminal status. With the counters unified
+// onto a single shared budget (incrementFailureCount), the SBOM must be pinned at exactly the
+// 3rd COMBINED attempt across mixed failure categories.
+func Test_processContainerWithMetadata_MixedFailureCategoriesShareBudget(t *testing.T) {
+	fake := newFakeSbomClient()
+	imageTag := "quay.io/kubescape/kubevuln:v0.3.2"
+	imageID := "sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a"
+
+	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
+	assert.NoError(t, err)
+
+	// Seed a previously-successful, content-bearing SBOM created by an older tool version so
+	// every call triggers reprocessing (version mismatch).
+	good := &v1beta1.SBOMSyft{}
+	good.Name = sbomName
+	good.Annotations = map[string]string{
+		helpersv1.StatusMetadataKey:      helpersv1.Learning,
+		helpersv1.ToolVersionMetadataKey: "v1.0.0",
+	}
+	good.Spec.Syft.Artifacts = make([]v1beta1.SyftPackage, 2)
+	fake.sboms[sbomName] = good
+
+	mgr := &SbomManager{
+		cfg:            config.Config{NodeName: "node-1"},
+		ctx:            context.Background(),
+		processing:     mapset.NewSet[string](),
+		storageClient:  fake,
+		scannerClient:  &alternatingScannerClient{},
+		metrics:        metricsmanager.NewMetricsNoop(),
+		version:        "v2.0.0",
+		failureRetries: newFailureRetries(),
+	}
+
+	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
+
+	// The first two mixed-category failures must stay below the shared threshold and never
+	// touch storage.
+	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+	assert.Equal(t, 0, fake.patchCalls, "the first two combined failures must not mark a terminal status")
+
+	// The 3rd combined attempt crosses the shared budget and pins the SBOM Incomplete -- proving
+	// the counters are unified, not independent (which would have needed up to 5-6 attempts).
+	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+	assert.Equal(t, 1, fake.patchCalls, "the 3rd combined failure must pin the SBOM at the shared threshold")
+	assert.Equal(t, 0, fake.replaceCalls, "failure marking must never use a full ReplaceSBOM")
+
+	raw := fake.get(sbomName)
+	assert.Equal(t, helpersv1.Incomplete, raw.Annotations[helpersv1.StatusMetadataKey])
+	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must survive an annotation-only status update")
 }
 
 // Test_processContainerWithMetadata_PreservesContentOnTooLarge is the ErrImageTooLarge

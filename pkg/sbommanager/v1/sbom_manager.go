@@ -91,13 +91,17 @@ type SbomManager struct {
 	version            string
 	scannerClient      sbomscanner.SBOMScannerClient
 	scannerMemLimit    int64
-	scanRetries        map[string]int // safe without mutex: only accessed from pool workers (pool size 1)
-	// failureRetries tracks consecutive generic SBOM-generation failures per sbomName. Bounded
-	// + TTL'd so short-lived images don't leak entries; a side effect is that the count resets
-	// if two failures for the same image are spaced more than failureRetryTTL apart, so it
-	// bounds retries for a tight failure cadence (e.g. a crash loop) rather than every possible
-	// one -- a slow-cadence permanent failure (long-lived pod, infrequent CronJob) can still
-	// reprocess indefinitely without ever accumulating enough consecutive failures to pin.
+	// failureRetries tracks consecutive SBOM-generation failures per sbomName, governing BOTH
+	// generic-failure (handleGenericFailure) and scanner-crash (handleScannerCrash) counting under
+	// the same TTL-reset policy -- see incrementFailureCount, the single source of truth for both.
+	// Previously scanner-crash counting lived in an untimed map that accumulated indefinitely
+	// across arbitrary time gaps; unifying onto this LRU means it now inherits the same 30-min
+	// TTL-reset that generic failures already had. That is an intentional consistency choice, not
+	// an oversight. Bounded + TTL'd so short-lived images don't leak entries; a side effect is that
+	// the count resets if two failures for the same image are spaced more than failureRetryTTL
+	// apart, so it bounds retries for a tight failure cadence (e.g. a crash loop) rather than every
+	// possible one -- a slow-cadence permanent failure (long-lived pod, infrequent CronJob) can
+	// still reprocess indefinitely without ever accumulating enough consecutive failures to pin.
 	failureRetries  *expirable.LRU[string, int]
 	pendingScans    map[string]pendingScan
 	pendingOrder    []string
@@ -151,7 +155,6 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		version:            packageVersion("github.com/anchore/syft"),
 		scannerClient:      scannerClient,
 		scannerMemLimit:    scannerMemLimit,
-		scanRetries:        make(map[string]int),
 		failureRetries:     expirable.NewLRU[string, int](maxFailureRetryEntries, nil, failureRetryTTL),
 		pendingScans:       make(map[string]pendingScan),
 		failureReporter:    failureReporter,
@@ -443,7 +446,6 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 		}
 		s.metrics.ReportSBOMScan("success")
 		s.metrics.ObserveSBOMScanDuration("success", time.Since(scanStart))
-		delete(s.scanRetries, sbomName)
 		syftDoc = result.SyftDocument
 	} else if s.scannerClient != nil {
 		s.metrics.SetSBOMScannerReady(false)
@@ -582,9 +584,19 @@ func (s *SbomManager) waitForSharedContainerData(containerID string) (*objectcac
 // (see the wipSbomHadContent doc comment in processContainerWithMetadata) -- in that case the
 // terminal status is Incomplete rather than TooLarge, since TooLarge is a one-way door in the
 // storage layer that would permanently freeze the SBOM's existing content.
+//
+// The retry budget is now shared with handleGenericFailure via incrementFailureCount, so
+// terminal-status classification (Incomplete vs TooLarge) is attempt-attributed: whichever
+// handler's call crosses the combined threshold decides the status based on that specific
+// attempt, not a blended view of prior mixed-category attempts. Safety is preserved by the
+// hadContent gate in this same function -- content-bearing SBOMs are always pinned Incomplete,
+// never TooLarge, regardless of which handler crossed the threshold, so TooLarge's one-way-door
+// risk to real content is never in play. The one residual edge is honest to disclose: a
+// contentless SBOM can occasionally reach TooLarge via a mix of generic+crash failures (rather
+// than 3 pure crashes). That is harmless -- a contentless TooLarge freezes no real content --
+// and is not a new risk introduced by unifying the counter.
 func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollection.PubSubEvent, scanErr error, imageTag, imageID string, hadContent bool) {
-	s.scanRetries[sbomName]++
-	retryCount := s.scanRetries[sbomName]
+	retryCount := s.incrementFailureCount(sbomName)
 
 	logger.L().Error("SbomManager - SBOM scanner sidecar crashed during scan",
 		helpers.Error(scanErr),
@@ -605,7 +617,6 @@ func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollect
 		}
 		// Report OOM regardless of persist success — the user should know the scan failed
 		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonScannerOOMKilled, scanErr)
-		delete(s.scanRetries, sbomName)
 	}
 }
 
@@ -697,19 +708,32 @@ func (s *SbomManager) shouldRetryAtCurrentVersion(wipSbom *v1beta1.SBOMSyft, sbo
 	return true
 }
 
+// incrementFailureCount increments the shared per-sbomName failure budget (used by both
+// handleGenericFailure and handleScannerCrash) and returns the new count. Once the count
+// reaches maxScanRetries the LRU entry is removed, so a later successful attempt or a tool
+// version bump starts with a fresh budget.
+func (s *SbomManager) incrementFailureCount(sbomName string) int {
+	count, _ := s.failureRetries.Get(sbomName)
+	count++
+	if count >= maxScanRetries {
+		s.failureRetries.Remove(sbomName)
+	} else {
+		s.failureRetries.Add(sbomName, count)
+	}
+	return count
+}
+
 // handleGenericFailure responds to a non-deterministic SBOM-generation failure (source
 // construction, syft cataloging, or sidecar scan error). markSBOMStatus only ever patches
 // annotations, never Spec, so it's always safe to call regardless of whether the SBOM
 // previously had real content -- but the image is only pinned Incomplete after
 // maxScanRetries consecutive failures, so a single transient error doesn't lose coverage.
+// The retry budget is shared with handleScannerCrash via incrementFailureCount, so failures
+// alternating between generic and scanner-crash categories count against the same budget.
 func (s *SbomManager) handleGenericFailure(sbomName string) {
-	count, _ := s.failureRetries.Get(sbomName)
-	count++
-	if count < maxScanRetries {
-		s.failureRetries.Add(sbomName, count)
+	if s.incrementFailureCount(sbomName) < maxScanRetries {
 		return
 	}
-	s.failureRetries.Remove(sbomName)
 	s.markSBOMStatus(sbomName, helpersv1.Incomplete, nil)
 }
 
