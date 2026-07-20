@@ -295,6 +295,15 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 		},
 	}
 	wipSbom, err = s.storageClient.CreateSBOM(wipSbom)
+	// wipSbomHadContent is true only when we're about to reprocess an SBOM that previously
+	// completed successfully (the Learning case below). It exists solely to keep a
+	// content-bearing SBOM from ever being marked TooLarge on the reprocess path: unlike
+	// Incomplete, TooLarge is a one-way door in the storage layer -- GuaranteedUpdate
+	// silently drops every future write once status=too-large is set, so persisting it here
+	// (with the real Spec still attached, since PatchSBOMAnnotations never clears it) would
+	// leave the SBOM permanently frozen with its old content, unfixable by any later version.
+	// Incomplete has no such short-circuit and stays safely retryable, so it's used instead.
+	var wipSbomHadContent bool
 	switch {
 	case k8serrors.IsAlreadyExists(err):
 		// get the existing SBOM metadata and check if it is ready or being processed by another node
@@ -333,6 +342,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				"SBOM was created with an different version of tool, recreating it") {
 				return
 			}
+			wipSbomHadContent = true
 			// continue to create SBOM
 		case wipSbom.Annotations[helpersv1.StatusMetadataKey] == helpersv1.Incomplete:
 			if !s.shouldRetryAtCurrentVersion(wipSbom, sbomName, notif,
@@ -416,7 +426,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				s.metrics.ObserveSBOMScanDuration("oom_killed", scanDuration)
 				s.metrics.ReportSBOMScannerRestart()
 				s.metrics.SetSBOMScannerReady(false)
-				s.handleScannerCrash(sbomName, notif, scanErr, imageTag, imageID)
+				s.handleScannerCrash(sbomName, notif, scanErr, imageTag, imageID, wipSbomHadContent)
 				return
 			}
 			s.metrics.ReportSBOMScan("error")
@@ -471,7 +481,13 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
 			if errors.Is(srcErr, syftutil.ErrImageTooLarge) {
-				s.markSBOMStatus(sbomName, helpersv1.TooLarge, nil)
+				if wipSbomHadContent {
+					// don't let a content-bearing SBOM reach the TooLarge one-way door; treat
+					// it as a generic (retryable, eventually Incomplete) failure instead.
+					s.handleGenericFailure(sbomName)
+				} else {
+					s.markSBOMStatus(sbomName, helpersv1.TooLarge, nil)
+				}
 				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonImageTooLarge, srcErr)
 			} else {
 				s.handleGenericFailure(sbomName)
@@ -562,7 +578,11 @@ func (s *SbomManager) waitForSharedContainerData(containerID string) (*objectcac
 }
 
 // handleScannerCrash responds to repeated sidecar OOM crashes while scanning the same image.
-func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollection.PubSubEvent, scanErr error, imageTag, imageID string) {
+// hadContent must be true when the SBOM being reprocessed previously completed successfully
+// (see the wipSbomHadContent doc comment in processContainerWithMetadata) -- in that case the
+// terminal status is Incomplete rather than TooLarge, since TooLarge is a one-way door in the
+// storage layer that would permanently freeze the SBOM's existing content.
+func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollection.PubSubEvent, scanErr error, imageTag, imageID string, hadContent bool) {
 	s.scanRetries[sbomName]++
 	retryCount := s.scanRetries[sbomName]
 
@@ -576,9 +596,13 @@ func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollect
 		helpers.Int("maxRetries", maxScanRetries))
 
 	if retryCount >= maxScanRetries {
-		s.markSBOMStatus(sbomName, helpersv1.TooLarge, map[string]any{
-			ScannerMemoryLimitAnnotation: fmt.Sprintf("%d", s.scannerMemLimit),
-		})
+		if hadContent {
+			s.markSBOMStatus(sbomName, helpersv1.Incomplete, nil)
+		} else {
+			s.markSBOMStatus(sbomName, helpersv1.TooLarge, map[string]any{
+				ScannerMemoryLimitAnnotation: fmt.Sprintf("%d", s.scannerMemLimit),
+			})
+		}
 		// Report OOM regardless of persist success — the user should know the scan failed
 		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonScannerOOMKilled, scanErr)
 		delete(s.scanRetries, sbomName)

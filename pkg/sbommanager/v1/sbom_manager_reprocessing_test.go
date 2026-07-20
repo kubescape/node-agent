@@ -292,9 +292,11 @@ func Test_processContainerWithMetadata_PreservesContentOnReprocessFailure(t *tes
 }
 
 // Test_processContainerWithMetadata_PreservesContentOnScannerCrash is the handleScannerCrash
-// counterpart to Test_processContainerWithMetadata_PreservesContentOnReprocessFailure: repeated
-// sidecar OOM crashes while reprocessing a content-bearing SBOM must pin it to TooLarge via an
-// annotation-only patch, never a full ReplaceSBOM that would clear its Spec.
+// counterpart to Test_processContainerWithMetadata_PreservesContentOnReprocessFailure. TooLarge
+// is a one-way door in the storage layer (all future writes to a TooLarge object are silently
+// dropped server-side), so repeated sidecar OOM crashes while reprocessing a content-bearing
+// SBOM must pin it to Incomplete (safely retryable) instead of TooLarge, via an annotation-only
+// patch that never touches its Spec.
 func Test_processContainerWithMetadata_PreservesContentOnScannerCrash(t *testing.T) {
 	fake := newFakeSbomClient()
 	mgr := newTestManagerWithScannerErr(fake, "v2.0.0", sbomscanner.ErrScannerCrashed)
@@ -314,31 +316,32 @@ func Test_processContainerWithMetadata_PreservesContentOnScannerCrash(t *testing
 
 	// Each container start triggers reprocessing (version mismatch) and the sidecar
 	// "crashes" (ErrScannerCrashed); handleScannerCrash's own maxScanRetries threshold pins
-	// the SBOM to TooLarge once exhausted, after which further attempts are skipped.
+	// the SBOM to Incomplete once exhausted, after which further attempts are skipped.
 	for range maxScanRetries + 2 {
 		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
 	}
 
 	raw := fake.get(sbomName)
 	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must survive an annotation-only status update")
-	assert.Equal(t, helpersv1.TooLarge, raw.Annotations[helpersv1.StatusMetadataKey])
-	assert.Equal(t, 1, fake.patchCalls, "only the maxScanRetries-th consecutive crash marks TooLarge; later attempts must skip")
+	assert.Equal(t, helpersv1.Incomplete, raw.Annotations[helpersv1.StatusMetadataKey], "content-bearing SBOMs must never be pinned TooLarge, a storage-layer one-way door")
+	assert.Equal(t, 1, fake.patchCalls, "only the maxScanRetries-th consecutive crash marks Incomplete; later attempts must skip")
 	assert.Equal(t, 0, fake.replaceCalls, "scanner-crash marking must never use a full ReplaceSBOM")
 }
 
 // Test_processContainerWithMetadata_PreservesContentOnTooLarge is the ErrImageTooLarge
 // counterpart to the other content-preservation tests: totalSize in syftutil.toLayers is
 // computed from the currently-mounted layer paths, not a fixed property of the image, so a
-// content-bearing SBOM being reprocessed can also hit ErrImageTooLarge. Unlike the generic
-// failure/crash paths, ErrImageTooLarge is marked immediately (no retry budget), but must
-// still go through PatchSBOMAnnotations so the existing content is never wiped.
+// content-bearing SBOM being reprocessed can also hit ErrImageTooLarge. TooLarge is a one-way
+// door in the storage layer, so a content-bearing SBOM must never be pinned to it -- instead
+// this is treated as a generic (retryable, eventually Incomplete) failure, same as any other
+// generic error, and always through PatchSBOMAnnotations so existing content is never wiped.
 func Test_processContainerWithMetadata_PreservesContentOnTooLarge(t *testing.T) {
 	fake := newFakeSbomClient()
 	imageTag := "quay.io/kubescape/kubevuln:v0.3.2"
 	imageID := "sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a"
 	imageStatus, mounts := testImageStatusWithLayer(t, imageTag)
 	// MaxImageSize (1 byte) smaller than the seeded layer file guarantees NewSource returns
-	// ErrImageTooLarge.
+	// ErrImageTooLarge on every attempt.
 	mgr := newTestManagerInProcess(fake, "v2.0.0", 1)
 	notif, _, _, _ := testNotifAndImageStatus()
 
@@ -354,11 +357,35 @@ func Test_processContainerWithMetadata_PreservesContentOnTooLarge(t *testing.T) 
 	good.Spec.Syft.Artifacts = make([]v1beta1.SyftPackage, 2)
 	fake.sboms[sbomName] = good
 
-	mgr.processContainerWithMetadata(notif, mounts, imageStatus, imageTag, imageID)
+	for range maxScanRetries + 2 {
+		mgr.processContainerWithMetadata(notif, mounts, imageStatus, imageTag, imageID)
+	}
 
 	raw := fake.get(sbomName)
 	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must survive an annotation-only status update")
-	assert.Equal(t, helpersv1.TooLarge, raw.Annotations[helpersv1.StatusMetadataKey])
-	assert.Equal(t, 1, fake.patchCalls)
+	assert.Equal(t, helpersv1.Incomplete, raw.Annotations[helpersv1.StatusMetadataKey], "content-bearing SBOMs must never be pinned TooLarge, a storage-layer one-way door")
+	assert.Equal(t, 1, fake.patchCalls, "only the maxScanRetries-th consecutive failure marks Incomplete; later attempts must skip")
 	assert.Equal(t, 0, fake.replaceCalls, "ErrImageTooLarge marking must never use a full ReplaceSBOM")
+}
+
+// Test_processContainerWithMetadata_MarksFreshImageTooLargeImmediately guards the unchanged
+// half of the ErrImageTooLarge behavior: an image with no prior content (a fresh reservation)
+// is still marked TooLarge immediately, with no retry budget -- TooLarge's storage-layer
+// one-way door is only a problem when it freezes real content, which a content-free SBOM
+// never had to begin with.
+func Test_processContainerWithMetadata_MarksFreshImageTooLargeImmediately(t *testing.T) {
+	fake := newFakeSbomClient()
+	imageTag := "quay.io/kubescape/kubevuln:v0.3.2"
+	imageStatus, mounts := testImageStatusWithLayer(t, imageTag)
+	mgr := newTestManagerInProcess(fake, "v2.0.0", 1)
+	notif, _, _, imageID := testNotifAndImageStatus()
+
+	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
+	assert.NoError(t, err)
+
+	mgr.processContainerWithMetadata(notif, mounts, imageStatus, imageTag, imageID)
+
+	stored := fake.get(sbomName)
+	assert.Equal(t, helpersv1.TooLarge, stored.Annotations[helpersv1.StatusMetadataKey])
+	assert.Equal(t, 1, fake.patchCalls, "a fresh reservation must mark TooLarge on the first occurrence, with no retry budget")
 }
