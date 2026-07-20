@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/distribution/distribution/reference"
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -62,6 +64,8 @@ const (
 	maxScanRetries                = 3
 	scannerReadinessCheckInterval = 5 * time.Second
 	maxPendingScans               = 1000
+	maxFailureRetryEntries        = 1000
+	failureRetryTTL               = 30 * time.Minute
 )
 
 // pendingScan holds the data needed to retry a container scan after the sidecar becomes ready.
@@ -88,11 +92,18 @@ type SbomManager struct {
 	scannerClient      sbomscanner.SBOMScannerClient
 	scannerMemLimit    int64
 	scanRetries        map[string]int // safe without mutex: only accessed from pool workers (pool size 1)
-	pendingScans       map[string]pendingScan
-	pendingOrder       []string
-	pendingMu          sync.Mutex
-	failureReporter    sbommanager.SbomFailureReporter
-	metrics            metricsmanager.MetricsManager
+	// failureRetries tracks consecutive generic SBOM-generation failures per sbomName. Bounded
+	// + TTL'd so short-lived images don't leak entries; a side effect is that the count resets
+	// if two failures for the same image are spaced more than failureRetryTTL apart, so it
+	// bounds retries for a tight failure cadence (e.g. a crash loop) rather than every possible
+	// one -- a slow-cadence permanent failure (long-lived pod, infrequent CronJob) can still
+	// reprocess indefinitely without ever accumulating enough consecutive failures to pin.
+	failureRetries  *expirable.LRU[string, int]
+	pendingScans    map[string]pendingScan
+	pendingOrder    []string
+	pendingMu       sync.Mutex
+	failureReporter sbommanager.SbomFailureReporter
+	metrics         metricsmanager.MetricsManager
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
@@ -141,6 +152,7 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		scannerClient:      scannerClient,
 		scannerMemLimit:    scannerMemLimit,
 		scanRetries:        make(map[string]int),
+		failureRetries:     expirable.NewLRU[string, int](maxFailureRetryEntries, nil, failureRetryTTL),
 		pendingScans:       make(map[string]pendingScan),
 		failureReporter:    failureReporter,
 		metrics:            metrics,
@@ -283,6 +295,15 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 		},
 	}
 	wipSbom, err = s.storageClient.CreateSBOM(wipSbom)
+	// wipSbomHadContent is true only when we're about to reprocess an SBOM that previously
+	// completed successfully (the Learning case below). It exists solely to keep a
+	// content-bearing SBOM from ever being marked TooLarge on the reprocess path: unlike
+	// Incomplete, TooLarge is a one-way door in the storage layer -- GuaranteedUpdate
+	// silently drops every future write once status=too-large is set, so persisting it here
+	// (with the real Spec still attached, since PatchSBOMAnnotations never clears it) would
+	// leave the SBOM permanently frozen with its old content, unfixable by any later version.
+	// Incomplete has no such short-circuit and stays safely retryable, so it's used instead.
+	var wipSbomHadContent bool
 	switch {
 	case k8serrors.IsAlreadyExists(err):
 		// get the existing SBOM metadata and check if it is ready or being processed by another node
@@ -316,24 +337,19 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("nodeName", wipSbom.Annotations[NodeNameMetadataKey]))
 			return
 		case wipSbom.Annotations[helpersv1.StatusMetadataKey] == helpersv1.Learning:
-			// only skip if the SBOM was created with the same version of tool
-			if wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] == s.version {
-				logger.L().Debug("SbomManager - SBOM is already created, skipping",
-					helpers.String("namespace", notif.Container.K8s.Namespace),
-					helpers.String("pod", notif.Container.K8s.PodName),
-					helpers.String("container", notif.Container.K8s.ContainerName),
-					helpers.String("sbomName", sbomName))
+			if !s.shouldRetryAtCurrentVersion(wipSbom, sbomName, notif,
+				"SBOM is already created, skipping",
+				"SBOM was created with an different version of tool, recreating it") {
 				return
 			}
-			logger.L().Debug("SbomManager - SBOM was created with an different version of tool, recreating it",
-				helpers.String("namespace", notif.Container.K8s.Namespace),
-				helpers.String("pod", notif.Container.K8s.PodName),
-				helpers.String("container", notif.Container.K8s.ContainerName),
-				helpers.String("sbomName", sbomName),
-				helpers.String("got version", wipSbom.Annotations[helpersv1.ToolVersionMetadataKey]),
-				helpers.String("expected version", s.version))
-			// update the version of the tool
-			wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
+			wipSbomHadContent = true
+			// continue to create SBOM
+		case wipSbom.Annotations[helpersv1.StatusMetadataKey] == helpersv1.Incomplete:
+			if !s.shouldRetryAtCurrentVersion(wipSbom, sbomName, notif,
+				"SBOM generation previously failed with this tool version, skipping",
+				"SBOM generation previously failed with a different tool version, retrying") {
+				return
+			}
 			// continue to create SBOM
 		case wipSbom.Annotations[NodeNameMetadataKey] != s.cfg.NodeName:
 			logger.L().Debug("SbomManager - SBOM is already being processed by another node, skipping",
@@ -410,7 +426,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				s.metrics.ObserveSBOMScanDuration("oom_killed", scanDuration)
 				s.metrics.ReportSBOMScannerRestart()
 				s.metrics.SetSBOMScannerReady(false)
-				s.handleScannerCrash(sbomName, wipSbom, notif, scanErr, imageTag, imageID)
+				s.handleScannerCrash(sbomName, notif, scanErr, imageTag, imageID, wipSbomHadContent)
 				return
 			}
 			s.metrics.ReportSBOMScan("error")
@@ -421,6 +437,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
+			s.handleGenericFailure(sbomName)
 			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)
 			return
 		}
@@ -464,15 +481,16 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
 			if errors.Is(srcErr, syftutil.ErrImageTooLarge) {
-				delete(wipSbom.Annotations, NodeNameMetadataKey)
-				wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
-				if _, replaceErr := s.storageClient.ReplaceSBOM(wipSbom); replaceErr != nil {
-					logger.L().Ctx(s.ctx).Error("SbomManager - failed to persist TooLarge SBOM",
-						helpers.Error(replaceErr),
-						helpers.String("sbomName", sbomName))
+				if wipSbomHadContent {
+					// don't let a content-bearing SBOM reach the TooLarge one-way door; treat
+					// it as a generic (retryable, eventually Incomplete) failure instead.
+					s.handleGenericFailure(sbomName)
+				} else {
+					s.markSBOMStatus(sbomName, helpersv1.TooLarge, nil)
 				}
 				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonImageTooLarge, srcErr)
 			} else {
+				s.handleGenericFailure(sbomName)
 				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, srcErr)
 			}
 			return
@@ -498,6 +516,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
+			s.handleGenericFailure(sbomName)
 			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, syftErr)
 			return
 		}
@@ -506,6 +525,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 	}
 
 	// prepare the SBOM
+	s.failureRetries.Remove(sbomName)
 	delete(wipSbom.Annotations, NodeNameMetadataKey)
 	wipSbom.Spec.Metadata.Report.CreatedAt = wipSbom.CreationTimestamp
 	wipSbom.Spec.Metadata.Tool.Name = "syft"
@@ -557,7 +577,12 @@ func (s *SbomManager) waitForSharedContainerData(containerID string) (*objectcac
 	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
 }
 
-func (s *SbomManager) handleScannerCrash(sbomName string, wipSbom *v1beta1.SBOMSyft, notif containercollection.PubSubEvent, scanErr error, imageTag, imageID string) {
+// handleScannerCrash responds to repeated sidecar OOM crashes while scanning the same image.
+// hadContent must be true when the SBOM being reprocessed previously completed successfully
+// (see the wipSbomHadContent doc comment in processContainerWithMetadata) -- in that case the
+// terminal status is Incomplete rather than TooLarge, since TooLarge is a one-way door in the
+// storage layer that would permanently freeze the SBOM's existing content.
+func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollection.PubSubEvent, scanErr error, imageTag, imageID string, hadContent bool) {
 	s.scanRetries[sbomName]++
 	retryCount := s.scanRetries[sbomName]
 
@@ -571,14 +596,12 @@ func (s *SbomManager) handleScannerCrash(sbomName string, wipSbom *v1beta1.SBOMS
 		helpers.Int("maxRetries", maxScanRetries))
 
 	if retryCount >= maxScanRetries {
-		delete(wipSbom.Annotations, NodeNameMetadataKey)
-		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
-		wipSbom.Annotations[ScannerMemoryLimitAnnotation] = fmt.Sprintf("%d", s.scannerMemLimit)
-		wipSbom.Spec = v1beta1.SBOMSyftSpec{}
-		if _, replaceErr := s.storageClient.ReplaceSBOM(wipSbom); replaceErr != nil {
-			logger.L().Error("SbomManager - failed to mark SBOM as TooLarge after scanner crashes",
-				helpers.Error(replaceErr),
-				helpers.String("sbomName", sbomName))
+		if hadContent {
+			s.markSBOMStatus(sbomName, helpersv1.Incomplete, nil)
+		} else {
+			s.markSBOMStatus(sbomName, helpersv1.TooLarge, map[string]any{
+				ScannerMemoryLimitAnnotation: fmt.Sprintf("%d", s.scannerMemLimit),
+			})
 		}
 		// Report OOM regardless of persist success — the user should know the scan failed
 		s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonScannerOOMKilled, scanErr)
@@ -628,6 +651,66 @@ func (s *SbomManager) drainPendingScans() {
 			s.processContainerWithMetadata(scan.notif, scan.mounts, scan.imageStatus, scan.imageTag, scan.imageID)
 		}, utils.FuncName(s.processContainerWithMetadata))
 	}
+}
+
+// markSBOMStatus persists the SBOM's terminal status (e.g. TooLarge, Incomplete) so a later
+// container start for the same image is handled by the matching case in
+// processContainerWithMetadata instead of retrying and failing indefinitely. It also records
+// the currently-running tool version alongside the status, since that's what determined the
+// outcome -- the Learning/Incomplete cases' version check relies on this being accurate.
+func (s *SbomManager) markSBOMStatus(sbomName, status string, extraAnnotations map[string]any) {
+	annotations := map[string]any{
+		NodeNameMetadataKey:              nil, // no longer owned by this node
+		helpersv1.StatusMetadataKey:      status,
+		helpersv1.ToolVersionMetadataKey: s.version,
+	}
+	maps.Copy(annotations, extraAnnotations)
+	if _, err := s.storageClient.PatchSBOMAnnotations(sbomName, annotations); err != nil {
+		logger.L().Ctx(s.ctx).Error("SbomManager - failed to persist SBOM status",
+			helpers.Error(err),
+			helpers.String("sbomName", sbomName),
+			helpers.String("status", status))
+	}
+}
+
+// shouldRetryAtCurrentVersion checks a status-gated SBOM's recorded tool version against the
+// running version. If they match, it logs skipMsg and returns false (the caller should skip
+// reprocessing). Otherwise it logs retryMsg, updates the tool-version annotation, and returns
+// true (the caller should continue to reprocess).
+func (s *SbomManager) shouldRetryAtCurrentVersion(wipSbom *v1beta1.SBOMSyft, sbomName string, notif containercollection.PubSubEvent, skipMsg, retryMsg string) bool {
+	if wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] == s.version {
+		logger.L().Debug(skipMsg,
+			helpers.String("namespace", notif.Container.K8s.Namespace),
+			helpers.String("pod", notif.Container.K8s.PodName),
+			helpers.String("container", notif.Container.K8s.ContainerName),
+			helpers.String("sbomName", sbomName))
+		return false
+	}
+	logger.L().Debug(retryMsg,
+		helpers.String("namespace", notif.Container.K8s.Namespace),
+		helpers.String("pod", notif.Container.K8s.PodName),
+		helpers.String("container", notif.Container.K8s.ContainerName),
+		helpers.String("sbomName", sbomName),
+		helpers.String("got version", wipSbom.Annotations[helpersv1.ToolVersionMetadataKey]),
+		helpers.String("expected version", s.version))
+	wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
+	return true
+}
+
+// handleGenericFailure responds to a non-deterministic SBOM-generation failure (source
+// construction, syft cataloging, or sidecar scan error). markSBOMStatus only ever patches
+// annotations, never Spec, so it's always safe to call regardless of whether the SBOM
+// previously had real content -- but the image is only pinned Incomplete after
+// maxScanRetries consecutive failures, so a single transient error doesn't lose coverage.
+func (s *SbomManager) handleGenericFailure(sbomName string) {
+	count, _ := s.failureRetries.Get(sbomName)
+	count++
+	if count < maxScanRetries {
+		s.failureRetries.Add(sbomName, count)
+		return
+	}
+	s.failureRetries.Remove(sbomName)
+	s.markSBOMStatus(sbomName, helpersv1.Incomplete, nil)
 }
 
 // reportFailure sends a scan failure report to the backend via the failure reporter.

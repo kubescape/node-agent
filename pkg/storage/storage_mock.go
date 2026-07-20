@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -78,14 +79,31 @@ func (sc *StorageHttpClientMock) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.S
 	return SBOM, nil
 }
 
+func (sc *StorageHttpClientMock) PatchSBOMAnnotations(_ string, annotations map[string]any) (*v1beta1.SBOMSyft, error) {
+	if sc.mockSBOM == nil {
+		return nil, nil
+	}
+	if sc.mockSBOM.Annotations == nil {
+		sc.mockSBOM.Annotations = map[string]string{}
+	}
+	for k, v := range annotations {
+		if v == nil {
+			delete(sc.mockSBOM.Annotations, k)
+			continue
+		}
+		sc.mockSBOM.Annotations[k] = fmt.Sprintf("%v", v)
+	}
+	return sc.mockSBOM, nil
+}
+
 // SeccompProfileClientMock is a mock implementation of SeccompProfileClient for testing
 type SeccompProfileClientMock struct {
-	Profiles      []*v1beta1.SeccompProfile
-	WatchEvents   chan watch.Event
-	WatchStopped  bool
-	GetError      error
-	ListError     error
-	WatchError    error
+	Profiles     []*v1beta1.SeccompProfile
+	WatchEvents  chan watch.Event
+	WatchStopped bool
+	GetError     error
+	ListError    error
+	WatchError   error
 }
 
 var _ SeccompProfileClient = (*SeccompProfileClientMock)(nil)

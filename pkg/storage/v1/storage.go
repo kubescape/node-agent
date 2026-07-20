@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -100,6 +102,18 @@ func (sc *Storage) GetStorageClient() spdxv1beta1.SpdxV1beta1Interface {
 
 func (sc *Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	return sc.storageClient.SBOMSyfts(sc.namespace).Update(context.Background(), SBOM, metav1.UpdateOptions{})
+}
+
+func (sc *Storage) PatchSBOMAnnotations(name string, annotations map[string]any) (*v1beta1.SBOMSyft, error) {
+	patch, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{
+			"annotations": annotations,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sc.storageClient.SBOMSyfts(sc.namespace).Patch(context.Background(), name, types.MergePatchType, patch, metav1.PatchOptions{})
 }
 
 func (sc *Storage) modifyName(n string) string {
