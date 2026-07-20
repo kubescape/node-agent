@@ -83,6 +83,15 @@ func (w *SeccompProfileWatcherImpl) listExisting(ctx context.Context) error {
 	return nil
 }
 
+// watchExit explains why processEvents returned, so watchWithRetry can react.
+type watchExit int
+
+const (
+	exitStopped       watchExit = iota // stopCh/ctx cancelled — caller should return
+	exitErrorEvent                     // watch.Error / expired RV — poison RV, re-List, back off
+	exitChannelClosed                  // clean channel close — re-watch from same RV
+)
+
 func (w *SeccompProfileWatcherImpl) watchWithRetry(ctx context.Context) {
 	b := backoff.NewExponentialBackOff()
 	b.MaxElapsedTime = 0 // Never stop retrying
@@ -104,20 +113,65 @@ func (w *SeccompProfileWatcherImpl) watchWithRetry(ctx context.Context) {
 			logger.L().Ctx(ctx).Debug("SeccompProfileWatcher - watch error, retrying",
 				helpers.Error(err),
 				helpers.String("retryIn", delay.String()))
-			time.Sleep(delay)
+			select {
+			case <-time.After(delay):
+			case <-w.stopCh:
+				return
+			case <-ctx.Done():
+				return
+			}
 			continue
 		}
 
-		// Reset backoff on successful connection
-		b.Reset()
+		resourceVersion, exit := w.processEvents(ctx, watcher)
 
-		if resourceVersion := w.processEvents(ctx, watcher); resourceVersion != "" {
-			opts.ResourceVersion = resourceVersion
+		switch exit {
+		case exitStopped:
+			return
+		case exitChannelClosed:
+			if resourceVersion != "" {
+				// Made progress before the close (e.g. server rotated the watch after
+				// delivering events). Resume from the last good RV and reset backoff.
+				opts.ResourceVersion = resourceVersion
+				b.Reset()
+				continue
+			}
+			// Clean close before any event: the CRD watch path can close without a
+			// watch.Error on disconnects/timeouts. Resetting backoff here would let
+			// repeated instant closes hot-spin, so back off before retrying instead.
+			delay := b.NextBackOff()
+			logger.L().Ctx(ctx).Debug("SeccompProfileWatcher - watch closed before any event, backing off",
+				helpers.String("retryIn", delay.String()))
+			select {
+			case <-time.After(delay):
+			case <-w.stopCh:
+				return
+			case <-ctx.Done():
+				return
+			}
+		case exitErrorEvent:
+			// The RV is poisoned (e.g. 410 Expired after etcd compaction). Drop it
+			// and re-List to recover a fresh RV, then back off before re-watching so
+			// a persistent error can never drive a zero-delay hot loop.
+			opts.ResourceVersion = ""
+			if err := w.listExisting(ctx); err != nil {
+				logger.L().Ctx(ctx).Warning("SeccompProfileWatcher - re-list after watch error failed", helpers.Error(err))
+			}
+			delay := b.NextBackOff()
+			logger.L().Ctx(ctx).Debug("SeccompProfileWatcher - watch error event, re-listing and backing off",
+				helpers.String("retryIn", delay.String()))
+			select {
+			case <-time.After(delay):
+			case <-w.stopCh:
+				return
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }
 
-func (w *SeccompProfileWatcherImpl) processEvents(ctx context.Context, watcher watch.Interface) string {
+func (w *SeccompProfileWatcherImpl) processEvents(ctx context.Context, watcher watch.Interface) (string, watchExit) {
 	defer watcher.Stop()
 
 	var lastResourceVersion string
@@ -125,18 +179,18 @@ func (w *SeccompProfileWatcherImpl) processEvents(ctx context.Context, watcher w
 	for {
 		select {
 		case <-w.stopCh:
-			return lastResourceVersion
+			return lastResourceVersion, exitStopped
 		case <-ctx.Done():
-			return lastResourceVersion
+			return lastResourceVersion, exitStopped
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				// Channel closed, need to restart watch
-				return lastResourceVersion
+				return lastResourceVersion, exitChannelClosed
 			}
 
 			if event.Type == watch.Error {
 				logger.L().Ctx(ctx).Debug("SeccompProfileWatcher - watch error event")
-				return lastResourceVersion
+				return lastResourceVersion, exitErrorEvent
 			}
 
 			profile, ok := event.Object.(*v1beta1api.SeccompProfile)

@@ -189,9 +189,10 @@ func TestSeccompProfileWatcher_ProcessEvents(t *testing.T) {
 	// Close the watch
 	close(mockWatch.events)
 
-	rv := watcher.processEvents(ctx, mockWatch)
+	rv, exit := watcher.processEvents(ctx, mockWatch)
 
 	assert.Equal(t, "123", rv)
+	assert.Equal(t, exitChannelClosed, exit)
 	assert.Equal(t, 1, mockManager.GetProfileCount())
 }
 
@@ -224,4 +225,149 @@ func (w *testWatch) Stop() {
 
 func (w *testWatch) ResultChan() <-chan watch.Event {
 	return w.events
+}
+
+// erroringClient is a SeccompProfileClient whose watches immediately emit a 410
+// error event. It counts how often the watcher re-Lists and re-Watches so we can
+// prove the retry loop re-Lists on error and does not hot-spin.
+type erroringClient struct {
+	mu         sync.Mutex
+	listCalls  int
+	watchCalls int
+}
+
+var _ storage.SeccompProfileClient = (*erroringClient)(nil)
+
+func (c *erroringClient) WatchSeccompProfiles(_ string, _ metav1.ListOptions) (watch.Interface, error) {
+	c.mu.Lock()
+	c.watchCalls++
+	c.mu.Unlock()
+	ch := make(chan watch.Event, 1)
+	ch <- watch.Event{Type: watch.Error, Object: &metav1.Status{Reason: metav1.StatusReasonExpired, Code: 410}}
+	// Do NOT close ch: processEvents returns on the error event, then Stops the watch.
+	return &testWatch{events: ch}, nil
+}
+
+func (c *erroringClient) ListSeccompProfiles(_ string, _ metav1.ListOptions) (*v1beta1api.SeccompProfileList, error) {
+	c.mu.Lock()
+	c.listCalls++
+	c.mu.Unlock()
+	return &v1beta1api.SeccompProfileList{ListMeta: metav1.ListMeta{ResourceVersion: "fresh"}}, nil
+}
+
+func (c *erroringClient) GetSeccompProfile(_ string, _ string) (*v1beta1api.SeccompProfile, error) {
+	return nil, nil
+}
+
+func (c *erroringClient) counts() (list, watch int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.listCalls, c.watchCalls
+}
+
+func TestSeccompProfileWatcher_ReListsAndBacksOffOnError(t *testing.T) {
+	client := &erroringClient{}
+	watcher := NewSeccompProfileWatcher(client, newTrackingSeccompManagerMock())
+
+	go watcher.watchWithRetry(context.Background())
+
+	// Re-List must engage on the error event (pre-fix: never re-Lists).
+	assert.Eventually(t, func() bool {
+		list, _ := client.counts()
+		return list >= 1
+	}, 3*time.Second, 10*time.Millisecond, "watcher must re-List after a watch.Error")
+
+	// Let it run a fixed window, then stop and assert it did NOT hot-spin.
+	time.Sleep(time.Second)
+	watcher.Stop()
+
+	list, watchCount := client.counts()
+	assert.GreaterOrEqual(t, list, 1)
+	// Pre-fix this loop spins hundreds-to-thousands of times/sec with zero delay.
+	// Post-fix each error triggers re-List + exponential backoff (>=~250ms), so a
+	// ~1s window yields only a handful of attempts. 20 is a generous ceiling that
+	// still separates cleanly from the pre-fix hot loop.
+	assert.Less(t, watchCount, 20, "retry loop must back off, not hot-spin")
+}
+
+// TestSeccompProfileWatcher_StopInterruptsBackoff proves that Stop() interrupts
+// an in-progress backoff sleep in watchWithRetry, rather than making the caller
+// wait out the full backoff interval (up to MaxInterval=60s) before shutting down.
+func TestSeccompProfileWatcher_StopInterruptsBackoff(t *testing.T) {
+	client := &erroringClient{}
+	watcher := NewSeccompProfileWatcher(client, newTrackingSeccompManagerMock())
+
+	done := make(chan struct{})
+	go func() {
+		watcher.watchWithRetry(context.Background())
+		close(done)
+	}()
+
+	// Wait until the loop has hit the client at least once, so it is in (or about
+	// to enter) the backoff sleep after the watch error event.
+	assert.Eventually(t, func() bool {
+		list, _ := client.counts()
+		return list >= 1
+	}, 3*time.Second, 10*time.Millisecond, "watcher must re-List after a watch.Error before we stop it")
+
+	watcher.Stop()
+
+	select {
+	case <-done:
+		// good: watchWithRetry returned promptly
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("watchWithRetry did not return within 200ms of Stop(); backoff sleep is not cancellable")
+	}
+}
+
+// closingClient is a SeccompProfileClient whose watches close immediately with no
+// event delivered (a clean close before any progress). It counts watch attempts so
+// we can prove the retry loop backs off instead of hot-spinning on repeated closes.
+type closingClient struct {
+	mu         sync.Mutex
+	watchCalls int
+}
+
+var _ storage.SeccompProfileClient = (*closingClient)(nil)
+
+func (c *closingClient) WatchSeccompProfiles(_ string, _ metav1.ListOptions) (watch.Interface, error) {
+	c.mu.Lock()
+	c.watchCalls++
+	c.mu.Unlock()
+	ch := make(chan watch.Event)
+	close(ch) // clean close, no event => processEvents returns exitChannelClosed with empty RV
+	return &testWatch{events: ch}, nil
+}
+
+func (c *closingClient) ListSeccompProfiles(_ string, _ metav1.ListOptions) (*v1beta1api.SeccompProfileList, error) {
+	return &v1beta1api.SeccompProfileList{}, nil
+}
+
+func (c *closingClient) GetSeccompProfile(_ string, _ string) (*v1beta1api.SeccompProfile, error) {
+	return nil, nil
+}
+
+func (c *closingClient) watches() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.watchCalls
+}
+
+// TestSeccompProfileWatcher_BacksOffOnCleanCloseWithoutEvents proves that when a
+// watch closes cleanly before delivering any event (resourceVersion never advances),
+// the retry loop backs off instead of resetting backoff and re-watching immediately.
+func TestSeccompProfileWatcher_BacksOffOnCleanCloseWithoutEvents(t *testing.T) {
+	client := &closingClient{}
+	watcher := NewSeccompProfileWatcher(client, newTrackingSeccompManagerMock())
+
+	go watcher.watchWithRetry(context.Background())
+
+	// Let it run a fixed window, then stop and assert it did NOT hot-spin.
+	time.Sleep(time.Second)
+	watcher.Stop()
+
+	// Pre-fix: exitChannelClosed with an empty RV calls b.Reset() and reopens with
+	// zero delay -> hundreds/thousands of watch attempts. Post-fix: each no-progress
+	// close backs off (>=~250ms), so a ~1s window yields only a handful.
+	assert.Less(t, client.watches(), 20, "retry loop must back off on repeated clean closes, not hot-spin")
 }
