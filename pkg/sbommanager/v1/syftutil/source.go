@@ -42,6 +42,9 @@ func NewSource(imageName, imageDigest, imageID string, imageStatus *runtime.Imag
 	if err != nil {
 		return nil, fmt.Errorf("unable to unmarshal image info: %w", err)
 	}
+	if err := validateDiffIDs(imageInfo.ImageSpec.RootFS.DiffIDs); err != nil {
+		return nil, fmt.Errorf("invalid image diff-ids: %w", err)
+	}
 	reverseLayers := imageInfo.ImageSpec.RootFS.DiffIDs
 	slices.Reverse(reverseLayers)
 	configFile := v1.ConfigFile{
@@ -127,6 +130,15 @@ func toConfig(config imagespec.ImageConfig) v1.Config {
 		StopSignal:      config.StopSignal,
 		Shell:           nil,
 	}
+}
+
+func validateDiffIDs(ds []imagedigest.Digest) error {
+	for i, d := range ds {
+		if err := d.Validate(); err != nil {
+			return fmt.Errorf("invalid diff-id at index %d (%q): %w", i, d, err)
+		}
+	}
+	return nil
 }
 
 func toDiffIDs(ds []imagedigest.Digest) []v1.Hash {
