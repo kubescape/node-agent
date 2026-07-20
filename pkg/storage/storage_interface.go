@@ -26,6 +26,11 @@ type SbomClient interface {
 	CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error)
 	GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error)
 	ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error)
+	// PatchSBOMAnnotations updates only metadata.annotations via a merge patch, never sending
+	// spec. A nil value for a key deletes that annotation. Safe to call regardless of whether
+	// the caller holds the SBOM's real spec (e.g. after a metadata-only GetSBOMMeta fetch),
+	// since spec is never part of the patch payload.
+	PatchSBOMAnnotations(name string, annotations map[string]any) (*v1beta1.SBOMSyft, error)
 }
 
 type StorageClient interface {

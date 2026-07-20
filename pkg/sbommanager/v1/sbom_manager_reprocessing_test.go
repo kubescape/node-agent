@@ -3,12 +3,14 @@ package v1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -30,10 +32,14 @@ import (
 // which fetches with metav1.GetOptions{ResourceVersion: softwarecomposition.ResourceVersionMetadata}
 // and therefore returns the object's metadata WITHOUT its Spec. Tests that rely on Spec
 // being present on a GetSBOMMeta result would hide the exact bug this fake is meant to catch.
+//
+// PatchSBOMAnnotations mirrors the real Storage.PatchSBOMAnnotations contract: it only ever
+// modifies the stored object's Annotations map (nil value deletes the key), never its Spec.
 type fakeSbomClient struct {
 	mu           sync.Mutex
 	sboms        map[string]*v1beta1.SBOMSyft
 	replaceCalls int
+	patchCalls   int
 }
 
 func newFakeSbomClient() *fakeSbomClient {
@@ -70,6 +76,27 @@ func (f *fakeSbomClient) ReplaceSBOM(sbom *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft,
 	return sbom, nil
 }
 
+func (f *fakeSbomClient) PatchSBOMAnnotations(name string, annotations map[string]any) (*v1beta1.SBOMSyft, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.patchCalls++
+	s, ok := f.sboms[name]
+	if !ok {
+		return nil, k8serrors.NewNotFound(schema.GroupResource{Resource: "sbomsyfts"}, name)
+	}
+	if s.Annotations == nil {
+		s.Annotations = map[string]string{}
+	}
+	for k, v := range annotations {
+		if v == nil {
+			delete(s.Annotations, k)
+			continue
+		}
+		s.Annotations[k] = fmt.Sprintf("%v", v)
+	}
+	return s.DeepCopy(), nil
+}
+
 func (f *fakeSbomClient) get(name string) *v1beta1.SBOMSyft {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -87,6 +114,10 @@ func (f *fakeScannerClient) CreateSBOM(_ context.Context, _ sbomscanner.ScanRequ
 func (f *fakeScannerClient) Ready() bool  { return true }
 func (f *fakeScannerClient) Close() error { return nil }
 
+func newFailureRetries() *expirable.LRU[string, int] {
+	return expirable.NewLRU[string, int](maxFailureRetryEntries, nil, failureRetryTTL)
+}
+
 func newTestManager(fake *fakeSbomClient, version string) *SbomManager {
 	return newTestManagerWithScannerErr(fake, version, errors.New("scan failed"))
 }
@@ -101,7 +132,7 @@ func newTestManagerWithScannerErr(fake *fakeSbomClient, version string, scannerE
 		metrics:        metricsmanager.NewMetricsNoop(),
 		version:        version,
 		scanRetries:    make(map[string]int),
-		failureRetries: make(map[string]int),
+		failureRetries: newFailureRetries(),
 	}
 }
 
@@ -115,7 +146,7 @@ func newTestManagerInProcess(fake *fakeSbomClient, version string, maxImageSize 
 		storageClient:  fake,
 		version:        version,
 		scanRetries:    make(map[string]int),
-		failureRetries: make(map[string]int),
+		failureRetries: newFailureRetries(),
 	}
 }
 
@@ -173,6 +204,7 @@ func testNotifAndImageStatus() (containercollection.PubSubEvent, *runtime.ImageS
 // only be pinned Incomplete after maxScanRetries consecutive failures (so a single transient
 // error doesn't permanently lose SBOM coverage), after which a later container start at the
 // same tool version must skip reprocessing instead of retrying and re-failing indefinitely.
+// Marking must go through PatchSBOMAnnotations (annotations only), never a full ReplaceSBOM.
 func Test_processContainerWithMetadata_IncompleteReprocessing(t *testing.T) {
 	fake := newFakeSbomClient()
 	mgr := newTestManager(fake, "v1.0.0")
@@ -186,21 +218,22 @@ func Test_processContainerWithMetadata_IncompleteReprocessing(t *testing.T) {
 	for range maxScanRetries - 1 {
 		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
 	}
-	assert.Equal(t, 0, fake.replaceCalls, "failures below the retry threshold must not mark Incomplete")
+	assert.Equal(t, 0, fake.patchCalls, "failures below the retry threshold must not mark Incomplete")
 	assert.Equal(t, helpersv1.Initializing, fake.get(sbomName).Annotations[helpersv1.StatusMetadataKey])
 
-	// The maxScanRetries-th consecutive failure must persist Incomplete.
+	// The maxScanRetries-th consecutive failure must persist Incomplete via a patch.
 	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
 	stored := fake.get(sbomName)
 	assert.Equal(t, helpersv1.Incomplete, stored.Annotations[helpersv1.StatusMetadataKey])
 	assert.Equal(t, "v1.0.0", stored.Annotations[helpersv1.ToolVersionMetadataKey])
-	assert.Equal(t, 1, fake.replaceCalls)
+	assert.Equal(t, 1, fake.patchCalls)
+	assert.Equal(t, 0, fake.replaceCalls, "failure marking must never use a full ReplaceSBOM")
 
 	// A later attempt at the same tool version must be skipped without touching storage
 	// again -- this is the exact bug being fixed: previously the SBOM stayed dangling with
 	// no terminal status and was reprocessed on every container start forever.
 	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
-	assert.Equal(t, 1, fake.replaceCalls, "the same tool version must not reprocess")
+	assert.Equal(t, 1, fake.patchCalls, "the same tool version must not reprocess")
 
 	// A different tool version must retry -- a fixed/updated node-agent build gets a fresh
 	// maxScanRetries budget instead of being pinned to Incomplete forever.
@@ -208,9 +241,9 @@ func Test_processContainerWithMetadata_IncompleteReprocessing(t *testing.T) {
 	for range maxScanRetries - 1 {
 		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
 	}
-	assert.Equal(t, 1, fake.replaceCalls, "a version bump must not immediately re-pin Incomplete")
+	assert.Equal(t, 1, fake.patchCalls, "a version bump must not immediately re-pin Incomplete")
 	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
-	assert.Equal(t, 2, fake.replaceCalls)
+	assert.Equal(t, 2, fake.patchCalls)
 
 	stored = fake.get(sbomName)
 	assert.Equal(t, helpersv1.Incomplete, stored.Annotations[helpersv1.StatusMetadataKey])
@@ -219,9 +252,10 @@ func Test_processContainerWithMetadata_IncompleteReprocessing(t *testing.T) {
 
 // Test_processContainerWithMetadata_PreservesContentOnReprocessFailure guards against
 // silently wiping a previously-successful SBOM. GetSBOMMeta (used to fetch the SBOM on the
-// reprocessing path, e.g. after a tool-version bump) returns metadata only, with no Spec --
-// persisting that stripped object on a failed reprocess would destroy the existing, real SBOM
-// content and permanently lose vulnerability-scan coverage for the image.
+// reprocessing path, e.g. after a tool-version bump) returns metadata only, with no Spec.
+// Marking a repeatedly-failing content-bearing SBOM Incomplete must go through
+// PatchSBOMAnnotations, which never sends Spec, so the existing artifacts survive even though
+// the status/tool-version annotations do get updated once the retry budget is exhausted.
 func Test_processContainerWithMetadata_PreservesContentOnReprocessFailure(t *testing.T) {
 	fake := newFakeSbomClient()
 	mgr := newTestManager(fake, "v2.0.0")
@@ -240,29 +274,27 @@ func Test_processContainerWithMetadata_PreservesContentOnReprocessFailure(t *tes
 	good.Spec.Syft.Artifacts = make([]v1beta1.SyftPackage, 2)
 	fake.sboms[sbomName] = good
 
-	// A container start at the new version triggers reprocessing (version mismatch); the
-	// scan then fails (mgr's scanner always errors). The stored SBOM's real content and
-	// status must survive untouched -- reprocessing a content-bearing SBOM must never call
-	// ReplaceSBOM on failure, regardless of the retry budget.
+	// A container start at the new version triggers reprocessing (version mismatch); the scan
+	// then fails (mgr's scanner always errors) on every subsequent attempt. Once the retry
+	// budget is exhausted the SBOM is pinned Incomplete, and further attempts at that recorded
+	// version are skipped -- but the artifacts must survive throughout, since marking never
+	// uses a full ReplaceSBOM.
 	for range maxScanRetries + 2 {
 		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
 	}
 
 	raw := fake.get(sbomName)
-	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must not be wiped by a failed reprocess")
-	assert.Equal(t, helpersv1.Learning, raw.Annotations[helpersv1.StatusMetadataKey], "status must be left untouched on failure")
-	// The stored object is never persisted on this path (see handleGenericFailure), so even
-	// the tool-version bump that triggered the retry is not recorded -- only a successful
-	// reprocess would update it. The image keeps retrying on every container start until
-	// then, which is the accepted trade-off for never risking existing content.
-	assert.Equal(t, "v1.0.0", raw.Annotations[helpersv1.ToolVersionMetadataKey], "storage is untouched, so the original recorded version is unchanged")
-	assert.Equal(t, 0, fake.replaceCalls, "a failed reprocess of a content-bearing SBOM must never touch storage")
+	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must survive an annotation-only status update")
+	assert.Equal(t, helpersv1.Incomplete, raw.Annotations[helpersv1.StatusMetadataKey])
+	assert.Equal(t, "v2.0.0", raw.Annotations[helpersv1.ToolVersionMetadataKey])
+	assert.Equal(t, 1, fake.patchCalls, "only the maxScanRetries-th consecutive failure marks Incomplete; later attempts must skip")
+	assert.Equal(t, 0, fake.replaceCalls, "failure marking must never use a full ReplaceSBOM")
 }
 
 // Test_processContainerWithMetadata_PreservesContentOnScannerCrash is the handleScannerCrash
 // counterpart to Test_processContainerWithMetadata_PreservesContentOnReprocessFailure: repeated
-// sidecar OOM crashes while reprocessing a content-bearing SBOM must not clear its Spec and
-// pin it to TooLarge, the same class of data loss as a generic scan/source/syft error.
+// sidecar OOM crashes while reprocessing a content-bearing SBOM must pin it to TooLarge via an
+// annotation-only patch, never a full ReplaceSBOM that would clear its Spec.
 func Test_processContainerWithMetadata_PreservesContentOnScannerCrash(t *testing.T) {
 	fake := newFakeSbomClient()
 	mgr := newTestManagerWithScannerErr(fake, "v2.0.0", sbomscanner.ErrScannerCrashed)
@@ -281,23 +313,25 @@ func Test_processContainerWithMetadata_PreservesContentOnScannerCrash(t *testing
 	fake.sboms[sbomName] = good
 
 	// Each container start triggers reprocessing (version mismatch) and the sidecar
-	// "crashes" (ErrScannerCrashed); handleScannerCrash's own maxScanRetries threshold would
-	// normally pin the SBOM to TooLarge with an empty Spec after this many crashes.
+	// "crashes" (ErrScannerCrashed); handleScannerCrash's own maxScanRetries threshold pins
+	// the SBOM to TooLarge once exhausted, after which further attempts are skipped.
 	for range maxScanRetries + 2 {
 		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
 	}
 
 	raw := fake.get(sbomName)
-	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must not be wiped by a scanner crash loop")
-	assert.Equal(t, helpersv1.Learning, raw.Annotations[helpersv1.StatusMetadataKey], "status must be left untouched on failure")
-	assert.Equal(t, 0, fake.replaceCalls, "a scanner crash loop on a content-bearing SBOM must never touch storage")
+	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must survive an annotation-only status update")
+	assert.Equal(t, helpersv1.TooLarge, raw.Annotations[helpersv1.StatusMetadataKey])
+	assert.Equal(t, 1, fake.patchCalls, "only the maxScanRetries-th consecutive crash marks TooLarge; later attempts must skip")
+	assert.Equal(t, 0, fake.replaceCalls, "scanner-crash marking must never use a full ReplaceSBOM")
 }
 
 // Test_processContainerWithMetadata_PreservesContentOnTooLarge is the ErrImageTooLarge
 // counterpart to the other content-preservation tests: totalSize in syftutil.toLayers is
 // computed from the currently-mounted layer paths, not a fixed property of the image, so a
-// content-bearing SBOM being reprocessed can also hit ErrImageTooLarge and must not have its
-// existing content wiped.
+// content-bearing SBOM being reprocessed can also hit ErrImageTooLarge. Unlike the generic
+// failure/crash paths, ErrImageTooLarge is marked immediately (no retry budget), but must
+// still go through PatchSBOMAnnotations so the existing content is never wiped.
 func Test_processContainerWithMetadata_PreservesContentOnTooLarge(t *testing.T) {
 	fake := newFakeSbomClient()
 	imageTag := "quay.io/kubescape/kubevuln:v0.3.2"
@@ -323,7 +357,8 @@ func Test_processContainerWithMetadata_PreservesContentOnTooLarge(t *testing.T) 
 	mgr.processContainerWithMetadata(notif, mounts, imageStatus, imageTag, imageID)
 
 	raw := fake.get(sbomName)
-	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must not be wiped by an ErrImageTooLarge reprocess")
-	assert.Equal(t, helpersv1.Learning, raw.Annotations[helpersv1.StatusMetadataKey], "status must be left untouched on failure")
-	assert.Equal(t, 0, fake.replaceCalls, "an ErrImageTooLarge reprocess of a content-bearing SBOM must never touch storage")
+	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must survive an annotation-only status update")
+	assert.Equal(t, helpersv1.TooLarge, raw.Annotations[helpersv1.StatusMetadataKey])
+	assert.Equal(t, 1, fake.patchCalls)
+	assert.Equal(t, 0, fake.replaceCalls, "ErrImageTooLarge marking must never use a full ReplaceSBOM")
 }
