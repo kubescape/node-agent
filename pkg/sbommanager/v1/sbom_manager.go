@@ -334,6 +334,27 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("expected version", s.version))
 			// update the version of the tool
 			wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
+		// continue to create SBOM
+		case wipSbom.Annotations[helpersv1.StatusMetadataKey] == helpersv1.Incomplete:
+			// only skip if the SBOM was created with the same version of tool, so a fixed
+			// node-agent build still retries images that previously failed
+			if wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] == s.version {
+				logger.L().Debug("SbomManager - SBOM generation previously failed with this tool version, skipping",
+					helpers.String("namespace", notif.Container.K8s.Namespace),
+					helpers.String("pod", notif.Container.K8s.PodName),
+					helpers.String("container", notif.Container.K8s.ContainerName),
+					helpers.String("sbomName", sbomName))
+				return
+			}
+			logger.L().Debug("SbomManager - SBOM generation previously failed with a different tool version, retrying",
+				helpers.String("namespace", notif.Container.K8s.Namespace),
+				helpers.String("pod", notif.Container.K8s.PodName),
+				helpers.String("container", notif.Container.K8s.ContainerName),
+				helpers.String("sbomName", sbomName),
+				helpers.String("got version", wipSbom.Annotations[helpersv1.ToolVersionMetadataKey]),
+				helpers.String("expected version", s.version))
+			// update the version of the tool
+			wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
 			// continue to create SBOM
 		case wipSbom.Annotations[NodeNameMetadataKey] != s.cfg.NodeName:
 			logger.L().Debug("SbomManager - SBOM is already being processed by another node, skipping",
@@ -421,6 +442,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
+			s.markSBOMStatus(wipSbom, sbomName, helpersv1.Incomplete)
 			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)
 			return
 		}
@@ -464,15 +486,10 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
 			if errors.Is(srcErr, syftutil.ErrImageTooLarge) {
-				delete(wipSbom.Annotations, NodeNameMetadataKey)
-				wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
-				if _, replaceErr := s.storageClient.ReplaceSBOM(wipSbom); replaceErr != nil {
-					logger.L().Ctx(s.ctx).Error("SbomManager - failed to persist TooLarge SBOM",
-						helpers.Error(replaceErr),
-						helpers.String("sbomName", sbomName))
-				}
+				s.markSBOMStatus(wipSbom, sbomName, helpersv1.TooLarge)
 				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonImageTooLarge, srcErr)
 			} else {
+				s.markSBOMStatus(wipSbom, sbomName, helpersv1.Incomplete)
 				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, srcErr)
 			}
 			return
@@ -498,6 +515,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName))
+			s.markSBOMStatus(wipSbom, sbomName, helpersv1.Incomplete)
 			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, syftErr)
 			return
 		}
@@ -627,6 +645,20 @@ func (s *SbomManager) drainPendingScans() {
 		s.pool.Submit(func() {
 			s.processContainerWithMetadata(scan.notif, scan.mounts, scan.imageStatus, scan.imageTag, scan.imageID)
 		}, utils.FuncName(s.processContainerWithMetadata))
+	}
+}
+
+// markSBOMStatus persists the SBOM's terminal status (e.g. TooLarge, Incomplete) so a later
+// container start for the same image is handled by the matching case in
+// processContainerWithMetadata instead of retrying and failing indefinitely.
+func (s *SbomManager) markSBOMStatus(wipSbom *v1beta1.SBOMSyft, sbomName, status string) {
+	delete(wipSbom.Annotations, NodeNameMetadataKey)
+	wipSbom.Annotations[helpersv1.StatusMetadataKey] = status
+	if _, err := s.storageClient.ReplaceSBOM(wipSbom); err != nil {
+		logger.L().Ctx(s.ctx).Error("SbomManager - failed to persist SBOM status",
+			helpers.Error(err),
+			helpers.String("sbomName", sbomName),
+			helpers.String("status", status))
 	}
 }
 
