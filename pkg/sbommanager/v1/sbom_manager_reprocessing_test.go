@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -118,20 +119,25 @@ func newFailureRetries() *expirable.LRU[string, int] {
 	return expirable.NewLRU[string, int](maxFailureRetryEntries, nil, failureRetryTTL)
 }
 
+func newCrashLoopRetries() *expirable.LRU[string, int] {
+	return expirable.NewLRU[string, int](maxFailureRetryEntries, nil, crashLoopRetryTTL)
+}
+
 func newTestManager(fake *fakeSbomClient, version string) *SbomManager {
 	return newTestManagerWithScannerErr(fake, version, errors.New("scan failed"))
 }
 
 func newTestManagerWithScannerErr(fake *fakeSbomClient, version string, scannerErr error) *SbomManager {
 	return &SbomManager{
-		cfg:            config.Config{NodeName: "node-1"},
-		ctx:            context.Background(),
-		processing:     mapset.NewSet[string](),
-		storageClient:  fake,
-		scannerClient:  &fakeScannerClient{err: scannerErr},
-		metrics:        metricsmanager.NewMetricsNoop(),
-		version:        version,
-		failureRetries: newFailureRetries(),
+		cfg:              config.Config{NodeName: "node-1"},
+		ctx:              context.Background(),
+		processing:       mapset.NewSet[string](),
+		storageClient:    fake,
+		scannerClient:    &fakeScannerClient{err: scannerErr},
+		metrics:          metricsmanager.NewMetricsNoop(),
+		version:          version,
+		failureRetries:   newFailureRetries(),
+		crashLoopRetries: newCrashLoopRetries(),
 	}
 }
 
@@ -139,12 +145,13 @@ func newTestManagerWithScannerErr(fake *fakeSbomClient, version string, scannerE
 // processContainerWithMetadata takes the in-process (syftutil.NewSource) fallback path.
 func newTestManagerInProcess(fake *fakeSbomClient, version string, maxImageSize int64) *SbomManager {
 	return &SbomManager{
-		cfg:            config.Config{NodeName: "node-1", MaxImageSize: maxImageSize},
-		ctx:            context.Background(),
-		processing:     mapset.NewSet[string](),
-		storageClient:  fake,
-		version:        version,
-		failureRetries: newFailureRetries(),
+		cfg:              config.Config{NodeName: "node-1", MaxImageSize: maxImageSize},
+		ctx:              context.Background(),
+		processing:       mapset.NewSet[string](),
+		storageClient:    fake,
+		version:          version,
+		failureRetries:   newFailureRetries(),
+		crashLoopRetries: newCrashLoopRetries(),
 	}
 }
 
@@ -370,14 +377,15 @@ func Test_processContainerWithMetadata_MixedFailureCategoriesShareBudget(t *test
 	fake.sboms[sbomName] = good
 
 	mgr := &SbomManager{
-		cfg:            config.Config{NodeName: "node-1"},
-		ctx:            context.Background(),
-		processing:     mapset.NewSet[string](),
-		storageClient:  fake,
-		scannerClient:  &alternatingScannerClient{},
-		metrics:        metricsmanager.NewMetricsNoop(),
-		version:        "v2.0.0",
-		failureRetries: newFailureRetries(),
+		cfg:              config.Config{NodeName: "node-1"},
+		ctx:              context.Background(),
+		processing:       mapset.NewSet[string](),
+		storageClient:    fake,
+		scannerClient:    &alternatingScannerClient{},
+		metrics:          metricsmanager.NewMetricsNoop(),
+		version:          "v2.0.0",
+		failureRetries:   newFailureRetries(),
+		crashLoopRetries: newCrashLoopRetries(),
 	}
 
 	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
@@ -459,4 +467,124 @@ func Test_processContainerWithMetadata_MarksFreshImageTooLargeImmediately(t *tes
 	stored := fake.get(sbomName)
 	assert.Equal(t, helpersv1.TooLarge, stored.Annotations[helpersv1.StatusMetadataKey])
 	assert.Equal(t, 1, fake.patchCalls, "a fresh reservation must mark TooLarge on the first occurrence, with no retry budget")
+}
+
+// genericThenCrashScannerClient returns a generic error on its first two calls, then
+// sbomscanner.ErrScannerCrashed on the third -- used to reproduce the exact mixed-failure
+// sequence from the review finding on PR #857 (2 generic failures + 1 crash).
+type genericThenCrashScannerClient struct{ calls int }
+
+func (a *genericThenCrashScannerClient) CreateSBOM(_ context.Context, _ sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
+	a.calls++
+	if a.calls < 3 {
+		return nil, errors.New("scan failed")
+	}
+	return nil, sbomscanner.ErrScannerCrashed
+}
+func (a *genericThenCrashScannerClient) Ready() bool  { return true }
+func (a *genericThenCrashScannerClient) Close() error { return nil }
+
+// Test_processContainerWithMetadata_MixedFailureCategoriesPinIncomplete is the regression test
+// for the review blocker on PR #857: a contentless image (hadContent == false, no prior
+// successful scan) that reaches the shared threshold via two generic failures plus a single
+// scanner crash must be pinned Incomplete, not TooLarge -- TooLarge is only reachable when
+// crashLoopRetries' crash-only backstop itself crosses the threshold, which one crash does not.
+func Test_processContainerWithMetadata_MixedFailureCategoriesPinIncomplete(t *testing.T) {
+	fake := newFakeSbomClient()
+	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
+	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
+	assert.NoError(t, err)
+
+	mgr := &SbomManager{
+		cfg:              config.Config{NodeName: "node-1"},
+		ctx:              context.Background(),
+		processing:       mapset.NewSet[string](),
+		storageClient:    fake,
+		scannerClient:    &genericThenCrashScannerClient{},
+		metrics:          metricsmanager.NewMetricsNoop(),
+		version:          "v2.0.0",
+		scannerMemLimit:  1024,
+		failureRetries:   newFailureRetries(),
+		crashLoopRetries: newCrashLoopRetries(),
+	}
+
+	for range 3 {
+		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+	}
+
+	raw := fake.get(sbomName)
+	assert.Equal(t, helpersv1.Incomplete, raw.Annotations[helpersv1.StatusMetadataKey], "a mix of generic failures and a single crash must never be classified TooLarge")
+	_, hasMemLimitAnnotation := raw.Annotations[ScannerMemoryLimitAnnotation]
+	assert.False(t, hasMemLimitAnnotation, "the TooLarge-only memory-limit annotation must not be set on an Incomplete pin")
+}
+
+// Test_processContainerWithMetadata_MarksContentlessImageTooLargeOnPureCrashLoop guards the
+// still-supported TooLarge path: a contentless image (no prior successful scan) that crashes the
+// scanner sidecar 3 consecutive times with no interleaved generic failures must still be pinned
+// TooLarge, with the scanner memory limit recorded -- this is the signal crashLoopRetries exists
+// to preserve.
+func Test_processContainerWithMetadata_MarksContentlessImageTooLargeOnPureCrashLoop(t *testing.T) {
+	fake := newFakeSbomClient()
+	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
+	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
+	assert.NoError(t, err)
+
+	mgr := &SbomManager{
+		cfg:              config.Config{NodeName: "node-1"},
+		ctx:              context.Background(),
+		processing:       mapset.NewSet[string](),
+		storageClient:    fake,
+		scannerClient:    &fakeScannerClient{err: sbomscanner.ErrScannerCrashed},
+		metrics:          metricsmanager.NewMetricsNoop(),
+		version:          "v2.0.0",
+		scannerMemLimit:  2048,
+		failureRetries:   newFailureRetries(),
+		crashLoopRetries: newCrashLoopRetries(),
+	}
+
+	for range 3 {
+		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+	}
+
+	raw := fake.get(sbomName)
+	assert.Equal(t, helpersv1.TooLarge, raw.Annotations[helpersv1.StatusMetadataKey])
+	assert.Equal(t, "2048", raw.Annotations[ScannerMemoryLimitAnnotation])
+}
+
+// Test_processContainerWithMetadata_CrashLoopBackstopSurvivesSparseCadence is the regression test
+// for review finding #2 on PR #857: a chronically-crashing image whose restarts are spaced wider
+// apart than failureRetryTTL must still eventually be pinned, via crashLoopRetries' longer TTL,
+// even though the shared failureRetries budget keeps expiring and never itself reaches
+// maxScanRetries. A short-TTL failureRetries and a longer-but-still-short crashLoopRetries are
+// constructed directly (rather than via the production TTL constants) so the test can force real
+// expiry with millisecond-scale sleeps instead of waiting on failureRetryTTL/crashLoopRetryTTL.
+func Test_processContainerWithMetadata_CrashLoopBackstopSurvivesSparseCadence(t *testing.T) {
+	fake := newFakeSbomClient()
+	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
+	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
+	assert.NoError(t, err)
+
+	mgr := &SbomManager{
+		cfg:              config.Config{NodeName: "node-1"},
+		ctx:              context.Background(),
+		processing:       mapset.NewSet[string](),
+		storageClient:    fake,
+		scannerClient:    &fakeScannerClient{err: sbomscanner.ErrScannerCrashed},
+		metrics:          metricsmanager.NewMetricsNoop(),
+		version:          "v2.0.0",
+		scannerMemLimit:  4096,
+		failureRetries:   expirable.NewLRU[string, int](maxFailureRetryEntries, nil, 5*time.Millisecond),
+		crashLoopRetries: expirable.NewLRU[string, int](maxFailureRetryEntries, nil, 500*time.Millisecond),
+	}
+
+	for i := range 3 {
+		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+		if i < 2 {
+			time.Sleep(20 * time.Millisecond) // exceeds the 5ms failureRetries TTL, well inside the 500ms crashLoopRetries TTL
+		}
+	}
+
+	raw := fake.get(sbomName)
+	assert.Equal(t, helpersv1.TooLarge, raw.Annotations[helpersv1.StatusMetadataKey], "the crash-only backstop must still pin TooLarge even though the shared budget kept expiring between crashes")
+	assert.Equal(t, "4096", raw.Annotations[ScannerMemoryLimitAnnotation])
 }
