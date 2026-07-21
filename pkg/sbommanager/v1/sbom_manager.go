@@ -258,7 +258,11 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		defer cancel()
 		sharedData, err := s.waitForSharedContainerData(ctx, notif.Container.Runtime.ContainerID)
 		if err != nil {
-			logger.L().Error("SbomManager - container not found in shared data",
+			logger.L().Ctx(s.ctx).Error("SbomManager - container not found in shared data",
+				helpers.Error(err),
+				helpers.String("namespace", notif.Container.K8s.Namespace),
+				helpers.String("pod", notif.Container.K8s.PodName),
+				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("container ID", notif.Container.Runtime.ContainerID))
 			return
 		}
