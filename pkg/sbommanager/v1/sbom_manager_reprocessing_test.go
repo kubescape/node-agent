@@ -574,13 +574,18 @@ func Test_processContainerWithMetadata_CrashLoopBackstopSurvivesSparseCadence(t 
 		version:          "v2.0.0",
 		scannerMemLimit:  4096,
 		failureRetries:   expirable.NewLRU[string, int](maxFailureRetryEntries, nil, 5*time.Millisecond),
-		crashLoopRetries: expirable.NewLRU[string, int](maxFailureRetryEntries, nil, 500*time.Millisecond),
+		crashLoopRetries: expirable.NewLRU[string, int](maxFailureRetryEntries, nil, 5*time.Second),
 	}
 
 	for i := range 3 {
 		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
 		if i < 2 {
-			time.Sleep(20 * time.Millisecond) // exceeds the 5ms failureRetries TTL, well inside the 500ms crashLoopRetries TTL
+			// exceeds the 5ms failureRetries TTL; crashLoopRetries' 5s TTL is never waited on by
+			// this test (only failureRetries needs to actually expire), so it's set generously
+			// wide to rule out a GC pause or a loaded CI runner expiring it and flipping the
+			// assertion to Incomplete -- a confusing false failure that would look like a
+			// regression rather than a runner hiccup.
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
 
