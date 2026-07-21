@@ -66,6 +66,8 @@ const (
 	maxPendingScans               = 1000
 	maxFailureRetryEntries        = 1000
 	failureRetryTTL               = 30 * time.Minute
+	// maxWaitForSharedContainerData bounds the wait for a container's shared data; mirrors containerprofilemanager's MaxWaitForSharedContainerData.
+	maxWaitForSharedContainerData = 10 * time.Minute
 )
 
 // pendingScan holds the data needed to retry a container scan after the sidecar becomes ready.
@@ -250,20 +252,20 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 			helpers.String("container", notif.Container.K8s.ContainerName))
 		return
 	}
-	// enqueue the container for processing
-	s.pool.Submit(func() {
-		s.processContainer(notif, mounts, imageStatus)
-	}, utils.FuncName(s.processContainer))
-}
-
-func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mounts []string, imageStatus *runtime.ImageStatusResponse) {
-	sharedData, err := s.waitForSharedContainerData(notif.Container.Runtime.ContainerID)
-	if err != nil {
-		logger.L().Error("SbomManager - container not found in shared data",
-			helpers.String("container ID", notif.Container.Runtime.ContainerID))
-		return
-	}
-	s.processContainerWithMetadata(notif, mounts, imageStatus, sharedData.ImageTag, sharedData.ImageID)
+	// Wait for shared data off the single-worker pool so a short-lived container whose data never arrives can't head-of-line-block SBOM generation node-wide (#850); only real work is submitted to the pool.
+	go func() {
+		ctx, cancel := context.WithTimeout(s.ctx, maxWaitForSharedContainerData)
+		defer cancel()
+		sharedData, err := s.waitForSharedContainerData(ctx, notif.Container.Runtime.ContainerID)
+		if err != nil {
+			logger.L().Error("SbomManager - container not found in shared data",
+				helpers.String("container ID", notif.Container.Runtime.ContainerID))
+			return
+		}
+		s.pool.Submit(func() {
+			s.processContainerWithMetadata(notif, mounts, imageStatus, sharedData.ImageTag, sharedData.ImageID)
+		}, utils.FuncName(s.processContainerWithMetadata))
+	}()
 }
 
 func (s *SbomManager) processContainerWithMetadata(notif containercollection.PubSubEvent, mounts []string, imageStatus *runtime.ImageStatusResponse, imageTag, imageID string) {
@@ -568,8 +570,8 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 		helpers.String("sbomName", sbomName))
 }
 
-func (s *SbomManager) waitForSharedContainerData(containerID string) (*objectcache.WatchedContainerData, error) {
-	return backoff.Retry(context.Background(), func() (*objectcache.WatchedContainerData, error) {
+func (s *SbomManager) waitForSharedContainerData(ctx context.Context, containerID string) (*objectcache.WatchedContainerData, error) {
+	return backoff.Retry(ctx, func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := s.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}
