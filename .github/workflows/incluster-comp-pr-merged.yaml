@@ -126,8 +126,8 @@ jobs:
           tags: ${{ inputs.IMAGE_NAME }}:${{ steps.image-prerelease-tag.outputs.IMAGE_TAG_PRERELEASE }}
           build-args: image_version=${{ inputs.IMAGE_TAG }}
           platforms: ${{ inputs.BUILD_PLATFORM }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=${{ inputs.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ inputs.IMAGE_NAME }}:buildcache,mode=max
           push: true
 
       - name: Attest image provenance
