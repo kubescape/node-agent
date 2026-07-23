@@ -7,6 +7,12 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
+// maxCallStacksInTree bounds the number of distinct call sites (CallIDs) indexed
+// in a container's search tree. A container that launches many distinct
+// executables produces many distinct call sites; without a cap the tree, trie and
+// per-CallID paths grow unbounded and inflate node-agent memory.
+const maxCallStacksInTree = 512
+
 // BidirectionalNode extends the call stack node with parent reference
 type BidirectionalNode struct {
 	Frame    v1beta1.StackFrame
@@ -36,6 +42,12 @@ func NewCallStackSearchTree() *CallStackSearchTree {
 func (t *CallStackSearchTree) AddCallStack(stack v1beta1.IdentifiedCallStack) {
 	// If call stack already exists, skip
 	if _, ok := t.Roots[stack.CallID]; ok {
+		return
+	}
+
+	// Bound memory: stop indexing new call sites past the cap (see
+	// maxCallStacksInTree). The tree already retains a representative set.
+	if len(t.Roots) >= maxCallStacksInTree {
 		return
 	}
 
