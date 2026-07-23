@@ -28,7 +28,9 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/utils/ptr"
 )
 
@@ -3226,4 +3228,126 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		require.Greater(t, countByRule(alerts, "R0011"), 0,
 			"DNS MITM: TCP to spoofed IP 128.130.194.56 must fire R0011")
 	})
+}
+
+// Test_34_NetworkNeighborsCIDRCollapse is an end-to-end test for storage
+// PR kubescape/storage#348 (CIDR-based collapsing of NetworkNeighbor entries).
+//
+// The collapse runs entirely on the storage side, in the PreSave/deflate path,
+// using the compiled-in defaults (NetworkIPGroupThreshold=50, floor /16), so the
+// test needs no workload pod and no config. It writes one NetworkNeighborhood
+// modelling a "curl" client with two external destinations, each an egress group
+// of 60 host IPs (> the 50 threshold) differing only by address:
+//
+//   - an S3-style endpoint whose addresses cluster in a single /24
+//     (52.216.183.0/24, last octet spanning the top bit)  -> collapses to /24
+//   - a broader CDN-style endpoint spanning a whole /16
+//     (100.68.0.0/16, third octet spanning the top bit)   -> collapses to /16
+//
+// so both the single-covering-/24 and floor-/16 paths are exercised. Groups are
+// keyed by DNS, so the two destinations collapse independently.
+//
+// Version note: the collapse output lands in the plural `ipAddresses` field,
+// which exists only on PR#348 storage — not on the pinned upstream storage Go
+// types this test compiles against. We therefore read the result back through
+// the DYNAMIC client, so the new field is never referenced at compile time and
+// is not silently dropped at decode time. The test compiles on plain upstream
+// but only passes when storage carries PR#348 — exactly the e2e contract we want.
+func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+	dyn := dynamic.NewForConfigOrDie(k8sClient.K8SConfig)
+	ctx := context.Background()
+
+	nnGVR := schema.GroupVersionResource{
+		Group:    "spdx.softwarecomposition.kubescape.io",
+		Version:  "v1beta1",
+		Resource: "networkneighborhoods",
+	}
+
+	// hostGroup builds `count` external egress entries that differ only by IP and
+	// share one DNS name, so storage groups them together for collapsing.
+	hostGroup := func(dns string, count int, ipFn func(i int) string) []v1beta1.NetworkNeighbor {
+		out := make([]v1beta1.NetworkNeighbor, 0, count)
+		for i := 0; i < count; i++ {
+			out = append(out, v1beta1.NetworkNeighbor{
+				Identifier: fmt.Sprintf("%s-%d", dns, i),
+				Type:       "external",
+				DNS:        dns,
+				DNSNames:   []string{dns},
+				IPAddress:  ipFn(i),
+				Ports:      []v1beta1.NetworkPort{{Name: "TCP-443", Protocol: "TCP", Port: ptr.To(int32(443))}},
+			})
+		}
+		return out
+	}
+
+	const hostCount = 60 // above the default NetworkIPGroupThreshold of 50
+
+	// Case 1: S3-style endpoint clustered in one /24 -> collapses to /24.
+	const s3DNS = "s3.eu-central-1.amazonaws.com."
+	const wantS3CIDR = "52.216.183.0/24"
+	// Case 2: broader endpoint spanning a whole /16 -> collapses to the /16 floor.
+	const broadDNS = "objects.example-cdn.net."
+	const wantBroadCIDR = "100.68.0.0/16"
+
+	egress := append(
+		hostGroup(s3DNS, hostCount, func(i int) string { return fmt.Sprintf("52.216.183.%d", i*4) }),
+		hostGroup(broadDNS, hostCount, func(i int) string { return fmt.Sprintf("100.68.%d.0", i*4) })...,
+	)
+
+	ns := testutils.NewRandomNamespace()
+	const overlayName = "cidr-collapse-34"
+	nn := &v1beta1.NetworkNeighborhood{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      overlayName,
+			Namespace: ns.Name,
+			Annotations: map[string]string{
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+			},
+		},
+		Spec: v1beta1.NetworkNeighborhoodSpec{
+			LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": overlayName}},
+			Containers: []v1beta1.NetworkNeighborhoodContainer{
+				{Name: "curl", Egress: egress},
+			},
+		},
+	}
+	_, err := storageClient.NetworkNeighborhoods(ns.Name).Create(ctx, nn, metav1.CreateOptions{})
+	require.NoError(t, err, "create NetworkNeighborhood with two %d-host egress groups", hostCount)
+
+	// Collapse runs on the storage PreSave path. Poll for BOTH collapsed blocks;
+	// if not yet present, re-save to re-run the pass (idempotent by design).
+	var finalRaw string
+	require.Eventually(t, func() bool {
+		got, gErr := dyn.Resource(nnGVR).Namespace(ns.Name).Get(ctx, overlayName, metav1.GetOptions{})
+		if gErr != nil {
+			return false
+		}
+		raw, _ := json.Marshal(got.Object)
+		if strings.Contains(string(raw), wantS3CIDR) && strings.Contains(string(raw), wantBroadCIDR) {
+			finalRaw = string(raw)
+			return true
+		}
+		_, _ = dyn.Resource(nnGVR).Namespace(ns.Name).Update(ctx, got, metav1.UpdateOptions{})
+		return false
+	}, 120*time.Second, 3*time.Second,
+		"storage should collapse both groups into %s and %s (requires PR#348)", wantS3CIDR, wantBroadCIDR)
+
+	// Positive: both collapsed CIDR blocks are present.
+	assert.Contains(t, finalRaw, wantS3CIDR, "S3 endpoint should collapse to %s", wantS3CIDR)
+	assert.Contains(t, finalRaw, wantBroadCIDR, "broad endpoint should collapse to %s", wantBroadCIDR)
+	// Negative: interior host /32s from each group must be gone as standalone IPs.
+	for _, last := range []int{4, 120, 200} {
+		assert.NotContains(t, finalRaw, fmt.Sprintf("%q", fmt.Sprintf("52.216.183.%d", last)),
+			"host /32 52.216.183.%d should have been collapsed away", last)
+	}
+	for _, third := range []int{4, 120, 200} {
+		assert.NotContains(t, finalRaw, fmt.Sprintf("%q", fmt.Sprintf("100.68.%d.0", third)),
+			"host /32 100.68.%d.0 should have been collapsed away", third)
+	}
 }
