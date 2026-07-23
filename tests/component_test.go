@@ -26,8 +26,10 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
@@ -3268,6 +3270,30 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 		Resource: "networkneighborhoods",
 	}
 
+	// Apply the cluster-scoped CollapseConfiguration singleton the production
+	// deflate path reads (storage wires SetCollapseSettings(collapseSettingsFromCRD)).
+	// Lower the network group threshold so our 60-host groups trip collapsing
+	// deterministically; keep the default /16 floor. Untyped: the network fields
+	// exist only on PR#348 storage.
+	ccGVR := schema.GroupVersionResource{
+		Group:    "spdx.softwarecomposition.kubescape.io",
+		Version:  "v1beta1",
+		Resource: "collapseconfigurations",
+	}
+	cc := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
+		"kind":       "CollapseConfiguration",
+		"metadata":   map[string]interface{}{"name": "default"},
+		"spec": map[string]interface{}{
+			"networkIPGroupThreshold": int64(5),
+			"networkCIDRFloorBits":    int64(16),
+		},
+	}}
+	if _, ccErr := dyn.Resource(ccGVR).Create(ctx, cc, metav1.CreateOptions{}); ccErr != nil && !apierrors.IsAlreadyExists(ccErr) {
+		require.NoError(t, ccErr, "apply CollapseConfiguration")
+	}
+	t.Cleanup(func() { _ = dyn.Resource(ccGVR).Delete(ctx, "default", metav1.DeleteOptions{}) })
+
 	// hostGroup builds `count` external egress entries that differ only by IP and
 	// share one DNS name, so storage groups them together for collapsing.
 	hostGroup := func(dns string, count int, ipFn func(i int) string) []v1beta1.NetworkNeighbor {
@@ -3320,23 +3346,30 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 	_, err := storageClient.NetworkNeighborhoods(ns.Name).Create(ctx, nn, metav1.CreateOptions{})
 	require.NoError(t, err, "create NetworkNeighborhood with two %d-host egress groups", hostCount)
 
-	// Collapse runs on the storage PreSave path. Poll for BOTH collapsed blocks;
-	// if not yet present, re-save to re-run the pass (idempotent by design).
+	// Collapse runs on the storage PreSave path; the config provider is
+	// TTL-cached, so it may take a couple of re-saves for the threshold to take
+	// effect. Poll, re-saving to re-trigger PreSave. On failure, dump the stored
+	// object so the run is self-diagnosing (collapse ran with wrong CIDRs vs.
+	// never ran at all).
 	var finalRaw string
-	require.Eventually(t, func() bool {
+	collapsed := false
+	for attempt := 0; attempt < 40; attempt++ {
 		got, gErr := dyn.Resource(nnGVR).Namespace(ns.Name).Get(ctx, overlayName, metav1.GetOptions{})
-		if gErr != nil {
-			return false
-		}
-		raw, _ := json.Marshal(got.Object)
-		if strings.Contains(string(raw), wantS3CIDR) && strings.Contains(string(raw), wantBroadCIDR) {
+		if gErr == nil {
+			raw, _ := json.Marshal(got.Object)
 			finalRaw = string(raw)
-			return true
+			if strings.Contains(finalRaw, wantS3CIDR) && strings.Contains(finalRaw, wantBroadCIDR) {
+				collapsed = true
+				break
+			}
+			_, _ = dyn.Resource(nnGVR).Namespace(ns.Name).Update(ctx, got, metav1.UpdateOptions{})
 		}
-		_, _ = dyn.Resource(nnGVR).Namespace(ns.Name).Update(ctx, got, metav1.UpdateOptions{})
-		return false
-	}, 120*time.Second, 3*time.Second,
-		"storage should collapse both groups into %s and %s (requires PR#348)", wantS3CIDR, wantBroadCIDR)
+		time.Sleep(3 * time.Second)
+	}
+	if !collapsed {
+		t.Logf("stored NetworkNeighborhood after polling (no collapse observed):\n%s", finalRaw)
+		t.Fatalf("storage did not collapse groups into %s and %s (requires PR#348)", wantS3CIDR, wantBroadCIDR)
+	}
 
 	// Positive: both collapsed CIDR blocks are present.
 	assert.Contains(t, finalRaw, wantS3CIDR, "S3 endpoint should collapse to %s", wantS3CIDR)
