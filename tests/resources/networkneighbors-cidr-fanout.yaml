@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: cidr-fanout
+  name: cidr-fanout
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cidr-fanout
+  template:
+    metadata:
+      labels:
+        app: cidr-fanout
+    spec:
+      containers:
+      - name: fanout
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args:
+        - |
+          while true; do
+            for i in $(seq 1 60); do nc -w 1 -z 52.216.0.$i 443 2>/dev/null; done
+            sleep 3
+          done
