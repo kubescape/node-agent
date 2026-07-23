@@ -3265,34 +3265,37 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 	ctx := context.Background()
 
 	nnGVR := schema.GroupVersionResource{
-		Group:    "spdx.softwarecomposition.kubescape.io",
-		Version:  "v1beta1",
-		Resource: "networkneighborhoods",
+		Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "networkneighborhoods",
+	}
+	ccGVR := schema.GroupVersionResource{
+		Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "collapseconfigurations",
 	}
 
-	// Apply the cluster-scoped CollapseConfiguration singleton the production
-	// deflate path reads (storage wires SetCollapseSettings(collapseSettingsFromCRD)).
-	// Lower the network group threshold so our 60-host groups trip collapsing
-	// deterministically; keep the default /16 floor. Untyped: the network fields
-	// exist only on PR#348 storage.
-	ccGVR := schema.GroupVersionResource{
-		Group:    "spdx.softwarecomposition.kubescape.io",
-		Version:  "v1beta1",
-		Resource: "collapseconfigurations",
-	}
+	// ONE cluster-scoped CollapseConfiguration singleton drives BOTH the network
+	// CIDR collapse (PR#348: networkIPGroupThreshold / networkCIDRFloorBits) AND
+	// the pre-existing path/endpoint collapse (openDynamicThreshold /
+	// endpointDynamicThreshold). We set every knob low so each scenario trips
+	// deterministically — and, crucially, so the mixed subtest can prove the two
+	// collapse families do NOT interfere. Untyped: the network fields exist only
+	// on PR#348 storage. Note the network floor is set to /16 explicitly — the
+	// shipped default is /24 (NetworkCIDRFloorBits=24), NOT the documented 16.
 	cc := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
 		"kind":       "CollapseConfiguration",
 		"metadata":   map[string]interface{}{"name": "default"},
 		"spec": map[string]interface{}{
-			"networkIPGroupThreshold": int64(5),
-			"networkCIDRFloorBits":    int64(16),
+			"networkIPGroupThreshold":  int64(5),
+			"networkCIDRFloorBits":     int64(16),
+			"openDynamicThreshold":     int64(5),
+			"endpointDynamicThreshold": int64(5),
 		},
 	}}
 	if _, ccErr := dyn.Resource(ccGVR).Create(ctx, cc, metav1.CreateOptions{}); ccErr != nil && !apierrors.IsAlreadyExists(ccErr) {
 		require.NoError(t, ccErr, "apply CollapseConfiguration")
 	}
 	t.Cleanup(func() { _ = dyn.Resource(ccGVR).Delete(ctx, "default", metav1.DeleteOptions{}) })
+
+	const hostCount = 60 // comfortably above every threshold (5 here, 50 default)
 
 	// hostGroup builds `count` external egress entries that differ only by IP and
 	// share one DNS name, so storage groups them together for collapsing.
@@ -3301,86 +3304,242 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 		for i := 0; i < count; i++ {
 			out = append(out, v1beta1.NetworkNeighbor{
 				Identifier: fmt.Sprintf("%s-%d", dns, i),
-				Type:       "external",
-				DNS:        dns,
-				DNSNames:   []string{dns},
-				IPAddress:  ipFn(i),
-				Ports:      []v1beta1.NetworkPort{{Name: "TCP-443", Protocol: "TCP", Port: ptr.To(int32(443))}},
+				Type:       "external", DNS: dns, DNSNames: []string{dns},
+				IPAddress: ipFn(i),
+				Ports:     []v1beta1.NetworkPort{{Name: "TCP-443", Protocol: "TCP", Port: ptr.To(int32(443))}},
 			})
 		}
 		return out
 	}
 
-	const hostCount = 60 // above the default NetworkIPGroupThreshold of 50
-
-	// Case 1: S3-style endpoint clustered in one /24 -> collapses to /24.
-	const s3DNS = "s3.eu-central-1.amazonaws.com."
-	const wantS3CIDR = "52.216.183.0/24"
-	// Case 2: broader endpoint spanning a whole /16 -> collapses to the /16 floor.
-	const broadDNS = "objects.example-cdn.net."
-	const wantBroadCIDR = "100.68.0.0/16"
-
-	egress := append(
-		hostGroup(s3DNS, hostCount, func(i int) string { return fmt.Sprintf("52.216.183.%d", i*4) }),
-		hostGroup(broadDNS, hostCount, func(i int) string { return fmt.Sprintf("100.68.%d.0", i*4) })...,
-	)
-
-	ns := testutils.NewRandomNamespace()
-	const overlayName = "cidr-collapse-34"
-	nn := &v1beta1.NetworkNeighborhood{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      overlayName,
-			Namespace: ns.Name,
-			Annotations: map[string]string{
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
+	// createNN writes a NetworkNeighborhood with the given egress and returns nothing.
+	createNN := func(t *testing.T, nsName, name string, egress []v1beta1.NetworkNeighbor) {
+		t.Helper()
+		nn := &v1beta1.NetworkNeighborhood{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name, Namespace: nsName,
+				Annotations: map[string]string{
+					helpersv1.StatusMetadataKey:     helpersv1.Completed,
+					helpersv1.CompletionMetadataKey: helpersv1.Full,
+				},
 			},
-		},
-		Spec: v1beta1.NetworkNeighborhoodSpec{
-			LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": overlayName}},
-			Containers: []v1beta1.NetworkNeighborhoodContainer{
-				{Name: "curl", Egress: egress},
+			Spec: v1beta1.NetworkNeighborhoodSpec{
+				LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+				Containers:    []v1beta1.NetworkNeighborhoodContainer{{Name: "curl", Egress: egress}},
 			},
-		},
-	}
-	_, err := storageClient.NetworkNeighborhoods(ns.Name).Create(ctx, nn, metav1.CreateOptions{})
-	require.NoError(t, err, "create NetworkNeighborhood with two %d-host egress groups", hostCount)
-
-	// Collapse runs on the storage PreSave path; the config provider is
-	// TTL-cached, so it may take a couple of re-saves for the threshold to take
-	// effect. Poll, re-saving to re-trigger PreSave. On failure, dump the stored
-	// object so the run is self-diagnosing (collapse ran with wrong CIDRs vs.
-	// never ran at all).
-	var finalRaw string
-	collapsed := false
-	for attempt := 0; attempt < 40; attempt++ {
-		got, gErr := dyn.Resource(nnGVR).Namespace(ns.Name).Get(ctx, overlayName, metav1.GetOptions{})
-		if gErr == nil {
-			raw, _ := json.Marshal(got.Object)
-			finalRaw = string(raw)
-			if strings.Contains(finalRaw, wantS3CIDR) && strings.Contains(finalRaw, wantBroadCIDR) {
-				collapsed = true
-				break
-			}
-			_, _ = dyn.Resource(nnGVR).Namespace(ns.Name).Update(ctx, got, metav1.UpdateOptions{})
 		}
-		time.Sleep(3 * time.Second)
-	}
-	if !collapsed {
-		t.Logf("stored NetworkNeighborhood after polling (no collapse observed):\n%s", finalRaw)
-		t.Fatalf("storage did not collapse groups into %s and %s (requires PR#348)", wantS3CIDR, wantBroadCIDR)
+		_, err := storageClient.NetworkNeighborhoods(nsName).Create(ctx, nn, metav1.CreateOptions{})
+		require.NoError(t, err, "create NetworkNeighborhood %s", name)
 	}
 
-	// Positive: both collapsed CIDR blocks are present.
-	assert.Contains(t, finalRaw, wantS3CIDR, "S3 endpoint should collapse to %s", wantS3CIDR)
-	assert.Contains(t, finalRaw, wantBroadCIDR, "broad endpoint should collapse to %s", wantBroadCIDR)
-	// Negative: interior host /32s from each group must be gone as standalone IPs.
-	for _, last := range []int{4, 120, 200} {
-		assert.NotContains(t, finalRaw, fmt.Sprintf("%q", fmt.Sprintf("52.216.183.%d", last)),
-			"host /32 52.216.183.%d should have been collapsed away", last)
+	// pollNN reads the stored NN via the DYNAMIC client (the typed client drops
+	// the plural ipAddresses field that exists only on PR#348), re-saving to
+	// re-trigger the TTL-cached PreSave collapse, until every wanted substring is
+	// present. Returns the last raw JSON and whether all were found; the caller
+	// dumps `raw` on failure so the run is self-diagnosing.
+	pollNN := func(t *testing.T, nsName, name string, want []string) (string, bool) {
+		t.Helper()
+		var raw string
+		for attempt := 0; attempt < 40; attempt++ {
+			got, gErr := dyn.Resource(nnGVR).Namespace(nsName).Get(ctx, name, metav1.GetOptions{})
+			if gErr == nil {
+				b, _ := json.Marshal(got.Object)
+				raw = string(b)
+				all := true
+				for _, w := range want {
+					if !strings.Contains(raw, w) {
+						all = false
+						break
+					}
+				}
+				if all {
+					return raw, true
+				}
+				_, _ = dyn.Resource(nnGVR).Namespace(nsName).Update(ctx, got, metav1.UpdateOptions{})
+			}
+			time.Sleep(3 * time.Second)
+		}
+		return raw, false
 	}
-	for _, third := range []int{4, 120, 200} {
-		assert.NotContains(t, finalRaw, fmt.Sprintf("%q", fmt.Sprintf("100.68.%d.0", third)),
-			"host /32 100.68.%d.0 should have been collapsed away", third)
+
+	// requireCollapsed polls for `want` and fails with the stored object dumped.
+	requireCollapsed := func(t *testing.T, nsName, name string, want []string) string {
+		t.Helper()
+		raw, ok := pollNN(t, nsName, name, want)
+		if !ok {
+			t.Logf("stored NetworkNeighborhood %s/%s (expected all of %v):\n%s", nsName, name, want, raw)
+			t.Fatalf("network collapse did not produce %v (requires PR#348)", want)
+		}
+		return raw
 	}
+	quoted := func(s string) string { return fmt.Sprintf("%q", s) }
+
+	// --- Case 1: S3-style endpoint clustered in one /24 -> single covering /24.
+	t.Run("network_single_covering_24", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		createNN(t, ns.Name, "cidr-24", hostGroup("s3.eu-central-1.amazonaws.com.", hostCount,
+			func(i int) string { return fmt.Sprintf("52.216.183.%d", i*4) }))
+		raw := requireCollapsed(t, ns.Name, "cidr-24", []string{"52.216.183.0/24"})
+		for _, last := range []int{4, 120, 200} {
+			assert.NotContains(t, raw, quoted(fmt.Sprintf("52.216.183.%d", last)), "host /32 should be collapsed away")
+		}
+	})
+
+	// --- Case 2: endpoint spanning a whole /16 -> floor /16 (would be /24 buckets by default).
+	t.Run("network_floor_16_covering", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		createNN(t, ns.Name, "cidr-16", hostGroup("objects.example-cdn.net.", hostCount,
+			func(i int) string { return fmt.Sprintf("100.68.%d.0", i*4) }))
+		raw := requireCollapsed(t, ns.Name, "cidr-16", []string{"100.68.0.0/16"})
+		for _, third := range []int{4, 120, 200} {
+			assert.NotContains(t, raw, quoted(fmt.Sprintf("100.68.%d.0", third)), "host /32 should be collapsed away")
+		}
+	})
+
+	// --- Case 3: adversarial mix in ONE group — collapsible host /32s alongside a
+	// pre-collapsed CIDR, the "*" sentinel, and an IPv6 literal. Hosts must
+	// aggregate; the non-aggregatable entries must pass through UNTOUCHED (matches
+	// storage's own TestCollapseIPGroups_Idempotent / _IPv6PassThrough).
+	t.Run("network_passthrough_cidr_star_ipv6", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		const dns = "mixed.example."
+		egress := hostGroup(dns, hostCount, func(i int) string { return fmt.Sprintf("203.0.113.%d", i*4) })
+		egress = append(egress,
+			v1beta1.NetworkNeighbor{Identifier: "held-cidr", Type: "external", DNS: dns, IPAddresses: []string{"10.9.0.0/16"}},
+			v1beta1.NetworkNeighbor{Identifier: "any", Type: "external", DNS: dns, IPAddresses: []string{"*"}},
+			v1beta1.NetworkNeighbor{Identifier: "v6", Type: "external", DNS: dns, IPAddress: "2001:db8::1"},
+		)
+		createNN(t, ns.Name, "cidr-mixed", egress)
+		// hosts collapse to /24; held CIDR, "*", and IPv6 survive verbatim.
+		raw := requireCollapsed(t, ns.Name, "cidr-mixed",
+			[]string{"203.0.113.0/24", "10.9.0.0/16", quoted("*"), "2001:db8::1"})
+		for _, last := range []int{4, 120, 200} {
+			assert.NotContains(t, raw, quoted(fmt.Sprintf("203.0.113.%d", last)), "aggregatable host /32 should be gone")
+		}
+	})
+
+	// --- Case 4: DNS plurals + ports are merged/deduped and replicated onto the
+	// collapsed CIDR entry (matches TestCollapseIPGroups_MultiBucketReplicatesDNSNamesAndPorts).
+	t.Run("network_dns_plurals_replicated", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+		egress := make([]v1beta1.NetworkNeighbor, 0, hostCount)
+		for i := 0; i < hostCount; i++ {
+			egress = append(egress, v1beta1.NetworkNeighbor{
+				Identifier: fmt.Sprintf("multi-%d", i),
+				Type:       "external", DNS: "multi.example.",
+				DNSNames:  []string{"alpha.example.", "beta.example."},
+				IPAddress: fmt.Sprintf("198.51.100.%d", i*4),
+				Ports: []v1beta1.NetworkPort{
+					{Name: "TCP-443", Protocol: "TCP", Port: ptr.To(int32(443))},
+					{Name: "TCP-8443", Protocol: "TCP", Port: ptr.To(int32(8443))},
+				},
+			})
+		}
+		createNN(t, ns.Name, "cidr-dns", egress)
+		// The single collapsed /24 entry must still carry BOTH plural DNS names and BOTH ports.
+		requireCollapsed(t, ns.Name, "cidr-dns",
+			[]string{"198.51.100.0/24", "alpha.example.", "beta.example.", "8443"})
+	})
+
+	// --- Case 5: network collapse and PATH/ENDPOINT collapse under the SAME config
+	// must not confuse each other. Realistic inputs only — DNS names are hostnames,
+	// never paths; slashes live in endpoint/open paths. Real confusion vectors:
+	//   * a DNS WILDCARD subdomain ("*.cdn.example.") — a legit DNS value containing
+	//     "*" — must not be confused with the network "*" any-IP sentinel;
+	//   * HTTP endpoint paths ("/api/v1/users/<id>") collapse to a dynamic-identifier
+	//     wildcard, independently of the network CIDR collapse;
+	//   * an IP-shaped OPEN path ("/data/10.0.0.5") stays a literal open, never a CIDR.
+	t.Run("network_and_path_no_confusion", func(t *testing.T) {
+		ns := testutils.NewRandomNamespace()
+
+		// Network side: 60 hosts -> 192.0.2.0/24. DNSNames carry a real wildcard
+		// subdomain (contains "*"). A SEPARATE DNS group carries the network "*"
+		// any-IP sentinel in IPAddresses. Both "*"s must survive in their own fields.
+		egress := make([]v1beta1.NetworkNeighbor, 0, hostCount+1)
+		for i := 0; i < hostCount; i++ {
+			egress = append(egress, v1beta1.NetworkNeighbor{
+				Identifier: fmt.Sprintf("svc-%d", i), Type: "external",
+				DNS: "api.internal.svc.", DNSNames: []string{"api.internal.svc.", "*.cdn.example."},
+				IPAddress: fmt.Sprintf("192.0.2.%d", i*4),
+				Ports:     []v1beta1.NetworkPort{{Name: "TCP-443", Protocol: "TCP", Port: ptr.To(int32(443))}},
+			})
+		}
+		egress = append(egress, v1beta1.NetworkNeighbor{
+			Identifier: "any-ip", Type: "external",
+			DNS: "telemetry.example.", DNSNames: []string{"telemetry.example."},
+			IPAddresses: []string{"*"},
+		})
+		createNN(t, ns.Name, "mix-net", egress)
+
+		// Path side: 60 HTTP endpoints differing only by a high-cardinality id
+		// segment -> collapse to one ":80/api/v1/users/<DynamicIdentifier>". Plus an
+		// IP-shaped OPEN path that must remain a literal open (never a CIDR).
+		const ipShapedOpen = "/data/10.0.0.5"
+		endpoints := make([]v1beta1.HTTPEndpoint, 0, hostCount)
+		for i := 0; i < hostCount; i++ {
+			endpoints = append(endpoints, v1beta1.HTTPEndpoint{
+				Endpoint: fmt.Sprintf(":80/api/v1/users/%d", i), Methods: []string{"GET"},
+			})
+		}
+		ap := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "mix-path", Namespace: ns.Name,
+				Annotations: map[string]string{
+					helpersv1.StatusMetadataKey:     helpersv1.Completed,
+					helpersv1.CompletionMetadataKey: helpersv1.Full,
+				},
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{{
+					Name:      "curl",
+					Execs:     []v1beta1.ExecCalls{{Path: "/bin/cat", Args: []string{"/bin/cat"}}},
+					Opens:     []v1beta1.OpenCalls{{Path: ipShapedOpen, Flags: []string{"O_RDONLY"}}},
+					Endpoints: endpoints,
+				}},
+			},
+		}
+		_, err := storageClient.ApplicationProfiles(ns.Name).Create(ctx, ap, metav1.CreateOptions{})
+		require.NoError(t, err, "create ApplicationProfile mix-path")
+
+		// Network assertions: hosts collapse to /24; the DNS wildcard subdomain and
+		// the "*" any-IP sentinel both survive (distinct fields, not confused). The
+		// path wildcard identifier must never appear inside the network object.
+		netRaw := requireCollapsed(t, ns.Name, "mix-net",
+			[]string{"192.0.2.0/24", "*.cdn.example.", quoted("*")})
+		assert.NotContains(t, netRaw, quoted("192.0.2.4"), "network host /32 should be collapsed")
+		assert.NotContains(t, netRaw, dynamicpathdetector.DynamicIdentifier, "path wildcard must not leak into the NetworkNeighborhood")
+
+		// Endpoint collapse (typed read): many /users/<id> -> one /users/<DynamicIdentifier>.
+		wantEndpoint := ":80/api/v1/users/" + dynamicpathdetector.DynamicIdentifier
+		var endpts, openPaths []string
+		collapsedEp := false
+		for attempt := 0; attempt < 40; attempt++ {
+			got, gErr := storageClient.ApplicationProfiles(ns.Name).Get(ctx, "mix-path", metav1.GetOptions{})
+			if gErr == nil && len(got.Spec.Containers) > 0 {
+				endpts, openPaths = endpts[:0], openPaths[:0]
+				for _, e := range got.Spec.Containers[0].Endpoints {
+					endpts = append(endpts, e.Endpoint)
+				}
+				for _, o := range got.Spec.Containers[0].Opens {
+					openPaths = append(openPaths, o.Path)
+				}
+				if slices.Contains(endpts, wantEndpoint) {
+					collapsedEp = true
+					break
+				}
+			}
+			time.Sleep(3 * time.Second)
+		}
+		if !collapsedEp {
+			t.Logf("stored ApplicationProfile (expected endpoint %s):\n  endpoints=%v\n  opens=%v", wantEndpoint, endpts, openPaths)
+			t.Fatalf("HTTP endpoints did not collapse to %s", wantEndpoint)
+		}
+		assert.NotContains(t, endpts, ":80/api/v1/users/5", "per-id endpoint should have collapsed away")
+
+		// Cross-contamination guards.
+		assert.Contains(t, openPaths, ipShapedOpen, "IP-shaped open path must stay a literal path, not a CIDR")
+		for _, e := range endpts {
+			assert.NotContains(t, e, "192.0.2.0/24", "network CIDR must not leak into an endpoint path")
+		}
+	})
 }
