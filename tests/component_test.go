@@ -1981,6 +1981,11 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
+	// R0002 file-access monitoring is opt-in (monitored prefixes incl. /etc/);
+	// without this the rule never evaluates opens and every "expect alert"
+	// anchoring case silently passes as a no-alert. Test_27 enables it the same
+	// way; Test_33 was missing it (it had never run in CI to expose the gap).
+	defer enableR0002ForTest(t)()
 
 	const ruleName = "Files Access Anomalies in container"
 	const profileName = "nginx-regex-profile"
