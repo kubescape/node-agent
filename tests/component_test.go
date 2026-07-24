@@ -2764,31 +2764,12 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		// AP and NN MUST therefore share that single name.
 		const overlayName = "curl-28-overlay"
 
-		ap := &v1beta1.ApplicationProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      overlayName,
-				Namespace: ns.Name,
-			},
-			Spec: v1beta1.ApplicationProfileSpec{
-				Containers: []v1beta1.ApplicationProfileContainer{
-					{
-						Name: "curl",
-						Execs: []v1beta1.ExecCalls{
-							{Path: "/bin/sleep"},
-							{Path: "/usr/bin/curl"},
-							{Path: "/usr/bin/nslookup"},
-							{Path: "/usr/bin/wget"},
-						},
-						Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev"},
-					},
-				},
-			},
-		}
-		_, err := storageClient.ApplicationProfiles(ns.Name).Create(
-			context.Background(), ap, metav1.CreateOptions{})
-		require.NoError(t, err, "create AP")
-
-		nn := &v1beta1.NetworkNeighborhood{
+		// Migration (#862): the user authors ONE ContainerProfile (managed-by:
+		// User) instead of a separate ApplicationProfile + NetworkNeighborhood.
+		// The kubescape.io/user-defined-profile pod label names this CP; node-agent
+		// uses it directly as the authoritative base. Its Spec merges the former AP
+		// surfaces (execs, syscalls) with the former NN surfaces (egress, selector).
+		cp := &v1beta1.ContainerProfile{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      overlayName,
 				Namespace: ns.Name,
@@ -2798,45 +2779,46 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 					helpersv1.CompletionMetadataKey: helpersv1.Full,
 				},
 				Labels: map[string]string{
-					helpersv1.ApiGroupMetadataKey:   "apps",
-					helpersv1.ApiVersionMetadataKey: "v1",
-					helpersv1.RelatedKindMetadataKey:       "Deployment",
-					helpersv1.RelatedNameMetadataKey:       "curl-28",
-					helpersv1.RelatedNamespaceMetadataKey:  ns.Name,
+					helpersv1.ApiGroupMetadataKey:         "apps",
+					helpersv1.ApiVersionMetadataKey:       "v1",
+					helpersv1.RelatedKindMetadataKey:      "Deployment",
+					helpersv1.RelatedNameMetadataKey:      "curl-28",
+					helpersv1.RelatedNamespaceMetadataKey: ns.Name,
 				},
 			},
-			Spec: v1beta1.NetworkNeighborhoodSpec{
+			Spec: v1beta1.ContainerProfileSpec{
+				Execs: []v1beta1.ExecCalls{
+					{Path: "/bin/sleep"},
+					{Path: "/usr/bin/curl"},
+					{Path: "/usr/bin/nslookup"},
+					{Path: "/usr/bin/wget"},
+				},
+				Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev"},
 				LabelSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{"app": "curl-28"},
 				},
-				Containers: []v1beta1.NetworkNeighborhoodContainer{
+				Egress: []v1beta1.NetworkNeighbor{
 					{
-						Name: "curl",
-						Egress: []v1beta1.NetworkNeighbor{
-							{
-								Identifier: "fusioncore-egress",
-								Type:       "external",
-								DNS:        "fusioncore.ai.",
-								DNSNames:   []string{"fusioncore.ai."},
-								IPAddress:  "162.0.217.171",
-								Ports: []v1beta1.NetworkPort{
-									{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
-								},
-							},
+						Identifier: "fusioncore-egress",
+						Type:       "external",
+						DNS:        "fusioncore.ai.",
+						DNSNames:   []string{"fusioncore.ai."},
+						IPAddress:  "162.0.217.171",
+						Ports: []v1beta1.NetworkPort{
+							{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
 						},
 					},
 				},
 			},
 		}
-		_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(
-			context.Background(), nn, metav1.CreateOptions{})
-		require.NoError(t, err, "create NN")
+		_, err := storageClient.ContainerProfiles(ns.Name).Create(
+			context.Background(), cp, metav1.CreateOptions{})
+		require.NoError(t, err, "create user-defined ContainerProfile")
 
 		require.Eventually(t, func() bool {
-			_, apErr := storageClient.ApplicationProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
-			_, nnErr := storageClient.NetworkNeighborhoods(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
-			return apErr == nil && nnErr == nil
-		}, 30*time.Second, 1*time.Second, "AP+NN must be in storage before pod deploy")
+			_, cpErr := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
+			return cpErr == nil
+		}, 30*time.Second, 1*time.Second, "user-defined CP must be in storage before pod deploy")
 
 		wl, err := testutils.NewTestWorkload(ns.Name,
 			path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
