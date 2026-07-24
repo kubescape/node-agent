@@ -3365,12 +3365,17 @@ func withPrefixes(cidrs []string, prefixes ...string) []string {
 // node-agent's write time, so only a genuinely learnt profile exercises collapse.
 //
 // Workloads egress to REAL cloud-provider address space (AWS S3, Cloudflare,
-// Azure, GCP) and assertions pin the EXACT cover — never an over-approximating
-// block the workload did not reach. The collapsed value lands in the plural
-// ipAddresses field (PR#348 only), read via the dynamic client.
+// Azure, GCP). Assertions pin two properties: a fully-observed block collapses to
+// exactly that block (never over-approximating past what the workload reached),
+// and scattered traffic is bucketed to the floor so output is bounded by the
+// number of distinct floor networks — not one entry per host, the regression
+// caught in the kubescape/storage#349 review against the real too-large profile.
+// The collapsed value lands in the plural ipAddresses field (PR#348), read via
+// the dynamic client.
 //
 //	floor /16, full S3 /28 (52.216.1.0/28)      -> exactly 52.216.1.0/28
-//	floor /16, scattered S3/CF/Azure/GCP IPs    -> exactly those /32s (no covering block)
+//	floor /16, ~30 hosts spread across a /16     -> one covering 52.216.0.0/16 (bounded, no /32s)
+//	floor /16, 8 hosts each in a distinct /16    -> one /16 bucket apiece (bounded, no /32s)
 //	floor /16, full Cloudflare IPv6 /124        -> exactly 2606:4700:0:1::/124 (dual-stack only)
 //	floor /28, full S3 /27 (52.216.2.0/27)      -> splits into 52.216.2.0/28 + 52.216.2.16/28
 func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
@@ -3387,6 +3392,7 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 
 	s3 := deployCIDRLearner(t, "resources/networkneighbors-s3-28.yaml")
 	scattered := deployCIDRLearner(t, "resources/networkneighbors-scattered.yaml")
+	spread := deployCIDRLearner(t, "resources/networkneighbors-cidr-spread.yaml")
 	v6 := deployCIDRLearner(t, "resources/networkneighbors-v6-124.yaml")
 
 	// A fully-observed S3 /28 exact-covers to exactly that /28.
@@ -3395,15 +3401,28 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 		"a fully-observed S3 /28 must collapse to exactly 52.216.1.0/28")
 	assert.Empty(t, withPrefixes(s3Bare, "52.216.1."), "no bare host /32 may remain")
 
-	// Scattered IPs across four providers, each in a distinct /16, must stay as
-	// their exact /32s — exact cover never invents a covering block.
+	// ~30 hosts spread across dozens of /24s within a single /16 — the shape of the
+	// real too-large profile from the storage#349 review. Under a /16 floor they
+	// share no common prefix as long as the floor collapses to one covering
+	// 52.216.0.0/16, NOT one entry per host. This is the case that exploded to
+	// thousands of /32s before the bucketing fix.
+	spreadCIDRs, spreadBare := collectLearntCollapse(t, dyn, spread)
+	assert.Equal(t, []string{"52.216.0.0/16"}, withPrefixes(spreadCIDRs, "52.216."),
+		"hosts spread across a /16 must collapse to a single bounded /16, not per-host entries")
+	assert.Empty(t, withPrefixes(spreadBare, "52.216."), "no bare host /32 may remain after bucketing")
+
+	// Scattered IPs across four providers, each in a distinct /16, share no common
+	// prefix as long as the floor, so each is bucketed into its floor-length (/16)
+	// network — one bounded block apiece, never left as unbounded per-host /32s.
 	scatteredWant := []string{
-		"104.16.100.50/32", "13.107.6.152/32", "172.64.200.10/32", "20.150.10.5/32",
-		"34.120.50.10/32", "35.190.20.30/32", "52.216.10.20/32", "52.217.50.100/32",
+		"104.16.0.0/16", "13.107.0.0/16", "172.64.0.0/16", "20.150.0.0/16",
+		"34.120.0.0/16", "35.190.0.0/16", "52.216.0.0/16", "52.217.0.0/16",
 	}
-	scatteredCIDRs, _ := collectLearntCollapse(t, dyn, scattered)
+	scatteredCIDRs, scatteredBare := collectLearntCollapse(t, dyn, scattered)
 	got := withPrefixes(scatteredCIDRs, "52.216.", "52.217.", "104.16.", "172.64.", "20.150.", "13.107.", "34.120.", "35.190.")
-	assert.Equal(t, scatteredWant, got, "scattered cloud IPs must be covered exactly, as individual /32s")
+	assert.Equal(t, scatteredWant, got, "scattered cloud IPs, each in a distinct /16, bucket to one /16 apiece")
+	assert.Empty(t, withPrefixes(scatteredBare, "52.216.", "52.217.", "104.16.", "172.64.", "20.150.", "13.107.", "34.120.", "35.190."),
+		"no bare host /32 may remain after bucketing")
 
 	// IPv6 exact cover — only on a dual-stack cluster; skip the assertion if the
 	// pod never egressed over v6 (single-stack), rather than fail.
@@ -3425,6 +3444,6 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 		"a fully-observed /27 must split into two /28s under a /28 floor")
 	assert.Empty(t, withPrefixes(splitBare, "52.216.2."))
 
-	t.Logf("collapse validated on real cloud ranges: S3=%v scattered=%v split=%v",
-		withPrefixes(s3CIDRs, "52.216.1."), got, withPrefixes(splitCIDRs, "52.216.2."))
+	t.Logf("collapse validated on real cloud ranges: S3=%v spread=%v scattered=%v split=%v",
+		withPrefixes(s3CIDRs, "52.216.1."), withPrefixes(spreadCIDRs, "52.216."), got, withPrefixes(splitCIDRs, "52.216.2."))
 }
