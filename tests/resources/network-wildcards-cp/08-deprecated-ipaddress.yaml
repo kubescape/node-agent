@@ -1,0 +1,24 @@
+# Fixture 08 — backward compatibility with deprecated singular `ipAddress`
+#
+# Edge case:    only the deprecated singular field populated; ipAddresses absent
+# Expects:      observed "10.0.0.42" matches via the singular field;
+#               behaviour unchanged from v0.0.1
+# Match path:   verifier walks BOTH singular and plural fields, treating them
+#               as a logical OR
+# Spec ref:     §4.7 ipAddress row — "Deprecated since v0.0.2 — kept for back-compat"
+# Producer rule: MUST NOT populate both `ipAddress` (singular) and `ipAddresses`
+#                (plural) on the same entry — admission strategy rejects
+#
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: nw-08-deprecated-ipaddress
+spec:
+  matchLabels:
+    app: nw-08
+  egress:
+  - identifier: legacy-singular-ip
+    type: external
+    ipAddress: "10.0.0.42"     # DEPRECATED — kept here on purpose to exercise back-compat
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}

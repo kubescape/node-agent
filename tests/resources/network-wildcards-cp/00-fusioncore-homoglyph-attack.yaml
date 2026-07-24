@@ -1,0 +1,54 @@
+# Fixture 00 — the fusioncore homoglyph attack
+#
+# THE SCENARIO
+#   A workload is allowed to reach exactly one external vendor, fusioncore.ai.
+#   An attacker who has code-exec in the container tries to exfiltrate to a
+#   look-alike domain that a human reviewer skimming an allow-list would wave
+#   through — but which is a DIFFERENT registrable domain under attacker
+#   control.
+#
+# WHY IT MATTERS
+#   dnsNames match is an EXACT, normalised string compare (lower-cased,
+#   trailing-dot normalised — see fixture 13). It is NOT a visual/semantic
+#   compare. So every homoglyph below is a cache-miss against the allow-list
+#   and fires R0005 (unexpected domain). The security value of a pinned
+#   dnsNames allow-list over "eyeball the domain in review" is exactly this:
+#   the matcher cannot be fooled by characters that look identical to a human.
+#
+# LOOK-ALIKES THAT THIS PROFILE REJECTS (each → R0005)
+#   fusioncοre.ai.     ← Greek omicron  U+03BF in place of latin 'o'
+#   fusiоncore.ai.     ← Cyrillic  'о'  U+043E in place of latin 'o'
+#   fusioncore.аi.     ← Cyrillic  'а'  U+0430 in place of latin 'a'
+#   fusi0ncore.ai.     ← digit zero for letter 'o'
+#   fusioncore-ai.com. ← hyphen + different TLD, visually close
+#   fusioncore.ai.evil.example.   ← legit label as a PREFIX of an attacker apex
+#   xn--fusioncre-... (punycode)  ← IDNA-encoded homoglyph on the wire
+#
+#   None of these normalise to "fusioncore.ai." — the ONLY allowed string —
+#   so each is an unexpected egress domain and alerts.
+#
+# AUTHORING TAKEAWAY
+#   Pin the exact FQDN(s) you trust. Do NOT reach for a wildcard (fixtures
+#   10/12) to "cover typos" — a wildcard widens the attack surface, it does
+#   not narrow the homoglyph gap. If you legitimately call several vendor
+#   sub-domains, list each one explicitly.
+#
+# Bind this profile to a workload with the pod label
+#   kubescape.io/user-defined-profile: fusioncore-homoglyph
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: fusioncore-homoglyph
+spec:
+  matchLabels:
+    app: curl-fusioncore
+  egress:
+  - identifier: fusioncore-vendor
+    type: external
+    # The ONE trusted external domain. Exact match, trailing dot normalised.
+    dnsNames:
+      - "fusioncore.ai."
+    ipAddress: 162.0.217.171
+    ports:
+      - {name: TCP-80, protocol: TCP, port: 80}
+      - {name: TCP-443, protocol: TCP, port: 443}
