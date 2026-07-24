@@ -27,6 +27,10 @@ import (
 // pointer equality).
 type fakeProfileClient struct {
 	cp    *v1beta1.ContainerProfile
+	// userCP, when non-nil, is returned by GetContainerProfile for a name
+	// matching userCP.Name (the migrated user-defined ContainerProfile). Other
+	// names fall through to cp. Lets tests exercise the new-way overlay path.
+	userCP *v1beta1.ContainerProfile
 	ap    *v1beta1.ApplicationProfile // returned for Get by ap.Name match (or any if overlayOnly is empty)
 	nn    *v1beta1.NetworkNeighborhood
 	cpErr error
@@ -78,8 +82,11 @@ func (f *fakeProfileClient) GetNetworkNeighborhood(_ context.Context, _, name st
 	}
 	return f.nn, f.nnErr
 }
-func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
+func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
 	f.getCPCalls++
+	if f.userCP != nil && name == f.userCP.Name {
+		return f.userCP, nil
+	}
 	return f.cp, f.cpErr
 }
 func (f *fakeProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
@@ -203,6 +210,43 @@ func TestOverlayPath_DeepCopies(t *testing.T) {
 	require.NotNil(t, entry.UserAPRef)
 	assert.Equal(t, "override", entry.UserAPRef.Name)
 	assert.Equal(t, "u1", entry.UserAPRV)
+}
+
+// TestOverlayPath_UserDefinedCP_NewWay verifies the migrated path: when the
+// user-defined-profile label names a user-authored ContainerProfile
+// (managed-by: User), it becomes the authoritative base — UserCPRef is set, the
+// legacy UserAPRef/UserNNRef are NOT, and the projection reflects the CP.
+func TestOverlayPath_UserDefinedCP_NewWay(t *testing.T) {
+	userCP := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "override", Namespace: "default", ResourceVersion: "uc1",
+			Annotations: map[string]string{
+				helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"NET_BIND_SERVICE"}},
+	}
+	// cp: nil (learning suppressed for user-defined); userCP served at "override".
+	client := &fakeProfileClient{cp: nil, cpErr: apierrors.NewNotFound(schema.GroupResource{}, "x"), userCP: userCP}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-udcp"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+
+	ev := eventContainer(id)
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "override"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.NotNil(t, entry.Projected, "user-defined CP path must produce a projected profile")
+	require.NotNil(t, entry.UserCPRef, "UserCPRef must be recorded for refresh")
+	assert.Equal(t, "override", entry.UserCPRef.Name)
+	assert.Equal(t, "uc1", entry.UserCPRV)
+	assert.Nil(t, entry.UserAPRef, "legacy AP ref must not be set on the new path")
+	assert.Nil(t, entry.UserNNRef, "legacy NN ref must not be set on the new path")
 }
 
 // TestDeleteContainer_LockAndCleanup verifies that deleteContainer removes

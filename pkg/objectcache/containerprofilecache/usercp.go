@@ -1,10 +1,20 @@
 package containerprofilecache
 
 import (
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// isUserDefinedContainerProfile reports whether a fetched ContainerProfile is a
+// user-authored profile (the migrated "new way"), identified by the
+// managed-by: User annotation — the same marker the legacy user-authored AP/NN
+// carry. A learned ContainerProfile that happens to share the label-referenced
+// name is deliberately NOT treated as user-defined.
+func isUserDefinedContainerProfile(cp *v1beta1.ContainerProfile) bool {
+	return cp != nil && cp.Annotations[helpersv1.ManagedByMetadataKey] == helpersv1.ManagedByUserValue
+}
 
 // ConvertUserProfilesToContainerProfile builds the single user-defined
 // ContainerProfile equivalent to a legacy user-authored ApplicationProfile +

@@ -403,6 +403,28 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		}
 	}
 
+	// Re-fetch the user-defined ContainerProfile (migrated "new way") when the
+	// entry was built from one. It is the authoritative base; a transient fetch
+	// error keeps the entry as-is.
+	var userDefinedCP *v1beta1.ContainerProfile
+	if e.UserCPRef != nil {
+		var userCPErr error
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, e.UserCPRef.Namespace, e.UserCPRef.Name)
+			return userCPErr
+		})
+		if userCPErr != nil && e.UserCPRV != "" {
+			logger.L().Debug("refreshOneEntry: user-defined CP fetch failed; keeping cached entry",
+				helpers.String("containerID", id),
+				helpers.String("name", e.UserCPRef.Name),
+				helpers.Error(userCPErr))
+			return
+		}
+		if userCPErr != nil {
+			userDefinedCP = nil
+		}
+	}
+
 	// Fast-skip when nothing changed. We match "absent" (nil) with empty RV:
 	// this avoids spurious rebuilds when an optional source is still missing,
 	// as long as it was also missing at the last build. Also skip when the
@@ -413,6 +435,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		currentSpecHash = spec.Hash
 	}
 	if rvsMatchCP(cp, e.RV) &&
+		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
 		rvsMatchAP(userManagedAP, e.UserManagedAPRV) &&
 		rvsMatchNN(userManagedNN, e.UserManagedNNRV) &&
 		rvsMatchAP(userAP, e.UserAPRV) &&
@@ -421,7 +444,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		return
 	}
 
-	c.rebuildEntryFromSources(id, e, cp, userManagedAP, userManagedNN, userAP, userNN)
+	c.rebuildEntryFromSources(id, e, cp, userDefinedCP, userManagedAP, userManagedNN, userAP, userNN)
 }
 
 // rvsMatchCP, rvsMatchAP, rvsMatchNN return true when either (a) the object is
@@ -456,6 +479,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	id string,
 	prev *CachedContainerProfile,
 	cp *v1beta1.ContainerProfile,
+	userDefinedCP *v1beta1.ContainerProfile,
 	userManagedAP *v1beta1.ApplicationProfile,
 	userManagedNN *v1beta1.NetworkNeighborhood,
 	userAP *v1beta1.ApplicationProfile,
@@ -474,10 +498,17 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		podUID = string(pod.UID)
 	}
 
-	// When the consolidated CP is absent but we still have user-managed /
-	// user-defined overlays to project, synthesize an empty base so
-	// downstream state display is sensible.
+	// A user-defined ContainerProfile ("new way") is the authoritative base,
+	// replacing the learned CP for this container. cp (the learned CP) stays
+	// separate so RV bookkeeping tracks each source independently.
 	effectiveCP := cp
+	if userDefinedCP != nil {
+		effectiveCP = userDefinedCP
+	}
+
+	// When neither a learned nor a user-defined CP is available but we still
+	// have user-managed overlays to project, synthesize an empty base so
+	// downstream state display is sensible.
 	if effectiveCP == nil {
 		syntheticName := prev.WorkloadName
 		if syntheticName == "" {
@@ -543,6 +574,12 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		UserManagedNNRV: rvOfNN(userManagedNN),
 		UserAPRV:        rvOfAP(userAP),
 		UserNNRV:        rvOfNN(userNN),
+		UserCPRV:        rvOfCP(userDefinedCP),
+	}
+	if userDefinedCP != nil {
+		newEntry.UserCPRef = &namespacedName{Namespace: userDefinedCP.Namespace, Name: userDefinedCP.Name}
+	} else if prev.UserCPRef != nil {
+		newEntry.UserCPRef = prev.UserCPRef
 	}
 	if userAP != nil {
 		newEntry.UserAPRef = &namespacedName{Namespace: userAP.Namespace, Name: userAP.Name}
