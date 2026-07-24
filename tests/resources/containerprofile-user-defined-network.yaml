@@ -1,0 +1,68 @@
+# Example: a user-defined (user-authored) ContainerProfile.
+#
+# This is the "new way" of authoring an allow-list behavioural profile: a single
+# ContainerProfile replaces the legacy ApplicationProfile + NetworkNeighborhood
+# pair. Bind it to a workload by adding the pod label
+#   kubescape.io/user-defined-profile: <this .metadata.name>
+# to the workload's pod template (see nginx-user-defined-deployment.yaml).
+#
+# A user-managed profile carries ONLY name + namespace (namespace is injected by
+# the test/tooling). It has NO learning-lifecycle annotations (status/completion)
+# and NO managed-by marker — those are meaningless on an authored profile. When
+# signed, the signing tooling adds a signature annotation; nothing else.
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: curl-28-overlay
+spec:
+  # Allowed executables (R0001).
+  execs:
+  - path: /bin/sleep
+  - path: /usr/bin/curl
+  - path: /usr/bin/nslookup
+  - path: /usr/bin/wget
+  # Allowed syscalls (R0003).
+  syscalls:
+  - socket
+  - connect
+  - sendto
+  - recvfrom
+  - read
+  - write
+  - close
+  - openat
+  - mmap
+  - mprotect
+  - munmap
+  - fcntl
+  - ioctl
+  - poll
+  - epoll_create1
+  - epoll_ctl
+  - epoll_wait
+  - bind
+  - listen
+  - accept4
+  - getsockopt
+  - setsockopt
+  - getsockname
+  - getpid
+  - fstat
+  - rt_sigaction
+  - rt_sigprocmask
+  - writev
+  # The workload pod selector (was NetworkNeighborhood.spec.labelSelector).
+  matchLabels:
+    app: curl-28
+  # Allowed egress (R0005 domains, R0011 addresses). Anything not listed alerts.
+  egress:
+  - identifier: fusioncore-egress
+    type: external
+    dns: fusioncore.ai.
+    dnsNames:
+    - fusioncore.ai.
+    ipAddress: 162.0.217.171
+    ports:
+    - name: TCP-80
+      protocol: TCP
+      port: 80

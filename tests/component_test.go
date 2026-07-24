@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"reflect"
 	"slices"
@@ -30,6 +31,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/yaml"
 )
 
 func tearDownTest(t *testing.T, startTime time.Time) {
@@ -1660,11 +1662,6 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      profileName,
 				Namespace: ns.Name,
-				Annotations: map[string]string{
-					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
-					helpersv1.StatusMetadataKey:     helpersv1.Completed,
-					helpersv1.CompletionMetadataKey: helpersv1.Full,
-				},
 			},
 			Spec: v1beta1.ContainerProfileSpec{
 				Architectures: []string{"amd64"},
@@ -1868,11 +1865,6 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      wildcardProfileName,
 				Namespace: ns.Name,
-				Annotations: map[string]string{
-					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
-					helpersv1.StatusMetadataKey:     helpersv1.Completed,
-					helpersv1.CompletionMetadataKey: helpersv1.Full,
-				},
 			},
 			Spec: v1beta1.ContainerProfileSpec{
 				Architectures: []string{"amd64"},
@@ -2038,11 +2030,6 @@ func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      profileName,
 				Namespace: ns.Name,
-				Annotations: map[string]string{
-					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
-					helpersv1.StatusMetadataKey:     helpersv1.Completed,
-					helpersv1.CompletionMetadataKey: helpersv1.Full,
-				},
 			},
 			Spec: v1beta1.ContainerProfileSpec{
 				Architectures: []string{"amd64"},
@@ -2264,11 +2251,6 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      overlayName,
 				Namespace: ns.Name,
-				Annotations: map[string]string{
-					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
-					helpersv1.StatusMetadataKey:     helpersv1.Completed,
-					helpersv1.CompletionMetadataKey: helpersv1.Full,
-				},
 				Labels: map[string]string{
 					helpersv1.ApiGroupMetadataKey:         "apps",
 					helpersv1.ApiVersionMetadataKey:       "v1",
@@ -2716,6 +2698,29 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 	})
 }
 
+// applyUserDefinedContainerProfile reads a ContainerProfile example yaml (the
+// copy-pasteable authoring example), stamps it into ns, and creates it. A
+// user-managed CP carries only name + spec — the pod's user-defined-profile
+// label is what binds it; no lifecycle annotations are needed.
+func applyUserDefinedContainerProfile(t *testing.T, ns, resourcePath string) *v1beta1.ContainerProfile {
+	t.Helper()
+	b, err := os.ReadFile(path.Join(utils.CurrentDir(), resourcePath))
+	require.NoError(t, err, "read %s", resourcePath)
+	var cp v1beta1.ContainerProfile
+	require.NoError(t, yaml.Unmarshal(b, &cp), "unmarshal %s", resourcePath)
+	cp.Namespace = ns
+	cp.ResourceVersion = ""
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+	_, err = storageClient.ContainerProfiles(ns).Create(context.Background(), &cp, metav1.CreateOptions{})
+	require.NoError(t, err, "create ContainerProfile from %s", resourcePath)
+	require.Eventually(t, func() bool {
+		_, e := storageClient.ContainerProfiles(ns).Get(context.Background(), cp.Name, v1.GetOptions{})
+		return e == nil
+	}, 30*time.Second, time.Second, "CP from %s must be in storage before pod deploy", resourcePath)
+	return &cp
+}
+
 func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
@@ -2725,8 +2730,6 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	setup := func(t *testing.T) *testutils.TestWorkload {
 		t.Helper()
 		ns := testutils.NewRandomNamespace()
-		k8sClient := k8sinterface.NewKubernetesApi()
-		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
 		// Upstream ContainerProfileCache (kubescape/node-agent#788) reads ONE
 		// pod label `kubescape.io/user-defined-profile=<name>` and uses
@@ -2739,56 +2742,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		// The kubescape.io/user-defined-profile pod label names this CP; node-agent
 		// uses it directly as the authoritative base. Its Spec merges the former AP
 		// surfaces (execs, syscalls) with the former NN surfaces (egress, selector).
-		cp := &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      overlayName,
-				Namespace: ns.Name,
-				Annotations: map[string]string{
-					helpersv1.ManagedByMetadataKey:  helpersv1.ManagedByUserValue,
-					helpersv1.StatusMetadataKey:     helpersv1.Completed,
-					helpersv1.CompletionMetadataKey: helpersv1.Full,
-				},
-				Labels: map[string]string{
-					helpersv1.ApiGroupMetadataKey:         "apps",
-					helpersv1.ApiVersionMetadataKey:       "v1",
-					helpersv1.RelatedKindMetadataKey:      "Deployment",
-					helpersv1.RelatedNameMetadataKey:      "curl-28",
-					helpersv1.RelatedNamespaceMetadataKey: ns.Name,
-				},
-			},
-			Spec: v1beta1.ContainerProfileSpec{
-				Execs: []v1beta1.ExecCalls{
-					{Path: "/bin/sleep"},
-					{Path: "/usr/bin/curl"},
-					{Path: "/usr/bin/nslookup"},
-					{Path: "/usr/bin/wget"},
-				},
-				Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev"},
-				LabelSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{"app": "curl-28"},
-				},
-				Egress: []v1beta1.NetworkNeighbor{
-					{
-						Identifier: "fusioncore-egress",
-						Type:       "external",
-						DNS:        "fusioncore.ai.",
-						DNSNames:   []string{"fusioncore.ai."},
-						IPAddress:  "162.0.217.171",
-						Ports: []v1beta1.NetworkPort{
-							{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
-						},
-					},
-				},
-			},
-		}
-		_, err := storageClient.ContainerProfiles(ns.Name).Create(
-			context.Background(), cp, metav1.CreateOptions{})
-		require.NoError(t, err, "create user-defined ContainerProfile")
-
-		require.Eventually(t, func() bool {
-			_, cpErr := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
-			return cpErr == nil
-		}, 30*time.Second, 1*time.Second, "user-defined CP must be in storage before pod deploy")
+		_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/containerprofile-user-defined-network.yaml")
 
 		wl, err := testutils.NewTestWorkload(ns.Name,
 			path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
