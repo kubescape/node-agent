@@ -578,6 +578,13 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 	if userDefinedCP != nil {
 		newEntry.UserCPRef = &namespacedName{Namespace: userDefinedCP.Namespace, Name: userDefinedCP.Name}
+		// A user-authored profile is complete by definition (no learning-lifecycle
+		// annotations); force the terminal state so the rule engine enforces it.
+		newEntry.State = &objectcache.ProfileState{
+			Status:     helpersv1.Completed,
+			Completion: helpersv1.Full,
+			Name:       userDefinedCP.Name,
+		}
 	} else if prev.UserCPRef != nil {
 		newEntry.UserCPRef = prev.UserCPRef
 	}

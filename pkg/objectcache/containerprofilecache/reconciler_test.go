@@ -995,7 +995,7 @@ func TestOverlayLabel_TransientFetchFailure_RefsRetained(t *testing.T) {
 		},
 	}
 	// Overlay fetch returns an error; the base CP is fine.
-	client := &fakeProfileClient{cp: cp, apErr: assertErrNotFound("override"), nnErr: assertErrNotFound("override")}
+	client := &fakeProfileClient{cp: cp, overlayOnly: "override", apErr: assertErrNotFound("override"), nnErr: assertErrNotFound("override")}
 	c, k8s := newTestCache(t, client)
 
 	id := "container-transient-overlay"

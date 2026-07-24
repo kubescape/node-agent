@@ -87,6 +87,12 @@ func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, name strin
 	if f.userCP != nil && name == f.userCP.Name {
 		return f.userCP, nil
 	}
+	// The overlay label points at overlayOnly; with no user CP published at that
+	// name it is absent, which drives the legacy AP/NN fallback path. (The base
+	// CP fetch uses the derived slug, a different name, and still gets f.cp.)
+	if f.overlayOnly != "" && name == f.overlayOnly {
+		return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, name)
+	}
 	return f.cp, f.cpErr
 }
 func (f *fakeProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {

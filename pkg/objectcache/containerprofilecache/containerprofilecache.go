@@ -412,7 +412,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, ns, overlayName)
 			return userCPErr
 		})
-		if userCPErr != nil || !isUserDefinedContainerProfile(userDefinedCP) {
+		if userCPErr != nil {
 			userDefinedCP = nil
 			var userAPErr error
 			_ = c.refreshRPC(ctx, func(rctx context.Context) error {
@@ -525,6 +525,16 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			// New way: track the user-defined CP for re-fetch; no legacy refs.
 			entry.UserCPRef = &namespacedName{Namespace: ns, Name: overlayName}
 			entry.UserCPRV = userDefinedCP.ResourceVersion
+			// A user-authored profile is authoritative and complete by
+			// definition — it carries no learning-lifecycle status/completion
+			// annotations (those are meaningless on an authored profile). Force
+			// the terminal state so the rule engine enforces it (rule_manager
+			// gates on Completed+Full).
+			entry.State = &objectcache.ProfileState{
+				Status:     helpersv1.Completed,
+				Completion: helpersv1.Full,
+				Name:       userDefinedCP.Name,
+			}
 		} else {
 			if entry.UserAPRef == nil {
 				entry.UserAPRef = &namespacedName{Namespace: ns, Name: overlayName}
