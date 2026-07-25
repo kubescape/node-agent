@@ -1,0 +1,245 @@
+##
+## User-defined ApplicationProfile for Test_28.
+##
+## Referenced directly from a pod via the label:
+##   kubescape.io/user-defined-profile: fusioncore-profile
+##
+## Modeled after a real auto-learned AP from curlimages/curl:8.5.0.
+##
+## Usage:
+##   sed "s/{{NAMESPACE}}/$NS/g" known-application-profile.yaml \
+##     | kubectl apply -f -
+##
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ApplicationProfile
+metadata:
+  name: fusioncore-profile
+  namespace: "{{NAMESPACE}}"
+spec:
+  architectures: ["amd64"]
+  containers:
+  - name: curl
+    imageID: "docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058"
+    imageTag: "docker.io/curlimages/curl:8.5.0"
+    capabilities:
+    - CAP_CHOWN
+    - CAP_DAC_OVERRIDE
+    - CAP_DAC_READ_SEARCH
+    - CAP_SETGID
+    - CAP_SETPCAP
+    - CAP_SETUID
+    - CAP_SYS_ADMIN
+    execs:
+    - path: /bin/sleep
+      args: ["/bin/sleep", "infinity"]
+    - path: /bin/cat
+      args: ["/bin/cat"]
+    - path: /usr/bin/curl
+      args: ["/usr/bin/curl", "-sm2", "fusioncore.ai"]
+    - path: /usr/bin/nslookup
+      args: ["/usr/bin/nslookup"]
+    opens:
+    - path: /7/setgroups
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: /etc/hosts
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /etc/ld-musl-x86_64.path
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /etc/passwd
+      flags: ["O_RDONLY", "O_CLOEXEC", "O_LARGEFILE"]
+    - path: /etc/resolv.conf
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /etc/ssl/openssl.cnf
+      flags: ["O_RDONLY", "O_LARGEFILE"]
+    - path: /home/curl_user/.config/curlrc
+      flags: ["O_RDONLY", "O_LARGEFILE"]
+    - path: /home/curl_user/.curlrc
+      flags: ["O_RDONLY", "O_LARGEFILE"]
+    - path: /lib/libbrotlicommon.so.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libbrotlidec.so.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libcom_err.so.2.1
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /lib/libcrypto.so.3
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /lib/libcurl.so.4
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libgssapi_krb5.so.2
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libidn2.so.0
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libk5crypto.so.3
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /lib/libkeyutils.so.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libkrb5.so.3
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libkrb5support.so.0
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libnghttp2.so.14
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /lib/libpsl.so.5
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libssh2.so.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libssl.so.3
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /lib/libunistring.so.5
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /lib/libz.so.1.3
+      flags: ["O_LARGEFILE", "O_CLOEXEC", "O_RDONLY"]
+    - path: /proc/⋯/cgroup
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: /proc/⋯/kernel/cap_last_cap
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: /proc/⋯/mountinfo
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: /proc/⋯/task/1/fd
+      flags: ["O_RDONLY", "O_DIRECTORY", "O_CLOEXEC"]
+    - path: /proc/⋯/task/7/fd
+      flags: ["O_RDONLY", "O_DIRECTORY", "O_CLOEXEC"]
+    - path: /runc
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: /sys/fs/cgroup/cpu.max
+      flags: ["O_RDONLY", "O_CLOEXEC"]
+    - path: /sys/kernel/mm/transparent_hugepage/hpage_pmd_size
+      flags: ["O_RDONLY"]
+    - path: /usr/lib/libbrotlicommon.so.1.1.0
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/lib/libbrotlidec.so.1.1.0
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/lib/libcurl.so.4.8.0
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/lib/libgssapi_krb5.so.2.2
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/lib/libidn2.so.0.3.8
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /usr/lib/libk5crypto.so.3.1
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /usr/lib/libkeyutils.so.1.10
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/lib/libkrb5.so.3.3
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /usr/lib/libkrb5support.so.0.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/lib/libnghttp2.so.14.25.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/lib/libpsl.so.5.3.4
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /usr/lib/libssh2.so.1.0.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/lib/libunistring.so.5.0.0
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libbrotlicommon.so.1
+      flags: ["O_LARGEFILE", "O_CLOEXEC", "O_RDONLY"]
+    - path: /usr/local/lib/libbrotlidec.so.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libcom_err.so.2
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /usr/local/lib/libcrypto.so.3
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libcurl.so.4
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libgssapi_krb5.so.2
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libidn2.so.0
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libk5crypto.so.3
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libkeyutils.so.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libkrb5.so.3
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libkrb5support.so.0
+      flags: ["O_CLOEXEC", "O_RDONLY", "O_LARGEFILE"]
+    - path: /usr/local/lib/libnghttp2.so.14
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libpsl.so.5
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libssh2.so.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libssl.so.3
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libunistring.so.5
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    - path: /usr/local/lib/libz.so.1
+      flags: ["O_RDONLY", "O_LARGEFILE", "O_CLOEXEC"]
+    syscalls:
+    - arch_prctl
+    - bind
+    - brk
+    - capget
+    - capset
+    - chdir
+    - clone
+    - close
+    - close_range
+    - connect
+    - epoll_ctl
+    - epoll_pwait
+    - execve
+    - exit
+    - exit_group
+    - faccessat2
+    - fchown
+    - fcntl
+    - fstat
+    - fstatfs
+    - futex
+    - getcwd
+    - getdents64
+    - getegid
+    - geteuid
+    - getgid
+    - getpeername
+    - getppid
+    - getsockname
+    - getsockopt
+    - gettid
+    - getuid
+    - ioctl
+    - membarrier
+    - mmap
+    - mprotect
+    - munmap
+    - nanosleep
+    - newfstatat
+    - open
+    - openat
+    - openat2
+    - pipe
+    - poll
+    - prctl
+    - read
+    - recvfrom
+    - recvmsg
+    - rt_sigaction
+    - rt_sigprocmask
+    - rt_sigreturn
+    - sendto
+    - set_tid_address
+    - setgid
+    - setgroups
+    - setsockopt
+    - setuid
+    - sigaltstack
+    - socket
+    - statx
+    - tkill
+    - unknown
+    - write
+    - writev
+    endpoints:
+    - endpoint: ":80/"
+      direction: outbound
+      methods: ["GET"]
+      internal: false
+      headers: '{"Host":["fusioncore.ai"]}'
+    seccompProfile:
+      spec:
+        defaultAction: ""
+    rulePolicies: {}
+  initContainers: []
+  ephemeralContainers: []
+status: {}

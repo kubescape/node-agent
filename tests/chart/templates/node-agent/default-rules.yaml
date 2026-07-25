@@ -704,6 +704,25 @@ spec:
           - "context:host"
           - "process"
           - "malicious"
+      - name: "Signed profile tampered"
+        enabled: true
+        id: "R1016"
+        description: "Detecting tampering with a cryptographically signed user-managed profile (ApplicationProfile or NetworkNeighborhood): the signature annotation is present but no longer verifies. This alert is emitted by node-agent when it re-verifies a signed user overlay on profile-cache load, not in response to an eBPF event, so it carries no CEL ruleExpression."
+        expressions:
+          message: "'Signed profile tampered: signature present but no longer valid'"
+          uniqueId: "'R1016'"
+          ruleExpression: []
+        profileDependency: 2
+        severity: 10
+        supportPolicy: false
+        isTriggerAlert: true
+        mitreTactic: "TA0005"
+        mitreTechnique: "T1562"
+        tags:
+          - "context:kubernetes"
+          - "context:host"
+          - "signature"
+          - "malicious"
       - name: "Unexpected io_uring Operation Detected"
         enabled: true
         id: "R1030"

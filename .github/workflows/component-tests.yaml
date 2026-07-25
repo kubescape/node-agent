@@ -73,7 +73,10 @@ jobs:
           Test_23_RuleCooldownTest,
           Test_24_ProcessTreeDepthTest,
           Test_27_ApplicationProfileOpens,
-          Test_32_UnexpectedProcessArguments
+          Test_32_UnexpectedProcessArguments,
+          Test_29_SignedApplicationProfile,
+          Test_30_TamperedSignedProfiles,
+          Test_31_TamperDetectionAlert
         ]
     steps:
       - name: Checkout code

@@ -119,6 +119,12 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 				"ppid":              fmt.Sprintf("%d", process.PPID),
 				"pcomm":             process.Pcomm,
 				"comm":              process.Comm,
+				// exepath: kernel-authoritative process path (when the exec
+				// event carried it). Symmetric with parse.get_exec_path's
+				// 3-arg overload + the recording-side resolveExecPath
+				// precedence — lets downstream tuners (e.g. bobctl) decide
+				// which path to allow without re-resolving.
+				"exepath":           process.Path,
 				"uid":               fmt.Sprintf("%d", process.Uid),
 				"gid":               fmt.Sprintf("%d", process.Gid),
 				"trace":             trace,
