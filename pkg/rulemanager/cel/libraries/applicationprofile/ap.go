@@ -130,6 +130,28 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		// ap.was_path_opened_with_suffix and ap.was_path_opened_with_prefix
+		// — rule-author contract (CodeRabbit upstream PR #807 finding #7):
+		//
+		// These helpers answer "did any RECORDED concrete path open match
+		// this suffix/prefix?". When the profile-projection cache is in
+		// pass-through mode (no rule declared an Opens-projection slice,
+		// so cp.Opens.All == true), wildcard patterns in cp.Opens.Patterns
+		// are NOT scanned via string-level HasSuffix/HasPrefix because the
+		// pattern text contains '*' / '⋯' tokens whose string shape doesn't
+		// safely answer suffix/prefix questions (see open.go comment).
+		// Concrete-only Values are scanned.
+		//
+		// False-negative gap: if a profile entry is `/var/log/pods/*/foo.log`,
+		// the runtime path `/var/log/pods/web-7d6f/volumes/foo.log` actually
+		// matches this pattern, but `was_path_opened_with_suffix("/foo.log")`
+		// returns FALSE because the pattern text doesn't end in `/foo.log`
+		// literally. Rule authors who need wildcard-aware coverage should
+		// either: (a) declare an Opens projection slice in the rule's
+		// ProfileDataRequired (then SuffixHits/PrefixHits become authoritative
+		// and the projector pre-computes the hit map for wildcard entries),
+		// or (b) use ap.was_path_opened(path) which DOES run dynamic-segment
+		// matching over Patterns via CompareDynamic.
 		"ap.was_path_opened_with_suffix": {
 			cel.Overload(
 				"ap_was_path_opened_with_suffix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
