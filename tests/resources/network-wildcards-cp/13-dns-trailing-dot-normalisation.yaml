@@ -29,6 +29,6 @@ spec:
     type: external
     dnsNames:
       - "api.stripe.com."     # canonical FQDN form
-      - "api.github.com"      # without trailing dot — equivalent
+      - "api.stripe.com"      # same host, without trailing dot — must compare equal
     ports:
       - {name: TCP-443, protocol: TCP, port: 443}

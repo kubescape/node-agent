@@ -341,110 +341,6 @@ func TestReconcilerExitsOnCtxCancel(t *testing.T) {
 	// test is only that iteration stopped early.
 }
 
-// TestRefreshFastSkipWhenAllRVsMatch — delta #4. When CP RV and both overlay
-// RVs match the cached values, refreshOneEntry returns without rebuilding.
-func TestRefreshFastSkipWhenAllRVsMatch(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{
-		Name: "cp", Namespace: "default", ResourceVersion: "100",
-		Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-	}}
-	ap := &v1beta1.ApplicationProfile{ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "50"}}
-	nn := &v1beta1.NetworkNeighborhood{ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "60"}}
-	client := &countingProfileClient{cp: cp, ap: ap, nn: nn}
-	k8s := newControllableK8sCache()
-	metrics := newCountingMetrics()
-	c := newReconcilerCache(t, client, k8s, metrics)
-
-	id := "c1"
-	entry := &CachedContainerProfile{
-		Projected:     Apply(nil, cp, nil),
-		State:         &objectcache.ProfileState{Name: cp.Name},
-		ContainerName: "nginx",
-		PodName:       "nginx-abc",
-		Namespace:     "default",
-		PodUID:        "uid-1",
-		CPName:        "cp",
-		UserAPRef:     &namespacedName{Namespace: "default", Name: "override"},
-		UserNNRef:     &namespacedName{Namespace: "default", Name: "override"},
-		RV:            "100",
-		UserAPRV:      "50",
-		UserNNRV:      "60",
-	}
-	c.entries.Set(id, entry)
-
-	c.refreshAllEntries(context.Background())
-
-	// Fetched CP once + overlays once each to check RVs; then fast-skipped.
-	assert.Equal(t, int64(1), client.cpCalls.Load(), "CP should be fetched once")
-	assert.Equal(t, int64(1), client.apCalls.Load(), "AP should be fetched once for RV check")
-	assert.Equal(t, int64(1), client.nnCalls.Load(), "NN should be fetched once for RV check")
-
-	stored, ok := c.entries.Load(id)
-	require.True(t, ok)
-	// Same pointer: the entry was NOT rebuilt.
-	assert.Same(t, entry, stored, "entry must not be replaced on fast-skip")
-	// No legacy-load metric emitted on fast-skip.
-	assert.Equal(t, 0, metrics.legacyLoad(kindApplication, completenessFull))
-	assert.Equal(t, 0, metrics.legacyLoad(kindNetwork, completenessFull))
-}
-
-// TestRefreshRebuildsOnUserAPChange — entry has stale UserAPRV; refresh sees
-// a newer AP RV and rebuilds.
-func TestRefreshRebuildsOnUserAPChange(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp", Namespace: "default", ResourceVersion: "100",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
-		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
-	}
-	ap := &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "51"},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{{
-				Name:         "nginx",
-				Capabilities: []string{"NET_BIND_SERVICE"},
-			}},
-		},
-	}
-	client := &countingProfileClient{cp: cp, ap: ap}
-	k8s := newControllableK8sCache()
-	metrics := newCountingMetrics()
-	c := newReconcilerCache(t, client, k8s, metrics)
-
-	id := "c1"
-	entry := &CachedContainerProfile{
-		Projected:     Apply(nil, cp, nil),
-		State:         &objectcache.ProfileState{Name: cp.Name},
-		ContainerName: "nginx",
-		PodName:       "nginx-abc",
-		Namespace:     "default",
-		PodUID:        "uid-1",
-		CPName:        "cp",
-		UserAPRef:     &namespacedName{Namespace: "default", Name: "override"},
-		RV:            "100",
-		UserAPRV:      "50", // stale: storage now returns 51
-	}
-	c.entries.Set(id, entry)
-
-	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
-		Capabilities: objectcache.FieldSpec{InUse: true, All: true},
-		Hash:         "test-caps",
-	})
-	c.refreshAllEntries(context.Background())
-
-	stored, ok := c.entries.Load(id)
-	require.True(t, ok)
-	assert.NotSame(t, entry, stored, "entry must be replaced when user-AP RV changes")
-	assert.Equal(t, "51", stored.UserAPRV, "new UserAPRV must be recorded")
-	caps := make([]string, 0, len(stored.Projected.Capabilities.Values))
-	for cap := range stored.Projected.Capabilities.Values {
-		caps = append(caps, cap)
-	}
-	assert.ElementsMatch(t, []string{"SYS_PTRACE", "NET_BIND_SERVICE"}, caps,
-		"rebuilt projection must include merged overlay capabilities")
-}
-
 // TestRefreshRebuildsOnCPChange — CP RV changed; entry rebuilds with fresh CP.
 func TestRefreshRebuildsOnCPChange(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
@@ -471,82 +367,6 @@ func TestRefreshRebuildsOnCPChange(t *testing.T) {
 	stored, ok := c.entries.Load(id)
 	require.True(t, ok)
 	assert.Equal(t, "101", stored.RV, "RV must update to the fresh CP's version")
-}
-
-// TestT8_EndToEndRefreshUpdatesProjection — delta #5. Mutate the user-AP in
-// the stubbed storage so its RV + execs change; assert the cached projection
-// reflects the new execs AND that the legacy-load metric was re-emitted.
-func TestT8_EndToEndRefreshUpdatesProjection(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp", Namespace: "default", ResourceVersion: "100",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
-		Spec: v1beta1.ContainerProfileSpec{
-			Execs: []v1beta1.ExecCalls{{Path: "/bin/base", Args: []string{"a"}}},
-		},
-	}
-	ap := &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "50"},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{{
-				Name:  "nginx",
-				Execs: []v1beta1.ExecCalls{{Path: "/bin/old", Args: []string{"x"}}},
-			}},
-		},
-	}
-	client := &countingProfileClient{cp: cp, ap: ap}
-	k8s := newControllableK8sCache()
-	metrics := newCountingMetrics()
-	c := newReconcilerCache(t, client, k8s, metrics)
-
-	id := "c1"
-	entry := &CachedContainerProfile{
-		Projected:     Apply(nil, cp, nil),
-		State:         &objectcache.ProfileState{Name: cp.Name},
-		ContainerName: "nginx",
-		PodName:       "nginx-abc",
-		Namespace:     "default",
-		PodUID:        "uid-1",
-		CPName:        "cp",
-		UserAPRef:     &namespacedName{Namespace: "default", Name: "override"},
-		RV:            "100",
-		UserAPRV:      "50",
-	}
-	c.entries.Set(id, entry)
-
-	// Mutate storage: new AP RV + new execs.
-	client.ap = &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "51"},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{{
-				Name:  "nginx",
-				Execs: []v1beta1.ExecCalls{{Path: "/bin/new", Args: []string{"y"}}},
-			}},
-		},
-	}
-
-	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
-		Execs: objectcache.FieldSpec{InUse: true, All: true},
-		Hash:  "test-execs",
-	})
-	c.refreshAllEntries(context.Background())
-
-	stored, ok := c.entries.Load(id)
-	require.True(t, ok)
-	assert.Equal(t, "51", stored.UserAPRV, "refresh must record the new user-AP RV")
-
-	// The projection must include the new exec (merged on top of the base CP's exec).
-	var paths []string
-	for path := range stored.Projected.Execs.Values {
-		paths = append(paths, path)
-	}
-	assert.Contains(t, paths, "/bin/base", "base CP exec must be preserved")
-	assert.Contains(t, paths, "/bin/new", "new user-AP exec must be projected into the cache")
-	assert.NotContains(t, paths, "/bin/old", "stale user-AP exec must NOT be in the projection")
-
-	assert.GreaterOrEqual(t, metrics.legacyLoad(kindApplication, completenessFull), 1,
-		"refresh with user-AP overlay must emit full-load metric")
 }
 
 // TestRefreshNoEntryWhenCPGetFails — storage error on CP keeps the existing
@@ -585,10 +405,6 @@ func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
 		workloadName    string
 		userManagedAPRV string
 		userManagedNNRV string
-		userAPRef       *namespacedName
-		userAPRV        string
-		userNNRef       *namespacedName
-		userNNRV        string
 	}
 	tests := []struct {
 		name    string
@@ -610,22 +426,6 @@ func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
 			overlay: overlayFields{
 				workloadName:    "nginx",
 				userManagedNNRV: "7",
-			},
-		},
-		{
-			name:  "user-defined AP timeout preserves entry",
-			apErr: true,
-			overlay: overlayFields{
-				userAPRef: &namespacedName{Namespace: "default", Name: "override"},
-				userAPRV:  "50",
-			},
-		},
-		{
-			name:  "user-defined NN timeout preserves entry",
-			nnErr: true,
-			overlay: overlayFields{
-				userNNRef: &namespacedName{Namespace: "default", Name: "override"},
-				userNNRV:  "60",
 			},
 		},
 	}
@@ -657,10 +457,6 @@ func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
 				WorkloadName:    tc.overlay.workloadName,
 				UserManagedAPRV: tc.overlay.userManagedAPRV,
 				UserManagedNNRV: tc.overlay.userManagedNNRV,
-				UserAPRef:       tc.overlay.userAPRef,
-				UserAPRV:        tc.overlay.userAPRV,
-				UserNNRef:       tc.overlay.userNNRef,
-				UserNNRV:        tc.overlay.userNNRV,
 			}
 			c.entries.Set(id, entry)
 
@@ -672,8 +468,6 @@ func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
 			// Overlay RVs must be unchanged (not cleared to "").
 			assert.Equal(t, tc.overlay.userManagedAPRV, stored.UserManagedAPRV)
 			assert.Equal(t, tc.overlay.userManagedNNRV, stored.UserManagedNNRV)
-			assert.Equal(t, tc.overlay.userAPRV, stored.UserAPRV)
-			assert.Equal(t, tc.overlay.userNNRV, stored.UserNNRV)
 		})
 	}
 }
@@ -983,38 +777,6 @@ func TestPartialCP_PreRunning_Accepted(t *testing.T) {
 	assert.Equal(t, 0, c.pending.Len(), "not pending when accepted")
 }
 
-// TestOverlayLabel_TransientFetchFailure_RefsRetained verifies that when
-// UserDefinedProfileMetadataKey is set but the user-AP/NN fetch fails, the
-// entry still records UserAPRef / UserNNRef so the refresh loop can re-fetch
-// on subsequent ticks instead of permanently dropping the overlay.
-func TestOverlayLabel_TransientFetchFailure_RefsRetained(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp-with-overlay", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
-	}
-	// Overlay fetch returns an error; the base CP is fine.
-	client := &fakeProfileClient{cp: cp, overlayOnly: "override", apErr: assertErrNotFound("override"), nnErr: assertErrNotFound("override")}
-	c, k8s := newTestCache(t, client)
-
-	id := "container-transient-overlay"
-	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
-
-	// Build the container with the overlay label set.
-	ct := eventContainer(id)
-	ct.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "override"}
-
-	require.NoError(t, c.addContainer(ct, context.Background()))
-
-	entry, ok := c.entries.Load(id)
-	require.True(t, ok, "entry stored with base CP even if overlay fetch failed")
-	require.NotNil(t, entry.UserAPRef, "UserAPRef retained for refresh retry")
-	require.NotNil(t, entry.UserNNRef, "UserNNRef retained for refresh retry")
-	assert.Equal(t, "override", entry.UserAPRef.Name)
-	assert.Equal(t, "override", entry.UserNNRef.Name)
-}
-
 // TestRefreshDoesNotResurrectDeletedEntry verifies the Phase-4 reviewer race:
 // refreshAllEntries snapshots entries without a lock; if deleteContainer
 // removes the entry before refreshOneEntry takes the lock, the refresh must
@@ -1046,42 +808,6 @@ func TestRefreshDoesNotResurrectDeletedEntry(t *testing.T) {
 	})
 
 	assert.Nil(t, c.GetProjectedContainerProfile(id), "refresh must not resurrect deleted entry")
-}
-
-// TestUserDefinedProfileOnly_NoBaseCP verifies that a container with only a
-// user-defined AP/NN (no base CP yet) still gets a cache entry, mirroring the
-// legacy behavior where user-defined profiles were stored directly.
-func TestUserDefinedProfileOnly_NoBaseCP(t *testing.T) {
-	userAP := &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "user-override", Namespace: "default", ResourceVersion: "10"},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{
-				{Name: "nginx", Capabilities: []string{"CAP_NET_ADMIN"}},
-			},
-		},
-	}
-	// Base CP fetch fails (404); only the overlay exists.
-	client := &fakeProfileClient{cp: nil, cpErr: assertErrNotFound("no-base"), ap: userAP}
-	c, k8s := newTestCache(t, client)
-
-	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
-		Capabilities: objectcache.FieldSpec{InUse: true, All: true},
-		Execs:        objectcache.FieldSpec{InUse: true, All: true},
-		Hash:         "user-only-test",
-	})
-
-	id := "container-user-only"
-	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
-	ct := eventContainer(id)
-	ct.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "user-override"}
-
-	require.NoError(t, c.addContainer(ct, context.Background()))
-
-	cached := c.GetProjectedContainerProfile(id)
-	require.NotNil(t, cached, "entry populated from user-AP even without base CP")
-	// The synthesized CP + projection should carry the user AP's capabilities.
-	_, hasCap := cached.Capabilities.Values["CAP_NET_ADMIN"]
-	assert.True(t, hasCap, "projected entry must contain CAP_NET_ADMIN from user-AP")
 }
 
 // primePreRunningSharedData is a variant of primeSharedData that sets the

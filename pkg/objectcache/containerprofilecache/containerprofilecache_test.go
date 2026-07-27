@@ -51,6 +51,13 @@ type fakeProfileClient struct {
 	// with overlay-AP/NN use this to keep the fixture scoped.
 	overlayOnly string
 
+	// overlayCPErr, when non-nil, is returned by GetContainerProfile for a
+	// name matching overlayOnly, instead of the default NotFound. Lets tests
+	// simulate a *transient* RPC failure on the user-defined-CP fetch (as
+	// opposed to a genuine "doesn't exist yet"), to prove the overlay is not
+	// permanently lost.
+	overlayCPErr error
+
 	getCPCalls int
 }
 
@@ -91,6 +98,9 @@ func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, name strin
 	// name it is absent, which drives the legacy AP/NN fallback path. (The base
 	// CP fetch uses the derived slug, a different name, and still gets f.cp.)
 	if f.overlayOnly != "" && name == f.overlayOnly {
+		if f.overlayCPErr != nil {
+			return nil, f.overlayCPErr
+		}
 		return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, name)
 	}
 	return f.cp, f.cpErr
@@ -181,47 +191,10 @@ func TestSharedFastPath_NoOverlay(t *testing.T) {
 	assert.NotNil(t, entryB.Projected, "entry B must have a projected profile")
 }
 
-// TestOverlayPath_DeepCopies verifies that when userAP is present the overlay
-// is merged into the projected profile.
-func TestOverlayPath_DeepCopies(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp-1", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
-		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
-	}
-	userAP := &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "u1"},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{{
-				Name:         "nginx",
-				Capabilities: []string{"NET_BIND_SERVICE"},
-			}},
-		},
-	}
-	client := &fakeProfileClient{cp: cp, ap: userAP, overlayOnly: "override"}
-	c, k8s := newTestCache(t, client)
-
-	id := "container-overlay"
-	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
-
-	ev := eventContainer(id)
-	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "override"}
-	require.NoError(t, c.addContainer(ev, context.Background()))
-
-	entry, ok := c.entries.Load(id)
-	require.True(t, ok)
-	assert.NotNil(t, entry.Projected, "overlay path must produce a projected profile")
-	require.NotNil(t, entry.UserAPRef)
-	assert.Equal(t, "override", entry.UserAPRef.Name)
-	assert.Equal(t, "u1", entry.UserAPRV)
-}
-
 // TestOverlayPath_UserDefinedCP_NewWay verifies the migrated path: when the
 // user-defined-profile label names a user-authored ContainerProfile
-// (managed-by: User), it becomes the authoritative base — UserCPRef is set, the
-// legacy UserAPRef/UserNNRef are NOT, and the projection reflects the CP.
+// (managed-by: User), it becomes the authoritative base — UserCPRef is set and
+// the projection reflects the CP.
 func TestOverlayPath_UserDefinedCP_NewWay(t *testing.T) {
 	userCP := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
@@ -251,8 +224,55 @@ func TestOverlayPath_UserDefinedCP_NewWay(t *testing.T) {
 	require.NotNil(t, entry.UserCPRef, "UserCPRef must be recorded for refresh")
 	assert.Equal(t, "override", entry.UserCPRef.Name)
 	assert.Equal(t, "uc1", entry.UserCPRV)
-	assert.Nil(t, entry.UserAPRef, "legacy AP ref must not be set on the new path")
-	assert.Nil(t, entry.UserNNRef, "legacy NN ref must not be set on the new path")
+}
+
+// TestOverlayPath_CPFetchTransientError_RecordsUserCPRef pins the cutover
+// semantics: when the overlay label is present but the GetContainerProfile
+// fetch at the overlay name fails *transiently* (an RPC error, not a genuine
+// absence), an entry that is still built from a present base CP must record
+// UserCPRef so the reconciler keeps probing for the user-defined CP on later
+// ticks. There is no legacy AP/NN fallback anymore — the CP is the only
+// user-defined source — so without this the authored profile would be silently
+// lost until the container restarts.
+//
+// This test fails on code that does not record UserCPRef on a transient
+// overlay-CP fetch failure and passes once it does.
+func TestOverlayPath_CPFetchTransientError_RecordsUserCPRef(t *testing.T) {
+	// A completed base CP is present (fetched by the derived slug name), but the
+	// CP fetch at the overlay name errors transiently, so userDefinedCP is nil
+	// for this add and the entry is built from the base CP.
+	baseCP := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp-base", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
+	}
+	client := &fakeProfileClient{
+		cp:           baseCP,
+		overlayOnly:  "override",
+		overlayCPErr: errors.New("etcdserver: request timed out"), // transient
+	}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-cp-transient"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+
+	ev := eventContainer(id)
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "override"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	// The contract: UserCPRef is recorded even though the overlay-CP fetch failed
+	// transiently, so refreshOneEntry (which only re-fetches the CP
+	// `if e.UserCPRef != nil`) will retry it once the transient error clears.
+	require.NotNil(t, entry.UserCPRef, "UserCPRef must be recorded so the reconciler retries the CP after a transient failure")
+	assert.Equal(t, "override", entry.UserCPRef.Name)
+	assert.Equal(t, "default", entry.UserCPRef.Namespace)
 }
 
 // TestDeleteContainer_LockAndCleanup verifies that deleteContainer removes

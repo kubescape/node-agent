@@ -366,46 +366,10 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			userManagedNN = nil
 		}
 	}
-	var userAP *v1beta1.ApplicationProfile
-	var userNN *v1beta1.NetworkNeighborhood
-	if e.UserAPRef != nil {
-		var userAPErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userAP, userAPErr = c.storageClient.GetApplicationProfile(rctx, e.UserAPRef.Namespace, e.UserAPRef.Name)
-			return userAPErr
-		})
-		if userAPErr != nil && e.UserAPRV != "" {
-			logger.L().Debug("refreshOneEntry: user-defined AP fetch failed; keeping cached entry",
-				helpers.String("containerID", id),
-				helpers.String("name", e.UserAPRef.Name),
-				helpers.Error(userAPErr))
-			return
-		}
-		if userAPErr != nil {
-			userAP = nil
-		}
-	}
-	if e.UserNNRef != nil {
-		var userNNErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userNN, userNNErr = c.storageClient.GetNetworkNeighborhood(rctx, e.UserNNRef.Namespace, e.UserNNRef.Name)
-			return userNNErr
-		})
-		if userNNErr != nil && e.UserNNRV != "" {
-			logger.L().Debug("refreshOneEntry: user-defined NN fetch failed; keeping cached entry",
-				helpers.String("containerID", id),
-				helpers.String("name", e.UserNNRef.Name),
-				helpers.Error(userNNErr))
-			return
-		}
-		if userNNErr != nil {
-			userNN = nil
-		}
-	}
-
 	// Re-fetch the user-defined ContainerProfile (migrated "new way") when the
-	// entry was built from one. It is the authoritative base; a transient fetch
-	// error keeps the entry as-is.
+	// entry was built from one. It is the authoritative base and the only
+	// user-defined source (the legacy AP/NN overlay is no longer supported); a
+	// transient fetch error keeps the entry as-is.
 	var userDefinedCP *v1beta1.ContainerProfile
 	if e.UserCPRef != nil {
 		var userCPErr error
@@ -438,13 +402,11 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
 		rvsMatchAP(userManagedAP, e.UserManagedAPRV) &&
 		rvsMatchNN(userManagedNN, e.UserManagedNNRV) &&
-		rvsMatchAP(userAP, e.UserAPRV) &&
-		rvsMatchNN(userNN, e.UserNNRV) &&
 		e.SpecHash == currentSpecHash {
 		return
 	}
 
-	c.rebuildEntryFromSources(id, e, cp, userDefinedCP, userManagedAP, userManagedNN, userAP, userNN)
+	c.rebuildEntryFromSources(id, e, cp, userDefinedCP, userManagedAP, userManagedNN)
 }
 
 // rvsMatchCP, rvsMatchAP, rvsMatchNN return true when either (a) the object is
@@ -482,8 +444,6 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	userDefinedCP *v1beta1.ContainerProfile,
 	userManagedAP *v1beta1.ApplicationProfile,
 	userManagedNN *v1beta1.NetworkNeighborhood,
-	userAP *v1beta1.ApplicationProfile,
-	userNN *v1beta1.NetworkNeighborhood,
 ) {
 	pod := c.k8sObjectCache.GetPod(prev.Namespace, prev.PodName)
 
@@ -527,20 +487,14 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	projected := effectiveCP
-	// Ladder pass #1: user-managed "ug-" AP + NN.
+	// User-managed "ug-" AP + NN overlay merge. (The label-referenced
+	// user-defined overlay is a whole ContainerProfile adopted directly as
+	// effectiveCP above — there is no separate AP/NN merge pass anymore.)
 	if userManagedAP != nil || userManagedNN != nil {
 		p, warnings := projectUserProfiles(projected, userManagedAP, userManagedNN, pod, prev.ContainerName)
 		projected = p
 		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
 	}
-	// Ladder pass #2: label-referenced user overlay AP + NN.
-	var userWarnings []partialProfileWarning
-	if userAP != nil || userNN != nil {
-		p, w := projectUserProfiles(projected, userAP, userNN, pod, prev.ContainerName)
-		projected = p
-		userWarnings = w
-	}
-	c.emitOverlayMetrics(userAP, userNN, userWarnings)
 
 	// Rebuild the call-stack search tree from the projected profile.
 	tree := callstackcache.NewCallStackSearchTree()
@@ -572,33 +526,22 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		RV:              rvOfCP(cp),
 		UserManagedAPRV: rvOfAP(userManagedAP),
 		UserManagedNNRV: rvOfNN(userManagedNN),
-		UserAPRV:        rvOfAP(userAP),
-		UserNNRV:        rvOfNN(userNN),
 		UserCPRV:        rvOfCP(userDefinedCP),
 	}
 	if userDefinedCP != nil {
+		// The user-authored CP is authoritative and complete by definition (no
+		// learning-lifecycle annotations); force the terminal state so the rule
+		// engine enforces it.
 		newEntry.UserCPRef = &namespacedName{Namespace: userDefinedCP.Namespace, Name: userDefinedCP.Name}
-		// A user-authored profile is complete by definition (no learning-lifecycle
-		// annotations); force the terminal state so the rule engine enforces it.
 		newEntry.State = &objectcache.ProfileState{
 			Status:     helpersv1.Completed,
 			Completion: helpersv1.Full,
 			Name:       userDefinedCP.Name,
 		}
 	} else if prev.UserCPRef != nil {
+		// No CP this tick (transient error or not-yet-landed): keep the ref so
+		// the reconciler retries the CP on the next tick.
 		newEntry.UserCPRef = prev.UserCPRef
-	}
-	if userAP != nil {
-		newEntry.UserAPRef = &namespacedName{Namespace: userAP.Namespace, Name: userAP.Name}
-	} else if prev.UserAPRef != nil {
-		// Preserve the ref so subsequent ticks still know to re-fetch the
-		// overlay (e.g. transient fetch error during this tick).
-		newEntry.UserAPRef = prev.UserAPRef
-	}
-	if userNN != nil {
-		newEntry.UserNNRef = &namespacedName{Namespace: userNN.Namespace, Name: userNN.Name}
-	} else if prev.UserNNRef != nil {
-		newEntry.UserNNRef = prev.UserNNRef
 	}
 
 	c.entries.Set(id, newEntry)
