@@ -15,7 +15,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/kubescape/storage/pkg/registry/file"
 )
 
 const (
@@ -29,12 +28,20 @@ const (
 	ItemsPerSegment = 100
 	// DefaultMaxQueueSize is the default maximum size of the queue
 	DefaultMaxQueueSize = 1000
+	// DefaultMaxAttempts is the default number of times a single queued profile is retried
+	// before it is dropped. Without a bound, a profile that can never be accepted is
+	// retried forever, and because the queue is disk-persistent it survives pod restarts.
+	DefaultMaxAttempts = 10
 )
 
 // QueuedContainerProfile represents a container profile queued for creation
 type QueuedContainerProfile struct {
 	Profile     *v1beta1.ContainerProfile `json:"profile"`
 	ContainerID string                    `json:"containerID"`
+	// Attempts counts how many times creation of this profile has failed with a
+	// retryable error. Items persisted before this field existed decode with Attempts
+	// at zero, so they simply get a full budget of retries.
+	Attempts int `json:"attempts"`
 }
 
 // QueuedContainerProfileBuilder creates a new QueuedContainerProfile instance for dque
@@ -54,6 +61,7 @@ type QueueData struct {
 	creator       storage.ProfileCreator
 	errorCallback ErrorCallback
 	maxQueueSize  int
+	maxAttempts   int
 	retryInterval time.Duration
 
 	stopChan chan struct{}
@@ -67,6 +75,7 @@ type QueueConfig struct {
 	QueueName       string
 	QueueDir        string
 	MaxQueueSize    int
+	MaxAttempts     int
 	RetryInterval   time.Duration
 	ItemsPerSegment int
 	ErrorCallback   ErrorCallback
@@ -83,6 +92,9 @@ func NewQueueData(ctx context.Context, creator storage.ProfileCreator, config Qu
 	}
 	if config.MaxQueueSize == 0 {
 		config.MaxQueueSize = DefaultMaxQueueSize
+	}
+	if config.MaxAttempts <= 0 {
+		config.MaxAttempts = DefaultMaxAttempts
 	}
 	if config.RetryInterval == 0 {
 		config.RetryInterval = DefaultRetryInterval
@@ -123,6 +135,7 @@ func NewQueueData(ctx context.Context, creator storage.ProfileCreator, config Qu
 		creator:       creator,
 		errorCallback: config.ErrorCallback,
 		maxQueueSize:  config.MaxQueueSize,
+		maxAttempts:   config.MaxAttempts,
 		retryInterval: config.RetryInterval,
 		stopChan:      make(chan struct{}),
 		running:       true,
@@ -253,20 +266,40 @@ func (qd *QueueData) processAllItems() {
 		// Attempt to create the profile
 		err = qd.creator.CreateContainerProfileDirect(queuedProfile.Profile)
 		if err != nil {
-			if err.Error() == file.ObjectTooLargeError.Error() || err.Error() == file.ObjectCompletedError.Error() {
+			kind, reported := classifyFailure(err)
+			if kind == failureTerminal {
 				logger.L().Debug("got rejected to create container profile, skipping",
 					helpers.String("name", queuedProfile.Profile.Name),
 					helpers.Error(err))
 
-				// Call error callback if provided to propagate the error
+				// Call error callback if provided to propagate the error. The sentinel is
+				// reported rather than err itself, so that the manager can map it onto the
+				// right terminal container status even when the transport lost the sentinel
+				// (an HTTP 413 from storage's QueueManager carries no sentinel at all).
 				if qd.errorCallback != nil {
-					qd.errorCallback.OnQueueError(queuedProfile.Profile, queuedProfile.ContainerID, err)
+					qd.errorCallback.OnQueueError(queuedProfile.Profile, queuedProfile.ContainerID, reported)
 				}
+				continue
+			}
+
+			// Retryable failure. Bound the number of retries so that an item which never
+			// succeeds cannot occupy the queue indefinitely: requeuing appends to the tail
+			// while enforceMaxSize evicts from the head, so an unbounded retry would push
+			// out newer profiles that could have been saved.
+			queuedProfile.Attempts++
+			if queuedProfile.Attempts >= qd.maxAttempts {
+				logger.L().Warning("dropping container profile after too many failed attempts",
+					helpers.String("name", queuedProfile.Profile.Name),
+					helpers.String("namespace", queuedProfile.Profile.Namespace),
+					helpers.String("containerID", queuedProfile.ContainerID),
+					helpers.Int("attempts", queuedProfile.Attempts),
+					helpers.Error(err))
 				continue
 			}
 
 			logger.L().Debug("failed to create container profile, requeuing",
 				helpers.String("name", queuedProfile.Profile.Name),
+				helpers.Int("attempts", queuedProfile.Attempts),
 				helpers.Error(err))
 
 			qd.requeueImmediate(queuedProfile)
