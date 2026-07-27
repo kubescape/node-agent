@@ -255,6 +255,16 @@ func TestQueueDropsProfileAfterMaxAttempts(t *testing.T) {
 	assert.Empty(t, cb.captured(), "a retryable failure must not end learning for the container")
 }
 
+// TestDefaultRetryBudgetOutlastsARestart guards the other side of the bound: the budget
+// must be generous enough that a reachable-but-restarting storage does not cause profiles
+// to be dropped. A tight bound would trade the infinite-retry bug for silent data loss.
+func TestDefaultRetryBudgetOutlastsARestart(t *testing.T) {
+	budget := time.Duration(DefaultMaxAttempts) * DefaultRetryInterval
+
+	assert.GreaterOrEqual(t, budget, 15*time.Minute,
+		"the default retry budget (%s) must outlast a storage rollout, image pull or node eviction", budget)
+}
+
 // TestNewQueueDataDefaultsMaxAttempts pins the default so an unset config cannot restore
 // the unbounded-retry behaviour.
 func TestNewQueueDataDefaultsMaxAttempts(t *testing.T) {

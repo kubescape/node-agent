@@ -31,7 +31,14 @@ const (
 	// DefaultMaxAttempts is the default number of times a single queued profile is retried
 	// before it is dropped. Without a bound, a profile that can never be accepted is
 	// retried forever, and because the queue is disk-persistent it survives pod restarts.
-	DefaultMaxAttempts = 10
+	//
+	// The bound exists to shed permanently-failing items, not to give up on a reachable
+	// storage, so it is deliberately generous: at DefaultRetryInterval this is roughly
+	// 30 minutes, which comfortably outlasts a storage rollout, image pull or node
+	// eviction. Dropping a profile loses data the container has already stopped tracking,
+	// so a tight bound would trade the infinite-retry bug for silent loss during an
+	// ordinary restart.
+	DefaultMaxAttempts = 360
 )
 
 // QueuedContainerProfile represents a container profile queued for creation
