@@ -75,6 +75,11 @@ func presenceOf(dsField string) ref.FieldTester {
 	})
 }
 
+// CelFields is the field registry exposed to rule expressions as `event.<name>`.
+//
+// A field whose IsSet tester is presenceOf(...) can be absent at runtime when
+// the running gadget does not emit it; rules should guard those with has().
+// See docs/features/exec-tty-field.md for the tty fields specifically.
 var CelFields = map[string]*celtypes.FieldType{
 	"args": {
 		Type:  celtypes.ListType,
