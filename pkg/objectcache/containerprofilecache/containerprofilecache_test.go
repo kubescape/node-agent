@@ -3,7 +3,6 @@ package containerprofilecache
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -41,12 +40,6 @@ type fakeProfileClient struct {
 	// per-container binding path can be exercised end-to-end.
 	userCPsByName map[string]*v1beta1.ContainerProfile
 
-	// userManagedCP, when non-nil, is returned by GetContainerProfile for any
-	// name starting with the "ug-" user-managed prefix. This is the migrated
-	// replacement for the legacy ug- ApplicationProfile + NetworkNeighborhood
-	// overlay pair and lets tests exercise the user-managed merge path.
-	userManagedCP *v1beta1.ContainerProfile
-
 	// overlayOnly, if non-empty, scopes the overlay name whose GetContainerProfile
 	// returns a genuine NotFound (or overlayCPErr). Tests use this to keep the
 	// user-defined-CP fixture scoped.
@@ -64,21 +57,8 @@ type fakeProfileClient struct {
 
 var _ storage.ProfileClient = (*fakeProfileClient)(nil)
 
-func TestShouldLogOptionalUserManagedFetchError(t *testing.T) {
-	assert.False(t, shouldLogOptionalUserManagedFetchError(nil))
-	assert.False(t, shouldLogOptionalUserManagedFetchError(
-		apierrors.NewNotFound(schema.GroupResource{Group: "softwarecomposition.kubescape.io", Resource: "containerprofiles"}, "ug-nginx"),
-	))
-	assert.True(t, shouldLogOptionalUserManagedFetchError(errors.New("boom")))
-}
-
 func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
 	f.getCPCalls++
-	// User-managed "ug-<workload>" overlay: a single ContainerProfile, the
-	// migrated replacement for the legacy ug- AP/NN pair.
-	if strings.HasPrefix(name, helpersv1.UserApplicationProfilePrefix) {
-		return f.userManagedCP, nil
-	}
 	// Name-keyed authored CPs take precedence: this is how a multi-container pod
 	// serves a different CP per "<overlay>-<containerName>" name.
 	if f.userCPsByName != nil {

@@ -1,0 +1,18 @@
+# Authored user-defined ContainerProfile for the "app" container of the mc35
+# pod. Resolved by node-agent as "<label>-<containerName>" == "mc35-app".
+# Allows /usr/bin/id but NOT /usr/bin/whoami — the inverse of mc35-sidecar, so
+# a cross-inheritance bug (both containers sharing one CP) is detectable: whoami
+# in "app" must alert (R0001), id in "app" must not.
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: mc35-app
+spec:
+  execs:
+  - path: /usr/bin/sleep
+    args:
+    - /usr/bin/sleep
+    - infinity
+  - path: /usr/bin/id
+    args:
+    - /usr/bin/id

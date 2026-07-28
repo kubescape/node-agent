@@ -261,4 +261,3 @@ func extractIngressAddresses(cp *v1beta1.ContainerProfile) []string {
 	}
 	return addrs
 }
-

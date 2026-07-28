@@ -28,10 +28,10 @@ type MetricsManager interface {
 	ReportContainerProfileReconcilerEviction(reason string)
 
 	// Profile-projection metrics — always-on.
-	IncMissingProfileDataRequired(ruleID string)      // rule has profileDependency>0 but no profileDataRequired
-	IncProjectionUndeclaredLiteral(helper string)     // literal evaluated against a projected field not in spec
-	SetProjectionStaleEntries(count float64)          // cache entries whose SpecHash != currentSpecHash
-	SetProjectionUndeclaredRules(count float64)       // rules loaded with no profileDataRequired
+	IncMissingProfileDataRequired(ruleID string)  // rule has profileDependency>0 but no profileDataRequired
+	IncProjectionUndeclaredLiteral(helper string) // literal evaluated against a projected field not in spec
+	SetProjectionStaleEntries(count float64)      // cache entries whose SpecHash != currentSpecHash
+	SetProjectionUndeclaredRules(count float64)   // rules loaded with no profileDataRequired
 
 	// Profile-projection metrics — detailed (gated by profileProjection.detailedMetricsEnabled).
 	IncProjectionSpecCompile()
@@ -41,6 +41,7 @@ type MetricsManager interface {
 	ObserveProjectionApplyDuration(d time.Duration)
 	IncProjectionReconcileTriggered(trigger string)
 	IncHelperCall(helper string)
+	IncUserDefinedProfileUnresolved(namespace string) // user-defined-profile label set but no ContainerProfile resolved (silent-upgrade visibility)
 	SetProjectionUndeclaredRulesDetail(ruleIDs []string)
 
 	// Memory-savings metrics — detailed (gated by profileProjection.detailedMetricsEnabled).

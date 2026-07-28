@@ -5,16 +5,15 @@
 //  1. reconcileOnce: evicts cache entries whose pod is gone or whose
 //     container is no longer Running.
 //  2. refreshAllEntries (single-flight via atomic flag): re-fetches the
-//     consolidated CP, the workload-level AP+NN, the user-managed
-//     "ug-<workload>" AP+NN, and any label-referenced user AP/NN overlay,
-//     then rebuilds the projection iff any resourceVersion changed. Fast-skip
-//     when every RV matches what's already cached.
+//     consolidated ContainerProfile and any label-referenced user-defined
+//     ContainerProfile, then rebuilds the projection iff any resourceVersion
+//     changed. Fast-skip when every RV matches what's already cached.
 //
-// RPC cost @ 300 containers / 30s cadence steady-state: up to 7 gets per
-// entry per tick (CP + 3×AP + 3×NN). At 300 entries that's 70 RPC/s in the
-// worst case, dropping close to 0 once fast-skip catches on. Most entries
-// carry only workload-level AP+NN, so the common case is 3 RPC/tick per
-// entry = 30 RPC/s.
+// RPC cost @ 300 containers / 30s cadence steady-state: up to 2 gets per entry
+// per tick (consolidated CP + label-referenced user-defined CP). At 300 entries
+// that's ~20 RPC/s worst case, dropping close to 0 once fast-skip catches on.
+// Most entries carry only the consolidated CP, so the common case is 1 RPC/tick
+// per entry.
 package containerprofilecache
 
 import (
@@ -267,19 +266,17 @@ func (c *ContainerProfileCacheImpl) refreshAllEntries(ctx context.Context) {
 }
 
 // refreshOneEntry refreshes a single cache entry under the per-container lock.
-// Re-fetches ALL sources the entry was originally built from (consolidated CP,
-// workload-level AP/NN, user-managed AP/NN at "ug-<workloadName>", and any
-// label-referenced user AP/NN overlay) and rebuilds the projection if ANY
-// ResourceVersion changed. Keeping the existing entry on fetch errors is fine:
-// the next tick will retry.
+// Re-fetches ALL sources the entry was originally built from (the consolidated
+// ContainerProfile and any label-referenced user-defined ContainerProfile) and
+// rebuilds the projection if ANY ResourceVersion changed. Keeping the existing
+// entry on fetch errors is fine: the next tick will retry.
 //
-// Rebuild on refresh applies the same projection ladder as tryPopulateEntry:
+// Rebuild on refresh mirrors tryPopulateEntry: a label-referenced user-defined
+// CP, when present, REPLACES the learned CP as the authoritative base.
 //
-//	base CP → workload AP+NN → user-managed (ug-) AP+NN → user overlay AP+NN.
-//
-// The completed-only gate is re-applied here: if the CP regresses to a
-// non-Completed status we keep the existing cached entry rather than
-// projecting stale/incomplete data.
+// The completed-only gate is re-applied here (only when no authored CP is
+// adopted): if the learned CP regresses to a non-Completed status we keep the
+// existing cached entry rather than projecting stale/incomplete data.
 func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id string, e *CachedContainerProfile) {
 	// Resurrection guard (reviewer #1): refreshAllEntries snapshots entries
 	// without holding containerLocks, so a concurrent deleteContainer /
@@ -373,28 +370,6 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
 		return
 	}
-	// Re-fetch the user-managed "ug-<workload>" ContainerProfile overlay (migrated
-	// from the legacy ug- AP/NN pair). A transient fetch error keeps the entry.
-	var userManagedCP *v1beta1.ContainerProfile
-	if e.WorkloadName != "" {
-		ugCPName := helpersv1.UserApplicationProfilePrefix + e.WorkloadName
-		var userManagedCPErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userManagedCP, userManagedCPErr = c.storageClient.GetContainerProfile(rctx, ns, ugCPName)
-			return userManagedCPErr
-		})
-		if userManagedCPErr != nil && e.UserManagedCPRV != "" {
-			logger.L().Debug("refreshOneEntry: user-managed CP fetch failed; keeping cached entry",
-				helpers.String("containerID", id),
-				helpers.String("name", ugCPName),
-				helpers.Error(userManagedCPErr))
-			return
-		}
-		if userManagedCPErr != nil {
-			userManagedCP = nil // k8s client returns non-nil zero-value on 404; treat as absent
-		}
-	}
-
 	// Fast-skip when nothing changed. We match "absent" (nil) with empty RV:
 	// this avoids spurious rebuilds when an optional source is still missing,
 	// as long as it was also missing at the last build. Also skip when the
@@ -406,12 +381,11 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	}
 	if rvsMatchCP(cp, e.RV) &&
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
-		rvsMatchCP(userManagedCP, e.UserManagedCPRV) &&
 		e.SpecHash == currentSpecHash {
 		return
 	}
 
-	c.rebuildEntryFromSources(id, e, cp, userDefinedCP, userManagedCP)
+	c.rebuildEntryFromSources(id, e, cp, userDefinedCP)
 }
 
 // rvsMatchCP returns true when either (a) the object is absent and the stored RV
@@ -425,9 +399,9 @@ func rvsMatchCP(obj *v1beta1.ContainerProfile, rv string) bool {
 }
 
 // rebuildEntryFromSources constructs a fresh CachedContainerProfile from the
-// given sources and stores it under `id`. Applies the projection ladder from
-// tryPopulateEntry: base CP (or synthesized) → user-managed (ug-) AP+NN →
-// label-referenced user overlay AP+NN.
+// given sources and stores it under `id`. Mirrors tryPopulateEntry: a
+// label-referenced user-defined CP, when present, REPLACES the learned CP (or
+// the synthesized base) as the authoritative base.
 //
 // Called by the reconciler when any input ResourceVersion has changed.
 func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
@@ -435,7 +409,6 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	prev *CachedContainerProfile,
 	cp *v1beta1.ContainerProfile,
 	userDefinedCP *v1beta1.ContainerProfile,
-	userManagedCP *v1beta1.ContainerProfile,
 ) {
 	// Authored-validation (mirror of the add path): a label-referenced CP that
 	// carries lifecycle annotations is a LEARNED profile, not an authored one.
@@ -467,9 +440,8 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		effectiveCP = userDefinedCP
 	}
 
-	// When neither a learned nor a user-defined CP is available but we still
-	// have user-managed overlays to project, synthesize an empty base so
-	// downstream state display is sensible.
+	// When neither a learned nor a user-defined CP is available, synthesize an
+	// empty base so downstream state display is sensible.
 	if effectiveCP == nil {
 		syntheticName := prev.WorkloadName
 		if syntheticName == "" {
@@ -488,12 +460,6 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	projected := effectiveCP
-	// User-managed "ug-<workload>" ContainerProfile overlay merge (migrated from
-	// the legacy ug- AP/NN pair). The label-referenced user-defined overlay is a
-	// whole ContainerProfile adopted directly as effectiveCP above.
-	if userManagedCP != nil {
-		projected = projectUserManagedCP(projected, userManagedCP)
-	}
 
 	// Rebuild the call-stack search tree from the projected profile.
 	tree := callstackcache.NewCallStackSearchTree()
@@ -511,20 +477,19 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	newEntry := &CachedContainerProfile{
-		Projected:       projectedCP,
-		SpecHash:        projectedCP.SpecHash,
-		State:           &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
-		CallStackTree:   tree,
-		ContainerName:   prev.ContainerName,
-		PodName:         prev.PodName,
-		Namespace:       prev.Namespace,
-		PodUID:          podUID,
-		WorkloadID:      prev.WorkloadID,
-		CPName:          prev.CPName,
-		WorkloadName:    prev.WorkloadName,
-		RV:              rvOfCP(cp),
-		UserManagedCPRV: rvOfCP(userManagedCP),
-		UserCPRV:        rvOfCP(userDefinedCP),
+		Projected:     projectedCP,
+		SpecHash:      projectedCP.SpecHash,
+		State:         &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
+		CallStackTree: tree,
+		ContainerName: prev.ContainerName,
+		PodName:       prev.PodName,
+		Namespace:     prev.Namespace,
+		PodUID:        podUID,
+		WorkloadID:    prev.WorkloadID,
+		CPName:        prev.CPName,
+		WorkloadName:  prev.WorkloadName,
+		RV:            rvOfCP(cp),
+		UserCPRV:      rvOfCP(userDefinedCP),
 	}
 	if userDefinedCP != nil {
 		// The user-authored CP is authoritative and complete by definition (no

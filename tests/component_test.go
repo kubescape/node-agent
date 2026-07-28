@@ -34,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 )
 
@@ -656,429 +655,6 @@ func Test_11_EndpointTest(t *testing.T) {
 			}
 		}
 		assert.Truef(t, found, "Expected endpoint %v not found in the container profile", expectedEndpoint)
-	}
-}
-
-func Test_12_MergingProfilesTest(t *testing.T) {
-	start := time.Now()
-	defer tearDownTest(t, start)
-
-	// PHASE 1: Setup workload and initial profile
-	ns := testutils.NewRandomNamespace()
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
-	require.NoError(t, err, "Failed to create workload")
-	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
-	// require.NoError(t, wl.WaitForContainerProfile(80, "ready"), "Application profile not ready")
-	time.Sleep(10 * time.Second)
-
-	// Generate initial profile data
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
-	require.NoError(t, err, "Failed to exec into nginx container")
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
-	require.NoError(t, err, "Failed to exec into server container")
-
-	require.NoError(t, wl.WaitForContainerProfileCompletion(160), "Profile failed to complete")
-	time.Sleep(10 * time.Second) // Allow profile processing
-
-	// Log initial profile state
-	initialProfiles, err := wl.GetContainerProfiles()
-	require.NoError(t, err, "Failed to get initial profiles")
-	initialProfilesJSON, _ := json.Marshal(initialProfiles)
-	t.Logf("Initial container profiles:\n%s", string(initialProfilesJSON))
-
-	// PHASE 2: Verify initial alerts
-	t.Log("Testing initial alert generation...")
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert
-	// time.Sleep(2 * time.Minute)                                // Wait for alert generation
-	time.Sleep(30 * time.Second) // Wait for alert generation
-
-	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Failed to get initial alerts")
-
-	// Record initial alert count
-	initialAlertCount := 0
-	for _, alert := range initialAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
-			initialAlertCount++
-		}
-	}
-
-	testutils.AssertContains(t, initialAlerts, "Unexpected process launched", "ls", "server", []bool{true})
-	testutils.AssertNotContains(t, initialAlerts, "Unexpected process launched", "ls", "nginx", []bool{true, false})
-
-	// PHASE 3: Apply user-managed profiles
-	t.Log("Applying user-managed profiles...")
-	// The unified ContainerProfile is authored per container, so a user-managed
-	// override is one ContainerProfile per container (managed-by: User) carrying
-	// the allowed surfaces on its flat spec.
-	userProfiles := []*v1beta1.ContainerProfile{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("ug-%s-nginx", wl.WorkloadObj.GetName()),
-				Namespace: ns.Name,
-				Annotations: map[string]string{
-					"kubescape.io/managed-by": "User",
-				},
-				Labels: map[string]string{
-					"kubescape.io/workload-container-name": "nginx",
-				},
-			},
-			Spec: v1beta1.ContainerProfileSpec{
-				Architectures: []string{"amd64"},
-				Execs: []v1beta1.ExecCalls{
-					{
-						Path: "/usr/bin/ls",
-						Args: []string{"/usr/bin/ls", "-l"},
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("ug-%s-server", wl.WorkloadObj.GetName()),
-				Namespace: ns.Name,
-				Annotations: map[string]string{
-					"kubescape.io/managed-by": "User",
-				},
-				Labels: map[string]string{
-					"kubescape.io/workload-container-name": "server",
-				},
-			},
-			Spec: v1beta1.ContainerProfileSpec{
-				Architectures: []string{"amd64"},
-				Execs: []v1beta1.ExecCalls{
-					{
-						Path: "/bin/ls",
-						Args: []string{"/bin/ls", "-l"},
-					},
-					{
-						Path: "/bin/grpc_health_probe",
-						Args: []string{"-addr=:9555"},
-					},
-				},
-			},
-		},
-	}
-
-	// Log the profiles we're about to create
-	userProfilesJSON, err := json.MarshalIndent(userProfiles, "", "  ")
-	require.NoError(t, err, "Failed to marshal user profiles")
-	t.Logf("Creating user profiles:\n%s", string(userProfilesJSON))
-
-	// Get k8s client
-	k8sClient := k8sinterface.NewKubernetesApi()
-
-	// Create the user-managed profiles
-	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-	for _, up := range userProfiles {
-		_, err = storageClient.ContainerProfiles(ns.Name).Create(context.Background(), up, metav1.CreateOptions{})
-		require.NoError(t, err, "Failed to create user profile %s", up.Name)
-	}
-
-	// PHASE 4: Verify merged profile behavior
-	t.Log("Verifying merged profile behavior...")
-	time.Sleep(1 * time.Minute) // Allow merge to complete
-
-	// Test merged profile behavior
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: no alert (user profile should suppress alert)
-	time.Sleep(1 * time.Minute)                                // Wait for potential alerts
-
-	// Verify alert counts
-	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Failed to get final alerts")
-
-	// Only count new alerts (after the initial count)
-	newAlertCount := 0
-	for _, alert := range finalAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
-			newAlertCount++
-		}
-	}
-
-	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
-
-	if newAlertCount > initialAlertCount {
-		t.Logf("Full alert details:")
-		for _, alert := range finalAlerts {
-			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
-				t.Logf("Alert: %+v", alert)
-			}
-		}
-		t.Errorf("New alerts were generated after merge (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
-	}
-
-	// The new cache doesn't listen to patches
-	// PHASE 5: Check PATCH (removing the ls command from the user profile of the server container and triggering an alert)
-	// t.Log("Patching user profile to remove ls command from server container...")
-	// patchOperations := []utils.PatchOperation{
-	// 	{Op: "remove", Path: "/spec/containers/1/execs/0"},
-	// }
-
-	// patch, err := json.Marshal(patchOperations)
-	// require.NoError(t, err, "Failed to marshal patch operations")
-
-	// _, err = storageClient.ApplicationProfiles(ns.Name).Patch(context.Background(), userProfile.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
-	// require.NoError(t, err, "Failed to patch user profile")
-
-	// // Verify patched profile behavior
-	// time.Sleep(15 * time.Second) // Allow merge to complete
-
-	// // Log the profile that was patched
-	// patchedProfile, err := wl.GetApplicationProfile()
-	// require.NoError(t, err, "Failed to get patched profile")
-	// t.Logf("Patched application profile:\n%v", patchedProfile)
-
-	// // Test patched profile behavior
-	// wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
-	// wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert (ls command removed from user profile)
-	// time.Sleep(10 * time.Second)                   // Wait for potential alerts
-
-	// // Verify alert counts
-	// finalAlerts, err = testutils.GetAlerts(wl.Namespace)
-	// require.NoError(t, err, "Failed to get final alerts")
-
-	// // Only count new alerts (after the initial count)
-	// newAlertCount = 0
-	// for _, alert := range finalAlerts {
-	// 	if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
-	// 		newAlertCount++
-	// 	}
-	// }
-
-	// t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
-
-	// if newAlertCount <= initialAlertCount {
-	// 	t.Logf("Full alert details:")
-	// 	for _, alert := range finalAlerts {
-	// 		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
-	// 			t.Logf("Alert: %+v", alert)
-	// 		}
-	// 	}
-	// 	t.Errorf("New alerts were not generated after patch (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
-	// }
-}
-
-func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
-	start := time.Now()
-	defer tearDownTest(t, start)
-
-	// PHASE 1: Setup workload and initial network neighborhood
-	ns := testutils.NewRandomNamespace()
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
-	require.NoError(t, err, "Failed to create workload")
-	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
-	require.NoError(t, wl.WaitForContainerProfile(80, "ready"), "Network neighborhood not ready")
-
-	// Generate initial network data
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
-	require.NoError(t, err, "Failed to exec wget in server container")
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
-	require.NoError(t, err, "Failed to exec curl in nginx container")
-
-	require.NoError(t, wl.WaitForContainerProfileCompletion(80), "Network neighborhood failed to complete")
-	time.Sleep(10 * time.Second) // Allow network neighborhood processing
-
-	// Log initial network surface state (one ContainerProfile per container)
-	initialProfiles, err := wl.GetContainerProfiles()
-	require.NoError(t, err, "Failed to get initial container profiles")
-	initialProfilesJSON, _ := json.Marshal(initialProfiles)
-	t.Logf("Initial container profiles:\n%s", string(initialProfilesJSON))
-
-	// PHASE 2: Verify initial alerts
-	t.Log("Testing initial alert generation...")
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")         // Expected: no alert (original rule)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (not allowed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (not allowed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (not allowed)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")               // Expected: no alert (original rule)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")                  // Expected: alert (not allowed)
-	time.Sleep(30 * time.Second)                                                                    // Wait for alert generation
-
-	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Failed to get initial alerts")
-
-	// Record initial alert count
-	initialAlertCount := 0
-	for _, alert := range initialAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
-			initialAlertCount++
-		}
-	}
-
-	// Verify initial alerts
-	testutils.AssertContains(t, initialAlerts, "DNS Anomalies in container", "wget", "server", []bool{true})
-	testutils.AssertContains(t, initialAlerts, "DNS Anomalies in container", "curl", "nginx", []bool{true})
-
-	// PHASE 3: Apply user-managed network surface (one ContainerProfile per container)
-	t.Log("Applying user-managed container profiles...")
-	selector := metav1.LabelSelector{
-		MatchLabels: map[string]string{
-			"app": "multiple-containers-app",
-		},
-	}
-	userNginxCP := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("ug-%s-nginx", wl.WorkloadObj.GetName()),
-			Namespace: ns.Name,
-			Annotations: map[string]string{
-				"kubescape.io/managed-by": "User",
-			},
-			Labels: map[string]string{
-				"kubescape.io/workload-container-name": "nginx",
-			},
-		},
-		Spec: v1beta1.ContainerProfileSpec{
-			LabelSelector: selector,
-			Egress: []v1beta1.NetworkNeighbor{
-				{
-					Identifier: "nginx-github",
-					Type:       "external",
-					DNSNames:   []string{"github.com."},
-					Ports: []v1beta1.NetworkPort{
-						{
-							Name:     "TCP-80",
-							Protocol: "TCP",
-							Port:     ptr.To(int32(80)),
-						},
-						{
-							Name:     "TCP-443",
-							Protocol: "TCP",
-							Port:     ptr.To(int32(443)),
-						},
-					},
-				},
-			},
-		},
-	}
-	userServerCP := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("ug-%s-server", wl.WorkloadObj.GetName()),
-			Namespace: ns.Name,
-			Annotations: map[string]string{
-				"kubescape.io/managed-by": "User",
-			},
-			Labels: map[string]string{
-				"kubescape.io/workload-container-name": "server",
-			},
-		},
-		Spec: v1beta1.ContainerProfileSpec{
-			LabelSelector: selector,
-			Egress: []v1beta1.NetworkNeighbor{
-				{
-					Identifier: "server-example",
-					Type:       "external",
-					DNSNames:   []string{"info.cern.ch."},
-					Ports: []v1beta1.NetworkPort{
-						{
-							Name:     "TCP-80",
-							Protocol: "TCP",
-							Port:     ptr.To(int32(80)),
-						},
-						{
-							Name:     "TCP-443",
-							Protocol: "TCP",
-							Port:     ptr.To(int32(443)),
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// Create user-managed container profiles
-	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-	_, err = storageClient.ContainerProfiles(ns.Name).Create(context.Background(), userNginxCP, metav1.CreateOptions{})
-	require.NoError(t, err, "Failed to create user nginx container profile")
-	_, err = storageClient.ContainerProfiles(ns.Name).Create(context.Background(), userServerCP, metav1.CreateOptions{})
-	require.NoError(t, err, "Failed to create user server container profile")
-
-	// PHASE 4: Verify merged behavior (no new alerts)
-	t.Log("Verifying merged network neighborhood behavior...")
-	time.Sleep(60 * time.Second) // Allow merge to complete
-
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert (original)
-	// Try multiple times to ensure alert is removed
-	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")            // Expected: no alert (original)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")               // Expected: no alert (user added)
-	time.Sleep(30 * time.Second)                                                                 // Wait for potential alerts
-
-	mergedAlerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Failed to get alerts after merge")
-
-	// Count new alerts after merge
-	newAlertCount := 0
-	for _, alert := range mergedAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
-			newAlertCount++
-		}
-	}
-
-	t.Logf("Alert counts - Initial: %d, After merge: %d", initialAlertCount, newAlertCount)
-
-	if newAlertCount > initialAlertCount {
-		t.Logf("Full alert details:")
-		for _, alert := range mergedAlerts {
-			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
-				t.Logf("Alert: %+v", alert)
-			}
-		}
-		t.Errorf("New alerts were generated after merge (Initial: %d, After merge: %d)", initialAlertCount, newAlertCount)
-	}
-
-	// PHASE 5: Remove permission via patch and verify alerts return
-	t.Log("Patching user server container profile to remove info.cern.ch egress...")
-	patchOperations := []utils.PatchOperation{
-		{Op: "remove", Path: "/spec/egress/0"},
-	}
-
-	patch, err := json.Marshal(patchOperations)
-	require.NoError(t, err, "Failed to marshal patch operations")
-
-	_, err = storageClient.ContainerProfiles(ns.Name).Patch(context.Background(), userServerCP.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
-	require.NoError(t, err, "Failed to patch user server container profile")
-
-	time.Sleep(60 * time.Second) // Allow merge to complete
-
-	// Test alerts after patch
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert
-	// Try multiple times to ensure alert is removed
-	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")            // Expected: no alert
-	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")               // Expected: no alert
-	time.Sleep(30 * time.Second)                                                                 // Wait for alerts
-
-	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Failed to get final alerts")
-
-	// Count final alerts
-	finalAlertCount := 0
-	for _, alert := range finalAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
-			finalAlertCount++
-		}
-	}
-
-	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, finalAlertCount)
-
-	if finalAlertCount <= initialAlertCount {
-		t.Logf("Full alert details:")
-		for _, alert := range finalAlerts {
-			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "DNS Anomalies in container" && alert.Labels["container_name"] == "server" {
-				t.Logf("Alert: %+v", alert)
-			}
-		}
-		t.Errorf("New alerts were not generated after patch (Initial: %d, Final: %d)", initialAlertCount, finalAlertCount)
 	}
 }
 
@@ -3367,4 +2943,86 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 
 	t.Logf("collapse validated on real cloud ranges: S3=%v spread=%v scattered=%v split=%v",
 		withPrefixes(s3CIDRs, "52.216.1."), withPrefixes(spreadCIDRs, "52.216."), got, withPrefixes(splitCIDRs, "52.216.2."))
+}
+
+// Test_35_MultiContainerPerContainerBinding pins the per-container binding of
+// user-defined ContainerProfiles (review finding on node-agent#864). A
+// multi-container pod shares ONE `kubescape.io/user-defined-profile` label
+// value, but each container is profiled independently: node-agent resolves each
+// container's authored CP as "<label>-<containerName>" (mc35-app / mc35-sidecar),
+// falling back to the bare "<label>" for single-container pods.
+//
+// The two containers carry INVERSE exec allow-lists — app allows /usr/bin/id
+// (not whoami), sidecar allows /usr/bin/whoami (not id). A regression that bound
+// both containers to a single CP (the behaviour the review flagged) would let
+// the wrong binary run in one of them, which this test detects: the forbidden
+// binary in each container MUST fire R0001, and the allowed binary MUST NOT —
+// the no-cross-inheritance assertion.
+func Test_35_MultiContainerPerContainerBinding(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+
+	// app allows /usr/bin/id (not whoami); sidecar allows /usr/bin/whoami (not id).
+	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/mc35-cp-app.yaml")
+	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/mc35-cp-sidecar.yaml")
+
+	wl, err := testutils.NewTestWorkload(ns.Name,
+		path.Join(utils.CurrentDir(), "resources/mc35-multi-container-userdefined-deployment.yaml"))
+	require.NoError(t, err)
+	require.NoError(t, wl.WaitForReady(80))
+	// Cache-load latency on the ContainerProfileCache is bursty; 30s covers the
+	// observed worst case on a loaded runner (matches Test_28).
+	time.Sleep(30 * time.Second)
+
+	// Exercise each container with BOTH binaries. Expected R0001 (unexpected
+	// process) per the inverse allow-lists:
+	//   app     : whoami -> R0001 (not allowed) ; id -> allowed (no alert)
+	//   sidecar : id     -> R0001 (not allowed) ; whoami -> allowed (no alert)
+	wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "app")
+	wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+	wl.ExecIntoPod([]string{"/usr/bin/id"}, "sidecar")
+	wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "sidecar")
+
+	var alerts []testutils.Alert
+	require.Eventually(t, func() bool {
+		var e error
+		alerts, e = testutils.GetAlerts(wl.Namespace)
+		return e == nil
+	}, 60*time.Second, 5*time.Second, "must be able to fetch alerts")
+	// Extra settle time for remaining alerts.
+	time.Sleep(10 * time.Second)
+	alerts, _ = testutils.GetAlerts(wl.Namespace)
+
+	for i, a := range alerts {
+		t.Logf("  [%d] %s(%s) comm=%s container=%s", i,
+			a.Labels["rule_name"], a.Labels["rule_id"], a.Labels["comm"], a.Labels["container_name"])
+	}
+
+	countR0001 := func(container, comm string) int {
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == "R0001" &&
+				a.Labels["container_name"] == container &&
+				a.Labels["comm"] == comm {
+				n++
+			}
+		}
+		return n
+	}
+
+	// The forbidden process in each container MUST alert.
+	assert.Greater(t, countR0001("app", "whoami"), 0,
+		"whoami is NOT in mc35-app (only sidecar's CP allows it) — must fire R0001 in app")
+	assert.Greater(t, countR0001("sidecar", "id"), 0,
+		"id is NOT in mc35-sidecar (only app's CP allows it) — must fire R0001 in sidecar")
+
+	// The allowed process in each container MUST NOT alert — the
+	// no-cross-inheritance assertion. If both containers shared one CP, one of
+	// these would be non-zero.
+	assert.Equal(t, 0, countR0001("app", "id"),
+		"id IS in mc35-app — must NOT fire R0001 in app (non-zero => sidecar's CP leaked in)")
+	assert.Equal(t, 0, countR0001("sidecar", "whoami"),
+		"whoami IS in mc35-sidecar — must NOT fire R0001 in sidecar (non-zero => app's CP leaked in)")
 }

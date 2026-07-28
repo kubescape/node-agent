@@ -1,0 +1,30 @@
+# Test_35 fixture — a 2-container pod bound to per-container user-defined
+# ContainerProfiles. The pod label kubescape.io/user-defined-profile=mc35 is a
+# POD label, but ContainerProfiles are per-container: node-agent resolves each
+# container to <label>-<containerName> (mc35-app / mc35-sidecar), falling back
+# to the bare <label> for single-container pods. This fixture + Test_35 pin the
+# per-container binding (review finding on node-agent#864) so it cannot drift.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mc35-deployment
+  labels:
+    app: mc35
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mc35
+  template:
+    metadata:
+      labels:
+        app: mc35
+        kubescape.io/user-defined-profile: mc35
+    spec:
+      containers:
+      - name: app
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]
+      - name: sidecar
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]

@@ -2,7 +2,6 @@ package containerprofilecache
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -372,15 +371,19 @@ func TestRefreshNoEntryWhenCPGetFails(t *testing.T) {
 	assert.Same(t, entry, stored, "entry pointer must not change when CP fetch fails")
 }
 
-// TestRefreshPreservesEntryOnTransientOverlayError — overlay fetch errors must
-// not strip overlay data from the cache. If the user-managed "ug-<workload>"
-// ContainerProfile GET returns an error while the entry already has a non-empty
-// cached RV for that overlay, refreshOneEntry must keep the old entry unchanged
-// (same pointer) rather than rebuilding without the overlay and clearing its RV.
-// Regression test for the refreshRPC timeout → silent nil → spurious rebuild path.
-func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
-	// Base CP is terminal (Completed) so refreshOneEntry passes the status gate
-	// and actually reaches the user-managed overlay fetch.
+// TestRefreshPreservesEntryOnTransientUserCPError — a transient error fetching
+// the user-defined (label-referenced) ContainerProfile must not strip the
+// authored overlay from the cache. When refreshOneEntry re-fetches the
+// user-defined CP (because entry.UserCPRef is set) and the GET returns an error
+// while the entry already holds a non-empty UserCPRV, refreshOneEntry must keep
+// the old entry unchanged (same pointer) rather than rebuilding without the
+// authored profile and clearing its RV. Regression test for the refreshRPC
+// timeout → silent nil → spurious rebuild path, migrated from the removed
+// legacy "ug-" user-managed overlay to the user-defined CP mechanism.
+func TestRefreshPreservesEntryOnTransientUserCPError(t *testing.T) {
+	// Base (learned) CP is terminal (Completed) and its RV matches the entry, so
+	// the base fetch succeeds without an early return and refreshOneEntry reaches
+	// the user-defined CP fetch.
 	cp := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "cp", Namespace: "default", ResourceVersion: "100",
@@ -392,47 +395,51 @@ func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
 		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
 	}
 
-	client := &overlayErrorClient{cp: cp, ugCPErr: assertErr{}}
+	// The user-defined CP fetch (by UserCPRef.Name) fails transiently.
+	client := &userCPErrorClient{cp: cp, userName: "override", userCPErr: assertErr{}}
 	k8s := newControllableK8sCache()
 	c := newReconcilerCache(t, client, k8s, nil)
 
 	id := "c1"
 	entry := &CachedContainerProfile{
-		Projected:       Apply(nil, cp, nil),
-		State:           &objectcache.ProfileState{Name: cp.Name},
-		ContainerName:   "nginx",
-		PodName:         "nginx-abc",
-		Namespace:       "default",
-		PodUID:          "uid-1",
-		CPName:          "cp",
-		RV:              "100",
-		WorkloadName:    "nginx",
-		UserManagedCPRV: "9",
+		Projected:     Apply(nil, cp, nil),
+		State:         &objectcache.ProfileState{Name: cp.Name},
+		ContainerName: "nginx",
+		PodName:       "nginx-abc",
+		Namespace:     "default",
+		PodUID:        "uid-1",
+		CPName:        "cp",
+		RV:            "100",
+		WorkloadName:  "nginx",
+		UserCPRef:     &namespacedName{Namespace: "default", Name: "override"},
+		UserCPRV:      "9",
 	}
 	c.entries.Set(id, entry)
 
 	c.refreshAllEntries(context.Background())
 
 	stored, ok := c.entries.Load(id)
-	require.True(t, ok, "overlay error must not delete the entry")
-	assert.Same(t, entry, stored, "entry pointer must not change when overlay fetch fails transiently")
-	// The overlay RV must be unchanged (not cleared to "").
-	assert.Equal(t, "9", stored.UserManagedCPRV, "UserManagedCPRV must be unchanged after a transient overlay-fetch error")
+	require.True(t, ok, "user-defined CP error must not delete the entry")
+	assert.Same(t, entry, stored, "entry pointer must not change when user-defined CP fetch fails transiently")
+	// The authored RV must be unchanged (not cleared to "").
+	assert.Equal(t, "9", stored.UserCPRV, "UserCPRV must be unchanged after a transient user-defined CP fetch error")
 }
 
-// overlayErrorClient returns a valid base CP but fails the user-managed
-// "ug-<workload>" ContainerProfile fetch with the configured error. Used to
-// test overlay error-preservation logic.
-type overlayErrorClient struct {
-	cp      *v1beta1.ContainerProfile
-	ugCPErr error
+// userCPErrorClient returns a valid base CP for any name except userName, whose
+// fetch fails with userCPErr. Used to test user-defined CP error-preservation:
+// the base/learned CP fetch succeeds while the label-referenced authored CP GET
+// fails transiently.
+type userCPErrorClient struct {
+	cp        *v1beta1.ContainerProfile
+	userName  string
+	userCPErr error
 }
 
-var _ storage.ProfileClient = (*overlayErrorClient)(nil)
+var _ storage.ProfileClient = (*userCPErrorClient)(nil)
 
-func (o *overlayErrorClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
-	if strings.HasPrefix(name, helpersv1.UserApplicationProfilePrefix) {
-		return nil, o.ugCPErr
+func (o *userCPErrorClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
+	if name == o.userName {
+		return nil, o.userCPErr
 	}
 	return o.cp, nil
 }
@@ -597,11 +604,11 @@ func TestRetryPendingEntries_CPCreatedAfterAdd(t *testing.T) {
 
 	assert.NotNil(t, c.GetProjectedContainerProfile(id), "entry promoted after CP appears")
 	assert.Equal(t, 0, c.pending.Len(), "pending drained on successful promotion")
-	// Four GETs total: each populate attempt issues two GetContainerProfile
-	// calls — the base CP plus the user-managed "ug-<workload>" overlay CP
-	// (the migrated replacement for the legacy ug- AP/NN pair). addContainer
+	// Two GETs total: this container carries no user-defined-profile label, so
+	// each populate attempt issues exactly one GetContainerProfile call for the
+	// base CP (there is no legacy "ug-" overlay fetch anymore). addContainer
 	// performs one attempt (base 404), the retry performs the second (base 200).
-	assert.Equal(t, 4, client.getCPCalls, "each tick re-GETs the base CP and the ug- overlay CP exactly once")
+	assert.Equal(t, 2, client.getCPCalls, "each tick re-GETs the base CP exactly once")
 }
 
 // TestPendingEntriesAreNotGCedBeforeRetry verifies we no longer drop pending
@@ -928,70 +935,6 @@ func TestNotifyContainerTerminal_Completed(t *testing.T) {
 	stored, ok := c.entries.Load(id)
 	require.True(t, ok)
 	assert.Equal(t, helpersv1.Completed, stored.State.Status)
-}
-
-// TestUserManagedProfileMerged exercises the user-managed merge path
-// (Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest):
-// a user-managed ContainerProfile published at "ug-<workloadName>" is merged on
-// top of the base CP. Anomalies NOT in the union of base + user-managed should
-// produce alerts; anomalies present in either source should not.
-func TestUserManagedProfileMerged(t *testing.T) {
-	// Base CP has exec "/bin/X"; user-managed CP adds "/bin/Y".
-	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-base",
-			Namespace:       "default",
-			ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
-		},
-		Spec: v1beta1.ContainerProfileSpec{
-			Execs: []v1beta1.ExecCalls{{Path: "/bin/X"}},
-		},
-	}
-	userManagedCP := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "ug-nginx",
-			Namespace:       "default",
-			ResourceVersion: "9",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
-		},
-		Spec: v1beta1.ContainerProfileSpec{
-			Execs: []v1beta1.ExecCalls{{Path: "/bin/Y"}},
-		},
-	}
-	client := &fakeProfileClient{
-		cp:            cp,
-		userManagedCP: userManagedCP,
-	}
-	c, k8s := newTestCache(t, client)
-
-	c.SetProjectionSpec(objectcache.RuleProjectionSpec{
-		Execs: objectcache.FieldSpec{InUse: true, All: true},
-		Hash:  "user-managed-test",
-	})
-
-	id := "container-user-managed"
-	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
-	require.NoError(t, c.addContainer(eventContainer(id), context.Background()))
-
-	cached := c.GetProjectedContainerProfile(id)
-	require.NotNil(t, cached, "entry populated")
-	_, hasX := cached.Execs.Values["/bin/X"]
-	_, hasY := cached.Execs.Values["/bin/Y"]
-	assert.True(t, hasX, "base CP exec must be present")
-	assert.True(t, hasY, "user-managed (ug-) CP exec must be merged in")
-
-	// Verify the RV was captured so a later user-managed update would trigger
-	// a refresh rebuild.
-	entry, ok := c.entries.Load(id)
-	require.True(t, ok)
-	assert.Equal(t, "9", entry.UserManagedCPRV, "UserManagedCPRV recorded at add time")
 }
 
 // TestSpecChange_TriggersReprojection — T5 nudge integration.

@@ -73,15 +73,13 @@ type CachedContainerProfile struct {
 	// shared data (which may have been evicted from K8sObjectCache by then).
 	CPName string
 
-	// WorkloadName is the per-workload slug used to fetch the workload-level
-	// ApplicationProfile / NetworkNeighborhood (primary data source while the
-	// storage-side consolidated CP isn't publicly queryable) and, with the
-	// "ug-" prefix, the user-managed AP/NN. Populated at addContainer time.
+	// WorkloadName is the per-workload slug used to synthesize a CP name when the
+	// consolidated ContainerProfile is not yet queryable in storage. Populated at
+	// addContainer time.
 	WorkloadName string
 
-	RV              string // ContainerProfile resourceVersion at last load
-	UserManagedCPRV string // user-managed CP (ug-<workload>) RV at last projection, "" if absent
-	UserCPRV        string // user-defined ContainerProfile (label-referenced) RV at last load, "" if not used
+	RV       string // ContainerProfile resourceVersion at last load
+	UserCPRV string // user-defined ContainerProfile (label-referenced) RV at last load, "" if not used
 }
 
 // pendingContainer captures the minimum state needed to retry the initial
@@ -107,8 +105,8 @@ type ContainerProfileCacheImpl struct {
 	k8sObjectCache objectcache.K8sObjectCache
 	metricsManager metricsmanager.MetricsManager
 
-	reconcileEvery time.Duration
-	rpcBudget      time.Duration
+	reconcileEvery    time.Duration
+	rpcBudget         time.Duration
 	refreshInProgress atomic.Bool
 
 	// Projection spec — installed by SetProjectionSpec when rulemanager loads rules.
@@ -152,10 +150,6 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 	c.pending.Set("", nil)
 	c.pending.Delete("")
 	return c
-}
-
-func shouldLogOptionalUserManagedFetchError(err error) bool {
-	return err != nil && !apierrors.IsNotFound(err)
 }
 
 // refreshRPC calls fn with a context bounded by c.rpcBudget, enforcing a
@@ -323,44 +317,6 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		cp = nil
 	}
 
-
-	// User-managed overlay: the migrated "ug-<workloadName>" ContainerProfile
-	// (annotated managed-by: User), unioned on top of the base. This replaces the
-	// legacy ug- ApplicationProfile + NetworkNeighborhood pair. Optional: nil on 404.
-	var userManagedCP *v1beta1.ContainerProfile
-	if workloadName != "" {
-		// UserApplicationProfilePrefix is the shared "ug-" user-managed prefix.
-		ugCPName := helpersv1.UserApplicationProfilePrefix + workloadName
-		var ugCPErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userManagedCP, ugCPErr = c.storageClient.GetContainerProfile(rctx, ns, ugCPName)
-			return ugCPErr
-		})
-		if ugCPErr != nil {
-			if shouldLogOptionalUserManagedFetchError(ugCPErr) {
-				logger.L().Debug("failed to fetch user-managed ContainerProfile",
-					helpers.String("containerID", containerID),
-					helpers.String("namespace", ns),
-					helpers.String("name", ugCPName),
-					helpers.Error(ugCPErr))
-			}
-			userManagedCP = nil
-		}
-	}
-
-	// Only cache profiles whose status is terminal (Completed or TooLarge).
-	// Learning/ready profiles are still being written; caching them would let
-	// rules fire against incomplete data. TooLarge is terminal: the manager
-	// stopped collecting but the truncated data is still valid for detection.
-	// Return false so the synthetic-CP fallback below does not bypass the gate.
-	if cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
-		logger.L().Debug("tryPopulateEntry: CP status not terminal; keeping pending",
-			helpers.String("containerID", containerID),
-			helpers.String("namespace", ns),
-			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
-		return false
-	}
-
 	// Fetch the user-authored ContainerProfile when the pod carries the
 	// UserDefinedProfileMetadataKey label. Migration (#862/#864) is a HARD
 	// cutover: the label now names a single user-authored ContainerProfile —
@@ -437,8 +393,24 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
+	// Only cache profiles whose status is terminal (Completed or TooLarge).
+	// Learning/ready profiles are still being written; caching them would let
+	// rules fire against incomplete data. TooLarge is terminal: the manager
+	// stopped collecting but the truncated data is still valid for detection.
+	// This gate runs AFTER the authored-CP fetch (review finding on
+	// node-agent#864): a user-authored CP replaces the learned one outright, so
+	// if one was adopted the learned CP's non-terminal status must not block it.
+	// Only gate when no authored CP will be used.
+	if userDefinedCP == nil && cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
+		logger.L().Debug("tryPopulateEntry: CP status not terminal; keeping pending",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", ns),
+			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
+		return false
+	}
+
 	// Need SOMETHING to cache. If we have nothing, stay pending and retry.
-	if cp == nil && userDefinedCP == nil && userManagedCP == nil {
+	if cp == nil && userDefinedCP == nil {
 		// Visibility for the upgrade path: a workload whose user-defined-profile
 		// label is set but resolves to nothing (e.g. still-legacy AP/NN that are
 		// no longer read) would otherwise pend forever with only a Debug trace.
@@ -449,6 +421,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 				helpers.String("containerID", containerID),
 				helpers.String("namespace", ns),
 				helpers.String("name", overlayName))
+			c.metricsManager.IncUserDefinedProfileUnresolved(ns)
 		}
 		return false
 	}
@@ -466,15 +439,9 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	// A user-defined ContainerProfile is authoritative for this container: it is
-	// the migrated replacement for the AP+NN overlay, so it becomes the base
-	// (the ug- user-managed pass may still union on top). Learning is suppressed
-	// for user-defined containers, so no consolidated CP competes with it.
-	// entry.RV must keep tracking the LEARNED CP (the object entry.CPName points
-	// at), so capture its RV before cp is repointed at the authored profile.
-	learnedRV := ""
-	if cp != nil {
-		learnedRV = cp.ResourceVersion
-	}
+	// the migrated replacement for the AP+NN overlay pair, so it becomes the
+	// base. Learning is suppressed for user-defined containers, so no
+	// consolidated CP competes with it.
 	if userDefinedCP != nil {
 		cp = userDefinedCP
 	}
@@ -507,12 +474,6 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			helpers.String("podName", container.K8s.PodName))
 	}
 
-	// User-managed "ug-" overlay pass: union the migrated ug- ContainerProfile
-	// on top of the base. (Legacy AP/NN overlay merge removed.)
-	if userManagedCP != nil {
-		cp = projectUserManagedCP(cp, userManagedCP)
-	}
-
 	entry := c.buildEntry(cp, pod, container, sharedData)
 	// Override CPName with the real consolidated-CP slug. buildEntry sets
 	// CPName from cp.Name, but when cp was synthesized above (no consolidated
@@ -521,22 +482,14 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// refresh queries the synthetic name, always 404s, and the fast-skip
 	// keeps the synthetic entry forever (stored RV is "" == absent-match).
 	entry.CPName = cpName
-	// buildEntry derives RV from whatever it projected, which is the authored CP
-	// when one was adopted. refreshOneEntry compares entry.RV against a GET on
-	// entry.CPName, so leaving the authored RV here makes the permanent 404 on
-	// the learned slug look like a transient error and freezes the entry.
-	entry.RV = learnedRV
 	// buildEntry derives RV from whatever it projected — the authored CP when one
 	// was adopted. refreshOneEntry compares entry.RV against a GET on entry.CPName
 	// (the learned slug), so leaving the authored RV here makes the permanent 404
 	// on that slug look transient and freezes the entry. Track the learned RV.
 	entry.RV = learnedRV
-	// Fill in user-managed bookkeeping so refreshOneEntry can re-fetch these
-	// sources on every tick. WorkloadName is the "ug-" lookup prefix.
+	// WorkloadName is the synthesize-name source refreshOneEntry uses when it
+	// rebuilds an entry whose consolidated CP is not yet in storage.
 	entry.WorkloadName = workloadName
-	if userManagedCP != nil {
-		entry.UserManagedCPRV = userManagedCP.ResourceVersion
-	}
 
 	// When the overlay label is set, ALWAYS record UserCPRef so the reconciler
 	// keeps probing for the user-authored ContainerProfile on every tick — even
@@ -598,9 +551,8 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 		entry.PodUID = string(pod.UID)
 	}
 
-	// The base is authoritative as-is: the user-defined overlay is now a whole
-	// ContainerProfile adopted directly as `cp` (no AP/NN merge), and the
-	// user-managed "ug-" merge already ran on `cp` before buildEntry is called.
+	// The base is authoritative as-is: a user-defined profile is a whole
+	// ContainerProfile adopted directly as `cp` (no AP/NN merge).
 	userMerged := cp
 
 	// Build call-stack search tree.
