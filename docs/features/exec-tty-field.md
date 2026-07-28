@@ -38,13 +38,26 @@ interactive shells. Such a rule must carry an `agentVersionRequirement`:
 ```yaml
 - name: "Non-interactive download tool"
   expressions:
-    rule_expression:
-      - event_type: exec
+    ruleExpression:
+      - eventType: exec
         expression: |
-          has(event.hasTty) && !event.hasTty &&
+          !event.hasTty &&
           event.exepath in ["/usr/bin/curl", "/usr/bin/wget"]
   agentVersionRequirement: ">=<version that ships the device number>"
 ```
+
+## Comparing the numeric fields
+
+`ttyMajor` and `ttyMinor` are unsigned; this CEL environment has no
+cross-type numeric comparison, so comparing against a bare integer literal
+fails to compile (and thus silently disables the rule) rather than failing
+at runtime. Compare them with an explicit unsigned literal:
+
+```cel
+has(event.ttyMajor) && event.ttyMajor == uint(136)
+```
+
+`event.tty` is signed, so it takes a bare integer instead: `event.tty == 3`.
 
 See `projects/2026-07-27-exec-tty-cel-field/spec.md` in shared-designs-and-docs
 for the full design and the phase-2 checklist.

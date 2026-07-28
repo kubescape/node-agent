@@ -222,12 +222,13 @@ func TestTTYGettersDoNotLog(t *testing.T) {
 
 	// The pretty logger honours SetWriter; the zap logger does not, and plain
 	// (non-Ctx) warnings bypass the OTEL bridge entirely.
+	prevName := logger.L().LoggerName()
 	logger.InitLogger("pretty")
 	prev := logger.L().GetWriter()
 	logger.L().SetWriter(f)
 	defer func() {
 		logger.L().SetWriter(prev)
-		logger.InitLogger("none")
+		logger.InitLogger(prevName)
 	}()
 
 	// Phase-1 shape: tty_major and tty_minor are absent.

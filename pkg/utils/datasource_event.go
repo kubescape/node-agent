@@ -509,6 +509,12 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 	}
 }
 
+// GetHasTTY reports whether the process has a controlling terminal. It checks
+// FieldPresent first: besides avoiding a log-spam warning for a field the
+// running gadget doesn't emit, this also guards against fieldCaches (keyed by
+// EventType, not by datasource) serving back a FieldAccessor cached by a
+// different datasource that does have the field, which would otherwise panic
+// inside Inspektor Gadget's fieldAccessor.Get.
 func (e *DatasourceEvent) GetHasTTY() bool {
 	if e.FieldPresent("tty_major") {
 		major, _ := e.getFieldAccessor("tty_major").Uint32(e.Data)
