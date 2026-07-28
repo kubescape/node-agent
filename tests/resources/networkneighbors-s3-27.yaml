@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3-full-27
+  labels:
+    app: s3-full-27
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: s3-full-27
+  template:
+    metadata:
+      labels:
+        app: s3-full-27
+    spec:
+      containers:
+        - name: c
+          image: busybox
+          command: ["sh", "-c"]
+          # AWS S3 (52.216.0.0/15): fully observe the /27 52.216.2.0/27
+          args:
+            - "while true; do for i in $(seq 0 31); do nc -w 1 -z 52.216.2.$i 443 2>/dev/null; done; sleep 2; done"

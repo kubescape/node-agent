@@ -26,9 +26,13 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/utils/ptr"
 )
 
@@ -2798,11 +2802,11 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 					helpersv1.CompletionMetadataKey: helpersv1.Full,
 				},
 				Labels: map[string]string{
-					helpersv1.ApiGroupMetadataKey:   "apps",
-					helpersv1.ApiVersionMetadataKey: "v1",
-					helpersv1.RelatedKindMetadataKey:       "Deployment",
-					helpersv1.RelatedNameMetadataKey:       "curl-28",
-					helpersv1.RelatedNamespaceMetadataKey:  ns.Name,
+					helpersv1.ApiGroupMetadataKey:         "apps",
+					helpersv1.ApiVersionMetadataKey:       "v1",
+					helpersv1.RelatedKindMetadataKey:      "Deployment",
+					helpersv1.RelatedNameMetadataKey:      "curl-28",
+					helpersv1.RelatedNamespaceMetadataKey: ns.Name,
 				},
 			},
 			Spec: v1beta1.NetworkNeighborhoodSpec{
@@ -3226,4 +3230,220 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		require.Greater(t, countByRule(alerts, "R0011"), 0,
 			"DNS MITM: TCP to spoofed IP 128.130.194.56 must fire R0011")
 	})
+}
+
+// Test_34_NetworkNeighborsCIDRCollapse is an end-to-end test for storage
+// PR kubescape/storage#348 (CIDR-based collapsing of NetworkNeighbor entries).
+//
+// It exercises the REAL learn→collapse path, not an injected profile: apply the
+// CollapseConfiguration, wait for it to go live, deploy a workload that egresses
+// to many IPs in 52.216.0.0/24, wait for node-agent to LEARN the profile to
+// completion, then assert the learnt egress collapsed into a covering CIDR with
+// no host /32 left behind.
+//
+// Why not inject a NetworkNeighborhood directly: storage rejects/empties a
+// directly-created `completion: complete` profile ("object is completed"), and
+// the deflate only runs at node-agent's write time — so only a genuinely learnt
+// profile exercises the collapse. Validated on a real k3s: 60 IPs -> one CIDR.
+//
+// The collapsed CIDR lands in the plural `ipAddresses` field, which exists only
+// on PR#348 storage, so the result is read via the DYNAMIC client (never
+// referenced at compile time). Compiles on plain upstream; passes only on PR#348.
+// nnCollapseGVR / ccCollapseGVR name the CIDR-collapse resources. The collapsed
+// value lands in the plural ipAddresses field, which exists only on PR#348
+// storage, so learnt NNs are read via the dynamic client (never referenced at
+// compile time). This file compiles on plain upstream and passes only on PR#348
+// storage carrying the collapse dedup fix.
+var (
+	nnCollapseGVR = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "networkneighborhoods"}
+	ccCollapseGVR = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "collapseconfigurations"}
+)
+
+// applyCollapseFloor create-or-updates the cluster-scoped CollapseConfiguration
+// singleton to threshold 5 (< the compiled-in default 50, so a modest fan-out
+// trips collapse) and the given CIDR floor. Deflate collapses at write time
+// using whatever config is live then, via a TTL-cached (~10s) provider — so
+// callers must wait after this before deploying a learner.
+func applyCollapseFloor(t *testing.T, dyn dynamic.Interface, floorBits int64) {
+	ctx := context.Background()
+	cc := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
+		"kind":       "CollapseConfiguration",
+		"metadata":   map[string]interface{}{"name": "default"},
+		"spec":       map[string]interface{}{"networkIPGroupThreshold": int64(5), "networkCIDRFloorBits": floorBits},
+	}}
+	_, err := dyn.Resource(ccCollapseGVR).Create(ctx, cc, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		cur, gerr := dyn.Resource(ccCollapseGVR).Get(ctx, "default", metav1.GetOptions{})
+		require.NoError(t, gerr, "get CollapseConfiguration")
+		require.NoError(t, unstructured.SetNestedField(cur.Object, floorBits, "spec", "networkCIDRFloorBits"))
+		require.NoError(t, unstructured.SetNestedField(cur.Object, int64(5), "spec", "networkIPGroupThreshold"))
+		_, uerr := dyn.Resource(ccCollapseGVR).Update(ctx, cur, metav1.UpdateOptions{})
+		require.NoError(t, uerr, "update CollapseConfiguration floor")
+		return
+	}
+	require.NoError(t, err, "apply CollapseConfiguration")
+}
+
+// deployCIDRLearner deploys an egress fan-out workload and waits for its pod to
+// be ready; the caller later waits for the learnt NN to finalise.
+func deployCIDRLearner(t *testing.T, resource string) *testutils.TestWorkload {
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), resource))
+	require.NoError(t, err, "deploy %s", resource)
+	require.NoError(t, wl.WaitForReady(80), "%s not ready", resource)
+	return wl
+}
+
+// collectLearntCollapse waits for the workload's NetworkNeighborhood to finalise
+// (completion: complete), reads it via the dynamic client, and returns the
+// sorted, de-duplicated set of 52.216.0.0/16 egress CIDRs plus any bare host /32
+// left behind in that range.
+// collectLearntCollapse waits for the workload's NetworkNeighborhood to finalise
+// and returns the sorted, de-duplicated set of learnt egress CIDRs (plural
+// ipAddresses values carrying a "/") and any bare host ipAddress left behind.
+func collectLearntCollapse(t *testing.T, dyn dynamic.Interface, wl *testutils.TestWorkload) (cidrs, bare []string) {
+	require.NoError(t, wl.WaitForNetworkNeighborhoodCompletion(120), "network neighborhood did not complete learning")
+	nnTyped, err := wl.GetNetworkNeighborhood()
+	require.NoError(t, err, "get learnt network neighborhood")
+	got, err := dyn.Resource(nnCollapseGVR).Namespace(nnTyped.Namespace).Get(context.Background(), nnTyped.Name, metav1.GetOptions{})
+	require.NoError(t, err, "dynamic get network neighborhood %s/%s", nnTyped.Namespace, nnTyped.Name)
+
+	seen := map[string]struct{}{}
+	conts, _, _ := unstructured.NestedSlice(got.Object, "spec", "containers")
+	for _, c := range conts {
+		cm, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		eg, _, _ := unstructured.NestedSlice(cm, "egress")
+		for _, e := range eg {
+			em, ok := e.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if ips, ok, _ := unstructured.NestedStringSlice(em, "ipAddresses"); ok {
+				for _, ip := range ips {
+					if strings.Contains(ip, "/") {
+						if _, s := seen[ip]; !s {
+							seen[ip] = struct{}{}
+							cidrs = append(cidrs, ip)
+						}
+					}
+				}
+			}
+			if s, _, _ := unstructured.NestedString(em, "ipAddress"); s != "" {
+				bare = append(bare, s)
+			}
+		}
+	}
+	sort.Strings(cidrs)
+	sort.Strings(bare)
+	return cidrs, bare
+}
+
+// withPrefixes returns the members of cidrs whose network address starts with
+// one of the given dotted/colon prefixes (e.g. "52.216." or "2606:4700:0:1:").
+func withPrefixes(cidrs []string, prefixes ...string) []string {
+	var out []string
+	for _, c := range cidrs {
+		for _, p := range prefixes {
+			if strings.HasPrefix(c, p) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Test_34_NetworkNeighborsCIDRCollapse exercises the REAL learn→collapse path for
+// storage PR kubescape/storage#348 (CIDR collapsing) plus the netipx exact-cover
+// fix stacked on it. It never injects a profile: storage rejects/empties a
+// directly-created `completion: complete` NN and deflate only runs at
+// node-agent's write time, so only a genuinely learnt profile exercises collapse.
+//
+// Workloads egress to REAL cloud-provider address space (AWS S3, Cloudflare,
+// Azure, GCP). Assertions pin two properties: a fully-observed block collapses to
+// exactly that block (never over-approximating past what the workload reached),
+// and scattered traffic is bucketed to the floor so output is bounded by the
+// number of distinct floor networks — not one entry per host, the regression
+// caught in the kubescape/storage#349 review against the real too-large profile.
+// The collapsed value lands in the plural ipAddresses field (PR#348), read via
+// the dynamic client.
+//
+//	floor /16, full S3 /28 (52.216.1.0/28)      -> exactly 52.216.1.0/28
+//	floor /16, ~30 hosts spread across a /16     -> one covering 52.216.0.0/16 (bounded, no /32s)
+//	floor /16, 8 hosts each in a distinct /16    -> one /16 bucket apiece (bounded, no /32s)
+//	floor /16, full Cloudflare IPv6 /124        -> exactly 2606:4700:0:1::/124 (dual-stack only)
+//	floor /28, full S3 /27 (52.216.2.0/27)      -> splits into 52.216.2.0/28 + 52.216.2.16/28
+func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	k8sClient := k8sinterface.NewKubernetesApi()
+	dyn := dynamic.NewForConfigOrDie(k8sClient.K8SConfig)
+	t.Cleanup(func() { _ = dyn.Resource(ccCollapseGVR).Delete(context.Background(), "default", metav1.DeleteOptions{}) })
+
+	// -------- Phase 1: /16 floor — exactness on real cloud ranges --------
+	applyCollapseFloor(t, dyn, 16)
+	time.Sleep(20 * time.Second) // let the TTL-cached provider pick up the floor
+
+	s3 := deployCIDRLearner(t, "resources/networkneighbors-s3-28.yaml")
+	scattered := deployCIDRLearner(t, "resources/networkneighbors-scattered.yaml")
+	spread := deployCIDRLearner(t, "resources/networkneighbors-cidr-spread.yaml")
+	v6 := deployCIDRLearner(t, "resources/networkneighbors-v6-124.yaml")
+
+	// A fully-observed S3 /28 exact-covers to exactly that /28.
+	s3CIDRs, s3Bare := collectLearntCollapse(t, dyn, s3)
+	assert.Equal(t, []string{"52.216.1.0/28"}, withPrefixes(s3CIDRs, "52.216.1."),
+		"a fully-observed S3 /28 must collapse to exactly 52.216.1.0/28")
+	assert.Empty(t, withPrefixes(s3Bare, "52.216.1."), "no bare host /32 may remain")
+
+	// ~30 hosts spread across dozens of /24s within a single /16 — the shape of the
+	// real too-large profile from the storage#349 review. Under a /16 floor they
+	// share no common prefix as long as the floor collapses to one covering
+	// 52.216.0.0/16, NOT one entry per host. This is the case that exploded to
+	// thousands of /32s before the bucketing fix.
+	spreadCIDRs, spreadBare := collectLearntCollapse(t, dyn, spread)
+	assert.Equal(t, []string{"52.216.0.0/16"}, withPrefixes(spreadCIDRs, "52.216."),
+		"hosts spread across a /16 must collapse to a single bounded /16, not per-host entries")
+	assert.Empty(t, withPrefixes(spreadBare, "52.216."), "no bare host /32 may remain after bucketing")
+
+	// Scattered IPs across four providers, each in a distinct /16, share no common
+	// prefix as long as the floor, so each is bucketed into its floor-length (/16)
+	// network — one bounded block apiece, never left as unbounded per-host /32s.
+	scatteredWant := []string{
+		"104.16.0.0/16", "13.107.0.0/16", "172.64.0.0/16", "20.150.0.0/16",
+		"34.120.0.0/16", "35.190.0.0/16", "52.216.0.0/16", "52.217.0.0/16",
+	}
+	scatteredCIDRs, scatteredBare := collectLearntCollapse(t, dyn, scattered)
+	got := withPrefixes(scatteredCIDRs, "52.216.", "52.217.", "104.16.", "172.64.", "20.150.", "13.107.", "34.120.", "35.190.")
+	assert.Equal(t, scatteredWant, got, "scattered cloud IPs, each in a distinct /16, bucket to one /16 apiece")
+	assert.Empty(t, withPrefixes(scatteredBare, "52.216.", "52.217.", "104.16.", "172.64.", "20.150.", "13.107.", "34.120.", "35.190."),
+		"no bare host /32 may remain after bucketing")
+
+	// IPv6 exact cover — only on a dual-stack cluster; skip the assertion if the
+	// pod never egressed over v6 (single-stack), rather than fail.
+	v6CIDRs, _ := collectLearntCollapse(t, dyn, v6)
+	if v6got := withPrefixes(v6CIDRs, "2606:4700:0:1:"); len(v6got) == 0 {
+		t.Log("no IPv6 egress learnt (single-stack cluster) — skipping the v6 assertion")
+	} else {
+		assert.Equal(t, []string{"2606:4700:0:1::/124"}, v6got,
+			"a fully-observed Cloudflare v6 /124 must collapse to exactly that /124")
+	}
+
+	// -------- Phase 2: /28 floor — a fully-observed /27 splits into two /28s ----
+	applyCollapseFloor(t, dyn, 28)
+	time.Sleep(20 * time.Second)
+
+	split := deployCIDRLearner(t, "resources/networkneighbors-s3-27.yaml")
+	splitCIDRs, splitBare := collectLearntCollapse(t, dyn, split)
+	assert.Equal(t, []string{"52.216.2.0/28", "52.216.2.16/28"}, withPrefixes(splitCIDRs, "52.216.2."),
+		"a fully-observed /27 must split into two /28s under a /28 floor")
+	assert.Empty(t, withPrefixes(splitBare, "52.216.2."))
+
+	t.Logf("collapse validated on real cloud ranges: S3=%v spread=%v scattered=%v split=%v",
+		withPrefixes(s3CIDRs, "52.216.1."), withPrefixes(spreadCIDRs, "52.216."), got, withPrefixes(splitCIDRs, "52.216.2."))
 }

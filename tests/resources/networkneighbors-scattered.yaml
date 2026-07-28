@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloud-scattered
+  labels:
+    app: cloud-scattered
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloud-scattered
+  template:
+    metadata:
+      labels:
+        app: cloud-scattered
+    spec:
+      containers:
+        - name: c
+          image: busybox
+          command: ["sh", "-c"]
+          # Scattered real IPs across AWS S3 / Cloudflare / Azure / GCP, each in a
+          # distinct /16. Above the group threshold and sharing no common prefix as
+          # long as the floor, they bucket to one /16 apiece under a /16 floor
+          # (bounded output), rather than staying as unbounded per-host /32s.
+          args:
+            - "while true; do for ip in 52.216.10.20 52.217.50.100 104.16.100.50 172.64.200.10 20.150.10.5 13.107.6.152 34.120.50.10 35.190.20.30; do nc -w 1 -z $ip 443 2>/dev/null; done; sleep 2; done"

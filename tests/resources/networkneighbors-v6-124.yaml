@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cf-v6-124
+  labels:
+    app: cf-v6-124
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cf-v6-124
+  template:
+    metadata:
+      labels:
+        app: cf-v6-124
+    spec:
+      containers:
+        - name: c
+          image: busybox
+          command: ["sh", "-c"]
+          # Cloudflare IPv6 (2606:4700::/32): fully observe the /124 2606:4700:0:1::/124
+          args:
+            - "while true; do for i in 0 1 2 3 4 5 6 7 8 9 a b c d e f; do nc -w 1 -z 2606:4700:0:1::$i 443 2>/dev/null; done; sleep 2; done"

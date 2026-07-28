@@ -73,7 +73,8 @@ jobs:
           Test_23_RuleCooldownTest,
           Test_24_ProcessTreeDepthTest,
           Test_27_ApplicationProfileOpens,
-          Test_32_UnexpectedProcessArguments
+          Test_32_UnexpectedProcessArguments,
+          Test_34_NetworkNeighborsCIDRCollapse
         ]
     steps:
       - name: Checkout code
