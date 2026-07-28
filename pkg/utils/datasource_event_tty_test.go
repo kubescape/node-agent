@@ -154,6 +154,15 @@ func TestDatasourceEventTTYGetters(t *testing.T) {
 		require.True(t, e.GetHasTTY())
 	})
 
+	t.Run("phase2 major zero wins over nonzero index", func(t *testing.T) {
+		// Discriminates preference-order from OR semantics: tty_major is
+		// authoritative when present, so major 0 means no controlling terminal
+		// even though the stale index is nonzero. An OR implementation would
+		// wrongly return true here.
+		e := newExecEvent(t, ttyFields{tty: i32(5), ttyMajor: u32(0), ttyMinor: u32(0)})
+		require.False(t, e.GetHasTTY(), "tty_major present and 0 must win over a nonzero tty index")
+	})
+
 	t.Run("no tty fields at all", func(t *testing.T) {
 		e := newExecEvent(t, ttyFields{})
 		require.Equal(t, int32(0), e.GetTTY())
@@ -173,6 +182,9 @@ func TestStructEventTTYGetters(t *testing.T) {
 	phase2 := &StructEvent{EventType: ExecveEventType, TTY: i32(0), TTYMajor: u32(136), TTYMinor: u32(0)}
 	require.Equal(t, uint32(136), phase2.GetTTYMajor())
 	require.True(t, phase2.GetHasTTY())
+
+	majorZeroWins := &StructEvent{EventType: ExecveEventType, TTY: i32(5), TTYMajor: u32(0), TTYMinor: u32(0)}
+	require.False(t, majorZeroWins.GetHasTTY(), "TTYMajor present and 0 must win over a nonzero TTY index")
 
 	unset := &StructEvent{EventType: ExecveEventType}
 	require.Equal(t, int32(0), unset.GetTTY())
