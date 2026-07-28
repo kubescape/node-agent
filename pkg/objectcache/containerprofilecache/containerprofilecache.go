@@ -469,6 +469,12 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// the migrated replacement for the AP+NN overlay, so it becomes the base
 	// (the ug- user-managed pass may still union on top). Learning is suppressed
 	// for user-defined containers, so no consolidated CP competes with it.
+	// entry.RV must keep tracking the LEARNED CP (the object entry.CPName points
+	// at), so capture its RV before cp is repointed at the authored profile.
+	learnedRV := ""
+	if cp != nil {
+		learnedRV = cp.ResourceVersion
+	}
 	if userDefinedCP != nil {
 		cp = userDefinedCP
 	}
@@ -515,6 +521,11 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// refresh queries the synthetic name, always 404s, and the fast-skip
 	// keeps the synthetic entry forever (stored RV is "" == absent-match).
 	entry.CPName = cpName
+	// buildEntry derives RV from whatever it projected, which is the authored CP
+	// when one was adopted. refreshOneEntry compares entry.RV against a GET on
+	// entry.CPName, so leaving the authored RV here makes the permanent 404 on
+	// the learned slug look like a transient error and freezes the entry.
+	entry.RV = learnedRV
 	// buildEntry derives RV from whatever it projected — the authored CP when one
 	// was adopted. refreshOneEntry compares entry.RV against a GET on entry.CPName
 	// (the learned slug), so leaving the authored RV here makes the permanent 404
