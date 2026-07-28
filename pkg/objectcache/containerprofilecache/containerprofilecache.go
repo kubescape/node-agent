@@ -371,25 +371,98 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// drives the reconciler to retry the CP on every tick until it materialises.
 	var userDefinedCP *v1beta1.ContainerProfile
 	overlayName, hasOverlay := container.K8s.PodLabels[helpersv1.UserDefinedProfileMetadataKey]
+	// resolvedOverlayName is the ContainerProfile name the label ultimately
+	// resolves to; it is recorded in entry.UserCPRef so refreshOneEntry re-fetches
+	// the SAME object every tick. It defaults to the bare label value — the
+	// single-container convention and the safest retry target when the
+	// per-container fetch does not cleanly succeed.
+	resolvedOverlayName := overlayName
 	if hasOverlay && overlayName != "" {
+		// Per-container binding (review finding on node-agent#864): a
+		// multi-container pod shares one label value but each container is
+		// profiled independently, so its authored ContainerProfile is published
+		// at "<overlay>-<containerName>". Try that per-container name first; on a
+		// genuine NotFound fall back to the bare "<overlay>" (single-container
+		// pods). A transient error is NOT a fallback trigger — the CP is left nil
+		// for this tick and the bare name stays the retry target.
+		perContainerName := overlayName + "-" + container.Runtime.ContainerName
 		var userCPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, ns, overlayName)
+			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, ns, perContainerName)
 			return userCPErr
 		})
-		if userCPErr != nil {
+		switch {
+		case userCPErr == nil && userDefinedCP != nil:
+			resolvedOverlayName = perContainerName
+		case apierrors.IsNotFound(userCPErr):
+			// Fall back to the bare overlay name (single-container convention).
+			userDefinedCP = nil
+			var bareErr error
+			_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+				userDefinedCP, bareErr = c.storageClient.GetContainerProfile(rctx, ns, overlayName)
+				return bareErr
+			})
+			if bareErr != nil {
+				logger.L().Debug("user-defined ContainerProfile not available",
+					helpers.String("containerID", containerID),
+					helpers.String("namespace", ns),
+					helpers.String("name", overlayName),
+					helpers.Error(bareErr))
+				userDefinedCP = nil
+			}
+		default:
+			// Transient error on the per-container fetch: keep probing the bare
+			// name on later ticks (the common single-container recovery target).
 			logger.L().Debug("user-defined ContainerProfile not available",
 				helpers.String("containerID", containerID),
 				helpers.String("namespace", ns),
-				helpers.String("name", overlayName),
+				helpers.String("name", perContainerName),
 				helpers.Error(userCPErr))
+			userDefinedCP = nil
+		}
+	}
+
+	// A label-referenced ContainerProfile must be USER-AUTHORED, not a learned
+	// one. A learned CP carries lifecycle annotations (status/completion); an
+	// authored one carries none. If the label resolves to a learned CP, ignore
+	// it — otherwise its real state is overwritten with Completed/Full below and
+	// a still-learning profile would be enforced as complete (false positives).
+	if userDefinedCP != nil {
+		if _, learned := userDefinedCP.Annotations[helpersv1.StatusMetadataKey]; learned {
+			logger.L().Warning("user-defined-profile label resolves to a learned ContainerProfile; ignoring it",
+				helpers.String("containerID", containerID),
+				helpers.String("namespace", ns),
+				helpers.String("name", overlayName))
 			userDefinedCP = nil
 		}
 	}
 
 	// Need SOMETHING to cache. If we have nothing, stay pending and retry.
 	if cp == nil && userDefinedCP == nil && userManagedCP == nil {
+		// Visibility for the upgrade path: a workload whose user-defined-profile
+		// label is set but resolves to nothing (e.g. still-legacy AP/NN that are
+		// no longer read) would otherwise pend forever with only a Debug trace.
+		// Warn once — before the container enters `pending` — so the periodic
+		// retry doesn't spam.
+		if hasOverlay && overlayName != "" && !c.pending.Has(containerID) {
+			logger.L().Warning("user-defined-profile label set but no ContainerProfile resolved; container has no profile (legacy ApplicationProfile/NetworkNeighborhood are no longer read)",
+				helpers.String("containerID", containerID),
+				helpers.String("namespace", ns),
+				helpers.String("name", overlayName))
+		}
 		return false
+	}
+
+	// Capture the LEARNED CP's ResourceVersion before cp is repointed at the
+	// authored profile. entry.RV must track the object entry.CPName points at
+	// (the learned slug). If it held the authored RV instead, refreshOneEntry
+	// would compare it against a GET on the learned slug — which 404s for a
+	// user-defined container (learning is suppressed) — and read that 404 as a
+	// transient error, freezing the entry so authored-CP edits are never picked
+	// up (review finding on node-agent#864).
+	learnedRV := ""
+	if cp != nil {
+		learnedRV = cp.ResourceVersion
 	}
 
 	// A user-defined ContainerProfile is authoritative for this container: it is
@@ -442,6 +515,11 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// refresh queries the synthetic name, always 404s, and the fast-skip
 	// keeps the synthetic entry forever (stored RV is "" == absent-match).
 	entry.CPName = cpName
+	// buildEntry derives RV from whatever it projected — the authored CP when one
+	// was adopted. refreshOneEntry compares entry.RV against a GET on entry.CPName
+	// (the learned slug), so leaving the authored RV here makes the permanent 404
+	// on that slug look transient and freezes the entry. Track the learned RV.
+	entry.RV = learnedRV
 	// Fill in user-managed bookkeeping so refreshOneEntry can re-fetch these
 	// sources on every tick. WorkloadName is the "ug-" lookup prefix.
 	entry.WorkloadName = workloadName
@@ -458,7 +536,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// until it restarts. There is no legacy AP/NN fallback anymore — the CP is
 	// the only user-defined source.
 	if hasOverlay && overlayName != "" {
-		entry.UserCPRef = &namespacedName{Namespace: ns, Name: overlayName}
+		entry.UserCPRef = &namespacedName{Namespace: ns, Name: resolvedOverlayName}
 		if userDefinedCP != nil {
 			entry.UserCPRV = userDefinedCP.ResourceVersion
 			// A user-authored profile is authoritative and complete by

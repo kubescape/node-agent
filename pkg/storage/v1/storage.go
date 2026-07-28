@@ -61,9 +61,10 @@ func CreateStorage(namespace string) (*Storage, error) {
 		return nil, fmt.Errorf("failed to create K8S Aggregated API Client with err: %v", err)
 	}
 
-	// wait for storage to be ready
+	// wait for storage to be ready. Probe ContainerProfiles — the unified profile
+	// resource — not ApplicationProfiles, which no longer exists in storage.
 	if err := backoff.RetryNotify(func() error {
-		_, err := clientset.SpdxV1beta1().ApplicationProfiles("default").List(context.Background(), metav1.ListOptions{})
+		_, err := clientset.SpdxV1beta1().ContainerProfiles("default").List(context.Background(), metav1.ListOptions{})
 		return err
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 60), func(err error, d time.Duration) {
 		logger.L().Info("waiting for storage to be ready", helpers.Error(err), helpers.String("retry in", d.String()))

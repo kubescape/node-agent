@@ -323,7 +323,50 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			helpers.Error(cpErr))
 		cp = nil
 	}
-	if cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
+	// Re-fetch the user-defined ContainerProfile (migrated "new way") FIRST, when
+	// the entry was built from one. It is the authoritative base and the only
+	// user-defined source (the legacy AP/NN overlay is no longer supported); a
+	// transient fetch error keeps the entry as-is.
+	//
+	// Ordering matters (review finding on node-agent#864): when an authored CP is
+	// present it REPLACES the learned CP as the base, so the learned-status gate
+	// below must not be allowed to early-return before the authored CP is
+	// fetched. Otherwise a learned CP stuck in a non-terminal status ("ready")
+	// would freeze authored-CP edits out of the cache forever.
+	var userDefinedCP *v1beta1.ContainerProfile
+	if e.UserCPRef != nil {
+		var userCPErr error
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, e.UserCPRef.Namespace, e.UserCPRef.Name)
+			return userCPErr
+		})
+		if userCPErr != nil && e.UserCPRV != "" {
+			logger.L().Debug("refreshOneEntry: user-defined CP fetch failed; keeping cached entry",
+				helpers.String("containerID", id),
+				helpers.String("name", e.UserCPRef.Name),
+				helpers.Error(userCPErr))
+			return
+		}
+		if userCPErr != nil {
+			userDefinedCP = nil
+		}
+	}
+	// Authored-validation (mirror of the add path): a label-referenced CP that
+	// carries lifecycle annotations is a LEARNED profile, not an authored one.
+	// Ignore it so its real state is not overwritten with Completed/Full and a
+	// still-learning profile is not enforced as complete.
+	if userDefinedCP != nil {
+		if _, learned := userDefinedCP.Annotations[helpersv1.StatusMetadataKey]; learned {
+			logger.L().Debug("refreshOneEntry: user-defined-profile label resolves to a learned CP; ignoring it",
+				helpers.String("containerID", id),
+				helpers.String("name", e.UserCPRef.Name))
+			userDefinedCP = nil
+		}
+	}
+	// Learned-status gate: only blocks when there is NO authored CP to adopt.
+	// With an authored CP present, the learned CP's status is irrelevant — the
+	// authored profile is the base and is enforced regardless.
+	if userDefinedCP == nil && cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
 		logger.L().Debug("refreshOneEntry: CP status not terminal; keeping cached entry",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName),
@@ -349,28 +392,6 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		}
 		if userManagedCPErr != nil {
 			userManagedCP = nil // k8s client returns non-nil zero-value on 404; treat as absent
-		}
-	}
-	// Re-fetch the user-defined ContainerProfile (migrated "new way") when the
-	// entry was built from one. It is the authoritative base and the only
-	// user-defined source (the legacy AP/NN overlay is no longer supported); a
-	// transient fetch error keeps the entry as-is.
-	var userDefinedCP *v1beta1.ContainerProfile
-	if e.UserCPRef != nil {
-		var userCPErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, e.UserCPRef.Namespace, e.UserCPRef.Name)
-			return userCPErr
-		})
-		if userCPErr != nil && e.UserCPRV != "" {
-			logger.L().Debug("refreshOneEntry: user-defined CP fetch failed; keeping cached entry",
-				helpers.String("containerID", id),
-				helpers.String("name", e.UserCPRef.Name),
-				helpers.Error(userCPErr))
-			return
-		}
-		if userCPErr != nil {
-			userDefinedCP = nil
 		}
 	}
 
@@ -416,6 +437,15 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	userDefinedCP *v1beta1.ContainerProfile,
 	userManagedCP *v1beta1.ContainerProfile,
 ) {
+	// Authored-validation (mirror of the add path): a label-referenced CP that
+	// carries lifecycle annotations is a LEARNED profile, not an authored one.
+	// Ignore it here too so it is never force-set Completed/Full below.
+	if userDefinedCP != nil {
+		if _, learned := userDefinedCP.Annotations[helpersv1.StatusMetadataKey]; learned {
+			userDefinedCP = nil
+		}
+	}
+
 	pod := c.k8sObjectCache.GetPod(prev.Namespace, prev.PodName)
 
 	// Backfill PodUID when the entry was originally added before the pod

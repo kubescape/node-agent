@@ -10,7 +10,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/cooldownqueue"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/watcher"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/pager"
@@ -150,18 +149,6 @@ func (wh *WatchHandler) Stop(_ context.Context) {
 
 func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts metav1.ListOptions) (watch.Interface, error) {
 	switch res.Resource {
-	case "applicationprofiles":
-		if wh.storageClient == nil {
-			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
-		}
-		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
-		return wh.storageClient.ApplicationProfiles("").Watch(context.Background(), opts)
-	case "networkneighborhoods":
-		if wh.storageClient == nil {
-			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
-		}
-		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
-		return wh.storageClient.NetworkNeighborhoods("").Watch(context.Background(), opts)
 	case "pods":
 		return wh.k8sClient.GetKubernetesClient().CoreV1().Pods("").Watch(context.Background(), opts)
 	case "runtimerulealertbindings":
@@ -236,18 +223,6 @@ func (wh *WatchHandler) watchRetry(_ context.Context, res schema.GroupVersionRes
 
 func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav1.ListOptions) (runtime.Object, error) {
 	switch res.Resource {
-	case "applicationprofiles":
-		if wh.storageClient == nil {
-			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
-		}
-		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
-		return wh.storageClient.ApplicationProfiles("").List(context.Background(), opts)
-	case "networkneighborhoods":
-		if wh.storageClient == nil {
-			return nil, fmt.Errorf("storage client is nil: %w", errNotImplemented)
-		}
-		opts.ResourceVersion = softwarecomposition.ResourceVersionFullSpec
-		return wh.storageClient.NetworkNeighborhoods("").List(context.Background(), opts)
 	case "pods":
 		return wh.k8sClient.GetKubernetesClient().CoreV1().Pods("").List(context.Background(), opts)
 	case "runtimerulealertbindings":

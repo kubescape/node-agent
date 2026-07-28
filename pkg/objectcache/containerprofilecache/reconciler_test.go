@@ -17,7 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -63,41 +65,44 @@ func (k *controllableK8sCache) GetSharedContainerData(_ string) *objectcache.Wat
 func (k *controllableK8sCache) DeleteSharedContainerData(_ string) {}
 
 // countingProfileClient tracks per-method RPC counts so tests can assert
-// fast-skip behavior.
+// fast-skip behavior. It is name-aware: the base/learned CP is served for its
+// own name, an optional authored CP for its own name, and every other name
+// returns NotFound. This lets refresh tests distinguish the learned slug from
+// the authored/overlay CP instead of returning the same object for any name.
 type countingProfileClient struct {
-	cp *v1beta1.ContainerProfile
+	cp     *v1beta1.ContainerProfile // learned/base CP, keyed by cp.Name
+	userCP *v1beta1.ContainerProfile // authored CP, keyed by userCP.Name
 
 	cpCalls atomic.Int64
 }
 
 var _ storage.ProfileClient = (*countingProfileClient)(nil)
 
-func (f *countingProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
+func (f *countingProfileClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
 	f.cpCalls.Add(1)
-	return f.cp, nil
+	if f.userCP != nil && name == f.userCP.Name {
+		return f.userCP, nil
+	}
+	if f.cp != nil && name == f.cp.Name {
+		return f.cp, nil
+	}
+	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, name)
 }
 
-// countingMetrics tallies ReportContainerProfileLegacyLoad calls so the T8
-// end-to-end test can assert the overlay refresh re-emits the full-load signal.
+// countingMetrics tallies reconciler eviction + entry-count signals so tests
+// can assert eviction behavior.
 type countingMetrics struct {
 	metricsmanager.MetricsMock
 	mu           sync.Mutex
-	legacyLoads  map[string]int // key = kind+"|"+completeness
 	evictions    map[string]int
 	entriesByKnd map[string]float64
 }
 
 func newCountingMetrics() *countingMetrics {
 	return &countingMetrics{
-		legacyLoads:  map[string]int{},
 		evictions:    map[string]int{},
 		entriesByKnd: map[string]float64{},
 	}
-}
-func (m *countingMetrics) ReportContainerProfileLegacyLoad(kind, completeness string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.legacyLoads[kind+"|"+completeness]++
 }
 func (m *countingMetrics) ReportContainerProfileReconcilerEviction(reason string) {
 	m.mu.Lock()
@@ -108,11 +113,6 @@ func (m *countingMetrics) SetContainerProfileCacheEntries(kind string, count flo
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.entriesByKnd[kind] = count
-}
-func (m *countingMetrics) legacyLoad(kind, completeness string) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.legacyLoads[kind+"|"+completeness]
 }
 func (m *countingMetrics) eviction(reason string) int {
 	m.mu.Lock()
