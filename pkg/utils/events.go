@@ -97,8 +97,12 @@ type ExecEvent interface {
 	GetArgs() []string
 	GetCwd() string
 	GetExePath() string
+	GetHasTTY() bool
 	GetParentExePath() string
 	GetPupperLayer() bool
+	GetTTY() int32
+	GetTTYMajor() uint32
+	GetTTYMinor() uint32
 	GetUpperLayer() bool
 }
 

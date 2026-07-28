@@ -509,6 +509,18 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 	}
 }
 
+func (e *DatasourceEvent) GetHasTTY() bool {
+	if e.FieldPresent("tty_major") {
+		major, _ := e.getFieldAccessor("tty_major").Uint32(e.Data)
+		return major != 0
+	}
+	if e.FieldPresent("tty") {
+		idx, _ := e.getFieldAccessor("tty").Int32(e.Data)
+		return idx != 0
+	}
+	return false
+}
+
 func (e *DatasourceEvent) GetHostNetwork() bool {
 	hostNetwork, _ := e.getFieldAccessor("k8s.hostnetwork").Bool(e.Data)
 	return hostNetwork
@@ -767,6 +779,40 @@ func (e *DatasourceEvent) GetSyscall() string {
 func (e *DatasourceEvent) GetSyscalls() []byte {
 	syscallsBuffer, _ := e.getFieldAccessor("syscalls").Bytes(e.Data)
 	return syscallsBuffer
+}
+
+// GetTTY returns the index of the controlling terminal within its own driver.
+// It does not identify a terminal: the index is only unique per driver, and 0
+// is reported both for /dev/pts/0 and for a process with no terminal. Prefer
+// GetTTYMajor/GetTTYMinor.
+func (e *DatasourceEvent) GetTTY() int32 {
+	if !e.FieldPresent("tty") {
+		return 0
+	}
+	tty, _ := e.getFieldAccessor("tty").Int32(e.Data)
+	return tty
+}
+
+// GetTTYMajor returns the major number of the controlling terminal's device,
+// or 0 when the process has no controlling terminal or the running gadget does
+// not emit it. Use FieldPresent("tty_major") to tell those apart.
+func (e *DatasourceEvent) GetTTYMajor() uint32 {
+	if !e.FieldPresent("tty_major") {
+		return 0
+	}
+	major, _ := e.getFieldAccessor("tty_major").Uint32(e.Data)
+	return major
+}
+
+// GetTTYMinor returns the minor number of the controlling terminal's device,
+// or 0 when the process has no controlling terminal or the running gadget does
+// not emit it.
+func (e *DatasourceEvent) GetTTYMinor() uint32 {
+	if !e.FieldPresent("tty_minor") {
+		return 0
+	}
+	minor, _ := e.getFieldAccessor("tty_minor").Uint32(e.Data)
+	return minor
 }
 
 func (e *DatasourceEvent) getTid() uint64 {

@@ -285,6 +285,18 @@ func (e *StructEvent) GetGid() *uint32 {
 	return &e.Gid
 }
 
+// GetHasTTY reports whether the process has a controlling terminal, preferring
+// the device major and falling back to the driver-local index.
+func (e *StructEvent) GetHasTTY() bool {
+	if e.TTYMajor != nil {
+		return *e.TTYMajor != 0
+	}
+	if e.TTY != nil {
+		return *e.TTY != 0
+	}
+	return false
+}
+
 func (e *StructEvent) GetHostNetwork() bool {
 	return e.HostNetwork
 }
@@ -428,6 +440,27 @@ func (e *StructEvent) GetSyscall() string {
 
 func (e *StructEvent) GetSyscalls() []byte {
 	return e.Syscalls
+}
+
+func (e *StructEvent) GetTTY() int32 {
+	if e.TTY == nil {
+		return 0
+	}
+	return *e.TTY
+}
+
+func (e *StructEvent) GetTTYMajor() uint32 {
+	if e.TTYMajor == nil {
+		return 0
+	}
+	return *e.TTYMajor
+}
+
+func (e *StructEvent) GetTTYMinor() uint32 {
+	if e.TTYMinor == nil {
+		return 0
+	}
+	return *e.TTYMinor
 }
 
 func (e *StructEvent) GetTid() uint64 {

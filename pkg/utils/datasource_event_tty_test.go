@@ -116,3 +116,65 @@ func TestStructEventFieldPresent(t *testing.T) {
 	// Names without a wired presence tester report false.
 	require.False(t, set.FieldPresent("comm"))
 }
+
+func TestDatasourceEventTTYGetters(t *testing.T) {
+	t.Run("phase1 with a terminal", func(t *testing.T) {
+		// Gadget emits only the driver-local index. Index 3 proves a terminal.
+		e := newExecEvent(t, ttyFields{tty: i32(3)})
+		require.Equal(t, int32(3), e.GetTTY())
+		require.True(t, e.GetHasTTY())
+		// Device number is unavailable on this gadget.
+		require.Equal(t, uint32(0), e.GetTTYMajor())
+		require.Equal(t, uint32(0), e.GetTTYMinor())
+	})
+
+	t.Run("phase1 index zero reads as no terminal", func(t *testing.T) {
+		// Knowingly wrong for pts/0; accepted phase-1 semantics.
+		e := newExecEvent(t, ttyFields{tty: i32(0)})
+		require.Equal(t, int32(0), e.GetTTY())
+		require.False(t, e.GetHasTTY())
+	})
+
+	t.Run("phase2 pts0 is recognised", func(t *testing.T) {
+		// The case phase 1 gets wrong: major 136 minor 0 is /dev/pts/0.
+		e := newExecEvent(t, ttyFields{tty: i32(0), ttyMajor: u32(136), ttyMinor: u32(0)})
+		require.Equal(t, uint32(136), e.GetTTYMajor())
+		require.Equal(t, uint32(0), e.GetTTYMinor())
+		require.True(t, e.GetHasTTY(), "major 136 is a pty, so a terminal exists")
+	})
+
+	t.Run("phase2 no terminal", func(t *testing.T) {
+		e := newExecEvent(t, ttyFields{tty: i32(0), ttyMajor: u32(0), ttyMinor: u32(0)})
+		require.False(t, e.GetHasTTY())
+	})
+
+	t.Run("phase2 major wins over index", func(t *testing.T) {
+		// Proves the fallback order: tty_major is authoritative when present.
+		e := newExecEvent(t, ttyFields{tty: i32(0), ttyMajor: u32(4), ttyMinor: u32(1)})
+		require.True(t, e.GetHasTTY())
+	})
+
+	t.Run("no tty fields at all", func(t *testing.T) {
+		e := newExecEvent(t, ttyFields{})
+		require.Equal(t, int32(0), e.GetTTY())
+		require.Equal(t, uint32(0), e.GetTTYMajor())
+		require.False(t, e.GetHasTTY())
+	})
+}
+
+func TestStructEventTTYGetters(t *testing.T) {
+	phase1 := &StructEvent{EventType: ExecveEventType, TTY: i32(3)}
+	require.Equal(t, int32(3), phase1.GetTTY())
+	require.True(t, phase1.GetHasTTY())
+
+	phase1Zero := &StructEvent{EventType: ExecveEventType, TTY: i32(0)}
+	require.False(t, phase1Zero.GetHasTTY())
+
+	phase2 := &StructEvent{EventType: ExecveEventType, TTY: i32(0), TTYMajor: u32(136), TTYMinor: u32(0)}
+	require.Equal(t, uint32(136), phase2.GetTTYMajor())
+	require.True(t, phase2.GetHasTTY())
+
+	unset := &StructEvent{EventType: ExecveEventType}
+	require.Equal(t, int32(0), unset.GetTTY())
+	require.False(t, unset.GetHasTTY())
+}
