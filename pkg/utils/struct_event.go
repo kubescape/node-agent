@@ -78,6 +78,9 @@ type StructEvent struct {
 	Syscalls             []byte                  `json:"syscalls,omitempty" yaml:"syscalls,omitempty"`
 	Tid                  uint64                  `json:"tid,omitempty" yaml:"tid,omitempty"`
 	Timestamp            int64                   `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
+	TTY                  *int32                  `json:"tty,omitempty" yaml:"tty,omitempty"`
+	TTYMajor             *uint32                 `json:"ttyMajor,omitempty" yaml:"ttyMajor,omitempty"`
+	TTYMinor             *uint32                 `json:"ttyMinor,omitempty" yaml:"ttyMinor,omitempty"`
 	Type                 HTTPDataType            `json:"type,omitempty" yaml:"type,omitempty"`
 	Uid                  uint32                  `json:"uid,omitempty" yaml:"uid,omitempty"`
 	UpperLayer           bool                    `json:"upperLayer,omitempty" yaml:"upperLayer,omitempty"`
@@ -422,6 +425,26 @@ func (e *StructEvent) GetTimestamp() types.Time {
 
 func (e *StructEvent) GetType() HTTPDataType {
 	return e.Type
+}
+
+// FieldPresent reports whether this event carries the named field, using
+// datasource field names (snake_case) to match the DatasourceEvent
+// implementation. A nil pointer means "not measured".
+//
+// Only names with a wired CEL presence tester are meaningful here; everything
+// else reports false. If a presence tester is ever added for another field,
+// this switch must be extended in the same change.
+func (e *StructEvent) FieldPresent(name string) bool {
+	switch name {
+	case "tty":
+		return e.TTY != nil
+	case "tty_major":
+		return e.TTYMajor != nil
+	case "tty_minor":
+		return e.TTYMinor != nil
+	default:
+		return false
+	}
 }
 
 func (e *StructEvent) GetUid() *uint32 {

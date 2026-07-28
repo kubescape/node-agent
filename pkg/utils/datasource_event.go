@@ -30,6 +30,19 @@ const (
 
 var (
 	fieldCaches = sync.Map{}
+
+	// presenceCaches maps a datasource.DataSource to a *sync.Map of
+	// fieldName -> bool, recording whether that datasource exposes the field.
+	//
+	// Keyed by datasource instance rather than by EventType (as fieldCaches is)
+	// for two reasons: a FieldAccessor is only valid against the datasource that
+	// produced it, and misses must be cached here. dataSource.GetField falls back
+	// to a case-insensitive scan over every field when the name is absent, and
+	// fields that are absent by design (tty_major on an older gadget) are looked
+	// up on every single event.
+	//
+	// Bounded by the number of tracers (~19), all long-lived.
+	presenceCaches = sync.Map{}
 )
 
 type DatasourceEvent struct {
@@ -189,6 +202,36 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 	}
 
 	return res
+}
+
+// FieldPresent reports whether the underlying datasource exposes the named
+// field. name is a datasource field name (snake_case), not a CEL field name.
+//
+// This is how "the gadget running on this agent does not emit this signal" is
+// distinguished from "the signal's value is zero". It never logs: an absent
+// field is an expected, per-event condition.
+func (e *DatasourceEvent) FieldPresent(name string) bool {
+	if e == nil || e.Datasource == nil {
+		return false
+	}
+
+	cacheVal, ok := presenceCaches.Load(e.Datasource)
+	if !ok {
+		cacheVal, _ = presenceCaches.LoadOrStore(e.Datasource, &sync.Map{})
+	}
+
+	m, ok := cacheVal.(*sync.Map)
+	if !ok {
+		return false
+	}
+
+	if present, ok := m.Load(name); ok {
+		return present.(bool)
+	}
+
+	present := e.Datasource.GetField(name) != nil
+	m.Store(name, present)
+	return present
 }
 
 func (e *DatasourceEvent) GetAddresses() []string {

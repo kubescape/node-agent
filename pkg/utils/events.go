@@ -37,6 +37,7 @@ type EnrichEvent interface {
 	GetContainerImageDigest() string
 	GetError() int64
 	GetExtra() interface{}
+	FieldPresent(name string) bool
 	GetGid() *uint32
 	GetHostNetwork() bool
 	GetMountNsID() uint64
