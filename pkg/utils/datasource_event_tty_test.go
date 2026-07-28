@@ -1,10 +1,12 @@
 package utils
 
 import (
+	"os"
 	"testing"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+	"github.com/kubescape/go-logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -189,4 +191,72 @@ func TestStructEventTTYGetters(t *testing.T) {
 	unset := &StructEvent{EventType: ExecveEventType}
 	require.Equal(t, int32(0), unset.GetTTY())
 	require.False(t, unset.GetHasTTY())
+}
+
+// logSize returns the number of bytes written to the capture file so far.
+func logSize(t *testing.T, f *os.File) int64 {
+	t.Helper()
+	st, err := os.Stat(f.Name())
+	require.NoError(t, err)
+	return st.Size()
+}
+
+// resetLog truncates the capture file back to empty.
+func resetLog(t *testing.T, f *os.File) {
+	t.Helper()
+	require.NoError(t, f.Truncate(0))
+	_, err := f.Seek(0, 0)
+	require.NoError(t, err)
+}
+
+// TestTTYGettersDoNotLog asserts that reading tty fields the running gadget does
+// not emit produces no log output. tty_major is absent on every exec event until
+// the gadget ships it, so a single Warning on that path becomes thousands of
+// lines per second on a busy node.
+//
+// Does not call t.Parallel(): it mutates the global logger.
+func TestTTYGettersDoNotLog(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "log")
+	require.NoError(t, err)
+	defer f.Close()
+
+	// The pretty logger honours SetWriter; the zap logger does not, and plain
+	// (non-Ctx) warnings bypass the OTEL bridge entirely.
+	logger.InitLogger("pretty")
+	prev := logger.L().GetWriter()
+	logger.L().SetWriter(f)
+	defer func() {
+		logger.L().SetWriter(prev)
+		logger.InitLogger("none")
+	}()
+
+	// Phase-1 shape: tty_major and tty_minor are absent.
+	e := newExecEvent(t, ttyFields{tty: i32(0)})
+
+	// Control 1: capture must be live, or everything below passes vacuously.
+	logger.L().Warning("capture control")
+	require.NotZero(t, logSize(t, f), "log capture is not working, so this test would prove nothing")
+	resetLog(t, f)
+
+	// The property under test.
+	for i := 0; i < 100; i++ {
+		e.GetHasTTY()
+		e.GetTTY()
+		e.GetTTYMajor()
+		e.GetTTYMinor()
+		e.FieldPresent("tty_major")
+	}
+	require.Zero(t, logSize(t, f), "tty getters must not log for absent fields")
+
+	// Control 2: an unguarded lookup of an absent field DOES log, proving the
+	// assertion above would fail if a getter dropped its FieldPresent guard.
+	//
+	// Deliberately NOT "tty_major": getFieldAccessor caches found fields in the
+	// package-global fieldCaches, keyed by EventType rather than by datasource.
+	// Earlier tests in this package construct a phase-2 datasource that HAS
+	// tty_major, which caches an accessor under ExecveEventType and silences the
+	// warning for every later lookup of that name. A name nothing else looks up
+	// is immune to that, and misses are never cached, so it logs every time.
+	_ = e.getFieldAccessor("zz_absent_log_control")
+	require.NotZero(t, logSize(t, f), "unguarded getFieldAccessor should log; if it does not, the assertion above has no teeth")
 }
