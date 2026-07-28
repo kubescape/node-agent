@@ -35,11 +35,16 @@ var (
 	// fieldName -> bool, recording whether that datasource exposes the field.
 	//
 	// Keyed by datasource instance rather than by EventType (as fieldCaches is)
-	// for two reasons: a FieldAccessor is only valid against the datasource that
-	// produced it, and misses must be cached here. dataSource.GetField falls back
-	// to a case-insensitive scan over every field when the name is absent, and
-	// fields that are absent by design (tty_major on an older gadget) are looked
-	// up on every single event.
+	// because a FieldAccessor is only valid against the datasource that produced
+	// it, so an EventType-keyed cache would serve accessors across datasources
+	// sharing an event type.
+	//
+	// Misses are cached too. Fields that are absent by design (tty_major on an
+	// older gadget) are looked up on every single event, and caching spares each
+	// one an RLock and a map lookup. It also keeps the cost flat if the IG
+	// replace directive in go.mod is ever retargeted at a version whose GetField
+	// falls back to a case-insensitive scan over all fields on a miss, as
+	// upstream's does.
 	//
 	// Bounded by the number of tracers (~19), all long-lived.
 	presenceCaches = sync.Map{}

@@ -96,6 +96,10 @@ func TestDatasourceEventFieldPresent(t *testing.T) {
 	// Defensive: a nil datasource must not panic.
 	empty := &DatasourceEvent{EventType: ExecveEventType}
 	require.False(t, empty.FieldPresent("tty"))
+
+	// Defensive: a nil receiver must not panic either.
+	var nilEvent *DatasourceEvent
+	require.False(t, nilEvent.FieldPresent("tty"))
 }
 
 func TestStructEventFieldPresent(t *testing.T) {

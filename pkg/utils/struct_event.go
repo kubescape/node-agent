@@ -104,6 +104,26 @@ var _ SshEvent = (*StructEvent)(nil)
 var _ SyscallEvent = (*StructEvent)(nil)
 var _ UnshareEvent = (*StructEvent)(nil)
 
+// FieldPresent reports whether this event carries the named field, using
+// datasource field names (snake_case) to match the DatasourceEvent
+// implementation. A nil pointer means "not measured".
+//
+// Only names with a wired CEL presence tester are meaningful here; everything
+// else reports false. If a presence tester is ever added for another field,
+// this switch must be extended in the same change.
+func (e *StructEvent) FieldPresent(name string) bool {
+	switch name {
+	case "tty":
+		return e.TTY != nil
+	case "tty_major":
+		return e.TTYMajor != nil
+	case "tty_minor":
+		return e.TTYMinor != nil
+	default:
+		return false
+	}
+}
+
 func (e *StructEvent) GetAddresses() []string {
 	return e.Addresses
 }
@@ -425,26 +445,6 @@ func (e *StructEvent) GetTimestamp() types.Time {
 
 func (e *StructEvent) GetType() HTTPDataType {
 	return e.Type
-}
-
-// FieldPresent reports whether this event carries the named field, using
-// datasource field names (snake_case) to match the DatasourceEvent
-// implementation. A nil pointer means "not measured".
-//
-// Only names with a wired CEL presence tester are meaningful here; everything
-// else reports false. If a presence tester is ever added for another field,
-// this switch must be extended in the same change.
-func (e *StructEvent) FieldPresent(name string) bool {
-	switch name {
-	case "tty":
-		return e.TTY != nil
-	case "tty_major":
-		return e.TTYMajor != nil
-	case "tty_minor":
-		return e.TTYMinor != nil
-	default:
-		return false
-	}
 }
 
 func (e *StructEvent) GetUid() *uint32 {
