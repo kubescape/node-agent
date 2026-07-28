@@ -28,17 +28,16 @@ func TestCapabilityInProfile(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Capabilities: []string{
 			"NET_ADMIN",
 			"SYS_ADMIN",
 			"SETUID",
 			"SETGID",
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),

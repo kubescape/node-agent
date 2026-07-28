@@ -66,6 +66,13 @@ const (
 	maxPendingScans               = 1000
 	maxFailureRetryEntries        = 1000
 	failureRetryTTL               = 30 * time.Minute
+	// maxWaitForSharedContainerData bounds the per-container wait for shared data. It must be
+	// >= the producer's budget, else the consumer gives up while the producer is still
+	// populating the data and the container silently never gets an SBOM: the producer
+	// (ContainerWatcher.setSharedWatchedContainerData) retries via cenkalti/backoff
+	// NewExponentialBackOff, whose DefaultMaxElapsedTime is 15m. Waits are cancelled early on
+	// container-remove, so this cap is only reached for a container still alive at 15m.
+	maxWaitForSharedContainerData = 15 * time.Minute
 	// crashLoopRetryTTL is deliberately much longer than failureRetryTTL: a sidecar OOM crash
 	// stalls the shared scanner for every image on the node, so a chronically-crashing image
 	// with restarts spaced further apart than failureRetryTTL must still eventually be pinned,
@@ -112,6 +119,11 @@ type SbomManager struct {
 	pendingMu        sync.Mutex
 	failureReporter  sbommanager.SbomFailureReporter
 	metrics          metricsmanager.MetricsManager
+	// waitCancels holds the cancel func for each in-flight shared-data wait, keyed by container
+	// ID, so a container-remove event cancels the wait immediately instead of leaking a goroutine
+	// (retaining notif/mounts/imageStatus) until the timeout (#850).
+	waitCancels   map[string]context.CancelFunc
+	waitCancelsMu sync.Mutex
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
@@ -164,6 +176,7 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		pendingScans:       make(map[string]pendingScan),
 		failureReporter:    failureReporter,
 		metrics:            metrics,
+		waitCancels:        make(map[string]context.CancelFunc),
 	}
 	if scannerClient != nil {
 		sm.startScannerReadinessWatcher()
@@ -218,8 +231,15 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 }
 
 func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
-	// only consider container start events
-	if notif.Type != containercollection.EventTypeAddContainer {
+	switch notif.Type {
+	case containercollection.EventTypeAddContainer:
+		// handled below
+	case containercollection.EventTypeRemoveContainer:
+		// Cancel any in-flight shared-data wait: the data is deleted on remove, so the wait can
+		// no longer succeed and would otherwise park a goroutine until the timeout (#850).
+		s.cancelWait(notif.Container.Runtime.ContainerID)
+		return
+	default:
 		return
 	}
 	if utils.IsHostContainer(notif.Container) {
@@ -258,20 +278,72 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 			helpers.String("container", notif.Container.K8s.ContainerName))
 		return
 	}
-	// enqueue the container for processing
-	s.pool.Submit(func() {
-		s.processContainer(notif, mounts, imageStatus)
-	}, utils.FuncName(s.processContainer))
+	s.awaitAndSubmit(notif, mounts, imageStatus)
 }
 
-func (s *SbomManager) processContainer(notif containercollection.PubSubEvent, mounts []string, imageStatus *runtime.ImageStatusResponse) {
-	sharedData, err := s.waitForSharedContainerData(notif.Container.Runtime.ContainerID)
-	if err != nil {
-		logger.L().Error("SbomManager - container not found in shared data",
-			helpers.String("container ID", notif.Container.Runtime.ContainerID))
-		return
+// awaitAndSubmit waits off the single-worker pool for the container's shared data and, once it
+// is available, submits the actual SBOM work to the pool. It returns immediately; the wait runs
+// in a background goroutine bounded by maxWaitForSharedContainerData and cancelled early on
+// container-remove. Keeping the wait off the pool is what stops a short-lived container from
+// head-of-line-blocking SBOM generation for the whole node (#850).
+func (s *SbomManager) awaitAndSubmit(notif containercollection.PubSubEvent, mounts []string, imageStatus *runtime.ImageStatusResponse) {
+	containerID := notif.Container.Runtime.ContainerID
+	ctx, cancel := context.WithTimeout(s.ctx, maxWaitForSharedContainerData)
+	s.registerWaitCancel(containerID, cancel)
+	go func() {
+		defer cancel()
+		defer s.unregisterWaitCancel(containerID)
+		sharedData, err := s.waitForSharedContainerData(ctx, containerID)
+		if err != nil {
+			// Deadline/cancellation is the expected outcome for a container that exits before its
+			// shared data lands (#848 noise); only genuinely unexpected failures warrant Error.
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				logger.L().Debug("SbomManager - gave up waiting for shared container data",
+					helpers.Error(err),
+					helpers.String("namespace", notif.Container.K8s.Namespace),
+					helpers.String("pod", notif.Container.K8s.PodName),
+					helpers.String("container", notif.Container.K8s.ContainerName),
+					helpers.String("container ID", containerID))
+				return
+			}
+			logger.L().Ctx(s.ctx).Error("SbomManager - container not found in shared data",
+				helpers.Error(err),
+				helpers.String("namespace", notif.Container.K8s.Namespace),
+				helpers.String("pod", notif.Container.K8s.PodName),
+				helpers.String("container", notif.Container.K8s.ContainerName),
+				helpers.String("container ID", containerID))
+			return
+		}
+		// Don't enqueue new work once the manager is shutting down.
+		if s.ctx.Err() != nil {
+			return
+		}
+		s.pool.Submit(func() {
+			s.processContainerWithMetadata(notif, mounts, imageStatus, sharedData.ImageTag, sharedData.ImageID)
+		}, utils.FuncName(s.processContainerWithMetadata))
+	}()
+}
+
+func (s *SbomManager) registerWaitCancel(containerID string, cancel context.CancelFunc) {
+	s.waitCancelsMu.Lock()
+	s.waitCancels[containerID] = cancel
+	s.waitCancelsMu.Unlock()
+}
+
+func (s *SbomManager) unregisterWaitCancel(containerID string) {
+	s.waitCancelsMu.Lock()
+	delete(s.waitCancels, containerID)
+	s.waitCancelsMu.Unlock()
+}
+
+// cancelWait cancels and drops the in-flight shared-data wait for containerID, if any.
+func (s *SbomManager) cancelWait(containerID string) {
+	s.waitCancelsMu.Lock()
+	if cancel, ok := s.waitCancels[containerID]; ok {
+		cancel()
+		delete(s.waitCancels, containerID)
 	}
-	s.processContainerWithMetadata(notif, mounts, imageStatus, sharedData.ImageTag, sharedData.ImageID)
+	s.waitCancelsMu.Unlock()
 }
 
 func (s *SbomManager) processContainerWithMetadata(notif containercollection.PubSubEvent, mounts []string, imageStatus *runtime.ImageStatusResponse, imageTag, imageID string) {
@@ -576,8 +648,8 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 		helpers.String("sbomName", sbomName))
 }
 
-func (s *SbomManager) waitForSharedContainerData(containerID string) (*objectcache.WatchedContainerData, error) {
-	return backoff.Retry(context.Background(), func() (*objectcache.WatchedContainerData, error) {
+func (s *SbomManager) waitForSharedContainerData(ctx context.Context, containerID string) (*objectcache.WatchedContainerData, error) {
+	return backoff.Retry(ctx, func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := s.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}

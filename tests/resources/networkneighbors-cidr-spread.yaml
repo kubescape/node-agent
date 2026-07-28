@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cidr-spread
+  labels:
+    app: cidr-spread
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cidr-spread
+  template:
+    metadata:
+      labels:
+        app: cidr-spread
+    spec:
+      containers:
+        - name: spread
+          image: busybox
+          command: ["sh", "-c"]
+          # Egress to IPs spread across the whole third octet of 52.216.0.0/16
+          # (0..255, including both extremes so the common prefix is exactly the
+          # /16 boundary). With a /16 floor this collapses to a single 52.216.0.0/16;
+          # with a /24 floor it splits into one /24 per distinct third octet.
+          args:
+            - "while true; do for o3 in 0 20 40 64 96 128 160 192 224 255; do for o4 in 1 2 3; do nc -w 1 -z 52.216.$o3.$o4 443 2>/dev/null; done; done; sleep 2; done"

@@ -29,9 +29,8 @@ func TestApplicationProfileCaching(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Opens: []v1beta1.OpenCalls{
 			{
 				Path:  "/etc/passwd",
@@ -46,8 +45,8 @@ func TestApplicationProfileCaching(t *testing.T) {
 		},
 		Syscalls:     []string{"open", "read", "write"},
 		Capabilities: []string{"CAP_NET_ADMIN"},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	// Create library with cache
 	lib := &apLibrary{
@@ -170,9 +169,8 @@ func TestApplicationProfileCacheDifferentArguments(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Opens: []v1beta1.OpenCalls{
 			{
 				Path:  "/etc/passwd",
@@ -183,8 +181,8 @@ func TestApplicationProfileCacheDifferentArguments(t *testing.T) {
 				Flags: []string{"O_WRONLY"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	lib := &apLibrary{
 		objectCache:   &objCache,
@@ -254,17 +252,16 @@ func TestApplicationProfileCacheExpiration(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Opens: []v1beta1.OpenCalls{
 			{
 				Path:  "/etc/passwd",
 				Flags: []string{"O_RDONLY"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	// Create cache with short TTL for testing
 	config := cache.FunctionCacheConfig{
@@ -331,17 +328,16 @@ func TestApplicationProfileCachePerformance(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Opens: []v1beta1.OpenCalls{
 			{
 				Path:  "/etc/passwd",
 				Flags: []string{"O_RDONLY"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	lib := &apLibrary{
 		objectCache:   &objCache,
@@ -408,17 +404,16 @@ func TestApplicationProfileCacheClearCache(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Opens: []v1beta1.OpenCalls{
 			{
 				Path:  "/etc/passwd",
 				Flags: []string{"O_RDONLY"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	lib := &apLibrary{
 		objectCache:   &objCache,

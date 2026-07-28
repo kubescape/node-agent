@@ -29,9 +29,8 @@ func TestExecInProfile(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Execs: []v1beta1.ExecCalls{
 			{
 				Path: "/bin/ls",
@@ -42,8 +41,8 @@ func TestExecInProfile(t *testing.T) {
 				Args: []string{"https://example.com"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -156,9 +155,8 @@ func TestExecWithArgsInProfile(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Execs: []v1beta1.ExecCalls{
 			{
 				Path: "/bin/ls",
@@ -173,8 +171,8 @@ func TestExecWithArgsInProfile(t *testing.T) {
 				Args: []string{"hello", "world"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -336,9 +334,8 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Execs: []v1beta1.ExecCalls{
 			// curl any URL: --user must be literal, value is one position.
 			{
@@ -361,8 +358,8 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 				Args: []string{"hello", dynamicpathdetector.ExecArgsWildcard},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),

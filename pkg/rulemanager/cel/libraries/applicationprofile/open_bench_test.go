@@ -14,9 +14,9 @@ import (
 //
 //   - values_only:        50 concrete entries, no Patterns
 //   - patterns_concrete:  50 concrete entries + 10 Patterns whose tail
-//                         is literal (the typical /var/log/⋯/foo.log shape)
+//     is literal (the typical /var/log/⋯/foo.log shape)
 //   - patterns_wildcard:  50 concrete entries + 10 Patterns ending in a
-//                         wildcard segment (the permissive-arm shape)
+//     wildcard segment (the permissive-arm shape)
 //
 // Captures Matthias's upstream PR #811 contract numbers for the PR
 // description.

@@ -31,9 +31,8 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
@@ -103,8 +102,8 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 				},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),

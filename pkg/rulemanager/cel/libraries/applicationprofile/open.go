@@ -184,4 +184,3 @@ func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val
 	}
 	return types.Bool(hit)
 }
-

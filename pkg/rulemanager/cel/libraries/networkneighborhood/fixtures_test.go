@@ -14,8 +14,8 @@ import (
 )
 
 // TestFixturesParse validates that every YAML fixture under
-// tests/resources/network-wildcards/ parses against the v1beta1
-// NetworkNeighborhood schema. This is the user-facing-examples gate:
+// tests/resources/network-wildcards-cp/ parses against the v1beta1
+// ContainerProfile schema. This is the user-facing-examples gate:
 // the fixtures double as authoritative syntax documentation, so a
 // fixture that fails to parse is a documentation bug.
 //
@@ -45,14 +45,14 @@ func TestFixturesParse(t *testing.T) {
 			// are templates, runtime substitutes a real namespace.
 			data = []byte(strings.ReplaceAll(string(data), "{{NAMESPACE}}", "test-ns"))
 
-			var nn v1beta1.NetworkNeighborhood
+			var cp v1beta1.ContainerProfile
 			// Strict mode: any unknown field in a fixture is a typo
 			// against the v1beta1 schema. Documentation must not drift
 			// from the runtime types.
-			err = yaml.UnmarshalStrict(data, &nn)
+			err = yaml.UnmarshalStrict(data, &cp)
 			require.NoError(t, err, "fixture %s must parse against v1beta1 schema (strict)", name)
-			require.Equal(t, "NetworkNeighborhood", nn.Kind, "fixture %s wrong kind", name)
-			require.NotEmpty(t, nn.Spec.Containers, "fixture %s should declare at least one container", name)
+			require.Equal(t, "ContainerProfile", cp.Kind, "fixture %s wrong kind", name)
+			require.True(t, len(cp.Spec.Egress) > 0 || len(cp.Spec.Ingress) > 0, "fixture %s should declare at least one egress or ingress entry", name)
 		})
 		parsed++
 	}
@@ -160,8 +160,8 @@ func TestFixturesMatchExpectedBehaviour(t *testing.T) {
 			// it was declared on. CR (node-agent#41) flagged that the prior
 			// version only checked egress; this asserts ingress too.
 			ipBothChecks: []ipBothCheck{
-				{observed: "8.8.8.8", wantEgress: true, wantIngress: false},      // egress-only
-				{observed: "10.244.5.5", wantEgress: false, wantIngress: true},   // ingress-only
+				{observed: "8.8.8.8", wantEgress: true, wantIngress: false},    // egress-only
+				{observed: "10.244.5.5", wantEgress: false, wantIngress: true}, // ingress-only
 			},
 		},
 	}
@@ -216,7 +216,7 @@ type dnsCheck struct {
 }
 
 // findFixturesDir walks up from the test's working directory to locate
-// tests/resources/network-wildcards/. The package's own working dir
+// tests/resources/network-wildcards-cp/. The package's own working dir
 // when `go test` runs is its source dir, so we walk up to find the
 // repo root.
 func findFixturesDir(t *testing.T) string {
@@ -224,7 +224,7 @@ func findFixturesDir(t *testing.T) string {
 	dir, err := os.Getwd()
 	require.NoError(t, err)
 	for i := 0; i < 10; i++ {
-		candidate := filepath.Join(dir, "tests", "resources", "network-wildcards")
+		candidate := filepath.Join(dir, "tests", "resources", "network-wildcards-cp")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
@@ -234,6 +234,6 @@ func findFixturesDir(t *testing.T) string {
 		}
 		dir = parent
 	}
-	t.Fatalf("could not find tests/resources/network-wildcards/ from %s", dir)
+	t.Fatalf("could not find tests/resources/network-wildcards-cp/ from %s", dir)
 	return ""
 }

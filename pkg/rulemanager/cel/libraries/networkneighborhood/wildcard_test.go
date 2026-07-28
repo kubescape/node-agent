@@ -25,13 +25,12 @@ func buildLibWithContainer(t *testing.T, neighbors []v1beta1.NetworkNeighbor, in
 			objectcache.Container: {{Name: "c"}},
 		},
 	})
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name:    "c",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress:  neighbors,
 		Ingress: ingressNeighbors,
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 	return &nnLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
@@ -49,9 +48,9 @@ func TestWasAddressInEgress_WildcardCIDRMatch(t *testing.T) {
 		observed string
 		want     bool
 	}{
-		{"10.1.2.3", true},     // inside CIDR
+		{"10.1.2.3", true}, // inside CIDR
 		{"10.255.255.254", true},
-		{"11.0.0.1", false},    // outside
+		{"11.0.0.1", false}, // outside
 	}
 	for _, tc := range cases {
 		t.Run(tc.observed, func(t *testing.T) {
@@ -98,9 +97,9 @@ func TestWasAddressInEgress_BothSingularAndPlural(t *testing.T) {
 	}, nil)
 
 	for addr, want := range map[string]bool{
-		"8.8.8.8":   true,  // deprecated singular hit
-		"10.1.2.3":  true,  // new CIDR hit
-		"1.2.3.4":   false, // neither
+		"8.8.8.8":  true,  // deprecated singular hit
+		"10.1.2.3": true,  // new CIDR hit
+		"1.2.3.4":  false, // neither
 	} {
 		res := lib.wasAddressInEgress(types.String("cid"), types.String(addr))
 		res = cache.ConvertProfileNotAvailableErrToBool(res, false)
@@ -144,7 +143,7 @@ func TestIsDomainInEgress_MidEllipsis(t *testing.T) {
 	}{
 		{"kubernetes.default.svc.cluster.local.", true},
 		{"kubernetes.kube-system.svc.cluster.local.", true},
-		{"redis.default.svc.cluster.local.", false},     // wrong service prefix
+		{"redis.default.svc.cluster.local.", false},      // wrong service prefix
 		{"kubernetes.foo.bar.svc.cluster.local.", false}, // two labels mid
 	}
 	for _, tc := range cases {
@@ -187,8 +186,8 @@ func TestWasAddressInEgress_DeprecatedIPAddress_AcceptsWildcardAndCIDR(t *testin
 		{"10.0.0.0/8", "10.1.2.3", true},
 		{"10.0.0.0/8", "10.255.255.255", true},
 		{"10.0.0.0/8", "11.0.0.1", false},
-		{"0.0.0.0/0", "203.0.113.7", true},  // any-IPv4 via CIDR
-		{"::/0", "2001:db8::1", true},        // any-IPv6 via CIDR
+		{"0.0.0.0/0", "203.0.113.7", true}, // any-IPv4 via CIDR
+		{"::/0", "2001:db8::1", true},      // any-IPv6 via CIDR
 		// Literal still works
 		{"192.168.1.1", "192.168.1.1", true},
 		{"192.168.1.1", "192.168.1.2", false},
@@ -215,10 +214,10 @@ func TestWasAddressInEgress_DeprecatedIPAddress_IPv6Canonicalisation(t *testing.
 		observed  string
 		want      bool
 	}{
-		{"2001:db8::1", "2001:db8::1", true},                                  // identical
-		{"2001:db8::1", "2001:0db8:0000:0000:0000:0000:0000:0001", true},      // expanded form same address
-		{"10.0.0.1", "::ffff:10.0.0.1", true},                                  // IPv4-mapped IPv6
-		{"10.0.0.1", "10.0.0.2", false},                                        // genuine miss
+		{"2001:db8::1", "2001:db8::1", true},                             // identical
+		{"2001:db8::1", "2001:0db8:0000:0000:0000:0000:0000:0001", true}, // expanded form same address
+		{"10.0.0.1", "::ffff:10.0.0.1", true},                            // IPv4-mapped IPv6
+		{"10.0.0.1", "10.0.0.2", false},                                  // genuine miss
 	}
 	for _, tc := range cases {
 		t.Run(tc.profileIP+"_vs_"+tc.observed, func(t *testing.T) {

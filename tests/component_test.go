@@ -27,9 +27,13 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 )
@@ -71,22 +75,17 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	// network activity from nginx container
 	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
 
-	err = wl.WaitForApplicationProfileCompletion(80)
+	err = wl.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
-	err = wl.WaitForNetworkNeighborhoodCompletion(80)
+	err = wl.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for network neighborhood to be completed")
 
 	time.Sleep(30 * time.Second)
 
-	appProfile, _ := wl.GetApplicationProfile()
-	appProfileJson, _ := json.Marshal(appProfile)
+	profiles, _ := wl.GetContainerProfiles()
+	profilesJson, _ := json.Marshal(profiles)
 
-	networkNeighborhood, _ := wl.GetNetworkNeighborhood()
-	networkNeighborhoodJson, _ := json.Marshal(networkNeighborhood)
-
-	t.Logf("network neighborhood: %v", string(networkNeighborhoodJson))
-
-	t.Logf("application profile: %v", string(appProfileJson))
+	t.Logf("container profiles: %v", string(profilesJson))
 
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")                               // no alert expected
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server")                              // alert expected
@@ -108,13 +107,17 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	// Verify UID fields are populated in alerts
 	testutils.AssertUIDFieldsPopulated(t, alerts, wl.Namespace)
 
-	// check network neighborhood
-	nn, _ := wl.GetNetworkNeighborhood()
-	testutils.AssertNetworkNeighborhoodContains(t, nn, "nginx", []string{"kubernetes.io."}, []string{})
-	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "server", []string{"kubernetes.io."}, []string{})
+	// check per-container network surface (one ContainerProfile per container)
+	nginxCP, err := wl.GetContainerProfile("nginx")
+	require.NoError(t, err, "Error getting nginx container profile")
+	serverCP, err := wl.GetContainerProfile("server")
+	require.NoError(t, err, "Error getting server container profile")
 
-	testutils.AssertNetworkNeighborhoodContains(t, nn, "server", []string{"ebpf.io."}, []string{})
-	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "nginx", []string{"ebpf.io."}, []string{})
+	testutils.AssertContainerProfileContains(t, nginxCP, []string{"kubernetes.io."}, []string{})
+	testutils.AssertContainerProfileNotContains(t, serverCP, []string{"kubernetes.io."}, []string{})
+
+	testutils.AssertContainerProfileContains(t, serverCP, []string{"ebpf.io."}, []string{})
+	testutils.AssertContainerProfileNotContains(t, nginxCP, []string{"ebpf.io."}, []string{})
 }
 
 // enableR0002ForTest applies an override Rules CRD that enables R0002 ("Files
@@ -152,7 +155,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	require.NoError(t, err, "Error waiting for workload to be ready")
 
 	// Wait for the application profile to be created and completed
-	err = wl.WaitForApplicationProfileCompletion(150)
+	err = wl.WaitForContainerProfileCompletion(150)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	// Wait for the alerts to be generated
@@ -228,7 +231,7 @@ func Test_03_BasicLoadActivities(t *testing.T) {
 	require.NoError(t, err, "Error waiting for workload to be ready")
 
 	// Wait for the application profile to be created and completed
-	err = wl.WaitForApplicationProfileCompletion(80)
+	err = wl.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	// Create loader
@@ -276,7 +279,7 @@ func Test_04_MemoryLeak(t *testing.T) {
 	for _, wl := range workloads {
 		err := wl.WaitForReady(80)
 		require.NoError(t, err, "Error waiting for workload to be ready")
-		err = wl.WaitForApplicationProfileCompletion(80)
+		err = wl.WaitForContainerProfileCompletion(80)
 		require.NoError(t, err, "Error waiting for application profile to be completed")
 	}
 
@@ -312,7 +315,7 @@ func Test_05_MemoryLeak_10K_Alerts(t *testing.T) {
 	err = nginx.WaitForReady(80)
 	require.NoError(t, err, "Error waiting for workload to be ready")
 
-	err = nginx.WaitForApplicationProfileCompletion(80)
+	err = nginx.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	// wait for 300 seconds for the GC to run, so the memory leak can be detected
@@ -362,14 +365,14 @@ func Test_06_KillProcessInTheMiddle(t *testing.T) {
 	require.NoError(t, err, "Error waiting for workload to be ready")
 
 	// Give time for the nginx application profile to be ready
-	require.NoError(t, nginx.WaitForApplicationProfile(80, "ready"))
+	require.NoError(t, nginx.WaitForContainerProfile(80, "ready"))
 
 	// Exec into the nginx pod and kill the process
 	_, _, err = nginx.ExecIntoPod([]string{"bash", "-c", "kill -9 1"}, "")
 	require.NoError(t, err, "Error executing remote command")
 
 	// Wait for the application profile to be 'completed'
-	err = nginx.WaitForApplicationProfileCompletion(20)
+	err = nginx.WaitForContainerProfileCompletion(20)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 }
 
@@ -405,8 +408,11 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 	t.Log("Creating namespace")
 	ns := testutils.NewRandomNamespace()
 
-	name := "replicaset-checkoutservice-59596bf8d8"
-	applicationProfile := &v1beta1.ApplicationProfile{
+	// The unified ContainerProfile carries the (former ApplicationProfile) surfaces
+	// directly on its flat Spec — one profile per container — so JSON-patch paths
+	// target /spec/<field> instead of /spec/containers/<i>/<field>.
+	name := "replicaset-checkoutservice-59596bf8d8-server"
+	containerProfile := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
@@ -416,6 +422,7 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 				"kubescape.io/workload-kind":             "Deployment",
 				"kubescape.io/workload-name":             "checkoutservice",
 				"kubescape.io/workload-namespace":        "node-agent-test-veum",
+				"kubescape.io/workload-container-name":   "server",
 				"kubescape.io/workload-resource-version": "667544",
 			},
 			Annotations: map[string]string{
@@ -423,40 +430,35 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 				"kubescape.io/status":     "initializing",
 			},
 		},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{
-				{
-					Name: "server",
-					Syscalls: []string{
-						"capget", "capset", "chdir", "close", "epoll_ctl", "faccessat2",
-						"fcntl", "fstat", "fstatfs", "futex", "getdents64", "getppid",
-						"nanosleep", "newfstatat", "openat", "prctl", "read", "setgid",
-						"setgroups", "setuid", "write",
-					},
-				},
+		Spec: v1beta1.ContainerProfileSpec{
+			Syscalls: []string{
+				"capget", "capset", "chdir", "close", "epoll_ctl", "faccessat2",
+				"fcntl", "fstat", "fstatfs", "futex", "getdents64", "getppid",
+				"nanosleep", "newfstatat", "openat", "prctl", "read", "setgid",
+				"setgroups", "setuid", "write",
 			},
 		},
-		Status: v1beta1.ApplicationProfileStatus{},
+		Status: v1beta1.ContainerProfileStatus{},
 	}
 
-	_, err := storageclient.ApplicationProfiles(ns.Name).Create(context.TODO(), applicationProfile, metav1.CreateOptions{})
+	_, err := storageclient.ContainerProfiles(ns.Name).Create(context.TODO(), containerProfile, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	// patch the application profile
+	// patch the container profile
 	patchOperations := []utils.PatchOperation{
-		{Op: "replace", Path: "/spec/containers/0/capabilities", Value: []string{"NET_ADMIN"}},
-		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SETGID"},
-		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SETPCAP"},
-		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SETUID"},
-		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SYS_ADMIN"},
-		{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "accept4"},
-		{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "arch_prctl"},
-		{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "bind"},
-		{Op: "replace", Path: "/spec/containers/0/execs", Value: []map[string]interface{}{{
+		{Op: "replace", Path: "/spec/capabilities", Value: []string{"NET_ADMIN"}},
+		{Op: "add", Path: "/spec/capabilities/-", Value: "SETGID"},
+		{Op: "add", Path: "/spec/capabilities/-", Value: "SETPCAP"},
+		{Op: "add", Path: "/spec/capabilities/-", Value: "SETUID"},
+		{Op: "add", Path: "/spec/capabilities/-", Value: "SYS_ADMIN"},
+		{Op: "add", Path: "/spec/syscalls/-", Value: "accept4"},
+		{Op: "add", Path: "/spec/syscalls/-", Value: "arch_prctl"},
+		{Op: "add", Path: "/spec/syscalls/-", Value: "bind"},
+		{Op: "replace", Path: "/spec/execs", Value: []map[string]interface{}{{
 			"path": "/checkoutservice",
 			"args": []string{"/checkoutservice"},
 		}}},
-		{Op: "add", Path: "/spec/containers/0/execs/-", Value: map[string]interface{}{
+		{Op: "add", Path: "/spec/execs/-", Value: map[string]interface{}{
 			"path": "/bin/grpc_health_probe",
 			"args": []string{"/bin/grpc_health_probe", "-addr=:5050"},
 		}},
@@ -468,7 +470,7 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 	require.NoError(t, err)
 
 	// TODO use Storage abstraction?
-	_, err = storageclient.ApplicationProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
+	_, err = storageclient.ContainerProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
 
 	assert.NoError(t, err)
 }
@@ -501,7 +503,7 @@ func Test_09_FalsePositiveTest(t *testing.T) {
 
 	t.Log("Waiting for all application profiles to be completed")
 	for _, wl := range deployments {
-		err = wl.WaitForApplicationProfileCompletion(80)
+		err = wl.WaitForContainerProfileCompletion(80)
 		require.NoError(t, err, "Error waiting for application profile to be completed")
 	}
 
@@ -574,7 +576,7 @@ func Test_11_EndpointTest(t *testing.T) {
 	err = endpointTraffic.WaitForReady(80)
 	require.NoError(t, err, "Error waiting for workload to be ready")
 
-	require.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	require.NoError(t, endpointTraffic.WaitForContainerProfile(80, "ready"))
 
 	// Merge methods
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80"}, "")
@@ -594,11 +596,11 @@ func Test_11_EndpointTest(t *testing.T) {
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80/users/99", "--header", "Connection:1234r"}, "")
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80/users/12", "--header", "Connection:ziz"}, "")
 
-	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
+	err = endpointTraffic.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
-	applicationProfile, err := endpointTraffic.GetApplicationProfile()
-	require.NoError(t, err, "Error getting application profile")
+	containerProfile, err := endpointTraffic.GetContainerProfile("endpoint-traffic")
+	require.NoError(t, err, "Error getting container profile")
 
 	headers := map[string][]string{"Connection": {"close"}, "Host": {"127.0.0.1:80"}}
 	rawJSON, err := json.Marshal(headers)
@@ -624,7 +626,7 @@ func Test_11_EndpointTest(t *testing.T) {
 		Headers:   rawJSON,
 	}
 
-	savedEndpoints := applicationProfile.Spec.Containers[0].Endpoints
+	savedEndpoints := containerProfile.Spec.Endpoints
 
 	for i := range savedEndpoints {
 
@@ -653,7 +655,7 @@ func Test_11_EndpointTest(t *testing.T) {
 				break
 			}
 		}
-		assert.Truef(t, found, "Expected endpoint %v not found in the application profile", expectedEndpoint)
+		assert.Truef(t, found, "Expected endpoint %v not found in the container profile", expectedEndpoint)
 	}
 }
 
@@ -666,7 +668,7 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
 	require.NoError(t, err, "Failed to create workload")
 	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
-	// require.NoError(t, wl.WaitForApplicationProfile(80, "ready"), "Application profile not ready")
+	// require.NoError(t, wl.WaitForContainerProfile(80, "ready"), "Application profile not ready")
 	time.Sleep(10 * time.Second)
 
 	// Generate initial profile data
@@ -675,14 +677,14 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
 	require.NoError(t, err, "Failed to exec into server container")
 
-	require.NoError(t, wl.WaitForApplicationProfileCompletion(160), "Profile failed to complete")
+	require.NoError(t, wl.WaitForContainerProfileCompletion(160), "Profile failed to complete")
 	time.Sleep(10 * time.Second) // Allow profile processing
 
 	// Log initial profile state
-	initialProfile, err := wl.GetApplicationProfile()
-	require.NoError(t, err, "Failed to get initial profile")
-	initialProfileJSON, _ := json.Marshal(initialProfile)
-	t.Logf("Initial application profile:\n%s", string(initialProfileJSON))
+	initialProfiles, err := wl.GetContainerProfiles()
+	require.NoError(t, err, "Failed to get initial profiles")
+	initialProfilesJSON, _ := json.Marshal(initialProfiles)
+	t.Logf("Initial container profiles:\n%s", string(initialProfilesJSON))
 
 	// PHASE 2: Verify initial alerts
 	t.Log("Testing initial alert generation...")
@@ -705,68 +707,74 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	testutils.AssertContains(t, initialAlerts, "Unexpected process launched", "ls", "server", []bool{true})
 	testutils.AssertNotContains(t, initialAlerts, "Unexpected process launched", "ls", "nginx", []bool{true, false})
 
-	// PHASE 3: Apply user-managed profile
-	t.Log("Applying user-managed profile...")
-	// Create the user-managed profile
-	userProfile := &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("ug-%s", initialProfile.Name),
-			Namespace: initialProfile.Namespace,
-			Annotations: map[string]string{
-				"kubescape.io/managed-by": "User",
+	// PHASE 3: Apply user-managed profiles
+	t.Log("Applying user-managed profiles...")
+	// The unified ContainerProfile is authored per container, so a user-managed
+	// override is one ContainerProfile per container (managed-by: User) carrying
+	// the allowed surfaces on its flat spec.
+	userProfiles := []*v1beta1.ContainerProfile{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("ug-%s-nginx", wl.WorkloadObj.GetName()),
+				Namespace: ns.Name,
+				Annotations: map[string]string{
+					"kubescape.io/managed-by": "User",
+				},
+				Labels: map[string]string{
+					"kubescape.io/workload-container-name": "nginx",
+				},
 			},
-		},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Architectures: []string{"amd64"},
-			Containers: []v1beta1.ApplicationProfileContainer{
-				{
-					Name: "nginx",
-					Execs: []v1beta1.ExecCalls{
-						{
-							Path: "/usr/bin/ls",
-							Args: []string{"/usr/bin/ls", "-l"},
-						},
-					},
-					SeccompProfile: v1beta1.SingleSeccompProfile{
-						Spec: v1beta1.SingleSeccompProfileSpec{
-							DefaultAction: "",
-						},
+			Spec: v1beta1.ContainerProfileSpec{
+				Architectures: []string{"amd64"},
+				Execs: []v1beta1.ExecCalls{
+					{
+						Path: "/usr/bin/ls",
+						Args: []string{"/usr/bin/ls", "-l"},
 					},
 				},
-				{
-					Name: "server",
-					Execs: []v1beta1.ExecCalls{
-						{
-							Path: "/bin/ls",
-							Args: []string{"/bin/ls", "-l"},
-						},
-						{
-							Path: "/bin/grpc_health_probe",
-							Args: []string{"-addr=:9555"},
-						},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("ug-%s-server", wl.WorkloadObj.GetName()),
+				Namespace: ns.Name,
+				Annotations: map[string]string{
+					"kubescape.io/managed-by": "User",
+				},
+				Labels: map[string]string{
+					"kubescape.io/workload-container-name": "server",
+				},
+			},
+			Spec: v1beta1.ContainerProfileSpec{
+				Architectures: []string{"amd64"},
+				Execs: []v1beta1.ExecCalls{
+					{
+						Path: "/bin/ls",
+						Args: []string{"/bin/ls", "-l"},
 					},
-					SeccompProfile: v1beta1.SingleSeccompProfile{
-						Spec: v1beta1.SingleSeccompProfileSpec{
-							DefaultAction: "",
-						},
+					{
+						Path: "/bin/grpc_health_probe",
+						Args: []string{"-addr=:9555"},
 					},
 				},
 			},
 		},
 	}
 
-	// Log the profile we're about to create
-	userProfileJSON, err := json.MarshalIndent(userProfile, "", "  ")
-	require.NoError(t, err, "Failed to marshal user profile")
-	t.Logf("Creating user profile:\n%s", string(userProfileJSON))
+	// Log the profiles we're about to create
+	userProfilesJSON, err := json.MarshalIndent(userProfiles, "", "  ")
+	require.NoError(t, err, "Failed to marshal user profiles")
+	t.Logf("Creating user profiles:\n%s", string(userProfilesJSON))
 
 	// Get k8s client
 	k8sClient := k8sinterface.NewKubernetesApi()
 
-	// Create the user-managed profile
+	// Create the user-managed profiles
 	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-	_, err = storageClient.ApplicationProfiles(ns.Name).Create(context.Background(), userProfile, metav1.CreateOptions{})
-	require.NoError(t, err, "Failed to create user profile")
+	for _, up := range userProfiles {
+		_, err = storageClient.ContainerProfiles(ns.Name).Create(context.Background(), up, metav1.CreateOptions{})
+		require.NoError(t, err, "Failed to create user profile %s", up.Name)
+	}
 
 	// PHASE 4: Verify merged profile behavior
 	t.Log("Verifying merged profile behavior...")
@@ -861,7 +869,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
 	require.NoError(t, err, "Failed to create workload")
 	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
-	require.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"), "Network neighborhood not ready")
+	require.NoError(t, wl.WaitForContainerProfile(80, "ready"), "Network neighborhood not ready")
 
 	// Generate initial network data
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
@@ -869,14 +877,14 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
 	require.NoError(t, err, "Failed to exec curl in nginx container")
 
-	require.NoError(t, wl.WaitForNetworkNeighborhoodCompletion(80), "Network neighborhood failed to complete")
+	require.NoError(t, wl.WaitForContainerProfileCompletion(80), "Network neighborhood failed to complete")
 	time.Sleep(10 * time.Second) // Allow network neighborhood processing
 
-	// Log initial network neighborhood state
-	initialNN, err := wl.GetNetworkNeighborhood()
-	require.NoError(t, err, "Failed to get initial network neighborhood")
-	initialNNJSON, _ := json.Marshal(initialNN)
-	t.Logf("Initial network neighborhood:\n%s", string(initialNNJSON))
+	// Log initial network surface state (one ContainerProfile per container)
+	initialProfiles, err := wl.GetContainerProfiles()
+	require.NoError(t, err, "Failed to get initial container profiles")
+	initialProfilesJSON, _ := json.Marshal(initialProfiles)
+	t.Logf("Initial container profiles:\n%s", string(initialProfilesJSON))
 
 	// PHASE 2: Verify initial alerts
 	t.Log("Testing initial alert generation...")
@@ -903,64 +911,75 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	testutils.AssertContains(t, initialAlerts, "DNS Anomalies in container", "wget", "server", []bool{true})
 	testutils.AssertContains(t, initialAlerts, "DNS Anomalies in container", "curl", "nginx", []bool{true})
 
-	// PHASE 3: Apply user-managed network neighborhood
-	t.Log("Applying user-managed network neighborhood...")
-	userNN := &v1beta1.NetworkNeighborhood{
+	// PHASE 3: Apply user-managed network surface (one ContainerProfile per container)
+	t.Log("Applying user-managed container profiles...")
+	selector := metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			"app": "multiple-containers-app",
+		},
+	}
+	userNginxCP := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("ug-%s", initialNN.Name),
-			Namespace: initialNN.Namespace,
+			Name:      fmt.Sprintf("ug-%s-nginx", wl.WorkloadObj.GetName()),
+			Namespace: ns.Name,
 			Annotations: map[string]string{
 				"kubescape.io/managed-by": "User",
 			},
-		},
-		Spec: v1beta1.NetworkNeighborhoodSpec{
-			LabelSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "multiple-containers-app",
-				},
+			Labels: map[string]string{
+				"kubescape.io/workload-container-name": "nginx",
 			},
-			Containers: []v1beta1.NetworkNeighborhoodContainer{
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			LabelSelector: selector,
+			Egress: []v1beta1.NetworkNeighbor{
 				{
-					Name: "nginx",
-					Egress: []v1beta1.NetworkNeighbor{
+					Identifier: "nginx-github",
+					Type:       "external",
+					DNSNames:   []string{"github.com."},
+					Ports: []v1beta1.NetworkPort{
 						{
-							Identifier: "nginx-github",
-							Type:       "external",
-							DNSNames:   []string{"github.com."},
-							Ports: []v1beta1.NetworkPort{
-								{
-									Name:     "TCP-80",
-									Protocol: "TCP",
-									Port:     ptr.To(int32(80)),
-								},
-								{
-									Name:     "TCP-443",
-									Protocol: "TCP",
-									Port:     ptr.To(int32(443)),
-								},
-							},
+							Name:     "TCP-80",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(80)),
+						},
+						{
+							Name:     "TCP-443",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(443)),
 						},
 					},
 				},
+			},
+		},
+	}
+	userServerCP := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("ug-%s-server", wl.WorkloadObj.GetName()),
+			Namespace: ns.Name,
+			Annotations: map[string]string{
+				"kubescape.io/managed-by": "User",
+			},
+			Labels: map[string]string{
+				"kubescape.io/workload-container-name": "server",
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			LabelSelector: selector,
+			Egress: []v1beta1.NetworkNeighbor{
 				{
-					Name: "server",
-					Egress: []v1beta1.NetworkNeighbor{
+					Identifier: "server-example",
+					Type:       "external",
+					DNSNames:   []string{"info.cern.ch."},
+					Ports: []v1beta1.NetworkPort{
 						{
-							Identifier: "server-example",
-							Type:       "external",
-							DNSNames:   []string{"info.cern.ch."},
-							Ports: []v1beta1.NetworkPort{
-								{
-									Name:     "TCP-80",
-									Protocol: "TCP",
-									Port:     ptr.To(int32(80)),
-								},
-								{
-									Name:     "TCP-443",
-									Protocol: "TCP",
-									Port:     ptr.To(int32(443)),
-								},
-							},
+							Name:     "TCP-80",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(80)),
+						},
+						{
+							Name:     "TCP-443",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(443)),
 						},
 					},
 				},
@@ -968,11 +987,13 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 		},
 	}
 
-	// Create user-managed network neighborhood
+	// Create user-managed container profiles
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-	_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(context.Background(), userNN, metav1.CreateOptions{})
-	require.NoError(t, err, "Failed to create user network neighborhood")
+	_, err = storageClient.ContainerProfiles(ns.Name).Create(context.Background(), userNginxCP, metav1.CreateOptions{})
+	require.NoError(t, err, "Failed to create user nginx container profile")
+	_, err = storageClient.ContainerProfiles(ns.Name).Create(context.Background(), userServerCP, metav1.CreateOptions{})
+	require.NoError(t, err, "Failed to create user server container profile")
 
 	// PHASE 4: Verify merged behavior (no new alerts)
 	t.Log("Verifying merged network neighborhood behavior...")
@@ -1012,16 +1033,16 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	}
 
 	// PHASE 5: Remove permission via patch and verify alerts return
-	t.Log("Patching user network neighborhood to remove info.cern.ch from server container...")
+	t.Log("Patching user server container profile to remove info.cern.ch egress...")
 	patchOperations := []utils.PatchOperation{
-		{Op: "remove", Path: "/spec/containers/1/egress/0"},
+		{Op: "remove", Path: "/spec/egress/0"},
 	}
 
 	patch, err := json.Marshal(patchOperations)
 	require.NoError(t, err, "Failed to marshal patch operations")
 
-	_, err = storageClient.NetworkNeighborhoods(ns.Name).Patch(context.Background(), userNN.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
-	require.NoError(t, err, "Failed to patch user network neighborhood")
+	_, err = storageClient.ContainerProfiles(ns.Name).Patch(context.Background(), userServerCP.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+	require.NoError(t, err, "Failed to patch user server container profile")
 
 	time.Sleep(60 * time.Second) // Allow merge to complete
 
@@ -1074,7 +1095,7 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	}
 
 	// Wait for application profile to be ready
-	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	assert.NoError(t, endpointTraffic.WaitForContainerProfile(80, "ready"))
 	time.Sleep(10 * time.Second)
 
 	// Add to rule policy symlink
@@ -1091,20 +1112,20 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
 	assert.NoError(t, err)
 
-	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
+	err = endpointTraffic.WaitForContainerProfileCompletion(80)
 	if err != nil {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
 
-	applicationProfile, err := endpointTraffic.GetApplicationProfile()
+	containerProfile, err := endpointTraffic.GetContainerProfile("endpoint-traffic")
 	if err != nil {
-		t.Errorf("Error getting application profile: %v", err)
+		t.Errorf("Error getting container profile: %v", err)
 	}
 
-	symlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId["R1010"]
+	symlinkPolicy := containerProfile.Spec.PolicyByRuleId["R1010"]
 	assert.Equal(t, []string{"ln"}, symlinkPolicy.AllowedProcesses)
 
-	hardlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId["R1012"]
+	hardlinkPolicy := containerProfile.Spec.PolicyByRuleId["R1012"]
 	assert.Len(t, hardlinkPolicy.AllowedProcesses, 0)
 
 	fmt.Println("After completed....")
@@ -1148,9 +1169,9 @@ func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
 		_ = k8sClient.KubernetesClient.CoreV1().Namespaces().Delete(context.Background(), ns.Name, v1.DeleteOptions{})
 	}()
 
-	// create an application profile with completed status
+	// create a container profile with completed status
 	name := "test"
-	ap1, err := storageclient.ApplicationProfiles(ns.Name).Create(context.TODO(), &v1beta1.ApplicationProfile{
+	cp1, err := storageclient.ContainerProfiles(ns.Name).Create(context.TODO(), &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Annotations: map[string]string{
@@ -1160,9 +1181,9 @@ func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
 		},
 	}, v1.CreateOptions{})
 	require.NoError(t, err)
-	require.Equal(t, helpersv1.Completed, ap1.Annotations[helpersv1.StatusMetadataKey])
+	require.Equal(t, helpersv1.Completed, cp1.Annotations[helpersv1.StatusMetadataKey])
 
-	// patch the application profile with ready status
+	// patch the container profile with learning status
 	patchOperations := []utils.PatchOperation{
 		{
 			Op:    "replace",
@@ -1172,9 +1193,9 @@ func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
 	}
 	patch, err := json.Marshal(patchOperations)
 	require.NoError(t, err)
-	ap2, err := storageclient.ApplicationProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
+	cp2, err := storageclient.ContainerProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
 	assert.NoError(t, err)                                                             // patch should succeed
-	assert.Equal(t, helpersv1.Completed, ap2.Annotations[helpersv1.StatusMetadataKey]) // but the status should not change
+	assert.Equal(t, helpersv1.Completed, cp2.Annotations[helpersv1.StatusMetadataKey]) // but the status should not change
 }
 
 func Test_16_ApNotStuckOnRestart(t *testing.T) {
@@ -1191,7 +1212,7 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 	// wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "nginx-deployment")
 	// require.NoError(t, err, "Error re-fetching workload after stop")
 	// require.NoError(t, wl.WaitForReady(80))
-	// require.NoError(t, wl.WaitForApplicationProfileCompletion(160))
+	// require.NoError(t, wl.WaitForContainerProfileCompletion(160))
 
 	time.Sleep(160 * time.Second)
 
@@ -1218,13 +1239,13 @@ func Test_17_ApCompletedToPartialUpdateTest(t *testing.T) {
 
 	time.Sleep(30 * time.Second)
 	require.NoError(t, wl.WaitForReady(80))
-	require.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
+	require.NoError(t, wl.WaitForContainerProfile(80, "ready"))
 
 	err = testutils.RestartDaemonSet("kubescape", "node-agent")
 	require.NoError(t, err, "Error restarting daemonset")
 
-	require.NoError(t, wl.WaitForApplicationProfileCompletion(160))
-	require.NoError(t, wl.WaitForNetworkNeighborhoodCompletion(160))
+	require.NoError(t, wl.WaitForContainerProfileCompletion(160))
+	require.NoError(t, wl.WaitForContainerProfileCompletion(160))
 
 	time.Sleep(30 * time.Second)
 
@@ -1247,7 +1268,7 @@ func Test_18_ShortLivedJobTest(t *testing.T) {
 	require.NoError(t, err, "Error creating workload")
 
 	// Application profile should be created and completed
-	err = wl.WaitForApplicationProfileCompletion(80)
+	err = wl.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 }
 
@@ -1270,11 +1291,11 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 	require.NoError(t, err, "Error restarting daemonset")
 
 	// Wait for the application profile to be completed
-	err = wl.WaitForApplicationProfileCompletion(160)
+	err = wl.WaitForContainerProfileCompletion(160)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
-	profile, err := wl.GetApplicationProfile()
-	require.NoError(t, err, "Error getting application profile")
+	profile, err := wl.GetContainerProfile("nginx")
+	require.NoError(t, err, "Error getting container profile")
 
 	require.Equal(t, helpersv1.Partial, profile.Annotations[helpersv1.CompletionMetadataKey])
 
@@ -1310,7 +1331,7 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	require.NoError(t, err, "Error restarting daemonset")
 
 	// Wait for the application profile to be completed (partial)
-	err = wl.WaitForApplicationProfileCompletion(160)
+	err = wl.WaitForContainerProfileCompletion(160)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	// Wait for cache to be updated
@@ -1326,8 +1347,8 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	require.NoError(t, err, "Error getting alerts")
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 
-	profile, err := wl.GetApplicationProfile()
-	require.NoError(t, err, "Error getting application profile")
+	profile, err := wl.GetContainerProfile("nginx")
+	require.NoError(t, err, "Error getting container profile")
 
 	// Restart the deployment to reset the profile learning
 	err = testutils.RestartDeployment(ns.Name, wl.WorkloadObj.GetName())
@@ -1345,7 +1366,7 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	require.NoError(t, err, "Error executing command in pod during learning")
 
 	// Wait for the application profile to be completed (with ls command learned)
-	err = wl.WaitForApplicationProfileCompletionWithBlacklist(160, []string{profile.Name})
+	err = wl.WaitForContainerProfileCompletionWithBlacklist(160, []string{profile.Name})
 	require.NoError(t, err, "Error waiting for application profile to be completed after learning")
 
 	// Wait for cache to be updated
@@ -1391,7 +1412,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	require.NoError(t, err, "Error restarting daemonset")
 
 	// Wait for the network neighborhood to be completed (partial)
-	err = wl.WaitForNetworkNeighborhoodCompletion(160)
+	err = wl.WaitForContainerProfileCompletion(160)
 	require.NoError(t, err, "Error waiting for network neighborhood to be completed")
 
 	// Wait for cache to be updated
@@ -1408,8 +1429,8 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	require.NoError(t, err, "Error getting alerts")
 	testutils.AssertContains(t, alerts, "DNS Anomalies in container", "curl", "nginx", []bool{true})
 
-	nn, err := wl.GetNetworkNeighborhood()
-	require.NoError(t, err, "Error getting network neighborhood")
+	nn, err := wl.GetContainerProfile("nginx")
+	require.NoError(t, err, "Error getting container profile")
 
 	// Restart the deployment to reset the profile learning
 	err = testutils.RestartDeployment(ns.Name, wl.WorkloadObj.GetName())
@@ -1438,7 +1459,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	logger.L().Info("workload metadata", helpers.Interface("metadata", wl.WorkloadObj.GetAnnotations()), helpers.Interface("labels", wl.WorkloadObj.GetLabels()))
 
 	// Wait for the network neighborhood to be completed (with curl command learned)
-	err = wl.WaitForNetworkNeighborhoodCompletionWithBlacklist(160, []string{nn.Name})
+	err = wl.WaitForContainerProfileCompletionWithBlacklist(160, []string{nn.Name})
 	require.NoError(t, err, "Error waiting for network neighborhood to be completed after learning")
 
 	// Wait for cache to be updated
@@ -1484,7 +1505,7 @@ func Test_22_AlertOnPartialNetworkProfileTest(t *testing.T) {
 	require.NoError(t, err, "Failed to restart daemonset")
 
 	// Wait for the network neighborhood to be completed
-	err = wl.WaitForNetworkNeighborhoodCompletion(160)
+	err = wl.WaitForContainerProfileCompletion(160)
 	require.NoError(t, err, "Error waiting for network neighborhood to be completed")
 
 	// Wait for cache to be updated
@@ -1510,7 +1531,7 @@ func Test_23_RuleCooldownTest(t *testing.T) {
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
 	require.NoError(t, err, "Error creating workload")
 
-	require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
+	require.NoError(t, wl.WaitForContainerProfileCompletion(80))
 
 	// Wait for cache
 	time.Sleep(30 * time.Second)
@@ -1556,7 +1577,7 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	err = endpointTraffic.WaitForReady(80)
 	require.NoError(t, err, "Error waiting for workload to be ready")
 
-	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
+	err = endpointTraffic.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	// wait for cache
@@ -1738,20 +1759,21 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
 		require.NoError(t, err)
 		require.NoError(t, wl.WaitForReady(80))
-		require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
+		require.NoError(t, wl.WaitForContainerProfileCompletion(80))
 
-		profile, err := wl.GetApplicationProfile()
-		require.NoError(t, err, "get application profile")
+		profiles, err := wl.GetContainerProfiles()
+		require.NoError(t, err, "get container profiles")
 
 		passed := true
-		for _, container := range profile.Spec.Containers {
-			for _, open := range container.Opens {
+		for _, profile := range profiles {
+			containerName := profile.Labels["kubescape.io/workload-container-name"]
+			for _, open := range profile.Spec.Opens {
 				if !strings.HasPrefix(open.Path, "/") {
-					t.Errorf("recorded path must be absolute: got %q (container %s)", open.Path, container.Name)
+					t.Errorf("recorded path must be absolute: got %q (container %s)", open.Path, containerName)
 					passed = false
 				}
 				if open.Path == "." {
-					t.Errorf("recorded path must not be relative dot: got %q (container %s)", open.Path, container.Name)
+					t.Errorf("recorded path must not be relative dot: got %q (container %s)", open.Path, containerName)
 					passed = false
 				}
 			}
@@ -3132,4 +3154,217 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 		require.Greater(t, countByRule(alerts, "R0011"), 0,
 			"DNS MITM: TCP to spoofed IP 128.130.194.56 must fire R0011")
 	})
+}
+
+// Test_34_NetworkNeighborsCIDRCollapse is an end-to-end test for storage
+// PR kubescape/storage#348 (CIDR-based collapsing of NetworkNeighbor entries).
+//
+// It exercises the REAL learn→collapse path, not an injected profile: apply the
+// CollapseConfiguration, wait for it to go live, deploy a workload that egresses
+// to many IPs in 52.216.0.0/24, wait for node-agent to LEARN the profile to
+// completion, then assert the learnt egress collapsed into a covering CIDR with
+// no host /32 left behind.
+//
+// Why not inject a NetworkNeighborhood directly: storage rejects/empties a
+// directly-created `completion: complete` profile ("object is completed"), and
+// the deflate only runs at node-agent's write time — so only a genuinely learnt
+// profile exercises the collapse. Validated on a real k3s: 60 IPs -> one CIDR.
+//
+// The collapsed CIDR lands in the plural `ipAddresses` field, which exists only
+// on PR#348 storage, so the result is read via the DYNAMIC client (never
+// referenced at compile time). Compiles on plain upstream; passes only on PR#348.
+// cpCollapseGVR / ccCollapseGVR name the CIDR-collapse resources. The collapsed
+// value lands in the plural ipAddresses field, which exists only on PR#348
+// storage, so learnt ContainerProfiles are read via the dynamic client (never
+// referenced at compile time). This file compiles on plain upstream and passes
+// only on PR#348 storage carrying the collapse dedup fix.
+var (
+	cpCollapseGVR = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "containerprofiles"}
+	ccCollapseGVR = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "collapseconfigurations"}
+)
+
+// applyCollapseFloor create-or-updates the cluster-scoped CollapseConfiguration
+// singleton to threshold 5 (< the compiled-in default 50, so a modest fan-out
+// trips collapse) and the given CIDR floor. Deflate collapses at write time
+// using whatever config is live then, via a TTL-cached (~10s) provider — so
+// callers must wait after this before deploying a learner.
+func applyCollapseFloor(t *testing.T, dyn dynamic.Interface, floorBits int64) {
+	ctx := context.Background()
+	cc := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
+		"kind":       "CollapseConfiguration",
+		"metadata":   map[string]interface{}{"name": "default"},
+		"spec":       map[string]interface{}{"networkIPGroupThreshold": int64(5), "networkCIDRFloorBits": floorBits},
+	}}
+	_, err := dyn.Resource(ccCollapseGVR).Create(ctx, cc, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		cur, gerr := dyn.Resource(ccCollapseGVR).Get(ctx, "default", metav1.GetOptions{})
+		require.NoError(t, gerr, "get CollapseConfiguration")
+		require.NoError(t, unstructured.SetNestedField(cur.Object, floorBits, "spec", "networkCIDRFloorBits"))
+		require.NoError(t, unstructured.SetNestedField(cur.Object, int64(5), "spec", "networkIPGroupThreshold"))
+		_, uerr := dyn.Resource(ccCollapseGVR).Update(ctx, cur, metav1.UpdateOptions{})
+		require.NoError(t, uerr, "update CollapseConfiguration floor")
+		return
+	}
+	require.NoError(t, err, "apply CollapseConfiguration")
+}
+
+// deployCIDRLearner deploys an egress fan-out workload and waits for its pod to
+// be ready; the caller later waits for the learnt ContainerProfile to finalise.
+func deployCIDRLearner(t *testing.T, resource string) *testutils.TestWorkload {
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), resource))
+	require.NoError(t, err, "deploy %s", resource)
+	require.NoError(t, wl.WaitForReady(80), "%s not ready", resource)
+	return wl
+}
+
+// collectLearntCollapse waits for the workload's ContainerProfiles to finalise
+// (completion: complete), reads each via the dynamic client, and returns the
+// sorted, de-duplicated set of learnt egress CIDRs (plural ipAddresses values
+// carrying a "/") and any bare host ipAddress left behind. The unified
+// ContainerProfile carries egress on its flat spec (one profile per container),
+// so entries are read from spec.egress directly rather than spec.containers[].
+func collectLearntCollapse(t *testing.T, dyn dynamic.Interface, wl *testutils.TestWorkload) (cidrs, bare []string) {
+	require.NoError(t, wl.WaitForContainerProfileCompletion(120), "container profile did not complete learning")
+	profiles, err := wl.GetContainerProfiles()
+	require.NoError(t, err, "get learnt container profiles")
+
+	seen := map[string]struct{}{}
+	for _, cp := range profiles {
+		got, err := dyn.Resource(cpCollapseGVR).Namespace(cp.Namespace).Get(context.Background(), cp.Name, metav1.GetOptions{})
+		require.NoError(t, err, "dynamic get container profile %s/%s", cp.Namespace, cp.Name)
+
+		eg, _, _ := unstructured.NestedSlice(got.Object, "spec", "egress")
+		for _, e := range eg {
+			em, ok := e.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if ips, ok, _ := unstructured.NestedStringSlice(em, "ipAddresses"); ok {
+				for _, ip := range ips {
+					if strings.Contains(ip, "/") {
+						if _, s := seen[ip]; !s {
+							seen[ip] = struct{}{}
+							cidrs = append(cidrs, ip)
+						}
+					}
+				}
+			}
+			if s, _, _ := unstructured.NestedString(em, "ipAddress"); s != "" {
+				bare = append(bare, s)
+			}
+		}
+	}
+	sort.Strings(cidrs)
+	sort.Strings(bare)
+	return cidrs, bare
+}
+
+// withPrefixes returns the members of cidrs whose network address starts with
+// one of the given dotted/colon prefixes (e.g. "52.216." or "2606:4700:0:1:").
+func withPrefixes(cidrs []string, prefixes ...string) []string {
+	var out []string
+	for _, c := range cidrs {
+		for _, p := range prefixes {
+			if strings.HasPrefix(c, p) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Test_34_NetworkNeighborsCIDRCollapse exercises the REAL learn→collapse path for
+// storage PR kubescape/storage#348 (CIDR collapsing) plus the netipx exact-cover
+// fix stacked on it. It never injects a profile: storage rejects/empties a
+// directly-created `completion: complete` NN and deflate only runs at
+// node-agent's write time, so only a genuinely learnt profile exercises collapse.
+//
+// Workloads egress to REAL cloud-provider address space (AWS S3, Cloudflare,
+// Azure, GCP). Assertions pin two properties: a fully-observed block collapses to
+// exactly that block (never over-approximating past what the workload reached),
+// and scattered traffic is bucketed to the floor so output is bounded by the
+// number of distinct floor networks — not one entry per host, the regression
+// caught in the kubescape/storage#349 review against the real too-large profile.
+// The collapsed value lands in the plural ipAddresses field (PR#348), read via
+// the dynamic client.
+//
+//	floor /16, full S3 /28 (52.216.1.0/28)      -> exactly 52.216.1.0/28
+//	floor /16, ~30 hosts spread across a /16     -> one covering 52.216.0.0/16 (bounded, no /32s)
+//	floor /16, 8 hosts each in a distinct /16    -> one /16 bucket apiece (bounded, no /32s)
+//	floor /16, full Cloudflare IPv6 /124        -> exactly 2606:4700:0:1::/124 (dual-stack only)
+//	floor /28, full S3 /27 (52.216.2.0/27)      -> splits into 52.216.2.0/28 + 52.216.2.16/28
+func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	k8sClient := k8sinterface.NewKubernetesApi()
+	dyn := dynamic.NewForConfigOrDie(k8sClient.K8SConfig)
+	t.Cleanup(func() {
+		_ = dyn.Resource(ccCollapseGVR).Delete(context.Background(), "default", metav1.DeleteOptions{})
+	})
+
+	// -------- Phase 1: /16 floor — exactness on real cloud ranges --------
+	applyCollapseFloor(t, dyn, 16)
+	time.Sleep(20 * time.Second) // let the TTL-cached provider pick up the floor
+
+	s3 := deployCIDRLearner(t, "resources/networkneighbors-s3-28.yaml")
+	scattered := deployCIDRLearner(t, "resources/networkneighbors-scattered.yaml")
+	spread := deployCIDRLearner(t, "resources/networkneighbors-cidr-spread.yaml")
+	v6 := deployCIDRLearner(t, "resources/networkneighbors-v6-124.yaml")
+
+	// A fully-observed S3 /28 exact-covers to exactly that /28.
+	s3CIDRs, s3Bare := collectLearntCollapse(t, dyn, s3)
+	assert.Equal(t, []string{"52.216.1.0/28"}, withPrefixes(s3CIDRs, "52.216.1."),
+		"a fully-observed S3 /28 must collapse to exactly 52.216.1.0/28")
+	assert.Empty(t, withPrefixes(s3Bare, "52.216.1."), "no bare host /32 may remain")
+
+	// ~30 hosts spread across dozens of /24s within a single /16 — the shape of the
+	// real too-large profile from the storage#349 review. Under a /16 floor they
+	// share no common prefix as long as the floor collapses to one covering
+	// 52.216.0.0/16, NOT one entry per host. This is the case that exploded to
+	// thousands of /32s before the bucketing fix.
+	spreadCIDRs, spreadBare := collectLearntCollapse(t, dyn, spread)
+	assert.Equal(t, []string{"52.216.0.0/16"}, withPrefixes(spreadCIDRs, "52.216."),
+		"hosts spread across a /16 must collapse to a single bounded /16, not per-host entries")
+	assert.Empty(t, withPrefixes(spreadBare, "52.216."), "no bare host /32 may remain after bucketing")
+
+	// Scattered IPs across four providers, each in a distinct /16, share no common
+	// prefix as long as the floor, so each is bucketed into its floor-length (/16)
+	// network — one bounded block apiece, never left as unbounded per-host /32s.
+	scatteredWant := []string{
+		"104.16.0.0/16", "13.107.0.0/16", "172.64.0.0/16", "20.150.0.0/16",
+		"34.120.0.0/16", "35.190.0.0/16", "52.216.0.0/16", "52.217.0.0/16",
+	}
+	scatteredCIDRs, scatteredBare := collectLearntCollapse(t, dyn, scattered)
+	got := withPrefixes(scatteredCIDRs, "52.216.", "52.217.", "104.16.", "172.64.", "20.150.", "13.107.", "34.120.", "35.190.")
+	assert.Equal(t, scatteredWant, got, "scattered cloud IPs, each in a distinct /16, bucket to one /16 apiece")
+	assert.Empty(t, withPrefixes(scatteredBare, "52.216.", "52.217.", "104.16.", "172.64.", "20.150.", "13.107.", "34.120.", "35.190."),
+		"no bare host /32 may remain after bucketing")
+
+	// IPv6 exact cover — only on a dual-stack cluster; skip the assertion if the
+	// pod never egressed over v6 (single-stack), rather than fail.
+	v6CIDRs, _ := collectLearntCollapse(t, dyn, v6)
+	if v6got := withPrefixes(v6CIDRs, "2606:4700:0:1:"); len(v6got) == 0 {
+		t.Log("no IPv6 egress learnt (single-stack cluster) — skipping the v6 assertion")
+	} else {
+		assert.Equal(t, []string{"2606:4700:0:1::/124"}, v6got,
+			"a fully-observed Cloudflare v6 /124 must collapse to exactly that /124")
+	}
+
+	// -------- Phase 2: /28 floor — a fully-observed /27 splits into two /28s ----
+	applyCollapseFloor(t, dyn, 28)
+	time.Sleep(20 * time.Second)
+
+	split := deployCIDRLearner(t, "resources/networkneighbors-s3-27.yaml")
+	splitCIDRs, splitBare := collectLearntCollapse(t, dyn, split)
+	assert.Equal(t, []string{"52.216.2.0/28", "52.216.2.16/28"}, withPrefixes(splitCIDRs, "52.216.2."),
+		"a fully-observed /27 must split into two /28s under a /28 floor")
+	assert.Empty(t, withPrefixes(splitBare, "52.216.2."))
+
+	t.Logf("collapse validated on real cloud ranges: S3=%v spread=%v scattered=%v split=%v",
+		withPrefixes(s3CIDRs, "52.216.1."), withPrefixes(spreadCIDRs, "52.216."), got, withPrefixes(splitCIDRs, "52.216.2."))
 }

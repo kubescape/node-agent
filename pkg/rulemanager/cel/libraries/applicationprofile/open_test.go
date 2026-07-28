@@ -130,9 +130,8 @@ func TestOpenInProfile(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Opens: []v1beta1.OpenCalls{
 			{
 				Path:  "/etc/passwd",
@@ -143,8 +142,8 @@ func TestOpenInProfile(t *testing.T) {
 				Flags: []string{"O_WRONLY", "O_CREAT"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -282,9 +281,8 @@ func TestOpenWithSuffixInProfile(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Opens: []v1beta1.OpenCalls{
 			{
 				Path:  "/etc/passwd",
@@ -303,8 +301,8 @@ func TestOpenWithSuffixInProfile(t *testing.T) {
 				Flags: []string{"O_RDONLY"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -441,9 +439,8 @@ func TestOpenWithPrefixInProfile(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Opens: []v1beta1.OpenCalls{
 			{
 				Path:  "/etc/passwd",
@@ -462,8 +459,8 @@ func TestOpenWithPrefixInProfile(t *testing.T) {
 				Flags: []string{"O_RDONLY"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -661,9 +658,8 @@ func TestOpenWithFlagsInProfile(t *testing.T) {
 		},
 	})
 
-	profile := &v1beta1.ApplicationProfile{}
-	profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
-		Name: "test-container",
+	profile := &v1beta1.ContainerProfile{}
+	profile.Spec = v1beta1.ContainerProfileSpec{
 		Opens: []v1beta1.OpenCalls{
 			{
 				Path:  "/etc/passwd",
@@ -678,8 +674,8 @@ func TestOpenWithFlagsInProfile(t *testing.T) {
 				Flags: []string{"O_RDWR", "O_APPEND"},
 			},
 		},
-	})
-	objCache.SetApplicationProfile(profile)
+	}
+	objCache.SetContainerProfile(profile)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -838,4 +834,3 @@ func TestOpenWithFlagsCompilation(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 }
-

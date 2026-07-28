@@ -29,9 +29,8 @@ func TestWasAddressPortProtocolInEgress(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
@@ -59,8 +58,8 @@ func TestWasAddressPortProtocolInEgress(t *testing.T) {
 				},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	lib := &nnLibrary{
 		objectCache:   &objCache,
@@ -166,9 +165,8 @@ func TestWasAddressPortProtocolInIngress(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Ingress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "172.16.0.10",
@@ -196,8 +194,8 @@ func TestWasAddressPortProtocolInIngress(t *testing.T) {
 				},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	lib := &nnLibrary{
 		objectCache:   &objCache,
@@ -373,9 +371,8 @@ func TestWasAddressPortProtocolWithNilPort(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
@@ -400,8 +397,8 @@ func TestWasAddressPortProtocolWithNilPort(t *testing.T) {
 				},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	lib := &nnLibrary{
 		objectCache:   &objCache,

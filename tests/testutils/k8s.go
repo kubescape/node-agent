@@ -216,185 +216,154 @@ func (w *TestWorkload) WaitForReady(maxRetries uint64) error {
 	return nil
 }
 
-func (w *TestWorkload) listApplicationProfilesInNamespace() ([]v1beta1.ApplicationProfile, error) {
+// The unified ContainerProfile (spdx.softwarecomposition.kubescape.io) replaces
+// the former per-workload ApplicationProfile and NetworkNeighborhood CRDs. It is
+// authored/learnt per container: a workload with N containers yields N
+// ContainerProfiles, each carrying the flat spec (execs/opens/capabilities/
+// syscalls/endpoints/egress/ingress) that used to live under a container entry
+// of an AP/NN. Profiles are matched to a workload by the kubescape.io/workload-*
+// labels and to a container by kubescape.io/workload-container-name.
+
+func (w *TestWorkload) listContainerProfilesInNamespace() ([]v1beta1.ContainerProfile, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
-	profiles, err := storageclient.ApplicationProfiles(w.Namespace).List(context.TODO(), metav1.ListOptions{})
+	profiles, err := storageclient.ContainerProfiles(w.Namespace).List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
 	return profiles.Items, nil
 }
 
-func (w *TestWorkload) listNetworkNeighborhoodInNamespace() ([]v1beta1.NetworkNeighborhood, error) {
-	k8sClient := k8sinterface.NewKubernetesApi()
-	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-
-	profiles, err := storageclient.NetworkNeighborhoods(w.Namespace).List(context.TODO(), metav1.ListOptions{})
+// matchingContainerProfiles returns every ContainerProfile whose workload labels
+// identify this workload (one per learnt/authored container).
+func (w *TestWorkload) matchingContainerProfiles() ([]v1beta1.ContainerProfile, error) {
+	cps, err := w.listContainerProfilesInNamespace()
 	if err != nil {
 		return nil, err
 	}
-	return profiles.Items, nil
-}
-
-func (w *TestWorkload) GetApplicationProfile() (*v1beta1.ApplicationProfile, error) {
-	k8sClient := k8sinterface.NewKubernetesApi()
-	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-
-	appProfiles, err := w.listApplicationProfilesInNamespace()
-	if err != nil {
-		return nil, err
-	}
-
-	var matchingProfiles []v1beta1.ApplicationProfile
-
-	// Find all matching profiles
-	for _, appProfile := range appProfiles {
-		wlKind := appProfile.Labels["kubescape.io/workload-kind"]
-		wlName := appProfile.Labels["kubescape.io/workload-name"]
-		wlNs := appProfile.Labels["kubescape.io/workload-namespace"]
-
+	var matching []v1beta1.ContainerProfile
+	for _, cp := range cps {
+		wlKind := cp.Labels["kubescape.io/workload-kind"]
+		wlName := cp.Labels["kubescape.io/workload-name"]
+		wlNs := cp.Labels["kubescape.io/workload-namespace"]
 		if wlKind == w.WorkloadObj.GetKind() && wlName == w.WorkloadObj.GetName() && wlNs == w.Namespace {
-			matchingProfiles = append(matchingProfiles, appProfile)
+			matching = append(matching, cp)
 		}
 	}
-
-	if len(matchingProfiles) == 0 {
-		return nil, fmt.Errorf("application profile not found")
-	}
-
-	// Find the newest profile
-	newestProfile := &matchingProfiles[0]
-	for i := 1; i < len(matchingProfiles); i++ {
-		if matchingProfiles[i].CreationTimestamp.After(newestProfile.CreationTimestamp.Time) {
-			newestProfile = &matchingProfiles[i]
-		}
-	}
-
-	// Get the full profile object
-	return storageclient.ApplicationProfiles(w.Namespace).Get(context.TODO(), newestProfile.Name, metav1.GetOptions{})
+	return matching, nil
 }
 
-func (w *TestWorkload) GetNetworkNeighborhood() (*v1beta1.NetworkNeighborhood, error) {
+// GetContainerProfile returns the newest ContainerProfile for the named
+// container of this workload.
+func (w *TestWorkload) GetContainerProfile(containerName string) (*v1beta1.ContainerProfile, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
-	nn, err := w.listNetworkNeighborhoodInNamespace()
+	matching, err := w.matchingContainerProfiles()
 	if err != nil {
 		return nil, err
 	}
 
-	var matchingNeighborhoods []v1beta1.NetworkNeighborhood
+	var candidates []v1beta1.ContainerProfile
+	for _, cp := range matching {
+		if cp.Labels["kubescape.io/workload-container-name"] == containerName {
+			candidates = append(candidates, cp)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("container profile for container %q not found", containerName)
+	}
 
-	// Find all matching network neighborhoods
-	for _, n := range nn {
-		wlKind := n.Labels["kubescape.io/workload-kind"]
-		wlName := n.Labels["kubescape.io/workload-name"]
-		wlNs := n.Labels["kubescape.io/workload-namespace"]
+	newest := &candidates[0]
+	for i := 1; i < len(candidates); i++ {
+		if candidates[i].CreationTimestamp.After(newest.CreationTimestamp.Time) {
+			newest = &candidates[i]
+		}
+	}
+	return storageclient.ContainerProfiles(w.Namespace).Get(context.TODO(), newest.Name, metav1.GetOptions{})
+}
 
-		if wlKind == w.WorkloadObj.GetKind() && wlName == w.WorkloadObj.GetName() && wlNs == w.Namespace {
-			matchingNeighborhoods = append(matchingNeighborhoods, n)
+// GetContainerProfiles returns the newest ContainerProfile per container name
+// for this workload.
+func (w *TestWorkload) GetContainerProfiles() ([]v1beta1.ContainerProfile, error) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	matching, err := w.matchingContainerProfiles()
+	if err != nil {
+		return nil, err
+	}
+	if len(matching) == 0 {
+		return nil, fmt.Errorf("container profile not found")
+	}
+
+	newestByContainer := map[string]*v1beta1.ContainerProfile{}
+	for i := range matching {
+		cp := &matching[i]
+		name := cp.Labels["kubescape.io/workload-container-name"]
+		if cur, ok := newestByContainer[name]; !ok || cp.CreationTimestamp.After(cur.CreationTimestamp.Time) {
+			newestByContainer[name] = cp
 		}
 	}
 
-	if len(matchingNeighborhoods) == 0 {
-		return nil, fmt.Errorf("network neighborhood not found")
-	}
-
-	// Find the newest neighborhood
-	newestNeighborhood := &matchingNeighborhoods[0]
-	for i := 1; i < len(matchingNeighborhoods); i++ {
-		if matchingNeighborhoods[i].CreationTimestamp.After(newestNeighborhood.CreationTimestamp.Time) {
-			newestNeighborhood = &matchingNeighborhoods[i]
+	var out []v1beta1.ContainerProfile
+	for _, cp := range newestByContainer {
+		full, err := storageclient.ContainerProfiles(w.Namespace).Get(context.TODO(), cp.Name, metav1.GetOptions{})
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, *full)
 	}
-
-	// Get the full network neighborhood object
-	return storageclient.NetworkNeighborhoods(w.Namespace).Get(context.TODO(), newestNeighborhood.Name, metav1.GetOptions{})
+	return out, nil
 }
 
-func (w *TestWorkload) WaitForApplicationProfileCompletion(maxRetries uint64) error {
-	return w.WaitForApplicationProfile(maxRetries, "completed")
+func (w *TestWorkload) WaitForContainerProfileCompletion(maxRetries uint64) error {
+	return w.WaitForContainerProfile(maxRetries, "completed")
 }
 
-func (w *TestWorkload) WaitForApplicationProfileCompletionWithBlacklist(maxRetries uint64, blacklist []string) error {
+func (w *TestWorkload) WaitForContainerProfileCompletionWithBlacklist(maxRetries uint64, blacklist []string) error {
 	return backoff.RetryNotify(func() error {
-		appProfile, err := w.GetApplicationProfile()
+		cps, err := w.matchingContainerProfiles()
 		if err != nil {
 			return err
 		}
-
-		if appProfile.Annotations["kubescape.io/status"] == "completed" {
+		if len(cps) == 0 {
+			return fmt.Errorf("no container profiles found")
+		}
+		for i := range cps {
+			if cps[i].Annotations["kubescape.io/status"] != "completed" {
+				return fmt.Errorf("container profile %s is not in status 'completed'", cps[i].Name)
+			}
 			for _, item := range blacklist {
-				if appProfile.Name == item {
-					return fmt.Errorf("application profile %s is blacklisted", item)
+				if cps[i].Name == item {
+					return fmt.Errorf("container profile %s is blacklisted", item)
 				}
 			}
-			return nil
 		}
-		return fmt.Errorf("application profile is not in status 'completed'")
+		return nil
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for app profile", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
+		logger.L().Info("waiting for container profile", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
 	})
 }
 
-func (w *TestWorkload) WaitForApplicationProfile(maxRetries uint64, expectedStatus string) error {
+func (w *TestWorkload) WaitForContainerProfile(maxRetries uint64, expectedStatus string) error {
 	return backoff.RetryNotify(func() error {
-		appProfile, err := w.GetApplicationProfile()
+		cps, err := w.matchingContainerProfiles()
 		if err != nil {
 			return err
 		}
-
-		if appProfile.Annotations["kubescape.io/status"] == expectedStatus {
-			return nil
+		if len(cps) == 0 {
+			return fmt.Errorf("no container profiles found")
 		}
-		return fmt.Errorf("application profile is not in status '%s'", expectedStatus)
-	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for app profile", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
-	})
-}
-
-func (w *TestWorkload) WaitForNetworkNeighborhoodCompletion(maxRetries uint64) error {
-	return w.WaitForNetworkNeighborhood(maxRetries, "completed")
-}
-
-func (w *TestWorkload) WaitForNetworkNeighborhoodCompletionWithBlacklist(maxRetries uint64, blacklist []string) error {
-	return backoff.RetryNotify(func() error {
-		networkNeighborhood, err := w.GetNetworkNeighborhood()
-		if err != nil {
-			return err
-		}
-
-		if networkNeighborhood.Annotations["kubescape.io/status"] == "completed" {
-			for _, item := range blacklist {
-				if networkNeighborhood.Name == item {
-					return fmt.Errorf("network neighborhood %s is blacklisted", item)
-				}
+		for i := range cps {
+			if cps[i].Annotations["kubescape.io/status"] != expectedStatus {
+				return fmt.Errorf("container profile %s is not in status '%s'", cps[i].Name, expectedStatus)
 			}
-			return nil
 		}
-		// Print the network neighborhood details
-		logger.L().Info("network neighborhood details", helpers.Interface("annotations", networkNeighborhood.Annotations), helpers.Interface("labels", networkNeighborhood.Labels))
-		return fmt.Errorf("network neighborhood is not in status 'completed'")
+		return nil
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for network neighborhood", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
-	})
-}
-
-func (w *TestWorkload) WaitForNetworkNeighborhood(maxRetries uint64, expectedStatus string) error {
-	return backoff.RetryNotify(func() error {
-		networkNeighborhood, err := w.GetNetworkNeighborhood()
-		if err != nil {
-			return err
-		}
-
-		if networkNeighborhood.Annotations["kubescape.io/status"] == expectedStatus {
-			return nil
-		}
-		return fmt.Errorf("network neighborhood is not in status '%s'", expectedStatus)
-	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for network neighborhood", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
+		logger.L().Info("waiting for container profile", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
 	})
 }
 
@@ -542,43 +511,37 @@ func IncreaseNodeAgentSniffingTime(newDuration string) {
 
 }
 
-func AssertNetworkNeighborhoodNotContains(t *testing.T, nn *v1beta1.NetworkNeighborhood, containerName string, notExpectedEgress, notExpectedIngress []string) {
-	container, err := getContainerFromNetworkNeighborhood(nn, containerName)
-	if err != nil {
-		t.Errorf("Error getting container from network neighborhood: %v", err)
-		return
-	}
-
-	egress := getEgressDnsNames(container)
+// AssertContainerProfileNotContains asserts that none of the given egress/ingress
+// DNS names appear in the container profile's learnt network surface. The
+// ContainerProfile is already scoped to a single container, so there is no
+// container-name argument (unlike the former per-workload NetworkNeighborhood).
+func AssertContainerProfileNotContains(t *testing.T, cp *v1beta1.ContainerProfile, notExpectedEgress, notExpectedIngress []string) {
+	egress := getEgressDnsNames(cp)
 	for _, dnsName := range notExpectedEgress {
-		assert.False(t, egress.Contains(dnsName), "did not expect egress DNS name '%s' in network neighborhood", dnsName)
+		assert.False(t, egress.Contains(dnsName), "did not expect egress DNS name '%s' in container profile", dnsName)
 	}
-	ingress := getIngressDnsNames(container)
+	ingress := getIngressDnsNames(cp)
 	for _, dnsName := range notExpectedIngress {
-		assert.False(t, ingress.Contains(dnsName), "did not expect ingress DNS name '%s' in network neighborhood", dnsName)
+		assert.False(t, ingress.Contains(dnsName), "did not expect ingress DNS name '%s' in container profile", dnsName)
 	}
 }
 
-func AssertNetworkNeighborhoodContains(t *testing.T, nn *v1beta1.NetworkNeighborhood, containerName string, expectedEgress, expectedIngress []string) {
-	container, err := getContainerFromNetworkNeighborhood(nn, containerName)
-	if err != nil {
-		t.Errorf("Error getting container from network neighborhood: %v", err)
-		return
-	}
-
-	egress := getEgressDnsNames(container)
+// AssertContainerProfileContains asserts that all of the given egress/ingress
+// DNS names appear in the container profile's learnt network surface.
+func AssertContainerProfileContains(t *testing.T, cp *v1beta1.ContainerProfile, expectedEgress, expectedIngress []string) {
+	egress := getEgressDnsNames(cp)
 	for _, dnsName := range expectedEgress {
-		assert.True(t, egress.Contains(dnsName), "Expected egress DNS name '%s' not found in network neighborhood", dnsName)
+		assert.True(t, egress.Contains(dnsName), "Expected egress DNS name '%s' not found in container profile", dnsName)
 	}
-	ingress := getIngressDnsNames(container)
+	ingress := getIngressDnsNames(cp)
 	for _, dnsName := range expectedIngress {
-		assert.True(t, ingress.Contains(dnsName), "Expected ingress DNS name '%s' not found in network neighborhood", dnsName)
+		assert.True(t, ingress.Contains(dnsName), "Expected ingress DNS name '%s' not found in container profile", dnsName)
 	}
 }
 
-func getEgressDnsNames(nnc *v1beta1.NetworkNeighborhoodContainer) mapset.Set[string] {
+func getEgressDnsNames(cp *v1beta1.ContainerProfile) mapset.Set[string] {
 	dns := mapset.NewSet[string]()
-	for _, egress := range nnc.Egress {
+	for _, egress := range cp.Spec.Egress {
 		for _, dnsName := range egress.DNSNames {
 			dns.Add(dnsName)
 		}
@@ -586,35 +549,14 @@ func getEgressDnsNames(nnc *v1beta1.NetworkNeighborhoodContainer) mapset.Set[str
 	return dns
 }
 
-func getIngressDnsNames(nnc *v1beta1.NetworkNeighborhoodContainer) mapset.Set[string] {
+func getIngressDnsNames(cp *v1beta1.ContainerProfile) mapset.Set[string] {
 	dns := mapset.NewSet[string]()
-	for _, ingress := range nnc.Ingress {
+	for _, ingress := range cp.Spec.Ingress {
 		for _, dnsName := range ingress.DNSNames {
 			dns.Add(dnsName)
 		}
 	}
 	return dns
-}
-
-func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (*v1beta1.NetworkNeighborhoodContainer, error) {
-	for _, container := range nn.Spec.Containers {
-		if container.Name == containerName {
-			return &container, nil
-		}
-	}
-
-	for _, container := range nn.Spec.InitContainers {
-		if container.Name == containerName {
-			return &container, nil
-		}
-	}
-
-	for _, container := range nn.Spec.EphemeralContainers {
-		if container.Name == containerName {
-			return &container, nil
-		}
-	}
-	return nil, fmt.Errorf("container '%s' not found", containerName)
 }
 
 func PrintAppLogs(t *testing.T, app string) {

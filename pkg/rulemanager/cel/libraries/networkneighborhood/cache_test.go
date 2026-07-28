@@ -30,9 +30,8 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
@@ -70,8 +69,8 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 				},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	// Create library with cache
 	lib := &nnLibrary{
@@ -206,9 +205,8 @@ func TestNetworkNeighborhoodCacheDifferentArguments(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
@@ -219,8 +217,8 @@ func TestNetworkNeighborhoodCacheDifferentArguments(t *testing.T) {
 				DNSNames:  []string{"database.internal"},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	lib := &nnLibrary{
 		objectCache:   &objCache,
@@ -290,17 +288,16 @@ func TestNetworkNeighborhoodCacheExpiration(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
 				DNSNames:  []string{"api.example.com"},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	// Create cache with short TTL for testing
 	config := cache.FunctionCacheConfig{
@@ -367,17 +364,16 @@ func TestNetworkNeighborhoodCachePerformance(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
 				DNSNames:  []string{"api.example.com"},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	lib := &nnLibrary{
 		objectCache:   &objCache,
@@ -444,9 +440,8 @@ func TestNetworkNeighborhoodCacheMultipleFunctions(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
@@ -459,8 +454,8 @@ func TestNetworkNeighborhoodCacheMultipleFunctions(t *testing.T) {
 				DNSNames:  []string{"loadbalancer.example.com"},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	lib := &nnLibrary{
 		objectCache:   &objCache,
@@ -531,17 +526,16 @@ func TestNetworkNeighborhoodCacheClearCache(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
 				DNSNames:  []string{"api.example.com"},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	lib := &nnLibrary{
 		objectCache:   &objCache,
@@ -605,17 +599,16 @@ func TestNetworkNeighborhoodCacheKeyGeneration(t *testing.T) {
 		},
 	})
 
-	nn := &v1beta1.NetworkNeighborhood{}
-	nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
-		Name: "test-container",
+	nn := &v1beta1.ContainerProfile{}
+	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "192.168.1.100",
 				DNSNames:  []string{"api.example.com"},
 			},
 		},
-	})
-	objCache.SetNetworkNeighborhood(nn)
+	}
+	objCache.SetContainerProfile(nn)
 
 	lib := &nnLibrary{
 		objectCache:   &objCache,
