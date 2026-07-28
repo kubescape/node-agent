@@ -3,6 +3,7 @@ package containerprofilecache
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,29 +27,22 @@ import (
 // always returns the same CP pointer (so the fast-path can be asserted via
 // pointer equality).
 type fakeProfileClient struct {
-	cp    *v1beta1.ContainerProfile
+	cp *v1beta1.ContainerProfile
 	// userCP, when non-nil, is returned by GetContainerProfile for a name
 	// matching userCP.Name (the migrated user-defined ContainerProfile). Other
 	// names fall through to cp. Lets tests exercise the new-way overlay path.
 	userCP *v1beta1.ContainerProfile
-	ap    *v1beta1.ApplicationProfile // returned for Get by ap.Name match (or any if overlayOnly is empty)
-	nn    *v1beta1.NetworkNeighborhood
-	cpErr error
-	apErr error
-	nnErr error
+	cpErr  error
 
-	// userManagedAP / userManagedNN, when non-nil, are returned for any
-	// GetApplicationProfile / GetNetworkNeighborhood whose name starts with
-	// the "ug-" prefix (the convention used by legacy user-managed profiles).
-	// This lets tests exercise the user-managed merge path added for
-	// Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest
-	// without fighting the overlayOnly restriction.
-	userManagedAP *v1beta1.ApplicationProfile
-	userManagedNN *v1beta1.NetworkNeighborhood
+	// userManagedCP, when non-nil, is returned by GetContainerProfile for any
+	// name starting with the "ug-" user-managed prefix. This is the migrated
+	// replacement for the legacy ug- ApplicationProfile + NetworkNeighborhood
+	// overlay pair and lets tests exercise the user-managed merge path.
+	userManagedCP *v1beta1.ContainerProfile
 
-	// overlayOnly, if non-empty, restricts ap/nn returns to only the given
-	// name; other names return (nil, nil). Tests that mix workload-AP/NN
-	// with overlay-AP/NN use this to keep the fixture scoped.
+	// overlayOnly, if non-empty, scopes the overlay name whose GetContainerProfile
+	// returns a genuine NotFound (or overlayCPErr). Tests use this to keep the
+	// user-defined-CP fixture scoped.
 	overlayOnly string
 
 	// overlayCPErr, when non-nil, is returned by GetContainerProfile for a
@@ -66,37 +60,24 @@ var _ storage.ProfileClient = (*fakeProfileClient)(nil)
 func TestShouldLogOptionalUserManagedFetchError(t *testing.T) {
 	assert.False(t, shouldLogOptionalUserManagedFetchError(nil))
 	assert.False(t, shouldLogOptionalUserManagedFetchError(
-		apierrors.NewNotFound(schema.GroupResource{Group: "softwarecomposition.kubescape.io", Resource: "applicationprofiles"}, "ug-nginx"),
+		apierrors.NewNotFound(schema.GroupResource{Group: "softwarecomposition.kubescape.io", Resource: "containerprofiles"}, "ug-nginx"),
 	))
 	assert.True(t, shouldLogOptionalUserManagedFetchError(errors.New("boom")))
 }
 
-func (f *fakeProfileClient) GetApplicationProfile(_ context.Context, _, name string) (*v1beta1.ApplicationProfile, error) {
-	if len(name) >= 3 && name[:3] == helpersv1.UserApplicationProfilePrefix {
-		return f.userManagedAP, nil
-	}
-	if f.overlayOnly != "" && name != f.overlayOnly {
-		return nil, nil
-	}
-	return f.ap, f.apErr
-}
-func (f *fakeProfileClient) GetNetworkNeighborhood(_ context.Context, _, name string) (*v1beta1.NetworkNeighborhood, error) {
-	if len(name) >= 3 && name[:3] == helpersv1.UserNetworkNeighborhoodPrefix {
-		return f.userManagedNN, nil
-	}
-	if f.overlayOnly != "" && name != f.overlayOnly {
-		return nil, nil
-	}
-	return f.nn, f.nnErr
-}
 func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
 	f.getCPCalls++
+	// User-managed "ug-<workload>" overlay: a single ContainerProfile, the
+	// migrated replacement for the legacy ug- AP/NN pair.
+	if strings.HasPrefix(name, helpersv1.UserApplicationProfilePrefix) {
+		return f.userManagedCP, nil
+	}
 	if f.userCP != nil && name == f.userCP.Name {
 		return f.userCP, nil
 	}
 	// The overlay label points at overlayOnly; with no user CP published at that
-	// name it is absent, which drives the legacy AP/NN fallback path. (The base
-	// CP fetch uses the derived slug, a different name, and still gets f.cp.)
+	// name it is absent (or a transient error). The base CP fetch uses the
+	// derived slug, a different name, and still gets f.cp.
 	if f.overlayOnly != "" && name == f.overlayOnly {
 		if f.overlayCPErr != nil {
 			return nil, f.overlayCPErr
@@ -104,12 +85,6 @@ func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, name strin
 		return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, name)
 	}
 	return f.cp, f.cpErr
-}
-func (f *fakeProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
-	return &v1beta1.ApplicationProfileList{}, nil
-}
-func (f *fakeProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
-	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 
 // newTestCache returns a cache wired with an in-memory K8sObjectCacheMock.

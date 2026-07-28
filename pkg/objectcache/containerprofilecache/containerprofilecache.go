@@ -80,8 +80,7 @@ type CachedContainerProfile struct {
 	WorkloadName string
 
 	RV              string // ContainerProfile resourceVersion at last load
-	UserManagedAPRV string // user-managed AP (ug-<workload>) RV at last projection, "" if absent
-	UserManagedNNRV string // user-managed NN (ug-<workload>) RV at last projection, "" if absent
+	UserManagedCPRV string // user-managed CP (ug-<workload>) RV at last projection, "" if absent
 	UserCPRV        string // user-defined ContainerProfile (label-referenced) RV at last load, "" if not used
 }
 
@@ -111,10 +110,6 @@ type ContainerProfileCacheImpl struct {
 	reconcileEvery time.Duration
 	rpcBudget      time.Duration
 	refreshInProgress atomic.Bool
-
-	// deprecationDedup tracks (kind|ns/name@rv) keys to emit one WARN log
-	// per legacy CRD resource-version across the process lifetime.
-	deprecationDedup sync.Map
 
 	// Projection spec — installed by SetProjectionSpec when rulemanager loads rules.
 	currentSpecMu  sync.RWMutex
@@ -329,41 +324,27 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 
-	// LEGACY ONLY
-	var userManagedAP *v1beta1.ApplicationProfile
-	var userManagedNN *v1beta1.NetworkNeighborhood
+	// User-managed overlay: the migrated "ug-<workloadName>" ContainerProfile
+	// (annotated managed-by: User), unioned on top of the base. This replaces the
+	// legacy ug- ApplicationProfile + NetworkNeighborhood pair. Optional: nil on 404.
+	var userManagedCP *v1beta1.ContainerProfile
 	if workloadName != "" {
-		ugName := helpersv1.UserApplicationProfilePrefix + workloadName
-		var ugAPErr error
+		// UserApplicationProfilePrefix is the shared "ug-" user-managed prefix.
+		ugCPName := helpersv1.UserApplicationProfilePrefix + workloadName
+		var ugCPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userManagedAP, ugAPErr = c.storageClient.GetApplicationProfile(rctx, ns, ugName)
-			return ugAPErr
+			userManagedCP, ugCPErr = c.storageClient.GetContainerProfile(rctx, ns, ugCPName)
+			return ugCPErr
 		})
-		if ugAPErr != nil {
-			if shouldLogOptionalUserManagedFetchError(ugAPErr) {
-				logger.L().Debug("failed to fetch user-managed ApplicationProfile",
+		if ugCPErr != nil {
+			if shouldLogOptionalUserManagedFetchError(ugCPErr) {
+				logger.L().Debug("failed to fetch user-managed ContainerProfile",
 					helpers.String("containerID", containerID),
 					helpers.String("namespace", ns),
-					helpers.String("name", ugName),
-					helpers.Error(ugAPErr))
+					helpers.String("name", ugCPName),
+					helpers.Error(ugCPErr))
 			}
-			userManagedAP = nil
-		}
-		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + workloadName
-		var ugNNErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userManagedNN, ugNNErr = c.storageClient.GetNetworkNeighborhood(rctx, ns, ugNNName)
-			return ugNNErr
-		})
-		if ugNNErr != nil {
-			if shouldLogOptionalUserManagedFetchError(ugNNErr) {
-				logger.L().Debug("failed to fetch user-managed NetworkNeighborhood",
-					helpers.String("containerID", containerID),
-					helpers.String("namespace", ns),
-					helpers.String("name", ugNNName),
-					helpers.Error(ugNNErr))
-			}
-			userManagedNN = nil
+			userManagedCP = nil
 		}
 	}
 
@@ -406,9 +387,8 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
-	// LEGACY mixed in 
 	// Need SOMETHING to cache. If we have nothing, stay pending and retry.
-	if cp == nil && userDefinedCP == nil && userManagedAP == nil && userManagedNN == nil {
+	if cp == nil && userDefinedCP == nil && userManagedCP == nil {
 		return false
 	}
 
@@ -448,12 +428,10 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			helpers.String("podName", container.K8s.PodName))
 	}
 
-	// LEGACY
-	userManagedApplied := userManagedAP != nil || userManagedNN != nil
-	if userManagedApplied {
-		projected, warnings := projectUserProfiles(cp, userManagedAP, userManagedNN, pod, container.Runtime.ContainerName)
-		cp = projected
-		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
+	// User-managed "ug-" overlay pass: union the migrated ug- ContainerProfile
+	// on top of the base. (Legacy AP/NN overlay merge removed.)
+	if userManagedCP != nil {
+		cp = projectUserManagedCP(cp, userManagedCP)
 	}
 
 	entry := c.buildEntry(cp, pod, container, sharedData)
@@ -467,11 +445,8 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// Fill in user-managed bookkeeping so refreshOneEntry can re-fetch these
 	// sources on every tick. WorkloadName is the "ug-" lookup prefix.
 	entry.WorkloadName = workloadName
-	if userManagedAP != nil {
-		entry.UserManagedAPRV = userManagedAP.ResourceVersion
-	}
-	if userManagedNN != nil {
-		entry.UserManagedNNRV = userManagedNN.ResourceVersion
+	if userManagedCP != nil {
+		entry.UserManagedCPRV = userManagedCP.ResourceVersion
 	}
 
 	// When the overlay label is set, ALWAYS record UserCPRef so the reconciler

@@ -2,6 +2,7 @@ package containerprofilecache
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -65,12 +66,8 @@ func (k *controllableK8sCache) DeleteSharedContainerData(_ string) {}
 // fast-skip behavior.
 type countingProfileClient struct {
 	cp *v1beta1.ContainerProfile
-	ap *v1beta1.ApplicationProfile
-	nn *v1beta1.NetworkNeighborhood
 
 	cpCalls atomic.Int64
-	apCalls atomic.Int64
-	nnCalls atomic.Int64
 }
 
 var _ storage.ProfileClient = (*countingProfileClient)(nil)
@@ -78,20 +75,6 @@ var _ storage.ProfileClient = (*countingProfileClient)(nil)
 func (f *countingProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	f.cpCalls.Add(1)
 	return f.cp, nil
-}
-func (f *countingProfileClient) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
-	f.apCalls.Add(1)
-	return f.ap, nil
-}
-func (f *countingProfileClient) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
-	f.nnCalls.Add(1)
-	return f.nn, nil
-}
-func (f *countingProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
-	return &v1beta1.ApplicationProfileList{}, nil
-}
-func (f *countingProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
-	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 
 // countingMetrics tallies ReportContainerProfileLegacyLoad calls so the T8
@@ -390,112 +373,68 @@ func TestRefreshNoEntryWhenCPGetFails(t *testing.T) {
 }
 
 // TestRefreshPreservesEntryOnTransientOverlayError — overlay fetch errors must
-// not strip overlay data from the cache. If a user-managed or user-defined
-// AP/NN GET returns an error while the entry already has a non-empty cached RV
-// for that overlay, refreshOneEntry must keep the old entry unchanged (same
-// pointer) rather than rebuilding without the overlay and clearing its RV.
+// not strip overlay data from the cache. If the user-managed "ug-<workload>"
+// ContainerProfile GET returns an error while the entry already has a non-empty
+// cached RV for that overlay, refreshOneEntry must keep the old entry unchanged
+// (same pointer) rather than rebuilding without the overlay and clearing its RV.
 // Regression test for the refreshRPC timeout → silent nil → spurious rebuild path.
 func TestRefreshPreservesEntryOnTransientOverlayError(t *testing.T) {
+	// Base CP is terminal (Completed) so refreshOneEntry passes the status gate
+	// and actually reaches the user-managed overlay fetch.
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "100"},
-		Spec:       v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
-	}
-
-	type overlayFields struct {
-		workloadName    string
-		userManagedAPRV string
-		userManagedNNRV string
-	}
-	tests := []struct {
-		name    string
-		apErr   bool
-		nnErr   bool
-		overlay overlayFields
-	}{
-		{
-			name:  "user-managed AP timeout preserves entry",
-			apErr: true,
-			overlay: overlayFields{
-				workloadName:    "nginx",
-				userManagedAPRV: "9",
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp", Namespace: "default", ResourceVersion: "100",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
 			},
 		},
-		{
-			name:  "user-managed NN timeout preserves entry",
-			nnErr: true,
-			overlay: overlayFields{
-				workloadName:    "nginx",
-				userManagedNNRV: "7",
-			},
-		},
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			apErr := error(nil)
-			if tc.apErr {
-				apErr = assertErr{}
-			}
-			nnErr := error(nil)
-			if tc.nnErr {
-				nnErr = assertErr{}
-			}
-			client := &overlayErrorClient{cp: cp, apErr: apErr, nnErr: nnErr}
-			k8s := newControllableK8sCache()
-			c := newReconcilerCache(t, client, k8s, nil)
+	client := &overlayErrorClient{cp: cp, ugCPErr: assertErr{}}
+	k8s := newControllableK8sCache()
+	c := newReconcilerCache(t, client, k8s, nil)
 
-			id := "c1"
-			entry := &CachedContainerProfile{
-				Projected:       Apply(nil, cp, nil),
-				State:           &objectcache.ProfileState{Name: cp.Name},
-				ContainerName:   "nginx",
-				PodName:         "nginx-abc",
-				Namespace:       "default",
-				PodUID:          "uid-1",
-				CPName:          "cp",
-				RV:              "100",
-				WorkloadName:    tc.overlay.workloadName,
-				UserManagedAPRV: tc.overlay.userManagedAPRV,
-				UserManagedNNRV: tc.overlay.userManagedNNRV,
-			}
-			c.entries.Set(id, entry)
-
-			c.refreshAllEntries(context.Background())
-
-			stored, ok := c.entries.Load(id)
-			require.True(t, ok, "overlay error must not delete the entry")
-			assert.Same(t, entry, stored, "entry pointer must not change when overlay fetch fails transiently")
-			// Overlay RVs must be unchanged (not cleared to "").
-			assert.Equal(t, tc.overlay.userManagedAPRV, stored.UserManagedAPRV)
-			assert.Equal(t, tc.overlay.userManagedNNRV, stored.UserManagedNNRV)
-		})
+	id := "c1"
+	entry := &CachedContainerProfile{
+		Projected:       Apply(nil, cp, nil),
+		State:           &objectcache.ProfileState{Name: cp.Name},
+		ContainerName:   "nginx",
+		PodName:         "nginx-abc",
+		Namespace:       "default",
+		PodUID:          "uid-1",
+		CPName:          "cp",
+		RV:              "100",
+		WorkloadName:    "nginx",
+		UserManagedCPRV: "9",
 	}
+	c.entries.Set(id, entry)
+
+	c.refreshAllEntries(context.Background())
+
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok, "overlay error must not delete the entry")
+	assert.Same(t, entry, stored, "entry pointer must not change when overlay fetch fails transiently")
+	// The overlay RV must be unchanged (not cleared to "").
+	assert.Equal(t, "9", stored.UserManagedCPRV, "UserManagedCPRV must be unchanged after a transient overlay-fetch error")
 }
 
-// overlayErrorClient returns a valid CP but fails AP/NN calls with the
-// configured errors. Used to test overlay error-preservation logic.
+// overlayErrorClient returns a valid base CP but fails the user-managed
+// "ug-<workload>" ContainerProfile fetch with the configured error. Used to
+// test overlay error-preservation logic.
 type overlayErrorClient struct {
-	cp    *v1beta1.ContainerProfile
-	apErr error
-	nnErr error
+	cp      *v1beta1.ContainerProfile
+	ugCPErr error
 }
 
 var _ storage.ProfileClient = (*overlayErrorClient)(nil)
 
-func (o *overlayErrorClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
+func (o *overlayErrorClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
+	if strings.HasPrefix(name, helpersv1.UserApplicationProfilePrefix) {
+		return nil, o.ugCPErr
+	}
 	return o.cp, nil
-}
-func (o *overlayErrorClient) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
-	return nil, o.apErr
-}
-func (o *overlayErrorClient) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
-	return nil, o.nnErr
-}
-func (o *overlayErrorClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
-	return &v1beta1.ApplicationProfileList{}, nil
-}
-func (o *overlayErrorClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
-	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 
 // --- helpers ---
@@ -538,18 +477,6 @@ var _ storage.ProfileClient = (*failingProfileClient)(nil)
 
 func (f *failingProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	return nil, f.cpErr
-}
-func (f *failingProfileClient) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
-	return nil, nil
-}
-func (f *failingProfileClient) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
-	return nil, nil
-}
-func (f *failingProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
-	return &v1beta1.ApplicationProfileList{}, nil
-}
-func (f *failingProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
-	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 
 // silence unused-import linter: helpersv1 is referenced only via the const in
@@ -631,18 +558,6 @@ func (b *blockingProfileClient) GetContainerProfile(ctx context.Context, _, _ st
 		return nil, ctx.Err()
 	}
 }
-func (b *blockingProfileClient) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
-	return nil, nil
-}
-func (b *blockingProfileClient) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
-	return nil, nil
-}
-func (b *blockingProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
-	return &v1beta1.ApplicationProfileList{}, nil
-}
-func (b *blockingProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
-	return &v1beta1.NetworkNeighborhoodList{}, nil
-}
 
 // TestRetryPendingEntries_CPCreatedAfterAdd exercises the bug that slipped
 // through PR #788 component tests: at EventTypeAddContainer the CP may not
@@ -682,8 +597,11 @@ func TestRetryPendingEntries_CPCreatedAfterAdd(t *testing.T) {
 
 	assert.NotNil(t, c.GetProjectedContainerProfile(id), "entry promoted after CP appears")
 	assert.Equal(t, 0, c.pending.Len(), "pending drained on successful promotion")
-	// Exactly two GETs: one from addContainer (404), one from retry (200).
-	assert.Equal(t, 2, client.getCPCalls, "retry should only re-GET once per tick")
+	// Four GETs total: each populate attempt issues two GetContainerProfile
+	// calls — the base CP plus the user-managed "ug-<workload>" overlay CP
+	// (the migrated replacement for the legacy ug- AP/NN pair). addContainer
+	// performs one attempt (base 404), the retry performs the second (base 200).
+	assert.Equal(t, 4, client.getCPCalls, "each tick re-GETs the base CP and the ug- overlay CP exactly once")
 }
 
 // TestPendingEntriesAreNotGCedBeforeRetry verifies we no longer drop pending
@@ -1014,11 +932,11 @@ func TestNotifyContainerTerminal_Completed(t *testing.T) {
 
 // TestUserManagedProfileMerged exercises the user-managed merge path
 // (Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest):
-// a user-managed AP published at "ug-<workloadName>" is merged on top of
-// the base CP. Anomalies NOT in the union of base + user-managed should
+// a user-managed ContainerProfile published at "ug-<workloadName>" is merged on
+// top of the base CP. Anomalies NOT in the union of base + user-managed should
 // produce alerts; anomalies present in either source should not.
 func TestUserManagedProfileMerged(t *testing.T) {
-	// Base CP has exec "/bin/X"; user-managed AP adds "/bin/Y".
+	// Base CP has exec "/bin/X"; user-managed CP adds "/bin/Y".
 	cp := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            "cp-base",
@@ -1033,7 +951,7 @@ func TestUserManagedProfileMerged(t *testing.T) {
 			Execs: []v1beta1.ExecCalls{{Path: "/bin/X"}},
 		},
 	}
-	userManagedAP := &v1beta1.ApplicationProfile{
+	userManagedCP := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            "ug-nginx",
 			Namespace:       "default",
@@ -1043,16 +961,13 @@ func TestUserManagedProfileMerged(t *testing.T) {
 				helpersv1.StatusMetadataKey:     helpersv1.Completed,
 			},
 		},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{{
-				Name:  "nginx",
-				Execs: []v1beta1.ExecCalls{{Path: "/bin/Y"}},
-			}},
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{{Path: "/bin/Y"}},
 		},
 	}
 	client := &fakeProfileClient{
 		cp:            cp,
-		userManagedAP: userManagedAP,
+		userManagedCP: userManagedCP,
 	}
 	c, k8s := newTestCache(t, client)
 
@@ -1069,14 +984,14 @@ func TestUserManagedProfileMerged(t *testing.T) {
 	require.NotNil(t, cached, "entry populated")
 	_, hasX := cached.Execs.Values["/bin/X"]
 	_, hasY := cached.Execs.Values["/bin/Y"]
-	assert.True(t, hasX, "base workload AP exec must be present")
-	assert.True(t, hasY, "user-managed (ug-) AP exec must be merged in")
+	assert.True(t, hasX, "base CP exec must be present")
+	assert.True(t, hasY, "user-managed (ug-) CP exec must be merged in")
 
 	// Verify the RV was captured so a later user-managed update would trigger
 	// a refresh rebuild.
 	entry, ok := c.entries.Load(id)
 	require.True(t, ok)
-	assert.Equal(t, "9", entry.UserManagedAPRV, "UserManagedAPRV recorded at add time")
+	assert.Equal(t, "9", entry.UserManagedCPRV, "UserManagedCPRV recorded at add time")
 }
 
 // TestSpecChange_TriggersReprojection — T5 nudge integration.

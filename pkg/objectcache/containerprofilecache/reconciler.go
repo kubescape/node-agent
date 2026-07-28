@@ -330,40 +330,25 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
 		return
 	}
-	var userManagedAP *v1beta1.ApplicationProfile
-	var userManagedNN *v1beta1.NetworkNeighborhood
+	// Re-fetch the user-managed "ug-<workload>" ContainerProfile overlay (migrated
+	// from the legacy ug- AP/NN pair). A transient fetch error keeps the entry.
+	var userManagedCP *v1beta1.ContainerProfile
 	if e.WorkloadName != "" {
-		ugAPName := helpersv1.UserApplicationProfilePrefix + e.WorkloadName
-		var userManagedAPErr error
+		ugCPName := helpersv1.UserApplicationProfilePrefix + e.WorkloadName
+		var userManagedCPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userManagedAP, userManagedAPErr = c.storageClient.GetApplicationProfile(rctx, ns, ugAPName)
-			return userManagedAPErr
+			userManagedCP, userManagedCPErr = c.storageClient.GetContainerProfile(rctx, ns, ugCPName)
+			return userManagedCPErr
 		})
-		if userManagedAPErr != nil && e.UserManagedAPRV != "" {
-			logger.L().Debug("refreshOneEntry: user-managed AP fetch failed; keeping cached entry",
+		if userManagedCPErr != nil && e.UserManagedCPRV != "" {
+			logger.L().Debug("refreshOneEntry: user-managed CP fetch failed; keeping cached entry",
 				helpers.String("containerID", id),
-				helpers.String("name", ugAPName),
-				helpers.Error(userManagedAPErr))
+				helpers.String("name", ugCPName),
+				helpers.Error(userManagedCPErr))
 			return
 		}
-		if userManagedAPErr != nil {
-			userManagedAP = nil // k8s client returns non-nil zero-value on 404; treat as absent
-		}
-		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + e.WorkloadName
-		var userManagedNNErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userManagedNN, userManagedNNErr = c.storageClient.GetNetworkNeighborhood(rctx, ns, ugNNName)
-			return userManagedNNErr
-		})
-		if userManagedNNErr != nil && e.UserManagedNNRV != "" {
-			logger.L().Debug("refreshOneEntry: user-managed NN fetch failed; keeping cached entry",
-				helpers.String("containerID", id),
-				helpers.String("name", ugNNName),
-				helpers.Error(userManagedNNErr))
-			return
-		}
-		if userManagedNNErr != nil {
-			userManagedNN = nil
+		if userManagedCPErr != nil {
+			userManagedCP = nil // k8s client returns non-nil zero-value on 404; treat as absent
 		}
 	}
 	// Re-fetch the user-defined ContainerProfile (migrated "new way") when the
@@ -400,31 +385,18 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	}
 	if rvsMatchCP(cp, e.RV) &&
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
-		rvsMatchAP(userManagedAP, e.UserManagedAPRV) &&
-		rvsMatchNN(userManagedNN, e.UserManagedNNRV) &&
+		rvsMatchCP(userManagedCP, e.UserManagedCPRV) &&
 		e.SpecHash == currentSpecHash {
 		return
 	}
 
-	c.rebuildEntryFromSources(id, e, cp, userDefinedCP, userManagedAP, userManagedNN)
+	c.rebuildEntryFromSources(id, e, cp, userDefinedCP, userManagedCP)
 }
 
-// rvsMatchCP, rvsMatchAP, rvsMatchNN return true when either (a) the object is
-// absent and the stored RV is empty, or (b) the object is present and its RV
-// matches the stored RV. This lets fast-skip treat "still missing" as a match.
+// rvsMatchCP returns true when either (a) the object is absent and the stored RV
+// is empty, or (b) the object is present and its RV matches the stored RV. This
+// lets fast-skip treat "still missing" as a match.
 func rvsMatchCP(obj *v1beta1.ContainerProfile, rv string) bool {
-	if obj == nil {
-		return rv == ""
-	}
-	return obj.ResourceVersion == rv
-}
-func rvsMatchAP(obj *v1beta1.ApplicationProfile, rv string) bool {
-	if obj == nil {
-		return rv == ""
-	}
-	return obj.ResourceVersion == rv
-}
-func rvsMatchNN(obj *v1beta1.NetworkNeighborhood, rv string) bool {
 	if obj == nil {
 		return rv == ""
 	}
@@ -442,8 +414,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	prev *CachedContainerProfile,
 	cp *v1beta1.ContainerProfile,
 	userDefinedCP *v1beta1.ContainerProfile,
-	userManagedAP *v1beta1.ApplicationProfile,
-	userManagedNN *v1beta1.NetworkNeighborhood,
+	userManagedCP *v1beta1.ContainerProfile,
 ) {
 	pod := c.k8sObjectCache.GetPod(prev.Namespace, prev.PodName)
 
@@ -487,13 +458,11 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	projected := effectiveCP
-	// User-managed "ug-" AP + NN overlay merge. (The label-referenced
-	// user-defined overlay is a whole ContainerProfile adopted directly as
-	// effectiveCP above — there is no separate AP/NN merge pass anymore.)
-	if userManagedAP != nil || userManagedNN != nil {
-		p, warnings := projectUserProfiles(projected, userManagedAP, userManagedNN, pod, prev.ContainerName)
-		projected = p
-		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
+	// User-managed "ug-<workload>" ContainerProfile overlay merge (migrated from
+	// the legacy ug- AP/NN pair). The label-referenced user-defined overlay is a
+	// whole ContainerProfile adopted directly as effectiveCP above.
+	if userManagedCP != nil {
+		projected = projectUserManagedCP(projected, userManagedCP)
 	}
 
 	// Rebuild the call-stack search tree from the projected profile.
@@ -524,8 +493,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		CPName:          prev.CPName,
 		WorkloadName:    prev.WorkloadName,
 		RV:              rvOfCP(cp),
-		UserManagedAPRV: rvOfAP(userManagedAP),
-		UserManagedNNRV: rvOfNN(userManagedNN),
+		UserManagedCPRV: rvOfCP(userManagedCP),
 		UserCPRV:        rvOfCP(userDefinedCP),
 	}
 	if userDefinedCP != nil {
@@ -547,22 +515,10 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	c.entries.Set(id, newEntry)
 }
 
-// rvOfCP / rvOfAP / rvOfNN return the object's ResourceVersion or "" when nil.
-// Separate typed versions avoid the Go nil-interface trap where a typed-nil
-// pointer wrapped in an interface is not == nil.
+// rvOfCP returns the object's ResourceVersion or "" when nil. Using a typed
+// helper avoids the Go nil-interface trap where a typed-nil pointer wrapped in
+// an interface is not == nil.
 func rvOfCP(o *v1beta1.ContainerProfile) string {
-	if o == nil {
-		return ""
-	}
-	return o.ResourceVersion
-}
-func rvOfAP(o *v1beta1.ApplicationProfile) string {
-	if o == nil {
-		return ""
-	}
-	return o.ResourceVersion
-}
-func rvOfNN(o *v1beta1.NetworkNeighborhood) string {
 	if o == nil {
 		return ""
 	}
