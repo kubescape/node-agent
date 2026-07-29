@@ -1,15 +1,7 @@
-# Example: a user-defined (user-authored) ContainerProfile.
-#
-# This is the "new way" of authoring an allow-list behavioural profile: a single
-# ContainerProfile replaces the legacy ApplicationProfile + NetworkNeighborhood
-# pair. Bind it to a workload by adding the pod label
-#   kubescape.io/user-defined-profile: <this .metadata.name>
-# to the workload's pod template (see nginx-user-defined-deployment.yaml).
-#
-# A user-managed profile carries ONLY name + namespace (namespace is injected by
-# the test/tooling). It has NO learning-lifecycle annotations (status/completion)
-# and NO managed-by marker — those are meaningless on an authored profile. When
-# signed, the signing tooling adds a signature annotation; nothing else.
+# Example: a user-authored ContainerProfile. Bind it to a workload with the pod
+# label kubescape.io/user-defined-profile: <metadata.name>. An authored profile
+# carries only name + spec (namespace is injected by the tooling) and no
+# learning-lifecycle annotations.
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ContainerProfile
 metadata:

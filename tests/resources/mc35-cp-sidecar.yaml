@@ -1,8 +1,6 @@
-# Authored user-defined ContainerProfile for the "sidecar" container of the
-# mc35 pod. Resolved by node-agent as "<label>-<containerName>" ==
-# "mc35-sidecar". Allows /usr/bin/whoami but NOT /usr/bin/id — the inverse of
-# mc35-app. If the two containers wrongly shared one CP, id in "sidecar" would
-# be allowed; the test asserts it alerts (R0001), proving per-container binding.
+# Authored ContainerProfile for the "sidecar" container of the mc35 pod, resolved
+# as "<label>-<containerName>" == "mc35-sidecar". Allows whoami but not id (the
+# inverse of mc35-app), so per-container binding is verifiable.
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ContainerProfile
 metadata:

@@ -400,30 +400,33 @@ func Test_07_RuleBindingApplyTest(t *testing.T) {
 	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
 }
 
-func Test_08_ApplicationProfilePatching(t *testing.T) {
+// Test_08_ContainerProfilePatching pins how a ContainerProfile behaves under a
+// JSON-patch. A ContainerProfile is per-container with a FLAT spec (unlike the
+// former ApplicationProfile, which nested containers under /spec/containers/<i>/),
+// so patch paths target /spec/<field> directly. The contract exercised here:
+//   - `add /spec/<array>/-` appends one element (a syscall, a capability, an exec);
+//   - `replace /spec/<field>` overwrites the whole field;
+//   - lifecycle annotations (kubescape.io/status, kubescape.io/completion) are
+//     patchable, bounded by the completed-immutability invariant (see Test_15):
+//     a completed profile cannot be patched back to learning, but a forward/lateral
+//     transition such as initializing→ready is allowed;
+//   - the storage layer accepts a JSONPatchType patch, persists it, and the
+//     patched fields read back.
+func Test_08_ContainerProfilePatching(t *testing.T) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
 	t.Log("Creating namespace")
 	ns := testutils.NewRandomNamespace()
 
-	// The unified ContainerProfile carries the (former ApplicationProfile) surfaces
-	// directly on its flat Spec — one profile per container — so JSON-patch paths
-	// target /spec/<field> instead of /spec/containers/<i>/<field>.
+	// One profile per container; the (former ApplicationProfile) surfaces live
+	// directly on the flat Spec, so patches target /spec/<field>.
 	name := "replicaset-checkoutservice-59596bf8d8-server"
 	containerProfile := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
-			Labels: map[string]string{
-				"kubescape.io/instance-template-hash":    "59596bf8d8",
-				"kubescape.io/workload-api-group":        "apps",
-				"kubescape.io/workload-api-version":      "v1",
-				"kubescape.io/workload-kind":             "Deployment",
-				"kubescape.io/workload-name":             "checkoutservice",
-				"kubescape.io/workload-namespace":        "node-agent-test-veum",
-				"kubescape.io/workload-container-name":   "server",
-				"kubescape.io/workload-resource-version": "667544",
-			},
+			// A learned CP carries lifecycle annotations; the patch below
+			// replaces them, so they must pre-exist.
 			Annotations: map[string]string{
 				"kubescape.io/completion": "complete",
 				"kubescape.io/status":     "initializing",
@@ -468,10 +471,47 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 	patch, err := json.Marshal(patchOperations)
 	require.NoError(t, err)
 
-	// TODO use Storage abstraction?
-	_, err = storageclient.ContainerProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
+	// Resilient to transient API errors: retry the patch until storage accepts it.
+	require.Eventually(t, func() bool {
+		_, patchErr := storageclient.ContainerProfiles(ns.Name).Patch(
+			context.Background(), name, types.JSONPatchType, patch, metav1.PatchOptions{})
+		return patchErr == nil
+	}, 30*time.Second, 1*time.Second, "JSON-patch of the ContainerProfile must be accepted by storage")
 
-	assert.NoError(t, err)
+	// Read back and prove the patch persisted on the flat spec. Poll, since the
+	// write may not be immediately visible.
+	var patched *v1beta1.ContainerProfile
+	require.Eventually(t, func() bool {
+		got, getErr := storageclient.ContainerProfiles(ns.Name).Get(
+			context.Background(), name, metav1.GetOptions{})
+		if getErr != nil {
+			return false
+		}
+		patched = got
+		return patched.Annotations["kubescape.io/status"] == "ready"
+	}, 30*time.Second, 1*time.Second, "patched ContainerProfile must read back with the updated status")
+
+	// replace reset /spec/capabilities to [NET_ADMIN], then four adds appended.
+	assert.ElementsMatch(t, []string{"NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_ADMIN"},
+		patched.Spec.Capabilities, "replace + add /- on /spec/capabilities")
+
+	// add /spec/syscalls/- appended without dropping the learned syscalls.
+	assert.Subset(t, patched.Spec.Syscalls, []string{"accept4", "arch_prctl", "bind"},
+		"add /spec/syscalls/- must append")
+	assert.Contains(t, patched.Spec.Syscalls, "read", "existing syscalls must survive the patch")
+
+	// replace reset /spec/execs to checkoutservice, then one add appended the probe.
+	execPaths := make([]string, 0, len(patched.Spec.Execs))
+	for _, e := range patched.Spec.Execs {
+		execPaths = append(execPaths, e.Path)
+	}
+	assert.ElementsMatch(t, []string{"/checkoutservice", "/bin/grpc_health_probe"}, execPaths,
+		"replace + add /- on /spec/execs")
+
+	// lifecycle annotations updated; initializing→ready is a legal transition
+	// (a completed→learning regression would instead be reverted — see Test_15).
+	assert.Equal(t, "ready", patched.Annotations["kubescape.io/status"])
+	assert.Equal(t, "complete", patched.Annotations["kubescape.io/completion"])
 }
 
 func Test_09_FalsePositiveTest(t *testing.T) {
@@ -1247,10 +1287,9 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		t.Log("======================================")
 	}()
 
-	// deployWithProfile creates a user-defined ApplicationProfile with the
-	// given Opens list, polls until it is retrievable from storage, then
-	// deploys nginx with the kubescape.io/user-defined-profile label
-	// pointing at it, and waits for the pod to be ready.
+	// deployWithProfile creates a user-defined ContainerProfile with the given
+	// Opens list, then deploys nginx bound to it via the
+	// kubescape.io/user-defined-profile label and waits for readiness.
 	deployWithProfile := func(t *testing.T, opens []v1beta1.OpenCalls) *testutils.TestWorkload {
 		t.Helper()
 		ns := testutils.NewRandomNamespace()
@@ -1849,33 +1888,11 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      overlayName,
 				Namespace: ns.Name,
-				Labels: map[string]string{
-					helpersv1.ApiGroupMetadataKey:         "apps",
-					helpersv1.ApiVersionMetadataKey:       "v1",
-					helpersv1.RelatedKindMetadataKey:      "Deployment",
-					helpersv1.RelatedNameMetadataKey:      "curl-32",
-					helpersv1.RelatedNamespaceMetadataKey: ns.Name,
-				},
 			},
 			Spec: v1beta1.ContainerProfileSpec{
 				Execs: []v1beta1.ExecCalls{
-					// Profile shape: Path AND Args[0] both use the
-					// absolute-path symlink form (/bin/sh,
-					// /usr/bin/nslookup, ...). With the symlink-
-					// faithful precedence in parse.get_exec_path
-					// (fix 9a6eb359), the rule queries the
-					// symlink-as-invoked path that the kernel
-					// preserves in argv[0]. Recording-side
-					// resolveExecPath uses the same precedence so
-					// auto-learned profiles get the same key.
-					//
-					// Storage's CompareExecArgs is a strict
-					// positional compare — no special argv[0]
-					// normalisation — so Args[0] MUST be the same
-					// string as runtime argv[0]. For
-					// kubectl-exec'd processes that's the absolute
-					// path the caller invoked.
-					//
+					// storage's CompareExecArgs is a strict positional compare, so
+					// Args[0] must equal runtime argv[0] (the absolute path invoked).
 					// pod startup: sleep <anything>
 					{Path: "/bin/sleep", Args: []string{"/bin/sleep", dynamicpathdetector.ExecArgsWildcard}},
 					// sh -c <anything trailing>
@@ -1890,29 +1907,14 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 					// anchor. (file:// URLs are used as the post-⋯ literals
 					// so curl reads local files and exits 0.)
 					{Path: "/usr/bin/curl", Args: []string{"/usr/bin/curl", "-s", dynamicpathdetector.DynamicIdentifier, "file:///etc/hosts", "file:///etc/hostname"}},
-					// Busybox-symlink mirror entries. The curl image's
-					// /bin/{sleep,sh,echo} are symlinks to /bin/busybox,
-					// so the kernel's resolved /proc/<pid>/exe — what
-					// IG captures as event.exepath — is /bin/busybox.
-					// parse.get_exec_path(args, comm, exepath) returns
-					// exepath first, so ap.was_executed queries arrive
-					// at the rule keyed on /bin/busybox, not the
-					// symlink form. Without a matching profile entry
-					// keyed on /bin/busybox, R0001 fires before R0040
-					// ever evaluates and the test trips its R0001
-					// precondition. The symlink-form entries above are
-					// retained for environments where exepath resolves
-					// to the as-invoked path (non-symlinked utilities;
-					// fexecve / argv[0] fallback in resolveExecPath).
+					// Busybox-symlink mirrors: the curl image's /bin/{sleep,sh,echo}
+					// resolve to /bin/busybox (exepath), which the rule keys on. These
+					// entries are required or R0001 fires before R0040 is reached.
 					{Path: "/bin/busybox", Args: []string{"/bin/sleep", dynamicpathdetector.ExecArgsWildcard}},
 					{Path: "/bin/busybox", Args: []string{"/bin/sh", "-c", dynamicpathdetector.ExecArgsWildcard}},
 					{Path: "/bin/busybox", Args: []string{"/bin/echo", "hello", dynamicpathdetector.ExecArgsWildcard}},
-					// Literal "*" arg: echo invoked with a GENUINE literal "*"
-					// (e.g. an unexpanded glob), recorded verbatim. Under the
-					// symbol contract a "*" in argv is DATA, not a wildcard, so
-					// this entry matches ONLY `echo star *` and must NOT broaden
-					// to `echo star <other>`. CT-level mirror of storage's
-					// TestAP_LiteralStarVsDynamic. (busybox + symlink forms.)
+					// Literal "*" is DATA, not a wildcard: matches only `echo star *`,
+					// never `echo star <other>` (busybox + symlink forms).
 					{Path: "/bin/echo", Args: []string{"/bin/echo", "star", "*"}},
 					{Path: "/bin/busybox", Args: []string{"/bin/echo", "star", "*"}},
 				},
@@ -1936,23 +1938,10 @@ func Test_32_UnexpectedProcessArguments(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, wl.WaitForReady(80))
 
-		// Deterministic profile-load gate (replaces a fixed sleep that raced the
-		// asynchronous overlay load). node-agent must observe the pod, resolve
-		// the kubescape.io/user-defined-profile annotation to UserAPRef, fetch
-		// the user AP and build the projection before the argv-comparison rule
-		// (R0040) can evaluate at all; until then refreshOneEntry reports the CP
-		// "not-available" and R0040 is suppressed — which makes every POSITIVE
-		// subtest pass VACUOUSLY (no profile -> no R0040 -> ==0) and every
-		// NEGATIVE subtest time out. The fixed 30s sleep did not reliably cover
-		// that window (observed: all negatives failing on a slow load).
-		//
-		// The canary is a deterministic argv MISMATCH: [echo, <probe>] matches
-		// neither [echo, hello, ⋯⋯] nor [echo, star, *], so once the overlay is
-		// projected it MUST fire R0040. R0040's cooldown key is uniqueId =
-		// comm+exepath+argv, so this distinct argv never suppresses a subtest's
-		// own R0040. We retry until it fires, then return the post-gate R0040
-		// count as a baseline so subtests assert on the DELTA, not absolutes —
-		// closing the vacuous-positive hole.
+		// Profile-load gate: wait until the user-defined CP is projected before
+		// asserting. The canary is a deterministic argv mismatch ([echo, <probe>])
+		// that must fire R0040 once the profile loads; we retry until it does and
+		// return the post-gate R0040 count so subtests assert on the delta.
 		countR0040 := func(alerts []testutils.Alert) int {
 			n := 0
 			for _, a := range alerts {
@@ -2323,37 +2312,24 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
-	// setup creates a namespace with user-defined AP + NN + pod.
-	// The NN allows only fusioncore.ai (162.0.217.171) on TCP/80.
+	// setup deploys a pod bound to an authored ContainerProfile whose egress
+	// allows only fusioncore.ai (162.0.217.171) on TCP/80.
 	setup := func(t *testing.T) *testutils.TestWorkload {
 		t.Helper()
 		ns := testutils.NewRandomNamespace()
 
-		// Upstream ContainerProfileCache (kubescape/node-agent#788) reads ONE
-		// pod label `kubescape.io/user-defined-profile=<name>` and uses
-		// <name> as the lookup key for BOTH the user AP and the user NN.
-		// AP and NN MUST therefore share that single name.
 		const overlayName = "curl-28-overlay"
 
-		// Migration (#862): the user authors ONE ContainerProfile (managed-by:
-		// User) instead of a separate ApplicationProfile + NetworkNeighborhood.
-		// The kubescape.io/user-defined-profile pod label names this CP; node-agent
-		// uses it directly as the authoritative base. Its Spec merges the former AP
-		// surfaces (execs, syscalls) with the former NN surfaces (egress, selector).
+		// The user authors ONE ContainerProfile (merging the former AP + NN
+		// surfaces); the pod's kubescape.io/user-defined-profile label names it.
 		_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/containerprofile-user-defined-network.yaml")
 
 		wl, err := testutils.NewTestWorkload(ns.Name,
 			path.Join(utils.CurrentDir(), "resources/nginx-user-defined-deployment.yaml"))
 		require.NoError(t, err)
 		require.NoError(t, wl.WaitForReady(80))
-		// Cache-load latency on the upstream ContainerProfileCache is bursty
-		// — 15s is enough on a quiet runner but not on a loaded one. The
-		// failure mode is alert metadata `errorMessage:"waiting for profile
-		// update"`, which means the rule manager evaluated against an
-		// unloaded NN and fired R0005/R0011 spuriously. 30s covers the
-		// observed worst-case in CI without pushing total test time too
-		// far. Real fix would be to poll a cache-loaded signal, but no
-		// such signal is exposed today.
+		// Give node-agent time to load the profile before generating traffic;
+		// evaluating against an unloaded profile fires R0005/R0011 spuriously.
 		time.Sleep(30 * time.Second)
 		return wl
 	}
@@ -2945,19 +2921,12 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 		withPrefixes(s3CIDRs, "52.216.1."), withPrefixes(spreadCIDRs, "52.216."), got, withPrefixes(splitCIDRs, "52.216.2."))
 }
 
-// Test_35_MultiContainerPerContainerBinding pins the per-container binding of
-// user-defined ContainerProfiles (review finding on node-agent#864). A
-// multi-container pod shares ONE `kubescape.io/user-defined-profile` label
-// value, but each container is profiled independently: node-agent resolves each
-// container's authored CP as "<label>-<containerName>" (mc35-app / mc35-sidecar),
-// falling back to the bare "<label>" for single-container pods.
-//
-// The two containers carry INVERSE exec allow-lists — app allows /usr/bin/id
-// (not whoami), sidecar allows /usr/bin/whoami (not id). A regression that bound
-// both containers to a single CP (the behaviour the review flagged) would let
-// the wrong binary run in one of them, which this test detects: the forbidden
-// binary in each container MUST fire R0001, and the allowed binary MUST NOT —
-// the no-cross-inheritance assertion.
+// Test_35_MultiContainerPerContainerBinding shows per-container binding: a
+// multi-container pod shares ONE kubescape.io/user-defined-profile label, but
+// each container resolves its own authored CP as "<label>-<containerName>"
+// (mc35-app / mc35-sidecar). The two CPs carry inverse exec allow-lists, so a
+// forbidden binary in either container must fire R0001 and the allowed one must
+// not — proving the containers do not share a profile.
 func Test_35_MultiContainerPerContainerBinding(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
