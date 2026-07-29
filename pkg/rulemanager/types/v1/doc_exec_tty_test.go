@@ -22,7 +22,7 @@ import (
 func TestExecTTYDocRuleYAMLIsParseable(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Skip("could not determine test file location via runtime.Caller")
+		t.Fatal("could not determine test file location via runtime.Caller")
 	}
 
 	// pkg/rulemanager/types/v1 -> repo root is four levels up.
@@ -31,12 +31,12 @@ func TestExecTTYDocRuleYAMLIsParseable(t *testing.T) {
 
 	content, err := os.ReadFile(docPath)
 	if err != nil {
-		t.Skipf("doc file not found at %s (repo layout may have changed): %v", docPath, err)
+		t.Fatalf("read documented rule example at %s: %v", docPath, err)
 	}
 
 	blocks := extractYAMLBlocks(string(content))
 	if len(blocks) == 0 {
-		t.Skip("no yaml code blocks found in docs/features/exec-tty-field.md")
+		t.Fatal("no yaml code blocks found in docs/features/exec-tty-field.md")
 	}
 
 	for i, block := range blocks {

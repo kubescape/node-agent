@@ -261,3 +261,69 @@ func TestTTYGettersDoNotLog(t *testing.T) {
 	_ = e.getFieldAccessor("zz_absent_log_control")
 	require.NotZero(t, logSize(t, f), "unguarded getFieldAccessor should log; if it does not, the assertion above has no teeth")
 }
+
+// TestTTYGettersUseTheirOwnDatasource is a regression test for accessor reuse
+// across datasources.
+//
+// fieldCaches is keyed by EventType, not by datasource, so two datasources that
+// share an event type share one accessor cache. A FieldAccessor decodes at a
+// fixed offset in the layout of the datasource that produced it, so reading one
+// datasource's data through another's accessor yields the wrong value or panics
+// inside Inspektor Gadget's fieldAccessor.Get.
+//
+// Checking presence first does not prevent this: presence only rules out the
+// case where this datasource lacks the field. When both expose it -- as here --
+// presence passes and the stale accessor is still the other datasource's. The
+// TTY getters therefore resolve accessors per datasource.
+//
+// The two datasources below deliberately place "tty" at different offsets, and
+// the wide one is read first so it is the entry that lands in the shared cache.
+func TestTTYGettersUseTheirOwnDatasource(t *testing.T) {
+	newAt := func(t *testing.T, name string, pads int, tty int32) *DatasourceEvent {
+		t.Helper()
+
+		ds, err := datasource.New(datasource.TypeSingle, name)
+		require.NoError(t, err)
+
+		commAcc, err := ds.AddField("comm", api.Kind_String)
+		require.NoError(t, err)
+		padAccs := make([]datasource.FieldAccessor, pads)
+		for i := 0; i < pads; i++ {
+			padAccs[i], err = ds.AddField("pad"+string(rune('a'+i)), api.Kind_Uint64)
+			require.NoError(t, err)
+		}
+		ttyAcc, err := ds.AddField("tty", api.Kind_Int32)
+		require.NoError(t, err)
+
+		data, err := ds.NewPacketSingle()
+		require.NoError(t, err)
+		t.Cleanup(func() { ds.Release(data) })
+
+		require.NoError(t, commAcc.PutString(data, "bash"))
+		for _, acc := range padAccs {
+			require.NoError(t, acc.PutUint64(data, 0xDEADBEEF))
+		}
+		require.NoError(t, ttyAcc.PutInt32(data, tty))
+
+		// Same EventType for both, which is what makes them share fieldCaches.
+		return &DatasourceEvent{Data: data, Datasource: ds, EventType: ExecveEventType}
+	}
+
+	wide := newAt(t, "exec-wide", 3, 7)
+	narrow := newAt(t, "exec-narrow", 0, 3)
+
+	// Read the wide one first so its accessor is the cached one for "tty".
+	require.Equal(t, int32(7), wide.GetTTY())
+	require.True(t, wide.GetHasTTY())
+
+	// The narrow datasource must read its own value, not the wide one's.
+	require.Equal(t, int32(3), narrow.GetTTY(),
+		"narrow datasource must decode its own tty, not through the wide datasource's cached accessor")
+	require.True(t, narrow.GetHasTTY())
+
+	// And a third, narrow datasource whose tty is genuinely 0 must not inherit
+	// the cached nonzero reading.
+	zero := newAt(t, "exec-zero", 0, 0)
+	require.Equal(t, int32(0), zero.GetTTY())
+	require.False(t, zero.GetHasTTY(), "tty == 0 must read as no terminal regardless of other datasources")
+}

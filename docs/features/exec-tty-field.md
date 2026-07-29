@@ -7,7 +7,7 @@ Four CEL fields on exec events describe the process's controlling terminal:
 | `event.hasTty` | bool | **Use this one.** True when the process has a controlling terminal. |
 | `event.ttyMajor` | uint | Terminal driver major: `136` = pseudo terminal (`kubectl exec`, `docker exec`, ssh), `4` = virtual console, `0` = none. |
 | `event.ttyMinor` | uint | Terminal device minor. |
-| `event.tty` | int | Raw driver-local index. **Does not identify a terminal** — the index is only unique per driver, so `/dev/pts/0` and `/dev/tty0` are both `0`. Prefer `ttyMajor`. |
+| `event.tty` | int | Raw driver-local index. **Does not uniquely identify a device** — the index is only unique per driver, so `/dev/pts/0` and `/dev/tty0` are both `0`. A nonzero value does mean a terminal is present; only `0` is ambiguous, meaning either `/dev/pts/0` or no terminal at all. Prefer `ttyMajor`. |
 
 ## Not every agent measures this
 
