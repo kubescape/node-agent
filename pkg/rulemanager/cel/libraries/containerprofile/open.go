@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"strings"
@@ -11,7 +11,7 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
-func (l *apLibrary) wasPathOpened(containerID, path ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasPathOpened(containerID, path ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -53,7 +53,7 @@ func (l *apLibrary) wasPathOpened(containerID, path ref.Val) ref.Val {
 // (composite-key projection would balloon the cache footprint). When the
 // flags-projection slice is added in a future spec revision, this helper
 // becomes the path-AND-flag matcher and v1 callers continue to work.
-func (l *apLibrary) wasPathOpenedWithFlags(containerID, path, flags ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasPathOpenedWithFlags(containerID, path, flags ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -92,7 +92,7 @@ func (l *apLibrary) wasPathOpenedWithFlags(containerID, path, flags ref.Val) ref
 	return types.Bool(false)
 }
 
-func (l *apLibrary) wasPathOpenedWithSuffix(containerID, suffix ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasPathOpenedWithSuffix(containerID, suffix ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -133,14 +133,14 @@ func (l *apLibrary) wasPathOpenedWithSuffix(containerID, suffix ref.Val) ref.Val
 	hit, declared := cp.Opens.SuffixHits[suffixStr]
 	if !declared {
 		if l.metrics != nil {
-			l.metrics.IncProjectionUndeclaredLiteral("ap.was_path_opened_with_suffix")
+			l.metrics.IncProjectionUndeclaredLiteral("cp.was_path_opened_with_suffix")
 		}
 		return types.Bool(false)
 	}
 	return types.Bool(hit)
 }
 
-func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -178,7 +178,7 @@ func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val
 	hit, declared := cp.Opens.PrefixHits[prefixStr]
 	if !declared {
 		if l.metrics != nil {
-			l.metrics.IncProjectionUndeclaredLiteral("ap.was_path_opened_with_prefix")
+			l.metrics.IncProjectionUndeclaredLiteral("cp.was_path_opened_with_prefix")
 		}
 		return types.Bool(false)
 	}

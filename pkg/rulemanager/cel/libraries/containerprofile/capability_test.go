@@ -1,20 +1,18 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"testing"
-	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSyscallInProfile(t *testing.T) {
+func TestCapabilityInProfile(t *testing.T) {
 	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
@@ -32,19 +30,19 @@ func TestSyscallInProfile(t *testing.T) {
 
 	profile := &v1beta1.ContainerProfile{}
 	profile.Spec = v1beta1.ContainerProfileSpec{
-		Syscalls: []string{
-			"open",
-			"read",
-			"write",
-			"close",
+		Capabilities: []string{
+			"NET_ADMIN",
+			"SYS_ADMIN",
+			"SETUID",
+			"SETGID",
 		},
 	}
 	objCache.SetContainerProfile(profile)
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
-		cel.Variable("syscallName", cel.StringType),
-		AP(&objCache, config.Config{}),
+		cel.Variable("capabilityName", cel.StringType),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -53,32 +51,32 @@ func TestSyscallInProfile(t *testing.T) {
 	testCases := []struct {
 		name           string
 		containerID    string
-		syscallName    string
+		capabilityName string
 		expectedResult bool
 	}{
 		{
-			name:           "Syscall exists in profile",
+			name:           "Capability exists in profile",
 			containerID:    "test-container-id",
-			syscallName:    "open",
+			capabilityName: "NET_ADMIN",
 			expectedResult: true,
 		},
 		{
-			name:           "Syscall does not exist in profile",
+			name:           "Capability does not exist in profile",
 			containerID:    "test-container-id",
-			syscallName:    "fork",
+			capabilityName: "DAC_OVERRIDE",
 			expectedResult: false,
 		},
 		{
-			name:           "Another syscall exists in profile",
+			name:           "Another capability exists in profile",
 			containerID:    "test-container-id",
-			syscallName:    "read",
+			capabilityName: "SYS_ADMIN",
 			expectedResult: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ast, issues := env.Compile(`ap.was_syscall_used(containerID, syscallName)`)
+			ast, issues := env.Compile(`cp.was_capability_used(containerID, capabilityName)`)
 			if issues != nil {
 				t.Fatalf("failed to compile expression: %v", issues.Err())
 			}
@@ -89,32 +87,32 @@ func TestSyscallInProfile(t *testing.T) {
 			}
 
 			result, _, err := program.Eval(map[string]interface{}{
-				"containerID": tc.containerID,
-				"syscallName": tc.syscallName,
+				"containerID":    tc.containerID,
+				"capabilityName": tc.capabilityName,
 			})
 			if err != nil {
 				t.Fatalf("failed to eval program: %v", err)
 			}
 
 			actualResult := result.Value().(bool)
-			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_syscall_used result should match expected value")
+			assert.Equal(t, tc.expectedResult, actualResult, "cp.was_capability_used result should match expected value")
 		})
 	}
 }
 
-func TestSyscallNoProfile(t *testing.T) {
+func TestCapabilityNoProfile(t *testing.T) {
 	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
-		cel.Variable("syscallName", cel.StringType),
-		AP(&objCache, config.Config{}),
+		cel.Variable("capabilityName", cel.StringType),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
-	ast, issues := env.Compile(`ap.was_syscall_used(containerID, syscallName)`)
+	ast, issues := env.Compile(`cp.was_capability_used(containerID, capabilityName)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -125,36 +123,31 @@ func TestSyscallNoProfile(t *testing.T) {
 	}
 
 	result, _, err := program.Eval(map[string]interface{}{
-		"containerID": "test-container-id",
-		"syscallName": "open",
+		"containerID":    "test-container-id",
+		"capabilityName": "NET_ADMIN",
 	})
 	if err != nil {
 		t.Fatalf("failed to eval program: %v", err)
 	}
 
 	actualResult := result.Value().(bool)
-	assert.False(t, actualResult, "ap.was_syscall_used should return false when no profile is available")
+	assert.False(t, actualResult, "cp.was_capability_used should return false when no profile is available")
 }
 
-func TestSyscallCompilation(t *testing.T) {
+func TestCapabilityCompilation(t *testing.T) {
 	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
-		cel.Variable("syscallName", cel.StringType),
-		AP(&objCache, config.Config{
-			CelConfigCache: cache.FunctionCacheConfig{
-				MaxSize: 1000,
-				TTL:     1 * time.Minute,
-			},
-		}),
+		cel.Variable("capabilityName", cel.StringType),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
 	// Test that the function compiles correctly
-	ast, issues := env.Compile(`ap.was_syscall_used(containerID, syscallName)`)
+	ast, issues := env.Compile(`cp.was_capability_used(containerID, capabilityName)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}

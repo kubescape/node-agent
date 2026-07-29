@@ -1,6 +1,6 @@
 # Fixture 19 — port + protocol + CIDR composed match
 #
-# Edge case:    nn.was_address_port_protocol_in_egress matcher — the granular
+# Edge case:    cp.was_address_port_protocol_in_egress matcher — the granular
 #               variant that requires IP+port+protocol all to match within
 #               the same NetworkNeighbor entry
 # Expects:

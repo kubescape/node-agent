@@ -1,4 +1,4 @@
-package networkneighborhood
+package containerprofilenetwork
 
 import (
 	"net"
@@ -83,7 +83,7 @@ func matchDNSField(field *objectcache.ProjectedField, observed string) bool {
 	return networkmatch.MatchDNS(entries, observed)
 }
 
-func (l *nnLibrary) wasAddressInEgress(containerID, address ref.Val) ref.Val {
+func (l *containerProfileNetworkLibrary) wasAddressInEgress(containerID, address ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -102,7 +102,7 @@ func (l *nnLibrary) wasAddressInEgress(containerID, address ref.Val) ref.Val {
 	return types.Bool(matchIPField(&cp.EgressAddresses, addressStr))
 }
 
-func (l *nnLibrary) wasAddressInIngress(containerID, address ref.Val) ref.Val {
+func (l *containerProfileNetworkLibrary) wasAddressInIngress(containerID, address ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -121,7 +121,7 @@ func (l *nnLibrary) wasAddressInIngress(containerID, address ref.Val) ref.Val {
 	return types.Bool(matchIPField(&cp.IngressAddresses, addressStr))
 }
 
-func (l *nnLibrary) isDomainInEgress(containerID, domain ref.Val) ref.Val {
+func (l *containerProfileNetworkLibrary) isDomainInEgress(containerID, domain ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -140,7 +140,7 @@ func (l *nnLibrary) isDomainInEgress(containerID, domain ref.Val) ref.Val {
 	return types.Bool(matchDNSField(&cp.EgressDomains, domainStr))
 }
 
-func (l *nnLibrary) isDomainInIngress(containerID, domain ref.Val) ref.Val {
+func (l *containerProfileNetworkLibrary) isDomainInIngress(containerID, domain ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -159,7 +159,7 @@ func (l *nnLibrary) isDomainInIngress(containerID, domain ref.Val) ref.Val {
 	return types.Bool(matchDNSField(&cp.IngressDomains, domainStr))
 }
 
-func (l *nnLibrary) wasAddressPortProtocolInEgress(containerID, address, port, protocol ref.Val) ref.Val {
+func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInEgress(containerID, address, port, protocol ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -191,7 +191,7 @@ func (l *nnLibrary) wasAddressPortProtocolInEgress(containerID, address, port, p
 	return types.Bool(matchIPField(&cp.EgressAddresses, addressStr))
 }
 
-func (l *nnLibrary) wasAddressPortProtocolInIngress(containerID, address, port, protocol ref.Val) ref.Val {
+func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(containerID, address, port, protocol ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}

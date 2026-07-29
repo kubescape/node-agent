@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"testing"
@@ -49,7 +49,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 	objCache.SetContainerProfile(profile)
 
 	// Create library with cache
-	lib := &apLibrary{
+	lib := &containerProfileLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -72,7 +72,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 	}{
 		{
 			name:       "was_path_opened caching",
-			expression: `ap.was_path_opened(containerID, path)`,
+			expression: `cp.was_path_opened(containerID, path)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"path":        "/etc/passwd",
@@ -81,7 +81,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 		},
 		{
 			name:       "was_executed caching",
-			expression: `ap.was_executed(containerID, path)`,
+			expression: `cp.was_executed(containerID, path)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"path":        "/bin/ls",
@@ -90,7 +90,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 		},
 		{
 			name:       "was_executed_with_args caching",
-			expression: `ap.was_executed_with_args(containerID, path, args)`,
+			expression: `cp.was_executed_with_args(containerID, path, args)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"path":        "/bin/ls",
@@ -100,7 +100,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 		},
 		{
 			name:       "was_syscall_used caching",
-			expression: `ap.was_syscall_used(containerID, syscall)`,
+			expression: `cp.was_syscall_used(containerID, syscall)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"syscall":     "open",
@@ -109,7 +109,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 		},
 		{
 			name:       "was_capability_used caching",
-			expression: `ap.was_capability_used(containerID, capability)`,
+			expression: `cp.was_capability_used(containerID, capability)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"capability":  "CAP_NET_ADMIN",
@@ -184,7 +184,7 @@ func TestApplicationProfileCacheDifferentArguments(t *testing.T) {
 	}
 	objCache.SetContainerProfile(profile)
 
-	lib := &apLibrary{
+	lib := &containerProfileLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -196,7 +196,7 @@ func TestApplicationProfileCacheDifferentArguments(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	ast, issues := env.Compile(`ap.was_path_opened(containerID, path)`)
+	ast, issues := env.Compile(`cp.was_path_opened(containerID, path)`)
 	assert.NoError(t, issues.Err())
 
 	program, err := env.Program(ast)
@@ -268,7 +268,7 @@ func TestApplicationProfileCacheExpiration(t *testing.T) {
 		MaxSize: 100,
 		TTL:     50 * time.Millisecond,
 	}
-	lib := &apLibrary{
+	lib := &containerProfileLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(config),
 	}
@@ -280,7 +280,7 @@ func TestApplicationProfileCacheExpiration(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	ast, issues := env.Compile(`ap.was_path_opened(containerID, path)`)
+	ast, issues := env.Compile(`cp.was_path_opened(containerID, path)`)
 	assert.NoError(t, issues.Err())
 
 	program, err := env.Program(ast)
@@ -339,7 +339,7 @@ func TestApplicationProfileCachePerformance(t *testing.T) {
 	}
 	objCache.SetContainerProfile(profile)
 
-	lib := &apLibrary{
+	lib := &containerProfileLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -351,7 +351,7 @@ func TestApplicationProfileCachePerformance(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	ast, issues := env.Compile(`ap.was_path_opened(containerID, path)`)
+	ast, issues := env.Compile(`cp.was_path_opened(containerID, path)`)
 	assert.NoError(t, issues.Err())
 
 	program, err := env.Program(ast)
@@ -415,7 +415,7 @@ func TestApplicationProfileCacheClearCache(t *testing.T) {
 	}
 	objCache.SetContainerProfile(profile)
 
-	lib := &apLibrary{
+	lib := &containerProfileLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -427,7 +427,7 @@ func TestApplicationProfileCacheClearCache(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	ast, issues := env.Compile(`ap.was_path_opened(containerID, path)`)
+	ast, issues := env.Compile(`cp.was_path_opened(containerID, path)`)
 	assert.NoError(t, issues.Err())
 
 	program, err := env.Program(ast)

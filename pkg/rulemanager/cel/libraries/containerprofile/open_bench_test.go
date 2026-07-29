@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"strconv"
@@ -52,7 +52,7 @@ func BenchmarkWasPathOpenedWithSuffix_AllMode(b *testing.B) {
 					Patterns: sh.patterns,
 				},
 			}
-			lib := &apLibrary{objectCache: &mockObjectCacheForPattern{pcp: pcp}}
+			lib := &containerProfileLibrary{objectCache: &mockObjectCacheForPattern{pcp: pcp}}
 			suffix := types.String(".log")
 			cid := types.String("bench-cid")
 			b.ReportAllocs()
@@ -95,7 +95,7 @@ func BenchmarkWasPathOpenedWithPrefix_AllMode(b *testing.B) {
 					Patterns: sh.patterns,
 				},
 			}
-			lib := &apLibrary{objectCache: &mockObjectCacheForPattern{pcp: pcp}}
+			lib := &containerProfileLibrary{objectCache: &mockObjectCacheForPattern{pcp: pcp}}
 			prefix := types.String("/var/")
 			cid := types.String("bench-cid")
 			b.ReportAllocs()

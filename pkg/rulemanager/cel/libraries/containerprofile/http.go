@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"net/url"
@@ -15,7 +15,7 @@ import (
 )
 
 // wasEndpointAccessed checks if a specific HTTP endpoint was accessed
-func (l *apLibrary) wasEndpointAccessed(containerID, endpoint ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasEndpointAccessed(containerID, endpoint ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -49,7 +49,7 @@ func (l *apLibrary) wasEndpointAccessed(containerID, endpoint ref.Val) ref.Val {
 }
 
 // wasEndpointAccessedWithMethod checks if a specific HTTP endpoint was accessed with a specific method
-func (l *apLibrary) wasEndpointAccessedWithMethod(containerID, endpoint, method ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasEndpointAccessedWithMethod(containerID, endpoint, method ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -87,7 +87,7 @@ func (l *apLibrary) wasEndpointAccessedWithMethod(containerID, endpoint, method 
 }
 
 // wasEndpointAccessedWithMethods checks if a specific HTTP endpoint was accessed with any of the specified methods
-func (l *apLibrary) wasEndpointAccessedWithMethods(containerID, endpoint, methods ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasEndpointAccessedWithMethods(containerID, endpoint, methods ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -126,7 +126,7 @@ func (l *apLibrary) wasEndpointAccessedWithMethods(containerID, endpoint, method
 }
 
 // wasEndpointAccessedWithPrefix checks if any HTTP endpoint with the specified prefix was accessed
-func (l *apLibrary) wasEndpointAccessedWithPrefix(containerID, prefix ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasEndpointAccessedWithPrefix(containerID, prefix ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -163,7 +163,7 @@ func (l *apLibrary) wasEndpointAccessedWithPrefix(containerID, prefix ref.Val) r
 	hit, declared := cp.Endpoints.PrefixHits[prefixStr]
 	if !declared {
 		if l.metrics != nil {
-			l.metrics.IncProjectionUndeclaredLiteral("ap.was_endpoint_accessed_with_prefix")
+			l.metrics.IncProjectionUndeclaredLiteral("cp.was_endpoint_accessed_with_prefix")
 		}
 		return types.Bool(false)
 	}
@@ -171,7 +171,7 @@ func (l *apLibrary) wasEndpointAccessedWithPrefix(containerID, prefix ref.Val) r
 }
 
 // wasEndpointAccessedWithSuffix checks if any HTTP endpoint with the specified suffix was accessed
-func (l *apLibrary) wasEndpointAccessedWithSuffix(containerID, suffix ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasEndpointAccessedWithSuffix(containerID, suffix ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -208,7 +208,7 @@ func (l *apLibrary) wasEndpointAccessedWithSuffix(containerID, suffix ref.Val) r
 	hit, declared := cp.Endpoints.SuffixHits[suffixStr]
 	if !declared {
 		if l.metrics != nil {
-			l.metrics.IncProjectionUndeclaredLiteral("ap.was_endpoint_accessed_with_suffix")
+			l.metrics.IncProjectionUndeclaredLiteral("cp.was_endpoint_accessed_with_suffix")
 		}
 		return types.Bool(false)
 	}
@@ -216,7 +216,7 @@ func (l *apLibrary) wasEndpointAccessedWithSuffix(containerID, suffix ref.Val) r
 }
 
 // wasHostAccessed checks if a specific host was accessed via HTTP endpoints or network connections
-func (l *apLibrary) wasHostAccessed(containerID, host ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasHostAccessed(containerID, host ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}

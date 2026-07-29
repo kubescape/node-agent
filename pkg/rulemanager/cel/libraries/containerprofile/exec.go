@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"github.com/google/cel-go/common/types"
@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
-func (l *apLibrary) wasExecuted(containerID, path ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasExecuted(containerID, path ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -55,7 +55,7 @@ func (l *apLibrary) wasExecuted(containerID, path ref.Val) ref.Val {
 	return types.Bool(false)
 }
 
-func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -155,7 +155,7 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 	return types.Bool(false)
 }
 
-func (l *apLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
+func (l *containerProfileLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}

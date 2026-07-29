@@ -1,4 +1,4 @@
-package networkneighborhood
+package containerprofilenetwork
 
 import (
 	"github.com/google/cel-go/cel"
@@ -13,7 +13,7 @@ import (
 )
 
 func New(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) libraries.Library {
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache: objectCache,
 		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
 			MaxSize: config.CelConfigCache.MaxSize,
@@ -27,136 +27,136 @@ func New(objectCache objectcache.ObjectCache, config config.Config, mm ...metric
 	return lib
 }
 
-func NN(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) cel.EnvOption {
+func CPNetwork(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) cel.EnvOption {
 	return cel.Lib(New(objectCache, config, mm...))
 }
 
-type nnLibrary struct {
+type containerProfileNetworkLibrary struct {
 	objectCache     objectcache.ObjectCache
 	functionCache   *cache.FunctionCache
 	metrics         metricsmanager.MetricsManager
 	detailedMetrics bool
 }
 
-func (l *nnLibrary) LibraryName() string {
-	return "nn"
+func (l *containerProfileNetworkLibrary) LibraryName() string {
+	return "cpnetwork"
 }
 
-func (l *nnLibrary) Types() []*cel.Type {
+func (l *containerProfileNetworkLibrary) Types() []*cel.Type {
 	return []*cel.Type{}
 }
 
-func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
+func (l *containerProfileNetworkLibrary) Declarations() map[string][]cel.FunctionOpt {
 	return map[string][]cel.FunctionOpt{
-		"nn.was_address_in_egress": {
+		"cp.was_address_in_egress": {
 			cel.Overload(
-				"nn_was_address_in_egress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_address_in_egress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("nn.was_address_in_egress")
+						l.metrics.IncHelperCall("cp.was_address_in_egress")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasAddressInEgress(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_egress", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_address_in_egress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"nn.was_address_in_ingress": {
+		"cp.was_address_in_ingress": {
 			cel.Overload(
-				"nn_was_address_in_ingress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_address_in_ingress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("nn.was_address_in_ingress")
+						l.metrics.IncHelperCall("cp.was_address_in_ingress")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasAddressInIngress(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_ingress", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_address_in_ingress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"nn.is_domain_in_egress": {
+		"cp.is_domain_in_egress": {
 			cel.Overload(
-				"nn_is_domain_in_egress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_is_domain_in_egress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("nn.is_domain_in_egress")
+						l.metrics.IncHelperCall("cp.is_domain_in_egress")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.isDomainInEgress(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_egress", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.is_domain_in_egress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"nn.is_domain_in_ingress": {
+		"cp.is_domain_in_ingress": {
 			cel.Overload(
-				"nn_is_domain_in_ingress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_is_domain_in_ingress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("nn.is_domain_in_ingress")
+						l.metrics.IncHelperCall("cp.is_domain_in_ingress")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.isDomainInIngress(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_ingress", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.is_domain_in_ingress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"nn.was_address_port_protocol_in_egress": {
+		"cp.was_address_port_protocol_in_egress": {
 			cel.Overload(
-				"nn_was_address_port_protocol_in_egress", []*cel.Type{cel.StringType, cel.StringType, cel.IntType, cel.StringType}, cel.BoolType,
+				"cp_was_address_port_protocol_in_egress", []*cel.Type{cel.StringType, cel.StringType, cel.IntType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 4 {
 						return types.NewErr("expected 4 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("nn.was_address_port_protocol_in_egress")
+						l.metrics.IncHelperCall("cp.was_address_port_protocol_in_egress")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasAddressPortProtocolInEgress(args[0], args[1], args[2], args[3])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_egress", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_address_port_protocol_in_egress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2], values[3])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"nn.was_address_port_protocol_in_ingress": {
+		"cp.was_address_port_protocol_in_ingress": {
 			cel.Overload(
-				"nn_was_address_port_protocol_in_ingress", []*cel.Type{cel.StringType, cel.StringType, cel.IntType, cel.StringType}, cel.BoolType,
+				"cp_was_address_port_protocol_in_ingress", []*cel.Type{cel.StringType, cel.StringType, cel.IntType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 4 {
 						return types.NewErr("expected 4 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("nn.was_address_port_protocol_in_ingress")
+						l.metrics.IncHelperCall("cp.was_address_port_protocol_in_ingress")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasAddressPortProtocolInIngress(args[0], args[1], args[2], args[3])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_ingress", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_address_port_protocol_in_ingress", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2], values[3])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -165,7 +165,7 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 	}
 }
 
-func (l *nnLibrary) CompileOptions() []cel.EnvOption {
+func (l *containerProfileNetworkLibrary) CompileOptions() []cel.EnvOption {
 	options := []cel.EnvOption{}
 	for name, overloads := range l.Declarations() {
 		options = append(options, cel.Function(name, overloads...))
@@ -173,37 +173,37 @@ func (l *nnLibrary) CompileOptions() []cel.EnvOption {
 	return options
 }
 
-func (l *nnLibrary) ProgramOptions() []cel.ProgramOption {
+func (l *containerProfileNetworkLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
-func (l *nnLibrary) CostEstimator() checker.CostEstimator {
-	return &nnCostEstimator{}
+func (l *containerProfileNetworkLibrary) CostEstimator() checker.CostEstimator {
+	return &containerProfileNetworkCostEstimator{}
 }
 
-// nnCostEstimator implements the checker.CostEstimator for the 'nn' library.
-type nnCostEstimator struct{}
+// containerProfileNetworkCostEstimator implements the checker.CostEstimator for the 'cpnetwork' library.
+type containerProfileNetworkCostEstimator struct{}
 
-func (e *nnCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func (e *containerProfileNetworkCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
 	cost := int64(0)
 	switch function {
-	case "nn.was_address_in_egress", "nn.was_address_in_ingress":
+	case "cp.was_address_in_egress", "cp.was_address_in_ingress":
 		// Cache lookup + O(n) linear search through egress/ingress list
 		cost = 20
-	case "nn.is_domain_in_egress", "nn.is_domain_in_ingress":
+	case "cp.is_domain_in_egress", "cp.is_domain_in_ingress":
 		// Cache lookup + O(n) list iteration + O(m) slice.Contains on DNS names per entry
 		cost = 35
-	case "nn.was_address_port_protocol_in_egress", "nn.was_address_port_protocol_in_ingress":
+	case "cp.was_address_port_protocol_in_egress", "cp.was_address_port_protocol_in_ingress":
 		// Cache lookup + O(n) address search + O(p) nested port/protocol matching
 		cost = 45
 	}
 	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
 }
 
-func (e *nnCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+func (e *containerProfileNetworkCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
 	return nil // Not providing size estimates for now.
 }
 
 // Ensure the implementation satisfies the interface
-var _ checker.CostEstimator = (*nnCostEstimator)(nil)
-var _ libraries.Library = (*nnLibrary)(nil)
+var _ checker.CostEstimator = (*containerProfileNetworkCostEstimator)(nil)
+var _ libraries.Library = (*containerProfileNetworkLibrary)(nil)

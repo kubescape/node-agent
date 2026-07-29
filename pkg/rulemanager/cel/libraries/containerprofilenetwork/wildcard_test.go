@@ -1,4 +1,4 @@
-package networkneighborhood
+package containerprofilenetwork
 
 import (
 	"testing"
@@ -14,7 +14,7 @@ import (
 )
 
 // Helper: build a ready-to-use library with a single-container profile.
-func buildLibWithContainer(t *testing.T, neighbors []v1beta1.NetworkNeighbor, ingressNeighbors []v1beta1.NetworkNeighbor) *nnLibrary {
+func buildLibWithContainer(t *testing.T, neighbors []v1beta1.NetworkNeighbor, ingressNeighbors []v1beta1.NetworkNeighbor) *containerProfileNetworkLibrary {
 	t.Helper()
 	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
@@ -31,7 +31,7 @@ func buildLibWithContainer(t *testing.T, neighbors []v1beta1.NetworkNeighbor, in
 		Ingress: ingressNeighbors,
 	}
 	objCache.SetContainerProfile(nn)
-	return &nnLibrary{
+	return &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}

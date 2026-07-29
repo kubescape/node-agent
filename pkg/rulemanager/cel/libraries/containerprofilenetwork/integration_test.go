@@ -1,4 +1,4 @@
-package networkneighborhood
+package containerprofilenetwork
 
 import (
 	"testing"
@@ -107,7 +107,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
-		NN(&objCache, config.Config{
+		CPNetwork(&objCache, config.Config{
 			CelConfigCache: cache.FunctionCacheConfig{
 				MaxSize: 1000,
 				TTL:     1 * time.Minute,
@@ -125,127 +125,127 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 	}{
 		{
 			name:           "Check egress address",
-			expression:     `nn.was_address_in_egress(containerID, "192.168.1.100")`,
+			expression:     `cp.was_address_in_egress(containerID, "192.168.1.100")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check ingress address",
-			expression:     `nn.was_address_in_ingress(containerID, "172.16.0.10")`,
+			expression:     `cp.was_address_in_ingress(containerID, "172.16.0.10")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check egress domain",
-			expression:     `nn.is_domain_in_egress(containerID, "api.example.com")`,
+			expression:     `cp.is_domain_in_egress(containerID, "api.example.com")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check ingress domain",
-			expression:     `nn.is_domain_in_ingress(containerID, "loadbalancer.example.com")`,
+			expression:     `cp.is_domain_in_ingress(containerID, "loadbalancer.example.com")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Complex network check - external communication",
-			expression:     `nn.was_address_in_egress(containerID, "8.8.8.8") && nn.is_domain_in_egress(containerID, "dns.google.com")`,
+			expression:     `cp.was_address_in_egress(containerID, "8.8.8.8") && cp.is_domain_in_egress(containerID, "dns.google.com")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Complex network check - internal communication",
-			expression:     `nn.was_address_in_egress(containerID, "10.0.0.50") && nn.is_domain_in_egress(containerID, "database.internal")`,
+			expression:     `cp.was_address_in_egress(containerID, "10.0.0.50") && cp.is_domain_in_egress(containerID, "database.internal")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Complex network check - load balancer access",
-			expression:     `nn.was_address_in_ingress(containerID, "172.16.0.10") && nn.is_domain_in_ingress(containerID, "lb.example.com")`,
+			expression:     `cp.was_address_in_ingress(containerID, "172.16.0.10") && cp.is_domain_in_ingress(containerID, "lb.example.com")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check non-existent network communication",
-			expression:     `nn.was_address_in_egress(containerID, "192.168.1.200") || nn.is_domain_in_ingress(containerID, "nonexistent.example.com")`,
+			expression:     `cp.was_address_in_egress(containerID, "192.168.1.200") || cp.is_domain_in_ingress(containerID, "nonexistent.example.com")`,
 			expectedResult: false,
 		},
 		{
 			name:           "Mixed valid and invalid checks",
-			expression:     `nn.was_address_in_egress(containerID, "192.168.1.100") && nn.was_address_in_egress(containerID, "192.168.1.200")`,
+			expression:     `cp.was_address_in_egress(containerID, "192.168.1.100") && cp.was_address_in_egress(containerID, "192.168.1.200")`,
 			expectedResult: false,
 		},
 		{
 			name:           "Multiple valid egress checks",
-			expression:     `nn.was_address_in_egress(containerID, "192.168.1.100") || nn.was_address_in_egress(containerID, "10.0.0.50")`,
+			expression:     `cp.was_address_in_egress(containerID, "192.168.1.100") || cp.was_address_in_egress(containerID, "10.0.0.50")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check egress address with port and protocol - TCP 80",
-			expression:     `nn.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check egress address with port and protocol - TCP 443",
-			expression:     `nn.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 443, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 443, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check egress address with port and protocol - UDP 53",
-			expression:     `nn.was_address_port_protocol_in_egress(containerID, "8.8.8.8", 53, "UDP")`,
+			expression:     `cp.was_address_port_protocol_in_egress(containerID, "8.8.8.8", 53, "UDP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check egress address with port and protocol - database",
-			expression:     `nn.was_address_port_protocol_in_egress(containerID, "10.0.0.50", 5432, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_egress(containerID, "10.0.0.50", 5432, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check ingress address with port and protocol - TCP 8080",
-			expression:     `nn.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check ingress address with port and protocol - TCP 9090",
-			expression:     `nn.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 9090, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 9090, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check ingress address with port and protocol - monitoring",
-			expression:     `nn.was_address_port_protocol_in_ingress(containerID, "10.0.0.20", 3000, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "10.0.0.20", 3000, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check non-existent egress address with port and protocol",
-			expression:     `nn.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 9999, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 9999, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check non-existent ingress address with port and protocol",
-			expression:     `nn.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 9999, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 9999, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check wrong protocol for existing address and port",
-			expression:     `nn.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "UDP")`,
+			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "UDP")`,
 			expectedResult: true,
 		},
 		{
 			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check wrong protocol for existing ingress address and port",
-			expression:     `nn.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "UDP")`,
+			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "UDP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Complex network check with port and protocol - egress",
-			expression:     `nn.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "TCP") && nn.was_address_port_protocol_in_egress(containerID, "8.8.8.8", 53, "UDP")`,
+			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "TCP") && cp.was_address_port_protocol_in_egress(containerID, "8.8.8.8", 53, "UDP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Complex network check with port and protocol - ingress",
-			expression:     `nn.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "TCP") && nn.was_address_port_protocol_in_ingress(containerID, "10.0.0.20", 3000, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "TCP") && cp.was_address_port_protocol_in_ingress(containerID, "10.0.0.20", 3000, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			// v1 degradation: both sides match on address only → true.
 			name:           "Mixed valid and invalid port protocol checks",
-			expression:     `nn.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "TCP") && nn.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 9999, "TCP")`,
+			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "TCP") && cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 9999, "TCP")`,
 			expectedResult: true,
 		},
 	}

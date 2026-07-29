@@ -1,4 +1,4 @@
-package networkneighborhood
+package containerprofilenetwork
 
 import (
 	"os"

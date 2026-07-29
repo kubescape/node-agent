@@ -1,4 +1,4 @@
-package networkneighborhood
+package containerprofilenetwork
 
 import (
 	"testing"
@@ -61,7 +61,7 @@ func TestWasAddressPortProtocolInEgress(t *testing.T) {
 	}
 	objCache.SetContainerProfile(nn)
 
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -197,7 +197,7 @@ func TestWasAddressPortProtocolInIngress(t *testing.T) {
 	}
 	objCache.SetContainerProfile(nn)
 
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -286,7 +286,7 @@ func TestWasAddressPortProtocolInIngress(t *testing.T) {
 }
 
 func TestWasAddressPortProtocolWithNilObjectCache(t *testing.T) {
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   nil,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -313,7 +313,7 @@ func TestWasAddressPortProtocolWithInvalidTypes(t *testing.T) {
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -400,7 +400,7 @@ func TestWasAddressPortProtocolWithNilPort(t *testing.T) {
 	}
 	objCache.SetContainerProfile(nn)
 
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}

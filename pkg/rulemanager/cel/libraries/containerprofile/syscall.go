@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"github.com/google/cel-go/common/types"
@@ -7,7 +7,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 )
 
-func (l *apLibrary) wasSyscallUsed(containerID, syscallName ref.Val) ref.Val {
+func (l *containerProfileLibrary) wasSyscallUsed(containerID, syscallName ref.Val) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}

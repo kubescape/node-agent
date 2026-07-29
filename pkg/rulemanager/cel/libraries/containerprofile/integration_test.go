@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"testing"
@@ -67,7 +67,7 @@ func TestIntegrationWithAllFunctions(t *testing.T) {
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -80,37 +80,37 @@ func TestIntegrationWithAllFunctions(t *testing.T) {
 	}{
 		{
 			name:           "Check suspicious execution pattern",
-			expression:     `ap.was_executed_with_args(containerID, "/bin/bash", ["/bin/bash", "-c", "curl http://example.com"])`,
+			expression:     `cp.was_executed_with_args(containerID, "/bin/bash", ["/bin/bash", "-c", "curl http://example.com"])`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check file access pattern",
-			expression:     `ap.was_path_opened_with_flags(containerID, "/etc/passwd", ["O_RDONLY"])`,
+			expression:     `cp.was_path_opened_with_flags(containerID, "/etc/passwd", ["O_RDONLY"])`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check dangerous syscall usage",
-			expression:     `ap.was_syscall_used(containerID, "execve")`,
+			expression:     `cp.was_syscall_used(containerID, "execve")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check dangerous capability usage",
-			expression:     `ap.was_capability_used(containerID, "SYS_ADMIN")`,
+			expression:     `cp.was_capability_used(containerID, "SYS_ADMIN")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Complex security check - suspicious behavior",
-			expression:     `ap.was_executed_with_args(containerID, "/bin/bash", ["/bin/bash", "-c", "curl http://example.com"]) && ap.was_path_opened(containerID, "/etc/passwd") && ap.was_syscall_used(containerID, "execve")`,
+			expression:     `cp.was_executed_with_args(containerID, "/bin/bash", ["/bin/bash", "-c", "curl http://example.com"]) && cp.was_path_opened(containerID, "/etc/passwd") && cp.was_syscall_used(containerID, "execve")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Complex security check - dangerous capabilities",
-			expression:     `ap.was_capability_used(containerID, "NET_ADMIN") || ap.was_capability_used(containerID, "SYS_ADMIN")`,
+			expression:     `cp.was_capability_used(containerID, "NET_ADMIN") || cp.was_capability_used(containerID, "SYS_ADMIN")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check non-existent operations",
-			expression:     `ap.was_executed(containerID, "/bin/nonexistent") || ap.was_syscall_used(containerID, "nonexistent_syscall")`,
+			expression:     `cp.was_executed(containerID, "/bin/nonexistent") || cp.was_syscall_used(containerID, "nonexistent_syscall")`,
 			expectedResult: false,
 		},
 	}

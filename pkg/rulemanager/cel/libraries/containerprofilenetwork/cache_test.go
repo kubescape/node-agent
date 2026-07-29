@@ -1,4 +1,4 @@
-package networkneighborhood
+package containerprofilenetwork
 
 import (
 	"testing"
@@ -73,7 +73,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 	objCache.SetContainerProfile(nn)
 
 	// Create library with cache
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -96,7 +96,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 	}{
 		{
 			name:       "was_address_in_egress caching",
-			expression: `nn.was_address_in_egress(containerID, address)`,
+			expression: `cp.was_address_in_egress(containerID, address)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"address":     "192.168.1.100",
@@ -105,7 +105,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		},
 		{
 			name:       "was_address_in_ingress caching",
-			expression: `nn.was_address_in_ingress(containerID, address)`,
+			expression: `cp.was_address_in_ingress(containerID, address)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"address":     "172.16.0.10",
@@ -114,7 +114,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		},
 		{
 			name:       "is_domain_in_egress caching",
-			expression: `nn.is_domain_in_egress(containerID, domain)`,
+			expression: `cp.is_domain_in_egress(containerID, domain)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"domain":      "api.example.com",
@@ -123,7 +123,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		},
 		{
 			name:       "is_domain_in_ingress caching",
-			expression: `nn.is_domain_in_ingress(containerID, domain)`,
+			expression: `cp.is_domain_in_ingress(containerID, domain)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"domain":      "loadbalancer.example.com",
@@ -132,7 +132,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		},
 		{
 			name:       "was_address_port_protocol_in_egress caching",
-			expression: `nn.was_address_port_protocol_in_egress(containerID, address, port, protocol)`,
+			expression: `cp.was_address_port_protocol_in_egress(containerID, address, port, protocol)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"address":     "192.168.1.100",
@@ -143,7 +143,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		},
 		{
 			name:       "was_address_port_protocol_in_ingress caching",
-			expression: `nn.was_address_port_protocol_in_ingress(containerID, address, port, protocol)`,
+			expression: `cp.was_address_port_protocol_in_ingress(containerID, address, port, protocol)`,
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"address":     "172.16.0.10",
@@ -220,7 +220,7 @@ func TestNetworkNeighborhoodCacheDifferentArguments(t *testing.T) {
 	}
 	objCache.SetContainerProfile(nn)
 
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -232,7 +232,7 @@ func TestNetworkNeighborhoodCacheDifferentArguments(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	ast, issues := env.Compile(`nn.was_address_in_egress(containerID, address)`)
+	ast, issues := env.Compile(`cp.was_address_in_egress(containerID, address)`)
 	assert.NoError(t, issues.Err())
 
 	program, err := env.Program(ast)
@@ -304,7 +304,7 @@ func TestNetworkNeighborhoodCacheExpiration(t *testing.T) {
 		MaxSize: 100,
 		TTL:     50 * time.Millisecond,
 	}
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(config),
 	}
@@ -316,7 +316,7 @@ func TestNetworkNeighborhoodCacheExpiration(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	ast, issues := env.Compile(`nn.was_address_in_egress(containerID, address)`)
+	ast, issues := env.Compile(`cp.was_address_in_egress(containerID, address)`)
 	assert.NoError(t, issues.Err())
 
 	program, err := env.Program(ast)
@@ -375,7 +375,7 @@ func TestNetworkNeighborhoodCachePerformance(t *testing.T) {
 	}
 	objCache.SetContainerProfile(nn)
 
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -387,7 +387,7 @@ func TestNetworkNeighborhoodCachePerformance(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	ast, issues := env.Compile(`nn.was_address_in_egress(containerID, address)`)
+	ast, issues := env.Compile(`cp.was_address_in_egress(containerID, address)`)
 	assert.NoError(t, issues.Err())
 
 	program, err := env.Program(ast)
@@ -457,7 +457,7 @@ func TestNetworkNeighborhoodCacheMultipleFunctions(t *testing.T) {
 	}
 	objCache.SetContainerProfile(nn)
 
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -473,10 +473,10 @@ func TestNetworkNeighborhoodCacheMultipleFunctions(t *testing.T) {
 		expression string
 		expected   bool
 	}{
-		{`nn.was_address_in_egress(containerID, "192.168.1.100")`, true},
-		{`nn.was_address_in_ingress(containerID, "172.16.0.10")`, true},
-		{`nn.is_domain_in_egress(containerID, "api.example.com")`, true},
-		{`nn.is_domain_in_ingress(containerID, "loadbalancer.example.com")`, true},
+		{`cp.was_address_in_egress(containerID, "192.168.1.100")`, true},
+		{`cp.was_address_in_ingress(containerID, "172.16.0.10")`, true},
+		{`cp.is_domain_in_egress(containerID, "api.example.com")`, true},
+		{`cp.is_domain_in_ingress(containerID, "loadbalancer.example.com")`, true},
 	}
 
 	for i, tc := range testExpressions {
@@ -537,7 +537,7 @@ func TestNetworkNeighborhoodCacheClearCache(t *testing.T) {
 	}
 	objCache.SetContainerProfile(nn)
 
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -549,7 +549,7 @@ func TestNetworkNeighborhoodCacheClearCache(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	ast, issues := env.Compile(`nn.was_address_in_egress(containerID, address)`)
+	ast, issues := env.Compile(`cp.was_address_in_egress(containerID, address)`)
 	assert.NoError(t, issues.Err())
 
 	program, err := env.Program(ast)
@@ -610,7 +610,7 @@ func TestNetworkNeighborhoodCacheKeyGeneration(t *testing.T) {
 	}
 	objCache.SetContainerProfile(nn)
 
-	lib := &nnLibrary{
+	lib := &containerProfileNetworkLibrary{
 		objectCache:   &objCache,
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
@@ -622,7 +622,7 @@ func TestNetworkNeighborhoodCacheKeyGeneration(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	ast, issues := env.Compile(`nn.was_address_in_egress(containerID, address)`)
+	ast, issues := env.Compile(`cp.was_address_in_egress(containerID, address)`)
 	assert.NoError(t, issues.Err())
 
 	program, err := env.Program(ast)

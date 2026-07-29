@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"testing"
@@ -47,7 +47,7 @@ func TestExecInProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -81,7 +81,7 @@ func TestExecInProfile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ast, issues := env.Compile(`ap.was_executed(containerID, path)`)
+			ast, issues := env.Compile(`cp.was_executed(containerID, path)`)
 			if issues != nil {
 				t.Fatalf("failed to compile expression: %v", issues.Err())
 			}
@@ -100,7 +100,7 @@ func TestExecInProfile(t *testing.T) {
 			}
 
 			actualResult := result.Value().(bool)
-			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_executed result should match expected value")
+			assert.Equal(t, tc.expectedResult, actualResult, "cp.was_executed result should match expected value")
 		})
 	}
 }
@@ -111,13 +111,13 @@ func TestExecNoProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
-	ast, issues := env.Compile(`ap.was_executed(containerID, path)`)
+	ast, issues := env.Compile(`cp.was_executed(containerID, path)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -136,7 +136,7 @@ func TestExecNoProfile(t *testing.T) {
 	}
 
 	actualResult := result.Value().(bool)
-	assert.False(t, actualResult, "ap.was_executed should return false when no profile is available")
+	assert.False(t, actualResult, "cp.was_executed should return false when no profile is available")
 }
 
 func TestExecWithArgsInProfile(t *testing.T) {
@@ -178,7 +178,7 @@ func TestExecWithArgsInProfile(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("args", cel.ListType(cel.StringType)),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -244,7 +244,7 @@ func TestExecWithArgsInProfile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ast, issues := env.Compile(`ap.was_executed_with_args(containerID, path, args)`)
+			ast, issues := env.Compile(`cp.was_executed_with_args(containerID, path, args)`)
 			if issues != nil {
 				t.Fatalf("failed to compile expression: %v", issues.Err())
 			}
@@ -264,7 +264,7 @@ func TestExecWithArgsInProfile(t *testing.T) {
 			}
 
 			actualResult := result.Value().(bool)
-			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_executed_with_args result should match expected value")
+			assert.Equal(t, tc.expectedResult, actualResult, "cp.was_executed_with_args result should match expected value")
 		})
 	}
 }
@@ -276,13 +276,13 @@ func TestExecWithArgsNoProfile(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("args", cel.ListType(cel.StringType)),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
-	ast, issues := env.Compile(`ap.was_executed_with_args(containerID, path, args)`)
+	ast, issues := env.Compile(`cp.was_executed_with_args(containerID, path, args)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -302,7 +302,7 @@ func TestExecWithArgsNoProfile(t *testing.T) {
 	}
 
 	actualResult := result.Value().(bool)
-	assert.False(t, actualResult, "ap.was_executed_with_args should return false when no profile is available")
+	assert.False(t, actualResult, "cp.was_executed_with_args should return false when no profile is available")
 }
 
 // TestExecWithArgsWildcardInProfile exercises wildcard tokens inside a
@@ -365,7 +365,7 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("args", cel.ListType(cel.StringType)),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -401,7 +401,7 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ast, issues := env.Compile(`ap.was_executed_with_args(containerID, path, args)`)
+			ast, issues := env.Compile(`cp.was_executed_with_args(containerID, path, args)`)
 			if issues != nil {
 				t.Fatalf("failed to compile expression: %v", issues.Err())
 			}
@@ -435,14 +435,14 @@ func TestExecWithArgsCompilation(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("args", cel.ListType(cel.StringType)),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
 	// Test that the function compiles correctly
-	ast, issues := env.Compile(`ap.was_executed_with_args(containerID, path, args)`)
+	ast, issues := env.Compile(`cp.was_executed_with_args(containerID, path, args)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}

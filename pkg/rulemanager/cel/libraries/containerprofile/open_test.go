@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"testing"
@@ -47,7 +47,7 @@ func TestWasPathOpenedWithSuffix_PatternsNotScanned(t *testing.T) {
 		},
 	}
 	objCache := &mockObjectCacheForPattern{pcp: pcp}
-	lib := &apLibrary{objectCache: objCache}
+	lib := &containerProfileLibrary{objectCache: objCache}
 
 	// 1) With concrete in Values: returns true.
 	got := lib.wasPathOpenedWithSuffix(types.String("test-cid"), types.String(".log"))
@@ -78,7 +78,7 @@ func TestWasPathOpenedWithPrefix_PatternsNotScanned(t *testing.T) {
 		},
 	}
 	objCache := &mockObjectCacheForPattern{pcp: pcp}
-	lib := &apLibrary{objectCache: objCache}
+	lib := &containerProfileLibrary{objectCache: objCache}
 
 	got := lib.wasPathOpenedWithPrefix(types.String("test-cid"), types.String("/var/"))
 	if b, _ := got.Value().(bool); !b {
@@ -148,7 +148,7 @@ func TestOpenInProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -182,7 +182,7 @@ func TestOpenInProfile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ast, issues := env.Compile(`ap.was_path_opened(containerID, path)`)
+			ast, issues := env.Compile(`cp.was_path_opened(containerID, path)`)
 			if issues != nil {
 				t.Fatalf("failed to compile expression: %v", issues.Err())
 			}
@@ -201,7 +201,7 @@ func TestOpenInProfile(t *testing.T) {
 			}
 
 			actualResult := result.Value().(bool)
-			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_path_opened result should match expected value")
+			assert.Equal(t, tc.expectedResult, actualResult, "cp.was_path_opened result should match expected value")
 		})
 	}
 }
@@ -212,13 +212,13 @@ func TestOpenNoProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
-	ast, issues := env.Compile(`ap.was_path_opened(containerID, path)`)
+	ast, issues := env.Compile(`cp.was_path_opened(containerID, path)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -237,7 +237,7 @@ func TestOpenNoProfile(t *testing.T) {
 	}
 
 	actualResult := result.Value().(bool)
-	assert.False(t, actualResult, "ap.was_path_opened should return false when no profile is available")
+	assert.False(t, actualResult, "cp.was_path_opened should return false when no profile is available")
 }
 
 func TestOpenCompilation(t *testing.T) {
@@ -246,14 +246,14 @@ func TestOpenCompilation(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
 	// Test that the function compiles correctly
-	ast, issues := env.Compile(`ap.was_path_opened(containerID, path)`)
+	ast, issues := env.Compile(`cp.was_path_opened(containerID, path)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -307,7 +307,7 @@ func TestOpenWithSuffixInProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("suffix", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -365,7 +365,7 @@ func TestOpenWithSuffixInProfile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ast, issues := env.Compile(`ap.was_path_opened_with_suffix(containerID, suffix)`)
+			ast, issues := env.Compile(`cp.was_path_opened_with_suffix(containerID, suffix)`)
 			if issues != nil {
 				t.Fatalf("failed to compile expression: %v", issues.Err())
 			}
@@ -384,7 +384,7 @@ func TestOpenWithSuffixInProfile(t *testing.T) {
 			}
 
 			actualResult := result.Value().(bool)
-			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_path_opened_with_suffix result should match expected value")
+			assert.Equal(t, tc.expectedResult, actualResult, "cp.was_path_opened_with_suffix result should match expected value")
 		})
 	}
 }
@@ -395,13 +395,13 @@ func TestOpenWithSuffixNoProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("suffix", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
-	ast, issues := env.Compile(`ap.was_path_opened_with_suffix(containerID, suffix)`)
+	ast, issues := env.Compile(`cp.was_path_opened_with_suffix(containerID, suffix)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -420,7 +420,7 @@ func TestOpenWithSuffixNoProfile(t *testing.T) {
 	}
 
 	actualResult := result.Value().(bool)
-	assert.False(t, actualResult, "ap.was_path_opened_with_suffix should return false when no profile is available")
+	assert.False(t, actualResult, "cp.was_path_opened_with_suffix should return false when no profile is available")
 }
 
 func TestOpenWithPrefixInProfile(t *testing.T) {
@@ -465,7 +465,7 @@ func TestOpenWithPrefixInProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("prefix", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -535,7 +535,7 @@ func TestOpenWithPrefixInProfile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ast, issues := env.Compile(`ap.was_path_opened_with_prefix(containerID, prefix)`)
+			ast, issues := env.Compile(`cp.was_path_opened_with_prefix(containerID, prefix)`)
 			if issues != nil {
 				t.Fatalf("failed to compile expression: %v", issues.Err())
 			}
@@ -554,7 +554,7 @@ func TestOpenWithPrefixInProfile(t *testing.T) {
 			}
 
 			actualResult := result.Value().(bool)
-			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_path_opened_with_prefix result should match expected value")
+			assert.Equal(t, tc.expectedResult, actualResult, "cp.was_path_opened_with_prefix result should match expected value")
 		})
 	}
 }
@@ -565,13 +565,13 @@ func TestOpenWithPrefixNoProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("prefix", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
-	ast, issues := env.Compile(`ap.was_path_opened_with_prefix(containerID, prefix)`)
+	ast, issues := env.Compile(`cp.was_path_opened_with_prefix(containerID, prefix)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -590,7 +590,7 @@ func TestOpenWithPrefixNoProfile(t *testing.T) {
 	}
 
 	actualResult := result.Value().(bool)
-	assert.False(t, actualResult, "ap.was_path_opened_with_prefix should return false when no profile is available")
+	assert.False(t, actualResult, "cp.was_path_opened_with_prefix should return false when no profile is available")
 }
 
 func TestOpenWithSuffixCompilation(t *testing.T) {
@@ -599,14 +599,14 @@ func TestOpenWithSuffixCompilation(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("suffix", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
 	// Test that the function compiles correctly
-	ast, issues := env.Compile(`ap.was_path_opened_with_suffix(containerID, suffix)`)
+	ast, issues := env.Compile(`cp.was_path_opened_with_suffix(containerID, suffix)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -624,14 +624,14 @@ func TestOpenWithPrefixCompilation(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("prefix", cel.StringType),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
 	// Test that the function compiles correctly
-	ast, issues := env.Compile(`ap.was_path_opened_with_prefix(containerID, prefix)`)
+	ast, issues := env.Compile(`cp.was_path_opened_with_prefix(containerID, prefix)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -681,7 +681,7 @@ func TestOpenWithFlagsInProfile(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("flags", cel.ListType(cel.StringType)),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -748,7 +748,7 @@ func TestOpenWithFlagsInProfile(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ast, issues := env.Compile(`ap.was_path_opened_with_flags(containerID, path, flags)`)
+			ast, issues := env.Compile(`cp.was_path_opened_with_flags(containerID, path, flags)`)
 			if issues != nil {
 				t.Fatalf("failed to compile expression: %v", issues.Err())
 			}
@@ -768,7 +768,7 @@ func TestOpenWithFlagsInProfile(t *testing.T) {
 			}
 
 			actualResult := result.Value().(bool)
-			assert.Equal(t, tc.expectedResult, actualResult, "ap.was_path_opened_with_flags result should match expected value")
+			assert.Equal(t, tc.expectedResult, actualResult, "cp.was_path_opened_with_flags result should match expected value")
 		})
 	}
 }
@@ -780,13 +780,13 @@ func TestOpenWithFlagsNoProfile(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("flags", cel.ListType(cel.StringType)),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
-	ast, issues := env.Compile(`ap.was_path_opened_with_flags(containerID, path, flags)`)
+	ast, issues := env.Compile(`cp.was_path_opened_with_flags(containerID, path, flags)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}
@@ -806,7 +806,7 @@ func TestOpenWithFlagsNoProfile(t *testing.T) {
 	}
 
 	actualResult := result.Value().(bool)
-	assert.False(t, actualResult, "ap.was_path_opened_with_flags should return false when no profile is available")
+	assert.False(t, actualResult, "cp.was_path_opened_with_flags should return false when no profile is available")
 }
 
 func TestOpenWithFlagsCompilation(t *testing.T) {
@@ -816,14 +816,14 @@ func TestOpenWithFlagsCompilation(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("flags", cel.ListType(cel.StringType)),
-		AP(&objCache, config.Config{}),
+		CP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
 	// Test that the function compiles correctly
-	ast, issues := env.Compile(`ap.was_path_opened_with_flags(containerID, path, flags)`)
+	ast, issues := env.Compile(`cp.was_path_opened_with_flags(containerID, path, flags)`)
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}

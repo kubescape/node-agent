@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"github.com/google/cel-go/cel"
@@ -13,7 +13,7 @@ import (
 )
 
 func New(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) libraries.Library {
-	lib := &apLibrary{
+	lib := &containerProfileLibrary{
 		objectCache: objectCache,
 		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
 			MaxSize: config.CelConfigCache.MaxSize,
@@ -28,11 +28,11 @@ func New(objectCache objectcache.ObjectCache, config config.Config, mm ...metric
 	return lib
 }
 
-func AP(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) cel.EnvOption {
+func CP(objectCache objectcache.ObjectCache, config config.Config, mm ...metricsmanager.MetricsManager) cel.EnvOption {
 	return cel.Lib(New(objectCache, config, mm...))
 }
 
-type apLibrary struct {
+type containerProfileLibrary struct {
 	objectCache     objectcache.ObjectCache
 	functionCache   *cache.FunctionCache
 	preStopCache    *PreStopHookCache
@@ -40,30 +40,30 @@ type apLibrary struct {
 	detailedMetrics bool
 }
 
-func (l *apLibrary) LibraryName() string {
-	return "ap"
+func (l *containerProfileLibrary) LibraryName() string {
+	return "cp"
 }
 
-func (l *apLibrary) Types() []*cel.Type {
+func (l *containerProfileLibrary) Types() []*cel.Type {
 	return []*cel.Type{}
 }
 
-func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
+func (l *containerProfileLibrary) Declarations() map[string][]cel.FunctionOpt {
 	return map[string][]cel.FunctionOpt{
-		"ap.was_executed": {
+		"cp.was_executed": {
 			cel.Overload(
-				"ap_was_executed", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_executed", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_executed")
+						l.metrics.IncHelperCall("cp.was_executed")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasExecuted(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_executed", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					// Convert "profile not available" error to false after cache layer
 					// This ensures: 1) error is not cached, 2) rule evaluation continues normally
@@ -71,20 +71,20 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
-		"ap.was_executed_with_args": {
+		"cp.was_executed_with_args": {
 			cel.Overload(
-				"ap_was_executed_with_args", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
+				"cp_was_executed_with_args", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_executed_with_args")
+						l.metrics.IncHelperCall("cp.was_executed_with_args")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasExecutedWithArgs(args[0], args[1], args[2])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed_with_args", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_executed_with_args", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2])
 					// Convert "profile not available" error to false after cache layer
 					// This ensures: 1) error is not cached, 2) rule evaluation continues normally
@@ -92,229 +92,229 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
-		"ap.was_path_opened": {
+		"cp.was_path_opened": {
 			cel.Overload(
-				"ap_was_path_opened", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_path_opened", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_path_opened")
+						l.metrics.IncHelperCall("cp.was_path_opened")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasPathOpened(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_path_opened", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_path_opened_with_flags": {
+		"cp.was_path_opened_with_flags": {
 			cel.Overload(
-				"ap_was_path_opened_with_flags", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
+				"cp_was_path_opened_with_flags", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_path_opened_with_flags")
+						l.metrics.IncHelperCall("cp.was_path_opened_with_flags")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasPathOpenedWithFlags(args[0], args[1], args[2])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_flags", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_path_opened_with_flags", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_path_opened_with_suffix": {
+		"cp.was_path_opened_with_suffix": {
 			cel.Overload(
-				"ap_was_path_opened_with_suffix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_path_opened_with_suffix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_path_opened_with_suffix")
+						l.metrics.IncHelperCall("cp.was_path_opened_with_suffix")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasPathOpenedWithSuffix(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_suffix", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_path_opened_with_suffix", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_path_opened_with_prefix": {
+		"cp.was_path_opened_with_prefix": {
 			cel.Overload(
-				"ap_was_path_opened_with_prefix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_path_opened_with_prefix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_path_opened_with_prefix")
+						l.metrics.IncHelperCall("cp.was_path_opened_with_prefix")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasPathOpenedWithPrefix(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_prefix", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_path_opened_with_prefix", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_syscall_used": {
+		"cp.was_syscall_used": {
 			cel.Overload(
-				"ap_was_syscall_used", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_syscall_used", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_syscall_used")
+						l.metrics.IncHelperCall("cp.was_syscall_used")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasSyscallUsed(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_syscall_used", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_syscall_used", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_capability_used": {
+		"cp.was_capability_used": {
 			cel.Overload(
-				"ap_was_capability_used", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_capability_used", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_capability_used")
+						l.metrics.IncHelperCall("cp.was_capability_used")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasCapabilityUsed(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_capability_used", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_capability_used", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_endpoint_accessed": {
+		"cp.was_endpoint_accessed": {
 			cel.Overload(
-				"ap_was_endpoint_accessed", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_endpoint_accessed", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_endpoint_accessed")
+						l.metrics.IncHelperCall("cp.was_endpoint_accessed")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessed(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_endpoint_accessed", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_endpoint_accessed_with_method": {
+		"cp.was_endpoint_accessed_with_method": {
 			cel.Overload(
-				"ap_was_endpoint_accessed_with_method", []*cel.Type{cel.StringType, cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_endpoint_accessed_with_method", []*cel.Type{cel.StringType, cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_endpoint_accessed_with_method")
+						l.metrics.IncHelperCall("cp.was_endpoint_accessed_with_method")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessedWithMethod(args[0], args[1], args[2])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_method", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_endpoint_accessed_with_method", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_endpoint_accessed_with_methods": {
+		"cp.was_endpoint_accessed_with_methods": {
 			cel.Overload(
-				"ap_was_endpoint_accessed_with_methods", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
+				"cp_was_endpoint_accessed_with_methods", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_endpoint_accessed_with_methods")
+						l.metrics.IncHelperCall("cp.was_endpoint_accessed_with_methods")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessedWithMethods(args[0], args[1], args[2])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_methods", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_endpoint_accessed_with_methods", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1], values[2])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_endpoint_accessed_with_prefix": {
+		"cp.was_endpoint_accessed_with_prefix": {
 			cel.Overload(
-				"ap_was_endpoint_accessed_with_prefix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_endpoint_accessed_with_prefix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_endpoint_accessed_with_prefix")
+						l.metrics.IncHelperCall("cp.was_endpoint_accessed_with_prefix")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessedWithPrefix(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_prefix", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_endpoint_accessed_with_prefix", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_endpoint_accessed_with_suffix": {
+		"cp.was_endpoint_accessed_with_suffix": {
 			cel.Overload(
-				"ap_was_endpoint_accessed_with_suffix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_endpoint_accessed_with_suffix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_endpoint_accessed_with_suffix")
+						l.metrics.IncHelperCall("cp.was_endpoint_accessed_with_suffix")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasEndpointAccessedWithSuffix(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_suffix", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_endpoint_accessed_with_suffix", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
 		},
-		"ap.was_host_accessed": {
+		"cp.was_host_accessed": {
 			cel.Overload(
-				"ap_was_host_accessed", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				"cp_was_host_accessed", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					if l.detailedMetrics && l.metrics != nil {
-						l.metrics.IncHelperCall("ap.was_host_accessed")
+						l.metrics.IncHelperCall("cp.was_host_accessed")
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return l.wasHostAccessed(args[0], args[1])
 					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_host_accessed", cache.HashForContainerProfile(l.objectCache))
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_host_accessed", cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values[0], values[1])
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
@@ -323,7 +323,7 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 	}
 }
 
-func (l *apLibrary) CompileOptions() []cel.EnvOption {
+func (l *containerProfileLibrary) CompileOptions() []cel.EnvOption {
 	options := []cel.EnvOption{}
 	for name, overloads := range l.Declarations() {
 		options = append(options, cel.Function(name, overloads...))
@@ -331,75 +331,75 @@ func (l *apLibrary) CompileOptions() []cel.EnvOption {
 	return options
 }
 
-func (l *apLibrary) ProgramOptions() []cel.ProgramOption {
+func (l *containerProfileLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
-func (l *apLibrary) CostEstimator() checker.CostEstimator {
-	return &apCostEstimator{}
+func (l *containerProfileLibrary) CostEstimator() checker.CostEstimator {
+	return &containerProfileCostEstimator{}
 }
 
-// apCostEstimator implements the checker.CostEstimator for the 'ap' library.
-type apCostEstimator struct{}
+// containerProfileCostEstimator implements the checker.CostEstimator for the 'cp' library.
+type containerProfileCostEstimator struct{}
 
-func (e *apCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+func (e *containerProfileCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
 	cost := int64(0)
 	switch function {
-	case "ap.was_executed":
+	case "cp.was_executed":
 		// Cache lookup + O(n) linear search through execs list
 		cost = 15
-	case "ap.was_executed_with_args":
+	case "cp.was_executed_with_args":
 		// Cache lookup + O(n) linear search + O(m) slice comparison for args
 		cost = 30
-	case "ap.was_path_opened":
+	case "cp.was_path_opened":
 		// Cache lookup + O(n) linear search + dynamic path comparison
 		cost = 25
-	case "ap.was_path_opened_with_flags":
+	case "cp.was_path_opened_with_flags":
 		// Cache lookup + O(n) search + dynamic path comparison + O(f*p) flag comparison
 		cost = 40
-	case "ap.was_path_opened_with_suffix":
+	case "cp.was_path_opened_with_suffix":
 		// Cache lookup + O(n) linear search + O(n*len(suffix)) string suffix checks
 		cost = 20
-	case "ap.was_path_opened_with_prefix":
+	case "cp.was_path_opened_with_prefix":
 		// Cache lookup + O(n) linear search + O(n*len(prefix)) string prefix checks
 		cost = 20
-	case "ap.was_syscall_used":
+	case "cp.was_syscall_used":
 		// Cache lookup + O(n) slice.Contains search through syscalls
 		cost = 12
-	case "ap.was_capability_used":
+	case "cp.was_capability_used":
 		// Cache lookup + O(n) slice.Contains search through capabilities
 		cost = 12
-	case "ap.was_endpoint_accessed":
+	case "cp.was_endpoint_accessed":
 		// Cache lookup + O(n) linear search through endpoints + dynamic path comparison
 		cost = 25
-	case "ap.was_endpoint_accessed_with_method":
+	case "cp.was_endpoint_accessed_with_method":
 		// Cache lookup + O(n) search + dynamic path comparison + O(m) method check
 		cost = 30
-	case "ap.was_endpoint_accessed_with_methods":
+	case "cp.was_endpoint_accessed_with_methods":
 		// Cache lookup + O(n) search + dynamic path comparison + O(m*k) method comparison
 		cost = 35
-	case "ap.was_endpoint_accessed_with_prefix":
+	case "cp.was_endpoint_accessed_with_prefix":
 		// Cache lookup + O(n) linear search + O(n*len(prefix)) string prefix checks
 		cost = 20
-	case "ap.was_endpoint_accessed_with_suffix":
+	case "cp.was_endpoint_accessed_with_suffix":
 		// Cache lookup + O(n) linear search + O(n*len(suffix)) string suffix checks
 		cost = 20
-	case "ap.was_host_accessed":
+	case "cp.was_host_accessed":
 		// Cache lookup + O(n) endpoint search + URL parsing + O(m) network neighbor search
 		cost = 35
-	case "ap.was_internal_endpoint_accessed":
+	case "cp.was_internal_endpoint_accessed":
 		// Cache lookup + O(n) linear search through endpoints checking internal flag
 		cost = 15
-	case "ap.was_external_endpoint_accessed":
+	case "cp.was_external_endpoint_accessed":
 		// Cache lookup + O(n) linear search through endpoints checking internal flag
 		cost = 15
-	case "ap.was_endpoint_accessed_with_direction":
+	case "cp.was_endpoint_accessed_with_direction":
 		// Cache lookup + O(n) linear search through endpoints + string comparison
 		cost = 18
-	case "ap.was_endpoint_accessed_with_header":
+	case "cp.was_endpoint_accessed_with_header":
 		// Cache lookup + O(n) search + JSON unmarshal + header map lookup
 		cost = 40
-	case "ap.was_endpoint_accessed_with_header_value":
+	case "cp.was_endpoint_accessed_with_header_value":
 		// Cache lookup + O(n) search + JSON unmarshal + header map lookup + slice.Contains
 		cost = 45
 	default:
@@ -409,10 +409,10 @@ func (e *apCostEstimator) EstimateCallCost(function, overloadID string, target *
 	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
 }
 
-func (e *apCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+func (e *containerProfileCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
 	return nil // Not providing size estimates for now.
 }
 
 // Ensure the implementation satisfies the interface
-var _ checker.CostEstimator = (*apCostEstimator)(nil)
-var _ libraries.Library = (*apLibrary)(nil)
+var _ checker.CostEstimator = (*containerProfileCostEstimator)(nil)
+var _ libraries.Library = (*containerProfileLibrary)(nil)

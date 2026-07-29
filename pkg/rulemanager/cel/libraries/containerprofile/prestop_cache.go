@@ -1,4 +1,4 @@
-package applicationprofile
+package containerprofile
 
 import (
 	"sync"
