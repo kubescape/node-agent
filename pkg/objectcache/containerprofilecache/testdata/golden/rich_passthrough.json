@@ -60,7 +60,6 @@
   "egressDomains": {
     "All": true,
     "Values": {
-      "api.example.com": {},
       "cdn.example.com": {}
     },
     "Patterns": null,
@@ -72,7 +71,6 @@
     "Values": {
       "*": {},
       "0.0.0.0/0": {},
-      "1.2.3.4": {},
       "8.8.8.8": {}
     },
     "Patterns": null,

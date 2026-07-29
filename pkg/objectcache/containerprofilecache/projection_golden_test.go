@@ -212,9 +212,7 @@ func richProfile() *v1beta1.ContainerProfile {
 			Egress: []v1beta1.NetworkNeighbor{
 				{
 					Identifier:  "egress-1",
-					DNS:         "api.example.com",
 					DNSNames:    []string{"cdn.example.com"},
-					IPAddress:   "1.2.3.4",
 					IPAddresses: []string{"8.8.8.8", "0.0.0.0/0", wild},
 				},
 			},
