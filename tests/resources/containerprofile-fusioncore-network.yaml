@@ -13,7 +13,7 @@
 # Modeled after a real auto-learned neighbourhood from curlimages/curl:8.5.0.
 # Allows exactly fusioncore.ai (162.0.217.171) on TCP/80. Anything else alerts
 # (unknown domain → R0005, unknown IP → R0011). See 00-fusioncore-homoglyph-attack
-# in network-wildcards-cp/ for why the exact-match dnsNames allow-list matters.
+# in network-wildcards/ for why the exact-match dnsNames allow-list matters.
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ContainerProfile
 metadata:

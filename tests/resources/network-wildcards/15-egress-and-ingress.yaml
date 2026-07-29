@@ -19,28 +19,23 @@
 #   but no built-in rule consumes them as of v0.0.2. Custom rules MAY.
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-15-egress-and-ingress
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-15
-  containers:
-  - name: bidirectional
-    egress:
-    - identifier: outbound-class-a
-      type: internal
-      ipAddresses:
-        - "10.0.0.0/8"
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
-    ingress:
-    - identifier: inbound-rfc1918-class-c
-      type: internal
-      ipAddresses:
-        - "192.168.0.0/16"
-      ports:
-        - {name: TCP-8080, protocol: TCP, port: 8080}
+  egress:
+  - identifier: outbound-class-a
+    type: internal
+    ipAddresses:
+      - "10.0.0.0/8"
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}
+  ingress:
+  - identifier: inbound-rfc1918-class-c
+    type: internal
+    ipAddresses:
+      - "192.168.0.0/16"
+    ports:
+      - {name: TCP-8080, protocol: TCP, port: 8080}

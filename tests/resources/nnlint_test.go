@@ -255,7 +255,7 @@ func validIPEntry(s string) bool {
 // netFixtureGlobs are the user-authored network surfaces to lint, relative to
 // this package directory (tests/resources).
 var netFixtureGlobs = []string{
-	"network-wildcards-cp/*.yaml",
+	"network-wildcards/*.yaml",
 	"containerprofile-*-network.yaml",
 }
 

@@ -31,25 +31,20 @@
 #   declare the equivalent via this NN.
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-18-cluster-dns-mid-ellipsis
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-18
-  containers:
-  - name: dns-client
-    egress:
-    - identifier: any-namespace-kubernetes-svc
-      type: internal
-      dnsNames:
-        - "kubernetes.⋯.svc.cluster.local."
-        # ↑ matches kubernetes.default.svc.cluster.local. exactly,
-        #   parametric on the namespace label. Use one entry per
-        #   service the workload calls; the wildcard is on the
-        #   namespace position, not the service name.
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
+  egress:
+  - identifier: any-namespace-kubernetes-svc
+    type: internal
+    dnsNames:
+      - "kubernetes.⋯.svc.cluster.local."
+      # ↑ matches kubernetes.default.svc.cluster.local. exactly,
+      #   parametric on the namespace label. Use one entry per
+      #   service the workload calls; the wildcard is on the
+      #   namespace position, not the service name.
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}

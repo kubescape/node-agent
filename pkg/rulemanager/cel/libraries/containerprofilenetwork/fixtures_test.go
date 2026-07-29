@@ -14,7 +14,7 @@ import (
 )
 
 // TestFixturesParse validates that every YAML fixture under
-// tests/resources/network-wildcards-cp/ parses against the v1beta1
+// tests/resources/network-wildcards/ parses against the v1beta1
 // ContainerProfile schema. This is the user-facing-examples gate:
 // the fixtures double as authoritative syntax documentation, so a
 // fixture that fails to parse is a documentation bug.
@@ -216,7 +216,7 @@ type dnsCheck struct {
 }
 
 // findFixturesDir walks up from the test's working directory to locate
-// tests/resources/network-wildcards-cp/. The package's own working dir
+// tests/resources/network-wildcards/. The package's own working dir
 // when `go test` runs is its source dir, so we walk up to find the
 // repo root.
 func findFixturesDir(t *testing.T) string {
@@ -224,7 +224,7 @@ func findFixturesDir(t *testing.T) string {
 	dir, err := os.Getwd()
 	require.NoError(t, err)
 	for i := 0; i < 10; i++ {
-		candidate := filepath.Join(dir, "tests", "resources", "network-wildcards-cp")
+		candidate := filepath.Join(dir, "tests", "resources", "network-wildcards")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
@@ -234,6 +234,6 @@ func findFixturesDir(t *testing.T) string {
 		}
 		dir = parent
 	}
-	t.Fatalf("could not find tests/resources/network-wildcards-cp/ from %s", dir)
+	t.Fatalf("could not find tests/resources/network-wildcards/ from %s", dir)
 	return ""
 }
