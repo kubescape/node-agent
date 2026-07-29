@@ -1,0 +1,107 @@
+# Test-only rules validating that the exec TTY CEL fields are usable from a real
+# rule against real eBPF. Applied by Test_35_ExecTTYFieldTest and deleted on
+# cleanup. IDs are in a deliberately test-only 99xx range so they cannot collide
+# with the shipped R1xxx/R2xxx ranges.
+#
+# The four rules exist as two pairs, because "no alert" is ambiguous on its own:
+# an unresolvable CEL field does not error, it fails to compile and silently
+# disables the whole expression, which looks exactly like "the field was false".
+#
+#   R9901 / R9902  isolate hasTty from the plumbing. R9902 fires on every probe
+#                  exec, so if R9902 is silent the trigger or the rule pipeline
+#                  is broken, not the TTY field.
+#   R9903 / R9904  pin down has() presence testing. Exactly one must fire.
+#                  Both silent would mean ttyMajor is unregistered (compile
+#                  failure); both firing is impossible. Today ttyMajor is not
+#                  emitted by the pinned gadget, so R9904 fires and R9903 does
+#                  not. When phase 2 lands (gadget emits tty_major/tty_minor)
+#                  these two swap, making this file the phase-2 acceptance test.
+#
+# All rules use profileDependency 2 (NotRequired) so the test never waits for
+# application-profile completion, and uniqueId includes the pid so per-rule
+# cooldown/dedup cannot swallow a later probe.
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  name: exec-tty-test-rules
+  namespace: kubescape
+  labels:
+    app: kubescape
+spec:
+  rules:
+    - name: "TEST TTY exec detected"
+      enabled: true
+      id: "R9901"
+      description: "Test rule: exec carrying a controlling terminal, via event.hasTty"
+      expressions:
+        message: "'TTY exec: ' + event.comm + ' tty=' + string(event.tty)"
+        uniqueId: "'R9901_' + event.comm + '_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "exec"
+            expression: "event.comm == 'uname' && event.hasTty"
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0002"
+      mitreTechnique: "T1059"
+      tags:
+        - "test"
+        - "exec"
+    - name: "TEST exec control"
+      enabled: true
+      id: "R9902"
+      description: "Test control rule: same trigger, no TTY predicate. Must fire for every probe exec."
+      expressions:
+        message: "'control exec: ' + event.comm + ' tty=' + string(event.tty)"
+        uniqueId: "'R9902_' + event.comm + '_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "exec"
+            expression: "event.comm == 'uname'"
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0002"
+      mitreTechnique: "T1059"
+      tags:
+        - "test"
+        - "exec"
+    - name: "TEST ttyMajor present"
+      enabled: true
+      id: "R9903"
+      description: "Test rule: fires only where the gadget emits the tty device number. Must NOT fire before phase 2."
+      expressions:
+        message: "'ttyMajor present: ' + string(event.ttyMajor)"
+        uniqueId: "'R9903_' + event.comm + '_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "exec"
+            expression: "event.comm == 'uname' && has(event.ttyMajor)"
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0002"
+      mitreTechnique: "T1059"
+      tags:
+        - "test"
+        - "exec"
+    - name: "TEST ttyMajor absent"
+      enabled: true
+      id: "R9904"
+      description: "Test rule: fires while the gadget does not emit the tty device number. Proves ttyMajor is registered but honestly absent."
+      expressions:
+        message: "'ttyMajor absent for ' + event.comm"
+        uniqueId: "'R9904_' + event.comm + '_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "exec"
+            expression: "event.comm == 'uname' && !has(event.ttyMajor)"
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0002"
+      mitreTechnique: "T1059"
+      tags:
+        - "test"
+        - "exec"
