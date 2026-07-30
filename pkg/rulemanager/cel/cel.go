@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/networkneighborhood"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/parse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/process"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/state"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/picatz/xcel"
@@ -72,6 +73,10 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metric
 		parse.Parse(cfg),
 		net.Net(cfg),
 		process.Process(cfg),
+		// Declares the "state" variable and its read functions. The store and the
+		// per-rule receiver are injected into the eval context, not here -- see
+		// state.Accessor.
+		state.State(cfg),
 	}
 
 	env, err := cel.NewEnv(envOptions...)

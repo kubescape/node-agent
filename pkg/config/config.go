@@ -16,6 +16,7 @@ import (
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulestate"
 	"github.com/spf13/viper"
 )
 
@@ -54,6 +55,7 @@ type AlertDeduplicationConfig struct {
 type Config struct {
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
+	CelStateStore                  rulestate.Config                     `mapstructure:"celStateStore"`
 	ContainerEolNotificationBuffer int                                  `mapstructure:"containerEolNotificationBuffer"`
 	DBpf                           bool                                 `mapstructure:"dBpf"`
 	DCapSys                        bool                                 `mapstructure:"dCapSys"`
