@@ -108,6 +108,35 @@ func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestProcfsFeeder_ReadProcessInfo_StartTime(t *testing.T) {
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
+	require.NoError(t, feeder.Start(context.Background()))
+	defer feeder.Stop()
+
+	event, err := feeder.readProcessInfo(uint32(os.Getpid()))
+	require.NoError(t, err)
+
+	// Boot-relative nanoseconds: non-zero and an exact multiple of 10ms,
+	// because /proc/<pid>/stat field 22 is denominated in USER_HZ=100 ticks.
+	assert.NotZero(t, event.StartTimeNs)
+	assert.Zero(t, event.StartTimeNs%10_000_000,
+		"procfs-derived StartTimeNs must be an exact multiple of 10^7 ns")
+
+	// Wall-clock derivation: btime + ticks/HZ. Sanity: within [boot, now].
+	assert.False(t, event.StartTimeWall.IsZero())
+	assert.True(t, event.StartTimeWall.Before(time.Now().Add(2*time.Second)))
+	// This process started after boot: wall - bootNs must land near btime.
+	// (Loose check: StartTimeWall minus the boot-relative duration is in the past.)
+	assert.True(t, event.StartTimeWall.Add(-time.Duration(event.StartTimeNs)).Before(time.Now()))
+
+	// Sharper check on the arithmetic itself: this is the test binary's own pid,
+	// so its real creation time is moments ago. A wrong btime or a wrong tick
+	// scaling would land this decades or hours away rather than minutes.
+	assert.WithinDuration(t, time.Now(), event.StartTimeWall, 5*time.Minute,
+		"btime + ticks/HZ must reconstruct the test process's actual start time")
+}
+
 func TestProcfsFeeder_GetProcessComm(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
 	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
