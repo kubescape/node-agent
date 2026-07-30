@@ -813,6 +813,8 @@ func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
 }
 
 func Test_16_ApNotStuckOnRestart(t *testing.T) {
+	const containerName = "nginx"
+
 	ns := testutils.NewRandomNamespace()
 
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
@@ -820,27 +822,104 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 
 	require.NoError(t, wl.WaitForReady(80))
 
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	// A container restart spawns transient per-instance ContainerProfiles named
+	// "<mergedName>-<32 hex>" that briefly flip failed/ready around the restart;
+	// the stable MERGED profile that node-agent actually enforces has no such
+	// suffix. The completion gate below therefore keys off the merged profile
+	// only — not "all matching profiles completed" (WaitForContainerProfileCompletion),
+	// which would hang on a lingering transient failed/ready per-instance profile.
+	isMerged := func(name string) bool {
+		i := strings.LastIndex(name, "-")
+		if i < 0 || len(name)-i-1 != 32 {
+			return true
+		}
+		for _, c := range name[i+1:] {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				return true
+			}
+		}
+		return false
+	}
+	mergedCompleted := func() (string, bool) {
+		cps, e := storageClient.ContainerProfiles(ns.Name).List(context.Background(), metav1.ListOptions{})
+		if e != nil {
+			return "", false
+		}
+		for _, c := range cps.Items {
+			if c.Labels["kubescape.io/workload-container-name"] != containerName || !isMerged(c.Name) {
+				continue
+			}
+			if c.Annotations[helpersv1.StatusMetadataKey] == helpersv1.Completed {
+				return c.Name, true
+			}
+		}
+		return "", false
+	}
+	logCPs := func() {
+		cps, e := storageClient.ContainerProfiles(ns.Name).List(context.Background(), metav1.ListOptions{})
+		if e != nil {
+			t.Logf("  <could not list ContainerProfiles: %v>", e)
+			return
+		}
+		for _, c := range cps.Items {
+			t.Logf("  CP %s status=%q completion=%q merged=%v", c.Name,
+				c.Annotations[helpersv1.StatusMetadataKey],
+				c.Annotations[helpersv1.CompletionMetadataKey], isMerged(c.Name))
+		}
+	}
+
+	// Let the container run briefly, then stop nginx (PID 1) so the kubelet
+	// restarts the container — the "does the profile get stuck on restart?"
+	// scenario under test.
 	time.Sleep(30 * time.Second)
+	_, _, _ = wl.ExecIntoPod([]string{"service", "nginx", "stop"}, "") // expected to error: this kills the container
 
-	_, _, _ = wl.ExecIntoPod([]string{"service", "nginx", "stop"}, "") // suppose to get error
-	// wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "nginx-deployment")
-	// require.NoError(t, err, "Error re-fetching workload after stop")
-	// require.NoError(t, wl.WaitForReady(80))
-	// require.NoError(t, wl.WaitForContainerProfileCompletion(160))
+	require.NoError(t, wl.WaitForReady(80), "workload did not become ready again after restart")
 
-	time.Sleep(160 * time.Second)
+	// GATE — replaces the former fixed time.Sleep(160s)+time.Sleep(15s). Wait
+	// for the merged ContainerProfile to reach 'completed' (i.e. enforcing)
+	// AFTER the restart. That is the real precondition for the violation below
+	// to alert; the fixed sleep raced this and dropped the alert whenever the
+	// completion (or its storage write, under load) ran past the timer. Bounded
+	// deadline + dump the ContainerProfiles on timeout — never the 20m panic.
+	restartReadyAt := time.Now()
+	var mergedName string
+	completionDeadline := time.Now().Add(5 * time.Minute)
+	for {
+		if n, ok := mergedCompleted(); ok {
+			mergedName = n
+			break
+		}
+		if time.Now().After(completionDeadline) {
+			t.Logf("timeout waiting for merged ContainerProfile to complete after restart — current ContainerProfiles:")
+			logCPs()
+			t.Fatalf("merged ContainerProfile for container %q did not reach %q within 5m after restart", containerName, helpersv1.Completed)
+		}
+		time.Sleep(5 * time.Second)
+	}
+	completedAt := time.Now()
+	t.Logf("merged ContainerProfile %q reached %q %s after restart-ready", mergedName, helpersv1.Completed, completedAt.Sub(restartReadyAt).Round(time.Second))
 
-	// Wait for cache to be updated
-	time.Sleep(15 * time.Second)
-
+	// A completed/enforcing profile now exists; run a process that is NOT in it.
+	t.Logf("exec 'ls -l' now — %s after profile completion", time.Since(completedAt).Round(time.Second))
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
 	require.NoError(t, err)
 
-	// Wait for the alert to be generated
-	time.Sleep(30 * time.Second)
-
-	alerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Error getting alerts")
+	// Poll for the alert (replaces the fixed time.Sleep(30s)+single GetAlerts).
+	var alerts []testutils.Alert
+	require.Eventually(t, func() bool {
+		alerts, _ = testutils.GetAlerts(wl.Namespace)
+		for _, a := range alerts {
+			if a.Labels["rule_name"] == "Unexpected process launched" &&
+				a.Labels["comm"] == "ls" && a.Labels["container_name"] == containerName {
+				return true
+			}
+		}
+		return false
+	}, 90*time.Second, 5*time.Second, "expected 'Unexpected process launched' alert for 'ls' in container 'nginx'")
 
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 }
