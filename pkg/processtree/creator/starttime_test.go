@@ -54,6 +54,85 @@ func TestExitByPid_DeletesStartTimeEntry(t *testing.T) {
 	assert.Zero(t, creator.GetProcessBootTimeNs(100), "side-map entry must die with the node")
 }
 
+func TestHandleForkEvent_ReadsStartTimeOnDemand(t *testing.T) {
+	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, config.Config{}).(*processTreeCreatorImpl)
+	wall := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	reads := 0
+	creator.readStartTime = func(pid uint32) (uint64, time.Time) {
+		reads++
+		require.Equal(t, uint32(100), pid)
+		return 777_770_000_000, wall
+	}
+
+	creator.FeedEvent(conversion.ProcessEvent{Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "curl"})
+	assert.Equal(t, uint64(777_770_000_000), creator.GetProcessBootTimeNs(100),
+		"a fork-created node must not wait up to a scan interval for its identity")
+	node, err := creator.GetProcessNode(100)
+	require.NoError(t, err)
+	assert.Equal(t, wall, node.StartTime)
+	assert.Equal(t, 1, reads)
+
+	// Exec on the same node: creation time cannot change on exec — no re-read.
+	creator.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: 100, PPID: 1, Comm: "curl", Cmdline: "curl -s"})
+	assert.Equal(t, 1, reads, "one read per node creation, never per event")
+}
+
+func TestHandleExecEvent_ReadsStartTimeOnDemand(t *testing.T) {
+	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, config.Config{}).(*processTreeCreatorImpl)
+	wall := time.Date(2026, 7, 29, 13, 0, 0, 0, time.UTC)
+	creator.readStartTime = func(pid uint32) (uint64, time.Time) { return 888_880_000_000, wall }
+
+	// An exec with no preceding fork event still creates the node, so it must
+	// also acquire an identity rather than waiting for the next scan.
+	creator.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: 200, PPID: 1, Comm: "sh"})
+	assert.Equal(t, uint64(888_880_000_000), creator.GetProcessBootTimeNs(200))
+	node, err := creator.GetProcessNode(200)
+	require.NoError(t, err)
+	assert.Equal(t, wall, node.StartTime)
+}
+
+func TestHandleForkEvent_ReadFailureLeavesZero(t *testing.T) {
+	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, config.Config{}).(*processTreeCreatorImpl)
+	creator.readStartTime = func(pid uint32) (uint64, time.Time) { return 0, time.Time{} } // process already gone
+	creator.FeedEvent(conversion.ProcessEvent{Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "flash"})
+	assert.Zero(t, creator.GetProcessBootTimeNs(100), "failure degrades to the pre-existing zero, never a guess")
+}
+
+// TestHandleForkEvent_IgnoresEventStartTimeNs pins the clock-domain boundary.
+// convertForkEvent sets ProcessEvent.StartTimeNs from the event's wall-clock
+// timestamp — epoch nanoseconds, not boot-relative, and stamping the fork rather
+// than process creation. Letting that value into the side map would make identity
+// comparisons wrong by decades while still compiling and still joining correctly
+// within a single message. Only the procfs read may populate the side map.
+func TestHandleForkEvent_IgnoresEventStartTimeNs(t *testing.T) {
+	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, config.Config{}).(*processTreeCreatorImpl)
+	creator.readStartTime = func(pid uint32) (uint64, time.Time) { return 777_770_000_000, time.Time{} }
+
+	const epochNs = uint64(1_753_876_800_000_000_000) // what convertForkEvent would supply
+	creator.FeedEvent(conversion.ProcessEvent{
+		Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "curl", StartTimeNs: epochNs,
+	})
+
+	assert.Equal(t, uint64(777_770_000_000), creator.GetProcessBootTimeNs(100),
+		"the side map must hold the procfs boot-relative read, not the event's epoch timestamp")
+}
+
+// TestHandleForkEvent_IgnoresEventStartTimeNs_OnReadFailure is the same boundary
+// on the failure path: a failed read must leave zero, never fall back to the
+// event's epoch timestamp.
+func TestHandleForkEvent_IgnoresEventStartTimeNs_OnReadFailure(t *testing.T) {
+	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, config.Config{}).(*processTreeCreatorImpl)
+	creator.readStartTime = func(pid uint32) (uint64, time.Time) { return 0, time.Time{} }
+
+	creator.FeedEvent(conversion.ProcessEvent{
+		Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "curl",
+		StartTimeNs: 1_753_876_800_000_000_000,
+	})
+
+	assert.Zero(t, creator.GetProcessBootTimeNs(100),
+		"a failed read must degrade to zero, never to the event's epoch timestamp")
+}
+
 // TestExitByPid_DeletesStartTimeEntry_NodeAlreadyGone covers exitByPid's early
 // return: the node is absent from processMap, but a stale side-map entry must
 // still be reclaimed rather than leaking for the lifetime of the agent.

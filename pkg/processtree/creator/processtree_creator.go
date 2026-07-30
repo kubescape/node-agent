@@ -3,6 +3,7 @@ package processtreecreator
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
@@ -33,6 +34,12 @@ type processTreeCreatorImpl struct {
 	// inherits btime's whole-second skew. Guarded by pt.mutex. Entries are
 	// deleted in exitByPid together with the tree node.
 	pidStartTimeNs map[uint32]uint64
+
+	// readStartTime fetches a pid's boot-relative start time and display-only
+	// wall time from /proc on demand, so a node created by a fork or exec event
+	// does not wait up to a full scan interval for its identity. Returns zeros
+	// when the process is already gone. Injectable for tests.
+	readStartTime func(pid uint32) (uint64, time.Time)
 }
 
 func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree, config config.Config) ProcessTreeCreator {
@@ -49,6 +56,7 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		containerTree:         containerTree,
 		pendingExits:          make(map[uint32]*pendingExit),
 		pidStartTimeNs:        make(map[uint32]uint64),
+		readStartTime:         newProcfsStartTimeReader(),
 		config:                config,
 	}
 
@@ -159,6 +167,34 @@ func (pt *processTreeCreatorImpl) UpdatePPID(proc *armotypes.Process, event conv
 	}
 }
 
+// ensureStartTime gives a fork/exec-created node its process identity without
+// waiting up to a full scan interval for the periodic /proc sweep — short-lived
+// processes are the population most exposed to pid reuse, and they are exactly
+// the ones the scan misses.
+//
+// One read per node creation, never per event: an exec on a node whose entry
+// already exists must not re-read, because creation time cannot change on exec.
+//
+// event.StartTimeNs is deliberately ignored. For fork and exec events it is the
+// event's wall-clock timestamp — epoch nanoseconds, not boot-relative, and
+// stamping the event rather than process creation. Only the procfs read may
+// populate the side map. A failed read leaves zero, never a guess.
+//
+// Must be called with pt.mutex held.
+func (pt *processTreeCreatorImpl) ensureStartTime(proc *armotypes.Process, pid uint32) {
+	if _, known := pt.pidStartTimeNs[pid]; known {
+		return
+	}
+	ns, wall := pt.readStartTime(pid)
+	if ns == 0 {
+		return
+	}
+	pt.pidStartTimeNs[pid] = ns
+	if !wall.IsZero() && proc.StartTime.IsZero() {
+		proc.StartTime = wall
+	}
+}
+
 // handleForkEvent handles fork events - only fills properties if they are empty or don't exist
 func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
@@ -192,6 +228,8 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 	if proc.Path == "" {
 		proc.Path = event.Path
 	}
+
+	pt.ensureStartTime(proc, event.PID)
 
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)
@@ -294,6 +332,9 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 	if event.Path != "" {
 		proc.Path = event.Path
 	}
+
+	pt.ensureStartTime(proc, event.PID)
+
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)
 	}
