@@ -1,6 +1,7 @@
 package rulecreator
 
 import (
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/contextdetection"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -16,8 +17,10 @@ func (r *RuleCreatorMock) CreateRulesByTags(tags []string) []typesv1.Rule {
 	var rl []typesv1.Rule
 	for _, t := range tags {
 		rl = append(rl, typesv1.Rule{
-			Name: t,
-			Tags: []string{t},
+			RuntimeRule: armotypes.RuntimeRule{
+				Name: t,
+				Tags: []string{t},
+			},
 		})
 	}
 	return rl
@@ -25,13 +28,13 @@ func (r *RuleCreatorMock) CreateRulesByTags(tags []string) []typesv1.Rule {
 
 func (r *RuleCreatorMock) CreateRuleByID(id string) typesv1.Rule {
 	return typesv1.Rule{
-		ID: id,
+		RuntimeRule: armotypes.RuntimeRule{ID: id},
 	}
 }
 
 func (r *RuleCreatorMock) CreateRuleByName(name string) typesv1.Rule {
 	return typesv1.Rule{
-		Name: name,
+		RuntimeRule: armotypes.RuntimeRule{Name: name},
 	}
 }
 
