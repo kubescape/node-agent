@@ -1,0 +1,28 @@
+# Single-container pod for Test_20 (process enforcement). Bound to the authored
+# ContainerProfile "partial20-overlay" via the kubescape.io/user-defined-profile
+# label. Uses debian:12-slim so /usr/bin/{sleep,id,ls} are REAL, distinct ELF
+# binaries — the kernel exec comm is the binary basename (id, ls), which R0001
+# keys on. (A busybox image would collapse them all to /bin/busybox and defeat
+# per-binary R0001 matching.)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: partial20
+  name: partial20
+spec:
+  selector:
+    matchLabels:
+      app: partial20
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: partial20
+        # Binds the pod to the authored ContainerProfile of this name.
+        kubescape.io/user-defined-profile: partial20-overlay
+    spec:
+      containers:
+      - name: app
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]

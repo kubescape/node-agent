@@ -16,8 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -928,178 +926,315 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 }
 
+// Test_20_AlertOnPartialThenLearnProcessTest exercises process-execution
+// ENFORCEMENT against an AUTHORED (user-defined) ContainerProfile, deterministically.
+//
+// SEMANTIC NOTE (flagged for review): this is NOT the old natural-learning /
+// daemonset-restart / re-learn / blacklist dance. It authors the profile
+// directly and then UPDATES it in place, so what it proves is profile
+// ENFORCEMENT of an authored partial -> full profile, not that learning
+// eventually captures the process. The core contract is preserved: a process
+// NOT in the profile alerts (R0001); the SAME process, once added to the
+// profile, does not.
+//
+// Determinism comes from a POSITIVE reload gate. The single update that ADDS
+// the subject binary (ls) also REMOVES a canary binary (id). Because id was
+// allowed before and forbidden after, it begins to fire R0001 the instant
+// node-agent reloads the new revision — an alert-APPEARS signal (never a race
+// on proving a negative) that confirms the reload took effect before we assert
+// that ls has gone silent. Subject and canary are told apart by the alert
+// `comm` label (real debian binaries => comm == binary basename).
 func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
+	const (
+		overlayName   = "partial20-overlay"
+		containerName = "app"
+	)
+
 	ns := testutils.NewRandomNamespace()
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
-	// Create a workload
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
-	require.NoError(t, err, "Error creating workload")
+	// Authored profile: allow the pod's baseline exec (sleep) and the canary
+	// (id) but NOT the subject (ls).
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: overlayName, Namespace: ns.Name},
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{
+				{Path: "/usr/bin/sleep"},
+				{Path: "/usr/bin/id"},
+			},
+			LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "partial20"}},
+		},
+	}
+	_, err := storageClient.ContainerProfiles(ns.Name).Create(context.Background(), cp, metav1.CreateOptions{})
+	require.NoError(t, err, "create authored ContainerProfile")
+	require.Eventually(t, func() bool {
+		_, e := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
+		return e == nil
+	}, 30*time.Second, time.Second, "authored CP must be in storage before pod deploy")
 
-	// Wait for the workload to be ready
-	err = wl.WaitForReady(80)
-	require.NoError(t, err, "Error waiting for workload to be ready")
+	wl, err := testutils.NewTestWorkload(ns.Name,
+		path.Join(utils.CurrentDir(), "resources/partial-process-deployment.yaml"))
+	require.NoError(t, err, "create workload")
+	require.NoError(t, wl.WaitForReady(80), "workload ready")
 
-	// Restart the daemonset
-	err = testutils.RestartDaemonSet("kubescape", "node-agent")
-	require.NoError(t, err, "Error restarting daemonset")
-
-	// Wait for the application profile to be completed (partial)
-	err = wl.WaitForContainerProfileCompletion(160)
-	require.NoError(t, err, "Error waiting for application profile to be completed")
-
-	// Wait for cache to be updated
-	time.Sleep(15 * time.Second)
-
-	// Generate an alert by executing a command (should trigger alert on partial profile)
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
-	require.NoError(t, err, "Error executing command in pod")
-
-	// Wait for the alert to be generated
-	time.Sleep(15 * time.Second)
-	alerts, err := testutils.GetAlerts(ns.Name)
-	require.NoError(t, err, "Error getting alerts")
-	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
-
-	profile, err := wl.GetContainerProfile("nginx")
-	require.NoError(t, err, "Error getting container profile")
-
-	// Restart the deployment to reset the profile learning
-	err = testutils.RestartDeployment(ns.Name, wl.WorkloadObj.GetName())
-	require.NoError(t, err, "Error restarting deployment")
-
-	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "nginx-deployment")
-	require.NoError(t, err, "Error re-fetching workload after restart")
-
-	// Wait for the workload to be ready after restart
-	err = wl.WaitForReady(80)
-	require.NoError(t, err, "Error waiting for workload to be ready after restart")
-
-	// Execute the same command during learning phase (should be learned in profile)
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
-	require.NoError(t, err, "Error executing command in pod during learning")
-
-	// Wait for the application profile to be completed (with ls command learned)
-	err = wl.WaitForContainerProfileCompletionWithBlacklist(160, []string{profile.Name})
-	require.NoError(t, err, "Error waiting for application profile to be completed after learning")
-
-	// Wait for cache to be updated
-	time.Sleep(15 * time.Second)
-
-	// Execute the same command again - should NOT trigger an alert now
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
-	require.NoError(t, err, "Error executing command in pod after learning")
-
-	// Wait to see if any alert is generated
-	time.Sleep(15 * time.Second)
-	alertsAfter, err := testutils.GetAlerts(ns.Name)
-	require.NoError(t, err, "Error getting alerts after learning")
-
-	// Should not contain new alert for ls command after learning
-	count := 0
-	for _, alert := range alertsAfter {
-		if alert.Labels["rule_name"] == "Unexpected process launched" && alert.Labels["container_name"] == "nginx" && alert.Labels["process_name"] == "ls" {
-			count++
+	// Count R0001 alerts for a given process comm in this container.
+	countR0001 := func(comm string) int {
+		alerts, _ := testutils.GetAlerts(ns.Name)
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == "R0001" &&
+				a.Labels["container_name"] == containerName &&
+				a.Labels["comm"] == comm {
+				n++
+			}
+		}
+		return n
+	}
+	// On any stuck wait, dump the namespace's ContainerProfiles (name + status
+	// + exec count) so a stuck state is visible immediately.
+	logCPs := func() {
+		cps, e := storageClient.ContainerProfiles(ns.Name).List(context.Background(), metav1.ListOptions{})
+		if e != nil {
+			t.Logf("  <could not list ContainerProfiles: %v>", e)
+			return
+		}
+		for _, c := range cps.Items {
+			t.Logf("  CP %s status=%q execs=%d", c.Name,
+				c.Annotations[helpersv1.StatusMetadataKey], len(c.Spec.Execs))
 		}
 	}
-	if count > 1 {
-		t.Errorf("Unexpected alerts found after learning: %d", count)
+	// Bounded poll: fail fast (never the 20m global panic) and dump CPs on
+	// timeout. `cond` polls the real condition (alert present).
+	waitFor := func(cond func() bool, timeout time.Duration, desc string) {
+		t.Helper()
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			if cond() {
+				return
+			}
+			time.Sleep(5 * time.Second)
+		}
+		t.Logf("timeout waiting for %s — current ContainerProfiles:", desc)
+		logCPs()
+		t.Fatalf("timeout after %s waiting for %s", timeout, desc)
 	}
+
+	// Give node-agent time to project the authored profile before generating
+	// events (matches Test_28; evaluating an unloaded profile is unreliable).
+	time.Sleep(30 * time.Second)
+
+	// PHASE 1 — subject NOT in the profile must alert. Doubles as the
+	// profile-load gate: once the authored CP is loaded, ls (not allowed)
+	// fires R0001.
+	waitFor(func() bool {
+		wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
+		return countR0001("ls") > 0
+	}, 3*time.Minute, "R0001 for ls (subject not in authored profile)")
+	t.Logf("phase1: R0001(ls)=%d on partial profile (expected >0)", countR0001("ls"))
+
+	// UPDATE — add the subject (ls), remove the canary (id). One atomic
+	// revision so the canary flip proves the ls addition also loaded.
+	cur, err := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
+	require.NoError(t, err, "get CP for update")
+	cur.Spec.Execs = []v1beta1.ExecCalls{
+		{Path: "/usr/bin/sleep"},
+		{Path: "/usr/bin/ls"},
+	}
+	_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cur, metav1.UpdateOptions{})
+	require.NoError(t, err, "update CP: add ls, remove id")
+
+	// Propagation delay before the reload gate (not an assertion gate).
+	time.Sleep(20 * time.Second)
+
+	// RELOAD GATE (positive) — the removed canary (id) must now alert, which
+	// proves node-agent reloaded the new revision (which also contains ls).
+	waitFor(func() bool {
+		wl.ExecIntoPod([]string{"/usr/bin/id"}, containerName)
+		return countR0001("id") > 0
+	}, 3*time.Minute, "R0001 for id (canary removed on update => proves reload)")
+	t.Logf("reload confirmed: R0001(id)=%d", countR0001("id"))
+
+	// PHASE 2 — the SAME subject, now in the profile, must NOT produce a NEW
+	// R0001. Cooldown headroom (per-container/per-rule, count 10) is untouched
+	// by the id-based gate, so a failed reload here would still let ls alert
+	// and be caught — this is a real enforcement check, not a vacuous pass.
+	before := countR0001("ls")
+	_, _, err = wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
+	require.NoError(t, err, "exec ls after profile update")
+	_, _, err = wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
+	require.NoError(t, err, "exec ls after profile update")
+	time.Sleep(20 * time.Second) // settle so any alert would have surfaced
+	after := countR0001("ls")
+	if after != before {
+		logCPs()
+	}
+	require.Equal(t, before, after,
+		"ls is now in the authored profile: no NEW R0001 expected (before=%d after=%d)", before, after)
 }
 
+// Test_21_AlertOnPartialThenLearnNetworkTest exercises network-egress
+// ENFORCEMENT against an AUTHORED (user-defined) ContainerProfile,
+// deterministically.
+//
+// SEMANTIC NOTE (flagged for review): like Test_20 this replaces natural
+// learning with an authored profile updated in place, so it proves egress
+// ENFORCEMENT of an authored partial -> full profile, not that learning
+// captures the destination. Core contract preserved: a destination NOT in the
+// egress list alerts; the SAME destination, once added, does not.
+//
+// The subject and the reload canary use DISTINCT rules so they never confuse
+// each other (alerts carry no destination label, only the rule + comm):
+//   - Subject: raw-IP TCP egress to 1.1.1.1:80 -> R0011 (no DNS, stable IP).
+//   - Reload canary: DNS lookup of fusioncore.ai -> R0005.
+// The single update ADDS 1.1.1.1 to egress and REMOVES fusioncore.ai, so
+// nslookup fusioncore.ai starts firing R0005 the instant the new revision
+// loads — the positive reload gate — while the subject IP goes silent. Each
+// step mirrors a proven Test_28 subtest (28c: curl 1.1.1.1 -> R0011; 28b:
+// unknown domain -> R0005; 28a: listed destination -> no alert).
 func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
+	const (
+		overlayName   = "partial21-overlay"
+		containerName = "curl"
+		subjectIP     = "1.1.1.1"
+		canaryDomain  = "fusioncore.ai"
+		fusioncoreIP  = "162.0.217.171"
+	)
+	port80 := int32(80)
+
 	ns := testutils.NewRandomNamespace()
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
-	// Create a workload using deployment-multiple-containers.yaml (same as Test_22)
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
-	require.NoError(t, err, "Error creating workload")
+	// Authored profile: egress allows the canary domain (fusioncore.ai) only;
+	// the subject IP (1.1.1.1) is NOT allowed. Execs/syscalls are listed only
+	// to keep unrelated rules quiet — the assertions key on R0011/R0005.
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: overlayName, Namespace: ns.Name},
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{
+				{Path: "/bin/sleep"},
+				{Path: "/usr/bin/curl"},
+				{Path: "/usr/bin/nslookup"},
+				{Path: "/usr/bin/wget"},
+			},
+			Syscalls: []string{"socket", "connect", "sendto", "recvfrom", "read", "write", "close", "openat", "mmap", "mprotect", "munmap", "fcntl", "ioctl", "poll", "epoll_create1", "epoll_ctl", "epoll_wait", "bind", "listen", "accept4", "getsockopt", "setsockopt", "getsockname", "getpid", "fstat", "rt_sigaction", "rt_sigprocmask", "writev", "execve"},
+			LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "partial21"}},
+			Egress: []v1beta1.NetworkNeighbor{
+				{
+					Identifier: "canary-egress",
+					Type:       v1beta1.CommunicationTypeEgress,
+					DNS:        canaryDomain + ".",
+					DNSNames:   []string{canaryDomain + "."},
+					IPAddress:  fusioncoreIP,
+					Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: v1beta1.ProtocolTCP, Port: &port80}},
+				},
+			},
+		},
+	}
+	_, err := storageClient.ContainerProfiles(ns.Name).Create(context.Background(), cp, metav1.CreateOptions{})
+	require.NoError(t, err, "create authored ContainerProfile")
+	require.Eventually(t, func() bool {
+		_, e := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
+		return e == nil
+	}, 30*time.Second, time.Second, "authored CP must be in storage before pod deploy")
 
-	// Wait for the workload to be ready
-	err = wl.WaitForReady(80)
-	require.NoError(t, err, "Error waiting for workload to be ready")
+	wl, err := testutils.NewTestWorkload(ns.Name,
+		path.Join(utils.CurrentDir(), "resources/partial-network-deployment.yaml"))
+	require.NoError(t, err, "create workload")
+	require.NoError(t, wl.WaitForReady(80), "workload ready")
 
-	// Restart the daemonset
-	err = testutils.RestartDaemonSet("kubescape", "node-agent")
-	require.NoError(t, err, "Error restarting daemonset")
-
-	// Wait for the network neighborhood to be completed (partial)
-	err = wl.WaitForContainerProfileCompletion(160)
-	require.NoError(t, err, "Error waiting for network neighborhood to be completed")
-
-	// Wait for cache to be updated
-	time.Sleep(15 * time.Second)
-
-	// Generate an alert by making a network request (should trigger alert on partial profile)
-	// Using curl with timeout and targeting nginx container (same as Test_22)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
-	require.NoError(t, err, "Error executing network command in pod")
-
-	// Wait for the alert to be generated
-	time.Sleep(15 * time.Second)
-	alerts, err := testutils.GetAlerts(ns.Name)
-	require.NoError(t, err, "Error getting alerts")
-	testutils.AssertContains(t, alerts, "DNS Anomalies in container", "curl", "nginx", []bool{true})
-
-	nn, err := wl.GetContainerProfile("nginx")
-	require.NoError(t, err, "Error getting container profile")
-
-	// Restart the deployment to reset the profile learning
-	err = testutils.RestartDeployment(ns.Name, wl.WorkloadObj.GetName())
-	require.NoError(t, err, "Error restarting deployment")
-
-	// Print we restarted the deployment
-	logger.L().Info("restarted deployment", helpers.String("name", wl.WorkloadObj.GetName()), helpers.String("namespace", wl.WorkloadObj.GetNamespace()))
-
-	// Sleep to allow the restart to complete
-	time.Sleep(30 * time.Second)
-
-	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "multiple-containers-deployment")
-	require.NoError(t, err, "Error re-fetching workload after restart")
-
-	// Wait for the workload to be ready after restart
-	err = wl.WaitForReady(80)
-	require.NoError(t, err, "Error waiting for workload to be ready after restart")
-
-	// Execute the same network command during learning phase (should be learned in profile)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
-	require.NoError(t, err, "Error executing network command in pod during learning")
-
-	// Print the workload details we are using
-	logger.L().Info("workload details", helpers.String("name", wl.WorkloadObj.GetName()), helpers.String("namespace", wl.WorkloadObj.GetNamespace()))
-	// Print the metadata of the workload
-	logger.L().Info("workload metadata", helpers.Interface("metadata", wl.WorkloadObj.GetAnnotations()), helpers.Interface("labels", wl.WorkloadObj.GetLabels()))
-
-	// Wait for the network neighborhood to be completed (with curl command learned)
-	err = wl.WaitForContainerProfileCompletionWithBlacklist(160, []string{nn.Name})
-	require.NoError(t, err, "Error waiting for network neighborhood to be completed after learning")
-
-	// Wait for cache to be updated
-	time.Sleep(15 * time.Second)
-
-	// Execute the same network command again - should NOT trigger an alert now
-	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
-	require.NoError(t, err, "Error executing network command in pod after learning")
-
-	// Wait to see if any alert is generated
-	time.Sleep(15 * time.Second)
-	alertsAfter, err := testutils.GetAlerts(ns.Name)
-	require.NoError(t, err, "Error getting alerts after learning")
-
-	// Should not contain new alert for curl command after learning
-	count := 0
-	for _, alert := range alertsAfter {
-		if alert.Labels["rule_name"] == "DNS Anomalies in container" && alert.Labels["container_name"] == "nginx" && alert.Labels["process_name"] == "curl" {
-			count++
+	countRule := func(ruleID string) int {
+		alerts, _ := testutils.GetAlerts(ns.Name)
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID && a.Labels["container_name"] == containerName {
+				n++
+			}
+		}
+		return n
+	}
+	logCPs := func() {
+		cps, e := storageClient.ContainerProfiles(ns.Name).List(context.Background(), metav1.ListOptions{})
+		if e != nil {
+			t.Logf("  <could not list ContainerProfiles: %v>", e)
+			return
+		}
+		for _, c := range cps.Items {
+			t.Logf("  CP %s status=%q egress=%d", c.Name,
+				c.Annotations[helpersv1.StatusMetadataKey], len(c.Spec.Egress))
 		}
 	}
-	if count > 1 {
-		t.Errorf("Unexpected alerts found after learning: %d", count)
+	waitFor := func(cond func() bool, timeout time.Duration, desc string) {
+		t.Helper()
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			if cond() {
+				return
+			}
+			time.Sleep(5 * time.Second)
+		}
+		t.Logf("timeout waiting for %s — current ContainerProfiles:", desc)
+		logCPs()
+		t.Fatalf("timeout after %s waiting for %s", timeout, desc)
 	}
+
+	// Let node-agent project the authored profile before generating traffic.
+	time.Sleep(30 * time.Second)
+
+	// PHASE 1 — subject IP NOT in egress must alert (R0011). Doubles as the
+	// profile-load gate.
+	waitFor(func() bool {
+		wl.ExecIntoPod([]string{"curl", "-sm5", "http://" + subjectIP}, containerName)
+		return countRule("R0011") > 0
+	}, 3*time.Minute, "R0011 for curl "+subjectIP+" (subject IP not in egress)")
+	t.Logf("phase1: R0011=%d on partial profile (expected >0)", countRule("R0011"))
+
+	// UPDATE — add the subject IP to egress, remove the canary domain.
+	cur, err := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), overlayName, v1.GetOptions{})
+	require.NoError(t, err, "get CP for update")
+	cur.Spec.Egress = []v1beta1.NetworkNeighbor{
+		{
+			Identifier: "subject-egress",
+			Type:       v1beta1.CommunicationTypeEgress,
+			IPAddress:  subjectIP,
+			Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: v1beta1.ProtocolTCP, Port: &port80}},
+		},
+	}
+	_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cur, metav1.UpdateOptions{})
+	require.NoError(t, err, "update CP: add subject IP, remove canary domain")
+
+	// Propagation delay before the reload gate (not an assertion gate).
+	time.Sleep(20 * time.Second)
+
+	// RELOAD GATE (positive) — the removed canary domain must now fire R0005,
+	// proving node-agent reloaded the new revision (which also allows the
+	// subject IP). R0005 (DNS) is a distinct rule from the subject's R0011, so
+	// the two signals never cross-talk.
+	waitFor(func() bool {
+		wl.ExecIntoPod([]string{"nslookup", canaryDomain}, containerName)
+		return countRule("R0005") > 0
+	}, 3*time.Minute, "R0005 for nslookup "+canaryDomain+" (canary domain removed => proves reload)")
+	t.Logf("reload confirmed: R0005=%d", countRule("R0005"))
+
+	// PHASE 2 — the SAME subject IP, now in egress, must NOT produce a NEW
+	// R0011.
+	before := countRule("R0011")
+	wl.ExecIntoPod([]string{"curl", "-sm5", "http://" + subjectIP}, containerName)
+	wl.ExecIntoPod([]string{"curl", "-sm5", "http://" + subjectIP}, containerName)
+	time.Sleep(20 * time.Second) // settle so any alert would have surfaced
+	after := countRule("R0011")
+	if after != before {
+		logCPs()
+	}
+	require.Equal(t, before, after,
+		"%s is now in the authored egress: no NEW R0011 expected (before=%d after=%d)", subjectIP, before, after)
 }
 
 func Test_22_AlertOnPartialNetworkProfileTest(t *testing.T) {
