@@ -128,6 +128,7 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 	proc, ok := pt.processMap.Load(pid)
 	if !ok {
 		delete(pt.pendingExits, pid)
+		delete(pt.pidStartTimeNs, pid)
 		return
 	}
 
@@ -181,5 +182,7 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 	}
 
 	pt.processMap.Delete(pid)
+	// The process identity dies with the node it identifies.
+	delete(pt.pidStartTimeNs, pid)
 	delete(pt.pendingExits, pid)
 }

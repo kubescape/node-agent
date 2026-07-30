@@ -24,6 +24,15 @@ type processTreeCreatorImpl struct {
 	// Exit manager fields
 	pendingExits        map[uint32]*pendingExit // PID -> pending exit
 	exitCleanupStopChan chan struct{}
+
+	// pidStartTimeNs maps a live pid to its creation time in nanoseconds since
+	// boot, sourced EXCLUSIVELY from /proc/<pid>/stat field 22 (never from
+	// fork/exec/exit event timestamps, which are epoch wall-clock — a different
+	// clock domain). This side map is the SOLE process-identity time source; the
+	// wall-clock Process.StartTime stamped on tree nodes is display-only and
+	// inherits btime's whole-second skew. Guarded by pt.mutex. Entries are
+	// deleted in exitByPid together with the tree node.
+	pidStartTimeNs map[uint32]uint64
 }
 
 func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree, config config.Config) ProcessTreeCreator {
@@ -39,6 +48,7 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		reparentingStrategies: reparentingLogic,
 		containerTree:         containerTree,
 		pendingExits:          make(map[uint32]*pendingExit),
+		pidStartTimeNs:        make(map[uint32]uint64),
 		config:                config,
 	}
 
@@ -96,6 +106,16 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*armotypes.Process, e
 		return nil, nil
 	}
 	return pt.shallowCopyProcess(proc), nil
+}
+
+// GetProcessBootTimeNs returns the pid's creation time as nanoseconds since boot
+// (CLOCK_BOOTTIME), or 0 when unknown — the process has not been seen by the
+// /proc scan or an on-demand read, or it has already exited. Procfs-sourced
+// only; see pidStartTimeNs for the identity contract.
+func (pt *processTreeCreatorImpl) GetProcessBootTimeNs(pid uint32) uint64 {
+	pt.mutex.RLock()
+	defer pt.mutex.RUnlock()
+	return pt.pidStartTimeNs[pid]
 }
 
 // GetPidBranch performs container branch operation (no longer needs to be atomic)
@@ -215,6 +235,16 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 	}
 	if event.Path != "" {
 		proc.Path = event.Path
+	}
+
+	// Start time from /proc/<pid>/stat field 22. The boot-relative value is the
+	// identity source and lives only in the side map; the wall-clock value is
+	// stamped on the node for display and must never be compared for identity.
+	if event.StartTimeNs != 0 {
+		pt.pidStartTimeNs[event.PID] = event.StartTimeNs
+		if !event.StartTimeWall.IsZero() {
+			proc.StartTime = event.StartTimeWall
+		}
 	}
 
 	if proc.ChildrenMap == nil {
