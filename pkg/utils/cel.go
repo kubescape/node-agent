@@ -61,6 +61,25 @@ var urlIsSet = ref.FieldTester(func(target any) bool {
 	return req != nil && req.URL != nil
 })
 
+// presenceOf builds a field tester backed by the datasource field name dsField,
+// so CEL has(event.x) reports whether the running gadget actually emits the
+// underlying signal. Without this, an absent field is indistinguishable from a
+// zero value and rules cannot tell "no terminal" from "not measured".
+func presenceOf(dsField string) ref.FieldTester {
+	return ref.FieldTester(func(target any) bool {
+		x := target.(*xcel.Object[CelEvent])
+		if x.Raw == nil {
+			return false
+		}
+		return x.Raw.FieldPresent(dsField)
+	})
+}
+
+// CelFields is the field registry exposed to rule expressions as `event.<name>`.
+//
+// A field whose IsSet tester is presenceOf(...) can be absent at runtime when
+// the running gadget does not emit it; rules should guard those with has().
+// See docs/features/exec-tty-field.md for the tty fields specifically.
 var CelFields = map[string]*celtypes.FieldType{
 	"args": {
 		Type:  celtypes.ListType,
@@ -214,6 +233,17 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, errCelObjectNil
 			}
 			return celtypes.Int(x.Raw.GetFlagsRaw()), nil
+		}),
+	},
+	"hasTty": {
+		Type:  celtypes.BoolType,
+		IsSet: presenceOf("tty"),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.Bool(x.Raw.GetHasTTY()), nil
 		}),
 	},
 	"module": {
@@ -390,6 +420,39 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, errCelObjectNil
 			}
 			return celtypes.String(x.Raw.GetSyscall()), nil
+		}),
+	},
+	"tty": {
+		Type:  celtypes.IntType,
+		IsSet: presenceOf("tty"),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.Int(x.Raw.GetTTY()), nil
+		}),
+	},
+	"ttyMajor": {
+		Type:  celtypes.UintType,
+		IsSet: presenceOf("tty_major"),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.Uint(x.Raw.GetTTYMajor()), nil
+		}),
+	},
+	"ttyMinor": {
+		Type:  celtypes.UintType,
+		IsSet: presenceOf("tty_minor"),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.Uint(x.Raw.GetTTYMinor()), nil
 		}),
 	},
 	"upperlayer": {

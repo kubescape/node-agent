@@ -3384,7 +3384,9 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 
 	k8sClient := k8sinterface.NewKubernetesApi()
 	dyn := dynamic.NewForConfigOrDie(k8sClient.K8SConfig)
-	t.Cleanup(func() { _ = dyn.Resource(ccCollapseGVR).Delete(context.Background(), "default", metav1.DeleteOptions{}) })
+	t.Cleanup(func() {
+		_ = dyn.Resource(ccCollapseGVR).Delete(context.Background(), "default", metav1.DeleteOptions{})
+	})
 
 	// -------- Phase 1: /16 floor — exactness on real cloud ranges --------
 	applyCollapseFloor(t, dyn, 16)
@@ -3446,4 +3448,150 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 
 	t.Logf("collapse validated on real cloud ranges: S3=%v spread=%v scattered=%v split=%v",
 		withPrefixes(s3CIDRs, "52.216.1."), withPrefixes(spreadCIDRs, "52.216."), got, withPrefixes(splitCIDRs, "52.216.2."))
+}
+
+// Test_35_ExecTTYFieldTest validates, against real eBPF on a real cluster, that
+// a CEL rule can actually use the exec TTY fields (event.hasTty, event.tty,
+// event.ttyMajor/ttyMinor). Everything before this test was exercised only
+// against synthetic datasources, so this is the first end-to-end proof.
+//
+// Why four rules instead of one: an unresolvable CEL field does not raise an
+// error, it fails to compile and silently disables the whole expression
+// (pkg/rulemanager/cel returns (false, nil) on compile failure). "No alert" is
+// therefore ambiguous between "the field was false" and "the rule never ran".
+// R9902 is a control on the same trigger with no TTY predicate, and R9903/R9904
+// are a mutually exclusive pair on has(event.ttyMajor). See
+// resources/exec-tty-rules.yaml.
+//
+// Why three containers: containers in a pod have separate mount namespaces and
+// therefore separate /dev/pts instances, so each trigger gets a pristine pts
+// index. That matters because pts indices are not reclaimed instantly -- with a
+// shared devpts a "single" exec can land on index >= 1 and make the phase-1
+// expectation below flap.
+func Test_35_ExecTTYFieldTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	rulesPath := path.Join(utils.CurrentDir(), "resources/exec-tty-rules.yaml")
+	bindingPath := path.Join(utils.CurrentDir(), "resources/exec-tty-rulebinding.yaml")
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", rulesPath), "apply TTY test rules")
+	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", rulesPath)
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", bindingPath), "apply TTY test rule binding")
+	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", bindingPath)
+	// let the rules watcher and rule-binding watcher pick the new rules up
+	time.Sleep(20 * time.Second)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/exec-tty-deployment.yaml"))
+	require.NoError(t, err, "Error creating workload")
+	require.NoError(t, wl.WaitForReady(80))
+	time.Sleep(15 * time.Second)
+
+	probe := []string{"/bin/uname"}
+
+	// Trigger A -- genuinely no controlling terminal.
+	_, _, err = wl.ExecIntoPodNoTTY(probe, "c-none")
+	require.NoError(t, err, "no-tty probe")
+
+	// Trigger B -- one TTY exec into a pristine devpts, so /dev/pts/0.
+	_, _, err = wl.ExecIntoPod(probe, "c-pts0")
+	require.NoError(t, err, "single-tty probe")
+
+	// Trigger C -- hold a pty open, then probe while it is held so the probe
+	// gets a nonzero pts index.
+	go func() {
+		// Writes its own tty path so the test can wait for real readiness, then
+		// keeps the pty allocated.
+		_, _, _ = wl.ExecIntoPod([]string{"sh", "-c", "tty > /tmp/holder-tty; sleep 120"}, "c-conc")
+	}()
+	defer func() {
+		_, _, _ = wl.ExecIntoPodNoTTY([]string{"pkill", "-f", "sleep 120"}, "c-conc")
+	}()
+
+	// Waiting for the holder to *report* its pty is the point: merely launching
+	// it and sleeping is racy. Observed on kind -- a probe fired before the
+	// holder's pty existed landed on pts/0 and read as "no terminal", which
+	// looks exactly like the feature being broken.
+	var holderTTY string
+	require.Eventually(t, func() bool {
+		out, _, err := wl.ExecIntoPodNoTTY([]string{"cat", "/tmp/holder-tty"}, "c-conc")
+		if err != nil {
+			return false
+		}
+		holderTTY = strings.TrimSpace(strings.ReplaceAll(out, "\r", ""))
+		return strings.HasPrefix(holderTTY, "/dev/pts/")
+	}, 90*time.Second, 3*time.Second, "holder must allocate its pty before the concurrent probe runs")
+	t.Logf("holder holds %s", holderTTY)
+
+	// Confirm the environment really does hand out a nonzero index here. If this
+	// fails the assertions below would be testing nothing.
+	out, _, err := wl.ExecIntoPod([]string{"tty"}, "c-conc")
+	require.NoError(t, err, "tty check in c-conc")
+	probeTTY := strings.TrimSpace(strings.ReplaceAll(out, "\r", ""))
+	t.Logf("concurrent probe sees %s", probeTTY)
+	require.True(t, strings.HasPrefix(probeTTY, "/dev/pts/"), "concurrent exec must get a terminal, got %q", probeTTY)
+	require.NotEqual(t, "/dev/pts/0", probeTTY,
+		"concurrent exec landed on pts/0; phase 1 cannot distinguish that from no terminal, so trigger C would prove nothing")
+
+	_, _, err = wl.ExecIntoPod(probe, "c-conc")
+	require.NoError(t, err, "concurrent-tty probe")
+
+	count := func(alerts []testutils.Alert, ruleID, container string) int {
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID && a.Labels["container_name"] == container {
+				n++
+			}
+		}
+		return n
+	}
+	total := func(alerts []testutils.Alert, ruleID string) int {
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID {
+				n++
+			}
+		}
+		return n
+	}
+
+	// Wait on the *control* rule reaching all three containers. R9901 and R9902
+	// evaluate the same exec event, so once R9902 has arrived for a container the
+	// verdict on R9901 for that same event is already decided -- which is what
+	// makes the negative assertions below sound rather than merely un-elapsed.
+	var alerts []testutils.Alert
+	require.Eventually(t, func() bool {
+		alerts, err = testutils.GetAlerts(ns.Name)
+		if err != nil {
+			return false
+		}
+		return count(alerts, "R9902", "c-none") > 0 &&
+			count(alerts, "R9902", "c-pts0") > 0 &&
+			count(alerts, "R9902", "c-conc") > 0
+	}, 180*time.Second, 5*time.Second,
+		"control rule R9902 must fire for all three probe execs -- if it does not, the trigger or the rule pipeline is broken, not the TTY field")
+
+	t.Logf("alert counts: R9901 none=%d pts0=%d conc=%d | R9902 total=%d | R9903=%d R9904=%d",
+		count(alerts, "R9901", "c-none"), count(alerts, "R9901", "c-pts0"), count(alerts, "R9901", "c-conc"),
+		total(alerts, "R9902"), total(alerts, "R9903"), total(alerts, "R9904"))
+
+	// The feature: hasTty discriminates.
+	assert.Greater(t, count(alerts, "R9901", "c-conc"), 0,
+		"R9901 must fire for the exec that held a nonzero pts index -- this is the actual TTY-field proof")
+	assert.Equal(t, 0, count(alerts, "R9901", "c-none"),
+		"R9901 must not fire for an exec with no controlling terminal")
+	// Deliberate: phase 1 reads the ambiguous per-driver index, where 0 means
+	// both /dev/pts/0 and "no terminal". A single exec into a fresh container is
+	// pts/0 and so is invisible to hasTty. This is a known, documented
+	// limitation, not a bug -- do not "fix" this expectation. It flips when
+	// phase 2 lands (gadget emits tty_major/tty_minor).
+	assert.Equal(t, 0, count(alerts, "R9901", "c-pts0"),
+		"phase 1: an exec on pts/0 is indistinguishable from no terminal, so R9901 must stay silent here")
+
+	// has() presence testing is honest, and ttyMajor is registered rather than
+	// silently unresolvable. Exactly one of these two must fire.
+	assert.Equal(t, 0, total(alerts, "R9903"),
+		"R9903 must not fire: the pinned gadget does not emit tty_major, so has(event.ttyMajor) is false")
+	assert.Greater(t, total(alerts, "R9904"), 0,
+		"R9904 must fire: !has(event.ttyMajor) proves ttyMajor is a registered field that is honestly absent, not a compile failure")
 }
