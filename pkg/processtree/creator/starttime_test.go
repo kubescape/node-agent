@@ -1,8 +1,11 @@
 package processtreecreator
 
 import (
+	"os"
 	"testing"
 	"time"
+
+	"github.com/prometheus/procfs"
 
 	"github.com/kubescape/node-agent/pkg/config"
 	processtreecreatorconfig "github.com/kubescape/node-agent/pkg/processtree/config"
@@ -150,4 +153,37 @@ func TestExitByPid_DeletesStartTimeEntry_NodeAlreadyGone(t *testing.T) {
 
 	assert.Zero(t, creator.GetProcessBootTimeNs(404),
 		"the early-return branch must reclaim the side-map entry too")
+}
+
+// TestProcfsStartTimeReader_ReadsRealProcess covers newProcfsStartTimeReader
+// itself. Every other test on the on-demand path injects a fake reader, so
+// without this the real /proc parse and its tick->nanosecond conversion have no
+// coverage at all: this package's nsPerTick could drift from the feeder's and
+// the same process would get two identities an order of magnitude apart, each
+// internally consistent.
+//
+// The conversion is pinned against an independently read field 22 times the
+// contract's literal 10^7, so a drifted constant fails deterministically rather
+// than only on machines whose uptime happens to make the error visible.
+func TestProcfsStartTimeReader_ReadsRealProcess(t *testing.T) {
+	read := newProcfsStartTimeReader()
+
+	ns, wall := read(uint32(os.Getpid()))
+	require.NotZero(t, ns, "the test's own process must be readable from /proc")
+
+	p, err := procfs.NewProc(os.Getpid())
+	require.NoError(t, err)
+	stat, err := p.Stat()
+	require.NoError(t, err)
+	assert.Equal(t, stat.Starttime*10_000_000, ns,
+		"conversion must be exactly field 22 ticks * 10^7 ns (USER_HZ=100)")
+
+	assert.False(t, wall.IsZero(), "btime should be readable, so the display value should be set")
+	assert.WithinDuration(t, time.Now(), wall, 5*time.Minute,
+		"btime + boot-relative offset must reconstruct this process's actual start time")
+
+	// A pid that cannot exist degrades to zeros rather than guessing.
+	nsGone, wallGone := read(uint32(1 << 22))
+	assert.Zero(t, nsGone, "an unreadable process must yield zero, never a guess")
+	assert.True(t, wallGone.IsZero())
 }

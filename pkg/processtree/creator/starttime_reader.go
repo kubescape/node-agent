@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/prometheus/procfs"
 )
 
@@ -33,10 +35,31 @@ const nsPerTick = uint64(10_000_000)
 func newProcfsStartTimeReader() func(pid uint32) (uint64, time.Time) {
 	var (
 		once     sync.Once
+		fs       procfs.FS
+		fsReady  bool
 		bootTime time.Time
 	)
 	return func(pid uint32) (uint64, time.Time) {
-		proc, err := procfs.NewProc(int(pid))
+		// Resolve /proc and btime once, not per read: procfs.NewProc would
+		// re-stat the mount point on every call.
+		once.Do(func() {
+			f, err := procfs.NewDefaultFS()
+			if err != nil {
+				logger.L().Warning("processtree: cannot open /proc, on-demand start times disabled", helpers.Error(err))
+				return
+			}
+			fs, fsReady = f, true
+			if s, err := f.Stat(); err == nil {
+				bootTime = time.Unix(int64(s.BootTime), 0)
+			} else {
+				// Boot-relative identity is unaffected; only the display value is lost.
+				logger.L().Warning("processtree: cannot read /proc/stat btime, wall-clock start times disabled", helpers.Error(err))
+			}
+		})
+		if !fsReady {
+			return 0, time.Time{}
+		}
+		proc, err := fs.Proc(int(pid))
 		if err != nil {
 			return 0, time.Time{}
 		}
@@ -44,13 +67,6 @@ func newProcfsStartTimeReader() func(pid uint32) (uint64, time.Time) {
 		if err != nil || stat.Starttime == 0 {
 			return 0, time.Time{}
 		}
-		once.Do(func() {
-			if fs, err := procfs.NewDefaultFS(); err == nil {
-				if s, err := fs.Stat(); err == nil {
-					bootTime = time.Unix(int64(s.BootTime), 0)
-				}
-			}
-		})
 		ns := stat.Starttime * nsPerTick
 		if bootTime.IsZero() {
 			return ns, time.Time{}
