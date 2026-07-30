@@ -22,4 +22,7 @@ type ProcessTreeManager interface {
 	// inherits btime's whole-second skew, so it must never be compared for
 	// identity.
 	GetProcessBootTimeNs(pid uint32) uint64
+	// GetAncestorPIDs returns pid's ancestors, nearest first, bounded by maxDepth.
+	// Works for host processes too, unlike GetContainerProcessTree.
+	GetAncestorPIDs(pid uint32, maxDepth int) []uint32
 }
