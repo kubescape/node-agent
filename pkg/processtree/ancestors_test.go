@@ -22,6 +22,7 @@ func (s *stubCreator) Start()                            {}
 func (s *stubCreator) Stop()                             {}
 
 func (s *stubCreator) GetRootTree() ([]armotypes.Process, error) { return nil, nil }
+func (s *stubCreator) GetProcessBootTimeNs(uint32) uint64        { return 0 }
 
 func (s *stubCreator) GetProcessMap() *maps.SafeMap[uint32, *armotypes.Process] {
 	m := &maps.SafeMap[uint32, *armotypes.Process]{}

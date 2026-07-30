@@ -280,6 +280,29 @@ const (
 	UnshareEventType      EventType = "unshare"
 )
 
+// nodeAgentEventTypes is every event stream node-agent can actually deliver.
+// AllEventType is deliberately absent: it is a rule-binding wildcard, not a
+// stream, so anything that must name a concrete stream has to reject it.
+var nodeAgentEventTypes = map[EventType]struct{}{
+	BpfEventType: {}, CapabilitiesEventType: {}, DnsEventType: {},
+	ExecveEventType: {}, ExitEventType: {}, ForkEventType: {},
+	HTTPEventType: {}, HardlinkEventType: {}, IoUringEventType: {},
+	KmodEventType: {}, NetworkEventType: {}, OpenEventType: {},
+	ProcfsEventType: {}, PtraceEventType: {}, RandomXEventType: {},
+	SSHEventType: {}, SymlinkEventType: {}, SyscallEventType: {},
+	UnshareEventType: {},
+}
+
+// IsValidEventType reports whether e names a concrete node-agent event stream.
+//
+// This is narrower than armotypes.IsKnownEventType, which spans both engines --
+// k8s-admission is a real armotypes event type that node-agent never emits, so a
+// node-agent rule naming it must be rejected at load rather than never matching.
+func IsValidEventType(e EventType) bool {
+	_, ok := nodeAgentEventTypes[e]
+	return ok
+}
+
 // GetHostFilePathFromEvent returns the primary host path of the file behind
 // the event. For an exec event this is the first path from
 // GetHostFilePathsFromEvent. Use GetHostFilePathsFromEvent to also get the

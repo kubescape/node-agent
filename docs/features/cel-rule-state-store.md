@@ -8,10 +8,81 @@ delete of a pod — cannot be expressed at all.
 
 Design: `shared-designs-and-docs/projects/2026-07-28-cel-rule-state-store/spec.md`.
 
-> **Status: under construction.** This page documents what has landed. The read
-> functions below exist and are tested, but nothing populates the store yet —
-> writes (`stateWrites:`) are still to come, so in a running agent every read is
-> currently a miss.
+> **Status: under construction.** Reads and writes both work. Still to land:
+> correlation evidence on the emitted alert, and scope purge on container removal.
+
+## Writing state
+
+A rule declares what it remembers in a `stateWrites:` block. Each entry is driven
+by one event type, which **need not** be an event type the rule alerts on:
+
+```yaml
+id: R1089
+stateWrites:
+  - eventType: exec                     # the stream that drives this write
+    when: "<a CEL bool guard>"          # optional; absent means always write
+    scope: container                    # container | pod | node
+    name: mount_exec                    # a literal, never an expression
+    key: "string(event.pid)"            # optional CEL string: who the fact is about
+    value:                              # optional extras, CEL expression strings
+      argv: "event.args"
+    ttl: 10m                            # clamped to the configured maxTtl
+expressions:
+  ruleExpression:
+    - eventType: network                # alerts on a DIFFERENT stream
+      expression: |
+        state.has("mount_exec", string(event.pid)) && !net.is_private_ip(event.dstIP)
+```
+
+`name` is a literal rather than an expression on purpose: it stays statically
+analysable and is safe to use as a metric label.
+
+### Writes are declarative, not a CEL setter
+
+There is no `state.set(...)` function, deliberately. A setter inside a predicate
+would be skipped by boolean short-circuiting, could be reordered by the static
+optimiser, and could never express "remember this **without** alerting" — which
+is exactly what the first leg of a cross-event rule needs.
+
+### Writes run after the predicate
+
+For a given event, the rule's predicate is evaluated first and the writes second.
+So a predicate only ever sees state from **earlier** events. Otherwise a rule
+that reads and writes the same name on the same event type would satisfy itself
+from its own write.
+
+### What suppresses a write
+
+| Condition | Writes still run? |
+|---|---|
+| Rule disabled, or does not apply to this context | no |
+| `profileDependency: Required` and no profile | no |
+| Pre-filter excluded the event | no |
+| Rule policy suppressed it | no |
+| **Alert cooldown** | **yes** |
+| **Predicate returned false** | **yes** |
+| Store at capacity | no — write rejected, `state_write_rejected_total` |
+
+Cooldown suppresses the *alert*, never the write: writes are evidence gathering,
+and dropping them would break the next leg of the chain.
+
+### Validation happens at load
+
+An unknown event type, `eventType: all` (a binding wildcard, not a stream),
+`scope: identity` (operator-only), a bad or non-positive TTL, or a `_`-prefixed
+name or value key is rejected when the rule loads. Every one of those mistakes
+would otherwise produce a rule that loads cleanly and silently never fires.
+
+A rule with a malformed clause is degraded to non-correlating and logged; it does
+not stop the other rules in the CRD from evaluating.
+
+### Bounds
+
+Over-capacity writes are **rejected, never satisfied by evicting** another
+entry — eviction would let one container disable detection for its neighbours.
+The per-scope cap is exact; the node-wide ceiling is approximate under
+concurrency. Host processes share one `c:__host__` bucket with its own larger cap,
+since it holds the whole node's process space and gets no removal purge.
 
 ## Reading state
 
