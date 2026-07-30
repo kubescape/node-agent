@@ -8,8 +8,9 @@ delete of a pod — cannot be expressed at all.
 
 Design: `shared-designs-and-docs/projects/2026-07-28-cel-rule-state-store/spec.md`.
 
-> **Status: under construction.** Reads and writes both work. Still to land:
-> correlation evidence on the emitted alert, and scope purge on container removal.
+> **Status: under construction.** Reads, writes and alert evidence all work.
+> Still to land: scope purge on container removal, and the end-to-end component
+> test against real eBPF events. Not yet exercised on a live cluster.
 
 ## Writing state
 
@@ -182,3 +183,25 @@ second, divergent source of truth.
 `string(timestamp)` renders in the node's local zone, so the offset in the text
 depends on where the agent runs. Comparisons are instant-based and unaffected.
 Assert on instants, not on rendered text.
+
+## Correlation evidence on the alert
+
+When a rule fires, the state entries its predicate **actually read** are attached
+to the alert as `correlations[]`, so the alert describes both ends of the chain.
+Without it, an exec-then-egress alert would say only "a process made an outbound
+connection" and drop the exec that makes it interesting.
+
+Each entry carries `name`, `eventType`, `timestamp`, `scope`, `key`, the
+remembered `process`, and any author `values`. Only hits are recorded — a miss is
+not evidence of anything — and the record is reset per rule, so one rule never
+cites another's entries.
+
+**Correlation enriches an incident; it does not re-key it.** `InfectedPID` and
+`RuntimeProcessDetails` continue to describe the *triggering* event, so backend
+incident grouping is unchanged. An alert with no correlations serializes exactly
+as before, with no `correlations` key.
+
+`message` and `uniqueId` are evaluated against the predicate's own context, so
+`state.get()` in a message resolves against the same entries the predicate
+matched — and `uniqueId` can be derived from the join key, which is what lets
+cooldown collapse both legs of a bidirectional rule into one alert.
