@@ -58,6 +58,11 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metric
 		cel.Variable("event", eventTyp), // All events accessible via "event" variable
 		cel.Variable("http", eventTyp),  // HTTP events also accessible via "http" variable
 		cel.Variable("eventType", cel.StringType),
+		// The resolved event time, as a top-level variable rather than an event
+		// field: CelFields getters receive an xcel wrapper around the event and
+		// cannot reach EnrichedEvent.Timestamp, so a field would be a second,
+		// divergent source of truth. See ResolveEventTime.
+		cel.Variable("timestamp", cel.TimestampType),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),
@@ -169,6 +174,7 @@ func (c *CEL) CreateEvalContext(event *events.EnrichedEvent) map[string]any {
 	evalContext := map[string]any{
 		"eventType": string(eventType),
 		"event":     obj,
+		"timestamp": ResolveEventTime(event),
 	}
 
 	// For HTTP events, also add "http" variable
