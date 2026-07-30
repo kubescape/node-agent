@@ -29,6 +29,16 @@ const (
 )
 
 var (
+	// fieldCaches maps an EventType to a *sync.Map of fieldName ->
+	// datasource.FieldAccessor, and backs getFieldAccessor.
+	//
+	// Note the key: accessors are cached per *event type*, so two datasources
+	// sharing an event type share one cache and can be handed each other's
+	// accessors. A FieldAccessor decodes at a fixed offset in the layout of the
+	// datasource that produced it, so that is safe only while one tracer is
+	// registered per event type -- which is what RegisterTracer's map assignment
+	// enforces today. Reads that must not depend on that invariant should use
+	// localFieldAccessor; see accessorCaches below.
 	fieldCaches = sync.Map{}
 
 	// accessorCaches maps a datasource.DataSource to a *sync.Map of
