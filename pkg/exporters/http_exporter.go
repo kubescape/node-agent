@@ -346,6 +346,7 @@ func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) armotypes.R
 		RuleID:                 failedRule.GetRuleId(),
 		IsTriggerAlert:         failedRule.GetIsTriggerAlert(),
 		HttpRuleAlert:          httpDetails,
+		CorrelationAlert:       failedRule.GetCorrelationAlert(),
 	}
 }
 

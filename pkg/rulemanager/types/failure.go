@@ -27,6 +27,7 @@ type GenericRuleFailure struct {
 	Extra                  interface{}
 	IsTriggerAlert         bool
 	SourceContext          contextdetection.EventSourceContext
+	CorrelationAlert       armotypes.CorrelationAlert
 }
 
 type RuleFailure interface {
@@ -40,6 +41,8 @@ type RuleFailure interface {
 	GetTriggerEvent() utils.EnrichEvent
 	// Get Rule Description
 	GetRuleAlert() armotypes.RuleAlert
+	// Get Correlation Alert -- the state entries this rule read to fire
+	GetCorrelationAlert() armotypes.CorrelationAlert
 	// Get K8s Runtime Details
 	GetRuntimeAlertK8sDetails() armotypes.RuntimeAlertK8sDetails
 	// Get ECS Runtime Details
@@ -85,6 +88,8 @@ type RuleFailure interface {
 	SetIsTriggerAlert(isTriggerAlert bool)
 	// Set Source Context
 	SetSourceContext(sourceContext contextdetection.EventSourceContext)
+	// Set Correlation Alert
+	SetCorrelationAlert(correlationAlert armotypes.CorrelationAlert)
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() armotypes.BaseRuntimeAlert {
@@ -101,6 +106,14 @@ func (rule *GenericRuleFailure) GetTriggerEvent() utils.EnrichEvent {
 
 func (rule *GenericRuleFailure) GetRuleAlert() armotypes.RuleAlert {
 	return rule.RuleAlert
+}
+
+func (rule *GenericRuleFailure) GetCorrelationAlert() armotypes.CorrelationAlert {
+	return rule.CorrelationAlert
+}
+
+func (rule *GenericRuleFailure) SetCorrelationAlert(correlationAlert armotypes.CorrelationAlert) {
+	rule.CorrelationAlert = correlationAlert
 }
 
 func (rule *GenericRuleFailure) GetRuntimeAlertK8sDetails() armotypes.RuntimeAlertK8sDetails {

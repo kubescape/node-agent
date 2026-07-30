@@ -499,7 +499,7 @@ func (rm *RuleManager) evaluateRuleAndAlert(a evaluateArgs) {
 		ruleState = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
 	}
 	rm.metrics.ReportRuleAlert(rule.ID)
-	message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
+	message, uniqueID, err := rm.getUniqueIdAndMessage(evalContext, rule)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
 		return
@@ -547,7 +547,10 @@ func (rm *RuleManager) evaluateRuleAndAlert(a evaluateArgs) {
 		alertSpan.End()
 	}
 
-	ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum, ruleState)
+	// The entries this rule's predicate actually read become the alert's
+	// correlation evidence. Harvested here, after the predicate ran and after
+	// cooldown, so a suppressed alert costs nothing.
+	ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum, ruleState, a.tracker.Hits())
 	if ruleFailure == nil {
 		logger.L().Error("RuleManager - failed to create rule failure", helpers.String("rule", rule.Name),
 			helpers.String("message", message),
@@ -694,12 +697,19 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.Eve
 	return ruleExpressions
 }
 
-func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent, rule typesv1.Rule) (string, string, error) {
-	message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
+// getUniqueIdAndMessage renders the alert's message and uniqueId.
+//
+// It takes the predicate's evalContext rather than rebuilding one. That matters
+// for two reasons: state.get() in a message must resolve against the SAME entries
+// the predicate matched, and uniqueId can then be derived from the join key --
+// which is what lets rulecooldown collapse both legs of a bidirectional rule into
+// a single alert instead of emitting one per leg.
+func (rm *RuleManager) getUniqueIdAndMessage(evalContext map[string]any, rule typesv1.Rule) (string, string, error) {
+	message, err := rm.celEvaluator.EvaluateStringExpressionWithContext(evalContext, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
-	uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
+	uniqueID, err := rm.celEvaluator.EvaluateStringExpressionWithContext(evalContext, rule.Expressions.UniqueID)
 	if err != nil {
 		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}
