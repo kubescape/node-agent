@@ -21,6 +21,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/rulestate"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -60,7 +61,7 @@ func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSRes
 	}
 }
 
-func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID, apChecksum string, state map[string]any) types.RuleFailure {
+func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID, apChecksum string, state map[string]any, hits []*rulestate.Entry) types.RuleFailure {
 	eventAdapter, ok := r.adapterFactory.GetAdapter(enrichedEvent.Event.GetEventType())
 	if !ok {
 		logger.L().Error("RuleFailureCreator - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.Event.GetEventType())))
@@ -111,6 +112,15 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 		}
 	}
 
+	// Set here rather than in an event adapter: SetFailureMetadata is
+	// per-event-type, whereas correlation is orthogonal to event type.
+	//
+	// Note what is deliberately NOT touched -- InfectedPID and
+	// RuntimeProcessDetails still describe the TRIGGERING event. Correlation
+	// enriches an incident, it does not re-key it, so backend incident grouping is
+	// unchanged by this.
+	setCorrelationEvidence(ruleFailure, hits)
+
 	return ruleFailure
 }
 
@@ -125,6 +135,36 @@ func eventProcessTree(branch armotypes.Process, eventProcess armotypes.Process, 
 		return armotypes.Process{}, false
 	}
 	return branch, true
+}
+
+// setCorrelationEvidence copies the state entries the predicate actually read
+// onto the alert, so a correlation alert describes BOTH ends of the chain.
+// Without it the alert would say only "a process made an outbound connection"
+// and drop the exec that makes it interesting.
+func setCorrelationEvidence(ruleFailure *types.GenericRuleFailure, hits []*rulestate.Entry) {
+	if len(hits) == 0 {
+		return
+	}
+	ev := make([]armotypes.CorrelationEvidence, 0, len(hits))
+	for _, h := range hits {
+		if h == nil {
+			continue
+		}
+		ev = append(ev, armotypes.CorrelationEvidence{
+			Name:      h.Name,
+			EventType: h.EventType,
+			Timestamp: h.Timestamp,
+			Scope:     h.Scope,
+			Key:       h.Key,
+			Process:   h.Process,
+			Admission: h.Admission,
+			Values:    h.Value,
+		})
+	}
+	if len(ev) == 0 {
+		return
+	}
+	ruleFailure.SetCorrelationAlert(armotypes.CorrelationAlert{Correlations: ev})
 }
 
 func (r *RuleFailureCreator) enrichRuleFailure(ruleFailure *types.GenericRuleFailure) {
