@@ -65,4 +65,15 @@ type MetricsManager interface {
 
 	// Alert suppression funnel — counts how many alerts were dropped and why.
 	ReportAlertSuppressed(ruleID, reason string)
+
+	// CEL rule state store. Labelled by ruleID only — never by state key, which is
+	// unbounded cardinality.
+	//
+	// ReportStateWriteRejected is the alert-worthy one: it means a rule is being
+	// silently starved of the state it needs to correlate.
+	ReportStateWrite(ruleID, result string)
+	ReportStateWriteRejected(ruleID, reason string)
+	ReportStateExpired(n int)
+	ReportStatePurged(n int)
+	ReportStateEntries(scope string, n int)
 }

@@ -107,6 +107,13 @@ type PrometheusMetric struct {
 	// Alert suppression funnel
 	alertSuppressedCounter *prometheus.CounterVec
 
+	// CEL rule state store
+	stateWritesCounter         *prometheus.CounterVec
+	stateWriteRejectedCounter  *prometheus.CounterVec
+	stateExpiredCounter        prometheus.Counter
+	statePurgedCounter         prometheus.Counter
+	stateEntriesGauge          *prometheus.GaugeVec
+
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache            map[string]prometheus.Counter
 	rulePrefilteredCounterCache map[string]prometheus.Counter
@@ -387,6 +394,26 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Name: "node_agent_alert_suppressed_total",
 			Help: "Total alerts suppressed before delivery, labeled by rule_id and reason",
 		}, []string{prometheusRuleIdLabel, "reason"}),
+		stateWritesCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "node_agent_state_writes_total",
+			Help: "Total CEL rule state entries written, labeled by rule_id",
+		}, []string{prometheusRuleIdLabel, "result"}),
+		stateWriteRejectedCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "node_agent_state_write_rejected_total",
+			Help: "Total CEL rule state writes rejected; a rule is being starved of the state it needs to correlate",
+		}, []string{prometheusRuleIdLabel, "reason"}),
+		stateExpiredCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_state_expired_total",
+			Help: "Total CEL rule state entries reclaimed by TTL expiry",
+		}),
+		statePurgedCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_state_purged_total",
+			Help: "Total CEL rule state entries dropped by scope purge, e.g. container removal",
+		}),
+		stateEntriesGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "node_agent_state_entries",
+			Help: "Current CEL rule state entries, labeled by scope",
+		}, []string{"scope"}),
 		sbomScanDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "sbom_scan_duration_seconds",
 			Help:    "SBOM scan duration in seconds",
@@ -479,6 +506,11 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.programPerCpuUsageGauge)
 	prometheus.Unregister(p.sbomScanCounter)
 	prometheus.Unregister(p.alertSuppressedCounter)
+	prometheus.Unregister(p.stateWritesCounter)
+	prometheus.Unregister(p.stateWriteRejectedCounter)
+	prometheus.Unregister(p.stateExpiredCounter)
+	prometheus.Unregister(p.statePurgedCounter)
+	prometheus.Unregister(p.stateEntriesGauge)
 	prometheus.Unregister(p.sbomScanDuration)
 	prometheus.Unregister(p.sbomRestarts)
 	prometheus.Unregister(p.sbomReady)
@@ -771,4 +803,24 @@ func (p *PrometheusMetric) SetSBOMScannerReady(ready bool) {
 
 func (p *PrometheusMetric) ReportAlertSuppressed(ruleID, reason string) {
 	p.alertSuppressedCounter.WithLabelValues(ruleID, reason).Inc()
+}
+
+func (p *PrometheusMetric) ReportStateWrite(ruleID, result string) {
+	p.stateWritesCounter.WithLabelValues(ruleID, result).Inc()
+}
+
+func (p *PrometheusMetric) ReportStateWriteRejected(ruleID, reason string) {
+	p.stateWriteRejectedCounter.WithLabelValues(ruleID, reason).Inc()
+}
+
+func (p *PrometheusMetric) ReportStateExpired(n int) {
+	p.stateExpiredCounter.Add(float64(n))
+}
+
+func (p *PrometheusMetric) ReportStatePurged(n int) {
+	p.statePurgedCounter.Add(float64(n))
+}
+
+func (p *PrometheusMetric) ReportStateEntries(scope string, n int) {
+	p.stateEntriesGauge.WithLabelValues(scope).Set(float64(n))
 }

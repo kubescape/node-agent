@@ -220,6 +220,45 @@ func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[stri
 	return out, nil
 }
 
+// EvaluateBoolExpressionWithContext evaluates a boolean expression against an
+// already-built context. State-write guards use it so the guard sees exactly the
+// same event view -- and the same state -- as the predicate did.
+func (c *CEL) EvaluateBoolExpressionWithContext(evalContext map[string]any, expression string) (bool, error) {
+	out, err := c.evaluateProgramWithContext(expression, evalContext)
+	if err != nil {
+		return false, err
+	}
+	// A nil program means compilation failed and was cached as such.
+	if out == nil {
+		return false, nil
+	}
+	boolVal, ok := out.Value().(bool)
+	if !ok {
+		return false, fmt.Errorf("expression returned %T, expected bool", out.Value())
+	}
+	return boolVal, nil
+}
+
+// EvaluateStringExpressionWithContext evaluates expr against an already-built
+// context. Message and uniqueId expressions must reuse the predicate's context so
+// state.get() resolves against the same entries -- and so uniqueId can be derived
+// from the join key, which is what lets rulecooldown collapse the two legs of a
+// bidirectional rule into one alert.
+func (c *CEL) EvaluateStringExpressionWithContext(evalContext map[string]any, expression string) (string, error) {
+	out, err := c.evaluateProgramWithContext(expression, evalContext)
+	if err != nil {
+		return "", err
+	}
+	if out == nil {
+		return "", nil
+	}
+	strVal, ok := out.Value().(string)
+	if !ok {
+		return "", fmt.Errorf("expression returned %T, expected string", out.Value())
+	}
+	return strVal, nil
+}
+
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
 	eventType := event.Event.GetEventType()
 	evalContext := c.CreateEvalContext(event)
