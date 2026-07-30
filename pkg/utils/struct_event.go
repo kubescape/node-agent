@@ -78,6 +78,9 @@ type StructEvent struct {
 	Syscalls             []byte                  `json:"syscalls,omitempty" yaml:"syscalls,omitempty"`
 	Tid                  uint64                  `json:"tid,omitempty" yaml:"tid,omitempty"`
 	Timestamp            int64                   `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
+	TTY                  *int32                  `json:"tty,omitempty" yaml:"tty,omitempty"`
+	TTYMajor             *uint32                 `json:"ttyMajor,omitempty" yaml:"ttyMajor,omitempty"`
+	TTYMinor             *uint32                 `json:"ttyMinor,omitempty" yaml:"ttyMinor,omitempty"`
 	Type                 HTTPDataType            `json:"type,omitempty" yaml:"type,omitempty"`
 	Uid                  uint32                  `json:"uid,omitempty" yaml:"uid,omitempty"`
 	UpperLayer           bool                    `json:"upperLayer,omitempty" yaml:"upperLayer,omitempty"`
@@ -100,6 +103,26 @@ var _ OpenEvent = (*StructEvent)(nil)
 var _ SshEvent = (*StructEvent)(nil)
 var _ SyscallEvent = (*StructEvent)(nil)
 var _ UnshareEvent = (*StructEvent)(nil)
+
+// FieldPresent reports whether this event carries the named field, using
+// datasource field names (snake_case) to match the DatasourceEvent
+// implementation. A nil pointer means "not measured".
+//
+// Only names with a wired CEL presence tester are meaningful here; everything
+// else reports false. If a presence tester is ever added for another field,
+// this switch must be extended in the same change.
+func (e *StructEvent) FieldPresent(name string) bool {
+	switch name {
+	case "tty":
+		return e.TTY != nil
+	case "tty_major":
+		return e.TTYMajor != nil
+	case "tty_minor":
+		return e.TTYMinor != nil
+	default:
+		return false
+	}
+}
 
 func (e *StructEvent) GetAddresses() []string {
 	return e.Addresses
@@ -262,6 +285,18 @@ func (e *StructEvent) GetGid() *uint32 {
 	return &e.Gid
 }
 
+// GetHasTTY reports whether the process has a controlling terminal, preferring
+// the device major and falling back to the driver-local index.
+func (e *StructEvent) GetHasTTY() bool {
+	if e.TTYMajor != nil {
+		return *e.TTYMajor != 0
+	}
+	if e.TTY != nil {
+		return *e.TTY != 0
+	}
+	return false
+}
+
 func (e *StructEvent) GetHostNetwork() bool {
 	return e.HostNetwork
 }
@@ -405,6 +440,27 @@ func (e *StructEvent) GetSyscall() string {
 
 func (e *StructEvent) GetSyscalls() []byte {
 	return e.Syscalls
+}
+
+func (e *StructEvent) GetTTY() int32 {
+	if e.TTY == nil {
+		return 0
+	}
+	return *e.TTY
+}
+
+func (e *StructEvent) GetTTYMajor() uint32 {
+	if e.TTYMajor == nil {
+		return 0
+	}
+	return *e.TTYMajor
+}
+
+func (e *StructEvent) GetTTYMinor() uint32 {
+	if e.TTYMinor == nil {
+		return 0
+	}
+	return *e.TTYMinor
 }
 
 func (e *StructEvent) GetTid() uint64 {

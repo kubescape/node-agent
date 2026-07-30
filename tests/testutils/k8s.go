@@ -93,6 +93,17 @@ func (w *TestWorkload) ExecIntoPod(command []string, container string) (string, 
 
 	return ExecIntoPod(pod.Name, w.Namespace, command, container)
 }
+
+// ExecIntoPodNoTTY execs without a controlling terminal. See ExecIntoPodNoTTY.
+func (w *TestWorkload) ExecIntoPodNoTTY(command []string, container string) (string, string, error) {
+	pods, err := w.GetPods()
+	if err != nil {
+		return "", "", err
+	}
+	pod := pods[0]
+
+	return ExecIntoPodNoTTY(pod.Name, w.Namespace, command, container)
+}
 func NewTestWorkloadFromK8sIdentifiers(namespace, kind, name string) (*TestWorkload, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 	gvr, err := k8sinterface.GetGroupVersionResource(kind)
@@ -120,7 +131,25 @@ func NewTestWorkloadFromK8sIdentifiers(namespace, kind, name string) (*TestWorkl
 	}, nil
 }
 
+// ExecIntoPodNoTTY is ExecIntoPod without a controlling terminal.
+//
+// Every other exec helper here sets TTY: true, and the API server allocates a
+// pty on that flag alone regardless of Stdin — so all ordinary component-test
+// execs run *with* a terminal. Note that `kubectl exec -t` is not a way to
+// check this: kubectl silently drops the TTY flag when -i is absent, so it
+// never sends TTY=true/Stdin=false at all and reports "not a tty" misleadingly.
+// Verified against a live API server: TTY=true/Stdin=false -> /dev/pts/0.
+//
+// Use this when a test needs a process with genuinely no controlling terminal.
+func ExecIntoPodNoTTY(podName, podNamespace string, command []string, container string) (string, string, error) {
+	return execIntoPod(podName, podNamespace, command, container, false)
+}
+
 func ExecIntoPod(podName, podNamespace string, command []string, container string) (string, string, error) {
+	return execIntoPod(podName, podNamespace, command, container, true)
+}
+
+func execIntoPod(podName, podNamespace string, command []string, container string, tty bool) (string, string, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 
 	buf := &bytes.Buffer{}
@@ -131,7 +160,7 @@ func ExecIntoPod(podName, podNamespace string, command []string, container strin
 		Stdin:   false,
 		Stdout:  true,
 		Stderr:  true,
-		TTY:     true,
+		TTY:     tty,
 	}
 
 	if container != "" {

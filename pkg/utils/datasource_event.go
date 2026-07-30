@@ -29,7 +29,42 @@ const (
 )
 
 var (
+	// fieldCaches maps an EventType to a *sync.Map of fieldName ->
+	// datasource.FieldAccessor, and backs getFieldAccessor.
+	//
+	// Note the key: accessors are cached per *event type*, so two datasources
+	// sharing an event type share one cache and can be handed each other's
+	// accessors. A FieldAccessor decodes at a fixed offset in the layout of the
+	// datasource that produced it, so that is safe only while one tracer is
+	// registered per event type -- which is what RegisterTracer's map assignment
+	// enforces today. Reads that must not depend on that invariant should use
+	// localFieldAccessor; see accessorCaches below.
 	fieldCaches = sync.Map{}
+
+	// accessorCaches maps a datasource.DataSource to a *sync.Map of
+	// fieldName -> datasource.FieldAccessor, storing nil for fields the
+	// datasource does not expose.
+	//
+	// Keyed by datasource instance rather than by EventType (as fieldCaches is)
+	// because a FieldAccessor is only valid against the datasource that produced
+	// it: it decodes at a fixed offset in that datasource's layout. An
+	// EventType-keyed cache serves accessors across datasources sharing an event
+	// type, so reading through one would decode another datasource's data at the
+	// wrong offset -- returning garbage, or panicking inside Inspektor Gadget's
+	// fieldAccessor.Get. Checking presence first is not sufficient protection,
+	// because it only rules out the case where this datasource lacks the field;
+	// when two datasources both expose it, presence passes and the cached
+	// accessor still belongs to the other one.
+	//
+	// Misses are cached too. Fields that are absent by design (tty_major on an
+	// older gadget) are looked up on every single event, and caching spares each
+	// one an RLock and a map lookup. It also keeps the cost flat if the IG
+	// replace directive in go.mod is ever retargeted at a version whose GetField
+	// falls back to a case-insensitive scan over all fields on a miss, as
+	// upstream's does.
+	//
+	// Bounded by the number of tracers (~19), all long-lived.
+	accessorCaches = sync.Map{}
 )
 
 type DatasourceEvent struct {
@@ -189,6 +224,47 @@ func (e *DatasourceEvent) getFieldAccessor(fieldName string) datasource.FieldAcc
 	}
 
 	return res
+}
+
+// FieldPresent reports whether the underlying datasource exposes the named
+// field. name is a datasource field name (snake_case), not a CEL field name.
+//
+// This is how "the gadget running on this agent does not emit this signal" is
+// distinguished from "the signal's value is zero". It never logs: an absent
+// field is an expected, per-event condition.
+func (e *DatasourceEvent) FieldPresent(name string) bool {
+	return e.localFieldAccessor(name) != nil
+}
+
+// localFieldAccessor returns the accessor for name on *this event's* datasource,
+// or nil when that datasource does not expose the field. Unlike
+// getFieldAccessor it never returns an accessor belonging to a different
+// datasource, and it never logs -- an absent field is an expected, per-event
+// condition. See accessorCaches for why the distinction matters.
+func (e *DatasourceEvent) localFieldAccessor(name string) datasource.FieldAccessor {
+	if e == nil || e.Datasource == nil {
+		return nil
+	}
+
+	cacheVal, ok := accessorCaches.Load(e.Datasource)
+	if !ok {
+		cacheVal, _ = accessorCaches.LoadOrStore(e.Datasource, &sync.Map{})
+	}
+
+	m, ok := cacheVal.(*sync.Map)
+	if !ok {
+		return nil
+	}
+
+	if cached, ok := m.Load(name); ok {
+		accessor, _ := cached.(datasource.FieldAccessor)
+		return accessor
+	}
+
+	// GetField returns nil for an absent field; storing that nil caches the miss.
+	field := e.Datasource.GetField(name)
+	m.Store(name, field)
+	return field
 }
 
 func (e *DatasourceEvent) GetAddresses() []string {
@@ -461,6 +537,28 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 	}
 }
 
+// GetHasTTY reports whether the process has a controlling terminal.
+//
+// It prefers the device number, which is unambiguous, and falls back to the
+// raw per-driver index, where 0 means both /dev/pts/0 and "no terminal" -- so on
+// a gadget that emits only the index this under-reports rather than
+// over-reports. The preference order is what lets the field become accurate with
+// no code change once the gadget emits tty_major.
+//
+// Reads go through localFieldAccessor, not getFieldAccessor, so an accessor from
+// another datasource sharing this EventType can never decode this event's data.
+func (e *DatasourceEvent) GetHasTTY() bool {
+	if accessor := e.localFieldAccessor("tty_major"); accessor != nil {
+		major, _ := accessor.Uint32(e.Data)
+		return major != 0
+	}
+	if accessor := e.localFieldAccessor("tty"); accessor != nil {
+		idx, _ := accessor.Int32(e.Data)
+		return idx != 0
+	}
+	return false
+}
+
 func (e *DatasourceEvent) GetHostNetwork() bool {
 	hostNetwork, _ := e.getFieldAccessor("k8s.hostnetwork").Bool(e.Data)
 	return hostNetwork
@@ -719,6 +817,44 @@ func (e *DatasourceEvent) GetSyscall() string {
 func (e *DatasourceEvent) GetSyscalls() []byte {
 	syscallsBuffer, _ := e.getFieldAccessor("syscalls").Bytes(e.Data)
 	return syscallsBuffer
+}
+
+// GetTTY returns the index of the controlling terminal within its own driver.
+// It does not uniquely identify a device: the index is only unique per driver,
+// so /dev/pts/0 and /dev/tty0 are both 0. A nonzero value does mean a terminal
+// is present; only 0 is ambiguous, meaning either /dev/pts/0 or no terminal at
+// all. Prefer GetTTYMajor/GetTTYMinor.
+func (e *DatasourceEvent) GetTTY() int32 {
+	accessor := e.localFieldAccessor("tty")
+	if accessor == nil {
+		return 0
+	}
+	tty, _ := accessor.Int32(e.Data)
+	return tty
+}
+
+// GetTTYMajor returns the major number of the controlling terminal's device,
+// or 0 when the process has no controlling terminal or the running gadget does
+// not emit it. Use FieldPresent("tty_major") to tell those apart.
+func (e *DatasourceEvent) GetTTYMajor() uint32 {
+	accessor := e.localFieldAccessor("tty_major")
+	if accessor == nil {
+		return 0
+	}
+	major, _ := accessor.Uint32(e.Data)
+	return major
+}
+
+// GetTTYMinor returns the minor number of the controlling terminal's device,
+// or 0 when the process has no controlling terminal or the running gadget does
+// not emit it.
+func (e *DatasourceEvent) GetTTYMinor() uint32 {
+	accessor := e.localFieldAccessor("tty_minor")
+	if accessor == nil {
+		return 0
+	}
+	minor, _ := accessor.Uint32(e.Data)
+	return minor
 }
 
 func (e *DatasourceEvent) getTid() uint64 {

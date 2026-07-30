@@ -1,0 +1,22 @@
+# Binds the test-only TTY rules. The shipped default binding
+# (chart/templates/node-agent/default-rule-binding.yaml) lists rules by explicit
+# ruleName, so newly added rule IDs are inert until something binds them.
+apiVersion: kubescape.io/v1
+kind: RuntimeRuleAlertBinding
+metadata:
+  name: exec-tty-test-binding
+spec:
+  namespaceSelector:
+    matchExpressions:
+      - key: "kubernetes.io/metadata.name"
+        operator: "NotIn"
+        values:
+          - "kube-system"
+          - "kube-public"
+          - "kube-node-lease"
+  podSelector:
+  rules:
+    - ruleName: "TEST TTY exec detected"
+    - ruleName: "TEST exec control"
+    - ruleName: "TEST ttyMajor present"
+    - ruleName: "TEST ttyMajor absent"

@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: exec-tty-app
+  name: exec-tty-deployment
+spec:
+  selector:
+    matchLabels:
+      app: exec-tty-app
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: exec-tty-app
+    spec:
+      containers:
+      # One container per TTY trigger. Containers in a pod get separate mount
+      # namespaces and therefore separate /dev/pts instances, so each starts
+      # from a pristine pts index with no cross-contamination. Verified on kind:
+      # with a session held in one container, an exec into a sibling container
+      # still lands on /dev/pts/0.
+      - name: c-none
+        image: alpine:3.20
+        command: ["sleep", "infinity"]
+      - name: c-pts0
+        image: alpine:3.20
+        command: ["sleep", "infinity"]
+      - name: c-conc
+        image: alpine:3.20
+        command: ["sleep", "infinity"]

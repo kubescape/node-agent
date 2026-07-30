@@ -37,6 +37,7 @@ type EnrichEvent interface {
 	GetContainerImageDigest() string
 	GetError() int64
 	GetExtra() interface{}
+	FieldPresent(name string) bool
 	GetGid() *uint32
 	GetHostNetwork() bool
 	GetMountNsID() uint64
@@ -96,8 +97,12 @@ type ExecEvent interface {
 	GetArgs() []string
 	GetCwd() string
 	GetExePath() string
+	GetHasTTY() bool
 	GetParentExePath() string
 	GetPupperLayer() bool
+	GetTTY() int32
+	GetTTYMajor() uint32
+	GetTTYMinor() uint32
 	GetUpperLayer() bool
 }
 
