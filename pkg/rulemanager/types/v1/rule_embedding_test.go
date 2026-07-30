@@ -52,12 +52,12 @@ func TestRule_ExistingFieldsUnchangedAfterEmbedding(t *testing.T) {
 	assert.Equal(t, utils.ExecveEventType, r.Expressions.RuleExpression[0].EventType)
 	assert.Equal(t, "event.comm", r.Expressions.UniqueID)
 
-	// Shadowed: node-agent's FieldRequirement semantics, including Declared.
+	// A declared surface is a non-nil pointer; an absent one stays nil.
 	require.NotNil(t, r.ProfileDataRequired)
+	require.NotNil(t, r.ProfileDataRequired.Execs)
 	assert.True(t, r.ProfileDataRequired.Execs.All)
-	assert.True(t, r.ProfileDataRequired.Execs.Declared)
-	assert.False(t, r.ProfileDataRequired.Opens.Declared,
-		"an absent surface must stay undeclared -- this is the semantics armotypes lacks")
+	assert.Nil(t, r.ProfileDataRequired.Opens,
+		"an absent surface must stay undeclared")
 }
 
 func TestRule_StateWritesAreReadableViaEmbedding(t *testing.T) {
@@ -136,9 +136,9 @@ func TestRule_DecodesViaApimachineryLikeTheCRDPath(t *testing.T) {
 	assert.Equal(t, "event.comm", r.Expressions.UniqueID)
 
 	require.NotNil(t, r.ProfileDataRequired)
+	require.NotNil(t, r.ProfileDataRequired.Execs)
 	assert.True(t, r.ProfileDataRequired.Execs.All)
-	assert.True(t, r.ProfileDataRequired.Execs.Declared)
-	assert.False(t, r.ProfileDataRequired.Opens.Declared)
+	assert.Nil(t, r.ProfileDataRequired.Opens)
 }
 
 func TestRule_StateWritesDecodeViaApimachinery(t *testing.T) {
