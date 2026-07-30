@@ -179,3 +179,46 @@ func TestHasWriteFor(t *testing.T) {
 	assert.False(t, hasWriteFor(compiled, utils.NetworkEventType))
 	assert.False(t, hasWriteFor(nil, utils.ExecveEventType))
 }
+
+// Container removal must reclaim that container's markers immediately -- a
+// churning node would otherwise hold state for containers that no longer exist
+// until TTL.
+func TestPurgeScope_OnContainerRemovalDropsOnlyThatContainer(t *testing.T) {
+	rm := testRuleManager(t)
+	rm.stateStore = rulestate.NewStore(rm.cfg.CelStateStore, rulestate.NoopMetrics{})
+
+	set := func(scopeID string) {
+		require.NoError(t, rm.stateStore.Set(&rulestate.Entry{
+			RuleID: "R1089", Name: "n", Key: "1",
+			Scope: armotypes.StateScopeContainer, ScopeID: scopeID,
+			Timestamp: time.Now(), ExpiresAt: time.Now().Add(time.Minute),
+		}))
+	}
+	set(rulestate.ContainerScopeID("abc"))
+	set(rulestate.ContainerScopeID("def"))
+	set(rulestate.HostScopeID())
+
+	rm.stateStore.PurgeScope(rulestate.ContainerScopeID("abc"))
+
+	_, ok := rm.stateStore.Get("R1089", armotypes.StateScopeContainer, rulestate.ContainerScopeID("abc"), "n", "1")
+	assert.False(t, ok, "the removed container's markers must be gone")
+
+	_, ok = rm.stateStore.Get("R1089", armotypes.StateScopeContainer, rulestate.ContainerScopeID("def"), "n", "1")
+	assert.True(t, ok, "a neighbouring container must be untouched")
+
+	_, ok = rm.stateStore.Get("R1089", armotypes.StateScopeContainer, rulestate.HostScopeID(), "n", "1")
+	assert.True(t, ok, "host markers must survive a container removal")
+}
+
+// The trap this guards: utils.TrimRuntimePrefix returns "" for an ID with no
+// "//" separator, and ContainerScopeID("") is the HOST bucket. If the removal
+// path ever trims the runtime container ID again, every container exit would wipe
+// all host-process state instead of that container's.
+func TestContainerScopeID_TrimmedRuntimeIDWouldHitTheHostBucket(t *testing.T) {
+	bare := "1a2b3c4d5e6f"
+	assert.Empty(t, utils.TrimRuntimePrefix(bare),
+		"TrimRuntimePrefix yields empty for a bare runtime ID")
+	assert.Equal(t, rulestate.HostScopeID(), rulestate.ContainerScopeID(utils.TrimRuntimePrefix(bare)),
+		"which would resolve to the host bucket -- purge must use the untrimmed ID")
+	assert.NotEqual(t, rulestate.HostScopeID(), rulestate.ContainerScopeID(bare))
+}

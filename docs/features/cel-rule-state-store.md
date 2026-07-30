@@ -8,9 +8,11 @@ delete of a pod — cannot be expressed at all.
 
 Design: `shared-designs-and-docs/projects/2026-07-28-cel-rule-state-store/spec.md`.
 
-> **Status: under construction.** Reads, writes and alert evidence all work.
-> Still to land: scope purge on container removal, and the end-to-end component
-> test against real eBPF events. Not yet exercised on a live cluster.
+> **Status: complete in-tree, not yet proven on a cluster.** Reads, writes, alert
+> evidence, config, metrics and container-removal purge all work and are unit
+> tested. Still outstanding: the end-to-end component test against real eBPF
+> events. **No rule has been run against a live agent yet**, so treat the
+> behaviour described here as tested-by-construction rather than field-proven.
 
 ## Writing state
 
@@ -205,3 +207,36 @@ as before, with no `correlations` key.
 `state.get()` in a message resolves against the same entries the predicate
 matched — and `uniqueId` can be derived from the join key, which is what lets
 cooldown collapse both legs of a bidirectional rule into one alert.
+
+## Configuration
+
+```yaml
+celStateStore:
+  enabled: true
+  maxSize: 100000               # node-wide ceiling (approximate under concurrency)
+  maxEntriesPerContainer: 256   # exact, per container
+  maxEntriesForHost: 4096       # the c:__host__ bucket
+  maxTtl: 30m                   # every rule's ttl is clamped to this
+  sweepInterval: 30s
+  ancestorMaxDepth: 8           # probes per has_ancestor call
+```
+
+Disabling it makes writes no-ops and every read a miss, so correlation rules stop
+firing while ordinary rules are unaffected.
+
+A container's entries are purged as soon as the container is removed, rather than
+waiting for TTL. The host bucket gets no such purge — it relies on TTL, which is
+why its cap is larger.
+
+## Metrics
+
+| Metric | Meaning |
+|---|---|
+| `node_agent_state_writes_total{rule_id,result}` | Entries written |
+| `node_agent_state_write_rejected_total{rule_id,reason}` | **Alert on this** — a rule is being starved of the state it needs |
+| `node_agent_state_expired_total` | Reclaimed by TTL |
+| `node_agent_state_purged_total` | Dropped by scope purge |
+| `node_agent_state_entries{scope}` | Current entry count |
+
+Counters are labelled by rule ID only, never by state key — a key is unbounded
+cardinality.
