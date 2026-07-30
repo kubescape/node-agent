@@ -397,8 +397,14 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		// would break the NEXT leg of the chain. The predicate and alert path is
 		// therefore its own function -- its early exits return, and the writes
 		// below still run.
+		// processed mirrors the pre-refactor control flow exactly: the old loop
+		// reached ReportRuleProcessed only by falling off the end, so an
+		// eval error or a cooldown-suppressed alert did NOT count as processed.
+		// Those were continues; they are returns now, so the metric has to be
+		// gated or its meaning would silently change for every existing rule.
+		processed := true
 		if len(ruleExpressions) > 0 {
-			rm.evaluateRuleAndAlert(evaluateArgs{
+			processed = rm.evaluateRuleAndAlert(evaluateArgs{
 				rule:            rule,
 				ruleExpressions: ruleExpressions,
 				enrichedEvent:   enrichedEvent,
@@ -420,7 +426,9 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				cel.ResolveEventTime(enrichedEvent))
 		}
 
-		rm.metrics.ReportRuleProcessed(rule.ID)
+		if processed {
+			rm.metrics.ReportRuleProcessed(rule.ID)
+		}
 	}
 }
 
@@ -442,7 +450,10 @@ type evaluateArgs struct {
 // Split out of the rule loop so that every early exit in here is a return rather
 // than a continue, which leaves the caller free to run the rule's state writes
 // afterwards regardless of whether an alert was emitted or suppressed.
-func (rm *RuleManager) evaluateRuleAndAlert(a evaluateArgs) {
+// The bool reports whether the path ran to completion. The caller uses it to
+// decide whether to count the rule as processed, preserving the metric's
+// pre-refactor meaning.
+func (rm *RuleManager) evaluateRuleAndAlert(a evaluateArgs) bool {
 	rule := a.rule
 	enrichedEvent := a.enrichedEvent
 	evalContext := a.evalContext
@@ -485,11 +496,13 @@ func (rm *RuleManager) evaluateRuleAndAlert(a evaluateArgs) {
 	if err != nil {
 		logger.L().Ctx(errCtx).Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
 		rm.metrics.ReportAlertSuppressed(rule.ID, "eval_error")
-		return
+		return false
 	}
 
+	// A predicate that simply did not match still counts as processed, exactly as
+	// it did when this was a fall-through rather than a return.
 	if !shouldAlert {
-		return
+		return true
 	}
 
 	// ruleState, not "state": the local would otherwise shadow the state
@@ -502,12 +515,12 @@ func (rm *RuleManager) evaluateRuleAndAlert(a evaluateArgs) {
 	message, uniqueID, err := rm.getUniqueIdAndMessage(evalContext, rule)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
-		return
+		return false
 	}
 
 	if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
 		rm.metrics.ReportAlertSuppressed(rule.ID, "cooldown")
-		return
+		return false
 	}
 
 	// Emit OTEL log after cooldown so suppressed alerts are not recorded.
@@ -557,11 +570,12 @@ func (rm *RuleManager) evaluateRuleAndAlert(a evaluateArgs) {
 			helpers.String("uniqueID", uniqueID),
 			helpers.String("enrichedEvent.EventType", string(eventType)),
 		)
-		return
+		return false
 	}
 
 	ruleFailure.SetWorkloadDetails(a.details)
 	rm.exporter.SendRuleAlert(ruleFailure)
+	return true
 }
 
 func (rm *RuleManager) enrichEventWithContext(enrichedEvent *events.EnrichedEvent) {
