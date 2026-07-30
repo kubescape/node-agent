@@ -27,22 +27,25 @@ import (
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/state"
 	"github.com/kubescape/node-agent/pkg/rulemanager/prefilter"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
-	"github.com/kubescape/node-agent/pkg/otelsetup"
+	"github.com/kubescape/node-agent/pkg/rulemanager/statewrites"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/rulestate"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	corev1 "k8s.io/api/core/v1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -72,6 +75,8 @@ type RuleManager struct {
 	detectorManager      *detectors.DetectorManager
 	alertLogDedup        *expirable.LRU[string, struct{}]
 	alertLogDedupMu      sync.Mutex
+	stateStore           *rulestate.Store
+	stateWrites          *statewrites.Executor
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -117,6 +122,12 @@ func CreateRuleManager(
 		detectorManager:     detectorManager,
 		alertLogDedup:       expirable.NewLRU[string, struct{}](1000, nil, 60*time.Second),
 	}
+
+	// The state store lives here rather than in main.go because the rule loop is
+	// its only writer and reader. Sweeping runs for the manager's lifetime.
+	r.stateStore = rulestate.NewStore(cfg.CelStateStore, newStateMetrics(metrics))
+	r.stateWrites = statewrites.NewExecutor(r.stateStore, celEvaluator, newStateMetrics(metrics))
+	go r.stateStore.Run(ctx)
 
 	// Compile the initial projection spec and start a goroutine that
 	// recompiles whenever rule bindings change.
@@ -322,6 +333,9 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 	var eventFields prefilter.EventFields
 	var evalContext map[string]any
+	// One tracker per event, reset per rule. Allocating per event rather than per
+	// rule keeps the common no-state path to a single allocation.
+	stateTracker := &state.ReadTracker{}
 
 	for _, rule := range rules {
 		if !rule.Enabled {
@@ -339,7 +353,15 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
-		if len(ruleExpressions) == 0 {
+
+		// Compile the write clause before the no-expressions bail-out below: a rule
+		// may legitimately have NO ruleExpression for this event type and still need
+		// to remember something. That is what makes write-without-alerting -- the
+		// first leg of every cross-event rule -- possible.
+		stateWrites, stateScopes := rm.compileStateWrites(&rule)
+		writesThisEvent := hasWriteFor(stateWrites, eventType)
+
+		if len(ruleExpressions) == 0 && !writesThisEvent {
 			continue
 		}
 
@@ -363,112 +385,180 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			evalContext = rm.celEvaluator.CreateEvalContext(enrichedEvent)
 		}
 
-		startTime := time.Now()
-		var shouldAlert bool
-		var err error
-		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
-			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
-		})
-		evaluationTime := time.Since(startTime)
-		// Slow-path tracing: only emit a span when evaluation exceeded the threshold.
-		// This protects the hot path from unconditional tracing overhead on millions of events/sec.
-		// errCtx tracks the spanned context (when a rule.evaluate span fires) so the
-		// failure log below inherits its trace_id/span_id — otherwise falls back to rm.ctx.
-		errCtx := rm.ctx
-		if evaluationTime >= otelsetup.SlowEvalThreshold() {
-			evalCtx, span := otelsetup.Tracer().Start(rm.ctx, "rule.evaluate",
-				trace.WithAttributes(
-					attribute.String("rule.id", rule.ID),
-					attribute.String("event.type", string(eventType)),
-					attribute.String("container.id", enrichedEvent.ContainerID),
-					attribute.Float64("eval.duration_ms", float64(evaluationTime.Milliseconds())),
-					attribute.Bool("alert_fired", shouldAlert),
-				))
-			if err != nil {
-				span.SetStatus(codes.Error, err.Error())
-			}
-			rm.metrics.ReportRuleEvaluationTime(evalCtx, rule.ID, eventType, evaluationTime)
-			span.End()
-			errCtx = evalCtx
-		} else {
-			rm.metrics.ReportRuleEvaluationTime(rm.ctx, rule.ID, eventType, evaluationTime)
+		// Rebuild the state receiver per rule: it carries the rule ID and the
+		// rule's own declared-name scopes, so it cannot be shared between rules.
+		// Resetting the tracker here is what stops rule N citing rule N-1's
+		// entries as its own evidence.
+		stateTracker.Reset()
+		rm.seedStateContext(evalContext, &rule, enrichedEvent, stateScopes, stateTracker)
+
+		// From here on, alerting must not skip the write clause: writes are
+		// evidence gathering, and dropping them because an alert was suppressed
+		// would break the NEXT leg of the chain. The predicate and alert path is
+		// therefore its own function -- its early exits return, and the writes
+		// below still run.
+		if len(ruleExpressions) > 0 {
+			rm.evaluateRuleAndAlert(evaluateArgs{
+				rule:            rule,
+				ruleExpressions: ruleExpressions,
+				enrichedEvent:   enrichedEvent,
+				evalContext:     evalContext,
+				eventType:       eventType,
+				namespace:       namespace,
+				pod:             pod,
+				details:         details,
+				apChecksum:      apChecksum,
+				tracker:         stateTracker,
+			})
 		}
 
-		if err != nil {
-			logger.L().Ctx(errCtx).Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
-			rm.metrics.ReportAlertSuppressed(rule.ID, "eval_error")
-			continue
+		if writesThisEvent {
+			// Writes run AFTER the predicate, so a predicate only ever sees state
+			// from EARLIER events. Otherwise a rule that reads and writes the same
+			// name on the same event type would trivially satisfy itself.
+			rm.stateWrites.Apply(stateWrites, rule.ID, enrichedEvent, evalContext,
+				cel.ResolveEventTime(enrichedEvent))
 		}
 
-		if shouldAlert {
-			state := rule.State
-			if eventType == utils.HTTPEventType { // TODO: Manage state evaluation in a better way (this is abuse of the state map, we need a better way to pass payloads from rules.)
-				state = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
-			}
-			rm.metrics.ReportRuleAlert(rule.ID)
-			message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
-			if err != nil {
-				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
-				continue
-			}
-
-			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
-				rm.metrics.ReportAlertSuppressed(rule.ID, "cooldown")
-				continue
-			}
-
-			// Emit OTEL log after cooldown so suppressed alerts are not recorded.
-			// Dedup key includes eventType to avoid collapsing distinct alert types.
-			dedupKey := rule.ID + "|" + enrichedEvent.ContainerID + "|" + string(eventType)
-			rm.alertLogDedupMu.Lock()
-			alreadySeen := rm.alertLogDedup.Contains(dedupKey)
-			if !alreadySeen {
-				rm.alertLogDedup.Add(dedupKey, struct{}{})
-			}
-			rm.alertLogDedupMu.Unlock()
-			if !alreadySeen {
-				var image, containerName string
-				if enrichable, ok := enrichedEvent.Event.(utils.EnrichEvent); ok {
-					image = enrichable.GetContainerImage()
-					containerName = enrichable.GetContainer()
-				}
-				alertCtx, alertSpan := otelsetup.Tracer().Start(rm.ctx, "rule.alert",
-					trace.WithAttributes(
-						attribute.String("rule.id", rule.ID),
-						attribute.String("rule.name", rule.Name),
-						attribute.String("k8s.namespace.name", namespace),
-						attribute.String("k8s.pod.name", pod),
-						attribute.String("container.id", enrichedEvent.ContainerID),
-						attribute.String("event.type", string(eventType)),
-					))
-				otelsetup.EmitAlertLogRecord(alertCtx, otelsetup.AlertLogAttrs{
-					RuleID:        rule.ID,
-					AlertType:     rule.Name,
-					ContainerID:   enrichedEvent.ContainerID,
-					ContainerName: containerName,
-					Namespace:     namespace,
-					PodName:       pod,
-					Image:         image,
-					EventType:     string(eventType),
-				})
-				alertSpan.End()
-			}
-
-			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum, state)
-			if ruleFailure == nil {
-				logger.L().Error("RuleManager - failed to create rule failure", helpers.String("rule", rule.Name),
-					helpers.String("message", message),
-					helpers.String("uniqueID", uniqueID),
-					helpers.String("enrichedEvent.EventType", string(eventType)),
-				)
-				continue
-			}
-
-			ruleFailure.SetWorkloadDetails(details)
-			rm.exporter.SendRuleAlert(ruleFailure)
-		}
 		rm.metrics.ReportRuleProcessed(rule.ID)
 	}
+}
+
+type evaluateArgs struct {
+	rule            typesv1.Rule
+	ruleExpressions []typesv1.RuleExpression
+	enrichedEvent   *events.EnrichedEvent
+	evalContext     map[string]any
+	eventType       utils.EventType
+	namespace       string
+	pod             string
+	details         string
+	apChecksum      string
+	tracker         *state.ReadTracker
+}
+
+// evaluateRuleAndAlert runs one rule's predicate and emits an alert if it fires.
+//
+// Split out of the rule loop so that every early exit in here is a return rather
+// than a continue, which leaves the caller free to run the rule's state writes
+// afterwards regardless of whether an alert was emitted or suppressed.
+func (rm *RuleManager) evaluateRuleAndAlert(a evaluateArgs) {
+	rule := a.rule
+	enrichedEvent := a.enrichedEvent
+	evalContext := a.evalContext
+	eventType := a.eventType
+	namespace := a.namespace
+	pod := a.pod
+	apChecksum := a.apChecksum
+
+	startTime := time.Now()
+	var shouldAlert bool
+	var err error
+	pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
+		shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, a.ruleExpressions)
+	})
+	evaluationTime := time.Since(startTime)
+	// Slow-path tracing: only emit a span when evaluation exceeded the threshold.
+	// This protects the hot path from unconditional tracing overhead on millions of events/sec.
+	// errCtx tracks the spanned context (when a rule.evaluate span fires) so the
+	// failure log below inherits its trace_id/span_id — otherwise falls back to rm.ctx.
+	errCtx := rm.ctx
+	if evaluationTime >= otelsetup.SlowEvalThreshold() {
+		evalCtx, span := otelsetup.Tracer().Start(rm.ctx, "rule.evaluate",
+			trace.WithAttributes(
+				attribute.String("rule.id", rule.ID),
+				attribute.String("event.type", string(eventType)),
+				attribute.String("container.id", enrichedEvent.ContainerID),
+				attribute.Float64("eval.duration_ms", float64(evaluationTime.Milliseconds())),
+				attribute.Bool("alert_fired", shouldAlert),
+			))
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		rm.metrics.ReportRuleEvaluationTime(evalCtx, rule.ID, eventType, evaluationTime)
+		span.End()
+		errCtx = evalCtx
+	} else {
+		rm.metrics.ReportRuleEvaluationTime(rm.ctx, rule.ID, eventType, evaluationTime)
+	}
+
+	if err != nil {
+		logger.L().Ctx(errCtx).Error("RuleManager.ReportEnrichedEvent - failed to evaluate rule", helpers.Error(err), helpers.String("rule", rule.ID), helpers.String("eventType", string(eventType)))
+		rm.metrics.ReportAlertSuppressed(rule.ID, "eval_error")
+		return
+	}
+
+	if !shouldAlert {
+		return
+	}
+
+	// ruleState, not "state": the local would otherwise shadow the state
+	// library package imported for the read tracker.
+	ruleState := rule.State
+	if eventType == utils.HTTPEventType { // TODO: Manage state evaluation in a better way (this is abuse of the state map, we need a better way to pass payloads from rules.)
+		ruleState = rm.evaluateHTTPPayloadState(rule.State, enrichedEvent)
+	}
+	rm.metrics.ReportRuleAlert(rule.ID)
+	message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
+	if err != nil {
+		logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
+		return
+	}
+
+	if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
+		rm.metrics.ReportAlertSuppressed(rule.ID, "cooldown")
+		return
+	}
+
+	// Emit OTEL log after cooldown so suppressed alerts are not recorded.
+	// Dedup key includes eventType to avoid collapsing distinct alert types.
+	dedupKey := rule.ID + "|" + enrichedEvent.ContainerID + "|" + string(eventType)
+	rm.alertLogDedupMu.Lock()
+	alreadySeen := rm.alertLogDedup.Contains(dedupKey)
+	if !alreadySeen {
+		rm.alertLogDedup.Add(dedupKey, struct{}{})
+	}
+	rm.alertLogDedupMu.Unlock()
+	if !alreadySeen {
+		var image, containerName string
+		if enrichable, ok := enrichedEvent.Event.(utils.EnrichEvent); ok {
+			image = enrichable.GetContainerImage()
+			containerName = enrichable.GetContainer()
+		}
+		alertCtx, alertSpan := otelsetup.Tracer().Start(rm.ctx, "rule.alert",
+			trace.WithAttributes(
+				attribute.String("rule.id", rule.ID),
+				attribute.String("rule.name", rule.Name),
+				attribute.String("k8s.namespace.name", namespace),
+				attribute.String("k8s.pod.name", pod),
+				attribute.String("container.id", enrichedEvent.ContainerID),
+				attribute.String("event.type", string(eventType)),
+			))
+		otelsetup.EmitAlertLogRecord(alertCtx, otelsetup.AlertLogAttrs{
+			RuleID:        rule.ID,
+			AlertType:     rule.Name,
+			ContainerID:   enrichedEvent.ContainerID,
+			ContainerName: containerName,
+			Namespace:     namespace,
+			PodName:       pod,
+			Image:         image,
+			EventType:     string(eventType),
+		})
+		alertSpan.End()
+	}
+
+	ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID, apChecksum, ruleState)
+	if ruleFailure == nil {
+		logger.L().Error("RuleManager - failed to create rule failure", helpers.String("rule", rule.Name),
+			helpers.String("message", message),
+			helpers.String("uniqueID", uniqueID),
+			helpers.String("enrichedEvent.EventType", string(eventType)),
+		)
+		return
+	}
+
+	ruleFailure.SetWorkloadDetails(a.details)
+	rm.exporter.SendRuleAlert(ruleFailure)
 }
 
 func (rm *RuleManager) enrichEventWithContext(enrichedEvent *events.EnrichedEvent) {
@@ -624,6 +714,18 @@ func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEv
 	for _, rule := range rules {
 		for _, expression := range rule.Expressions.RuleExpression {
 			if string(expression.EventType) == string(eventType) {
+				return true
+			}
+		}
+		// A write leg needs no ruleExpression for its event type -- that is what
+		// makes write-without-alerting possible. Without this, write-only legs are
+		// dropped before reaching the loop and the chain never forms.
+		//
+		// The string() casts are load-bearing: StateWrites carries
+		// armotypes.EventType while eventType is utils.EventType. They are the same
+		// strings, but not the same Go type.
+		for _, w := range rule.StateWrites {
+			if string(w.EventType) == string(eventType) {
 				return true
 			}
 		}

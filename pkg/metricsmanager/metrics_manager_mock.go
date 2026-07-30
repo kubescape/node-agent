@@ -97,3 +97,9 @@ func (m *MetricsMock) ObserveSBOMScanDuration(_ string, _ time.Duration)        
 func (m *MetricsMock) ReportSBOMScannerRestart()                                          {}
 func (m *MetricsMock) SetSBOMScannerReady(_ bool)                                         {}
 func (m *MetricsMock) ReportAlertSuppressed(_, _ string)                                  {}
+
+func (m *MetricsMock) ReportStateWrite(_, _ string)         {}
+func (m *MetricsMock) ReportStateWriteRejected(_, _ string) {}
+func (m *MetricsMock) ReportStateExpired(_ int)             {}
+func (m *MetricsMock) ReportStatePurged(_ int)              {}
+func (m *MetricsMock) ReportStateEntries(_ string, _ int)   {}

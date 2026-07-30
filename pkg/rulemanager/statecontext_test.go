@@ -1,0 +1,181 @@
+package rulemanager
+
+import (
+	"testing"
+	"time"
+
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/rulestate"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func execEnriched() *events.EnrichedEvent {
+	return &events.EnrichedEvent{
+		Event: &utils.StructEvent{EventType: utils.ExecveEventType},
+	}
+}
+
+// The subtle failure this exists to prevent: a rule whose ONLY reference to exec
+// is a stateWrites entry must still let exec events reach the rule loop. Without
+// it the first leg of every cross-event rule is filtered out before evaluation
+// and no chain ever forms.
+func TestIsSupportedEventType_WriteOnlyLegIsSupported(t *testing.T) {
+	rule := typesv1.Rule{
+		RuntimeRule: armotypes.RuntimeRule{
+			ID: "R1089",
+			StateWrites: []armotypes.StateWrite{{
+				EventType: armotypes.EventTypeExec,
+				Scope:     armotypes.StateScopeContainer,
+				Name:      "mount_exec",
+				TTL:       "10m",
+			}},
+		},
+		// Alerts on network only -- there is deliberately no exec expression.
+		Expressions: typesv1.RuleExpressions{
+			RuleExpression: []typesv1.RuleExpression{
+				{EventType: utils.NetworkEventType, Expression: "true"},
+			},
+		},
+	}
+
+	assert.True(t, isSupportedEventType([]typesv1.Rule{rule}, execEnriched()),
+		"an exec event must reach the loop for a rule that only WRITES on exec")
+}
+
+func TestIsSupportedEventType_UnrelatedEventStillUnsupported(t *testing.T) {
+	rule := typesv1.Rule{
+		RuntimeRule: armotypes.RuntimeRule{
+			ID: "R1089",
+			StateWrites: []armotypes.StateWrite{{
+				EventType: armotypes.EventTypeDNS,
+				Scope:     armotypes.StateScopeContainer,
+				Name:      "n",
+				TTL:       "10m",
+			}},
+		},
+		Expressions: typesv1.RuleExpressions{
+			RuleExpression: []typesv1.RuleExpression{
+				{EventType: utils.NetworkEventType, Expression: "true"},
+			},
+		},
+	}
+
+	assert.False(t, isSupportedEventType([]typesv1.Rule{rule}, execEnriched()),
+		"exec appears in neither the expressions nor the writes")
+}
+
+func TestIsSupportedEventType_ExpressionStillWorksWithoutWrites(t *testing.T) {
+	rule := typesv1.Rule{
+		RuntimeRule: armotypes.RuntimeRule{ID: "R1004"},
+		Expressions: typesv1.RuleExpressions{
+			RuleExpression: []typesv1.RuleExpression{
+				{EventType: utils.ExecveEventType, Expression: "true"},
+			},
+		},
+	}
+	assert.True(t, isSupportedEventType([]typesv1.Rule{rule}, execEnriched()))
+}
+
+func testRuleManager(t *testing.T) *RuleManager {
+	t.Helper()
+	cfg := config.Config{}
+	cfg.CelStateStore = rulestate.Config{
+		Enabled:                true,
+		MaxSize:                1000,
+		MaxEntriesPerContainer: 100,
+		MaxEntriesForHost:      100,
+		MaxTTL:                 30 * time.Minute,
+		AncestorMaxDepth:       8,
+	}
+	return &RuleManager{cfg: cfg}
+}
+
+func TestCompileStateWrites_NoWritesIsNil(t *testing.T) {
+	rm := testRuleManager(t)
+	compiled, scopeOf := rm.compileStateWrites(&typesv1.Rule{
+		RuntimeRule: armotypes.RuntimeRule{ID: "R1004"},
+	})
+	assert.Nil(t, compiled)
+	assert.Nil(t, scopeOf)
+}
+
+func TestCompileStateWrites_ValidClause(t *testing.T) {
+	rm := testRuleManager(t)
+	compiled, scopeOf := rm.compileStateWrites(&typesv1.Rule{
+		RuntimeRule: armotypes.RuntimeRule{
+			ID: "R1089",
+			StateWrites: []armotypes.StateWrite{{
+				EventType: armotypes.EventTypeExec,
+				Scope:     armotypes.StateScopeContainer,
+				Name:      "mount_exec",
+				Key:       "string(event.pid)",
+				TTL:       "10m",
+			}},
+		},
+	})
+	require.Len(t, compiled, 1)
+	assert.Equal(t, utils.ExecveEventType, compiled[0].EventType)
+	assert.Equal(t, map[string]armotypes.StateScope{
+		"mount_exec": armotypes.StateScopeContainer,
+	}, scopeOf)
+}
+
+// A malformed clause must degrade that one rule to non-correlating, not take down
+// evaluation for every other rule in the CRD.
+func TestCompileStateWrites_InvalidClauseDegradesToNoWrites(t *testing.T) {
+	rm := testRuleManager(t)
+	compiled, scopeOf := rm.compileStateWrites(&typesv1.Rule{
+		RuntimeRule: armotypes.RuntimeRule{
+			ID: "R1089",
+			StateWrites: []armotypes.StateWrite{{
+				EventType: armotypes.EventTypeExec,
+				Scope:     armotypes.StateScopeIdentity, // operator-only
+				Name:      "mount_exec",
+				TTL:       "10m",
+			}},
+		},
+	})
+	assert.Nil(t, compiled)
+	assert.Nil(t, scopeOf)
+}
+
+// TTL clamping has to use the configured max, not the write's own value.
+func TestCompileStateWrites_ClampsToConfiguredMaxTTL(t *testing.T) {
+	rm := testRuleManager(t)
+	compiled, _ := rm.compileStateWrites(&typesv1.Rule{
+		RuntimeRule: armotypes.RuntimeRule{
+			ID: "R1089",
+			StateWrites: []armotypes.StateWrite{{
+				EventType: armotypes.EventTypeExec,
+				Scope:     armotypes.StateScopeContainer,
+				Name:      "mount_exec",
+				TTL:       "99h",
+			}},
+		},
+	})
+	require.Len(t, compiled, 1)
+	assert.Equal(t, 30*time.Minute, compiled[0].TTL)
+}
+
+func TestHasWriteFor(t *testing.T) {
+	rm := testRuleManager(t)
+	compiled, _ := rm.compileStateWrites(&typesv1.Rule{
+		RuntimeRule: armotypes.RuntimeRule{
+			ID: "R1089",
+			StateWrites: []armotypes.StateWrite{{
+				EventType: armotypes.EventTypeExec,
+				Scope:     armotypes.StateScopeContainer,
+				Name:      "mount_exec",
+				TTL:       "10m",
+			}},
+		},
+	})
+	assert.True(t, hasWriteFor(compiled, utils.ExecveEventType))
+	assert.False(t, hasWriteFor(compiled, utils.NetworkEventType))
+	assert.False(t, hasWriteFor(nil, utils.ExecveEventType))
+}
