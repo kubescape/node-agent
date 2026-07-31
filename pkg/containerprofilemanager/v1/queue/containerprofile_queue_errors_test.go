@@ -10,6 +10,7 @@ import (
 	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file"
@@ -112,6 +113,17 @@ func TestClassifyFailure(t *testing.T) {
 			err:          fmt.Errorf("saving profile: %w", file.ObjectCompletedError),
 			wantKind:     failureTerminal,
 			wantSentinel: file.ObjectCompletedError,
+		},
+		{
+			// This is precisely the input whose classification changed from terminal to
+			// retryable: matchesSentinel's substring fallback used to run against every
+			// error shape, so a plain error whose text merely mentions the sentinel (e.g.
+			// relayed by a proxy or ingress, not by the apiserver as a StatusError) would
+			// misclassify as terminal and end learning. It is now restricted to
+			// *apierrors.StatusError, where the message is known to be a relayed sentinel.
+			name:     "non-StatusError error merely mentioning the sentinel is retryable",
+			err:      errors.New("proxy error: upstream said object is too large"),
+			wantKind: failureRetryable,
 		},
 		{
 			name:     "server timeout is retryable",
@@ -609,4 +621,83 @@ func TestNewQueueDataDefaultsMaxSplitDepth(t *testing.T) {
 		assert.Equal(t, DefaultMaxSplitDepth, qd.maxSplitDepth)
 		require.NoError(t, qd.Close())
 	}
+}
+
+// spyMetrics wraps MetricsNoop and records split/drop calls, so tests can assert on the
+// exact reasons reported without depending on GetQueueStats's internal counters alone.
+type spyMetrics struct {
+	*metricsmanager.MetricsNoop
+	mu      sync.Mutex
+	splits  int
+	dropped []string
+}
+
+func newSpyMetrics() *spyMetrics {
+	return &spyMetrics{MetricsNoop: &metricsmanager.MetricsNoop{}}
+}
+
+func (s *spyMetrics) ReportContainerProfileSplit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.splits++
+}
+
+func (s *spyMetrics) ReportContainerProfileChunkDropped(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropped = append(s.dropped, reason)
+}
+
+func (s *spyMetrics) droppedReasons() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.dropped...)
+}
+
+// TestEnqueueLocked_ReturnsErrQueueNotRunning pins the mechanism requeueSplit's first-half
+// failure path depends on: once the queue is no longer running, enqueueLocked refuses rather
+// than touching the underlying dque.
+func TestEnqueueLocked_ReturnsErrQueueNotRunning(t *testing.T) {
+	qd := startQueue(t, &alwaysFailingCreator{}, &recordingCallback{}, QueueConfig{})
+
+	qd.mu.Lock()
+	qd.running = false
+	qd.mu.Unlock()
+
+	err := qd.enqueueLocked(&QueuedContainerProfile{Profile: testProfile(), ContainerID: "container-id"})
+	assert.ErrorIs(t, err, ErrQueueNotRunning)
+	assert.Equal(t, 0, qd.GetQueueSize())
+}
+
+// TestRequeueSplit_QueueNotRunningDropsBothHalvesAndAttemptsStitch covers the path a previous
+// review found untested: when the queue stops running between a chunk being dequeued for
+// splitting and its halves being re-enqueued - reachable during Close while processAllItems is
+// still mid-flight - requeueSplit must not silently lose the chunk. Both the lost-halves case
+// and the stitch-also-failed case must be logged and counted, never swallowed.
+func TestRequeueSplit_QueueNotRunningDropsBothHalvesAndAttemptsStitch(t *testing.T) {
+	spy := newSpyMetrics()
+	qd := startQueue(t, &alwaysFailingCreator{}, &recordingCallback{}, QueueConfig{MetricsManager: spy})
+
+	parent := testProfile()
+	parent.Spec.Capabilities = []string{"cap-a", "cap-b"}
+	a, b, ok := splitProfile(parent)
+	require.True(t, ok, "fixture must be splittable")
+
+	queuedParent := &QueuedContainerProfile{
+		Profile:     parent,
+		ContainerID: "container-id",
+		Attempts:    2,
+		SplitDepth:  1,
+	}
+
+	qd.mu.Lock()
+	qd.running = false
+	qd.mu.Unlock()
+
+	qd.requeueSplit(queuedParent, a, b)
+
+	assert.Equal(t, 0, qd.GetQueueSize(), "neither half nor the stitch can land while the queue isn't running")
+	assert.Equal(t, int64(2), qd.chunksDropped.Load(),
+		"both the lost-halves case and the stitch-also-failed case must be counted")
+	assert.Equal(t, []string{string(dropReasonEnqueueFailed), string(dropReasonEnqueueFailed)}, spy.droppedReasons())
 }
