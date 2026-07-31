@@ -26,12 +26,17 @@ type MetricsManager interface {
 	ReportContainerProfileCacheHit(hit bool)
 	ReportContainerProfileReconcilerDuration(phase string, duration time.Duration)
 	ReportContainerProfileReconcilerEviction(reason string)
+	// ReportContainerProfileSplit counts chunks halved after a transport-level size rejection.
+	ReportContainerProfileSplit()
+	// ReportContainerProfileChunkDropped counts chunks discarded because they could not be
+	// split further, labeled by the queue's closed set of drop reasons.
+	ReportContainerProfileChunkDropped(reason string)
 
 	// Profile-projection metrics — always-on.
-	IncMissingProfileDataRequired(ruleID string)      // rule has profileDependency>0 but no profileDataRequired
-	IncProjectionUndeclaredLiteral(helper string)     // literal evaluated against a projected field not in spec
-	SetProjectionStaleEntries(count float64)          // cache entries whose SpecHash != currentSpecHash
-	SetProjectionUndeclaredRules(count float64)       // rules loaded with no profileDataRequired
+	IncMissingProfileDataRequired(ruleID string)  // rule has profileDependency>0 but no profileDataRequired
+	IncProjectionUndeclaredLiteral(helper string) // literal evaluated against a projected field not in spec
+	SetProjectionStaleEntries(count float64)      // cache entries whose SpecHash != currentSpecHash
+	SetProjectionUndeclaredRules(count float64)   // rules loaded with no profileDataRequired
 
 	// Profile-projection metrics — detailed (gated by profileProjection.detailedMetricsEnabled).
 	IncProjectionSpecCompile()

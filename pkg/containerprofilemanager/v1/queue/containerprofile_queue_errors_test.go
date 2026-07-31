@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file"
 	"github.com/stretchr/testify/assert"
@@ -39,6 +41,17 @@ func relayedStatusError(message string) error {
 	}}
 }
 
+// relayedStatusErrorWithCode is relayedStatusError but with an explicit HTTP code, so tests
+// can reproduce a 413 whose body happens to relay a sentinel's text.
+func relayedStatusErrorWithCode(code int, message string) error {
+	return &apierrors.StatusError{ErrStatus: metav1.Status{
+		Status:  metav1.StatusFailure,
+		Code:    int32(code),
+		Reason:  metav1.StatusReasonUnknown,
+		Message: message,
+	}}
+}
+
 func TestClassifyFailure(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -53,9 +66,18 @@ func TestClassifyFailure(t *testing.T) {
 		},
 		{
 			// The ISO Gruppe regression: QueueManager rejects on Content-Length with a
-			// plain-text 413, so the error carries neither sentinel.
-			name:         "http 413 from QueueManager is terminal and reported as too large",
-			err:          genericStatusError(http.StatusRequestEntityTooLarge),
+			// plain-text 413, so the error carries neither sentinel. A bare 413 is a
+			// transport rejection of one delta, not an aggregate verdict, so it is split
+			// rather than terminal.
+			name:     "bare http 413 is split, not terminal",
+			err:      genericStatusError(http.StatusRequestEntityTooLarge),
+			wantKind: failureSplit,
+		},
+		{
+			// Pins the §5.1 reordering: an authoritative sentinel always wins over a bare
+			// status code, even when that status code happens to be 413.
+			name:         "413 that relays ObjectTooLargeError is terminal, not split",
+			err:          relayedStatusErrorWithCode(http.StatusRequestEntityTooLarge, file.ObjectTooLargeError.Error()),
 			wantKind:     failureTerminal,
 			wantSentinel: file.ObjectTooLargeError,
 		},
@@ -129,9 +151,10 @@ func TestClassifyFailure(t *testing.T) {
 	}
 }
 
-// TestClassifyFailure_413IsNotRequeued guards the specific regression: before this fix a
-// 413 matched neither sentinel by string equality and was requeued forever.
-func TestClassifyFailure_413IsNotRequeued(t *testing.T) {
+// TestClassifyFailure_413IsSplitNotTerminal guards the specific regression: before this fix a
+// 413 matched neither sentinel by string equality and was requeued forever; after it, a bare
+// 413 must classify as failureSplit (not failureTerminal, and not failureRetryable either).
+func TestClassifyFailure_413IsSplitNotTerminal(t *testing.T) {
 	err := genericStatusError(http.StatusRequestEntityTooLarge)
 
 	// Establish that the old exact-equality check really does miss this error, so the
@@ -140,21 +163,25 @@ func TestClassifyFailure_413IsNotRequeued(t *testing.T) {
 	assert.NotEqual(t, file.ObjectCompletedError.Error(), err.Error())
 
 	kind, reported := classifyFailure(err)
-	assert.Equal(t, failureTerminal, kind)
-	assert.Equal(t, file.ObjectTooLargeError, reported)
+	assert.Equal(t, failureSplit, kind)
+	assert.Equal(t, err, reported)
 }
 
-// alwaysFailingCreator returns the same error for every create and counts the calls.
+// alwaysFailingCreator returns the same error for every create, counts the calls, and records
+// every profile it was asked to create (regardless of outcome) so tests can inspect what the
+// queue actually attempted to send - including dropChunk's replacement stitch chunks.
 type alwaysFailingCreator struct {
-	mu    sync.Mutex
-	err   error
-	calls int
+	mu       sync.Mutex
+	err      error
+	calls    int
+	profiles []*v1beta1.ContainerProfile
 }
 
-func (c *alwaysFailingCreator) CreateContainerProfileDirect(*v1beta1.ContainerProfile) error {
+func (c *alwaysFailingCreator) CreateContainerProfileDirect(p *v1beta1.ContainerProfile) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.calls++
+	c.profiles = append(c.profiles, p.DeepCopy())
 	return c.err
 }
 
@@ -162,6 +189,39 @@ func (c *alwaysFailingCreator) callCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.calls
+}
+
+func (c *alwaysFailingCreator) attemptedProfiles() []*v1beta1.ContainerProfile {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]*v1beta1.ContainerProfile(nil), c.profiles...)
+}
+
+// sizeGatedCreator rejects a create with a bare 413 while the profile still has more than
+// threshold partitionable elements, and records everything it accepts. This gates on element
+// count rather than bytes or elapsed time, so convergence is exact and deterministic.
+type sizeGatedCreator struct {
+	mu        sync.Mutex
+	threshold int
+	accepted  []*v1beta1.ContainerProfile
+}
+
+func (c *sizeGatedCreator) CreateContainerProfileDirect(p *v1beta1.ContainerProfile) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if countPartitionableElements(&p.Spec) > c.threshold {
+		return genericStatusError(http.StatusRequestEntityTooLarge)
+	}
+
+	c.accepted = append(c.accepted, p.DeepCopy())
+	return nil
+}
+
+func (c *sizeGatedCreator) acceptedProfiles() []*v1beta1.ContainerProfile {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]*v1beta1.ContainerProfile(nil), c.accepted...)
 }
 
 // recordingCallback captures the errors the queue reports through ErrorCallback.
@@ -182,18 +242,29 @@ func (r *recordingCallback) captured() []error {
 	return append([]error(nil), r.errors...)
 }
 
-func startQueue(t *testing.T, creator *alwaysFailingCreator, cb ErrorCallback, maxAttempts int) *QueueData {
+// startQueue starts a QueueData for testing. cfg is an overlay: any zero-valued field is
+// filled with a fast test default. ErrorCallback is always taken from cb, not cfg.
+func startQueue(t *testing.T, creator storage.ProfileCreator, cb ErrorCallback, cfg QueueConfig) *QueueData {
 	t.Helper()
 
-	qd, err := NewQueueData(context.Background(), creator, QueueConfig{
-		QueueName:       "test-queue",
-		QueueDir:        t.TempDir(),
-		MaxQueueSize:    10,
-		MaxAttempts:     maxAttempts,
-		RetryInterval:   20 * time.Millisecond,
-		ItemsPerSegment: 10,
-		ErrorCallback:   cb,
-	})
+	if cfg.QueueName == "" {
+		cfg.QueueName = "test-queue"
+	}
+	if cfg.QueueDir == "" {
+		cfg.QueueDir = t.TempDir()
+	}
+	if cfg.MaxQueueSize == 0 {
+		cfg.MaxQueueSize = 10
+	}
+	if cfg.RetryInterval == 0 {
+		cfg.RetryInterval = 20 * time.Millisecond
+	}
+	if cfg.ItemsPerSegment == 0 {
+		cfg.ItemsPerSegment = 10
+	}
+	cfg.ErrorCallback = cb
+
+	qd, err := NewQueueData(context.Background(), creator, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = qd.Close() })
 
@@ -201,36 +272,279 @@ func startQueue(t *testing.T, creator *alwaysFailingCreator, cb ErrorCallback, m
 	return qd
 }
 
+// testProfile returns a minimal but production-shaped profile: a real (previousReportTimestamp,
+// reportTimestamp] pair built from actual time.Now() calls (never time.Date, which would mask
+// the monotonic-suffix bug - see parseReportTimestamp) plus a ReportSeriesIdMetadataKey
+// annotation. Without these, queue-level split tests would silently only exercise
+// chainHalves's refuse-and-drop path while appearing to pass.
+//
+// The name already carries a one-time-slug suffix (base + "-" + 32 hex chars), matching what
+// every real profile name looks like (GetOneTimeSlug). freshOneTimeSlug regenerates a
+// same-length suffix on top of it, so splitting never inflates the name - a short, sluggless
+// name would make the regenerated 32-hex suffix dwarf a small partitionable payload and trip
+// the byte-progress guard for reasons that have nothing to do with what a test is checking.
 func testProfile() *v1beta1.ContainerProfile {
+	prev := time.Now().Add(-time.Hour)
+	rt := time.Now()
+
 	return &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cattle-cluster-agent", Namespace: "cattle-system"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cattle-cluster-agent-0123456789abcdef0123456789abcdef",
+			Namespace: "cattle-system",
+			Annotations: map[string]string{
+				helpersv1.ReportSeriesIdMetadataKey:          "test-series-id",
+				helpersv1.PreviousReportTimestampMetadataKey: prev.String(),
+				helpersv1.ReportTimestampMetadataKey:         rt.String(),
+			},
+		},
 	}
 }
 
-// TestQueueEndsLearningOnHTTP413 is the regression test for the ISO Gruppe report: an
-// oversized profile rejected by storage's QueueManager must end learning instead of being
-// retried every RetryInterval forever.
-func TestQueueEndsLearningOnHTTP413(t *testing.T) {
+// trackPeakQueueSize polls qd's queue size in the background and reports the maximum observed.
+// Split tests use it to assert the queue never actually hit MaxQueueSize during the run, since
+// hitting the cap would silently invalidate a "no data lost" assertion via LRU eviction.
+func trackPeakQueueSize(qd *QueueData) (peak func() int, stop func()) {
+	var mu sync.Mutex
+	var max int
+	var once sync.Once
+
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(2 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if s := qd.GetQueueSize(); s > max {
+					mu.Lock()
+					max = s
+					mu.Unlock()
+				}
+			}
+		}
+	}()
+
+	return func() int {
+			mu.Lock()
+			defer mu.Unlock()
+			return max
+		}, func() {
+			once.Do(func() { close(done) })
+		}
+}
+
+// TestQueueSplitsProfileOnHTTP413 replaces TestQueueEndsLearningOnHTTP413: after the fix, a
+// bare 413 no longer ends learning. The queue must instead halve the rejected chunk and keep
+// retrying both halves until storage accepts them.
+func TestQueueSplitsProfileOnHTTP413(t *testing.T) {
+	profile := testProfile()
+	profile.Spec.Capabilities = []string{"cap-0", "cap-1", "cap-2", "cap-3", "cap-4", "cap-5", "cap-6", "cap-7"}
+
+	creator := &sizeGatedCreator{threshold: 2}
+	cb := &recordingCallback{}
+	qd := startQueue(t, creator, cb, QueueConfig{MaxQueueSize: 32, RetryInterval: 20 * time.Millisecond})
+
+	peak, stop := trackPeakQueueSize(qd)
+	defer stop()
+
+	require.NoError(t, qd.Enqueue(profile, "container-id"))
+
+	assert.Eventually(t, func() bool {
+		return qd.GetQueueSize() == 0 && len(creator.acceptedProfiles()) > 0
+	}, 5*time.Second, 20*time.Millisecond, "expected the split chunks to eventually be accepted")
+
+	stop()
+	accepted := creator.acceptedProfiles()
+	require.NotEmpty(t, accepted)
+
+	baseName, _ := file.SplitProfileName(profile.Name)
+	seen := map[string]bool{}
+	var union []string
+	var rows []tsRow
+
+	for _, p := range accepted {
+		for _, c := range p.Spec.Capabilities {
+			assert.False(t, seen[c], "capability %q duplicated across accepted chunks", c)
+			seen[c] = true
+			union = append(union, c)
+		}
+
+		name, _ := file.SplitProfileName(p.Name)
+		assert.Equal(t, baseName, name, "every accepted chunk must share the original's aggregate base name")
+
+		rows = append(rows, rowOf(p))
+	}
+
+	assert.ElementsMatch(t, profile.Spec.Capabilities, union, "the union of accepted chunks must equal the original set exactly")
+	assert.Empty(t, cb.captured(), "learning must never end on a 413 path")
+
+	sortRowsDesc(rows)
+	assertChainIsLinear(t, rows,
+		profile.Annotations[helpersv1.PreviousReportTimestampMetadataKey],
+		profile.Annotations[helpersv1.ReportTimestampMetadataKey])
+
+	golden := consolidateGolden(rows)
+	require.Len(t, golden, 1)
+
+	assert.Less(t, peak(), 32, "the queue must never reach MaxQueueSize during the run")
+}
+
+// TestQueueDropsUnsplittableProfileOnHTTP413 is the floor case and the single most important
+// regression guard for D2: a chunk that cannot be split further must still not end learning.
+func TestQueueDropsUnsplittableProfileOnHTTP413(t *testing.T) {
+	profile := testProfile()
+	profile.Spec.Capabilities = []string{"only"}
+	profile.Spec.SeccompProfile = v1beta1.SingleSeccompProfile{Name: "seccomp-1"}
+	profile.Spec.ImageID = "sha256:deadbeef"
+	profile.Spec.ImageTag = "v1.2.3"
+
 	creator := &alwaysFailingCreator{err: genericStatusError(http.StatusRequestEntityTooLarge)}
 	cb := &recordingCallback{}
-	qd := startQueue(t, creator, cb, DefaultMaxAttempts)
+	qd := startQueue(t, creator, cb, QueueConfig{MaxQueueSize: 8})
 
-	require.NoError(t, qd.Enqueue(testProfile(), "container-id"))
+	peak, stop := trackPeakQueueSize(qd)
+	defer stop()
 
-	// The item is consumed once and reported as too large.
+	require.NoError(t, qd.Enqueue(profile, "container-id"))
+
 	assert.Eventually(t, func() bool {
-		return len(cb.captured()) == 1
-	}, 2*time.Second, 10*time.Millisecond, "expected the profile to be reported through OnQueueError")
+		return qd.GetQueueSize() == 0 && creator.callCount() >= 2
+	}, 2*time.Second, 10*time.Millisecond, "expected the original and its replacement stitch to both be attempted")
 
-	assert.Equal(t, []error{file.ObjectTooLargeError}, cb.captured(),
-		"the sentinel must be reported so the manager sets status=too-large and ends learning")
-	assert.Equal(t, 0, qd.GetQueueSize(), "the rejected profile must not stay in the queue")
-
-	// Give the processor several more ticks to prove there is no retry loop.
-	callsAfterReport := creator.callCount()
+	// No further attempts: the stitch is never itself re-stitched.
+	callsAfterDrain := creator.callCount()
 	time.Sleep(200 * time.Millisecond)
-	assert.Equal(t, callsAfterReport, creator.callCount(), "a 413 must not be retried")
-	assert.Equal(t, 1, creator.callCount(), "the profile must be attempted exactly once")
+	assert.Equal(t, callsAfterDrain, creator.callCount())
+
+	stop()
+	attempts := creator.attemptedProfiles()
+	require.Len(t, attempts, 2, "exactly the original and its stitch replacement must be attempted")
+
+	original := attempts[0]
+	assert.Equal(t, []string{"only"}, original.Spec.Capabilities)
+
+	stitch := attempts[1]
+	assert.Equal(t, profile.Spec.SeccompProfile, stitch.Spec.SeccompProfile)
+	assert.Equal(t, profile.Spec.ImageID, stitch.Spec.ImageID)
+	assert.Equal(t, profile.Spec.ImageTag, stitch.Spec.ImageTag)
+	assert.Empty(t, stitch.Spec.Capabilities)
+	assert.Equal(t, profile.Annotations[helpersv1.PreviousReportTimestampMetadataKey], stitch.Annotations[helpersv1.PreviousReportTimestampMetadataKey])
+	assert.Equal(t, profile.Annotations[helpersv1.ReportTimestampMetadataKey], stitch.Annotations[helpersv1.ReportTimestampMetadataKey])
+
+	assert.Empty(t, cb.captured(), "learning must never end on a 413 path, even in the floor case")
+	assert.Equal(t, 0, qd.GetQueueSize())
+	assert.Less(t, peak(), 8)
+}
+
+// TestQueueRespectsMaxSplitDepth bounds the split storm: with MaxSplitDepth set low, a
+// richly-populated profile that always 413s must still terminate rather than split forever.
+func TestQueueRespectsMaxSplitDepth(t *testing.T) {
+	const maxSplitDepth = 2
+
+	profile := testProfile()
+	profile.Spec.Capabilities = []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+
+	creator := &alwaysFailingCreator{err: genericStatusError(http.StatusRequestEntityTooLarge)}
+	cb := &recordingCallback{}
+	qd := startQueue(t, creator, cb, QueueConfig{MaxQueueSize: 64, MaxSplitDepth: maxSplitDepth})
+
+	peak, stop := trackPeakQueueSize(qd)
+	defer stop()
+
+	require.NoError(t, qd.Enqueue(profile, "container-id"))
+
+	// The queue can transiently read size 0 between an item being dequeued and its split
+	// children (or stitch replacement) being re-enqueued within the same tick, so require
+	// size 0 to hold across a settle window before treating the queue as actually drained -
+	// otherwise this flakes by snapshotting callCount mid-tree-expansion.
+	require.Eventually(t, func() bool {
+		if qd.GetQueueSize() != 0 {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+		return qd.GetQueueSize() == 0
+	}, 5*time.Second, 20*time.Millisecond, "expected the queue to drain rather than split forever")
+
+	// The tree bounded by MaxSplitDepth, plus one stitch per dropped leaf, must stop growing.
+	callsAfterDrain := creator.callCount()
+	time.Sleep(200 * time.Millisecond)
+	assert.Equal(t, callsAfterDrain, creator.callCount(), "attempts must stop once the queue has drained")
+
+	stop()
+	assert.LessOrEqual(t, creator.callCount(), 1<<(maxSplitDepth+2),
+		"total attempts must be bounded by the depth cap, not grow without limit")
+	assert.Empty(t, cb.captured())
+	assert.Less(t, peak(), 64)
+}
+
+// TestQueueDoesNotStitchAStitch is the B2 regression guard: without the IsStitch check, a
+// dropped stitch would itself be stitched, forever, since neither drop path touches Attempts.
+func TestQueueDoesNotStitchAStitch(t *testing.T) {
+	profile := testProfile()
+	profile.Spec.Capabilities = []string{"only"} // floor case: cannot split, must be dropped
+
+	creator := &alwaysFailingCreator{err: genericStatusError(http.StatusRequestEntityTooLarge)}
+	cb := &recordingCallback{}
+	qd := startQueue(t, creator, cb, QueueConfig{MaxQueueSize: 8, RetryInterval: 10 * time.Millisecond})
+
+	require.NoError(t, qd.Enqueue(profile, "container-id"))
+
+	assert.Eventually(t, func() bool {
+		return qd.GetQueueSize() == 0 && creator.callCount() >= 2
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Run for many more ticks than a runaway stitch->413->stitch loop would need to explode.
+	time.Sleep(300 * time.Millisecond)
+
+	assert.LessOrEqual(t, creator.callCount(), 3, "a dropped stitch must never itself be re-stitched")
+	assert.Equal(t, 0, qd.GetQueueSize(), "the queue must drain rather than grow without limit")
+	assert.Empty(t, cb.captured())
+}
+
+// TestQueuePersistsSplitDepth closes §8 assumption 4: SplitDepth and IsStitch must survive
+// dque's gob-based persistence, or IsStitch failing to persist would silently restore the B2
+// stitch->413->stitch loop across a restart.
+func TestQueuePersistsSplitDepth(t *testing.T) {
+	dir := t.TempDir()
+	creator := &alwaysFailingCreator{}
+	cb := &recordingCallback{}
+
+	cfg := QueueConfig{
+		QueueName:       "test-queue",
+		QueueDir:        dir,
+		MaxQueueSize:    10,
+		RetryInterval:   time.Hour, // long enough that the processor never runs during this test
+		ItemsPerSegment: 10,
+		ErrorCallback:   cb,
+	}
+
+	qd, err := NewQueueData(context.Background(), creator, cfg)
+	require.NoError(t, err)
+
+	item := &QueuedContainerProfile{
+		Profile:     testProfile(),
+		ContainerID: "container-id",
+		Attempts:    5,
+		SplitDepth:  3,
+		IsStitch:    true,
+	}
+	require.NoError(t, qd.queue.Enqueue(item))
+	require.NoError(t, qd.Close())
+
+	reopened, err := NewQueueData(context.Background(), creator, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reopened.Close() })
+
+	iface, err := reopened.queue.Dequeue()
+	require.NoError(t, err)
+	got, ok := iface.(*QueuedContainerProfile)
+	require.True(t, ok)
+
+	assert.Equal(t, 3, got.SplitDepth)
+	assert.True(t, got.IsStitch)
+	assert.Equal(t, 5, got.Attempts)
 }
 
 // TestQueueDropsProfileAfterMaxAttempts covers the general case: any error that never
@@ -240,7 +554,7 @@ func TestQueueDropsProfileAfterMaxAttempts(t *testing.T) {
 
 	creator := &alwaysFailingCreator{err: errors.New("dial tcp 10.96.0.1:443: connect: connection refused")}
 	cb := &recordingCallback{}
-	qd := startQueue(t, creator, cb, maxAttempts)
+	qd := startQueue(t, creator, cb, QueueConfig{MaxAttempts: maxAttempts})
 
 	require.NoError(t, qd.Enqueue(testProfile(), "container-id"))
 
@@ -277,6 +591,22 @@ func TestNewQueueDataDefaultsMaxAttempts(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, DefaultMaxAttempts, qd.maxAttempts)
+		require.NoError(t, qd.Close())
+	}
+}
+
+// TestNewQueueDataDefaultsMaxSplitDepth pins the default so an unset config cannot restore
+// unbounded splitting.
+func TestNewQueueDataDefaultsMaxSplitDepth(t *testing.T) {
+	for _, configured := range []int{0, -1} {
+		qd, err := NewQueueData(context.Background(), &alwaysFailingCreator{}, QueueConfig{
+			QueueName:       "test-queue",
+			QueueDir:        t.TempDir(),
+			ItemsPerSegment: 10,
+			MaxSplitDepth:   configured,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, DefaultMaxSplitDepth, qd.maxSplitDepth)
 		require.NoError(t, qd.Close())
 	}
 }
