@@ -40,6 +40,8 @@ type OTELMetricsManager struct {
 	profileCacheHitTotal     metric.Int64Counter
 	reconcilerDuration       metric.Float64Histogram
 	reconcilerEvictionsTotal metric.Int64Counter
+	profileSplitTotal        metric.Int64Counter
+	profileChunkDroppedTotal metric.Int64Counter
 
 	// Rule projection — always-on
 	projMissingDeclTotal   metric.Int64Counter
@@ -170,6 +172,10 @@ func NewOTELMetricsManager(ownContainerID string) *OTELMetricsManager {
 		"ContainerProfile reconciler phase duration", "s", defBuckets)
 	m.reconcilerEvictionsTotal = mustCounter("node_agent.profile.reconciler.evictions.total",
 		"ContainerProfile cache evictions by reason")
+	m.profileSplitTotal = mustCounter("node_agent.profile.split.total",
+		"ContainerProfile chunks halved after a transport-level size rejection")
+	m.profileChunkDroppedTotal = mustCounter("node_agent.profile.chunk.dropped.total",
+		"ContainerProfile chunks dropped because they could not be split further, by reason")
 
 	m.projMissingDeclTotal = mustCounter("node_agent.rule.projection.missing_decl.total",
 		"Rules with profileDependency>0 but no profileDataRequired declaration")
@@ -359,6 +365,16 @@ func (m *OTELMetricsManager) ReportContainerProfileReconcilerDuration(phase stri
 
 func (m *OTELMetricsManager) ReportContainerProfileReconcilerEviction(reason string) {
 	m.reconcilerEvictionsTotal.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("reason", reason),
+	))
+}
+
+func (m *OTELMetricsManager) ReportContainerProfileSplit() {
+	m.profileSplitTotal.Add(context.Background(), 1)
+}
+
+func (m *OTELMetricsManager) ReportContainerProfileChunkDropped(reason string) {
+	m.profileChunkDroppedTotal.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("reason", reason),
 	))
 }

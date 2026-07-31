@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,16 +12,26 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// MockProfileCreator implements ProfileCreator for testing
+// MockProfileCreator implements ProfileCreator for testing.
+//
+// ShouldFail and FailCount are set once at construction, before the queue's processor
+// goroutine starts, so they need no synchronization. CallCount and CreatedProfiles are
+// written by that goroutine and read by the test goroutine after a time.Sleep, so they are
+// guarded by mu.
 type MockProfileCreator struct {
-	CreatedProfiles []*v1beta1.ContainerProfile
-	ShouldFail      bool
-	FailCount       int
-	CallCount       int
+	mu              sync.Mutex
+	createdProfiles []*v1beta1.ContainerProfile
+	callCount       int
+
+	ShouldFail bool
+	FailCount  int
 }
 
 func (m *MockProfileCreator) CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error {
-	m.CallCount++
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.callCount++
 
 	if m.ShouldFail {
 		if m.FailCount > 0 {
@@ -29,14 +40,28 @@ func (m *MockProfileCreator) CreateContainerProfileDirect(profile *v1beta1.Conta
 		}
 		// If FailCount is 0 but ShouldFail is true, continue failing (unless FailCount was initially set)
 		// This allows for "fail N times then succeed" behavior
-		if m.FailCount == 0 && m.CallCount <= 1 {
+		if m.FailCount == 0 && m.callCount <= 1 {
 			// This means ShouldFail was set but no specific FailCount, so always fail
 			return fmt.Errorf("mock always fails")
 		}
 	}
 
-	m.CreatedProfiles = append(m.CreatedProfiles, profile)
+	m.createdProfiles = append(m.createdProfiles, profile)
 	return nil
+}
+
+// CreatedProfiles returns a snapshot of every profile successfully created so far.
+func (m *MockProfileCreator) CreatedProfiles() []*v1beta1.ContainerProfile {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]*v1beta1.ContainerProfile(nil), m.createdProfiles...)
+}
+
+// CallCount returns how many times CreateContainerProfileDirect has been called so far.
+func (m *MockProfileCreator) CallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.callCount
 }
 
 func TestQueueBasicOperations(t *testing.T) {
@@ -90,8 +115,8 @@ func TestQueueBasicOperations(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Check that profile was created
-	if len(mockCreator.CreatedProfiles) != 1 {
-		t.Errorf("Expected 1 created profile, got %d", len(mockCreator.CreatedProfiles))
+	if len(mockCreator.CreatedProfiles()) != 1 {
+		t.Errorf("Expected 1 created profile, got %d", len(mockCreator.CreatedProfiles()))
 	}
 
 	// Check queue is empty after successful processing
@@ -204,13 +229,13 @@ func TestQueueRetryMechanism(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Should have been called at least 3 times (2 failures + 1 success)
-	if mockCreator.CallCount < 3 {
-		t.Errorf("Expected at least 3 calls (2 failures + 1 success), got %d", mockCreator.CallCount)
+	if mockCreator.CallCount() < 3 {
+		t.Errorf("Expected at least 3 calls (2 failures + 1 success), got %d", mockCreator.CallCount())
 	}
 
 	// Should eventually succeed
-	if len(mockCreator.CreatedProfiles) != 1 {
-		t.Errorf("Expected 1 successfully created profile, got %d", len(mockCreator.CreatedProfiles))
+	if len(mockCreator.CreatedProfiles()) != 1 {
+		t.Errorf("Expected 1 successfully created profile, got %d", len(mockCreator.CreatedProfiles()))
 	}
 
 	// Queue should be empty after success
@@ -281,13 +306,13 @@ func TestQueuePersistence(t *testing.T) {
 	time.Sleep(1200 * time.Millisecond)
 
 	// Should have processed the persisted item
-	if len(mockCreator2.CreatedProfiles) != 1 {
-		t.Errorf("Expected 1 created profile after reload, got %d", len(mockCreator2.CreatedProfiles))
+	if len(mockCreator2.CreatedProfiles()) != 1 {
+		t.Errorf("Expected 1 created profile after reload, got %d", len(mockCreator2.CreatedProfiles()))
 		return // Avoid panic on next line
 	}
 
-	if mockCreator2.CreatedProfiles[0].Name != "persistence-test-profile" {
-		t.Errorf("Expected profile name 'persistence-test-profile', got '%s'", mockCreator2.CreatedProfiles[0].Name)
+	if mockCreator2.CreatedProfiles()[0].Name != "persistence-test-profile" {
+		t.Errorf("Expected profile name 'persistence-test-profile', got '%s'", mockCreator2.CreatedProfiles()[0].Name)
 	}
 }
 
@@ -460,8 +485,8 @@ func TestQueueConcurrentOperations(t *testing.T) {
 
 	// Check that all items were processed
 	expectedTotal := numGoroutines * itemsPerGoroutine
-	if len(mockCreator.CreatedProfiles) != expectedTotal {
-		t.Errorf("Expected %d created profiles, got %d", expectedTotal, len(mockCreator.CreatedProfiles))
+	if len(mockCreator.CreatedProfiles()) != expectedTotal {
+		t.Errorf("Expected %d created profiles, got %d", expectedTotal, len(mockCreator.CreatedProfiles()))
 	}
 
 	// Queue should be empty after processing
@@ -591,8 +616,8 @@ func TestQueueWithDifferentConfigurations(t *testing.T) {
 			// Wait based on retry interval
 			time.Sleep(tc.config.RetryInterval + 50*time.Millisecond)
 
-			if len(mockCreator.CreatedProfiles) != 1 {
-				t.Errorf("Expected 1 created profile with config %s, got %d", tc.name, len(mockCreator.CreatedProfiles))
+			if len(mockCreator.CreatedProfiles()) != 1 {
+				t.Errorf("Expected 1 created profile with config %s, got %d", tc.name, len(mockCreator.CreatedProfiles()))
 			}
 		})
 	}

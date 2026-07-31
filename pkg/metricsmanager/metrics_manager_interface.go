@@ -26,6 +26,11 @@ type MetricsManager interface {
 	ReportContainerProfileCacheHit(hit bool)
 	ReportContainerProfileReconcilerDuration(phase string, duration time.Duration)
 	ReportContainerProfileReconcilerEviction(reason string)
+	// ReportContainerProfileSplit counts chunks halved after a transport-level size rejection.
+	ReportContainerProfileSplit()
+	// ReportContainerProfileChunkDropped counts chunks discarded because they could not be
+	// split further, labeled by the queue's closed set of drop reasons.
+	ReportContainerProfileChunkDropped(reason string)
 
 	// Profile-projection metrics — always-on.
 	IncMissingProfileDataRequired(ruleID string)  // rule has profileDependency>0 but no profileDataRequired

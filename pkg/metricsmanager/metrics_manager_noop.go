@@ -19,8 +19,7 @@ func (m *MetricsNoop) ReportFailedEvent()             {}
 func (m *MetricsNoop) ReportRuleProcessed(_ string)   {}
 func (m *MetricsNoop) ReportRulePrefiltered(_ string) {}
 func (m *MetricsNoop) ReportRuleAlert(_ string)       {}
-func (m *MetricsNoop) ReportRuleEvaluationTime(_ context.Context, _ string, _ utils.EventType, _ time.Duration) {
-}
+func (m *MetricsNoop) ReportRuleEvaluationTime(_ context.Context, _ string, _ utils.EventType, _ time.Duration) {}
 func (m *MetricsNoop) ReportContainerStart()                                              {}
 func (m *MetricsNoop) ReportContainerStop()                                               {}
 func (m *MetricsNoop) ReportDedupEvent(_ utils.EventType, _ bool)                         {}
@@ -29,6 +28,8 @@ func (m *MetricsNoop) SetContainerProfileCacheEntries(_ string, _ float64)      
 func (m *MetricsNoop) ReportContainerProfileCacheHit(_ bool)                              {}
 func (m *MetricsNoop) ReportContainerProfileReconcilerDuration(_ string, _ time.Duration) {}
 func (m *MetricsNoop) ReportContainerProfileReconcilerEviction(_ string)                  {}
+func (m *MetricsNoop) ReportContainerProfileSplit()                                       {}
+func (m *MetricsNoop) ReportContainerProfileChunkDropped(_ string)                        {}
 func (m *MetricsNoop) IncMissingProfileDataRequired(_ string)                             {}
 func (m *MetricsNoop) IncProjectionUndeclaredLiteral(_ string)                            {}
 func (m *MetricsNoop) SetProjectionStaleEntries(_ float64)                                {}
