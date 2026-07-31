@@ -68,7 +68,6 @@ func (m *MetricsMock) ReportContainerStart() {}
 func (m *MetricsMock) ReportContainerStop() {}
 
 func (m *MetricsMock) ReportDedupEvent(eventType utils.EventType, duplicate bool)         {}
-func (m *MetricsMock) ReportDedupEvent(eventType utils.EventType, duplicate bool)         {}
 func (m *MetricsMock) ReportContainerProfileLegacyLoad(_, _ string)                       {}
 func (m *MetricsMock) SetContainerProfileCacheEntries(_ string, _ float64)                {}
 func (m *MetricsMock) ReportContainerProfileCacheHit(_ bool)                              {}

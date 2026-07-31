@@ -46,7 +46,6 @@ type PrometheusMetric struct {
 	rulePrefilteredCounter *prometheus.CounterVec
 	alertCounter           *prometheus.CounterVec
 	ruleEvaluationTime     *prometheus.HistogramVec
-	ruleEvaluationTime     *prometheus.HistogramVec
 
 	// Program ID metrics
 	programRuntimeGauge       *prometheus.GaugeVec
@@ -109,10 +108,7 @@ type PrometheusMetric struct {
 
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache            map[string]prometheus.Counter
-	ruleCounterCache            map[string]prometheus.Counter
 	rulePrefilteredCounterCache map[string]prometheus.Counter
-	alertCounterCache           map[string]prometheus.Counter
-	counterCacheMutex           sync.RWMutex
 	alertCounterCache           map[string]prometheus.Counter
 	counterCacheMutex           sync.RWMutex
 }
