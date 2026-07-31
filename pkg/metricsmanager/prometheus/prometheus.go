@@ -25,27 +25,27 @@ const (
 var _ metricsmanager.MetricsManager = (*PrometheusMetric)(nil)
 
 type PrometheusMetric struct {
-	ebpfExecCounter       prometheus.Counter
-	ebpfOpenCounter       prometheus.Counter
-	ebpfNetworkCounter    prometheus.Counter
-	ebpfDNSCounter        prometheus.Counter
-	ebpfSyscallCounter    prometheus.Counter
-	ebpfCapabilityCounter prometheus.Counter
-	ebpfRandomXCounter    prometheus.Counter
-	ebpfFailedCounter     prometheus.Counter
-	ebpfSymlinkCounter    prometheus.Counter
-	ebpfHardlinkCounter   prometheus.Counter
-	ebpfSSHCounter        prometheus.Counter
-	ebpfHTTPCounter       prometheus.Counter
-	ebpfPtraceCounter     prometheus.Counter
-	ebpfIoUringCounter    prometheus.Counter
-	ebpfKmodCounter       prometheus.Counter
-	ebpfUnshareCounter    prometheus.Counter
-	ebpfBpfCounter        prometheus.Counter
+	ebpfExecCounter        prometheus.Counter
+	ebpfOpenCounter        prometheus.Counter
+	ebpfNetworkCounter     prometheus.Counter
+	ebpfDNSCounter         prometheus.Counter
+	ebpfSyscallCounter     prometheus.Counter
+	ebpfCapabilityCounter  prometheus.Counter
+	ebpfRandomXCounter     prometheus.Counter
+	ebpfFailedCounter      prometheus.Counter
+	ebpfSymlinkCounter     prometheus.Counter
+	ebpfHardlinkCounter    prometheus.Counter
+	ebpfSSHCounter         prometheus.Counter
+	ebpfHTTPCounter        prometheus.Counter
+	ebpfPtraceCounter      prometheus.Counter
+	ebpfIoUringCounter     prometheus.Counter
+	ebpfKmodCounter        prometheus.Counter
+	ebpfUnshareCounter     prometheus.Counter
+	ebpfBpfCounter         prometheus.Counter
 	ruleCounter            *prometheus.CounterVec
 	rulePrefilteredCounter *prometheus.CounterVec
 	alertCounter           *prometheus.CounterVec
-	ruleEvaluationTime    *prometheus.HistogramVec
+	ruleEvaluationTime     *prometheus.HistogramVec
 
 	// Program ID metrics
 	programRuntimeGauge       *prometheus.GaugeVec
@@ -65,14 +65,16 @@ type PrometheusMetric struct {
 	dedupEventCounter *prometheus.CounterVec
 
 	// ContainerProfile cache metrics
-	cpCacheLegacyLoadsCounter      *prometheus.CounterVec
-	cpCacheEntriesGauge            *prometheus.GaugeVec
-	cpCacheHitCounter              *prometheus.CounterVec
-	cpReconcilerDurationHistogram  *prometheus.HistogramVec
-	cpReconcilerEvictionsCounter   *prometheus.CounterVec
+	cpCacheLegacyLoadsCounter     *prometheus.CounterVec
+	cpCacheEntriesGauge           *prometheus.GaugeVec
+	cpCacheHitCounter             *prometheus.CounterVec
+	cpReconcilerDurationHistogram *prometheus.HistogramVec
+	cpReconcilerEvictionsCounter  *prometheus.CounterVec
+	cpSplitCounter                prometheus.Counter
+	cpChunkDroppedCounter         *prometheus.CounterVec
 
 	// Profile projection metrics — always-on
-	cpProjectionMissingDeclCounter      *prometheus.CounterVec
+	cpProjectionMissingDeclCounter       *prometheus.CounterVec
 	cpProjectionUndeclaredLiteralCounter *prometheus.CounterVec
 	cpProjectionStaleEntriesGauge        prometheus.Gauge
 	cpProjectionUndeclaredRulesGauge     prometheus.Gauge
@@ -104,10 +106,10 @@ type PrometheusMetric struct {
 	alertSuppressedCounter *prometheus.CounterVec
 
 	// Cache to avoid allocating Labels maps on every call
-	ruleCounterCache          map[string]prometheus.Counter
+	ruleCounterCache            map[string]prometheus.Counter
 	rulePrefilteredCounterCache map[string]prometheus.Counter
-	alertCounterCache         map[string]prometheus.Counter
-	counterCacheMutex sync.RWMutex
+	alertCounterCache           map[string]prometheus.Counter
+	counterCacheMutex           sync.RWMutex
 }
 
 func NewPrometheusMetric() *PrometheusMetric {
@@ -277,6 +279,14 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Name: "node_agent_containerprofile_reconciler_evictions_total",
 			Help: "Total number of ContainerProfile cache evictions by reason.",
 		}, []string{"reason"}),
+		cpSplitCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_containerprofile_split_total",
+			Help: "Total number of ContainerProfile chunks halved after a transport-level size rejection.",
+		}),
+		cpChunkDroppedCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "node_agent_containerprofile_chunk_dropped_total",
+			Help: "Total number of ContainerProfile chunks dropped because they could not be split further, by reason.",
+		}, []string{"reason"}),
 
 		// Profile projection metrics — always-on
 		cpProjectionMissingDeclCounter: promauto.NewCounterVec(prometheus.CounterOpts{
@@ -427,6 +437,8 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.cpCacheHitCounter)
 	prometheus.Unregister(p.cpReconcilerDurationHistogram)
 	prometheus.Unregister(p.cpReconcilerEvictionsCounter)
+	prometheus.Unregister(p.cpSplitCounter)
+	prometheus.Unregister(p.cpChunkDroppedCounter)
 	prometheus.Unregister(p.cpProjectionMissingDeclCounter)
 	prometheus.Unregister(p.cpProjectionUndeclaredLiteralCounter)
 	prometheus.Unregister(p.cpProjectionStaleEntriesGauge)
@@ -644,6 +656,14 @@ func (p *PrometheusMetric) ReportContainerProfileCacheHit(hit bool) {
 
 func (p *PrometheusMetric) ReportContainerProfileReconcilerDuration(phase string, duration time.Duration) {
 	p.cpReconcilerDurationHistogram.WithLabelValues(phase).Observe(duration.Seconds())
+}
+
+func (p *PrometheusMetric) ReportContainerProfileSplit() {
+	p.cpSplitCounter.Inc()
+}
+
+func (p *PrometheusMetric) ReportContainerProfileChunkDropped(reason string) {
+	p.cpChunkDroppedCounter.WithLabelValues(reason).Inc()
 }
 
 func (p *PrometheusMetric) ReportContainerProfileReconcilerEviction(reason string) {

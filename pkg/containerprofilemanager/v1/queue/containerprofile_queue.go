@@ -8,14 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/joncrlsn/dque"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/kubescape/storage/pkg/registry/file"
 )
 
 const (
@@ -29,13 +30,56 @@ const (
 	ItemsPerSegment = 100
 	// DefaultMaxQueueSize is the default maximum size of the queue
 	DefaultMaxQueueSize = 1000
+	// DefaultMaxAttempts is the default number of times a single queued profile is retried
+	// before it is dropped. Without a bound, a profile that can never be accepted is
+	// retried forever, and because the queue is disk-persistent it survives pod restarts.
+	//
+	// The bound exists to shed permanently-failing items, not to give up on a reachable
+	// storage, so it is deliberately generous: at DefaultRetryInterval this is roughly
+	// 30 minutes, which comfortably outlasts a storage rollout, image pull or node
+	// eviction. Dropping a profile loses data the container has already stopped tracking,
+	// so a tight bound would trade the infinite-retry bug for silent loss during an
+	// ordinary restart.
+	DefaultMaxAttempts = 360
 )
 
 // QueuedContainerProfile represents a container profile queued for creation
 type QueuedContainerProfile struct {
 	Profile     *v1beta1.ContainerProfile `json:"profile"`
 	ContainerID string                    `json:"containerID"`
+	// Attempts counts how many times creation of this profile has failed with a
+	// retryable error. Items persisted before this field existed decode with Attempts
+	// at zero, so they simply get a full budget of retries.
+	Attempts int `json:"attempts"`
+	// SplitDepth counts how many times this item's lineage has been halved after an HTTP 413.
+	// Items persisted before this field existed decode with SplitDepth at zero.
+	SplitDepth int `json:"splitDepth"`
+	// IsStitch marks a metadata-only chunk emitted by dropChunk to repair the report chain.
+	// A stitch is never split and is never itself stitched - dropping a stitch leaves the chain
+	// forked, which is strictly better than an unbounded stitch->413->stitch loop.
+	IsStitch bool `json:"isStitch"`
 }
+
+// dropReason labels why a chunk was discarded by dropChunk. The set is closed and every value
+// is a compile-time constant, so it is safe as a metric label.
+type dropReason string
+
+const (
+	// dropReasonUnsplittable: splitProfile refused - floor case, unconstructable chain
+	// timestamp, or no byte progress. Collapsed into one reason because all three mean
+	// "this chunk cannot be made smaller".
+	dropReasonUnsplittable dropReason = "unsplittable"
+	// dropReasonDepthExhausted: MaxSplitDepth reached before the chunk became acceptable.
+	dropReasonDepthExhausted dropReason = "depth-exhausted"
+	// dropReasonStitchRejected: a stitch chunk was itself rejected. Not re-stitched, so this
+	// is the one drop that knowingly leaves the report chain forked.
+	dropReasonStitchRejected dropReason = "stitch-rejected"
+	// dropReasonEnqueueFailed: the replacement stitch could not be enqueued.
+	dropReasonEnqueueFailed dropReason = "enqueue-failed"
+)
+
+// ErrQueueNotRunning is returned by enqueueLocked once the queue has been closed.
+var ErrQueueNotRunning = errors.New("queue is not running")
 
 // QueuedContainerProfileBuilder creates a new QueuedContainerProfile instance for dque
 func QueuedContainerProfileBuilder() interface{} {
@@ -54,7 +98,15 @@ type QueueData struct {
 	creator       storage.ProfileCreator
 	errorCallback ErrorCallback
 	maxQueueSize  int
+	maxAttempts   int
+	maxSplitDepth int
 	retryInterval time.Duration
+	metrics       metricsmanager.MetricsManager
+
+	// Written by the queue processor goroutine and read by GetQueueStats, so they carry
+	// their own synchronization rather than widening qd.mu.
+	splits        atomic.Int64
+	chunksDropped atomic.Int64
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -67,9 +119,12 @@ type QueueConfig struct {
 	QueueName       string
 	QueueDir        string
 	MaxQueueSize    int
+	MaxAttempts     int
+	MaxSplitDepth   int
 	RetryInterval   time.Duration
 	ItemsPerSegment int
 	ErrorCallback   ErrorCallback
+	MetricsManager  metricsmanager.MetricsManager
 }
 
 // NewQueueData creates a new QueueData instance with simple LRU behavior
@@ -83,6 +138,15 @@ func NewQueueData(ctx context.Context, creator storage.ProfileCreator, config Qu
 	}
 	if config.MaxQueueSize == 0 {
 		config.MaxQueueSize = DefaultMaxQueueSize
+	}
+	if config.MaxAttempts <= 0 {
+		config.MaxAttempts = DefaultMaxAttempts
+	}
+	if config.MaxSplitDepth <= 0 {
+		config.MaxSplitDepth = DefaultMaxSplitDepth
+	}
+	if config.MetricsManager == nil {
+		config.MetricsManager = &metricsmanager.MetricsNoop{}
 	}
 	if config.RetryInterval == 0 {
 		config.RetryInterval = DefaultRetryInterval
@@ -123,7 +187,10 @@ func NewQueueData(ctx context.Context, creator storage.ProfileCreator, config Qu
 		creator:       creator,
 		errorCallback: config.ErrorCallback,
 		maxQueueSize:  config.MaxQueueSize,
+		maxAttempts:   config.MaxAttempts,
+		maxSplitDepth: config.MaxSplitDepth,
 		retryInterval: config.RetryInterval,
+		metrics:       config.MetricsManager,
 		stopChan:      make(chan struct{}),
 		running:       true,
 	}
@@ -154,29 +221,34 @@ func (qd *QueueData) Enqueue(profile *v1beta1.ContainerProfile, containerID stri
 	qd.mu.Lock()
 	defer qd.mu.Unlock()
 
-	if !qd.running {
-		return fmt.Errorf("queue is not running")
-	}
-
-	// Create queued profile
-	queuedProfile := &QueuedContainerProfile{
+	if err := qd.enqueueLocked(&QueuedContainerProfile{
 		Profile:     profile,
 		ContainerID: containerID,
-	}
-
-	// Remove oldest items if we're at capacity
-	qd.enforceMaxSize()
-
-	// Add new item
-	err := qd.queue.Enqueue(queuedProfile)
-	if err != nil {
-		return fmt.Errorf("failed to enqueue profile: %w", err)
+	}); err != nil {
+		return err
 	}
 
 	logger.L().Debug("container profile enqueued",
 		helpers.String("name", profile.Name),
 		helpers.String("namespace", profile.Namespace),
 		helpers.Int("queueSize", qd.queue.Size()))
+
+	return nil
+}
+
+// enqueueLocked adds item to the queue, evicting the oldest items first.
+// Callers must hold qd.mu.
+func (qd *QueueData) enqueueLocked(item *QueuedContainerProfile) error {
+	if !qd.running {
+		return ErrQueueNotRunning
+	}
+
+	// Remove oldest items if we're at capacity
+	qd.enforceMaxSize()
+
+	if err := qd.queue.Enqueue(item); err != nil {
+		return fmt.Errorf("failed to enqueue profile: %w", err)
+	}
 
 	return nil
 }
@@ -230,6 +302,7 @@ func (qd *QueueData) processAllItems() {
 	logger.L().Debug("processing queue", helpers.Int("size", queueSize))
 
 	// Process each item in the queue
+processLoop:
 	for i := 0; i < queueSize; i++ {
 		// Try to get an item from the queue
 		iface, err := qd.queue.Dequeue()
@@ -253,32 +326,80 @@ func (qd *QueueData) processAllItems() {
 		// Attempt to create the profile
 		err = qd.creator.CreateContainerProfileDirect(queuedProfile.Profile)
 		if err != nil {
-			if err.Error() == file.ObjectTooLargeError.Error() || err.Error() == file.ObjectCompletedError.Error() {
+			// An explicit switch, so that a future fourth failureKind cannot silently fall
+			// through to the retryable branch.
+			kind, reported := classifyFailure(err)
+			switch kind {
+			case failureTerminal:
 				logger.L().Debug("got rejected to create container profile, skipping",
 					helpers.String("name", queuedProfile.Profile.Name),
 					helpers.Error(err))
 
-				// Call error callback if provided to propagate the error
+				// Call error callback if provided to propagate the error. The sentinel is
+				// reported rather than err itself, so that the manager can map it onto the
+				// right terminal container status even when the transport lost the sentinel.
 				if qd.errorCallback != nil {
-					qd.errorCallback.OnQueueError(queuedProfile.Profile, queuedProfile.ContainerID, err)
+					qd.errorCallback.OnQueueError(queuedProfile.Profile, queuedProfile.ContainerID, reported)
 				}
-				continue
-			}
 
-			logger.L().Debug("failed to create container profile, requeuing",
-				helpers.String("name", queuedProfile.Profile.Name),
-				helpers.Error(err))
+			case failureSplit:
+				// A bare 413 rejects this one delta for its size; it says nothing about the
+				// container, so learning continues and only the chunk is shed.
+				switch {
+				case queuedProfile.IsStitch:
+					qd.dropChunk(queuedProfile, dropReasonStitchRejected)
+				case queuedProfile.SplitDepth >= qd.maxSplitDepth:
+					qd.dropChunk(queuedProfile, dropReasonDepthExhausted)
+				default:
+					a, b, ok := splitProfile(queuedProfile.Profile)
+					if !ok {
+						qd.dropChunk(queuedProfile, dropReasonUnsplittable)
+						continue
+					}
 
-			qd.requeueImmediate(queuedProfile)
+					logger.L().Debug("splitting container profile rejected with 413",
+						helpers.String("name", queuedProfile.Profile.Name),
+						helpers.String("namespace", queuedProfile.Profile.Namespace),
+						helpers.Int("splitDepth", queuedProfile.SplitDepth),
+						helpers.Int("elements", countPartitionableElements(&queuedProfile.Profile.Spec)),
+						helpers.Int("bytes", serializedSize(queuedProfile.Profile)))
 
-			// Check for "too many requests" error
-			if strings.Contains(err.Error(), "the server has received too many requests and has asked us to try again later") {
-				logger.L().Debug("server overloaded, breaking processing loop and waiting for next interval",
+					qd.splits.Add(1)
+					qd.metrics.ReportContainerProfileSplit()
+					qd.requeueSplit(queuedProfile, a, b)
+				}
+
+			case failureRetryable:
+				// Bound the number of retries so that an item which never succeeds cannot
+				// occupy the queue indefinitely: requeuing appends to the tail while
+				// enforceMaxSize evicts from the head, so an unbounded retry would push out
+				// newer profiles that could have been saved.
+				queuedProfile.Attempts++
+				if queuedProfile.Attempts >= qd.maxAttempts {
+					logger.L().Warning("dropping container profile after too many failed attempts",
+						helpers.String("name", queuedProfile.Profile.Name),
+						helpers.String("namespace", queuedProfile.Profile.Namespace),
+						helpers.String("containerID", queuedProfile.ContainerID),
+						helpers.Int("attempts", queuedProfile.Attempts),
+						helpers.Error(err))
+					continue
+				}
+
+				logger.L().Debug("failed to create container profile, requeuing",
 					helpers.String("name", queuedProfile.Profile.Name),
+					helpers.Int("attempts", queuedProfile.Attempts),
 					helpers.Error(err))
 
-				// Break from the for loop
-				break
+				qd.requeueImmediate(queuedProfile)
+
+				// Check for "too many requests" error
+				if strings.Contains(err.Error(), "the server has received too many requests and has asked us to try again later") {
+					logger.L().Debug("server overloaded, breaking processing loop and waiting for next interval",
+						helpers.String("name", queuedProfile.Profile.Name),
+						helpers.Error(err))
+
+					break processLoop
+				}
 			}
 
 		} else {
@@ -294,16 +415,132 @@ func (qd *QueueData) requeueImmediate(queuedProfile *QueuedContainerProfile) {
 	qd.mu.Lock()
 	defer qd.mu.Unlock()
 
-	if qd.running {
-		// Enforce max size before requeuing
-		qd.enforceMaxSize()
+	if err := qd.enqueueLocked(queuedProfile); err != nil {
+		logger.L().Debug("failed to requeue container profile",
+			helpers.String("name", queuedProfile.Profile.Name),
+			helpers.Error(err))
+	}
+}
 
-		err := qd.queue.Enqueue(queuedProfile)
-		if err != nil {
-			logger.L().Error("failed to requeue container profile",
-				helpers.String("name", queuedProfile.Profile.Name),
-				helpers.Error(err))
+// requeueSplit enqueues both halves of a split chunk under a single lock acquisition, so the
+// two halves are never separated by a concurrent Enqueue or by an intervening eviction sweep.
+//
+// Both halves inherit parent.Attempts, take SplitDepth = parent.SplitDepth+1, and are explicitly
+// IsStitch = false (the zero value - stated because a half must always remain splittable).
+//
+// Callers must NOT hold qd.mu.
+func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.ContainerProfile) {
+	half := func(profile *v1beta1.ContainerProfile) *QueuedContainerProfile {
+		return &QueuedContainerProfile{
+			Profile:     profile,
+			ContainerID: parent.ContainerID,
+			Attempts:    parent.Attempts,
+			SplitDepth:  parent.SplitDepth + 1,
+			IsStitch:    false,
 		}
+	}
+
+	qd.mu.Lock()
+	defer qd.mu.Unlock()
+
+	if err := qd.enqueueLocked(half(a)); err != nil {
+		// The parent was already dequeued, so neither half reaches the queue: this is a
+		// total loss of the chunk, not just a fork, and must be at least as loud as the
+		// second-half case below. Unlike that case, nothing of the parent's data survives
+		// to carry its (previousReportTimestamp, reportTimestamp] interval forward, so the
+		// stitch is built from parent.Profile itself - that interval is exactly what needs
+		// repairing since it never reached the queue in any form.
+		logger.L().Warning("failed to enqueue the first half of a split container profile, both halves are lost",
+			helpers.String("name", a.Name),
+			helpers.String("namespace", a.Namespace),
+			helpers.String("containerID", parent.ContainerID),
+			helpers.Error(err))
+
+		qd.chunksDropped.Add(1)
+		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
+
+		stitch := &QueuedContainerProfile{
+			Profile:     stitchChunk(parent.Profile),
+			ContainerID: parent.ContainerID,
+			Attempts:    parent.Attempts,
+			SplitDepth:  qd.maxSplitDepth,
+			IsStitch:    true,
+		}
+		if stitchErr := qd.enqueueLocked(stitch); stitchErr != nil {
+			logger.L().Warning("failed to enqueue replacement stitch chunk after a lost split, the report chain is now forked",
+				helpers.String("name", stitch.Profile.Name),
+				helpers.String("namespace", stitch.Profile.Namespace),
+				helpers.String("containerID", parent.ContainerID),
+				helpers.Error(stitchErr))
+
+			qd.chunksDropped.Add(1)
+			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
+		}
+		return
+	}
+
+	if err := qd.enqueueLocked(half(b)); err != nil {
+		// Exactly one half of a pair survived, which forks the container's report chain.
+		logger.L().Warning("failed to enqueue the second half of a split container profile, its report chain is now forked",
+			helpers.String("name", b.Name),
+			helpers.String("namespace", b.Namespace),
+			helpers.String("containerID", parent.ContainerID),
+			helpers.Error(err))
+
+		qd.chunksDropped.Add(1)
+		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
+	}
+}
+
+// dropChunk discards a chunk that was rejected for its size and cannot be split further.
+//
+// It deliberately does NOT call errorCallback.OnQueueError: that path ends learning for the
+// whole container, which is the behaviour this change exists to remove. Losing one delta is
+// strictly better than losing every future delta.
+//
+// It enqueues a stitch chunk in the dropped chunk's place so the report chain stays linear
+// (see chainHalves); without it, dropping one half of a pair forks the chain and hangs the
+// profile in Learning. A dropped stitch is never re-stitched: that would loop forever, since
+// neither drop path touches Attempts.
+//
+// Callers must NOT hold qd.mu.
+func (qd *QueueData) dropChunk(dropped *QueuedContainerProfile, reason dropReason) {
+	logger.L().Warning("dropping oversized container profile chunk",
+		helpers.String("name", dropped.Profile.Name),
+		helpers.String("namespace", dropped.Profile.Namespace),
+		helpers.String("containerID", dropped.ContainerID),
+		helpers.String("reason", string(reason)),
+		helpers.Int("splitDepth", dropped.SplitDepth),
+		helpers.Int("bytes", serializedSize(dropped.Profile)))
+
+	qd.chunksDropped.Add(1)
+	qd.metrics.ReportContainerProfileChunkDropped(string(reason))
+
+	if dropped.IsStitch {
+		return
+	}
+
+	stitch := &QueuedContainerProfile{
+		Profile:     stitchChunk(dropped.Profile),
+		ContainerID: dropped.ContainerID,
+		Attempts:    dropped.Attempts,
+		SplitDepth:  qd.maxSplitDepth,
+		IsStitch:    true,
+	}
+
+	qd.mu.Lock()
+	err := qd.enqueueLocked(stitch)
+	qd.mu.Unlock()
+
+	if err != nil {
+		logger.L().Warning("failed to enqueue replacement stitch chunk, the report chain is now forked",
+			helpers.String("name", stitch.Profile.Name),
+			helpers.String("namespace", stitch.Profile.Namespace),
+			helpers.String("containerID", dropped.ContainerID),
+			helpers.Error(err))
+
+		qd.chunksDropped.Add(1)
+		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 	}
 }
 
@@ -317,11 +554,20 @@ func (qd *QueueData) GetQueueSize() int {
 
 // GetQueueStats returns basic statistics about the queue
 func (qd *QueueData) GetQueueStats() map[string]interface{} {
+	// running is written under qd.mu by Close, so it must be read under it too.
+	qd.mu.Lock()
+	running := qd.running
+	size := qd.GetQueueSize()
+	qd.mu.Unlock()
+
 	return map[string]interface{}{
-		"size":          qd.GetQueueSize(),
+		"size":          size,
 		"maxQueueSize":  qd.maxQueueSize,
+		"maxSplitDepth": qd.maxSplitDepth,
 		"retryInterval": qd.retryInterval.String(),
-		"running":       qd.running,
+		"running":       running,
+		"splits":        qd.splits.Load(),
+		"chunksDropped": qd.chunksDropped.Load(),
 	}
 }
 
