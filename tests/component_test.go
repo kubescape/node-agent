@@ -726,15 +726,11 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
 	assert.NoError(t, err)
 
-	err = endpointTraffic.WaitForContainerProfileCompletion(80)
-	if err != nil {
-		t.Errorf("Error waiting for application profile to be completed: %v", err)
-	}
+	require.NoError(t, endpointTraffic.WaitForContainerProfileCompletion(80),
+		"Error waiting for container profile to be completed")
 
 	containerProfile, err := endpointTraffic.GetContainerProfile("endpoint-traffic")
-	if err != nil {
-		t.Errorf("Error getting container profile: %v", err)
-	}
+	require.NoError(t, err, "Error getting container profile")
 
 	symlinkPolicy := containerProfile.Spec.PolicyByRuleId["R1010"]
 	assert.Equal(t, []string{"ln"}, symlinkPolicy.AllowedProcesses)
@@ -1142,6 +1138,11 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	// by the id-based gate, so a failed reload here would still let ls alert
 	// and be caught — this is a real enforcement check, not a vacuous pass.
 	before := countR0001("ls")
+	// Guard against phase-1 self-exhaustion: if the per-container/per-rule R0001
+	// cooldown budget (cap 10) were already spent, ls could not alert in phase 2
+	// regardless of enforcement, making the "no NEW R0001" check below vacuous.
+	require.Less(t, before, 10,
+		"phase 1 exhausted the R0001 ls cooldown budget (before=%d, cap=10); phase 2 would pass vacuously", before)
 	_, _, err = wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
 	require.NoError(t, err, "exec ls after profile update")
 	_, _, err = wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)

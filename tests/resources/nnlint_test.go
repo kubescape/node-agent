@@ -190,10 +190,18 @@ func lintEndpoint(dir string, e netEndpoint, add func(rule, msg string)) {
 		add("R-NN-14", where("sets both singular ipAddress and plural ipAddresses — pick one"))
 	}
 
+	if e.DNS != "" {
+		if msg := dnsNameProblem(e.DNS); msg != "" {
+			add("R-NN-13", where(fmt.Sprintf("dns %q: %s", e.DNS, msg)))
+		}
+	}
 	for _, d := range e.DNSNames {
 		if msg := dnsNameProblem(d); msg != "" {
 			add("R-NN-13", where(fmt.Sprintf("dnsName %q: %s", d, msg)))
 		}
+	}
+	if e.IPAddress != "" && !validIPEntry(e.IPAddress) {
+		add("R-NN-15", where(fmt.Sprintf("ipAddress %q is not an IP, CIDR, or \"*\" sentinel", e.IPAddress)))
 	}
 	for _, ip := range e.IPAddresses {
 		if !validIPEntry(ip) {

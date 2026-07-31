@@ -266,6 +266,27 @@ func (w *TestWorkload) listContainerProfilesInNamespace() ([]v1beta1.ContainerPr
 
 // matchingContainerProfiles returns every ContainerProfile whose workload labels
 // identify this workload (one per learnt/authored container).
+// isMergedContainerProfileName reports whether name is a stable MERGED
+// ContainerProfile rather than a transient per-instance one. A container
+// restart spawns per-instance profiles named "<mergedName>-<32 hex>" that
+// briefly flip failed/ready and carry the SAME kubescape.io/workload-* labels
+// as the merged profile node-agent actually enforces. Every helper built on
+// matchingContainerProfiles must ignore them, or GetContainerProfile can pick a
+// transient profile and WaitForContainerProfile can hang on one stuck in a
+// non-terminal status. (Test_16_ApNotStuckOnRestart inlines the same filter.)
+func isMergedContainerProfileName(name string) bool {
+	i := strings.LastIndex(name, "-")
+	if i < 0 || len(name)-i-1 != 32 {
+		return true
+	}
+	for _, c := range name[i+1:] {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *TestWorkload) matchingContainerProfiles() ([]v1beta1.ContainerProfile, error) {
 	cps, err := w.listContainerProfilesInNamespace()
 	if err != nil {
@@ -276,7 +297,8 @@ func (w *TestWorkload) matchingContainerProfiles() ([]v1beta1.ContainerProfile, 
 		wlKind := cp.Labels["kubescape.io/workload-kind"]
 		wlName := cp.Labels["kubescape.io/workload-name"]
 		wlNs := cp.Labels["kubescape.io/workload-namespace"]
-		if wlKind == w.WorkloadObj.GetKind() && wlName == w.WorkloadObj.GetName() && wlNs == w.Namespace {
+		if wlKind == w.WorkloadObj.GetKind() && wlName == w.WorkloadObj.GetName() && wlNs == w.Namespace &&
+			isMergedContainerProfileName(cp.Name) {
 			matching = append(matching, cp)
 		}
 	}
@@ -306,7 +328,8 @@ func (w *TestWorkload) GetContainerProfile(containerName string) (*v1beta1.Conta
 
 	newest := &candidates[0]
 	for i := 1; i < len(candidates); i++ {
-		if candidates[i].CreationTimestamp.After(newest.CreationTimestamp.Time) {
+		ti, tn := candidates[i].CreationTimestamp.Time, newest.CreationTimestamp.Time
+		if ti.After(tn) || (ti.Equal(tn) && candidates[i].Name < newest.Name) {
 			newest = &candidates[i]
 		}
 	}
@@ -331,7 +354,9 @@ func (w *TestWorkload) GetContainerProfiles() ([]v1beta1.ContainerProfile, error
 	for i := range matching {
 		cp := &matching[i]
 		name := cp.Labels["kubescape.io/workload-container-name"]
-		if cur, ok := newestByContainer[name]; !ok || cp.CreationTimestamp.After(cur.CreationTimestamp.Time) {
+		cur, ok := newestByContainer[name]
+		if !ok || cp.CreationTimestamp.Time.After(cur.CreationTimestamp.Time) ||
+			(cp.CreationTimestamp.Time.Equal(cur.CreationTimestamp.Time) && cp.Name < cur.Name) {
 			newestByContainer[name] = cp
 		}
 	}
@@ -571,6 +596,9 @@ func AssertContainerProfileContains(t *testing.T, cp *v1beta1.ContainerProfile, 
 func getEgressDnsNames(cp *v1beta1.ContainerProfile) mapset.Set[string] {
 	dns := mapset.NewSet[string]()
 	for _, egress := range cp.Spec.Egress {
+		if egress.DNS != "" {
+			dns.Add(egress.DNS)
+		}
 		for _, dnsName := range egress.DNSNames {
 			dns.Add(dnsName)
 		}
@@ -581,6 +609,9 @@ func getEgressDnsNames(cp *v1beta1.ContainerProfile) mapset.Set[string] {
 func getIngressDnsNames(cp *v1beta1.ContainerProfile) mapset.Set[string] {
 	dns := mapset.NewSet[string]()
 	for _, ingress := range cp.Spec.Ingress {
+		if ingress.DNS != "" {
+			dns.Add(ingress.DNS)
+		}
 		for _, dnsName := range ingress.DNSNames {
 			dns.Add(dnsName)
 		}
