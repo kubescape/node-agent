@@ -174,16 +174,17 @@ Drop reasons are typed constants (pkg/containerprofilemanager/v1/queue/container
 ## Tests
 
 - `pkg/containerprofilemanager/v1/queue/containerprofile_split_test.go` — comprehensive unit tests of the split algorithm:
-  - Chain linearity (`TestChainHalves*`, `TestConsolidationAfterSplit*`) — ensures the timestamp interposition is correct and consolidation reconstructs the original interval
-  - Zero-time and boundary cases (`TestInterposeTimestampZeroTime*`, `TestParseReportTimestampMonotonic*`)
-  - Non-convergence (`TestSplitWithBaselineOverflow*`) and floor-case drops (`TestSplitFloorCase*`)
-  - Determinism (`TestHalvePolicies*`)
-  - Stitching (`TestStitchPreservesFields*`)
+  - Chain linearity (`TestChainHalves_ConsolidatesToParentInterval`, `TestSplitProfile_RecursiveChainStaysLinear`) — ensures the timestamp interposition is correct and consolidation (via a golden port of storage's own algorithm) reconstructs the original interval, including under recursive re-splitting
+  - Zero-time and boundary cases (`TestChainHalves_ZeroPreviousTimestamp`, `TestParseReportTimestamp_MonotonicSuffix`, `TestParseReportTimestamp_NumericZoneAbbreviation`)
+  - Non-convergence (`TestSplitProfile_NoProgressGuard`) and floor-case drops (`TestSplitProfile_FloorCase`)
+  - Determinism (`TestSplitProfile_Deterministic`)
+  - Stitching (`TestStitchChunk_PreservesAssignmentMergedScalars`)
 
-- `pkg/containerprofilemanager/v1/queue/containerprofile_queue_test.go` — queue-level integration:
-  - Split dispatch and requeue (`Test*ClassifyFailureSplit*`, `Test*ProcessAllItemsSplit*`)
-  - Depth bounds (`Test*MaxSplitDepth*`)
-  - Stitch-rejection loop prevention (`Test*StitchRejected*`)
+- `pkg/containerprofilemanager/v1/queue/containerprofile_queue_errors_test.go` — queue-level integration:
+  - Split dispatch and requeue (`TestQueueSplitsProfileOnHTTP413`, `TestQueueDropsUnsplittableProfileOnHTTP413`)
+  - Depth bounds (`TestQueueRespectsMaxSplitDepth`)
+  - Stitch-rejection loop prevention (`TestQueueDoesNotStitchAStitch`)
+  - Persistence across a queue restart (`TestQueuePersistsSplitDepth`)
 
 - End-to-end: no new e2e tests are added (the split is internal; no new public API). Existing learning-completion tests should pass without change (profiles should complete normally even when internal chunks split).
 

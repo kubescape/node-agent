@@ -444,9 +444,38 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 	defer qd.mu.Unlock()
 
 	if err := qd.enqueueLocked(half(a)); err != nil {
-		logger.L().Debug("failed to enqueue the first half of a split container profile",
+		// The parent was already dequeued, so neither half reaches the queue: this is a
+		// total loss of the chunk, not just a fork, and must be at least as loud as the
+		// second-half case below. Unlike that case, nothing of the parent's data survives
+		// to carry its (previousReportTimestamp, reportTimestamp] interval forward, so the
+		// stitch is built from parent.Profile itself - that interval is exactly what needs
+		// repairing since it never reached the queue in any form.
+		logger.L().Warning("failed to enqueue the first half of a split container profile, both halves are lost",
 			helpers.String("name", a.Name),
+			helpers.String("namespace", a.Namespace),
+			helpers.String("containerID", parent.ContainerID),
 			helpers.Error(err))
+
+		qd.chunksDropped.Add(1)
+		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
+
+		stitch := &QueuedContainerProfile{
+			Profile:     stitchChunk(parent.Profile),
+			ContainerID: parent.ContainerID,
+			Attempts:    parent.Attempts,
+			SplitDepth:  qd.maxSplitDepth,
+			IsStitch:    true,
+		}
+		if stitchErr := qd.enqueueLocked(stitch); stitchErr != nil {
+			logger.L().Warning("failed to enqueue replacement stitch chunk after a lost split, the report chain is now forked",
+				helpers.String("name", stitch.Profile.Name),
+				helpers.String("namespace", stitch.Profile.Namespace),
+				helpers.String("containerID", parent.ContainerID),
+				helpers.Error(stitchErr))
+
+			qd.chunksDropped.Add(1)
+			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
+		}
 		return
 	}
 
@@ -457,6 +486,9 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 			helpers.String("namespace", b.Namespace),
 			helpers.String("containerID", parent.ContainerID),
 			helpers.Error(err))
+
+		qd.chunksDropped.Add(1)
+		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 	}
 }
 

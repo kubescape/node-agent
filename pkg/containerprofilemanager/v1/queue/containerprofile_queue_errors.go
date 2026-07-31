@@ -67,6 +67,23 @@ func classifyFailure(err error) (failureKind, error) {
 
 // matchesSentinel reports whether err carries the given storage sentinel, either as a
 // wrapped error or as text in the message relayed by the apiserver.
+//
+// The substring fallback is deliberately restricted to *apierrors.StatusError: that's the
+// only shape where the message is known to be a sentinel relayed verbatim by the apiserver
+// (StatusError.Error() returns only the message, and storage wraps the sentinel in a
+// size-specific prefix on some paths, so errors.Is alone can't match it). Applying
+// strings.Contains to every error shape would let any error whose text happens to embed
+// "object is too large" or "object is completed" - e.g. from a proxy or ingress - classify
+// as terminal and end learning for the container, even though it isn't a real sentinel.
 func matchesSentinel(err, sentinel error) bool {
-	return errors.Is(err, sentinel) || strings.Contains(err.Error(), sentinel.Error())
+	if errors.Is(err, sentinel) {
+		return true
+	}
+
+	var statusErr *apierrors.StatusError
+	if errors.As(err, &statusErr) {
+		return strings.Contains(statusErr.ErrStatus.Message, sentinel.Error())
+	}
+
+	return false
 }
