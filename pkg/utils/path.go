@@ -6,7 +6,16 @@ import (
 	"strings"
 )
 
-var headlessProcRegex = regexp.MustCompile(`^/\d+/(task|fd)(/|$)`)
+// headlessProcRegex matches any path whose leading segment is a bare PID — the
+// residue of a /proc/<pid>/... path stripped of its /proc root. A top-level
+// numeric segment is never a real filesystem path node-agent should record, so
+// the entire class is normalized back under /proc.
+//
+// The allowlist was previously narrowed to `(task|fd)`, which let sibling
+// headless paths written by runc:[2:INIT] during user-namespace setup —
+// /<pid>/setgroups, /<pid>/gid_map, /<pid>/uid_map, /<pid>/status, /<pid>/cgroup,
+// ... — leak /proc-less into learned ContainerProfiles (a regression of #721).
+var headlessProcRegex = regexp.MustCompile(`^/\d+(/|$)`)
 
 // NormalizePath normalizes a path by:
 // 1. Prepending "/proc" to "headless" proc paths (e.g. /46/task/46/fd -> /proc/46/task/46/fd)
