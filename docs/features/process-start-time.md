@@ -27,7 +27,7 @@ skew, and will be wrong intermittently rather than consistently.
 `/proc/<pid>/stat` field 22 (`starttime`), the process's creation time in clock
 ticks since boot. It is converted **once**, on the way in:
 
-```
+```text
 boot-relative nanoseconds = ticks × 10,000,000        (USER_HZ = 100)
 ```
 
@@ -37,8 +37,20 @@ across messages by seven orders of magnitude. If you find yourself scaling this
 value on output, that is a bug.
 
 **The unit implies more precision than the value carries.** USER_HZ is 100, so
-every value is an exact multiple of 10 ms. That is fine for distinguishing
-recycled process ids; do not treat it as a timestamp.
+every value is an exact multiple of 10 ms. Do not treat it as a timestamp.
+
+### `(pid, startTimeNs)` is not guaranteed unique
+
+The 10 ms quantization means two processes created within the same tick share a
+start time. For a **join key** built from `(pid, startTimeNs)` — which is what
+the network-stream attribution work uses — that leaves a residual collision: a
+process id recycled and reused inside the same 10 ms window produces two
+incarnations with an identical tuple, and they are indistinguishable.
+
+This is narrow but real, and it is a limitation of the source rather than of
+this code — `/proc` does not expose anything finer. Treat the tuple as a strong
+discriminator, not a unique identifier, and do not build logic that assumes
+two matching tuples must be the same process.
 
 **It is never derived from an event timestamp.** `convertExecEvent`,
 `convertForkEvent` and `convertExitEvent` set `ProcessEvent.StartTimeNs` from the

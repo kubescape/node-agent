@@ -213,11 +213,14 @@ func TestHandleForkEvent_RecycledPidDoesNotInheritDeadProcessStartTime(t *testin
 
 	const aStart = uint64(1_000_000_000) // process A, boot+1s
 	const bStart = uint64(9_000_000_000) // process B, boot+9s
-	creator.readStartTime = func(pid uint32) (uint64, time.Time) { return bStart, time.Time{} }
+	aWall := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+	bWall := time.Date(2026, 7, 29, 10, 30, 0, 0, time.UTC)
+	creator.readStartTime = func(pid uint32) (uint64, time.Time) { return bStart, bWall }
 
 	// Process A on pid 4242, seen by the periodic scan.
 	creator.FeedEvent(conversion.ProcessEvent{
-		Type: conversion.ProcfsEvent, PID: 4242, PPID: 1, Comm: "victim", StartTimeNs: aStart,
+		Type: conversion.ProcfsEvent, PID: 4242, PPID: 1, Comm: "victim",
+		StartTimeNs: aStart, StartTimeWall: aWall,
 	})
 	require.Equal(t, aStart, creator.GetProcessBootTimeNs(4242))
 
@@ -233,4 +236,13 @@ func TestHandleForkEvent_RecycledPidDoesNotInheritDeadProcessStartTime(t *testin
 
 	assert.Equal(t, bStart, creator.GetProcessBootTimeNs(4242),
 		"a newborn pid must get its OWN start time, not the dead process's")
+
+	// The node is reused, so its display value must be restamped too. If only the
+	// side map is cleared, the identity value and the value shown to a human
+	// disagree for exactly the case this guard exists to handle.
+	node, err := creator.GetProcessNode(4242)
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	assert.Equal(t, bWall, node.StartTime,
+		"the reused node must not keep displaying the dead process's start time")
 }
