@@ -186,6 +186,21 @@ func (pt *processTreeCreatorImpl) ensureStartTime(proc *armotypes.Process, pid u
 		return
 	}
 	ns, wall := pt.readStartTime(pid)
+	pt.applyStartTime(proc, pid, ns, wall)
+}
+
+// applyStartTime stores an already-read start time. Split out from
+// ensureStartTime so the fork path can perform its /proc read before taking
+// pt.mutex: fork is the highest-volume event path and always reads (the
+// recycled-pid guard drops any stale entry), so reading under the tree-wide
+// write lock would serialise a file read into the hot path for every alert
+// type. Exec keeps the read inside ensureStartTime, where the
+// skip-when-already-known check makes it conditional.
+//
+// A zero ns means the read failed — leave the pre-existing zero, never guess.
+//
+// Must be called with pt.mutex held.
+func (pt *processTreeCreatorImpl) applyStartTime(proc *armotypes.Process, pid uint32, ns uint64, wall time.Time) {
 	if ns == 0 {
 		return
 	}
@@ -197,6 +212,14 @@ func (pt *processTreeCreatorImpl) ensureStartTime(proc *armotypes.Process, pid u
 
 // handleForkEvent handles fork events - only fills properties if they are empty or don't exist
 func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent) {
+	// Read the start time BEFORE taking the tree lock. A fork always needs it —
+	// the pid is newborn, and the guard below drops any stale value — so this is
+	// the same number of reads as doing it under the lock, with none of them
+	// holding it. Widening the gap between event and read only widens an
+	// already-accepted race: if the pid is recycled in between, the value read
+	// belongs to the current incarnation, which the reuse hardening detects.
+	startTimeNs, startTimeWall := pt.readStartTime(event.PID)
+
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
@@ -241,7 +264,7 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 		proc.Path = event.Path
 	}
 
-	pt.ensureStartTime(proc, event.PID)
+	pt.applyStartTime(proc, event.PID, startTimeNs, startTimeWall)
 
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[armotypes.CommPID]*armotypes.Process)

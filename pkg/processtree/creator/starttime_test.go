@@ -246,3 +246,34 @@ func TestHandleForkEvent_RecycledPidDoesNotInheritDeadProcessStartTime(t *testin
 	assert.Equal(t, bWall, node.StartTime,
 		"the reused node must not keep displaying the dead process's start time")
 }
+
+// TestHandleForkEvent_ReadsStartTimeWithoutHoldingTreeLock pins that the fork
+// path's /proc read happens OUTSIDE pt.mutex.
+//
+// pt.mutex is the tree-wide write lock that every alert type contends on, and
+// fork is the highest-volume event path on a node — thousands per second on a
+// busy one. Since the recycled-pid guard drops any stale entry, every fork now
+// performs a read, so holding the lock across it would serialise a file read
+// into the hot path for the whole process tree.
+//
+// TryRLock rather than RLock: if the write lock were held, RLock from this same
+// goroutine would deadlock and the test would hang instead of failing.
+func TestHandleForkEvent_ReadsStartTimeWithoutHoldingTreeLock(t *testing.T) {
+	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, config.Config{}).(*processTreeCreatorImpl)
+
+	readWasLockFree := false
+	creator.readStartTime = func(pid uint32) (uint64, time.Time) {
+		if creator.mutex.TryRLock() {
+			readWasLockFree = true
+			creator.mutex.RUnlock()
+		}
+		return 555_550_000_000, time.Time{}
+	}
+
+	creator.FeedEvent(conversion.ProcessEvent{Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "curl"})
+
+	assert.True(t, readWasLockFree,
+		"the fork path's /proc read must not hold the tree-wide write lock")
+	assert.Equal(t, uint64(555_550_000_000), creator.GetProcessBootTimeNs(100),
+		"and the value must still be stored")
+}

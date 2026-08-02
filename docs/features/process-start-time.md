@@ -74,6 +74,32 @@ The on-demand read happens **once per node creation, never per event**. An exec
 on a node that already has a value does not re-read: creation time cannot change
 on exec.
 
+### Cost, and why the fork read is taken outside the tree lock
+
+A single `/proc/<pid>/stat` open-read-parse measures **~7.5 µs** (Go benchmark,
+Linux container, warm). Fork is the highest-volume event path on a node —
+thousands per second on a busy one — and **every fork performs a read**, because
+the recycled-pid guard below drops any stale value before the read decision is
+made.
+
+At 1,000 forks/s that is ~7.5 ms of read time per second; at 3,000/s, ~22 ms/s.
+Taken while holding `pt.mutex`, the tree-wide write lock, that would be hold
+time blocking every reader of the process tree — and the tree is shared by every
+alert type, not just the consumer this field was added for.
+
+So the fork path reads **before** acquiring the lock and stores the result under
+it. Same number of reads, none of them holding the lock; fork contributes zero
+added lock hold time. `TestHandleForkEvent_ReadsStartTimeWithoutHoldingTreeLock`
+pins this, using `TryRLock` so a regression fails rather than deadlocks.
+
+Exec keeps its read inside the lock, where the skip-when-already-known check
+makes it conditional and it only fires on first sight of a pid.
+
+The tradeoff: reading before the lock widens the window between the event and
+the read. If the pid is recycled inside that window the value belongs to the new
+incarnation — the same already-accepted race as before, just slightly wider, and
+the reuse hardening is what detects it.
+
 ### Zero means unknown
 
 A read fails if the process is already gone. The value stays zero rather than
