@@ -187,3 +187,50 @@ func TestProcfsStartTimeReader_ReadsRealProcess(t *testing.T) {
 	assert.Zero(t, nsGone, "an unreadable process must yield zero, never a guess")
 	assert.True(t, wallGone.IsZero())
 }
+
+// TestHandleForkEvent_RecycledPidDoesNotInheritDeadProcessStartTime guards the
+// case the start time exists to catch. A fork's pid is newborn by definition, so
+// a surviving side-map entry can only mean the kernel recycled the pid.
+//
+// It is reachable with shipped defaults: exitCleanup.cleanupDelay is 5 minutes,
+// so an exited process's tree node AND its side-map entry outlive it by that
+// long. Without the guard the recycled pid reports the DEAD process's start
+// time, and if the new process lives less than one 30s scan interval — the
+// short-lived population the on-demand read was added for — the periodic scan
+// never corrects it. That is worse than the zero it replaces: a consumer joining
+// on (pid, startTime) concludes the two processes are one.
+//
+// Scoped to this package's side map only. This is NOT pid-reuse hardening: the
+// shared tree node still carries the dead process's comm, cmdline and path.
+func TestHandleForkEvent_RecycledPidDoesNotInheritDeadProcessStartTime(t *testing.T) {
+	cfg := config.Config{}
+	cfg.ExitCleanup = processtreecreatorconfig.ExitCleanupConfig{
+		MaxPendingExits: 1000,
+		CleanupInterval: 30 * time.Second,
+		CleanupDelay:    5 * time.Minute, // shipped default
+	}
+	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, cfg).(*processTreeCreatorImpl)
+
+	const aStart = uint64(1_000_000_000) // process A, boot+1s
+	const bStart = uint64(9_000_000_000) // process B, boot+9s
+	creator.readStartTime = func(pid uint32) (uint64, time.Time) { return bStart, time.Time{} }
+
+	// Process A on pid 4242, seen by the periodic scan.
+	creator.FeedEvent(conversion.ProcessEvent{
+		Type: conversion.ProcfsEvent, PID: 4242, PPID: 1, Comm: "victim", StartTimeNs: aStart,
+	})
+	require.Equal(t, aStart, creator.GetProcessBootTimeNs(4242))
+
+	// A exits. Cleanup is delayed, so the node and the side-map entry survive.
+	creator.FeedEvent(conversion.ProcessEvent{
+		Type: conversion.ExitEvent, PID: 4242, Comm: "exit", Timestamp: time.Now(),
+	})
+
+	// The kernel recycles 4242 for process B; B's fork event arrives.
+	creator.FeedEvent(conversion.ProcessEvent{
+		Type: conversion.ForkEvent, PID: 4242, PPID: 1, Comm: "beacon",
+	})
+
+	assert.Equal(t, bStart, creator.GetProcessBootTimeNs(4242),
+		"a newborn pid must get its OWN start time, not the dead process's")
+}

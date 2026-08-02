@@ -200,6 +200,16 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
+	// A fork's pid is newborn, so a surviving side-map entry can only belong to a
+	// process the kernel already recycled this pid away from. Drop it so
+	// ensureStartTime reads this incarnation's own creation time instead of
+	// inheriting the dead one's — exits linger for exitCleanup.cleanupDelay
+	// (5 minutes by default), so the stale entry is readily reachable.
+	//
+	// Scoped to this side map. This is NOT pid-reuse hardening: the shared tree
+	// node still carries the dead process's comm, cmdline and path.
+	delete(pt.pidStartTimeNs, event.PID)
+
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
 		proc = pt.getOrCreateProcess(event.PID)
