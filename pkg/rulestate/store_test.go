@@ -152,6 +152,52 @@ func TestStore_HostBucketHasItsOwnLargerCap(t *testing.T) {
 	assert.ErrorIs(t, s.Set(entry("R1089", HostScopeID(), "n", "8", now, time.Minute)), ErrScopeCapReached)
 }
 
+// Node scope is a single node-wide bucket shared by every rule and workload, and
+// PurgeScope is only ever called with a container's scope ID, so it is never
+// reclaimed on container removal. It therefore needs the same headroom as the
+// host bucket -- the per-container cap would starve it on a busy node.
+func TestStore_NodeBucketGetsTheLargerCap(t *testing.T) {
+	s := NewStore(testConfig(), NoopMetrics{}) // host/node cap 8, container cap 4
+	now := time.Now()
+	for i := 0; i < 8; i++ {
+		e := entry("R1089", NodeScopeID(), "n", fmt.Sprint(i), now, time.Minute)
+		e.Scope = armotypes.StateScopeNode
+		require.NoError(t, s.Set(e),
+			"node scope must not be bounded by the per-container cap")
+	}
+	over := entry("R1089", NodeScopeID(), "n", "8", now, time.Minute)
+	over.Scope = armotypes.StateScopeNode
+	assert.ErrorIs(t, s.Set(over), ErrScopeCapReached)
+}
+
+// At the global ceiling with nothing reclaimable, a write that only REPLACES an
+// existing key does not grow the store, so it must still be admitted -- otherwise
+// a rule loses the ability to refresh a marker exactly when the store is under
+// most pressure. Mirrors TestStore_OverwriteSucceedsEvenAtCap for the global cap.
+func TestStore_GlobalCapAdmitsAReplacement(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxSize = 3
+	cfg.MaxEntriesPerContainer = 100
+	s := NewStore(cfg, NoopMetrics{})
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		require.NoError(t, s.Set(entry("R1089", "c:abc", "n", fmt.Sprint(i), now, time.Minute)))
+	}
+
+	// A genuine insert is still rejected...
+	assert.ErrorIs(t, s.Set(entry("R1089", "c:abc", "n", "new", now, time.Minute)), ErrGlobalCapReached)
+
+	// ...but refreshing an existing key is not.
+	later := now.Add(time.Second)
+	require.NoError(t, s.Set(entry("R1089", "c:abc", "n", "0", later, time.Minute)),
+		"a replacement does not grow the store, so the ceiling must not block it")
+
+	got, ok := s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "n", "0")
+	require.True(t, ok)
+	assert.Equal(t, later, got.Timestamp)
+	assert.Equal(t, 3, s.Len())
+}
+
 func TestScopeIDs_HostAndNodeDoNotCollide(t *testing.T) {
 	// Host processes carry ContainerID == "", and node scope has no ID. Without
 	// type prefixes both would be "" and share a bucket.
