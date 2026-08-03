@@ -23,8 +23,22 @@ type processTreeCreatorImpl struct {
 	config                config.Config
 
 	// Exit manager fields
-	pendingExits        map[uint32]*pendingExit // PID -> pending exit
+	pendingExits map[uint32]*pendingExit // PID -> pending exit
+
+	// exitCleanupStopChan is the loop's stop signal while it is armed, and nil once
+	// stopped, which is what lets startExitManager bring the loop back up. It is
+	// an intent flag, not a liveness flag: it is non-nil before the goroutine has
+	// been scheduled, and nil while a signalled loop is still finishing its current
+	// iteration. Do not read it as "the loop is running".
+	//
+	// Every access in non-test code is under exitCleanupMutex, and NOT under
+	// pt.mutex: the tree lock is held across performExitCleanup, so reusing it for
+	// lifecycle transitions would couple shutdown to tree contention. Tests read
+	// the field directly, which is safe only because those reads are sequenced
+	// after Start/Stop returns and the loop never touches the field — it receives
+	// the channel as an argument.
 	exitCleanupStopChan chan struct{}
+	exitCleanupMutex    sync.Mutex
 
 	// pidStartTimeNs maps a live pid to its creation time in nanoseconds since
 	// boot, sourced EXCLUSIVELY from /proc/<pid>/stat field 22 (never from

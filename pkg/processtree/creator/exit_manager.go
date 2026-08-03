@@ -20,26 +20,36 @@ type pendingExit struct {
 }
 
 func (pt *processTreeCreatorImpl) startExitManager() {
+	pt.exitCleanupMutex.Lock()
+	defer pt.exitCleanupMutex.Unlock()
+
 	if pt.exitCleanupStopChan != nil {
 		return
 	}
 
-	pt.exitCleanupStopChan = make(chan struct{})
-	go pt.exitCleanupLoop()
+	// Hand the channel to the loop by value. The loop must never read the field
+	// itself: the field is mutable state shared with stopExitManager, and reading
+	// it on every select iteration is what made this a data race.
+	stopChan := make(chan struct{})
+	pt.exitCleanupStopChan = stopChan
+	go pt.exitCleanupLoop(stopChan)
 }
 
 func (pt *processTreeCreatorImpl) stopExitManager() {
+	pt.exitCleanupMutex.Lock()
+	defer pt.exitCleanupMutex.Unlock()
+
 	if pt.exitCleanupStopChan == nil {
 		return
 	}
 
-	select {
-	case <-pt.exitCleanupStopChan:
-		return
-	default:
-		close(pt.exitCleanupStopChan)
-		pt.exitCleanupStopChan = nil
-	}
+	// Closing is the signal that stops the loop; nil is only the "not running"
+	// flag that lets startExitManager bring it back up. Holding the mutex across
+	// the check and the close makes the transition atomic — previously two
+	// concurrent Stop() calls could both find the channel open and both close it,
+	// panicking with "close of closed channel".
+	close(pt.exitCleanupStopChan)
+	pt.exitCleanupStopChan = nil
 }
 
 func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent) {
@@ -58,13 +68,21 @@ func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent) 
 	}
 }
 
-func (pt *processTreeCreatorImpl) exitCleanupLoop() {
+// exitCleanupLoop runs until it observes stopChan closed — which is not the same
+// instant the close happens: an in-flight iteration is not preempted, and when
+// both arms are ready the runtime picks between them at random, so one or two
+// further cleanup passes after Stop() are normal.
+//
+// stopChan is a parameter rather than a field read so the loop holds its own
+// reference for its whole lifetime, unaffected by a concurrent stopExitManager
+// clearing the field.
+func (pt *processTreeCreatorImpl) exitCleanupLoop(stopChan <-chan struct{}) {
 	ticker := time.NewTicker(pt.config.ExitCleanup.CleanupInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-pt.exitCleanupStopChan:
+		case <-stopChan:
 			return
 		case <-ticker.C:
 			pt.performExitCleanup()
