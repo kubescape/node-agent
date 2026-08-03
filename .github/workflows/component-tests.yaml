@@ -105,6 +105,7 @@ jobs:
           Test_34_NetworkNeighborsCIDRCollapse,
           Test_35_ExecTTYFieldTest,
           Test_36_MultiContainerPerContainerBinding,
+          Test_37_CelStateStoreCorrelation,
           Test_43_RelativeOpenPathResolution,
           Test_48_MultiSubtypeGroupedProfileDocument,
           Test_49_EphemeralContainerFullTreatment
