@@ -285,6 +285,10 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 }
 
 func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *armotypes.ProcessTree) {
+	// Resolved before the lock: see processRefFor on the lock ordering.
+	ref := ns.processRefFor(event.GetPID())
+	outboundKey := getDnsOutboundIdentifier(event.GetDNSName(), ref)
+
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
 
@@ -304,7 +308,7 @@ func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *armot
 	}
 
 	// We get only DNS response events, so we put them in the outbound map
-	if _, exists := entity.Outbound[event.GetDNSName()]; exists {
+	if _, exists := entity.Outbound[outboundKey]; exists {
 		// If the event already exists, we can skip it
 		return
 	}
@@ -319,8 +323,9 @@ func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *armot
 
 	processTree = ns.getProcessTreeByPid(event.GetPID(), event.GetComm(), processTree)
 	networkEvent.ProcessTree = processTree
+	networkEvent.ProcessRef = ref
 
-	entity.Outbound[event.GetDNSName()] = networkEvent
+	entity.Outbound[outboundKey] = networkEvent
 	ns.networkEventsStorage.Entities[entityId] = entity
 }
 
@@ -343,7 +348,8 @@ func (ns *NetworkStream) shouldReportDnsEvent(dnsEvent utils.DNSEvent) bool {
 }
 
 func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTree *armotypes.ProcessTree) {
-	endpointID := getNetworkEndpointIdentifier(event)
+	ref := ns.processRefFor(event.GetPID())
+	endpointID := getNetworkEndpointIdentifier(event, ref)
 
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
@@ -368,20 +374,20 @@ func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTre
 			// If the event already exists, we can skip it
 			return
 		}
-		networkEvent := ns.buildNetworkEvent(event, processTree)
+		networkEvent := ns.buildNetworkEvent(event, processTree, ref)
 		entity.Outbound[endpointID] = networkEvent
 	} else {
 		if _, exists := entity.Inbound[endpointID]; exists {
 			// If the event already exists, we can skip it
 			return
 		}
-		networkEvent := ns.buildNetworkEvent(event, processTree)
+		networkEvent := ns.buildNetworkEvent(event, processTree, ref)
 		entity.Inbound[endpointID] = networkEvent
 	}
 	ns.networkEventsStorage.Entities[entityId] = entity
 }
 
-func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree *armotypes.ProcessTree) armotypes.NetworkStreamEvent {
+func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree *armotypes.ProcessTree, ref *armotypes.ProcessRef) armotypes.NetworkStreamEvent {
 	var domain string
 	var ok bool
 	dstEndpoint := event.GetDstEndpoint()
@@ -444,6 +450,7 @@ func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree
 
 	processTree = ns.getProcessTreeByPid(event.GetPID(), event.GetComm(), processTree)
 	networkEvent.ProcessTree = processTree
+	networkEvent.ProcessRef = ref
 
 	return networkEvent
 }
@@ -500,8 +507,50 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *armotypes.NetworkStream
 	return nil
 }
 
-func getNetworkEndpointIdentifier(event utils.NetworkEvent) string {
-	return fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetDstPort(), event.GetProto())
+// getNetworkEndpointIdentifier builds the per-batch connection key. The process
+// ref is APPENDED, never reordered: a nil ref leaves the key byte-identical to
+// the pre-attribution format, and an attributed key always carries two more
+// components, so the two can never collide. The traffic-view write path collapses
+// process-split entries back to one row (verified, SUB-7851).
+func getNetworkEndpointIdentifier(event utils.NetworkEvent, ref *armotypes.ProcessRef) string {
+	id := fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetDstPort(), event.GetProto())
+	if ref != nil {
+		id += "/" + ref.String()
+	}
+	return id
+}
+
+// getDnsOutboundIdentifier keys a DNS query by name plus the querying process, so
+// two processes resolving one domain no longer overwrite each other. The ref is
+// appended on the same terms as getNetworkEndpointIdentifier's.
+func getDnsOutboundIdentifier(dnsName string, ref *armotypes.ProcessRef) string {
+	if ref == nil {
+		return dnsName
+	}
+	return dnsName + "/" + ref.String()
+}
+
+// processRefFor builds the wire identity of the process behind an event.
+//
+// StartTimeNs is boot-relative NANOSECONDS, read from the procfs-fed identity map
+// and emitted VERBATIM — never scale it. A division here would still join
+// correctly within one message (key and ref share a producer) while silently
+// breaking identity across messages by seven orders of magnitude. See
+// docs/features/process-start-time.md.
+//
+// Zero is legal: it means unknown (process not yet scanned, died before its
+// creation event was processed, or a Kubernetes-mode host process), leaving
+// pid-only identity. The ref is emitted anyway — dropping it would lose
+// attribution entirely for that population.
+//
+// Called BEFORE eventsStorageMutex is taken: the lookup acquires the process
+// tree's read lock, and holding the storage mutex across it would add a
+// storage->tree lock-order edge for no benefit.
+func (ns *NetworkStream) processRefFor(pid uint32) *armotypes.ProcessRef {
+	if pid == 0 || ns.processTreeManager == nil {
+		return nil // nothing to attribute
+	}
+	return &armotypes.ProcessRef{PID: pid, StartTimeNs: ns.processTreeManager.GetProcessBootTimeNs(pid)}
 }
 
 func isEmptyNetworkStream(networkStream *armotypes.NetworkStream) bool {
