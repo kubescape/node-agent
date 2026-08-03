@@ -210,8 +210,10 @@ func (ns *NetworkStream) Start() {
 					ns.eventsNotificationChannel <- *snapshot
 				}
 
-				// Send the snapshot outside the lock so event recording is never stalled by I/O
-				if err := ns.sendNetworkEvent(snapshot); err != nil {
+				// The wire copy is derived outside the lock too: it deep-copies one tree
+				// per distinct process and caps command lines, which is the only
+				// expensive part of a flush.
+				if err := ns.sendNetworkEvent(buildWireStream(snapshot)); err != nil {
 					logger.L().Error("NetworkStream - failed to send network events", helpers.Error(err))
 				}
 				logger.L().Debug("NetworkStream - sent network events")

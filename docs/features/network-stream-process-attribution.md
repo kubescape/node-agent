@@ -112,7 +112,57 @@ what keeps the lock body cheap, and it is safe because a tree is immutable once
 attached to an event: nothing mutates one in place. `buildBranchToShim` allocates
 fresh nodes per branch, so event trees are not shared with the process tree's
 live map — only with its 1-minute LRU entry, which nothing writes to after
-construction. Anything that would modify a tree operates on a `DeepCopy`.
+construction. Anything that would modify a tree copies it first.
+
+Transient memory outside the lock is one capped tree copy per distinct process —
+at most connections × p90 tree size ≈ 283 × 5.1 KB ≈ 1.4 MB worst case, freed
+after the HTTP send.
+
+## The wire copy (`wire.go`)
+
+`buildWireStream` derives the HTTP payload from the snapshot:
+
+- Each event's tree moves into `Processes`, keyed by the event's own ref, and the
+  per-event `ProcessTree` is cleared **on the copy only**.
+- `ProcessAttributionVersion` is set **unconditionally**, including when nothing
+  was attributable. `len(Processes) == 0` is not a capability signal — a sensor
+  that ran and found nothing must stay distinguishable from one that predates
+  attribution.
+- `Processes` is left nil when empty, so `omitempty` drops it.
+- A ref whose tree never resolved still ships. It dangles, and `ProcessTreeFor`
+  is specified to return nil for that; dropping the ref would lose the pid too.
+
+**One tree per process, not per connection.** Trees dominate the payload; the
+duplicated ref bytes do not. The ref therefore travels twice per connection (map
+key and event value) by design — do not "optimise" that away.
+
+**On collision the deeper chain wins.** The process-tree cache TTL (1 minute) is
+shorter than the flush interval (2 minutes), so two lookups for one process
+inside a single interval can legitimately return chains with different amounts of
+ancestry resolved. First-wins would discard the richer chain *and* would make the
+payload depend on Go's randomised map iteration order.
+
+### Why not `Process.DeepCopy`
+
+`armotypes.Process.DeepCopy` **mutates its receiver**: it calls `MigrateToMap`,
+which allocates `ChildrenMap` and nils `Children`, and it does so on every child
+it recurses into — nodes the LRU cache, the alert paths and the channel consumer
+are reading. `copyCappedProcess` is read-only instead, normalising the deprecated
+`Children` slice into the copy's `ChildrenMap` without touching the source. Every
+recursive walk here is bounded by `maxTreeDepth` (64), so a malformed or cyclic
+tree costs a truncated payload rather than the agent's stack.
+
+### Command-line cap
+
+Each node's `Cmdline` is capped at **1024 bytes on the wire copy only**, with a
+trailing `…` so a cut is visible to a human. `cmdline` is ~40% of a tree's bytes
+and unbounded — a single pathological java or node command line can exceed
+100 KB — so this is the lever that keeps the payload tail bounded, not an
+optimisation. 1024 bytes keeps >99% of real command lines intact, and the cut
+never splits a UTF-8 rune.
+
+The cap is applied **during** the copy, so the legacy alert paths and the
+notification-channel consumer keep the uncapped values.
 
 ## Handoff note for the host/ECS workstream
 
