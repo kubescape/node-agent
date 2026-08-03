@@ -161,6 +161,7 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 		Cwd:            event.Cwd,
 		Path:           event.Path,
 		StartTimeNs:    event.StartTimeNs,
+		StartTimeWall:  event.StartTimeWall,
 		ContainerID:    event.ContainerID,
 		ContainerMntNs: event.ContainerMntNs,
 		ContainerNetNs: event.ContainerNetNs,

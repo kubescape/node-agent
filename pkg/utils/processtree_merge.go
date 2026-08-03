@@ -53,6 +53,7 @@ func CopyProcess(src *armotypes.Process) *armotypes.Process {
 		Cwd:         src.Cwd,
 		Gid:         copyUint32Ptr(src.Gid),
 		Uid:         copyUint32Ptr(src.Uid),
+		StartTime:   src.StartTime,
 		ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 	}
 }
@@ -86,6 +87,9 @@ func EnrichProcess(target *armotypes.Process, source *armotypes.Process) {
 	}
 	if target.Gid == nil && source.Gid != nil {
 		target.Gid = copyUint32Ptr(source.Gid)
+	}
+	if target.StartTime.IsZero() && !source.StartTime.IsZero() {
+		target.StartTime = source.StartTime
 	}
 }
 

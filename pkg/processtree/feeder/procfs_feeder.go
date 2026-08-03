@@ -15,6 +15,15 @@ import (
 	"github.com/prometheus/procfs"
 )
 
+// ticksPerSecond is USER_HZ, the unit of /proc/<pid>/stat field 22. Hardcoded to
+// match prometheus/procfs's own userHZ constant and the wire contract's
+// documentation that start times are exact multiples of 10 ms.
+const ticksPerSecond = 100
+
+// nsPerTick converts /proc/<pid>/stat field 22 (clock ticks since boot) to
+// boot-relative nanoseconds. Exact: 1e9 / 100 = 10,000,000.
+const nsPerTick = uint64(1_000_000_000 / ticksPerSecond)
+
 // ProcfsFeeder implements ProcessEventFeeder by reading process information from /proc filesystem.
 type ProcfsFeeder struct {
 	subscribers        []chan<- conversion.ProcessEvent
@@ -26,6 +35,10 @@ type ProcfsFeeder struct {
 	procfsPath         string
 	procfs             procfs.FS
 	processTreeManager processtree.ProcessTreeManager
+	// bootTime is /proc/stat's btime, read once at Start. Used only to derive the
+	// display-only wall-clock start time; it has whole-second resolution, which is
+	// why boot-relative nanoseconds remain the sole process-identity source.
+	bootTime time.Time
 }
 
 // procInfo is a helper struct to pass results from worker goroutines.
@@ -60,6 +73,13 @@ func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize procfs: %w", err)
 	}
 	pf.procfs = fs
+
+	if stat, err := fs.Stat(); err == nil {
+		pf.bootTime = time.Unix(int64(stat.BootTime), 0)
+	} else {
+		// Wall-clock start times will stay zero; boot-relative identity is unaffected.
+		fmt.Fprintf(os.Stderr, "procfs feeder: failed to read btime, StartTimeWall disabled: %v\n", err)
+	}
 
 	// Create a cancellable context for graceful shutdown
 	pf.ctx, pf.cancel = context.WithCancel(ctx)
@@ -232,6 +252,14 @@ func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (conversion.ProcessEvent, er
 
 	event.PPID = uint32(stat.PPID)
 	event.Comm = stat.Comm
+
+	// Field 22: process creation time in clock ticks since boot. Convert to
+	// boot-relative nanoseconds (the identity unit on the wire) and, separately,
+	// to a display-only wall-clock time via btime.
+	event.StartTimeNs = stat.Starttime * nsPerTick
+	if !pf.bootTime.IsZero() && event.StartTimeNs != 0 {
+		event.StartTimeWall = pf.bootTime.Add(time.Duration(event.StartTimeNs))
+	}
 
 	if status, err := proc.NewStatus(); err == nil {
 		uid := uint32(status.UIDs[1])

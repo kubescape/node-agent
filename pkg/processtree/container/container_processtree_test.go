@@ -2,6 +2,7 @@ package containerprocesstree
 
 import (
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
@@ -820,4 +821,52 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_OutsideProce
 	assert.True(t, cpt.IsProcessUnderAnyContainerSubtree(50, createSafeMapFromData(fullTree)))   // shim
 	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(200, createSafeMapFromData(fullTree))) // outside process
 	assert.False(t, cpt.IsProcessUnderAnyContainerSubtree(1, createSafeMapFromData(fullTree)))   // init
+}
+
+// TestContainerProcessTreeImpl_GetPidBranch_CarriesStartTime pins the third of
+// the three copy sites that strip any field they do not explicitly list.
+// buildBranchToShim feeds GetContainerProcessTree, so every alert branch and
+// every network-stream tree goes through it: if the node literal drops
+// StartTime, the value is populated on the tree and still never reaches a
+// consumer.
+func TestContainerProcessTreeImpl_GetPidBranch_CarriesStartTime(t *testing.T) {
+	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+
+	containerID := "test-container-123"
+	shimPID := uint32(50)
+	cpt.containerIdToShimPid[containerID] = shimPID
+
+	nginxStart := time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC)
+	workerStart := time.Date(2026, 7, 29, 10, 5, 0, 0, time.UTC)
+
+	nginxWorker := &armotypes.Process{
+		PID:         101,
+		PPID:        100,
+		Comm:        "nginx-worker",
+		StartTime:   workerStart,
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
+	}
+	nginxProcess := &armotypes.Process{
+		PID:       100,
+		PPID:      50, // parent is shim
+		Comm:      "nginx",
+		StartTime: nginxStart,
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{
+			{Comm: "nginx-worker", PID: 101}: nginxWorker,
+		},
+	}
+	fullTree := map[uint32]*armotypes.Process{
+		1:   {PID: 1, PPID: 0, Comm: "init"},
+		50:  {PID: 50, PPID: 1, Comm: "containerd-shim", ChildrenMap: map[armotypes.CommPID]*armotypes.Process{{Comm: "nginx", PID: 100}: nginxProcess}},
+		100: nginxProcess,
+		101: nginxWorker,
+	}
+
+	result, err := cpt.GetPidBranch(containerID, 101, createSafeMapFromData(fullTree))
+	assert.NoError(t, err)
+	assert.Equal(t, nginxStart, result.StartTime, "branch root must carry the source node's StartTime")
+
+	child, ok := result.ChildrenMap[armotypes.CommPID{Comm: "nginx-worker", PID: 101}]
+	assert.True(t, ok)
+	assert.Equal(t, workerStart, child.StartTime, "branch leaf must carry the source node's StartTime")
 }

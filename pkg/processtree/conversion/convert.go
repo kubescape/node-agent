@@ -131,9 +131,14 @@ func convertProcfsEvent(procfsEvent *events.ProcfsEvent) ProcessEvent {
 		Cwd:         procfsEvent.Cwd,
 		Path:        procfsEvent.Path,
 		StartTimeNs: procfsEvent.StartTimeNs,
-		ContainerID: procfsEvent.ContainerID,
-		HostPID:     procfsEvent.HostPID,
-		HostPPID:    procfsEvent.HostPPID,
+		// Only ProcfsEvent carries a real start time. The exec/fork/exit
+		// converters above set StartTimeNs from the event's wall-clock timestamp
+		// — a different clock domain (epoch ns, not boot ns) with different
+		// semantics — and deliberately leave StartTimeWall zero.
+		StartTimeWall: procfsEvent.StartTimeWall,
+		ContainerID:   procfsEvent.ContainerID,
+		HostPID:       procfsEvent.HostPID,
+		HostPPID:      procfsEvent.HostPPID,
 	}
 
 	return event
