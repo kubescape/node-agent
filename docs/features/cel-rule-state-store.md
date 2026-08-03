@@ -245,3 +245,42 @@ why its cap is larger.
 
 Counters are labelled by rule ID only, never by state key — a key is unbounded
 cardinality.
+
+## When a correlation rule does not fire
+
+Every failure mode here is silent — the rule applies, loads, and simply never
+matches. Work down this list in order; each step is cheap and rules out one cause.
+
+**1. Is the clause even reaching the agent?** The `Rules` CRD must declare
+`stateWrites`, or the API server prunes it. This is the most likely cause and the
+hardest to guess, because `kubectl apply` reports success:
+
+```bash
+kubectl get rules <name> -n kubescape -o jsonpath='{.spec.rules[0].stateWrites}'
+```
+
+Empty output after a successful apply means the schema is missing the property.
+`--validate=false` does not help — it skips client-side validation only.
+
+**2. Did the clause fail validation?** node-agent logs
+`RuleManager - invalid stateWrites clause` with the rule ID and the offending
+write name. A rule that fails validation is degraded to non-correlating; the rest
+of the CRD keeps evaluating.
+
+**3. Is the rule bound?** Rules are inert until a `RuntimeRuleAlertBinding` lists
+them by `ruleName`. A new rule ID does nothing on its own.
+
+**4. Is the write leg reaching the rule loop?** Add a temporary control rule that
+alerts on the *write* event type with the same predicate as your `when:` guard. If
+the control is silent, the problem is upstream of the state store.
+
+**5. Do the two legs agree on the join key?** Have the control rules print
+`string(event.pid)` in their `message`, and compare. `has_ancestor` is the right
+answer when the second leg is a *child* rather than the same process.
+
+**6. Is the write being rejected?** `state_write_rejected_total` counts caps and
+guard errors, labelled by rule ID.
+
+**7. Could the events be reordered?** node-agent evaluates on a concurrent worker
+pool, so two events milliseconds apart can be processed out of order. This is real
+but usually not the cause — rule out everything above first.
