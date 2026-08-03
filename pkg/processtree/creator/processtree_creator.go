@@ -205,7 +205,7 @@ func (pt *processTreeCreatorImpl) applyStartTime(proc *armotypes.Process, pid ui
 		return
 	}
 	pt.pidStartTimeNs[pid] = ns
-	if !wall.IsZero() && proc.StartTime.IsZero() {
+	if !wall.IsZero() {
 		proc.StartTime = wall
 	}
 }
