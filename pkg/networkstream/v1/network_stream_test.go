@@ -333,8 +333,13 @@ func TestFlush_ChannelSnapshotSurvivesTheProducer(t *testing.T) {
 		t.Fatal("no flush arrived on the notification channel")
 	}
 
-	// Let the producer finish the flush and record another connection.
-	time.Sleep(300 * time.Millisecond)
+	// Wait for the producer to actually finish the flush — an emptied live storage is
+	// the observable signal that its clear loop ran — then record another connection.
+	require.Eventually(t, func() bool {
+		ns.eventsStorageMutex.RLock()
+		defer ns.eventsStorageMutex.RUnlock()
+		return len(ns.networkEventsStorage.Entities[testNodeName].Outbound) == 0
+	}, 5*time.Second, 5*time.Millisecond, "the flush never cleared the live storage")
 	ns.handleNetworkEvent(outboundEvent(202, "9.9.9.9", 80), treeFor(202, "wget"))
 
 	outbound := received.Entities[testNodeName].Outbound
@@ -344,4 +349,67 @@ func TestFlush_ChannelSnapshotSurvivesTheProducer(t *testing.T) {
 		assert.Equal(t, "curl", ev.ProcessTree.ProcessTree.Comm)
 		require.NotNil(t, ev.ProcessRef)
 	}
+}
+
+// TestFlush_BlockedChannelSendHonoursShutdown: the channel send is deliberately
+// blocking, so a slow consumer applies backpressure rather than losing traffic.
+// That makes it a goroutine leak unless it also selects on context cancellation —
+// which the send could not do while it held eventsStorageMutex. Nothing else in
+// this suite enters the blocked path, because every other channel test buffers
+// specifically so the producer never blocks.
+func TestFlush_BlockedChannelSendHonoursShutdown(t *testing.T) {
+	mgr := processtree.NewProcessTreeManagerMock()
+	ctx, cancel := context.WithCancel(context.Background())
+	// Unbuffered and never read: the flush blocks on the send.
+	ch := make(chan armotypes.NetworkStream)
+	ns, err := NewNetworkStream(ctx, config.Config{NetworkStreamingInterval: 20 * time.Millisecond},
+		nil, stubResolver{}, testNodeName, ch, true, mgr)
+	require.NoError(t, err)
+	ns.handleNetworkEvent(outboundEvent(101, "1.2.3.4", 443), treeFor(101, "curl"))
+
+	ns.Start()
+
+	// The flush is past the lock body once the live storage is cleared, so from here
+	// it is parked on the send with nobody reading.
+	require.Eventually(t, func() bool {
+		ns.eventsStorageMutex.RLock()
+		defer ns.eventsStorageMutex.RUnlock()
+		return len(ns.networkEventsStorage.Entities[testNodeName].Outbound) == 0
+	}, 5*time.Second, 5*time.Millisecond, "the flush never reached its channel send")
+
+	cancel()
+	// Give the parked select a moment to observe cancellation. Only ctx.Done() is
+	// ready at this point — the send cannot be, because there is still no receiver —
+	// so a correct implementation abandons the send and returns.
+	time.Sleep(100 * time.Millisecond)
+
+	// Now become a receiver. If the goroutine were still parked on a plain blocking
+	// send it would hand us the snapshot; having exited, it never can.
+	select {
+	case <-ch:
+		t.Fatal("the flush completed its channel send after ctx cancellation: it is still parked on a send that ignores shutdown")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// TestHandleDnsEvent_NoPidKeepsLegacyKey mirrors the network-event case: with no
+// pid the DNS key stays the bare name, byte-identical to the old format.
+func TestHandleDnsEvent_NoPidKeepsLegacyKey(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	ns.handleDnsEvent(&utils.StructEvent{DNSName: "example.com.", DstPort: 53, Timestamp: time.Now().UnixNano()}, nil)
+
+	entity := ns.networkEventsStorage.Entities[testNodeName]
+	require.Len(t, entity.Outbound, 1)
+	for key, ev := range entity.Outbound {
+		assert.Equal(t, "example.com.", key)
+		assert.Nil(t, ev.ProcessRef, "pid 0 is not an identity")
+	}
+}
+
+// TestProcessRefFor_NoManager: the constructor accepts a nil process-tree manager
+// (TestNewNetworkStream passes one), so the ref lookup must not dereference it.
+func TestProcessRefFor_NoManager(t *testing.T) {
+	ns := newTestStream(t, nil)
+	assert.Nil(t, ns.processRefFor(101), "no manager means nothing to attribute, not a panic")
+	assert.Nil(t, ns.processRefFor(0))
 }

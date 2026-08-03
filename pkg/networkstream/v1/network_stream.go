@@ -201,6 +201,13 @@ func (ns *NetworkStream) Start() {
 				}
 				ns.eventsStorageMutex.Unlock()
 
+				// Derive the wire copy BEFORE handing the snapshot away. Both are outside
+				// the lock — the tree copies and command-line caps are the only expensive
+				// part of a flush — but the order matters: once the snapshot is on the
+				// channel its maps belong to the consumer, and reading them here afterwards
+				// would depend on that consumer never writing to what it receives.
+				wire := buildWireStream(snapshot)
+
 				// The snapshot is independent of the live storage, so the consumer gets it
 				// outside the lock and WITH its process trees intact — private-node-agent's
 				// host network sensor reads outbound.ProcessTree from this channel. There is
@@ -219,10 +226,7 @@ func (ns *NetworkStream) Start() {
 					}
 				}
 
-				// The wire copy is derived outside the lock too: it deep-copies one tree
-				// per distinct process and caps command lines, which is the only
-				// expensive part of a flush.
-				if err := ns.sendNetworkEvent(buildWireStream(snapshot)); err != nil {
+				if err := ns.sendNetworkEvent(wire); err != nil {
 					logger.L().Error("NetworkStream - failed to send network events", helpers.Error(err))
 				}
 				logger.L().Debug("NetworkStream - sent network events")

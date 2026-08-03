@@ -58,9 +58,16 @@ The key now appends the ref:
 | Attributed DNS query | `evil.example.com./101/5000000000` |
 
 **Appended, never reordered.** An unattributed key stays byte-identical to the
-pre-attribution format, and an attributed key always carries two more components,
-so the two can never collide. First-writer-wins is retained for the *same*
-process, so a chatty process does not inflate the batch.
+pre-attribution format. For IP connections the two forms cannot collide: the
+address, port and protocol components are structured, so an attributed key always
+carries exactly two more of them. For DNS the name is unstructured, so an
+unattributed query for a name that itself ends in `/<pid>/<startTimeNs>` would
+collide with an attributed query for the name's prefix, and one of the two records
+would be dropped. Contrived, and it costs one record rather than corrupting
+attribution, but it is not impossible the way the IP case is.
+
+First-writer-wins is retained for the *same* process, so a chatty process does not
+inflate the batch.
 
 Accepted consequence: an attributed and an unattributed connection to one
 endpoint become two entries. The traffic-view write path collapses them to one
@@ -122,6 +129,17 @@ construction. Anything that would modify a tree copies it first.
 Transient memory outside the lock is one capped tree copy per distinct process —
 at most connections × p90 tree size ≈ 283 × 5.1 KB ≈ 1.4 MB worst case, freed
 after the HTTP send.
+
+The wire copy is derived **before** the snapshot goes on the channel. Once the
+consumer has it, its maps are the consumer's; reading them afterwards would depend
+on that consumer never writing to what it receives.
+
+The table above covers the flush only. `eventsStorageMutex` is also held by
+`handleNetworkEvent` across `buildNetworkEvent`, which calls `ResolveIPAddress`
+and — on a cache miss — an unbounded `net.LookupAddr`. That is pre-existing and
+untouched here (this change strictly reduces flush-side contention), but it is the
+larger contributor to hold time on that mutex and should not be mistaken for
+covered ground.
 
 ## The wire copy (`wire.go`)
 

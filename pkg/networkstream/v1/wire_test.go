@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -212,21 +213,31 @@ func TestBuildWireStream_SerializationContract(t *testing.T) {
 }
 
 // TestNoTickScaling guards the one silent failure mode of this feature: a
-// StartTimeNs division would still join correctly inside a single message while
-// breaking identity across messages by seven orders of magnitude.
+// StartTimeNs division would still join correctly inside a single message — the key
+// and the ref share a producer — while breaking identity across messages by seven
+// orders of magnitude.
+//
+// It must run the WHOLE producer path, starting at processRefFor where the value
+// enters, because that is where a scaling bug would be introduced. Asserting only
+// that buildWireStream does not rewrite an already-correct literal is a tautology.
 func TestNoTickScaling(t *testing.T) {
-	ref := &armotypes.ProcessRef{PID: 101, StartTimeNs: 5_000_000_000}
-	snapshot := outboundOnly("c1", map[string]armotypes.NetworkStreamEvent{
-		"1.2.3.4/443/TCP/101/5000000000": {ProcessRef: ref, ProcessTree: treeOf("c1", chain(101))},
-	})
+	const startTimeNs = uint64(5_000_000_000) // procfs values are exact multiples of 10^7
+	mgr := processtree.NewProcessTreeManagerMock()
+	mgr.SetProcessBootTimeNs(101, startTimeNs)
+	ns := newTestStream(t, mgr)
 
-	wire := buildWireStream(snapshot)
+	ns.handleNetworkEvent(outboundEvent(101, "1.2.3.4", 443), treeFor(101, "curl"))
+	wire := buildWireStream(snapshotNetworkStream(&ns.networkEventsStorage))
 
-	for _, ev := range wire.Entities["c1"].Outbound {
-		assert.Equal(t, uint64(5_000_000_000), ev.ProcessRef.StartTimeNs, "emitted verbatim, never rescaled")
+	require.Len(t, wire.Entities[testNodeName].Outbound, 1)
+	for key, ev := range wire.Entities[testNodeName].Outbound {
+		require.NotNil(t, ev.ProcessRef)
+		assert.Equal(t, startTimeNs, ev.ProcessRef.StartTimeNs, "emitted verbatim, never rescaled")
+		assert.Equal(t, "1.2.3.4/443/TCP/101/5000000000", key, "the batch key carries the unscaled value too")
 	}
+	require.Len(t, wire.Processes, 1)
 	for gotRef := range wire.Processes {
-		assert.Equal(t, uint64(5_000_000_000), gotRef.StartTimeNs, "the map key must match the event's ref exactly")
+		assert.Equal(t, startTimeNs, gotRef.StartTimeNs, "the map key must match the event's ref exactly")
 	}
 }
 

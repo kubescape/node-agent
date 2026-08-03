@@ -98,7 +98,15 @@ func capTreeCopy(tree *armotypes.ProcessTree) *armotypes.ProcessTree {
 		return nil
 	}
 	copied := copyCappedProcess(&tree.ProcessTree, maxTreeDepth)
-	return &armotypes.ProcessTree{ContainerID: tree.ContainerID, ProcessTree: *copied}
+	if copied == nil {
+		return nil
+	}
+	// Copy the wrapper wholesale rather than field-listing it: a field list silently
+	// drops anything added to ProcessTree later, which is the exact trap the three
+	// existing process copiers fell into (see docs/features/process-start-time.md).
+	dst := *tree
+	dst.ProcessTree = *copied
+	return &dst
 }
 
 // copyCappedProcess copies a node and its descendants, capping command lines as
