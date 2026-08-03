@@ -50,8 +50,15 @@ func (s *Store) shardFor(scopeID string) *shard {
 	return s.shards[h.Sum32()%shardCount]
 }
 
+// scopeCap picks the cap for a bucket. The larger cap applies to both node-wide
+// buckets -- the host pseudo-container and node scope itself. Neither holds one
+// workload: they are shared by every rule and every process on the node, and
+// neither is ever reclaimed by PurgeScope (which is only ever called with a
+// container's scope ID), so both rely on TTL and need the headroom. Bounding node
+// scope by the per-container cap would starve it far sooner than intended on a
+// busy node.
 func (s *Store) scopeCap(scopeID string) int {
-	if IsHostScopeID(scopeID) {
+	if IsHostScopeID(scopeID) || scopeID == NodeScopeID() {
 		return s.cfg.MaxEntriesForHost
 	}
 	return s.cfg.MaxEntriesPerContainer
@@ -70,15 +77,26 @@ func (s *Store) Set(e *Entry) error {
 	// writers can each pass this check before any of them increments, so the size
 	// can exceed MaxSize by up to the number of in-flight writers. The per-scope
 	// cap, which IS exact, is what bounds any single workload.
-	if s.currentSize() >= s.cfg.MaxSize {
-		if s.Sweep() == 0 {
-			s.metrics.ReportStateWriteRejected(e.RuleID, "global_cap")
-			return ErrGlobalCapReached
-		}
-	}
-
 	sh := s.shardFor(e.ScopeID)
 	k := entryKey{e.RuleID, e.Name, e.Key}
+
+	if s.currentSize() >= s.cfg.MaxSize {
+		if s.Sweep() == 0 {
+			// A replacement does not grow the store, so the ceiling must not block
+			// it -- the same reasoning the per-scope cap already applies below.
+			// Otherwise a rule loses the ability to refresh an established marker
+			// exactly when the store is under most pressure, which is when an
+			// incident is most likely to be in progress.
+			//
+			// The peek costs an extra RLock, but only on this already-degraded
+			// path: at the ceiling with nothing reclaimable. The hot path is
+			// unchanged.
+			if !s.holds(sh, e.ScopeID, k) {
+				s.metrics.ReportStateWriteRejected(e.RuleID, "global_cap")
+				return ErrGlobalCapReached
+			}
+		}
+	}
 
 	sh.mu.Lock()
 	b, ok := sh.scopes[e.ScopeID]
@@ -102,6 +120,19 @@ func (s *Store) Set(e *Entry) error {
 	}
 	s.metrics.ReportStateWrite(e.RuleID, "ok")
 	return nil
+}
+
+// holds reports whether a live-or-expired entry already exists under k. Used only
+// by the global-cap path to tell a replacement from a genuine insert.
+func (s *Store) holds(sh *shard, scopeID string, k entryKey) bool {
+	sh.mu.RLock()
+	defer sh.mu.RUnlock()
+	b, ok := sh.scopes[scopeID]
+	if !ok {
+		return false
+	}
+	_, exists := b.entries[k]
+	return exists
 }
 
 // Get returns a live entry, or false if absent or expired. Expiry is enforced

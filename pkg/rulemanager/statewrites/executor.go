@@ -81,6 +81,13 @@ func (e *Executor) Apply(
 	if e == nil || e.store == nil || len(compiled) == 0 || evalContext == nil {
 		return
 	}
+	// podIdentity and processOf below both tolerate a nil Event; without this the
+	// very next line would panic instead, so the package's nil handling would be
+	// inconsistent. Not reachable from the rule loop, which dereferences Event
+	// earlier, but the exported entry point should not depend on that.
+	if enriched == nil || enriched.Event == nil {
+		return
+	}
 	eventType := enriched.Event.GetEventType()
 	scopeIDs := ScopeIDs(enriched)
 
