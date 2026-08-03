@@ -3906,3 +3906,101 @@ func Test_49_EphemeralContainerFullTreatment(t *testing.T) {
 		return countRuleAlerts(t, ns.Name, "R0001", "ephcon", "id") > 0
 	}, 2*time.Minute, 10*time.Second, "id was not in the ephemeral container's learned profile — it must fire R0001 (detected + alerted like any other container)")
 }
+
+// Test_37_CelStateStoreCorrelation is the end-to-end proof of the CEL state
+// store: a rule that remembers a fact on one event stream and reads it back on
+// another, against real eBPF events.
+//
+// The proof does not need to inspect the alert payload. R9911's network-leg
+// predicate is state.has(...), so if the store does not work the predicate is
+// false and no alert is emitted at all. The alert's EXISTENCE is the proof.
+// Asserting the correlations[] evidence payload needs a payload-level receiver
+// and is a separate, optional tier.
+//
+// The trigger puts an 8-second gap between the write and the read:
+//
+//	sh -c '# CELSTATE_MARKER; sleep 8; exec nc -w 3 $HOST $PORT'
+//
+// T=0 the shell execs with the marker in argv -> R9911 writes state under pid P.
+// T=8 `exec nc` replaces the shell's image IN THE SAME PID (exec does not fork),
+// and nc connects -> the network event carries pid P and the read hits.
+//
+// Without that gap the exec and the connect are milliseconds apart, and
+// node-agent evaluates events on a concurrent worker pool -- so a failure could
+// be reordering rather than a defect. With it, a failure is a real defect.
+func Test_37_CelStateStoreCorrelation(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	rulesPath := path.Join(utils.CurrentDir(), "resources/cel-state-rules.yaml")
+	bindingPath := path.Join(utils.CurrentDir(), "resources/cel-state-rulebinding.yaml")
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", rulesPath), "apply state test rules")
+	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", rulesPath)
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", bindingPath), "apply state test rule binding")
+	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", bindingPath)
+	// let the rules watcher and rule-binding watcher pick the new rules up
+	time.Sleep(20 * time.Second)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/cel-state-deployment.yaml"))
+	require.NoError(t, err, "Error creating workload")
+	require.NoError(t, wl.WaitForReady(80))
+	time.Sleep(15 * time.Second)
+
+	// Confirm nc exists before relying on it; without this a missing applet looks
+	// exactly like the state store failing.
+	_, _, err = wl.ExecIntoPodNoTTY([]string{"sh", "-c", "command -v nc"}, "probe")
+	require.NoError(t, err, "busybox nc must be present in the probe container")
+
+	// Three probes rather than one. Each is independent (its own pid, its own
+	// state key), so a single flake does not fail the run, and three silent
+	// probes is clearly systematic rather than a race.
+	const probes = 3
+	trigger := `# CELSTATE_MARKER
+sleep 8
+exec nc -w 3 "$KUBERNETES_SERVICE_HOST" "$KUBERNETES_SERVICE_PORT"`
+
+	for i := 0; i < probes; i++ {
+		go func() {
+			// nc is expected to be closed by the peer or time out; the connection
+			// attempt is the signal, its outcome is irrelevant.
+			_, _, _ = wl.ExecIntoPodNoTTY([]string{"sh", "-c", trigger}, "probe")
+		}()
+		time.Sleep(1 * time.Second)
+	}
+
+	// 8s sleep + connect + export + Alertmanager group interval.
+	t.Log("waiting for the probes to connect and their alerts to land")
+	time.Sleep(60 * time.Second)
+
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Error getting alerts")
+
+	count := func(ruleID string) int {
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID {
+				n++
+			}
+		}
+		return n
+	}
+	for _, a := range alerts {
+		t.Logf("alert rule_id=%s rule_name=%q", a.Labels["rule_id"], a.Labels["rule_name"])
+	}
+
+	// Controls FIRST. If either is silent, R9911's silence says nothing about
+	// the state store, and these messages are the only diagnostic available.
+	require.Greater(t, count("R9913"), 0,
+		"exec control did not fire: the marker exec never reached the rule loop, so this test cannot say anything about state")
+	require.Greater(t, count("R9912"), 0,
+		"network control did not fire: the outbound connection never reached the rule loop, so this test cannot say anything about state")
+
+	// The actual proof.
+	assert.Greater(t, count("R9911"), 0,
+		"correlation rule never fired: state written on exec was not readable on the network event")
+
+	// And the negative control, which makes the assertion above meaningful.
+	assert.Equal(t, 0, count("R9914"),
+		"negative control fired: state.has returned true for a name no rule writes, so R9911 proves nothing")
+}
