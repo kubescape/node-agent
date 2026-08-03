@@ -8,11 +8,16 @@ delete of a pod — cannot be expressed at all.
 
 Design: `shared-designs-and-docs/projects/2026-07-28-cel-rule-state-store/spec.md`.
 
-> **Status: complete in-tree, not yet proven on a cluster.** Reads, writes, alert
-> evidence, config, metrics and container-removal purge all work and are unit
-> tested. Still outstanding: the end-to-end component test against real eBPF
-> events. **No rule has been run against a live agent yet**, so treat the
-> behaviour described here as tested-by-construction rather than field-proven.
+> **Status: proven end-to-end on a cluster.** Verified against real eBPF events
+> on kind by `Test_36_CelStateStoreCorrelation`: a rule that writes on `exec` and
+> alerts on `network` fires, carries the remembered `value:` through to its
+> message, and a negative control confirms it is not firing spuriously.
+>
+> **Deployment prerequisite:** the `Rules` CRD must declare `stateWrites`. The
+> canonical CRD ships from **`kubescape/helm-charts`**, and until the property is
+> added there the API server silently strips the clause — rules load cleanly and
+> never fire, with no error anywhere. The copy in `tests/chart/crds/` is fixed;
+> helm-charts is a separate, required change.
 
 ## Writing state
 
