@@ -51,6 +51,30 @@ func TestNormalizePath(t *testing.T) {
 			expected: "/proc/46/task",
 		},
 		{
+			// #721 regression: runc:[2:INIT] user-namespace-setup paths outside
+			// the old (task|fd) allowlist previously leaked /proc-less.
+			name:     "headless proc path (setgroups)",
+			input:    "/17/setgroups",
+			expected: "/proc/17/setgroups",
+		},
+		{
+			name:     "headless proc path (gid_map)",
+			input:    "/1/gid_map",
+			expected: "/proc/1/gid_map",
+		},
+		{
+			name:     "headless proc path (uid_map)",
+			input:    "/1/uid_map",
+			expected: "/proc/1/uid_map",
+		},
+		{
+			// A non-proc path whose leading segment is non-numeric must be
+			// untouched even though a later segment looks proc-like.
+			name:     "non-proc path with data dir",
+			input:    "/data/appendonlydir/x",
+			expected: "/data/appendonlydir/x",
+		},
+		{
 			name:     "relative path (not dot)",
 			input:    "usr/bin/ls",
 			expected: "/usr/bin/ls",
