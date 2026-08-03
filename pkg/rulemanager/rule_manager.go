@@ -715,18 +715,23 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.Eve
 // which is what lets rulecooldown collapse both legs of a bidirectional rule into
 // a single alert instead of emitting one per leg.
 func (rm *RuleManager) getUniqueIdAndMessage(evalContext map[string]any, rule typesv1.Rule) (string, string, error) {
-	message, err := rm.celEvaluator.EvaluateStringExpressionWithContext(evalContext, rule.Expressions.Message)
-	if err != nil {
-		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate message", helpers.Error(err))
+	message, msgErr := rm.celEvaluator.EvaluateStringExpressionWithContext(evalContext, rule.Expressions.Message)
+	if msgErr != nil {
+		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate message", helpers.Error(msgErr))
 	}
-	uniqueID, err := rm.celEvaluator.EvaluateStringExpressionWithContext(evalContext, rule.Expressions.UniqueID)
-	if err != nil {
-		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
+	uniqueID, idErr := rm.celEvaluator.EvaluateStringExpressionWithContext(evalContext, rule.Expressions.UniqueID)
+	if idErr != nil {
+		logger.L().Ctx(rm.ctx).Error("RuleManager - failed to evaluate unique ID", helpers.Error(idErr))
 	}
 
 	uniqueID = hashStringToMD5(uniqueID)
 
-	return message, uniqueID, err
+	// Only the uniqueId error is returned, and the caller drops the alert on it.
+	// That asymmetry is deliberate: uniqueId drives cooldown and backend dedup, so
+	// a wrong one corrupts grouping, whereas a failed message costs description
+	// only. Dropping a real detection because its text did not render would be the
+	// worse failure, so a message error is logged and the alert still ships.
+	return message, uniqueID, idErr
 }
 
 func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEvent) bool {

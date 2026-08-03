@@ -299,7 +299,7 @@ func TestApply_NilSafeOnMissingPieces(t *testing.T) {
 func TestScopeIDs_ResolvesFromTheEventOnly(t *testing.T) {
 	ids := ScopeIDs(execEvent("abc"))
 	assert.Equal(t, "c:abc", ids[armotypes.StateScopeContainer])
-	assert.Equal(t, "n:", ids[armotypes.StateScopeNode])
+	assert.Equal(t, rulestate.NodeScopeID(), ids[armotypes.StateScopeNode])
 	assert.Equal(t, "p:prod/web-1", ids[armotypes.StateScopePod])
 
 	// Host: container scope resolves to the host bucket, pod scope is absent.
