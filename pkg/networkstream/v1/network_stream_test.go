@@ -41,6 +41,17 @@ func newTestStream(t *testing.T, mgr processtree.ProcessTreeManager) *NetworkStr
 	return ns
 }
 
+// newTestStreamWithChannel additionally wires a notification channel and a flush
+// interval, so Start()'s ticker body can be exercised.
+func newTestStreamWithChannel(t *testing.T, mgr processtree.ProcessTreeManager, ch chan armotypes.NetworkStream, interval time.Duration) *NetworkStream {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns, err := NewNetworkStream(ctx, config.Config{NetworkStreamingInterval: interval}, nil, stubResolver{}, testNodeName, ch, true, mgr)
+	require.NoError(t, err)
+	return ns
+}
+
 func outboundEvent(pid uint32, addr string, port uint16) *utils.StructEvent {
 	return &utils.StructEvent{
 		Pid:         pid,
@@ -265,5 +276,72 @@ func TestNewNetworkStream(t *testing.T) {
 				t.Error("eventsNotificationChannel not set correctly")
 			}
 		})
+	}
+}
+
+// TestSnapshotNetworkStream_OwnsItsEventMaps: the flush snapshot must own its
+// Inbound/Outbound maps. Sharing them means the producer keeps writing into maps
+// a consumer already holds — the race the flush path's 100 ms sleep exists to
+// paper over.
+func TestSnapshotNetworkStream_OwnsItsEventMaps(t *testing.T) {
+	mgr := processtree.NewProcessTreeManagerMock()
+	mgr.SetProcessBootTimeNs(101, 5_000_000_000)
+	ns := newTestStream(t, mgr)
+	ns.handleNetworkEvent(outboundEvent(101, "1.2.3.4", 443), treeFor(101, "curl"))
+
+	snap := snapshotNetworkStream(&ns.networkEventsStorage)
+	require.Len(t, snap.Entities[testNodeName].Outbound, 1)
+
+	// Mutate the LIVE maps in place, exactly as removeProcessTreeFromEvents did.
+	live := ns.networkEventsStorage.Entities[testNodeName]
+	for k, ev := range live.Outbound {
+		ev.ProcessTree = nil
+		live.Outbound[k] = ev
+	}
+	delete(live.Outbound, "gone")
+
+	for _, ev := range snap.Entities[testNodeName].Outbound {
+		assert.NotNil(t, ev.ProcessTree, "the snapshot must not see in-place mutation of the live storage")
+	}
+}
+
+// TestFlush_ChannelSnapshotSurvivesTheProducer pins the notification-channel
+// contract end to end. private-node-agent's host network sensor reads
+// outbound.ProcessTree off this channel, so what it receives must (a) still carry
+// trees and (b) be immune to everything the producer does after the send —
+// stripping trees, clearing entities, recording new events.
+//
+// Against the pre-attribution flush this fails deterministically: the channel
+// carried the live storage struct, so the strip nils the trees the consumer is
+// about to read and the clear empties its Outbound map.
+func TestFlush_ChannelSnapshotSurvivesTheProducer(t *testing.T) {
+	mgr := processtree.NewProcessTreeManagerMock()
+	mgr.SetProcessBootTimeNs(101, 5_000_000_000)
+	// Buffered so a later tick cannot block the producer: the pre-attribution flush
+	// sent while holding eventsStorageMutex, so a full channel would deadlock this
+	// test against its own handleNetworkEvent call rather than failing an assertion.
+	ch := make(chan armotypes.NetworkStream, 16)
+	ns := newTestStreamWithChannel(t, mgr, ch, 200*time.Millisecond)
+	ns.handleNetworkEvent(outboundEvent(101, "1.2.3.4", 443), treeFor(101, "curl"))
+
+	ns.Start()
+
+	var received armotypes.NetworkStream
+	select {
+	case received = <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no flush arrived on the notification channel")
+	}
+
+	// Let the producer finish the flush and record another connection.
+	time.Sleep(300 * time.Millisecond)
+	ns.handleNetworkEvent(outboundEvent(202, "9.9.9.9", 80), treeFor(202, "wget"))
+
+	outbound := received.Entities[testNodeName].Outbound
+	require.Len(t, outbound, 1, "the received snapshot must keep its own events after the producer clears and re-fills storage")
+	for _, ev := range outbound {
+		require.NotNil(t, ev.ProcessTree, "the channel consumer keeps trees — the host network sensor reads them")
+		assert.Equal(t, "curl", ev.ProcessTree.ProcessTree.Comm)
+		require.NotNil(t, ev.ProcessRef)
 	}
 }

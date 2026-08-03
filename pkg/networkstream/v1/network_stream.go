@@ -176,18 +176,14 @@ func (ns *NetworkStream) Start() {
 				logger.L().Info("NetworkStream - stopping")
 				return
 			case <-ticker.C:
+				// Everything under the lock is O(entities + connections) map and struct
+				// copies; process-tree POINTERS are copied, never walked. Both sends and
+				// the wire copy's tree deep-copies happen outside it. This file has a
+				// history of mutex stalls on this path, so the bound matters: at the
+				// largest observed message (109 entities / 283 connections) this is a few
+				// hundred small copies, where the previous body held the lock across a
+				// blocking channel send plus a 100 ms sleep.
 				ns.eventsStorageMutex.Lock()
-				// Send the network events to the notification channel
-				if ns.eventsNotificationChannel != nil {
-					ns.eventsNotificationChannel <- ns.networkEventsStorage
-					// Add a small delay to ensure consumers have time to process
-					time.Sleep(100 * time.Millisecond)
-				}
-
-				// Remove process tree from events (to reduce size)
-				removeProcessTreeFromEvents(&ns.networkEventsStorage)
-
-				// Snapshot for HTTP send — allows releasing the lock before the network call
 				snapshot := snapshotNetworkStream(&ns.networkEventsStorage)
 
 				// Clear the storage
@@ -204,6 +200,15 @@ func (ns *NetworkStream) Start() {
 					Outbound: make(map[string]armotypes.NetworkStreamEvent),
 				}
 				ns.eventsStorageMutex.Unlock()
+
+				// The snapshot is independent of the live storage, so the consumer gets it
+				// outside the lock and WITH its process trees intact — private-node-agent's
+				// host network sensor reads outbound.ProcessTree from this channel. There is
+				// no shared state left to race on, which is why the historical 100 ms
+				// "give consumers time to process" sleep is gone rather than shortened.
+				if ns.eventsNotificationChannel != nil {
+					ns.eventsNotificationChannel <- *snapshot
+				}
 
 				// Send the snapshot outside the lock so event recording is never stalled by I/O
 				if err := ns.sendNetworkEvent(snapshot); err != nil {
@@ -565,33 +570,34 @@ func isEmptyNetworkStream(networkStream *armotypes.NetworkStream) bool {
 	return true
 }
 
-func removeProcessTreeFromEvents(networkStream *armotypes.NetworkStream) {
-	for entityId, entity := range networkStream.Entities {
-		for eventId, event := range entity.Inbound {
-			event.ProcessTree = nil
-			entity.Inbound[eventId] = event
-		}
-		for eventId, event := range entity.Outbound {
-			event.ProcessTree = nil
-			entity.Outbound[eventId] = event
-		}
-		networkStream.Entities[entityId] = entity
-	}
-}
-
-// snapshotNetworkStream returns a new NetworkStream with an independent Entities map so that
-// the caller can release eventsStorageMutex before the HTTP send. A new map is required because
-// the clearing loop replaces entity structs in the live Entities map; copying the entity structs
-// by value is sufficient because the clearing loop never mutates the old Inbound/Outbound maps
-// in place — it allocates new ones and assigns them to the new struct.
+// snapshotNetworkStream returns a NetworkStream that shares no mutable state with the
+// live storage, so eventsStorageMutex can be released before either send.
+//
+// The Entities map and both event maps per entity are freshly allocated; events are
+// copied by value. Process-tree POINTERS are shared rather than walked — that is what
+// keeps this O(entities + connections) cheap struct copies instead of a deep tree walk,
+// and it is safe because a tree is immutable once attached to an event: nothing mutates
+// one in place (buildWireStream caps command lines on a DeepCopy, never on the shared
+// nodes, which the process-tree manager's LRU cache and the legacy alert paths hold too).
 func snapshotNetworkStream(src *armotypes.NetworkStream) *armotypes.NetworkStream {
 	dst := &armotypes.NetworkStream{
 		Entities: make(map[string]armotypes.NetworkStreamEntity, len(src.Entities)),
 	}
 	for entityID, entity := range src.Entities {
-		dst.Entities[entityID] = entity // struct copy; Inbound/Outbound map pointers are safe to share
+		e := entity // struct copy: scalar entity metadata
+		e.Inbound = copyEvents(entity.Inbound)
+		e.Outbound = copyEvents(entity.Outbound)
+		dst.Entities[entityID] = e
 	}
 	return dst
+}
+
+func copyEvents(events map[string]armotypes.NetworkStreamEvent) map[string]armotypes.NetworkStreamEvent {
+	out := make(map[string]armotypes.NetworkStreamEvent, len(events))
+	for key, event := range events {
+		out[key] = event
+	}
+	return out
 }
 
 func (ns *NetworkStream) getProcessTreeByPid(pid uint32, comm string, processTree *armotypes.ProcessTree) *armotypes.ProcessTree {
