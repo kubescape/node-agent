@@ -206,8 +206,17 @@ func (ns *NetworkStream) Start() {
 				// host network sensor reads outbound.ProcessTree from this channel. There is
 				// no shared state left to race on, which is why the historical 100 ms
 				// "give consumers time to process" sleep is gone rather than shortened.
+				// The send stays blocking, so a slow consumer applies backpressure rather
+				// than losing traffic — but it now honours shutdown, which it could not
+				// while it held the lock. Without this a stalled consumer would pin this
+				// goroutine past ctx cancellation.
 				if ns.eventsNotificationChannel != nil {
-					ns.eventsNotificationChannel <- *snapshot
+					select {
+					case ns.eventsNotificationChannel <- *snapshot:
+					case <-ns.ctx.Done():
+						logger.L().Info("NetworkStream - stopping")
+						return
+					}
 				}
 
 				// The wire copy is derived outside the lock too: it deep-copies one tree

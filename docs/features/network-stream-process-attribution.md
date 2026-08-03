@@ -97,6 +97,11 @@ per-entity event maps, so the delivered value is immune to everything the
 producer does next. Both sends happen outside the lock, and the 100 ms sleep is
 **deleted rather than shortened** — there is no shared state left to race on.
 
+The channel send stays blocking, so a slow consumer applies backpressure rather
+than losing traffic, but it now selects on context cancellation as well. That was
+impossible while the send held the lock; without it a stalled consumer would pin
+the flush goroutine past shutdown.
+
 ### Lock discipline
 
 This file has a history of mutex stalls on this path, so the bound is part of the
