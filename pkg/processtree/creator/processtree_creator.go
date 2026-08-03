@@ -226,16 +226,22 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
 		proc = pt.getOrCreateProcess(event.PID)
-	} else {
-		// A fork's pid is newborn, so an existing node belongs to a process the
-		// kernel already recycled this pid away from. Exits linger for
-		// exitCleanup.cleanupDelay (5 minutes by default), so this is readily
-		// reachable. Drop BOTH halves of the stale start time — the identity
-		// value and the display value must never disagree — and let
-		// ensureStartTime restamp them for this incarnation.
+	} else if _, exited := pt.pendingExits[event.PID]; exited {
+		// The previous holder of this pid exited but its node is still around —
+		// exits linger for exitCleanup.cleanupDelay, 5 minutes by default — so a
+		// fork on it means the kernel recycled the pid. Drop BOTH halves of the
+		// stale start time, the identity value and the display value, so they
+		// cannot disagree, and let applyStartTime restamp them below.
+		//
+		// Gated on a pending exit rather than on the node merely existing: an
+		// existing node alone only means some other path created it first, and
+		// wiping on that weaker signal would discard a good scan-recorded value
+		// whenever the on-demand read then fails.
 		//
 		// Scoped to the start time. This is NOT pid-reuse hardening: the node
-		// still carries the dead process's comm, cmdline and path.
+		// still carries the dead process's comm, cmdline and path, and the dead
+		// process's pendingExits entry still schedules a delayed exitByPid that
+		// will remove this live successor's node. Both belong to SUB-7846.
 		delete(pt.pidStartTimeNs, event.PID)
 		proc.StartTime = time.Time{}
 	}

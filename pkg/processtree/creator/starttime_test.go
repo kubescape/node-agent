@@ -277,3 +277,32 @@ func TestHandleForkEvent_ReadsStartTimeWithoutHoldingTreeLock(t *testing.T) {
 	assert.Equal(t, uint64(555_550_000_000), creator.GetProcessBootTimeNs(100),
 		"and the value must still be stored")
 }
+
+// A fork on an existing node does not always mean pid reuse — some other path
+// may simply have created the node first. Wiping unconditionally destroys a
+// good scan-recorded value whenever the on-demand read then fails, so the wipe
+// is gated on there actually being a pending exit for the pid.
+func TestHandleForkEvent_DoesNotWipeKnownStartTimeWithoutAPendingExit(t *testing.T) {
+	cfg := config.Config{}
+	cfg.ExitCleanup = processtreecreatorconfig.ExitCleanupConfig{
+		MaxPendingExits: 1000, CleanupInterval: time.Hour, CleanupDelay: time.Minute,
+	}
+	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, cfg).(*processTreeCreatorImpl)
+	creator.readStartTime = func(pid uint32) (uint64, time.Time) { return 0, time.Time{} } // read fails
+
+	wall := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
+	creator.FeedEvent(conversion.ProcessEvent{
+		Type: conversion.ProcfsEvent, PID: 100, PPID: 1, Comm: "nginx",
+		StartTimeNs: 1_000_000_000, StartTimeWall: wall,
+	})
+	require.Equal(t, uint64(1_000_000_000), creator.GetProcessBootTimeNs(100))
+
+	// No exit for this pid, so the node is still nginx's — not a recycled pid.
+	creator.FeedEvent(conversion.ProcessEvent{Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "nginx"})
+
+	assert.Equal(t, uint64(1_000_000_000), creator.GetProcessBootTimeNs(100),
+		"a failed read must not destroy a value the scan already recorded")
+	node, err := creator.GetProcessNode(100)
+	require.NoError(t, err)
+	assert.Equal(t, wall, node.StartTime, "nor the display value")
+}
