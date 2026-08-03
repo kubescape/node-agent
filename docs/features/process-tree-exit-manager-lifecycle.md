@@ -79,11 +79,15 @@ Removing a node reparents its children, unlinks it from its parent, deletes the
 node, and deletes the pid's entry in the process-identity side map. See
 [process-start-time.md](./process-start-time.md) for that side map.
 
-> `exitByPid` matches on **pid alone**. It does not check that the node holding
-> that pid is still the process the exit was for, so when the kernel recycles a
-> pid inside the cleanup window, a dead process's delayed exit removes the *live*
-> successor's node. Tracked as SUB-7846 — this document describes the lifecycle,
-> not a fix for that.
+> `exitByPid` no longer matches on **pid alone**. A fork or exec retires a
+> recycled predecessor before the delayed cleanup can reach it, and the cleanup
+> itself skips a node whose recorded boot-relative creation time postdates the
+> exit's arrival.
+>
+> The window is narrowed, not closed: a node with no recorded creation time has
+> nothing to compare, so it still falls through to unconditional deletion. See
+> [process-id-reuse-hardening.md](./process-id-reuse-hardening.md) for the layers
+> and for what each deliberately does not cover.
 
 ## Testing
 

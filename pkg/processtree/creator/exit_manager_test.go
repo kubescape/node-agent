@@ -126,7 +126,7 @@ func TestExitManager_AddPendingExit(t *testing.T) {
 	// Test adding a pending exit
 	pt.mutex.Lock()
 	event := createTestExitEvent(100, 12345)
-	pt.addPendingExit(event)
+	pt.addPendingExit(event, 0)
 	pt.mutex.Unlock()
 
 	// Check that the exit was added
@@ -354,7 +354,7 @@ func TestExitManager_ThreadSafety(t *testing.T) {
 			pid := uint32(i + 1)
 			pt.mutex.Lock()
 			event := createTestExitEvent(pid, uint64(i))
-			pt.addPendingExit(event)
+			pt.addPendingExit(event, 0)
 			pt.mutex.Unlock()
 			time.Sleep(1 * time.Millisecond)
 		}
