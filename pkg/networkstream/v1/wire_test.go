@@ -2,6 +2,7 @@ package networkstream
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -297,4 +298,111 @@ func TestCapCmdline(t *testing.T) {
 	capped := capCmdline(multibyte)
 	assert.LessOrEqual(t, len(capped), maxCmdlineBytes)
 	assert.True(t, utf8.ValidString(capped), "a cut mid-rune would emit invalid UTF-8")
+}
+
+// bigTree builds a tree whose estimated size is roughly sizeBytes, using the
+// command line (which is what actually dominates a real tree's bytes).
+func bigTree(pid uint32, sizeBytes int) *armotypes.ProcessTree {
+	cmdlineLen := sizeBytes - processNodeOverheadBytes
+	if cmdlineLen < 1 {
+		cmdlineLen = 1
+	}
+	return treeOf("c1", &armotypes.Process{PID: pid, Comm: "p", Cmdline: strings.Repeat("a", cmdlineLen)})
+}
+
+// TestBuildWireStream_UnderBudgetShipsEveryTree: the budget is a safety valve, so
+// ordinary messages must be untouched by it.
+func TestBuildWireStream_UnderBudgetShipsEveryTree(t *testing.T) {
+	events := map[string]armotypes.NetworkStreamEvent{}
+	for pid := uint32(1); pid <= 200; pid++ {
+		ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+		events[fmt.Sprintf("1.2.3.%d/443/TCP/%d/10000000", pid%256, pid)] =
+			armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, 2048)}
+	}
+
+	wire := buildWireStream(outboundOnly("c1", events))
+
+	assert.Len(t, wire.Processes, 200, "200 x ~2 KB is well inside the budget")
+}
+
+// TestBuildWireStream_OverBudgetDropsTreesNotConnections pins the failure mode the
+// budget exists to prevent. Before it, a node with heavy process churn produced a
+// message over the broker's 5 MiB limit, which is rejected and dropped — losing the
+// node's ENTIRE interval of traffic. Now the connections all still ship; only the
+// least-connected processes lose their trees.
+func TestBuildWireStream_OverBudgetDropsTreesNotConnections(t *testing.T) {
+	events := map[string]armotypes.NetworkStreamEvent{}
+	const processes = 4000
+	for pid := uint32(1); pid <= processes; pid++ {
+		ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+		events[fmt.Sprintf("10.0.%d.%d/443/TCP/%d/10000000", pid/256, pid%256, pid)] =
+			armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, 2048)}
+	}
+	snapshot := outboundOnly("c1", events)
+
+	wire := buildWireStream(snapshot)
+
+	// Every connection survives, with its ref.
+	require.Len(t, wire.Entities["c1"].Outbound, processes, "connections must never be dropped — that is the data loss this whole change fixes")
+	for _, ev := range wire.Entities["c1"].Outbound {
+		require.NotNil(t, ev.ProcessRef, "the pid identity survives even when the tree does not")
+	}
+
+	// Trees are bounded.
+	assert.Less(t, len(wire.Processes), processes, "the budget must actually drop trees")
+	assert.NotEmpty(t, wire.Processes, "it must not drop everything either")
+	shipped := 0
+	for _, tree := range wire.Processes {
+		shipped += estimateTreeBytes(tree)
+	}
+	assert.LessOrEqual(t, shipped, maxProcessTreeBytes, "shipped trees must fit the budget")
+
+	// A dropped ref resolves to nil rather than panicking.
+	for _, ev := range wire.Entities["c1"].Outbound {
+		_ = wire.ProcessTreeFor(&ev)
+	}
+
+	// And the payload stays under the broker limit even after the base64 envelope.
+	payload, err := json.Marshal(wire)
+	require.NoError(t, err)
+	encoded := len(payload) * 4 / 3
+	assert.Less(t, encoded, 5<<20, "the whole point: %d bytes JSON -> ~%d base64, under 5 MiB", len(payload), encoded)
+}
+
+// TestSelectProcessTrees_PrefersFanOutDeterministically: over budget, the process
+// that reached the most endpoints keeps its tree, and the outcome must not depend
+// on Go's randomised map iteration order.
+func TestSelectProcessTrees_PrefersFanOutDeterministically(t *testing.T) {
+	chatty := armotypes.ProcessRef{PID: 900, StartTimeNs: 10_000_000}
+	for i := 0; i < 16; i++ {
+		events := map[string]armotypes.NetworkStreamEvent{}
+		// One process with many connections...
+		for c := 0; c < 40; c++ {
+			ref := chatty
+			events[fmt.Sprintf("10.1.1.%d/443/TCP/900/10000000", c)] =
+				armotypes.NetworkStreamEvent{ProcessRef: &ref, ProcessTree: bigTree(900, 4096)}
+		}
+		// ...and many single-connection processes that together blow the budget.
+		for pid := uint32(1); pid <= 2000; pid++ {
+			ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+			events[fmt.Sprintf("10.2.%d.%d/443/TCP/%d/10000000", pid/256, pid%256, pid)] =
+				armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, 4096)}
+		}
+
+		wire := buildWireStream(outboundOnly("c1", events))
+
+		require.NotNil(t, wire.Processes[chatty], "the highest-fan-out process must keep its tree on every run")
+	}
+}
+
+func TestEstimateTreeBytes_CountsCappedCmdline(t *testing.T) {
+	assert.Zero(t, estimateTreeBytes(nil))
+
+	short := treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh", Cmdline: "sh -c true"})
+	assert.Greater(t, estimateTreeBytes(short), processNodeOverheadBytes)
+
+	// A 200 KB command line must be counted as its capped size, not its raw size —
+	// otherwise the budget would reject trees that are actually small on the wire.
+	huge := treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh", Cmdline: strings.Repeat("a", 200_000)})
+	assert.Less(t, estimateTreeBytes(huge), processNodeOverheadBytes+maxCmdlineBytes+64)
 }

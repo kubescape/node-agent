@@ -175,6 +175,69 @@ are reading. `copyCappedProcess` is read-only instead, normalising the deprecate
 recursive walk here is bounded by `maxTreeDepth` (64), so a malformed or cyclic
 tree costs a truncated payload rather than the agent's stack.
 
+### The process-tree budget
+
+Attribution changed **what sizes the payload**. Before, the batch key collapsed
+every process reaching one endpoint into a single entry carrying no tree, so size
+tracked *distinct endpoints*. Now the key splits per process and each distinct
+process contributes a tree, so size tracks **distinct processes that connected
+during the interval** — and nothing bounded that.
+
+The original payload analysis (SUB-7850) modelled bytes per connection at a fixed
+count of 283 connections. That is exactly the quantity the key change stops
+holding fixed, so the multiplier on connection *count* was never budgeted.
+
+Measured, with ~2 KB trees and all connections to one endpoint:
+
+| Distinct processes | JSON | after base64 (×1.333) |
+|---|---|---|
+| 283 | 0.35 MB | 0.47 MB |
+| 1000 | 1.25 MB | 1.66 MB |
+| 4000 | 4.99 MB | **6.65 MB — over the 5 MiB limit** |
+
+Exceeding the limit is not a graceful degradation: `sendNetworkEvent` gets a
+non-2xx, returns an error, `Start()` logs it and drops the snapshot. **The node
+loses its entire interval of traffic** — no retry, no split. A node with heavy
+short-lived process churn (a cron loop shelling out, a CI runner, exec-based
+liveness probes) can reach that.
+
+So `maxProcessTreeBytes` (1.5 MiB of estimated tree bytes) bounds the trees:
+
+- **A byte budget, not a tree count.** Tree size varies ~2.5× even with the
+  command-line cap (~2 KB median, ~5 KB p90, ~12 KB for a deep chain of capped
+  command lines), so no count bounds the payload.
+- **Connections are never dropped** — that is the data loss this change exists to
+  fix. Only trees are, and the refs stay on the connections, so pid identity
+  survives and `ProcessTreeFor` returns nil for them as specified.
+- **Ranked by connection count**, ties broken on the ref. A process that reached
+  many endpoints is both the most expensive attribution to lose and the shape
+  reputation cares about most; tie-breaking on the ref keeps the payload
+  independent of map iteration order.
+- At p90 tree size the budget is ~300 trees, above the largest message observed in
+  production (283 connections, so at most 283 distinct processes) — a safety valve,
+  not a routine limiter.
+
+### Observability, because the real distribution is not knowable yet
+
+How often a real node exceeds the budget **cannot be measured from today's data**:
+the current sensor strips trees and puts no process identity on the wire, so
+distinct-processes-per-batch does not exist in any message. Fleet-wide, today's
+messages average ~30 KB (`pulsar_average_msg_size` on
+`persistent://armo/internal/network-stream-v1`, ~175× under the limit), which says
+the baseline is comfortable but nothing about the new multiplier.
+
+Two log lines make it answerable after rollout:
+
+- `NetworkStream - process tree budget exceeded` — with `distinctProcesses`,
+  `treesShipped`, `treesDropped`, `connectionsWithoutTree` and the byte totals.
+  Fires only when the budget binds.
+- `NetworkStream - large payload` — above `payloadWarnBytes` (2 MiB), with the
+  marshalled size, entity, connection and tree counts. Reports the tail
+  approaching the limit; quiet at the ~30 KB fleet mean.
+
+If the first line turns out to fire routinely, the budget should become
+configurable rather than being raised blind.
+
 ### Command-line cap
 
 Each node's `Cmdline` is capped at **1024 bytes on the wire copy only**, with a

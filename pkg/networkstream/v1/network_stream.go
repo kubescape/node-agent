@@ -29,6 +29,11 @@ import (
 
 const (
 	timeoutDefaultSeconds = 30 // Default timeout for HTTP requests if not set in the config
+
+	// payloadWarnBytes is the size above which a flush logs its shape. Set well
+	// under the broker's 5 MiB limit and far above the ~30 KB fleet mean, so it
+	// reports the tail approaching the limit without being chatty.
+	payloadWarnBytes = 2 << 20
 )
 
 type NetworkStream struct {
@@ -499,6 +504,18 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *armotypes.NetworkStream
 	if err != nil {
 		return fmt.Errorf("marshal network stream: %w", err)
 	}
+	// Attribution made the payload scale with the number of distinct processes that
+	// connected, so how close real messages get to the broker's 5 MiB limit is worth
+	// knowing rather than assuming. Today's fleet mean is ~30 KB, so this is quiet
+	// unless something has changed materially. Note the synchronizer envelope is
+	// base64, costing a further x1.333 on top of what is logged here.
+	if len(bodyBytes) > payloadWarnBytes {
+		logger.L().Warning("NetworkStream - large payload",
+			helpers.Int("bytes", len(bodyBytes)),
+			helpers.Int("entities", len(networkStream.Entities)),
+			helpers.Int("connections", countConnections(networkStream)),
+			helpers.Int("processTrees", len(networkStream.Processes)))
+	}
 	bodyReader := bytes.NewReader(bodyBytes)
 	// prepare the request
 	req, err := http.NewRequest(ns.cfg.Exporters.HTTPExporterConfig.Method,
@@ -571,6 +588,14 @@ func (ns *NetworkStream) processRefFor(pid uint32) *armotypes.ProcessRef {
 		return nil // nothing to attribute
 	}
 	return &armotypes.ProcessRef{PID: pid, StartTimeNs: ns.processTreeManager.GetProcessBootTimeNs(pid)}
+}
+
+func countConnections(networkStream *armotypes.NetworkStream) int {
+	total := 0
+	for _, entity := range networkStream.Entities {
+		total += len(entity.Inbound) + len(entity.Outbound)
+	}
+	return total
 }
 
 func isEmptyNetworkStream(networkStream *armotypes.NetworkStream) bool {
