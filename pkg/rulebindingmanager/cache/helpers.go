@@ -10,10 +10,26 @@ import (
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
+
+// namespaceListHasName reports whether name is an exact member of list.Items.
+// Do not use strings.Contains(list.String(), name): NamespaceList.String() is a
+// debug dump, so substrings (e.g. "dev" in "devel") falsely match.
+func namespaceListHasName(list *corev1.NamespaceList, name string) bool {
+	if list == nil {
+		return false
+	}
+	for i := range list.Items {
+		if list.Items[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
 
 func uniqueNameToName(n string) (string, string) {
 	if str := strings.Split(n, "/"); len(str) == 2 {
