@@ -30,9 +30,8 @@ import (
 const (
 	timeoutDefaultSeconds = 30 // Default timeout for HTTP requests if not set in the config
 
-	// payloadWarnBytes is the size above which a flush logs its shape. Set well
-	// under the broker's 5 MiB limit and far above the ~30 KB fleet mean, so it
-	// reports the tail approaching the limit without being chatty.
+	// payloadWarnBytes is the size above which a flush logs its shape — well under
+	// the broker's 5 MiB limit, far above the ~30 KB fleet mean.
 	payloadWarnBytes = 2 << 20
 )
 
@@ -181,13 +180,8 @@ func (ns *NetworkStream) Start() {
 				logger.L().Info("NetworkStream - stopping")
 				return
 			case <-ticker.C:
-				// Everything under the lock is O(entities + connections) map and struct
-				// copies; process-tree POINTERS are copied, never walked. Both sends and
-				// the wire copy's tree deep-copies happen outside it. This file has a
-				// history of mutex stalls on this path, so the bound matters: at the
-				// largest observed message (109 entities / 283 connections) this is a few
-				// hundred small copies, where the previous body held the lock across a
-				// blocking channel send plus a 100 ms sleep.
+				// Snapshot and clear only; both sends and the tree copies stay outside
+				// the lock. This path has a history of mutex stalls.
 				ns.eventsStorageMutex.Lock()
 				snapshot := snapshotNetworkStream(&ns.networkEventsStorage)
 
@@ -206,22 +200,14 @@ func (ns *NetworkStream) Start() {
 				}
 				ns.eventsStorageMutex.Unlock()
 
-				// Derive the wire copy BEFORE handing the snapshot away. Both are outside
-				// the lock — the tree copies and command-line caps are the only expensive
-				// part of a flush — but the order matters: once the snapshot is on the
-				// channel its maps belong to the consumer, and reading them here afterwards
-				// would depend on that consumer never writing to what it receives.
+				// Before the send: once the snapshot is on the channel, its maps belong
+				// to the consumer.
 				wire := buildWireStream(snapshot)
 
-				// The snapshot is independent of the live storage, so the consumer gets it
-				// outside the lock and WITH its process trees intact — private-node-agent's
-				// host network sensor reads outbound.ProcessTree from this channel. There is
-				// no shared state left to race on, which is why the historical 100 ms
-				// "give consumers time to process" sleep is gone rather than shortened.
-				// The send stays blocking, so a slow consumer applies backpressure rather
-				// than losing traffic — but it now honours shutdown, which it could not
-				// while it held the lock. Without this a stalled consumer would pin this
-				// goroutine past ctx cancellation.
+				// The consumer gets the snapshot WITH its trees — private-node-agent's
+				// host network sensor reads outbound.ProcessTree from here. The send
+				// blocks so a slow consumer applies backpressure instead of losing
+				// traffic, and selects on ctx so it cannot outlive shutdown.
 				if ns.eventsNotificationChannel != nil {
 					select {
 					case ns.eventsNotificationChannel <- *snapshot:
@@ -504,11 +490,8 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *armotypes.NetworkStream
 	if err != nil {
 		return fmt.Errorf("marshal network stream: %w", err)
 	}
-	// Attribution made the payload scale with the number of distinct processes that
-	// connected, so how close real messages get to the broker's 5 MiB limit is worth
-	// knowing rather than assuming. Today's fleet mean is ~30 KB, so this is quiet
-	// unless something has changed materially. Note the synchronizer envelope is
-	// base64, costing a further x1.333 on top of what is logged here.
+	// Quiet at the ~30 KB fleet mean; reports the tail approaching the broker's 5 MiB
+	// limit. Note the synchronizer envelope is base64, a further x1.333 on this size.
 	if len(bodyBytes) > payloadWarnBytes {
 		logger.L().Warning("NetworkStream - large payload",
 			helpers.Int("bytes", len(bodyBytes)),
@@ -544,11 +527,10 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *armotypes.NetworkStream
 	return nil
 }
 
-// getNetworkEndpointIdentifier builds the per-batch connection key. The process
-// ref is APPENDED, never reordered: a nil ref leaves the key byte-identical to
-// the pre-attribution format, and an attributed key always carries two more
-// components, so the two can never collide. The traffic-view write path collapses
-// process-split entries back to one row (verified, SUB-7851).
+// getNetworkEndpointIdentifier builds the per-batch connection key. The ref is
+// APPENDED, never reordered: a nil ref leaves the key byte-identical to the
+// pre-attribution format, and an attributed key carries two more components, so the
+// two forms cannot collide.
 func getNetworkEndpointIdentifier(event utils.NetworkEvent, ref *armotypes.ProcessRef) string {
 	id := fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetDstPort(), event.GetProto())
 	if ref != nil {
@@ -558,8 +540,7 @@ func getNetworkEndpointIdentifier(event utils.NetworkEvent, ref *armotypes.Proce
 }
 
 // getDnsOutboundIdentifier keys a DNS query by name plus the querying process, so
-// two processes resolving one domain no longer overwrite each other. The ref is
-// appended on the same terms as getNetworkEndpointIdentifier's.
+// two processes resolving one domain no longer overwrite each other.
 func getDnsOutboundIdentifier(dnsName string, ref *armotypes.ProcessRef) string {
 	if ref == nil {
 		return dnsName
@@ -569,20 +550,15 @@ func getDnsOutboundIdentifier(dnsName string, ref *armotypes.ProcessRef) string 
 
 // processRefFor builds the wire identity of the process behind an event.
 //
-// StartTimeNs is boot-relative NANOSECONDS, read from the procfs-fed identity map
-// and emitted VERBATIM — never scale it. A division here would still join
-// correctly within one message (key and ref share a producer) while silently
-// breaking identity across messages by seven orders of magnitude. See
-// docs/features/process-start-time.md.
+// StartTimeNs is boot-relative NANOSECONDS, emitted VERBATIM — never scale it. A
+// division here still joins correctly within one message while breaking identity
+// across messages by seven orders of magnitude, so the bug is nearly invisible.
+// See docs/features/process-start-time.md.
 //
-// Zero is legal: it means unknown (process not yet scanned, died before its
-// creation event was processed, or a Kubernetes-mode host process), leaving
-// pid-only identity. The ref is emitted anyway — dropping it would lose
-// attribution entirely for that population.
+// Zero is legal and means unknown, leaving pid-only identity; emit the ref anyway.
 //
-// Called BEFORE eventsStorageMutex is taken: the lookup acquires the process
-// tree's read lock, and holding the storage mutex across it would add a
-// storage->tree lock-order edge for no benefit.
+// Call this BEFORE taking eventsStorageMutex — the lookup takes the process tree's
+// read lock, and holding both would add a storage->tree lock-order edge.
 func (ns *NetworkStream) processRefFor(pid uint32) *armotypes.ProcessRef {
 	if pid == 0 || ns.processTreeManager == nil {
 		return nil // nothing to attribute
@@ -610,15 +586,12 @@ func isEmptyNetworkStream(networkStream *armotypes.NetworkStream) bool {
 	return true
 }
 
-// snapshotNetworkStream returns a NetworkStream that shares no mutable state with the
-// live storage, so eventsStorageMutex can be released before either send.
+// snapshotNetworkStream returns a NetworkStream sharing no mutable state with the live
+// storage, so eventsStorageMutex can be released before either send.
 //
-// The Entities map and both event maps per entity are freshly allocated; events are
-// copied by value. Process-tree POINTERS are shared rather than walked — that is what
-// keeps this O(entities + connections) cheap struct copies instead of a deep tree walk,
-// and it is safe because a tree is immutable once attached to an event: nothing mutates
-// one in place (buildWireStream caps command lines on a DeepCopy, never on the shared
-// nodes, which the process-tree manager's LRU cache and the legacy alert paths hold too).
+// Tree POINTERS are shared rather than walked, which keeps this to cheap struct copies.
+// That is safe only because a tree is immutable once attached to an event — anything
+// that would modify one copies it first.
 func snapshotNetworkStream(src *armotypes.NetworkStream) *armotypes.NetworkStream {
 	dst := &armotypes.NetworkStream{
 		Entities: make(map[string]armotypes.NetworkStreamEntity, len(src.Entities)),

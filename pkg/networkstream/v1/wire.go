@@ -9,102 +9,51 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
-// maxCmdlineBytes caps each process node's command line ON THE WIRE COPY ONLY.
-// cmdline is ~40% of a tree's bytes and unbounded, so it is the lever that keeps
-// the payload tail bounded: the worst observed message lands near 2 MB at p90
-// tree size against a 5 MiB limit (SUB-7850), and one pathological java or node
-// command line can exceed 100 KB on its own. 1024 bytes keeps >99% of real
-// command lines intact.
-//
-// The legacy alert paths and the notification-channel consumer keep the UNCAPPED
-// value — never apply this to a node they share.
+// Wire-format assembly for the HTTP payload. The reasoning behind every constant
+// here, with the production measurements it was calibrated against, is in
+// docs/features/network-stream-process-attribution.md.
+
+// maxCmdlineBytes caps a command line on the WIRE COPY ONLY. cmdline is unbounded
+// and ~40% of a tree's bytes. The alert paths and the notification-channel consumer
+// share these nodes and must keep the full value.
 const maxCmdlineBytes = 1024
 
-// cmdlineTruncationMarker makes a cut visible to a human reading the payload. It
-// is charged against the budget, so a capped value is never longer than
-// maxCmdlineBytes.
+// cmdlineTruncationMarker makes a cut visible, and is charged against the cap.
 const cmdlineTruncationMarker = "…"
 
-// maxTreeDepth bounds every recursive tree walk here. Real chains are ~10 nodes
-// deep; this exists so a malformed or cyclic tree costs a truncated payload
-// rather than the agent's stack.
+// maxTreeDepth bounds every recursive walk here, so a malformed or cyclic tree
+// costs a truncated payload rather than the stack. Real chains are ~10 nodes.
 const maxTreeDepth = 64
 
-// maxProcessTreeBytes budgets the process trees in one message.
+// maxProcessTreeBytes bounds the trees in one message, keeping it under the
+// broker's 5 MiB limit. Exceeding that limit is not graceful: the message is
+// rejected and dropped, so the node loses its whole interval of traffic rather
+// than some trees. A bound is needed because the process-aware batch key makes the
+// payload scale with distinct processes, which nothing else limits.
 //
-// This is the bound that keeps a message under the 5 MiB broker limit. It is
-// needed because attribution changed what sizes the payload: the batch key now
-// splits per process, so the message grows with the number of DISTINCT PROCESSES
-// that connected during the interval, and each one contributes a tree. The
-// original payload analysis (SUB-7850) modelled bytes per connection at a fixed
-// connection count of 283, which is exactly the quantity the key change stops
-// holding fixed. Without a bound, a node with heavy short-lived process churn —
-// a cron loop shelling out, a CI runner, exec-based probes — can exceed the limit,
-// and the whole message is then rejected and dropped: the node loses its entire
-// interval of traffic, not just some trees.
-//
-// A budget in BYTES rather than a tree count, because tree size is not uniform:
-// depth varies, the fields are variable-length, and JSON escaping inflates some
-// content ~6x (see escapedLen). No tree count bounds the payload.
-//
-// Calibrated against measured production traffic rather than guessed. In prod-eu a
-// network-stream message averages 29 KB on the topic, so ~22 KB of JSON before the
-// synchronizer envelope's base64; the reputation consumer's events_in divided by
-// the topic's message count puts a batch at ~42 connections (prod-us: ~32), which
-// makes a connection ~530 bytes of JSON without its tree. The largest batch ever
-// observed is 283 connections (SUB-7850).
-//
-// Measured against the worst case this budget exists for — EVERY connection from a
-// distinct process, so trees scale 1:1 with connections — using a fully-populated
-// 10-node chain, which estimates ~5.1 KB and marshals to ~4.3 KB:
-//
-//	 283 connections (the observed worst): all 283 trees ship, 1.77 MiB after base64
-//	 500 connections:                      all 500 ship,      3.13 MiB
-//	1000 connections:                      binds at 513 trees, 3.60 MiB
-//
-// So 2.5 MiB, which binds above ~513 such trees — 1.8x the observed worst batch,
-// keeping it a safety valve rather than a routine limiter that would degrade
-// attribution on the busiest nodes. A tighter 1.5 MiB was tried first and rejected:
-// it clips 70 of 283 trees, below the observed worst, while the payload there is
-// barely a third of the limit.
-//
-// Residual, deliberately not addressed here: with trees bounded, the connection
-// ENTRIES alone breach the limit at ~3,300 connections (11x the observed worst) —
-// measured 6.01 MiB at 4,000. The fix for that regime is splitting the message, as
-// the container profile does on HTTP 413, not dropping connections. The logging
-// below is what would tell us it is being approached.
+// Bytes rather than a tree count, because tree size varies too much for any count
+// to bound the payload. 2.5 MiB holds ~513 realistic trees — well above the largest
+// batch observed in production (283 connections), so it is a safety valve rather
+// than a routine limiter.
 const maxProcessTreeBytes = 2560 * 1024
 
-// processNodeOverheadBytes approximates the non-string JSON cost of one process
-// node — every field name, the numeric ids, the RFC-3339 start time (time.Time
-// ignores omitempty, so it is always serialised) and the childrenMap key, in which
-// a node's comm appears a second time.
-//
-// Measured against a fully-populated node as the tree builder produces them, which
-// is ~360 bytes with short strings. Deliberately generous: this feeds a budget, so
-// overestimating shrinks the payload while underestimating is what risks the limit.
+// processNodeOverheadBytes is one node's non-string JSON cost: field names, ids,
+// the always-serialised start time, and the childrenMap key. ~360 measured for a
+// fully-populated node; generous on purpose, since underestimating risks the limit.
 const processNodeOverheadBytes = 320
 
-// escapedByteBytes is the cost of one byte that JSON renders as an escape. The
-// worst form is \uXXXX; the short forms (\" \\ \n \r \t) cost 2, but they are
-// charged 6 as well, because over-charging shrinks the payload and under-charging
-// is what breaches the limit.
+// escapedByteBytes is what one JSON-escaped byte costs. \uXXXX is the worst form;
+// the short forms cost 2 but are charged 6 as well, erring toward a smaller payload.
 const escapedByteBytes = 6
 
-// buildWireStream derives the HTTP payload from the flush snapshot: per-event
-// trees move into the message-scoped Processes map — one capped copy per distinct
-// ProcessRef, because trees dominate the payload cost and the extra map entries
-// do not — events keep only their ref, and the attribution version marker is
-// stamped unconditionally, since an upgraded sensor with nothing to attribute
-// must stay distinguishable from a sensor that predates attribution.
+// buildWireStream derives the HTTP payload from the flush snapshot: each event's
+// tree moves into the message-scoped Processes map (one capped copy per distinct
+// ref), events keep only their ref, and the version marker is set unconditionally
+// so an upgraded sensor with nothing to attribute stays distinguishable from one
+// that predates attribution.
 //
-// The snapshot is NEVER mutated. The notification-channel consumer
-// (private-node-agent's host network sensor) holds it and reads
-// event.ProcessTree, and the trees themselves are shared with the process-tree
-// manager's cache and the legacy alert paths.
-//
-// Runs OUTSIDE eventsStorageMutex: this is the only expensive part of a flush,
-// and holding the lock across it would stall event recording.
+// Never mutates the snapshot: the notification-channel consumer holds it, and the
+// trees are shared with the process-tree cache and the alert paths.
 func buildWireStream(snapshot *armotypes.NetworkStream) *armotypes.NetworkStream {
 	wire := &armotypes.NetworkStream{
 		ProcessAttributionVersion: armotypes.NetworkStreamProcessAttributionV1,
@@ -138,11 +87,10 @@ type processCandidate struct {
 // collectTrees returns a copy of events with the per-event tree cleared, gathering
 // one candidate per distinct ref.
 //
-// On collision the DEEPER chain wins. The process-tree cache TTL (1 minute) is
-// shorter than the flush interval (2 minutes), so two lookups for one process
-// inside a single interval can legitimately return chains with different amounts
-// of ancestry resolved. First-wins would discard the richer chain and would make
-// the payload depend on Go's randomised map iteration order.
+// On collision the deeper chain wins: the tree cache TTL is shorter than the flush
+// interval, so two lookups for one process can return different amounts of resolved
+// ancestry, and first-wins would both discard the richer chain and make the payload
+// depend on map iteration order.
 func collectTrees(events map[string]armotypes.NetworkStreamEvent, candidates map[armotypes.ProcessRef]*processCandidate) map[string]armotypes.NetworkStreamEvent {
 	out := make(map[string]armotypes.NetworkStreamEvent, len(events))
 	for key, event := range events {
@@ -171,21 +119,13 @@ func collectTrees(events map[string]armotypes.NetworkStreamEvent, candidates map
 // selectProcessTrees copies the candidate trees that fit maxProcessTreeBytes,
 // returning nil when there are none so omitempty drops the field.
 //
-// Over budget, candidates are ranked SMALLEST TREE FIRST, ties broken on the ref.
-// That maximises the number of processes that keep an attributable tree, which is
-// the best available objective given that the sensor cannot know which process will
-// turn out to matter.
+// Over budget, ranking is smallest-tree-first, which maximises how many processes
+// keep a tree; ties break on the ref so the shipped set never depends on map
+// iteration order. (Ranking by connection count was rejected: a low-and-slow beacon
+// makes one connection per interval, so it would lose its tree first.)
 //
-// Ranking by connection count was tried and rejected: it sounds right, but a
-// low-and-slow beacon opens exactly ONE connection per interval, so it sorts last
-// and is the first tree dropped — the precise case reputation attribution exists to
-// catch. Tie-breaking on the ref keeps the payload independent of Go's randomised
-// map iteration order either way.
-//
-// Dropped candidates keep their refs on the connections — the pid identity
-// survives, and ProcessTreeFor is specified to return nil for a ref with no entry —
-// so the cost is degraded attribution for some processes rather than a rejected
-// message and the loss of every traffic row for the interval.
+// Connections are never dropped — only trees. Their refs stay put, so pid identity
+// survives and ProcessTreeFor returns nil for them as specified.
 func selectProcessTrees(candidates map[armotypes.ProcessRef]*processCandidate) map[armotypes.ProcessRef]*armotypes.ProcessTree {
 	if len(candidates) == 0 {
 		return nil
@@ -231,10 +171,9 @@ func selectProcessTrees(candidates map[armotypes.ProcessRef]*processCandidate) m
 		usedBytes += candidate.estBytes
 	}
 
-	// The whole point of the budget is that we find out whether it ever fires.
-	logger.L().Warning("NetworkStream - process tree budget exceeded, shipping refs without trees for the largest trees",
-		helpers.Int("processesWithTrees", len(candidates)), // processes with a ref but no tree are not candidates
-
+	// Logged so we learn whether this ever fires in production.
+	logger.L().Warning("NetworkStream - process tree budget exceeded, dropping the largest trees",
+		helpers.Int("processesWithTrees", len(candidates)),
 		helpers.Int("treesShipped", len(processes)),
 		helpers.Int("treesDropped", droppedTrees),
 		helpers.Int("connectionsWithoutTree", droppedConnections),
@@ -258,8 +197,7 @@ func estimateProcessBytes(node *armotypes.Process, budget int) int {
 		return 0
 	}
 
-	// The command line is counted as capTreeCopy will leave it. Slicing raw bytes
-	// mirrors capCmdline's budget; a cut mid-rune only makes escapedLen charge more.
+	// Counted as capTreeCopy will leave it; a cut mid-rune only costs more, not less.
 	cmdline := node.Cmdline
 	if len(cmdline) > maxCmdlineBytes {
 		cmdline = cmdline[:maxCmdlineBytes]
@@ -279,17 +217,11 @@ func estimateProcessBytes(node *armotypes.Process, budget int) int {
 	return total
 }
 
-// escapedLen returns at least the number of bytes encoding/json emits for s,
-// excluding the surrounding quotes.
-//
-// len(s) is NOT what reaches the wire, and the difference is what decides whether
-// the budget is a real bound. json escapes `"` and `\`, every control byte, and —
-// because Marshal enables HTML escaping — `<`, `>` and `&`, which real command
-// lines are full of (`sh -c 'cmd > /dev/null 2>&1'`). Invalid UTF-8 is replaced
-// byte-for-byte by �, and process argv is arbitrary kernel bytes, not
-// guaranteed UTF-8. Each such byte costs up to six where len() counts one, so
-// charging len() let a payload six times the estimate pass the budget and breach
-// the broker's message limit — losing the node's whole interval of traffic.
+// escapedLen returns at least the bytes encoding/json emits for s, excluding the
+// quotes. Never use len() here: json escapes `"`, `\`, control bytes and — Marshal
+// enables HTML escaping — `<`, `>`, `&`, which command lines are full of, and it
+// replaces each invalid UTF-8 byte (argv is raw kernel bytes) with \ufffd. Those
+// cost 6 bytes where len() counts 1, which is enough to void the budget entirely.
 func escapedLen(s string) int {
 	total := 0
 	for i := 0; i < len(s); {
@@ -316,10 +248,9 @@ func escapedLen(s string) int {
 	return total
 }
 
-// capTreeCopy returns an independent copy of a chain with every node's command
-// line capped. It must copy rather than cap in place: the nodes are shared with
-// the process-tree manager's LRU cache, the legacy alert paths, and the
-// notification-channel consumer, all of which keep the uncapped values.
+// capTreeCopy returns an independent copy of a chain with every command line capped.
+// It must copy rather than cap in place: these nodes are shared with the process-tree
+// cache, the alert paths and the channel consumer, which keep the uncapped values.
 func capTreeCopy(tree *armotypes.ProcessTree) *armotypes.ProcessTree {
 	if tree == nil {
 		return nil
@@ -328,27 +259,25 @@ func capTreeCopy(tree *armotypes.ProcessTree) *armotypes.ProcessTree {
 	if copied == nil {
 		return nil
 	}
-	// Copy the wrapper wholesale rather than field-listing it: a field list silently
-	// drops anything added to ProcessTree later, which is the exact trap the three
-	// existing process copiers fell into (see docs/features/process-start-time.md).
+	// Wholesale, not field-listed: a field list silently drops anything added to
+	// ProcessTree later. See docs/features/process-start-time.md for that trap.
 	dst := *tree
 	dst.ProcessTree = *copied
 	return &dst
 }
 
-// copyCappedProcess copies a node and its descendants, capping command lines as
-// it goes, and writes NOTHING to the source.
+// copyCappedProcess copies a node and its descendants, capping command lines, and
+// writes NOTHING to the source.
 //
-// armotypes.Process.DeepCopy cannot be used here: it calls MigrateToMap on its
-// receiver and on every child it recurses into, which allocates ChildrenMap and
-// nils Children on nodes other goroutines are reading. This function normalises
-// the deprecated Children slice on read instead.
+// Do not replace this with armotypes.Process.DeepCopy: that calls MigrateToMap on
+// its receiver and on every child it descends into, writing to nodes other
+// goroutines are reading. This normalises the deprecated Children slice on read.
 func copyCappedProcess(src *armotypes.Process, budget int) *armotypes.Process {
 	if src == nil || budget <= 0 {
 		return nil
 	}
 
-	dst := *src // scalar and string fields; strings are immutable, so sharing them is safe
+	dst := *src // strings are immutable, so sharing them is safe
 	dst.Cmdline = capCmdline(src.Cmdline)
 	dst.Uid = copyUint32Ptr(src.Uid)
 	dst.Gid = copyUint32Ptr(src.Gid)
@@ -391,9 +320,8 @@ func copyBoolPtr(p *bool) *bool {
 	return &v
 }
 
-// chainDepth returns the longest root-to-leaf node count, bounded by
-// maxTreeDepth. Read-only: unlike DeepCopy it does not normalise as it walks, so
-// it counts both child representations.
+// chainDepth returns the longest root-to-leaf node count, bounded by maxTreeDepth.
+// Read-only, so it counts both child representations rather than normalising.
 func chainDepth(node *armotypes.Process) int {
 	return chainDepthWithin(node, maxTreeDepth)
 }

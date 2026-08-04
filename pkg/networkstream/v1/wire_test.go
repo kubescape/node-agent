@@ -108,12 +108,10 @@ func TestBuildWireStream_RefWithoutTree(t *testing.T) {
 	assert.Nil(t, wire.ProcessTreeFor(ev), "a dangling ref resolves to nil, not a panic")
 }
 
-// TestBuildWireStream_DeeperChainWins: the process-tree cache TTL (1 min) is
-// shorter than the flush interval (2 min), so two lookups for one process inside
-// a single interval can legitimately return chains with different amounts of
-// ancestry resolved. First-wins would discard the richer chain and would make the
-// payload depend on Go's map iteration order; preferring the deeper chain is
-// deterministic.
+// TestBuildWireStream_DeeperChainWins: the tree cache TTL is shorter than the flush
+// interval, so two lookups for one process can return different amounts of resolved
+// ancestry. First-wins would discard the richer chain and make the payload depend on
+// map iteration order.
 func TestBuildWireStream_DeeperChainWins(t *testing.T) {
 	ref := &armotypes.ProcessRef{PID: 101, StartTimeNs: 5_000_000_000}
 	shallow := treeOf("c1", chain(50, 101))
@@ -152,15 +150,10 @@ func TestBuildWireStream_InboundIsAttributedToo(t *testing.T) {
 	}
 }
 
-// TestBuildWireStream_DoesNotMutateSharedTree pins the constraint that makes
-// sharing tree pointers into the flush snapshot safe: the wire copy must not
-// write to the source nodes. They are shared with the process-tree manager's LRU
-// cache, the legacy alert paths, and the notification-channel consumer.
-//
-// armotypes.Process.DeepCopy is NOT usable for this: it calls MigrateToMap on its
-// receiver and on every child it recurses into, which allocates ChildrenMap and
-// nils Children on the SHARED nodes. This test fails if the copy ever regresses
-// to it.
+// TestBuildWireStream_DoesNotMutateSharedTree pins what makes sharing tree pointers
+// into the snapshot safe: the wire copy must not write to the source nodes, which are
+// shared with the process-tree cache, the alert paths and the channel consumer. Fails
+// if the copy ever regresses to armotypes.Process.DeepCopy, which mutates as it walks.
 func TestBuildWireStream_DoesNotMutateSharedTree(t *testing.T) {
 	ref := &armotypes.ProcessRef{PID: 101, StartTimeNs: 5_000_000_000}
 	// Deliberately in the legacy shape: nil ChildrenMap, ancestry in Children.
@@ -216,14 +209,10 @@ func TestBuildWireStream_SerializationContract(t *testing.T) {
 	assert.Equal(t, "curl", resolved.ProcessTree.Comm)
 }
 
-// TestNoTickScaling guards the one silent failure mode of this feature: a
-// StartTimeNs division would still join correctly inside a single message — the key
-// and the ref share a producer — while breaking identity across messages by seven
-// orders of magnitude.
-//
-// It must run the WHOLE producer path, starting at processRefFor where the value
-// enters, because that is where a scaling bug would be introduced. Asserting only
-// that buildWireStream does not rewrite an already-correct literal is a tautology.
+// TestNoTickScaling guards this feature's one silent failure mode: a StartTimeNs
+// division still joins correctly inside a message while breaking identity across
+// messages. It must run the WHOLE producer path from processRefFor, where the value
+// enters — asserting that buildWireStream preserves a correct literal is a tautology.
 func TestNoTickScaling(t *testing.T) {
 	const startTimeNs = uint64(5_000_000_000) // procfs values are exact multiples of 10^7
 	mgr := processtree.NewProcessTreeManagerMock()
@@ -468,11 +457,9 @@ func TestSelectProcessTrees_PrefersSmallestTrees(t *testing.T) {
 }
 
 // TestSelectProcessTrees_OversizedTreeDoesNotBlockSmallOnes: the packing loop skips
-// rather than stops, so one tree larger than the whole budget cannot starve the rest.
-//
-// Note such a tree has to be WIDE, not deep: maxTreeDepth caps a chain at 64 nodes,
-// so the deepest possible chain is a few hundred KB. Real network-stream trees are
-// chains, which is why this case is defensive rather than expected.
+// rather than stops, so one oversized tree cannot starve the rest. Such a tree must be
+// WIDE — maxTreeDepth caps a chain at 64 nodes — so this is defensive: real trees are
+// chains.
 func TestSelectProcessTrees_OversizedTreeDoesNotBlockSmallOnes(t *testing.T) {
 	huge := armotypes.ProcessRef{PID: 1, StartTimeNs: 10_000_000}
 	oversized := &armotypes.Process{PID: 1, Comm: "p", ChildrenMap: map[armotypes.CommPID]*armotypes.Process{}}
@@ -535,18 +522,11 @@ func TestEstimateTreeBytes_CountsCappedCmdline(t *testing.T) {
 	assert.Less(t, estimateTreeBytes(huge), processNodeOverheadBytes+maxCmdlineBytes+64)
 }
 
-// TestBuildWireStream_ObservedWorstCaseFitsBudget pins the CALIBRATION, not just
-// the mechanism. The budget must not bind on traffic that production actually
-// produces, or it degrades attribution on exactly the busiest nodes.
-//
-// The scenario is the worst case the budget exists for, at the largest batch ever
-// observed: 283 connections (SUB-7850), every one from a DISTINCT process, each
-// carrying a p90-sized (~7 KB) tree. Measured production inputs: a batch averages
-// ~42 connections at ~530 bytes of JSON each (prod-eu, reputation events_in over
-// topic message count, against a 29 KB mean message).
-//
-// A 1.5 MiB budget fails this test — it binds at 216 trees — which is why the
-// budget is 2.5 MiB.
+// TestBuildWireStream_ObservedWorstCaseFitsBudget pins the CALIBRATION, not the
+// mechanism: the budget must not bind on traffic production actually produces, or it
+// degrades attribution on the busiest nodes. The scenario is the largest batch ever
+// observed (283 connections, SUB-7850) with every connection from a distinct process.
+// A 1.5 MiB budget fails this, which is why it is 2.5 MiB.
 func TestBuildWireStream_ObservedWorstCaseFitsBudget(t *testing.T) {
 	const (
 		observedWorstConnections = 283
@@ -586,16 +566,10 @@ func realisticNode(pid uint32, cmdline string) *armotypes.Process {
 	}
 }
 
-// TestEstimateTreeBytes_NeverUnderestimates is the guard the process-tree budget
-// rests on. estimateTreeBytes feeds maxProcessTreeBytes, so if it can undercount
-// the real marshalled size, the budget is not a bound and an oversized message is
-// silently produced — the broker rejects it and the node loses its ENTIRE interval
-// of traffic, with nothing logged.
-//
-// The subtle case is JSON escaping. len(s) is not what reaches the wire: json
-// escapes quotes, backslashes, control bytes, and — because Marshal enables HTML
-// escaping — `<`, `>` and `&`, which real command lines are full of. Process argv
-// is arbitrary kernel bytes, so invalid UTF-8 is routine and costs 6 bytes each.
+// TestEstimateTreeBytes_NeverUnderestimates is the guard the budget rests on: if the
+// estimate can undercount the marshalled size, maxProcessTreeBytes is not a bound and
+// an oversized message ships silently. The subtle case is JSON escaping — see
+// escapedLen.
 func TestEstimateTreeBytes_NeverUnderestimates(t *testing.T) {
 	deepChain := func(nodes int, cmdline string) *armotypes.Process {
 		var root, prev *armotypes.Process

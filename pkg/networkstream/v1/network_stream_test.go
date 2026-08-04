@@ -305,15 +305,10 @@ func TestSnapshotNetworkStream_OwnsItsEventMaps(t *testing.T) {
 	}
 }
 
-// TestFlush_ChannelSnapshotSurvivesTheProducer pins the notification-channel
-// contract end to end. private-node-agent's host network sensor reads
-// outbound.ProcessTree off this channel, so what it receives must (a) still carry
-// trees and (b) be immune to everything the producer does after the send —
-// stripping trees, clearing entities, recording new events.
-//
-// Against the pre-attribution flush this fails deterministically: the channel
-// carried the live storage struct, so the strip nils the trees the consumer is
-// about to read and the clear empties its Outbound map.
+// TestFlush_ChannelSnapshotSurvivesTheProducer pins the channel contract end to end:
+// what the consumer receives must still carry trees AND be immune to everything the
+// producer does afterwards. Fails deterministically against the pre-attribution flush,
+// which handed over the live storage struct and then stripped and cleared it.
 func TestFlush_ChannelSnapshotSurvivesTheProducer(t *testing.T) {
 	mgr := processtree.NewProcessTreeManagerMock()
 	mgr.SetProcessBootTimeNs(101, 5_000_000_000)
@@ -351,12 +346,10 @@ func TestFlush_ChannelSnapshotSurvivesTheProducer(t *testing.T) {
 	}
 }
 
-// TestFlush_BlockedChannelSendHonoursShutdown: the channel send is deliberately
-// blocking, so a slow consumer applies backpressure rather than losing traffic.
-// That makes it a goroutine leak unless it also selects on context cancellation —
-// which the send could not do while it held eventsStorageMutex. Nothing else in
-// this suite enters the blocked path, because every other channel test buffers
-// specifically so the producer never blocks.
+// TestFlush_BlockedChannelSendHonoursShutdown: the send blocks deliberately, so a slow
+// consumer applies backpressure instead of losing traffic — which leaks the goroutine
+// unless it also selects on ctx. Nothing else here enters the blocked path, because the
+// other channel tests buffer so the producer never blocks.
 func TestFlush_BlockedChannelSendHonoursShutdown(t *testing.T) {
 	mgr := processtree.NewProcessTreeManagerMock()
 	ctx, cancel := context.WithCancel(context.Background())
