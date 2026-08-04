@@ -86,6 +86,44 @@ func (l *containerProfileNetworkLibrary) Declarations() map[string][]cel.Functio
 				}),
 			),
 		},
+		"cp.was_selector_in_ingress": {
+			cel.Overload(
+				"cp_was_selector_in_ingress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("cp.was_selector_in_ingress")
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasSelectorInIngress(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_selector_in_ingress", cache.HashForContainerProfile(l.objectCache))
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
+				}),
+			),
+		},
+		"cp.was_selector_in_egress": {
+			cel.Overload(
+				"cp_was_selector_in_egress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("cp.was_selector_in_egress")
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasSelectorInEgress(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "cp.was_selector_in_egress", cache.HashForContainerProfile(l.objectCache))
+					result := cachedFunc(values[0], values[1])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
+				}),
+			),
+		},
 		"cp.is_domain_in_egress": {
 			cel.Overload(
 				"cp_is_domain_in_egress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
@@ -190,6 +228,9 @@ func (e *containerProfileNetworkCostEstimator) EstimateCallCost(function, overlo
 	case "cp.was_address_in_egress", "cp.was_address_in_ingress":
 		// Cache lookup + O(n) linear search through egress/ingress list
 		cost = 20
+	case "cp.was_selector_in_ingress", "cp.was_selector_in_egress":
+		// Cache lookup + O(pods) IP→pod resolution + O(selectors) label match
+		cost = 50
 	case "cp.is_domain_in_egress", "cp.is_domain_in_ingress":
 		// Cache lookup + O(n) list iteration + O(m) slice.Contains on DNS names per entry
 		cost = 35

@@ -10,6 +10,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/storage/pkg/registry/file/networkmatch"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 // matchIPField is the wildcard-aware adapter from the projection layer's
@@ -218,4 +221,97 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(contain
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 	return types.Bool(matchIPField(&cp.IngressAddresses, addressStr))
+}
+
+// resolvePodByIP finds the pod whose status.PodIP == addr, using the k8s object
+// cache. O(n) over the pod set; the CEL functionCache memoises (containerID,
+// addr) for its TTL, so this only runs on a cache miss.
+func (l *containerProfileNetworkLibrary) resolvePodByIP(addr string) *corev1.Pod {
+	k8s := l.objectCache.K8sObjectCache()
+	if k8s == nil {
+		return nil
+	}
+	for _, p := range k8s.GetPods() {
+		if p != nil && p.Status.PodIP == addr {
+			return p
+		}
+	}
+	return nil
+}
+
+// namespaceSelectorMatches matches a namespaceSelector against the peer's
+// namespace via the implicit kubernetes.io/metadata.name label every namespace
+// carries (the form these profiles use). A nil selector is "any namespace".
+// Selectors keyed on other namespace labels are not resolved here.
+func namespaceSelectorMatches(sel *metav1.LabelSelector, ns string) bool {
+	if sel == nil {
+		return true
+	}
+	s, err := metav1.LabelSelectorAsSelector(sel)
+	if err != nil {
+		return false
+	}
+	return s.Matches(labels.Set{"kubernetes.io/metadata.name": ns})
+}
+
+// wasSelectorInPeers reports whether pod matches any peer entry's podSelector
+// (AND its namespaceSelector).
+func wasSelectorInPeers(peers []objectcache.PeerSelector, pod *corev1.Pod) bool {
+	podLabels := labels.Set(pod.Labels)
+	for i := range peers {
+		peer := &peers[i]
+		if peer.PodSelector == nil {
+			continue
+		}
+		ps, err := metav1.LabelSelectorAsSelector(peer.PodSelector)
+		if err != nil {
+			continue
+		}
+		if ps.Matches(podLabels) && namespaceSelectorMatches(peer.NamespaceSelector, pod.Namespace) {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *containerProfileNetworkLibrary) wasSelectorInIngress(containerID, address ref.Val) ref.Val {
+	return l.wasSelectorIn(containerID, address, true)
+}
+
+func (l *containerProfileNetworkLibrary) wasSelectorInEgress(containerID, address ref.Val) ref.Val {
+	return l.wasSelectorIn(containerID, address, false)
+}
+
+// wasSelectorIn resolves the runtime peer address to a pod and reports whether
+// that pod matches any of the profile's ingress-or-egress peer selectors. The
+// label-based complement to was_address_in_{ingress,egress}: it survives pod IP
+// churn because it matches the peer by identity, not by (learned) IP.
+func (l *containerProfileNetworkLibrary) wasSelectorIn(containerID, address ref.Val, ingress bool) ref.Val {
+	if l.objectCache == nil {
+		return types.NewErr("objectCache is nil")
+	}
+	containerIDStr, ok := containerID.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(containerID)
+	}
+	addressStr, ok := address.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(address)
+	}
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
+	if err != nil {
+		return cache.NewProfileNotAvailableErr("%v", err)
+	}
+	peers := cp.EgressPeers
+	if ingress {
+		peers = cp.IngressPeers
+	}
+	if len(peers) == 0 {
+		return types.Bool(false)
+	}
+	pod := l.resolvePodByIP(addressStr)
+	if pod == nil {
+		return types.Bool(false)
+	}
+	return types.Bool(wasSelectorInPeers(peers, pod))
 }
