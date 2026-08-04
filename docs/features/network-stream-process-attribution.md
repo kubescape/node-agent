@@ -126,9 +126,10 @@ fresh nodes per branch, so event trees are not shared with the process tree's
 live map — only with its 1-minute LRU entry, which nothing writes to after
 construction. Anything that would modify a tree copies it first.
 
-Transient memory outside the lock is one capped tree copy per distinct process —
-at most connections × p90 tree size ≈ 283 × 5.1 KB ≈ 1.4 MB worst case, freed
-after the HTTP send.
+Transient memory outside the lock is one capped tree copy per *selected* process,
+so it is bounded by `maxProcessTreeBytes` (2.5 MiB) rather than by the connection
+count, and freed after the HTTP send. `capTreeCopy` runs only for candidates that
+fit the budget.
 
 The wire copy is derived **before** the snapshot goes on the channel. Once the
 consumer has it, its maps are the consumer's; reading them afterwards would depend
@@ -201,46 +202,71 @@ liveness probes) can reach that.
 | Mean connections per batch | ~42 (prod-us ~32) | `network_reputation_events_in_total` ÷ topic message count |
 | ⇒ bytes per connection, no tree | ~530 B of JSON | derived from the two above |
 | Largest batch ever observed | 283 connections | SUB-7850 |
-| Tree size | ~2 KB median, ~7 KB p90 | SUB-7850 (note: the implementation plan says 5.1 KB p90, the epic plan's ~2 MB ÷ 283 implies ~7 KB — the larger figure is used here) |
+| Tree size | ~4.3 KB marshalled for a fully-populated 10-node chain | measured here (the plan documents give ~2 KB median and disagree on p90 — 5.1 KB vs the ~7 KB implied by its own ~2 MB ÷ 283) |
 
-`maxProcessTreeBytes` is **2.5 MiB** of estimated tree bytes. Measured against the
-worst case it exists for — *every* connection from a distinct process, so trees
-scale 1:1 with connections:
+`maxProcessTreeBytes` is **2.5 MiB** of estimated tree bytes. Measured end to end
+against the worst case it exists for — *every* connection from a distinct process,
+so trees scale 1:1 with connections — with production-weight connection entries
+(530 B) included:
 
-| Connections (all distinct processes) | Tree size | Trees shipped | JSON | after base64 |
-|---|---|---|---|---|
-| 42 (the mean) | 7 KB | all 42 | 0.28 MB | 0.37 MB |
-| **283 (observed worst)** | **7 KB** | **all 283** | 1.87 MB | **2.50 MB — 48% of limit** |
-| 500 | 7 KB | 356 (budget binds) | 2.38 MB | 3.17 MB |
-| 4000 | 7 KB | 356 | 2.89 MB | 3.85 MB |
-| 4000 | 2 KB | 1069 | 2.90 MB | 3.86 MB |
+| Connections (all distinct processes) | Trees shipped | JSON | after base64 |
+|---|---|---|---|
+| 42 (the mean) | all 42 | 0.20 MiB | 0.26 MiB |
+| **283 (observed worst)** | **all 283** | 1.33 MiB | **1.77 MiB — 35% of limit** |
+| 500 | all 500 | 2.35 MiB | 3.13 MiB |
+| 1000 | 513 (budget binds) | 2.70 MiB | 3.60 MiB |
+| 4000 | 513 | 4.50 MiB | **6.01 MiB — over the limit, on entries alone** |
 
-The load-bearing row is the third: **the budget must not bind on traffic
-production actually produces**, or it degrades attribution on exactly the busiest
-nodes. A tighter 1.5 MiB was tried first and rejected — it binds at 213 of 283
-trees, while the payload there is under half the limit.
-`TestBuildWireStream_ObservedWorstCaseFitsBudget` pins this, and fails at 1.5 MiB.
+Two load-bearing rows. The **283** row: the budget must not bind on traffic
+production actually produces, or it degrades attribution on exactly the busiest
+nodes — a tighter 1.5 MiB was tried first and rejected, because it clips 70 of those
+283 trees while the payload is barely a third of the limit.
+`TestBuildWireStream_ObservedWorstCaseFitsBudget` pins that and fails at 1.5 MiB.
+The **4000** row is the residual below: past ~3,300 connections the entries alone
+exceed the limit no matter how tightly trees are bounded.
 
-- **A byte budget, not a tree count.** Tree size varies ~3.5× even with the
-  command-line cap (~2 KB median, ~7 KB p90, ~12 KB for a deep chain of capped
-  command lines), so no count bounds the payload. The estimator counts the command
-  line at its *capped* length and overestimates real marshalled size by 1–6% —
-  conservative in the safe direction.
+- **A byte budget, not a tree count.** Tree size is not uniform — depth varies,
+  fields are variable-length, and JSON escaping inflates some content ~6× (below),
+  so no count bounds the payload. The estimator overestimates real marshalled size
+  by ~19% for realistic trees, and `TestEstimateTreeBytes_NeverUnderestimates`
+  enforces that it never goes the other way.
+
+#### JSON escaping is what makes the estimate honest
+
+`len(s)` is **not** what reaches the wire, and getting this wrong silently voided
+the bound. `encoding/json` escapes `"` and `\`, every control byte, and — because
+`Marshal` enables HTML escaping — `<`, `>` and `&`, which real command lines are
+full of (`sh -c 'cmd > /dev/null 2>&1'`). Invalid UTF-8 is replaced byte-for-byte
+with `�`, and process argv is arbitrary kernel bytes, not guaranteed UTF-8.
+Each such byte costs up to **six** where `len()` counts one.
+
+Charging `len()` therefore let a payload six times the estimate pass the budget: 629
+processes with 1 KB of non-UTF-8 argv each estimated at 29% of the budget, dropped
+nothing, logged nothing, and produced **5.37 MB after base64** — rejected by the
+broker, so the node lost its entire interval of traffic. `escapedLen` charges the
+true escaped cost (rounding every escape up to 6 bytes), which is what makes
+`maxProcessTreeBytes` an actual bound. Note this is reachable deliberately by
+anyone able to exec in any container on the node, which made it a detection-evasion
+primitive rather than merely a bug.
 - **Connections are never dropped** — that is the data loss this change exists to
   fix. Only trees are, and the refs stay on the connections, so pid identity
   survives and `ProcessTreeFor` returns nil for them as specified.
-- **Ranked by connection count**, ties broken on the ref. A process that reached
-  many endpoints is both the most expensive attribution to lose and the shape
-  reputation cares about most; tie-breaking on the ref keeps the payload
-  independent of map iteration order.
-- At p90 tree size the budget is ~360 trees and at median ~1280 — above anything
-  yet observed, so it is a safety valve rather than a routine limiter.
+- **Ranked smallest-tree-first**, ties broken on the ref. That maximises the number
+  of processes keeping an attributable tree, which is the best objective available
+  given the sensor cannot know which process will matter. Ranking by connection
+  count was tried and rejected: a low-and-slow beacon opens exactly *one*
+  connection per interval, so it would sort last and lose its tree first — the
+  precise case reputation attribution exists to catch. The ref tie-break keeps the
+  shipped set independent of map iteration order, which
+  `TestSelectProcessTrees_IsDeterministic` pins.
+- The budget holds ~513 fully-populated 10-node chains — 1.8x the observed worst
+  batch — so it is a safety valve rather than a routine limiter.
 
 **Residual, deliberately not fixed here.** With trees bounded, the connection
-*entries* alone would still breach the limit somewhere around 2,500–4,400
-connections (the range is per-entry richness: ~530 B derived from production versus
-~300 B for a lean entry). That is 9–16× the observed worst batch. The fix for that
-regime is splitting the message — as the container profile does on HTTP 413,
+*entries* alone breach the limit at roughly **3,300 connections** at the
+production-derived ~530 B per entry — 11x the observed worst batch, and measured at
+6.01 MiB for 4,000. No tree budget can help there. The fix for that regime is
+splitting the message — as the container profile does on HTTP 413,
 `docs/features/container-profile-split-on-413.md` — not dropping connections. The
 logging below is what would tell us it is being approached.
 
@@ -257,9 +283,9 @@ and it is bounded above by 1.
 
 Two log lines make it answerable after rollout:
 
-- `NetworkStream - process tree budget exceeded` — with `distinctProcesses`,
+- `NetworkStream - process tree budget exceeded` — with `processesWithTrees`,
   `treesShipped`, `treesDropped`, `connectionsWithoutTree` and the byte totals.
-  Fires only when the budget binds.
+  Fires once per flush, and only when the budget binds.
 - `NetworkStream - large payload` — above `payloadWarnBytes` (2 MiB), with the
   marshalled size, entity, connection and tree counts. Reports the tail
   approaching the limit; quiet at the ~30 KB fleet mean.

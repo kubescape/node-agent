@@ -43,9 +43,9 @@ const maxTreeDepth = 64
 // and the whole message is then rejected and dropped: the node loses its entire
 // interval of traffic, not just some trees.
 //
-// A budget in BYTES rather than a tree count, because tree size varies by ~3.5x
-// even with the command-line cap (~2 KB median, ~7 KB p90, ~12 KB for a deep chain
-// of capped command lines), so no count bounds the payload.
+// A budget in BYTES rather than a tree count, because tree size is not uniform:
+// depth varies, the fields are variable-length, and JSON escaping inflates some
+// content ~6x (see escapedLen). No tree count bounds the payload.
 //
 // Calibrated against measured production traffic rather than guessed. In prod-eu a
 // network-stream message averages 29 KB on the topic, so ~22 KB of JSON before the
@@ -54,30 +54,42 @@ const maxTreeDepth = 64
 // makes a connection ~530 bytes of JSON without its tree. The largest batch ever
 // observed is 283 connections (SUB-7850).
 //
-// Taking the worst case this budget exists for — EVERY connection from a distinct
-// process, so trees scale 1:1 with connections:
+// Measured against the worst case this budget exists for — EVERY connection from a
+// distinct process, so trees scale 1:1 with connections — using a fully-populated
+// 10-node chain, which estimates ~5.1 KB and marshals to ~4.3 KB:
 //
-//	283 connections x ~7 KB p90 tree ≈ 1.96 MiB of trees, + 146 KB of entries
-//	≈ 2.1 MiB JSON ≈ 2.8 MiB after base64 — 56% of the 5 MiB limit.
+//	 283 connections (the observed worst): all 283 trees ship, 1.77 MiB after base64
+//	 500 connections:                      all 500 ship,      3.13 MiB
+//	1000 connections:                      binds at 513 trees, 3.60 MiB
 //
-// So 2.5 MiB. It binds above ~360 distinct processes at p90 tree size and ~1280 at
-// median, i.e. above anything yet observed, which keeps it a safety valve instead
-// of a routine limiter that would degrade attribution on the busiest nodes. A
-// tighter 1.5 MiB was tried first and rejected: it binds at 216-301 trees, *below*
-// the observed worst batch, while the payload there is only half the limit.
+// So 2.5 MiB, which binds above ~513 such trees — 1.8x the observed worst batch,
+// keeping it a safety valve rather than a routine limiter that would degrade
+// attribution on the busiest nodes. A tighter 1.5 MiB was tried first and rejected:
+// it clips 70 of 283 trees, below the observed worst, while the payload there is
+// barely a third of the limit.
 //
 // Residual, deliberately not addressed here: with trees bounded, the connection
-// entries alone would breach the limit at ~2,500 connections — 9x the observed
-// worst. The fix for that regime is splitting the message (as the container
-// profile does on HTTP 413), not dropping connections. The logging below is what
-// would tell us it is being approached.
+// ENTRIES alone breach the limit at ~3,300 connections (11x the observed worst) —
+// measured 6.01 MiB at 4,000. The fix for that regime is splitting the message, as
+// the container profile does on HTTP 413, not dropping connections. The logging
+// below is what would tell us it is being approached.
 const maxProcessTreeBytes = 2560 * 1024
 
 // processNodeOverheadBytes approximates the non-string JSON cost of one process
-// node — field names, the numeric ids, the RFC-3339 start time and the child map
-// key. Deliberately generous: this feeds a budget, so overestimating shrinks the
-// payload and underestimating is what risks the limit.
-const processNodeOverheadBytes = 200
+// node — every field name, the numeric ids, the RFC-3339 start time (time.Time
+// ignores omitempty, so it is always serialised) and the childrenMap key, in which
+// a node's comm appears a second time.
+//
+// Measured against a fully-populated node as the tree builder produces them, which
+// is ~360 bytes with short strings. Deliberately generous: this feeds a budget, so
+// overestimating shrinks the payload while underestimating is what risks the limit.
+const processNodeOverheadBytes = 320
+
+// escapedByteBytes is the cost of one byte that JSON renders as an escape. The
+// worst form is \uXXXX; the short forms (\" \\ \n \r \t) cost 2, but they are
+// charged 6 as well, because over-charging shrinks the payload and under-charging
+// is what breaches the limit.
+const escapedByteBytes = 6
 
 // buildWireStream derives the HTTP payload from the flush snapshot: per-event
 // trees move into the message-scoped Processes map — one capped copy per distinct
@@ -159,14 +171,21 @@ func collectTrees(events map[string]armotypes.NetworkStreamEvent, candidates map
 // selectProcessTrees copies the candidate trees that fit maxProcessTreeBytes,
 // returning nil when there are none so omitempty drops the field.
 //
-// Over budget, candidates are ranked by connection count first: a process that
-// reached many endpoints is both the most expensive attribution to lose and the
-// shape reputation cares about most (beacon-style fan-out). Ties break on the ref
-// so the payload never depends on map iteration order. Dropped candidates keep
-// their refs on the connections — the pid identity survives, and ProcessTreeFor is
-// specified to return nil for a ref with no entry — so the cost is degraded
-// attribution for the least-connected processes rather than a rejected message and
-// the loss of every traffic row for the interval.
+// Over budget, candidates are ranked SMALLEST TREE FIRST, ties broken on the ref.
+// That maximises the number of processes that keep an attributable tree, which is
+// the best available objective given that the sensor cannot know which process will
+// turn out to matter.
+//
+// Ranking by connection count was tried and rejected: it sounds right, but a
+// low-and-slow beacon opens exactly ONE connection per interval, so it sorts last
+// and is the first tree dropped — the precise case reputation attribution exists to
+// catch. Tie-breaking on the ref keeps the payload independent of Go's randomised
+// map iteration order either way.
+//
+// Dropped candidates keep their refs on the connections — the pid identity
+// survives, and ProcessTreeFor is specified to return nil for a ref with no entry —
+// so the cost is degraded attribution for some processes rather than a rejected
+// message and the loss of every traffic row for the interval.
 func selectProcessTrees(candidates map[armotypes.ProcessRef]*processCandidate) map[armotypes.ProcessRef]*armotypes.ProcessTree {
 	if len(candidates) == 0 {
 		return nil
@@ -191,8 +210,8 @@ func selectProcessTrees(candidates map[armotypes.ProcessRef]*processCandidate) m
 	}
 	sort.Slice(ordered, func(i, j int) bool {
 		a, b := ordered[i], ordered[j]
-		if a.connections != b.connections {
-			return a.connections > b.connections
+		if a.estBytes != b.estBytes {
+			return a.estBytes < b.estBytes
 		}
 		if a.ref.PID != b.ref.PID {
 			return a.ref.PID < b.ref.PID
@@ -213,8 +232,9 @@ func selectProcessTrees(candidates map[armotypes.ProcessRef]*processCandidate) m
 	}
 
 	// The whole point of the budget is that we find out whether it ever fires.
-	logger.L().Warning("NetworkStream - process tree budget exceeded, shipping refs without trees for the least-connected processes",
-		helpers.Int("distinctProcesses", len(candidates)),
+	logger.L().Warning("NetworkStream - process tree budget exceeded, shipping refs without trees for the largest trees",
+		helpers.Int("processesWithTrees", len(candidates)), // processes with a ref but no tree are not candidates
+
 		helpers.Int("treesShipped", len(processes)),
 		helpers.Int("treesDropped", droppedTrees),
 		helpers.Int("connectionsWithoutTree", droppedConnections),
@@ -237,15 +257,61 @@ func estimateProcessBytes(node *armotypes.Process, budget int) int {
 	if node == nil || budget <= 0 {
 		return 0
 	}
-	total := processNodeOverheadBytes +
-		min(len(node.Cmdline), maxCmdlineBytes) +
-		len(node.Comm) + len(node.Pcomm) + len(node.Path) + len(node.Cwd) +
-		len(node.Hardlink) + len(node.UserName) + len(node.GroupName)
+
+	// The command line is counted as capTreeCopy will leave it. Slicing raw bytes
+	// mirrors capCmdline's budget; a cut mid-rune only makes escapedLen charge more.
+	cmdline := node.Cmdline
+	if len(cmdline) > maxCmdlineBytes {
+		cmdline = cmdline[:maxCmdlineBytes]
+	}
+
+	total := processNodeOverheadBytes + len(cmdlineTruncationMarker) +
+		escapedLen(cmdline) +
+		escapedLen(node.Comm) + escapedLen(node.Pcomm) + escapedLen(node.Path) +
+		escapedLen(node.Cwd) + escapedLen(node.Hardlink) +
+		escapedLen(node.UserName) + escapedLen(node.GroupName)
 	for _, child := range node.ChildrenMap {
 		total += estimateProcessBytes(child, budget-1)
 	}
 	for i := range node.Children {
 		total += estimateProcessBytes(&node.Children[i], budget-1)
+	}
+	return total
+}
+
+// escapedLen returns at least the number of bytes encoding/json emits for s,
+// excluding the surrounding quotes.
+//
+// len(s) is NOT what reaches the wire, and the difference is what decides whether
+// the budget is a real bound. json escapes `"` and `\`, every control byte, and —
+// because Marshal enables HTML escaping — `<`, `>` and `&`, which real command
+// lines are full of (`sh -c 'cmd > /dev/null 2>&1'`). Invalid UTF-8 is replaced
+// byte-for-byte by �, and process argv is arbitrary kernel bytes, not
+// guaranteed UTF-8. Each such byte costs up to six where len() counts one, so
+// charging len() let a payload six times the estimate pass the budget and breach
+// the broker's message limit — losing the node's whole interval of traffic.
+func escapedLen(s string) int {
+	total := 0
+	for i := 0; i < len(s); {
+		if c := s[i]; c < utf8.RuneSelf {
+			if c >= 0x20 && c != '"' && c != '\\' && c != '<' && c != '>' && c != '&' {
+				total++
+			} else {
+				total += escapedByteBytes
+			}
+			i++
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			total += escapedByteBytes // one invalid byte -> the 6-byte \ufffd
+		case r == '\u2028' || r == '\u2029': // JSON escapes the line/paragraph separators
+			total += escapedByteBytes
+		default:
+			total += size
+		}
+		i += size
 	}
 	return total
 }

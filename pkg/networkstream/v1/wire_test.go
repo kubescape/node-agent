@@ -3,8 +3,10 @@ package networkstream
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -401,30 +403,123 @@ func TestBuildWireStream_OverBudgetDropsTreesNotConnections(t *testing.T) {
 	assert.Less(t, encoded, 5<<20, "the whole point: %d bytes JSON -> ~%d base64, under 5 MiB", len(payload), encoded)
 }
 
-// TestSelectProcessTrees_PrefersFanOutDeterministically: over budget, the process
-// that reached the most endpoints keeps its tree, and the outcome must not depend
-// on Go's randomised map iteration order.
-func TestSelectProcessTrees_PrefersFanOutDeterministically(t *testing.T) {
-	chatty := armotypes.ProcessRef{PID: 900, StartTimeNs: 10_000_000}
-	for i := 0; i < 16; i++ {
+// TestSelectProcessTrees_IsDeterministic pins the stated contract that the shipped
+// SET never depends on Go's randomised map iteration order. Asserting only that one
+// particular process survived is not enough: with the ref tie-breaks removed, every
+// equal-cost candidate ties, sort.Slice's output becomes iteration-dependent, and
+// the set silently varies run to run.
+func TestSelectProcessTrees_IsDeterministic(t *testing.T) {
+	build := func() map[armotypes.ProcessRef]*armotypes.ProcessTree {
 		events := map[string]armotypes.NetworkStreamEvent{}
-		// One process with many connections...
-		for c := 0; c < 40; c++ {
-			ref := chatty
-			events[fmt.Sprintf("10.1.1.%d/443/TCP/900/10000000", c)] =
-				armotypes.NetworkStreamEvent{ProcessRef: &ref, ProcessTree: bigTree(900, 4096)}
-		}
-		// ...and many single-connection processes that together blow the budget.
 		for pid := uint32(1); pid <= 2000; pid++ {
 			ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
 			events[fmt.Sprintf("10.2.%d.%d/443/TCP/%d/10000000", pid/256, pid%256, pid)] =
 				armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, 4096)}
 		}
-
-		wire := buildWireStream(outboundOnly("c1", events))
-
-		require.NotNil(t, wire.Processes[chatty], "the highest-fan-out process must keep its tree on every run")
+		return buildWireStream(outboundOnly("c1", events)).Processes
 	}
+
+	first := build()
+	require.NotEmpty(t, first)
+	require.Less(t, len(first), 2000, "this case must actually exceed the budget")
+
+	firstRefs := make([]string, 0, len(first))
+	for ref := range first {
+		firstRefs = append(firstRefs, ref.String())
+	}
+	sort.Strings(firstRefs)
+
+	for i := 0; i < 12; i++ {
+		again := build()
+		refs := make([]string, 0, len(again))
+		for ref := range again {
+			refs = append(refs, ref.String())
+		}
+		sort.Strings(refs)
+		require.Equal(t, firstRefs, refs, "the shipped set must be identical on every run")
+	}
+}
+
+// TestSelectProcessTrees_PrefersSmallestTrees: over budget, ranking is smallest-tree
+// first, so the number of processes keeping attribution is maximised. Ranking by
+// connection count was rejected — a low-and-slow beacon makes one connection, so it
+// would sort last and lose its tree first.
+func TestSelectProcessTrees_PrefersSmallestTrees(t *testing.T) {
+	small := armotypes.ProcessRef{PID: 1, StartTimeNs: 10_000_000}
+	events := map[string]armotypes.NetworkStreamEvent{
+		// One connection, tiny tree: the low-and-slow shape. Must survive.
+		"10.9.9.9/443/TCP/1/10000000": {ProcessRef: &small, ProcessTree: bigTree(1, 1024)},
+	}
+	// Chatty processes with large trees that together blow the budget.
+	for pid := uint32(100); pid < 1100; pid++ {
+		for c := 0; c < 5; c++ {
+			ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+			events[fmt.Sprintf("10.3.%d.%d/%d/TCP/%d/10000000", pid/256, pid%256, c, pid)] =
+				armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, 12288)}
+		}
+	}
+
+	wire := buildWireStream(outboundOnly("c1", events))
+
+	require.Less(t, len(wire.Processes), 1001, "this case must exceed the budget")
+	assert.NotNil(t, wire.Processes[small],
+		"the single-connection process with the smallest tree must keep it — that is the beacon shape")
+}
+
+// TestSelectProcessTrees_OversizedTreeDoesNotBlockSmallOnes: the packing loop skips
+// rather than stops, so one tree larger than the whole budget cannot starve the rest.
+//
+// Note such a tree has to be WIDE, not deep: maxTreeDepth caps a chain at 64 nodes,
+// so the deepest possible chain is a few hundred KB. Real network-stream trees are
+// chains, which is why this case is defensive rather than expected.
+func TestSelectProcessTrees_OversizedTreeDoesNotBlockSmallOnes(t *testing.T) {
+	huge := armotypes.ProcessRef{PID: 1, StartTimeNs: 10_000_000}
+	oversized := &armotypes.Process{PID: 1, Comm: "p", ChildrenMap: map[armotypes.CommPID]*armotypes.Process{}}
+	for i := 0; i < 4000; i++ {
+		child := &armotypes.Process{PID: uint32(10_000 + i), Comm: "p",
+			Cmdline: strings.Repeat("a", maxCmdlineBytes), ChildrenMap: map[armotypes.CommPID]*armotypes.Process{}}
+		oversized.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
+	}
+	require.Greater(t, estimateTreeBytes(treeOf("c1", oversized)), maxProcessTreeBytes,
+		"this tree must exceed the whole budget on its own")
+
+	events := map[string]armotypes.NetworkStreamEvent{
+		"10.9.9.9/443/TCP/1/10000000": {ProcessRef: &huge, ProcessTree: treeOf("c1", oversized)},
+	}
+	for pid := uint32(2); pid <= 6; pid++ {
+		ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+		events[fmt.Sprintf("10.4.0.%d/443/TCP/%d/10000000", pid, pid)] =
+			armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, 2048)}
+	}
+
+	wire := buildWireStream(outboundOnly("c1", events))
+
+	assert.Nil(t, wire.Processes[huge], "a tree larger than the whole budget cannot ship")
+	assert.Len(t, wire.Processes, 5, "the small trees after it must still ship")
+}
+
+// TestEstimateTreeBytes_CountsLegacyChildren: the deprecated Children slice reaches
+// the wire (capTreeCopy normalises it into ChildrenMap), so the estimator must charge
+// for it. If it did not, a Children-shaped tree would be free against the budget.
+func TestEstimateTreeBytes_CountsLegacyChildren(t *testing.T) {
+	childless := treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh"})
+	withLegacyChild := treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh",
+		Children: []armotypes.Process{{PID: 2, Comm: "curl", Cmdline: strings.Repeat("a", 500)}}})
+
+	assert.Greater(t, estimateTreeBytes(withLegacyChild), estimateTreeBytes(childless)+500,
+		"a Children-shaped descendant must be charged, not free")
+}
+
+// TestCapTreeCopy_PreservesWrapperFields: the wrapper is copied wholesale rather than
+// field-listed, so a field added to ProcessTree later cannot be silently dropped.
+func TestCapTreeCopy_PreservesWrapperFields(t *testing.T) {
+	src := &armotypes.ProcessTree{ContainerID: "c1", UniqueID: 4242,
+		ProcessTree: armotypes.Process{PID: 1, Comm: "sh"}}
+
+	capped := capTreeCopy(src)
+
+	assert.Equal(t, "c1", capped.ContainerID)
+	assert.Equal(t, uint32(4242), capped.UniqueID, "field-listing the wrapper would drop this")
 }
 
 func TestEstimateTreeBytes_CountsCappedCmdline(t *testing.T) {
@@ -474,4 +569,112 @@ func TestBuildWireStream_ObservedWorstCaseFitsBudget(t *testing.T) {
 	require.NoError(t, err)
 	encoded := (len(payload) + observedWorstConnections*bytesPerConnection) * 4 / 3
 	assert.Less(t, encoded, 4<<20, "~%d B encoded should stay well clear of the 5 MiB limit", encoded)
+}
+
+// realisticNode is a process node shaped the way the tree builder actually
+// produces them: every field populated. Sparse nodes are a test artefact.
+func realisticNode(pid uint32, cmdline string) *armotypes.Process {
+	uid, gid := uint32(1000), uint32(1000)
+	upper := true
+	return &armotypes.Process{
+		PID: pid, PPID: pid - 1, Comm: "some-process", Pcomm: "parent-process",
+		Cmdline: cmdline, Path: "/usr/local/bin/some-process", Cwd: "/var/lib/some-process",
+		Hardlink: "/usr/local/bin/some-process", UserName: "serviceaccount", GroupName: "serviceaccount",
+		Uid: &uid, Gid: &gid, UpperLayer: &upper, StartTime: time.Unix(1754290000, 994619533),
+		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
+	}
+}
+
+// TestEstimateTreeBytes_NeverUnderestimates is the guard the process-tree budget
+// rests on. estimateTreeBytes feeds maxProcessTreeBytes, so if it can undercount
+// the real marshalled size, the budget is not a bound and an oversized message is
+// silently produced — the broker rejects it and the node loses its ENTIRE interval
+// of traffic, with nothing logged.
+//
+// The subtle case is JSON escaping. len(s) is not what reaches the wire: json
+// escapes quotes, backslashes, control bytes, and — because Marshal enables HTML
+// escaping — `<`, `>` and `&`, which real command lines are full of. Process argv
+// is arbitrary kernel bytes, so invalid UTF-8 is routine and costs 6 bytes each.
+func TestEstimateTreeBytes_NeverUnderestimates(t *testing.T) {
+	deepChain := func(nodes int, cmdline string) *armotypes.Process {
+		var root, prev *armotypes.Process
+		for i := 0; i < nodes; i++ {
+			node := realisticNode(uint32(100+i), cmdline)
+			if prev == nil {
+				root = node
+			} else {
+				prev.ChildrenMap[armotypes.CommPID{Comm: node.Comm, PID: node.PID}] = node
+			}
+			prev = node
+		}
+		return root
+	}
+	wide := realisticNode(1, "sh")
+	for i := 0; i < 50; i++ {
+		child := realisticNode(uint32(1000+i), "worker --shard=<n> & echo \"done\"")
+		wide.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
+	}
+
+	cases := []struct {
+		name string
+		tree *armotypes.ProcessTree
+	}{
+		{"bare", treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh"})},
+		{"realistic single node", treeOf("c1", realisticNode(1, "/usr/bin/curl https://example.com/api?a=1"))},
+		{"realistic 10-node chain", treeOf("c1", deepChain(10, "/usr/bin/curl https://example.com"))},
+		{"realistic 64-node chain", treeOf("c1", deepChain(64, "/usr/bin/curl https://example.com"))},
+		{"over-deep chain (truncated)", treeOf("c1", deepChain(120, "sh -c true"))},
+		{"wide fan-out", treeOf("c1", wide)},
+		// Shell redirects and job control: every < > & costs 6 bytes, not 1.
+		{"html-escaped shell cmdline", treeOf("c1", realisticNode(1, strings.Repeat("sh -c 'a > b 2>&1 && c < d' ", 40)))},
+		{"all quotes", treeOf("c1", realisticNode(1, strings.Repeat(`"`, 900)))},
+		{"all backslashes", treeOf("c1", realisticNode(1, strings.Repeat(`\`, 900)))},
+		{"control bytes", treeOf("c1", realisticNode(1, strings.Repeat("\x01\x02\x1f", 300)))},
+		// Non-UTF-8 argv: each invalid byte becomes the 6-byte �.
+		{"invalid utf-8 argv", treeOf("c1", realisticNode(1, strings.Repeat("\x80", 1024)))},
+		{"invalid utf-8 over the cap", treeOf("c1", realisticNode(1, strings.Repeat("\xff", 8000)))},
+		{"line separators", treeOf("c1", realisticNode(1, strings.Repeat("a b ", 300)))},
+		{"uncapped path field", treeOf("c1", &armotypes.Process{PID: 1, Comm: "x",
+			Path: strings.Repeat("\x80", 20_000), Cwd: strings.Repeat("&", 20_000)})},
+		{"legacy Children shape", treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh",
+			Children: []armotypes.Process{*realisticNode(2, strings.Repeat("<&>", 400))}})},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Compare against what actually goes on the wire: the capped copy.
+			capped := capTreeCopy(tc.tree)
+			payload, err := json.Marshal(capped)
+			require.NoError(t, err)
+			est := estimateTreeBytes(tc.tree)
+
+			assert.GreaterOrEqual(t, est, len(payload),
+				"estimate %d < marshalled %d: the budget would not bound the payload", est, len(payload))
+		})
+	}
+}
+
+// TestBuildWireStream_EscapeHeavyPayloadStaysUnderLimit is the end-to-end version:
+// many processes whose command lines are non-UTF-8 kernel bytes, which inflate 6x
+// through JSON. Before escaping was accounted for, 629 such processes estimated at
+// 29% of the budget and produced 5.37 MB after base64 — over the broker limit, with
+// nothing dropped and nothing logged.
+func TestBuildWireStream_EscapeHeavyPayloadStaysUnderLimit(t *testing.T) {
+	events := map[string]armotypes.NetworkStreamEvent{}
+	for pid := uint32(1); pid <= 800; pid++ {
+		ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+		events[fmt.Sprintf("10.%d.%d.%d/443/TCP/%d/10000000", pid/65536, pid/256%256, pid%256, pid)] =
+			armotypes.NetworkStreamEvent{ProcessRef: ref,
+				ProcessTree: treeOf("c1", realisticNode(pid, strings.Repeat("\x80", maxCmdlineBytes)))}
+	}
+
+	wire := buildWireStream(outboundOnly("c1", events))
+
+	payload, err := json.Marshal(wire)
+	require.NoError(t, err)
+	encoded := len(payload) * 4 / 3
+	assert.Less(t, encoded, 5<<20,
+		"%d processes -> %d B JSON -> ~%d B base64, must stay under the 5 MiB broker limit",
+		len(wire.Processes), len(payload), encoded)
+	require.Len(t, wire.Entities["c1"].Outbound, 800, "connections are never dropped")
 }

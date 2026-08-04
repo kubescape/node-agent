@@ -413,3 +413,16 @@ func TestProcessRefFor_NoManager(t *testing.T) {
 	assert.Nil(t, ns.processRefFor(101), "no manager means nothing to attribute, not a panic")
 	assert.Nil(t, ns.processRefFor(0))
 }
+
+func TestCountConnections(t *testing.T) {
+	assert.Zero(t, countConnections(&armotypes.NetworkStream{}))
+
+	stream := &armotypes.NetworkStream{Entities: map[string]armotypes.NetworkStreamEntity{
+		"a": {
+			Inbound:  map[string]armotypes.NetworkStreamEvent{"i1": {}, "i2": {}},
+			Outbound: map[string]armotypes.NetworkStreamEvent{"o1": {}},
+		},
+		"b": {Outbound: map[string]armotypes.NetworkStreamEvent{"o2": {}, "o3": {}}},
+	}}
+	assert.Equal(t, 5, countConnections(stream), "inbound and outbound across every entity")
+}
