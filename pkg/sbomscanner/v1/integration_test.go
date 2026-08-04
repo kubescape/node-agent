@@ -12,9 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 	_ "modernc.org/sqlite"
 )
@@ -130,9 +128,7 @@ func TestIntegration_ImageTooLarge(t *testing.T) {
 		MaxImageSize: 1,
 	})
 	require.Error(t, err)
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.ErrorIs(t, err, ErrImageTooLarge)
 }
 
 func TestIntegration_ReadyCheck(t *testing.T) {
