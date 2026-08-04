@@ -3,6 +3,7 @@ package networkstream
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"sort"
 	"strings"
 	"testing"
@@ -677,4 +678,51 @@ func TestBuildWireStream_EscapeHeavyPayloadStaysUnderLimit(t *testing.T) {
 		"%d processes -> %d B JSON -> ~%d B base64, must stay under the 5 MiB broker limit",
 		len(wire.Processes), len(payload), encoded)
 	require.Len(t, wire.Entities["c1"].Outbound, 800, "connections are never dropped")
+}
+
+// TestEstimateTreeBytes_NeverUnderestimatesRandom is the generalisation of the
+// table above: the budget's soundness depends on a property that must hold for
+// ALL inputs, and process argv is arbitrary kernel bytes. Deterministic seed, so a
+// failure is reproducible.
+func TestEstimateTreeBytes_NeverUnderestimatesRandom(t *testing.T) {
+	rng := rand.New(rand.NewSource(20260804))
+	randomBytes := func(n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			switch rng.Intn(5) {
+			case 0: // the bytes JSON escapes to 6 chars
+				b[i] = []byte{'<', '>', '&', 0x00, 0x1f}[rng.Intn(5)]
+			case 1: // the short escapes
+				b[i] = []byte{'"', '\\', '\n', '\r', '\t'}[rng.Intn(5)]
+			case 2: // high bytes: mostly invalid UTF-8
+				b[i] = byte(0x80 + rng.Intn(0x80))
+			default: // plain ASCII
+				b[i] = byte(0x20 + rng.Intn(0x5f))
+			}
+		}
+		return string(b)
+	}
+
+	for i := 0; i < 400; i++ {
+		node := &armotypes.Process{
+			PID: uint32(rng.Intn(1 << 20)), PPID: uint32(rng.Intn(1 << 20)),
+			Comm: randomBytes(rng.Intn(24)), Pcomm: randomBytes(rng.Intn(24)),
+			Cmdline: randomBytes(rng.Intn(3000)), Path: randomBytes(rng.Intn(300)),
+			Cwd: randomBytes(rng.Intn(300)), Hardlink: randomBytes(rng.Intn(60)),
+			UserName: randomBytes(rng.Intn(30)), GroupName: randomBytes(rng.Intn(30)),
+			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
+		}
+		for c := 0; c < rng.Intn(4); c++ {
+			child := &armotypes.Process{PID: uint32(rng.Intn(1 << 20)), Comm: randomBytes(rng.Intn(20)),
+				Cmdline: randomBytes(rng.Intn(2000)), Path: randomBytes(rng.Intn(200))}
+			node.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
+		}
+		tree := treeOf(randomBytes(rng.Intn(40)), node)
+
+		payload, err := json.Marshal(capTreeCopy(tree))
+		require.NoError(t, err)
+		est := estimateTreeBytes(tree)
+		require.GreaterOrEqual(t, est, len(payload),
+			"iteration %d: estimate %d < marshalled %d — the budget would not bound the payload", i, est, len(payload))
+	}
 }
