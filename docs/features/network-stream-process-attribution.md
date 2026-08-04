@@ -187,25 +187,45 @@ The original payload analysis (SUB-7850) modelled bytes per connection at a fixe
 count of 283 connections. That is exactly the quantity the key change stops
 holding fixed, so the multiplier on connection *count* was never budgeted.
 
-Measured, with ~2 KB trees and all connections to one endpoint:
-
-| Distinct processes | JSON | after base64 (×1.333) |
-|---|---|---|
-| 283 | 0.35 MB | 0.47 MB |
-| 1000 | 1.25 MB | 1.66 MB |
-| 4000 | 4.99 MB | **6.65 MB — over the 5 MiB limit** |
-
 Exceeding the limit is not a graceful degradation: `sendNetworkEvent` gets a
 non-2xx, returns an error, `Start()` logs it and drops the snapshot. **The node
 loses its entire interval of traffic** — no retry, no split. A node with heavy
 short-lived process churn (a cron loop shelling out, a CI runner, exec-based
 liveness probes) can reach that.
 
-So `maxProcessTreeBytes` (1.5 MiB of estimated tree bytes) bounds the trees:
+#### Calibration, from measured production traffic
 
-- **A byte budget, not a tree count.** Tree size varies ~2.5× even with the
-  command-line cap (~2 KB median, ~5 KB p90, ~12 KB for a deep chain of capped
-  command lines), so no count bounds the payload.
+| Input | Value | Source |
+|---|---|---|
+| Mean message on the topic | 29 KB (prod-us 32 KB) | `pulsar_average_msg_size` on `network-stream-v1` |
+| Mean connections per batch | ~42 (prod-us ~32) | `network_reputation_events_in_total` ÷ topic message count |
+| ⇒ bytes per connection, no tree | ~530 B of JSON | derived from the two above |
+| Largest batch ever observed | 283 connections | SUB-7850 |
+| Tree size | ~2 KB median, ~7 KB p90 | SUB-7850 (note: the implementation plan says 5.1 KB p90, the epic plan's ~2 MB ÷ 283 implies ~7 KB — the larger figure is used here) |
+
+`maxProcessTreeBytes` is **2.5 MiB** of estimated tree bytes. Measured against the
+worst case it exists for — *every* connection from a distinct process, so trees
+scale 1:1 with connections:
+
+| Connections (all distinct processes) | Tree size | Trees shipped | JSON | after base64 |
+|---|---|---|---|---|
+| 42 (the mean) | 7 KB | all 42 | 0.28 MB | 0.37 MB |
+| **283 (observed worst)** | **7 KB** | **all 283** | 1.87 MB | **2.50 MB — 48% of limit** |
+| 500 | 7 KB | 356 (budget binds) | 2.38 MB | 3.17 MB |
+| 4000 | 7 KB | 356 | 2.89 MB | 3.85 MB |
+| 4000 | 2 KB | 1069 | 2.90 MB | 3.86 MB |
+
+The load-bearing row is the third: **the budget must not bind on traffic
+production actually produces**, or it degrades attribution on exactly the busiest
+nodes. A tighter 1.5 MiB was tried first and rejected — it binds at 213 of 283
+trees, while the payload there is under half the limit.
+`TestBuildWireStream_ObservedWorstCaseFitsBudget` pins this, and fails at 1.5 MiB.
+
+- **A byte budget, not a tree count.** Tree size varies ~3.5× even with the
+  command-line cap (~2 KB median, ~7 KB p90, ~12 KB for a deep chain of capped
+  command lines), so no count bounds the payload. The estimator counts the command
+  line at its *capped* length and overestimates real marshalled size by 1–6% —
+  conservative in the safe direction.
 - **Connections are never dropped** — that is the data loss this change exists to
   fix. Only trees are, and the refs stay on the connections, so pid identity
   survives and `ProcessTreeFor` returns nil for them as specified.
@@ -213,18 +233,27 @@ So `maxProcessTreeBytes` (1.5 MiB of estimated tree bytes) bounds the trees:
   many endpoints is both the most expensive attribution to lose and the shape
   reputation cares about most; tie-breaking on the ref keeps the payload
   independent of map iteration order.
-- At p90 tree size the budget is ~300 trees, above the largest message observed in
-  production (283 connections, so at most 283 distinct processes) — a safety valve,
-  not a routine limiter.
+- At p90 tree size the budget is ~360 trees and at median ~1280 — above anything
+  yet observed, so it is a safety valve rather than a routine limiter.
+
+**Residual, deliberately not fixed here.** With trees bounded, the connection
+*entries* alone would still breach the limit somewhere around 2,500–4,400
+connections (the range is per-entry richness: ~530 B derived from production versus
+~300 B for a lean entry). That is 9–16× the observed worst batch. The fix for that
+regime is splitting the message — as the container profile does on HTTP 413,
+`docs/features/container-profile-split-on-413.md` — not dropping connections. The
+logging below is what would tell us it is being approached.
 
 ### Observability, because the real distribution is not knowable yet
 
-How often a real node exceeds the budget **cannot be measured from today's data**:
-the current sensor strips trees and puts no process identity on the wire, so
-distinct-processes-per-batch does not exist in any message. Fleet-wide, today's
-messages average ~30 KB (`pulsar_average_msg_size` on
-`persistent://armo/internal/network-stream-v1`, ~175× under the limit), which says
-the baseline is comfortable but nothing about the new multiplier.
+The calibration above bounds the worst case, but **how often a real node actually
+has that many distinct processes cannot be measured from today's data**: the
+current sensor strips trees and puts no process identity on the wire, so
+distinct-processes-per-batch exists in no message. What is measurable — connections
+per batch (~42 mean) and message size (~30 KB mean, ~175× under the limit) — bounds
+the worst case only under the pessimistic assumption that *every* connection comes
+from a different process. The real ratio of processes to connections is the unknown,
+and it is bounded above by 1.
 
 Two log lines make it answerable after rollout:
 

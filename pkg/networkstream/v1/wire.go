@@ -43,17 +43,35 @@ const maxTreeDepth = 64
 // and the whole message is then rejected and dropped: the node loses its entire
 // interval of traffic, not just some trees.
 //
-// A budget in BYTES rather than a tree count, because tree size varies by ~2.5x
-// even with the command-line cap (~2 KB median, ~5 KB p90, ~12 KB for a deep chain
+// A budget in BYTES rather than a tree count, because tree size varies by ~3.5x
+// even with the command-line cap (~2 KB median, ~7 KB p90, ~12 KB for a deep chain
 // of capped command lines), so no count bounds the payload.
 //
-// 1.5 MiB of estimated tree bytes ≈ 2.1 MB once the synchronizer envelope's base64
-// costs x1.333, leaving room for the connection entries themselves and for the
-// 5 MiB ceiling. At p90 tree size that is ~300 trees, above the largest message
-// observed in production (283 connections, so at most 283 distinct processes), so
-// this is a safety valve rather than a routine limiter. Whether it ever fires is
-// deliberately observable: see the warning below.
-const maxProcessTreeBytes = 1536 * 1024
+// Calibrated against measured production traffic rather than guessed. In prod-eu a
+// network-stream message averages 29 KB on the topic, so ~22 KB of JSON before the
+// synchronizer envelope's base64; the reputation consumer's events_in divided by
+// the topic's message count puts a batch at ~42 connections (prod-us: ~32), which
+// makes a connection ~530 bytes of JSON without its tree. The largest batch ever
+// observed is 283 connections (SUB-7850).
+//
+// Taking the worst case this budget exists for — EVERY connection from a distinct
+// process, so trees scale 1:1 with connections:
+//
+//	283 connections x ~7 KB p90 tree ≈ 1.96 MiB of trees, + 146 KB of entries
+//	≈ 2.1 MiB JSON ≈ 2.8 MiB after base64 — 56% of the 5 MiB limit.
+//
+// So 2.5 MiB. It binds above ~360 distinct processes at p90 tree size and ~1280 at
+// median, i.e. above anything yet observed, which keeps it a safety valve instead
+// of a routine limiter that would degrade attribution on the busiest nodes. A
+// tighter 1.5 MiB was tried first and rejected: it binds at 216-301 trees, *below*
+// the observed worst batch, while the payload there is only half the limit.
+//
+// Residual, deliberately not addressed here: with trees bounded, the connection
+// entries alone would breach the limit at ~2,500 connections — 9x the observed
+// worst. The fix for that regime is splitting the message (as the container
+// profile does on HTTP 413), not dropping connections. The logging below is what
+// would tell us it is being approached.
+const maxProcessTreeBytes = 2560 * 1024
 
 // processNodeOverheadBytes approximates the non-string JSON cost of one process
 // node — field names, the numeric ids, the RFC-3339 start time and the child map

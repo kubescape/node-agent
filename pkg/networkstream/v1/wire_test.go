@@ -300,14 +300,46 @@ func TestCapCmdline(t *testing.T) {
 	assert.True(t, utf8.ValidString(capped), "a cut mid-rune would emit invalid UTF-8")
 }
 
-// bigTree builds a tree whose estimated size is roughly sizeBytes, using the
-// command line (which is what actually dominates a real tree's bytes).
+// bigTree builds a chain whose estimated size is at least sizeBytes, the way a real
+// tree gets big: across ~10 ancestor nodes, not one giant command line. A single
+// node cannot exceed processNodeOverheadBytes + maxCmdlineBytes, because the cap
+// truncates it — so a helper that piles all the bytes into one cmdline silently
+// produces a ~1.2 KB tree however large a size it is asked for.
 func bigTree(pid uint32, sizeBytes int) *armotypes.ProcessTree {
-	cmdlineLen := sizeBytes - processNodeOverheadBytes
-	if cmdlineLen < 1 {
-		cmdlineLen = 1
+	const perNode = processNodeOverheadBytes + maxCmdlineBytes
+	nodes := (sizeBytes + perNode - 1) / perNode
+	if nodes < 1 {
+		nodes = 1
 	}
-	return treeOf("c1", &armotypes.Process{PID: pid, Comm: "p", Cmdline: strings.Repeat("a", cmdlineLen)})
+	cmdline := strings.Repeat("a", maxCmdlineBytes)
+
+	var root, prev *armotypes.Process
+	for i := 0; i < nodes; i++ {
+		// The leaf carries the process's own pid; ancestors get synthetic ones.
+		nodePID := pid
+		if i < nodes-1 {
+			nodePID = pid + uint32((i+1)*1_000_000)
+		}
+		node := &armotypes.Process{PID: nodePID, Comm: "p", Cmdline: cmdline,
+			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{}}
+		if prev == nil {
+			root = node
+		} else {
+			prev.ChildrenMap[armotypes.CommPID{Comm: node.Comm, PID: node.PID}] = node
+		}
+		prev = node
+	}
+	return treeOf("c1", root)
+}
+
+// TestBigTree_ReachesRequestedSize keeps the helper honest: every budget test below
+// is meaningless if the trees it builds are smaller than they claim.
+func TestBigTree_ReachesRequestedSize(t *testing.T) {
+	for _, want := range []int{2048, 5222, 7270, 12288} {
+		got := estimateTreeBytes(bigTree(1, want))
+		assert.GreaterOrEqual(t, got, want, "bigTree(%d) estimated only %d bytes", want, got)
+		assert.Less(t, got, want+processNodeOverheadBytes+maxCmdlineBytes, "bigTree(%d) overshot at %d", want, got)
+	}
 }
 
 // TestBuildWireStream_UnderBudgetShipsEveryTree: the budget is a safety valve, so
@@ -405,4 +437,41 @@ func TestEstimateTreeBytes_CountsCappedCmdline(t *testing.T) {
 	// otherwise the budget would reject trees that are actually small on the wire.
 	huge := treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh", Cmdline: strings.Repeat("a", 200_000)})
 	assert.Less(t, estimateTreeBytes(huge), processNodeOverheadBytes+maxCmdlineBytes+64)
+}
+
+// TestBuildWireStream_ObservedWorstCaseFitsBudget pins the CALIBRATION, not just
+// the mechanism. The budget must not bind on traffic that production actually
+// produces, or it degrades attribution on exactly the busiest nodes.
+//
+// The scenario is the worst case the budget exists for, at the largest batch ever
+// observed: 283 connections (SUB-7850), every one from a DISTINCT process, each
+// carrying a p90-sized (~7 KB) tree. Measured production inputs: a batch averages
+// ~42 connections at ~530 bytes of JSON each (prod-eu, reputation events_in over
+// topic message count, against a 29 KB mean message).
+//
+// A 1.5 MiB budget fails this test — it binds at 216 trees — which is why the
+// budget is 2.5 MiB.
+func TestBuildWireStream_ObservedWorstCaseFitsBudget(t *testing.T) {
+	const (
+		observedWorstConnections = 283
+		p90TreeBytes             = 7270
+		bytesPerConnection       = 530
+	)
+	events := map[string]armotypes.NetworkStreamEvent{}
+	for pid := uint32(1); pid <= observedWorstConnections; pid++ {
+		ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+		events[fmt.Sprintf("10.0.%d.%d/443/TCP/%d/10000000", pid/256, pid%256, pid)] =
+			armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, p90TreeBytes)}
+	}
+
+	wire := buildWireStream(outboundOnly("c1", events))
+
+	require.Len(t, wire.Processes, observedWorstConnections,
+		"the budget must not bind on the largest batch observed in production")
+
+	// And that case must sit well under the broker limit once base64 applies.
+	payload, err := json.Marshal(wire)
+	require.NoError(t, err)
+	encoded := (len(payload) + observedWorstConnections*bytesPerConnection) * 4 / 3
+	assert.Less(t, encoded, 4<<20, "~%d B encoded should stay well clear of the 5 MiB limit", encoded)
 }
