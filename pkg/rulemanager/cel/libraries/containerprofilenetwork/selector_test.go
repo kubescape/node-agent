@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 func peer(pod, ns map[string]string) objectcache.PeerSelector {
@@ -17,10 +17,10 @@ func peer(pod, ns map[string]string) objectcache.PeerSelector {
 }
 
 func TestWasSelectorInPeers(t *testing.T) {
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		Namespace: "redis",
-		Labels:    map[string]string{"app": "redis-client"},
-	}}
+	// Peer identity as IG's kubeipresolver stamps it onto the event: a namespace
+	// and pod labels, resolved cluster-wide. No IP, no local pod lookup.
+	podLabels := labels.Set{"app": "redis-client"}
+	ns := "redis"
 	nsRedis := map[string]string{"kubernetes.io/metadata.name": "redis"}
 
 	cases := []struct {
@@ -37,7 +37,7 @@ func TestWasSelectorInPeers(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := wasSelectorInPeers(tc.peers, pod); got != tc.want {
+			if got := wasSelectorInPeers(tc.peers, podLabels, ns); got != tc.want {
 				t.Fatalf("wasSelectorInPeers = %v, want %v", got, tc.want)
 			}
 		})
