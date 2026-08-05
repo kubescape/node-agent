@@ -19,6 +19,15 @@ import (
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
+// networkNeighborExpansionEstimate approximates, in bytes, how much a NetworkEvent grows
+// when createNetworkNeighbor() (container_data.go) turns it into a v1beta1.NetworkNeighbor
+// at serialization time: a generated Identifier hash (sha256 hex, 64 bytes), a Type string,
+// a Ports entry, and - when DNS resolution or a Pod/Service selector applies - a DNS name or
+// label-selector map that has no counterpart on the raw event. None of that can be computed
+// exactly at report time, since DNS resolution and the Service selector lookup only happen
+// at serialization, so this is a fixed conservative surcharge rather than a live measurement.
+const networkNeighborExpansionEstimate = 256
+
 // ReportCapability reports a capability event for a container
 func (cpm *ContainerProfileManager) ReportCapability(containerID, capability string) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
@@ -273,7 +282,7 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		}
 
 		data.networks.Add(networkEvent)
-		return size.Of(networkEvent), nil
+		return size.Of(networkEvent) + networkNeighborExpansionEstimate, nil
 	})
 
 	cpm.logEventError(err, "network", containerID)
@@ -299,7 +308,13 @@ func (cpm *ContainerProfileManager) ReportSyscall(containerID string, syscall st
 		if data.syscalls == nil {
 			data.syscalls = mapset.NewSet[string]()
 		}
-		return data.syscalls.Append(syscall), nil
+		// Append returns the number of elements newly added (0 or 1 here), not their
+		// serialized size - using it directly mixed element-count units into a
+		// byte-size accumulator and made syscalls contribute ~0 to MaxTsProfileSize.
+		if data.syscalls.Append(syscall) == 0 {
+			return 0, nil
+		}
+		return size.Of(syscall), nil
 	})
 
 	cpm.logEventError(err, "syscalls", containerID)
