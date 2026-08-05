@@ -104,6 +104,28 @@ previously missing event types (`exit`, `fork`).
 | New OTEL name | Description |
 |---|---|
 | `node_agent_ebpf_events_dropped_total{reason}` | eBPF events dropped due to backpressure (`reason=worker_channel_full`) or profile drops |
+| `node_agent_pod_memory_cgroup_bytes` | Pod-level memory usage, read from the parent `kubepods-*-pod<UID>.slice` cgroup (one level above the container `.scope`). Covers every container in the pod, including third-party sidecars with no OTEL instrumentation of their own (e.g. `clamav`, gated behind `capabilities.malwareDetection`). Additive alongside `node_agent_process_memory_cgroup_bytes`, which stays container-scoped and unchanged. |
+| `node_agent_pod_memory_cgroup_limit_bytes` | Pod-level memory limit, paired with `node_agent_pod_memory_cgroup_bytes` (0 = unlimited/unresolved). |
+
+### Cgroup Scope Resolution Hardening (accuracy fix, no name change)
+
+`node_agent_process_memory_cgroup_bytes` / `..._cgroup_limit_bytes` (and the new pod-level
+metrics above) are read via `findCgroupScopeDir`, which had two defects fixed alongside the
+pod-level metric addition — no metric was renamed, but previously-silent `0` readings on
+affected hosts will now report real values:
+
+- Container-ID matching was an unanchored substring (`strings.Contains`), which could in
+  principle select the wrong container's cgroup. Now a delimited-segment match.
+- The first name-matching `.scope` directory was accepted without checking it actually
+  contained `memory.current`. On cgroup-v1/hybrid hosts, `filepath.WalkDir` can reach an
+  unrelated controller subtree (e.g. `blkio`, `cpu`) before `memory`, so the resolver would
+  lock onto a directory with no `memory.current` and silently cache a `0` read for the
+  process lifetime. Per-pod production telemetry showed this affecting **35% of live pods**
+  (`cgroup_bytes == 0` while `rss_bytes > 0`) before this fix.
+- Scoped to the **systemd** cgroup driver; hosts on the cgroupfs driver still read `0` for
+  both the container- and pod-level cgroup metrics (pre-existing, unchanged by this PR —
+  tracked as a follow-up, since `findCgroupScopeDir` requires a `.scope`-suffixed name that
+  cgroupfs layouts never produce).
 
 ### Removed Metrics (not migrated)
 

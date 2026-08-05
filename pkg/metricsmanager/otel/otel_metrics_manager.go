@@ -101,7 +101,11 @@ type OTELMetricsManager struct {
 // the cgroup memory gauges resolve the correct container scope under the
 // host-mounted cgroup tree. Pass "" when unknown — the gauges then fall back to
 // /proc-based resolution and report 0 if that fails.
-func NewOTELMetricsManager(ownContainerID string) *OTELMetricsManager {
+//
+// ownPodUID is this agent's own pod UID (from the same k8s API call); it
+// verifies the pod-level cgroup slice the pod memory gauges read from. Pass ""
+// when unknown — the pod slice is then accepted on its name shape alone.
+func NewOTELMetricsManager(ownContainerID, ownPodUID string) *OTELMetricsManager {
 	meter := otelsetup.Meter()
 	m := &OTELMetricsManager{
 		undeclaredRulesSet: make(map[string]struct{}),
@@ -228,7 +232,7 @@ func NewOTELMetricsManager(ownContainerID string) *OTELMetricsManager {
 	m.alertSuppressedTotal = mustCounter("node_agent.alert.suppressed.total",
 		"Total alerts suppressed before delivery, labeled by rule_id and reason")
 
-	registerResourceMetrics(meter, &m.containerCount, ownContainerID)
+	registerResourceMetrics(meter, &m.containerCount, ownContainerID, ownPodUID)
 
 	return m
 }
