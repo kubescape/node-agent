@@ -603,6 +603,46 @@ func TestQueueDropsProfileAfterMaxAttempts(t *testing.T) {
 		"the stitch must preserve the dropped chunk's chain link")
 }
 
+// TestDropChunk_StitchBacklogExhaustedForksWithoutReplacement covers a gap a review of this
+// change found: dropChunk built and enqueued a repair stitch unconditionally, without checking
+// the same in-flight backlog bound enforceMaxSize's own eviction loop respects. Left unfixed, a
+// sustained run of MaxAttempts exhaustions could grow the backlog past the bound the eviction
+// loop relies on to terminate promptly, since only enforceMaxSize's own path was gated. This
+// pins that dropChunk (here reached via MaxAttempts exhaustion) must also check
+// stitchBacklogFull and fall back to an unrepaired, forked drop once the backlog is already
+// spent - never enqueueing a stitch or incrementing the backlog past its bound.
+func TestDropChunk_StitchBacklogExhaustedForksWithoutReplacement(t *testing.T) {
+	spy := newSpyMetrics()
+	creator := &alwaysFailingCreator{err: errors.New("dial tcp 10.96.0.1:443: connect: connection refused")}
+	cb := &recordingCallback{}
+	qd := startQueue(t, creator, cb, QueueConfig{MaxAttempts: 1, MetricsManager: spy})
+
+	// Simulate the backlog already sitting at its bound, e.g. from unrelated evictions or
+	// prior drops, so this drop's own stitch must be refused rather than pushing it over.
+	qd.stitchBacklog.Store(qd.maxStitchBacklog)
+
+	require.NoError(t, qd.Enqueue(testProfile(), "container-id"))
+
+	assert.Eventually(t, func() bool {
+		return creator.callCount() >= 1 && qd.GetQueueSize() == 0
+	}, 2*time.Second, 10*time.Millisecond, "expected the profile to be dropped after its single attempt")
+
+	// No stitch was enqueued (the backlog was already full), so there is nothing left to
+	// attempt: no further calls happen.
+	callsAfterDrain := creator.callCount()
+	time.Sleep(200 * time.Millisecond)
+	assert.Equal(t, callsAfterDrain, creator.callCount(), "no stitch should have been enqueued to attempt")
+	assert.Equal(t, 1, creator.callCount(), "only the original's single attempt, no stitch attempt")
+	assert.Equal(t, 0, qd.GetQueueSize())
+	assert.Equal(t, qd.maxStitchBacklog, qd.stitchBacklog.Load(), "the backlog must not have grown past its bound")
+
+	reasons := spy.droppedReasons()
+	assert.Contains(t, reasons, string(dropReasonMaxAttemptsExhausted))
+	assert.Contains(t, reasons, string(dropReasonStitchBacklogExhausted))
+	assert.NotContains(t, reasons, string(dropReasonEnqueueFailed), "no enqueue was attempted, so it cannot have failed")
+	assert.Empty(t, cb.captured(), "a retryable failure must not end learning for the container")
+}
+
 // TestEnforceMaxSize_EvictionEnqueuesStitch is the LRU-eviction counterpart of
 // TestQueueDropsUnsplittableProfileOnHTTP413: issue #871 flagged that a hard-capacity eviction
 // was also a silent, chain-forking drop, with no replacement ever regenerated. enforceMaxSize

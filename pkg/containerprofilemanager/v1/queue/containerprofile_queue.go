@@ -104,6 +104,13 @@ const (
 	// backlog (see maxStitchBacklog) was already at its bound, so no replacement was
 	// enqueued and this eviction forks the chain.
 	dropReasonLRUBacklogExhausted dropReason = "lru-backlog-exhausted"
+	// dropReasonStitchBacklogExhausted: dropChunk or requeueSplit needed to repair a chunk's
+	// chain with a stitch, but the in-flight stitch backlog (see maxStitchBacklog) was already
+	// at its bound, so no replacement was enqueued and the chain is left forked. The
+	// LRU-eviction equivalent is dropReasonLRUBacklogExhausted; this covers every other
+	// stitch-admission site so the same bound applies everywhere a stitch can be created, not
+	// just enforceMaxSize's own loop.
+	dropReasonStitchBacklogExhausted dropReason = "stitch-backlog-exhausted"
 )
 
 // ErrQueueNotRunning is returned by enqueueLocked once the queue has been closed.
@@ -332,6 +339,16 @@ func (qd *QueueData) newStitchFor(dropped *QueuedContainerProfile) *QueuedContai
 	}
 }
 
+// stitchBacklogFull reports whether the in-flight stitch backlog (see maxStitchBacklogFor) is
+// already at its bound. Every stitch-admission site - dropChunk, requeueSplit's lost-first-half
+// case, and enforceMaxSize's own eviction loop - must check this before building and enqueueing
+// a stitch, so the same bound holds regardless of which path is creating them; gating only
+// enforceMaxSize's loop would let a sustained run of MaxAttempts exhaustions or unsplittable
+// drops grow the backlog past the bound the loop itself relies on to terminate promptly.
+func (qd *QueueData) stitchBacklogFull() bool {
+	return qd.stitchBacklog.Load() >= qd.maxStitchBacklog
+}
+
 // enforceMaxSize evicts oldest items while the queue is at or over capacity.
 //
 // A plain eviction silently forks the evicted container's report-timestamp chain: storage can
@@ -376,7 +393,7 @@ func (qd *QueueData) enforceMaxSize() {
 			helpers.String("name", evicted.Profile.Name),
 			helpers.String("namespace", evicted.Profile.Namespace))
 
-		if qd.stitchBacklog.Load() >= qd.maxStitchBacklog {
+		if qd.stitchBacklogFull() {
 			qd.chunksDropped.Add(1)
 			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonLRUBacklogExhausted))
 
@@ -603,6 +620,17 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 		qd.chunksDropped.Add(1)
 		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 
+		if qd.stitchBacklogFull() {
+			logger.L().Warning("stitch backlog is exhausted, cannot enqueue a replacement for a lost split, the report chain is now forked",
+				helpers.String("name", parent.Profile.Name),
+				helpers.String("namespace", parent.Profile.Namespace),
+				helpers.String("containerID", parent.ContainerID))
+
+			qd.chunksDropped.Add(1)
+			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonStitchBacklogExhausted))
+			return
+		}
+
 		stitch := qd.newStitchFor(parent)
 		if stitchErr := qd.enqueueLocked(stitch); stitchErr != nil {
 			logger.L().Warning("failed to enqueue replacement stitch chunk after a lost split, the report chain is now forked",
@@ -659,6 +687,17 @@ func (qd *QueueData) dropChunk(dropped *QueuedContainerProfile, reason dropReaso
 	qd.metrics.ReportContainerProfileChunkDropped(string(reason))
 
 	if dropped.IsStitch {
+		return
+	}
+
+	if qd.stitchBacklogFull() {
+		logger.L().Warning("stitch backlog is exhausted, dropping container profile chunk without a replacement, its report chain is now forked",
+			helpers.String("name", dropped.Profile.Name),
+			helpers.String("namespace", dropped.Profile.Namespace),
+			helpers.String("containerID", dropped.ContainerID))
+
+		qd.chunksDropped.Add(1)
+		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonStitchBacklogExhausted))
 		return
 	}
 
