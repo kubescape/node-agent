@@ -776,7 +776,12 @@ func TestEstimateTreeBytes_NeverUnderestimatesRandom(t *testing.T) {
 		// fields per child, which left the per-node slack untouched and could never
 		// reach the deficit region where the childrenMap key made the estimate
 		// undercount — 200k trees found nothing.
-		for c := 0; c < rng.Intn(6); c++ {
+		//
+		// Draw the child count ONCE: in the loop condition it is redrawn per iteration,
+		// which skews the distribution badly (5 children becomes ~1.5% likely instead of
+		// ~16.7%) and starves the high-fan-out cases this generator exists to reach.
+		children := rng.Intn(6)
+		for c := 0; c < children; c++ {
 			uid, gid := uint32(rng.Intn(70000)), uint32(rng.Intn(70000))
 			upper := rng.Intn(2) == 0
 			child := &armotypes.Process{

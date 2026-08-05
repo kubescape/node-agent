@@ -247,6 +247,14 @@ Tree bytes are measured; entry bytes are **modelled** at the production-derived 
 not measured, so the two are added rather than read off one payload — see the residual
 section for why that distinction matters.
 
+This is why the 4000 row exceeding the limit does **not** contradict
+`TestBuildWireStream_EscapeHeavyPayloadStaysUnderLimit` and
+`TestBuildWireStream_OverBudgetDropsTreesNotConnections`, which drive comparable process
+counts and assert the payload stays *under* 5 MiB. Those tests build synthetic events
+carrying only a ref and a key — roughly 94 B each — where a production connection entry
+is ~530 B. The tests bound what the code emits; the table adds the real-world entry
+weight on top. Neither is a failing bound.
+
 Two load-bearing rows. The **283** row: the budget must not bind on traffic
 production actually produces, or it degrades attribution on exactly the busiest
 nodes — a tighter 1.5 MiB was tried first and rejected, because it clips 70 of those
