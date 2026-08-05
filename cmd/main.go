@@ -201,7 +201,10 @@ func main() {
 	// when OTEL_METRICS_EXPORTER=prometheus; OTLP push when OTEL_EXPORTER_OTLP_ENDPOINT set).
 	// MUST be constructed after otelsetup.InitProviders() so the global MeterProvider is set.
 	// Always use the OTEL impl — the SDK's own no-op providers handle the "no endpoint" case.
-	metricsProvider := otelmetrics.NewOTELMetricsManager(resolveOwnContainerID(ctx, k8sClient))
+	ownContainerID, ownPodUID := resolveOwnContainerID(ctx, k8sClient)
+	// true: this entrypoint (the Kubernetes DaemonSet) bind-mounts the HOST's
+	// /sys/fs/cgroup over its own — see NewOTELMetricsManager's doc comment.
+	metricsProvider := otelmetrics.NewOTELMetricsManager(ownContainerID, ownPodUID, true)
 
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.GetStorageClient(), cfg.SkipNamespace)
@@ -535,31 +538,41 @@ func main() {
 	// Return normally so deferred OTEL shutdown flushes traces/metrics/logs.
 }
 
-// resolveOwnContainerID returns node-agent's own container ID via the k8s API
-// (using the Downward-API POD_NAME / NAMESPACE_NAME env), or "" if it cannot be
-// determined. The cgroup memory gauges use it to locate the correct container
-// scope in the host-mounted cgroup tree; "" makes them fall back to /proc-based
-// resolution. Best-effort: a failure here only degrades those gauges.
-func resolveOwnContainerID(ctx context.Context, k8sClient *k8sinterface.KubernetesApi) string {
+// resolveOwnContainerID returns node-agent's own container ID and pod UID via
+// the k8s API (using the Downward-API POD_NAME / NAMESPACE_NAME env), or "", ""
+// if they cannot be determined. The cgroup memory gauges use the container ID
+// to locate the correct container scope in the host-mounted cgroup tree ("" makes
+// them fall back to /proc-based resolution) and the pod UID to verify the parent
+// pod slice the pod-level gauges read from. Best-effort: a failure here only
+// degrades those gauges.
+func resolveOwnContainerID(ctx context.Context, k8sClient *k8sinterface.KubernetesApi) (containerID, podUID string) {
 	const containerName = "node-agent"
 	podName, namespace := os.Getenv("POD_NAME"), os.Getenv("NAMESPACE_NAME")
 	if podName == "" || namespace == "" {
-		return ""
+		logger.L().Warning("resolveOwnContainerID - POD_NAME or NAMESPACE_NAME unset, cgroup memory gauges will report 0",
+			helpers.String("pod", podName), helpers.String("namespace", namespace))
+		return "", ""
 	}
 	pod, err := k8sClient.GetKubernetesClient().CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
-		logger.L().Warning("resolveOwnContainerID - failed to get own pod, cgroup memory gauges will fall back",
+		logger.L().Warning("resolveOwnContainerID - failed to get own pod, cgroup memory gauges will report 0",
 			helpers.Error(err), helpers.String("pod", podName), helpers.String("namespace", namespace))
-		return ""
+		return "", ""
 	}
 	for _, cs := range pod.Status.ContainerStatuses {
 		if cs.Name == containerName {
 			// ContainerID is "<runtime>://<id>", e.g. "containerd://9103ee5f..."
 			if i := strings.LastIndex(cs.ContainerID, "/"); i >= 0 {
-				return cs.ContainerID[i+1:]
+				return cs.ContainerID[i+1:], string(pod.UID)
 			}
-			return cs.ContainerID
+			return cs.ContainerID, string(pod.UID)
 		}
 	}
-	return ""
+	// No ContainerStatuses entry named "node-agent" yet — most likely a
+	// startup race (this pod's own status hasn't propagated yet). This result
+	// is cached for the process lifetime by the caller, so it's worth logging:
+	// otherwise it's silently indistinguishable from a genuine misconfiguration.
+	logger.L().Warning("resolveOwnContainerID - no ContainerStatuses entry named \"node-agent\" yet, cgroup memory gauges will report 0",
+		helpers.String("pod", podName), helpers.String("namespace", namespace))
+	return "", ""
 }

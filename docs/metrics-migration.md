@@ -104,6 +104,67 @@ previously missing event types (`exit`, `fork`).
 | New OTEL name | Description |
 |---|---|
 | `node_agent_ebpf_events_dropped_total{reason}` | eBPF events dropped due to backpressure (`reason=worker_channel_full`) or profile drops |
+| `node_agent_pod_memory_cgroup_bytes` | Pod-level memory usage, read from the parent `kubepods-*-pod<UID>.slice` cgroup (one level above the container `.scope`). Covers every container in the pod, including third-party sidecars with no OTEL instrumentation of their own (e.g. `clamav`, gated behind `capabilities.malwareDetection`). Additive alongside `node_agent_process_memory_cgroup_bytes`, which stays container-scoped and unchanged. |
+| `node_agent_pod_memory_cgroup_limit_bytes` | Pod-level memory limit, paired with `node_agent_pod_memory_cgroup_bytes` (0 = unlimited/unresolved). |
+
+### Cgroup Scope Resolution Hardening (accuracy fix, no name change)
+
+`node_agent_process_memory_cgroup_bytes` / `..._cgroup_limit_bytes` (and the new pod-level
+metrics above) are read via `findCgroupScopeDir` / `resolveCgroupMemoryPaths`, which had several
+defects fixed alongside the pod-level metric addition — no metric was renamed, but
+previously-silent or previously-wrong readings on affected hosts will now report correctly:
+
+- Container-ID matching was an unanchored substring (`strings.Contains`), which could in
+  principle select the wrong container's cgroup. Now a delimited-segment match.
+- The first name-matching `.scope` directory was accepted without checking it actually
+  contained a memory-accounting file at all. On cgroup-v1/hybrid hosts, `filepath.WalkDir` can
+  reach an unrelated controller subtree (e.g. `blkio`, `cpu`) before `memory`, so the resolver
+  could lock onto a directory with no memory-accounting file and silently cache a `0` read for
+  the process lifetime. The resolver now keeps walking until it finds a directory that actually
+  has one (`memory.current` on v2, `memory.usage_in_bytes` on v1), and reads the correct
+  filename pair for whichever it found — so v1 hosts get correctly *container-scoped* numbers
+  instead of `0`, not just a `0` that's harder to trigger. This applies to both the container-
+  and pod-level resolvers.
+- **A host-mounted caller never falls through to the unscoped resolution strategies.** Those
+  strategies read from the cgroup root itself, which is only a valid proxy for "this container's
+  memory" when the caller mounts its own namespaced cgroup root (the sbom-scanner sidecar, and
+  any entrypoint that isn't the Kubernetes DaemonSet). For the DaemonSet, which bind-mounts the
+  *host's* cgroup tree, that same root is the whole node. This is a property of the deployment
+  topology (`hostCgroupMounted`, passed explicitly by each entrypoint), not of whether a
+  container ID happens to be known for a given call — an earlier version of this fix inferred
+  it from `ownContainerID == ""` instead, which left the same node-wide misattribution reachable
+  through a different door: an empty container ID on the host-mounted DaemonSet (e.g. a
+  permanently-cached early-startup race, before this pod's own `ContainerStatuses` entry
+  exists) still bind-mounts the host tree, so falling through in that case was exactly as wrong
+  as falling through after a failed scoped lookup. Both doors are closed now; a host-mounted
+  caller that can't verify a container-scoped directory always reports `0`, never a
+  plausible-looking wrong number, regardless of why the container ID wasn't known.
+- Scoped to the **systemd** cgroup driver; hosts on the cgroupfs driver still read `0` for
+  both the container- and pod-level cgroup metrics (pre-existing, unchanged by this PR —
+  tracked as a follow-up, since `findCgroupScopeDir` requires a `.scope`-suffixed name that
+  cgroupfs layouts never produce). This is the only remaining declared non-goal; cgroup v1 is
+  now fully supported at both the container and pod level.
+- The two currently-silent `resolveOwnContainerID` failure paths (missing `POD_NAME`/
+  `NAMESPACE_NAME`, and no `ContainerStatuses` entry named `node-agent` yet) now log a
+  `Warning`, as does an unresolved container ID on the DaemonSet reaching
+  `RegisterPodMemoryMetrics`. Combined with the resolver's own rejection log (also raised to
+  `Warning`), the empty-container-ID and cgroup-v1 populations should both become directly
+  observable in logs post-deploy.
+
+**On the production data cited during development:** per-pod SigNoz telemetry showed 35% of
+live pods reporting `cgroup_bytes == 0` while `rss_bytes > 0`, and 2% showing a smaller genuine
+`0 < cgroup_bytes < rss_bytes` inversion. At the time, this was attributed mainly to the
+wrong-controller-subtree defect above (cgroup-v1/hybrid hosts). On review, that attribution
+isn't fully confirmed: a simpler, v2-compatible explanation — `ownContainerID` resolving to
+empty on a permanently-cached early-startup race — is equally consistent with the same observed
+zeros, and the true v1-vs-v2 split of the affected 35% couldn't be determined from SigNoz data
+alone (no cgroup-version attribute exists in the current telemetry, and live per-node inspection
+wasn't available at the time). This PR fixes both failure modes it found either way, but the
+35% figure should be read as "pods currently reporting a silent `cgroup_bytes == 0`," not as
+confirmed evidence for any one specific mechanism. Because this fix makes cgroup-v1 hosts report
+real (non-zero) container-scoped numbers instead of `0`, and raises the pod-level resolver's
+rejection log from `Debug` to `Warning`, the actual v1-vs-empty-container-ID split will become
+directly observable post-deploy rather than inferred.
 
 ### Removed Metrics (not migrated)
 
