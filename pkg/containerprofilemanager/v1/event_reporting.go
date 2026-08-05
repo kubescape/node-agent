@@ -1,6 +1,7 @@
 package containerprofilemanager
 
 import (
+	"crypto/sha256"
 	"errors"
 	"reflect"
 	"regexp"
@@ -15,18 +16,72 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
-// networkNeighborExpansionEstimate approximates, in bytes, how much a NetworkEvent grows
-// when createNetworkNeighbor() (container_data.go) turns it into a v1beta1.NetworkNeighbor
-// at serialization time: a generated Identifier hash (sha256 hex, 64 bytes), a Type string,
-// a Ports entry, and - when DNS resolution or a Pod/Service selector applies - a DNS name or
-// label-selector map that has no counterpart on the raw event. None of that can be computed
-// exactly at report time, since DNS resolution and the Service selector lookup only happen
-// at serialization, so this is a fixed conservative surcharge rather than a live measurement.
-const networkNeighborExpansionEstimate = 256
+// networkNeighborExpansionEstimate is the number of bytes a NetworkEvent gains when
+// createNetworkNeighbor() (container_data.go) turns it into a v1beta1.NetworkNeighbor at
+// serialization time. None of these fields exist on the raw event, and none can be computed
+// exactly at report time since DNS resolution and the Service selector lookup are deferred
+// to serialization, so each is sized at its documented worst case instead of guessed:
+//
+//   - Identifier: hex.EncodeToString of a sha256 sum, always exactly 2*sha256.Size bytes.
+//   - Type: the longer of "internal"/"external".
+//   - Ports: createNetworkNeighbor always appends exactly one NetworkPort entry.
+//   - DNS/DNSNames: the longest legal DNS name (RFC 1035 §3.1: 253 bytes), stored once in
+//     DNS and again in DNSNames - previously undercounted entirely (253*2 alone exceeds the
+//     old flat 256-byte guess this replaces).
+//   - NamespaceSelector: getNamespaceMatchLabels always produces exactly one entry keyed
+//     "kubernetes.io/metadata.name", valued with a namespace name (DNS-1123 label, RFC 1123:
+//     63 bytes max) - this bound is exact, not assumed.
+//   - PodSelector: filterLabels forwards whatever label set the destination pod has. Core
+//     Kubernetes caps a label's key (253 bytes, optional DNS-subdomain prefix + "/" + 63-byte
+//     name) and value (63 bytes) but not the number of labels on an object, so no fixed bound
+//     is exact here. maxBudgetedPodLabels labels at that per-label maximum is budgeted as a
+//     documented, deliberately generous headroom for typical (e.g. Helm-templated) workloads;
+//     a pod with more labels than that could still push a profile past MaxTsProfileSize before
+//     this estimator catches it, in which case the queue-level split from #866 is the backstop.
+//
+// A single event never produces DNS and both selectors at once (createNetworkNeighbor takes
+// one branch per Destination.Kind), so summing every component here is deliberately
+// conservative on top of the already-generous per-field bounds.
+var networkNeighborExpansionEstimate = computeNetworkNeighborExpansionEstimate()
+
+const maxBudgetedPodLabels = 12
+
+func computeNetworkNeighborExpansionEstimate() int {
+	identifier := strings.Repeat("f", sha256.Size*2)
+	maxDNSName := strings.Repeat("a", 253)
+	maxLabelKey := strings.Repeat("k", 253)
+	maxLabelValue := strings.Repeat("v", 63)
+
+	ports := []v1beta1.NetworkPort{{
+		Name:     "protocol-65535",
+		Protocol: v1beta1.ProtocolTCP,
+		Port:     ptr.To(int32(65535)),
+	}}
+
+	namespaceSelector := &metav1.LabelSelector{
+		MatchLabels: map[string]string{"kubernetes.io/metadata.name": maxLabelValue},
+	}
+
+	podLabels := make(map[string]string, maxBudgetedPodLabels)
+	for i := 0; i < maxBudgetedPodLabels; i++ {
+		// Trailing rune only exists to keep the map keys distinct; length is still ~maxLabelKey.
+		podLabels[maxLabelKey+string(rune('a'+i))] = maxLabelValue
+	}
+	podSelector := &metav1.LabelSelector{MatchLabels: podLabels}
+
+	return size.Of(identifier) +
+		size.Of(ExternalTrafficType) +
+		size.Of(ports) +
+		size.Of(maxDNSName) + size.Of([]string{maxDNSName}) +
+		size.Of(namespaceSelector) +
+		size.Of(podSelector)
+}
 
 // ReportCapability reports a capability event for a container
 func (cpm *ContainerProfileManager) ReportCapability(containerID, capability string) {
