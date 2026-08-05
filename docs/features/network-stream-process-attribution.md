@@ -253,7 +253,7 @@ nodes — a tighter 1.5 MiB was tried first and rejected, because it clips 70 of
 283 trees while the payload is barely a third of the limit.
 `TestBuildWireStream_ObservedWorstCaseFitsBudget` pins that and fails at 1.5 MiB.
 The **4000** row is the residual below: with the tree budget saturated, the message
-exceeds the limit at roughly 3,000 connections.
+exceeds the limit at roughly 3,600 connections.
 
 - **A byte budget, not a tree count.** Tree size is not uniform — depth varies,
   fields are variable-length, and JSON escaping inflates some content ~6× (below),
@@ -315,14 +315,20 @@ number means what, because the difference decides what an operator should do:
 
 | | connections |
 |---|---|
-| Breach **with the tree budget saturated** (today's configuration) | ~3,000 |
+| Breach **with the tree budget saturated** (today's configuration) | ~3,600 |
 | Breach from connection **entries alone**, if trees took no space at all | ~7,400 |
 
-The usable budget is 3.75 MiB of JSON (5 MiB after base64's x1.333). At 4,000
-connections the entries are 4,000 x 530 B = 2.02 MiB and the saturated trees are
-~1.91 MiB; back the trees out and 3.75 - 1.91 leaves room for ~2,900 entries, which is
-where the ~3,000 comes from. Entries alone would not breach until 3,932,160 / 530 =
-~7,400.
+The usable budget is 3.75 MiB of JSON (5 MiB after base64's x1.333). A saturated tree
+map **measures** 1,978,505 B (1.89 MiB) — marshalled, not inferred — which leaves
+3,932,160 - 1,978,505 = 1,953,655 B (1.86 MiB), so ~3,690 entries at 530 B. Independent
+measurements put it at ~3,580 and ~3,600, hence **~3,600** above: rounding low is the
+right direction for a breach threshold. Entries alone would not breach until
+3,932,160 / 530 = ~7,400.
+
+Derive this from the *measured* tree total, never from a payload figure that already
+contains entries. Getting that wrong produced two successive errors here — a table row
+that counted entries twice, and a ~3,000 threshold that survived the correction of the
+tree figure it had been derived from.
 
 **So the tree budget IS a lever in that regime** — trees are roughly half the payload,
 and tightening `maxProcessTreeBytes` moves the breach point out, toward ~7,400 as the
