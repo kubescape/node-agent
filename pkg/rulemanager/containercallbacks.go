@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/contextdetection/detectors"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/rulestate"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -102,6 +103,21 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		}
 
 		rm.trackedContainers.Remove(k8sContainerID)
+
+		// Reclaim immediately rather than waiting for TTL: a churning node would
+		// otherwise hold markers for containers that no longer exist.
+		//
+		// This uses Runtime.ContainerID verbatim because that is exactly what the
+		// write path stored under -- EnrichedEvent.ContainerID is assigned from
+		// container.Runtime.ContainerID (containercallback.go), untrimmed. Do NOT
+		// pass it through utils.TrimRuntimePrefix: that helper returns "" for an ID
+		// with no "//" separator, and ContainerScopeID("") is the HOST bucket, so
+		// trimming here would purge every host process marker on each container
+		// exit.
+		if rm.stateStore != nil {
+			rm.stateStore.PurgeScope(rulestate.ContainerScopeID(notif.Container.Runtime.ContainerID))
+		}
+
 		namespace := notif.Container.K8s.Namespace
 		podName := notif.Container.K8s.PodName
 		podID := utils.CreateK8sPodID(namespace, podName)

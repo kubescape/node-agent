@@ -1,0 +1,22 @@
+# Binds the test-only state-store rules. The shipped default binding
+# (chart/templates/node-agent/default-rule-binding.yaml) lists rules by explicit
+# ruleName, so newly added rule IDs are inert until something binds them.
+apiVersion: kubescape.io/v1
+kind: RuntimeRuleAlertBinding
+metadata:
+  name: cel-state-test-binding
+spec:
+  namespaceSelector:
+    matchExpressions:
+      - key: "kubernetes.io/metadata.name"
+        operator: "NotIn"
+        values:
+          - "kube-system"
+          - "kube-public"
+          - "kube-node-lease"
+  podSelector:
+  rules:
+    - ruleName: "TEST state correlation exec then connect"
+    - ruleName: "TEST state network control"
+    - ruleName: "TEST state exec control"
+    - ruleName: "TEST state negative control"

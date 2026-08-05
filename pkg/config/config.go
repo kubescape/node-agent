@@ -16,6 +16,7 @@ import (
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulestate"
 	"github.com/spf13/viper"
 )
 
@@ -54,6 +55,7 @@ type AlertDeduplicationConfig struct {
 type Config struct {
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
+	CelStateStore                  rulestate.Config                     `mapstructure:"celStateStore"`
 	ContainerEolNotificationBuffer int                                  `mapstructure:"containerEolNotificationBuffer"`
 	DBpf                           bool                                 `mapstructure:"dBpf"`
 	DCapSys                        bool                                 `mapstructure:"dCapSys"`
@@ -209,6 +211,17 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("blockEvents", false)
 	viper.SetDefault("celConfigCache::maxSize", 100000)
 	viper.SetDefault("celConfigCache::ttl", 1*time.Minute)
+
+	// CEL rule state store. maxEntriesForHost is larger than the per-container cap
+	// because the host bucket holds the whole node's process space rather than one
+	// workload, and never receives a container-removal purge -- it relies on TTL.
+	viper.SetDefault("celStateStore::enabled", true)
+	viper.SetDefault("celStateStore::maxSize", 100000)
+	viper.SetDefault("celStateStore::maxEntriesPerContainer", 256)
+	viper.SetDefault("celStateStore::maxEntriesForHost", 4096)
+	viper.SetDefault("celStateStore::maxTtl", 30*time.Minute)
+	viper.SetDefault("celStateStore::sweepInterval", 30*time.Second)
+	viper.SetDefault("celStateStore::ancestorMaxDepth", 8)
 	viper.SetDefault("ignoreRuleBindings", false)
 
 	viper.SetDefault("eventDedup::enabled", true)
