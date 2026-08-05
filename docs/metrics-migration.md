@@ -110,22 +110,47 @@ previously missing event types (`exit`, `fork`).
 ### Cgroup Scope Resolution Hardening (accuracy fix, no name change)
 
 `node_agent_process_memory_cgroup_bytes` / `..._cgroup_limit_bytes` (and the new pod-level
-metrics above) are read via `findCgroupScopeDir`, which had two defects fixed alongside the
-pod-level metric addition — no metric was renamed, but previously-silent `0` readings on
-affected hosts will now report real values:
+metrics above) are read via `findCgroupScopeDir` / `resolveCgroupMemoryPaths`, which had three
+defects fixed alongside the pod-level metric addition — no metric was renamed, but
+previously-silent or previously-wrong readings on affected hosts will now report correctly:
 
 - Container-ID matching was an unanchored substring (`strings.Contains`), which could in
   principle select the wrong container's cgroup. Now a delimited-segment match.
 - The first name-matching `.scope` directory was accepted without checking it actually
-  contained `memory.current`. On cgroup-v1/hybrid hosts, `filepath.WalkDir` can reach an
-  unrelated controller subtree (e.g. `blkio`, `cpu`) before `memory`, so the resolver would
-  lock onto a directory with no `memory.current` and silently cache a `0` read for the
-  process lifetime. Per-pod production telemetry showed this affecting **35% of live pods**
-  (`cgroup_bytes == 0` while `rss_bytes > 0`) before this fix.
+  contained a memory-accounting file at all. On cgroup-v1/hybrid hosts, `filepath.WalkDir` can
+  reach an unrelated controller subtree (e.g. `blkio`, `cpu`) before `memory`, so the resolver
+  could lock onto a directory with no memory-accounting file and silently cache a `0` read for
+  the process lifetime. The resolver now keeps walking until it finds a directory that actually
+  has one (`memory.current` on v2, `memory.usage_in_bytes` on v1), and reads the correct
+  filename pair for whichever it found — so v1 hosts get correctly *container-scoped* numbers
+  instead of `0`, not just a `0` that's harder to trigger.
+- **A caller with a known container ID never falls through to the unscoped resolution
+  strategies.** Those strategies read from the cgroup root itself, which is only a valid proxy
+  for "this container's memory" when the caller mounts its own namespaced cgroup root (the
+  sbom-scanner sidecar topology, `ownContainerID == ""`). For the main agent, which bind-mounts
+  the *host's* cgroup tree, that same root is the whole node — an earlier version of this fix
+  did fall through in that case, which would have silently reported node-wide memory as this
+  container's own on any host where the scoped lookup failed. Fixed before merge; a container
+  ID that can't be scope-resolved now reports `0`, never a plausible-looking wrong number.
 - Scoped to the **systemd** cgroup driver; hosts on the cgroupfs driver still read `0` for
   both the container- and pod-level cgroup metrics (pre-existing, unchanged by this PR —
   tracked as a follow-up, since `findCgroupScopeDir` requires a `.scope`-suffixed name that
   cgroupfs layouts never produce).
+
+**On the production data cited during development:** per-pod SigNoz telemetry showed 35% of
+live pods reporting `cgroup_bytes == 0` while `rss_bytes > 0`, and 2% showing a smaller genuine
+`0 < cgroup_bytes < rss_bytes` inversion. At the time, this was attributed mainly to the
+wrong-controller-subtree defect above (cgroup-v1/hybrid hosts). On review, that attribution
+isn't fully confirmed: a simpler, v2-compatible explanation — `ownContainerID` resolving to
+empty on a permanently-cached early-startup race — is equally consistent with the same observed
+zeros, and the true v1-vs-v2 split of the affected 35% couldn't be determined from SigNoz data
+alone (no cgroup-version attribute exists in the current telemetry, and live per-node inspection
+wasn't available at the time). This PR fixes both failure modes it found either way, but the
+35% figure should be read as "pods currently reporting a silent `cgroup_bytes == 0`," not as
+confirmed evidence for any one specific mechanism. Because this fix makes cgroup-v1 hosts report
+real (non-zero) container-scoped numbers instead of `0`, and raises the pod-level resolver's
+rejection log from `Debug` to `Warning`, the actual v1-vs-empty-container-ID split will become
+directly observable post-deploy rather than inferred.
 
 ### Removed Metrics (not migrated)
 

@@ -153,16 +153,103 @@ func TestFindCgroupScopeDir_SkipsControllerWithoutMemoryFiles(t *testing.T) {
 		assert.Empty(t, findCgroupScopeDir(root, id), "no memory-controller match → no path, not a wrong path")
 	})
 
-	// cgroup v1: resolveCgroupMemoryPaths hardcodes the v2 filename pair at its
-	// return, so accepting a v1 directory here would yield nonexistent paths.
-	t.Run("cgroupv1 filename is not accepted", func(t *testing.T) {
+	// cgroup v1: the memory-controller scope has memory.usage_in_bytes, not
+	// memory.current. findCgroupScopeDir must accept it — resolveCgroupMemoryPaths
+	// is what decides which filename pair to read from the verified directory.
+	t.Run("cgroupv1 filename is accepted", func(t *testing.T) {
 		root := t.TempDir()
 		scope := filepath.Join(root, "memory", "kubepods.slice", scopeName)
 		require.NoError(t, os.MkdirAll(scope, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(scope, "memory.usage_in_bytes"), []byte("123\n"), 0o644))
 
-		assert.Empty(t, findCgroupScopeDir(root, id), "v1 hosts must fall through to the later strategies")
+		assert.Equal(t, scope, findCgroupScopeDir(root, id))
 	})
+}
+
+// TestResolveCgroupMemoryPathsUnder pins the fix for the cgroup-v1 node-wide
+// misattribution: when ownContainerID is known, resolution must never fall
+// through to the unscoped strategies (2/3) meant for the "caller mounts its
+// own namespaced cgroup root" topology — those return the wrong number (the
+// whole host's memory, not this container's) for a caller that bind-mounts
+// the host's cgroup tree. It also pins proper cgroup-v1 support: a verified
+// v1-only scope directory must be read via its own (v1) filenames, not
+// silently dropped.
+func TestResolveCgroupMemoryPathsUnder(t *testing.T) {
+	const id = "abc1230000000000000000000000000000000000000000000000000000000000"
+	scopeName := "cri-containerd-" + id + ".scope"
+
+	t.Run("known container ID, v2 scope resolved", func(t *testing.T) {
+		root := t.TempDir()
+		scope := filepath.Join(root, "memory", "kubepods.slice", scopeName)
+		require.NoError(t, os.MkdirAll(scope, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(scope, "memory.current"), []byte("123\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(scope, "memory.max"), []byte("456\n"), 0o644))
+
+		cur, max := resolveCgroupMemoryPathsUnder(root, id, "")
+		assert.Equal(t, filepath.Join(scope, "memory.current"), cur)
+		assert.Equal(t, filepath.Join(scope, "memory.max"), max)
+	})
+
+	t.Run("known container ID, v1-only scope resolved via its own filenames", func(t *testing.T) {
+		root := t.TempDir()
+		scope := filepath.Join(root, "memory", "kubepods.slice", scopeName)
+		require.NoError(t, os.MkdirAll(scope, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(scope, "memory.usage_in_bytes"), []byte("123\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(scope, "memory.limit_in_bytes"), []byte("456\n"), 0o644))
+
+		cur, max := resolveCgroupMemoryPathsUnder(root, id, "")
+		assert.Equal(t, filepath.Join(scope, "memory.usage_in_bytes"), cur)
+		assert.Equal(t, filepath.Join(scope, "memory.limit_in_bytes"), max)
+	})
+
+	t.Run("known container ID, no scope found anywhere never falls through to the unscoped fixed-mount path", func(t *testing.T) {
+		root := t.TempDir()
+		// A v1 fixed-mount file DOES exist at the root — simulating the host's
+		// own (node-wide) cgroup accounting file, reachable via strategy 3 if
+		// resolution incorrectly fell through to it. No scope directory for
+		// `id` exists anywhere, so this container's own cgroup genuinely
+		// cannot be found.
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "memory"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.usage_in_bytes"), []byte("999999999\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.limit_in_bytes"), []byte("999999999\n"), 0o644))
+
+		cur, max := resolveCgroupMemoryPathsUnder(root, id, "")
+		assert.Empty(t, cur, "must not fall through to the node-wide fixed-mount file for a known container ID")
+		assert.Empty(t, max)
+	})
+
+	t.Run("empty container ID falls through to the v2 self-cgroup strategy", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.MkdirAll(root, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory.current"), []byte("111\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory.max"), []byte("222\n"), 0o644))
+
+		cur, max := resolveCgroupMemoryPathsUnder(root, "", "0::/\n")
+		assert.Equal(t, filepath.Join(root, "memory.current"), cur)
+		assert.Equal(t, filepath.Join(root, "memory.max"), max)
+	})
+
+	t.Run("empty container ID falls through to the v1 fixed-mount strategy", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "memory"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.usage_in_bytes"), []byte("333\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.limit_in_bytes"), []byte("444\n"), 0o644))
+
+		// No "0::" line at all (pure cgroup-v1 host) — strategy 2 no-ops.
+		cur, max := resolveCgroupMemoryPathsUnder(root, "", "4:memory:/kubepods.slice\n")
+		assert.Equal(t, filepath.Join(root, "memory", "memory.usage_in_bytes"), cur)
+		assert.Equal(t, filepath.Join(root, "memory", "memory.limit_in_bytes"), max)
+	})
+}
+
+// TestParseCgroupMemValue_V1UnlimitedSentinel pins the cgroup-v1 "unlimited"
+// normalization: a value at or above the sentinel threshold reports as 0
+// (unlimited), matching the cgroupv2 "max" convention, instead of a huge and
+// misleading-looking number.
+func TestParseCgroupMemValue_V1UnlimitedSentinel(t *testing.T) {
+	assert.Equal(t, int64(0), parseCgroupMemValue("9223372036854771712"))
+	assert.Equal(t, int64(0), parseCgroupMemValue("max"))
+	assert.Equal(t, int64(536870912), parseCgroupMemValue("536870912")) // 512MiB, a real limit, unaffected
 }
 
 const (

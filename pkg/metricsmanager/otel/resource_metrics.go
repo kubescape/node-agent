@@ -194,37 +194,71 @@ func readCgroupMem(ownContainerID string) (current, limit int64) {
 // reports "0::/") while bind-mounting the host's /sys/fs/cgroup over its own,
 // so the namespaced path cannot be joined with the host tree — reading the
 // fixed root path yields 0. Strategies, in order:
+//
 //  1. If our own container ID is known (resolved from the k8s API at startup),
-//     find the matching *.scope directory in the host cgroup tree. This is the
-//     node-agent topology. Self-discovery from /proc is unreliable here:
-//     /proc/self/cgroup is "0::/", and /proc/self/mountinfo is polluted with
-//     every other container's ID via shared mount propagation of /host.
+//     find the matching *.scope directory in the host cgroup tree and read
+//     whichever memory-accounting filenames actually exist there (cgroupv2
+//     memory.current/memory.max, or cgroupv1 memory.usage_in_bytes/
+//     memory.limit_in_bytes). This is the node-agent topology. Self-discovery
+//     from /proc is unreliable here: /proc/self/cgroup is "0::/", and
+//     /proc/self/mountinfo is polluted with every other container's ID via
+//     shared mount propagation of /host.
+//
+//     When the container ID is known but no scope directory can be verified,
+//     this returns "", "" immediately — it deliberately does NOT fall through
+//     to strategies 2/3 below. Those two strategies read from cgroupRoot's own
+//     root, which is only a valid proxy for "this container's memory" when the
+//     caller mounts its own namespaced /sys/fs/cgroup (strategy 2/3's actual
+//     intended topology, see below). For the main agent, which bind-mounts the
+//     HOST's /sys/fs/cgroup, that same root is the whole node — falling
+//     through would silently report the host's memory as this container's own
+//     (a wrong-but-plausible number is worse than a missing series).
+//
 //  2. Join /proc/self/cgroup with the cgroup root; use it if memory.current
 //     exists there. This covers both the host cgroup namespace (rel is the full
 //     path) and a container's own namespaced /sys/fs/cgroup mount, where
 //     /proc/self/cgroup is "0::/" and the namespace root (cgroupRoot itself) is
-//     the container's own cgroup — the sbom-scanner sidecar topology. The main
-//     agent overrides /sys/fs/cgroup with the host tree, whose root has no
-//     memory.current, so this path no-ops there and strategy 1 wins.
+//     the container's own cgroup — the sbom-scanner sidecar topology.
+//
 //  3. cgroupv1 fixed mount layout.
+//
+// Strategies 2 and 3 only run when ownContainerID == "" — i.e. the caller
+// either doesn't know which container it is, or mounts its own namespaced
+// cgroup root (see above), the two cases where reading cgroupRoot's own root
+// is actually scoped to the right thing.
 func resolveCgroupMemoryPaths(ownContainerID string) (current, max string) {
+	return resolveCgroupMemoryPathsUnder(cgroupRoot, ownContainerID, readFileString("/proc/self/cgroup"))
+}
+
+// resolveCgroupMemoryPathsUnder is the testable core of resolveCgroupMemoryPaths:
+// root replaces the cgroupRoot const, and selfCgroupContent replaces a live
+// read of /proc/self/cgroup, so tests can exercise every strategy against a
+// synthetic tree instead of the real host filesystem.
+func resolveCgroupMemoryPathsUnder(root, ownContainerID, selfCgroupContent string) (current, max string) {
 	if ownContainerID != "" {
-		if dir := findCgroupScopeDir(cgroupRoot, ownContainerID); dir != "" {
-			cgroupScopeDir = dir // published under cgroupResolveOnce for cachedCgroupScopeDir
+		dir := findCgroupScopeDir(root, ownContainerID)
+		if dir == "" {
+			return "", ""
+		}
+		cgroupScopeDir = dir // published under cgroupResolveOnce for cachedCgroupScopeDir
+		if fileExists(filepath.Join(dir, "memory.current")) {
 			return filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.max")
 		}
+		// cgroupv1: same (verified) directory, different filenames.
+		return filepath.Join(dir, "memory.usage_in_bytes"), filepath.Join(dir, "memory.limit_in_bytes")
 	}
 	// cgroupv2: join /proc/self/cgroup with the root. filepath.Join collapses
-	// the "0::/" namespace-root case to cgroupRoot itself.
-	if rel, ok := parseSelfCgroupV2(readFileString("/proc/self/cgroup")); ok {
-		dir := filepath.Join(cgroupRoot, rel)
+	// the "0::/" namespace-root case to root itself.
+	if rel, ok := parseSelfCgroupV2(selfCgroupContent); ok {
+		dir := filepath.Join(root, rel)
 		if fileExists(filepath.Join(dir, "memory.current")) {
 			return filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.max")
 		}
 	}
 	// cgroupv1 fallback (fixed mount layout).
-	if fileExists("/sys/fs/cgroup/memory/memory.usage_in_bytes") {
-		return "/sys/fs/cgroup/memory/memory.usage_in_bytes", "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+	v1Current := filepath.Join(root, "memory", "memory.usage_in_bytes")
+	if fileExists(v1Current) {
+		return v1Current, filepath.Join(root, "memory", "memory.limit_in_bytes")
 	}
 	return "", ""
 }
@@ -283,7 +317,7 @@ func resolvePodCgroupMemoryPathsUnder(root, ownContainerID, ownPodUID string) (c
 	// so log what was rejected — otherwise the silence is indistinguishable
 	// from the by-design case above, forever.
 	reject := func(rejected string) (string, string) {
-		logger.L().Debug("otelmetrics: pod-level cgroup memory unresolved, pod memory metrics will report 0",
+		logger.L().Warning("otelmetrics: pod-level cgroup memory unresolved, pod memory metrics will report 0",
 			helpers.String("containerID", ownContainerID),
 			helpers.String("podUID", ownPodUID),
 			helpers.String("rejected", rejected))
@@ -397,21 +431,22 @@ func scopeNameMatchesID(name, id string) bool {
 // WalkDir visits /sys/fs/cgroup/blkio, /cpu, /cpuacct, /devices, /freezer — all
 // lexically before /memory — and any of them can hold a
 // "cri-containerd-<id>.scope" directory. The walk therefore locked in a
-// directory with no memory.current, readCgroupMem silently read 0, and
-// sync.Once cached that outcome for the process lifetime.
+// directory with no memory accounting file at all, readCgroupMem silently
+// read 0, and sync.Once cached that outcome for the process lifetime.
 //
-// The memory.current existence check below is therefore load-bearing, not
-// defensive, and so is "keep walking" (return nil) instead of SkipAll on a
-// name-only match: that is what lets the walk skip the decoy controller
-// subtrees and reach the real memory-controller scope.
+// The existence check below is therefore load-bearing, not defensive, and so
+// is "keep walking" (return nil) instead of SkipAll on a name-only match:
+// that is what lets the walk skip the decoy controller subtrees and reach the
+// real memory-controller scope.
 //
-// The check deliberately accepts the cgroupv2 filename memory.current *only*,
-// never the cgroupv1 memory.usage_in_bytes: resolveCgroupMemoryPaths returns
-// the v2 filename pair unconditionally once this function succeeds, so
-// accepting a v1 directory would hand back paths that do not exist and
-// reproduce H4 verbatim. Returning "" on a v1 host is strictly better — it lets
-// resolveCgroupMemoryPaths fall through to its later strategies, including the
-// cgroupv1 fixed-mount fallback, instead of caching a dead v2 path.
+// The check accepts EITHER the cgroupv2 filename memory.current or the
+// cgroupv1 filename memory.usage_in_bytes — cgroup v1's memory controller
+// mounts as its own subtree with its own copy of the directory name, so a v1
+// host's real memory-controller scope has memory.usage_in_bytes, not
+// memory.current, and rejecting it here would make v1 hosts indistinguishable
+// from "no scope found at all". resolveCgroupMemoryPaths re-checks which file
+// is actually present at the returned directory and returns the matching
+// pair, so this never hands back a nonexistent path.
 func findCgroupScopeDir(root, id string) string {
 	if id == "" {
 		return ""
@@ -424,7 +459,9 @@ func findCgroupScopeDir(root, id string) string {
 		if !scopeNameMatchesID(d.Name(), id) {
 			return nil
 		}
-		if !fileExists(filepath.Join(path, "memory.current")) {
+		hasV2 := fileExists(filepath.Join(path, "memory.current"))
+		hasV1 := fileExists(filepath.Join(path, "memory.usage_in_bytes"))
+		if !hasV2 && !hasV1 {
 			return nil // name matches but wrong controller subtree — keep walking
 		}
 		found = path
@@ -435,6 +472,15 @@ func findCgroupScopeDir(root, id string) string {
 
 // parseCgroupMemValue parses a cgroup memory file value; the literal "max"
 // (cgroupv2 unlimited) and unparseable input both yield 0.
+// v1UnlimitedThreshold is a generous lower bound for cgroup v1's "unlimited"
+// limit sentinel (kernels report a value near math.MaxInt64, rounded down to
+// a page boundary — the exact value depends on page size/arch, e.g.
+// 9223372036854771712 on 4KB-page x86_64). No real container's memory usage
+// or limit can plausibly reach this, so treating anything at or above it as
+// "unlimited" (0) matches the cgroupv2 "max" convention without risking a
+// false positive on a real value.
+const v1UnlimitedThreshold = int64(1) << 62
+
 func parseCgroupMemValue(s string) int64 {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "max" {
@@ -442,6 +488,9 @@ func parseCgroupMemValue(s string) int64 {
 	}
 	v, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
+		return 0
+	}
+	if v >= v1UnlimitedThreshold {
 		return 0
 	}
 	return v
