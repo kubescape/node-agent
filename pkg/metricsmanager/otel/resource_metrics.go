@@ -23,14 +23,19 @@ const cgroupRoot = "/sys/fs/cgroup"
 // registerResourceMetrics wires up observable gauges for process-level and
 // host-level resource. Called once from NewOTELMetricsManager; panics on
 // instrument creation failure (same policy as mustCounter/mustGauge).
-func registerResourceMetrics(meter metric.Meter, containerCount *atomic.Int64, ownContainerID, ownPodUID string) {
+//
+// hostCgroupMounted must be true only for the entrypoint that bind-mounts the
+// HOST's /sys/fs/cgroup over its own (the Kubernetes DaemonSet, cmd/main.go)
+// — see resolveCgroupMemoryPathsUnder's doc comment for why this can't be
+// inferred from ownContainerID alone.
+func registerResourceMetrics(meter metric.Meter, containerCount *atomic.Int64, ownContainerID, ownPodUID string, hostCgroupMounted bool) {
 	// Per-process memory gauges (rss + cgroup usage/limit) — shared with the
 	// sbom-scanner sidecar so both containers report the same memory signals.
-	RegisterProcessMemoryMetrics(meter, ownContainerID)
+	RegisterProcessMemoryMetrics(meter, ownContainerID, hostCgroupMounted)
 
 	// Pod-scoped memory gauges — registered only here (the main agent), never
 	// from the sidecar-shared RegisterProcessMemoryMetrics.
-	RegisterPodMemoryMetrics(meter, ownContainerID, ownPodUID)
+	RegisterPodMemoryMetrics(meter, ownContainerID, ownPodUID, hostCgroupMounted)
 
 	hostMemTotal := readHostMemTotalBytes()
 	hostCPUCount := int64(runtime.NumCPU())
@@ -68,12 +73,18 @@ func registerResourceMetrics(meter metric.Meter, containerCount *atomic.Int64, o
 // Both the main agent and the sbom-scanner sidecar call this so each container
 // reports its own memory usage and limit (distinguished downstream by
 // service.name). ownContainerID, when non-empty, lets the cgroup resolver find
-// the correct scope under a host-mounted cgroup tree (the main-agent topology);
-// pass "" for containers that mount their own namespaced /sys/fs/cgroup (the
-// sidecar), where a direct read of the namespace root works.
+// the correct scope under a host-mounted cgroup tree (the main-agent topology).
+//
+// hostCgroupMounted must be true only for callers that bind-mount the HOST's
+// /sys/fs/cgroup over their own (the Kubernetes DaemonSet). It must be false
+// for every caller that mounts its own namespaced /sys/fs/cgroup — the
+// sbom-scanner sidecar, and any entrypoint (cmd/host, cmd/ecs) that isn't the
+// Kubernetes DaemonSet — regardless of whether ownContainerID happens to be
+// known for that call. This can't be inferred from ownContainerID alone: see
+// resolveCgroupMemoryPathsUnder's doc comment for why.
 //
 // MUST be called after otelsetup.InitProviders so the real MeterProvider is set.
-func RegisterProcessMemoryMetrics(meter metric.Meter, ownContainerID string) {
+func RegisterProcessMemoryMetrics(meter metric.Meter, ownContainerID string, hostCgroupMounted bool) {
 	rssGauge, err := meter.Int64ObservableGauge("node_agent.process.memory.rss_bytes",
 		metric.WithDescription("Process RSS (resident set size) from /proc/self/status"),
 		metric.WithUnit("By"),
@@ -98,7 +109,7 @@ func RegisterProcessMemoryMetrics(meter metric.Meter, ownContainerID string) {
 
 	_, _ = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		o.ObserveInt64(rssGauge, readProcessRSSBytes())
-		cur, lim := readCgroupMem(ownContainerID)
+		cur, lim := readCgroupMem(ownContainerID, hostCgroupMounted)
 		o.ObserveInt64(cgroupMemGauge, cur)
 		o.ObserveInt64(cgroupLimitGauge, lim)
 		return nil
@@ -111,10 +122,17 @@ func RegisterProcessMemoryMetrics(meter metric.Meter, ownContainerID string) {
 // the shared RegisterProcessMemoryMetrics — registering it per-container would
 // double-count the pod under any aggregation.
 //
-// ownContainerID == "" (sbom-scanner sidecar, cmd/host, cmd/ecs) registers
-// nothing at all, so no empty series is ever emitted from those topologies.
-func RegisterPodMemoryMetrics(meter metric.Meter, ownContainerID, ownPodUID string) {
+// ownContainerID == "" registers nothing at all, so no empty series is ever
+// emitted. This is by-design and silent for topologies with no Kubernetes pod
+// concept at all (the sbom-scanner sidecar, cmd/host, cmd/ecs) — but on the
+// Kubernetes DaemonSet (hostCgroupMounted == true) an empty ownContainerID is
+// always anomalous (a startup race in resolveOwnContainerID, never a
+// legitimate state), so that specific combination is logged.
+func RegisterPodMemoryMetrics(meter metric.Meter, ownContainerID, ownPodUID string, hostCgroupMounted bool) {
 	if ownContainerID == "" {
+		if hostCgroupMounted {
+			logger.L().Warning("otelmetrics: own container ID unresolved on the Kubernetes DaemonSet topology, pod memory metrics will not be registered")
+		}
 		return
 	}
 
@@ -134,7 +152,7 @@ func RegisterPodMemoryMetrics(meter metric.Meter, ownContainerID, ownPodUID stri
 	}
 
 	_, _ = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
-		cur, lim := readPodCgroupMem(ownContainerID, ownPodUID)
+		cur, lim := readPodCgroupMem(ownContainerID, ownPodUID, hostCgroupMounted)
 		o.ObserveInt64(podMemGauge, cur)
 		o.ObserveInt64(podLimitGauge, lim)
 		return nil
@@ -171,9 +189,9 @@ var (
 // readCgroupMem returns the process's cgroup memory usage and limit in bytes
 // (limit 0 = unlimited / unresolved). Paths are resolved once and cached since
 // a process never changes cgroup.
-func readCgroupMem(ownContainerID string) (current, limit int64) {
+func readCgroupMem(ownContainerID string, hostCgroupMounted bool) (current, limit int64) {
 	cgroupResolveOnce.Do(func() {
-		cgroupCurrentPath, cgroupMaxPath = resolveCgroupMemoryPaths(ownContainerID)
+		cgroupCurrentPath, cgroupMaxPath = resolveCgroupMemoryPaths(ownContainerID, hostCgroupMounted)
 	})
 	if cgroupCurrentPath != "" {
 		if data, err := os.ReadFile(cgroupCurrentPath); err == nil {
@@ -190,10 +208,21 @@ func readCgroupMem(ownContainerID string) (current, limit int64) {
 
 // resolveCgroupMemoryPaths locates this process's cgroup memory files.
 //
-// node-agent runs with a private cgroup namespace (so /proc/self/cgroup
-// reports "0::/") while bind-mounting the host's /sys/fs/cgroup over its own,
-// so the namespaced path cannot be joined with the host tree — reading the
-// fixed root path yields 0. Strategies, in order:
+// hostCgroupMounted is the deployment-level topology signal that decides
+// which strategies below are safe — it is NOT derivable from ownContainerID.
+// Those are two independent questions:
+//   - "do I know my own container ID right now" (ownContainerID) can be
+//     empty even for a host-mounted caller, e.g. a startup race in
+//     resolveOwnContainerID before the pod's ContainerStatuses are populated.
+//   - "is cgroupRoot the HOST's cgroup tree, or my own namespaced one"
+//     (hostCgroupMounted) is fixed per entrypoint/deployment and never
+//     changes at runtime.
+//
+// Conflating them (treating ownContainerID == "" as sufficient permission to
+// read cgroupRoot's own root) is exactly how a host-mounted caller with an
+// unresolved container ID would silently report the whole node's memory as
+// its own — the same wrong-but-plausible failure mode this function exists
+// to prevent for the "scope not found" case. Strategies, in order:
 //
 //  1. If our own container ID is known (resolved from the k8s API at startup),
 //     find the matching *.scope directory in the host cgroup tree and read
@@ -204,16 +233,6 @@ func readCgroupMem(ownContainerID string) (current, limit int64) {
 //     /proc/self/mountinfo is polluted with every other container's ID via
 //     shared mount propagation of /host.
 //
-//     When the container ID is known but no scope directory can be verified,
-//     this returns "", "" immediately — it deliberately does NOT fall through
-//     to strategies 2/3 below. Those two strategies read from cgroupRoot's own
-//     root, which is only a valid proxy for "this container's memory" when the
-//     caller mounts its own namespaced /sys/fs/cgroup (strategy 2/3's actual
-//     intended topology, see below). For the main agent, which bind-mounts the
-//     HOST's /sys/fs/cgroup, that same root is the whole node — falling
-//     through would silently report the host's memory as this container's own
-//     (a wrong-but-plausible number is worse than a missing series).
-//
 //  2. Join /proc/self/cgroup with the cgroup root; use it if memory.current
 //     exists there. This covers both the host cgroup namespace (rel is the full
 //     path) and a container's own namespaced /sys/fs/cgroup mount, where
@@ -222,31 +241,43 @@ func readCgroupMem(ownContainerID string) (current, limit int64) {
 //
 //  3. cgroupv1 fixed mount layout.
 //
-// Strategies 2 and 3 only run when ownContainerID == "" — i.e. the caller
-// either doesn't know which container it is, or mounts its own namespaced
-// cgroup root (see above), the two cases where reading cgroupRoot's own root
-// is actually scoped to the right thing.
-func resolveCgroupMemoryPaths(ownContainerID string) (current, max string) {
-	return resolveCgroupMemoryPathsUnder(cgroupRoot, ownContainerID, readFileString("/proc/self/cgroup"))
+// Strategies 2 and 3 read cgroupRoot's own root, which is only a valid proxy
+// for "this container's memory" when the caller mounts its own namespaced
+// /sys/fs/cgroup — i.e. hostCgroupMounted == false. They run whenever
+// hostCgroupMounted == false, regardless of whether strategy 1 was attempted
+// or what it found, since a non-host-mounted caller's own root is always
+// safe to read. When hostCgroupMounted == true, only strategy 1 is ever
+// tried; if it doesn't resolve, this returns "", "" — never a wrong number.
+func resolveCgroupMemoryPaths(ownContainerID string, hostCgroupMounted bool) (current, max string) {
+	return resolveCgroupMemoryPathsUnder(cgroupRoot, ownContainerID, hostCgroupMounted, readFileString("/proc/self/cgroup"))
 }
 
 // resolveCgroupMemoryPathsUnder is the testable core of resolveCgroupMemoryPaths:
 // root replaces the cgroupRoot const, and selfCgroupContent replaces a live
 // read of /proc/self/cgroup, so tests can exercise every strategy against a
 // synthetic tree instead of the real host filesystem.
-func resolveCgroupMemoryPathsUnder(root, ownContainerID, selfCgroupContent string) (current, max string) {
+func resolveCgroupMemoryPathsUnder(root, ownContainerID string, hostCgroupMounted bool, selfCgroupContent string) (current, max string) {
 	if ownContainerID != "" {
-		dir := findCgroupScopeDir(root, ownContainerID)
-		if dir == "" {
-			return "", ""
+		if dir := findCgroupScopeDir(root, ownContainerID); dir != "" {
+			cgroupScopeDir = dir // published under cgroupResolveOnce for cachedCgroupScopeDir
+			if fileExists(filepath.Join(dir, "memory.current")) {
+				return filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.max")
+			}
+			// cgroupv1: same (verified) directory, different filenames.
+			return filepath.Join(dir, "memory.usage_in_bytes"), filepath.Join(dir, "memory.limit_in_bytes")
 		}
-		cgroupScopeDir = dir // published under cgroupResolveOnce for cachedCgroupScopeDir
-		if fileExists(filepath.Join(dir, "memory.current")) {
-			return filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.max")
-		}
-		// cgroupv1: same (verified) directory, different filenames.
-		return filepath.Join(dir, "memory.usage_in_bytes"), filepath.Join(dir, "memory.limit_in_bytes")
 	}
+	if hostCgroupMounted {
+		// root is the HOST's cgroup tree, not ours. Whether ownContainerID was
+		// known or not, we could not verify a container-scoped directory, and
+		// there is no safe unscoped fallback here: reading root's own files
+		// would report the whole node's memory as this container's own.
+		return "", ""
+	}
+	// root is this caller's OWN namespaced cgroup (sbom-scanner sidecar, or any
+	// entrypoint that isn't the host-mounted Kubernetes DaemonSet) — safe to
+	// read directly regardless of whether the container ID resolved above.
+	//
 	// cgroupv2: join /proc/self/cgroup with the root. filepath.Join collapses
 	// the "0::/" namespace-root case to root itself.
 	if rel, ok := parseSelfCgroupV2(selfCgroupContent); ok {
@@ -291,21 +322,21 @@ var podSliceNameRe = regexp.MustCompile(`^(?:[a-z0-9]+-)*pod([0-9a-f_]{32,})\.sl
 // in the pod at that level, including third-party sidecars (clamav) that carry
 // no OTEL instrumentation of their own.
 //
-// systemd cgroup driver on cgroup v2 only. The parent-name guard below matches
-// the systemd slice naming convention; under the cgroupfs driver
-// findCgroupScopeDir does not match at all (it requires a ".scope" suffix). The
-// memory.current check is likewise v2-only: this function hardcodes the v2
-// filename pair in its return, so accepting a v1 directory would hand back
-// paths that do not exist. Both cases return "", "".
+// systemd cgroup driver only. The parent-name guard below matches the systemd
+// slice naming convention; under the cgroupfs driver findCgroupScopeDir does
+// not match at all (it requires a ".scope" suffix), so this returns "", "".
+// Both cgroupv2 (memory.current) and cgroupv1 (memory.usage_in_bytes) parent
+// slices are supported — whichever filename pair is actually present at the
+// verified parent directory is what gets read.
 //
 // Returns "", "" when the pod slice cannot be positively identified.
-func resolvePodCgroupMemoryPaths(ownContainerID, ownPodUID string) (current, max string) {
-	return resolvePodCgroupMemoryPathsUnder(cgroupRoot, ownContainerID, ownPodUID)
+func resolvePodCgroupMemoryPaths(ownContainerID, ownPodUID string, hostCgroupMounted bool) (current, max string) {
+	return resolvePodCgroupMemoryPathsUnder(cgroupRoot, ownContainerID, ownPodUID, hostCgroupMounted)
 }
 
 // resolvePodCgroupMemoryPathsUnder is the testable core of
 // resolvePodCgroupMemoryPaths, parameterised on the cgroup tree root.
-func resolvePodCgroupMemoryPathsUnder(root, ownContainerID, ownPodUID string) (current, max string) {
+func resolvePodCgroupMemoryPathsUnder(root, ownContainerID, ownPodUID string, hostCgroupMounted bool) (current, max string) {
 	// Sidecar / cmd/host / cmd/ecs topologies: no own container ID means no pod
 	// slice can be identified, and a pod-level number would be wrong anyway.
 	// This is by design, so it is deliberately not logged.
@@ -323,7 +354,7 @@ func resolvePodCgroupMemoryPathsUnder(root, ownContainerID, ownPodUID string) (c
 			helpers.String("rejected", rejected))
 		return "", ""
 	}
-	dir := cachedCgroupScopeDir(root, ownContainerID)
+	dir := cachedCgroupScopeDir(root, ownContainerID, hostCgroupMounted)
 	if dir == "" {
 		return reject("no .scope directory found for this container ID")
 	}
@@ -342,10 +373,14 @@ func resolvePodCgroupMemoryPathsUnder(root, ownContainerID, ownPodUID string) (c
 	if ownPodUID != "" && m[1] != strings.ReplaceAll(ownPodUID, "-", "_") {
 		return reject("parent slice belongs to a different pod UID: " + filepath.Base(parent))
 	}
-	if !fileExists(filepath.Join(parent, "memory.current")) {
-		return reject("parent slice has no memory.current (cgroup v1?): " + parent)
+	if fileExists(filepath.Join(parent, "memory.current")) {
+		return filepath.Join(parent, "memory.current"), filepath.Join(parent, "memory.max")
 	}
-	return filepath.Join(parent, "memory.current"), filepath.Join(parent, "memory.max")
+	// cgroupv1: same (verified) parent slice, different filenames.
+	if fileExists(filepath.Join(parent, "memory.usage_in_bytes")) {
+		return filepath.Join(parent, "memory.usage_in_bytes"), filepath.Join(parent, "memory.limit_in_bytes")
+	}
+	return reject("parent slice has no memory-accounting file: " + parent)
 }
 
 // cachedCgroupScopeDir returns this container's ".scope" directory in the
@@ -353,12 +388,12 @@ func resolvePodCgroupMemoryPathsUnder(root, ownContainerID, ownPodUID string) (c
 // resolver's cached result — both resolvers look for the exact same directory —
 // so the tree is walked at most once per process instead of once per resolver.
 // A test root falls back to a direct walk.
-func cachedCgroupScopeDir(root, ownContainerID string) string {
+func cachedCgroupScopeDir(root, ownContainerID string, hostCgroupMounted bool) string {
 	if root != cgroupRoot {
 		return findCgroupScopeDir(root, ownContainerID)
 	}
 	cgroupResolveOnce.Do(func() {
-		cgroupCurrentPath, cgroupMaxPath = resolveCgroupMemoryPaths(ownContainerID)
+		cgroupCurrentPath, cgroupMaxPath = resolveCgroupMemoryPaths(ownContainerID, hostCgroupMounted)
 	})
 	return cgroupScopeDir
 }
@@ -367,9 +402,9 @@ func cachedCgroupScopeDir(root, ownContainerID string) string {
 // (limit 0 = unlimited / unresolved). Paths are resolved once and cached — a
 // pod never changes cgroup — mirroring readCgroupMem's contract: a stale path
 // yields a read error and therefore 0, never a wrong number.
-func readPodCgroupMem(ownContainerID, ownPodUID string) (current, limit int64) {
+func readPodCgroupMem(ownContainerID, ownPodUID string, hostCgroupMounted bool) (current, limit int64) {
 	podCgroupResolveOnce.Do(func() {
-		podCgroupCurrentPath, podCgroupMaxPath = resolvePodCgroupMemoryPaths(ownContainerID, ownPodUID)
+		podCgroupCurrentPath, podCgroupMaxPath = resolvePodCgroupMemoryPaths(ownContainerID, ownPodUID, hostCgroupMounted)
 	})
 	if podCgroupCurrentPath != "" {
 		if data, err := os.ReadFile(podCgroupCurrentPath); err == nil {

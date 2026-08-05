@@ -54,8 +54,9 @@ func RunServer(ctx context.Context, accountID, accessKey string) {
 		// Per-process memory gauges (rss + cgroup usage/limit), same as the main
 		// agent. The sidecar mounts its own namespaced /sys/fs/cgroup (no host
 		// override), so the cgroup resolver reads the namespace root directly —
-		// no container ID needed.
-		otelmetrics.RegisterProcessMemoryMetrics(otelsetup.Meter(), "")
+		// no container ID needed. hostCgroupMounted=false: this sidecar does
+		// NOT bind-mount the host's cgroup tree, unlike the main agent.
+		otelmetrics.RegisterProcessMemoryMetrics(otelsetup.Meter(), "", false)
 	}
 
 	socketPath := os.Getenv("SOCKET_PATH")

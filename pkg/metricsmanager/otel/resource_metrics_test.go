@@ -173,7 +173,12 @@ func TestFindCgroupScopeDir_SkipsControllerWithoutMemoryFiles(t *testing.T) {
 // whole host's memory, not this container's) for a caller that bind-mounts
 // the host's cgroup tree. It also pins proper cgroup-v1 support: a verified
 // v1-only scope directory must be read via its own (v1) filenames, not
-// silently dropped.
+// silently dropped. hostCgroupMounted, not ownContainerID, decides whether
+// the unscoped strategies (2/3) are ever reachable — see the four
+// "hostCgroupMounted" subtests, which pin the residual regression found in
+// review: an empty ownContainerID on the HOST-MOUNTED topology (a startup
+// race, not the sidecar's own-namespace topology) must not fall through
+// either.
 func TestResolveCgroupMemoryPathsUnder(t *testing.T) {
 	const id = "abc1230000000000000000000000000000000000000000000000000000000000"
 	scopeName := "cri-containerd-" + id + ".scope"
@@ -185,7 +190,7 @@ func TestResolveCgroupMemoryPathsUnder(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(scope, "memory.current"), []byte("123\n"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(scope, "memory.max"), []byte("456\n"), 0o644))
 
-		cur, max := resolveCgroupMemoryPathsUnder(root, id, "")
+		cur, max := resolveCgroupMemoryPathsUnder(root, id, true, "")
 		assert.Equal(t, filepath.Join(scope, "memory.current"), cur)
 		assert.Equal(t, filepath.Join(scope, "memory.max"), max)
 	})
@@ -197,12 +202,12 @@ func TestResolveCgroupMemoryPathsUnder(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(scope, "memory.usage_in_bytes"), []byte("123\n"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(scope, "memory.limit_in_bytes"), []byte("456\n"), 0o644))
 
-		cur, max := resolveCgroupMemoryPathsUnder(root, id, "")
+		cur, max := resolveCgroupMemoryPathsUnder(root, id, true, "")
 		assert.Equal(t, filepath.Join(scope, "memory.usage_in_bytes"), cur)
 		assert.Equal(t, filepath.Join(scope, "memory.limit_in_bytes"), max)
 	})
 
-	t.Run("known container ID, no scope found anywhere never falls through to the unscoped fixed-mount path", func(t *testing.T) {
+	t.Run("hostCgroupMounted=true, known container ID, no scope found anywhere never falls through", func(t *testing.T) {
 		root := t.TempDir()
 		// A v1 fixed-mount file DOES exist at the root — simulating the host's
 		// own (node-wide) cgroup accounting file, reachable via strategy 3 if
@@ -213,32 +218,63 @@ func TestResolveCgroupMemoryPathsUnder(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.usage_in_bytes"), []byte("999999999\n"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.limit_in_bytes"), []byte("999999999\n"), 0o644))
 
-		cur, max := resolveCgroupMemoryPathsUnder(root, id, "")
+		cur, max := resolveCgroupMemoryPathsUnder(root, id, true, "")
 		assert.Empty(t, cur, "must not fall through to the node-wide fixed-mount file for a known container ID")
 		assert.Empty(t, max)
 	})
 
-	t.Run("empty container ID falls through to the v2 self-cgroup strategy", func(t *testing.T) {
+	t.Run("hostCgroupMounted=true, empty container ID never falls through either (the residual regression)", func(t *testing.T) {
+		root := t.TempDir()
+		// Same node-wide file as above, plus a "0::/" self-cgroup line — both
+		// unscoped strategies are reachable in principle. This reproduces the
+		// exact scenario from review: the main agent (host-mounted) hits an
+		// early-startup race in resolveOwnContainerID (ownContainerID == ""),
+		// while still bind-mounting the host tree. hostCgroupMounted=true must
+		// close this off regardless of ownContainerID.
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "memory"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.usage_in_bytes"), []byte("8589934592\n"), 0o644)) // 8 GiB "whole node"
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.limit_in_bytes"), []byte("8589934592\n"), 0o644))
+
+		cur, max := resolveCgroupMemoryPathsUnder(root, "", true, "0::/\n")
+		assert.Empty(t, cur, "an empty container ID on the host-mounted topology must not read the node-wide file either")
+		assert.Empty(t, max)
+	})
+
+	t.Run("hostCgroupMounted=false, empty container ID falls through to the v2 self-cgroup strategy", func(t *testing.T) {
 		root := t.TempDir()
 		require.NoError(t, os.MkdirAll(root, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "memory.current"), []byte("111\n"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "memory.max"), []byte("222\n"), 0o644))
 
-		cur, max := resolveCgroupMemoryPathsUnder(root, "", "0::/\n")
+		cur, max := resolveCgroupMemoryPathsUnder(root, "", false, "0::/\n")
 		assert.Equal(t, filepath.Join(root, "memory.current"), cur)
 		assert.Equal(t, filepath.Join(root, "memory.max"), max)
 	})
 
-	t.Run("empty container ID falls through to the v1 fixed-mount strategy", func(t *testing.T) {
+	t.Run("hostCgroupMounted=false, empty container ID falls through to the v1 fixed-mount strategy", func(t *testing.T) {
 		root := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(root, "memory"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.usage_in_bytes"), []byte("333\n"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "memory", "memory.limit_in_bytes"), []byte("444\n"), 0o644))
 
 		// No "0::" line at all (pure cgroup-v1 host) — strategy 2 no-ops.
-		cur, max := resolveCgroupMemoryPathsUnder(root, "", "4:memory:/kubepods.slice\n")
+		cur, max := resolveCgroupMemoryPathsUnder(root, "", false, "4:memory:/kubepods.slice\n")
 		assert.Equal(t, filepath.Join(root, "memory", "memory.usage_in_bytes"), cur)
 		assert.Equal(t, filepath.Join(root, "memory", "memory.limit_in_bytes"), max)
+	})
+
+	t.Run("hostCgroupMounted=false, known container ID that fails to scope-resolve still falls through", func(t *testing.T) {
+		// Not a regression case — pins that non-host-mounted callers keep their
+		// existing fallback behavior even when a container ID happens to be
+		// known but unresolvable (e.g. a partial/experimental future caller).
+		root := t.TempDir()
+		require.NoError(t, os.MkdirAll(root, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory.current"), []byte("555\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "memory.max"), []byte("666\n"), 0o644))
+
+		cur, max := resolveCgroupMemoryPathsUnder(root, id, false, "0::/\n")
+		assert.Equal(t, filepath.Join(root, "memory.current"), cur)
+		assert.Equal(t, filepath.Join(root, "memory.max"), max)
 	})
 }
 
@@ -289,7 +325,7 @@ func TestResolvePodCgroupMemoryPaths(t *testing.T) {
 
 	assertPodRead := func(t *testing.T, root, podSlice string) {
 		t.Helper()
-		cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID)
+		cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID, true)
 		require.Equal(t, filepath.Join(podSlice, "memory.current"), cur)
 		require.Equal(t, filepath.Join(podSlice, "memory.max"), max)
 		assert.Equal(t, int64(900000), parseCgroupMemValue(readFileString(cur)))
@@ -317,7 +353,7 @@ func TestResolvePodCgroupMemoryPaths_Guards(t *testing.T) {
 		root := t.TempDir()
 		mkPodCgroupTree(t, root, filepath.Join("kubepods.slice", "kubepods-burstable-pod"+testPodUIDEscaped+".slice"),
 			podFiles, testNodeAgentID)
-		cur, max := resolvePodCgroupMemoryPathsUnder(root, "", testPodUID)
+		cur, max := resolvePodCgroupMemoryPathsUnder(root, "", testPodUID, true)
 		assert.Empty(t, cur)
 		assert.Empty(t, max)
 	})
@@ -325,7 +361,7 @@ func TestResolvePodCgroupMemoryPaths_Guards(t *testing.T) {
 	t.Run("scope directly under root", func(t *testing.T) {
 		root := t.TempDir()
 		mkPodCgroupTree(t, root, ".", podFiles, testNodeAgentID)
-		cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID)
+		cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID, true)
 		assert.Empty(t, cur, "must never escape above the cgroup root")
 		assert.Empty(t, max)
 	})
@@ -334,18 +370,18 @@ func TestResolvePodCgroupMemoryPaths_Guards(t *testing.T) {
 		root := t.TempDir()
 		mkPodCgroupTree(t, root, filepath.Join("kubepods.slice", "kubepods-burstable-pod"+testPodUIDEscaped+".slice"),
 			nil, testNodeAgentID)
-		cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID)
+		cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID, true)
 		assert.Empty(t, cur)
 		assert.Empty(t, max)
 	})
 
-	t.Run("cgroupv1 pod slice", func(t *testing.T) {
+	t.Run("cgroupv1 pod slice is resolved via its own filenames", func(t *testing.T) {
 		root := t.TempDir()
-		mkPodCgroupTree(t, root, filepath.Join("kubepods.slice", "kubepods-burstable-pod"+testPodUIDEscaped+".slice"),
+		podSlice := mkPodCgroupTree(t, root, filepath.Join("kubepods.slice", "kubepods-burstable-pod"+testPodUIDEscaped+".slice"),
 			map[string]string{"memory.usage_in_bytes": "900000\n", "memory.limit_in_bytes": "1500000\n"}, testNodeAgentID)
-		cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID)
-		assert.Empty(t, cur, "v1 pod slice must fail to zero, not to nonexistent v2 paths")
-		assert.Empty(t, max)
+		cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID, true)
+		assert.Equal(t, filepath.Join(podSlice, "memory.usage_in_bytes"), cur)
+		assert.Equal(t, filepath.Join(podSlice, "memory.limit_in_bytes"), max)
 	})
 
 	// Both halves of the name guard's truth table. The reject set is the
@@ -372,7 +408,7 @@ func TestResolvePodCgroupMemoryPaths_Guards(t *testing.T) {
 				root := t.TempDir()
 				parent := mkPodCgroupTree(t, root, filepath.Join("kubepods.slice", tt.baseName),
 					podFiles, testNodeAgentID)
-				cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID)
+				cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, testPodUID, true)
 				if tt.accept {
 					assert.Equal(t, filepath.Join(parent, "memory.current"), cur)
 					assert.Equal(t, filepath.Join(parent, "memory.max"), max)
@@ -408,7 +444,7 @@ func TestResolvePodCgroupMemoryPaths_PodUIDVerification(t *testing.T) {
 			root := t.TempDir()
 			parent := mkPodCgroupTree(t, root, filepath.Join("kubepods.slice", tt.sliceName),
 				podFiles, testNodeAgentID)
-			cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, tt.ownPodUID)
+			cur, max := resolvePodCgroupMemoryPathsUnder(root, testNodeAgentID, tt.ownPodUID, true)
 			if tt.accept {
 				assert.Equal(t, filepath.Join(parent, "memory.current"), cur)
 				assert.Equal(t, filepath.Join(parent, "memory.max"), max)

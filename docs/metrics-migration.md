@@ -110,7 +110,7 @@ previously missing event types (`exit`, `fork`).
 ### Cgroup Scope Resolution Hardening (accuracy fix, no name change)
 
 `node_agent_process_memory_cgroup_bytes` / `..._cgroup_limit_bytes` (and the new pod-level
-metrics above) are read via `findCgroupScopeDir` / `resolveCgroupMemoryPaths`, which had three
+metrics above) are read via `findCgroupScopeDir` / `resolveCgroupMemoryPaths`, which had several
 defects fixed alongside the pod-level metric addition — no metric was renamed, but
 previously-silent or previously-wrong readings on affected hosts will now report correctly:
 
@@ -123,19 +123,33 @@ previously-silent or previously-wrong readings on affected hosts will now report
   the process lifetime. The resolver now keeps walking until it finds a directory that actually
   has one (`memory.current` on v2, `memory.usage_in_bytes` on v1), and reads the correct
   filename pair for whichever it found — so v1 hosts get correctly *container-scoped* numbers
-  instead of `0`, not just a `0` that's harder to trigger.
-- **A caller with a known container ID never falls through to the unscoped resolution
-  strategies.** Those strategies read from the cgroup root itself, which is only a valid proxy
-  for "this container's memory" when the caller mounts its own namespaced cgroup root (the
-  sbom-scanner sidecar topology, `ownContainerID == ""`). For the main agent, which bind-mounts
-  the *host's* cgroup tree, that same root is the whole node — an earlier version of this fix
-  did fall through in that case, which would have silently reported node-wide memory as this
-  container's own on any host where the scoped lookup failed. Fixed before merge; a container
-  ID that can't be scope-resolved now reports `0`, never a plausible-looking wrong number.
+  instead of `0`, not just a `0` that's harder to trigger. This applies to both the container-
+  and pod-level resolvers.
+- **A host-mounted caller never falls through to the unscoped resolution strategies.** Those
+  strategies read from the cgroup root itself, which is only a valid proxy for "this container's
+  memory" when the caller mounts its own namespaced cgroup root (the sbom-scanner sidecar, and
+  any entrypoint that isn't the Kubernetes DaemonSet). For the DaemonSet, which bind-mounts the
+  *host's* cgroup tree, that same root is the whole node. This is a property of the deployment
+  topology (`hostCgroupMounted`, passed explicitly by each entrypoint), not of whether a
+  container ID happens to be known for a given call — an earlier version of this fix inferred
+  it from `ownContainerID == ""` instead, which left the same node-wide misattribution reachable
+  through a different door: an empty container ID on the host-mounted DaemonSet (e.g. a
+  permanently-cached early-startup race, before this pod's own `ContainerStatuses` entry
+  exists) still bind-mounts the host tree, so falling through in that case was exactly as wrong
+  as falling through after a failed scoped lookup. Both doors are closed now; a host-mounted
+  caller that can't verify a container-scoped directory always reports `0`, never a
+  plausible-looking wrong number, regardless of why the container ID wasn't known.
 - Scoped to the **systemd** cgroup driver; hosts on the cgroupfs driver still read `0` for
   both the container- and pod-level cgroup metrics (pre-existing, unchanged by this PR —
   tracked as a follow-up, since `findCgroupScopeDir` requires a `.scope`-suffixed name that
-  cgroupfs layouts never produce).
+  cgroupfs layouts never produce). This is the only remaining declared non-goal; cgroup v1 is
+  now fully supported at both the container and pod level.
+- The two currently-silent `resolveOwnContainerID` failure paths (missing `POD_NAME`/
+  `NAMESPACE_NAME`, and no `ContainerStatuses` entry named `node-agent` yet) now log a
+  `Warning`, as does an unresolved container ID on the DaemonSet reaching
+  `RegisterPodMemoryMetrics`. Combined with the resolver's own rejection log (also raised to
+  `Warning`), the empty-container-ID and cgroup-v1 populations should both become directly
+  observable in logs post-deploy.
 
 **On the production data cited during development:** per-pod SigNoz telemetry showed 35% of
 live pods reporting `cgroup_bytes == 0` while `rss_bytes > 0`, and 2% showing a smaller genuine
