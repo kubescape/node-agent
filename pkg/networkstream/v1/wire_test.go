@@ -460,11 +460,12 @@ func TestSelectProcessTrees_PrefersSmallestTrees(t *testing.T) {
 		"the single-connection process with the smallest tree must keep it — that is the beacon shape")
 }
 
-// TestSelectProcessTrees_OversizedTreeDoesNotBlockSmallOnes: the packing loop skips
-// rather than stops, so one oversized tree cannot starve the rest. Such a tree must be
-// WIDE — maxTreeDepth caps a chain at 64 nodes — so this is defensive: real trees are
-// chains.
-func TestSelectProcessTrees_OversizedTreeDoesNotBlockSmallOnes(t *testing.T) {
+// TestSelectProcessTrees_OversizedTreeIsExcluded: a tree larger than the whole budget
+// must be dropped while the rest still ship. Note what this does NOT prove: it passes
+// under either loop shape, because the ascending sort puts the small trees first — the
+// skip-vs-break branch is unreachable, not load-bearing. Such a tree also has to be
+// WIDE, since maxTreeDepth caps a chain at 64 nodes, so real chains never hit this.
+func TestSelectProcessTrees_OversizedTreeIsExcluded(t *testing.T) {
 	huge := armotypes.ProcessRef{PID: 1, StartTimeNs: 10_000_000}
 	oversized := &armotypes.Process{PID: 1, Comm: "p", ChildrenMap: map[armotypes.CommPID]*armotypes.Process{}}
 	for i := 0; i < 4000; i++ {
@@ -813,4 +814,91 @@ func escapeHeavyBytes(rng *rand.Rand, n int) string {
 		b[i] = []byte{'<', '>', '&', '"', '\\', 0x01, 0x1f, 0x80, 0xff}[rng.Intn(9)]
 	}
 	return string(b)
+}
+
+// TestSelectProcessTrees_MaximisesTreesKept pins the ranking ORDER, which
+// TestSelectProcessTrees_PrefersSmallestTrees does not: every tree there is the same
+// size, so ordering only decides which equal-sized trees ship. Mixing two size
+// populations makes the shipped COUNT depend on the order, which is the property
+// smallest-first exists for.
+func TestSelectProcessTrees_MaximisesTreesKept(t *testing.T) {
+	const smallBytes, largeBytes = 20_000, 80_000
+	smallEst := estimateTreeBytes(bigTree(1, smallBytes))
+	require.Greater(t, estimateTreeBytes(bigTree(1, largeBytes)), smallEst*3,
+		"the two populations must be far enough apart to discriminate")
+
+	events := map[string]armotypes.NetworkStreamEvent{}
+	smallRefs := map[armotypes.ProcessRef]bool{}
+	for pid := uint32(1); pid <= 200; pid++ {
+		ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+		smallRefs[*ref] = true
+		events[fmt.Sprintf("10.1.0.%d/443/TCP/%d/10000000", pid%256, pid)] =
+			armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, smallBytes)}
+	}
+	for pid := uint32(1000); pid < 1100; pid++ {
+		ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+		events[fmt.Sprintf("10.2.0.%d/443/TCP/%d/10000000", pid%256, pid)] =
+			armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, largeBytes)}
+	}
+
+	wire := buildWireStream(outboundOnly("c1", events))
+
+	// Greedy-smallest is optimal for "most processes keep a tree", so the expected
+	// count is computable rather than a magic number.
+	want := min(maxProcessTreeBytes/smallEst, 200)
+	assert.Equal(t, want, len(wire.Processes), "ranking must maximise how many processes keep a tree")
+	for ref := range wire.Processes {
+		assert.True(t, smallRefs[ref], "a large tree displaced a small one: ranking is not smallest-first")
+	}
+}
+
+// TestSelectWithinBudget_StatsAreDerived pins the counters the budget warning reports.
+// They are the decision input for whether the budget needs raising, so they must be
+// consistent by construction rather than by an accumulator that a future change to the
+// packing loop could silently desynchronise.
+func TestSelectWithinBudget_StatsAreDerived(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		processes, stats := selectWithinBudget(nil)
+		assert.Nil(t, processes, "nil so omitempty drops the field")
+		assert.False(t, stats.exceeded)
+		assert.Zero(t, stats.candidates)
+	})
+
+	build := func(count, sizeBytes, connsEach int) map[armotypes.ProcessRef]*processCandidate {
+		candidates := map[armotypes.ProcessRef]*processCandidate{}
+		for pid := uint32(1); pid <= uint32(count); pid++ {
+			ref := armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
+			tree := bigTree(pid, sizeBytes)
+			candidates[ref] = &processCandidate{
+				ref: ref, tree: tree, connections: connsEach, estBytes: estimateTreeBytes(tree),
+			}
+		}
+		return candidates
+	}
+
+	t.Run("under budget", func(t *testing.T) {
+		candidates := build(20, 2048, 3)
+		processes, stats := selectWithinBudget(candidates)
+		assert.False(t, stats.exceeded)
+		assert.Len(t, processes, 20)
+		assert.Equal(t, 20, stats.treesShipped)
+		assert.Zero(t, stats.treesDropped)
+		assert.Zero(t, stats.connectionsWithoutTree)
+	})
+
+	t.Run("over budget", func(t *testing.T) {
+		const count, connsEach = 1000, 4
+		candidates := build(count, 12288, connsEach)
+		processes, stats := selectWithinBudget(candidates)
+
+		require.True(t, stats.exceeded, "this case must exceed the budget")
+		assert.Equal(t, count, stats.candidates)
+		assert.Equal(t, len(processes), stats.treesShipped)
+		// The identities that hold however the loop is written.
+		assert.Equal(t, count, stats.treesShipped+stats.treesDropped,
+			"every candidate is either shipped or counted as dropped")
+		assert.Equal(t, stats.treesDropped*connsEach, stats.connectionsWithoutTree,
+			"connections without a tree must follow from the trees actually dropped")
+		assert.Greater(t, stats.estimatedBytes, maxProcessTreeBytes)
+	})
 }

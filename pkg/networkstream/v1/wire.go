@@ -38,9 +38,13 @@ const maxTreeDepth = 64
 const maxProcessTreeBytes = 2560 * 1024
 
 // processNodeOverheadBytes is one node's non-string JSON cost: field names, the
-// numeric ids, the always-serialised start time and the childrenMap wrapper. ~360
-// measured for a fully-populated node; generous on purpose, since underestimating
-// risks the limit. Per-entry map keys are charged explicitly, not from this slack.
+// numeric ids, the always-serialised start time and the childrenMap wrapper.
+//
+// Measured at ~149 bytes (133 for a node with every numeric at max and strings
+// empty, plus ~16 for the childrenMap wrapper). 320 is therefore deliberate
+// headroom, not a measurement: it absorbs the fields not modelled individually,
+// such as ProcessTree.UniqueID, and anything added to the type later. Per-entry map
+// keys are charged explicitly rather than from this slack.
 const processNodeOverheadBytes = 320
 
 // processMapKeyOverheadBytes is a childrenMap entry key's cost apart from the comm:
@@ -133,22 +137,54 @@ func collectTrees(events map[string]armotypes.NetworkStreamEvent, candidates map
 // Connections are never dropped — only trees. Their refs stay put, so pid identity
 // survives and ProcessTreeFor returns nil for them as specified.
 func selectProcessTrees(candidates map[armotypes.ProcessRef]*processCandidate) map[armotypes.ProcessRef]*armotypes.ProcessTree {
+	processes, stats := selectWithinBudget(candidates)
+	if stats.exceeded {
+		// Logged so we learn whether this ever fires in production; these counts are
+		// the decision input for raising the budget or making it configurable.
+		logger.L().Warning("NetworkStream - process tree budget exceeded, dropping the largest trees",
+			helpers.Int("processesWithTrees", stats.candidates),
+			helpers.Int("treesShipped", stats.treesShipped),
+			helpers.Int("treesDropped", stats.treesDropped),
+			helpers.Int("connectionsWithoutTree", stats.connectionsWithoutTree),
+			helpers.Int("estimatedTreeBytes", stats.estimatedBytes),
+			helpers.Int("budgetBytes", maxProcessTreeBytes))
+	}
+	return processes
+}
+
+// budgetStats reports what a selection did. The drop figures are DERIVED from the
+// result rather than accumulated inside the packing loop, so they stay correct
+// however that loop is later restructured.
+type budgetStats struct {
+	candidates             int
+	treesShipped           int
+	treesDropped           int
+	connectionsWithoutTree int
+	estimatedBytes         int
+	exceeded               bool
+}
+
+func selectWithinBudget(candidates map[armotypes.ProcessRef]*processCandidate) (map[armotypes.ProcessRef]*armotypes.ProcessTree, budgetStats) {
+	stats := budgetStats{candidates: len(candidates)}
 	if len(candidates) == 0 {
-		return nil
+		return nil, stats
 	}
 
-	totalBytes := 0
+	totalConnections := 0
 	for _, candidate := range candidates {
-		totalBytes += candidate.estBytes
+		stats.estimatedBytes += candidate.estBytes
+		totalConnections += candidate.connections
 	}
 
 	processes := make(map[armotypes.ProcessRef]*armotypes.ProcessTree, len(candidates))
-	if totalBytes <= maxProcessTreeBytes {
+	if stats.estimatedBytes <= maxProcessTreeBytes {
 		for ref, candidate := range candidates {
 			processes[ref] = capTreeCopy(candidate.tree)
 		}
-		return processes
+		stats.treesShipped = len(processes)
+		return processes, stats
 	}
+	stats.exceeded = true
 
 	ordered := make([]*processCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -165,28 +201,23 @@ func selectProcessTrees(candidates map[armotypes.ProcessRef]*processCandidate) m
 		return a.ref.StartTimeNs < b.ref.StartTimeNs
 	})
 
-	usedBytes, droppedTrees, droppedConnections := 0, 0, 0
+	usedBytes, shippedConnections := 0, 0
 	for _, candidate := range ordered {
-		// Skip rather than stop, so a small tree still ships after an oversized one.
+		// Defensive only: the ascending sort means nothing after the first miss can
+		// fit either, so this is equivalent to breaking. It costs one comparison and
+		// survives a future change to the ordering.
 		if usedBytes+candidate.estBytes > maxProcessTreeBytes {
-			droppedTrees++
-			droppedConnections += candidate.connections
 			continue
 		}
 		processes[candidate.ref] = capTreeCopy(candidate.tree)
 		usedBytes += candidate.estBytes
+		shippedConnections += candidate.connections
 	}
 
-	// Logged so we learn whether this ever fires in production.
-	logger.L().Warning("NetworkStream - process tree budget exceeded, dropping the largest trees",
-		helpers.Int("processesWithTrees", len(candidates)),
-		helpers.Int("treesShipped", len(processes)),
-		helpers.Int("treesDropped", droppedTrees),
-		helpers.Int("connectionsWithoutTree", droppedConnections),
-		helpers.Int("estimatedTreeBytes", totalBytes),
-		helpers.Int("budgetBytes", maxProcessTreeBytes))
-
-	return processes
+	stats.treesShipped = len(processes)
+	stats.treesDropped = len(candidates) - len(processes)
+	stats.connectionsWithoutTree = totalConnections - shippedConnections
+	return processes, stats
 }
 
 // estimateTreeBytes approximates a tree's serialised size, counting the command

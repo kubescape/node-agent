@@ -78,6 +78,32 @@ The ref is computed **before** `eventsStorageMutex` is taken. The lookup acquire
 the process tree's read lock, and holding the storage mutex across it would add a
 storage→tree lock-order edge for no benefit.
 
+### Known cost: the ref lookup is on the packet path
+
+`processRefFor` runs for **every** network and DNS event, including duplicates —
+unavoidably, since the dedup key contains the ref, so the ref must exist before the key
+can be built. It takes `ProcessTreeManagerImpl.mutex.RLock()` and then the creator's
+`RLock()` to read one map entry, and `ProcessTreeManagerImpl.ReportEvent` write-locks
+that same manager mutex for every exec/fork/exit/procfs event. Before attribution the
+network path never touched those locks at all.
+
+Measured on the duplicate-connection path (8 threads, real `ProcessTreeManagerImpl`;
+control is the same benchmark with the lookup short-circuited):
+
+| | ns/op |
+|---|---|
+| Idle tree, control | 210 |
+| Idle tree, with ref lookup | 244 |
+| 4 goroutines of exec churn, control | 254–271 |
+| 4 goroutines of exec churn, with ref lookup | 996–1035 |
+
+~16% idle, **~3.9× under exec churn** — essentially all write-lock contention, so it
+lands hardest on the fork-heavy nodes this feature's budget was calibrated for. The
+lookup is inherent to the design; the contention is not. A dedicated RWMutex for the
+creator's `pidStartTimeNs` side map, or an atomic/sharded read, would keep packet
+handling off the process-tree writer's critical path. That change belongs in
+`pkg/processtree/creator` and is left to the workstream that owns it.
+
 ## The flush: one snapshot, two consumers
 
 The flush has two consumers with different needs:
@@ -213,22 +239,22 @@ so trees scale 1:1 with connections — with production-weight connection entrie
 |---|---|---|---|
 | 42 (the mean) | all 42 | 0.20 MiB | 0.26 MiB |
 | **283 (observed worst)** | **all 283** | 1.33 MiB | **1.77 MiB — 35% of limit** |
-| 500 | all 500 | 2.35 MiB | 3.13 MiB |
-| 1000 | 513 (budget binds) | 2.70 MiB | 3.60 MiB |
-| 4000 | 513 | 4.50 MiB | **6.01 MiB — over the limit, on entries alone** |
+| 500 | 461 (budget binds) | 2.19 MiB | 2.92 MiB |
+| 1000 | 461 | 2.49 MiB | 3.31 MiB |
+| 4000 | 461 | 4.29 MiB | **5.72 MiB — over the limit, on entries alone** |
 
 Two load-bearing rows. The **283** row: the budget must not bind on traffic
 production actually produces, or it degrades attribution on exactly the busiest
 nodes — a tighter 1.5 MiB was tried first and rejected, because it clips 70 of those
 283 trees while the payload is barely a third of the limit.
 `TestBuildWireStream_ObservedWorstCaseFitsBudget` pins that and fails at 1.5 MiB.
-The **4000** row is the residual below: past ~3,300 connections the entries alone
+The **4000** row is the residual below: past ~3,000 connections the entries alone
 exceed the limit no matter how tightly trees are bounded.
 
 - **A byte budget, not a tree count.** Tree size is not uniform — depth varies,
   fields are variable-length, and JSON escaping inflates some content ~6× (below),
   so no count bounds the payload. The estimator overestimates real marshalled size
-  by ~19% for realistic trees, and `TestEstimateTreeBytes_NeverUnderestimates`
+  by ~33% for realistic trees, and `TestEstimateTreeBytes_NeverUnderestimates`
   enforces that it never goes the other way.
 
 #### JSON escaping is what makes the estimate honest
@@ -268,13 +294,21 @@ invariant nothing in this repo enforces — with an unbounded comm the old accou
   precise case reputation attribution exists to catch. The ref tie-break keeps the
   shipped set independent of map iteration order, which
   `TestSelectProcessTrees_IsDeterministic` pins.
-- The budget holds ~513 fully-populated 10-node chains — 1.8x the observed worst
+- The budget holds ~461 fully-populated 10-node chains — 1.6x the observed worst
   batch — so it is a safety valve rather than a routine limiter.
 
-**Residual, deliberately not fixed here.** With trees bounded, the connection
-*entries* alone breach the limit at roughly **3,300 connections** at the
-production-derived ~530 B per entry — 11x the observed worst batch, and measured at
-6.01 MiB for 4,000. No tree budget can help there. The fix for that regime is
+**Residual, deliberately not fixed here.** Two things this budget does not cover.
+
+First, **it bounds the wire, not the heap.** With the process-aware key,
+`networkEventsStorage` retains one entry per (process, endpoint) for the whole flush
+interval, each pinning a `*ProcessTree`, and nothing caps that — resident memory grows
+with distinct processes even though the payload is trimmed on the way out. Capping it
+would mean dropping connections, which is the data loss this change exists to fix, so
+the honest position is that it is unbounded and monitored rather than bounded.
+
+Second, the connection *entries* alone breach the message limit at roughly **3,000
+connections** at the production-derived ~530 B per entry — 10x the observed worst
+batch, and measured at 5.72 MiB for 4,000. No tree budget can help there. The fix for that regime is
 splitting the message — as the container profile does on HTTP 413,
 `docs/features/container-profile-split-on-413.md` — not dropping connections. The
 logging below is what would tell us it is being approached.
