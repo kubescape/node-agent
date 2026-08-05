@@ -241,15 +241,19 @@ so trees scale 1:1 with connections — with production-weight connection entrie
 | **283 (observed worst)** | **all 283** | 1.33 MiB | **1.77 MiB — 35% of limit** |
 | 500 | 461 (budget binds) | 2.19 MiB | 2.92 MiB |
 | 1000 | 461 | 2.49 MiB | 3.31 MiB |
-| 4000 | 461 | 4.29 MiB | **5.72 MiB — over the limit, on entries alone** |
+| 4000 | 461 | 3.93 MiB | **5.24 MiB — over the limit** |
+
+Tree bytes are measured; entry bytes are **modelled** at the production-derived 530 B,
+not measured, so the two are added rather than read off one payload — see the residual
+section for why that distinction matters.
 
 Two load-bearing rows. The **283** row: the budget must not bind on traffic
 production actually produces, or it degrades attribution on exactly the busiest
 nodes — a tighter 1.5 MiB was tried first and rejected, because it clips 70 of those
 283 trees while the payload is barely a third of the limit.
 `TestBuildWireStream_ObservedWorstCaseFitsBudget` pins that and fails at 1.5 MiB.
-The **4000** row is the residual below: past ~3,000 connections the entries alone
-exceed the limit no matter how tightly trees are bounded.
+The **4000** row is the residual below: with the tree budget saturated, the message
+exceeds the limit at roughly 3,000 connections.
 
 - **A byte budget, not a tree count.** Tree size is not uniform — depth varies,
   fields are variable-length, and JSON escaping inflates some content ~6× (below),
@@ -306,12 +310,37 @@ with distinct processes even though the payload is trimmed on the way out. Cappi
 would mean dropping connections, which is the data loss this change exists to fix, so
 the honest position is that it is unbounded and monitored rather than bounded.
 
-Second, the connection *entries* alone breach the message limit at roughly **3,000
-connections** at the production-derived ~530 B per entry — 10x the observed worst
-batch, and measured at 5.72 MiB for 4,000. No tree budget can help there. The fix for that regime is
-splitting the message — as the container profile does on HTTP 413,
-`docs/features/container-profile-split-on-413.md` — not dropping connections. The
-logging below is what would tell us it is being approached.
+Second, connection volume alone can exceed the message limit. Be precise about which
+number means what, because the difference decides what an operator should do:
+
+| | connections |
+|---|---|
+| Breach **with the tree budget saturated** (today's configuration) | ~3,000 |
+| Breach from connection **entries alone**, if trees took no space at all | ~7,400 |
+
+The usable budget is 3.75 MiB of JSON (5 MiB after base64's x1.333). At 4,000
+connections the entries are 4,000 x 530 B = 2.02 MiB and the saturated trees are
+~1.91 MiB; back the trees out and 3.75 - 1.91 leaves room for ~2,900 entries, which is
+where the ~3,000 comes from. Entries alone would not breach until 3,932,160 / 530 =
+~7,400.
+
+**So the tree budget IS a lever in that regime** — trees are roughly half the payload,
+and tightening `maxProcessTreeBytes` moves the breach point out, toward ~7,400 as the
+budget approaches zero. That is the fastest thing to reach for during an incident: no
+protocol change, no backend coordination.
+
+Splitting the message remains the better long-term fix, because tightening the budget
+buys headroom by shipping fewer process trees — the attribution this feature exists to
+deliver — whereas splitting keeps all of it. One prerequisite before anyone builds it:
+the container-profile precedent
+(`docs/features/container-profile-split-on-413.md`) reacts to a **synchronous** HTTP 413
+from storage's `QueueManager`. This path posts elsewhere, handles no 413 anywhere, and
+the 5 MiB cap is a broker limit whose enforcement point is unverified (SUB-7850). If it
+is enforced downstream at the broker, the sensor sees `200 OK` and never learns, so
+reactive splitting is unavailable and the split must be decided before the first send.
+Settle that before designing.
+
+The logging below is what would tell us any of this is being approached.
 
 ### Observability, because the real distribution is not knowable yet
 
