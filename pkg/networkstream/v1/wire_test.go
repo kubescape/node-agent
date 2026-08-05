@@ -330,7 +330,11 @@ func TestBigTree_ReachesRequestedSize(t *testing.T) {
 	for _, want := range []int{2048, 5222, 7270, 12288} {
 		got := estimateTreeBytes(bigTree(1, want))
 		assert.GreaterOrEqual(t, got, want, "bigTree(%d) estimated only %d bytes", want, got)
-		assert.Less(t, got, want+processNodeOverheadBytes+maxCmdlineBytes, "bigTree(%d) overshot at %d", want, got)
+		// A proportional ceiling: the point is that the helper lands near the size it
+		// was asked for, not that it matches an exact byte count that shifts whenever
+		// per-node accounting changes.
+		assert.Less(t, got, want*5/4+processNodeOverheadBytes+maxCmdlineBytes,
+			"bigTree(%d) overshot at %d", want, got)
 	}
 }
 
@@ -516,10 +520,14 @@ func TestEstimateTreeBytes_CountsCappedCmdline(t *testing.T) {
 	short := treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh", Cmdline: "sh -c true"})
 	assert.Greater(t, estimateTreeBytes(short), processNodeOverheadBytes)
 
-	// A 200 KB command line must be counted as its capped size, not its raw size —
-	// otherwise the budget would reject trees that are actually small on the wire.
+	// A 200 KB command line must be counted at its CAPPED size, not its raw size —
+	// otherwise the budget would reject trees that are small on the wire. Asserted
+	// against the raw length rather than a tight constant, so the bound states the
+	// intent and does not have to be retuned whenever per-node accounting changes.
 	huge := treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh", Cmdline: strings.Repeat("a", 200_000)})
-	assert.Less(t, estimateTreeBytes(huge), processNodeOverheadBytes+maxCmdlineBytes+64)
+	estimate := estimateTreeBytes(huge)
+	assert.Greater(t, estimate, maxCmdlineBytes, "the capped command line is still counted")
+	assert.Less(t, estimate, 4*maxCmdlineBytes, "but nothing close to the 200 KB raw length")
 }
 
 // TestBuildWireStream_ObservedWorstCaseFitsBudget pins the CALIBRATION, not the
@@ -564,6 +572,65 @@ func realisticNode(pid uint32, cmdline string) *armotypes.Process {
 		Uid: &uid, Gid: &gid, UpperLayer: &upper, StartTime: time.Unix(1754290000, 994619533),
 		ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 	}
+}
+
+// escapeHeavyComm is 15 bytes — the kernel's TASK_COMM_LEN bound — of a character
+// JSON expands to 6 bytes, so escapedLen is 90 against a len of 15.
+const escapeHeavyComm = "<<<<<<<<<<<<<<<"
+
+func escapeHeavyCommTree(children int) *armotypes.ProcessTree {
+	root := realisticNode(1, "sh")
+	for i := 0; i < children; i++ {
+		child := realisticNode(uint32(1000+i), "/usr/bin/curl https://example.com")
+		child.Comm = escapeHeavyComm
+		root.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
+	}
+	return treeOf("c1", root)
+}
+
+func escapeHeavyCommLegacyTree(children int) *armotypes.ProcessTree {
+	root := realisticNode(1, "sh")
+	for i := 0; i < children; i++ {
+		child := realisticNode(uint32(1000+i), "/usr/bin/curl https://example.com")
+		child.Comm = escapeHeavyComm
+		root.Children = append(root.Children, *child)
+	}
+	return treeOf("c1", root)
+}
+
+func unboundedCommTree(children, commBytes int) *armotypes.ProcessTree {
+	root := realisticNode(1, "sh")
+	for i := 0; i < children; i++ {
+		child := realisticNode(uint32(1000+i), "/usr/bin/curl https://example.com")
+		child.Comm = strings.Repeat("<", commBytes)
+		root.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
+	}
+	return treeOf("c1", root)
+}
+
+func unboundedCommLegacyTree(children, commBytes int) *armotypes.ProcessTree {
+	root := realisticNode(1, "sh")
+	for i := 0; i < children; i++ {
+		child := realisticNode(uint32(1000+i), "/usr/bin/curl https://example.com")
+		child.Comm = strings.Repeat("<", commBytes)
+		root.Children = append(root.Children, *child)
+	}
+	return treeOf("c1", root)
+}
+
+func escapeHeavyCommChain(nodes int) *armotypes.ProcessTree {
+	var root, prev *armotypes.Process
+	for i := 0; i < nodes; i++ {
+		node := realisticNode(uint32(100+i), "/usr/bin/curl https://example.com")
+		node.Comm = escapeHeavyComm
+		if prev == nil {
+			root = node
+		} else {
+			prev.ChildrenMap[armotypes.CommPID{Comm: node.Comm, PID: node.PID}] = node
+		}
+		prev = node
+	}
+	return treeOf("c1", root)
 }
 
 // TestEstimateTreeBytes_NeverUnderestimates is the guard the budget rests on: if the
@@ -613,6 +680,23 @@ func TestEstimateTreeBytes_NeverUnderestimates(t *testing.T) {
 			Path: strings.Repeat("\x80", 20_000), Cwd: strings.Repeat("&", 20_000)})},
 		{"legacy Children shape", treeOf("c1", &armotypes.Process{PID: 1, Comm: "sh",
 			Children: []armotypes.Process{*realisticNode(2, strings.Repeat("<&>", 400))}})},
+		// A child's comm is emitted TWICE — as its own field and inside the parent's
+		// childrenMap key — so it must be charged twice. At the kernel's 15-byte comm
+		// bound the per-node slack happens to absorb the difference, so these cases
+		// are regression cover for the near-break-even region...
+		{"escape-heavy child comm, fan-out 5", escapeHeavyCommTree(5)},
+		{"escape-heavy child comm, fan-out 200", escapeHeavyCommTree(200)},
+		{"escape-heavy child comm, legacy Children", escapeHeavyCommLegacyTree(50)},
+		{"escape-heavy child comm, 64-node chain", escapeHeavyCommChain(64)},
+		// ...and these are the cases that actually discriminate. Nothing in this repo
+		// enforces a comm length — it is only ever 15 bytes because every source is a
+		// kernel TASK_COMM_LEN buffer. The estimate must not depend on that: with an
+		// unbounded comm the old accounting ran ~48% under, and a bound that rests on
+		// an unenforced external invariant is not a bound.
+		{"unbounded child comm, fan-out 200", unboundedCommTree(200, 1024)},
+		{"unbounded child comm, legacy Children", unboundedCommLegacyTree(200, 1024)},
+		// containerID lives on the wrapper and is escaped like any other string.
+		{"escape-heavy containerID", treeOf(strings.Repeat("<", 64), realisticNode(1, "sh"))},
 	}
 
 	for _, tc := range cases {
@@ -686,9 +770,24 @@ func TestEstimateTreeBytes_NeverUnderestimatesRandom(t *testing.T) {
 			UserName: randomBytes(rng.Intn(30)), GroupName: randomBytes(rng.Intn(30)),
 			ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
 		}
-		for c := 0; c < rng.Intn(4); c++ {
-			child := &armotypes.Process{PID: uint32(rng.Intn(1 << 20)), Comm: randomBytes(rng.Intn(20)),
-				Cmdline: randomBytes(rng.Intn(2000)), Path: randomBytes(rng.Intn(200))}
+		// Children are FULLY populated, and comms are drawn at the kernel's 15-byte
+		// bound from the escape-heavy alphabet. A previous generator set only four
+		// fields per child, which left the per-node slack untouched and could never
+		// reach the deficit region where the childrenMap key made the estimate
+		// undercount — 200k trees found nothing.
+		for c := 0; c < rng.Intn(6); c++ {
+			uid, gid := uint32(rng.Intn(70000)), uint32(rng.Intn(70000))
+			upper := rng.Intn(2) == 0
+			child := &armotypes.Process{
+				PID: uint32(rng.Intn(1 << 20)), PPID: uint32(rng.Intn(1 << 20)),
+				Comm: escapeHeavyBytes(rng, 15), Pcomm: escapeHeavyBytes(rng, 15),
+				Cmdline: randomBytes(rng.Intn(2000)), Path: randomBytes(rng.Intn(200)),
+				Cwd: randomBytes(rng.Intn(200)), Hardlink: randomBytes(rng.Intn(60)),
+				UserName: randomBytes(rng.Intn(30)), GroupName: randomBytes(rng.Intn(30)),
+				Uid: &uid, Gid: &gid, UpperLayer: &upper,
+				StartTime:   time.Unix(int64(1754290000+rng.Intn(1000)), int64(rng.Intn(1e9))),
+				ChildrenMap: map[armotypes.CommPID]*armotypes.Process{},
+			}
 			node.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
 		}
 		tree := treeOf(randomBytes(rng.Intn(40)), node)
@@ -699,4 +798,19 @@ func TestEstimateTreeBytes_NeverUnderestimatesRandom(t *testing.T) {
 		require.GreaterOrEqual(t, est, len(payload),
 			"iteration %d: estimate %d < marshalled %d — the budget would not bound the payload", i, est, len(payload))
 	}
+}
+
+// escapeHeavyBytes builds a string of n bytes weighted heavily toward characters
+// JSON expands to six bytes, which is the region where a len()-based estimate
+// undercounts the marshalled size.
+func escapeHeavyBytes(rng *rand.Rand, n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		if rng.Intn(4) == 0 {
+			b[i] = byte(0x20 + rng.Intn(0x5f)) // plain ASCII
+			continue
+		}
+		b[i] = []byte{'<', '>', '&', '"', '\\', 0x01, 0x1f, 0x80, 0xff}[rng.Intn(9)]
+	}
+	return string(b)
 }

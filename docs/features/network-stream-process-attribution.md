@@ -248,6 +248,15 @@ true escaped cost (rounding every escape up to 6 bytes), which is what makes
 `maxProcessTreeBytes` an actual bound. Note this is reachable deliberately by
 anyone able to exec in any container on the node, which made it a detection-evasion
 primitive rather than merely a bug.
+
+Two further accounting gaps were closed after CodeRabbit review. A child's `comm` is
+emitted **twice** — as its own field and inside the parent's `childrenMap` key, which
+`CommPID.MarshalText` renders as `comm␟pid` — so it is now charged twice, together with
+the key's structural bytes; and `containerID` was charged with a bare `len()`. Neither
+was reachable in production: comm is only ever 15 bytes because every source is a kernel
+`TASK_COMM_LEN` buffer, and container IDs are hex. But the estimate must not rest on an
+invariant nothing in this repo enforces — with an unbounded comm the old accounting ran
+**48% under**, and a bound that depends on an unenforced assumption is not a bound.
 - **Connections are never dropped** — that is the data loss this change exists to
   fix. Only trees are, and the refs stay on the connections, so pid identity
   survives and `ProcessTreeFor` returns nil for them as specified.

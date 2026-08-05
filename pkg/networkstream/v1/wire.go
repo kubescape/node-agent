@@ -32,15 +32,21 @@ const maxTreeDepth = 64
 // payload scale with distinct processes, which nothing else limits.
 //
 // Bytes rather than a tree count, because tree size varies too much for any count
-// to bound the payload. 2.5 MiB holds ~513 realistic trees — well above the largest
+// to bound the payload. 2.5 MiB holds ~461 realistic trees — well above the largest
 // batch observed in production (283 connections), so it is a safety valve rather
 // than a routine limiter.
 const maxProcessTreeBytes = 2560 * 1024
 
-// processNodeOverheadBytes is one node's non-string JSON cost: field names, ids,
-// the always-serialised start time, and the childrenMap key. ~360 measured for a
-// fully-populated node; generous on purpose, since underestimating risks the limit.
+// processNodeOverheadBytes is one node's non-string JSON cost: field names, the
+// numeric ids, the always-serialised start time and the childrenMap wrapper. ~360
+// measured for a fully-populated node; generous on purpose, since underestimating
+// risks the limit. Per-entry map keys are charged explicitly, not from this slack.
 const processNodeOverheadBytes = 320
+
+// processMapKeyOverheadBytes is a childrenMap entry key's cost apart from the comm:
+// two quotes, the separator CommPID.MarshalText writes (U+241F, three UTF-8 bytes),
+// up to ten digits of pid, and the colon and comma around the entry.
+const processMapKeyOverheadBytes = 2 + 3 + 10 + 2
 
 // escapedByteBytes is what one JSON-escaped byte costs. \uXXXX is the worst form;
 // the short forms cost 2 but are charged 6 as well, erring toward a smaller payload.
@@ -189,7 +195,8 @@ func estimateTreeBytes(tree *armotypes.ProcessTree) int {
 	if tree == nil {
 		return 0
 	}
-	return len(tree.ContainerID) + estimateProcessBytes(&tree.ProcessTree, maxTreeDepth)
+	return processNodeOverheadBytes + escapedLen(tree.ContainerID) +
+		estimateProcessBytes(&tree.ProcessTree, maxTreeDepth)
 }
 
 func estimateProcessBytes(node *armotypes.Process, budget int) int {
@@ -208,11 +215,20 @@ func estimateProcessBytes(node *armotypes.Process, budget int) int {
 		escapedLen(node.Comm) + escapedLen(node.Pcomm) + escapedLen(node.Path) +
 		escapedLen(node.Cwd) + escapedLen(node.Hardlink) +
 		escapedLen(node.UserName) + escapedLen(node.GroupName)
+	// A child's comm is emitted TWICE: as its own field, and again in this node's
+	// childrenMap key. Charging it once let the estimate undercount whenever a comm
+	// was escape-heavy enough to outgrow the per-node slack.
 	for _, child := range node.ChildrenMap {
-		total += estimateProcessBytes(child, budget-1)
+		if child == nil {
+			continue
+		}
+		total += processMapKeyOverheadBytes + escapedLen(child.Comm) +
+			estimateProcessBytes(child, budget-1)
 	}
 	for i := range node.Children {
-		total += estimateProcessBytes(&node.Children[i], budget-1)
+		child := &node.Children[i]
+		total += processMapKeyOverheadBytes + escapedLen(child.Comm) +
+			estimateProcessBytes(child, budget-1)
 	}
 	return total
 }
