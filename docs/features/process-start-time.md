@@ -127,26 +127,27 @@ alone does not prove reuse — some other path may simply have created it first 
 and wiping on that weaker signal would discard a good scan-recorded value
 whenever the on-demand read then fails.
 
-> **This guard covers the identity map only.** It is **not** process-id-reuse
-> hardening, and its benefit is temporary.
+> **This guard covers the identity map only**, and on its own it was not
+> process-id-reuse hardening.
 >
-> The dead process's entry in `pendingExits` survives the fork. When the delayed
-> cleanup fires — up to `cleanupDelay` after the *original* exit — it runs
-> `exitByPid` on that pid and deletes what is by then the **live** successor's
-> node, along with the start time just read for it. The pid reverts to reading
-> as unknown.
+> By itself it left the dead process's `pendingExits` entry in place, so the
+> delayed cleanup would later run `exitByPid` on that pid and delete what was by
+> then the **live** successor's node, along with the start time just read for it.
+> During the same window the node also still carried the dead process's `comm`,
+> `cmdline` and `path`, so an alert could name the wrong command.
 >
-> During the same window the node also still carries the dead process's `comm`,
-> `cmdline` and `path`, so an alert can name the wrong command.
+> Both are now fixed: a fork or exec on a pid with a pending exit retires the
+> predecessor properly — reparenting its children rather than merely dropping the
+> pending entry, which would leave them to be inherited by the successor. See
+> [process-id-reuse-hardening.md](./process-id-reuse-hardening.md), which also
+> covers the two recycle cases this guard never saw: one discovered only by the
+> `/proc` scan, and a delayed exit arriving for a node that is provably newer.
 >
-> Both are the pre-existing pid-reuse behaviour, tracked separately. The fix is
-> to retire the predecessor when a fork reuses a pid with a pending exit —
-> reparenting its children rather than merely dropping the pending entry, which
-> would leave them to be inherited by the successor.
+> The guard here still earns its place. It is what keeps the identity and display
+> halves of the start time from disagreeing, and it remains the fallback when the
+> teardown cannot complete because reparenting failed.
 
-The entry is deleted at the same point the tree node is deleted. Note that per
-the above, the node deleted may by then belong to a different process than the
-one whose exit scheduled the deletion.
+The entry is deleted at the same point the tree node is deleted.
 
 ## Reading it
 

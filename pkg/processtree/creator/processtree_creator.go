@@ -23,8 +23,22 @@ type processTreeCreatorImpl struct {
 	config                config.Config
 
 	// Exit manager fields
-	pendingExits        map[uint32]*pendingExit // PID -> pending exit
+	pendingExits map[uint32]*pendingExit // PID -> pending exit
+
+	// exitCleanupStopChan is the loop's stop signal while it is armed, and nil once
+	// stopped, which is what lets startExitManager bring the loop back up. It is
+	// an intent flag, not a liveness flag: it is non-nil before the goroutine has
+	// been scheduled, and nil while a signalled loop is still finishing its current
+	// iteration. Do not read it as "the loop is running".
+	//
+	// Every access in non-test code is under exitCleanupMutex, and NOT under
+	// pt.mutex: the tree lock is held across performExitCleanup, so reusing it for
+	// lifecycle transitions would couple shutdown to tree contention. Tests read
+	// the field directly, which is safe only because those reads are sequenced
+	// after Start/Stop returns and the loop never touches the field — it receives
+	// the channel as an argument.
 	exitCleanupStopChan chan struct{}
+	exitCleanupMutex    sync.Mutex
 
 	// pidStartTimeNs maps a live pid to its creation time in nanoseconds since
 	// boot, sourced EXCLUSIVELY from /proc/<pid>/stat field 22 (never from
@@ -40,6 +54,12 @@ type processTreeCreatorImpl struct {
 	// does not wait up to a full scan interval for its identity. Returns zeros
 	// when the process is already gone. Injectable for tests.
 	readStartTime func(pid uint32) (uint64, time.Time)
+
+	// nowBootNs reads CLOCK_BOOTTIME in nanoseconds, the same clock domain as
+	// pidStartTimeNs, so an exit's arrival can be compared against a node's
+	// recorded creation time. Injectable for tests; read through pt.bootTimeNs(),
+	// which tolerates a nil hook by returning 0 ("unknown").
+	nowBootNs func() uint64
 }
 
 func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree, config config.Config) ProcessTreeCreator {
@@ -57,6 +77,7 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		pendingExits:          make(map[uint32]*pendingExit),
 		pidStartTimeNs:        make(map[uint32]uint64),
 		readStartTime:         newProcfsStartTimeReader(),
+		nowBootNs:             readBootTimeNs,
 		config:                config,
 	}
 
@@ -223,25 +244,29 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
+	// A fork's pid is newborn, so a pending exit on it can only belong to a dead
+	// predecessor whose pid the kernel recycled. Retire that predecessor — node,
+	// children and pending entry — before touching the node below.
+	pt.retireRecycledPredecessor(event.PID)
+
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
 		proc = pt.getOrCreateProcess(event.PID)
 	} else if _, exited := pt.pendingExits[event.PID]; exited {
-		// The previous holder of this pid exited but its node is still around —
-		// exits linger for exitCleanup.cleanupDelay, 5 minutes by default — so a
-		// fork on it means the kernel recycled the pid. Drop BOTH halves of the
-		// stale start time, the identity value and the display value, so they
-		// cannot disagree, and let applyStartTime restamp them below.
+		// Reached only when retireRecycledPredecessor could not tear the node
+		// down: exitByPid bails out when reparenting fails, leaving both the node
+		// and the pending entry in place. Fall back to the narrower start-time
+		// guard — drop BOTH halves of the stale value, identity and display, so
+		// they cannot disagree, and let applyStartTime restamp them below.
 		//
 		// Gated on a pending exit rather than on the node merely existing: an
 		// existing node alone only means some other path created it first, and
 		// wiping on that weaker signal would discard a good scan-recorded value
 		// whenever the on-demand read then fails.
 		//
-		// Scoped to the start time. This is NOT pid-reuse hardening: the node
-		// still carries the dead process's comm, cmdline and path, and the dead
-		// process's pendingExits entry still schedules a delayed exitByPid that
-		// will remove this live successor's node. Both belong to SUB-7846.
+		// On this path the node keeps the dead process's comm, cmdline and path.
+		// That is deliberate: a failed reparent must fall through to exactly
+		// today's behaviour rather than invent a partial teardown.
 		delete(pt.pidStartTimeNs, event.PID)
 		proc.StartTime = time.Time{}
 	}
@@ -290,6 +315,45 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
+	// Pid-reuse guard (L3): two procfs readings of the same process always yield
+	// the identical starttime ticks, so a different NON-ZERO value proves the
+	// kernel recycled this pid. No tolerance is needed, and none should be added.
+	//
+	// Never merge across incarnations. The overwrite-only-if-non-empty block below
+	// preserves any field the new process does not report, so the dead process's
+	// Cwd, Path and friends would otherwise survive into it — a node describing
+	// two processes at once. Tear the stale node down instead and rebuild from this
+	// event. A pending exit for the dead incarnation is consumed here too, which
+	// disarms its delayed deletion.
+	//
+	// The children are reparented by the teardown. Most belonged to the dead
+	// process, but not necessarily all: this fires up to a scan interval after the
+	// recycle, so the successor may already have forked. Detaching a live child is
+	// a worse-in-one-direction trade against retaining a dead parent, and it
+	// self-corrects on the child's next scan — see the doc's observable changes.
+	//
+	// A zero on either side proves nothing and falls through to today's merge, so
+	// this never fires for a pid the side map has no prior value for. That is also
+	// why a pending exit must NOT be the signal on this path: /proc lists zombies,
+	// so the same incarnation can legitimately have one.
+	if event.StartTimeNs != 0 {
+		if prev := pt.pidStartTimeNs[event.PID]; prev != 0 && prev != event.StartTimeNs {
+			if _, removed := pt.removeProcessNode(event.PID); removed {
+				delete(pt.pendingExits, event.PID)
+
+				// Re-apply the host-process policy the absent-node path above
+				// enforces. Rebuilding unconditionally would let a host procfs
+				// event materialise a node that a first sighting would refuse.
+				if pt.config.KubernetesMode && event.ContainerID == armotypes.HostContainerID {
+					return
+				}
+
+				proc = pt.getOrCreateProcess(event.PID)
+			}
+			// If the teardown failed, fall through and merge as before.
+		}
+	}
+
 	if event.PPID != 0 {
 		pt.UpdatePPID(proc, event)
 	}
@@ -334,6 +398,13 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
+
+	// An exec proves a live process holds this pid, so a pending exit on it
+	// belongs to a recycled predecessor. Exec already overwrites comm, cmdline and
+	// path, so the visible identity would self-correct — but the predecessor's
+	// delayed exit would still delete this live process's node, and its children
+	// would still be inherited. Retire it for those two reasons.
+	pt.retireRecycledPredecessor(event.PID)
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
@@ -383,10 +454,18 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 
 // handleExitEvent handles exit events - now uses delayed removal via integrated exit manager
 func (pt *processTreeCreatorImpl) handleExitEvent(event conversion.ProcessEvent) {
+	// Read the boot clock BEFORE taking the tree lock. unix.ClockGettime is a raw
+	// syscall — x/sys does not route it through the vDSO the way the runtime does
+	// for time.Now — and exits are about as frequent as forks, thousands per second
+	// on a busy node. Holding pt.mutex across it would put syscall latency on the
+	// tree-wide write lock that every alert type reads through, which is the same
+	// mistake the fork path's start-time read avoids, for the same reason.
+	arrivalBootNs := pt.bootTimeNs()
+
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
-	pt.addPendingExit(event)
+	pt.addPendingExit(event, arrivalBootNs)
 }
 
 func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *armotypes.Process {
