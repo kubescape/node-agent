@@ -559,17 +559,68 @@ func TestQueuePersistsSplitDepth(t *testing.T) {
 	assert.Equal(t, 5, got.Attempts)
 }
 
+// TestStitchBacklog_ClampsAtZeroAcrossRestart guards Blocker 1 found on review: stitchBacklog
+// starts at zero every process start, but the disk queue can already hold stitches persisted by
+// a prior run. Before releaseStitch existed, decrementing for one of those - which never
+// incremented the fresh instance's counter in the first place - drove it negative and kept it
+// there for the rest of the process, silently widening maxStitchBacklog by however many
+// stitches were resident at startup (up to maxQueueSize in the worst case).
+func TestStitchBacklog_ClampsAtZeroAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	cfg := QueueConfig{
+		QueueName:       "test-queue",
+		QueueDir:        dir,
+		MaxQueueSize:    10,
+		RetryInterval:   time.Hour, // never started; this test drives dequeues directly
+		ItemsPerSegment: 10,
+	}
+
+	qd1, err := NewQueueData(context.Background(), &alwaysFailingCreator{}, cfg)
+	require.NoError(t, err)
+
+	// Persist a stitch, then close - simulating a restart with a stitch still resident in the
+	// queue from before this process started.
+	stitch := &QueuedContainerProfile{
+		Profile:     testProfile(),
+		ContainerID: "container-id",
+		IsStitch:    true,
+	}
+	require.NoError(t, qd1.queue.Enqueue(stitch))
+	require.NoError(t, qd1.Close())
+
+	qd2, err := NewQueueData(context.Background(), &alwaysFailingCreator{}, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = qd2.Close() })
+
+	require.Equal(t, int64(0), qd2.stitchBacklog.Load(), "a fresh instance starts with no knowledge of pre-existing stitches")
+	require.Equal(t, 1, qd2.GetQueueSize())
+
+	// Dequeue the persisted stitch and release it exactly as processAllItems/enforceMaxSize
+	// would - this must not drive the counter negative.
+	item, err := qd2.queue.Dequeue()
+	require.NoError(t, err)
+	require.True(t, item.(*QueuedContainerProfile).IsStitch)
+	qd2.releaseStitch()
+
+	assert.Equal(t, int64(0), qd2.stitchBacklog.Load(), "releaseStitch must clamp at zero, never go negative")
+
+	stats := qd2.GetQueueStats()
+	assert.Equal(t, int64(0), stats["stitchBacklog"], "a negative backlog would also surface as a bug on the stats endpoint")
+}
+
 // TestQueueDropsProfileAfterMaxAttempts covers the general case: any error that never
 // resolves must stop consuming the queue rather than starving newer profiles.
 //
 // It also covers issue #871: before the fix, exhausting MaxAttempts simply discarded the item,
 // forking the container's report-timestamp chain with no replacement. Now the drop goes through
 // dropChunk like any other, so a stitch carrying the original's (previousReportTimestamp,
-// reportTimestamp] pair must be attempted too - and, since the creator here always fails, that
-// stitch inherits the parent's already-exhausted Attempts and so is itself dropped after a
-// single try, without ever being re-stitched (mirrors TestQueueDoesNotStitchAStitch).
+// reportTimestamp] pair must be attempted too - and it gets its own fresh MaxAttempts budget
+// (newStitchFor's freshAttempts) rather than inheriting the parent's already-exhausted one, so
+// with a creator that always fails it is itself retried the full budget before being dropped,
+// without ever being re-stitched (mirrors TestQueueDoesNotStitchAStitch).
 func TestQueueDropsProfileAfterMaxAttempts(t *testing.T) {
 	const maxAttempts = 3
+	const totalCalls = 2 * maxAttempts // the original's budget, then the stitch's own fresh budget
 
 	profile := testProfile()
 	creator := &alwaysFailingCreator{err: errors.New("dial tcp 10.96.0.1:443: connect: connection refused")}
@@ -579,21 +630,23 @@ func TestQueueDropsProfileAfterMaxAttempts(t *testing.T) {
 	require.NoError(t, qd.Enqueue(profile, "container-id"))
 
 	assert.Eventually(t, func() bool {
-		return creator.callCount() >= maxAttempts+1 && qd.GetQueueSize() == 0
-	}, 2*time.Second, 10*time.Millisecond, "expected the profile and its replacement stitch to both be attempted")
+		return creator.callCount() >= totalCalls && qd.GetQueueSize() == 0
+	}, 2*time.Second, 10*time.Millisecond, "expected the profile and its replacement stitch to both exhaust their own retry budgets")
 
 	// The retry budget is a hard bound, and the stitch is never itself re-stitched, so no
 	// further attempts happen once both have been dropped.
 	callsAfterDrain := creator.callCount()
 	time.Sleep(200 * time.Millisecond)
 	assert.Equal(t, callsAfterDrain, creator.callCount(), "no further attempts once the original and its stitch are both dropped")
-	assert.Equal(t, maxAttempts+1, creator.callCount(), "the original gets its full budget, the stitch exactly one try")
+	assert.Equal(t, totalCalls, creator.callCount(), "the original and the stitch each get the full MaxAttempts budget")
 	assert.Equal(t, 0, qd.GetQueueSize())
 	assert.Empty(t, cb.captured(), "a retryable failure must not end learning for the container")
 
 	attempts := creator.attemptedProfiles()
-	require.Len(t, attempts, maxAttempts+1)
+	require.Len(t, attempts, totalCalls)
 
+	// attempts[0:maxAttempts] are all retries of the original (same name); attempts[maxAttempts]
+	// is the stitch's first attempt.
 	stitch := attempts[maxAttempts]
 	assert.NotEqual(t, profile.Name, stitch.Name)
 	assert.Empty(t, stitch.Spec.Capabilities, "a stitch carries no size-bearing data")
@@ -601,6 +654,14 @@ func TestQueueDropsProfileAfterMaxAttempts(t *testing.T) {
 		"the stitch must preserve the dropped chunk's chain link")
 	assert.Equal(t, profile.Annotations[helpersv1.ReportTimestampMetadataKey], stitch.Annotations[helpersv1.ReportTimestampMetadataKey],
 		"the stitch must preserve the dropped chunk's chain link")
+
+	// Every attempt after the first stitch attempt must also be the stitch (same name), proving
+	// it was retried on its own budget rather than dropped after a single try.
+	for i := maxAttempts; i < totalCalls; i++ {
+		assert.Equal(t, stitch.Name, attempts[i].Name, "attempt %d must be a retry of the stitch, not a new item", i)
+	}
+
+	assert.Equal(t, int64(2), qd.chunksDropped.Load(), "one drop for the original, one for the stitch - never double-counted per drop")
 }
 
 // TestDropChunk_StitchBacklogExhaustedForksWithoutReplacement covers a gap a review of this
@@ -636,10 +697,12 @@ func TestDropChunk_StitchBacklogExhaustedForksWithoutReplacement(t *testing.T) {
 	assert.Equal(t, 0, qd.GetQueueSize())
 	assert.Equal(t, qd.maxStitchBacklog, qd.stitchBacklog.Load(), "the backlog must not have grown past its bound")
 
+	// Exactly one chunk was dropped (the original); the backlog-exhausted refusal is a second
+	// reason sample for the same chunk, not a second drop, so the counter stays at 1.
+	assert.Equal(t, int64(1), qd.chunksDropped.Load())
+
 	reasons := spy.droppedReasons()
-	assert.Contains(t, reasons, string(dropReasonMaxAttemptsExhausted))
-	assert.Contains(t, reasons, string(dropReasonStitchBacklogExhausted))
-	assert.NotContains(t, reasons, string(dropReasonEnqueueFailed), "no enqueue was attempted, so it cannot have failed")
+	assert.Equal(t, []string{string(dropReasonMaxAttemptsExhausted), string(dropReasonStitchBacklogExhausted)}, reasons)
 	assert.Empty(t, cb.captured(), "a retryable failure must not end learning for the container")
 }
 
@@ -847,7 +910,8 @@ func TestRequeueSplit_QueueNotRunningDropsBothHalvesAndAttemptsStitch(t *testing
 	qd.requeueSplit(queuedParent, a, b)
 
 	assert.Equal(t, 0, qd.GetQueueSize(), "neither half nor the stitch can land while the queue isn't running")
-	assert.Equal(t, int64(2), qd.chunksDropped.Load(),
-		"both the lost-halves case and the stitch-also-failed case must be counted")
-	assert.Equal(t, []string{string(dropReasonEnqueueFailed), string(dropReasonEnqueueFailed)}, spy.droppedReasons())
+	assert.Equal(t, int64(1), qd.chunksDropped.Load(),
+		"one chunk (the parent) is lost; the stitch-also-failed case reports its own reason but is not a second dropped chunk")
+	assert.Equal(t, []string{string(dropReasonEnqueueFailed), string(dropReasonEnqueueFailed)}, spy.droppedReasons(),
+		"both the lost-halves case and the stitch-also-failed case must still each report a metric sample")
 }
