@@ -5,16 +5,15 @@
 //  1. reconcileOnce: evicts cache entries whose pod is gone or whose
 //     container is no longer Running.
 //  2. refreshAllEntries (single-flight via atomic flag): re-fetches the
-//     consolidated CP, the workload-level AP+NN, the user-managed
-//     "ug-<workload>" AP+NN, and any label-referenced user AP/NN overlay,
-//     then rebuilds the projection iff any resourceVersion changed. Fast-skip
-//     when every RV matches what's already cached.
+//     consolidated ContainerProfile and any label-referenced user-defined
+//     ContainerProfile, then rebuilds the projection iff any resourceVersion
+//     changed. Fast-skip when every RV matches what's already cached.
 //
-// RPC cost @ 300 containers / 30s cadence steady-state: up to 7 gets per
-// entry per tick (CP + 3×AP + 3×NN). At 300 entries that's 70 RPC/s in the
-// worst case, dropping close to 0 once fast-skip catches on. Most entries
-// carry only workload-level AP+NN, so the common case is 3 RPC/tick per
-// entry = 30 RPC/s.
+// RPC cost @ 300 containers / 30s cadence steady-state: up to 2 gets per entry
+// per tick (consolidated CP + label-referenced user-defined CP). At 300 entries
+// that's ~20 RPC/s worst case, dropping close to 0 once fast-skip catches on.
+// Most entries carry only the consolidated CP, so the common case is 1 RPC/tick
+// per entry.
 package containerprofilecache
 
 import (
@@ -267,19 +266,17 @@ func (c *ContainerProfileCacheImpl) refreshAllEntries(ctx context.Context) {
 }
 
 // refreshOneEntry refreshes a single cache entry under the per-container lock.
-// Re-fetches ALL sources the entry was originally built from (consolidated CP,
-// workload-level AP/NN, user-managed AP/NN at "ug-<workloadName>", and any
-// label-referenced user AP/NN overlay) and rebuilds the projection if ANY
-// ResourceVersion changed. Keeping the existing entry on fetch errors is fine:
-// the next tick will retry.
+// Re-fetches ALL sources the entry was originally built from (the consolidated
+// ContainerProfile and any label-referenced user-defined ContainerProfile) and
+// rebuilds the projection if ANY ResourceVersion changed. Keeping the existing
+// entry on fetch errors is fine: the next tick will retry.
 //
-// Rebuild on refresh applies the same projection ladder as tryPopulateEntry:
+// Rebuild on refresh mirrors tryPopulateEntry: a label-referenced user-defined
+// CP, when present, REPLACES the learned CP as the authoritative base.
 //
-//	base CP → workload AP+NN → user-managed (ug-) AP+NN → user overlay AP+NN.
-//
-// The completed-only gate is re-applied here: if the CP regresses to a
-// non-Completed status we keep the existing cached entry rather than
-// projecting stale/incomplete data.
+// The completed-only gate is re-applied here (only when no authored CP is
+// adopted): if the learned CP regresses to a non-Completed status we keep the
+// existing cached entry rather than projecting stale/incomplete data.
 func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id string, e *CachedContainerProfile) {
 	// Resurrection guard (reviewer #1): refreshAllEntries snapshots entries
 	// without holding containerLocks, so a concurrent deleteContainer /
@@ -323,86 +320,56 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			helpers.Error(cpErr))
 		cp = nil
 	}
-	if cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
+	// Re-fetch the user-defined ContainerProfile (migrated "new way") FIRST, when
+	// the entry was built from one. It is the authoritative base and the only
+	// user-defined source (the legacy AP/NN overlay is no longer supported); a
+	// transient fetch error keeps the entry as-is.
+	//
+	// Ordering matters (review finding on node-agent#864): when an authored CP is
+	// present it REPLACES the learned CP as the base, so the learned-status gate
+	// below must not be allowed to early-return before the authored CP is
+	// fetched. Otherwise a learned CP stuck in a non-terminal status ("ready")
+	// would freeze authored-CP edits out of the cache forever.
+	var userDefinedCP *v1beta1.ContainerProfile
+	if e.UserCPRef != nil {
+		var userCPErr error
+		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, e.UserCPRef.Namespace, e.UserCPRef.Name)
+			return userCPErr
+		})
+		if userCPErr != nil && e.UserCPRV != "" {
+			logger.L().Debug("refreshOneEntry: user-defined CP fetch failed; keeping cached entry",
+				helpers.String("containerID", id),
+				helpers.String("name", e.UserCPRef.Name),
+				helpers.Error(userCPErr))
+			return
+		}
+		if userCPErr != nil {
+			userDefinedCP = nil
+		}
+	}
+	// Authored-validation (mirror of the add path): a label-referenced CP that
+	// carries lifecycle annotations is a LEARNED profile, not an authored one.
+	// Ignore it so its real state is not overwritten with Completed/Full and a
+	// still-learning profile is not enforced as complete.
+	if userDefinedCP != nil {
+		if _, learned := userDefinedCP.Annotations[helpersv1.StatusMetadataKey]; learned {
+			logger.L().Debug("refreshOneEntry: user-defined-profile label resolves to a learned CP; ignoring it",
+				helpers.String("containerID", id),
+				helpers.String("name", e.UserCPRef.Name))
+			userDefinedCP = nil
+		}
+	}
+	// Learned-status gate: only blocks when there is NO authored CP to adopt.
+	// With an authored CP present, the learned CP's status is irrelevant — the
+	// authored profile is the base and is enforced regardless.
+	if userDefinedCP == nil && cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
 		logger.L().Debug("refreshOneEntry: CP status not terminal; keeping cached entry",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName),
 			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
 		return
 	}
-	var userManagedAP *v1beta1.ApplicationProfile
-	var userManagedNN *v1beta1.NetworkNeighborhood
-	if e.WorkloadName != "" {
-		ugAPName := helpersv1.UserApplicationProfilePrefix + e.WorkloadName
-		var userManagedAPErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userManagedAP, userManagedAPErr = c.storageClient.GetApplicationProfile(rctx, ns, ugAPName)
-			return userManagedAPErr
-		})
-		if userManagedAPErr != nil && e.UserManagedAPRV != "" {
-			logger.L().Debug("refreshOneEntry: user-managed AP fetch failed; keeping cached entry",
-				helpers.String("containerID", id),
-				helpers.String("name", ugAPName),
-				helpers.Error(userManagedAPErr))
-			return
-		}
-		if userManagedAPErr != nil {
-			userManagedAP = nil // k8s client returns non-nil zero-value on 404; treat as absent
-		}
-		ugNNName := helpersv1.UserNetworkNeighborhoodPrefix + e.WorkloadName
-		var userManagedNNErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userManagedNN, userManagedNNErr = c.storageClient.GetNetworkNeighborhood(rctx, ns, ugNNName)
-			return userManagedNNErr
-		})
-		if userManagedNNErr != nil && e.UserManagedNNRV != "" {
-			logger.L().Debug("refreshOneEntry: user-managed NN fetch failed; keeping cached entry",
-				helpers.String("containerID", id),
-				helpers.String("name", ugNNName),
-				helpers.Error(userManagedNNErr))
-			return
-		}
-		if userManagedNNErr != nil {
-			userManagedNN = nil
-		}
-	}
-	var userAP *v1beta1.ApplicationProfile
-	var userNN *v1beta1.NetworkNeighborhood
-	if e.UserAPRef != nil {
-		var userAPErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userAP, userAPErr = c.storageClient.GetApplicationProfile(rctx, e.UserAPRef.Namespace, e.UserAPRef.Name)
-			return userAPErr
-		})
-		if userAPErr != nil && e.UserAPRV != "" {
-			logger.L().Debug("refreshOneEntry: user-defined AP fetch failed; keeping cached entry",
-				helpers.String("containerID", id),
-				helpers.String("name", e.UserAPRef.Name),
-				helpers.Error(userAPErr))
-			return
-		}
-		if userAPErr != nil {
-			userAP = nil
-		}
-	}
-	if e.UserNNRef != nil {
-		var userNNErr error
-		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
-			userNN, userNNErr = c.storageClient.GetNetworkNeighborhood(rctx, e.UserNNRef.Namespace, e.UserNNRef.Name)
-			return userNNErr
-		})
-		if userNNErr != nil && e.UserNNRV != "" {
-			logger.L().Debug("refreshOneEntry: user-defined NN fetch failed; keeping cached entry",
-				helpers.String("containerID", id),
-				helpers.String("name", e.UserNNRef.Name),
-				helpers.Error(userNNErr))
-			return
-		}
-		if userNNErr != nil {
-			userNN = nil
-		}
-	}
-
 	// Fast-skip when nothing changed. We match "absent" (nil) with empty RV:
 	// this avoids spurious rebuilds when an optional source is still missing,
 	// as long as it was also missing at the last build. Also skip when the
@@ -413,33 +380,18 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		currentSpecHash = spec.Hash
 	}
 	if rvsMatchCP(cp, e.RV) &&
-		rvsMatchAP(userManagedAP, e.UserManagedAPRV) &&
-		rvsMatchNN(userManagedNN, e.UserManagedNNRV) &&
-		rvsMatchAP(userAP, e.UserAPRV) &&
-		rvsMatchNN(userNN, e.UserNNRV) &&
+		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
 		e.SpecHash == currentSpecHash {
 		return
 	}
 
-	c.rebuildEntryFromSources(id, e, cp, userManagedAP, userManagedNN, userAP, userNN)
+	c.rebuildEntryFromSources(id, e, cp, userDefinedCP)
 }
 
-// rvsMatchCP, rvsMatchAP, rvsMatchNN return true when either (a) the object is
-// absent and the stored RV is empty, or (b) the object is present and its RV
-// matches the stored RV. This lets fast-skip treat "still missing" as a match.
+// rvsMatchCP returns true when either (a) the object is absent and the stored RV
+// is empty, or (b) the object is present and its RV matches the stored RV. This
+// lets fast-skip treat "still missing" as a match.
 func rvsMatchCP(obj *v1beta1.ContainerProfile, rv string) bool {
-	if obj == nil {
-		return rv == ""
-	}
-	return obj.ResourceVersion == rv
-}
-func rvsMatchAP(obj *v1beta1.ApplicationProfile, rv string) bool {
-	if obj == nil {
-		return rv == ""
-	}
-	return obj.ResourceVersion == rv
-}
-func rvsMatchNN(obj *v1beta1.NetworkNeighborhood, rv string) bool {
 	if obj == nil {
 		return rv == ""
 	}
@@ -447,20 +399,26 @@ func rvsMatchNN(obj *v1beta1.NetworkNeighborhood, rv string) bool {
 }
 
 // rebuildEntryFromSources constructs a fresh CachedContainerProfile from the
-// given sources and stores it under `id`. Applies the projection ladder from
-// tryPopulateEntry: base CP (or synthesized) → user-managed (ug-) AP+NN →
-// label-referenced user overlay AP+NN.
+// given sources and stores it under `id`. Mirrors tryPopulateEntry: a
+// label-referenced user-defined CP, when present, REPLACES the learned CP (or
+// the synthesized base) as the authoritative base.
 //
 // Called by the reconciler when any input ResourceVersion has changed.
 func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	id string,
 	prev *CachedContainerProfile,
 	cp *v1beta1.ContainerProfile,
-	userManagedAP *v1beta1.ApplicationProfile,
-	userManagedNN *v1beta1.NetworkNeighborhood,
-	userAP *v1beta1.ApplicationProfile,
-	userNN *v1beta1.NetworkNeighborhood,
+	userDefinedCP *v1beta1.ContainerProfile,
 ) {
+	// Authored-validation (mirror of the add path): a label-referenced CP that
+	// carries lifecycle annotations is a LEARNED profile, not an authored one.
+	// Ignore it here too so it is never force-set Completed/Full below.
+	if userDefinedCP != nil {
+		if _, learned := userDefinedCP.Annotations[helpersv1.StatusMetadataKey]; learned {
+			userDefinedCP = nil
+		}
+	}
+
 	pod := c.k8sObjectCache.GetPod(prev.Namespace, prev.PodName)
 
 	// Backfill PodUID when the entry was originally added before the pod
@@ -474,10 +432,16 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		podUID = string(pod.UID)
 	}
 
-	// When the consolidated CP is absent but we still have user-managed /
-	// user-defined overlays to project, synthesize an empty base so
-	// downstream state display is sensible.
+	// A user-defined ContainerProfile ("new way") is the authoritative base,
+	// replacing the learned CP for this container. cp (the learned CP) stays
+	// separate so RV bookkeeping tracks each source independently.
 	effectiveCP := cp
+	if userDefinedCP != nil {
+		effectiveCP = userDefinedCP
+	}
+
+	// When neither a learned nor a user-defined CP is available, synthesize an
+	// empty base so downstream state display is sensible.
 	if effectiveCP == nil {
 		syntheticName := prev.WorkloadName
 		if syntheticName == "" {
@@ -496,20 +460,6 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	projected := effectiveCP
-	// Ladder pass #1: user-managed "ug-" AP + NN.
-	if userManagedAP != nil || userManagedNN != nil {
-		p, warnings := projectUserProfiles(projected, userManagedAP, userManagedNN, pod, prev.ContainerName)
-		projected = p
-		c.emitOverlayMetrics(userManagedAP, userManagedNN, warnings)
-	}
-	// Ladder pass #2: label-referenced user overlay AP + NN.
-	var userWarnings []partialProfileWarning
-	if userAP != nil || userNN != nil {
-		p, w := projectUserProfiles(projected, userAP, userNN, pod, prev.ContainerName)
-		projected = p
-		userWarnings = w
-	}
-	c.emitOverlayMetrics(userAP, userNN, userWarnings)
 
 	// Rebuild the call-stack search tree from the projected profile.
 	tree := callstackcache.NewCallStackSearchTree()
@@ -527,55 +477,43 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	newEntry := &CachedContainerProfile{
-		Projected:       projectedCP,
-		SpecHash:        projectedCP.SpecHash,
-		State:           &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
-		CallStackTree:   tree,
-		ContainerName:   prev.ContainerName,
-		PodName:         prev.PodName,
-		Namespace:       prev.Namespace,
-		PodUID:          podUID,
-		WorkloadID:      prev.WorkloadID,
-		CPName:          prev.CPName,
-		WorkloadName:    prev.WorkloadName,
-		RV:              rvOfCP(cp),
-		UserManagedAPRV: rvOfAP(userManagedAP),
-		UserManagedNNRV: rvOfNN(userManagedNN),
-		UserAPRV:        rvOfAP(userAP),
-		UserNNRV:        rvOfNN(userNN),
+		Projected:     projectedCP,
+		SpecHash:      projectedCP.SpecHash,
+		State:         &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
+		CallStackTree: tree,
+		ContainerName: prev.ContainerName,
+		PodName:       prev.PodName,
+		Namespace:     prev.Namespace,
+		PodUID:        podUID,
+		WorkloadID:    prev.WorkloadID,
+		CPName:        prev.CPName,
+		WorkloadName:  prev.WorkloadName,
+		RV:            rvOfCP(cp),
+		UserCPRV:      rvOfCP(userDefinedCP),
 	}
-	if userAP != nil {
-		newEntry.UserAPRef = &namespacedName{Namespace: userAP.Namespace, Name: userAP.Name}
-	} else if prev.UserAPRef != nil {
-		// Preserve the ref so subsequent ticks still know to re-fetch the
-		// overlay (e.g. transient fetch error during this tick).
-		newEntry.UserAPRef = prev.UserAPRef
-	}
-	if userNN != nil {
-		newEntry.UserNNRef = &namespacedName{Namespace: userNN.Namespace, Name: userNN.Name}
-	} else if prev.UserNNRef != nil {
-		newEntry.UserNNRef = prev.UserNNRef
+	if userDefinedCP != nil {
+		// The user-authored CP is authoritative and complete by definition (no
+		// learning-lifecycle annotations); force the terminal state so the rule
+		// engine enforces it.
+		newEntry.UserCPRef = &namespacedName{Namespace: userDefinedCP.Namespace, Name: userDefinedCP.Name}
+		newEntry.State = &objectcache.ProfileState{
+			Status:     helpersv1.Completed,
+			Completion: helpersv1.Full,
+			Name:       userDefinedCP.Name,
+		}
+	} else if prev.UserCPRef != nil {
+		// No CP this tick (transient error or not-yet-landed): keep the ref so
+		// the reconciler retries the CP on the next tick.
+		newEntry.UserCPRef = prev.UserCPRef
 	}
 
 	c.entries.Set(id, newEntry)
 }
 
-// rvOfCP / rvOfAP / rvOfNN return the object's ResourceVersion or "" when nil.
-// Separate typed versions avoid the Go nil-interface trap where a typed-nil
-// pointer wrapped in an interface is not == nil.
+// rvOfCP returns the object's ResourceVersion or "" when nil. Using a typed
+// helper avoids the Go nil-interface trap where a typed-nil pointer wrapped in
+// an interface is not == nil.
 func rvOfCP(o *v1beta1.ContainerProfile) string {
-	if o == nil {
-		return ""
-	}
-	return o.ResourceVersion
-}
-func rvOfAP(o *v1beta1.ApplicationProfile) string {
-	if o == nil {
-		return ""
-	}
-	return o.ResourceVersion
-}
-func rvOfNN(o *v1beta1.NetworkNeighborhood) string {
 	if o == nil {
 		return ""
 	}

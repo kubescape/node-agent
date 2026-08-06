@@ -25,7 +25,7 @@ spec:
           \ || event.path == '/.dockerenv' || event.path == '/proc/self/environ')\
           \ && !(event.path.startsWith('/run/secrets/kubernetes.io/serviceaccount')\
           \ ||\n  event.path.startsWith('/var/run/secrets/kubernetes.io/serviceaccount')\
-          \ ||\n  event.path.startsWith('/tmp'))\n&& !ap.was_path_opened(event.containerId,\
+          \ ||\n  event.path.startsWith('/tmp'))\n&& !cp.was_path_opened(event.containerId,\
           \ event.path)\n"
     profileDependency: 0
     profileDataRequired:

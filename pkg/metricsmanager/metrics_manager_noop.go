@@ -19,8 +19,7 @@ func (m *MetricsNoop) ReportFailedEvent()             {}
 func (m *MetricsNoop) ReportRuleProcessed(_ string)   {}
 func (m *MetricsNoop) ReportRulePrefiltered(_ string) {}
 func (m *MetricsNoop) ReportRuleAlert(_ string)       {}
-func (m *MetricsNoop) ReportRuleEvaluationTime(_ context.Context, _ string, _ utils.EventType, _ time.Duration) {
-}
+func (m *MetricsNoop) ReportRuleEvaluationTime(_ context.Context, _ string, _ utils.EventType, _ time.Duration) {}
 func (m *MetricsNoop) ReportContainerStart()                                              {}
 func (m *MetricsNoop) ReportContainerStop()                                               {}
 func (m *MetricsNoop) ReportDedupEvent(_ utils.EventType, _ bool)                         {}
@@ -42,6 +41,7 @@ func (m *MetricsNoop) SetProjectionSpecAllField(_ string, _ bool)               
 func (m *MetricsNoop) ObserveProjectionApplyDuration(_ time.Duration)                     {}
 func (m *MetricsNoop) IncProjectionReconcileTriggered(_ string)                           {}
 func (m *MetricsNoop) IncHelperCall(_ string)                                             {}
+func (m *MetricsNoop) IncUserDefinedProfileUnresolved(_ string)                           {}
 func (m *MetricsNoop) SetProjectionUndeclaredRulesDetail(_ []string)                      {}
 func (m *MetricsNoop) ObserveProfileRawSize(_ float64)                                    {}
 func (m *MetricsNoop) ObserveProfileProjectedSize(_ float64)                              {}

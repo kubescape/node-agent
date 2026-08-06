@@ -1,0 +1,16 @@
+# Authored ContainerProfile for the "app" container of the mc35 pod, resolved as
+# "<label>-<containerName>" == "mc35-app". Allows id but not whoami (the inverse
+# of mc35-sidecar), so per-container binding is verifiable.
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: mc35-app
+spec:
+  execs:
+  - path: /usr/bin/sleep
+    args:
+    - /usr/bin/sleep
+    - infinity
+  - path: /usr/bin/id
+    args:
+    - /usr/bin/id

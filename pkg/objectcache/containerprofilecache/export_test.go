@@ -36,15 +36,3 @@ func (c *ContainerProfileCacheImpl) WarmPendingForTest(ids []string) {
 		c.pending.Delete(id)
 	}
 }
-
-// SeedEntryWithOverlayForTest seeds an entry with user AP and NN overlay refs.
-// Pass empty strings to leave a ref nil.
-func (c *ContainerProfileCacheImpl) SeedEntryWithOverlayForTest(containerID string, entry *CachedContainerProfile, apNS, apName, nnNS, nnName string) {
-	if apName != "" {
-		entry.UserAPRef = &namespacedName{Namespace: apNS, Name: apName}
-	}
-	if nnName != "" {
-		entry.UserNNRef = &namespacedName{Namespace: nnNS, Name: nnName}
-	}
-	c.entries.Set(containerID, entry)
-}

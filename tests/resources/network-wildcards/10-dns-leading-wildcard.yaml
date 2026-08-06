@@ -15,21 +15,16 @@
 #               all honour this convention
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-10-dns-leading-wildcard
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-10
-  containers:
-  - name: client
-    egress:
-    - identifier: example-com-subdomains
-      type: external
-      dnsNames:
-        - "*.example.com."
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
+  egress:
+  - identifier: example-com-subdomains
+    type: external
+    dnsNames:
+      - "*.example.com."
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}
