@@ -19,6 +19,13 @@ import (
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
+// maxIdentifiedCallStacksPerContainer bounds the number of distinct identified
+// call stacks retained per container between reporting flushes. Each distinct
+// call site produces a distinct (deduped-by-hash) call stack; without a cap a
+// workload that launches many distinct executables grows this map unbounded and
+// drives the node-agent OOM.
+const maxIdentifiedCallStacksPerContainer = 512
+
 // ReportCapability reports a capability event for a container
 func (cpm *ContainerProfileManager) ReportCapability(containerID, capability string) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
@@ -230,6 +237,15 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 
 		// Check if we already have this call stack
 		if data.callStacks.Has(callStackIdentifier) {
+			return 0, nil
+		}
+
+		// Bound memory: a container that launches many distinct executables (or a
+		// process-enumeration/fork-churn attack) produces a distinct call stack per
+		// call site, which would otherwise grow this map unbounded within a
+		// reporting window and drive the node-agent OOM. The profile only needs a
+		// representative set, so stop retaining new call stacks past the cap.
+		if data.callStacks.Len() >= maxIdentifiedCallStacksPerContainer {
 			return 0, nil
 		}
 
