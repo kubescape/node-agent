@@ -8,6 +8,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
@@ -73,19 +74,19 @@ func TestReportNetworkEventSizeAccounting(t *testing.T) {
 			IPAddress: "10.0.0.5",
 		},
 	}
-	want := int64(size.Of(networkEvent) + networkNeighborExpansionEstimate)
+	want := int64(size.Of(networkEvent) + networkNeighborIncrement(entry.data, networkEvent))
 	assert.Equal(t, want, entry.data.size.Load(),
-		"estimate must include the networkNeighborExpansionEstimate surcharge for the DNS/selector/identifier fields createNetworkNeighbor adds at serialization time")
+		"estimate must include the networkNeighborIncrement surcharge for the identifier/Ports/DNS fields createNetworkNeighbor adds at serialization time")
 
 	// Re-reporting the identical event is a set-dedup no-op and must not grow the estimate.
 	cpm.ReportNetworkEvent("container1", event)
 	assert.Equal(t, want, entry.data.size.Load())
 }
 
-// TestNetworkNeighborExpansionEstimateCoversMaxDNSName confirms the report-time estimate
-// does not undercount a NetworkNeighbor carrying the longest legal DNS name (RFC 1035
-// §3.1, 253 bytes) once DNS resolution actually runs at serialization time.
-func TestNetworkNeighborExpansionEstimateCoversMaxDNSName(t *testing.T) {
+// TestNetworkNeighborIncrementCoversMaxDNSName confirms the report-time estimate does not
+// undercount a NetworkNeighbor carrying the longest legal DNS name (RFC 1035 §3.1, 253
+// bytes) once DNS resolution actually runs at serialization time.
+func TestNetworkNeighborIncrementCoversMaxDNSName(t *testing.T) {
 	maxDNSName := strings.Repeat("a", 253)
 
 	networkEvent := NetworkEvent{
@@ -104,15 +105,15 @@ func TestNetworkNeighborExpansionEstimateCoversMaxDNSName(t *testing.T) {
 		return
 	}
 
-	estimate := size.Of(networkEvent) + networkNeighborExpansionEstimate
+	estimate := size.Of(networkEvent) + networkNeighborIncrement(cd, networkEvent)
 	assert.GreaterOrEqual(t, estimate, size.Of(*neighbor),
 		"report-time estimate must cover a resolved NetworkNeighbor with the longest legal DNS name")
 }
 
-// TestNetworkNeighborExpansionEstimateCoversSelectorPayload confirms the report-time
-// estimate does not undercount a NetworkNeighbor whose PodSelector/NamespaceSelector are
-// populated from the destination pod's labels at serialization time.
-func TestNetworkNeighborExpansionEstimateCoversSelectorPayload(t *testing.T) {
+// TestNetworkNeighborIncrementCoversSelectorPayload confirms the report-time estimate does
+// not undercount a NetworkNeighbor whose PodSelector/NamespaceSelector are populated from
+// the destination pod's labels at serialization time.
+func TestNetworkNeighborIncrementCoversSelectorPayload(t *testing.T) {
 	podLabels := map[string]string{
 		"app.kubernetes.io/name":       "web",
 		"app.kubernetes.io/instance":   "web-abc123",
@@ -134,15 +135,17 @@ func TestNetworkNeighborExpansionEstimateCoversSelectorPayload(t *testing.T) {
 	}
 	networkEvent.SetDestinationPodLabels(podLabels)
 
-	cd := &containerData{}
-	// namespace "default" differs from the destination's "other-ns", so both PodSelector and
-	// NamespaceSelector get populated - matching a real cross-namespace neighbor.
+	// The container's own namespace ("default") differs from the destination's ("other-ns"),
+	// so both PodSelector and NamespaceSelector get populated - matching a real cross-namespace
+	// neighbor. watchedContainerData.Namespace is what networkNeighborIncrement reads to make
+	// the same "different namespace" call createNetworkNeighbor's own namespace arg does below.
+	cd := &containerData{watchedContainerData: &objectcache.WatchedContainerData{Namespace: "default"}}
 	neighbor := cd.createNetworkNeighbor(networkEvent, "default", nil, nil)
 	if !assert.NotNil(t, neighbor) {
 		return
 	}
 
-	estimate := size.Of(networkEvent) + networkNeighborExpansionEstimate
+	estimate := size.Of(networkEvent) + networkNeighborIncrement(cd, networkEvent)
 	assert.GreaterOrEqual(t, estimate, size.Of(*neighbor),
 		"report-time estimate must cover a NetworkNeighbor with a populated selector payload")
 }

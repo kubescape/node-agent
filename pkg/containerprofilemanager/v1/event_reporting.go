@@ -22,65 +22,88 @@ import (
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
-// networkNeighborExpansionEstimate is the number of bytes a NetworkEvent gains when
-// createNetworkNeighbor() (container_data.go) turns it into a v1beta1.NetworkNeighbor at
-// serialization time. None of these fields exist on the raw event, and none can be computed
-// exactly at report time since DNS resolution and the Service selector lookup are deferred
-// to serialization, so each is sized at its documented worst case instead of guessed:
-//
-//   - Identifier: hex.EncodeToString of a sha256 sum, always exactly 2*sha256.Size bytes.
-//   - Type: the longer of "internal"/"external".
-//   - Ports: createNetworkNeighbor always appends exactly one NetworkPort entry.
-//   - DNS/DNSNames: the longest legal DNS name (RFC 1035 §3.1: 253 bytes), stored once in
-//     DNS and again in DNSNames - previously undercounted entirely (253*2 alone exceeds the
-//     old flat 256-byte guess this replaces).
-//   - NamespaceSelector: getNamespaceMatchLabels always produces exactly one entry keyed
-//     "kubernetes.io/metadata.name", valued with a namespace name (DNS-1123 label, RFC 1123:
-//     63 bytes max) - this bound is exact, not assumed.
-//   - PodSelector: filterLabels forwards whatever label set the destination pod has. Core
-//     Kubernetes caps a label's key (253 bytes, optional DNS-subdomain prefix + "/" + 63-byte
-//     name) and value (63 bytes) but not the number of labels on an object, so no fixed bound
-//     is exact here. maxBudgetedPodLabels labels at that per-label maximum is budgeted as a
-//     documented, deliberately generous headroom for typical (e.g. Helm-templated) workloads;
-//     a pod with more labels than that could still push a profile past MaxTsProfileSize before
-//     this estimator catches it, in which case the queue-level split from #866 is the backstop.
-//
-// A single event never produces DNS and both selectors at once (createNetworkNeighbor takes
-// one branch per Destination.Kind), so summing every component here is deliberately
-// conservative on top of the already-generous per-field bounds.
-var networkNeighborExpansionEstimate = computeNetworkNeighborExpansionEstimate()
+// neighborFixedOverhead is the number of bytes every v1beta1.NetworkNeighbor gains over its
+// source NetworkEvent regardless of Destination.Kind: a generated Identifier hash and a Type
+// string. Both are exactly bounded, so they're measured once rather than guessed:
+// Identifier is hex.EncodeToString of a sha256 sum (always 2*sha256.Size bytes), Type is the
+// longer of "internal"/"external".
+var neighborFixedOverhead = size.Of(strings.Repeat("f", sha256.Size*2)) + size.Of(ExternalTrafficType)
 
-const maxBudgetedPodLabels = 12
-
-func computeNetworkNeighborExpansionEstimate() int {
-	identifier := strings.Repeat("f", sha256.Size*2)
+// maxDNSNameEstimate budgets the one field that's genuinely unknowable at report time on
+// container_data.go's raw/DNS branch: DNS resolution happens at serialization, not when the
+// event is reported. RFC 1035 §3.1 bounds an encoded domain name to 253 bytes;
+// createNetworkNeighbor stores it twice (DNS and DNSNames[0]).
+var maxDNSNameEstimate = func() int {
 	maxDNSName := strings.Repeat("a", 253)
+	return size.Of(maxDNSName) + size.Of([]string{maxDNSName})
+}()
+
+// maxBudgetedServiceLabels bounds maxServiceSelectorEstimate below. Kubernetes Services are
+// conventionally selected on a handful of short labels (e.g. "app: foo"), unlike Pods which
+// can carry many more, so this is deliberately smaller than a Pod label budget would be.
+const maxBudgetedServiceLabels = 6
+
+// maxServiceSelectorEstimate budgets the other field genuinely unknowable at report time:
+// on the Service branch, svc.GetServiceSelector() is fetched from the k8s API at
+// serialization time and has no relationship to anything on the raw event. Each of
+// maxBudgetedServiceLabels labels is sized at Kubernetes' per-label maximum (253-byte key,
+// 63-byte value) as generous headroom.
+var maxServiceSelectorEstimate = func() int {
 	maxLabelKey := strings.Repeat("k", 253)
 	maxLabelValue := strings.Repeat("v", 63)
-
-	ports := []v1beta1.NetworkPort{{
-		Name:     "protocol-65535",
-		Protocol: v1beta1.ProtocolTCP,
-		Port:     ptr.To(int32(65535)),
-	}}
-
-	namespaceSelector := &metav1.LabelSelector{
-		MatchLabels: map[string]string{"kubernetes.io/metadata.name": maxLabelValue},
-	}
-
-	podLabels := make(map[string]string, maxBudgetedPodLabels)
-	for i := 0; i < maxBudgetedPodLabels; i++ {
+	labels := make(map[string]string, maxBudgetedServiceLabels)
+	for i := 0; i < maxBudgetedServiceLabels; i++ {
 		// Trailing rune only exists to keep the map keys distinct; length is still ~maxLabelKey.
-		podLabels[maxLabelKey+string(rune('a'+i))] = maxLabelValue
+		labels[maxLabelKey+string(rune('a'+i))] = maxLabelValue
 	}
-	podSelector := &metav1.LabelSelector{MatchLabels: podLabels}
+	return size.Of(&metav1.LabelSelector{MatchLabels: labels})
+}()
 
-	return size.Of(identifier) +
-		size.Of(ExternalTrafficType) +
-		size.Of(ports) +
-		size.Of(maxDNSName) + size.Of([]string{maxDNSName}) +
-		size.Of(namespaceSelector) +
-		size.Of(podSelector)
+// networkNeighborIncrement estimates the additional bytes createNetworkNeighbor()
+// (container_data.go) adds beyond the raw NetworkEvent when it builds the eventual
+// v1beta1.NetworkNeighbor. createNetworkNeighbor takes exactly one branch per
+// Destination.Kind, so only that branch's cost is charged - summing every branch
+// unconditionally, as an earlier version of this function did, overcounted by 6-20x and
+// turned the split path from #866 into the normal case instead of a rare backstop.
+//
+// PodSelector on the Pod branch is not budgeted as a guess: its label *bytes* are already on
+// the meter via Destination.PodLabels, a string field size.Of(networkEvent) counts by the
+// caller, but re-shaping that string into map[string]string costs real additional bytes (Go
+// map bucket overhead), so this measures that wrapper delta exactly from the same data
+// filterLabels/GetDestinationPodLabels would produce, rather than assuming it's zero or
+// guessing a label count. Ports and NamespaceSelector are similarly computed exactly from
+// fields already on the event (Port/Protocol, and the destination namespace compared against
+// the container's own), not estimated, since nothing about their content is deferred to
+// serialization.
+func networkNeighborIncrement(data *containerData, networkEvent NetworkEvent) int {
+	est := neighborFixedOverhead + size.Of([]v1beta1.NetworkPort{{
+		Name:     generatePortIdentifierFromEvent(networkEvent),
+		Protocol: v1beta1.Protocol(networkEvent.Protocol),
+		Port:     ptr.To(int32(networkEvent.Port)),
+	}})
+
+	sourceNamespace := ""
+	if data.watchedContainerData != nil {
+		sourceNamespace = data.watchedContainerData.Namespace
+	}
+	if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, sourceNamespace); namespaceLabels != nil {
+		est += size.Of(&metav1.LabelSelector{MatchLabels: namespaceLabels})
+	}
+
+	switch networkEvent.Destination.Kind {
+	case EndpointKindService:
+		est += maxServiceSelectorEstimate
+	case EndpointKindPod:
+		// The label bytes are already on the meter via Destination.PodLabels; only charge the
+		// extra cost of wrapping them into a LabelSelector's map, and never a negative one.
+		podSelector := &metav1.LabelSelector{MatchLabels: filterLabels(networkEvent.GetDestinationPodLabels())}
+		if delta := size.Of(podSelector) - size.Of(networkEvent.Destination.PodLabels); delta > 0 {
+			est += delta
+		}
+	default:
+		est += maxDNSNameEstimate
+	}
+	return est
 }
 
 // ReportCapability reports a capability event for a container
@@ -337,7 +360,7 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		}
 
 		data.networks.Add(networkEvent)
-		return size.Of(networkEvent) + networkNeighborExpansionEstimate, nil
+		return size.Of(networkEvent) + networkNeighborIncrement(data, networkEvent), nil
 	})
 
 	cpm.logEventError(err, "network", containerID)
