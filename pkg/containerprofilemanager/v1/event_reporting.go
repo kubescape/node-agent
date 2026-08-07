@@ -1,6 +1,7 @@
 package containerprofilemanager
 
 import (
+	"crypto/sha256"
 	"errors"
 	"reflect"
 	"regexp"
@@ -15,9 +16,95 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
+
+// neighborFixedOverhead is the number of bytes every v1beta1.NetworkNeighbor gains over its
+// source NetworkEvent regardless of Destination.Kind: a generated Identifier hash and a Type
+// string. Both are exactly bounded, so they're measured once rather than guessed:
+// Identifier is hex.EncodeToString of a sha256 sum (always 2*sha256.Size bytes), Type is the
+// longer of "internal"/"external".
+var neighborFixedOverhead = size.Of(strings.Repeat("f", sha256.Size*2)) + size.Of(ExternalTrafficType)
+
+// maxDNSNameEstimate budgets the one field that's genuinely unknowable at report time on
+// container_data.go's raw/DNS branch: DNS resolution happens at serialization, not when the
+// event is reported. RFC 1035 §3.1 bounds an encoded domain name to 253 bytes;
+// createNetworkNeighbor stores it twice (DNS and DNSNames[0]).
+var maxDNSNameEstimate = func() int {
+	maxDNSName := strings.Repeat("a", 253)
+	return size.Of(maxDNSName) + size.Of([]string{maxDNSName})
+}()
+
+// maxBudgetedServiceLabels bounds maxServiceSelectorEstimate below. Kubernetes Services are
+// conventionally selected on a handful of short labels (e.g. "app: foo"), unlike Pods which
+// can carry many more, so this is deliberately smaller than a Pod label budget would be.
+const maxBudgetedServiceLabels = 6
+
+// maxServiceSelectorEstimate budgets the other field genuinely unknowable at report time:
+// on the Service branch, svc.GetServiceSelector() is fetched from the k8s API at
+// serialization time and has no relationship to anything on the raw event. Each of
+// maxBudgetedServiceLabels labels is sized at Kubernetes' per-label maximum (253-byte key,
+// 63-byte value) as generous headroom.
+var maxServiceSelectorEstimate = func() int {
+	maxLabelKey := strings.Repeat("k", 253)
+	maxLabelValue := strings.Repeat("v", 63)
+	labels := make(map[string]string, maxBudgetedServiceLabels)
+	for i := 0; i < maxBudgetedServiceLabels; i++ {
+		// Trailing rune only exists to keep the map keys distinct; length is still ~maxLabelKey.
+		labels[maxLabelKey+string(rune('a'+i))] = maxLabelValue
+	}
+	return size.Of(&metav1.LabelSelector{MatchLabels: labels})
+}()
+
+// networkNeighborIncrement estimates the additional bytes createNetworkNeighbor()
+// (container_data.go) adds beyond the raw NetworkEvent when it builds the eventual
+// v1beta1.NetworkNeighbor. createNetworkNeighbor takes exactly one branch per
+// Destination.Kind, so only that branch's cost is charged - summing every branch
+// unconditionally, as an earlier version of this function did, overcounted by 6-20x and
+// turned the split path from #866 into the normal case instead of a rare backstop.
+//
+// PodSelector on the Pod branch is not budgeted as a guess: its label *bytes* are already on
+// the meter via Destination.PodLabels, a string field size.Of(networkEvent) counts by the
+// caller, but re-shaping that string into map[string]string costs real additional bytes (Go
+// map bucket overhead), so this measures that wrapper delta exactly from the same data
+// filterLabels/GetDestinationPodLabels would produce, rather than assuming it's zero or
+// guessing a label count. Ports and NamespaceSelector are similarly computed exactly from
+// fields already on the event (Port/Protocol, and the destination namespace compared against
+// the container's own), not estimated, since nothing about their content is deferred to
+// serialization.
+func networkNeighborIncrement(data *containerData, networkEvent NetworkEvent) int {
+	est := neighborFixedOverhead + size.Of([]v1beta1.NetworkPort{{
+		Name:     generatePortIdentifierFromEvent(networkEvent),
+		Protocol: v1beta1.Protocol(networkEvent.Protocol),
+		Port:     ptr.To(int32(networkEvent.Port)),
+	}})
+
+	sourceNamespace := ""
+	if data.watchedContainerData != nil {
+		sourceNamespace = data.watchedContainerData.Namespace
+	}
+	if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, sourceNamespace); namespaceLabels != nil {
+		est += size.Of(&metav1.LabelSelector{MatchLabels: namespaceLabels})
+	}
+
+	switch networkEvent.Destination.Kind {
+	case EndpointKindService:
+		est += maxServiceSelectorEstimate
+	case EndpointKindPod:
+		// The label bytes are already on the meter via Destination.PodLabels; only charge the
+		// extra cost of wrapping them into a LabelSelector's map, and never a negative one.
+		podSelector := &metav1.LabelSelector{MatchLabels: filterLabels(networkEvent.GetDestinationPodLabels())}
+		if delta := size.Of(podSelector) - size.Of(networkEvent.Destination.PodLabels); delta > 0 {
+			est += delta
+		}
+	default:
+		est += maxDNSNameEstimate
+	}
+	return est
+}
 
 // ReportCapability reports a capability event for a container
 func (cpm *ContainerProfileManager) ReportCapability(containerID, capability string) {
@@ -273,7 +360,7 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		}
 
 		data.networks.Add(networkEvent)
-		return size.Of(networkEvent), nil
+		return size.Of(networkEvent) + networkNeighborIncrement(data, networkEvent), nil
 	})
 
 	cpm.logEventError(err, "network", containerID)
@@ -299,7 +386,13 @@ func (cpm *ContainerProfileManager) ReportSyscall(containerID string, syscall st
 		if data.syscalls == nil {
 			data.syscalls = mapset.NewSet[string]()
 		}
-		return data.syscalls.Append(syscall), nil
+		// Append returns the number of elements newly added (0 or 1 here), not their
+		// serialized size - using it directly mixed element-count units into a
+		// byte-size accumulator and made syscalls contribute ~0 to MaxTsProfileSize.
+		if data.syscalls.Append(syscall) == 0 {
+			return 0, nil
+		}
+		return size.Of(syscall), nil
 	})
 
 	cpm.logEventError(err, "syscalls", containerID)
