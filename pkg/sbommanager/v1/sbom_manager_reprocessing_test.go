@@ -469,6 +469,56 @@ func Test_processContainerWithMetadata_MarksFreshImageTooLargeImmediately(t *tes
 	assert.Equal(t, 1, fake.patchCalls, "a fresh reservation must mark TooLarge on the first occurrence, with no retry budget")
 }
 
+// Test_processContainerWithMetadata_MarksFreshImageTooLargeImmediatelyViaSidecar is the
+// sidecar counterpart to Test_processContainerWithMetadata_MarksFreshImageTooLargeImmediately:
+// a fresh reservation whose sidecar returns sbomscanner.ErrImageTooLarge must still be marked
+// TooLarge immediately, with no retry budget.
+func Test_processContainerWithMetadata_MarksFreshImageTooLargeImmediatelyViaSidecar(t *testing.T) {
+	fake := newFakeSbomClient()
+	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
+	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
+	assert.NoError(t, err)
+
+	mgr := newTestManagerWithScannerErr(fake, "v2.0.0", sbomscanner.ErrImageTooLarge)
+	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+
+	stored := fake.get(sbomName)
+	assert.Equal(t, helpersv1.TooLarge, stored.Annotations[helpersv1.StatusMetadataKey])
+	assert.Equal(t, 1, fake.patchCalls, "sidecar ErrImageTooLarge must mark TooLarge on the first attempt")
+	_, stillBudgeted := mgr.failureRetries.Get(sbomName)
+	assert.False(t, stillBudgeted, "sidecar ErrImageTooLarge must not consume the generic retry budget")
+}
+
+// Test_processContainerWithMetadata_PreservesContentOnSidecarTooLarge is the sidecar
+// counterpart to Test_processContainerWithMetadata_PreservesContentOnTooLarge: TooLarge is a
+// storage-layer one-way door, so a content-bearing SBOM must fall back to generic Incomplete
+// pinning instead.
+func Test_processContainerWithMetadata_PreservesContentOnSidecarTooLarge(t *testing.T) {
+	fake := newFakeSbomClient()
+	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
+	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
+	assert.NoError(t, err)
+
+	good := &v1beta1.SBOMSyft{}
+	good.Name = sbomName
+	good.Annotations = map[string]string{
+		helpersv1.StatusMetadataKey:      helpersv1.Learning,
+		helpersv1.ToolVersionMetadataKey: "v1.0.0",
+	}
+	good.Spec.Syft.Artifacts = make([]v1beta1.SyftPackage, 2)
+	fake.sboms[sbomName] = good
+
+	mgr := newTestManagerWithScannerErr(fake, "v2.0.0", sbomscanner.ErrImageTooLarge)
+	for range maxScanRetries + 2 {
+		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+	}
+
+	raw := fake.get(sbomName)
+	assert.Len(t, raw.Spec.Syft.Artifacts, 2, "existing SBOM content must survive an annotation-only status update")
+	assert.Equal(t, helpersv1.Incomplete, raw.Annotations[helpersv1.StatusMetadataKey], "content-bearing SBOMs must never be pinned TooLarge via sidecar")
+	assert.Equal(t, 1, fake.patchCalls, "only the maxScanRetries-th consecutive failure marks Incomplete")
+}
+
 // genericThenCrashScannerClient returns a generic error on its first two calls, then
 // sbomscanner.ErrScannerCrashed on the third -- used to reproduce the exact mixed-failure
 // sequence from the review finding on PR #857 (2 generic failures + 1 crash).

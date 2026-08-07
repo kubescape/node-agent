@@ -92,6 +92,9 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 		if ok && (st.Code() == codes.Unavailable || st.Code() == codes.Aborted) {
 			return nil, fmt.Errorf("%w: %v", ErrScannerCrashed, err)
 		}
+		if ok && st.Code() == codes.FailedPrecondition {
+			return nil, fmt.Errorf("%w: %v", ErrImageTooLarge, err)
+		}
 		return nil, err
 	}
 

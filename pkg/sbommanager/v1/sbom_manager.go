@@ -509,6 +509,23 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				s.handleScannerCrash(sbomName, notif, scanErr, imageTag, imageID, wipSbomHadContent)
 				return
 			}
+			if errors.Is(scanErr, sbomscanner.ErrImageTooLarge) {
+				s.metrics.ReportSBOMScan("error")
+				s.metrics.ObserveSBOMScanDuration("error", scanDuration)
+				logger.L().Ctx(s.ctx).Error("SbomManager - sidecar image too large",
+					helpers.Error(scanErr),
+					helpers.String("namespace", notif.Container.K8s.Namespace),
+					helpers.String("pod", notif.Container.K8s.PodName),
+					helpers.String("container", notif.Container.K8s.ContainerName),
+					helpers.String("sbomName", sbomName))
+				if wipSbomHadContent {
+					s.handleGenericFailure(sbomName)
+				} else {
+					s.markSBOMStatus(sbomName, helpersv1.TooLarge, nil)
+				}
+				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonImageTooLarge, scanErr)
+				return
+			}
 			s.metrics.ReportSBOMScan("error")
 			s.metrics.ObserveSBOMScanDuration("error", scanDuration)
 			logger.L().Ctx(s.ctx).Error("SbomManager - sidecar scan failed",

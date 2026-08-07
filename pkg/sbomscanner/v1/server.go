@@ -57,7 +57,7 @@ func (s *scannerServer) CreateSBOM(ctx context.Context, req *pb.CreateSBOMReques
 	src, err := syftutil.NewSource(req.ImageTag, req.ImageId, req.ImageId, &imageStatus, req.LayerPaths, req.MaxImageSize)
 	if err != nil {
 		if errors.Is(err, syftutil.ErrImageTooLarge) {
-			return nil, status.Error(codes.FailedPrecondition, "image size exceeds maximum allowed size")
+			return nil, status.Error(codes.FailedPrecondition, ErrImageTooLarge.Error())
 		}
 		return nil, status.Errorf(codes.Internal, "failed to create image source: %v", err)
 	}
