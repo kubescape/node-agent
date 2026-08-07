@@ -77,6 +77,11 @@ nodeAgent:
     profileProjection:
       detailedMetricsEnabled: true
       strictValidation: false
+      # Skip node-agent's client-side user-managed (ug-) AP/NN merge and rely on
+      # storage#319's server-side merge (served already-merged on ContainerProfile
+      # GET). Keep false until the storage version that ships #319 is deployed:
+      # enabling it against older storage drops ug- exception enforcement.
+      serverSideUserManagedMergeEnabled: false
 
   serviceMonitor:
     enabled: true
