@@ -1,0 +1,16 @@
+# Authored ContainerProfile for the "sidecar" container of the mc35 pod, resolved
+# as "<label>-<containerName>" == "mc35-sidecar". Allows whoami but not id (the
+# inverse of mc35-app), so per-container binding is verifiable.
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: mc35-sidecar
+spec:
+  execs:
+  - path: /usr/bin/sleep
+    args:
+    - /usr/bin/sleep
+    - infinity
+  - path: /usr/bin/whoami
+    args:
+    - /usr/bin/whoami

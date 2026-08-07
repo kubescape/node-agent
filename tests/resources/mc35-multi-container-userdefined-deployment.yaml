@@ -1,0 +1,28 @@
+# 2-container pod bound via one pod label kubescape.io/user-defined-profile=mc35.
+# ContainerProfiles are per-container: node-agent resolves each container to
+# <label>-<containerName> (mc35-app / mc35-sidecar), falling back to the bare
+# <label> for single-container pods.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mc35-deployment
+  labels:
+    app: mc35
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mc35
+  template:
+    metadata:
+      labels:
+        app: mc35
+        kubescape.io/user-defined-profile: mc35
+    spec:
+      containers:
+      - name: app
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]
+      - name: sidecar
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]

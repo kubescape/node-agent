@@ -18,7 +18,7 @@ spec:
           uniqueId: "event.comm + '_' + event.exepath"
           ruleExpression:
             - eventType: "exec"
-              expression: "!ap.was_executed(event.containerId, (event.exepath != \"\" ? event.exepath : parse.get_exec_path(event.args, event.comm)))"
+              expression: "!cp.was_executed(event.containerId, (event.exepath != \"\" ? event.exepath : parse.get_exec_path(event.args, event.comm)))"
         profileDependency: 0
         profileDataRequired:
           execs: all
@@ -61,7 +61,7 @@ spec:
                   event.path.startsWith('/var/run/secrets/kubernetes.io/serviceaccount') ||
                   event.path.startsWith('/tmp'))
                 &&
-                !ap.was_path_opened(event.containerId, event.path)
+                !cp.was_path_opened(event.containerId, event.path)
         profileDependency: 0
         profileDataRequired:
           opens:
@@ -98,7 +98,7 @@ spec:
           uniqueId: "event.syscallName"
           ruleExpression:
             - eventType: "syscall"
-              expression: "!ap.was_syscall_used(event.containerId, event.syscallName)"
+              expression: "!cp.was_syscall_used(event.containerId, event.syscallName)"
         profileDependency: 0
         profileDataRequired:
           syscalls: all
@@ -122,7 +122,7 @@ spec:
           uniqueId: "event.comm + '_' + event.capName"
           ruleExpression:
             - eventType: "capabilities"
-              expression: "!ap.was_capability_used(event.containerId, event.capName)"
+              expression: "!cp.was_capability_used(event.containerId, event.capName)"
         profileDependency: 0
         profileDataRequired:
           capabilities: all
@@ -146,7 +146,7 @@ spec:
           uniqueId: "event.comm + '_' + event.name"
           ruleExpression:
             - eventType: "dns"
-              expression: "!event.name.endsWith('.svc.cluster.local.') && !nn.is_domain_in_egress(event.containerId, event.name)"
+              expression: "!event.name.endsWith('.svc.cluster.local.') && !cp.is_domain_in_egress(event.containerId, event.name)"
         profileDependency: 0
         profileDataRequired:
           egressDomains: all
@@ -175,7 +175,7 @@ spec:
                  (event.path.startsWith('/var/run/secrets/kubernetes.io/serviceaccount') && event.path.endsWith('/token')) ||
                  (event.path.startsWith('/run/secrets/eks.amazonaws.com/serviceaccount') && event.path.endsWith('/token')) ||
                  (event.path.startsWith('/var/run/secrets/eks.amazonaws.com/serviceaccount') && event.path.endsWith('/token'))) &&
-                !ap.was_path_opened_with_suffix(event.containerId, '/token')
+                !cp.was_path_opened_with_suffix(event.containerId, '/token')
         state:
           includePrefixes:
             - /run/secrets
@@ -203,9 +203,9 @@ spec:
           uniqueId: "eventType == 'exec' ? 'exec_' + event.comm : 'network_' + event.dstAddr"
           ruleExpression:
             - eventType: "exec"
-              expression: "(event.comm == 'kubectl' || event.exepath.endsWith('/kubectl')) && !ap.was_executed(event.containerId, (event.exepath != \"\" ? event.exepath : parse.get_exec_path(event.args, event.comm)))"
+              expression: "(event.comm == 'kubectl' || event.exepath.endsWith('/kubectl')) && !cp.was_executed(event.containerId, (event.exepath != \"\" ? event.exepath : parse.get_exec_path(event.args, event.comm)))"
             - eventType: "network"
-              expression: "event.pktType == 'OUTGOING' && k8s.is_api_server_address(event.dstAddr) && !nn.was_address_in_egress(event.containerId, event.dstAddr)"
+              expression: "event.pktType == 'OUTGOING' && k8s.is_api_server_address(event.dstAddr) && !cp.was_address_in_egress(event.containerId, event.dstAddr)"
         profileDependency: 0
         profileDataRequired:
           execs: all
@@ -233,7 +233,7 @@ spec:
               expression: >
                 event.path.startsWith('/proc/') && 
                 event.path.endsWith('/environ') &&
-                !ap.was_path_opened_with_suffix(event.containerId, '/environ')
+                !cp.was_path_opened_with_suffix(event.containerId, '/environ')
         state:
           includePrefixes:
             - /proc
@@ -262,7 +262,7 @@ spec:
           uniqueId: "event.comm + '_' + 'bpf' + '_' + string(event.cmd)"
           ruleExpression:
             - eventType: "bpf"
-              expression: "event.cmd == uint(5) && !ap.was_syscall_used(event.containerId, 'bpf')"
+              expression: "event.cmd == uint(5) && !cp.was_syscall_used(event.containerId, 'bpf')"
         profileDependency: 1
         profileDataRequired:
           syscalls:
@@ -287,7 +287,7 @@ spec:
           uniqueId: "event.comm + '_' + event.path"
           ruleExpression:
             - eventType: "open"
-              expression: "event.path.startsWith('/etc/shadow') && !ap.was_path_opened(event.containerId, event.path)"
+              expression: "event.path.startsWith('/etc/shadow') && !cp.was_path_opened(event.containerId, event.path)"
         profileDependency: 1
         profileDataRequired:
           opens:
@@ -313,7 +313,7 @@ spec:
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
           ruleExpression:
             - eventType: "network"
-              expression: "event.pktType == 'OUTGOING' && !net.is_private_ip(event.dstAddr) && !nn.was_address_in_egress(event.containerId, event.dstAddr)"
+              expression: "event.pktType == 'OUTGOING' && !net.is_private_ip(event.dstAddr) && !cp.was_address_in_egress(event.containerId, event.dstAddr)"
         profileDependency: 0
         profileDataRequired:
           egressAddresses: all
@@ -332,13 +332,13 @@ spec:
       - name: "Unexpected process arguments"
         enabled: true
         id: "R0040"
-        description: "Detects an exec event whose path IS in the application profile but whose argv vector does not match any recorded argv pattern for that path. Consumes ap.was_executed_with_args, which walks the ExecsByPath projection surface and delegates argv comparison to dynamicpathdetector.MatchExecArgs (storage). Stays silent when the path is unknown (R0001 covers that case) and when the argv vector matches any recorded pattern (including the trailing zero-or-more form and the single-arg form); a '*' in a recorded arg is a literal character, not a wildcard."
+        description: "Detects an exec event whose path IS in the application profile but whose argv vector does not match any recorded argv pattern for that path. Consumes cp.was_executed_with_args, which walks the ExecsByPath projection surface and delegates argv comparison to dynamicpathdetector.MatchExecArgs (storage). Stays silent when the path is unknown (R0001 covers that case) and when the argv vector matches any recorded pattern (including the trailing zero-or-more form and the single-arg form); a '*' in a recorded arg is a literal character, not a wildcard."
         expressions:
           message: "'Unexpected process arguments: ' + event.comm + ' with PID ' + string(event.pid) + ' argv=' + event.args.map(a, string(a)).join(' ')"
           uniqueId: "event.comm + '_' + event.exepath + '_' + event.args.map(a, string(a)).join(' ')"
           ruleExpression:
             - eventType: "exec"
-              expression: "ap.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath)) && !ap.was_executed_with_args(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath), event.args)"
+              expression: "cp.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath)) && !cp.was_executed_with_args(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath), event.args)"
         profileDependency: 0
         profileDataRequired:
           execs: all
@@ -391,7 +391,7 @@ spec:
               expression: >
                 (event.upperlayer == true ||
                  event.pupperlayer == true) &&
-                !ap.was_executed(event.containerId, (event.exepath != "" ? event.exepath : parse.get_exec_path(event.args, event.comm)))
+                !cp.was_executed(event.containerId, (event.exepath != "" ? event.exepath : parse.get_exec_path(event.args, event.comm)))
         profileDependency: 1
         profileDataRequired:
           execs: all
@@ -440,7 +440,7 @@ spec:
           uniqueId: "event.comm + '_' + event.dstIp + '_' + string(dyn(event.dstPort))"
           ruleExpression:
             - eventType: "ssh"
-              expression: "dyn(event.srcPort) >= 32768 && dyn(event.srcPort) <= 60999 && !(dyn(event.dstPort) in [22, 2022]) && !nn.was_address_in_egress(event.containerId, event.dstIp)"
+              expression: "dyn(event.srcPort) >= 32768 && dyn(event.srcPort) <= 60999 && !(dyn(event.dstPort) in [22, 2022]) && !cp.was_address_in_egress(event.containerId, event.dstIp)"
         profileDependency: 1
         profileDataRequired:
           egressAddresses: all
@@ -466,7 +466,7 @@ spec:
           uniqueId: "event.comm"
           ruleExpression:
             - eventType: "exec"
-              expression: "!ap.was_executed(event.containerId, (event.exepath != \"\" ? event.exepath : parse.get_exec_path(event.args, event.comm))) && k8s.get_container_mount_paths(event.namespace, event.podName, event.containerName).exists(mount, event.exepath.startsWith(mount) || (event.exepath != \"\" ? event.exepath : parse.get_exec_path(event.args, event.comm)).startsWith(mount))"
+              expression: "!cp.was_executed(event.containerId, (event.exepath != \"\" ? event.exepath : parse.get_exec_path(event.args, event.comm))) && k8s.get_container_mount_paths(event.namespace, event.podName, event.containerName).exists(mount, event.exepath.startsWith(mount) || (event.exepath != \"\" ? event.exepath : parse.get_exec_path(event.args, event.comm)).startsWith(mount))"
         profileDependency: 1
         profileDataRequired:
           execs: all
@@ -512,7 +512,7 @@ spec:
           uniqueId: "event.comm + '_' + 'unshare'"
           ruleExpression:
             - eventType: "unshare"
-              expression: "event.pcomm != 'runc' && !ap.was_syscall_used(event.containerId, 'unshare')"
+              expression: "event.pcomm != 'runc' && !cp.was_syscall_used(event.containerId, 'unshare')"
         profileDependency: 1
         profileDataRequired:
           syscalls:
@@ -585,7 +585,7 @@ spec:
           uniqueId: "event.comm + '_' + string(event.dstPort)"
           ruleExpression:
             - eventType: "network"
-              expression: "event.proto == 'TCP' && event.pktType == 'OUTGOING' && event.dstPort in [3333, 45700] && !nn.was_address_in_egress(event.containerId, event.dstAddr)"
+              expression: "event.proto == 'TCP' && event.pktType == 'OUTGOING' && event.dstPort in [3333, 45700] && !cp.was_address_in_egress(event.containerId, event.dstAddr)"
         state:
           ports:
             - 3333
@@ -615,7 +615,7 @@ spec:
           uniqueId: "event.comm + '_' + event.oldPath"
           ruleExpression:
             - eventType: "symlink"
-              expression: "(event.oldPath.startsWith('/etc/shadow') || event.oldPath.startsWith('/etc/sudoers')) && !ap.was_path_opened(event.containerId, event.oldPath)"
+              expression: "(event.oldPath.startsWith('/etc/shadow') || event.oldPath.startsWith('/etc/sudoers')) && !cp.was_path_opened(event.containerId, event.oldPath)"
         profileDependency: 1
         profileDataRequired:
           opens:
@@ -667,7 +667,7 @@ spec:
           uniqueId: "event.comm + '_' + event.oldPath"
           ruleExpression:
             - eventType: "hardlink"
-              expression: "(event.oldPath.startsWith('/etc/shadow') || event.oldPath.startsWith('/etc/sudoers')) && !ap.was_path_opened(event.containerId, event.oldPath)"
+              expression: "(event.oldPath.startsWith('/etc/shadow') || event.oldPath.startsWith('/etc/sudoers')) && !cp.was_path_opened(event.containerId, event.oldPath)"
         profileDependency: 1
         profileDataRequired:
           opens:

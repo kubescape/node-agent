@@ -10,11 +10,7 @@ import (
 )
 
 type ProfileClient interface {
-	GetApplicationProfile(ctx context.Context, namespace, name string) (*v1beta1.ApplicationProfile, error)
-	GetNetworkNeighborhood(ctx context.Context, namespace, name string) (*v1beta1.NetworkNeighborhood, error)
 	GetContainerProfile(ctx context.Context, namespace, name string) (*v1beta1.ContainerProfile, error)
-	ListApplicationProfiles(ctx context.Context, namespace string, limit int64, cont string) (*v1beta1.ApplicationProfileList, error)
-	ListNetworkNeighborhoods(ctx context.Context, namespace string, limit int64, cont string) (*v1beta1.NetworkNeighborhoodList, error)
 }
 
 // ProfileCreator defines the interface for creating container profiles

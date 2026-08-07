@@ -55,8 +55,6 @@ func makeTestPod(name, namespace, uid string, containerStatuses []corev1.Contain
 type stubStorage struct {
 	mu sync.RWMutex
 	cp *v1beta1.ContainerProfile
-	ap *v1beta1.ApplicationProfile
-	nn *v1beta1.NetworkNeighborhood
 }
 
 var _ storage.ProfileClient = (*stubStorage)(nil)
@@ -69,26 +67,6 @@ func (s *stubStorage) GetContainerProfile(_ context.Context, _, _ string) (*v1be
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.cp, nil
-}
-
-func (s *stubStorage) GetApplicationProfile(_ context.Context, _, _ string) (*v1beta1.ApplicationProfile, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.ap, nil
-}
-
-func (s *stubStorage) GetNetworkNeighborhood(_ context.Context, _, _ string) (*v1beta1.NetworkNeighborhood, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.nn, nil
-}
-
-func (s *stubStorage) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
-	return &v1beta1.ApplicationProfileList{}, nil
-}
-
-func (s *stubStorage) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
-	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 
 // stubK8sCache is a controllable K8sObjectCache stub.

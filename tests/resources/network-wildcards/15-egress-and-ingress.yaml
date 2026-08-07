@@ -8,39 +8,34 @@
 #   pktType=='INCOMING' from "10.0.0.42"   → NO match in ingress (NOT in 192.168/16)
 #                                            (even though 10.0.0.0/8 IS in egress —
 #                                            direction isolation is the contract)
-# Match path:   nn.was_address_in_egress() walks Spec.Egress only;
-#               nn.was_address_in_ingress() walks Spec.Ingress only
+# Match path:   cp.was_address_in_egress() walks Spec.Egress only;
+#               cp.was_address_in_ingress() walks Spec.Ingress only
 # Spec ref:     §4.7 "egress and ingress" — direction isolation contract
 #
 # Note on current rule coverage:
 #   The default kubescape rule set (R0005, R0011, etc.) only fires on
 #   pktType=='OUTGOING'. The ingress block is fully matchable via the
-#   nn.was_address_in_ingress / nn.is_domain_in_ingress CEL functions,
+#   cp.was_address_in_ingress / cp.is_domain_in_ingress CEL functions,
 #   but no built-in rule consumes them as of v0.0.2. Custom rules MAY.
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-15-egress-and-ingress
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-15
-  containers:
-  - name: bidirectional
-    egress:
-    - identifier: outbound-class-a
-      type: internal
-      ipAddresses:
-        - "10.0.0.0/8"
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
-    ingress:
-    - identifier: inbound-rfc1918-class-c
-      type: internal
-      ipAddresses:
-        - "192.168.0.0/16"
-      ports:
-        - {name: TCP-8080, protocol: TCP, port: 8080}
+  egress:
+  - identifier: outbound-class-a
+    type: internal
+    ipAddresses:
+      - "10.0.0.0/8"
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}
+  ingress:
+  - identifier: inbound-rfc1918-class-c
+    type: internal
+    ipAddresses:
+      - "192.168.0.0/16"
+    ports:
+      - {name: TCP-8080, protocol: TCP, port: 8080}

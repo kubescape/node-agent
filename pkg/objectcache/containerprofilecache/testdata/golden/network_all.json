@@ -1,0 +1,84 @@
+{
+  "specHash": "949a9d7ed7a4054f",
+  "syncChecksum": "",
+  "opens": {
+    "All": true,
+    "Values": null,
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "execs": {
+    "All": true,
+    "Values": null,
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "endpoints": {
+    "All": true,
+    "Values": null,
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "capabilities": {
+    "All": true,
+    "Values": null,
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "syscalls": {
+    "All": true,
+    "Values": null,
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "egressDomains": {
+    "All": true,
+    "Values": {
+      "c.example.com": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "egressAddresses": {
+    "All": true,
+    "Values": {
+      "*": {},
+      "203.0.113.0/24": {},
+      "203.0.113.7": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "ingressDomains": {
+    "All": true,
+    "Values": {
+      "a.internal": {},
+      "b.internal": {},
+      "old.internal": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "ingressAddresses": {
+    "All": true,
+    "Values": {
+      "*": {},
+      "192.168.0.0/16": {},
+      "192.168.1.10": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "execsByPath": null,
+  "policyByRuleId": null,
+  "callStacks": null
+}
