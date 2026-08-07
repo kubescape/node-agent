@@ -11,6 +11,25 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
+func TestNamespaceListHasName(t *testing.T) {
+	list := &corev1.NamespaceList{
+		Items: []corev1.Namespace{
+			{ObjectMeta: metav1.ObjectMeta{Name: "devel"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "production"}},
+		},
+	}
+
+	assert.True(t, namespaceListHasName(list, "devel"))
+	assert.True(t, namespaceListHasName(list, "production"))
+	// Substring of "devel" / "production" must not match (regression for
+	// strings.Contains(namespaces.String(), ns)).
+	assert.False(t, namespaceListHasName(list, "dev"))
+	assert.False(t, namespaceListHasName(list, "prod"))
+	assert.False(t, namespaceListHasName(list, "missing"))
+	assert.False(t, namespaceListHasName(nil, "devel"))
+	assert.False(t, namespaceListHasName(&corev1.NamespaceList{}, "devel"))
+}
+
 func TestResourcesToWatch(t *testing.T) {
 	tests := []struct {
 		name               string
