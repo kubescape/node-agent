@@ -3,6 +3,10 @@ package utils
 import (
 	"strings"
 	"testing"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+	"github.com/stretchr/testify/require"
 )
 
 // This file is the regression net for #874 ("catch when /proc prefixes go
@@ -18,19 +22,19 @@ import (
 //      is reconstructable from the string alone, so a miss here is a gap in
 //      headlessProcRegex (node-agent's fault, fixable in this repo).
 //
-//   2. tracer layer — the tracer delivered only a *basename*, because the
-//      open event's `fpath` field was empty and DatasourceEvent.GetPath /
-//      GetFullPath fall back to `fname`. Nothing in this repo can reconstruct
-//      the directory: the information never arrived.
+//   2. tracer layer — the open event's `fpath` field was empty, so
+//      DatasourceEvent.GetPath / GetFullPath fell back to `fname`, which
+//      carries a basename. Nothing in this repo can reconstruct the directory:
+//      the information never arrived.
 //
 // Telling them apart matters because NormalizePath actively destroys the
-// evidence for case (2) — see TestNormalizePath_FabricatesRootFromBasename.
+// evidence for case (2) — see TestOpenPathFabricatesRootFromBasename.
 
 // pathDefectLayer is the layer a malformed tracer path is attributable to.
 type pathDefectLayer int
 
 const (
-	// layerNone: a well-formed absolute path, nothing to attribute.
+	// layerNone: a well-formed path, nothing to attribute.
 	layerNone pathDefectLayer = iota
 	// layerNormalization: recoverable in this repo by re-rooting under /proc.
 	layerNormalization
@@ -55,7 +59,7 @@ func (l pathDefectLayer) String() string {
 //
 // It must be fed the raw field value. Running it on NormalizePath's output is
 // meaningless, because NormalizePath rewrites a bare basename into something
-// that is indistinguishable from a genuine root-level file.
+// indistinguishable from a genuine root-level file.
 func classifyRawTracerPath(raw string) pathDefectLayer {
 	// Nothing delivered at all, or runc's "." / "/." placeholder from #721.
 	if raw == "" || raw == "." || raw == "/." {
@@ -63,22 +67,30 @@ func classifyRawTracerPath(raw string) pathDefectLayer {
 	}
 	// No separator anywhere: this is a basename, so `fpath` was empty and the
 	// `fname` fallback supplied it. The directory is simply not in the event.
-	if !strings.Contains(strings.TrimPrefix(raw, "/"), "/") && !strings.HasPrefix(raw, "/") {
+	if !strings.Contains(raw, "/") {
 		return layerTracer
 	}
-	// Shaped like a /proc/<pid>/... path that lost its root. Structurally
-	// intact, so recovering it is normalization's job.
+	// Shaped like a /proc/<pid>/<entry> path that lost its root, with <entry>
+	// a name /proc/<pid> actually has. Structurally intact, so recovering it
+	// is normalization's job.
 	if headlessProcRegex.MatchString(raw) || isHeadlessProcShaped(raw) {
 		return layerNormalization
 	}
 	return layerNone
 }
 
-// isHeadlessProcShaped reports whether raw looks like /proc/<pid>/<something>
-// with the /proc root stripped, independent of the headlessProcRegex
-// allowlist. This is deliberately broader than headlessProcRegex: it is used
-// to detect entries the allowlist does *not* yet cover, which is exactly the
-// drift #872 had to patch after #721.
+// isHeadlessProcShaped reports whether raw looks like /proc/<pid>/<entry> with
+// the /proc root stripped.
+//
+// A leading numeric segment is necessary but NOT sufficient: /2024/logs and
+// /1/data/dump.rdb are ordinary directories that happen to start with digits,
+// and misreading them as PIDs is precisely the false positive the explicit
+// allowlist in path.go exists to avoid. The second segment must therefore also
+// be a name /proc/<pid> actually exposes.
+//
+// This is deliberately broader than headlessProcRegex on the entry axis: it
+// recognises entries the allowlist does not yet cover, which is exactly the
+// drift #872 had to patch by hand after #721.
 func isHeadlessProcShaped(raw string) bool {
 	if !strings.HasPrefix(raw, "/") {
 		return false
@@ -88,13 +100,21 @@ func isHeadlessProcShaped(raw string) bool {
 	if slash <= 0 {
 		return false
 	}
-	first := rest[:slash]
-	for _, r := range first {
+	for _, r := range rest[:slash] {
 		if r < '0' || r > '9' {
 			return false
 		}
 	}
-	return true
+	return knownProcEntryNames[procEntryName(rest[slash+1:])]
+}
+
+// procEntryName returns the first path segment of a /proc/<pid> entry, so that
+// "task/46/fd" and "ns/user" reduce to "task" and "ns".
+func procEntryName(entry string) string {
+	if i := strings.Index(entry, "/"); i >= 0 {
+		return entry[:i]
+	}
+	return entry
 }
 
 // procEntriesReRooted are the /proc/<pid>/<entry> names headlessProcRegex
@@ -121,6 +141,20 @@ var procEntriesStillLeaking = []string{
 	"limits", "loginuid", "net/dev", "sched", "mounts", "personality",
 	"timerslack_ns", "statm", "wchan",
 }
+
+// knownProcEntryNames is the set of first segments from both coverage lists.
+// Deriving it keeps one source of truth: adding an entry to either list above
+// teaches the classifier about it at the same time.
+var knownProcEntryNames = func() map[string]bool {
+	m := make(map[string]bool, len(procEntriesReRooted)+len(procEntriesStillLeaking))
+	for _, e := range procEntriesReRooted {
+		m[procEntryName(e)] = true
+	}
+	for _, e := range procEntriesStillLeaking {
+		m[procEntryName(e)] = true
+	}
+	return m
+}()
 
 // TestNormalizePath_ProcPrefixCoverage pins both sides of the allowlist: what
 // is re-rooted today, and what still escapes. Either set changing is a signal.
@@ -154,52 +188,173 @@ func TestNormalizePath_ProcPrefixCoverage(t *testing.T) {
 	})
 }
 
-// TestNormalizePath_NumericDirIsNotAPID guards the false-positive direction:
-// a real top-level numeric directory must never be mistaken for a PID and
-// shoved under /proc. This is the constraint that keeps the allowlist explicit.
+// TestNormalizePath_NumericDirIsNotAPID guards the false-positive direction: a
+// real top-level numeric directory must never be mistaken for a PID, neither by
+// NormalizePath (which would shove it under /proc) nor by the classifier (which
+// would blame the wrong layer and send someone editing the regex).
 func TestNormalizePath_NumericDirIsNotAPID(t *testing.T) {
 	for _, p := range []string{"/2024/logs", "/1/data/dump.rdb", "/42/config.yaml"} {
 		if got := NormalizePath(p); got != p {
 			t.Errorf("NormalizePath(%q) = %q, want it untouched — a genuine numeric directory was misread as a PID", p, got)
 		}
+		if layer := classifyRawTracerPath(p); layer != layerNone {
+			t.Errorf("classifyRawTracerPath(%q) = %v, want none — a genuine numeric directory is not a normalization defect", p, layer)
+		}
 	}
 }
 
-// TestNormalizePath_FabricatesRootFromBasename pins the mechanism behind the
+// newOpenEvent builds a synthetic "open" datasource event.
+//
+// Both `fpath` and `fname` are always declared, in a fixed order, because the
+// real open gadget always exposes both (see the expected-field list in
+// pkg/containerwatcher/v2/tracers/open_test.go) and signals "no full path" with
+// an *empty* fpath rather than an absent one — which is what GetFullPath tests
+// for. Keeping the layout identical across every open event this file builds
+// also matters mechanically: getFieldAccessor caches accessors in the
+// package-global fieldCaches keyed by EventType, not by datasource, so two open
+// datasources with different layouts would decode each other's data at the
+// wrong offset.
+func newOpenEvent(t *testing.T, fpath, fname string, fullPathTracing bool) *DatasourceEvent {
+	t.Helper()
+
+	ds, err := datasource.New(datasource.TypeSingle, "open")
+	require.NoError(t, err)
+
+	fpathAcc, err := ds.AddField("fpath", api.Kind_String)
+	require.NoError(t, err)
+	fnameAcc, err := ds.AddField("fname", api.Kind_String)
+	require.NoError(t, err)
+
+	data, err := ds.NewPacketSingle()
+	require.NoError(t, err)
+	t.Cleanup(func() { ds.Release(data) })
+
+	require.NoError(t, fpathAcc.PutString(data, fpath))
+	require.NoError(t, fnameAcc.PutString(data, fname))
+
+	return &DatasourceEvent{
+		Data:            data,
+		Datasource:      ds,
+		EventType:       OpenEventType,
+		FullPathTracing: fullPathTracing,
+	}
+}
+
+// newExecPathEvent builds a synthetic "exec" datasource event carrying an
+// exepath plus a comm basename. The comm field is what makes the asymmetry test
+// meaningful: a basename is present in the event, and GetExePath must still not
+// reach for it. Layout is fixed for the same fieldCaches reason as above.
+func newExecPathEvent(t *testing.T, exepath, comm string) *DatasourceEvent {
+	t.Helper()
+
+	ds, err := datasource.New(datasource.TypeSingle, "exec-path")
+	require.NoError(t, err)
+
+	exepathAcc, err := ds.AddField("exepath", api.Kind_String)
+	require.NoError(t, err)
+	commAcc, err := ds.AddField("comm", api.Kind_String)
+	require.NoError(t, err)
+
+	data, err := ds.NewPacketSingle()
+	require.NoError(t, err)
+	t.Cleanup(func() { ds.Release(data) })
+
+	require.NoError(t, exepathAcc.PutString(data, exepath))
+	require.NoError(t, commAcc.PutString(data, comm))
+
+	return &DatasourceEvent{
+		Data:       data,
+		Datasource: ds,
+		EventType:  ExecveEventType,
+	}
+}
+
+// TestOpenPathFabricatesRootFromBasename pins the mechanism behind the
 // scrambled entries reported in #874 (`/ocal.sh`, `/cal.sh`, `/cksource)`
 // appearing in a redis workload's opens, where the real liveness probe is
 // named `...-local.sh`).
 //
-// When `fpath` is empty, DatasourceEvent.GetPath falls back to the `fname`
-// field, which carries a basename only. NormalizePath then prepends "/",
-// promoting that basename to a root-level absolute path that never existed on
-// disk. If the basename was itself truncated upstream, the result is a
-// plausible-looking but entirely fictional path — and it is written into the
-// profile, where it later drives false positives in opens.
+// When `fpath` is empty, GetFullPath falls back to the `fname` field, which
+// carries a basename only; with FullPathTracing off, GetPath reads `fname`
+// directly. NormalizePath then prepends "/", promoting that basename to a
+// root-level absolute path that never existed on disk. If the basename was
+// itself truncated upstream, the result is a plausible-looking but entirely
+// fictional path — and it is written into the profile, where it later drives
+// false positives in opens.
 //
-// This is asserted as current behavior, not as desired behavior: the fix
-// belongs at the fallback in datasource_event.go, not inside NormalizePath.
-func TestNormalizePath_FabricatesRootFromBasename(t *testing.T) {
+// This asserts current behaviour, not desired behaviour: the fix belongs at the
+// fallback in datasource_event.go, not inside NormalizePath.
+func TestOpenPathFabricatesRootFromBasename(t *testing.T) {
 	basenames := []string{"local.sh", "ocal.sh", "cal.sh", "cksource)"}
 
 	for _, name := range basenames {
-		if layer := classifyRawTracerPath(name); layer != layerTracer {
-			t.Errorf("classifyRawTracerPath(%q) = %v, want tracer — a bare basename means fpath was empty", name, layer)
-		}
+		t.Run(name, func(t *testing.T) {
+			// The raw field value is attributable; that is the only point at
+			// which attribution is still possible.
+			require.Equal(t, layerTracer, classifyRawTracerPath(name),
+				"a bare basename in fname means fpath was empty")
 
-		got := NormalizePath(name)
-		if got != "/"+name {
-			t.Errorf("NormalizePath(%q) = %q, want %q", name, got, "/"+name)
-		}
+			// FullPathTracing on: GetFullPath falls back from empty fpath to fname.
+			tracing := newOpenEvent(t, "", name, true)
+			require.Equal(t, "/"+name, tracing.GetFullPath(),
+				"empty fpath must fall back to fname, which NormalizePath then roots")
+			require.Equal(t, "/"+name, tracing.GetPath())
 
-		// The damage: after normalization the fabricated path is
-		// indistinguishable from a genuine root-level file, so attribution is
-		// no longer possible. Anything classifying paths must run on the raw
-		// field, upstream of this call.
-		if layer := classifyRawTracerPath(got); layer != layerNone {
-			t.Errorf("classifyRawTracerPath(%q) = %v, want none — the fabricated path should look clean, which is the whole problem", got, layer)
-		}
+			// FullPathTracing off: GetPath reads fname directly, same fabrication.
+			noTracing := newOpenEvent(t, "", name, false)
+			require.Equal(t, "/"+name, noTracing.GetPath(),
+				"with FullPathTracing off the open path is always the fname basename")
+
+			// The damage: the value handed downstream is indistinguishable from
+			// a genuine root-level file, so attribution is no longer possible.
+			// Anything classifying paths must run on the raw field, upstream.
+			require.Equal(t, layerNone, classifyRawTracerPath(tracing.GetPath()),
+				"the fabricated path looks clean, which is the whole problem")
+		})
 	}
+}
+
+// TestOpenPathUsesFpathWhenPresent is the control for the test above: when the
+// tracer does deliver a full path, no fabrication happens and fname is ignored.
+// Without this, the fallback assertions would pass even if GetFullPath had
+// stopped reading fpath altogether.
+func TestOpenPathUsesFpathWhenPresent(t *testing.T) {
+	e := newOpenEvent(t, "/data/scripts/redis-local.sh", "redis-local.sh", true)
+	require.Equal(t, "/data/scripts/redis-local.sh", e.GetFullPath())
+	require.Equal(t, "/data/scripts/redis-local.sh", e.GetPath())
+	require.Equal(t, layerNone, classifyRawTracerPath(e.GetPath()))
+}
+
+// TestOpenExecPathAsymmetry records why #874 shows up in `opens` but not in
+// `execs`, which is the part that looked surprising when it was reported.
+//
+// The asymmetry is in the field-fallback contract, not in NormalizePath:
+// GetPath/GetFullPath fall back to the `fname` basename, GetExePath has no
+// fallback at all. So only the open path can ever hand NormalizePath a string
+// with no directory in it.
+func TestOpenExecPathAsymmetry(t *testing.T) {
+	t.Run("open falls back to a basename and fabricates a root", func(t *testing.T) {
+		e := newOpenEvent(t, "", "redis-server", true)
+		require.Equal(t, "/redis-server", e.GetPath(),
+			"open has an fname fallback, so a basename becomes a fabricated absolute path")
+	})
+
+	t.Run("exec has no basename fallback", func(t *testing.T) {
+		// A basename IS present in the event as comm, and GetExePath must still
+		// not reach for it: an empty exepath yields an empty path, never a
+		// fabricated one. This is the property that keeps execs clean.
+		e := newExecPathEvent(t, "", "redis-server")
+		require.Equal(t, "", e.GetExePath(),
+			"exec must not fall back to a basename the way open does")
+	})
+
+	t.Run("exec paths arrive absolute and pass through untouched", func(t *testing.T) {
+		for _, p := range []string{"/usr/local/bin/redis-server", "/bin/sh", "/usr/bin/runc"} {
+			e := newExecPathEvent(t, p, "redis-server")
+			require.Equal(t, p, e.GetExePath())
+			require.Equal(t, layerNone, classifyRawTracerPath(p))
+		}
+	})
 }
 
 // TestClassifyRawTracerPath_KnownSamples runs the paths actually observed in
@@ -252,6 +407,24 @@ func TestClassifyRawTracerPath_KnownSamples(t *testing.T) {
 			want: layerNormalization,
 		},
 		{
+			// A numeric leading segment alone must not imply a PID, or the
+			// classifier would send someone to widen the regex and break
+			// genuine numeric directories.
+			name: "numeric log directory is not a PID",
+			raw:  "/2024/logs",
+			want: layerNone,
+		},
+		{
+			name: "numeric data directory is not a PID",
+			raw:  "/1/data/dump.rdb",
+			want: layerNone,
+		},
+		{
+			name: "numeric directory with a file is not a PID",
+			raw:  "/42/config.yaml",
+			want: layerNone,
+		},
+		{
 			name: "well-formed absolute path",
 			raw:  "/data/appendonlydir/appendonly.aof.1.base.rdb",
 			want: layerNone,
@@ -269,41 +442,5 @@ func TestClassifyRawTracerPath_KnownSamples(t *testing.T) {
 				t.Errorf("classifyRawTracerPath(%q) = %v, want %v", tt.raw, got, tt.want)
 			}
 		})
-	}
-}
-
-// TestOpenExecPathAsymmetry records why #874 shows up in `opens` but not in
-// `execs`, which is the part that looked surprising when it was reported.
-//
-// Exec paths come from the `exepath` field, which the kernel always fills with
-// a fully-resolved absolute path; DatasourceEvent.GetExePath has no fallback,
-// so NormalizePath is a no-op on it. Open paths come from `fpath` with an
-// `fname` fallback, and `fname` is a basename — so only the open path can ever
-// hand NormalizePath a string with no directory in it.
-//
-// The asymmetry is therefore in the field-fallback contract, not in
-// NormalizePath: given the same shapes, NormalizePath treats both identically.
-func TestOpenExecPathAsymmetry(t *testing.T) {
-	// exepath shape: always absolute, so normalization cannot fabricate.
-	execShapes := []string{"/usr/local/bin/redis-server", "/bin/sh", "/usr/bin/runc"}
-	for _, p := range execShapes {
-		if got := NormalizePath(p); got != p {
-			t.Errorf("NormalizePath(%q) = %q, want it untouched", p, got)
-		}
-		if layer := classifyRawTracerPath(p); layer != layerNone {
-			t.Errorf("classifyRawTracerPath(%q) = %v, want none", p, layer)
-		}
-	}
-
-	// fname shape: a basename reaches NormalizePath only on the open path,
-	// and only there does it get a fabricated root.
-	openFallbackShapes := []string{"redis-server", "sh", "runc"}
-	for _, p := range openFallbackShapes {
-		if got := NormalizePath(p); got != "/"+p {
-			t.Errorf("NormalizePath(%q) = %q, want %q", p, got, "/"+p)
-		}
-		if layer := classifyRawTracerPath(p); layer != layerTracer {
-			t.Errorf("classifyRawTracerPath(%q) = %v, want tracer", p, layer)
-		}
 	}
 }
