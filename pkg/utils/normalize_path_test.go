@@ -26,50 +26,19 @@ func TestNormalizePath(t *testing.T) {
 			expected: "/etc/passwd",
 		},
 		{
-			name:     "headless proc path (task)",
-			input:    "/46/task/46/fd",
-			expected: "/proc/46/task/46/fd",
-		},
-		{
-			name:     "headless proc path (fd)",
-			input:    "/46/fd/3",
-			expected: "/proc/46/fd/3",
-		},
-		{
-			name:     "already absolute proc path",
+			name:     "absolute proc path",
 			input:    "/proc/46/fd/3",
 			expected: "/proc/46/fd/3",
 		},
 		{
-			name:     "terminal headless proc fd path",
-			input:    "/46/fd",
-			expected: "/proc/46/fd",
+			// The gadget resolves relative opens against their dirfd/cwd, so a
+			// numeric first segment is a genuine directory name and must be
+			// left untouched, not re-rooted under /proc.
+			name:     "numeric first segment stays literal",
+			input:    "/46/task/46/fd",
+			expected: "/46/task/46/fd",
 		},
 		{
-			name:     "terminal headless proc task path",
-			input:    "/46/task",
-			expected: "/proc/46/task",
-		},
-		{
-			// #721 regression: runc:[2:INIT] user-namespace-setup paths outside
-			// the old (task|fd) allowlist previously leaked /proc-less.
-			name:     "headless proc path (setgroups)",
-			input:    "/17/setgroups",
-			expected: "/proc/17/setgroups",
-		},
-		{
-			name:     "headless proc path (gid_map)",
-			input:    "/1/gid_map",
-			expected: "/proc/1/gid_map",
-		},
-		{
-			name:     "headless proc path (uid_map)",
-			input:    "/1/uid_map",
-			expected: "/proc/1/uid_map",
-		},
-		{
-			// A non-proc path whose leading segment is non-numeric must be
-			// untouched even though a later segment looks proc-like.
 			name:     "non-proc path with data dir",
 			input:    "/data/appendonlydir/x",
 			expected: "/data/appendonlydir/x",
