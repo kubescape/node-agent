@@ -3595,3 +3595,58 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 	assert.Greater(t, total(alerts, "R9904"), 0,
 		"R9904 must fire: !has(event.ttyMajor) proves ttyMajor is a registered field that is honestly absent, not a compile failure")
 }
+
+func Test_43_RelativeOpenPathResolution(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name,
+		path.Join(utils.CurrentDir(), "resources/relative-open-deployment.yaml"))
+	require.NoError(t, err, "create relative-open workload in ns %s", ns.Name)
+	require.NoError(t, wl.WaitForReady(80), "relative-open workload not ready in ns %s", ns.Name)
+
+	require.NoError(t, wl.WaitForApplicationProfileCompletion(60),
+		"ApplicationProfile did not complete for the relative-open workload")
+
+	ap, err := wl.GetApplicationProfile()
+	require.NoError(t, err, "get learned ApplicationProfile")
+
+	var opens []string
+	for _, c := range ap.Spec.Containers {
+		if c.Name != "relative-open" {
+			continue
+		}
+		for _, o := range c.Opens {
+			opens = append(opens, o.Path)
+		}
+	}
+	t.Logf("learned opens (%d): %v", len(opens), opens)
+
+	matchesResolved := func(name string) bool {
+		for _, p := range opens {
+			if p == "/data/reldir/"+name || strings.HasPrefix(p, "/data/reldir/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	var fabricated []string
+	for _, p := range opens {
+		segs := strings.Split(strings.TrimPrefix(p, "/"), "/")
+		if len(segs) == 0 {
+			continue
+		}
+		if segs[0] == "reldir" || p == "/present.txt" || p == "/absent.txt" {
+			fabricated = append(fabricated, p)
+		}
+	}
+
+	assert.Empty(t, fabricated,
+		"relative opens must not be recorded as fabricated roots (unresolved cwd) -- got %v", fabricated)
+	assert.True(t, matchesResolved("present.txt"),
+		"the existing relative open reldir/present.txt must be learned as /data/reldir/present.txt; opens=%v", opens)
+	assert.True(t, matchesResolved("absent.txt"),
+		"the FAILED relative open reldir/absent.txt (no fd) must also resolve to /data/reldir/absent.txt; opens=%v", opens)
+}

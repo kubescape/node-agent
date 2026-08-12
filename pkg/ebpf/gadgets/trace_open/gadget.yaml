@@ -1,0 +1,91 @@
+name: trace open
+description: trace open files
+homepageURL: https://inspektor-gadget.io/
+documentationURL: https://www.inspektor-gadget.io/docs/latest/gadgets/trace_open
+sourceURL: https://github.com/inspektor-gadget/inspektor-gadget/tree/main/gadgets/trace_open
+datasources:
+  open:
+    fields:
+      error_raw:
+        annotations:
+          columns.hidden: "true"
+      fd:
+        annotations:
+          columns.alignment: right
+          columns.maxwidth: "3"
+          columns.minwidth: "2"
+          description: File descriptor. 0 in case of error
+      flags:
+        annotations:
+          columns.hidden: "true"
+          columns.width: "10"
+      flags_raw:
+        annotations:
+          columns.hidden: "true"
+      fname:
+        annotations:
+          columns.minwidth: "24"
+          columns.width: "32"
+          description: File name as given in the open syscall
+      fpath:
+        annotations:
+          columns.minwidth: "24"
+          columns.width: "32"
+          description: Full file path after symlink resolution (require --paths flag)
+      mode:
+        annotations:
+          description: File access mode
+      mode_raw:
+        annotations:
+          columns.hidden: "true"
+      proc:
+        annotations:
+          description: 'TODO: Fill field description'
+      timestamp_raw:
+        annotations:
+          description: 'TODO: Fill field description'
+      ustack:
+        annotations:
+          description: 'TODO: Fill field description'
+params:
+  ebpf:
+    collect_build_id:
+      key: collect_build_id
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    collect_ustack:
+      key: collect_ustack
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    ig_build_id_max_entries:
+      key: ig_build_id_max_entries
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    paths:
+      key: paths
+      defaultValue: "false"
+      description: Show file path after symlink resolution
+    targ_comm:
+      key: targ_comm
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_failed:
+      key: failed
+      defaultValue: "false"
+      description: Show only failed events
+    targ_gid:
+      key: targ_gid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_pid:
+      key: targ_pid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_tid:
+      key: targ_tid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_uid:
+      key: targ_uid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
