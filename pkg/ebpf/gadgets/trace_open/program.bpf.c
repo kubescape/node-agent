@@ -113,6 +113,7 @@ static __always_inline int trace_exit(struct syscall_trace_exit *ctx)
 
 	fd = 0;
 	errval = 0;
+	event->fpath[0] = '\0';
 	if (ret >= 0) {
 		fd = ret;
 
@@ -133,8 +134,7 @@ static __always_inline int trace_exit(struct syscall_trace_exit *ctx)
 		bpf_probe_read_user(&first, 1, ap->fname);
 		if (first != 0 && first != '/') {
 			long r = read_full_path_of_dfd_rel(
-				ap->dfd, ap->fname, (char *)event->fpath,
-				sizeof(event->fpath));
+				ap->dfd, ap->fname, (char *)event->fpath);
 			if (r <= 0)
 				event->fpath[0] = '\0';
 		}

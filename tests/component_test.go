@@ -3625,7 +3625,7 @@ func Test_43_RelativeOpenPathResolution(t *testing.T) {
 
 	matchesResolved := func(name string) bool {
 		for _, p := range opens {
-			if p == "/data/reldir/"+name || strings.HasPrefix(p, "/data/reldir/") {
+			if p == "/data/reldir/"+name {
 				return true
 			}
 		}
