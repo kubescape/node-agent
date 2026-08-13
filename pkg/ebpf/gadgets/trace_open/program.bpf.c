@@ -125,8 +125,6 @@ static __always_inline int trace_exit(struct syscall_trace_exit *ctx)
 		}
 	} else {
 		errval = -ret;
-		if (paths)
-			event->fpath[0] = '\0';
 	}
 
 	if (paths && event->fpath[0] == '\0') {

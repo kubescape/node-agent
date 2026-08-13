@@ -39,6 +39,13 @@ func TestNormalizePath(t *testing.T) {
 			expected: "/46/task/46/fd",
 		},
 		{
+			// Same case arriving relative (no leading slash): it must only gain
+			// a leading slash, not be re-rooted under /proc.
+			name:     "relative numeric first segment is not re-rooted",
+			input:    "46/task/46/fd",
+			expected: "/46/task/46/fd",
+		},
+		{
 			name:     "non-proc path with data dir",
 			input:    "/data/appendonlydir/x",
 			expected: "/data/appendonlydir/x",
