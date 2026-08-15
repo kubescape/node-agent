@@ -219,8 +219,3 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(contain
 	}
 	return types.Bool(matchIPField(&cp.IngressAddresses, addressStr))
 }
-
-// wasSelectorIn reports whether the runtime peer — identified by the namespace
-// and pod labels that Inspektor Gadget's kubeipresolver stamps onto the network
-// event — matches any of the profile's ingress-or-egress peer selectors.
-//
