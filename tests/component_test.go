@@ -1616,6 +1616,9 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	const ruleName = "Files Access Anomalies in container"
 	const profileName = "nginx-regex-profile"
 
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
 	// --- result tracking for end-of-test summary ---
 	type subtestResult struct {
 		name        string
@@ -1743,61 +1746,119 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	//     There must be no "." in the Opens paths.
 	// ---------------------------------------------------------------
 	t.Run("recorded_profile_absolute_paths", func(t *testing.T) {
-		scrambledPath := regexp.MustCompile(`^/[0-9]`)
-		checkOpens := func(t *testing.T, workload string, profile *v1beta1.ApplicationProfile) (bool, int) {
-			passed, procRooted := true, 0
-			for _, container := range profile.Spec.Containers {
-				for _, open := range container.Opens {
-					if !strings.HasPrefix(open.Path, "/") {
-						t.Errorf("recorded path must be absolute: got %q (%s container %s)", open.Path, workload, container.Name)
-						passed = false
-					}
-					if open.Path == "." {
-						t.Errorf("recorded path must not be relative dot: got %q (%s container %s)", open.Path, workload, container.Name)
-						passed = false
-					}
-					if scrambledPath.MatchString(open.Path) {
-						t.Errorf("scrambled (prefix-stripped) open path: got %q (%s container %s) - a resolved path never begins with a numeric segment", open.Path, workload, container.Name)
-						passed = false
-					}
-					if strings.HasPrefix(open.Path, "/proc/") {
-						procRooted++
-					}
+		ns := testutils.NewRandomNamespace()
+		wl, err := testutils.NewTestWorkload(ns.Name,
+			path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+		require.NoError(t, err)
+		require.NoError(t, wl.WaitForReady(80))
+		require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
+
+		profile, err := wl.GetApplicationProfile()
+		require.NoError(t, err, "get application profile")
+
+		passed := true
+		for _, container := range profile.Spec.Containers {
+			for _, open := range container.Opens {
+				if !strings.HasPrefix(open.Path, "/") {
+					t.Errorf("recorded path must be absolute: got %q (container %s)", open.Path, container.Name)
+					passed = false
+				}
+				if open.Path == "." {
+					t.Errorf("recorded path must not be relative dot: got %q (container %s)", open.Path, container.Name)
+					passed = false
+				}
+				if scrambledPath.MatchString(open.Path) {
+					t.Errorf("scrambled (prefix-stripped) open path: got %q (%s container %s) — a resolved path never begins with a numeric segment", open.Path, cpName, containerName)
+					passed = false
 				}
 			}
-			return passed, procRooted
 		}
 
-		learn := func(t *testing.T, manifest string) *v1beta1.ApplicationProfile {
-			ns := testutils.NewRandomNamespace()
-			wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), manifest))
-			require.NoError(t, err)
-			require.NoError(t, wl.WaitForReady(80))
-			require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
-			profile, err := wl.GetApplicationProfile()
-			require.NoError(t, err, "get application profile for %s", manifest)
-			return profile
+		for _, profile := range profiles {
+			checkOpens(profile.Name, profile.Labels["kubescape.io/workload-container-name"], profile.Spec.Opens)
 		}
 
-		nginxPassed, _ := checkOpens(t, "nginx", learn(t, "resources/nginx-deployment.yaml"))
+		// runc-heavy leg: the EXACT redis manifest the distro demo deploys
+		// (helm-rendered, digest-pinned) - bitnami container init opens procfs
+		// through detached fsopen/fsmount handles, the natural reproducer for
+		// prefix-stripped paths. Positive control rejects an event-less gadget.
+		bns := testutils.NewRandomNamespace()
+		rendered, err := os.ReadFile(path.Join(utils.CurrentDir(), "resources/bitnami-redis-rendered.yaml"))
+		require.NoError(t, err)
+        dyn := k8sinterface.NewKubernetesApi()
+                storageClient := spdxv1beta1client.NewForConfigOrDie(dyn.K8SConfig)
+                for _, doc := range strings.Split(string(rendered), "\n---\n") {
+                        if strings.TrimSpace(doc) == "" {
+                                continue
+                        }
+                        var obj unstructured.Unstructured
+                        jd, cerr := yaml.YAMLToJSON([]byte(doc))
+                        require.NoError(t, cerr)
+                        require.NoError(t, obj.UnmarshalJSON(jd))
+                        gvr, gerr := k8sinterface.GetGroupVersionResource(obj.GetKind())
+                        require.NoError(t, gerr, "gvr for %s", obj.GetKind())
+                        _, aerr := dyn.DynamicClient.Resource(gvr).Namespace(bns.Name).Create(context.Background(), &obj, metav1.CreateOptions{})
+                        require.NoError(t, aerr, "apply rendered %s/%s", obj.GetKind(), obj.GetName())
+                }
+                require.Eventually(t, func() bool {
+                        pods, perr := dyn.KubernetesClient.CoreV1().Pods(bns.Name).List(context.Background(),
+                                metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=redis"})
+                        if perr != nil || len(pods.Items) == 0 {
+                                return false
+                        }
+                        for _, c := range pods.Items[0].Status.ContainerStatuses {
+                                if !c.Ready {
+                                        return false
+                                }
+                        }
+                        return len(pods.Items[0].Status.ContainerStatuses) > 0
+                }, 8*time.Minute, 5*time.Second, "rendered redis statefulset pod must become Ready")
+                var bprofiles []v1beta1.ContainerProfile
+                require.Eventually(t, func() bool {
+                        cps, lerr := storageClient.ContainerProfiles(bns.Name).List(context.TODO(), metav1.ListOptions{})
+                        if lerr != nil || len(cps.Items) == 0 {
+                                return false
+                        }
+                        for _, cp := range cps.Items {
+                                if cp.Annotations["kubescape.io/status"] == "completed" {                                                                 
+                                        bprofiles = cps.Items
+                                        return true
+                                }
+                        }
+                        return false
+                }, 8*time.Minute, 10*time.Second, "learned redis ContainerProfile must complete")
+                procRooted := 0
+                for i := range bprofiles {
+                        checkOpens(bprofiles[i].Namespace+"/"+bprofiles[i].Name, bprofiles[i].Labels["kubescape.io/workload-container-name"], bprofiles[i].Spec
+                        for _, open := range bprofiles[i].Spec.Opens {
+                                if strings.HasPrefix(open.Path, "/proc/") {
+                                        procRooted++
+                                }
+                        }
+                }
+                if procRooted == 0 {
+                        t.Errorf("redis learned profile has no /proc/-rooted opens - gadget positive control failed")
+                        passed = false
+                }
 
-		// runc-heavy image: container init opens procfs through detached
-		// fsopen/fsmount handles - the natural reproducer for prefix-stripped
-		// paths. The positive control rejects a silently event-less gadget.
-		bitnamiProfile := learn(t, "resources/bitnami-redis-deployment.yaml")
-		bitnamiPassed, procRooted := checkOpens(t, "bitnami-redis", bitnamiProfile)
-		if procRooted == 0 {
-			t.Errorf("bitnami-redis learned profile has no /proc/-rooted opens - gadget positive control failed")
-			bitnamiPassed = false
-		}
-
-		passed := nginxPassed && bitnamiPassed
-		detail := ""
-		if !passed {
-			detail = "found non-absolute, '.', scrambled, or missing /proc opens in recorded profiles"
-		}
-		addResult("recorded_profile_absolute_paths", "(auto-learned)", "(nginx + bitnami-redis startup)", false, passed, detail)
-	})
+                // Distro-wide scan: the scrambled paths originally surfaced in real distro
+                // workloads (redis/valkey mounted-etc, health-check scripts, service-account
+                // tokens), so scan EVERY learned ContainerProfile across all namespaces, not
+                // only this test's workload. Best-effort: a failed cluster-wide list is not fatal.
+                if allCPs, listErr := storageClient.ContainerProfiles(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{}); listErr != nil {
+                        t.Logf("distro-wide scrambled-path scan skipped (cluster-wide list failed): %v", listErr)
+                } else {
+                        for i := range allCPs.Items {
+                                cp := &allCPs.Items[i]
+                                checkOpens(cp.Namespace+"/"+cp.Name, cp.Labels["kubescape.io/workload-container-name"], cp.Spec.Opens)
+                        }
+                }
+                detail := ""
+                if !passed {
+                        detail = "found non-absolute or '.' paths in recorded profile"                                                                    
+                }
+                addResult("recorded_profile_absolute_paths", "(auto-learned)", "(nginx + bitnami-redis startup)", false, passed, detail)
+        })
 
 	// ---------------------------------------------------------------
 	// 1b. User-defined profile wildcard tests.
