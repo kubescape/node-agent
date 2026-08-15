@@ -202,26 +202,23 @@ func (r *RuleFailureCreator) setCloudServices(ruleFailure *types.GenericRuleFail
 
 func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleFailure) {
 	var hostPath string
-	var err error
-	var path string
-
 	triggerEvent := ruleFailure.GetTriggerEvent()
+	processTree := ruleFailure.GetRuntimeProcessDetails().ProcessTree
 
-	if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path == "" {
-		path, err = utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
+	if processTree.Path == "" {
+		path, err := utils.GetPathFromPid(processTree.PID)
 		if err != nil {
 			return
 		}
-		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID, path))
-	}
-
-	if err != nil { // FIXME WTF it's always nil here
-		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" && triggerEvent != nil {
-			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", r.containerIdToPid.Get(triggerEvent.GetContainerID()),
-				ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path))
-		}
+		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", processTree.PID, path))
 	} else {
-		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID, path))
+		pidToUse := processTree.PID
+		if triggerEvent != nil {
+			if containerPID := r.containerIdToPid.Get(triggerEvent.GetContainerID()); containerPID != 0 {
+				pidToUse = containerPID
+			}
+		}
+		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", pidToUse, processTree.Path))
 	}
 
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
@@ -231,6 +228,7 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 	}
 	var size int64 = 0
 	if hostPath != "" {
+		var err error
 		size, err = utils.GetFileSize(hostPath)
 		if err != nil {
 			size = 0
