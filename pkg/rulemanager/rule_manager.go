@@ -27,6 +27,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
@@ -34,15 +35,14 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
-	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	corev1 "k8s.io/api/core/v1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -93,7 +93,6 @@ func CreateRuleManager(
 	mntnsRegistry contextdetection.Registry,
 	agentVersion string,
 ) (*RuleManager, error) {
-	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory, armotypes.AlertSourcePlatformK8sAgent, agentVersion)
 	rulePolicyValidator := NewRulePolicyValidator(objectCache)
 	detectorManager := detectors.NewDetectorManager(mntnsRegistry)
 
@@ -111,12 +110,13 @@ func CreateRuleManager(
 		processManager:      processManager,
 		ruleCooldown:        ruleCooldown,
 		celEvaluator:        celEvaluator,
-		ruleFailureCreator:  ruleFailureCreator,
 		rulePolicyValidator: rulePolicyValidator,
 		mntnsRegistry:       mntnsRegistry,
 		detectorManager:     detectorManager,
 		alertLogDedup:       expirable.NewLRU[string, struct{}](1000, nil, 60*time.Second),
 	}
+
+	r.ruleFailureCreator = ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory, armotypes.AlertSourcePlatformK8sAgent, agentVersion, &r.containerIdToPid)
 
 	// Compile the initial projection spec and start a goroutine that
 	// recompiles whenever rule bindings change.

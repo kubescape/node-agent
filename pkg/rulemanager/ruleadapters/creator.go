@@ -47,15 +47,16 @@ type RuleFailureCreator struct {
 	agentVersion     string
 }
 
-func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver, adapterFactory *EventRuleAdapterFactory, alertPlatform armotypes.AlertSourcePlatform, agentVersion string) *RuleFailureCreator {
+func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver, adapterFactory *EventRuleAdapterFactory, alertPlatform armotypes.AlertSourcePlatform, agentVersion string, containerIdToPid *maps.SafeMap[string, uint32]) *RuleFailureCreator {
 	hashCache := expirable.NewLRU[string, *FileHashCache](hashCacheMaxSize, nil, hashCacheTTL)
 	return &RuleFailureCreator{
-		adapterFactory: adapterFactory,
-		dnsManager:     dnsManager,
-		enricher:       enricher,
-		hashCache:      hashCache,
-		alertPlatform:  alertPlatform,
-		agentVersion:   agentVersion,
+		adapterFactory:   adapterFactory,
+		containerIdToPid: containerIdToPid,
+		dnsManager:       dnsManager,
+		enricher:         enricher,
+		hashCache:        hashCache,
+		alertPlatform:    alertPlatform,
+		agentVersion:     agentVersion,
 	}
 }
 
@@ -200,28 +201,31 @@ func (r *RuleFailureCreator) setCloudServices(ruleFailure *types.GenericRuleFail
 
 }
 
-func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleFailure) {
-	var hostPath string
-	var err error
-	var path string
-
-	triggerEvent := ruleFailure.GetTriggerEvent()
-
-	if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path == "" {
-		path, err = utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
+func (r *RuleFailureCreator) getHostPath(processTree armotypes.Process, triggerEvent utils.EnrichEvent) (string, error) {
+	if processTree.Path == "" {
+		path, err := utils.GetPathFromPid(processTree.PID)
 		if err != nil {
-			return
+			return "", err
 		}
-		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID, path))
+		return filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", processTree.PID, path)), nil
 	}
 
-	if err != nil { // FIXME WTF it's always nil here
-		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" && triggerEvent != nil {
-			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", r.containerIdToPid.Get(triggerEvent.GetContainerID()),
-				ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path))
+	pidToUse := processTree.PID
+	if triggerEvent != nil {
+		if containerPID := r.containerIdToPid.Get(triggerEvent.GetContainerID()); containerPID != 0 {
+			pidToUse = containerPID
 		}
-	} else {
-		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID, path))
+	}
+	return filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", pidToUse, processTree.Path)), nil
+}
+
+func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleFailure) {
+	triggerEvent := ruleFailure.GetTriggerEvent()
+	processTree := ruleFailure.GetRuntimeProcessDetails().ProcessTree
+
+	hostPath, err := r.getHostPath(processTree, triggerEvent)
+	if err != nil {
+		return
 	}
 
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
@@ -231,6 +235,7 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 	}
 	var size int64 = 0
 	if hostPath != "" {
+		var err error
 		size, err = utils.GetFileSize(hostPath)
 		if err != nil {
 			size = 0
