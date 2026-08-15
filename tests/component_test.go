@@ -3510,3 +3510,58 @@ func Test_48_MultiSubtypeGroupedProfileDocument(t *testing.T) {
 		t.Logf("ephemeral tracing appears fixed — promote the debug assertions back to hard requirements")
 	}
 }
+
+func Test_43_RelativeOpenPathResolution(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name,
+		path.Join(utils.CurrentDir(), "resources/relative-open-deployment.yaml"))
+	require.NoError(t, err, "create relative-open workload in ns %s", ns.Name)
+	require.NoError(t, wl.WaitForReady(80), "relative-open workload not ready in ns %s", ns.Name)
+
+	require.NoError(t, wl.WaitForContainerProfileCompletion(60),
+		"ContainerProfile did not complete for the relative-open workload")
+
+	cps, err := wl.GetContainerProfiles()
+	require.NoError(t, err, "get learned ContainerProfiles")
+
+	var opens []string
+	for _, cp := range cps {
+		if cp.Labels["kubescape.io/workload-container-name"] != "relative-open" {
+			continue
+		}
+		for _, o := range cp.Spec.Opens {
+			opens = append(opens, o.Path)
+		}
+	}
+	t.Logf("learned opens (%d): %v", len(opens), opens)
+
+	matchesResolved := func(name string) bool {
+		for _, p := range opens {
+			if p == "/data/reldir/"+name {
+				return true
+			}
+		}
+		return false
+	}
+
+	var fabricated []string
+	for _, p := range opens {
+		segs := strings.Split(strings.TrimPrefix(p, "/"), "/")
+		if len(segs) == 0 {
+			continue
+		}
+		if segs[0] == "reldir" || p == "/present.txt" || p == "/absent.txt" {
+			fabricated = append(fabricated, p)
+		}
+	}
+
+	assert.Empty(t, fabricated,
+		"relative opens must not be recorded as fabricated roots (unresolved cwd) -- got %v", fabricated)
+	assert.True(t, matchesResolved("present.txt"),
+		"the existing relative open reldir/present.txt must be learned as /data/reldir/present.txt; opens=%v", opens)
+	assert.True(t, matchesResolved("absent.txt"),
+		"the FAILED relative open reldir/absent.txt (no fd) must also resolve to /data/reldir/absent.txt; opens=%v", opens)
+}

@@ -167,20 +167,34 @@ func TestQueueLRUEviction(t *testing.T) {
 		t.Errorf("Expected queue size 3 due to LRU eviction, got %d", queueData.GetQueueSize())
 	}
 
-	// Check the names of the profiles in the queue
+	// With MaxQueueSize this small, maxStitchBacklog floors to 1 (see maxStitchBacklogFor): only
+	// the very first eviction (test-profile-0) gets a chain-preserving stitch enqueued in its
+	// place (see enforceMaxSize); the backlog is then exhausted, so the next eviction
+	// (test-profile-1) falls back to a plain, chain-forking drop instead of growing the queue
+	// further. Evicting test-profile-2 for test-profile-4 hits the same exhausted backlog, since
+	// the stitch is still sitting unprocessed at the head. The survivors are therefore the
+	// repair stitch followed by the two newest real profiles.
+	dequeued := make([]*QueuedContainerProfile, 0, 3)
 	for i := 0; i < 3; i++ {
-		profile, err := queueData.queue.Dequeue()
+		item, err := queueData.queue.Dequeue()
 		if err != nil {
-			t.Fatalf("Failed to dequeue profile %d: %v", i, err)
+			t.Fatalf("Failed to dequeue item %d: %v", i, err)
 		}
-		if profile == nil {
-			t.Fatalf("Expected profile %d, got nil", i)
+		dequeued = append(dequeued, item.(*QueuedContainerProfile))
+	}
+
+	if !dequeued[0].IsStitch {
+		t.Errorf("Expected the first surviving item to be the repair stitch for test-profile-0, got a real chunk named %q", dequeued[0].Profile.Name)
+	}
+	for i, expectedName := range []string{"test-profile-3", "test-profile-4"} {
+		got := dequeued[i+1]
+		if got.IsStitch || got.Profile.Name != expectedName {
+			t.Errorf("Expected profile %q, got IsStitch=%v name=%q", expectedName, got.IsStitch, got.Profile.Name)
 		}
-		newProfile := profile.(*QueuedContainerProfile).Profile
-		expectedName := fmt.Sprintf("test-profile-%d", i+2) // Should keep last 3 profiles
-		if newProfile.Name != expectedName {
-			t.Errorf("Expected profile name '%s', got '%s'", expectedName, newProfile.Name)
-		}
+	}
+
+	if got := queueData.chunksDropped.Load(); got != 3 {
+		t.Errorf("Expected 3 chunks dropped (1 repaired with a stitch + 2 backlog-exhausted forks), got %d", got)
 	}
 }
 

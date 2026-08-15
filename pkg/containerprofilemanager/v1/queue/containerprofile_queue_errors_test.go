@@ -559,26 +559,239 @@ func TestQueuePersistsSplitDepth(t *testing.T) {
 	assert.Equal(t, 5, got.Attempts)
 }
 
+// TestStitchBacklog_ClampsAtZeroAcrossRestart guards Blocker 1 found on review: stitchBacklog
+// starts at zero every process start, but the disk queue can already hold stitches persisted by
+// a prior run. Before releaseStitch existed, decrementing for one of those - which never
+// incremented the fresh instance's counter in the first place - drove it negative and kept it
+// there for the rest of the process, silently widening maxStitchBacklog by however many
+// stitches were resident at startup (up to maxQueueSize in the worst case).
+func TestStitchBacklog_ClampsAtZeroAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	cfg := QueueConfig{
+		QueueName:       "test-queue",
+		QueueDir:        dir,
+		MaxQueueSize:    10,
+		RetryInterval:   time.Hour, // never started; this test drives dequeues directly
+		ItemsPerSegment: 10,
+	}
+
+	qd1, err := NewQueueData(context.Background(), &alwaysFailingCreator{}, cfg)
+	require.NoError(t, err)
+
+	// Persist a stitch, then close - simulating a restart with a stitch still resident in the
+	// queue from before this process started.
+	stitch := &QueuedContainerProfile{
+		Profile:     testProfile(),
+		ContainerID: "container-id",
+		IsStitch:    true,
+	}
+	require.NoError(t, qd1.queue.Enqueue(stitch))
+	require.NoError(t, qd1.Close())
+
+	qd2, err := NewQueueData(context.Background(), &alwaysFailingCreator{}, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = qd2.Close() })
+
+	require.Equal(t, int64(0), qd2.stitchBacklog.Load(), "a fresh instance starts with no knowledge of pre-existing stitches")
+	require.Equal(t, 1, qd2.GetQueueSize())
+
+	// Dequeue the persisted stitch and release it exactly as processAllItems/enforceMaxSize
+	// would - this must not drive the counter negative.
+	item, err := qd2.queue.Dequeue()
+	require.NoError(t, err)
+	require.True(t, item.(*QueuedContainerProfile).IsStitch)
+	qd2.releaseStitch()
+
+	assert.Equal(t, int64(0), qd2.stitchBacklog.Load(), "releaseStitch must clamp at zero, never go negative")
+
+	stats := qd2.GetQueueStats()
+	assert.Equal(t, int64(0), stats["stitchBacklog"], "a negative backlog would also surface as a bug on the stats endpoint")
+}
+
 // TestQueueDropsProfileAfterMaxAttempts covers the general case: any error that never
 // resolves must stop consuming the queue rather than starving newer profiles.
+//
+// It also covers issue #871: before the fix, exhausting MaxAttempts simply discarded the item,
+// forking the container's report-timestamp chain with no replacement. Now the drop goes through
+// dropChunk like any other, so a stitch carrying the original's (previousReportTimestamp,
+// reportTimestamp] pair must be attempted too - and it gets its own fresh MaxAttempts budget
+// (newStitchFor's freshAttempts) rather than inheriting the parent's already-exhausted one, so
+// with a creator that always fails it is itself retried the full budget before being dropped,
+// without ever being re-stitched (mirrors TestQueueDoesNotStitchAStitch).
 func TestQueueDropsProfileAfterMaxAttempts(t *testing.T) {
 	const maxAttempts = 3
+	const totalCalls = 2 * maxAttempts // the original's budget, then the stitch's own fresh budget
 
+	profile := testProfile()
 	creator := &alwaysFailingCreator{err: errors.New("dial tcp 10.96.0.1:443: connect: connection refused")}
 	cb := &recordingCallback{}
 	qd := startQueue(t, creator, cb, QueueConfig{MaxAttempts: maxAttempts})
 
+	require.NoError(t, qd.Enqueue(profile, "container-id"))
+
+	assert.Eventually(t, func() bool {
+		return creator.callCount() >= totalCalls && qd.GetQueueSize() == 0
+	}, 2*time.Second, 10*time.Millisecond, "expected the profile and its replacement stitch to both exhaust their own retry budgets")
+
+	// The retry budget is a hard bound, and the stitch is never itself re-stitched, so no
+	// further attempts happen once both have been dropped.
+	callsAfterDrain := creator.callCount()
+	time.Sleep(200 * time.Millisecond)
+	assert.Equal(t, callsAfterDrain, creator.callCount(), "no further attempts once the original and its stitch are both dropped")
+	assert.Equal(t, totalCalls, creator.callCount(), "the original and the stitch each get the full MaxAttempts budget")
+	assert.Equal(t, 0, qd.GetQueueSize())
+	assert.Empty(t, cb.captured(), "a retryable failure must not end learning for the container")
+
+	attempts := creator.attemptedProfiles()
+	require.Len(t, attempts, totalCalls)
+
+	// attempts[0:maxAttempts] are all retries of the original (same name); attempts[maxAttempts]
+	// is the stitch's first attempt.
+	stitch := attempts[maxAttempts]
+	assert.NotEqual(t, profile.Name, stitch.Name)
+	assert.Empty(t, stitch.Spec.Capabilities, "a stitch carries no size-bearing data")
+	assert.Equal(t, profile.Annotations[helpersv1.PreviousReportTimestampMetadataKey], stitch.Annotations[helpersv1.PreviousReportTimestampMetadataKey],
+		"the stitch must preserve the dropped chunk's chain link")
+	assert.Equal(t, profile.Annotations[helpersv1.ReportTimestampMetadataKey], stitch.Annotations[helpersv1.ReportTimestampMetadataKey],
+		"the stitch must preserve the dropped chunk's chain link")
+
+	// Every attempt after the first stitch attempt must also be the stitch (same name), proving
+	// it was retried on its own budget rather than dropped after a single try.
+	for i := maxAttempts; i < totalCalls; i++ {
+		assert.Equal(t, stitch.Name, attempts[i].Name, "attempt %d must be a retry of the stitch, not a new item", i)
+	}
+
+	assert.Equal(t, int64(2), qd.chunksDropped.Load(), "one drop for the original, one for the stitch - never double-counted per drop")
+}
+
+// TestDropChunk_StitchBacklogExhaustedForksWithoutReplacement covers a gap a review of this
+// change found: dropChunk built and enqueued a repair stitch unconditionally, without checking
+// the same in-flight backlog bound enforceMaxSize's own eviction loop respects. Left unfixed, a
+// sustained run of MaxAttempts exhaustions could grow the backlog past the bound the eviction
+// loop relies on to terminate promptly, since only enforceMaxSize's own path was gated. This
+// pins that dropChunk (here reached via MaxAttempts exhaustion) must also check
+// stitchBacklogFull and fall back to an unrepaired, forked drop once the backlog is already
+// spent - never enqueueing a stitch or incrementing the backlog past its bound.
+func TestDropChunk_StitchBacklogExhaustedForksWithoutReplacement(t *testing.T) {
+	spy := newSpyMetrics()
+	creator := &alwaysFailingCreator{err: errors.New("dial tcp 10.96.0.1:443: connect: connection refused")}
+	cb := &recordingCallback{}
+	qd := startQueue(t, creator, cb, QueueConfig{MaxAttempts: 1, MetricsManager: spy})
+
+	// Simulate the backlog already sitting at its bound, e.g. from unrelated evictions or
+	// prior drops, so this drop's own stitch must be refused rather than pushing it over.
+	qd.stitchBacklog.Store(qd.maxStitchBacklog)
+
 	require.NoError(t, qd.Enqueue(testProfile(), "container-id"))
 
 	assert.Eventually(t, func() bool {
-		return creator.callCount() >= maxAttempts && qd.GetQueueSize() == 0
-	}, 2*time.Second, 10*time.Millisecond, "expected the profile to be dropped after %d attempts", maxAttempts)
+		return creator.callCount() >= 1 && qd.GetQueueSize() == 0
+	}, 2*time.Second, 10*time.Millisecond, "expected the profile to be dropped after its single attempt")
 
-	// The retry budget is a hard bound, so no further attempts happen.
+	// No stitch was enqueued (the backlog was already full), so there is nothing left to
+	// attempt: no further calls happen.
+	callsAfterDrain := creator.callCount()
 	time.Sleep(200 * time.Millisecond)
-	assert.Equal(t, maxAttempts, creator.callCount(), "attempts must be capped at MaxAttempts")
+	assert.Equal(t, callsAfterDrain, creator.callCount(), "no stitch should have been enqueued to attempt")
+	assert.Equal(t, 1, creator.callCount(), "only the original's single attempt, no stitch attempt")
 	assert.Equal(t, 0, qd.GetQueueSize())
+	assert.Equal(t, qd.maxStitchBacklog, qd.stitchBacklog.Load(), "the backlog must not have grown past its bound")
+
+	// Exactly one chunk was dropped (the original); the backlog-exhausted refusal is a second
+	// reason sample for the same chunk, not a second drop, so the counter stays at 1.
+	assert.Equal(t, int64(1), qd.chunksDropped.Load())
+
+	reasons := spy.droppedReasons()
+	assert.Equal(t, []string{string(dropReasonMaxAttemptsExhausted), string(dropReasonStitchBacklogExhausted)}, reasons)
 	assert.Empty(t, cb.captured(), "a retryable failure must not end learning for the container")
+}
+
+// TestEnforceMaxSize_EvictionEnqueuesStitch is the LRU-eviction counterpart of
+// TestQueueDropsUnsplittableProfileOnHTTP413: issue #871 flagged that a hard-capacity eviction
+// was also a silent, chain-forking drop, with no replacement ever regenerated. enforceMaxSize
+// must repair it the same way dropChunk repairs its own drop paths - and, since MaxQueueSize
+// here floors maxStitchBacklog to 1 (see maxStitchBacklogFor), the very next eviction exhausts
+// that budget and must fall back to a plain, unrepaired drop rather than growing the queue.
+func TestEnforceMaxSize_EvictionEnqueuesStitch(t *testing.T) {
+	dir := t.TempDir()
+	qd, err := NewQueueData(context.Background(), &alwaysFailingCreator{}, QueueConfig{
+		QueueName:       "test-queue",
+		QueueDir:        dir,
+		MaxQueueSize:    2,
+		RetryInterval:   time.Hour, // never started - this test only exercises the enqueue path
+		ItemsPerSegment: 10,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = qd.Close() })
+
+	evicted := testProfile()
+	dropped := testProfile()
+	survivor := testProfile()
+
+	require.NoError(t, qd.Enqueue(evicted, "container-id-evicted"))
+	require.NoError(t, qd.Enqueue(dropped, "container-id-dropped"))
+	// Overflows MaxQueueSize=2: `evicted` is repaired with a stitch (backlog 0 < bound 1), then
+	// `dropped` is evicted too, but the backlog is already exhausted, so it is forked with no
+	// replacement.
+	require.NoError(t, qd.Enqueue(survivor, "container-id-survivor"))
+
+	require.Equal(t, 2, qd.GetQueueSize())
+	assert.Equal(t, int64(2), qd.chunksDropped.Load(), "one repaired eviction plus one backlog-exhausted fork")
+	assert.Equal(t, int64(1), qd.stitchBacklog.Load(), "the repair stitch is still resident in the queue")
+
+	first, err := qd.queue.Dequeue()
+	require.NoError(t, err)
+	stitch := first.(*QueuedContainerProfile)
+
+	assert.True(t, stitch.IsStitch)
+	assert.Equal(t, "container-id-evicted", stitch.ContainerID)
+	assert.NotEqual(t, evicted.Name, stitch.Profile.Name)
+	assert.Empty(t, stitch.Profile.Spec.Capabilities, "a stitch carries no size-bearing data")
+	assert.Equal(t, evicted.Annotations[helpersv1.PreviousReportTimestampMetadataKey], stitch.Profile.Annotations[helpersv1.PreviousReportTimestampMetadataKey],
+		"the stitch must preserve the evicted chunk's chain link")
+	assert.Equal(t, evicted.Annotations[helpersv1.ReportTimestampMetadataKey], stitch.Profile.Annotations[helpersv1.ReportTimestampMetadataKey],
+		"the stitch must preserve the evicted chunk's chain link")
+
+	second, err := qd.queue.Dequeue()
+	require.NoError(t, err)
+	assert.Equal(t, survivor.Name, second.(*QueuedContainerProfile).Profile.Name,
+		"dropped must have been forked without a replacement, so survivor is next, not a stitch for dropped")
+}
+
+// TestEnforceMaxSize_BacklogBoundsRepairCost guards the termination property enforceMaxSize
+// depends on: replacing every LRU eviction with a same-count stitch makes no progress toward
+// the size limit by itself (see enforceMaxSize's doc comment), so without a cap on the in-flight
+// stitch backlog, a single call against a queue full of never-before-stitched real profiles
+// would walk through and convert the entire queue before ever making room for the new item that
+// triggered it. This drives a burst well past MaxQueueSize into an already-full, all-real queue;
+// a regression here would show up as this test hanging (the surrounding go test timeout is the
+// tripwire), not as an assertion failure.
+func TestEnforceMaxSize_BacklogBoundsRepairCost(t *testing.T) {
+	const maxQueueSize = 50
+
+	dir := t.TempDir()
+	qd, err := NewQueueData(context.Background(), &alwaysFailingCreator{}, QueueConfig{
+		QueueName:       "test-queue",
+		QueueDir:        dir,
+		MaxQueueSize:    maxQueueSize,
+		RetryInterval:   time.Hour,
+		ItemsPerSegment: 100,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = qd.Close() })
+
+	for i := 0; i < maxQueueSize; i++ {
+		require.NoError(t, qd.Enqueue(testProfile(), fmt.Sprintf("container-%d", i)))
+	}
+	require.Equal(t, maxQueueSize, qd.GetQueueSize())
+
+	for i := 0; i < maxQueueSize*3; i++ {
+		require.NoError(t, qd.Enqueue(testProfile(), fmt.Sprintf("container-burst-%d", i)))
+		require.LessOrEqual(t, qd.stitchBacklog.Load(), qd.maxStitchBacklog, "stitch backlog must never exceed its bound")
+	}
+
+	assert.Equal(t, maxQueueSize, qd.GetQueueSize())
+	assert.LessOrEqual(t, qd.stitchBacklog.Load(), qd.maxStitchBacklog)
 }
 
 // TestDefaultRetryBudgetOutlastsARestart guards the other side of the bound: the budget
@@ -697,7 +910,8 @@ func TestRequeueSplit_QueueNotRunningDropsBothHalvesAndAttemptsStitch(t *testing
 	qd.requeueSplit(queuedParent, a, b)
 
 	assert.Equal(t, 0, qd.GetQueueSize(), "neither half nor the stitch can land while the queue isn't running")
-	assert.Equal(t, int64(2), qd.chunksDropped.Load(),
-		"both the lost-halves case and the stitch-also-failed case must be counted")
-	assert.Equal(t, []string{string(dropReasonEnqueueFailed), string(dropReasonEnqueueFailed)}, spy.droppedReasons())
+	assert.Equal(t, int64(1), qd.chunksDropped.Load(),
+		"one chunk (the parent) is lost; the stitch-also-failed case reports its own reason but is not a second dropped chunk")
+	assert.Equal(t, []string{string(dropReasonEnqueueFailed), string(dropReasonEnqueueFailed)}, spy.droppedReasons(),
+		"both the lost-halves case and the stitch-also-failed case must still each report a metric sample")
 }

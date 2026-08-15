@@ -126,7 +126,7 @@ When a chunk is dropped (floor case, depth exhaustion, etc.), a **stitch chunk**
 
 Why preserve only three fields? Storage's `mergeContainerProfileTS` (kubescape/storage pkg/registry/file/containerprofile_processor.go:855-881) merges most fields by **append**, but these three by **unconditional assignment** (lines 863, 865, 866)—the last merge wins. Rows merge in DESC order, so the oldest row wins. Clearing `SeccompProfile`/`ImageID`/`ImageTag` would zero them on the aggregate.
 
-A stitch is a couple of KB and cannot exceed the 413 cap. If it is rejected with 413 (which should never happen), it is dropped without re-stitching via the `IsStitch` flag (pkg/containerprofilemanager/v1/queue/containerprofile_queue.go), to avoid an infinite loop. This gap (one half of a pair lost) forks the chain, leaving the profile stuck in `Learning`—a known limitation tracked as a follow-up against the queue's LRU eviction and `MaxAttempts` retry exhaustion.
+A stitch is a couple of KB and cannot exceed the 413 cap. If it is rejected with 413 (which should never happen), it is dropped without re-stitching via the `IsStitch` flag (pkg/containerprofilemanager/v1/queue/containerprofile_queue.go), to avoid an infinite loop. `dropReasonStitchRejected` is not the only drop path that can leave the chain forked, though—the in-flight stitch backlog bound (`maxStitchBacklogFor`) means an LRU eviction falls back to the same unrepaired fork (`dropReasonLRUBacklogExhausted`) once that bound is hit. `MaxAttempts` retry exhaustion still repairs the chain the same way as the split-chunk drop paths above, subject to that same backlog bound (see [Known limitations](#known-limitations) and issue #871).
 
 ### Temporary shim
 
@@ -170,6 +170,10 @@ Drop reasons are typed constants (pkg/containerprofilemanager/v1/queue/container
 | `dropReasonDepthExhausted` | `MaxSplitDepth` reached before convergence |
 | `dropReasonStitchRejected` | A stitch chunk was itself rejected with 413. The chain fork is left open (known limitation). |
 | `dropReasonEnqueueFailed` | The stitch replacement could not be enqueued (rare; the queue is full or degraded). |
+| `dropReasonMaxAttemptsExhausted` | An item's retry budget (`MaxAttempts`) ran out; see [LRU eviction and MaxAttempts gaps](#known-limitations) below. |
+| `dropReasonLRUEvicted` | The queue was at capacity and this was the oldest item; it was evicted and repaired with a stitch. |
+| `dropReasonLRUBacklogExhausted` | Same as above, but the in-flight stitch backlog was already at its bound, so no replacement was enqueued and the chain forks. |
+| `dropReasonStitchBacklogExhausted` | `dropChunk` or `requeueSplit`'s lost-first-half case needed to repair a chain with a stitch, but the in-flight stitch backlog was already at its bound. The LRU-eviction equivalent is `dropReasonLRUBacklogExhausted`; this covers every other stitch-admission site so the bound applies everywhere a stitch can be created. |
 
 ## Tests
 
@@ -185,6 +189,8 @@ Drop reasons are typed constants (pkg/containerprofilemanager/v1/queue/container
   - Depth bounds (`TestQueueRespectsMaxSplitDepth`)
   - Stitch-rejection loop prevention (`TestQueueDoesNotStitchAStitch`)
   - Persistence across a queue restart (`TestQueuePersistsSplitDepth`)
+  - `MaxAttempts` exhaustion now repairs the chain (`TestQueueDropsProfileAfterMaxAttempts`)
+  - LRU eviction repairs the chain, bounded by the stitch backlog (`TestEnforceMaxSize_EvictionEnqueuesStitch`, `TestEnforceMaxSize_BacklogBoundsRepairCost`)
 
 - End-to-end: no new e2e tests are added (the split is internal; no new public API). Existing learning-completion tests should pass without change (profiles should complete normally even when internal chunks split).
 
@@ -192,6 +198,18 @@ Drop reasons are typed constants (pkg/containerprofilemanager/v1/queue/container
 
 1. **Node-agent estimator.** The `MaxTsProfileSize` threshold mixes byte-size and element-count heuristics. This PR tolerates occasional 413s via splitting, but the root cause (the estimator) is tracked separately and remains a node-agent bug.
 
-2. **LRU eviction and MaxAttempts gaps.** If exactly one half of a split pair is evicted from the queue (by LRU due to `MaxQueueSize`) or exhausts `MaxAttempts` retries before landing, the chain fork persists and the profile hangs in `Learning`. This gap is pre-existing (the same failure mode applies today via the pre-existing `MaxAttempts` drop path and is not new). A comprehensive fix requires explicit half-tracking across queue evictions, tracked as a follow-up against the queue's LRU and retry-budget design.
+2. **LRU eviction and MaxAttempts gaps (fixed, issue #871).** Previously, a chunk evicted from the queue by LRU (`MaxQueueSize`) or dropped after exhausting its `MaxAttempts` retry budget was discarded with no replacement, forking the chain and hanging the profile in `Learning` forever with no field-visible symptom—this applied to any queued chunk, not just split halves, and was reported as a side effect of reviewing this change.
+
+   Both paths now go through the same stitch-repair mechanism as the split-chunk drop paths above (pkg/containerprofilemanager/v1/queue/containerprofile_queue.go):
+   - `enforceMaxSize` replaces an evicted non-stitch item with a stitch instead of discarding it outright.
+   - The `MaxAttempts` exhaustion path now calls `dropChunk` (`dropReasonMaxAttemptsExhausted`) instead of dropping the item directly.
+
+   Replacing every eviction with a same-count stitch makes no net progress toward `MaxQueueSize` by itself (one item out, one back in), so `enforceMaxSize` bounds the in-flight stitch backlog via `maxStitchBacklogFor` (10% of `MaxQueueSize`, floor 1). Without that bound, a single call against a queue full of never-before-stitched profiles could walk through and convert the entire queue before ever making room for the new item that triggered it. Once the backlog is exhausted, further evictions fall back to the original unrepaired drop (`dropReasonLRUBacklogExhausted`)—a bounded, observable trade-off rather than unbounded queue growth.
+
+   `stitchBacklogFull()` gates every stitch-admission site the same way, not just `enforceMaxSize`'s own loop: `dropChunk` (covering both `MaxAttempts` exhaustion and the split-chunk drops above) and `requeueSplit`'s lost-first-half case also check it before building and enqueueing a stitch, falling back to `dropReasonStitchBacklogExhausted` when the bound is already spent. Without that, a sustained run of `MaxAttempts` exhaustions could grow the backlog past the bound the eviction loop itself relies on to terminate promptly.
+
+   Two caveats worth knowing:
+   - **A `MaxAttempts` repair is best-effort, not a guarantee, under a sustained outage.** `dropChunk` gives that stitch a fresh retry budget rather than inheriting the exhausted one (see `newStitchFor`), so it gets its own full retry window rather than a single attempt — but if storage is still unreachable when that window also runs out, the stitch is dropped un-restitched and the chain forks anyway. What this fixes outright is an item-specific, persistent rejection (a metadata-only stitch succeeds where the original payload didn't); it narrows, but does not eliminate, the outage case.
+   - **A restart can now shed two chunks instead of one when the queue was left exactly at capacity.** `NewQueueData`'s startup sweep calls the same lineage-aware `enforceMaxSize`, which evicts while `size >= MaxQueueSize`. At exactly `MaxQueueSize` (a normal, non-overshoot state that also triggered one eviction before this change) the first eviction is replaced with a stitch — no net size reduction — so the loop evicts a second, real item to actually make room, even though no new item is waiting to be enqueued at startup. Pre-fix this cost one delta per such restart; it now costs up to two.
 
 3. **No "too-large ends learning" signal on transport rejection.** Prior to this change, a 413 ended learning loudly with an `ObjectTooLargeError` status. Now, a 413 silently splits (or is silently dropped if unsplittable). Storage's own sentinels (`ObjectTooLargeError`, `ObjectCompletedError`) still end learning authoritatively and will log. But if a container is stuck splitting/dropping chunks forever with no terminal status ever reached, that silent degradation may require the drop counters and debug logs to diagnose. This trade-off (silently degrade one delta vs. silently end the container) is intentional.

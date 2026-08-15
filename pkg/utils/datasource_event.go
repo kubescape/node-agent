@@ -520,15 +520,7 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 
 func (e *DatasourceEvent) GetFullPath() string {
 	path, _ := e.getFieldAccessor("fpath").String(e.Data)
-	// Discard a full path the gadget could not actually resolve. A non-absolute
-	// value is stale scratch-buffer content, not this event's path -- see
-	// IsResolvedFullPath. Without this guard NormalizePath prefixes "/" and
-	// turns the fragment into a well-formed absolute path, which then enters
-	// the learned profile as its own root-level segment. Enough distinct
-	// fragments cross OpenDynamicThreshold and collapse the profile's root
-	// position to a wildcard, which stops the profile matching anything
-	// meaningfully.
-	if !IsResolvedFullPath(path) {
+	if path == "" {
 		path, _ = e.getFieldAccessor("fname").String(e.Data)
 	}
 	return NormalizePath(path)

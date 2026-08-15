@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: relative-open
+  name: relative-open-deployment
+spec:
+  selector:
+    matchLabels:
+      app: relative-open
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: relative-open
+    spec:
+      containers:
+      - name: relative-open
+        image: python:3.12-slim
+        command: ["python3", "-u", "-c"]
+        args:
+          - |
+            import os, time
+            os.makedirs('/data/reldir', exist_ok=True)
+            with open('/data/reldir/present.txt', 'w') as f:
+                f.write('hello')
+            os.chdir('/data')
+            while True:
+                try:
+                    open('reldir/present.txt').close()
+                except OSError:
+                    pass
+                try:
+                    open('reldir/absent.txt').close()
+                except OSError:
+                    pass
+                time.sleep(2)
+        volumeMounts:
+          - name: data
+            mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
