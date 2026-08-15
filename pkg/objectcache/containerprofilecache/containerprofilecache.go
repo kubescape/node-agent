@@ -34,10 +34,14 @@ import (
 const (
 	defaultReconcileInterval = 30 * time.Second
 	defaultStorageRPCBudget  = 5 * time.Second
+	// defaultRemovalGracePeriod keeps a removed container's entry resolvable
+	// long enough for in-flight events (ordered event queue + worker pool) to
+	// complete rule evaluation. See ContainerProfileCacheImpl.removalGrace.
+	defaultRemovalGracePeriod = 10 * time.Second
 )
 
-// namespacedName is a minimal identifier for a legacy user-authored CRD
-// (ApplicationProfile / NetworkNeighborhood) overlaid on a ContainerProfile.
+// namespacedName is a minimal identifier for the user-authored
+// ContainerProfile a container's user-defined-profile label resolves to.
 type namespacedName struct {
 	Namespace string
 	Name      string
@@ -80,6 +84,11 @@ type CachedContainerProfile struct {
 
 	RV       string // ContainerProfile resourceVersion at last load
 	UserCPRV string // user-defined ContainerProfile (label-referenced) RV at last load, "" if not used
+
+	// terminatedSeenAt is set by the reconciler the first time it observes the
+	// container Terminated; eviction happens on a later tick once the removal
+	// grace has elapsed. Accessed only from the reconciler goroutine.
+	terminatedSeenAt time.Time
 }
 
 // pendingContainer captures the minimum state needed to retry the initial
@@ -108,6 +117,17 @@ type ContainerProfileCacheImpl struct {
 	reconcileEvery    time.Duration
 	rpcBudget         time.Duration
 	refreshInProgress atomic.Bool
+
+	// removalGrace is how long an entry stays resolvable after the container's
+	// remove callback. Events emitted during the container's life are still in
+	// flight through the ordered event queue and worker pool when the remove
+	// callback runs; deleting immediately makes ProfileDependency=Required
+	// rules suppress the container's terminal events as profile_incomplete
+	// (issue #79). The reconciler's terminated-eviction honors the same grace.
+	removalGrace time.Duration
+	// removalPending marks containers whose remove callback fired and whose
+	// deferred deletion is scheduled; reconcileOnce must not evict them early.
+	removalPending maps.SafeMap[string, time.Time]
 
 	// Projection spec — installed by SetProjectionSpec when rulemanager loads rules.
 	currentSpecMu  sync.RWMutex
@@ -140,6 +160,7 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 		metricsManager: metricsManager,
 		reconcileEvery: reconcileEvery,
 		rpcBudget:      rpcBudget,
+		removalGrace:   defaultRemovalGracePeriod,
 		nudge:          make(chan struct{}, 1),
 	}
 	// Pre-initialize SafeMap internal maps: Load() reads m.items == nil without
@@ -149,6 +170,8 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 	c.entries.Delete("")
 	c.pending.Set("", nil)
 	c.pending.Delete("")
+	c.removalPending.Set("", time.Time{})
+	c.removalPending.Delete("")
 	return c
 }
 
@@ -162,7 +185,7 @@ func (c *ContainerProfileCacheImpl) refreshRPC(ctx context.Context, fn func(cont
 
 // Start begins the periodic reconciler goroutine. The loop evicts entries
 // whose container is no longer Running and refreshes live entries' base CP +
-// user AP/NN overlays. See reconciler.go for the tick loop and RPC-cost
+// user-authored CP. See reconciler.go for the tick loop and RPC-cost
 // characterization.
 func (c *ContainerProfileCacheImpl) Start(ctx context.Context) {
 	go c.tickLoop(ctx)
@@ -193,7 +216,20 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 		// labels matched the ignore filter would otherwise leak in the cache.
 		// The reconciler eviction path is the safety net, but a Remove event
 		// should always clean up regardless of current label state.
-		go c.deleteContainer(notif.Container.Runtime.ContainerID)
+		//
+		// Deletion is DEFERRED by removalGrace: events emitted during the
+		// container's life (its terminal exec in particular) are still in
+		// flight through the ordered event queue and worker pool when this
+		// callback runs, and the rule engine resolves the projected profile
+		// by container ID at evaluation time. Immediate deletion made
+		// ProfileDependency=Required rules suppress those events as
+		// profile_incomplete (issue #79).
+		containerID := notif.Container.Runtime.ContainerID
+		c.removalPending.Set(containerID, time.Now())
+		time.AfterFunc(c.removalGrace, func() {
+			c.removalPending.Delete(containerID)
+			c.deleteContainer(containerID)
+		})
 	}
 }
 
@@ -223,9 +259,9 @@ func (c *ContainerProfileCacheImpl) addContainerWithTimeout(container *container
 }
 
 // addContainer builds and stores a cache entry for the container: fetches
-// the ContainerProfile from storage, optionally fetches user-authored AP/NN
-// CRDs, projects them onto a DeepCopy (or fast-paths via shared pointer), and
-// builds the call-stack search tree.
+// the ContainerProfile from storage, optionally fetches the user-authored
+// ContainerProfile the pod label names, projects onto a DeepCopy (or
+// fast-paths via shared pointer), and builds the call-stack search tree.
 func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.Container, ctx context.Context) error {
 	containerID := container.Runtime.ContainerID
 
@@ -243,10 +279,9 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 		//                  Kept for forward-compat; current storage does not
 		//                  publish a queryable consolidated CP at this name,
 		//                  so we treat a 404 as "not yet".
-		//   workloadName = per-workload stable slug, where the server-side
-		//                  aggregation publishes the ApplicationProfile and
-		//                  NetworkNeighborhood CRs. Legacy caches read these
-		//                  directly; the new cache does the same while the
+		//   workloadName = per-workload stable slug. Used as the synthetic-CP
+		//                  name when no consolidated CP has landed yet, so
+		//                  downstream state display stays sensible while the
 		//                  server-side consolidated-CP plumbing matures.
 		cpName, err := sharedData.InstanceID.GetSlug(false)
 		if err != nil {
@@ -264,8 +299,8 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 		}
 
 		if populated := c.tryPopulateEntry(ctx, containerID, container, sharedData, cpName, workloadName); !populated {
-			// No profile data available yet (neither consolidated CP nor
-			// workload AP/NN have landed in storage). Record a pending entry;
+			// No profile data available yet (no consolidated CP in storage,
+			// and no authored CP resolved). Record a pending entry;
 			// the reconciler will retry each tick until data shows up or the
 			// container stops. This preserves the legacy periodic-scan
 			// recovery that kicked in when profiles were created after
@@ -282,9 +317,10 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 	})
 }
 
-// tryPopulateEntry issues the CP GET (plus any user-AP/NN overlay) and
-// installs the cache entry on success. Returns true iff an entry was
-// installed. Must be called while holding containerLocks.WithLock(id).
+// tryPopulateEntry issues the CP GET (plus the authored CP when the pod
+// label names one) and installs the cache entry on success. Returns true iff
+// an entry was installed. Must be called while holding
+// containerLocks.WithLock(id).
 func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	ctx context.Context,
 	containerID string,
@@ -378,6 +414,24 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
+	// A grouped (multi-container) authored document carries per-subtype
+	// container sections; select THIS container's section by name across
+	// containers/initContainers/ephemeralContainers - the contract the legacy
+	// AP/NN specs expressed. A flat document passes through unchanged. A
+	// grouped document that does not cover this container resolves to nil and
+	// falls through to the unresolved handling below (never enforce a
+	// sibling's profile).
+	if resolved := resolveAuthoredContainerSection(userDefinedCP, container.Runtime.ContainerName); resolved != userDefinedCP {
+		if resolved == nil && userDefinedCP != nil {
+			logger.L().Warning("authored ContainerProfile document does not cover this container; treating as unresolved",
+				helpers.String("containerID", containerID),
+				helpers.String("namespace", ns),
+				helpers.String("name", resolvedOverlayName),
+				helpers.String("containerName", container.Runtime.ContainerName))
+		}
+		userDefinedCP = resolved
+	}
+
 	// A label-referenced ContainerProfile must be USER-AUTHORED, not a learned
 	// one. A learned CP carries lifecycle annotations (status/completion); an
 	// authored one carries none. If the label resolves to a learned CP, ignore
@@ -441,9 +495,16 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// A user-defined ContainerProfile is authoritative for this container: it is
 	// the migrated replacement for the AP+NN overlay pair, so it becomes the
 	// base. Learning is suppressed for user-defined containers, so no
-	// consolidated CP competes with it.
+	// consolidated CP competes with it. Adoption is logged and counted — the
+	// legacy overlay path emitted metrics here and enforcement silently
+	// switching to an authored profile should be visible.
 	if userDefinedCP != nil {
 		cp = userDefinedCP
+		logger.L().Info("adopted user-authored ContainerProfile as authoritative base",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", ns),
+			helpers.String("name", userDefinedCP.Name))
+		c.metricsManager.IncUserDefinedProfileAdopted(ns)
 	}
 
 	// When no consolidated CP is available, synthesize an empty CP named
@@ -549,6 +610,14 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 	}
 	if pod != nil {
 		entry.PodUID = string(pod.UID)
+	} else if container.K8s.PodUID != "" {
+		// The pod is not yet in the k8s cache (busy-node watch lag) but the
+		// container runtime metadata already carries the pod UID. Without this
+		// backfill the entry starts with an empty PodUID, and the reconciler's
+		// (Name, PodUID) fallback for pre-running containers cannot match —
+		// which historically fed live init containers into the
+		// "absent = reaped" eviction path.
+		entry.PodUID = container.K8s.PodUID
 	}
 
 	// The base is authoritative as-is: a user-defined profile is a whole

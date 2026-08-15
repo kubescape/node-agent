@@ -74,7 +74,9 @@ jobs:
           Test_24_ProcessTreeDepthTest,
           Test_27_ApplicationProfileOpens,
           Test_32_UnexpectedProcessArguments,
-          Test_34_NetworkNeighborsCIDRCollapse
+          Test_34_NetworkNeighborsCIDRCollapse,
+          Test_36_MultiContainerPerContainerBinding,
+          Test_48_MultiSubtypeGroupedProfileDocument
         ]
     steps:
       - name: Checkout code

@@ -58,6 +58,7 @@ type OTELMetricsManager struct {
 	projReconcileTriggeredTotal       metric.Int64Counter
 	projHelperCallTotal               metric.Int64Counter
 	userDefinedProfileUnresolvedTotal metric.Int64Counter
+	userDefinedProfileAdoptedTotal    metric.Int64Counter
 	projUndeclaredRulesDetail         metric.Float64Gauge
 
 	// Memory-savings metrics (dev-only, kept for interface compat; candidates for removal)
@@ -99,10 +100,24 @@ type OTELMetricsManager struct {
 // returns the real MeterProvider, not the SDK no-op.
 //
 // ownContainerID is this agent's own container ID (from the k8s API); it lets
-// the cgroup memory gauges resolve the correct container scope under the
-// host-mounted cgroup tree. Pass "" when unknown — the gauges then fall back to
-// /proc-based resolution and report 0 if that fails.
-func NewOTELMetricsManager(ownContainerID string) *OTELMetricsManager {
+// the cgroup memory gauges resolve the correct container scope. Pass "" when
+// unknown.
+//
+// ownPodUID is this agent's own pod UID (from the same k8s API call); it
+// verifies the pod-level cgroup slice the pod memory gauges read from. Pass ""
+// when unknown — the pod slice is then accepted on its name shape alone.
+//
+// hostCgroupMounted MUST be true only for the caller that bind-mounts the
+// HOST's /sys/fs/cgroup over its own (the Kubernetes DaemonSet). It MUST be
+// false for every other caller — the sbom-scanner sidecar, or any entrypoint
+// (cmd/host, cmd/ecs) that mounts its own namespaced /sys/fs/cgroup —
+// regardless of whether ownContainerID is known for that call. Getting this
+// wrong on a host-mounted caller with an unresolved container ID would
+// silently report the whole node's memory as this container's own; see
+// resolveCgroupMemoryPathsUnder's doc comment for the full reasoning. When
+// hostCgroupMounted is false, a resolution failure simply falls back to
+// /proc-based resolution and reports 0 if that also fails.
+func NewOTELMetricsManager(ownContainerID, ownPodUID string, hostCgroupMounted bool) *OTELMetricsManager {
 	meter := otelsetup.Meter()
 	m := &OTELMetricsManager{
 		undeclaredRulesSet: make(map[string]struct{}),
@@ -202,6 +217,8 @@ func NewOTELMetricsManager(ownContainerID string) *OTELMetricsManager {
 		"Profile-helper CEL function calls by helper name")
 	m.userDefinedProfileUnresolvedTotal = mustCounter("node_agent.container_profile.user_defined_unresolved.total",
 		"Times a pod's user-defined-profile label was set but no ContainerProfile resolved")
+	m.userDefinedProfileAdoptedTotal = mustCounter("node_agent.container_profile.user_defined_adopted.total",
+		"Times an authored ContainerProfile was adopted as the authoritative base for a container")
 	// program runtime gauges intentionally omitted — dead code since initial implementation
 	m.projUndeclaredRulesDetail = mustGauge("node_agent.rule.projection.undeclared_rules_detail",
 		"Per-rule gauge for undeclared rules (high-cardinality; candidate for removal in Phase 3)")
@@ -231,7 +248,7 @@ func NewOTELMetricsManager(ownContainerID string) *OTELMetricsManager {
 	m.alertSuppressedTotal = mustCounter("node_agent.alert.suppressed.total",
 		"Total alerts suppressed before delivery, labeled by rule_id and reason")
 
-	registerResourceMetrics(meter, &m.containerCount, ownContainerID)
+	registerResourceMetrics(meter, &m.containerCount, ownContainerID, ownPodUID, hostCgroupMounted)
 
 	return m
 }
@@ -442,6 +459,12 @@ func (m *OTELMetricsManager) IncHelperCall(helper string) {
 
 func (m *OTELMetricsManager) IncUserDefinedProfileUnresolved(namespace string) {
 	m.userDefinedProfileUnresolvedTotal.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("namespace", namespace),
+	))
+}
+
+func (m *OTELMetricsManager) IncUserDefinedProfileAdopted(namespace string) {
+	m.userDefinedProfileAdoptedTotal.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("namespace", namespace),
 	))
 }

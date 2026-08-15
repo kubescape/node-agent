@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
+	"github.com/prometheus/procfs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -106,6 +107,45 @@ func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
 	// Test reading info for a non-existent PID
 	_, err = feeder.readProcessInfo(999999)
 	assert.Error(t, err)
+}
+
+func TestProcfsFeeder_ReadProcessInfo_StartTime(t *testing.T) {
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
+	require.NoError(t, feeder.Start(context.Background()))
+	defer feeder.Stop()
+
+	event, err := feeder.readProcessInfo(uint32(os.Getpid()))
+	require.NoError(t, err)
+
+	// Boot-relative nanoseconds: non-zero and an exact multiple of 10ms,
+	// because /proc/<pid>/stat field 22 is denominated in USER_HZ=100 ticks.
+	assert.NotZero(t, event.StartTimeNs)
+	assert.Zero(t, event.StartTimeNs%10_000_000,
+		"procfs-derived StartTimeNs must be an exact multiple of 10^7 ns")
+
+	// Wall-clock derivation: btime + ticks/HZ. Sanity: within [boot, now].
+	assert.False(t, event.StartTimeWall.IsZero())
+	assert.True(t, event.StartTimeWall.Before(time.Now().Add(2*time.Second)))
+	// This process started after boot: wall - bootNs must land near btime.
+	// (Loose check: StartTimeWall minus the boot-relative duration is in the past.)
+	assert.True(t, event.StartTimeWall.Add(-time.Duration(event.StartTimeNs)).Before(time.Now()))
+
+	// Pin the conversion against an independently read field 22 and the contract's
+	// literal 10^7, so a drifted ticksPerSecond fails deterministically instead of
+	// only on machines whose uptime happens to make the error visible.
+	p, err := procfs.NewProc(os.Getpid())
+	require.NoError(t, err)
+	stat, err := p.Stat()
+	require.NoError(t, err)
+	assert.Equal(t, stat.Starttime*10_000_000, event.StartTimeNs,
+		"conversion must be exactly field 22 ticks * 10^7 ns (USER_HZ=100)")
+
+	// Sharper check on the arithmetic itself: this is the test binary's own pid,
+	// so its real creation time is moments ago. A wrong btime or a wrong tick
+	// scaling would land this decades or hours away rather than minutes.
+	assert.WithinDuration(t, time.Now(), event.StartTimeWall, 5*time.Minute,
+		"btime + ticks/HZ must reconstruct the test process's actual start time")
 }
 
 func TestProcfsFeeder_GetProcessComm(t *testing.T) {

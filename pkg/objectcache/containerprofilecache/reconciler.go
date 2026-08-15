@@ -126,7 +126,28 @@ func (c *ContainerProfileCacheImpl) reconcileOnce(ctx context.Context) {
 		// NOT a reason to evict — init containers and pre-running containers
 		// legitimately pass through Waiting before transitioning to Running.
 		if isContainerTerminated(pod, e, id) {
+			// Removal-grace coordination (issue #79): a container whose
+			// remove callback fired has a deferred deletion scheduled — do
+			// not evict it early, or in-flight terminal events lose profile
+			// resolution. For terminated containers whose remove event was
+			// missed (this path's real purpose), apply the same grace by
+			// marking on first observation and evicting on a later tick.
+			if c.removalPending.Has(id) {
+				return true
+			}
+			if e.terminatedSeenAt.IsZero() {
+				e.terminatedSeenAt = time.Now()
+				return true
+			}
+			if time.Since(e.terminatedSeenAt) < c.removalGrace {
+				return true
+			}
 			toEvict = append(toEvict, id)
+		} else if !e.terminatedSeenAt.IsZero() {
+			// The container is observed alive again: reset the mark so a
+			// later, genuine termination gets a full grace window instead of
+			// an instant eviction against a stale mark.
+			e.terminatedSeenAt = time.Time{}
 		}
 		return true
 	})
@@ -176,7 +197,16 @@ func isContainerTerminated(pod *corev1.Pod, e *CachedContainerProfile, id string
 	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
 	for _, s := range statuses {
 		if s.ContainerID == "" {
-			if s.Name == e.ContainerName && string(pod.UID) == e.PodUID {
+			// Pre-running container: the kubelet has not published its
+			// ContainerID yet, so match on the container name. The stored
+			// PodUID may legitimately be empty when the entry was added
+			// before the pod appeared in the k8s cache (busy-node lag); an
+			// empty stored PodUID must not defeat the name match — the pod
+			// was already looked up by (Namespace, PodName), so the name is
+			// the best remaining signal. Requiring a UID match with an empty
+			// stored UID made this branch unreachable and sent live init
+			// containers into the "absent = reaped" eviction below.
+			if s.Name == e.ContainerName && (e.PodUID == "" || string(pod.UID) == e.PodUID) {
 				return s.State.Terminated != nil
 			}
 			continue
@@ -185,14 +215,58 @@ func isContainerTerminated(pod *corev1.Pod, e *CachedContainerProfile, id string
 			return s.State.Terminated != nil
 		}
 	}
+	// No status entry matches this exact container id. If a status entry
+	// carries the same container NAME under a different, non-empty
+	// ContainerID, the kubelet has replaced this instance (restart): the old
+	// instance was reaped.
+	for _, s := range statuses {
+		if s.Name == e.ContainerName && s.ContainerID != "" {
+			return true
+		}
+	}
 	// Container not found in any status list. If no statuses have been
 	// published yet (kubelet lag on a brand-new pod), do NOT evict — the
 	// empty list is indistinguishable from a fully-reaped container otherwise.
 	if len(statuses) == 0 {
 		return false
 	}
-	// Statuses were published but this container is absent: it was reaped.
+	// Statuses were published but this container is absent. If the container
+	// is still DECLARED in the pod spec, kubelet simply has not published its
+	// status yet — routine for a just-attached ephemeral container (the
+	// ephemeralContainerStatuses entry lags the attach by seconds) and for an
+	// init container whose entry carries an empty PodUID while its status has
+	// no ContainerID yet. Classifying that as reaped evicted the
+	// freshly-adopted profile entry, permanently suppressing every
+	// ProfileDependency=Required rule for the container's life (issue #79).
+	if containerDeclaredInSpec(pod, e.ContainerName) {
+		return false
+	}
+	// Absent from spec AND status: it was reaped.
 	return true
+}
+
+// containerDeclaredInSpec reports whether the pod spec declares a container
+// with the given name in containers, initContainers or ephemeralContainers.
+func containerDeclaredInSpec(pod *corev1.Pod, name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == name {
+			return true
+		}
+	}
+	for i := range pod.Spec.InitContainers {
+		if pod.Spec.InitContainers[i].Name == name {
+			return true
+		}
+	}
+	for i := range pod.Spec.EphemeralContainers {
+		if pod.Spec.EphemeralContainers[i].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func isContainerRunning(pod *corev1.Pod, e *CachedContainerProfile, id string) bool {
@@ -218,9 +292,9 @@ func isContainerRunning(pod *corev1.Pod, e *CachedContainerProfile, id string) b
 	return false
 }
 
-// refreshAllEntries re-fetches CP + user AP/NN for each cache entry and
-// updates the projection if any ResourceVersion changed. Fast-skip when RV +
-// UserAPRV + UserNNRV all match (delta #4). Exposed for tests.
+// refreshAllEntries re-fetches the learned CP + the user-authored CP for each
+// cache entry and updates the projection if any ResourceVersion changed.
+// Fast-skip when RV + UserCPRV both match (delta #4). Exposed for tests.
 func (c *ContainerProfileCacheImpl) refreshAllEntries(ctx context.Context) {
 	start := time.Now()
 	defer func() {
@@ -348,6 +422,12 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			userDefinedCP = nil
 		}
 	}
+	// Grouped-document selection (mirror of the add path): a multi-container
+	// authored document carries per-subtype container sections; select this
+	// entry's container by name. A flat document passes through; a grouped
+	// document that does not cover this container resolves to nil.
+	userDefinedCP = resolveAuthoredContainerSection(userDefinedCP, e.ContainerName)
+
 	// Authored-validation (mirror of the add path): a label-referenced CP that
 	// carries lifecycle annotations is a LEARNED profile, not an authored one.
 	// Ignore it so its real state is not overwritten with Completed/Full and a

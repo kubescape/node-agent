@@ -25,23 +25,23 @@ const (
 var _ metricsmanager.MetricsManager = (*PrometheusMetric)(nil)
 
 type PrometheusMetric struct {
-	ebpfExecCounter         prometheus.Counter
-	ebpfOpenCounter         prometheus.Counter
-	ebpfNetworkCounter      prometheus.Counter
-	ebpfDNSCounter          prometheus.Counter
-	ebpfSyscallCounter      prometheus.Counter
-	ebpfCapabilityCounter   prometheus.Counter
-	ebpfRandomXCounter      prometheus.Counter
-	ebpfFailedCounter       prometheus.Counter
-	ebpfSymlinkCounter      prometheus.Counter
-	ebpfHardlinkCounter     prometheus.Counter
-	ebpfSSHCounter          prometheus.Counter
-	ebpfHTTPCounter         prometheus.Counter
-	ebpfPtraceCounter       prometheus.Counter
-	ebpfIoUringCounter      prometheus.Counter
-	ebpfKmodCounter         prometheus.Counter
-	ebpfUnshareCounter      prometheus.Counter
-	ebpfBpfCounter          prometheus.Counter
+	ebpfExecCounter        prometheus.Counter
+	ebpfOpenCounter        prometheus.Counter
+	ebpfNetworkCounter     prometheus.Counter
+	ebpfDNSCounter         prometheus.Counter
+	ebpfSyscallCounter     prometheus.Counter
+	ebpfCapabilityCounter  prometheus.Counter
+	ebpfRandomXCounter     prometheus.Counter
+	ebpfFailedCounter      prometheus.Counter
+	ebpfSymlinkCounter     prometheus.Counter
+	ebpfHardlinkCounter    prometheus.Counter
+	ebpfSSHCounter         prometheus.Counter
+	ebpfHTTPCounter        prometheus.Counter
+	ebpfPtraceCounter      prometheus.Counter
+	ebpfIoUringCounter     prometheus.Counter
+	ebpfKmodCounter        prometheus.Counter
+	ebpfUnshareCounter     prometheus.Counter
+	ebpfBpfCounter         prometheus.Counter
 	ruleCounter            *prometheus.CounterVec
 	rulePrefilteredCounter *prometheus.CounterVec
 	alertCounter           *prometheus.CounterVec
@@ -74,7 +74,7 @@ type PrometheusMetric struct {
 	cpChunkDroppedCounter         *prometheus.CounterVec
 
 	// Profile projection metrics — always-on
-	cpProjectionMissingDeclCounter        *prometheus.CounterVec
+	cpProjectionMissingDeclCounter       *prometheus.CounterVec
 	cpProjectionUndeclaredLiteralCounter *prometheus.CounterVec
 	cpProjectionStaleEntriesGauge        prometheus.Gauge
 	cpProjectionUndeclaredRulesGauge     prometheus.Gauge
@@ -87,6 +87,7 @@ type PrometheusMetric struct {
 	cpProjectionApplyDurationHistogram    prometheus.Histogram
 	cpProjectionReconcileTriggeredCounter *prometheus.CounterVec
 	cpUserDefinedProfileUnresolvedCounter *prometheus.CounterVec
+	cpUserDefinedProfileAdoptedCounter    *prometheus.CounterVec
 	cpHelperCallCounter                   *prometheus.CounterVec
 	cpProjectionUndeclaredRulesListGauge  *prometheus.GaugeVec
 
@@ -341,6 +342,10 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Name: "container_profile_user_defined_unresolved_total",
 			Help: "Total times a pod's user-defined-profile label was set but no ContainerProfile resolved (legacy AP/NN are no longer read).",
 		}, []string{"namespace"}),
+		cpUserDefinedProfileAdoptedCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "container_profile_user_defined_adopted_total",
+			Help: "Total times an authored ContainerProfile was adopted as the authoritative base for a container.",
+		}, []string{"namespace"}),
 		cpProjectionUndeclaredRulesListGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "rule_projection_undeclared_rules_list",
 			Help: "Per-rule gauge (1) for each rule currently loaded without a profileDataRequired declaration.",
@@ -455,6 +460,7 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.cpProjectionApplyDurationHistogram)
 	prometheus.Unregister(p.cpProjectionReconcileTriggeredCounter)
 	prometheus.Unregister(p.cpUserDefinedProfileUnresolvedCounter)
+	prometheus.Unregister(p.cpUserDefinedProfileAdoptedCounter)
 	prometheus.Unregister(p.cpHelperCallCounter)
 	prometheus.Unregister(p.cpProjectionUndeclaredRulesListGauge)
 	prometheus.Unregister(p.cpProfileRawSizeHistogram)
@@ -709,6 +715,10 @@ func (p *PrometheusMetric) ObserveProjectionApplyDuration(d time.Duration) {
 }
 func (p *PrometheusMetric) IncUserDefinedProfileUnresolved(namespace string) {
 	p.cpUserDefinedProfileUnresolvedCounter.WithLabelValues(namespace).Inc()
+}
+
+func (p *PrometheusMetric) IncUserDefinedProfileAdopted(namespace string) {
+	p.cpUserDefinedProfileAdoptedCounter.WithLabelValues(namespace).Inc()
 }
 
 func (p *PrometheusMetric) IncProjectionReconcileTriggered(trigger string) {

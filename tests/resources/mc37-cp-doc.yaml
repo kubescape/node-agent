@@ -1,0 +1,80 @@
+# ONE grouped ContainerProfile document for the whole mc37 pod, bound via the
+# bare label value (kubescape.io/user-defined-profile=mc37). The spec carries
+# the container subtype groups the legacy AP/NN specs expressed - containers /
+# initContainers / ephemeralContainers - and node-agent selects each
+# container's section by name. Every section allows its own housekeeping
+# binaries plus ONE distinguishing binary, and deliberately omits the sibling
+# sections' distinguishing binaries:
+#   app (container)        : id allowed,      whoami forbidden
+#   setup (initContainer)  : sleep/sh allowed, id forbidden (its command runs id)
+#   debug (ephemeral)      : whoami allowed,  id forbidden
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: mc37
+spec:
+  containers:
+  - name: app
+    execs:
+    - path: /usr/bin/sleep
+      args:
+      - /usr/bin/sleep
+      - infinity
+    - path: /usr/bin/id
+      args:
+      - /usr/bin/id
+  initContainers:
+  - name: setup
+    execs:
+    - path: /bin/sh
+      args:
+      - /bin/sh
+      - -c
+      - 'sleep 100; /usr/bin/id'
+    - path: /bin/dash
+      args:
+      - /bin/dash
+      - -c
+      - 'sleep 100; /usr/bin/id'
+    - path: /usr/bin/dash
+      args:
+      - /usr/bin/dash
+      - -c
+      - 'sleep 100; /usr/bin/id'
+    - path: /usr/bin/sleep
+      args:
+      - /usr/bin/sleep
+      - '100'
+    - path: /bin/sleep
+      args:
+      - /bin/sleep
+      - '100'
+  ephemeralContainers:
+  - name: debug
+    execs:
+    - path: /bin/sh
+      args:
+      - /bin/sh
+      - -c
+      - 'sleep 75; /usr/bin/whoami; /usr/bin/id'
+    - path: /bin/dash
+      args:
+      - /bin/dash
+      - -c
+      - 'sleep 75; /usr/bin/whoami; /usr/bin/id'
+    - path: /usr/bin/dash
+      args:
+      - /usr/bin/dash
+      - -c
+      - 'sleep 75; /usr/bin/whoami; /usr/bin/id'
+    - path: /usr/bin/sleep
+      args:
+      - /usr/bin/sleep
+      - '100'
+    - path: /bin/sleep
+      args:
+      - /bin/sleep
+      - '100'
+    - path: /usr/bin/whoami
+      args:
+      - /usr/bin/whoami

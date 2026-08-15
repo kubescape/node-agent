@@ -7,7 +7,8 @@ import (
 
 // ProcessTreeManagerMock implements the ProcessTreeManager interface for testing
 type ProcessTreeManagerMock struct {
-	pidList []uint32
+	pidList    []uint32
+	bootTimeNs map[uint32]uint64
 }
 
 var _ ProcessTreeManager = (*ProcessTreeManagerMock)(nil)
@@ -47,4 +48,18 @@ func (m *ProcessTreeManagerMock) ReportEvent(eventType utils.EventType, event ut
 // GetPidList returns the mock PID list
 func (m *ProcessTreeManagerMock) GetPidList() []uint32 {
 	return m.pidList
+}
+
+// GetProcessBootTimeNs returns the configured start time for a pid, or 0 for an
+// unknown one — matching the real manager's "0 means unknown" contract.
+func (m *ProcessTreeManagerMock) GetProcessBootTimeNs(pid uint32) uint64 {
+	return m.bootTimeNs[pid]
+}
+
+// SetProcessBootTimeNs sets the boot-relative start time the mock reports for a pid.
+func (m *ProcessTreeManagerMock) SetProcessBootTimeNs(pid uint32, ns uint64) {
+	if m.bootTimeNs == nil {
+		m.bootTimeNs = make(map[uint32]uint64)
+	}
+	m.bootTimeNs[pid] = ns
 }

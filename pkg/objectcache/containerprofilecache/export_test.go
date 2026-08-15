@@ -4,7 +4,16 @@ package containerprofilecache
 // package (the *_test.go files in this directory). Compiled only during
 // `go test`; never included in the production binary.
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+// SetRemovalGraceForTest overrides the end-of-life removal grace period so
+// eviction behavior can be tested without multi-second sleeps.
+func (c *ContainerProfileCacheImpl) SetRemovalGraceForTest(d time.Duration) {
+	c.removalGrace = d
+}
 
 func (c *ContainerProfileCacheImpl) ReconcileOnce(ctx context.Context) {
 	c.reconcileOnce(ctx)

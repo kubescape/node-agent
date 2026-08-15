@@ -796,3 +796,48 @@ func RestartDeployment(namespace, name string) error {
 
 	return err
 }
+
+// AddEphemeralContainer attaches an ephemeral container to the workload's
+// first pod via the ephemeralcontainers subresource (the API `kubectl debug`
+// uses) and waits until it is observed running. This is the only way to start
+// an ephemeralContainers-subtype container, which cannot be declared in a pod
+// spec.
+func (w *TestWorkload) AddEphemeralContainer(name, image string, command []string, maxRetries uint64) error {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	pods, err := w.GetPods()
+	if err != nil {
+		return err
+	}
+	pod := pods[0]
+
+	current, err := k8sClient.KubernetesClient.CoreV1().Pods(w.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	current.Spec.EphemeralContainers = append(current.Spec.EphemeralContainers, v1.EphemeralContainer{
+		EphemeralContainerCommon: v1.EphemeralContainerCommon{
+			Name:    name,
+			Image:   image,
+			Command: command,
+		},
+	})
+	if _, err := k8sClient.KubernetesClient.CoreV1().Pods(w.Namespace).UpdateEphemeralContainers(
+		context.TODO(), pod.Name, current, metav1.UpdateOptions{}); err != nil {
+		return err
+	}
+
+	return backoff.RetryNotify(func() error {
+		p, err := k8sClient.KubernetesClient.CoreV1().Pods(w.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		for _, st := range p.Status.EphemeralContainerStatuses {
+			if st.Name == name && (st.State.Running != nil || st.State.Terminated != nil) {
+				return nil
+			}
+		}
+		return fmt.Errorf("ephemeral container %s not started yet", name)
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(3*time.Second), maxRetries), func(err error, d time.Duration) {
+		logger.L().Info("waiting for ephemeral container", helpers.String("name", name), helpers.Error(err))
+	})
+}

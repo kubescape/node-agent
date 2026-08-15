@@ -51,6 +51,9 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 	pcp.Execs = projectField(s.Execs, execsPaths, true)
 	pcp.ExecsByPath = extractExecsByPath(cp)
 
+	pcp.IngressPeers = extractIngressPeers(cp)
+	pcp.EgressPeers = extractEgressPeers(cp)
+
 	endpointPaths := extractEndpointPaths(cp)
 	pcp.Endpoints = projectField(s.Endpoints, endpointPaths, true)
 
@@ -179,11 +182,10 @@ func extractExecsPaths(cp *v1beta1.ContainerProfile) []string {
 // extractExecsByPath builds the path → []argv-vectors map used by
 // exec-args matchers (e.g. dynamicpathdetector.CompareExecArgs in
 // node-agent#807). Multiple ExecCalls entries with the same Path
-// APPEND to the per-path list — overlay merge in
-// mergeApplicationProfile (storage) legitimately produces several
-// ExecCalls per path, each with a distinct argv shape, and the
-// consumer must accept any of them (matthyx review on PR #807,
-// 2026-05-28).
+// APPEND to the per-path list — the storage-side profile merge
+// legitimately produces several ExecCalls per path, each with a
+// distinct argv shape, and the consumer must accept any of them
+// (see node-agent#807).
 //
 // nil-Args entries are stored as empty-but-non-nil slices so the
 // downstream matcher distinguishes "present with empty args" (a
@@ -260,4 +262,30 @@ func extractIngressAddresses(cp *v1beta1.ContainerProfile) []string {
 		addrs = append(addrs, n.IPAddresses...)
 	}
 	return addrs
+}
+
+// extractIngressPeers / extractEgressPeers carry the label selectors of each
+// network-neighbor entry so cp.was_selector_in_{ingress,egress} can match a
+// peer by identity. Only entries that actually declare a podSelector are kept.
+func extractIngressPeers(cp *v1beta1.ContainerProfile) []objectcache.PeerSelector {
+	return extractPeers(cp.Spec.Ingress)
+}
+
+func extractEgressPeers(cp *v1beta1.ContainerProfile) []objectcache.PeerSelector {
+	return extractPeers(cp.Spec.Egress)
+}
+
+func extractPeers(neighbors []v1beta1.NetworkNeighbor) []objectcache.PeerSelector {
+	var peers []objectcache.PeerSelector
+	for i := range neighbors {
+		n := &neighbors[i]
+		if n.PodSelector == nil {
+			continue
+		}
+		peers = append(peers, objectcache.PeerSelector{
+			PodSelector:       n.PodSelector,
+			NamespaceSelector: n.NamespaceSelector,
+		})
+	}
+	return peers
 }

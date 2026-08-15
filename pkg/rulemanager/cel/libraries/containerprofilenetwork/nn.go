@@ -86,6 +86,40 @@ func (l *containerProfileNetworkLibrary) Declarations() map[string][]cel.Functio
 				}),
 			),
 		},
+		// Peer identity (namespace + labels) comes from IG's kubeipresolver
+		// enrichment on the event, resolved cluster-wide. The functionCache is
+		// intentionally bypassed here: a map argument does not produce a stable
+		// scalar cache key, and the match is cheap (O(selectors)).
+		"cp.was_selector_in_ingress": {
+			cel.Overload(
+				"cp_was_selector_in_ingress", []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType)}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 3 {
+						return types.NewErr("expected 3 arguments, got %d", len(values))
+					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("cp.was_selector_in_ingress")
+					}
+					result := l.wasSelectorInIngress(values[0], values[1], values[2])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
+				}),
+			),
+		},
+		"cp.was_selector_in_egress": {
+			cel.Overload(
+				"cp_was_selector_in_egress", []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType)}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 3 {
+						return types.NewErr("expected 3 arguments, got %d", len(values))
+					}
+					if l.detailedMetrics && l.metrics != nil {
+						l.metrics.IncHelperCall("cp.was_selector_in_egress")
+					}
+					result := l.wasSelectorInEgress(values[0], values[1], values[2])
+					return cache.ConvertProfileNotAvailableErrToBool(result, false)
+				}),
+			),
+		},
 		"cp.is_domain_in_egress": {
 			cel.Overload(
 				"cp_is_domain_in_egress", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
@@ -190,6 +224,10 @@ func (e *containerProfileNetworkCostEstimator) EstimateCallCost(function, overlo
 	case "cp.was_address_in_egress", "cp.was_address_in_ingress":
 		// Cache lookup + O(n) linear search through egress/ingress list
 		cost = 20
+	case "cp.was_selector_in_ingress", "cp.was_selector_in_egress":
+		// Profile projection lookup + O(selectors) label match against the
+		// IG-enriched peer labels (no IP-to-pod resolution).
+		cost = 30
 	case "cp.is_domain_in_egress", "cp.is_domain_in_ingress":
 		// Cache lookup + O(n) list iteration + O(m) slice.Contains on DNS names per entry
 		cost = 35

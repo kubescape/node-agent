@@ -28,6 +28,12 @@ type ProcessEvent struct {
 	Cwd         string
 	Path        string
 	StartTimeNs uint64 // Process start time in nanoseconds for unique identification
+	// StartTimeWall is the process creation time as wall-clock time, derived by
+	// the procfs feeder from /proc/stat btime + StartTimeNs. DISPLAY ONLY: btime
+	// has whole-second resolution, so this value carries up to 1s of skew and
+	// must never be compared for process identity — StartTimeNs is the sole
+	// identity source. Zero for every event type except ProcfsEvent.
+	StartTimeWall time.Time
 
 	// Container context
 	ContainerID    string

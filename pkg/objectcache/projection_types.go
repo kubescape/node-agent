@@ -3,7 +3,19 @@ package objectcache
 import (
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// PeerSelector carries a single network-neighbor entry's identity selectors
+// (podSelector + namespaceSelector) through the projection so the
+// cp.was_selector_in_{ingress,egress} CEL helpers can resolve a runtime peer
+// IP to a pod and match it by LABEL rather than by (volatile) IP. The address
+// surfaces (Ingress/EgressAddresses) still carry the ipAddress/CIDR form for
+// the was_address_in_* helpers; these are complementary.
+type PeerSelector struct {
+	PodSelector       *metav1.LabelSelector
+	NamespaceSelector *metav1.LabelSelector
+}
 
 // PathMatcher is implemented by the trie-based matchers in containerprofilecache.
 type PathMatcher interface {
@@ -53,6 +65,14 @@ type ProjectedContainerProfile struct {
 	EgressAddresses  ProjectedField
 	IngressDomains   ProjectedField
 	IngressAddresses ProjectedField
+
+	// IngressPeers / EgressPeers carry the podSelector+namespaceSelector of each
+	// network-neighbor entry (dropped by the address/domain projection) so the
+	// cp.was_selector_in_{ingress,egress} helpers can match a runtime peer by
+	// label. Always projected in full (not gated by a rule surface) since they
+	// are small and only populated when the profile actually declares selectors.
+	IngressPeers []PeerSelector
+	EgressPeers  []PeerSelector
 
 	// ExecsByPath carries the per-Path Args slices from cp.Spec.Execs so
 	// downstream consumers (e.g. dynamicpathdetector.CompareExecArgs used

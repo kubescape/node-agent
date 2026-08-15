@@ -180,11 +180,19 @@ func TestReconcilerEvictsTerminatedContainer(t *testing.T) {
 	})
 	metrics := newCountingMetrics()
 	c := newReconcilerCache(t, client, k8s, metrics)
+	c.SetRemovalGraceForTest(30 * time.Millisecond)
 	c.entries.Set(id, newEntry(cp, "nginx", "nginx-abc", "default", "uid-1"))
 
+	// End-of-life grace (issue #79): the first Terminated observation only
+	// marks the entry — in-flight events must still resolve the profile.
+	c.reconcileOnce(context.Background())
+	assert.NotNil(t, c.GetProjectedContainerProfile(id), "first Terminated observation must not evict (removal grace)")
+
+	// After the grace has elapsed, a later tick evicts.
+	time.Sleep(50 * time.Millisecond)
 	c.reconcileOnce(context.Background())
 
-	assert.Nil(t, c.GetProjectedContainerProfile(id), "terminated container entry must be evicted")
+	assert.Nil(t, c.GetProjectedContainerProfile(id), "terminated container entry must be evicted after the grace")
 	assert.Equal(t, 1, metrics.eviction("pod_stopped"), "should report one eviction")
 }
 
@@ -284,6 +292,181 @@ func TestIsContainerRunning_NotRunning(t *testing.T) {
 	}
 	entry := &CachedContainerProfile{ContainerName: "nginx", PodUID: "pod-uid-123"}
 	assert.False(t, isContainerRunning(pod, entry, "abc"))
+}
+
+// TestReconcilerKeepsJustAttachedEphemeralContainer — node-agent#79 ephemeral
+// total-loss root cause. A just-attached ephemeral container is in the pod
+// SPEC but not yet in ephemeralContainerStatuses (kubelet publishes the status
+// groups incrementally). "Absent from published statuses" must NOT be treated
+// as reaped while the spec still names the container: the eviction was
+// permanent (no re-add path) and silently suppressed every
+// ProfileDependency=Required rule for the container's entire life.
+func TestReconcilerKeepsJustAttachedEphemeralContainer(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	client := &countingProfileClient{cp: cp}
+	k8s := newControllableK8sCache()
+	id := "ephdebug123"
+	k8s.setPod("default", "mc-abc", &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app"}},
+			EphemeralContainers: []corev1.EphemeralContainer{{
+				EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug"},
+			}},
+		},
+		// Statuses are published for the regular container only — the
+		// ephemeralContainerStatuses entry for "debug" has not appeared yet.
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:        "app",
+			ContainerID: "containerd://appid456",
+			State:       corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		}}},
+	})
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, k8s, metrics)
+	c.entries.Set(id, newEntry(cp, "debug", "mc-abc", "default", "uid-1"))
+
+	c.reconcileOnce(context.Background())
+
+	assert.NotNil(t, c.GetProjectedContainerProfile(id),
+		"ephemeral container present in pod spec but not yet in statuses must be retained")
+	assert.Equal(t, 0, metrics.eviction("pod_stopped"), "no eviction for status-lagged ephemeral container")
+}
+
+// TestReconcilerEvictsEphemeralContainerAfterTermination — regression guard for
+// the fix above: once the ephemeral container's status IS published with a
+// Terminated state, the entry is evicted normally.
+func TestReconcilerEvictsEphemeralContainerAfterTermination(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	client := &countingProfileClient{cp: cp}
+	k8s := newControllableK8sCache()
+	id := "ephdebug123"
+	k8s.setPod("default", "mc-abc", &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Spec: corev1.PodSpec{
+			EphemeralContainers: []corev1.EphemeralContainer{{
+				EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug"},
+			}},
+		},
+		Status: corev1.PodStatus{EphemeralContainerStatuses: []corev1.ContainerStatus{{
+			Name:        "debug",
+			ContainerID: "containerd://" + id,
+			State:       corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+		}}},
+	})
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, k8s, metrics)
+	c.SetRemovalGraceForTest(0) // eviction is deferred by the end-of-life grace; assert the post-grace outcome
+	c.entries.Set(id, newEntry(cp, "debug", "mc-abc", "default", "uid-1"))
+
+	c.reconcileOnce(context.Background())
+	c.reconcileOnce(context.Background()) // second tick: eviction is mark-and-sweep (mark on first observation, sweep after the grace)
+
+	assert.Nil(t, c.GetProjectedContainerProfile(id), "terminated ephemeral container entry must be evicted")
+	assert.Equal(t, 1, metrics.eviction("pod_stopped"))
+}
+
+// TestReconcilerKeepsInitContainerWithEmptyStoredPodUID — node-agent#79 init
+// intermittency root cause. Entry added before the pod reached the k8s cache
+// carries an empty PodUID; the init container's status entry still has an
+// empty ContainerID (pre-running). The (Name, PodUID) fallback must not
+// require a UID match against an empty stored UID — that made the fallback
+// unreachable and sent the live init container into the "absent = reaped"
+// eviction.
+func TestReconcilerKeepsInitContainerWithEmptyStoredPodUID(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	client := &countingProfileClient{cp: cp}
+	k8s := newControllableK8sCache()
+	id := "initsetup123"
+	k8s.setPod("default", "mc-abc", &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "setup"}},
+			Containers:     []corev1.Container{{Name: "app"}},
+		},
+		Status: corev1.PodStatus{
+			InitContainerStatuses: []corev1.ContainerStatus{{
+				Name:        "setup",
+				ContainerID: "", // kubelet has not published the ID yet
+				State:       corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+			}},
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  "app",
+				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "PodInitializing"}},
+			}},
+		},
+	})
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, k8s, metrics)
+	c.entries.Set(id, newEntry(cp, "setup", "mc-abc", "default", "" /* PodUID unknown at add time */))
+
+	c.reconcileOnce(context.Background())
+
+	assert.NotNil(t, c.GetProjectedContainerProfile(id),
+		"running init container must be retained even when the entry's PodUID was unknown at add time")
+	assert.Equal(t, 0, metrics.eviction("pod_stopped"))
+}
+
+// TestReconcilerEvictsContainerGoneFromSpecAndStatus — regression guard: a
+// container absent from BOTH the pod spec and every status list is genuinely
+// reaped and must still be evicted.
+func TestReconcilerEvictsContainerGoneFromSpecAndStatus(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	client := &countingProfileClient{cp: cp}
+	k8s := newControllableK8sCache()
+	id := "gonecontainer1"
+	k8s.setPod("default", "mc-abc", &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:        "app",
+			ContainerID: "containerd://appid456",
+			State:       corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		}}},
+	})
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, k8s, metrics)
+	c.SetRemovalGraceForTest(0) // eviction is deferred by the end-of-life grace; assert the post-grace outcome
+	c.entries.Set(id, newEntry(cp, "old-sidecar", "mc-abc", "default", "uid-1"))
+
+	c.reconcileOnce(context.Background())
+	c.reconcileOnce(context.Background()) // second tick: eviction is mark-and-sweep (mark on first observation, sweep after the grace)
+
+	assert.Nil(t, c.GetProjectedContainerProfile(id),
+		"container absent from both spec and statuses is reaped and must be evicted")
+	assert.Equal(t, 1, metrics.eviction("pod_stopped"))
+}
+
+// TestReconcilerEvictsReplacedContainerInstance — regression guard: when a
+// status entry carries the same container NAME under a different, non-empty
+// ContainerID (kubelet restarted the container), the entry for the OLD
+// instance is reaped and must be evicted even though the name is still in the
+// pod spec.
+func TestReconcilerEvictsReplacedContainerInstance(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	client := &countingProfileClient{cp: cp}
+	k8s := newControllableK8sCache()
+	oldID := "oldinstance1"
+	k8s.setPod("default", "mc-abc", &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:        "app",
+			ContainerID: "containerd://newinstance2",
+			State:       corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		}}},
+	})
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, k8s, metrics)
+	c.SetRemovalGraceForTest(0) // eviction is deferred by the end-of-life grace; assert the post-grace outcome
+	c.entries.Set(oldID, newEntry(cp, "app", "mc-abc", "default", "uid-1"))
+
+	c.reconcileOnce(context.Background())
+	c.reconcileOnce(context.Background()) // second tick: eviction is mark-and-sweep (mark on first observation, sweep after the grace)
+
+	assert.Nil(t, c.GetProjectedContainerProfile(oldID),
+		"old container instance replaced by a new one (same name, different id) must be evicted")
+	assert.Equal(t, 1, metrics.eviction("pod_stopped"))
 }
 
 // TestReconcilerExitsOnCtxCancel — R2 from plan risks, delta #3. Cancelling

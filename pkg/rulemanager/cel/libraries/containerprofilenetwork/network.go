@@ -2,6 +2,7 @@ package containerprofilenetwork
 
 import (
 	"net"
+	"reflect"
 	"strings"
 
 	"github.com/google/cel-go/common/types"
@@ -10,6 +11,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/storage/pkg/registry/file/networkmatch"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 // matchIPField is the wildcard-aware adapter from the projection layer's
@@ -218,4 +221,103 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(contain
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 	return types.Bool(matchIPField(&cp.IngressAddresses, addressStr))
+}
+
+// namespaceSelectorMatches matches a namespaceSelector against the peer's
+// namespace via the implicit kubernetes.io/metadata.name label every namespace
+// carries (the form these profiles use). A nil selector is "any namespace".
+// Selectors keyed on other namespace labels are not resolved here.
+func namespaceSelectorMatches(sel *metav1.LabelSelector, ns string) bool {
+	if sel == nil {
+		return true
+	}
+	s, err := metav1.LabelSelectorAsSelector(sel)
+	if err != nil {
+		return false
+	}
+	return s.Matches(labels.Set{"kubernetes.io/metadata.name": ns})
+}
+
+// wasSelectorInPeers reports whether the peer identified by (podLabels, ns)
+// matches any peer entry's podSelector AND its namespaceSelector.
+func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, ns string) bool {
+	for i := range peers {
+		peer := &peers[i]
+		if peer.PodSelector == nil {
+			continue
+		}
+		ps, err := metav1.LabelSelectorAsSelector(peer.PodSelector)
+		if err != nil {
+			continue
+		}
+		if ps.Matches(podLabels) && namespaceSelectorMatches(peer.NamespaceSelector, ns) {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *containerProfileNetworkLibrary) wasSelectorInIngress(containerID, namespace, podLabels ref.Val) ref.Val {
+	return l.wasSelectorIn(containerID, namespace, podLabels, true)
+}
+
+func (l *containerProfileNetworkLibrary) wasSelectorInEgress(containerID, namespace, podLabels ref.Val) ref.Val {
+	return l.wasSelectorIn(containerID, namespace, podLabels, false)
+}
+
+// wasSelectorIn reports whether the runtime peer — identified by the namespace
+// and pod labels that Inspektor Gadget's kubeipresolver stamps onto the network
+// event — matches any of the profile's ingress-or-egress peer selectors.
+//
+// Matching on the peer's identity (namespace + labels) rather than its IP is the
+// whole point: it is stable across pod IP churn AND works across nodes, because
+// kubeipresolver resolves the peer against a cluster-wide pod inventory before
+// the event ever reaches CEL. There is deliberately no IP→pod lookup here — that
+// would reintroduce a dependency on node-agent's node-local pod cache, which is
+// exactly what breaks cross-node peers.
+func (l *containerProfileNetworkLibrary) wasSelectorIn(containerID, namespace, podLabels ref.Val, ingress bool) ref.Val {
+	if l.objectCache == nil {
+		return types.NewErr("objectCache is nil")
+	}
+	containerIDStr, ok := containerID.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(containerID)
+	}
+	nsStr, ok := namespace.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(namespace)
+	}
+	peerLabels := refValToStringMap(podLabels)
+	if len(peerLabels) == 0 {
+		// The peer did not resolve to a pod (e.g. an external IP, or a service
+		// without pod labels): it cannot satisfy any podSelector, so it is never
+		// in the profile's selector set.
+		return types.Bool(false)
+	}
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
+	if err != nil {
+		return cache.NewProfileNotAvailableErr("%v", err)
+	}
+	peers := cp.EgressPeers
+	if ingress {
+		peers = cp.IngressPeers
+	}
+	if len(peers) == 0 {
+		return types.Bool(false)
+	}
+	return types.Bool(wasSelectorInPeers(peers, labels.Set(peerLabels), nsStr))
+}
+
+// refValToStringMap converts a CEL map argument to a Go map[string]string. A nil
+// or non-map value yields nil (treated as "peer has no labels").
+func refValToStringMap(v ref.Val) map[string]string {
+	if v == nil {
+		return nil
+	}
+	native, err := v.ConvertToNative(reflect.TypeOf(map[string]string(nil)))
+	if err != nil {
+		return nil
+	}
+	m, _ := native.(map[string]string)
+	return m
 }

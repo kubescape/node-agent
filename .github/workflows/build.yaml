@@ -1,0 +1,116 @@
+name: build-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      SOURCE_REF:
+        required: false
+        type: string
+        default: ""
+        description: "Branch/tag/SHA of node-agent to build (defaults to the dispatched ref). Use this to build upstream-pr/** or any clean branch without giving it fork-specific workflow files."
+      IMAGE_TAG:
+        required: true
+        type: string
+        description: "Image tag for the node-agent image"
+      STORAGE_REF:
+        required: false
+        type: string
+        default: ""
+        description: "Branch/tag/commit of k8sstormcenter/storage to use (leave empty to keep go.mod default)"
+      PLATFORMS:
+        type: boolean
+        required: false
+        default: false
+        description: "Build for both amd64 and arm64"
+
+# Default to read-only at the workflow level (least privilege per Scorecard).
+# Jobs that need elevated scopes override below.
+permissions: read-all
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # On dispatch, SOURCE_REF may point at a clean upstream-pr/** branch
+          # (or an upstream SHA) that carries no fork workflow files; the
+          # workflow itself is resolved from the dispatched --ref (fork-ci),
+          # then the tree is switched to SOURCE_REF here. Empty on push.
+          ref: ${{ inputs.SOURCE_REF || github.ref }}
+          submodules: recursive
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.25"
+
+      - name: Update storage dependency
+        if: ${{ inputs.STORAGE_REF != '' }}
+        env:
+          STORAGE_REF: ${{ inputs.STORAGE_REF }}
+          GONOSUMCHECK: "*"
+          GOFLAGS: ""
+        run: |
+          echo "Replacing github.com/kubescape/storage with github.com/k8sstormcenter/storage@${STORAGE_REF}"
+          go mod edit -replace "github.com/kubescape/storage=github.com/k8sstormcenter/storage@${STORAGE_REF}"
+          go mod tidy
+          echo "Resolved storage version:"
+          grep "k8sstormcenter/storage" go.sum | head -1
+
+      - name: Ensure ig is installed
+        run: |
+          curl -L https://github.com/inspektor-gadget/inspektor-gadget/releases/download/v0.45.0/ig_0.45.0_amd64.deb -O
+          sudo dpkg -i ig_0.45.0_amd64.deb
+
+      - name: Build gadgets
+        run: make gadgets
+
+      - name: Set up QEMU
+        if: ${{ inputs.PLATFORMS }}
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: build/Dockerfile
+          tags: ghcr.io/${{ github.repository_owner }}/node-agent:${{ inputs.IMAGE_TAG }}
+          build-args: image_version=${{ inputs.IMAGE_TAG }}
+          platforms: ${{ inputs.PLATFORMS && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: true
+
+
+  trigger-component-tests:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger component tests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          STORAGE_TAG="${{ inputs.IMAGE_TAG }}"
+          NODE_AGENT_TAG="${{ inputs.IMAGE_TAG }}"
+          STORAGE_REF="${{ inputs.STORAGE_REF }}"
+          echo "Triggering component tests with STORAGE_TAG=${STORAGE_TAG} NODE_AGENT_TAG=${NODE_AGENT_TAG} STORAGE_REF=${STORAGE_REF}"
+          gh workflow run component-tests.yaml \
+            --repo "${{ github.repository }}" \
+            --ref "${{ github.ref_name }}" \
+            -f STORAGE_TAG="${STORAGE_TAG}" \
+            -f NODE_AGENT_TAG="${NODE_AGENT_TAG}" \
+            -f STORAGE_REF="${STORAGE_REF}"

@@ -240,6 +240,7 @@ func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *armotypes.Proce
 			Gid:         node.Gid,
 			Cwd:         node.Cwd,
 			Path:        node.Path,
+			StartTime:   node.StartTime,
 			ChildrenMap: make(map[armotypes.CommPID]*armotypes.Process),
 		}
 	}

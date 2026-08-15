@@ -75,26 +75,27 @@ func (m *MetricsMock) ReportContainerProfileReconcilerDuration(_ string, _ time.
 func (m *MetricsMock) ReportContainerProfileReconcilerEviction(_ string)                  {}
 func (m *MetricsMock) ReportContainerProfileSplit()                                       {}
 func (m *MetricsMock) ReportContainerProfileChunkDropped(_ string)                        {}
-func (m *MetricsMock) IncMissingProfileDataRequired(_ string)                                              {}
-func (m *MetricsMock) IncProjectionUndeclaredLiteral(_ string)                                             {}
-func (m *MetricsMock) SetProjectionStaleEntries(_ float64)                                                 {}
-func (m *MetricsMock) SetProjectionUndeclaredRules(_ float64)                                              {}
-func (m *MetricsMock) IncProjectionSpecCompile()                                                           {}
-func (m *MetricsMock) IncProjectionSpecHashChange()                                                        {}
-func (m *MetricsMock) SetProjectionSpecPatterns(_, _ string, _ float64)                                    {}
-func (m *MetricsMock) SetProjectionSpecAllField(_ string, _ bool)                                          {}
-func (m *MetricsMock) ObserveProjectionApplyDuration(_ time.Duration)                                      {}
-func (m *MetricsMock) IncProjectionReconcileTriggered(_ string)                                            {}
-func (m *MetricsMock) IncHelperCall(_ string)                                                              {}
+func (m *MetricsMock) IncMissingProfileDataRequired(_ string)                             {}
+func (m *MetricsMock) IncProjectionUndeclaredLiteral(_ string)                            {}
+func (m *MetricsMock) SetProjectionStaleEntries(_ float64)                                {}
+func (m *MetricsMock) SetProjectionUndeclaredRules(_ float64)                             {}
+func (m *MetricsMock) IncProjectionSpecCompile()                                          {}
+func (m *MetricsMock) IncProjectionSpecHashChange()                                       {}
+func (m *MetricsMock) SetProjectionSpecPatterns(_, _ string, _ float64)                   {}
+func (m *MetricsMock) SetProjectionSpecAllField(_ string, _ bool)                         {}
+func (m *MetricsMock) ObserveProjectionApplyDuration(_ time.Duration)                     {}
+func (m *MetricsMock) IncProjectionReconcileTriggered(_ string)                           {}
+func (m *MetricsMock) IncHelperCall(_ string)                                             {}
 func (m *MetricsMock) IncUserDefinedProfileUnresolved(_ string)                           {}
-func (m *MetricsMock) SetProjectionUndeclaredRulesDetail(_ []string)                                       {}
-func (m *MetricsMock) ObserveProfileRawSize(_ float64)                                                     {}
-func (m *MetricsMock) ObserveProfileProjectedSize(_ float64)                                               {}
-func (m *MetricsMock) ObserveProfileEntriesRaw(_ string, _ float64)                                         {}
-func (m *MetricsMock) ObserveProfileEntriesRetained(_ string, _ float64)                                   {}
-func (m *MetricsMock) ObserveProfileRetentionRatio(_ string, _ float64)                                    {}
-func (m *MetricsMock) ReportSBOMScan(_ string)                                                             {}
-func (m *MetricsMock) ObserveSBOMScanDuration(_ string, _ time.Duration)                                   {}
-func (m *MetricsMock) ReportSBOMScannerRestart()                                                           {}
-func (m *MetricsMock) SetSBOMScannerReady(_ bool)                                                          {}
-func (m *MetricsMock) ReportAlertSuppressed(_, _ string)                                                   {}
+func (m *MetricsMock) IncUserDefinedProfileAdopted(_ string)                              {}
+func (m *MetricsMock) SetProjectionUndeclaredRulesDetail(_ []string)                      {}
+func (m *MetricsMock) ObserveProfileRawSize(_ float64)                                    {}
+func (m *MetricsMock) ObserveProfileProjectedSize(_ float64)                              {}
+func (m *MetricsMock) ObserveProfileEntriesRaw(_ string, _ float64)                       {}
+func (m *MetricsMock) ObserveProfileEntriesRetained(_ string, _ float64)                  {}
+func (m *MetricsMock) ObserveProfileRetentionRatio(_ string, _ float64)                   {}
+func (m *MetricsMock) ReportSBOMScan(_ string)                                            {}
+func (m *MetricsMock) ObserveSBOMScanDuration(_ string, _ time.Duration)                  {}
+func (m *MetricsMock) ReportSBOMScannerRestart()                                          {}
+func (m *MetricsMock) SetSBOMScannerReady(_ bool)                                         {}
+func (m *MetricsMock) ReportAlertSuppressed(_, _ string)                                  {}

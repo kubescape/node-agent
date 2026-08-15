@@ -1,29 +1,35 @@
 package events
 
 import (
+	"time"
+
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 // ProcfsEvent represents a procfs event that can be processed by the ordered event queue
 type ProcfsEvent struct {
-	Type           types.EventType `json:"type"`
-	Timestamp      types.Time      `json:"timestamp"`
-	PID            uint32          `json:"pid"`
-	PPID           uint32          `json:"ppid"`
-	Comm           string          `json:"comm"`
-	Pcomm          string          `json:"pcomm"`
-	Cmdline        string          `json:"cmdline"`
-	Uid            *uint32         `json:"uid"`
-	Gid            *uint32         `json:"gid"`
-	Cwd            string          `json:"cwd"`
-	Path           string          `json:"path"`
-	StartTimeNs    uint64          `json:"start_time_ns"`
-	ContainerID    string          `json:"container_id"`
-	ContainerMntNs uint64          `json:"container_mnt_ns"`
-	ContainerNetNs uint64          `json:"container_net_ns"`
-	HostPID        int             `json:"host_pid"`
-	HostPPID       int             `json:"host_ppid"`
+	Type        types.EventType `json:"type"`
+	Timestamp   types.Time      `json:"timestamp"`
+	PID         uint32          `json:"pid"`
+	PPID        uint32          `json:"ppid"`
+	Comm        string          `json:"comm"`
+	Pcomm       string          `json:"pcomm"`
+	Cmdline     string          `json:"cmdline"`
+	Uid         *uint32         `json:"uid"`
+	Gid         *uint32         `json:"gid"`
+	Cwd         string          `json:"cwd"`
+	Path        string          `json:"path"`
+	StartTimeNs uint64          `json:"start_time_ns"`
+	// StartTimeWall is the display-only wall-clock creation time derived by the
+	// procfs feeder from btime + StartTimeNs. Never compare it for process
+	// identity — StartTimeNs (boot-relative) is the sole identity source.
+	StartTimeWall  time.Time `json:"start_time_wall"`
+	ContainerID    string    `json:"container_id"`
+	ContainerMntNs uint64    `json:"container_mnt_ns"`
+	ContainerNetNs uint64    `json:"container_net_ns"`
+	HostPID        int       `json:"host_pid"`
+	HostPPID       int       `json:"host_ppid"`
 }
 
 var _ utils.K8sEvent = (*ProcfsEvent)(nil)

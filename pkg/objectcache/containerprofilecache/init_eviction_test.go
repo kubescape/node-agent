@@ -67,6 +67,7 @@ func TestInitContainerEvictionViaRemoveEvent(t *testing.T) {
 	store := newFakeStorage(cp)
 	k8s := newFakeK8sCache()
 	cache := newCPCForEvictionTest(store, k8s)
+	cache.SetRemovalGraceForTest(50 * time.Millisecond)
 
 	// Seed both containers directly — no goroutines, no races.
 	seedEntry(cache, initID, cp, initName, podName, namespace, podUID)
@@ -75,17 +76,19 @@ func TestInitContainerEvictionViaRemoveEvent(t *testing.T) {
 	assert.NotNil(t, cache.GetProjectedContainerProfile(initID), "init container must be cached before eviction")
 	assert.NotNil(t, cache.GetProjectedContainerProfile(regID), "regular container must be cached before eviction")
 
-	// Fire remove event for init container only. deleteContainer runs in a
-	// goroutine; wait for it to complete.
+	// Fire remove event for init container only. Deletion is deferred by the
+	// removal grace (issue #79) so in-flight events still resolve the profile.
 	cache.ContainerCallback(containercollection.PubSubEvent{
 		Type:      containercollection.EventTypeRemoveContainer,
 		Container: makeTestContainer(initID, podName, namespace, initName),
 	})
 
-	// deleteContainer goroutine is very fast (just a map delete + lock release).
+	assert.NotNil(t, cache.GetProjectedContainerProfile(initID),
+		"init container entry must remain resolvable during the removal grace window")
+
 	assert.Eventually(t, func() bool {
 		return cache.GetProjectedContainerProfile(initID) == nil
-	}, 3*time.Second, 10*time.Millisecond, "init container entry must be evicted after RemoveContainer event")
+	}, 3*time.Second, 10*time.Millisecond, "init container entry must be evicted after the removal grace")
 
 	// Regular container must survive.
 	assert.NotNil(t, cache.GetProjectedContainerProfile(regID), "regular container entry must remain after init eviction")
@@ -127,6 +130,7 @@ func TestMissedRemoveEventEvictedByReconciler(t *testing.T) {
 	k8s.setPod(namespace, podName, runningPod)
 
 	cache := newCPCForEvictionTest(store, k8s)
+	cache.SetRemovalGraceForTest(50 * time.Millisecond)
 
 	// Seed init container entry directly.
 	seedEntry(cache, initID, cp, initName, podName, namespace, podUID)
@@ -146,8 +150,15 @@ func TestMissedRemoveEventEvictedByReconciler(t *testing.T) {
 	k8s.setPod(namespace, podName, terminatedPod)
 
 	// Drive the reconciler directly — no tick loop running, no goroutines.
+	// First observation marks the entry (removal grace, issue #79); a later
+	// tick past the grace evicts it.
+	cache.ReconcileOnce(context.Background())
+	assert.NotNil(t, cache.GetProjectedContainerProfile(initID),
+		"first Terminated observation must not evict (removal grace)")
+
+	time.Sleep(80 * time.Millisecond)
 	cache.ReconcileOnce(context.Background())
 
 	assert.Nil(t, cache.GetProjectedContainerProfile(initID),
-		"reconciler must evict init container entry when pod status shows Terminated")
+		"reconciler must evict init container entry when pod status shows Terminated and the grace has elapsed")
 }
