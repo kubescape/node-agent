@@ -125,7 +125,7 @@ static __always_inline void *get_path_str(struct path *path)
 				continue;
 			}
 			// Detached procfs mounts (fsopen/fsmount, no mountpoint) canonicalize to /proc
-			if (BPF_CORE_READ(dentry, d_sb, s_magic) == PROC_SUPER_MAGIC) {
+			if (buf_off >= 5 && BPF_CORE_READ(dentry, d_sb, s_magic) == PROC_SUPER_MAGIC) {
 				char proc_name[4] = { 'p', 'r', 'o', 'c' };
 				buf_off -= 1;
 				bpf_probe_read(&(string_p->buf[buf_off & (MAX_PERCPU_BUFSIZE - 1)]), 1, &slash);
