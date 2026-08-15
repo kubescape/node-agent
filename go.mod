@@ -35,7 +35,7 @@ require (
 	github.com/kubescape/backend v0.0.39
 	github.com/kubescape/go-logger v0.0.32
 	github.com/kubescape/k8s-interface v0.0.214
-	github.com/kubescape/storage v0.0.290
+	github.com/kubescape/storage v0.0.303
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/oleiade/lane/v2 v2.0.0
@@ -481,5 +481,3 @@ replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
 replace github.com/anchore/stereoscope => github.com/anchore/stereoscope v0.1.9
 
 replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1
-
-replace github.com/kubescape/storage => github.com/k8sstormcenter/storage v0.0.0-20260814205251-829145296d11
