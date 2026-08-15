@@ -1794,6 +1794,9 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
                         var obj unstructured.Unstructured
                         jd, cerr := yaml.YAMLToJSON([]byte(doc))
                         require.NoError(t, cerr)
+					    if string(jd) == "null" {
+							continue
+						}
                         require.NoError(t, obj.UnmarshalJSON(jd))
                         gvr, gerr := k8sinterface.GetGroupVersionResource(obj.GetKind())
                         require.NoError(t, gerr, "gvr for %s", obj.GetKind())
