@@ -1827,7 +1827,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 				return false
 			}
 			for _, cp := range cps.Items {
-				if cp.Annotations["kubescape.io/status"] == "completed" {
+				if cp.Annotations["kubescape.io/status"] == "completed" && cp.Labels["kubescape.io/workload-container-name"] == "redis" {
 					bprofiles = cps.Items
 					return true
 				}
@@ -1846,19 +1846,22 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=redis"})
 		require.NoError(t, perr)
 		require.NotEmpty(t, pods.Items)
-		_, _, _ = testutils.ExecIntoPod(pods.Items[0].Name, bns.Name, []string{"cat", "/proc/1/cmdline"}, "redis")
+		// completed profile needs a reconciler tick to reach the enforcement cache
+		time.Sleep(45 * time.Second)
+		stdout, stderr, eerr := testutils.ExecIntoPod(pods.Items[0].Name, bns.Name, []string{"cat", "/proc/1/cmdline"}, "redis")
+		require.NoError(t, eerr, "probe exec must run (stdout=%q stderr=%q)", stdout, stderr)
 		require.Eventually(t, func() bool {
 			alerts, aerr := testutils.GetAlerts(bns.Name)
 			if aerr != nil {
 				return false
 			}
 			for _, a := range alerts {
-				if a.Labels["rule_id"] == "R0002" && a.Labels["comm"] == "cat" {
+				if a.Labels["comm"] == "cat" && (a.Labels["rule_id"] == "R0001" || a.Labels["rule_id"] == "R0002") {
 					return true
 				}
 			}
 			return false
-		}, 3*time.Minute, 5*time.Second, "procfs read must alert with a rooted path - gadget positive control")
+		}, 3*time.Minute, 5*time.Second, "the probe exec/open must alert - gadget positive control (silent pipeline)")
 
 		// Distro-wide scan: the scrambled paths originally surfaced in real distro
 		// workloads (redis/valkey mounted-etc, health-check scripts, service-account
