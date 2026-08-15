@@ -22,6 +22,10 @@
 
 #define MAX_PATH_COMPONENTS   80
 
+#ifndef PROC_SUPER_MAGIC
+#define PROC_SUPER_MAGIC 0x9fa0
+#endif
+
 // memory related
 enum buf_idx_e
 {
@@ -120,7 +124,14 @@ static __always_inline void *get_path_str(struct path *path)
 				vfsmnt = &mnt_p->mnt;
 				continue;
 			}
-			// Global root - path fully parsed
+			// Detached procfs mounts (fsopen/fsmount, no mountpoint) canonicalize to /proc
+			if (BPF_CORE_READ(dentry, d_sb, s_magic) == PROC_SUPER_MAGIC) {
+				char proc_name[4] = { 'p', 'r', 'o', 'c' };
+				buf_off -= 1;
+				bpf_probe_read(&(string_p->buf[buf_off & (MAX_PERCPU_BUFSIZE - 1)]), 1, &slash);
+				buf_off -= 4;
+				bpf_probe_read(&(string_p->buf[buf_off & ((MAX_PERCPU_BUFSIZE >> 1) - 1)]), 4, proc_name);
+			}
 			break;
 		}
 		// Add this dentry name to path
