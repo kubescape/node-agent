@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -1742,34 +1743,60 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	//     There must be no "." in the Opens paths.
 	// ---------------------------------------------------------------
 	t.Run("recorded_profile_absolute_paths", func(t *testing.T) {
-		ns := testutils.NewRandomNamespace()
-		wl, err := testutils.NewTestWorkload(ns.Name,
-			path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
-		require.NoError(t, err)
-		require.NoError(t, wl.WaitForReady(80))
-		require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
-
-		profile, err := wl.GetApplicationProfile()
-		require.NoError(t, err, "get application profile")
-
-		passed := true
-		for _, container := range profile.Spec.Containers {
-			for _, open := range container.Opens {
-				if !strings.HasPrefix(open.Path, "/") {
-					t.Errorf("recorded path must be absolute: got %q (container %s)", open.Path, container.Name)
-					passed = false
-				}
-				if open.Path == "." {
-					t.Errorf("recorded path must not be relative dot: got %q (container %s)", open.Path, container.Name)
-					passed = false
+		scrambledPath := regexp.MustCompile(`^/[0-9]`)
+		checkOpens := func(t *testing.T, workload string, profile *v1beta1.ApplicationProfile) (bool, int) {
+			passed, procRooted := true, 0
+			for _, container := range profile.Spec.Containers {
+				for _, open := range container.Opens {
+					if !strings.HasPrefix(open.Path, "/") {
+						t.Errorf("recorded path must be absolute: got %q (%s container %s)", open.Path, workload, container.Name)
+						passed = false
+					}
+					if open.Path == "." {
+						t.Errorf("recorded path must not be relative dot: got %q (%s container %s)", open.Path, workload, container.Name)
+						passed = false
+					}
+					if scrambledPath.MatchString(open.Path) {
+						t.Errorf("scrambled (prefix-stripped) open path: got %q (%s container %s) - a resolved path never begins with a numeric segment", open.Path, workload, container.Name)
+						passed = false
+					}
+					if strings.HasPrefix(open.Path, "/proc/") {
+						procRooted++
+					}
 				}
 			}
+			return passed, procRooted
 		}
+
+		learn := func(t *testing.T, manifest string) *v1beta1.ApplicationProfile {
+			ns := testutils.NewRandomNamespace()
+			wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), manifest))
+			require.NoError(t, err)
+			require.NoError(t, wl.WaitForReady(80))
+			require.NoError(t, wl.WaitForApplicationProfileCompletion(80))
+			profile, err := wl.GetApplicationProfile()
+			require.NoError(t, err, "get application profile for %s", manifest)
+			return profile
+		}
+
+		nginxPassed, _ := checkOpens(t, "nginx", learn(t, "resources/nginx-deployment.yaml"))
+
+		// runc-heavy image: container init opens procfs through detached
+		// fsopen/fsmount handles - the natural reproducer for prefix-stripped
+		// paths. The positive control rejects a silently event-less gadget.
+		bitnamiProfile := learn(t, "resources/bitnami-redis-deployment.yaml")
+		bitnamiPassed, procRooted := checkOpens(t, "bitnami-redis", bitnamiProfile)
+		if procRooted == 0 {
+			t.Errorf("bitnami-redis learned profile has no /proc/-rooted opens - gadget positive control failed")
+			bitnamiPassed = false
+		}
+
+		passed := nginxPassed && bitnamiPassed
 		detail := ""
 		if !passed {
-			detail = "found non-absolute or '.' paths in recorded profile"
+			detail = "found non-absolute, '.', scrambled, or missing /proc opens in recorded profiles"
 		}
-		addResult("recorded_profile_absolute_paths", "(auto-learned)", "(nginx startup)", false, passed, detail)
+		addResult("recorded_profile_absolute_paths", "(auto-learned)", "(nginx + bitnami-redis startup)", false, passed, detail)
 	})
 
 	// ---------------------------------------------------------------

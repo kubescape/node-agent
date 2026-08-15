@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bitnami-redis
+  labels:
+    app: bitnami-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bitnami-redis
+  template:
+    metadata:
+      labels:
+        app: bitnami-redis
+    spec:
+      containers:
+      - name: redis
+        image: bitnami/redis:7.2
+        env:
+        - name: ALLOW_EMPTY_PASSWORD
+          value: "yes"
