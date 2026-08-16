@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: r75static
+  labels:
+    app: r75static
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: r75static
+  template:
+    metadata:
+      labels:
+        app: r75static
+        kubescape.io/user-defined-profile: r75static
+    spec:
+      containers:
+      - name: app
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]

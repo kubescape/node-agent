@@ -707,13 +707,8 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	ns := testutils.NewRandomNamespace()
 
 	endpointTraffic, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/endpoint-traffic.yaml"))
-	if err != nil {
-		t.Errorf("Error creating workload: %v", err)
-	}
-	err = endpointTraffic.WaitForReady(80)
-	if err != nil {
-		t.Errorf("Error waiting for workload to be ready: %v", err)
-	}
+	require.NoError(t, err, "Error creating workload")
+	require.NoError(t, endpointTraffic.WaitForReady(80), "Error waiting for workload to be ready")
 
 	// Wait for application profile to be ready
 	assert.NoError(t, endpointTraffic.WaitForContainerProfile(80, "ready"))

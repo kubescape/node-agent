@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: r75learn
+  labels:
+    app: r75learn
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: r75learn
+  template:
+    metadata:
+      labels:
+        app: r75learn
+    spec:
+      containers:
+      - name: app
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]
