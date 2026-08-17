@@ -42,11 +42,13 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 	t.Log("Waiting 30 seconds for Prometheus to scrape the data")
 	time.Sleep(30 * time.Second)
 
-	err := testutils.PlotNodeAgentPrometheusCPUUsage(t.Name(), startTime, end)
-	require.NoError(t, err, "Error plotting CPU usage")
-
-	_, err = testutils.PlotNodeAgentPrometheusMemoryUsage(t.Name(), startTime, end)
-	require.NoError(t, err, "Error plotting memory usage")
+	// Diagnostic plots are non-fatal: DS-restart tests gap the Prometheus series.
+	if err := testutils.PlotNodeAgentPrometheusCPUUsage(t.Name(), startTime, end); err != nil {
+		t.Logf("plot CPU usage (diagnostic, non-fatal): %v", err)
+	}
+	if _, err := testutils.PlotNodeAgentPrometheusMemoryUsage(t.Name(), startTime, end); err != nil {
+		t.Logf("plot memory usage (diagnostic, non-fatal): %v", err)
+	}
 
 	testutils.PrintAppLogs(t, "node-agent")
 	testutils.PrintAppLogs(t, "malicious-app")
@@ -1338,8 +1340,8 @@ func Test_22_AlertOnPartialNetworkProfileTest(t *testing.T) {
 	err = testutils.RestartDaemonSet("kubescape", "node-agent")
 	require.NoError(t, err, "Failed to restart daemonset")
 
-	// Wait for the network neighborhood to be completed
-	err = wl.WaitForContainerProfileCompletion(160)
+	// Budget 100x10s=~16.7m must stay under the 20m go-test timeout (160 overran it).
+	err = wl.WaitForContainerProfileCompletion(100)
 	require.NoError(t, err, "Error waiting for network neighborhood to be completed")
 
 	// Wait for cache to be updated
@@ -3316,7 +3318,7 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 // Test_36_MultiContainerPerContainerBinding shows per-container binding: a
 // multi-container pod shares ONE kubescape.io/user-defined-profile label, but
 // each container resolves its own authored CP as "<label>-<containerName>"
-// (mc35-app / mc35-sidecar). The two CPs carry inverse exec allow-lists, so a
+// (percontainer-app / percontainer-sidecar). The two CPs carry inverse exec allow-lists, so a
 // forbidden binary in either container must fire R0001 and the allowed one must
 // not — proving the containers do not share a profile.
 func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
@@ -3326,11 +3328,11 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 	ns := testutils.NewRandomNamespace()
 
 	// app allows /usr/bin/id (not whoami); sidecar allows /usr/bin/whoami (not id).
-	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/mc35-cp-app.yaml")
-	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/mc35-cp-sidecar.yaml")
+	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/percontainer-cp-app.yaml")
+	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/percontainer-cp-sidecar.yaml")
 
 	wl, err := testutils.NewTestWorkload(ns.Name,
-		path.Join(utils.CurrentDir(), "resources/mc35-multi-container-userdefined-deployment.yaml"))
+		path.Join(utils.CurrentDir(), "resources/percontainer-deployment.yaml"))
 	require.NoError(t, err)
 	require.NoError(t, wl.WaitForReady(80))
 	// Cache-load latency on the ContainerProfileCache is bursty; 30s covers the
@@ -3375,23 +3377,23 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 
 	// The forbidden process in each container MUST alert.
 	assert.Greater(t, countR0001("app", "whoami"), 0,
-		"whoami is NOT in mc35-app (only sidecar's CP allows it) — must fire R0001 in app")
+		"whoami is NOT in percontainer-app (only sidecar's CP allows it) — must fire R0001 in app")
 	assert.Greater(t, countR0001("sidecar", "id"), 0,
-		"id is NOT in mc35-sidecar (only app's CP allows it) — must fire R0001 in sidecar")
+		"id is NOT in percontainer-sidecar (only app's CP allows it) — must fire R0001 in sidecar")
 
 	// The allowed process in each container MUST NOT alert — the
 	// no-cross-inheritance assertion. If both containers shared one CP, one of
 	// these would be non-zero.
 	assert.Equal(t, 0, countR0001("app", "id"),
-		"id IS in mc35-app — must NOT fire R0001 in app (non-zero => sidecar's CP leaked in)")
+		"id IS in percontainer-app — must NOT fire R0001 in app (non-zero => sidecar's CP leaked in)")
 	assert.Equal(t, 0, countR0001("sidecar", "whoami"),
-		"whoami IS in mc35-sidecar — must NOT fire R0001 in sidecar (non-zero => app's CP leaked in)")
+		"whoami IS in percontainer-sidecar — must NOT fire R0001 in sidecar (non-zero => app's CP leaked in)")
 
 	t.Run("refresh_reprojects_authored_CP_update", func(t *testing.T) {
 		k8sClient := k8sinterface.NewKubernetesApi()
 		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-		cp, err := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), "mc35-app", v1.GetOptions{})
-		require.NoError(t, err, "get mc35-app")
+		cp, err := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), "percontainer-app", v1.GetOptions{})
+		require.NoError(t, err, "get percontainer-app")
 		kept := cp.Spec.Execs[:0]
 		for _, e := range cp.Spec.Execs {
 			if e.Path != "/usr/bin/id" {
@@ -3400,7 +3402,7 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 		}
 		cp.Spec.Execs = kept
 		_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cp, v1.UpdateOptions{})
-		require.NoError(t, err, "update mc35-app to forbid id")
+		require.NoError(t, err, "update percontainer-app to forbid id")
 
 		time.Sleep(45 * time.Second)
 		wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
@@ -3417,7 +3419,7 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 			}
 			return false
 		}, 90*time.Second, 5*time.Second,
-			"after mc35-app is updated to forbid id, the reconciler refresh must re-fetch and re-project it so id now fires R0001 in app")
+			"after percontainer-app is updated to forbid id, the reconciler refresh must re-fetch and re-project it so id now fires R0001 in app")
 	})
 }
 
@@ -3439,7 +3441,7 @@ func Test_48_MultiSubtypeGroupedProfileDocument(t *testing.T) {
 
 	ns := testutils.NewRandomNamespace()
 
-	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/mc37-cp-doc.yaml")
+	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/multisubtype-cp-doc.yaml")
 
 	// Ground-truth round-trip assertion: the apiserver must serve the grouped
 	// document back with all three subtype groups intact. If a storage-side
@@ -3449,7 +3451,7 @@ func Test_48_MultiSubtypeGroupedProfileDocument(t *testing.T) {
 	{
 		k8sClient := k8sinterface.NewKubernetesApi()
 		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-		served, err := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), "mc37", v1.GetOptions{})
+		served, err := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), "multisubtype", v1.GetOptions{})
 		require.NoError(t, err)
 		require.Len(t, served.Spec.Containers, 1,
 			"served document lost spec.containers - storage write path stripped the subtype groups")
@@ -3462,7 +3464,7 @@ func Test_48_MultiSubtypeGroupedProfileDocument(t *testing.T) {
 	}
 
 	wl, err := testutils.NewTestWorkload(ns.Name,
-		path.Join(utils.CurrentDir(), "resources/mc37-multi-subtype-userdefined-deployment.yaml"))
+		path.Join(utils.CurrentDir(), "resources/multisubtype-deployment.yaml"))
 	require.NoError(t, err)
 	// The init container sleeps 100s before running its forbidden binary (the
 	// authored-profile adoption for an init container has been observed to take
@@ -3592,4 +3594,237 @@ func Test_43_RelativeOpenPathResolution(t *testing.T) {
 		"the existing relative open reldir/present.txt must be learned as /data/reldir/present.txt; opens=%v", opens)
 	assert.True(t, matchesResolved("absent.txt"),
 		"the FAILED relative open reldir/absent.txt (no fd) must also resolve to /data/reldir/absent.txt; opens=%v", opens)
+}
+
+// countRuleAlerts counts alertmanager alerts matching ruleID (+ optional container/comm). Empty container/comm = wildcard.
+func countRuleAlerts(t *testing.T, ns, ruleID, container, comm string) int {
+	t.Helper()
+	alerts, _ := testutils.GetAlerts(ns)
+	n := 0
+	for _, a := range alerts {
+		if a.Labels["rule_id"] == ruleID &&
+			(container == "" || a.Labels["container_name"] == container) &&
+			(comm == "" || a.Labels["comm"] == comm) {
+			n++
+		}
+	}
+	return n
+}
+
+// withNodeAgentConfig mutates config.json + restarts the DaemonSet; the returned func reverts + restarts.
+func withNodeAgentConfig(t *testing.T, mutate func(cfg map[string]any)) func() {
+	t.Helper()
+	const nsKS, cmName = "kubescape", "node-agent"
+	k8s := k8sinterface.NewKubernetesApi()
+	cm, err := k8s.KubernetesClient.CoreV1().ConfigMaps(nsKS).Get(context.Background(), cmName, metav1.GetOptions{})
+	require.NoError(t, err, "get node-agent ConfigMap")
+	original := cm.Data["config.json"]
+
+	var cfg map[string]any
+	require.NoError(t, json.Unmarshal([]byte(original), &cfg), "parse config.json")
+	mutate(cfg)
+	updated, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err, "marshal config.json")
+
+	apply := func(body string) {
+		c, e := k8s.KubernetesClient.CoreV1().ConfigMaps(nsKS).Get(context.Background(), cmName, metav1.GetOptions{})
+		require.NoError(t, e)
+		c.Data["config.json"] = body
+		_, e = k8s.KubernetesClient.CoreV1().ConfigMaps(nsKS).Update(context.Background(), c, metav1.UpdateOptions{})
+		require.NoError(t, e, "update node-agent ConfigMap")
+		require.NoError(t, testutils.RestartDaemonSet(nsKS, cmName), "restart node-agent")
+		time.Sleep(45 * time.Second)
+	}
+	apply(string(updated))
+	return func() { apply(original) }
+}
+
+// Test_12: one grouped authored CP (containers[]/initContainers[]/ephemeralContainers[] subtype sections) enforces each container only against its own section. cf Test_36 (per-container via separate CPs), Test_48 (grouped served-doc survives storage).
+func Test_12_AuthoredMultiSubtypeProfile(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/multisubtype-cp.yaml")
+
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/multisubtype-deployment.yaml"))
+	require.NoError(t, err, "create multisubtype workload")
+	require.NoError(t, wl.WaitForReady(120), "workload ready")
+	time.Sleep(30 * time.Second)
+
+	// app section resolved: a command IN the app section is quiet, one NOT in it alerts.
+	require.Eventually(t, func() bool {
+		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		return countRuleAlerts(t, ns.Name, "R0001", "app", "id") > 0
+	}, 2*time.Minute, 10*time.Second, "id is not in the app subtype — must fire R0001 in app")
+
+	require.Eventually(t, func() bool {
+		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/cat", "/etc/hostname"}, "app")
+		time.Sleep(8 * time.Second)
+		return countRuleAlerts(t, ns.Name, "R0001", "app", "cat") == 0
+	}, 2*time.Minute, 12*time.Second, "cat IS in the app subtype — must NOT fire R0001 (empty/whole-doc resolution would alert)")
+
+	// initContainers section resolved: the init container's own id (in its section) does not alert.
+	require.Equal(t, 0, countRuleAlerts(t, ns.Name, "R0001", "setup", "id"),
+		"id IS in the initContainers[setup] subtype — the init container's id must not alert")
+}
+
+// Test_13: learn -> restart -> re-learn -> enforce. A cmd absent from the learned profile fires R0001; the same cmd exec'd during the post-restart learning window is learned, then silent. Debian image => R0001 not R0040. cf Test_30 (learning-window duration), Test_49 (ephemeral learns identically).
+func Test_13_NaturalLearningLifecycle(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/learning-lifecycle-deployment.yaml"))
+	require.NoError(t, err, "create learner workload")
+	require.NoError(t, wl.WaitForReady(80), "workload ready")
+	require.NoError(t, wl.WaitForContainerProfileCompletion(30), "initial profile completion")
+	time.Sleep(20 * time.Second)
+
+	stale, err := wl.GetContainerProfiles()
+	require.NoError(t, err, "list initial profiles")
+	staleNames := make([]string, 0, len(stale))
+	for i := range stale {
+		staleNames = append(staleNames, stale[i].Name)
+	}
+
+	require.Eventually(t, func() bool {
+		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		return countRuleAlerts(t, ns.Name, "R0001", "app", "id") > 0
+	}, 2*time.Minute, 10*time.Second, "id absent from the learned profile must fire R0001")
+
+	require.NoError(t, testutils.RestartDeployment(ns.Name, "learner"), "restart to reset learning")
+	require.NoError(t, wl.WaitForReady(80), "workload ready after restart")
+	for i := 0; i < 8; i++ {
+		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		time.Sleep(8 * time.Second)
+	}
+	require.NoError(t, wl.WaitForContainerProfileCompletionWithDenylist(30, staleNames), "re-learned profile completion")
+	time.Sleep(20 * time.Second)
+
+	before := countRuleAlerts(t, ns.Name, "R0001", "app", "id")
+	for i := 0; i < 4; i++ {
+		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		time.Sleep(3 * time.Second)
+	}
+	time.Sleep(20 * time.Second)
+	require.Equal(t, before, countRuleAlerts(t, ns.Name, "R0001", "app", "id"),
+		"id executed during the learning window must be in the re-learned profile — no new R0001")
+}
+
+// Test_25: static authored profile (never re-learns) isolates cooldown from profile reload: 20 identical unlisted execs => exactly ruleCooldownAfterCount(10) alerts, further execs add none. cf Test_23 (general cooldown under learning).
+func Test_25_RuleCooldownExactThreshold(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/static-authored-cp.yaml")
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/static-authored-deployment.yaml"))
+	require.NoError(t, err, "create static workload")
+	require.NoError(t, wl.WaitForReady(80), "workload ready")
+	time.Sleep(40 * time.Second)
+
+	for i := 0; i < 20; i++ {
+		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		time.Sleep(1 * time.Second)
+	}
+	time.Sleep(30 * time.Second)
+	require.Equal(t, 10, countRuleAlerts(t, ns.Name, "R0001", "app", "id"),
+		"cooldown must cap identical alerts at ruleCooldownAfterCount (10) despite 20 execs")
+
+	for i := 0; i < 10; i++ {
+		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		time.Sleep(1 * time.Second)
+	}
+	time.Sleep(30 * time.Second)
+	require.Equal(t, 10, countRuleAlerts(t, ns.Name, "R0001", "app", "id"),
+		"once cooled down, further identical execs add no alerts (suppression holds for ruleCooldownDuration)")
+}
+
+// Test_30: excludeNamespaces/excludeLabels drop a container (no profile, no alerts) while a control workload is still profiled; maxSniffingTimePerContainer governs the learning-window length. cf Test_13 (learning lifecycle). Uses withNodeAgentConfig (restarts node-agent).
+func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	t.Run("ExcludeFlagsDropContainer", func(t *testing.T) {
+		excluded := testutils.NewRandomNamespace()
+		control := testutils.NewRandomNamespace()
+		restore := withNodeAgentConfig(t, func(cfg map[string]any) {
+			cfg["excludeNamespaces"] = []string{excluded.Name}
+			cfg["excludeLabels"] = map[string][]string{"skip-me": {"true"}}
+		})
+		defer restore()
+
+		exNS, err := testutils.NewTestWorkload(excluded.Name, path.Join(utils.CurrentDir(), "resources/learning-lifecycle-deployment.yaml"))
+		require.NoError(t, err, "excluded-namespace workload")
+		require.NoError(t, exNS.WaitForReady(80))
+		ctl, err := testutils.NewTestWorkload(control.Name, path.Join(utils.CurrentDir(), "resources/learning-lifecycle-deployment.yaml"))
+		require.NoError(t, err, "control workload")
+		require.NoError(t, ctl.WaitForReady(80))
+
+		time.Sleep(90 * time.Second)
+
+		exCPs, _ := exNS.GetContainerProfiles()
+		require.Empty(t, exCPs, "an excluded-namespace workload must produce NO ContainerProfile")
+		ctlCPs, _ := ctl.GetContainerProfiles()
+		require.NotEmpty(t, ctlCPs, "a non-excluded workload must still be profiled (exclusion must be selective)")
+
+		for i := 0; i < 5; i++ {
+			_, _, _ = exNS.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+			time.Sleep(2 * time.Second)
+		}
+		time.Sleep(20 * time.Second)
+		require.Equal(t, 0, countRuleAlerts(t, excluded.Name, "R0001", "app", "id"),
+			"an excluded container must generate no alerts")
+	})
+
+	t.Run("LearningDurationOverride", func(t *testing.T) {
+		restore := withNodeAgentConfig(t, func(cfg map[string]any) {
+			cfg["maxSniffingTimePerContainer"] = "45s"
+			cfg["initialDelay"] = "10s"
+		})
+		defer restore()
+
+		ns := testutils.NewRandomNamespace()
+		wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/learning-lifecycle-deployment.yaml"))
+		require.NoError(t, err, "workload")
+		require.NoError(t, wl.WaitForReady(80))
+
+		deadline := time.Now().Add(90 * time.Second)
+		require.NoError(t, wl.WaitForContainerProfileCompletion(90), "profile must complete within the shortened window")
+		require.True(t, time.Now().Before(deadline),
+			"completion must track the configured maxSniffingTimePerContainer, not a longer default")
+	})
+}
+
+// Test_49: an ephemeral container gets the full treatment like a regular one — its own ContainerProfile completes, and an exec unseen during learning fires R0001. cf Test_13 (same learn->enforce cycle for a regular container).
+func Test_49_EphemeralContainerFullTreatment(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/learning-lifecycle-deployment.yaml"))
+	require.NoError(t, err, "create workload")
+	require.NoError(t, wl.WaitForReady(80), "workload ready")
+
+	require.NoError(t, wl.AddEphemeralContainer("ephcon", "debian:12-slim", []string{"/usr/bin/sleep", "infinity"}, 120),
+		"attach ephemeral container")
+
+	require.Eventually(t, func() bool {
+		cps, e := wl.GetContainerProfiles()
+		if e != nil {
+			return false
+		}
+		for i := range cps {
+			if strings.Contains(cps[i].Name, "ephcon") && cps[i].Annotations["kubescape.io/status"] == "completed" {
+				return true
+			}
+		}
+		return false
+	}, 4*time.Minute, 10*time.Second, "an ephemeral container must be LEARNED — a completed ContainerProfile must exist for it (full treatment)")
+
+	require.Eventually(t, func() bool {
+		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "ephcon")
+		return countRuleAlerts(t, ns.Name, "R0001", "ephcon", "id") > 0
+	}, 2*time.Minute, 10*time.Second, "id was not in the ephemeral container's learned profile — it must fire R0001 (detected + alerted like any other container)")
 }

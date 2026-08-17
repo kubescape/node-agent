@@ -1,7 +1,7 @@
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ContainerProfile
 metadata:
-  name: mc37
+  name: multisubtype
 spec:
   containers:
   - name: app

@@ -10,16 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestDeclarationsCompileEachOverload builds a CEL env with the cp library
-// and compiles + programs a representative call for every function declared
-// by the library. It is a registration-regression guard: if an overload is
-// wired with the wrong argument types (or dropped/renamed), the matching
-// expression fails to compile or program, failing the test. No cluster or
-// profile is required — only the type-checker and program binder run.
-//
-// The exprByFunc map is asserted to cover EXACTLY the set of functions in
-// Declarations(), so adding or removing a declared function without updating
-// this smoke test is itself a failure.
+// Registration-regression guard: every function in Declarations() must compile+program from one well-typed call site, and exprByFunc must cover EXACTLY that set (drift in either direction fails). Type-checker only, no cluster.
 func TestDeclarationsCompileEachOverload(t *testing.T) {
 	// One well-typed call site per declared function.
 	exprByFunc := map[string]string{

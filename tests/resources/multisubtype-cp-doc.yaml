@@ -1,5 +1,5 @@
-# ONE grouped ContainerProfile document for the whole mc37 pod, bound via the
-# bare label value (kubescape.io/user-defined-profile=mc37). The spec carries
+# ONE grouped ContainerProfile document for the whole multisubtype pod, bound via the
+# bare label value (kubescape.io/user-defined-profile=multisubtype). The spec carries
 # the container subtype groups the legacy AP/NN specs expressed - containers /
 # initContainers / ephemeralContainers - and node-agent selects each
 # container's section by name. Every section allows its own housekeeping
@@ -11,7 +11,7 @@
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ContainerProfile
 metadata:
-  name: mc37
+  name: multisubtype
 spec:
   containers:
   - name: app

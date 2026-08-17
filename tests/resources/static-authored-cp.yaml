@@ -1,7 +1,7 @@
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ContainerProfile
 metadata:
-  name: r75static
+  name: static-authored
 spec:
   execs:
   - path: /usr/bin/sleep

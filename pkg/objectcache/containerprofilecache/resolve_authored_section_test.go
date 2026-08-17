@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Pins the one narrative both add (tryPopulateEntry) and refresh (refreshOneEntry) share via resolveAuthoredSection. 404/transient handling around it is in reconciler_notfound_test.go.
 func TestResolveAuthoredSection_SharedNarrative(t *testing.T) {
 	flat := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "flat", Namespace: "default"},

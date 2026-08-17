@@ -33,6 +33,8 @@ func notFound(name string) error {
 	return apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, name)
 }
 
+// Differential oracles for the refresh 404-vs-transient contract (B1 learned / B2 authored / F1 both-gone). Authored-section resolution shared with the add path is covered in resolve_authored_section_test.go.
+
 func TestRefresh_LearnedCP_NotFoundEvictsVsTransientKeeps(t *testing.T) {
 	learned := func() *v1beta1.ContainerProfile {
 		return &v1beta1.ContainerProfile{

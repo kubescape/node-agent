@@ -1,18 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: r75learn
+  name: learner
   labels:
-    app: r75learn
+    app: learner
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: r75learn
+      app: learner
   template:
     metadata:
       labels:
-        app: r75learn
+        app: learner
     spec:
       containers:
       - name: app

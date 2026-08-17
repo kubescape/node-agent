@@ -1,11 +1,4 @@
-// Network-endpoint fixture lint tests — the Test_28 (network) counterpart of
-// aplint_test.go (kubescape/node-agent#847, LintApplicationProfileYAML).
-//
-// Validates every user-authored network surface under tests/resources/ — the
-// migrated ContainerProfile authoring examples (spec.egress / spec.ingress) and
-// the NetworkNeighborhood fixtures (spec.containers[].egress/ingress) — against
-// the v0.0.2 endpoint grammar: DNS wildcard tokens, IP/CIDR/sentinel forms, the
-// deprecated singular-vs-plural IP fields, and port/protocol shape.
+// Lints tests/resources/ network fixtures (ContainerProfile egress/ingress, flat + grouped) against the v0.0.2 endpoint grammar. Catches malformed authoring fixtures before they reach a cluster.
 //
 // Runs as a regular `go test ./...` — no component tag, no kind cluster.
 //

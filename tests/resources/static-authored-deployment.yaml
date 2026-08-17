@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: r75static
+  name: static-authored
   labels:
-    app: r75static
+    app: static-authored
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: r75static
+      app: static-authored
   template:
     metadata:
       labels:
-        app: r75static
-        kubescape.io/user-defined-profile: r75static
+        app: static-authored
+        kubescape.io/user-defined-profile: static-authored
     spec:
       containers:
       - name: app

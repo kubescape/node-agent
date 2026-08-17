@@ -1,5 +1,5 @@
 # Pod with a regular container AND an initContainer, bound via ONE pod label
-# to ONE grouped ContainerProfile document (mc37-cp-doc.yaml) that carries the
+# to ONE grouped ContainerProfile document (multisubtype-cp-doc.yaml) that carries the
 # containers/initContainers/ephemeralContainers subtype groups. The ephemeral
 # "debug" container is added at runtime by the component test via the
 # ephemeralcontainers subresource.
@@ -10,19 +10,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mc37-deployment
+  name: multisubtype-deployment
   labels:
-    app: mc37
+    app: multisubtype
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mc37
+      app: multisubtype
   template:
     metadata:
       labels:
-        app: mc37
-        kubescape.io/user-defined-profile: mc37
+        app: multisubtype
+        kubescape.io/user-defined-profile: multisubtype
     spec:
       initContainers:
       - name: setup
