@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,7 +104,7 @@ func Test_13_NaturalLearningLifecycle(t *testing.T) {
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/review75-learn-deployment.yaml"))
 	require.NoError(t, err, "create learner workload")
 	require.NoError(t, wl.WaitForReady(80), "workload ready")
-	require.NoError(t, wl.WaitForContainerProfileCompletion(120), "initial profile completion")
+	require.NoError(t, wl.WaitForContainerProfileCompletion(30), "initial profile completion")
 	time.Sleep(20 * time.Second)
 
 	stale, err := wl.GetContainerProfiles()
@@ -124,7 +125,7 @@ func Test_13_NaturalLearningLifecycle(t *testing.T) {
 		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
 		time.Sleep(8 * time.Second)
 	}
-	require.NoError(t, wl.WaitForContainerProfileCompletionWithBlacklist(160, staleNames), "re-learned profile completion")
+	require.NoError(t, wl.WaitForContainerProfileCompletionWithBlacklist(30, staleNames), "re-learned profile completion")
 	time.Sleep(20 * time.Second)
 
 	before := countRuleAlerts(t, ns.Name, "R0001", "app", "id")
@@ -224,4 +225,39 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		require.True(t, time.Now().Before(deadline),
 			"completion must track the configured maxSniffingTimePerContainer, not a longer default")
 	})
+}
+
+// Test_49_EphemeralContainerFullTreatment pins that an ephemeral container is
+// learned, detected, and alerted on exactly like a regular container: a
+// ContainerProfile is generated for it, and an exec not seen during learning
+// fires R0001.
+func Test_49_EphemeralContainerFullTreatment(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/review75-learn-deployment.yaml"))
+	require.NoError(t, err, "create workload")
+	require.NoError(t, wl.WaitForReady(80), "workload ready")
+
+	require.NoError(t, wl.AddEphemeralContainer("ephcon", "debian:12-slim", []string{"/usr/bin/sleep", "infinity"}, 120),
+		"attach ephemeral container")
+
+	require.Eventually(t, func() bool {
+		cps, e := wl.GetContainerProfiles()
+		if e != nil {
+			return false
+		}
+		for i := range cps {
+			if strings.Contains(cps[i].Name, "ephcon") && cps[i].Annotations["kubescape.io/status"] == "completed" {
+				return true
+			}
+		}
+		return false
+	}, 4*time.Minute, 10*time.Second, "an ephemeral container must be LEARNED — a completed ContainerProfile must exist for it (full treatment)")
+
+	require.Eventually(t, func() bool {
+		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "ephcon")
+		return countRuleAlerts(t, ns.Name, "R0001", "ephcon", "id") > 0
+	}, 2*time.Minute, 10*time.Second, "id was not in the ephemeral container's learned profile — it must fire R0001 (detected + alerted like any other container)")
 }
