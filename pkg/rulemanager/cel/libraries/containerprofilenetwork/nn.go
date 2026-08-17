@@ -196,6 +196,8 @@ func (e *containerProfileNetworkCostEstimator) EstimateCallCost(function, overlo
 	case "cp.was_address_port_protocol_in_egress", "cp.was_address_port_protocol_in_ingress":
 		// Cache lookup + O(n) address search + O(p) nested port/protocol matching
 		cost = 45
+	default:
+		return nil
 	}
 	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
 }

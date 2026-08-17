@@ -387,6 +387,7 @@ func (e *containerProfileCostEstimator) EstimateCallCost(function, overloadID st
 	case "cp.was_host_accessed":
 		// Cache lookup + O(n) endpoint search + URL parsing + O(m) network neighbor search
 		cost = 35
+	// Endpoint/HTTP predicates below are not declared or implemented in this build (dead in OSS); cost entries retained for parity with builds that register them.
 	case "cp.was_internal_endpoint_accessed":
 		// Cache lookup + O(n) linear search through endpoints checking internal flag
 		cost = 15

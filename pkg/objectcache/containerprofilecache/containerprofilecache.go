@@ -24,7 +24,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // defaultReconcileInterval is the fallback refresh cadence when
@@ -414,38 +413,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
-	// A grouped (multi-container) authored document carries per-subtype
-	// container sections; select THIS container's section by name across
-	// containers/initContainers/ephemeralContainers - the contract the legacy
-	// AP/NN specs expressed. A flat document passes through unchanged. A
-	// grouped document that does not cover this container resolves to nil and
-	// falls through to the unresolved handling below (never enforce a
-	// sibling's profile).
-	if resolved := resolveAuthoredContainerSection(userDefinedCP, container.Runtime.ContainerName); resolved != userDefinedCP {
-		if resolved == nil && userDefinedCP != nil {
-			logger.L().Warning("authored ContainerProfile document does not cover this container; treating as unresolved",
-				helpers.String("containerID", containerID),
-				helpers.String("namespace", ns),
-				helpers.String("name", resolvedOverlayName),
-				helpers.String("containerName", container.Runtime.ContainerName))
-		}
-		userDefinedCP = resolved
-	}
-
-	// A label-referenced ContainerProfile must be USER-AUTHORED, not a learned
-	// one. A learned CP carries lifecycle annotations (status/completion); an
-	// authored one carries none. If the label resolves to a learned CP, ignore
-	// it — otherwise its real state is overwritten with Completed/Full below and
-	// a still-learning profile would be enforced as complete (false positives).
-	if userDefinedCP != nil {
-		if _, learned := userDefinedCP.Annotations[helpersv1.StatusMetadataKey]; learned {
-			logger.L().Warning("user-defined-profile label resolves to a learned ContainerProfile; ignoring it",
-				helpers.String("containerID", containerID),
-				helpers.String("namespace", ns),
-				helpers.String("name", overlayName))
-			userDefinedCP = nil
-		}
-	}
+	userDefinedCP = resolveAuthoredSection(userDefinedCP, container.Runtime.ContainerName, resolvedOverlayName, containerID, ns)
 
 	// Only cache profiles whose status is terminal (Completed or TooLarge).
 	// Learning/ready profiles are still being written; caching them would let
@@ -505,26 +473,6 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 			helpers.String("namespace", ns),
 			helpers.String("name", userDefinedCP.Name))
 		c.metricsManager.IncUserDefinedProfileAdopted(ns)
-	}
-
-	// When no consolidated CP is available, synthesize an empty CP named
-	// after the workload so downstream state display is sensible. Projection
-	// below merges user-managed + user-defined overlay onto this base.
-	if cp == nil {
-		syntheticName := workloadName
-		if syntheticName == "" {
-			syntheticName = overlayName
-		}
-		cp = &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      syntheticName,
-				Namespace: ns,
-				Annotations: map[string]string{
-					helpersv1.CompletionMetadataKey: helpersv1.Full,
-					helpersv1.StatusMetadataKey:     helpersv1.Completed,
-				},
-			},
-		}
 	}
 
 	pod := c.k8sObjectCache.GetPod(container.K8s.Namespace, container.K8s.PodName)

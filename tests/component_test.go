@@ -3386,6 +3386,39 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 		"id IS in mc35-app — must NOT fire R0001 in app (non-zero => sidecar's CP leaked in)")
 	assert.Equal(t, 0, countR0001("sidecar", "whoami"),
 		"whoami IS in mc35-sidecar — must NOT fire R0001 in sidecar (non-zero => app's CP leaked in)")
+
+	t.Run("refresh_reprojects_authored_CP_update", func(t *testing.T) {
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+		cp, err := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), "mc35-app", v1.GetOptions{})
+		require.NoError(t, err, "get mc35-app")
+		kept := cp.Spec.Execs[:0]
+		for _, e := range cp.Spec.Execs {
+			if e.Path != "/usr/bin/id" {
+				kept = append(kept, e)
+			}
+		}
+		cp.Spec.Execs = kept
+		_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cp, v1.UpdateOptions{})
+		require.NoError(t, err, "update mc35-app to forbid id")
+
+		time.Sleep(45 * time.Second)
+		wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+
+		require.Eventually(t, func() bool {
+			a2, e := testutils.GetAlerts(wl.Namespace)
+			if e != nil {
+				return false
+			}
+			for _, a := range a2 {
+				if a.Labels["rule_id"] == "R0001" && a.Labels["container_name"] == "app" && a.Labels["comm"] == "id" {
+					return true
+				}
+			}
+			return false
+		}, 90*time.Second, 5*time.Second,
+			"after mc35-app is updated to forbid id, the reconciler refresh must re-fetch and re-project it so id now fires R0001 in app")
+	})
 }
 
 // Test_48_MultiSubtypeGroupedProfileDocument pins the container-subtype

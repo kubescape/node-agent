@@ -29,7 +29,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // tickLoop drives the reconciler. Each tick it evicts terminated containers,
@@ -386,24 +385,11 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			userDefinedCP = nil
 		}
 	}
-	// Grouped-document selection (mirror of the add path): a multi-container
-	// authored document carries per-subtype container sections; select this
-	// entry's container by name. A flat document passes through; a grouped
-	// document that does not cover this container resolves to nil.
-	userDefinedCP = resolveAuthoredContainerSection(userDefinedCP, e.ContainerName)
-
-	// Authored-validation (mirror of the add path): a label-referenced CP that
-	// carries lifecycle annotations is a LEARNED profile, not an authored one.
-	// Ignore it so its real state is not overwritten with Completed/Full and a
-	// still-learning profile is not enforced as complete.
-	if userDefinedCP != nil {
-		if _, learned := userDefinedCP.Annotations[helpersv1.StatusMetadataKey]; learned {
-			logger.L().Debug("refreshOneEntry: user-defined-profile label resolves to a learned CP; ignoring it",
-				helpers.String("containerID", id),
-				helpers.String("name", e.UserCPRef.Name))
-			userDefinedCP = nil
-		}
+	userCPName := ""
+	if e.UserCPRef != nil {
+		userCPName = e.UserCPRef.Name
 	}
+	userDefinedCP = resolveAuthoredSection(userDefinedCP, e.ContainerName, userCPName, id, ns)
 	if cp == nil && userDefinedCP == nil {
 		logger.L().Debug("refreshOneEntry: no CP available after refresh; evicting entry",
 			helpers.String("containerID", id),
@@ -491,25 +477,6 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	effectiveCP := cp
 	if userDefinedCP != nil {
 		effectiveCP = userDefinedCP
-	}
-
-	// When neither a learned nor a user-defined CP is available, synthesize an
-	// empty base so downstream state display is sensible.
-	if effectiveCP == nil {
-		syntheticName := prev.WorkloadName
-		if syntheticName == "" {
-			syntheticName = prev.CPName
-		}
-		effectiveCP = &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      syntheticName,
-				Namespace: prev.Namespace,
-				Annotations: map[string]string{
-					helpersv1.CompletionMetadataKey: helpersv1.Full,
-					helpersv1.StatusMetadataKey:     helpersv1.Completed,
-				},
-			},
-		}
 	}
 
 	projected := effectiveCP

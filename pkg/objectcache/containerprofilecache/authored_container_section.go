@@ -1,8 +1,34 @@
 package containerprofilecache
 
 import (
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
+
+func resolveAuthoredSection(cp *v1beta1.ContainerProfile, containerName, name, containerID, namespace string) *v1beta1.ContainerProfile {
+	if cp == nil {
+		return nil
+	}
+	resolved := resolveAuthoredContainerSection(cp, containerName)
+	if resolved == nil {
+		logger.L().Warning("authored ContainerProfile document does not cover this container; treating as unresolved",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", namespace),
+			helpers.String("name", name),
+			helpers.String("containerName", containerName))
+		return nil
+	}
+	if _, learned := resolved.Annotations[helpersv1.StatusMetadataKey]; learned {
+		logger.L().Warning("user-defined-profile label resolves to a learned ContainerProfile; ignoring it",
+			helpers.String("containerID", containerID),
+			helpers.String("namespace", namespace),
+			helpers.String("name", name))
+		return nil
+	}
+	return resolved
+}
 
 // resolveAuthoredContainerSection maps a user-authored ContainerProfile
 // document to the flat per-container view this container enforces.
