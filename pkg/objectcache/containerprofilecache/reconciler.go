@@ -28,6 +28,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -173,15 +174,6 @@ func (c *ContainerProfileCacheImpl) reconcileOnce(ctx context.Context) {
 	c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))
 }
 
-// isContainerRunning reports whether the container identified by `id` (the
-// cache key, a trimmed containerID) or by (e.ContainerName, e.PodUID) is in
-// State=Running in the pod's container/initContainer/ephemeralContainer
-// statuses.
-//
-// Pre-running init containers can appear with an empty ContainerID in the
-// status (kubelet hasn't published it yet). In that case we fall back to
-// matching on (Name, PodUID) so we don't prematurely evict the entry the
-// instant it's populated.
 // isContainerTerminated reports whether the container identified by `id` or
 // by (e.ContainerName, e.PodUID) has a Terminated state in the pod's
 // container/initContainer/ephemeralContainer statuses. This is stricter than
@@ -264,29 +256,6 @@ func containerDeclaredInSpec(pod *corev1.Pod, name string) bool {
 	for i := range pod.Spec.EphemeralContainers {
 		if pod.Spec.EphemeralContainers[i].Name == name {
 			return true
-		}
-	}
-	return false
-}
-
-func isContainerRunning(pod *corev1.Pod, e *CachedContainerProfile, id string) bool {
-	statuses := make([]corev1.ContainerStatus, 0,
-		len(pod.Status.ContainerStatuses)+
-			len(pod.Status.InitContainerStatuses)+
-			len(pod.Status.EphemeralContainerStatuses))
-	statuses = append(statuses, pod.Status.ContainerStatuses...)
-	statuses = append(statuses, pod.Status.InitContainerStatuses...)
-	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
-	for _, s := range statuses {
-		if s.ContainerID == "" {
-			// pre-running init container: match by (Name, PodUID)
-			if s.Name == e.ContainerName && string(pod.UID) == e.PodUID {
-				return s.State.Running != nil
-			}
-			continue
-		}
-		if utils.TrimRuntimePrefix(s.ContainerID) == id {
-			return s.State.Running != nil
 		}
 	}
 	return false
@@ -376,19 +345,14 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		return cpErr
 	})
 	if cpErr != nil {
-		// If the previous entry was built off a real CP (non-empty RV), a
-		// CP fetch error on this tick is transient — keep the entry as-is.
-		// If the entry never had a CP (RV == "", pure workload/user-managed
-		// build), treat the error as 404 and let workload/user-managed
-		// re-fetches drive any refresh.
-		if e.RV != "" {
-			logger.L().Debug("refreshOneEntry: CP fetch failed; keeping cached entry",
+		if !apierrors.IsNotFound(cpErr) && e.RV != "" {
+			logger.L().Debug("refreshOneEntry: CP fetch failed transiently; keeping cached entry",
 				helpers.String("containerID", id),
 				helpers.String("cpName", e.CPName),
 				helpers.Error(cpErr))
 			return
 		}
-		logger.L().Debug("refreshOneEntry: CP fetch failed (no prior CP); treating as not-available",
+		logger.L().Debug("refreshOneEntry: CP not available (NotFound or no prior CP); dropping learned base",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName),
 			helpers.Error(cpErr))
@@ -411,8 +375,8 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, e.UserCPRef.Namespace, e.UserCPRef.Name)
 			return userCPErr
 		})
-		if userCPErr != nil && e.UserCPRV != "" {
-			logger.L().Debug("refreshOneEntry: user-defined CP fetch failed; keeping cached entry",
+		if userCPErr != nil && !apierrors.IsNotFound(userCPErr) && e.UserCPRV != "" {
+			logger.L().Debug("refreshOneEntry: user-defined CP fetch failed transiently; keeping cached entry",
 				helpers.String("containerID", id),
 				helpers.String("name", e.UserCPRef.Name),
 				helpers.Error(userCPErr))
@@ -440,10 +404,19 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			userDefinedCP = nil
 		}
 	}
+	if cp == nil && userDefinedCP == nil {
+		logger.L().Debug("refreshOneEntry: no CP available after refresh; evicting entry",
+			helpers.String("containerID", id),
+			helpers.String("cpName", e.CPName))
+		c.entries.Delete(id)
+		c.metricsManager.ReportContainerProfileReconcilerEviction("profile_deleted")
+		return
+	}
 	// Learned-status gate: only blocks when there is NO authored CP to adopt.
 	// With an authored CP present, the learned CP's status is irrelevant — the
 	// authored profile is the base and is enforced regardless.
-	if userDefinedCP == nil && cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) {
+	authoredJustDropped := e.UserCPRV != "" && userDefinedCP == nil
+	if userDefinedCP == nil && cp != nil && !isTerminalCPStatus(cp.Annotations[helpersv1.StatusMetadataKey]) && !authoredJustDropped {
 		logger.L().Debug("refreshOneEntry: CP status not terminal; keeping cached entry",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName),
@@ -557,19 +530,20 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	newEntry := &CachedContainerProfile{
-		Projected:     projectedCP,
-		SpecHash:      projectedCP.SpecHash,
-		State:         &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
-		CallStackTree: tree,
-		ContainerName: prev.ContainerName,
-		PodName:       prev.PodName,
-		Namespace:     prev.Namespace,
-		PodUID:        podUID,
-		WorkloadID:    prev.WorkloadID,
-		CPName:        prev.CPName,
-		WorkloadName:  prev.WorkloadName,
-		RV:            rvOfCP(cp),
-		UserCPRV:      rvOfCP(userDefinedCP),
+		Projected:        projectedCP,
+		SpecHash:         projectedCP.SpecHash,
+		State:            &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
+		CallStackTree:    tree,
+		ContainerName:    prev.ContainerName,
+		PodName:          prev.PodName,
+		Namespace:        prev.Namespace,
+		PodUID:           podUID,
+		WorkloadID:       prev.WorkloadID,
+		CPName:           prev.CPName,
+		WorkloadName:     prev.WorkloadName,
+		RV:               rvOfCP(cp),
+		UserCPRV:         rvOfCP(userDefinedCP),
+		terminatedSeenAt: prev.terminatedSeenAt,
 	}
 	if userDefinedCP != nil {
 		// The user-authored CP is authoritative and complete by definition (no

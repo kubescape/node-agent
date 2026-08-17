@@ -247,53 +247,6 @@ func TestReconcilerKeepsRunningContainer(t *testing.T) {
 	assert.Equal(t, 0, metrics.eviction("pod_stopped"), "should not evict a running entry")
 }
 
-// TestIsContainerRunning_PreRunningInitWithEmptyContainerID — T2c from the
-// plan risks. Pre-running init container publishes an empty ContainerID, so
-// we fall back to (Name, PodUID) matching.
-func TestIsContainerRunning_PreRunningInitWithEmptyContainerID(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-uid-123")},
-		Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{
-			Name:        "init-1",
-			ContainerID: "", // not published yet
-			State:       corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
-		}}},
-	}
-	entry := &CachedContainerProfile{ContainerName: "init-1", PodUID: "pod-uid-123"}
-	assert.True(t, isContainerRunning(pod, entry, "init-cid"),
-		"pre-running init container with empty ContainerID must match on (Name, PodUID)")
-}
-
-// TestIsContainerRunning_ContainerIDMatchTakesPriority — the containerd:// etc
-// prefix is stripped before comparing against the cache key.
-func TestIsContainerRunning_ContainerIDMatchTakesPriority(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-uid-123")},
-		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
-			Name:        "nginx",
-			ContainerID: "docker://abc",
-			State:       corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
-		}}},
-	}
-	entry := &CachedContainerProfile{ContainerName: "nginx", PodUID: "pod-uid-123"}
-	assert.True(t, isContainerRunning(pod, entry, "abc"), "docker:// prefix should be stripped")
-	assert.False(t, isContainerRunning(pod, entry, "zzz"), "id mismatch should return false")
-}
-
-// TestIsContainerRunning_NotRunning — container exists but is Terminated.
-func TestIsContainerRunning_NotRunning(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-uid-123")},
-		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
-			Name:        "nginx",
-			ContainerID: "containerd://abc",
-			State:       corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
-		}}},
-	}
-	entry := &CachedContainerProfile{ContainerName: "nginx", PodUID: "pod-uid-123"}
-	assert.False(t, isContainerRunning(pod, entry, "abc"))
-}
-
 // TestReconcilerKeepsJustAttachedEphemeralContainer — node-agent#79 ephemeral
 // total-loss root cause. A just-attached ephemeral container is in the pod
 // SPEC but not yet in ephemeralContainerStatuses (kubelet publishes the status
