@@ -37,6 +37,24 @@ type ProfileProjectionConfig struct {
 	// StrictValidation rejects rules with profileDependency>0 but no profileDataRequired.
 	// Defaults to false (soft mode: log + metric only).
 	StrictValidation bool `mapstructure:"strictValidation"`
+	// ServerSideUserManagedMerge, when true, trusts the storage backend to merge
+	// user-managed (ug-) ApplicationProfile / NetworkNeighborhood into the
+	// consolidated ContainerProfile server-side (kubescape/storage#319 serves the
+	// already-merged CP on GET). node-agent then skips its redundant client-side
+	// ug- fetch + projection in the ContainerProfile cache.
+	//
+	// Default false preserves the client-side merge, so this flag must only be
+	// enabled once the storage floor that ships #319 is confirmed deployed:
+	// enabling it against pre-#319 storage would silently drop ug- exception
+	// enforcement (the merged CP isn't served, and node-agent no longer overlays
+	// ug- itself).
+	//
+	// Load-bearing assumption: storage#319 merges on GET only, NOT on List/Watch.
+	// node-agent's CP reads are GET-driven (storage.ProfileClient.GetContainerProfile),
+	// so the merged view is always observed. If CP reads ever move to a list-watch
+	// informer, the server-side merge is bypassed and ug- overlays disappear —
+	// re-evaluate this flag before doing so.
+	ServerSideUserManagedMerge bool `mapstructure:"serverSideUserManagedMergeEnabled"`
 }
 
 type EventDedupConfig struct {

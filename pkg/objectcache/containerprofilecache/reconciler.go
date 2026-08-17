@@ -330,9 +330,15 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			helpers.String("status", cp.Annotations[helpersv1.StatusMetadataKey]))
 		return
 	}
+	// User-managed (ug-) re-fetch. Skipped when ServerSideUserManagedMerge is
+	// enabled: the CP re-fetched above already carries the merged ug- overlay
+	// (storage#319), so leaving these nil makes ladder pass #1 in
+	// rebuildEntryFromSources a no-op and the RV fast-skip below treats them as
+	// "still absent" (rvsMatchAP(nil, "") == true) since UserManagedAPRV/NNRV are
+	// never set under this flag.
 	var userManagedAP *v1beta1.ApplicationProfile
 	var userManagedNN *v1beta1.NetworkNeighborhood
-	if e.WorkloadName != "" {
+	if !c.cfg.ProfileProjection.ServerSideUserManagedMerge && e.WorkloadName != "" {
 		ugAPName := helpersv1.UserApplicationProfilePrefix + e.WorkloadName
 		var userManagedAPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
