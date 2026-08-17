@@ -9,6 +9,6 @@ spec:
     - ruleName: "Unexpected process launched"
       ruleTags:
       - "exec"
-      - "whitelisted"
+      - "allowlisted"
     - ruleID: "R0005"
     

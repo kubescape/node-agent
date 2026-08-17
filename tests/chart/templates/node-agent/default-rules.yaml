@@ -92,7 +92,7 @@ spec:
       - name: "Syscalls Anomalies in container"
         enabled: true
         id: "R0003"
-        description: "Detects unexpected system calls that are not whitelisted by application profile"
+        description: "Detects unexpected system calls that are not allowlisted by application profile"
         expressions:
           message: "'Unexpected system call detected: ' + event.syscallName + ' with PID ' + string(event.pid)"
           uniqueId: "event.syscallName"
@@ -116,7 +116,7 @@ spec:
       - name: "Linux Capabilities Anomalies in container"
         enabled: true
         id: "R0004"
-        description: "Detects unexpected capabilities that are not whitelisted by application profile"
+        description: "Detects unexpected capabilities that are not allowlisted by application profile"
         expressions:
           message: "'Unexpected capability used: ' + event.capName + ' in syscall ' + event.syscallName + ' with PID ' + string(event.pid)"
           uniqueId: "event.comm + '_' + event.capName"
@@ -140,7 +140,7 @@ spec:
       - name: "DNS Anomalies in container"
         enabled: true
         id: "R0005"
-        description: "Detecting unexpected domain requests that are not whitelisted by application profile."
+        description: "Detecting unexpected domain requests that are not allowlisted by application profile."
         expressions:
           message: "'Unexpected domain communication: ' + event.name + ' from: ' + event.containerName"
           uniqueId: "event.comm + '_' + event.name"
@@ -307,7 +307,7 @@ spec:
       - name: "Unexpected Egress Network Traffic"
         enabled: true
         id: "R0011"
-        description: "Detecting unexpected egress network traffic that is not whitelisted by application profile."
+        description: "Detecting unexpected egress network traffic that is not allowlisted by application profile."
         expressions:
           message: "'Unexpected egress network communication to: ' + event.dstAddr + ':' + string(event.dstPort) + ' using ' + event.proto + ' from: ' + event.containerName"
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
@@ -325,7 +325,7 @@ spec:
         tags:
           - "context:kubernetes"
           - "context:container"
-          - "whitelisted"
+          - "allowlisted"
           - "network"
           - "anomaly"
           - "networkprofile"

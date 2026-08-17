@@ -8,5 +8,5 @@ spec:
   rules:
     - ruleTags:
       - "exec"
-      - "whitelistedmnmnn"
+      - "allowlistedmnmnn"
     

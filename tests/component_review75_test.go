@@ -125,7 +125,7 @@ func Test_13_NaturalLearningLifecycle(t *testing.T) {
 		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
 		time.Sleep(8 * time.Second)
 	}
-	require.NoError(t, wl.WaitForContainerProfileCompletionWithBlacklist(30, staleNames), "re-learned profile completion")
+	require.NoError(t, wl.WaitForContainerProfileCompletionWithDenylist(30, staleNames), "re-learned profile completion")
 	time.Sleep(20 * time.Second)
 
 	before := countRuleAlerts(t, ns.Name, "R0001", "app", "id")

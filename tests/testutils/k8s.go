@@ -376,7 +376,7 @@ func (w *TestWorkload) WaitForContainerProfileCompletion(maxRetries uint64) erro
 	return w.WaitForContainerProfile(maxRetries, "completed")
 }
 
-func (w *TestWorkload) WaitForContainerProfileCompletionWithBlacklist(maxRetries uint64, blacklist []string) error {
+func (w *TestWorkload) WaitForContainerProfileCompletionWithDenylist(maxRetries uint64, denylist []string) error {
 	return backoff.RetryNotify(func() error {
 		cps, err := w.matchingContainerProfiles()
 		if err != nil {
@@ -385,15 +385,25 @@ func (w *TestWorkload) WaitForContainerProfileCompletionWithBlacklist(maxRetries
 		if len(cps) == 0 {
 			return fmt.Errorf("no container profiles found")
 		}
+		fresh := 0
 		for i := range cps {
+			denied := false
+			for _, item := range denylist {
+				if cps[i].Name == item {
+					denied = true
+					break
+				}
+			}
+			if denied {
+				continue
+			}
 			if cps[i].Annotations["kubescape.io/status"] != "completed" {
 				return fmt.Errorf("container profile %s is not in status 'completed'", cps[i].Name)
 			}
-			for _, item := range blacklist {
-				if cps[i].Name == item {
-					return fmt.Errorf("container profile %s is blacklisted", item)
-				}
-			}
+			fresh++
+		}
+		if fresh == 0 {
+			return fmt.Errorf("no non-denied completed container profile found yet")
 		}
 		return nil
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {

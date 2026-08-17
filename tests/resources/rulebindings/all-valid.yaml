@@ -10,5 +10,5 @@ spec:
     - ruleID: "R0005"
     - ruleTags:
       - "exec"
-      - "whitelisted"
+      - "allowlisted"
     

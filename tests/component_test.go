@@ -1007,7 +1007,7 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 // ENFORCEMENT against an AUTHORED (user-defined) ContainerProfile, deterministically.
 //
 // SEMANTIC NOTE (flagged for review): this is NOT the old natural-learning /
-// daemonset-restart / re-learn / blacklist dance. It authors the profile
+// daemonset-restart / re-learn / denylist dance. It authors the profile
 // directly and then UPDATES it in place, so what it proves is profile
 // ENFORCEMENT of an authored partial -> full profile, not that learning
 // eventually captures the process. The core contract is preserved: a process
@@ -1921,7 +1921,7 @@ func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 				},
 				Opens: []v1beta1.OpenCalls{
 					{Path: profilePath, Flags: []string{"O_RDONLY"}},
-					// Dynamic linker fires this on every exec — keep it whitelisted.
+					// Dynamic linker fires this on every exec — keep it allowlisted.
 					{Path: "/etc/ld.so.cache", Flags: []string{"O_RDONLY", "O_CLOEXEC"}},
 				},
 			},
@@ -2720,7 +2720,7 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 	//
 	//      This documents a detection gap: pure DNS MITM (without
 	//      subsequent TCP to the spoofed IP) is invisible to both
-	//      R0005 and R0011 when the domain is already whitelisted.
+	//      R0005 and R0011 when the domain is already allowlisted.
 	//
 	//      NOTE: this subtest MUST run last — it modifies the
 	//      cluster-wide CoreDNS configmap.
