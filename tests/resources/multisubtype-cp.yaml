@@ -1,0 +1,30 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: multisubtype
+spec:
+  containers:
+  - name: app
+    execs:
+    - path: /usr/bin/cat
+      args:
+      - /usr/bin/cat
+    - path: /bin/cat
+      args:
+      - /bin/cat
+    - path: /usr/bin/sleep
+      args:
+      - /usr/bin/sleep
+      - infinity
+  initContainers:
+  - name: setup
+    execs:
+    - path: /bin/sh
+      args:
+      - /bin/sh
+      - -c
+      - sleep 100; /usr/bin/id
+    - path: /usr/bin/sleep
+    - path: /usr/bin/id
+      args:
+      - /usr/bin/id

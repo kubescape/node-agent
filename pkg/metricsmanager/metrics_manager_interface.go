@@ -46,6 +46,8 @@ type MetricsManager interface {
 	ObserveProjectionApplyDuration(d time.Duration)
 	IncProjectionReconcileTriggered(trigger string)
 	IncHelperCall(helper string)
+	IncUserDefinedProfileUnresolved(namespace string) // user-defined-profile label set but no ContainerProfile resolved (silent-upgrade visibility)
+	IncUserDefinedProfileAdopted(namespace string)    // an authored ContainerProfile was adopted as the authoritative base for a container
 	SetProjectionUndeclaredRulesDetail(ruleIDs []string)
 
 	// Memory-savings metrics — detailed (gated by profileProjection.detailedMetricsEnabled).

@@ -13,22 +13,17 @@
 #               the `*` sentinel.
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-06-any-as-cidr
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-06
-  containers:
-  - name: client
-    egress:
-    - identifier: any-via-cidrs
-      type: external
-      ipAddresses:
-        - "0.0.0.0/0"
-        - "::/0"
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
+  egress:
+  - identifier: any-via-cidrs
+    type: external
+    ipAddresses:
+      - "0.0.0.0/0"
+      - "::/0"
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}

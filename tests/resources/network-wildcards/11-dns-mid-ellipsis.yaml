@@ -21,21 +21,16 @@
 #   It is NOT three ASCII periods (`...`).
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-11-dns-mid-ellipsis
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-11
-  containers:
-  - name: dns-client
-    egress:
-    - identifier: cluster-svc-resolution
-      type: internal
-      dnsNames:
-        - "svc.⋯.cluster.local."
-      ports:
-        - {name: UDP-53, protocol: UDP, port: 53}
+  egress:
+  - identifier: cluster-svc-resolution
+    type: internal
+    dnsNames:
+      - "svc.⋯.cluster.local."
+    ports:
+      - {name: UDP-53, protocol: UDP, port: 53}

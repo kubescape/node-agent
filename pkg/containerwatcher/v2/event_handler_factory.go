@@ -3,6 +3,7 @@ package containerwatcher
 import (
 	"context"
 	"runtime/pprof"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"go.opentelemetry.io/otel/attribute"
@@ -74,6 +75,9 @@ type EventHandlerFactory struct {
 	metrics                  metricsmanager.MetricsManager
 	dedupSkipSet             map[Manager]struct{} // Managers to skip when event is duplicate
 	ebpfDropCounter          metric.Int64Counter
+	// removalGracePeriod overrides removedContainerGracePeriod when > 0.
+	// Settable in tests; production uses the default.
+	removalGracePeriod time.Duration
 }
 
 // NewEventHandlerFactory creates a new event handler factory
@@ -440,6 +444,44 @@ func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(enrichedEvent *ev
 				}
 			}
 		}
+	}
+}
+
+// removedContainerGracePeriod is how long container info remains resolvable
+// for event processing after the container's removal. Events emitted during
+// the container's life are still in flight through the ordered event queue
+// (50ms collection tick + batching) and the worker pool when the remove
+// callback runs; without a grace window the terminal events of a short-lived
+// container (init containers with a terminal exec, ephemeral debug
+// containers) are silently dropped in ProcessEvent (issue #79).
+const removedContainerGracePeriod = 10 * time.Second
+
+// ContainerCallback receives container lifecycle events so the factory can
+// resolve container info for in-flight events across the container's end of
+// life. On add, the lookup cache is warmed so even a container's first-ever
+// event resolves after removal. On remove, eviction of the cache entry is
+// deferred by removedContainerGracePeriod instead of relying on the live
+// collection. Behavior is pinned by event_handler_factory_removal_test.go.
+func (ehf *EventHandlerFactory) ContainerCallback(notif containercollection.PubSubEvent) {
+	if notif.Container == nil || notif.Container.Runtime.ContainerID == "" {
+		return
+	}
+	containerID := notif.Container.Runtime.ContainerID
+	switch notif.Type {
+	case containercollection.EventTypeAddContainer:
+		ehf.containerCache.Set(containerID, notif.Container)
+	case containercollection.EventTypeRemoveContainer:
+		// Keep the entry resolvable for the grace window, then evict. This
+		// also fixes the previous behavior of never evicting lazily-cached
+		// entries at all.
+		ehf.containerCache.Set(containerID, notif.Container)
+		grace := ehf.removalGracePeriod
+		if grace <= 0 {
+			grace = removedContainerGracePeriod
+		}
+		time.AfterFunc(grace, func() {
+			ehf.containerCache.Delete(containerID)
+		})
 	}
 }
 

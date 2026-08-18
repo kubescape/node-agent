@@ -18,22 +18,17 @@
 # normalisation runs on profile-side entries, not just observed names.
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-13-dns-trailing-dot
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-13
-  containers:
-  - name: client
-    egress:
-    - identifier: mixed-trailing-dot-forms
-      type: external
-      dnsNames:
-        - "api.stripe.com."     # canonical FQDN form
-        - "api.github.com"      # without trailing dot — equivalent
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
+  egress:
+  - identifier: mixed-trailing-dot-forms
+    type: external
+    dnsNames:
+      - "api.stripe.com."     # canonical FQDN form
+      - "api.stripe.com"      # same host, without trailing dot — must compare equal
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}

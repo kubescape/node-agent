@@ -86,6 +86,8 @@ func (m *MetricsMock) SetProjectionSpecAllField(_ string, _ bool)               
 func (m *MetricsMock) ObserveProjectionApplyDuration(_ time.Duration)                     {}
 func (m *MetricsMock) IncProjectionReconcileTriggered(_ string)                           {}
 func (m *MetricsMock) IncHelperCall(_ string)                                             {}
+func (m *MetricsMock) IncUserDefinedProfileUnresolved(_ string)                           {}
+func (m *MetricsMock) IncUserDefinedProfileAdopted(_ string)                              {}
 func (m *MetricsMock) SetProjectionUndeclaredRulesDetail(_ []string)                      {}
 func (m *MetricsMock) ObserveProfileRawSize(_ float64)                                    {}
 func (m *MetricsMock) ObserveProfileProjectedSize(_ float64)                              {}

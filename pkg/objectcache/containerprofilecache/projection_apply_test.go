@@ -417,6 +417,7 @@ func TestApply_ExactFilter_NoMatchYieldsNilValues(t *testing.T) {
 //   - Path with a populated Args slice — projected as a CLONED slice
 //   - Path with nil Args — projected as an empty (non-nil) slice
 //   - Two ExecCalls with the same Path — last write wins
+//
 // The cloned-slice invariant is checked by mutating the projected slice
 // and asserting the source is unchanged.
 func TestApply_ExecsByPath_PopulatesFromSpec(t *testing.T) {

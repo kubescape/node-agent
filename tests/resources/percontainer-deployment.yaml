@@ -1,0 +1,28 @@
+# 2-container pod bound via one pod label kubescape.io/user-defined-profile=percontainer.
+# ContainerProfiles are per-container: node-agent resolves each container to
+# <label>-<containerName> (percontainer-app / percontainer-sidecar), falling back to the bare
+# <label> for single-container pods.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: percontainer-deployment
+  labels:
+    app: percontainer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: percontainer
+  template:
+    metadata:
+      labels:
+        app: percontainer
+        kubescape.io/user-defined-profile: percontainer
+    spec:
+      containers:
+      - name: app
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]
+      - name: sidecar
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]

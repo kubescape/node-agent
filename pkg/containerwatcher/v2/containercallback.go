@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"fmt"
+	corev1 "k8s.io/api/core/v1"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -122,13 +123,30 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workload: %w", err)
 	}
-	// make sure the pod is not pending (otherwise ImageID is empty in containerStatuses)
+	// The pod phase must not gate init containers: a pod executing its init
+	// containers is Pending BY DEFINITION, so waiting for phase != Pending
+	// means shared data (and with it profile adoption and rule enforcement)
+	// can only arrive after the init phase is over - an init container could
+	// never be enforced during its own execution. The original intent of the
+	// phase check was "ImageID is empty in containerStatuses while pending";
+	// check that directly for THIS container across all three status groups
+	// instead of gating on the phase.
 	podStatus, err := wl.GetPodStatus()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod status: %w", err)
 	}
 	if podStatus.Phase == "Pending" {
-		return nil, fmt.Errorf("pod is still pending")
+		imageIDReady := false
+		for _, sts := range [][]corev1.ContainerStatus{podStatus.ContainerStatuses, podStatus.InitContainerStatuses, podStatus.EphemeralContainerStatuses} {
+			for i := range sts {
+				if sts[i].Name == container.K8s.ContainerName && sts[i].ImageID != "" {
+					imageIDReady = true
+				}
+			}
+		}
+		if !imageIDReady {
+			return nil, fmt.Errorf("pod is still pending and container %s has no ImageID yet", container.K8s.ContainerName)
+		}
 	}
 	pod := wl.(*workloadinterface.Workload)
 	// fill container type, index and names

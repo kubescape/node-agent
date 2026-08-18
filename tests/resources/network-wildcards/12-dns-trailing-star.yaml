@@ -26,21 +26,16 @@
 # variable hierarchy is on the LEFT of a fixed registry suffix.
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-12-dns-trailing-star
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-12
-  containers:
-  - name: client
-    egress:
-    - identifier: mycorp-anything-deeper
-      type: external
-      dnsNames:
-        - "mycorp.com.*"
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
+  egress:
+  - identifier: mycorp-anything-deeper
+    type: external
+    dnsNames:
+      - "mycorp.com.*"
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}
