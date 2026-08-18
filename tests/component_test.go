@@ -1470,9 +1470,6 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	const ruleName = "Files Access Anomalies in container"
 	const profileName = "nginx-regex-profile"
 
-	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
-
 	// --- result tracking for end-of-test summary ---
 	type subtestResult struct {
 		name        string
@@ -1627,10 +1624,6 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			checkOpens(profile.Name, profile.Labels["kubescape.io/workload-container-name"], profile.Spec.Opens)
 		}
 
-		// Distro-wide scan: the scrambled paths originally surfaced in real distro
-		// workloads (redis/valkey mounted-etc, health-check scripts, service-account
-		// tokens), so scan EVERY learned ContainerProfile across all namespaces, not
-		// only this test's workload. Best-effort: a failed cluster-wide list is not fatal.
 		k8sClient := k8sinterface.NewKubernetesApi()
 		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 		// runc-heavy leg: the EXACT redis manifest the distro demo deploys
