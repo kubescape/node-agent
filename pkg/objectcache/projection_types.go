@@ -1,6 +1,9 @@
 package objectcache
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,6 +56,46 @@ type FieldSpec struct {
 	SuffixMatcher PathMatcher
 }
 
+// AddrPortGroup pairs one neighbor entry's addresses with its allowed ports.
+// Empty Ports means any port (port 0 or no ports declared = wildcard).
+type AddrPortGroup struct {
+	Addrs []string
+	Ports map[string]struct{}
+}
+
+func PortKey(protocol string, port int32) string {
+	return strings.ToUpper(protocol) + "-" + strconv.Itoa(int(port))
+}
+
+func ExtractAddrPorts(neighbors []v1beta1.NetworkNeighbor) []AddrPortGroup {
+	var groups []AddrPortGroup
+	for i := range neighbors {
+		n := &neighbors[i]
+		var addrs []string
+		if n.IPAddress != "" {
+			addrs = append(addrs, n.IPAddress)
+		}
+		addrs = append(addrs, n.IPAddresses...)
+		if len(addrs) == 0 {
+			continue
+		}
+		ports := make(map[string]struct{}, len(n.Ports))
+		wildcard := len(n.Ports) == 0
+		for _, p := range n.Ports {
+			if p.Port == nil || *p.Port == 0 {
+				wildcard = true
+				continue
+			}
+			ports[PortKey(string(p.Protocol), *p.Port)] = struct{}{}
+		}
+		if wildcard {
+			ports = nil
+		}
+		groups = append(groups, AddrPortGroup{Addrs: addrs, Ports: ports})
+	}
+	return groups
+}
+
 // ProjectedContainerProfile is the cache-resident compact form. Pure node-agent
 // internal type; never serialized. Replaces *v1beta1.ContainerProfile in the cache.
 type ProjectedContainerProfile struct {
@@ -78,6 +121,10 @@ type ProjectedContainerProfile struct {
 	// are small and only populated when the profile actually declares selectors.
 	IngressPeers []PeerSelector
 	EgressPeers  []PeerSelector
+
+	// IngressAddrPorts / EgressAddrPorts group each neighbor's addresses with its ports for was_address_port_protocol_in_*.
+	IngressAddrPorts []AddrPortGroup
+	EgressAddrPorts  []AddrPortGroup
 
 	// ExecsByPath carries the per-Path Args slices from cp.Spec.Execs so
 	// downstream consumers (e.g. dynamicpathdetector.CompareExecArgs used

@@ -62,6 +62,29 @@ func matchIPField(field *objectcache.ProjectedField, observed string) bool {
 	return networkmatch.MatchIP(entries, observed)
 }
 
+// matchAddrPort reports whether observed (address, protocol, port) falls within
+// any single neighbor entry: its addresses match AND the entry allows the port
+// (empty Ports = any port). Address-only entries thus stay wildcard on ports.
+func matchAddrPort(groups []objectcache.AddrPortGroup, address, protocol string, port int32) bool {
+	if address == "" {
+		return false
+	}
+	key := objectcache.PortKey(protocol, port)
+	for i := range groups {
+		g := &groups[i]
+		if !networkmatch.MatchIP(g.Addrs, address) {
+			continue
+		}
+		if len(g.Ports) == 0 {
+			return true
+		}
+		if _, ok := g.Ports[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func matchDNSField(field *objectcache.ProjectedField, observed string) bool {
 	if observed == "" || field == nil {
 		return false
@@ -174,9 +197,6 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInEgress(containe
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(address)
 	}
-	// port/protocol projection (AddressPortsByAddr) is out of scope for the
-	// projection-v1 layer upstream landed; matchers degrade to address-only.
-	// Wildcards remain enforced via matchIPField.
 	portInt, ok := port.Value().(int64)
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(port)
@@ -184,14 +204,15 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInEgress(containe
 	if portInt < 0 || portInt > 65535 {
 		return types.Bool(false)
 	}
-	if _, ok := protocol.Value().(string); !ok {
+	protocolStr, ok := protocol.Value().(string)
+	if !ok {
 		return types.MaybeNoSuchOverloadErr(protocol)
 	}
 	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
-	return types.Bool(matchIPField(&cp.EgressAddresses, addressStr))
+	return types.Bool(matchAddrPort(cp.EgressAddrPorts, addressStr, protocolStr, int32(portInt)))
 }
 
 func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(containerID, address, port, protocol ref.Val) ref.Val {
@@ -213,14 +234,15 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(contain
 	if portInt < 0 || portInt > 65535 {
 		return types.Bool(false)
 	}
-	if _, ok := protocol.Value().(string); !ok {
+	protocolStr, ok := protocol.Value().(string)
+	if !ok {
 		return types.MaybeNoSuchOverloadErr(protocol)
 	}
 	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
-	return types.Bool(matchIPField(&cp.IngressAddresses, addressStr))
+	return types.Bool(matchAddrPort(cp.IngressAddrPorts, addressStr, protocolStr, int32(portInt)))
 }
 
 // namespaceSelectorMatches matches a namespaceSelector against the peer's
