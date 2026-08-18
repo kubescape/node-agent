@@ -313,7 +313,7 @@ spec:
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
           ruleExpression:
             - eventType: "network"
-              expression: "event.pktType == 'OUTGOING' && !net.is_private_ip(event.dstAddr) && !cp.was_address_in_egress(event.containerId, event.dstAddr)"
+              expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
         profileDependency: 0
         profileDataRequired:
           egressAddresses: all
