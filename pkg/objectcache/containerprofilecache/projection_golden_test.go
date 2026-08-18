@@ -65,6 +65,8 @@ type projectionGolden struct {
 	EgressAddresses  objectcache.ProjectedField    `json:"egressAddresses"`
 	IngressDomains   objectcache.ProjectedField    `json:"ingressDomains"`
 	IngressAddresses objectcache.ProjectedField    `json:"ingressAddresses"`
+	IngressPeers     []objectcache.PeerSelector    `json:"ingressPeers"`
+	EgressPeers      []objectcache.PeerSelector    `json:"egressPeers"`
 	ExecsByPath      map[string][][]string         `json:"execsByPath"`
 	PolicyByRuleId   map[string]v1beta1.RulePolicy `json:"policyByRuleId"`
 	CallStacks       []callStackSummary            `json:"callStacks"`
@@ -93,6 +95,8 @@ func toGolden(pcp *objectcache.ProjectedContainerProfile, tree *callstackcache.C
 		EgressAddresses:  pcp.EgressAddresses,
 		IngressDomains:   pcp.IngressDomains,
 		IngressAddresses: pcp.IngressAddresses,
+		IngressPeers:     pcp.IngressPeers,
+		EgressPeers:      pcp.EgressPeers,
 		ExecsByPath:      pcp.ExecsByPath,
 		PolicyByRuleId:   pcp.PolicyByRuleId,
 	}
@@ -236,9 +240,12 @@ func networkProfile() *v1beta1.ContainerProfile {
 			Ingress: []v1beta1.NetworkNeighbor{
 				{Identifier: "in-a", DNS: "old.internal", DNSNames: []string{"a.internal", "b.internal"}, IPAddresses: []string{"192.168.1.10", "192.168.0.0/16"}},
 				{Identifier: "in-b", IPAddresses: []string{wild}},
+				{Identifier: "in-c", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "redis-client"}}},
+				{Identifier: "in-d", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "probe"}}, NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "monitoring"}}},
 			},
 			Egress: []v1beta1.NetworkNeighbor{
 				{Identifier: "eg-a", DNSNames: []string{"c.example.com"}, IPAddress: "203.0.113.7", IPAddresses: []string{"203.0.113.0/24", wild}},
+				{Identifier: "eg-b", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "upstream"}}},
 			},
 		},
 	}

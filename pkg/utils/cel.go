@@ -202,6 +202,35 @@ var CelFields = map[string]*celtypes.FieldType{
 			return celtypes.Int(x.Raw.GetDstPort()), nil
 		}),
 	},
+	// dstNamespace / dstPodLabels carry the peer identity that IG's
+	// kubeipresolver resolves cluster-wide (independent of node-agent's
+	// node-local pod cache), so selector rules can match a peer on any node.
+	"dstNamespace": {
+		Type:  celtypes.StringType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.String(x.Raw.GetDstEndpoint().Namespace), nil
+		}),
+	},
+	"dstPodLabels": {
+		Type:  celtypes.MapType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			pl := x.Raw.GetDstEndpoint().PodLabels
+			if pl == nil {
+				pl = map[string]string{}
+			}
+			return pl, nil
+		}),
+	},
 	"exepath": {
 		Type:  celtypes.StringType,
 		IsSet: isSet,
