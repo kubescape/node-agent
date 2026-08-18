@@ -14,6 +14,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Login to Quay.io
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         uses: docker/login-action@v3
         with:
           registry: quay.io/kubescape
@@ -28,16 +29,39 @@ jobs:
           echo "Installing IG version: ${IG_VERSION}"
           curl -sL https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-${IG_ARCH}-${IG_VERSION}.tar.gz | sudo tar -C /usr/local/bin -xzf - ig
           sudo chmod +x /usr/local/bin/ig
-      - name: Build the Image and Push to Quay.io
+      - name: Build the image
         id: build-and-push-image
         run: |
           COMMIT_HASH=$(git rev-parse --short HEAD)
           export IMAGE_TAG=test-${COMMIT_HASH}
           export IMAGE_REPO=quay.io/kubescape/node-agent
+
           echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
-          export IMAGE_NAME=quay.io/kubescape/node-agent:${IMAGE_TAG}
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          make docker-build TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO} && make docker-push TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO}
+
+          make docker-build TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO}
+
+      - name: Push image to Quay.io
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          make docker-push \
+            TAG=${{ steps.build-and-push-image.outputs.image_tag }} \
+            IMAGE=${{ steps.build-and-push-image.outputs.image_repo }}
+
+      - name: Save image for fork PR
+        if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          docker save \
+            ${{ steps.build-and-push-image.outputs.image_repo }}:${{ steps.build-and-push-image.outputs.image_tag }} \
+            -o node-agent-image.tar
+
+      - name: Upload image artifact for fork PR
+        if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-agent-image
+          path: node-agent-image.tar
+          retention-days: 1
     outputs:
       image_tag: ${{ steps.build-and-push-image.outputs.image_tag }}
       image_repo: ${{ steps.build-and-push-image.outputs.image_repo }}
@@ -56,7 +80,7 @@ jobs:
           # Test_05_MemoryLeak_10K_Alerts,
           Test_06_KillProcessInTheMiddle,
           Test_07_RuleBindingApplyTest,
-          Test_08_ApplicationProfilePatching,
+          Test_08_ContainerProfilePatching,
           Test_10_MalwareDetectionTest,
           Test_11_EndpointTest,
           Test_12_MergingProfilesTest,
@@ -74,11 +98,24 @@ jobs:
           Test_24_ProcessTreeDepthTest,
           Test_27_ApplicationProfileOpens,
           Test_32_UnexpectedProcessArguments,
-          Test_34_NetworkNeighborsCIDRCollapse
+          Test_34_NetworkNeighborsCIDRCollapse,
+          Test_36_MultiContainerPerContainerBinding,
+          Test_48_MultiSubtypeGroupedProfileDocument
         ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Download fork PR image
+        if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        uses: actions/download-artifact@v4
+        with:
+          name: node-agent-image
+
+      - name: Load fork PR image
+        if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          docker load -i node-agent-image.tar
 
       - name: Set up Kind
         run: |
@@ -88,11 +125,19 @@ jobs:
           curl -LO "https://dl.k8s.io/release/v1.35.0/bin/linux/amd64/kubectl"
           chmod +x ./kubectl
           sudo mv ./kubectl /usr/local/bin/kubectl
+
+      - name: Load fork PR image into Kind
+        if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          ./kind load docker-image \
+            ${{ needs.build-and-push-image.outputs.image_repo }}:${{ needs.build-and-push-image.outputs.image_tag }}
+
       - name: Install Helm and Kubectl
         run: |
           curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
           chmod 700 get_helm.sh
           sudo ./get_helm.sh
+
       - name: Install Prometheus and Node Exporter
         run: |
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts

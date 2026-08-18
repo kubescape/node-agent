@@ -169,7 +169,7 @@ func Test_25_AlertBulkingBasic(t *testing.T) {
 	time.Sleep(10 * time.Second)
 
 	// Wait for application profile to complete
-	err = wl.WaitForApplicationProfileCompletion(80)
+	err = wl.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	time.Sleep(30 * time.Second)

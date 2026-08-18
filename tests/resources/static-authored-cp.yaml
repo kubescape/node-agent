@@ -1,0 +1,10 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: static-authored
+spec:
+  execs:
+  - path: /usr/bin/sleep
+    args:
+    - /usr/bin/sleep
+    - infinity

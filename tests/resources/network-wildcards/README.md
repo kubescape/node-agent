@@ -1,11 +1,11 @@
 # Network-wildcards test fixtures
 
-Living documentation for the `feat/network-wildcards` work.
+Living documentation for the network-wildcard surface.
 
-Each `*.yaml` here is a complete `NetworkNeighborhood` document that exercises
+Each `*.yaml` here is a complete `ContainerProfile` document that exercises
 ONE edge case in the v0.0.2 wildcard surface. The fixture-walk test
 (`TestFixturesParse` + `TestFixturesMatchExpectedBehaviour` in
-`pkg/rulemanager/cel/libraries/networkneighborhood/fixtures_test.go`,
+`pkg/rulemanager/cel/libraries/containerprofilenetwork/fixtures_test.go`,
 plus the lab-side `Test_34_NetworkWildcardSurface`) consumes them
 directly; users learning the syntax can copy-paste them as authoritative
 examples.
@@ -42,6 +42,7 @@ won't accidentally let it through.
 
 | # | File | Edge case |
 |---|------|-----------|
+| 00 | `00-fusioncore-homoglyph-attack.yaml` | Unicode-homoglyph DNS: look-alike labels MUST NOT match the ASCII original |
 | 01 | `01-literal-ipv4.yaml` | Single IPv4 literal in `ipAddresses[]` |
 | 02 | `02-literal-ipv6.yaml` | IPv6 literal — verifier MUST canonicalise |
 | 03 | `03-cidr-ipv4.yaml` | IPv4 CIDR — `10.0.0.0/8` covers a /8 range |
@@ -59,15 +60,9 @@ won't accidentally let it through.
 | 15 | `15-egress-and-ingress.yaml` | Both directions populated on same container |
 | 16 | `16-egress-none.yaml` | NONE (`egress: []`) — declared zero-egress |
 | 17 | `17-realistic-stripe-api.yaml` | Realistic external API call (Stripe) |
-| 18 | `18-cluster-dns-via-mid-ellipsis.yaml` | The user's `svc.⋯.kubernetes.io.` use case |
+| 18 | `18-cluster-dns-via-mid-ellipsis.yaml` | The `svc.⋯.kubernetes.io.` use case |
 | 19 | `19-port-protocol-with-cidr.yaml` | Ports + protocol + CIDR composed |
-| 20 | `20-multi-container-mixed-wildcards.yaml` | Pod with multiple containers, each with different rules — combined real-world example |
-
-## Expected behaviour matrix
-
-The accompanying `expectations.json` (generated alongside) lists, per fixture,
-the `(observedIP, observedDNS) → expected match result` triples that
-`Test_34_NetworkWildcardSurface` walks.
+| 20 | `20-multi-container-mixed-wildcards.yaml` | Pod with multiple containers, each with different rules — combined real-world example (one CP document per container) |
 
 ## Migration note
 

@@ -48,6 +48,12 @@ type NetworkStream struct {
 	eventsNotificationChannel chan armotypes.NetworkStream
 	dnsSupport                bool
 	processTreeManager        processtree.ProcessTreeManager
+
+	// unannouncedEntities holds the entity IDs the event path created because
+	// ContainerCallback never announced the container. Nothing will ever remove
+	// them — the callback that would deliver the removal is the one that is
+	// missing — so snapshotAndClear prunes them once they go quiet.
+	unannouncedEntities map[string]struct{}
 }
 
 func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, nodeName string, eventsNotificationChannel chan armotypes.NetworkStream, dnsSupport bool, processTreeManager processtree.ProcessTreeManager) (*NetworkStream, error) {
@@ -85,16 +91,23 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		eventsNotificationChannel: eventsNotificationChannel,
 		dnsSupport:                dnsSupport,
 		processTreeManager:        processTreeManager,
+		unannouncedEntities:       make(map[string]struct{}),
 	}
 
 	// Create the host entity
-	ns.networkEventsStorage.Entities[nodeName] = armotypes.NetworkStreamEntity{
+	ns.networkEventsStorage.Entities[nodeName] = newHostEntity()
+
+	return &ns, nil
+}
+
+// newHostEntity builds the entity that carries the node's own traffic — everything
+// not attributable to a container.
+func newHostEntity() armotypes.NetworkStreamEntity {
+	return armotypes.NetworkStreamEntity{
 		Kind:     armotypes.NetworkStreamEntityKindHost,
 		Inbound:  make(map[string]armotypes.NetworkStreamEvent),
 		Outbound: make(map[string]armotypes.NetworkStreamEvent),
 	}
-
-	return &ns, nil
 }
 
 func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent) {
@@ -106,7 +119,7 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 		if utils.IsHostContainer(notif.Container) {
 			containerID = ns.nodeName
 		}
-		ns.networkEventsStorage.Entities[containerID] = armotypes.NetworkStreamEntity{
+		entity := armotypes.NetworkStreamEntity{
 			Kind: armotypes.NetworkStreamEntityKindContainer,
 			NetworkStreamEntityContainer: armotypes.NetworkStreamEntityContainer{
 				ContainerName: notif.Container.Runtime.ContainerName,
@@ -117,6 +130,20 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 			Inbound:  make(map[string]armotypes.NetworkStreamEvent),
 			Outbound: make(map[string]armotypes.NetworkStreamEvent),
 		}
+		// The watcher submits this callback to a worker pool, so the event path may
+		// already have recorded traffic against this container — a new container's
+		// first egress lands in exactly that window. Announcing it supplies the
+		// identity; it must not throw the traffic away.
+		// Not the node entity: that one exists from construction and is remade by
+		// every flush, so it has no unannounced window to rescue, and leaving it
+		// alone keeps this callback's node-entity behaviour exactly as it was.
+		if existing, ok := ns.networkEventsStorage.Entities[containerID]; ok && containerID != ns.nodeName {
+			entity.Inbound = existing.Inbound
+			entity.Outbound = existing.Outbound
+		}
+		ns.networkEventsStorage.Entities[containerID] = entity
+		// The container is announced now, so silence no longer means it is gone.
+		delete(ns.unannouncedEntities, containerID)
 		ns.eventsStorageMutex.Unlock()
 		if ns.k8sObjectCache != nil && !utils.IsHostContainer(notif.Container) {
 			go ns.enrichWorkloadDetails(notif.Container.Runtime.ContainerID)
@@ -128,6 +155,7 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 			containerID = ns.nodeName
 		}
 		delete(ns.networkEventsStorage.Entities, containerID)
+		delete(ns.unannouncedEntities, containerID)
 		ns.eventsStorageMutex.Unlock()
 	}
 }
@@ -180,25 +208,7 @@ func (ns *NetworkStream) Start() {
 				logger.L().Info("NetworkStream - stopping")
 				return
 			case <-ticker.C:
-				// Snapshot and clear only; both sends and the tree copies stay outside
-				// the lock. This path has a history of mutex stalls.
-				ns.eventsStorageMutex.Lock()
-				snapshot := snapshotNetworkStream(&ns.networkEventsStorage)
-
-				// Clear the storage
-				for entityId := range ns.networkEventsStorage.Entities {
-					entity := ns.networkEventsStorage.Entities[entityId]
-					entity.Inbound = make(map[string]armotypes.NetworkStreamEvent)
-					entity.Outbound = make(map[string]armotypes.NetworkStreamEvent)
-					ns.networkEventsStorage.Entities[entityId] = entity
-				}
-				// Re-create the host entity
-				ns.networkEventsStorage.Entities[ns.nodeName] = armotypes.NetworkStreamEntity{
-					Kind:     armotypes.NetworkStreamEntityKindHost,
-					Inbound:  make(map[string]armotypes.NetworkStreamEvent),
-					Outbound: make(map[string]armotypes.NetworkStreamEvent),
-				}
-				ns.eventsStorageMutex.Unlock()
+				snapshot := ns.snapshotAndClear()
 
 				// Before the send: once the snapshot is on the channel, its maps belong
 				// to the consumer.
@@ -224,6 +234,41 @@ func (ns *NetworkStream) Start() {
 			}
 		}
 	}()
+}
+
+// snapshotAndClear takes the interval's events and resets the live storage under a
+// single lock. Snapshot and clear only; both sends and the tree copies stay outside
+// the lock. This path has a history of mutex stalls.
+func (ns *NetworkStream) snapshotAndClear() *armotypes.NetworkStream {
+	ns.eventsStorageMutex.Lock()
+	defer ns.eventsStorageMutex.Unlock()
+
+	// Pruned before the snapshot, so a dead container never reaches a payload at all.
+	// An entity the event path created has no container lifecycle behind it, so an
+	// interval without traffic is the only "it is gone" signal there is. Keeping it
+	// would put a dead container in every later payload — unbounded growth wherever
+	// containers churn. A container that is merely idle costs one re-creation on its
+	// next event.
+	for entityID := range ns.unannouncedEntities {
+		entity, ok := ns.networkEventsStorage.Entities[entityID]
+		if !ok || (len(entity.Inbound) == 0 && len(entity.Outbound) == 0) {
+			delete(ns.networkEventsStorage.Entities, entityID)
+			delete(ns.unannouncedEntities, entityID)
+		}
+	}
+
+	snapshot := snapshotNetworkStream(&ns.networkEventsStorage)
+
+	// Clear the storage
+	for entityID, entity := range ns.networkEventsStorage.Entities {
+		entity.Inbound = make(map[string]armotypes.NetworkStreamEvent)
+		entity.Outbound = make(map[string]armotypes.NetworkStreamEvent)
+		ns.networkEventsStorage.Entities[entityID] = entity
+	}
+	// Re-create the host entity
+	ns.networkEventsStorage.Entities[ns.nodeName] = newHostEntity()
+
+	return snapshot
 }
 
 func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
@@ -303,18 +348,8 @@ func (ns *NetworkStream) handleDnsEvent(event utils.DNSEvent, processTree *armot
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
 
-	entityId := event.GetContainerID()
-	// Normalize host container ID to nodeName
-	if entityId == armotypes.HostContainerID {
-		entityId = ns.nodeName
-	}
-	if entityId == "" || ns.k8sObjectCache == nil {
-		entityId = ns.nodeName
-	}
-
-	entity, ok := ns.networkEventsStorage.Entities[entityId]
+	entity, entityId, ok := ns.entityForEventLocked(event.GetContainerID())
 	if !ok {
-		logger.L().Error("NetworkStream - entity not found", helpers.String("entity ID", entityId))
 		return
 	}
 
@@ -365,18 +400,8 @@ func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTre
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
 
-	entityId := event.GetContainerID()
-	// Normalize host container ID to nodeName
-	if entityId == armotypes.HostContainerID {
-		entityId = ns.nodeName
-	}
-	if entityId == "" || ns.k8sObjectCache == nil {
-		entityId = ns.nodeName
-	}
-
-	entity, ok := ns.networkEventsStorage.Entities[entityId]
+	entity, entityId, ok := ns.entityForEventLocked(event.GetContainerID())
 	if !ok {
-		logger.L().Error("NetworkStream - entity not found", helpers.String("entity ID", entityId))
 		return
 	}
 
@@ -396,6 +421,67 @@ func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTre
 		entity.Inbound[endpointID] = networkEvent
 	}
 	ns.networkEventsStorage.Entities[entityId] = entity
+}
+
+// entityForEventLocked resolves the entity an event belongs to, reporting false when
+// the event has nowhere to go and must be dropped.
+//
+// Only traffic that is not a container's — no container ID, or the host sentinel —
+// collapses onto the node entity. Everything else keys by container ID. That used to
+// depend on the Kubernetes object cache being present, so on ECS and host installs
+// every container's traffic was merged into the node and no per-container entity
+// existed at all.
+//
+// Outside Kubernetes the entity is also created here, which is what makes the keying
+// useful there: nothing announces a container to this package, so an event for an
+// unknown entity was simply dropped and no container entity could ever exist. Such
+// entities are recorded in unannouncedEntities, because they are the ones
+// snapshotAndClear has to prune.
+//
+// In Kubernetes the container lifecycle is reliable, so a missing entity means the
+// container was removed or is ignored, not that it was never announced — and the
+// collection publishes the removal BEFORE the container leaves it, so events keep
+// arriving for a container that is already gone. Creating one there would emit a
+// container with no pod or workload identity for a pod that no longer exists, so
+// Kubernetes keeps dropping.
+//
+// Callers must hold eventsStorageMutex for writing.
+func (ns *NetworkStream) entityForEventLocked(containerID string) (armotypes.NetworkStreamEntity, string, bool) {
+	entityID := containerID
+	if entityID == "" || entityID == armotypes.HostContainerID {
+		entityID = ns.nodeName
+	}
+
+	if entity, ok := ns.networkEventsStorage.Entities[entityID]; ok {
+		return entity, entityID, true
+	}
+
+	// The node entity is created at construction and re-created by every flush, so
+	// it is only missing if the host container was removed in between. Restore it as
+	// the host rather than inventing a container whose ID is the node's name, and
+	// leave it unprunable.
+	if entityID == ns.nodeName {
+		entity := newHostEntity()
+		ns.networkEventsStorage.Entities[entityID] = entity
+		return entity, entityID, true
+	}
+
+	if ns.cfg.KubernetesMode {
+		logger.L().Error("NetworkStream - entity not found", helpers.String("entity ID", entityID))
+		return armotypes.NetworkStreamEntity{}, entityID, false
+	}
+
+	entity := armotypes.NetworkStreamEntity{
+		Kind: armotypes.NetworkStreamEntityKindContainer,
+		NetworkStreamEntityContainer: armotypes.NetworkStreamEntityContainer{
+			ContainerID: entityID,
+		},
+		Inbound:  make(map[string]armotypes.NetworkStreamEvent),
+		Outbound: make(map[string]armotypes.NetworkStreamEvent),
+	}
+	ns.networkEventsStorage.Entities[entityID] = entity
+	ns.unannouncedEntities[entityID] = struct{}{}
+	return entity, entityID, true
 }
 
 func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree *armotypes.ProcessTree, ref *armotypes.ProcessRef) armotypes.NetworkStreamEvent {
@@ -427,33 +513,39 @@ func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree
 		Protocol:  armotypes.NetworkStreamEventProtocol(event.GetProto()),
 	}
 
-	if armotypes.EndpointKind(dstEndpoint.Kind) == armotypes.EndpointKindPod {
-		slimPod := ns.k8sInventory.GetPodByIp(dstEndpoint.Addr)
-		if slimPod != nil {
-			networkEvent.PodName = slimPod.Name
-			networkEvent.PodNamespace = slimPod.Namespace
+	// The inventory is only built in Kubernetes mode. Outside it a pod- or
+	// service-kind endpoint leaves the connection unenriched rather than
+	// dereferencing a nil interface.
+	if ns.k8sInventory != nil {
+		switch armotypes.EndpointKind(dstEndpoint.Kind) {
+		case armotypes.EndpointKindPod:
+			slimPod := ns.k8sInventory.GetPodByIp(dstEndpoint.Addr)
+			if slimPod != nil {
+				networkEvent.PodName = slimPod.Name
+				networkEvent.PodNamespace = slimPod.Namespace
 
-			workloadKind := ""
-			workloadName := ""
+				workloadKind := ""
+				workloadName := ""
 
-			if len(slimPod.OwnerReferences) > 0 {
-				workloadKind = slimPod.OwnerReferences[0].Kind
-				if WorkloadKind(workloadKind) == ReplicaSet {
-					workloadKind = string(Deployment)
+				if len(slimPod.OwnerReferences) > 0 {
+					workloadKind = slimPod.OwnerReferences[0].Kind
+					if WorkloadKind(workloadKind) == ReplicaSet {
+						workloadKind = string(Deployment)
+					}
+					// TODO: handle similar cases for CronJob -> Job -> Pod.
+					workloadName = extractWorkloadName(slimPod.Name, WorkloadKind(workloadKind))
 				}
-				// TODO: handle similar cases for CronJob -> Job -> Pod.
-				workloadName = extractWorkloadName(slimPod.Name, WorkloadKind(workloadKind))
-			}
 
-			networkEvent.WorkloadName = workloadName
-			networkEvent.WorkloadKind = workloadKind
-			networkEvent.WorkloadNamespace = slimPod.Namespace
-		}
-	} else if armotypes.EndpointKind(dstEndpoint.Kind) == armotypes.EndpointKindService {
-		slimService := ns.k8sInventory.GetSvcByIp(dstEndpoint.Addr)
-		if slimService != nil {
-			networkEvent.ServiceName = slimService.Name
-			networkEvent.ServiceNamespace = slimService.Namespace
+				networkEvent.WorkloadName = workloadName
+				networkEvent.WorkloadKind = workloadKind
+				networkEvent.WorkloadNamespace = slimPod.Namespace
+			}
+		case armotypes.EndpointKindService:
+			slimService := ns.k8sInventory.GetSvcByIp(dstEndpoint.Addr)
+			if slimService != nil {
+				networkEvent.ServiceName = slimService.Name
+				networkEvent.ServiceNamespace = slimService.Namespace
+			}
 		}
 	}
 

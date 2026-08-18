@@ -2,7 +2,6 @@ package cache
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -411,14 +410,22 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) []rulebindingmana
 		rbName := uniqueName(&rb)
 
 		// check pod selectors
-		podSelector, _ := metav1.LabelSelectorAsSelector(&rb.Spec.PodSelector)
+		podSelector, err := metav1.LabelSelectorAsSelector(&rb.Spec.PodSelector)
+		if err != nil {
+			logger.L().Warning("RBCache - failed to parse pod selector", helpers.String("ruleBiding", uniqueName(&rb)), helpers.Error(err))
+			continue
+		}
 		if !podSelector.Matches(labels.Set(pod.GetLabels())) {
 			// pod selectors doesnt match
 			continue
 		}
 
 		// check namespace selectors
-		nsSelector, _ := metav1.LabelSelectorAsSelector(&rb.Spec.NamespaceSelector)
+		nsSelector, err := metav1.LabelSelectorAsSelector(&rb.Spec.NamespaceSelector)
+		if err != nil {
+			logger.L().Warning("RBCache - failed to parse ns selector", helpers.String("ruleBiding", uniqueName(&rb)), helpers.Error(err))
+			continue
+		}
 		nsSelectorStr := nsSelector.String()
 		if len(nsSelectorStr) != 0 {
 			// get related namespaces
@@ -427,7 +434,7 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) []rulebindingmana
 				logger.L().Warning("RBCache - failed to list namespaces", helpers.String("ruleBiding", uniqueName(&rb)), helpers.String("nsSelector", nsSelectorStr), helpers.Error(err))
 				continue
 			}
-			if !strings.Contains(namespaces.String(), pod.GetNamespace()) {
+			if !namespaceListHasName(namespaces, pod.GetNamespace()) {
 				// namespace selectors dont match
 				continue
 			}

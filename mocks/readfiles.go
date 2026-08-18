@@ -5,7 +5,6 @@ import (
 	"path"
 	"runtime"
 
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
@@ -20,8 +19,6 @@ const (
 	TestKindPod    TestKinds = "Pod"
 	TestKindRS     TestKinds = "ReplicaSet"
 	TestKindDeploy TestKinds = "Deployment"
-	TestKindAP     TestKinds = "ApplicationProfile"
-	TestKindNN     TestKinds = "NetworkNeighborhood"
 )
 
 const (
@@ -30,20 +27,14 @@ const (
 )
 
 const (
-	nginxPodBytes                 = "testdata/nginx_pod.json"
-	nginxRSBytes                  = "testdata/nginx_rs.json"
-	nginxDeploymentBytes          = "testdata/nginx_deploy.json"
-	nginxApplicationProfileBytes  = "testdata/nginx_applicationprofiles.json"
-	nginxApplicationActivityBytes = "testdata/nginx_applicationactivities.json"
-	nginxNetworkNeighborhoodBytes = "testdata/nginx_networkneighborhood.json"
+	nginxPodBytes        = "testdata/nginx_pod.json"
+	nginxRSBytes         = "testdata/nginx_rs.json"
+	nginxDeploymentBytes = "testdata/nginx_deploy.json"
 )
 const (
-	collectionPodBytes                 = "testdata/collection_pod.json"
-	collectionRSBytes                  = "testdata/collection_rs.json"
-	collectionDeploymentBytes          = "testdata/collection_deploy.json"
-	collectionApplicationProfileBytes  = "testdata/collection_applicationprofiles.json"
-	collectionApplicationActivityBytes = "testdata/collection_applicationactivities.json"
-	collectionNetworkNeighborhoodBytes = "testdata/collection_networkneighborhood.json"
+	collectionPodBytes        = "testdata/collection_pod.json"
+	collectionRSBytes         = "testdata/collection_rs.json"
+	collectionDeploymentBytes = "testdata/collection_deploy.json"
 )
 
 var NAMESPACE = ""
@@ -85,16 +76,6 @@ func UnstructuredToRuntime(u *unstructured.Unstructured) k8sruntime.Object {
 		deploy := &appsv1.Deployment{}
 		if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(u.Object, deploy); err == nil {
 			return deploy
-		}
-	case TestKindAP:
-		ap := &v1beta1.ApplicationProfile{}
-		if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(u.Object, ap); err == nil {
-			return ap
-		}
-	case TestKindNN:
-		nn := &v1beta1.NetworkNeighborhood{}
-		if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(u.Object, nn); err == nil {
-			return nn
 		}
 	}
 	return nil
@@ -142,20 +123,6 @@ func GetBytes(kind TestKinds, name TestName) []byte {
 			return readFile(nginxDeploymentBytes)
 		case TestCollection:
 			return readFile(collectionDeploymentBytes)
-		}
-	case TestKindAP:
-		switch name {
-		case TestNginx:
-			return readFile(nginxApplicationProfileBytes)
-		case TestCollection:
-			return readFile(collectionApplicationProfileBytes)
-		}
-	case TestKindNN:
-		switch name {
-		case TestNginx:
-			return readFile(nginxNetworkNeighborhoodBytes)
-		case TestCollection:
-			return readFile(collectionNetworkNeighborhoodBytes)
 		}
 	}
 	return []byte{}

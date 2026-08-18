@@ -111,23 +111,6 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		return nil
 	}
 
-	// Ignore ephemeral containers
-	if sharedData.ContainerType == objectcache.EphemeralContainer {
-		logger.L().Debug("ignoring ephemeral container",
-			helpers.String("containerID", containerID),
-			helpers.String("containerName", container.Runtime.ContainerName),
-			helpers.String("podName", container.K8s.PodName),
-			helpers.String("namespace", container.K8s.Namespace))
-		// Close ready channel before removing entry
-		if entry, exists := cpm.getContainerEntry(containerID); exists {
-			entry.readyOnce.Do(func() {
-				close(entry.ready)
-			})
-		}
-		cpm.removeContainerEntry(containerID)
-		return nil
-	}
-
 	if sharedData.PreRunningContainer && !(cpm.cfg.EnableRuntimeDetection || cpm.cfg.EnablePartialProfileGeneration) {
 		logger.L().Debug("ignoring pre-running container without runtime detection or partial profile generation",
 			helpers.String("containerID", containerID),

@@ -27,3 +27,32 @@ func TestProjectField_StarPathRoutesToPatterns(t *testing.T) {
 	_, cacheInValues := pcp.Opens.Values["/etc/ld.so.cache"]
 	assert.True(t, cacheInValues, "a literal path entry stays a Value")
 }
+
+// TestProjectField_StarExecPathRoutesToPatterns pins the same classification
+// for the Execs surface: exec paths route through the same path-surface
+// projection as opens, so a "*"-bearing exec path must be a Pattern too.
+// The classifier fix applied to every path surface, but only Opens had a
+// pinning test.
+func TestProjectField_StarExecPathRoutesToPatterns(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{
+		Spec: v1beta1.ContainerProfileSpec{
+			Execs: []v1beta1.ExecCalls{
+				{Path: "/usr/bin/*", Args: []string{"/usr/bin/*"}},
+				{Path: "/usr/bin/redis-cli", Args: []string{"/usr/bin/redis-cli", "ping"}},
+				{Path: "/opt/⋯/agent", Args: []string{"/opt/⋯/agent"}},
+			},
+		},
+	}
+	pcp := Apply(nil, cp, nil) // nil spec => pass-through (All=true)
+
+	require.Contains(t, pcp.Execs.Patterns, "/usr/bin/*",
+		"a '*'-bearing exec path must be a Pattern")
+	_, starInValues := pcp.Execs.Values["/usr/bin/*"]
+	assert.False(t, starInValues, "'*'-bearing exec path must NOT be a literal Value")
+
+	require.Contains(t, pcp.Execs.Patterns, "/opt/⋯/agent",
+		"a '⋯'-bearing exec path must be a Pattern")
+
+	_, literalInValues := pcp.Execs.Values["/usr/bin/redis-cli"]
+	assert.True(t, literalInValues, "a literal exec path stays a Value")
+}

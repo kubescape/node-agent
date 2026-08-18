@@ -1,0 +1,34 @@
+# Pod with a regular container AND an initContainer, bound via ONE pod label
+# to ONE grouped ContainerProfile document (multisubtype-cp-doc.yaml) that carries the
+# containers/initContainers/ephemeralContainers subtype groups. The ephemeral
+# "debug" container is added at runtime by the component test via the
+# ephemeralcontainers subresource.
+#
+# The initContainer sleeps long enough for node-agent to adopt the authored
+# profile, then runs /usr/bin/id - which its section does NOT allow - so the
+# init phase itself must produce an R0001 with container_name=setup.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multisubtype-deployment
+  labels:
+    app: multisubtype
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: multisubtype
+  template:
+    metadata:
+      labels:
+        app: multisubtype
+        kubescape.io/user-defined-profile: multisubtype
+    spec:
+      initContainers:
+      - name: setup
+        image: debian:12-slim
+        command: ["/bin/sh", "-c", "sleep 100; /usr/bin/id"]
+      containers:
+      - name: app
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]

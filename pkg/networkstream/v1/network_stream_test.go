@@ -8,10 +8,12 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
@@ -52,6 +54,26 @@ func newTestStreamWithChannel(t *testing.T, mgr processtree.ProcessTreeManager, 
 	return ns
 }
 
+// addContainerNotification is what the container collection publishes when a
+// container appears, carrying the pod identity the stream entity is built from.
+func addContainerNotification(containerID, containerName, namespace, podName string) containercollection.PubSubEvent {
+	return containercollection.PubSubEvent{
+		Type: containercollection.EventTypeAddContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+					ContainerID:   containerID,
+					ContainerName: containerName,
+					ContainerPID:  4242, // not 1: IsHostContainer treats pid 1 as the host
+				},
+			},
+			K8s: containercollection.K8sMetadata{
+				BasicK8sMetadata: types.BasicK8sMetadata{Namespace: namespace, PodName: podName},
+			},
+		},
+	}
+}
+
 func outboundEvent(pid uint32, addr string, port uint16) *utils.StructEvent {
 	return &utils.StructEvent{
 		Pid:         pid,
@@ -65,6 +87,273 @@ func outboundEvent(pid uint32, addr string, port uint16) *utils.StructEvent {
 
 func treeFor(pid uint32, comm string) *armotypes.ProcessTree {
 	return &armotypes.ProcessTree{ProcessTree: armotypes.Process{PID: pid, Comm: comm}}
+}
+
+// containerEvent is an outbound event attributed to a container, which is what
+// every event outside the host's own namespace looks like.
+func containerEvent(containerID string, pid uint32, addr string, port uint16) *utils.StructEvent {
+	event := outboundEvent(pid, addr, port)
+	event.ContainerID = containerID
+	return event
+}
+
+// TestHandleNetworkEvent_ContainersKeepSeparateEntities: outside Kubernetes every
+// event used to be folded onto the node entity, so an ECS task's containers were
+// indistinguishable in the stream. Each container must own its entity.
+func TestHandleNetworkEvent_ContainersKeepSeparateEntities(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock()) // k8sObjectCache nil: the host/ECS shape
+
+	ns.handleNetworkEvent(containerEvent("container-a", 101, "1.2.3.4", 443), nil)
+	ns.handleNetworkEvent(containerEvent("container-b", 202, "5.6.7.8", 443), nil)
+
+	require.Len(t, ns.networkEventsStorage.Entities["container-a"].Outbound, 1)
+	require.Len(t, ns.networkEventsStorage.Entities["container-b"].Outbound, 1)
+	assert.Empty(t, ns.networkEventsStorage.Entities[testNodeName].Outbound,
+		"container traffic must not be attributed to the node")
+}
+
+// TestHandleNetworkEvent_UnannouncedEntityCarriesContainerIdentity: nothing announces an
+// ECS container to the stream, so the entity born on the first event is the only
+// place its kind and ID can come from.
+func TestHandleNetworkEvent_UnannouncedEntityCarriesContainerIdentity(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+
+	ns.handleNetworkEvent(containerEvent("container-a", 101, "1.2.3.4", 443), nil)
+
+	entity := ns.networkEventsStorage.Entities["container-a"]
+	assert.Equal(t, armotypes.NetworkStreamEntityKindContainer, entity.Kind)
+	assert.Equal(t, "container-a", entity.ContainerID)
+}
+
+// TestHandleDnsEvent_ContainersKeepSeparateEntities mirrors the network-event case
+// for DNS, which keys entities through the same path.
+func TestHandleDnsEvent_ContainersKeepSeparateEntities(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	dnsEvent := func(containerID string) *utils.StructEvent {
+		return &utils.StructEvent{ContainerID: containerID, DNSName: "evil.example.com.", DstPort: 53, Timestamp: time.Now().UnixNano()}
+	}
+
+	ns.handleDnsEvent(dnsEvent("container-a"), nil)
+	ns.handleDnsEvent(dnsEvent("container-b"), nil)
+
+	assert.Len(t, ns.networkEventsStorage.Entities["container-a"].Outbound, 1)
+	assert.Len(t, ns.networkEventsStorage.Entities["container-b"].Outbound, 1)
+	assert.Empty(t, ns.networkEventsStorage.Entities[testNodeName].Outbound)
+}
+
+// TestHandleNetworkEvent_HostTrafficStaysOnTheNodeEntity: only traffic that is not
+// a container's — no container ID, or the host sentinel — collapses onto the node.
+func TestHandleNetworkEvent_HostTrafficStaysOnTheNodeEntity(t *testing.T) {
+	for _, containerID := range []string{"", armotypes.HostContainerID} {
+		t.Run("containerID="+containerID, func(t *testing.T) {
+			ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+
+			ns.handleNetworkEvent(containerEvent(containerID, 101, "1.2.3.4", 443), nil)
+
+			assert.Len(t, ns.networkEventsStorage.Entities[testNodeName].Outbound, 1)
+			assert.Len(t, ns.networkEventsStorage.Entities, 1, "no entity may be created for the sentinel itself")
+			assert.Equal(t, armotypes.NetworkStreamEntityKindHost, ns.networkEventsStorage.Entities[testNodeName].Kind)
+		})
+	}
+}
+
+// TestHandleNetworkEvent_KeyingIgnoresK8sObjectCache is the Kubernetes-inertness pin:
+// the entity an event lands on is decided by the event's container ID alone. The cache
+// used to force every event onto the node whenever it was absent, which is the whole
+// bug — but the Kubernetes side of that condition must keep behaving exactly as it did.
+func TestHandleNetworkEvent_KeyingIgnoresK8sObjectCache(t *testing.T) {
+	for name, cache := range map[string]objectcache.K8sObjectCache{
+		"kubernetes": &objectcache.K8sObjectCacheMock{},
+		"host/ecs":   nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ns, err := NewNetworkStream(context.Background(), config.Config{}, cache, stubResolver{}, testNodeName, nil, true, processtree.NewProcessTreeManagerMock())
+			require.NoError(t, err)
+
+			ns.handleNetworkEvent(containerEvent("container-a", 101, "1.2.3.4", 443), nil)
+			ns.handleNetworkEvent(containerEvent("", 202, "5.6.7.8", 80), nil)
+
+			assert.Len(t, ns.networkEventsStorage.Entities["container-a"].Outbound, 1)
+			assert.Len(t, ns.networkEventsStorage.Entities[testNodeName].Outbound, 1)
+		})
+	}
+}
+
+// TestHandleNetworkEvent_AnnouncedContainerKeepsItsMetadata: where ContainerCallback
+// does run, the entity it registered — with the pod identity the backend keys on —
+// must not be replaced by the bare entity the event path would create.
+func TestHandleNetworkEvent_AnnouncedContainerKeepsItsMetadata(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	ns.ContainerCallback(addContainerNotification("container-a", "nginx", "default", "nginx-abc"))
+
+	ns.handleNetworkEvent(containerEvent("container-a", 101, "1.2.3.4", 443), nil)
+
+	entity := ns.networkEventsStorage.Entities["container-a"]
+	require.Len(t, entity.Outbound, 1)
+	assert.Equal(t, "nginx", entity.ContainerName)
+	assert.Equal(t, "default", entity.PodNamespace)
+	assert.Equal(t, "nginx-abc", entity.PodName)
+}
+
+// TestContainerCallback_KeepsWhatTheEventPathAlreadyRecorded: the container watcher
+// submits this callback to a worker pool, so a container's first connections can be
+// recorded before it is announced — the window a new container's first egress falls
+// into. Announcing it must add identity, not discard the traffic.
+func TestContainerCallback_KeepsWhatTheEventPathAlreadyRecorded(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	ns.handleNetworkEvent(containerEvent("container-a", 101, "1.2.3.4", 443), nil)
+
+	ns.ContainerCallback(addContainerNotification("container-a", "nginx", "default", "nginx-abc"))
+
+	entity := ns.networkEventsStorage.Entities["container-a"]
+	assert.Len(t, entity.Outbound, 1, "traffic recorded before the announcement must survive it")
+	assert.Equal(t, "nginx", entity.ContainerName, "and the announcement still supplies the identity")
+}
+
+// TestHandleNetworkEvent_KubernetesStillDropsUnknownEntities: in Kubernetes the
+// container lifecycle is reliable, so a missing entity means the container was removed
+// or is ignored — not that it was never announced. Creating one would emit a container
+// with no pod or workload identity for a pod that is already gone, and the remove event
+// is published BEFORE the container leaves the collection, so events keep arriving for
+// it. Kubernetes keeps dropping, exactly as before.
+func TestHandleNetworkEvent_KubernetesStillDropsUnknownEntities(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	ns.cfg.KubernetesMode = true // the constructor cannot: it needs a live inventory
+
+	ns.handleNetworkEvent(containerEvent("container-a", 101, "1.2.3.4", 443), nil)
+
+	assert.NotContains(t, ns.networkEventsStorage.Entities, "container-a")
+	assert.Empty(t, ns.unannouncedEntities)
+}
+
+// TestHandleNetworkEvent_RestoresTheNodeEntityAsHost: the node entity is created at
+// construction and re-created by every flush, so it is only ever missing because the
+// host container was removed in between. It must come back as the host — never as a
+// container whose ID is the node's name — and it must never become prunable.
+func TestHandleNetworkEvent_RestoresTheNodeEntityAsHost(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	hostNotif := addContainerNotification(armotypes.HostContainerID, "", "", "")
+	hostNotif.Container.Runtime.ContainerPID = 1 // what makes IsHostContainer true
+	hostNotif.Type = containercollection.EventTypeRemoveContainer
+	ns.ContainerCallback(hostNotif)
+	require.NotContains(t, ns.networkEventsStorage.Entities, testNodeName)
+
+	ns.handleNetworkEvent(containerEvent(armotypes.HostContainerID, 101, "1.2.3.4", 443), nil)
+
+	entity := ns.networkEventsStorage.Entities[testNodeName]
+	assert.Equal(t, armotypes.NetworkStreamEntityKindHost, entity.Kind)
+	assert.Empty(t, entity.ContainerID, "the node is not a container")
+	require.Len(t, entity.Outbound, 1)
+
+	ns.snapshotAndClear()
+	ns.snapshotAndClear()
+	assert.Contains(t, ns.networkEventsStorage.Entities, testNodeName, "the node entity is never prunable")
+}
+
+// TestContainerCallback_LeavesTheNodeEntityAlone pins an inertness decision, not a
+// desirable behaviour. With host monitoring on, the virtual host container is announced
+// at startup and this callback overwrites the node entity — losing whatever it held and
+// mislabelling it as a container until the next flush restores its kind. That is
+// pre-existing and out of scope here, so the merge above is scoped to real containers:
+// announcing the host container does nothing it did not already do. Do not "simplify"
+// that condition away without deciding what the node entity's kind should be.
+func TestContainerCallback_LeavesTheNodeEntityAlone(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	ns.handleNetworkEvent(containerEvent(armotypes.HostContainerID, 101, "1.2.3.4", 443), nil)
+	require.Len(t, ns.networkEventsStorage.Entities[testNodeName].Outbound, 1)
+
+	hostNotif := addContainerNotification(armotypes.HostContainerID, "", "", "")
+	hostNotif.Container.Runtime.ContainerPID = 1 // what makes IsHostContainer true
+	ns.ContainerCallback(hostNotif)
+
+	assert.Empty(t, ns.networkEventsStorage.Entities[testNodeName].Outbound,
+		"the node entity behaves exactly as it did before this change")
+}
+
+// TestContainerCallback_RemoveLeavesNoDanglingMark: the prune set is only meaningful as
+// a subset of the entity map. A mark left behind for an entity that is gone would have
+// the prune reasoning about something that no longer exists.
+func TestContainerCallback_RemoveLeavesNoDanglingMark(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	ns.handleNetworkEvent(containerEvent("container-a", 101, "1.2.3.4", 443), nil)
+	require.Contains(t, ns.unannouncedEntities, "container-a")
+
+	notif := addContainerNotification("container-a", "nginx", "default", "nginx-abc")
+	notif.Type = containercollection.EventTypeRemoveContainer
+	ns.ContainerCallback(notif)
+
+	assert.NotContains(t, ns.networkEventsStorage.Entities, "container-a")
+	assert.NotContains(t, ns.unannouncedEntities, "container-a")
+}
+
+// TestSnapshotAndClear_PrunesIdleUnannouncedEntities: an entity created from an event has no
+// lifecycle callback behind it, so nothing would ever remove it. Left in place it would
+// ride along in every later payload — unbounded growth on a host with container churn.
+// An interval with no traffic is the only "it is gone" signal available.
+func TestSnapshotAndClear_PrunesIdleUnannouncedEntities(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	ns.handleNetworkEvent(containerEvent("container-a", 101, "1.2.3.4", 443), nil)
+
+	// The interval that carried its traffic must keep the entity: the events are in
+	// the snapshot, and dropping the entity here would only churn it.
+	snapshot := ns.snapshotAndClear()
+	require.Len(t, snapshot.Entities["container-a"].Outbound, 1)
+	assert.Contains(t, ns.networkEventsStorage.Entities, "container-a")
+
+	// The pruning interval must not carry the dead entity either: it is dropped
+	// before the snapshot is taken, so it never reaches a payload at all.
+	snapshot = ns.snapshotAndClear() // a second interval, with nothing on it
+	assert.NotContains(t, snapshot.Entities, "container-a")
+	assert.NotContains(t, ns.networkEventsStorage.Entities, "container-a")
+	assert.Contains(t, ns.networkEventsStorage.Entities, testNodeName, "the node entity is never pruned")
+}
+
+// TestSnapshotAndClear_KeepsIdleAnnouncedEntities: a container the callback registered
+// is removed by the callback, not by silence. Pruning it on an idle interval would drop
+// the workload identity that enrichWorkloadDetails resolved and never recover it.
+func TestSnapshotAndClear_KeepsIdleAnnouncedEntities(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	ns.ContainerCallback(addContainerNotification("container-a", "nginx", "default", "nginx-abc"))
+
+	ns.snapshotAndClear()
+	ns.snapshotAndClear()
+
+	entity, ok := ns.networkEventsStorage.Entities["container-a"]
+	require.True(t, ok, "an announced container outlives its idle intervals")
+	assert.Equal(t, "nginx", entity.ContainerName)
+}
+
+// TestSnapshotAndClear_AnnouncingAnEntityStopsThePruning: the two paths can create
+// the same entity in either order. Once the callback vouches for a container, silence
+// must stop meaning "gone".
+func TestSnapshotAndClear_AnnouncingAnEntityStopsThePruning(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	ns.handleNetworkEvent(containerEvent("container-a", 101, "1.2.3.4", 443), nil)
+	ns.ContainerCallback(addContainerNotification("container-a", "nginx", "default", "nginx-abc"))
+
+	ns.snapshotAndClear()
+	ns.snapshotAndClear()
+
+	assert.Contains(t, ns.networkEventsStorage.Entities, "container-a")
+}
+
+// TestBuildNetworkEvent_PodEndpointWithoutK8sInventory: the inventory only exists in
+// Kubernetes mode, so a pod- or service-kind endpoint reaching this code anywhere else
+// would dereference a nil interface and take the agent down.
+func TestBuildNetworkEvent_PodEndpointWithoutK8sInventory(t *testing.T) {
+	ns := newTestStream(t, processtree.NewProcessTreeManagerMock())
+	require.Nil(t, ns.k8sInventory)
+
+	for _, kind := range []types.EndpointKind{types.EndpointKindPod, types.EndpointKindService} {
+		t.Run(string(kind), func(t *testing.T) {
+			event := outboundEvent(101, "1.2.3.4", 443)
+			event.DstEndpoint = types.L3Endpoint{Addr: "1.2.3.4", Kind: kind}
+
+			assert.NotPanics(t, func() { ns.handleNetworkEvent(event, nil) })
+			assert.Len(t, ns.networkEventsStorage.Entities[testNodeName].Outbound, 1,
+				"the connection is still recorded, only its Kubernetes enrichment is missing")
+		})
+	}
 }
 
 // TestHandleNetworkEvent_TwoProcessesSameEndpoint pins the DATA LOSS this change

@@ -47,31 +47,12 @@ func (sc *StorageHttpClientMock) GetContainerProfile(_ context.Context, namespac
 	return nil, nil
 }
 
-func (sc *StorageHttpClientMock) GetApplicationProfile(_ context.Context, _, _ string) (*spdxv1beta1.ApplicationProfile, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (sc *StorageHttpClientMock) GetNetworkNeighborhood(_ context.Context, _, _ string) (*spdxv1beta1.NetworkNeighborhood, error) {
-	//TODO implement me
-	panic("implement me")
-}
 func (sc *StorageHttpClientMock) GetSBOMMeta(_ string) (*v1beta1.SBOMSyft, error) {
 	return sc.mockSBOM, nil
 }
 
 func (sc *StorageHttpClientMock) GetStorageClient() beta1.SpdxV1beta1Interface {
 	return nil
-}
-
-func (sc *StorageHttpClientMock) ListApplicationProfiles(_ context.Context, namespace string, limit int64, cont string) (*spdxv1beta1.ApplicationProfileList, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (sc *StorageHttpClientMock) ListNetworkNeighborhoods(_ context.Context, namespace string, limit int64, cont string) (*spdxv1beta1.NetworkNeighborhoodList, error) {
-	//TODO implement me
-	panic("implement me")
 }
 
 func (sc *StorageHttpClientMock) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {

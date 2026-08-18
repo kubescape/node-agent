@@ -1,0 +1,150 @@
+{
+  "specHash": "1e9bdb48627eec55",
+  "syncChecksum": "sync-abc123",
+  "opens": {
+    "All": true,
+    "Values": {
+      "/etc/app.conf": {},
+      "/etc/passwd": {}
+    },
+    "Patterns": [
+      "/data/⋯/config",
+      "/var/log/*"
+    ],
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "execs": {
+    "All": true,
+    "Values": {
+      "/bin/curl": {},
+      "/bin/echo": {},
+      "/bin/ls": {},
+      "/usr/bin/app": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "endpoints": {
+    "All": true,
+    "Values": {
+      "/api/v1/health": {},
+      "/metrics": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "capabilities": {
+    "All": true,
+    "Values": {
+      "NET_ADMIN": {},
+      "SYS_PTRACE": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "syscalls": {
+    "All": true,
+    "Values": {
+      "openat": {},
+      "read": {},
+      "write": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "egressDomains": {
+    "All": true,
+    "Values": {
+      "cdn.example.com": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "egressAddresses": {
+    "All": true,
+    "Values": {
+      "*": {},
+      "0.0.0.0/0": {},
+      "8.8.8.8": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "ingressDomains": {
+    "All": true,
+    "Values": {
+      "client.internal": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "ingressAddresses": {
+    "All": true,
+    "Values": {
+      "*": {},
+      "10.0.0.5": {},
+      "10.1.0.0/16": {}
+    },
+    "Patterns": null,
+    "PrefixHits": {},
+    "SuffixHits": {}
+  },
+  "execsByPath": {
+    "/bin/curl": [
+      [
+        "*",
+        "https://example.com"
+      ]
+    ],
+    "/bin/echo": [
+      []
+    ],
+    "/bin/ls": [
+      [
+        "-la",
+        "/tmp"
+      ]
+    ],
+    "/usr/bin/app": [
+      [
+        "run",
+        "⋯"
+      ]
+    ]
+  },
+  "policyByRuleId": {
+    "R0001": {
+      "processAllowed": [
+        "cat",
+        "ls"
+      ]
+    },
+    "R0002": {
+      "containerAllowed": true
+    }
+  },
+  "callStacks": [
+    {
+      "callID": "cs-exec-1",
+      "pathCount": 1,
+      "pathDepths": [
+        2
+      ]
+    },
+    {
+      "callID": "cs-open-1",
+      "pathCount": 1,
+      "pathDepths": [
+        3
+      ]
+    }
+  ]
+}

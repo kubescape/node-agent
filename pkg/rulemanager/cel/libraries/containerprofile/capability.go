@@ -1,0 +1,34 @@
+package containerprofile
+
+import (
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
+)
+
+func (l *containerProfileLibrary) wasCapabilityUsed(containerID, capabilityName ref.Val) ref.Val {
+	if l.objectCache == nil {
+		return types.NewErr("objectCache is nil")
+	}
+
+	containerIDStr, ok := containerID.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(containerID)
+	}
+	capabilityNameStr, ok := capabilityName.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(capabilityName)
+	}
+
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
+	if err != nil {
+		return cache.NewProfileNotAvailableErr("%v", err)
+	}
+
+	if _, ok := cp.Capabilities.Values[capabilityNameStr]; ok {
+		return types.Bool(true)
+	}
+
+	return types.Bool(false)
+}

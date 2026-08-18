@@ -10,22 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-//	func TestName(t *testing.T) {
-//		var ap v1beta1.ApplicationProfile
-//		file, err := os.ReadFile("../../../mocks/testdata/nginx_applicationprofiles.json")
-//		assert.NoError(t, err)
-//		err = json.Unmarshal(file, &ap)
-//		assert.NoError(t, err)
-//		ap.Spec.Containers[0].SeccompProfile.Path = "default/replicaset-nginx-bf5d5cf98-nginx.json"
-//		file2, err := os.ReadFile("../../../seccomp/default/replicaset-nginx-bf5d5cf98-nginx.json")
-//		assert.NoError(t, err)
-//		err = json.Unmarshal(file2, &ap.Spec.Containers[0].SeccompProfile.Spec)
-//		assert.NoError(t, err)
-//		bytes, err := json.Marshal(ap)
-//		assert.NoError(t, err)
-//		err = os.WriteFile("../../../mocks/testdata/nginx_applicationprofiles.json", bytes, 0644)
-//	}
-
 //func TestName(t *testing.T) {
 //	sp := v1beta1.SeccompProfile{
 //		TypeMeta: metav1.TypeMeta{

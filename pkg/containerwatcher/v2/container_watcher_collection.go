@@ -58,6 +58,9 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 	// Set up container callbacks
 	cw.callbacks = []containercollection.FuncNotify{
 		cw.containerCallbackAsync,
+		// Keeps container info resolvable for in-flight events across the
+		// container's end of life (removal grace window, issue #79).
+		cw.eventHandlerFactory.ContainerCallback,
 		cw.containerProcessTree.ContainerCallback,
 		cw.containerProfileManager.ContainerCallback,
 		cw.objectCache.ContainerProfileCache().ContainerCallback,

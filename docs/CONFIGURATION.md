@@ -154,8 +154,7 @@ correlation is an upgrade, not a dependency.
 | `nodeProfileServiceEnabled` | bool | `false` | Enable node profiling |
 | `fimEnabled` | bool | `false` | Enable File Integrity Monitoring |
 | `httpDetectionEnabled` | bool | `false` | Enable HTTP traffic parsing |
-| `hostMalwareSensorEnabled` | bool | `false` | Enable host-level malware sensor |
-| `hostNetworkSensorEnabled` | bool | `false` | Enable host-level network sensor |
+| `hostMonitoringEnabled` | bool | `false` | Monitor the host's own namespace as a synthetic container |
 | `prometheusExporterEnabled` | bool | `false` | Enable Prometheus metrics |
 | `fullPathTracingEnabled` | bool | `true` | Include full executable paths |
 | `enableEmbeddedSBOMs` | bool | `false` | Use embedded SBOMs from images |

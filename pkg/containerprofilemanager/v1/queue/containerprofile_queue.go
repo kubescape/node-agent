@@ -41,7 +41,21 @@ const (
 	// so a tight bound would trade the infinite-retry bug for silent loss during an
 	// ordinary restart.
 	DefaultMaxAttempts = 360
+	// stitchBacklogFraction sets maxStitchBacklog to one tenth of a queue's MaxQueueSize (see
+	// maxStitchBacklogFor and enforceMaxSize for why that bound exists).
+	stitchBacklogFraction = 10
 )
+
+// maxStitchBacklogFor computes the in-flight repair-stitch budget for a queue of the given
+// capacity. See enforceMaxSize for what the budget is for; it is deliberately small relative to
+// maxQueueSize (10%, floor 1) since it trades away chain-repair only under sustained overload,
+// not in the common case of one or two evictions between processing ticks.
+func maxStitchBacklogFor(maxQueueSize int) int64 {
+	if b := int64(maxQueueSize / stitchBacklogFraction); b > 0 {
+		return b
+	}
+	return 1
+}
 
 // QueuedContainerProfile represents a container profile queued for creation
 type QueuedContainerProfile struct {
@@ -54,9 +68,10 @@ type QueuedContainerProfile struct {
 	// SplitDepth counts how many times this item's lineage has been halved after an HTTP 413.
 	// Items persisted before this field existed decode with SplitDepth at zero.
 	SplitDepth int `json:"splitDepth"`
-	// IsStitch marks a metadata-only chunk emitted by dropChunk to repair the report chain.
-	// A stitch is never split and is never itself stitched - dropping a stitch leaves the chain
-	// forked, which is strictly better than an unbounded stitch->413->stitch loop.
+	// IsStitch marks a metadata-only chunk emitted in place of a chunk that was dropped or
+	// LRU-evicted (see dropChunk and enforceMaxSize) to repair the report chain. A stitch is
+	// never split and is never itself stitched - dropping a stitch leaves the chain forked,
+	// which is strictly better than an unbounded stitch->drop->stitch loop.
 	IsStitch bool `json:"isStitch"`
 }
 
@@ -76,6 +91,34 @@ const (
 	dropReasonStitchRejected dropReason = "stitch-rejected"
 	// dropReasonEnqueueFailed: the replacement stitch could not be enqueued.
 	dropReasonEnqueueFailed dropReason = "enqueue-failed"
+	// dropReasonMaxAttemptsExhausted: the item's retry budget (MaxAttempts) ran out. The
+	// failure may well be container-independent and transient, but by definition it has
+	// already been retried for the queue's full retry window (~30 minutes by default)
+	// without success - see dropChunk for why it is still repaired rather than silently
+	// forking the chain.
+	//
+	// The repair is best-effort, not a guarantee, against a sustained outage: dropChunk gives
+	// the replacement stitch a fresh retry budget (see newStitchFor's freshAttempts), so it
+	// gets its own full retry window rather than a single attempt inherited from the exhausted
+	// original - but if storage is still unreachable when that window also runs out, the
+	// stitch is dropped un-restitched and the chain forks anyway. What this reliably fixes is
+	// an item-specific, persistent rejection, where a metadata-only stitch succeeds where the
+	// original payload didn't.
+	dropReasonMaxAttemptsExhausted dropReason = "max-attempts-exhausted"
+	// dropReasonLRUEvicted: the queue was at capacity and this was the oldest item, so
+	// enforceMaxSize evicted it to make room and enqueued a stitch in its place.
+	dropReasonLRUEvicted dropReason = "lru-evicted"
+	// dropReasonLRUBacklogExhausted: same as dropReasonLRUEvicted, but the in-flight stitch
+	// backlog (see maxStitchBacklog) was already at its bound, so no replacement was
+	// enqueued and this eviction forks the chain.
+	dropReasonLRUBacklogExhausted dropReason = "lru-backlog-exhausted"
+	// dropReasonStitchBacklogExhausted: dropChunk or requeueSplit needed to repair a chunk's
+	// chain with a stitch, but the in-flight stitch backlog (see maxStitchBacklog) was already
+	// at its bound, so no replacement was enqueued and the chain is left forked. The
+	// LRU-eviction equivalent is dropReasonLRUBacklogExhausted; this covers every other
+	// stitch-admission site so the same bound applies everywhere a stitch can be created, not
+	// just enforceMaxSize's own loop.
+	dropReasonStitchBacklogExhausted dropReason = "stitch-backlog-exhausted"
 )
 
 // ErrQueueNotRunning is returned by enqueueLocked once the queue has been closed.
@@ -103,10 +146,28 @@ type QueueData struct {
 	retryInterval time.Duration
 	metrics       metricsmanager.MetricsManager
 
+	// maxStitchBacklog bounds stitchBacklog - see enforceMaxSize for why that bound has to
+	// exist at all. Fixed at construction time from maxQueueSize.
+	maxStitchBacklog int64
+
 	// Written by the queue processor goroutine and read by GetQueueStats, so they carry
 	// their own synchronization rather than widening qd.mu.
 	splits        atomic.Int64
 	chunksDropped atomic.Int64
+	// stitchBacklog counts IsStitch items currently resident in the queue (enqueued but not
+	// yet dequeued for processing or eviction). Every enqueue/dequeue of the underlying dque
+	// funnels through enqueueLocked/enqueueStitchNoEvict (increment) and
+	// processAllItems/enforceMaxSize via releaseStitch (decrement), which keep this in step;
+	// see enforceMaxSize for what it's used for.
+	//
+	// It starts at zero on every process start, but the disk queue may already hold stitches
+	// persisted by a prior run (dque has no cheap way to count a predicate over its contents
+	// without draining it) - those decrement the counter as they leave without ever having
+	// incremented it in this process's lifetime. releaseStitch clamps at zero so that cannot
+	// drive the counter negative and permanently widen maxStitchBacklog for the rest of the
+	// process; the cost is a brief window right after a restart where the budget looks
+	// emptier than it actually is, never the reverse.
+	stitchBacklog atomic.Int64
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -182,21 +243,26 @@ func NewQueueData(ctx context.Context, creator storage.ProfileCreator, config Qu
 	}
 
 	qd := &QueueData{
-		queue:         queue,
-		ctx:           ctx,
-		creator:       creator,
-		errorCallback: config.ErrorCallback,
-		maxQueueSize:  config.MaxQueueSize,
-		maxAttempts:   config.MaxAttempts,
-		maxSplitDepth: config.MaxSplitDepth,
-		retryInterval: config.RetryInterval,
-		metrics:       config.MetricsManager,
-		stopChan:      make(chan struct{}),
-		running:       true,
+		queue:            queue,
+		ctx:              ctx,
+		creator:          creator,
+		errorCallback:    config.ErrorCallback,
+		maxQueueSize:     config.MaxQueueSize,
+		maxAttempts:      config.MaxAttempts,
+		maxSplitDepth:    config.MaxSplitDepth,
+		maxStitchBacklog: maxStitchBacklogFor(config.MaxQueueSize),
+		retryInterval:    config.RetryInterval,
+		metrics:          config.MetricsManager,
+		stopChan:         make(chan struct{}),
+		running:          true,
 	}
 
-	// Remove old items if queue is over capacity on startup
+	// Remove old items if queue is over capacity on startup. No other goroutine can reach qd
+	// yet, but enforceMaxSize is called under qd.mu everywhere else (see enqueueLocked), so
+	// take it here too rather than carve out an exception to that invariant.
+	qd.mu.Lock()
 	qd.enforceMaxSize()
+	qd.mu.Unlock()
 
 	return qd, nil
 }
@@ -249,15 +315,117 @@ func (qd *QueueData) enqueueLocked(item *QueuedContainerProfile) error {
 	if err := qd.queue.Enqueue(item); err != nil {
 		return fmt.Errorf("failed to enqueue profile: %w", err)
 	}
+	if item.IsStitch {
+		qd.stitchBacklog.Add(1)
+	}
 
 	return nil
 }
 
-// enforceMaxSize removes oldest items when queue is at max capacity
+// enqueueStitchNoEvict adds a repair stitch directly to the tail without invoking
+// enforceMaxSize.
+//
+// It exists only for enforceMaxSize's own use: every call to enforceMaxSize holds qd.mu (either
+// via enqueueLocked, whose callers must already hold it, or NewQueueData's startup sweep, which
+// takes it explicitly even though no other goroutine can reach qd yet), so routing its
+// replacement stitch back through enqueueLocked - which calls enforceMaxSize itself - would
+// re-enter the very loop this is called from. Every other stitch insertion (dropChunk,
+// requeueSplit) goes through enqueueLocked as normal, so capacity is enforced for them exactly
+// like any other enqueue.
+func (qd *QueueData) enqueueStitchNoEvict(item *QueuedContainerProfile) error {
+	if err := qd.queue.Enqueue(item); err != nil {
+		return err
+	}
+	qd.stitchBacklog.Add(1)
+	return nil
+}
+
+// newStitchFor builds the metadata-only replacement enqueued in place of dropped, so the
+// container's report-timestamp chain (see stitchChunk) survives the drop. SplitDepth is set to
+// qd.maxSplitDepth so a stitch that later fails and needs its own drop reason goes straight to
+// dropReasonStitchRejected rather than treating a chunk that has nothing left to give as
+// splittable.
+//
+// Attempts is inherited from dropped unless freshAttempts is set. Inheriting is load-bearing for
+// the 413/split lineage (requeueSplit, and dropChunk's split-related reasons): it's what bounds
+// the split/stitch cascade, so a payload alternating between retryable failures and 413s cannot
+// refresh its budget indefinitely by splitting. But a stitch built to repair a
+// dropReasonMaxAttemptsExhausted drop would otherwise inherit an already-exhausted counter and
+// so get exactly one try - quite possibly against the same unreachable storage that exhausted
+// the original - before being dropped un-restitched, making the repair a no-op for a sustained
+// outage. dropChunk passes freshAttempts=true for that reason only: a stitch is never
+// re-stitched, so a fresh budget still bounds total exposure at two retry windows, not an
+// unbounded one, and the cost is one extra queue slot, the same cost already paid to enqueue
+// the stitch at all.
+func (qd *QueueData) newStitchFor(dropped *QueuedContainerProfile, freshAttempts bool) *QueuedContainerProfile {
+	attempts := dropped.Attempts
+	if freshAttempts {
+		attempts = 0
+	}
+	return &QueuedContainerProfile{
+		Profile:     stitchChunk(dropped.Profile),
+		ContainerID: dropped.ContainerID,
+		Attempts:    attempts,
+		SplitDepth:  qd.maxSplitDepth,
+		IsStitch:    true,
+	}
+}
+
+// stitchBacklogFull reports whether the in-flight stitch backlog (see maxStitchBacklogFor) is
+// already at its bound. Every stitch-admission site - dropChunk, requeueSplit's lost-first-half
+// case, and enforceMaxSize's own eviction loop - must check this before building and enqueueing
+// a stitch, so the same bound holds regardless of which path is creating them; gating only
+// enforceMaxSize's loop would let a sustained run of MaxAttempts exhaustions or unsplittable
+// drops grow the backlog past the bound the loop itself relies on to terminate promptly.
+//
+// This is advisory, not a hard invariant: it reads stitchBacklog outside qd.mu, so a dropChunk
+// call on the processor goroutine can race an enforceMaxSize call under the lock and overshoot
+// the bound by one. Harmless - the bound exists to keep a single call's work small, and one
+// extra stitch doesn't change that - but worth knowing before treating it as exact.
+func (qd *QueueData) stitchBacklogFull() bool {
+	return qd.stitchBacklog.Load() >= qd.maxStitchBacklog
+}
+
+// releaseStitch decrements the resident-stitch count without letting it go below zero.
+//
+// stitchBacklog starts at zero every process start, but the disk queue may already hold
+// stitches persisted by a prior run; each of those decrements the counter as it leaves via this
+// method without ever having incremented it in this process's lifetime (see stitchBacklog's doc
+// comment). An unclamped decrement would drive the counter negative and keep it there for the
+// rest of the process, silently widening maxStitchBacklog by however many stitches were
+// resident at startup - up to maxQueueSize, which is exactly the "convert the whole queue in one
+// call" pathology the bound exists to prevent.
+func (qd *QueueData) releaseStitch() {
+	for {
+		cur := qd.stitchBacklog.Load()
+		if cur <= 0 {
+			return
+		}
+		if qd.stitchBacklog.CompareAndSwap(cur, cur-1) {
+			return
+		}
+	}
+}
+
+// enforceMaxSize evicts oldest items while the queue is at or over capacity.
+//
+// A plain eviction silently forks the evicted container's report-timestamp chain: storage can
+// only complete a profile whose consolidated chain traces back to the container's first report,
+// so one missing link hangs that container in Learning forever with no field-visible symptom
+// (issue #871). So an item evicted here that isn't already a stitch is replaced with one at the
+// tail via enqueueStitchNoEvict, the same repair dropChunk performs for its own drop paths.
+//
+// That replacement makes no net progress toward the size limit by itself - one item out, one
+// (smaller, but equally counted) item back in - so the loop condition is rechecked and eviction
+// continues onto the next-oldest item. Real progress happens only once the head is already a
+// stitch (evicted for good, never replaced - same rule as dropChunk) or once the in-flight
+// stitch backlog is exhausted, at which point this falls back to a plain drop that forks the
+// chain. Without that bound, a queue that starts out entirely full of real, never-before-
+// stitched profiles would have a single call here walk through and convert the whole queue
+// before ever making room for the new item that triggered it.
 func (qd *QueueData) enforceMaxSize() {
-	// Remove oldest items if we're at or over capacity
 	for qd.queue.Size() >= qd.maxQueueSize {
-		_, err := qd.queue.Dequeue()
+		iface, err := qd.queue.Dequeue()
 		if err != nil {
 			if errors.Is(err, dque.ErrEmpty) {
 				break
@@ -265,7 +433,56 @@ func (qd *QueueData) enforceMaxSize() {
 			logger.L().Error("error removing old item from queue", helpers.Error(err))
 			break
 		}
-		logger.L().Debug("removed oldest item due to size limit")
+
+		evicted, ok := iface.(*QueuedContainerProfile)
+		if !ok {
+			logger.L().Error("evicted item is not a QueuedContainerProfile",
+				helpers.String("type", fmt.Sprintf("%T", iface)))
+			continue
+		}
+
+		if evicted.IsStitch {
+			qd.releaseStitch()
+			logger.L().Debug("removed oldest item due to size limit, item was already a stitch")
+			continue
+		}
+
+		logger.L().Debug("removed oldest item due to size limit",
+			helpers.String("name", evicted.Profile.Name),
+			helpers.String("namespace", evicted.Profile.Namespace))
+
+		if qd.stitchBacklogFull() {
+			qd.chunksDropped.Add(1)
+			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonLRUBacklogExhausted))
+
+			logger.L().Warning("evicted container profile chunk to enforce queue size, stitch backlog is exhausted so its report chain is now forked",
+				helpers.String("name", evicted.Profile.Name),
+				helpers.String("namespace", evicted.Profile.Namespace),
+				helpers.String("containerID", evicted.ContainerID))
+			continue
+		}
+
+		qd.chunksDropped.Add(1)
+		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonLRUEvicted))
+
+		stitch := qd.newStitchFor(evicted, false)
+		if err := qd.enqueueStitchNoEvict(stitch); err != nil {
+			// evicted was already counted as dropped above; this is the same chunk's repair
+			// failing, not a second chunk, so only the reason is reported, not the counter.
+			logger.L().Warning("failed to enqueue replacement stitch chunk after LRU eviction, the report chain is now forked",
+				helpers.String("name", stitch.Profile.Name),
+				helpers.String("namespace", stitch.Profile.Namespace),
+				helpers.String("containerID", evicted.ContainerID),
+				helpers.Error(err))
+
+			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
+			continue
+		}
+
+		logger.L().Warning("evicted container profile chunk to enforce queue size, enqueued a stitch to preserve its report chain",
+			helpers.String("name", evicted.Profile.Name),
+			helpers.String("namespace", evicted.Profile.Namespace),
+			helpers.String("containerID", evicted.ContainerID))
 	}
 }
 
@@ -322,6 +539,14 @@ processLoop:
 				helpers.String("type", fmt.Sprintf("%T", iface)))
 			continue
 		}
+		if queuedProfile.IsStitch {
+			// It has left the queue for processing; enforceMaxSize's backlog bound (see its
+			// doc comment) only needs to track stitches still resident in the queue. If this
+			// attempt fails and the item is requeued or re-dropped-and-replaced below, that
+			// path re-enqueues through enqueueLocked/enqueueStitchNoEvict, which increments
+			// the backlog again.
+			qd.releaseStitch()
+		}
 
 		// Attempt to create the profile
 		err = qd.creator.CreateContainerProfileDirect(queuedProfile.Profile)
@@ -376,12 +601,7 @@ processLoop:
 				// newer profiles that could have been saved.
 				queuedProfile.Attempts++
 				if queuedProfile.Attempts >= qd.maxAttempts {
-					logger.L().Warning("dropping container profile after too many failed attempts",
-						helpers.String("name", queuedProfile.Profile.Name),
-						helpers.String("namespace", queuedProfile.Profile.Namespace),
-						helpers.String("containerID", queuedProfile.ContainerID),
-						helpers.Int("attempts", queuedProfile.Attempts),
-						helpers.Error(err))
+					qd.dropChunk(queuedProfile, dropReasonMaxAttemptsExhausted)
 					continue
 				}
 
@@ -456,16 +676,23 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 			helpers.String("containerID", parent.ContainerID),
 			helpers.Error(err))
 
+		// The parent (and both would-be halves) is counted as dropped exactly once here; the
+		// two branches below describe why its repair also failed and report a reason each,
+		// but neither increments the counter again for what is still the same lost chunk.
 		qd.chunksDropped.Add(1)
 		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 
-		stitch := &QueuedContainerProfile{
-			Profile:     stitchChunk(parent.Profile),
-			ContainerID: parent.ContainerID,
-			Attempts:    parent.Attempts,
-			SplitDepth:  qd.maxSplitDepth,
-			IsStitch:    true,
+		if qd.stitchBacklogFull() {
+			logger.L().Warning("stitch backlog is exhausted, cannot enqueue a replacement for a lost split, the report chain is now forked",
+				helpers.String("name", parent.Profile.Name),
+				helpers.String("namespace", parent.Profile.Namespace),
+				helpers.String("containerID", parent.ContainerID))
+
+			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonStitchBacklogExhausted))
+			return
 		}
+
+		stitch := qd.newStitchFor(parent, false)
 		if stitchErr := qd.enqueueLocked(stitch); stitchErr != nil {
 			logger.L().Warning("failed to enqueue replacement stitch chunk after a lost split, the report chain is now forked",
 				helpers.String("name", stitch.Profile.Name),
@@ -473,7 +700,6 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 				helpers.String("containerID", parent.ContainerID),
 				helpers.Error(stitchErr))
 
-			qd.chunksDropped.Add(1)
 			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 		}
 		return
@@ -492,24 +718,28 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 	}
 }
 
-// dropChunk discards a chunk that was rejected for its size and cannot be split further.
+// dropChunk discards a queued chunk that cannot be delivered as-is: because it was rejected for
+// its size and cannot be split further (failureSplit), or because it exhausted its retry budget
+// without ever succeeding (failureRetryable, dropReasonMaxAttemptsExhausted).
 //
 // It deliberately does NOT call errorCallback.OnQueueError: that path ends learning for the
-// whole container, which is the behaviour this change exists to remove. Losing one delta is
-// strictly better than losing every future delta.
+// whole container. A single delta failing to fit, or timing out its retry budget, says nothing
+// about whether the container is learnable - losing one delta is strictly better than losing
+// every future delta.
 //
 // It enqueues a stitch chunk in the dropped chunk's place so the report chain stays linear
-// (see chainHalves); without it, dropping one half of a pair forks the chain and hangs the
-// profile in Learning. A dropped stitch is never re-stitched: that would loop forever, since
-// neither drop path touches Attempts.
+// (see chainHalves); without it, dropping the chunk forks the chain and hangs the profile in
+// Learning. A dropped stitch is never re-stitched: that would loop forever, since neither drop
+// path touches Attempts.
 //
 // Callers must NOT hold qd.mu.
 func (qd *QueueData) dropChunk(dropped *QueuedContainerProfile, reason dropReason) {
-	logger.L().Warning("dropping oversized container profile chunk",
+	logger.L().Warning("dropping container profile chunk",
 		helpers.String("name", dropped.Profile.Name),
 		helpers.String("namespace", dropped.Profile.Namespace),
 		helpers.String("containerID", dropped.ContainerID),
 		helpers.String("reason", string(reason)),
+		helpers.Int("attempts", dropped.Attempts),
 		helpers.Int("splitDepth", dropped.SplitDepth),
 		helpers.Int("bytes", serializedSize(dropped.Profile)))
 
@@ -520,13 +750,22 @@ func (qd *QueueData) dropChunk(dropped *QueuedContainerProfile, reason dropReaso
 		return
 	}
 
-	stitch := &QueuedContainerProfile{
-		Profile:     stitchChunk(dropped.Profile),
-		ContainerID: dropped.ContainerID,
-		Attempts:    dropped.Attempts,
-		SplitDepth:  qd.maxSplitDepth,
-		IsStitch:    true,
+	// dropped is already counted as dropped above; the two branches below describe why its
+	// repair also failed and report a reason each, but neither increments the counter again
+	// for what is still the same lost chunk.
+	if qd.stitchBacklogFull() {
+		logger.L().Warning("stitch backlog is exhausted, dropping container profile chunk without a replacement, its report chain is now forked",
+			helpers.String("name", dropped.Profile.Name),
+			helpers.String("namespace", dropped.Profile.Namespace),
+			helpers.String("containerID", dropped.ContainerID))
+
+		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonStitchBacklogExhausted))
+		return
 	}
+
+	// A MaxAttempts-exhaustion drop gets its repair stitch a fresh retry budget rather than
+	// inheriting the parent's already-exhausted one - see newStitchFor's doc comment.
+	stitch := qd.newStitchFor(dropped, reason == dropReasonMaxAttemptsExhausted)
 
 	qd.mu.Lock()
 	err := qd.enqueueLocked(stitch)
@@ -539,7 +778,6 @@ func (qd *QueueData) dropChunk(dropped *QueuedContainerProfile, reason dropReaso
 			helpers.String("containerID", dropped.ContainerID),
 			helpers.Error(err))
 
-		qd.chunksDropped.Add(1)
 		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 	}
 }
@@ -561,13 +799,15 @@ func (qd *QueueData) GetQueueStats() map[string]interface{} {
 	qd.mu.Unlock()
 
 	return map[string]interface{}{
-		"size":          size,
-		"maxQueueSize":  qd.maxQueueSize,
-		"maxSplitDepth": qd.maxSplitDepth,
-		"retryInterval": qd.retryInterval.String(),
-		"running":       running,
-		"splits":        qd.splits.Load(),
-		"chunksDropped": qd.chunksDropped.Load(),
+		"size":             size,
+		"maxQueueSize":     qd.maxQueueSize,
+		"maxSplitDepth":    qd.maxSplitDepth,
+		"retryInterval":    qd.retryInterval.String(),
+		"running":          running,
+		"splits":           qd.splits.Load(),
+		"chunksDropped":    qd.chunksDropped.Load(),
+		"stitchBacklog":    qd.stitchBacklog.Load(),
+		"maxStitchBacklog": qd.maxStitchBacklog,
 	}
 }
 
@@ -610,6 +850,7 @@ func (qd *QueueData) EmptyQueue() error {
 		}
 		count++
 	}
+	qd.stitchBacklog.Store(0)
 
 	logger.L().Info("queue emptied", helpers.Int("itemsRemoved", count))
 	return nil

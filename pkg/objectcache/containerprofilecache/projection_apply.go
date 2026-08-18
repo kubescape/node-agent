@@ -179,11 +179,10 @@ func extractExecsPaths(cp *v1beta1.ContainerProfile) []string {
 // extractExecsByPath builds the path → []argv-vectors map used by
 // exec-args matchers (e.g. dynamicpathdetector.CompareExecArgs in
 // node-agent#807). Multiple ExecCalls entries with the same Path
-// APPEND to the per-path list — overlay merge in
-// mergeApplicationProfile (storage) legitimately produces several
-// ExecCalls per path, each with a distinct argv shape, and the
-// consumer must accept any of them (matthyx review on PR #807,
-// 2026-05-28).
+// APPEND to the per-path list — the storage-side profile merge
+// legitimately produces several ExecCalls per path, each with a
+// distinct argv shape, and the consumer must accept any of them
+// (see node-agent#807).
 //
 // nil-Args entries are stored as empty-but-non-nil slices so the
 // downstream matcher distinguishes "present with empty args" (a
@@ -261,4 +260,3 @@ func extractIngressAddresses(cp *v1beta1.ContainerProfile) []string {
 	}
 	return addrs
 }
-

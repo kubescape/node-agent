@@ -26,67 +26,59 @@ import (
 // always returns the same CP pointer (so the fast-path can be asserted via
 // pointer equality).
 type fakeProfileClient struct {
-	cp    *v1beta1.ContainerProfile
-	ap    *v1beta1.ApplicationProfile // returned for Get by ap.Name match (or any if overlayOnly is empty)
-	nn    *v1beta1.NetworkNeighborhood
-	cpErr error
-	apErr error
-	nnErr error
+	cp *v1beta1.ContainerProfile
+	// userCP, when non-nil, is returned by GetContainerProfile for a name
+	// matching userCP.Name (the migrated user-defined ContainerProfile). Other
+	// names fall through to cp. Lets tests exercise the new-way overlay path.
+	userCP *v1beta1.ContainerProfile
+	cpErr  error
 
-	// userManagedAP / userManagedNN, when non-nil, are returned for any
-	// GetApplicationProfile / GetNetworkNeighborhood whose name starts with
-	// the "ug-" prefix (the convention used by legacy user-managed profiles).
-	// This lets tests exercise the user-managed merge path added for
-	// Test_12_MergingProfilesTest / Test_13_MergingNetworkNeighborhoodTest
-	// without fighting the overlayOnly restriction.
-	userManagedAP *v1beta1.ApplicationProfile
-	userManagedNN *v1beta1.NetworkNeighborhood
+	// userCPsByName, when non-empty, is consulted before the cp/userCP
+	// fallbacks: a name present in the map returns its CP (nil error), a name
+	// absent returns cp/cpErr. Lets tests publish DISTINCT authored
+	// ContainerProfiles per container name ("<overlay>-<containerName>") so the
+	// per-container binding path can be exercised end-to-end.
+	userCPsByName map[string]*v1beta1.ContainerProfile
 
-	// overlayOnly, if non-empty, restricts ap/nn returns to only the given
-	// name; other names return (nil, nil). Tests that mix workload-AP/NN
-	// with overlay-AP/NN use this to keep the fixture scoped.
+	// overlayOnly, if non-empty, scopes the overlay name whose GetContainerProfile
+	// returns a genuine NotFound (or overlayCPErr). Tests use this to keep the
+	// user-defined-CP fixture scoped.
 	overlayOnly string
+
+	// overlayCPErr, when non-nil, is returned by GetContainerProfile for a
+	// name matching overlayOnly, instead of the default NotFound. Lets tests
+	// simulate a *transient* RPC failure on the user-defined-CP fetch (as
+	// opposed to a genuine "doesn't exist yet"), to prove the overlay is not
+	// permanently lost.
+	overlayCPErr error
 
 	getCPCalls int
 }
 
 var _ storage.ProfileClient = (*fakeProfileClient)(nil)
 
-func TestShouldLogOptionalUserManagedFetchError(t *testing.T) {
-	assert.False(t, shouldLogOptionalUserManagedFetchError(nil))
-	assert.False(t, shouldLogOptionalUserManagedFetchError(
-		apierrors.NewNotFound(schema.GroupResource{Group: "softwarecomposition.kubescape.io", Resource: "applicationprofiles"}, "ug-nginx"),
-	))
-	assert.True(t, shouldLogOptionalUserManagedFetchError(errors.New("boom")))
-}
-
-func (f *fakeProfileClient) GetApplicationProfile(_ context.Context, _, name string) (*v1beta1.ApplicationProfile, error) {
-	if len(name) >= 3 && name[:3] == helpersv1.UserApplicationProfilePrefix {
-		return f.userManagedAP, nil
-	}
-	if f.overlayOnly != "" && name != f.overlayOnly {
-		return nil, nil
-	}
-	return f.ap, f.apErr
-}
-func (f *fakeProfileClient) GetNetworkNeighborhood(_ context.Context, _, name string) (*v1beta1.NetworkNeighborhood, error) {
-	if len(name) >= 3 && name[:3] == helpersv1.UserNetworkNeighborhoodPrefix {
-		return f.userManagedNN, nil
-	}
-	if f.overlayOnly != "" && name != f.overlayOnly {
-		return nil, nil
-	}
-	return f.nn, f.nnErr
-}
-func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
+func (f *fakeProfileClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
 	f.getCPCalls++
+	// Name-keyed authored CPs take precedence: this is how a multi-container pod
+	// serves a different CP per "<overlay>-<containerName>" name.
+	if f.userCPsByName != nil {
+		if cp, ok := f.userCPsByName[name]; ok {
+			return cp, nil
+		}
+	}
+	if f.userCP != nil && name == f.userCP.Name {
+		return f.userCP, nil
+	}
+	// The overlay label points at overlayOnly; with no user CP published at that
+	// name it is absent (or a transient error). The base CP fetch uses the
+	// derived slug, a different name, and still gets f.cp.
+	if f.overlayOnly != "" && name == f.overlayOnly {
+		if f.overlayCPErr != nil {
+			return nil, f.overlayCPErr
+		}
+		return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, name)
+	}
 	return f.cp, f.cpErr
-}
-func (f *fakeProfileClient) ListApplicationProfiles(_ context.Context, _ string, _ int64, _ string) (*v1beta1.ApplicationProfileList, error) {
-	return &v1beta1.ApplicationProfileList{}, nil
-}
-func (f *fakeProfileClient) ListNetworkNeighborhoods(_ context.Context, _ string, _ int64, _ string) (*v1beta1.NetworkNeighborhoodList, error) {
-	return &v1beta1.NetworkNeighborhoodList{}, nil
 }
 
 // newTestCache returns a cache wired with an in-memory K8sObjectCacheMock.
@@ -168,29 +160,29 @@ func TestSharedFastPath_NoOverlay(t *testing.T) {
 	assert.NotNil(t, entryB.Projected, "entry B must have a projected profile")
 }
 
-// TestOverlayPath_DeepCopies verifies that when userAP is present the overlay
-// is merged into the projected profile.
-func TestOverlayPath_DeepCopies(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{
+// TestOverlayPath_UserDefinedCP_NewWay verifies the migrated path: when the
+// user-defined-profile label names a user-authored ContainerProfile
+// (managed-by: User), it becomes the authoritative base — UserCPRef is set and
+// the projection reflects the CP.
+func TestOverlayPath_UserDefinedCP_NewWay(t *testing.T) {
+	// A genuine authored CP carries NO learning-lifecycle annotations (no
+	// status/completion) — only managed-by: User. A CP that carried a status
+	// annotation would be treated as learned and ignored (see
+	// TestUserDefinedCP_LearnedProfileIgnored).
+	userCP := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp-1", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+			Name: "override", Namespace: "default", ResourceVersion: "uc1",
+			Annotations: map[string]string{
+				helpersv1.ManagedByMetadataKey: helpersv1.ManagedByUserValue,
+			},
 		},
-		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"NET_BIND_SERVICE"}},
 	}
-	userAP := &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "u1"},
-		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{{
-				Name:         "nginx",
-				Capabilities: []string{"NET_BIND_SERVICE"},
-			}},
-		},
-	}
-	client := &fakeProfileClient{cp: cp, ap: userAP, overlayOnly: "override"}
+	// cp: nil (learning suppressed for user-defined); userCP served at "override".
+	client := &fakeProfileClient{cp: nil, cpErr: apierrors.NewNotFound(schema.GroupResource{}, "x"), userCP: userCP}
 	c, k8s := newTestCache(t, client)
 
-	id := "container-overlay"
+	id := "container-udcp"
 	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
 
 	ev := eventContainer(id)
@@ -199,10 +191,62 @@ func TestOverlayPath_DeepCopies(t *testing.T) {
 
 	entry, ok := c.entries.Load(id)
 	require.True(t, ok)
-	assert.NotNil(t, entry.Projected, "overlay path must produce a projected profile")
-	require.NotNil(t, entry.UserAPRef)
-	assert.Equal(t, "override", entry.UserAPRef.Name)
-	assert.Equal(t, "u1", entry.UserAPRV)
+	assert.NotNil(t, entry.Projected, "user-defined CP path must produce a projected profile")
+	require.NotNil(t, entry.UserCPRef, "UserCPRef must be recorded for refresh")
+	assert.Equal(t, "override", entry.UserCPRef.Name)
+	assert.Equal(t, "uc1", entry.UserCPRV)
+}
+
+// TestOverlayPath_CPFetchTransientError_RecordsUserCPRef pins the cutover
+// semantics: when the overlay label is present but the GetContainerProfile
+// fetch at the overlay name fails *transiently* (an RPC error, not a genuine
+// absence), an entry that is still built from a present base CP must record
+// UserCPRef so the reconciler keeps probing for the user-defined CP on later
+// ticks. There is no legacy AP/NN fallback anymore — the CP is the only
+// user-defined source — so without this the authored profile would be silently
+// lost until the container restarts.
+//
+// This test fails on code that does not record UserCPRef on a transient
+// overlay-CP fetch failure and passes once it does.
+func TestOverlayPath_CPFetchTransientError_RecordsUserCPRef(t *testing.T) {
+	// A completed base CP is present (fetched by the derived slug name), but the
+	// CP fetch at the overlay name errors transiently, so userDefinedCP is nil
+	// for this add and the entry is built from the base CP.
+	baseCP := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cp-base", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
+	}
+	// The per-container fetch ("override-nginx") errors transiently. A transient
+	// error is not a fallback trigger, so the bare "override" stays the recorded
+	// retry target — proving UserCPRef is set even when this fetch fails.
+	client := &fakeProfileClient{
+		cp:           baseCP,
+		overlayOnly:  "override-nginx",
+		overlayCPErr: errors.New("etcdserver: request timed out"), // transient
+	}
+	c, k8s := newTestCache(t, client)
+
+	id := "container-cp-transient"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+
+	ev := eventContainer(id)
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "override"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	// The contract: UserCPRef is recorded even though the overlay-CP fetch failed
+	// transiently, so refreshOneEntry (which only re-fetches the CP
+	// `if e.UserCPRef != nil`) will retry it once the transient error clears.
+	require.NotNil(t, entry.UserCPRef, "UserCPRef must be recorded so the reconciler retries the CP after a transient failure")
+	assert.Equal(t, "override", entry.UserCPRef.Name)
+	assert.Equal(t, "default", entry.UserCPRef.Namespace)
 }
 
 // TestDeleteContainer_LockAndCleanup verifies that deleteContainer removes
@@ -319,6 +363,316 @@ func TestCallStackIndexBuiltFromProfile(t *testing.T) {
 	require.NotNil(t, tree.PathsByCallID)
 	_, hasCallID := tree.PathsByCallID["r1"]
 	assert.True(t, hasCallID, "call-stack tree must contain CallID 'r1' from CP")
+}
+
+// authoredCP builds a genuine user-authored ContainerProfile: managed-by: User
+// and, crucially, NO learning-lifecycle annotations (no status/completion), so
+// the authored-validation gate does not treat it as a learned profile. Its spec
+// carries a single distinctive Exec so per-container adoption is observable in
+// the projection.
+func authoredCP(name, execPath, rv string) *v1beta1.ContainerProfile {
+	return &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: "default", ResourceVersion: rv,
+			Annotations: map[string]string{
+				helpersv1.ManagedByMetadataKey: helpersv1.ManagedByUserValue,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: execPath}}},
+	}
+}
+
+// execsAllSpec is a projection spec that retains every Exec path in Values so
+// tests can assert per-container adoption via the projected allow-list.
+func execsAllSpec(hash string) objectcache.RuleProjectionSpec {
+	return objectcache.RuleProjectionSpec{
+		Execs: objectcache.FieldSpec{InUse: true, All: true},
+		Hash:  hash,
+	}
+}
+
+// TestUserDefinedCP_PerContainerBinding proves blocker #2: in a multi-container
+// pod that shares ONE user-defined-profile label value, each container must
+// adopt its OWN authored ContainerProfile, resolved by the
+// "<overlay>-<containerName>" naming convention — not the same CP for every
+// container.
+func TestUserDefinedCP_PerContainerBinding(t *testing.T) {
+	frontend := authoredCP("nw-20-multi-container-frontend", "/bin/frontend", "1")
+	sidecar := authoredCP("nw-20-multi-container-sidecar", "/bin/sidecar", "1")
+	client := &fakeProfileClient{
+		cp:    nil,
+		cpErr: apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, "learned"),
+		userCPsByName: map[string]*v1beta1.ContainerProfile{
+			"nw-20-multi-container-frontend": frontend,
+			"nw-20-multi-container-sidecar":  sidecar,
+		},
+	}
+	c, k8s := newTestCache(t, client)
+	c.SetProjectionSpec(execsAllSpec("per-container"))
+
+	cases := []struct {
+		id, cname, ownExec, otherExec, cpName string
+	}{
+		{"cid-frontend", "frontend", "/bin/frontend", "/bin/sidecar", "nw-20-multi-container-frontend"},
+		{"cid-sidecar", "sidecar", "/bin/sidecar", "/bin/frontend", "nw-20-multi-container-sidecar"},
+	}
+	for _, tc := range cases {
+		primeSharedData(t, k8s, tc.id, "wlid://cluster-a/namespace-default/deployment-nginx")
+		ev := eventContainer(tc.id)
+		ev.Runtime.ContainerName = tc.cname
+		ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "nw-20-multi-container"}
+		require.NoError(t, c.addContainer(ev, context.Background()))
+	}
+
+	for _, tc := range cases {
+		entry, ok := c.entries.Load(tc.id)
+		require.True(t, ok, "entry present for %s", tc.cname)
+		require.NotNil(t, entry.UserCPRef)
+		assert.Equal(t, tc.cpName, entry.UserCPRef.Name,
+			"%s must resolve to its per-container CP so the reconciler re-fetches the same object", tc.cname)
+		proj := c.GetProjectedContainerProfile(tc.id)
+		require.NotNil(t, proj)
+		_, hasOwn := proj.Execs.Values[tc.ownExec]
+		_, hasOther := proj.Execs.Values[tc.otherExec]
+		assert.True(t, hasOwn, "%s must adopt its OWN CP (%s present)", tc.cname, tc.ownExec)
+		assert.False(t, hasOther, "%s must NOT adopt the sibling container's CP (%s absent)", tc.cname, tc.otherExec)
+	}
+}
+
+// TestUserDefinedCP_SingleContainerBareFallback proves the single-container
+// fallback in blocker #2: when no "<overlay>-<containerName>" CP exists, the
+// resolver falls back to the bare "<overlay>" name.
+func TestUserDefinedCP_SingleContainerBareFallback(t *testing.T) {
+	bare := authoredCP("override", "/bin/only", "1")
+	client := &fakeProfileClient{
+		cp:            nil,
+		cpErr:         apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, "learned"),
+		userCPsByName: map[string]*v1beta1.ContainerProfile{"override": bare},
+	}
+	c, k8s := newTestCache(t, client)
+	c.SetProjectionSpec(execsAllSpec("bare-fallback"))
+
+	id := "cid-single"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	ev := eventContainer(id) // ContainerName "nginx" → per-container "override-nginx" is absent
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "override"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	require.NotNil(t, entry.UserCPRef)
+	assert.Equal(t, "override", entry.UserCPRef.Name, "single-container pod falls back to the bare overlay name")
+	proj := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, proj)
+	_, hasOnly := proj.Execs.Values["/bin/only"]
+	assert.True(t, hasOnly, "bare-name CP must be adopted")
+}
+
+// TestUserDefinedCP_LearnedProfileIgnored proves blocker #3 on the add path: a
+// CP published at the label name that carries a lifecycle status ("ready") is a
+// LEARNED profile, not authored. It must be ignored — never adopted and never
+// force-enforced as Completed/Full. With no other profile source, the container
+// stays pending.
+func TestUserDefinedCP_LearnedProfileIgnored(t *testing.T) {
+	learnedAtLabel := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "ready-cp", Namespace: "default", ResourceVersion: "1",
+			Annotations: map[string]string{
+				helpersv1.StatusMetadataKey:     helpersv1.Learning, // status: ready → still learning
+				helpersv1.CompletionMetadataKey: helpersv1.Partial,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: "/bin/leaked"}}},
+	}
+	client := &fakeProfileClient{
+		cp:            nil,
+		cpErr:         apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, "learned"),
+		userCPsByName: map[string]*v1beta1.ContainerProfile{"ready-cp": learnedAtLabel},
+	}
+	c, k8s := newTestCache(t, client)
+
+	id := "cid-learned-label"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	ev := eventContainer(id)
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "ready-cp"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	_, ok := c.entries.Load(id)
+	assert.False(t, ok, "a learned CP at the label name must NOT be adopted/force-enforced")
+	assert.Equal(t, 1, c.pending.Len(), "container stays pending when the label resolves only to a learned CP")
+}
+
+// TestRefreshReflectsAuthoredCPEdit_RVFreezeProof is the key proof for fix #1
+// (RV freeze). A user-defined-only container (NO learned CP — learning is
+// suppressed) is added; the entry's learned RV must be empty. When the authored
+// CP is later edited (RV bumped + spec changed), a single refresh MUST reflect
+// the edit. This only holds because entry.RV tracks the LEARNED slug (empty),
+// so the permanent 404 on that slug during refresh is not mistaken for a
+// transient error that would freeze the entry.
+func TestRefreshReflectsAuthoredCPEdit_RVFreezeProof(t *testing.T) {
+	authored := authoredCP("authored-cp-nginx", "/bin/init", "a1")
+	client := &fakeProfileClient{
+		cp:            nil,
+		cpErr:         apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, "learned"),
+		userCPsByName: map[string]*v1beta1.ContainerProfile{"authored-cp-nginx": authored},
+	}
+	c, k8s := newTestCache(t, client)
+	c.SetProjectionSpec(execsAllSpec("rv-freeze"))
+
+	id := "cid-rvfreeze"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	ev := eventContainer(id)
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "authored-cp"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	require.NotNil(t, entry.UserCPRef)
+	assert.Equal(t, "authored-cp-nginx", entry.UserCPRef.Name)
+	assert.Equal(t, "", entry.RV, "learned RV must be empty (no learned CP) — the freeze-proof invariant")
+	assert.Equal(t, "a1", entry.UserCPRV)
+
+	before := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, before)
+	_, hasInit := before.Execs.Values["/bin/init"]
+	assert.True(t, hasInit)
+	_, hasEditedYet := before.Execs.Values["/bin/edited"]
+	require.False(t, hasEditedYet, "edit not applied before it happens")
+
+	// Edit the authored CP: bump RV and append an Exec.
+	authored.ResourceVersion = "a2"
+	authored.Spec.Execs = append(authored.Spec.Execs, v1beta1.ExecCalls{Path: "/bin/edited"})
+
+	c.refreshAllEntries(context.Background())
+
+	after := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, after)
+	_, hasEditedNow := after.Execs.Values["/bin/edited"]
+	assert.True(t, hasEditedNow, "authored-CP edit MUST be reflected after one refresh (entry not frozen)")
+	updated, _ := c.entries.Load(id)
+	assert.Equal(t, "a2", updated.UserCPRV, "UserCPRV must track the edited authored CP")
+	assert.Equal(t, "", updated.RV, "learned RV stays empty across refresh")
+}
+
+// TestRefreshUserCP_NoLearnedCP covers the user-defined-only refresh path: an
+// authored CP present with NO learned CP is force-enforced Completed/Full at add
+// time, and an unchanged refresh fast-skips (same entry pointer) while keeping
+// the terminal state.
+func TestRefreshUserCP_NoLearnedCP(t *testing.T) {
+	authored := authoredCP("authored-cp-nginx", "/bin/authored", "a1")
+	client := &fakeProfileClient{
+		cp:            nil,
+		cpErr:         apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, "learned"),
+		userCPsByName: map[string]*v1beta1.ContainerProfile{"authored-cp-nginx": authored},
+	}
+	c, k8s := newTestCache(t, client)
+
+	id := "cid-nolearned"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	ev := eventContainer(id)
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "authored-cp"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Equal(t, "", entry.RV, "no learned CP → learned RV empty")
+	assert.Equal(t, "a1", entry.UserCPRV)
+	require.NotNil(t, entry.State)
+	assert.Equal(t, helpersv1.Completed, entry.State.Status, "authored CP is force-enforced Completed")
+	assert.Equal(t, helpersv1.Full, entry.State.Completion, "authored CP is force-enforced Full")
+
+	c.refreshAllEntries(context.Background())
+
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Same(t, entry, stored, "no source changed → fast-skip keeps the same entry pointer")
+	assert.Equal(t, helpersv1.Completed, stored.State.Status)
+}
+
+// TestRefreshUserCP_FastSkipWhenRVsMatch: with BOTH a learned base CP and an
+// authored CP, an unchanged refresh (learned RV + authored RV both match)
+// fast-skips and preserves the entry pointer.
+func TestRefreshUserCP_FastSkipWhenRVsMatch(t *testing.T) {
+	learned := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "learned-base", Namespace: "default", ResourceVersion: "L1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"NET_ADMIN"}},
+	}
+	authored := authoredCP("authored-cp-nginx", "/bin/authored", "a1")
+	client := &fakeProfileClient{
+		cp:            learned,
+		userCPsByName: map[string]*v1beta1.ContainerProfile{"authored-cp-nginx": authored},
+	}
+	c, k8s := newTestCache(t, client)
+
+	id := "cid-fastskip"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	ev := eventContainer(id)
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "authored-cp"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	require.NotEmpty(t, entry.RV, "learned RV recorded")
+	require.Equal(t, "a1", entry.UserCPRV, "authored RV recorded")
+
+	c.refreshAllEntries(context.Background())
+
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.Same(t, entry, stored, "matching learned RV + authored RV → fast-skip, same pointer")
+}
+
+// TestRefreshUserCP_RebuildWhenUserCPRVChanges: with the learned RV unchanged
+// but the authored CP's RV bumped, refresh rebuilds the entry and the edit is
+// reflected.
+func TestRefreshUserCP_RebuildWhenUserCPRVChanges(t *testing.T) {
+	learned := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "learned-base", Namespace: "default", ResourceVersion: "L1",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+	}
+	authored := authoredCP("authored-cp-nginx", "/bin/v1", "a1")
+	client := &fakeProfileClient{
+		cp:            learned,
+		userCPsByName: map[string]*v1beta1.ContainerProfile{"authored-cp-nginx": authored},
+	}
+	c, k8s := newTestCache(t, client)
+	c.SetProjectionSpec(execsAllSpec("usercp-rebuild"))
+
+	id := "cid-usercp-rebuild"
+	primeSharedData(t, k8s, id, "wlid://cluster-a/namespace-default/deployment-nginx")
+	ev := eventContainer(id)
+	ev.K8s.PodLabels = map[string]string{helpersv1.UserDefinedProfileMetadataKey: "authored-cp"}
+	require.NoError(t, c.addContainer(ev, context.Background()))
+
+	entry, ok := c.entries.Load(id)
+	require.True(t, ok)
+	require.Equal(t, "a1", entry.UserCPRV)
+
+	// Bump ONLY the authored CP (learned RV stays L1).
+	authored.ResourceVersion = "a2"
+	authored.Spec.Execs = append(authored.Spec.Execs, v1beta1.ExecCalls{Path: "/bin/v2"})
+
+	c.refreshAllEntries(context.Background())
+
+	stored, ok := c.entries.Load(id)
+	require.True(t, ok)
+	assert.NotSame(t, entry, stored, "authored RV change → rebuild, new pointer")
+	assert.Equal(t, "a2", stored.UserCPRV, "UserCPRV updated to the edited authored CP")
+	proj := c.GetProjectedContainerProfile(id)
+	require.NotNil(t, proj)
+	_, hasV2 := proj.Execs.Values["/bin/v2"]
+	assert.True(t, hasV2, "the authored-CP edit is reflected after rebuild")
 }
 
 // TestGetContainerProfile_Miss sanity-checks the nil path returns nil and a
