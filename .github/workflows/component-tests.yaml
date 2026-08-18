@@ -83,8 +83,8 @@ jobs:
           Test_08_ContainerProfilePatching,
           Test_10_MalwareDetectionTest,
           Test_11_EndpointTest,
-          Test_12_MergingProfilesTest,
-          Test_13_MergingNetworkNeighborhoodTest,
+          Test_12_AuthoredMultiSubtypeProfile,
+          Test_13_NaturalLearningLifecycle,
           Test_14_RulePoliciesTest,
           Test_15_CompletedApCannotBecomeReadyAgain,
           Test_16_ApNotStuckOnRestart,
@@ -96,11 +96,18 @@ jobs:
           Test_22_AlertOnPartialNetworkProfileTest,
           Test_23_RuleCooldownTest,
           Test_24_ProcessTreeDepthTest,
+          Test_25_RuleCooldownExactThreshold,
           Test_27_ApplicationProfileOpens,
+          Test_28_UserDefinedNetworkNeighborhood,
+          Test_30_IgnoreExcludeAndLearningDuration,
           Test_32_UnexpectedProcessArguments,
+          Test_33_AnalyzeOpensWildcardAnchoring,
           Test_34_NetworkNeighborsCIDRCollapse,
+          Test_35_ExecTTYFieldTest,
           Test_36_MultiContainerPerContainerBinding,
-          Test_48_MultiSubtypeGroupedProfileDocument
+          Test_43_RelativeOpenPathResolution,
+          Test_48_MultiSubtypeGroupedProfileDocument,
+          Test_49_EphemeralContainerFullTreatment
         ]
     steps:
       - name: Checkout code
