@@ -1,5 +1,3 @@
-This fork main = `mirrormain`
-
 # NodeAgent
 
 <p align="center">
