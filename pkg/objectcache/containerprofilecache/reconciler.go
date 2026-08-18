@@ -344,7 +344,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		return cpErr
 	})
 	if cpErr != nil {
-		if !apierrors.IsNotFound(cpErr) && e.RV != "" {
+		if !apierrors.IsNotFound(cpErr) {
 			logger.L().Debug("refreshOneEntry: CP fetch failed transiently; keeping cached entry",
 				helpers.String("containerID", id),
 				helpers.String("cpName", e.CPName),
@@ -374,7 +374,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, e.UserCPRef.Namespace, e.UserCPRef.Name)
 			return userCPErr
 		})
-		if userCPErr != nil && !apierrors.IsNotFound(userCPErr) && e.UserCPRV != "" {
+		if userCPErr != nil && !apierrors.IsNotFound(userCPErr) {
 			logger.L().Debug("refreshOneEntry: user-defined CP fetch failed transiently; keeping cached entry",
 				helpers.String("containerID", id),
 				helpers.String("name", e.UserCPRef.Name),
