@@ -83,6 +83,9 @@ type containerProfileNetworkFuncSpec struct {
 	arity      int
 	// call invokes the shared implementation method on l.
 	call func(l *containerProfileNetworkLibrary, args []ref.Val) ref.Val
+	// noCache bypasses the functionCache: a map argument has no stable scalar
+	// cache key, and the selector match is cheap (O(selectors)).
+	noCache bool
 }
 
 var containerProfileNetworkFuncSpecs = []containerProfileNetworkFuncSpec{
@@ -140,6 +143,26 @@ var containerProfileNetworkFuncSpecs = []containerProfileNetworkFuncSpec{
 			return l.wasAddressPortProtocolInIngress(a[0], a[1], a[2], a[3])
 		},
 	},
+	{
+		name:       "was_selector_in_egress",
+		argTypes:   []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType)},
+		resultType: cel.BoolType,
+		arity:      3,
+		call: func(l *containerProfileNetworkLibrary, a []ref.Val) ref.Val {
+			return l.wasSelectorInEgress(a[0], a[1], a[2])
+		},
+		noCache: true,
+	},
+	{
+		name:       "was_selector_in_ingress",
+		argTypes:   []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType)},
+		resultType: cel.BoolType,
+		arity:      3,
+		call: func(l *containerProfileNetworkLibrary, a []ref.Val) ref.Val {
+			return l.wasSelectorInIngress(a[0], a[1], a[2])
+		},
+		noCache: true,
+	},
 }
 
 // declarationsWithPrefix builds the cel.FunctionOpt map for every function in
@@ -164,6 +187,9 @@ func (l *containerProfileNetworkLibrary) declarationsWithPrefix(namePrefix, over
 					}
 					if l.detailedMetrics && l.metrics != nil {
 						l.metrics.IncHelperCall(fullName)
+					}
+					if spec.noCache {
+						return cache.ConvertProfileNotAvailableErrToBool(spec.call(l, values), false)
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return spec.call(l, args)
@@ -270,6 +296,9 @@ func (e *containerProfileNetworkCostEstimator) EstimateCallCost(function, overlo
 	case "cp.is_domain_in_egress", "cp.is_domain_in_ingress":
 		// Cache lookup + O(n) list iteration + O(m) slice.Contains on DNS names per entry
 		cost = 35
+	case "cp.was_selector_in_egress", "cp.was_selector_in_ingress":
+		// O(selectors) label-set match per peer entry
+		cost = 30
 	case "cp.was_address_port_protocol_in_egress", "cp.was_address_port_protocol_in_ingress":
 		// Cache lookup + O(n) address search + O(p) nested port/protocol matching
 		cost = 45

@@ -99,22 +99,20 @@ func TestWasAddressPortProtocolInEgress(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address-only matching.
 			name:           "Invalid port",
 			containerID:    "test-container-id",
 			address:        "192.168.1.100",
 			port:           9999,
 			protocol:       "TCP",
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address-only matching.
 			name:           "Invalid protocol",
 			containerID:    "test-container-id",
 			address:        "192.168.1.100",
 			port:           80,
 			protocol:       "UDP",
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
 			name:           "Invalid address",
@@ -235,22 +233,20 @@ func TestWasAddressPortProtocolInIngress(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address-only matching.
 			name:           "Invalid port",
 			containerID:    "test-container-id",
 			address:        "172.16.0.10",
 			port:           9999,
 			protocol:       "TCP",
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address-only matching.
 			name:           "Invalid protocol",
 			containerID:    "test-container-id",
 			address:        "172.16.0.10",
 			port:           8080,
 			protocol:       "UDP",
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
 			name:           "Invalid address",
@@ -405,7 +401,7 @@ func TestWasAddressPortProtocolWithNilPort(t *testing.T) {
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
 
-	// v1 degradation: address-only matching; nil port in profile no longer checked.
+	// nil port in a profile entry = any-port wildcard for that entry's addresses.
 	result := lib.wasAddressPortProtocolInEgress(
 		types.String("test-container-id"),
 		types.String("192.168.1.100"),
