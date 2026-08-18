@@ -1600,24 +1600,21 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		require.NoError(t, err, "get container profiles")
 
 		passed := true
-		// A fully resolved open path never begins with a numeric first segment.
-		// One that does is a scrambled, prefix-stripped path: a /proc/<pid> residue
-		// (/17/setgroups) or a k8s atomic-writer "..<ts>" projected-volume prefix
-		// that lost its root (/8011833/master.conf, /03_16_52_09.../token).
-		// Regression guard for #721/#872 and the full-path resolution fix.
+		// A fully resolved open path never begins with a numeric first segment;
+		// one that does is a scrambled, prefix-stripped /proc residue.
 		scrambledPath := regexp.MustCompile(`^/[0-9]`)
-		checkOpens := func(cpName, containerName string, opens []v1beta1.OpenCalls) {
+		checkOpens := func(name, containerName string, opens []v1beta1.OpenCalls) {
 			for _, open := range opens {
 				if !strings.HasPrefix(open.Path, "/") {
-					t.Errorf("recorded path must be absolute: got %q (%s container %s)", open.Path, cpName, containerName)
+					t.Errorf("recorded path must be absolute: got %q (%s container %s)", open.Path, name, containerName)
 					passed = false
 				}
 				if open.Path == "." {
-					t.Errorf("recorded path must not be relative dot: got %q (%s container %s)", open.Path, cpName, containerName)
+					t.Errorf("recorded path must not be relative dot: got %q (%s container %s)", open.Path, name, containerName)
 					passed = false
 				}
 				if scrambledPath.MatchString(open.Path) {
-					t.Errorf("scrambled (prefix-stripped) open path: got %q (%s container %s) — a resolved path never begins with a numeric segment", open.Path, cpName, containerName)
+					t.Errorf("scrambled (prefix-stripped) open path: got %q (%s container %s) - a resolved path never begins with a numeric segment", open.Path, name, containerName)
 					passed = false
 				}
 			}
@@ -1627,12 +1624,93 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			checkOpens(profile.Name, profile.Labels["kubescape.io/workload-container-name"], profile.Spec.Opens)
 		}
 
+		k8sClient := k8sinterface.NewKubernetesApi()
+		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+		// runc-heavy leg: the EXACT redis manifest the distro demo deploys
+		// (helm-rendered, digest-pinned) - bitnami container init opens procfs
+		// through detached fsopen/fsmount handles, the natural reproducer for
+		// prefix-stripped paths. Positive control rejects an event-less gadget.
+		bns := testutils.NewRandomNamespace()
+		rendered, err := os.ReadFile(path.Join(utils.CurrentDir(), "resources/bitnami-redis-rendered.yaml"))
+		require.NoError(t, err)
+		dyn := k8sClient
+		for _, doc := range strings.Split(string(rendered), "\n---\n") {
+			if strings.TrimSpace(doc) == "" {
+				continue
+			}
+			var obj unstructured.Unstructured
+			jd, cerr := yaml.YAMLToJSON([]byte(doc))
+			require.NoError(t, cerr)
+			if string(jd) == "null" {
+				continue
+			}
+			require.NoError(t, obj.UnmarshalJSON(jd))
+			obj.SetNamespace(bns.Name)
+			gvr, gerr := k8sinterface.GetGroupVersionResource(obj.GetKind())
+			require.NoError(t, gerr, "gvr for %s", obj.GetKind())
+			_, aerr := dyn.DynamicClient.Resource(gvr).Namespace(bns.Name).Create(context.Background(), &obj, metav1.CreateOptions{})
+			require.NoError(t, aerr, "apply rendered %s/%s", obj.GetKind(), obj.GetName())
+		}
+		require.Eventually(t, func() bool {
+			pods, perr := dyn.KubernetesClient.CoreV1().Pods(bns.Name).List(context.Background(),
+				metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=redis"})
+			if perr != nil || len(pods.Items) == 0 {
+				return false
+			}
+			for _, c := range pods.Items[0].Status.ContainerStatuses {
+				if !c.Ready {
+					return false
+				}
+			}
+			return len(pods.Items[0].Status.ContainerStatuses) > 0
+		}, 8*time.Minute, 5*time.Second, "rendered redis statefulset pod must become Ready")
+		var bprofiles []v1beta1.ContainerProfile
+		require.Eventually(t, func() bool {
+			cps, lerr := storageClient.ContainerProfiles(bns.Name).List(context.TODO(), metav1.ListOptions{})
+			if lerr != nil || len(cps.Items) == 0 {
+				return false
+			}
+			for _, cp := range cps.Items {
+				if cp.Annotations["kubescape.io/status"] == "completed" && cp.Labels["kubescape.io/workload-container-name"] == "redis" {
+					bprofiles = cps.Items
+					return true
+				}
+			}
+			return false
+		}, 8*time.Minute, 10*time.Second, "learned redis ContainerProfile must complete")
+		for i := range bprofiles {
+			checkOpens(bprofiles[i].Namespace+"/"+bprofiles[i].Name, bprofiles[i].Labels["kubescape.io/workload-container-name"], bprofiles[i].Spec.Opens)
+		}
+
+		// Deterministic gadget positive control, race-free: the profile is
+		// completed (frozen), so a procfs read now must surface as an R0002
+		// alert carrying the exactly-rooted path. A silent gadget produces no
+		// alert; a scrambling gadget produces "/1/cmdline".
+		pods, perr := dyn.KubernetesClient.CoreV1().Pods(bns.Name).List(context.Background(),
+			metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=redis"})
+		require.NoError(t, perr)
+		require.NotEmpty(t, pods.Items)
+		// completed profile needs a reconciler tick to reach the enforcement cache
+		time.Sleep(45 * time.Second)
+		stdout, stderr, eerr := testutils.ExecIntoPod(pods.Items[0].Name, bns.Name, []string{"cat", "/proc/1/cmdline"}, "redis")
+		require.NoError(t, eerr, "probe exec must run (stdout=%q stderr=%q)", stdout, stderr)
+		require.Eventually(t, func() bool {
+			alerts, aerr := testutils.GetAlerts(bns.Name)
+			if aerr != nil {
+				return false
+			}
+			for _, a := range alerts {
+				if a.Labels["comm"] == "cat" && (a.Labels["rule_id"] == "R0001" || a.Labels["rule_id"] == "R0002") {
+					return true
+				}
+			}
+			return false
+		}, 3*time.Minute, 5*time.Second, "the probe exec/open must alert - gadget positive control (silent pipeline)")
+
 		// Distro-wide scan: the scrambled paths originally surfaced in real distro
 		// workloads (redis/valkey mounted-etc, health-check scripts, service-account
 		// tokens), so scan EVERY learned ContainerProfile across all namespaces, not
 		// only this test's workload. Best-effort: a failed cluster-wide list is not fatal.
-		k8sClient := k8sinterface.NewKubernetesApi()
-		storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 		if allCPs, listErr := storageClient.ContainerProfiles(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{}); listErr != nil {
 			t.Logf("distro-wide scrambled-path scan skipped (cluster-wide list failed): %v", listErr)
 		} else {
@@ -1645,7 +1723,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		if !passed {
 			detail = "found non-absolute or '.' paths in recorded profile"
 		}
-		addResult("recorded_profile_absolute_paths", "(auto-learned)", "(nginx startup)", false, passed, detail)
+		addResult("recorded_profile_absolute_paths", "(auto-learned)", "(nginx + bitnami-redis startup)", false, passed, detail)
 	})
 
 	// ---------------------------------------------------------------
