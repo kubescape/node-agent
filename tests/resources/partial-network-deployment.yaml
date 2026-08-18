@@ -1,0 +1,26 @@
+# Single-container pod for Test_21 (network egress enforcement). Bound to the
+# authored ContainerProfile "partial21-overlay" via the
+# kubescape.io/user-defined-profile label. The curl image carries curl, nslookup
+# and wget, which the test uses to drive DNS (R0005) and TCP egress (R0011).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: partial21
+  name: partial21
+spec:
+  selector:
+    matchLabels:
+      app: partial21
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: partial21
+        # Binds the pod to the authored ContainerProfile of this name.
+        kubescape.io/user-defined-profile: partial21-overlay
+    spec:
+      containers:
+      - name: curl
+        image: docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058
+        command: ["sleep", "infinity"]

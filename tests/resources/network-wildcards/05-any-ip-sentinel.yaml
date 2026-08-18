@@ -9,23 +9,16 @@
 #               Producers should normally enumerate concrete IPs/CIDRs.
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-05-any-sentinel
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
-    # Make the operational risk explicit:
-    sbob.io/discouraged-wildcards: "ipAddresses-any-sentinel"
 spec:
   matchLabels:
     app: nw-05
-  containers:
-  - name: client
-    egress:
-    - identifier: any-ip-development-profile
-      type: external
-      ipAddresses:
-        - "*"
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
+  egress:
+  - identifier: any-ip-development-profile
+    type: external
+    ipAddresses:
+      - "*"
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}

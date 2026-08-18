@@ -1,0 +1,16 @@
+# Authored ContainerProfile for the "app" container of the percontainer pod, resolved as
+# "<label>-<containerName>" == "percontainer-app". Allows id but not whoami (the inverse
+# of percontainer-sidecar), so per-container binding is verifiable.
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: percontainer-app
+spec:
+  execs:
+  - path: /usr/bin/sleep
+    args:
+    - /usr/bin/sleep
+    - infinity
+  - path: /usr/bin/id
+    args:
+    - /usr/bin/id

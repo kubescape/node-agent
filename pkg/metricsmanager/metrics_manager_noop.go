@@ -42,6 +42,8 @@ func (m *MetricsNoop) SetProjectionSpecAllField(_ string, _ bool)               
 func (m *MetricsNoop) ObserveProjectionApplyDuration(_ time.Duration)                     {}
 func (m *MetricsNoop) IncProjectionReconcileTriggered(_ string)                           {}
 func (m *MetricsNoop) IncHelperCall(_ string)                                             {}
+func (m *MetricsNoop) IncUserDefinedProfileUnresolved(_ string)                           {}
+func (m *MetricsNoop) IncUserDefinedProfileAdopted(_ string)                              {}
 func (m *MetricsNoop) SetProjectionUndeclaredRulesDetail(_ []string)                      {}
 func (m *MetricsNoop) ObserveProfileRawSize(_ float64)                                    {}
 func (m *MetricsNoop) ObserveProfileProjectedSize(_ float64)                              {}

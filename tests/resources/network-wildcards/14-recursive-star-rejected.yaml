@@ -17,22 +17,16 @@
 #   3. Assert no NetworkNeighborhood named `nw-14-recursive-rejected` exists
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-14-recursive-rejected
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
-    sbob.io/expected-admission: "rejected"
 spec:
   matchLabels:
     app: nw-14
-  containers:
-  - name: client
-    egress:
-    - identifier: invalid-recursive
-      type: external
-      dnsNames:
-        - "**.example.com."     # INVALID — admission MUST reject
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
+  egress:
+  - identifier: invalid-recursive
+    type: external
+    dnsNames:
+      - "**.example.com."     # INVALID — admission MUST reject
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}

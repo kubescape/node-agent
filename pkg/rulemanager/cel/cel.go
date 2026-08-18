@@ -14,10 +14,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/containerprofile"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/containerprofilenetwork"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/net"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/networkneighborhood"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/parse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/process"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
@@ -62,8 +62,8 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metric
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),
 		k8s.K8s(objectCache.K8sObjectCache(), cfg),
-		applicationprofile.AP(objectCache, cfg, mm...),
-		networkneighborhood.NN(objectCache, cfg, mm...),
+		containerprofile.CP(objectCache, cfg, mm...),
+		containerprofilenetwork.CPNetwork(objectCache, cfg, mm...),
 		parse.Parse(cfg),
 		net.Net(cfg),
 		process.Process(cfg),

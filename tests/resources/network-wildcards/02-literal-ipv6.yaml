@@ -7,21 +7,16 @@
 # Spec ref:     §5.7 — "textual canonicalisation is the verifier's responsibility"
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-02-literal-ipv6
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-02
-  containers:
-  - name: client
-    egress:
-    - identifier: literal-ipv6
-      type: external
-      ipAddresses:
-        - "2001:db8::1"
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
+  egress:
+  - identifier: literal-ipv6
+    type: external
+    ipAddresses:
+      - "2001:db8::1"
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}

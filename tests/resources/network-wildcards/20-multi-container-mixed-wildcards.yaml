@@ -15,40 +15,44 @@
 # This is also the most realistic deployment shape: a frontend that calls
 # external APIs plus an in-cluster sidecar that talks to DBs/caches.
 #
+# container: frontend
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
-  name: nw-20-multi-container
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
+  name: nw-20-multi-container-frontend
 spec:
   matchLabels:
     app: nw-20
-  containers:
-  - name: frontend
-    egress:
-    - identifier: external-api
-      type: external
-      dnsNames:
-        - "*.example.com."          # leading-* RFC 4592
-        - "api.partner.io."         # literal
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
-  - name: sidecar
-    egress:
-    - identifier: in-cluster-services
-      type: internal
-      ipAddresses:
-        - "10.0.0.0/8"              # cluster pod CIDR
-        - "172.16.0.0/12"           # alt cluster service CIDR
-      ports:
-        - {name: TCP-6379, protocol: TCP, port: 6379}    # redis
-        - {name: TCP-5432, protocol: TCP, port: 5432}    # postgres
-    ingress:
-    - identifier: from-frontend
-      type: internal
-      ipAddresses:
-        - "10.244.0.0/16"           # narrower — only the frontend pod's CIDR
-      ports:
-        - {name: TCP-9090, protocol: TCP, port: 9090}    # sidecar metrics
+  egress:
+  - identifier: external-api
+    type: external
+    dnsNames:
+      - "*.example.com."          # leading-* RFC 4592
+      - "api.partner.io."         # literal
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}
+---
+# container: sidecar
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: nw-20-multi-container-sidecar
+spec:
+  matchLabels:
+    app: nw-20
+  egress:
+  - identifier: in-cluster-services
+    type: internal
+    ipAddresses:
+      - "10.0.0.0/8"              # cluster pod CIDR
+      - "172.16.0.0/12"           # alt cluster service CIDR
+    ports:
+      - {name: TCP-6379, protocol: TCP, port: 6379}    # redis
+      - {name: TCP-5432, protocol: TCP, port: 5432}    # postgres
+  ingress:
+  - identifier: from-frontend
+    type: internal
+    ipAddresses:
+      - "10.244.0.0/16"           # narrower — only the frontend pod's CIDR
+    ports:
+      - {name: TCP-9090, protocol: TCP, port: 9090}    # sidecar metrics

@@ -13,24 +13,19 @@
 #               behaviour
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-07-mixed-ip-list
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-07
-  containers:
-  - name: client
-    egress:
-    - identifier: mixed-shapes
-      type: external
-      ipAddresses:
-        - "162.0.217.171"     # IPv4 literal
-        - "10.0.0.0/8"        # IPv4 CIDR
-        - "2001:db8::/32"     # IPv6 CIDR
-        - "*"                 # any (sentinel — overrides everything; here for test)
-      ports:
-        - {name: TCP-443, protocol: TCP, port: 443}
+  egress:
+  - identifier: mixed-shapes
+    type: external
+    ipAddresses:
+      - "162.0.217.171"     # IPv4 literal
+      - "10.0.0.0/8"        # IPv4 CIDR
+      - "2001:db8::/32"     # IPv6 CIDR
+      - "*"                 # any (sentinel — overrides everything; here for test)
+    ports:
+      - {name: TCP-443, protocol: TCP, port: 443}

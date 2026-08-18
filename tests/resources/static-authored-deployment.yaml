@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: static-authored
+  labels:
+    app: static-authored
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: static-authored
+  template:
+    metadata:
+      labels:
+        app: static-authored
+        kubescape.io/user-defined-profile: static-authored
+    spec:
+      containers:
+      - name: app
+        image: debian:12-slim
+        command: ["/usr/bin/sleep", "infinity"]

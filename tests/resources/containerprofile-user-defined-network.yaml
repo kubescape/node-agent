@@ -1,0 +1,60 @@
+# Example: a user-authored ContainerProfile. Bind it to a workload with the pod
+# label kubescape.io/user-defined-profile: <metadata.name>. An authored profile
+# carries only name + spec (namespace is injected by the tooling) and no
+# learning-lifecycle annotations.
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: curl-28-overlay
+spec:
+  # Allowed executables (R0001).
+  execs:
+  - path: /bin/sleep
+  - path: /usr/bin/curl
+  - path: /usr/bin/nslookup
+  - path: /usr/bin/wget
+  # Allowed syscalls (R0003).
+  syscalls:
+  - socket
+  - connect
+  - sendto
+  - recvfrom
+  - read
+  - write
+  - close
+  - openat
+  - mmap
+  - mprotect
+  - munmap
+  - fcntl
+  - ioctl
+  - poll
+  - epoll_create1
+  - epoll_ctl
+  - epoll_wait
+  - bind
+  - listen
+  - accept4
+  - getsockopt
+  - setsockopt
+  - getsockname
+  - getpid
+  - fstat
+  - rt_sigaction
+  - rt_sigprocmask
+  - writev
+  # The workload pod selector (was NetworkNeighborhood.spec.labelSelector).
+  matchLabels:
+    app: curl-28
+  # Allowed egress (R0005 domains, R0011 addresses). Anything not listed alerts.
+  egress:
+  - identifier: fusioncore-egress
+    type: external
+    dns: fusioncore.ai.
+    dnsNames:
+    - fusioncore.ai.
+    ipAddress: 162.0.217.171
+    ports:
+    - name: TCP-80
+      protocol: TCP
+      port: 80

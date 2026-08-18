@@ -17,22 +17,17 @@
 #   replication stream.
 #
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
-kind: NetworkNeighborhood
+kind: ContainerProfile
 metadata:
   name: nw-16-egress-none
-  namespace: "{{NAMESPACE}}"
-  annotations:
-    sbob.io/spec-version: "0.0.2"
 spec:
   matchLabels:
     app: nw-16
-  containers:
-  - name: locked-down-worker
-    egress: []        # NONE — any outbound traffic is a violation
-    ingress:
-    - identifier: control-plane-only
-      type: internal
-      ipAddresses:
-        - "10.0.0.1"
-      ports:
-        - {name: TCP-9000, protocol: TCP, port: 9000}
+  egress: []        # NONE — any outbound traffic is a violation
+  ingress:
+  - identifier: control-plane-only
+    type: internal
+    ipAddresses:
+      - "10.0.0.1"
+    ports:
+      - {name: TCP-9000, protocol: TCP, port: 9000}
