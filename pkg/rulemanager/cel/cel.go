@@ -64,6 +64,13 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metric
 		k8s.K8s(objectCache.K8sObjectCache(), cfg),
 		containerprofile.CP(objectCache, cfg, mm...),
 		containerprofilenetwork.CPNetwork(objectCache, cfg, mm...),
+		// Deprecated backward-compat aliases for the ap.*/nn.* CEL namespaces
+		// renamed to cp.* in #864 (no aliases were kept at the time, which
+		// silently disabled any pre-existing user rule still using the old
+		// names). Retained for a transition window; remove once user rules
+		// have migrated to cp.*.
+		containerprofile.AP(objectCache, cfg, mm...),
+		containerprofilenetwork.NN(objectCache, cfg, mm...),
 		parse.Parse(cfg),
 		net.Net(cfg),
 		process.Process(cfg),
