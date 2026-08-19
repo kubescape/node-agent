@@ -2,7 +2,10 @@ package tracers
 
 import (
 	"context"
+	"sync"
+	"time"
 
+	"github.com/cenkalti/backoff"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
@@ -21,14 +24,24 @@ import (
 const (
 	dnsImageName = "ghcr.io/inspektor-gadget/gadget/trace_dns:v0.48.1"
 	dnsTraceName = "trace_dns"
+
+	// dnsStartMaxRetries bounds retries of a failed gadget start. Startup
+	// failures in this class are transient/timing-dependent (see
+	// armosec/private-node-agent#511: a CO-RE/BTF cache race in the pinned
+	// cilium/ebpf fork can abort relocation for any kernel module with
+	// split BTF present at that moment), so a single failed attempt does
+	// not mean the gadget can never start.
+	dnsStartMaxRetries = 5
 )
 
 var _ containerwatcher.TracerInterface = (*DNSTracer)(nil)
 
 // DNSTracer implements TracerInterface for events
 type DNSTracer struct {
-	eventCallback      containerwatcher.ResultCallback
-	gadgetCtx          *gadgetcontext.GadgetContext
+	eventCallback containerwatcher.ResultCallback
+	gadgetCtxMu   sync.Mutex
+	gadgetCtx     *gadgetcontext.GadgetContext
+
 	kubeManager        operators.DataOperator
 	ociStore           *orasoci.ReadOnlyStore
 	runtime            runtime.Runtime
@@ -55,9 +68,11 @@ func NewDNSTracer(
 	}
 }
 
-// Start initializes and starts the tracer
-func (dt *DNSTracer) Start(ctx context.Context) error {
-	dt.gadgetCtx = gadgetcontext.New(
+// newGadgetContext builds a fresh GadgetContext for a single run attempt and
+// records it as the tracer's current one, so Stop() always cancels whichever
+// attempt is in flight.
+func (dt *DNSTracer) newGadgetContext(ctx context.Context) *gadgetcontext.GadgetContext {
+	gadgetCtx := gadgetcontext.New(
 		ctx,
 		// This is the image that contains the gadget we want to run.
 		dnsImageName,
@@ -72,13 +87,40 @@ func (dt *DNSTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithName(dnsTraceName),
 		gadgetcontext.WithOrasReadonlyTarget(dt.ociStore),
 	)
+
+	dt.gadgetCtxMu.Lock()
+	dt.gadgetCtx = gadgetCtx
+	dt.gadgetCtxMu.Unlock()
+
+	return gadgetCtx
+}
+
+// Start initializes and starts the tracer
+func (dt *DNSTracer) Start(ctx context.Context) error {
+	dt.newGadgetContext(ctx)
+
 	go func() {
 		params := map[string]string{
 			"operator.oci.ebpf.paths": "true", // CWD paths in events
 		}
-		err := dt.runtime.RunGadget(dt.gadgetCtx, nil, params)
+
+		attempt := 0
+		bo := backoff.WithContext(backoff.WithMaxRetries(backoff.NewExponentialBackOff(), dnsStartMaxRetries-1), ctx)
+		err := backoff.RetryNotify(func() error {
+			attempt++
+			// Each attempt gets its own GadgetContext: a failed run leaves
+			// the previous one terminated, and it also becomes the current
+			// one Stop() will cancel.
+			gadgetCtx := dt.newGadgetContext(ctx)
+			return dt.runtime.RunGadget(gadgetCtx, nil, params)
+		}, bo, func(err error, next time.Duration) {
+			logger.L().Warning("Error running gadget, retrying",
+				helpers.String("gadget", dnsTraceName),
+				helpers.Int("attempt", attempt),
+				helpers.Error(err))
+		})
 		if err != nil {
-			logger.L().Error("Error running gadget", helpers.String("gadget", dt.gadgetCtx.Name()), helpers.Error(err))
+			logger.L().Error("Error running gadget", helpers.String("gadget", dnsTraceName), helpers.Int("attempts", attempt), helpers.Error(err))
 		}
 	}()
 	return nil
@@ -89,8 +131,13 @@ func (dt *DNSTracer) Stop() error {
 	if dt.socketEnricherOp != nil {
 		dt.socketEnricherOp.Close()
 	}
-	if dt.gadgetCtx != nil {
-		dt.gadgetCtx.Cancel()
+
+	dt.gadgetCtxMu.Lock()
+	gadgetCtx := dt.gadgetCtx
+	dt.gadgetCtxMu.Unlock()
+
+	if gadgetCtx != nil {
+		gadgetCtx.Cancel()
 	}
 	return nil
 }
