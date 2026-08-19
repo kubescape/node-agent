@@ -72,6 +72,30 @@ func TestDNSTracerStartGivesUpAfterMaxRetries(t *testing.T) {
 	require.NoError(t, dt.Stop())
 }
 
+func TestDNSTracerStopStopsRetryingMidBackoff(t *testing.T) {
+	fr := &fakeRuntime{failCount: dnsStartMaxRetries + 10} // always fail
+	dt := NewDNSTracer(nil, fr, nil, nil, nil, nil)
+
+	require.NoError(t, dt.Start(context.Background()))
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&fr.calls) >= 1
+	}, 5*time.Second, 10*time.Millisecond, "expected at least one attempt")
+
+	// Stop while an attempt is in flight or the loop is waiting between
+	// attempts - not after the context passed to Start was ever canceled
+	// by the caller, only by Stop itself. Before the fix, Stop only
+	// canceled the in-flight GadgetContext: that made the current attempt
+	// fail, but the retry loop's own context was untouched, so
+	// RetryNotify started yet another attempt anyway.
+	require.NoError(t, dt.Stop())
+
+	callsAtStop := atomic.LoadInt32(&fr.calls)
+	time.Sleep(1 * time.Second)
+	require.Equal(t, callsAtStop, atomic.LoadInt32(&fr.calls),
+		"expected no further RunGadget calls after Stop")
+}
+
 func TestDNSTracerStartStopsRetryingWhenContextCanceled(t *testing.T) {
 	fr := &fakeRuntime{failCount: dnsStartMaxRetries + 10} // always fail
 	dt := NewDNSTracer(nil, fr, nil, nil, nil, nil)

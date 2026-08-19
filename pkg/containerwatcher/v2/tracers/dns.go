@@ -39,8 +39,12 @@ var _ containerwatcher.TracerInterface = (*DNSTracer)(nil)
 // DNSTracer implements TracerInterface for events
 type DNSTracer struct {
 	eventCallback containerwatcher.ResultCallback
-	gadgetCtxMu   sync.Mutex
-	gadgetCtx     *gadgetcontext.GadgetContext
+
+	mu        sync.Mutex
+	gadgetCtx *gadgetcontext.GadgetContext
+	// cancel stops the retry loop started by Start, independently of
+	// whichever GadgetContext is currently in flight. See Stop.
+	cancel context.CancelFunc
 
 	kubeManager        operators.DataOperator
 	ociStore           *orasoci.ReadOnlyStore
@@ -88,16 +92,22 @@ func (dt *DNSTracer) newGadgetContext(ctx context.Context) *gadgetcontext.Gadget
 		gadgetcontext.WithOrasReadonlyTarget(dt.ociStore),
 	)
 
-	dt.gadgetCtxMu.Lock()
+	dt.mu.Lock()
 	dt.gadgetCtx = gadgetCtx
-	dt.gadgetCtxMu.Unlock()
+	dt.mu.Unlock()
 
 	return gadgetCtx
 }
 
 // Start initializes and starts the tracer
 func (dt *DNSTracer) Start(ctx context.Context) error {
-	dt.newGadgetContext(ctx)
+	// The retry loop gets its own cancelable context, independent of
+	// whichever GadgetContext is currently in flight, so Stop can halt
+	// retries even between attempts (see Stop).
+	ctx, cancel := context.WithCancel(ctx)
+	dt.mu.Lock()
+	dt.cancel = cancel
+	dt.mu.Unlock()
 
 	go func() {
 		params := map[string]string{
@@ -132,10 +142,19 @@ func (dt *DNSTracer) Stop() error {
 		dt.socketEnricherOp.Close()
 	}
 
-	dt.gadgetCtxMu.Lock()
+	dt.mu.Lock()
+	cancel := dt.cancel
 	gadgetCtx := dt.gadgetCtx
-	dt.gadgetCtxMu.Unlock()
+	dt.mu.Unlock()
 
+	// Stop the retry loop first: canceling only the in-flight GadgetContext
+	// below would make that one attempt fail, but RetryNotify would then
+	// start a new one from a fresh, uncanceled context - retrying after
+	// Stop was called. Canceling this context makes the backoff wrapper
+	// give up instead.
+	if cancel != nil {
+		cancel()
+	}
 	if gadgetCtx != nil {
 		gadgetCtx.Cancel()
 	}
