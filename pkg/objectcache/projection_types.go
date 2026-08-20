@@ -57,7 +57,9 @@ type FieldSpec struct {
 }
 
 // AddrPortGroup pairs one neighbor entry's addresses with its allowed ports.
-// Empty Ports means any port (port 0 or no ports declared = wildcard).
+// Ports == nil means the neighbor declared no ports stanza (indistinguishable
+// from an empty one after a storage round-trip) and matches any port; a
+// non-empty map matches only its literal (protocol, port) keys.
 type AddrPortGroup struct {
 	Addrs []string
 	Ports map[string]struct{}
@@ -79,16 +81,17 @@ func ExtractAddrPorts(neighbors []v1beta1.NetworkNeighbor) []AddrPortGroup {
 		if len(addrs) == 0 {
 			continue
 		}
+		// The only port wildcard is an absent (or empty — protobuf cannot tell
+		// them apart) ports stanza. A listed entry always restricts: an explicit
+		// port (0 included) is a literal, a nil port contributes nothing.
 		ports := make(map[string]struct{}, len(n.Ports))
-		wildcard := len(n.Ports) == 0
 		for _, p := range n.Ports {
-			if p.Port == nil || *p.Port == 0 {
-				wildcard = true
+			if p.Port == nil {
 				continue
 			}
 			ports[PortKey(string(p.Protocol), *p.Port)] = struct{}{}
 		}
-		if wildcard {
+		if len(n.Ports) == 0 {
 			ports = nil
 		}
 		groups = append(groups, AddrPortGroup{Addrs: addrs, Ports: ports})

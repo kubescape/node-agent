@@ -401,14 +401,15 @@ func TestWasAddressPortProtocolWithNilPort(t *testing.T) {
 		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
 	}
 
-	// nil port in a profile entry = any-port wildcard for that entry's addresses.
+	// A listed entry with a nil port contributes nothing: the only port
+	// wildcard is an ABSENT ports stanza, so these addresses stay restricted.
 	result := lib.wasAddressPortProtocolInEgress(
 		types.String("test-container-id"),
 		types.String("192.168.1.100"),
 		types.Int(80),
 		types.String("TCP"),
 	)
-	assert.Equal(t, types.Bool(true), result)
+	assert.Equal(t, types.Bool(false), result)
 
 	result = lib.wasAddressPortProtocolInIngress(
 		types.String("test-container-id"),
@@ -416,5 +417,5 @@ func TestWasAddressPortProtocolWithNilPort(t *testing.T) {
 		types.Int(8080),
 		types.String("TCP"),
 	)
-	assert.Equal(t, types.Bool(true), result)
+	assert.Equal(t, types.Bool(false), result)
 }

@@ -64,7 +64,7 @@ func matchIPField(field *objectcache.ProjectedField, observed string) bool {
 
 // matchAddrPort reports whether observed (address, protocol, port) falls within
 // any single neighbor entry: its addresses match AND the entry allows the port
-// (empty Ports = any port). Address-only entries thus stay wildcard on ports.
+// (nil Ports = no ports stanza = any port; a populated map matches literal keys only).
 func matchAddrPort(groups []objectcache.AddrPortGroup, address, protocol string, port int32) bool {
 	if address == "" {
 		return false
@@ -75,7 +75,7 @@ func matchAddrPort(groups []objectcache.AddrPortGroup, address, protocol string,
 		if !networkmatch.MatchIP(g.Addrs, address) {
 			continue
 		}
-		if len(g.Ports) == 0 {
+		if g.Ports == nil {
 			return true
 		}
 		if _, ok := g.Ports[key]; ok {
