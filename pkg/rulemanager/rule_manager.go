@@ -297,8 +297,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	if enrichedEvent.SourceContext == nil || enrichedEvent.SourceContext.Context() == contextdetection.Kubernetes {
 		rules = rm.ruleBindingCache.ListRulesForPod(namespace, pod)
 	} else {
-		// TODO: rule filtering based on context
-		rules = rm.ruleBindingCache.GetRuleCreator().CreateAllRules()
+		rules = rm.ruleBindingCache.GetRuleCreator().CreateRulesForContext(enrichedEvent.SourceContext.Context())
 	}
 
 	if len(rules) == 0 {

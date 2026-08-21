@@ -1,6 +1,7 @@
 package rulecreator
 
 import (
+	"github.com/kubescape/node-agent/pkg/contextdetection"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -25,6 +26,7 @@ type RuleCreator interface {
 	CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule
 	CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule
 	CreateAllRules() []typesv1.Rule
+	CreateRulesForContext(ctx contextdetection.EventSourceContext) []typesv1.Rule
 	GetAllRuleIDs() []string
 
 	// Dynamic rule management methods for CRD sync
