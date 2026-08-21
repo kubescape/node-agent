@@ -13,7 +13,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/cilium/ebpf v0.20.0
+	github.com/cilium/ebpf v0.22.0
 	github.com/crewjam/rfc5424 v0.1.0
 	github.com/cyphar/filepath-securejoin v0.6.0
 	github.com/deckarep/golang-set/v2 v2.8.0
@@ -99,7 +99,7 @@ require (
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20250520111509-a70c2aa677fa // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Azure/go-ntlmssp v0.1.1 // indirect
-	github.com/BurntSushi/toml v1.5.0 // indirect
+	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/CycloneDX/cyclonedx-go v0.9.2 // indirect
 	github.com/DataDog/zstd v1.5.7 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.32.0 // indirect
@@ -472,9 +472,7 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20260513134836-aa8a4c2613db
-
-replace github.com/cilium/ebpf => github.com/matthyx/ebpf v0.0.0-20260421101317-8a32d06def6c
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20260819074828-9494a925bd43
 
 replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
 
