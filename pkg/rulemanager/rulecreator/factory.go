@@ -92,6 +92,9 @@ func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 }
 
 func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
 	var rules []typesv1.Rule
 	for i := range r.Rules {
 		if r.Rules[i].Prefilter == nil {
@@ -103,6 +106,9 @@ func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
 }
 
 func (r *RuleCreatorImpl) CreateRulesForContext(ctx contextdetection.EventSourceContext) []typesv1.Rule {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
 	var rules []typesv1.Rule
 	for i := range r.Rules {
 		if !RuleMatchesContext(&r.Rules[i], ctx) {
