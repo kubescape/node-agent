@@ -272,20 +272,16 @@ func TestWasAddressPortProtocolInEgress_PortWrapRejected(t *testing.T) {
 		},
 	}, nil)
 
-	// See TestWasAddressPortProtocolInEgress_WithCIDR for the
-	// port/protocol regression note. The port-range guard ([0, 65535])
-	// still applies — what's gone is port-specific matching: any in-range
-	// port matches if the address matches.
 	cases := []struct {
 		name string
 		port int64
 		want bool
 	}{
 		{"in-range hit", 443, true},
-		{"in-range miss", 444, true},                // was: false (port mismatch). Now matches: address-only after projection-v1.
-		{"wrap-to-443 rejected", 4294967739, false}, // (1<<32)+443 — range guard fires
-		{"negative rejected", -1, false},            // range guard fires
-		{"too-large rejected", 65536, false},        // range guard fires
+		{"in-range miss", 444, false},
+		{"wrap-to-443 rejected", 4294967739, false},
+		{"negative rejected", -1, false},
+		{"too-large rejected", 65536, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -350,27 +346,17 @@ func TestWasAddressPortProtocolInEgress_WithCIDR(t *testing.T) {
 		},
 	}, nil)
 
-	// NOTE: upstream's projection-v1 (PR #799) explicitly drops port/protocol
-	// granularity from the address surface — the comment in network.go reads
-	// "port/protocol projection (AddressPortsByAddr) is out of scope for v1;
-	// degrade to address-only matching". So the matcher now only checks IP.
-	//
-	// Spec §4.7 still says ports[] is per-neighbor; the runtime gap is a
-	// known limitation flagged in the rebase commit. Test expectations
-	// updated to match runtime reality. Bringing port/protocol back is a
-	// follow-up: would need projection_apply to surface a per-address
-	// (port, protocol) set into ProjectedContainerProfile and the CEL
-	// helper to consult it.
 	cases := []struct {
 		observed string
 		port     int64
 		proto    string
 		want     bool
 	}{
-		{"10.1.2.3", 443, "TCP", true},  // CIDR match (port/proto not enforced)
-		{"10.1.2.3", 80, "TCP", true},   // was: wrong port — now matches address-only
-		{"10.1.2.3", 443, "UDP", true},  // was: wrong protocol — now matches address-only
-		{"11.0.0.1", 443, "TCP", false}, // outside CIDR — still rejected
+		{"10.1.2.3", 443, "TCP", true},
+		{"10.1.2.3", 80, "TCP", false},
+		{"10.1.2.3", 443, "UDP", false},
+		{"11.0.0.1", 443, "TCP", false},
+		{"10.1.2.3", 443, "tcp", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.observed, func(t *testing.T) {

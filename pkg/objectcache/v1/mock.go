@@ -193,6 +193,9 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 		}
 	}
 
+	pcp.EgressAddrPorts = objectcache.ExtractAddrPorts(cp.Spec.Egress)
+	pcp.IngressAddrPorts = objectcache.ExtractAddrPorts(cp.Spec.Ingress)
+
 	return pcp
 }
 

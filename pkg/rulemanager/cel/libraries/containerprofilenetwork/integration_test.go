@@ -209,28 +209,24 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check non-existent egress address with port and protocol",
 			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 9999, "TCP")`,
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check non-existent ingress address with port and protocol",
 			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 9999, "TCP")`,
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check wrong protocol for existing address and port",
 			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "UDP")`,
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check wrong protocol for existing ingress address and port",
 			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "UDP")`,
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
 			name:           "Complex network check with port and protocol - egress",
@@ -243,10 +239,9 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			// v1 degradation: both sides match on address only → true.
 			name:           "Mixed valid and invalid port protocol checks",
 			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "TCP") && cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 9999, "TCP")`,
-			expectedResult: true,
+			expectedResult: false,
 		},
 	}
 

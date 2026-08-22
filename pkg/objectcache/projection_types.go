@@ -1,9 +1,24 @@
 package objectcache
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// PeerSelector carries a single network-neighbor entry's identity selectors
+// (podSelector + namespaceSelector) through the projection so the
+// cp.was_selector_in_{ingress,egress} CEL helpers can resolve a runtime peer
+// IP to a pod and match it by LABEL rather than by (volatile) IP. The address
+// surfaces (Ingress/EgressAddresses) still carry the ipAddress/CIDR form for
+// the was_address_in_* helpers; these are complementary.
+type PeerSelector struct {
+	PodSelector       *metav1.LabelSelector
+	NamespaceSelector *metav1.LabelSelector
+}
 
 // PathMatcher is implemented by the trie-based matchers in containerprofilecache.
 type PathMatcher interface {
@@ -41,9 +56,57 @@ type FieldSpec struct {
 	SuffixMatcher PathMatcher
 }
 
+// AddrPortGroup pairs one neighbor entry's addresses with its allowed ports.
+// Ports == nil means the neighbor declared no ports stanza (indistinguishable
+// from an empty one after a storage round-trip) and matches any port; a
+// non-empty map matches only its literal (protocol, port) keys.
+type AddrPortGroup struct {
+	Addrs []string
+	Ports map[string]struct{}
+}
+
+func PortKey(protocol string, port int32) string {
+	return strings.ToUpper(protocol) + "-" + strconv.Itoa(int(port))
+}
+
+func ExtractAddrPorts(neighbors []v1beta1.NetworkNeighbor) []AddrPortGroup {
+	var groups []AddrPortGroup
+	for i := range neighbors {
+		n := &neighbors[i]
+		var addrs []string
+		if n.IPAddress != "" {
+			addrs = append(addrs, n.IPAddress)
+		}
+		addrs = append(addrs, n.IPAddresses...)
+		if len(addrs) == 0 {
+			continue
+		}
+		// The only port wildcard is an absent (or empty — protobuf cannot tell
+		// them apart) ports stanza. A listed entry always restricts: an explicit
+		// port (0 included) is a literal, a nil port contributes nothing.
+		ports := make(map[string]struct{}, len(n.Ports))
+		for _, p := range n.Ports {
+			if p.Port == nil {
+				continue
+			}
+			ports[PortKey(string(p.Protocol), *p.Port)] = struct{}{}
+		}
+		if len(n.Ports) == 0 {
+			ports = nil
+		}
+		groups = append(groups, AddrPortGroup{Addrs: addrs, Ports: ports})
+	}
+	return groups
+}
+
 // ProjectedContainerProfile is the cache-resident compact form. Pure node-agent
 // internal type; never serialized. Replaces *v1beta1.ContainerProfile in the cache.
 type ProjectedContainerProfile struct {
+	// Namespace is the profiled workload's own namespace; a peer entry whose
+	// NamespaceSelector is nil matches only peers in this namespace (the learned
+	// encoding and the NetworkPolicyPeer semantic for an absent namespaceSelector).
+	Namespace string
+
 	Opens            ProjectedField
 	Execs            ProjectedField
 	Endpoints        ProjectedField
@@ -53,6 +116,18 @@ type ProjectedContainerProfile struct {
 	EgressAddresses  ProjectedField
 	IngressDomains   ProjectedField
 	IngressAddresses ProjectedField
+
+	// IngressPeers / EgressPeers carry the podSelector+namespaceSelector of each
+	// network-neighbor entry (dropped by the address/domain projection) so the
+	// cp.was_selector_in_{ingress,egress} helpers can match a runtime peer by
+	// label. Always projected in full (not gated by a rule surface) since they
+	// are small and only populated when the profile actually declares selectors.
+	IngressPeers []PeerSelector
+	EgressPeers  []PeerSelector
+
+	// IngressAddrPorts / EgressAddrPorts group each neighbor's addresses with its ports for was_address_port_protocol_in_*.
+	IngressAddrPorts []AddrPortGroup
+	EgressAddrPorts  []AddrPortGroup
 
 	// ExecsByPath carries the per-Path Args slices from cp.Spec.Execs so
 	// downstream consumers (e.g. dynamicpathdetector.CompareExecArgs used
