@@ -2,10 +2,10 @@ package rulemanager
 
 import (
 	"slices"
-	"strings"
 
 	"github.com/kubescape/node-agent/pkg/contextdetection"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 )
 
@@ -33,7 +33,6 @@ func (v *RulePolicyValidator) Validate(ruleId string, process string, pcp *objec
 	return false, nil
 }
 
-// RuleAppliesToContext checks if a rule should execute in the given context
 func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.ContextInfo) bool {
 	var currentContext contextdetection.EventSourceContext
 	if contextInfo == nil {
@@ -41,30 +40,5 @@ func RuleAppliesToContext(rule *typesv1.Rule, contextInfo contextdetection.Conte
 	} else {
 		currentContext = contextInfo.Context()
 	}
-
-	// container is a meta-context matching any containerized workload (kubernetes, standalone, container, ecs)
-	isContainerContext := currentContext == contextdetection.Kubernetes ||
-		currentContext == contextdetection.Standalone ||
-		currentContext == contextdetection.Container ||
-		currentContext == contextdetection.ECS
-
-	var hasContextTags bool
-	for _, tag := range rule.Tags {
-		if ctx, found := strings.CutPrefix(tag, "context:"); found {
-			if ctx == string(currentContext) {
-				return true
-			}
-			if ctx == string(contextdetection.Container) && isContainerContext {
-				return true
-			}
-			hasContextTags = true
-		}
-	}
-
-	// No context specified in tags: default to kubernetes only (backward compatible)
-	if !hasContextTags {
-		return currentContext == contextdetection.Kubernetes
-	}
-
-	return false
+	return rulecreator.RuleMatchesContext(rule, currentContext)
 }

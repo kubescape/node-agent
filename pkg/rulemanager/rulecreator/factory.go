@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/kubescape/node-agent/pkg/contextdetection"
 	"github.com/kubescape/node-agent/pkg/rulemanager/prefilter"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -91,8 +92,28 @@ func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 }
 
 func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
 	var rules []typesv1.Rule
 	for i := range r.Rules {
+		if r.Rules[i].Prefilter == nil {
+			r.Rules[i].Prefilter = prefilter.ParseWithDefaults(r.Rules[i].State, nil)
+		}
+		rules = append(rules, r.Rules[i])
+	}
+	return rules
+}
+
+func (r *RuleCreatorImpl) CreateRulesForContext(ctx contextdetection.EventSourceContext) []typesv1.Rule {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	var rules []typesv1.Rule
+	for i := range r.Rules {
+		if !RuleMatchesContext(&r.Rules[i], ctx) {
+			continue
+		}
 		if r.Rules[i].Prefilter == nil {
 			r.Rules[i].Prefilter = prefilter.ParseWithDefaults(r.Rules[i].State, nil)
 		}

@@ -1,6 +1,7 @@
 package rulecreator
 
 import (
+	"github.com/kubescape/node-agent/pkg/contextdetection"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -47,6 +48,16 @@ func (r *RuleCreatorMock) CreateRulePolicyRulesByEventType(eventType utils.Event
 
 func (r *RuleCreatorMock) CreateAllRules() []typesv1.Rule {
 	return []typesv1.Rule{}
+}
+
+func (r *RuleCreatorMock) CreateRulesForContext(ctx contextdetection.EventSourceContext) []typesv1.Rule {
+	var rules []typesv1.Rule
+	for i := range r.Rules {
+		if RuleMatchesContext(&r.Rules[i], ctx) {
+			rules = append(rules, r.Rules[i])
+		}
+	}
+	return rules
 }
 
 func (r *RuleCreatorMock) GetAllRuleIDs() []string {
