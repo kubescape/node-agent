@@ -3931,6 +3931,19 @@ func Test_50_ServiceRefNetworkNeighbor(t *testing.T) {
 	)
 	port80, port443, port53 := int32(80), int32(443), int32(53)
 
+	// The shipped R0011 ignores private destinations, so in-cluster lateral
+	// movement — the very thing a named-Service allowlist narrows down — cannot
+	// trip it. R9911 is the same predicate restricted to internal addresses,
+	// applied for this test only and bound to this suite's pods, so no other
+	// namespace's expectations move.
+	rulesPath := path.Join(utils.CurrentDir(), "resources/serviceref-rules.yaml")
+	bindingPath := path.Join(utils.CurrentDir(), "resources/serviceref-rulebinding.yaml")
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", rulesPath), "apply serviceRef test rules")
+	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", rulesPath)
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", bindingPath), "apply serviceRef test rule binding")
+	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", bindingPath)
+	time.Sleep(20 * time.Second)
+
 	ns := testutils.NewRandomNamespace()
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
@@ -4050,22 +4063,24 @@ func Test_50_ServiceRefNetworkNeighbor(t *testing.T) {
 		}
 		// Two further reconcile intervals of steady-state traffic.
 		time.Sleep(90 * time.Second)
+		assert.Equal(t, 0, countRule("R9911"),
+			"apiserver/DNS/helm-repo egress is fully named by serviceRef+serviceSelector — no internal-egress alert may fire")
 		assert.Equal(t, 0, countRule("R0011"),
-			"apiserver/DNS/helm-repo egress is fully named by serviceRef+serviceSelector — R0011 must NOT fire")
+			"no external egress is expected from the controller either")
 	})
 
 	// Phase 2 — the GitOps source of truth is tampered with: primary is
 	// repointed at decoy-repo, a sibling Service on the same port that the
 	// role=helm-repo selector does not cover. source-controller fetches it on
 	// its own next reconcile. This is the lateral move a serviceCIDR entry hides.
-	t.Run("sibling_service_pivot_fires_r0011", func(t *testing.T) {
-		before := countRule("R0011")
+	t.Run("sibling_service_pivot_fires_alert", func(t *testing.T) {
+		before := countRule("R9911")
 		patch := []byte(fmt.Sprintf(`{"spec":{"url":"http://decoy-repo.%s.svc.cluster.local./"}}`, ns.Name))
 		_, e := repoClient.Patch(context.TODO(), "primary", types.MergePatchType, patch, metav1.PatchOptions{})
 		require.NoError(t, e, "repoint HelmRepository at the decoy Service")
 		require.Eventually(t, func() bool {
-			return countRule("R0011") > before
+			return countRule("R9911") > before
 		}, 4*time.Minute, 15*time.Second,
-			"egress to an unlisted sibling Service MUST fire R0011 — the selector is narrow, not a blanket")
+			"egress to an unlisted sibling Service MUST alert — the selector is narrow, not a blanket")
 	})
 }
