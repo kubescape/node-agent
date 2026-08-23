@@ -3907,91 +3907,165 @@ func Test_49_EphemeralContainerFullTreatment(t *testing.T) {
 	}, 2*time.Minute, 10*time.Second, "id was not in the ephemeral container's learned profile — it must fire R0001 (detected + alerted like any other container)")
 }
 
-// Test_50_ServiceRefNetworkNeighbor validates the serviceRef selector end to
-// end (k8sstormcenter/node-agent#92): a workload whose ContainerProfile
-// allowlists egress by Service NAME (default/kubernetes — the apiserver, a
-// service every workload legitimately reaches) must NOT fire R0011 for that
-// egress, while egress to a real but UNLISTED in-cluster Service (kube-dns)
-// MUST still fire R0011. That contrast is the whole point of serviceRef over a
-// broad serviceCIDR ipAddresses entry: a narrow, portable allowlist that does
-// not blind R0011 to lateral movement. No toy target manifests — the peers are
-// the cluster's own infrastructure Services.
+// Test_50_ServiceRefNetworkNeighbor validates serviceRef/serviceSelector end to
+// end (k8sstormcenter/node-agent#92) against REAL GitOps traffic: a Flux
+// source-controller reconciling HelmRepository CRs. Its egress is authored
+// purely as Kubernetes-native selectors — serviceRef default/kubernetes for the
+// apiserver, serviceRef kube-system/kube-dns for name resolution, and a
+// serviceSelector role=helm-repo fanning across the two repo Services it is
+// allowed to fetch. Nothing is exec'd and no address is hardcoded; the
+// controller's own reconcile loop generates every connection.
+//
+// The negative is the lateral move a broad serviceCIDR entry would hide: the
+// HelmRepository URL is repointed at decoy-repo — a sibling Service on the same
+// port, backed by its own pod, carrying none of the selector's labels — and the
+// controller itself fetches it. R0011 MUST fire for that and MUST NOT fire for
+// the allowlisted Services.
 func Test_50_ServiceRefNetworkNeighbor(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
-	getClusterIP := func(t *testing.T, ns, name string) string {
-		t.Helper()
-		k := k8sinterface.NewKubernetesApi()
-		svc, err := k.KubernetesClient.CoreV1().Services(ns).Get(context.TODO(), name, metav1.GetOptions{})
-		require.NoError(t, err, "must read %s/%s ClusterIP", ns, name)
-		require.NotEmpty(t, svc.Spec.ClusterIP)
-		return svc.Spec.ClusterIP
+	const (
+		cpName        = "serviceref-flux-cp"
+		containerName = "manager"
+	)
+	port80, port443, port53 := int32(80), int32(443), int32(53)
+
+	ns := testutils.NewRandomNamespace()
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	// Authored profile: NETWORK ONLY. No syscalls/execs — they are irrelevant to
+	// a network test and only add false-positive surface. Every peer is named,
+	// never addressed.
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: cpName, Namespace: ns.Name},
+		Spec: v1beta1.ContainerProfileSpec{
+			LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "source-controller"}},
+			Egress: []v1beta1.NetworkNeighbor{
+				{
+					Identifier:          "apiserver",
+					Type:                v1beta1.CommunicationTypeEgress,
+					ServiceRefNamespace: "default",
+					ServiceRefName:      "kubernetes",
+					Ports:               []v1beta1.NetworkPort{{Name: "TCP-443", Protocol: v1beta1.ProtocolTCP, Port: &port443}},
+				},
+				{
+					Identifier:          "cluster-dns",
+					Type:                v1beta1.CommunicationTypeEgress,
+					ServiceRefNamespace: "kube-system",
+					ServiceRefName:      "kube-dns",
+					Ports: []v1beta1.NetworkPort{
+						{Name: "UDP-53", Protocol: v1beta1.ProtocolUDP, Port: &port53},
+						{Name: "TCP-53", Protocol: v1beta1.ProtocolTCP, Port: &port53},
+					},
+				},
+				{
+					Identifier:        "helm-repos",
+					Type:              v1beta1.CommunicationTypeEgress,
+					ServiceSelector:   &metav1.LabelSelector{MatchLabels: map[string]string{"role": "helm-repo"}},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns.Name}},
+					Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: v1beta1.ProtocolTCP, Port: &port80}},
+				},
+			},
+		},
 	}
-	countR0011 := func(alerts []testutils.Alert) int {
+	_, err := storageClient.ContainerProfiles(ns.Name).Create(context.Background(), cp, metav1.CreateOptions{})
+	require.NoError(t, err, "create authored ContainerProfile")
+	require.Eventually(t, func() bool {
+		_, e := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), cpName, v1.GetOptions{})
+		return e == nil
+	}, 30*time.Second, time.Second, "authored CP must be in storage before pod deploy")
+
+	require.NoError(t, testutils.ApplyMultiDocDir(ns.Name, path.Join(utils.CurrentDir(), "resources/serviceref-suite")),
+		"apply flux source-controller + helm repo suite")
+
+	waitDeploy := func(name string) {
+		t.Helper()
+		require.Eventually(t, func() bool {
+			d, e := k8sClient.KubernetesClient.AppsV1().Deployments(ns.Name).Get(context.TODO(), name, metav1.GetOptions{})
+			return e == nil && d.Status.ReadyReplicas > 0
+		}, 3*time.Minute, 5*time.Second, "%s must become ready", name)
+	}
+	waitDeploy("helm-repo")
+	waitDeploy("decoy-repo")
+	waitDeploy("source-controller")
+
+	countRule := func(ruleID string) int {
+		alerts, _ := testutils.GetAlerts(ns.Name)
 		n := 0
 		for _, a := range alerts {
-			if a.Labels["rule_id"] == "R0011" {
+			if a.Labels["rule_id"] == ruleID && a.Labels["container_name"] == containerName {
 				n++
 			}
 		}
 		return n
 	}
-	waitAlerts := func(t *testing.T, ns string) []testutils.Alert {
-		t.Helper()
-		var alerts []testutils.Alert
-		require.Eventually(t, func() bool {
-			var err error
-			alerts, err = testutils.GetAlerts(ns)
-			return err == nil
-		}, 60*time.Second, 5*time.Second, "must be able to fetch alerts")
-		time.Sleep(10 * time.Second)
-		alerts, _ = testutils.GetAlerts(ns)
-		return alerts
+
+	helmRepoGVR := schema.GroupVersionResource{Group: "source.toolkit.fluxcd.io", Version: "v1", Resource: "helmrepositories"}
+	repoClient := k8sClient.DynamicClient.Resource(helmRepoGVR).Namespace(ns.Name)
+	newRepo := func(name, svc string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "source.toolkit.fluxcd.io/v1",
+			"kind":       "HelmRepository",
+			"metadata":   map[string]interface{}{"name": name, "namespace": ns.Name},
+			// Trailing-dot FQDN: absolute, so the resolver does not walk the
+			// search list and emit extra lookups.
+			"spec": map[string]interface{}{
+				"interval": "30s",
+				"url":      fmt.Sprintf("http://%s.%s.svc.cluster.local./", svc, ns.Name),
+			},
+		}}
+	}
+	repoReady := func(name string) bool {
+		obj, e := repoClient.Get(context.TODO(), name, metav1.GetOptions{})
+		if e != nil {
+			return false
+		}
+		conds, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+		for _, c := range conds {
+			m, ok := c.(map[string]interface{})
+			if ok && m["type"] == "Ready" && m["status"] == "True" {
+				return true
+			}
+		}
+		return false
 	}
 
-	ns := testutils.NewRandomNamespace()
-	_ = applyUserDefinedContainerProfile(t, ns.Name, "resources/containerprofile-serviceref-network.yaml")
-
-	wl, err := testutils.NewTestWorkload(ns.Name,
-		path.Join(utils.CurrentDir(), "resources/serviceref-client-deployment.yaml"))
-	require.NoError(t, err)
-	require.NoError(t, wl.WaitForReady(80))
-	// Let node-agent load the bound profile AND sync its Service informer
-	// (serviceRef resolves against live cluster state) before generating traffic.
+	// Let node-agent bind the profile and fill its Service/EndpointSlice caches
+	// before any reconcile traffic is judged.
 	time.Sleep(40 * time.Second)
 
-	apiserverIP := getClusterIP(t, "default", "kubernetes")
-	t.Logf("apiserver ClusterIP=%s (serviceRef-allowed); unlisted egress target=1.1.1.1:80", apiserverIP)
-
-	// Phase 1 — egress to the apiserver, allowlisted by serviceRef
-	// default/kubernetes. The TCP connect is what R0011 evaluates; -k so curl
-	// attempts it despite the self-signed cert.
-	t.Run("serviceref_allowed_no_r0011", func(t *testing.T) {
-		for i := 0; i < 3; i++ {
-			so, se, e := wl.ExecIntoPod([]string{"curl", "-skm", "5", fmt.Sprintf("https://%s:443/healthz", apiserverIP)}, "curl")
-			t.Logf("curl apiserver → err=%v out=%q stderr=%q", e, so, se)
+	// Phase 1 — the controller reconciles both allowlisted repo Services while
+	// continuously talking to the apiserver and cluster DNS. Every one of those
+	// peers is named by the profile, so no egress alert may fire.
+	t.Run("selector_allowed_no_alert", func(t *testing.T) {
+		for _, r := range []struct{ name, svc string }{{"primary", "helm-primary"}, {"mirror", "helm-mirror"}} {
+			_, e := repoClient.Create(context.TODO(), newRepo(r.name, r.svc), metav1.CreateOptions{})
+			require.NoError(t, e, "create HelmRepository %s", r.name)
 		}
-		alerts := waitAlerts(t, wl.Namespace)
-		assert.Equal(t, 0, countR0011(alerts),
-			"apiserver egress is allowlisted by serviceRef default/kubernetes — R0011 must NOT fire")
+		for _, n := range []string{"primary", "mirror"} {
+			require.Eventually(t, func() bool { return repoReady(n) }, 3*time.Minute, 10*time.Second,
+				"HelmRepository %s must reconcile (real fetch through an allowlisted Service)", n)
+		}
+		// Two further reconcile intervals of steady-state traffic.
+		time.Sleep(90 * time.Second)
+		assert.Equal(t, 0, countRule("R0011"),
+			"apiserver/DNS/helm-repo egress is fully named by serviceRef+serviceSelector — R0011 must NOT fire")
 	})
 
-	// Phase 2 — egress NOT covered by the serviceRef must still fire R0011,
-	// proving serviceRef is a NARROW allowlist (only default/kubernetes), not a
-	// blanket that suppresses everything. Raw-IP egress to 1.1.1.1:80 is the
-	// proven R0011 trigger in this suite (mirrors Test_28c) and is the faithful
-	// analog of the flux RCA, where R0011 fired for the external github egress
-	// the named-service allowlist did not cover.
-	t.Run("uncovered_egress_fires_r0011", func(t *testing.T) {
-		before := countR0011(waitAlerts(t, wl.Namespace))
-		for i := 0; i < 3; i++ {
-			so, se, e := wl.ExecIntoPod([]string{"curl", "-sm", "5", "http://1.1.1.1:80"}, "curl")
-			t.Logf("curl 1.1.1.1 (uncovered) → err=%v out=%q stderr=%q", e, so, se)
-		}
+	// Phase 2 — the GitOps source of truth is tampered with: primary is
+	// repointed at decoy-repo, a sibling Service on the same port that the
+	// role=helm-repo selector does not cover. source-controller fetches it on
+	// its own next reconcile. This is the lateral move a serviceCIDR entry hides.
+	t.Run("sibling_service_pivot_fires_r0011", func(t *testing.T) {
+		before := countRule("R0011")
+		patch := []byte(fmt.Sprintf(`{"spec":{"url":"http://decoy-repo.%s.svc.cluster.local./"}}`, ns.Name))
+		_, e := repoClient.Patch(context.TODO(), "primary", types.MergePatchType, patch, metav1.PatchOptions{})
+		require.NoError(t, e, "repoint HelmRepository at the decoy Service")
 		require.Eventually(t, func() bool {
-			return countR0011(waitAlerts(t, wl.Namespace)) > before
-		}, 3*time.Minute, 15*time.Second,
-			"egress uncovered by serviceRef MUST fire R0011 — serviceRef is narrow, not a blanket allow")
+			return countRule("R0011") > before
+		}, 4*time.Minute, 15*time.Second,
+			"egress to an unlisted sibling Service MUST fire R0011 — the selector is narrow, not a blanket")
 	})
 }

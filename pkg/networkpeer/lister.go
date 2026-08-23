@@ -126,6 +126,31 @@ func (l *InformerLister) endpointIPs(namespace, service string) []string {
 	return dedupe(ips)
 }
 
+// TrimService and TrimEndpointSlice are informer TransformFuncs that drop the
+// bulk the resolver never reads — managedFields and annotations (1–4 KiB per
+// real object), and for EndpointSlices every per-endpoint field but Addresses —
+// before objects enter the cluster-wide cache. Wire via Informer().SetTransform
+// so a DaemonSet's per-node Service/EndpointSlice cache stays small. Identity
+// and resourceVersion are preserved so listing/indexing is unaffected.
+func TrimService(obj interface{}) (interface{}, error) {
+	if svc, ok := obj.(*corev1.Service); ok {
+		svc.ManagedFields = nil
+		svc.Annotations = nil
+	}
+	return obj, nil
+}
+
+func TrimEndpointSlice(obj interface{}) (interface{}, error) {
+	if es, ok := obj.(*discoveryv1.EndpointSlice); ok {
+		es.ManagedFields = nil
+		es.Annotations = nil
+		for i := range es.Endpoints {
+			es.Endpoints[i] = discoveryv1.Endpoint{Addresses: es.Endpoints[i].Addresses}
+		}
+	}
+	return obj, nil
+}
+
 func podCIDRs(n *corev1.Node) []string {
 	if len(n.Spec.PodCIDRs) > 0 {
 		return n.Spec.PodCIDRs

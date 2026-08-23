@@ -48,6 +48,10 @@ func TestExpandServiceNeighbors_Egress(t *testing.T) {
 	if len(got.Ports) != 1 || got.Ports[0].Port == nil || *got.Ports[0].Port != 9093 {
 		t.Errorf("ports not carried over: %+v", got.Ports)
 	}
+	// serviceRef implies the Service cluster FQDN as a dnsName (R0005 suppression).
+	if len(got.DNSNames) != 1 || got.DNSNames[0] != "alertmanager.honey.svc.cluster.local" {
+		t.Errorf("serviceRef FQDN not emitted: %v", got.DNSNames)
+	}
 }
 
 // TestExpandServiceNeighbors_HostEntity: fromEntity host resolves to node +
@@ -60,6 +64,10 @@ func TestExpandServiceNeighbors_HostEntity(t *testing.T) {
 	out := ExpandServiceNeighbors(in, l)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 synthesized host neighbor, got %d", len(out))
+	}
+	// host entity is not a Service: no FQDN.
+	if len(out[0].DNSNames) != 0 {
+		t.Errorf("host entity must not emit a dnsName: %v", out[0].DNSNames)
 	}
 	// Feed the synthesized entry through the address matcher the same way the
 	// projection would, to prove end-to-end intent.
