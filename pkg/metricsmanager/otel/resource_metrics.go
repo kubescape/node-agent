@@ -319,7 +319,7 @@ var podSliceNameRe = regexp.MustCompile(`^(?:[a-z0-9]+-)*pod([0-9a-f_]{32,})\.sl
 // resolvePodCgroupMemoryPaths locates the pod-level cgroup memory files by
 // walking one level up from this container's ".scope" directory to its parent
 // "kubepods-...-pod<UID>.slice". The kernel already aggregates every container
-// in the pod at that level, including third-party sidecars (clamav) that carry
+// in the pod at that level, including third-party sidecars that carry
 // no OTEL instrumentation of their own.
 //
 // systemd cgroup driver only. The parent-name guard below matches the systemd

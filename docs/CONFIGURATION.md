@@ -146,7 +146,7 @@ correlation is an upgrade, not a dependency.
 |-----|------|---------|-------------|
 | `applicationProfileServiceEnabled` | bool | `false` | Enable application profiling |
 | `runtimeDetectionEnabled` | bool | `false` | Enable runtime threat detection |
-| `malwareDetectionEnabled` | bool | `false` | Enable ClamAV malware scanning |
+| `malwareDetectionEnabled` | bool | `false` | Start the malware manager (needs an out-of-tree scanner) |
 | `networkServiceEnabled` | bool | `false` | Enable network connection tracking |
 | `networkStreamingEnabled` | bool | `false` | Enable network event streaming |
 | `sbomGenerationEnabled` | bool | `false` | Enable SBOM generation |
