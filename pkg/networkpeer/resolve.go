@@ -24,6 +24,12 @@ import "strings"
 // represent (kubelet health probes, node-sourced / masqueraded traffic).
 const EntityHost = "host"
 
+// clusterDNSSuffix is the in-cluster Service DNS zone. A serviceRef /
+// serviceSelector implies the cluster FQDN <name>.<namespace>.svc.<zone> so a
+// client dialling the Service by DNS is allowlisted without a parallel
+// dnsNames entry. Kubernetes' default zone; overridden per-cluster is rare.
+const clusterDNSSuffix = "svc.cluster.local"
+
 // PortProto is a single allowed destination port/protocol. Protocol is
 // upper-case ("TCP"/"UDP"); an empty Protocol matches any protocol.
 type PortProto struct {
@@ -105,31 +111,56 @@ func ResolveIPs(spec PeerSpec, l Lister) []string {
 }
 
 func resolveIPs(spec PeerSpec, l Lister) []string {
-	switch {
-	case spec.Entity != "":
+	if spec.Entity != "" {
 		if strings.EqualFold(spec.Entity, EntityHost) {
 			return dedupe(l.HostIPs())
 		}
 		return nil
+	}
+	var ips []string
+	for _, svc := range resolveServices(spec, l) {
+		ips = append(ips, serviceIPs(svc)...)
+	}
+	return dedupe(ips)
+}
+
+// resolveServices returns the Services a serviceRef / serviceSelector spec
+// matches. An entity spec matches no Service and returns nil; an empty
+// serviceSelector fails closed (never every Service).
+func resolveServices(spec PeerSpec, l Lister) []*ServiceInfo {
+	switch {
 	case spec.ServiceRef != nil:
 		svc, ok := l.ServiceByName(spec.ServiceRef.Namespace, spec.ServiceRef.Name)
 		if !ok || svc == nil {
 			return nil
 		}
-		return serviceIPs(svc)
+		return []*ServiceInfo{svc}
 	case spec.ServiceSelector != nil:
-		// An empty selector is NOT a cluster-wide match-all: fail closed.
 		if len(spec.ServiceSelector) == 0 {
 			return nil
 		}
-		var ips []string
-		for _, svc := range l.ServicesByLabels(spec.ServiceSelector, spec.NamespaceLabels) {
-			ips = append(ips, serviceIPs(svc)...)
-		}
-		return dedupe(ips)
+		return l.ServicesByLabels(spec.ServiceSelector, spec.NamespaceLabels)
 	default:
 		return nil
 	}
+}
+
+// ResolveDNSNames returns the cluster FQDN(s) — <name>.<namespace>.svc.<zone> —
+// of the Services a serviceRef / serviceSelector spec matches, so a client
+// dialling the Service by DNS is allowlisted alongside its IPs. Entity specs
+// and unresolvable selectors yield nothing.
+func ResolveDNSNames(spec PeerSpec, l Lister) []string {
+	if l == nil {
+		return nil
+	}
+	var out []string
+	for _, svc := range resolveServices(spec, l) {
+		if svc == nil || svc.Namespace == "" || svc.Name == "" {
+			continue
+		}
+		out = append(out, svc.Name+"."+svc.Namespace+"."+clusterDNSSuffix)
+	}
+	return dedupe(out)
 }
 
 func serviceIPs(svc *ServiceInfo) []string {

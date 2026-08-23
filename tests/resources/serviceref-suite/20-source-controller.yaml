@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: source-controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: source-controller
+rules:
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "events", "serviceaccounts"]
+    verbs: ["*"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: source-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: source-controller
+subjects:
+  - kind: ServiceAccount
+    name: source-controller
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: source-controller
+spec:
+  selector:
+    app: source-controller
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: source-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: source-controller
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: source-controller
+        kubescape.io/user-defined-profile: serviceref-flux-cp
+    spec:
+      serviceAccountName: source-controller
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: manager
+          image: ghcr.io/fluxcd/source-controller:v1.3.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --log-level=info
+            - --log-encoding=json
+            - --storage-path=/data
+            - --storage-adv-addr=source-controller.$(RUNTIME_NAMESPACE).svc.cluster.local.
+            - --watch-all-namespaces=false
+            - --enable-leader-election=false
+          env:
+            - name: RUNTIME_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: TUF_ROOT
+              value: /tmp/.sigstore
+          ports:
+            - containerPort: 9090
+              name: http
+            - containerPort: 9440
+              name: healthz
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - mountPath: /data
+              name: data
+            - mountPath: /tmp
+              name: tmp
+      securityContext:
+        fsGroup: 1337
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

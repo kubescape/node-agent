@@ -191,6 +191,30 @@ func TestResolve_NoMatchAll(t *testing.T) {
 	}
 }
 
+// Test A7 — serviceRef/serviceSelector imply the Service cluster FQDN(s);
+// entity and unresolvable specs imply none.
+func TestResolveDNSNames(t *testing.T) {
+	l := realFluxTopology()
+	one := ResolveDNSNames(PeerSpec{ServiceRef: &ServiceRef{"honey", "alertmanager"}}, l)
+	if len(one) != 1 || one[0] != "alertmanager.honey.svc.cluster.local" {
+		t.Errorf("serviceRef FQDN: got %v", one)
+	}
+	fan := ResolveDNSNames(PeerSpec{
+		ServiceSelector: map[string]string{"app": "guestbook"},
+		NamespaceLabels: map[string]string{"kubernetes.io/metadata.name": "gitops-demo"},
+	}, l)
+	want := map[string]bool{"guestbook-ui.gitops-demo.svc.cluster.local": true, "helm-guestbook.gitops-demo.svc.cluster.local": true}
+	if len(fan) != 2 || !want[fan[0]] || !want[fan[1]] {
+		t.Errorf("selector FQDN fanout: got %v", fan)
+	}
+	if got := ResolveDNSNames(PeerSpec{Entity: EntityHost}, l); got != nil {
+		t.Errorf("host entity implies no FQDN, got %v", got)
+	}
+	if got := ResolveDNSNames(PeerSpec{ServiceRef: &ServiceRef{"honey", "nope"}}, l); got != nil {
+		t.Errorf("unresolvable serviceRef implies no FQDN, got %v", got)
+	}
+}
+
 // Test A6 — a nil Lister and any-port (no Ports) behave safely.
 func TestResolve_Edges(t *testing.T) {
 	if got := Resolve(PeerSpec{Entity: EntityHost}, nil); got != nil {

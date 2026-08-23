@@ -11,10 +11,12 @@ import (
 // synthesized ipAddresses neighbors (one per source neighbor, carrying the
 // resolved IPs and the source neighbor's own ports).
 //
-// The synthesized neighbors are ordinary selector-free ipAddresses entries, so
-// the existing port-sensitive address matcher handles them with no further
+// The synthesized neighbors are ordinary selector-free ipAddresses entries
+// (plus, for Service-backed specs, the Service's cluster FQDN as a dnsName so a
+// client dialling it by name is allowlisted too), so the existing
+// port-sensitive address matcher and DNS matcher handle them with no further
 // change — a serviceRef/host neighbor becomes exactly the narrow, resolved
-// ipAddresses entry it stands for. Neighbors that resolve to nothing (unknown
+// entry it stands for. Neighbors that resolve to nothing (unknown
 // Service, selector matching nothing, unknown entity) contribute nothing —
 // never a match-all. Callers append the result to the same direction (egress
 // or ingress) before projecting the profile.
@@ -30,13 +32,15 @@ func ExpandServiceNeighbors(neighbors []v1beta1.NetworkNeighbor, l Lister) []v1b
 			continue
 		}
 		ips := ResolveIPs(spec, l)
-		if len(ips) == 0 {
+		dnsNames := ResolveDNSNames(spec, l)
+		if len(ips) == 0 && len(dnsNames) == 0 {
 			continue
 		}
 		out = append(out, v1beta1.NetworkNeighbor{
 			Identifier:  n.Identifier + "-resolved",
 			Type:        n.Type,
 			IPAddresses: ips,
+			DNSNames:    dnsNames,
 			Ports:       n.Ports,
 		})
 	}
@@ -96,6 +100,12 @@ func hasServiceFields(n *v1beta1.NetworkNeighbor) bool {
 // if the neighbor declares none of the service/entity selectors (a plain
 // ipAddresses / dnsNames / podSelector neighbor is left untouched).
 func specFromNeighbor(n *v1beta1.NetworkNeighbor) (PeerSpec, bool) {
+	// Cheap-reject a plain ipAddresses/dnsNames neighbor before allocating a
+	// []PortProto it would only discard (hot on every projection's non-service
+	// neighbors).
+	if n.Entity == "" && n.ServiceRefName == "" && n.ServiceSelector == nil {
+		return PeerSpec{}, false
+	}
 	spec := PeerSpec{Ports: portsFromNeighbor(n.Ports)}
 	switch {
 	case n.Entity != "":
