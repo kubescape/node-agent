@@ -1,0 +1,48 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: serviceref-overlay
+spec:
+  execs:
+  - path: /bin/sleep
+  - path: /usr/bin/curl
+  syscalls:
+  - socket
+  - connect
+  - sendto
+  - recvfrom
+  - read
+  - write
+  - close
+  - openat
+  - mmap
+  - mprotect
+  - munmap
+  - fcntl
+  - ioctl
+  - poll
+  - epoll_create1
+  - epoll_ctl
+  - epoll_wait
+  - bind
+  - listen
+  - accept4
+  - getsockopt
+  - setsockopt
+  - getsockname
+  - getpid
+  - fstat
+  - rt_sigaction
+  - rt_sigprocmask
+  - writev
+  matchLabels:
+    app: serviceref-client
+  egress:
+  - identifier: apiserver-serviceref
+    type: internal
+    serviceRefNamespace: default
+    serviceRefName: kubernetes
+    ports:
+    - name: TCP-443
+      protocol: TCP
+      port: 443

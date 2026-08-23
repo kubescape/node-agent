@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: serviceref-client
+  name: serviceref-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: serviceref-client
+  template:
+    metadata:
+      labels:
+        app: serviceref-client
+        kubescape.io/user-defined-profile: serviceref-overlay
+    spec:
+      containers:
+      - name: curl
+        image: docker.io/curlimages/curl@sha256:08e466006f0860e54fc299378de998935333e0e130a15f6f98482e9f8dab3058
+        command: ["sleep", "infinity"]
