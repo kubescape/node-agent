@@ -2,6 +2,7 @@ package tracers
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -140,20 +141,24 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 
 func decodeSyscalls(syscallsBuffer []byte) []string {
 	syscallStrings := make([]string, 0)
+	// Syscall numbers this build cannot resolve to a name are skipped. Recording a
+	// placeholder name would propagate into the application profile and from there
+	// into generated seccomp profiles, where it is not a valid syscall name. The
+	// numbers are collected and logged once per decode to keep this loop cheap.
+	var skipped []int
 	for i := range syscallsBuffer {
 		if syscallsBuffer[i] > 0 {
 			syscallName, exist := syscalls.GetSyscallNameByNumber(i)
 			if !exist {
-				// The syscall number is not known to this build. Recording a placeholder
-				// name would propagate into the application profile and from there into
-				// generated seccomp profiles, where it is not a valid syscall name.
-				// Drop it and keep the number for diagnostics.
-				logger.L().Debug("decodeSyscalls - skipping unrecognized syscall number",
-					helpers.Int("syscallNumber", i))
+				skipped = append(skipped, i)
 				continue
 			}
 			syscallStrings = append(syscallStrings, syscallName)
 		}
+	}
+	if len(skipped) > 0 {
+		logger.L().Debug("decodeSyscalls - skipped syscall numbers with no known name",
+			helpers.String("syscallNumbers", fmt.Sprint(skipped)))
 	}
 	return syscallStrings
 }

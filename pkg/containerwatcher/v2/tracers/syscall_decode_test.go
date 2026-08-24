@@ -14,8 +14,9 @@ import (
 func TestDecodeSyscallsSkipsUnrecognizedNumbers(t *testing.T) {
 	// Find a syscall number that this build cannot resolve, to stand in for a
 	// number coming from a newer kernel than the one this binary knows about.
+	const maxSyscallNumberProbed = 511
 	unknownNumber := -1
-	for i := len(make([]byte, 512)) - 1; i >= 0; i-- {
+	for i := maxSyscallNumberProbed; i >= 0; i-- {
 		if _, exist := syscalls.GetSyscallNameByNumber(i); !exist {
 			unknownNumber = i
 			break
