@@ -45,14 +45,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-const (
-	syscallPeriod = 5 * time.Second
-)
-
 type RuleManager struct {
 	cfg                  config.Config
 	ruleBindingCache     bindingcache.RuleBindingCache
-	trackedContainers    mapset.Set[string] // key is k8sContainerID
+	trackedContainers    mapset.Set[string]                  // key is k8sContainerID
+	trackedContainerDone maps.SafeMap[string, chan struct{}] // key is k8sContainerID; closed when that specific registration is removed
 	k8sClient            k8sclient.K8sClientInterface
 	ctx                  context.Context
 	objectCache          objectcache.ObjectCache
@@ -220,12 +217,12 @@ func (rm *RuleManager) recompileProjectionSpec() {
 	rm.objectCache.ContainerProfileCache().SetProjectionSpec(spec)
 }
 
-func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string) {
+func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string, done <-chan struct{}) {
 	if utils.IsHostContainer(container) {
 		logger.L().Debug("RuleManager - skipping shared data wait for host container",
 			helpers.String("container ID", container.Runtime.ContainerID))
 		// Skip podToWlid and shim PID setup for host containers as they don't have K8s metadata
-		if err := rm.monitorContainer(container, k8sContainerID); err != nil {
+		if err := rm.monitorContainer(container, k8sContainerID, done); err != nil {
 			logger.L().Debug("RuleManager - stop monitor on host container",
 				helpers.String("reason", err.Error()),
 				helpers.String("container ID", container.Runtime.ContainerID),
@@ -250,7 +247,7 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 		}
 	}
 
-	if err := rm.monitorContainer(container, k8sContainerID); err != nil {
+	if err := rm.monitorContainer(container, k8sContainerID, done); err != nil {
 		logger.L().Debug("RuleManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s container id", k8sContainerID))

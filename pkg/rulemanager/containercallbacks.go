@@ -15,30 +15,31 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-func (rm *RuleManager) monitorContainer(container *containercollection.Container, k8sContainerID string) error {
+// monitorContainer blocks for the lifetime of one container registration. It
+// exits only in response to rm.ctx being cancelled (process shutdown) or to
+// done being closed by the specific ContainerCallback removal that created
+// it. It intentionally does not re-derive liveness by polling shared mutable
+// state (e.g. rm.trackedContainers) on a timer: a container ID that is
+// removed and re-added faster than a poll interval would look "tracked
+// again" to a stale goroutine from the earlier registration, letting it
+// survive alongside the new one. done is scoped per-registration so only the
+// registration that owns it is ever told to stop.
+func (rm *RuleManager) monitorContainer(container *containercollection.Container, k8sContainerID string, done <-chan struct{}) error {
 	logger.L().Debug("RuleManager - start monitor on container",
 		helpers.String("container ID", container.Runtime.ContainerID),
 		helpers.String("k8s container id", k8sContainerID))
 
-	syscallTicker := time.NewTicker(syscallPeriod)
-
-	for {
-		select {
-		case <-rm.ctx.Done():
-			logger.L().Debug("RuleManager - stop monitor on container",
-				helpers.String("container ID", container.Runtime.ContainerID),
-				helpers.String("k8s container id", k8sContainerID))
-			return nil
-		case <-syscallTicker.C:
-			if container.Mntns == 0 {
-				logger.L().Debug("RuleManager - mount namespace ID is not set", helpers.String("container ID", container.Runtime.ContainerID))
-			}
-
-			if !rm.trackedContainers.Contains(k8sContainerID) {
-				logger.L().Debug("RuleManager - container is not tracked", helpers.String("container ID", container.Runtime.ContainerID))
-				return nil
-			}
-		}
+	select {
+	case <-rm.ctx.Done():
+		logger.L().Debug("RuleManager - stop monitor on container",
+			helpers.String("container ID", container.Runtime.ContainerID),
+			helpers.String("k8s container id", k8sContainerID))
+		return nil
+	case <-done:
+		logger.L().Debug("RuleManager - container is not tracked",
+			helpers.String("container ID", container.Runtime.ContainerID),
+			helpers.String("k8s container id", k8sContainerID))
+		return nil
 	}
 }
 
@@ -84,6 +85,8 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		}
 
 		rm.trackedContainers.Add(k8sContainerID)
+		done := make(chan struct{})
+		rm.trackedContainerDone.Set(k8sContainerID, done)
 		shim, err := utils.GetProcessStat(int(notif.Container.ContainerPid()))
 		if err != nil {
 			logger.L().Warning("RuleManager - failed to get shim process", helpers.Error(err))
@@ -91,7 +94,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			rm.containerIdToShimPid.Set(notif.Container.Runtime.ContainerID, uint32(shim.PPID))
 		}
 		rm.containerIdToPid.Set(notif.Container.Runtime.ContainerID, notif.Container.ContainerPid())
-		go rm.startRuleManager(notif.Container, k8sContainerID)
+		go rm.startRuleManager(notif.Container, k8sContainerID, done)
 	case containercollection.EventTypeRemoveContainer:
 		logger.L().Debug("RuleManager - remove container",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
@@ -102,6 +105,10 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		}
 
 		rm.trackedContainers.Remove(k8sContainerID)
+		if done, ok := rm.trackedContainerDone.Load(k8sContainerID); ok {
+			close(done)
+			rm.trackedContainerDone.Delete(k8sContainerID)
+		}
 		namespace := notif.Container.K8s.Namespace
 		podName := notif.Container.K8s.PodName
 		podID := utils.CreateK8sPodID(namespace, podName)
