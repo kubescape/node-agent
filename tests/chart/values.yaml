@@ -58,6 +58,7 @@ nodeAgent:
     maxLearningPeriod: 2m
     learningPeriod: 1m
     updatePeriod: 30s
+    networkServiceResolution: true
     maxDelaySeconds: 1
     prometheusExporter: enable
     httpExporterConfig: {}
