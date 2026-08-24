@@ -114,7 +114,7 @@ func (a *Accessor) lookup(name, key string) (*rulestate.Entry, bool) {
 	if !ok {
 		return nil, false
 	}
-	e, ok := a.store.Get(a.ruleID, scope, scopeID, name, key)
+	e, ok := a.store.Get(a.ruleID, scopeID, name, key)
 	if !ok {
 		return nil, false
 	}
