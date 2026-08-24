@@ -3992,19 +3992,6 @@ func Test_50_ServiceRefNetworkNeighbor(t *testing.T) {
 	)
 	port80, port443, port53 := int32(80), int32(443), int32(53)
 
-	// The shipped R0011 ignores private destinations, so in-cluster lateral
-	// movement — the very thing a named-Service allowlist narrows down — cannot
-	// trip it. R9911 is the same predicate restricted to internal addresses,
-	// applied for this test only and bound to this suite's pods, so no other
-	// namespace's expectations move.
-	rulesPath := path.Join(utils.CurrentDir(), "resources/serviceref-rules.yaml")
-	bindingPath := path.Join(utils.CurrentDir(), "resources/serviceref-rulebinding.yaml")
-	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", rulesPath), "apply serviceRef test rules")
-	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", rulesPath)
-	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", bindingPath), "apply serviceRef test rule binding")
-	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", bindingPath)
-	time.Sleep(20 * time.Second)
-
 	ns := testutils.NewRandomNamespace()
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
@@ -4124,10 +4111,8 @@ func Test_50_ServiceRefNetworkNeighbor(t *testing.T) {
 		}
 		// Two further reconcile intervals of steady-state traffic.
 		time.Sleep(90 * time.Second)
-		assert.Equal(t, 0, countRule("R9911"),
-			"apiserver/DNS/helm-repo egress is fully named by serviceRef+serviceSelector — no internal-egress alert may fire")
 		assert.Equal(t, 0, countRule("R0011"),
-			"no external egress is expected from the controller either")
+			"apiserver/DNS/helm-repo egress is fully named by serviceRef+serviceSelector — R0011 may not fire")
 	})
 
 	// Phase 2 — the GitOps source of truth is tampered with: primary is
@@ -4135,13 +4120,108 @@ func Test_50_ServiceRefNetworkNeighbor(t *testing.T) {
 	// role=helm-repo selector does not cover. source-controller fetches it on
 	// its own next reconcile. This is the lateral move a serviceCIDR entry hides.
 	t.Run("sibling_service_pivot_fires_alert", func(t *testing.T) {
-		before := countRule("R9911")
+		before := countRule("R0011")
 		patch := []byte(fmt.Sprintf(`{"spec":{"url":"http://decoy-repo.%s.svc.cluster.local./"}}`, ns.Name))
 		_, e := repoClient.Patch(context.TODO(), "primary", types.MergePatchType, patch, metav1.PatchOptions{})
 		require.NoError(t, e, "repoint HelmRepository at the decoy Service")
 		require.Eventually(t, func() bool {
-			return countRule("R9911") > before
+			return countRule("R0011") > before
 		}, 4*time.Minute, 15*time.Second,
-			"egress to an unlisted sibling Service MUST alert — the selector is narrow, not a blanket")
+			"egress to an unlisted sibling Service MUST fire R0011 — the selector is narrow, not a blanket")
+	})
+}
+
+// Test_51_ServiceRefIngressR0012 is the ingress twin of Test_50: nginx serves
+// two real clients; the profile names one of them (ingress serviceRef, whose
+// resolution covers the client Service's ClusterIP and pod endpoint IPs), and
+// R0012 must stay silent for it while firing for the unlisted one (k6).
+func Test_51_ServiceRefIngressR0012(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	const cpName = "serviceref-ingress-cp"
+	port80 := int32(80)
+
+	ns := testutils.NewRandomNamespace()
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: cpName, Namespace: ns.Name},
+		Spec: v1beta1.ContainerProfileSpec{
+			LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "helm-repo"}},
+			Ingress: []v1beta1.NetworkNeighbor{
+				{
+					Identifier:          "gitops-clients",
+					Type:                v1beta1.CommunicationTypeIngress,
+					ServiceRefNamespace: ns.Name,
+					ServiceRefName:      "source-controller",
+					Ports:               []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: v1beta1.ProtocolTCP, Port: &port80}},
+				},
+			},
+		},
+	}
+	_, err := storageClient.ContainerProfiles(ns.Name).Create(context.Background(), cp, metav1.CreateOptions{})
+	require.NoError(t, err, "create authored ContainerProfile")
+
+	require.NoError(t, testutils.ApplyMultiDocDir(ns.Name, path.Join(utils.CurrentDir(), "resources/serviceref-suite")),
+		"apply flux source-controller + helm repo suite")
+
+	patch := []byte(fmt.Sprintf(`{"spec":{"template":{"metadata":{"labels":{"kubescape.io/user-defined-profile":%q}}}}}`, cpName))
+	_, err = k8sClient.KubernetesClient.AppsV1().Deployments(ns.Name).Patch(context.TODO(), "helm-repo", types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	require.NoError(t, err, "bind profile to helm-repo pods")
+
+	waitDeploy := func(name string) {
+		t.Helper()
+		require.Eventually(t, func() bool {
+			d, e := k8sClient.KubernetesClient.AppsV1().Deployments(ns.Name).Get(context.TODO(), name, metav1.GetOptions{})
+			return e == nil && d.Status.ReadyReplicas > 0 && d.Status.UpdatedReplicas == d.Status.ReadyReplicas
+		}, 3*time.Minute, 5*time.Second, "%s must become ready", name)
+	}
+	waitDeploy("helm-repo")
+	waitDeploy("source-controller")
+
+	countR0012 := func() int {
+		alerts, _ := testutils.GetAlerts(ns.Name)
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == "R0012" && a.Labels["container_name"] == "nginx" {
+				n++
+			}
+		}
+		return n
+	}
+
+	helmRepoGVR := schema.GroupVersionResource{Group: "source.toolkit.fluxcd.io", Version: "v1", Resource: "helmrepositories"}
+	repoClient := k8sClient.DynamicClient.Resource(helmRepoGVR).Namespace(ns.Name)
+	repo := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "source.toolkit.fluxcd.io/v1",
+		"kind":       "HelmRepository",
+		"metadata":   map[string]interface{}{"name": "primary", "namespace": ns.Name},
+		"spec": map[string]interface{}{
+			"interval": "30s",
+			"url":      fmt.Sprintf("http://helm-primary.%s.svc.cluster.local./", ns.Name),
+		},
+	}}
+	_, err = repoClient.Create(context.TODO(), repo, metav1.CreateOptions{})
+	require.NoError(t, err, "create HelmRepository")
+
+	time.Sleep(40 * time.Second)
+
+	t.Run("listed_client_no_r0012", func(t *testing.T) {
+		// Two reconcile intervals of real source-controller fetches into nginx.
+		time.Sleep(90 * time.Second)
+		assert.Equal(t, 0, countR0012(),
+			"ingress from the serviceRef-listed client must not fire R0012")
+	})
+
+	t.Run("unlisted_client_fires_r0012", func(t *testing.T) {
+		before := countR0012()
+		require.NoError(t, testutils.ApplyMultiDocYAML(ns.Name, path.Join(utils.CurrentDir(), "resources/serviceref-k6.yaml")),
+			"deploy unlisted k6 client")
+		require.Eventually(t, func() bool {
+			return countR0012() > before
+		}, 4*time.Minute, 15*time.Second,
+			"ingress from a client no serviceRef names MUST fire R0012")
 	})
 }
