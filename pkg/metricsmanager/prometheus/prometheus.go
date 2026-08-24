@@ -108,11 +108,11 @@ type PrometheusMetric struct {
 	alertSuppressedCounter *prometheus.CounterVec
 
 	// CEL rule state store
-	stateWritesCounter         *prometheus.CounterVec
-	stateWriteRejectedCounter  *prometheus.CounterVec
-	stateExpiredCounter        prometheus.Counter
-	statePurgedCounter         prometheus.Counter
-	stateEntriesGauge          *prometheus.GaugeVec
+	stateWritesCounter        *prometheus.CounterVec
+	stateWriteRejectedCounter *prometheus.CounterVec
+	stateExpiredCounter       prometheus.Counter
+	statePurgedCounter        prometheus.Counter
+	stateEntriesGauge         *prometheus.GaugeVec
 
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache            map[string]prometheus.Counter

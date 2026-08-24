@@ -398,7 +398,14 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		// eval error or a cooldown-suppressed alert did NOT count as processed.
 		// Those were continues; they are returns now, so the metric has to be
 		// gated or its meaning would silently change for every existing rule.
-		processed := true
+		//
+		// It starts false, not true, for the same reason: the old loop also
+		// continued at len(ruleExpressions) == 0 and never counted that rule. A
+		// write-only leg -- a rule with a stateWrites clause but no
+		// ruleExpression for THIS event type -- reaches here now where it
+		// previously could not, so defaulting to true would inflate the counter
+		// for exactly the case this feature introduces.
+		processed := false
 		if len(ruleExpressions) > 0 {
 			processed = rm.evaluateRuleAndAlert(evaluateArgs{
 				rule:            rule,
