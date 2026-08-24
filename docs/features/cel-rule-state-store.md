@@ -74,12 +74,22 @@ from its own write.
 Cooldown suppresses the *alert*, never the write: writes are evidence gathering,
 and dropping them would break the next leg of the chain.
 
-### Validation happens at load
+### Validation
 
 An unknown event type, `eventType: all` (a binding wildcard, not a stream),
 `scope: identity` (operator-only), a bad or non-positive TTL, or a `_`-prefixed
-name or value key is rejected when the rule loads. Every one of those mistakes
-would otherwise produce a rule that loads cleanly and silently never fires.
+name or value key is rejected. Every one of those mistakes would otherwise produce
+a rule that loads cleanly and silently never fires.
+
+Validation runs on the rule's first matching event rather than at load, because a
+rule reaches the loop by two paths and only one of them populates load-time
+derived fields. The compiled result is then cached, keyed by a fingerprint of the
+clause, so an edited rule recompiles on its own without an invalidation hook.
+
+The practical consequence is that a malformed clause is reported the first time
+the rule sees a matching event, not at apply time — and reported **once per
+version of the clause**, not once per event. A TTL above `maxTtl` is clamped and
+logged on the same terms.
 
 A rule with a malformed clause is degraded to non-correlating and logged; it does
 not stop the other rules in the CRD from evaluating.

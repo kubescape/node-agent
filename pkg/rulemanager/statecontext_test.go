@@ -5,10 +5,12 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/state"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/rulestate"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -94,7 +96,10 @@ func testRuleManager(t *testing.T) *RuleManager {
 		MaxTTL:                 30 * time.Minute,
 		AncestorMaxDepth:       8,
 	}
-	return &RuleManager{cfg: cfg}
+	return &RuleManager{
+		cfg:              cfg,
+		stateWritesCache: expirable.NewLRU[string, *compiledWrites](512, nil, 0),
+	}
 }
 
 func TestCompileStateWrites_NoWritesIsNil(t *testing.T) {
@@ -276,4 +281,75 @@ func TestPurgePodScope_ReclaimsWhenTheLastContainerGoes(t *testing.T) {
 	_, ok = rm.stateStore.Get("R1089", armotypes.StateScopePod,
 		rulestate.PodScopeID("prod", "web-2"), "n", "1")
 	assert.True(t, ok, "purging one pod must not touch its neighbour")
+}
+
+// Compiling the write clause on every event meant a malformed rule logged an
+// error on every matching event, forever -- thousands of identical lines per
+// second from one bad rule on a busy node. The cache is what makes that one line
+// per clause version, so it is worth pinning that the key tracks the clause.
+func TestStateWritesCacheKey_TracksEveryFieldValidationReads(t *testing.T) {
+	base := func() *typesv1.Rule {
+		return &typesv1.Rule{RuntimeRule: armotypes.RuntimeRule{
+			ID: "R1089",
+			StateWrites: []armotypes.StateWrite{{
+				EventType: armotypes.EventTypeExec,
+				Scope:     armotypes.StateScopeContainer,
+				Name:      "mount_exec",
+				Key:       "string(event.pid)",
+				When:      "is_mount",
+				TTL:       "10m",
+				Value:     map[string]any{"argv": "event.args", "comm": "event.comm"},
+			}},
+		}}
+	}
+
+	require.Equal(t, stateWritesCacheKey(base()), stateWritesCacheKey(base()),
+		"an unchanged clause must hash the same, or the cache never hits")
+
+	// Value is a map: iteration order varies between runs, so the digest must not.
+	reordered := base()
+	reordered.StateWrites[0].Value = map[string]any{"comm": "event.comm", "argv": "event.args"}
+	assert.Equal(t, stateWritesCacheKey(base()), stateWritesCacheKey(reordered),
+		"map iteration order must not change the key, or the cache thrashes")
+
+	mutations := map[string]func(*typesv1.Rule){
+		"rule ID":    func(r *typesv1.Rule) { r.ID = "R1090" },
+		"event type": func(r *typesv1.Rule) { r.StateWrites[0].EventType = armotypes.EventTypeNetwork },
+		"scope":      func(r *typesv1.Rule) { r.StateWrites[0].Scope = armotypes.StateScopePod },
+		"name":       func(r *typesv1.Rule) { r.StateWrites[0].Name = "other" },
+		"key":        func(r *typesv1.Rule) { r.StateWrites[0].Key = "string(event.ppid)" },
+		"guard":      func(r *typesv1.Rule) { r.StateWrites[0].When = "other" },
+		"ttl":        func(r *typesv1.Rule) { r.StateWrites[0].TTL = "20m" },
+		"value expr": func(r *typesv1.Rule) { r.StateWrites[0].Value["argv"] = "event.cwd" },
+		"value key":  func(r *typesv1.Rule) { r.StateWrites[0].Value["extra"] = "event.cwd" },
+		"extra write": func(r *typesv1.Rule) {
+			r.StateWrites = append(r.StateWrites, r.StateWrites[0])
+		},
+	}
+	for what, mutate := range mutations {
+		mutated := base()
+		mutate(mutated)
+		assert.NotEqual(t, stateWritesCacheKey(base()), stateWritesCacheKey(mutated),
+			"changing the %s must change the key, or an edited rule keeps its stale compilation", what)
+	}
+}
+
+// A rule that declares no state must not be handed the previous rule's accessor.
+// evalContext is built once per event and reused down the rule list, so skipping
+// the seed without clearing the key would let a stateless rule read another
+// rule's state -- the exact thing the receiver design makes inexpressible.
+func TestSeedStateContext_KeyIsClearedForRulesWithoutState(t *testing.T) {
+	rm := testRuleManager(t)
+	rm.stateStore = rulestate.NewStore(rm.cfg.CelStateStore, rulestate.NoopMetrics{})
+
+	evalContext := map[string]any{}
+	withState := &typesv1.Rule{RuntimeRule: armotypes.RuntimeRule{ID: "R1089"}}
+	rm.seedStateContext(evalContext, withState, execEnriched(),
+		map[string]armotypes.StateScope{"mount_exec": armotypes.StateScopeContainer}, nil)
+	require.Contains(t, evalContext, state.AccessorContextKey)
+
+	// The loop's else branch: a stateless rule follows.
+	delete(evalContext, state.AccessorContextKey)
+	assert.NotContains(t, evalContext, state.AccessorContextKey,
+		"a rule with no declared state must not inherit the previous rule's accessor")
 }
