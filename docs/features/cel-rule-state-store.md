@@ -65,14 +65,26 @@ from its own write.
 |---|---|
 | Rule disabled, or does not apply to this context | no |
 | `profileDependency: Required` and no profile | no |
-| Pre-filter excluded the event | no |
-| Rule policy suppressed it | no |
+| Pre-filter excluded the event | no — counted as `state_write_rejected_total{reason="prefiltered"}` |
+| Rule policy suppressed it | no — counted as `reason="policy"` |
 | **Alert cooldown** | **yes** |
 | **Predicate returned false** | **yes** |
 | Store at capacity | no — write rejected, `state_write_rejected_total` |
 
 Cooldown suppresses the *alert*, never the write: writes are evidence gathering,
 and dropping them would break the next leg of the chain.
+
+**The pre-filter case is the one to watch when writing a correlation rule.** A
+rule's pre-filter is built from the rule as a whole — in practice mostly from its
+alerting leg's parameters — but it is applied to every event type the rule
+touches. So a rule whose `network` leg carries `ignorePrefixes` or
+`excludeProcesses` has those same parameters applied to its `exec` leg, and the
+write is dropped. The chain then never forms, and nothing about the resulting
+silence points at the pre-filter. That is why the two suppression paths are
+counted: a non-zero `reason="prefiltered"` for a rule that is not firing is the
+answer. Where the parameters are genuinely meant for one leg only, the fix is to
+express them in that leg's `expression` instead of as rule-level pre-filter
+parameters.
 
 ### Validation
 
@@ -264,7 +276,7 @@ is what will say so.
 | Metric | Meaning |
 |---|---|
 | `node_agent_state_writes_total{rule_id,result}` | Entries written |
-| `node_agent_state_write_rejected_total{rule_id,reason}` | **Alert on this** — a rule is being starved of the state it needs |
+| `node_agent_state_write_rejected_total{rule_id,reason}` | **Alert on this** — a rule is being starved of the state it needs. `scope_cap` / `global_cap` are the store's own limits; `prefiltered` and `policy` mean a suppression meant for the rule's *alerting* leg silenced its *write* leg instead (see below); `guard_error`, `key_error` and `scope_unresolved` are the clause failing to evaluate |
 | `node_agent_state_expired_total` | Reclaimed by TTL |
 | `node_agent_state_purged_total` | Dropped by scope purge |
 | `node_agent_state_entries{scope}` | Current entry count, published by each sweep. `scope` is the scope *kind* — `container`, `host`, `pod` or `node` — never a scope ID, which would be unbounded. The host bucket is reported apart from real containers because it is one of the two that TTL alone reclaims. Every kind is republished on each sweep, so a kind that drains reads as zero rather than keeping its last value. |

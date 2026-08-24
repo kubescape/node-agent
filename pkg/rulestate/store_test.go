@@ -38,7 +38,7 @@ func TestStore_SetThenGet(t *testing.T) {
 	now := time.Now()
 	require.NoError(t, s.Set(entry("R1089", "c:abc", "mount_exec", "4471", now, time.Minute)))
 
-	got, ok := s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "mount_exec", "4471")
+	got, ok := s.Get("R1089", "c:abc", "mount_exec", "4471")
 	require.True(t, ok)
 	assert.Equal(t, uint32(4471), got.Process.PID)
 }
@@ -49,17 +49,17 @@ func TestStore_IsolationAcrossRulesScopesAndKeys(t *testing.T) {
 	require.NoError(t, s.Set(entry("R1089", "c:abc", "mount_exec", "4471", now, time.Minute)))
 
 	// Different rule: state is rule-private.
-	_, ok := s.Get("R1090", armotypes.StateScopeContainer, "c:abc", "mount_exec", "4471")
+	_, ok := s.Get("R1090", "c:abc", "mount_exec", "4471")
 	assert.False(t, ok, "another rule must not see this entry")
 
 	// Different container: the security property.
-	_, ok = s.Get("R1089", armotypes.StateScopeContainer, "c:def", "mount_exec", "4471")
+	_, ok = s.Get("R1089", "c:def", "mount_exec", "4471")
 	assert.False(t, ok, "a neighbouring container must not see this entry")
 
 	// Different key and different name.
-	_, ok = s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "mount_exec", "9999")
+	_, ok = s.Get("R1089", "c:abc", "mount_exec", "9999")
 	assert.False(t, ok)
-	_, ok = s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "other", "4471")
+	_, ok = s.Get("R1089", "c:abc", "other", "4471")
 	assert.False(t, ok)
 }
 
@@ -68,7 +68,7 @@ func TestStore_ExpiredEntryIsAMissOnRead(t *testing.T) {
 	past := time.Now().Add(-2 * time.Minute)
 	require.NoError(t, s.Set(entry("R1089", "c:abc", "mount_exec", "4471", past, time.Minute)))
 
-	_, ok := s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "mount_exec", "4471")
+	_, ok := s.Get("R1089", "c:abc", "mount_exec", "4471")
 	assert.False(t, ok, "TTL must be enforced lazily on read, not only by the sweeper")
 }
 
@@ -96,7 +96,7 @@ func TestStore_ScopeCapRejectsRatherThanEvicting(t *testing.T) {
 	// The critical assertion: nothing already stored was evicted. Evicting would
 	// let a hostile container silently disable its own -- or a neighbour's -- rules.
 	for i := 0; i < 4; i++ {
-		_, ok := s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "n", fmt.Sprint(i))
+		_, ok := s.Get("R1089", "c:abc", "n", fmt.Sprint(i))
 		assert.True(t, ok, "entry %d was evicted; writes must be rejected instead", i)
 	}
 }
@@ -124,7 +124,7 @@ func TestStore_OverwriteSucceedsEvenAtCap(t *testing.T) {
 	require.NoError(t, s.Set(entry("R1089", "c:abc", "n", "0", later, time.Minute)),
 		"replacing an existing key does not grow the scope, so the cap must not block it")
 
-	got, ok := s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "n", "0")
+	got, ok := s.Get("R1089", "c:abc", "n", "0")
 	require.True(t, ok)
 	assert.Equal(t, later, got.Timestamp)
 }
@@ -136,7 +136,7 @@ func TestStore_OverwriteIsLastWriteWins(t *testing.T) {
 	require.NoError(t, s.Set(entry("R1089", "c:abc", "n", "1", t1, time.Minute)))
 	require.NoError(t, s.Set(entry("R1089", "c:abc", "n", "1", t2, time.Minute)))
 
-	got, ok := s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "n", "1")
+	got, ok := s.Get("R1089", "c:abc", "n", "1")
 	require.True(t, ok)
 	assert.Equal(t, t2, got.Timestamp)
 	assert.Equal(t, 1, s.Len(), "overwrite must not grow the store")
@@ -192,7 +192,7 @@ func TestStore_GlobalCapAdmitsAReplacement(t *testing.T) {
 	require.NoError(t, s.Set(entry("R1089", "c:abc", "n", "0", later, time.Minute)),
 		"a replacement does not grow the store, so the ceiling must not block it")
 
-	got, ok := s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "n", "0")
+	got, ok := s.Get("R1089", "c:abc", "n", "0")
 	require.True(t, ok)
 	assert.Equal(t, later, got.Timestamp)
 	assert.Equal(t, 3, s.Len())
@@ -217,9 +217,9 @@ func TestStore_PurgeScopeDropsOnlyThatScope(t *testing.T) {
 	require.NoError(t, s.Set(entry("R1089", "c:def", "n", "1", now, time.Minute)))
 
 	s.PurgeScope("c:abc")
-	_, ok := s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "n", "1")
+	_, ok := s.Get("R1089", "c:abc", "n", "1")
 	assert.False(t, ok)
-	_, ok = s.Get("R1089", armotypes.StateScopeContainer, "c:def", "n", "1")
+	_, ok = s.Get("R1089", "c:def", "n", "1")
 	assert.True(t, ok)
 	assert.Equal(t, 1, s.Len(), "purge must decrement the global size, not just drop the bucket")
 }
@@ -229,7 +229,7 @@ func TestStore_DisabledIsANoop(t *testing.T) {
 	cfg.Enabled = false
 	s := NewStore(cfg, NoopMetrics{})
 	require.NoError(t, s.Set(entry("R1089", "c:abc", "n", "1", time.Now(), time.Minute)))
-	_, ok := s.Get("R1089", armotypes.StateScopeContainer, "c:abc", "n", "1")
+	_, ok := s.Get("R1089", "c:abc", "n", "1")
 	assert.False(t, ok, "disabled: writes are no-ops and reads always miss")
 	assert.Equal(t, 0, s.Len())
 }
@@ -286,7 +286,7 @@ func TestStore_ConcurrentSetGetIsRaceFree(t *testing.T) {
 			scopeID := fmt.Sprintf("c:%d", c)
 			for i := 0; i < 200; i++ {
 				_ = s.Set(entry("R1089", scopeID, "n", fmt.Sprint(i), now, time.Minute))
-				s.Get("R1089", armotypes.StateScopeContainer, scopeID, "n", fmt.Sprint(i))
+				s.Get("R1089", scopeID, "n", fmt.Sprint(i))
 			}
 		}(c)
 	}
@@ -372,7 +372,7 @@ func TestStore_PurgeScopeReclaimsAPodBucket(t *testing.T) {
 
 	s.PurgeScope(podID)
 
-	_, ok := s.Get("R1089", armotypes.StateScopePod, podID, "n", "1")
+	_, ok := s.Get("R1089", podID, "n", "1")
 	assert.False(t, ok)
 	assert.Equal(t, 0, s.Len(), "purging a pod bucket must decrement the global size")
 }

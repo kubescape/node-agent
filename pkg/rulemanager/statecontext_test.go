@@ -207,13 +207,13 @@ func TestPurgeScope_OnContainerRemovalDropsOnlyThatContainer(t *testing.T) {
 
 	rm.stateStore.PurgeScope(rulestate.ContainerScopeID("abc"))
 
-	_, ok := rm.stateStore.Get("R1089", armotypes.StateScopeContainer, rulestate.ContainerScopeID("abc"), "n", "1")
+	_, ok := rm.stateStore.Get("R1089", rulestate.ContainerScopeID("abc"), "n", "1")
 	assert.False(t, ok, "the removed container's markers must be gone")
 
-	_, ok = rm.stateStore.Get("R1089", armotypes.StateScopeContainer, rulestate.ContainerScopeID("def"), "n", "1")
+	_, ok = rm.stateStore.Get("R1089", rulestate.ContainerScopeID("def"), "n", "1")
 	assert.True(t, ok, "a neighbouring container must be untouched")
 
-	_, ok = rm.stateStore.Get("R1089", armotypes.StateScopeContainer, rulestate.HostScopeID(), "n", "1")
+	_, ok = rm.stateStore.Get("R1089", rulestate.HostScopeID(), "n", "1")
 	assert.True(t, ok, "host markers must survive a container removal")
 }
 
@@ -244,8 +244,7 @@ func TestPurgePodScope_ReclaimsWhenTheLastContainerGoes(t *testing.T) {
 	rm.trackedContainers = mapset.NewSet[string]()
 
 	podEntry := func() (*rulestate.Entry, bool) {
-		return rm.stateStore.Get("R1089", armotypes.StateScopePod,
-			rulestate.PodScopeID("prod", "web-1"), "n", "1")
+		return rm.stateStore.Get("R1089", rulestate.PodScopeID("prod", "web-1"), "n", "1")
 	}
 	seed := func() {
 		require.NoError(t, rm.stateStore.Set(&rulestate.Entry{
@@ -278,8 +277,7 @@ func TestPurgePodScope_ReclaimsWhenTheLastContainerGoes(t *testing.T) {
 		Timestamp: time.Now(), ExpiresAt: time.Now().Add(time.Minute),
 	}))
 	rm.purgePodScopeIfPodGone("prod", "web-1")
-	_, ok = rm.stateStore.Get("R1089", armotypes.StateScopePod,
-		rulestate.PodScopeID("prod", "web-2"), "n", "1")
+	_, ok = rm.stateStore.Get("R1089", rulestate.PodScopeID("prod", "web-2"), "n", "1")
 	assert.True(t, ok, "purging one pod must not touch its neighbour")
 }
 

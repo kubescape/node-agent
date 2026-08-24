@@ -6,8 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/armosec/armoapi-go/armotypes"
 )
 
 const shardCount = 16
@@ -158,7 +156,11 @@ func (s *Store) holds(sh *shard, scopeID string, k entryKey) bool {
 
 // Get returns a live entry, or false if absent or expired. Expiry is enforced
 // here as well as by the sweeper so a read never sees a stale marker.
-func (s *Store) Get(ruleID string, _ armotypes.StateScope, scopeID, name, key string) (*Entry, bool) {
+//
+// It takes no scope: the scope is already encoded in scopeID's type prefix, and a
+// second, ignored scope argument on the read path of a scope-keyed store invites a
+// caller to pass one that disagrees and assume it is checked.
+func (s *Store) Get(ruleID, scopeID, name, key string) (*Entry, bool) {
 	if !s.cfg.Enabled {
 		return nil, false
 	}

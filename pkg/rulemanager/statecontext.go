@@ -172,3 +172,23 @@ func (s *stateMetrics) ReportStateEntries(scope string, n int) {
 		s.mm.ReportStateEntries(scope, n)
 	}
 }
+
+// reportSuppressedWrite counts a write leg that a suppression path dropped.
+//
+// Suppression is applied to the rule as a whole, so a gate meant for the rule's
+// alerting leg also silences its write leg on a different event stream. That is
+// the documented behaviour, but it is invisible: the chain simply never forms,
+// and no metric, log or alert says so. This makes it countable, under the same
+// metric as the store's own rejections, so step 4 of "when a correlation rule
+// does not fire" has something to look at.
+func (rm *RuleManager) reportSuppressedWrite(
+	rule *typesv1.Rule,
+	compiled []statewrites.Compiled,
+	eventType utils.EventType,
+	reason string,
+) {
+	if !hasWriteFor(compiled, eventType) {
+		return
+	}
+	rm.metrics.ReportStateWriteRejected(rule.ID, reason)
+}
