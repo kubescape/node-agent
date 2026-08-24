@@ -4,12 +4,17 @@ import (
 	"context"
 	"hash/fnv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 )
 
 const shardCount = 16
+
+// defaultWriteSweepInterval bounds write-path sweeping when no sweep interval is
+// configured, so a missing setting cannot reinstate the per-write full walk.
+const defaultWriteSweepInterval = time.Second
 
 type entryKey struct{ ruleID, name, key string }
 
@@ -32,8 +37,14 @@ type Store struct {
 	metrics Metrics
 	shards  [shardCount]*shard
 
-	sizeMu sync.Mutex
-	size   int
+	// size is atomic rather than mutex-guarded: it is read on every write, and a
+	// single global mutex there would serialise exactly what the sharding exists
+	// to keep independent.
+	size atomic.Int64
+
+	// lastSweepNs bounds how often the WRITE path may sweep. Without it, every
+	// write at the ceiling triggers a full all-shard walk -- see sweepIfDue.
+	lastSweepNs atomic.Int64
 }
 
 func NewStore(cfg Config, metrics Metrics) *Store {
@@ -91,7 +102,7 @@ func (s *Store) Set(e *Entry) error {
 	k := entryKey{e.RuleID, e.Name, e.Key}
 
 	if s.currentSize() >= s.cfg.MaxSize {
-		if s.Sweep() == 0 {
+		if s.sweepIfDue() == 0 {
 			// A replacement does not grow the store, so the ceiling must not block
 			// it -- the same reasoning the per-scope cap already applies below.
 			// Otherwise a rule loses the ability to refresh an established marker
@@ -187,9 +198,18 @@ func (s *Store) PurgeScope(scopeID string) {
 
 // Sweep removes expired entries and returns how many it reclaimed. Lazy
 // expiry on read hides stale entries; only Sweep frees the memory.
+//
+// It is also where the per-kind occupancy gauge is published: the walk already
+// visits every surviving bucket under the lock, so the counts are free here and
+// would need a second full traversal anywhere else.
 func (s *Store) Sweep() int {
 	now := time.Now()
+	s.lastSweepNs.Store(now.UnixNano())
 	total := 0
+	live := make(map[string]int, len(ScopeKinds()))
+	for _, kind := range ScopeKinds() {
+		live[kind] = 0
+	}
 	for _, sh := range s.shards {
 		sh.mu.Lock()
 		for scopeID, b := range sh.scopes {
@@ -201,15 +221,56 @@ func (s *Store) Sweep() int {
 			}
 			if len(b.entries) == 0 {
 				delete(sh.scopes, scopeID)
+				continue
 			}
+			live[ScopeKind(scopeID)] += len(b.entries)
 		}
 		sh.mu.Unlock()
+	}
+	// Every kind is reported, including the ones now at zero: a gauge that is
+	// only written when non-zero keeps its last value forever once a kind drains.
+	for kind, n := range live {
+		s.metrics.ReportStateEntries(kind, n)
 	}
 	if total > 0 {
 		s.addSize(-total)
 		s.metrics.ReportStateExpired(total)
 	}
 	return total
+}
+
+// sweepIfDue is the write path's sweep, rate-limited to at most one per sweep
+// interval across all writers.
+//
+// Without the limit, reaching the global ceiling turns every subsequent write
+// into a full walk of all 16 shards, each under its write lock -- up to MaxSize
+// (100k by default) entries examined per write, while the rule loop is
+// concurrent, so every worker stalls behind it. That is a cliff exactly when the
+// node is busiest, and it does not even help: if the previous sweep a moment ago
+// reclaimed nothing, neither will this one.
+//
+// Returning 0 when a sweep is not due is the honest answer for the caller's
+// purposes -- nothing was reclaimed -- so the write falls through to the
+// replacement-only rule, which is the same decision it would make after a sweep
+// that freed nothing.
+func (s *Store) sweepIfDue() int {
+	interval := s.cfg.SweepInterval
+	if interval <= 0 {
+		// No background sweeper is running, so the write path is the only
+		// reclamation there is; keep it cheap but do not disable it.
+		interval = defaultWriteSweepInterval
+	}
+	last := s.lastSweepNs.Load()
+	now := time.Now().UnixNano()
+	if now-last < int64(interval) {
+		return 0
+	}
+	// CAS so that concurrent writers at the ceiling produce one sweep, not one
+	// per writer.
+	if !s.lastSweepNs.CompareAndSwap(last, now) {
+		return 0
+	}
+	return s.Sweep()
 }
 
 // Run sweeps until ctx is cancelled.
@@ -231,14 +292,6 @@ func (s *Store) Run(ctx context.Context) {
 
 func (s *Store) Len() int { return s.currentSize() }
 
-func (s *Store) currentSize() int {
-	s.sizeMu.Lock()
-	defer s.sizeMu.Unlock()
-	return s.size
-}
+func (s *Store) currentSize() int { return int(s.size.Load()) }
 
-func (s *Store) addSize(d int) {
-	s.sizeMu.Lock()
-	s.size += d
-	s.sizeMu.Unlock()
-}
+func (s *Store) addSize(d int) { s.size.Add(int64(d)) }

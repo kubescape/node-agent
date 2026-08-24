@@ -89,7 +89,11 @@ not stop the other rules in the CRD from evaluating.
 Over-capacity writes are **rejected, never satisfied by evicting** another
 entry — eviction would let one container disable detection for its neighbours.
 The per-scope cap is exact; the node-wide ceiling is approximate under
-concurrency. Host processes share one `c:__host__` bucket with its own larger cap,
+concurrency. At the ceiling a write first tries to reclaim expired entries, but at
+most one such sweep runs per `sweepInterval` across all writers — otherwise every
+write at a full store would walk all 16 shards under their locks, stalling the
+whole rule loop at the busiest possible moment. A write arriving between sweeps is
+treated as though the sweep freed nothing, which is what it would have found. Host processes share one `c:__host__` bucket with its own larger cap,
 since it holds the whole node's process space and gets no removal purge; node scope
 takes that same larger cap for the same reason.
 
@@ -253,7 +257,7 @@ is what will say so.
 | `node_agent_state_write_rejected_total{rule_id,reason}` | **Alert on this** — a rule is being starved of the state it needs |
 | `node_agent_state_expired_total` | Reclaimed by TTL |
 | `node_agent_state_purged_total` | Dropped by scope purge |
-| `node_agent_state_entries{scope}` | Current entry count |
+| `node_agent_state_entries{scope}` | Current entry count, published by each sweep. `scope` is the scope *kind* — `container`, `host`, `pod` or `node` — never a scope ID, which would be unbounded. The host bucket is reported apart from real containers because it is one of the two that TTL alone reclaims. Every kind is republished on each sweep, so a kind that drains reads as zero rather than keeping its last value. |
 
 Counters are labelled by rule ID only, never by state key — a key is unbounded
 cardinality.
