@@ -90,7 +90,8 @@ Over-capacity writes are **rejected, never satisfied by evicting** another
 entry — eviction would let one container disable detection for its neighbours.
 The per-scope cap is exact; the node-wide ceiling is approximate under
 concurrency. Host processes share one `c:__host__` bucket with its own larger cap,
-since it holds the whole node's process space and gets no removal purge.
+since it holds the whole node's process space and gets no removal purge; node scope
+takes that same larger cap for the same reason.
 
 ## Reading state
 
@@ -230,8 +231,19 @@ Disabling it makes writes no-ops and every read a miss, so correlation rules sto
 firing while ordinary rules are unaffected.
 
 A container's entries are purged as soon as the container is removed, rather than
-waiting for TTL. The host bucket gets no such purge — it relies on TTL, which is
-why its cap is larger.
+waiting for TTL. A **pod** bucket is purged once the pod's *last* container is
+removed — it cannot go earlier, because pod-scoped state exists precisely to
+outlive any one container in the pod. That check runs on the same 10-minute timer
+as the rest of the pod-level cleanup, so a pod bucket can outlive its pod by up to
+ten minutes before being reclaimed.
+
+The **host and node** buckets get no purge at all — they are node-wide and belong
+to no workload, so they rely on TTL, which is why their cap is larger.
+
+Pod scope shares the per-container cap, and that cap covers the whole pod rather
+than each container in it. Pod scope is meant for facts about the pod as a unit; if
+a real workload needs more room, `state_write_rejected_total{reason="scope_cap"}`
+is what will say so.
 
 ## Metrics
 

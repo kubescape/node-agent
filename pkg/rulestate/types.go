@@ -53,7 +53,9 @@ type Config struct {
 	Enabled bool `mapstructure:"enabled"`
 	// MaxSize is the node-wide ceiling, a backstop above the per-scope caps.
 	MaxSize int `mapstructure:"maxSize"`
-	// MaxEntriesPerContainer bounds one container.
+	// MaxEntriesPerContainer bounds one container, and also one pod bucket --
+	// see Store.scopeCap for why pod scope shares this cap rather than the
+	// larger one.
 	MaxEntriesPerContainer int `mapstructure:"maxEntriesPerContainer"`
 	// MaxEntriesForHost bounds the c:__host__ bucket, which holds the whole
 	// node's process space rather than one workload, and never receives a
