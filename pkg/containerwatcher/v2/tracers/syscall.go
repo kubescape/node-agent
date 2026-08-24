@@ -144,7 +144,13 @@ func decodeSyscalls(syscallsBuffer []byte) []string {
 		if syscallsBuffer[i] > 0 {
 			syscallName, exist := syscalls.GetSyscallNameByNumber(i)
 			if !exist {
-				syscallName = "unknown"
+				// The syscall number is not known to this build. Recording a placeholder
+				// name would propagate into the application profile and from there into
+				// generated seccomp profiles, where it is not a valid syscall name.
+				// Drop it and keep the number for diagnostics.
+				logger.L().Debug("decodeSyscalls - skipping unrecognized syscall number",
+					helpers.Int("syscallNumber", i))
+				continue
 			}
 			syscallStrings = append(syscallStrings, syscallName)
 		}
