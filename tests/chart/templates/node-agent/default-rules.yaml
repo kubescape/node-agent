@@ -313,7 +313,7 @@ spec:
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
           ruleExpression:
             - eventType: "network"
-              expression: "event.pktType == 'OUTGOING' && !net.is_private_ip(event.dstAddr) && !cp.was_address_in_egress(event.containerId, event.dstAddr)"
+              expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
         profileDependency: 0
         profileDataRequired:
           egressAddresses: all
@@ -329,19 +329,19 @@ spec:
           - "network"
           - "anomaly"
           - "networkprofile"
-      - name: "Unexpected Internal Egress Network Traffic"
+      - name: "Unexpected Ingress Network Traffic"
         enabled: true
         id: "R0012"
-        description: "Detecting egress to cluster-internal addresses that is not allowlisted by the application profile. Complements R0011 (external egress): serviceCIDR-wide entries blind detection to lateral movement, so internal peers should be allowlisted narrowly (addresses, or resolved serviceRef/serviceSelector entries) and everything else alerts."
+        description: "Detecting unexpected ingress network traffic that is not allowlisted by application profile. Symmetric twin of R0011: internal and external peers alike, only loopback excluded; internal peers are allowlisted narrowly via addresses or resolved serviceRef/serviceSelector entries rather than a serviceCIDR that blinds detection to lateral movement."
         expressions:
-          message: "'Unexpected internal egress network communication to: ' + event.dstAddr + ':' + string(event.dstPort) + ' using ' + event.proto + ' from: ' + event.containerName"
+          message: "'Unexpected ingress network communication from: ' + event.dstAddr + ':' + string(event.dstPort) + ' using ' + event.proto + ' to: ' + event.containerName"
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
           ruleExpression:
             - eventType: "network"
-              expression: "event.pktType == 'OUTGOING' && net.is_private_ip(event.dstAddr) && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
+              expression: "event.pktType == 'HOST' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_ingress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
         profileDependency: 0
         profileDataRequired:
-          egressAddresses: all
+          ingressAddresses: all
         severity: 5 # Medium
         supportPolicy: false
         isTriggerAlert: false
