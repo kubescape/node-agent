@@ -96,7 +96,7 @@ func TestApply_GuardTrueStoresEntry(t *testing.T) {
 	NewExecutor(store, ev, nil).Apply(mustCompile(t, w), "R1089", execEvent("abc"),
 		map[string]any{}, eventTime)
 
-	got, ok := store.Get("R1089", armotypes.StateScopeContainer, "c:abc", "mount_exec", "4471")
+	got, ok := store.Get("R1089", "c:abc", "mount_exec", "4471")
 	require.True(t, ok)
 	assert.Equal(t, eventTime, got.Timestamp,
 		"the entry must carry the event time, so _ts guards compare the same clock the predicate saw")
@@ -131,7 +131,7 @@ func TestApply_AbsentGuardAlwaysStores(t *testing.T) {
 	NewExecutor(store, ev, nil).Apply(mustCompile(t, w), "R1089", execEvent("abc"),
 		map[string]any{}, time.Now())
 
-	_, ok := store.Get("R1089", armotypes.StateScopeContainer, "c:abc", "mount_exec", "4471")
+	_, ok := store.Get("R1089", "c:abc", "mount_exec", "4471")
 	assert.True(t, ok)
 }
 
@@ -145,7 +145,7 @@ func TestApply_HostProcessUsesHostScopeID(t *testing.T) {
 	NewExecutor(store, ev, nil).Apply(mustCompile(t, base()), "R1089", execEvent(""),
 		map[string]any{}, time.Now())
 
-	_, ok := store.Get("R1089", armotypes.StateScopeContainer, rulestate.HostScopeID(), "mount_exec", "4471")
+	_, ok := store.Get("R1089", rulestate.HostScopeID(), "mount_exec", "4471")
 	assert.True(t, ok, "a host process must be addressable under %q", rulestate.HostScopeID())
 }
 
@@ -188,7 +188,7 @@ func TestApply_ValueExpressionsAreStored(t *testing.T) {
 	NewExecutor(store, ev, nil).Apply(mustCompile(t, w), "R1089", execEvent("abc"),
 		map[string]any{}, time.Now())
 
-	got, ok := store.Get("R1089", armotypes.StateScopeContainer, "c:abc", "mount_exec", "4471")
+	got, ok := store.Get("R1089", "c:abc", "mount_exec", "4471")
 	require.True(t, ok)
 	assert.Equal(t, map[string]any{"argv": "-o pool:4444"}, got.Value)
 }
@@ -203,7 +203,7 @@ func TestApply_EmptyKeyYieldsOneScopeWideEntry(t *testing.T) {
 	NewExecutor(store, ev, nil).Apply(mustCompile(t, w), "R1089", execEvent("abc"),
 		map[string]any{}, time.Now())
 
-	_, ok := store.Get("R1089", armotypes.StateScopeContainer, "c:abc", "mount_exec", "")
+	_, ok := store.Get("R1089", "c:abc", "mount_exec", "")
 	assert.True(t, ok)
 	assert.Equal(t, 1, store.Len())
 }
@@ -261,7 +261,7 @@ func TestApply_PodScopeUsesNamespacedID(t *testing.T) {
 	NewExecutor(store, ev, nil).Apply(mustCompile(t, w), "R1089", execEvent("abc"),
 		map[string]any{}, time.Now())
 
-	_, ok := store.Get("R1089", armotypes.StateScopePod, rulestate.PodScopeID("prod", "web-1"),
+	_, ok := store.Get("R1089", rulestate.PodScopeID("prod", "web-1"),
 		"mount_exec", "4471")
 	assert.True(t, ok)
 }
@@ -281,7 +281,7 @@ func TestApply_GuardMayItselfDependOnState(t *testing.T) {
 	NewExecutor(store, ev, nil).Apply(mustCompile(t, w), "R1089", execEvent("abc"),
 		map[string]any{}, time.Now())
 
-	_, ok := store.Get("R1089", armotypes.StateScopeContainer, "c:abc", "step2", "4471")
+	_, ok := store.Get("R1089", "c:abc", "step2", "4471")
 	assert.True(t, ok)
 }
 

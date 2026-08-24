@@ -375,12 +375,21 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 			if rule.Prefilter.ShouldSkip(&eventFields) {
 				rm.metrics.ReportRulePrefiltered(rule.ID)
+				// A prefilter is built from the rule as a whole, in practice
+				// mostly from its alerting leg's params, but it is applied to
+				// every event type the rule touches. So a correlation rule whose
+				// network leg carries ignorePrefixes or excludeProcesses has those
+				// same params applied to its exec leg, and the write is dropped --
+				// the chain then never forms, with nothing anywhere to say why.
+				// Counting it is what turns that into a visible failure.
+				rm.reportSuppressedWrite(&rule, stateWrites, eventType, "prefiltered")
 				continue
 			}
 		}
 
 		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
 			rm.metrics.ReportAlertSuppressed(rule.ID, "policy")
+			rm.reportSuppressedWrite(&rule, stateWrites, eventType, "policy")
 			continue
 		}
 
