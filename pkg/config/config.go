@@ -83,6 +83,7 @@ type Config struct {
 	EnableMalwareDetection         bool                                 `mapstructure:"malwareDetectionEnabled"`
 	EnableNetworkStreaming         bool                                 `mapstructure:"networkStreamingEnabled"`
 	EnableNetworkTracing           bool                                 `mapstructure:"networkServiceEnabled"`
+	EnableNetworkServiceResolution bool                                 `mapstructure:"networkServiceResolutionEnabled"`
 	EnableNodeProfile              bool                                 `mapstructure:"nodeProfileServiceEnabled"`
 	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`

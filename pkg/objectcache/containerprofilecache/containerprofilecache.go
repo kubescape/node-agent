@@ -16,6 +16,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
+	"github.com/kubescape/node-agent/pkg/networkpeer"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/resourcelocks"
@@ -57,6 +58,15 @@ type CachedContainerProfile struct {
 	SpecHash      string // mirrors Projected.SpecHash; used for staleness checks
 	State         *objectcache.ProfileState
 	CallStackTree *callstackcache.CallStackSearchTree
+
+	// UsesServiceResolution is true when the profile declares serviceRef/
+	// serviceSelector/entity neighbors, so its projected addresses depend on the
+	// live cluster view. ListerGen is the service-lister generation captured at
+	// projection time; the reconciler re-projects such entries when the
+	// generation advances (endpoint churn, or caches that filled after the
+	// initial projection). Non-resolving profiles keep the RV/spec fast-skip.
+	UsesServiceResolution bool
+	ListerGen             int64
 
 	ContainerName string
 	PodName       string
@@ -111,6 +121,10 @@ type ContainerProfileCacheImpl struct {
 	containerLocks *resourcelocks.ResourceLocks
 	storageClient  storage.ProfileClient
 	k8sObjectCache objectcache.K8sObjectCache
+	// serviceLister resolves serviceRef/serviceSelector/entity network
+	// neighbors to concrete IPs at projection time. nil = feature off (the
+	// profile projects unchanged), which is what every unit test leaves it as.
+	serviceLister  networkpeer.Lister
 	metricsManager metricsmanager.MetricsManager
 
 	reconcileEvery    time.Duration
@@ -172,6 +186,22 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 	c.removalPending.Set("", time.Time{})
 	c.removalPending.Delete("")
 	return c
+}
+
+// SetServiceLister installs the cluster view used to resolve
+// serviceRef/serviceSelector/entity network neighbors at projection time. It
+// is optional: when unset the projection leaves such neighbors unresolved.
+func (c *ContainerProfileCacheImpl) SetServiceLister(l networkpeer.Lister) {
+	c.serviceLister = l
+}
+
+// listerGen returns the current service-lister generation, or 0 when no lister
+// is installed (unit tests, or the feature is off).
+func (c *ContainerProfileCacheImpl) listerGen() int64 {
+	if c.serviceLister == nil {
+		return 0
+	}
+	return c.serviceLister.Generation()
 }
 
 // refreshRPC calls fn with a context bounded by c.rpcBudget, enforcing a
@@ -579,9 +609,15 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 	}
 	entry.CallStackTree = tree
 
-	// Project under the current spec.
+	// Project under the current spec, resolving any serviceRef/entity network
+	// neighbors to concrete IPs first. Record whether this profile depends on
+	// the live cluster view and the lister generation it was resolved against,
+	// so the reconciler re-projects it when that view changes.
 	spec := c.snapshotSpec()
-	projected := Apply(spec, userMerged, tree)
+	entry.UsesServiceResolution = networkpeer.HasServiceNeighbors(userMerged)
+	entry.ListerGen = c.listerGen()
+	projected := Apply(spec, networkpeer.WithResolvedServiceNeighbors(userMerged, c.serviceLister), tree)
+	projected.ResolvedGen = entry.ListerGen
 	entry.Projected = projected
 	entry.SpecHash = projected.SpecHash
 

@@ -142,7 +142,14 @@ type ProjectedContainerProfile struct {
 	// constraint" (back-compat for pre-projection profiles).
 	ExecsByPath map[string][][]string
 
-	SpecHash       string
+	SpecHash string
+	// ResolvedGen is the cluster-view generation the profile's serviceRef/
+	// serviceSelector/entity neighbors were resolved against. It participates in
+	// the CEL result-cache key: re-projecting against a moved cluster view
+	// changes the projected addresses without touching SpecHash or SyncChecksum,
+	// so a result cached before the informers filled would otherwise be served
+	// forever. Zero for profiles that resolve nothing.
+	ResolvedGen    int64
 	SyncChecksum   string
 	PolicyByRuleId map[string]v1beta1.RulePolicy
 	CallStackTree  *callstackcache.CallStackSearchTree

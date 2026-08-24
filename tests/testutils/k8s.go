@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -28,10 +29,15 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/kubectl/pkg/scheme"
 )
@@ -82,6 +88,75 @@ func NewTestWorkload(namespace, resourcePath string) (*TestWorkload, error) {
 		WorkloadObj:     wl,
 		client:          client,
 	}, nil
+}
+
+// ApplyMultiDocYAML creates every document in a multi-document YAML file,
+// mapping each object's apiVersion/kind to its resource via server discovery so
+// custom resources work without a compiled-in table. Namespaced objects land in
+// namespace; cluster-scoped ones (CRDs) ignore it. Already-existing objects are
+// not an error, so a fixture may be applied by more than one test.
+func ApplyMultiDocYAML(namespace, resourcePath string) error {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	raw, err := os.ReadFile(resourcePath)
+	if err != nil {
+		return err
+	}
+	dc, err := discovery.NewDiscoveryClientForConfig(k8sClient.K8SConfig)
+	if err != nil {
+		return err
+	}
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(dc))
+	for _, doc := range strings.Split(string(raw), "\n---") {
+		if strings.TrimSpace(doc) == "" {
+			continue
+		}
+		jsonData, err := yaml.YAMLToJSON([]byte(doc))
+		if err != nil {
+			return fmt.Errorf("%s: %w", resourcePath, err)
+		}
+		obj := &unstructured.Unstructured{}
+		if err := obj.UnmarshalJSON(jsonData); err != nil {
+			return fmt.Errorf("%s: %w", resourcePath, err)
+		}
+		if obj.GetKind() == "" {
+			continue
+		}
+		gvk := obj.GroupVersionKind()
+		m, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		if err != nil {
+			return fmt.Errorf("%s %s: %w", resourcePath, gvk.String(), err)
+		}
+		var ri dynamic.ResourceInterface = k8sClient.DynamicClient.Resource(m.Resource)
+		if m.Scope.Name() == meta.RESTScopeNameNamespace {
+			ri = k8sClient.DynamicClient.Resource(m.Resource).Namespace(namespace)
+		}
+		if _, err := ri.Create(context.TODO(), obj, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("%s %s/%s: %w", resourcePath, obj.GetKind(), obj.GetName(), err)
+		}
+	}
+	return nil
+}
+
+// ApplyMultiDocDir applies every YAML file in dir in lexical order (filenames
+// are numbered so CRDs land before the resources that use them).
+func ApplyMultiDocDir(namespace, dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if err := ApplyMultiDocYAML(namespace, filepath.Join(dir, n)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (w *TestWorkload) ExecIntoPod(command []string, container string) (string, string, error) {

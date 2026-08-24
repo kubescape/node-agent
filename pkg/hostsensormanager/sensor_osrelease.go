@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -68,7 +67,7 @@ func (s *OsReleaseSensor) getOsReleaseFile() (string, error) {
 	var etcSons []string
 	for etcSons, err = etcDir.Readdirnames(100); err == nil; etcSons, err = etcDir.Readdirnames(100) {
 		for idx := range etcSons {
-			if strings.HasSuffix(etcSons[idx], osReleaseFileSuffix) {
+			if etcSons[idx] == osReleaseFileSuffix {
 				logger.L().Debug("os release file found", helpers.String("filename", etcSons[idx]))
 				return etcSons[idx], nil
 			}
