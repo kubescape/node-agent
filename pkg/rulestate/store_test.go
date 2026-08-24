@@ -376,3 +376,102 @@ func TestStore_PurgeScopeReclaimsAPodBucket(t *testing.T) {
 	assert.False(t, ok)
 	assert.Equal(t, 0, s.Len(), "purging a pod bucket must decrement the global size")
 }
+
+// The occupancy gauge was plumbed through every metrics manager, documented, and
+// never called -- so node_agent_state_entries silently did not exist. Sweep now
+// publishes it, including zeroes, so a kind that drains does not keep its last
+// non-zero reading forever.
+func TestStore_SweepPublishesOccupancyPerScopeKind(t *testing.T) {
+	m := &recordingMetrics{entries: map[string]int{}}
+	s := NewStore(testConfig(), m)
+	now := time.Now()
+
+	live := func(scopeID string, key string) *Entry {
+		return entry("R1089", scopeID, "n", key, now, time.Minute)
+	}
+	require.NoError(t, s.Set(live(ContainerScopeID("abc"), "1")))
+	require.NoError(t, s.Set(live(ContainerScopeID("abc"), "2")))
+	require.NoError(t, s.Set(live(ContainerScopeID("def"), "1")))
+	require.NoError(t, s.Set(live(HostScopeID(), "1")))
+	require.NoError(t, s.Set(live(PodScopeID("prod", "web-1"), "1")))
+	require.NoError(t, s.Set(live(NodeScopeID(), "1")))
+	// An entry that is already expired must not be counted as live.
+	require.NoError(t, s.Set(entry("R1089", ContainerScopeID("abc"), "n", "old", now.Add(-time.Hour), time.Minute)))
+
+	s.Sweep()
+
+	assert.Equal(t, 3, m.entries[ScopeKindContainer], "two containers, three live entries; the host bucket is counted separately")
+	assert.Equal(t, 1, m.entries[ScopeKindHost])
+	assert.Equal(t, 1, m.entries[ScopeKindPod])
+	assert.Equal(t, 1, m.entries[ScopeKindNode])
+
+	// Drain everything: each kind must be republished as zero.
+	s.PurgeScope(ContainerScopeID("abc"))
+	s.PurgeScope(ContainerScopeID("def"))
+	s.PurgeScope(HostScopeID())
+	s.PurgeScope(PodScopeID("prod", "web-1"))
+	s.PurgeScope(NodeScopeID())
+	s.Sweep()
+
+	for _, kind := range ScopeKinds() {
+		assert.Equal(t, 0, m.entries[kind], "%s must be republished as zero once it drains", kind)
+	}
+}
+
+// recordingMetrics keeps only what the occupancy assertions need.
+type recordingMetrics struct {
+	NoopMetrics
+	entries map[string]int
+}
+
+func (r *recordingMetrics) ReportStateEntries(scope string, n int) { r.entries[scope] = n }
+
+// At the global ceiling the write path used to sweep on EVERY write: a full walk
+// of all 16 shards, each under its write lock, per write, while the rule loop is
+// concurrent. This pins the rate limit -- one sweep per interval, no matter how
+// many writes arrive at the ceiling.
+func TestStore_WritePathSweepIsRateLimited(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxSize = 2
+	cfg.SweepInterval = time.Hour // nothing may sweep twice inside this test
+	s := NewStore(cfg, NoopMetrics{})
+	now := time.Now()
+
+	// Fill to the ceiling with entries that are ALREADY expired, so the first
+	// sweep has something to reclaim and later ones would too.
+	require.NoError(t, s.Set(entry("R1089", ContainerScopeID("abc"), "n", "1", now.Add(-time.Hour), time.Minute)))
+	require.NoError(t, s.Set(entry("R1089", ContainerScopeID("abc"), "n", "2", now.Add(-time.Hour), time.Minute)))
+	require.Equal(t, 2, s.Len())
+
+	// This write is at the ceiling, so it sweeps: both expired entries go, and it
+	// is admitted.
+	require.NoError(t, s.Set(entry("R1089", ContainerScopeID("abc"), "n", "3", now, time.Minute)))
+	assert.Equal(t, 1, s.Len(), "the write-path sweep must reclaim the expired entries")
+
+	// Re-fill to the ceiling with expired entries. A second sweep WOULD reclaim
+	// them, but it is not due, so the ceiling holds and the insert is rejected.
+	require.NoError(t, s.Set(entry("R1089", ContainerScopeID("abc"), "n", "4", now.Add(-time.Hour), time.Minute)))
+	assert.Equal(t, 2, s.Len())
+	err := s.Set(entry("R1089", ContainerScopeID("abc"), "n", "5", now, time.Minute))
+	assert.ErrorIs(t, err, ErrGlobalCapReached,
+		"a second sweep inside the interval must not run, so the ceiling still rejects")
+
+	// The rate limit must not break the replacement exemption: refreshing a key
+	// that already exists still does not grow the store, so it is still admitted.
+	assert.NoError(t, s.Set(entry("R1089", ContainerScopeID("abc"), "n", "3", now, time.Minute)),
+		"a replacement must stay admissible even when the sweep is rate-limited")
+}
+
+// An explicit Sweep() must still run on demand -- only the write path is
+// rate-limited. The background sweeper calls Sweep directly.
+func TestStore_ExplicitSweepIsNotRateLimited(t *testing.T) {
+	cfg := testConfig()
+	cfg.SweepInterval = time.Hour
+	s := NewStore(cfg, NoopMetrics{})
+	now := time.Now()
+
+	require.NoError(t, s.Set(entry("R1089", ContainerScopeID("abc"), "n", "1", now.Add(-time.Hour), time.Minute)))
+	assert.Equal(t, 1, s.Sweep(), "a direct Sweep must always run")
+	require.NoError(t, s.Set(entry("R1089", ContainerScopeID("abc"), "n", "2", now.Add(-time.Hour), time.Minute)))
+	assert.Equal(t, 1, s.Sweep(), "and again immediately after")
+}

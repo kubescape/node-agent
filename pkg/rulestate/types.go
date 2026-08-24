@@ -9,6 +9,7 @@ package rulestate
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -94,6 +95,39 @@ func ContainerScopeID(containerID string) string {
 		return "c:" + hostScopeSuffix
 	}
 	return "c:" + containerID
+}
+
+// Scope kinds, as reported on the node_agent_state_entries gauge. Deliberately a
+// small fixed set: the label must never carry a scope ID, which is a container or
+// pod identity and so unbounded.
+const (
+	ScopeKindContainer = "container"
+	ScopeKindHost      = "host"
+	ScopeKindPod       = "pod"
+	ScopeKindNode      = "node"
+)
+
+// ScopeKinds lists every kind the gauge reports, so a kind that has just fallen
+// to zero is published as zero rather than keeping its last non-zero value.
+func ScopeKinds() []string {
+	return []string{ScopeKindContainer, ScopeKindHost, ScopeKindPod, ScopeKindNode}
+}
+
+// ScopeKind classifies a bucket for metrics. The host pseudo-container is
+// reported separately from real containers: it is the one bucket that is never
+// purged, so watching it against the others is how its TTL-only reclamation is
+// observed.
+func ScopeKind(scopeID string) string {
+	switch {
+	case IsHostScopeID(scopeID):
+		return ScopeKindHost
+	case scopeID == NodeScopeID():
+		return ScopeKindNode
+	case strings.HasPrefix(scopeID, "p:"):
+		return ScopeKindPod
+	default:
+		return ScopeKindContainer
+	}
 }
 
 func HostScopeID() string               { return "c:" + hostScopeSuffix }
