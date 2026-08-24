@@ -205,8 +205,9 @@ func lintEndpoint(dir string, e netEndpoint, add func(rule, msg string)) {
 		if p.Protocol != "TCP" && p.Protocol != "UDP" {
 			add("R-NN-20", where(fmt.Sprintf("port %q protocol %q is not TCP|UDP", p.Name, p.Protocol)))
 		}
-		if p.Port < 1 || p.Port > 65535 {
-			add("R-NN-20", where(fmt.Sprintf("port %q value %d out of range 1..65535", p.Name, p.Port)))
+		// Port 0 is the any-port wildcard (matches R0011/R0012 port semantics).
+		if p.Port != 0 && (p.Port < 1 || p.Port > 65535) {
+			add("R-NN-20", where(fmt.Sprintf("port %q value %d out of range 1..65535 (0 = any)", p.Name, p.Port)))
 		}
 	}
 }

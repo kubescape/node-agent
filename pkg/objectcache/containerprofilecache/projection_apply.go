@@ -67,6 +67,9 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 	pcp.IngressDomains = projectField(s.IngressDomains, extractIngressDomains(cp), false)
 	pcp.IngressAddresses = projectField(s.IngressAddresses, extractIngressAddresses(cp), false)
 
+	pcp.EgressAddrPorts = objectcache.ExtractAddrPorts(cp.Spec.Egress)
+	pcp.IngressAddrPorts = objectcache.ExtractAddrPorts(cp.Spec.Ingress)
+
 	return pcp
 }
 
