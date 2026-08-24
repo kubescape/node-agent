@@ -72,8 +72,12 @@ type RuleManager struct {
 	detectorManager      *detectors.DetectorManager
 	alertLogDedup        *expirable.LRU[string, struct{}]
 	alertLogDedupMu      sync.Mutex
-	stateStore           *rulestate.Store
-	stateWrites          *statewrites.Executor
+	// stateWritesCache holds compiled write clauses, keyed by rule ID plus a
+	// fingerprint of the clause, so an edited rule recompiles without an
+	// invalidation hook. expirable.LRU is already concurrency-safe.
+	stateWritesCache *expirable.LRU[string, *compiledWrites]
+	stateStore       *rulestate.Store
+	stateWrites      *statewrites.Executor
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -116,6 +120,9 @@ func CreateRuleManager(
 		mntnsRegistry:       mntnsRegistry,
 		detectorManager:     detectorManager,
 		alertLogDedup:       expirable.NewLRU[string, struct{}](1000, nil, 60*time.Second),
+		// No TTL: a compiled clause stays valid until the clause itself changes,
+		// which changes the key. The bound is what evicts stale versions.
+		stateWritesCache: expirable.NewLRU[string, *compiledWrites](512, nil, 0),
 	}
 
 	r.ruleFailureCreator = ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory, armotypes.AlertSourcePlatformK8sAgent, agentVersion, &r.containerIdToPid)
@@ -385,8 +392,23 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		// rule's own declared-name scopes, so it cannot be shared between rules.
 		// Resetting the tracker here is what stops rule N citing rule N-1's
 		// entries as its own evidence.
-		stateTracker.Reset()
-		rm.seedStateContext(evalContext, &rule, enrichedEvent, stateScopes, stateTracker)
+		//
+		// Only rules that actually declare state pay for this. seedStateContext
+		// allocates a ScopeIDs map and an Accessor, and it ran for every rule on
+		// every event -- on a node running forty stateless rules that was eighty
+		// allocations per event for a feature none of them use.
+		//
+		// The delete is not optional. evalContext is built once per event and
+		// reused across rules, so skipping the seed without clearing the key would
+		// leave the PREVIOUS rule's accessor in place, and a stateless rule would
+		// read another rule's state through it -- the one thing the receiver design
+		// exists to make inexpressible.
+		if len(stateScopes) > 0 {
+			stateTracker.Reset()
+			rm.seedStateContext(evalContext, &rule, enrichedEvent, stateScopes, stateTracker)
+		} else {
+			delete(evalContext, state.AccessorContextKey)
+		}
 
 		// From here on, alerting must not skip the write clause: writes are
 		// evidence gathering, and dropping them because an alert was suppressed
