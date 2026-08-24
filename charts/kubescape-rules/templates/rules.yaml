@@ -313,7 +313,7 @@ spec:
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
           ruleExpression:
             - eventType: "network"
-              expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
+              expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto) && !cp.was_selector_in_egress(event.containerId, event.dstNamespace, event.dstPodLabels)"
         profileDependency: 0
         profileDataRequired:
           egressAddresses: all
@@ -338,7 +338,7 @@ spec:
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
           ruleExpression:
             - eventType: "network"
-              expression: "event.pktType == 'HOST' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_ingress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
+              expression: "event.pktType == 'HOST' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_ingress(event.containerId, event.dstAddr, event.dstPort, event.proto) && !cp.was_selector_in_ingress(event.containerId, event.dstNamespace, event.dstPodLabels)"
         profileDependency: 0
         profileDataRequired:
           ingressAddresses: all
