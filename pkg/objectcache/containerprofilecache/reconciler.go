@@ -497,6 +497,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	spec := c.snapshotSpec()
 	applyStart := time.Now()
 	projectedCP := Apply(spec, networkpeer.WithResolvedServiceNeighbors(projected, c.serviceLister), tree)
+	projectedCP.ResolvedGen = c.listerGen()
 	if c.cfg.ProfileProjection.DetailedMetricsEnabled {
 		c.metricsManager.ObserveProjectionApplyDuration(time.Since(applyStart))
 		c.observeMemoryMetrics(projected, projectedCP)

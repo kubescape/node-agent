@@ -617,6 +617,7 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 	entry.UsesServiceResolution = networkpeer.HasServiceNeighbors(userMerged)
 	entry.ListerGen = c.listerGen()
 	projected := Apply(spec, networkpeer.WithResolvedServiceNeighbors(userMerged, c.serviceLister), tree)
+	projected.ResolvedGen = entry.ListerGen
 	entry.Projected = projected
 	entry.SpecHash = projected.SpecHash
 
