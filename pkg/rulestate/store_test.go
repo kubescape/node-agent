@@ -337,3 +337,42 @@ func TestStore_ConcurrentSweepIsRaceFree(t *testing.T) {
 	sweeper.Wait()
 	assert.GreaterOrEqual(t, s.Len(), 0, "size must never go negative")
 }
+
+// Pod scope taking the per-container cap is a decision, not a fallthrough: a pod
+// is one workload and its bucket is reclaimed when the pod's last container goes,
+// so it does not need the node-wide headroom. Pinned so that a future change to
+// scopeCap has to be deliberate.
+func TestStore_PodBucketTakesTheContainerCap(t *testing.T) {
+	s := NewStore(testConfig(), NoopMetrics{}) // host/node cap 8, container cap 4
+	now := time.Now()
+	podID := PodScopeID("prod", "web-1")
+
+	for i := 0; i < 4; i++ {
+		e := entry("R1089", podID, "n", fmt.Sprint(i), now, time.Minute)
+		e.Scope = armotypes.StateScopePod
+		require.NoError(t, s.Set(e))
+	}
+	over := entry("R1089", podID, "n", "4", now, time.Minute)
+	over.Scope = armotypes.StateScopePod
+	assert.ErrorIs(t, s.Set(over), ErrScopeCapReached,
+		"pod scope must be bounded by the per-container cap, not the node-wide one")
+}
+
+// The pod bucket must be reclaimable in full, the same way a container's is --
+// this is the store-side half of the pod-removal purge.
+func TestStore_PurgeScopeReclaimsAPodBucket(t *testing.T) {
+	s := NewStore(testConfig(), NoopMetrics{})
+	now := time.Now()
+	podID := PodScopeID("prod", "web-1")
+
+	e := entry("R1089", podID, "n", "1", now, time.Minute)
+	e.Scope = armotypes.StateScopePod
+	require.NoError(t, s.Set(e))
+	require.Equal(t, 1, s.Len())
+
+	s.PurgeScope(podID)
+
+	_, ok := s.Get("R1089", armotypes.StateScopePod, podID, "n", "1")
+	assert.False(t, ok)
+	assert.Equal(t, 0, s.Len(), "purging a pod bucket must decrement the global size")
+}

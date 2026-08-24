@@ -130,25 +130,15 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		podID := utils.CreateK8sPodID(namespace, podName)
 
 		time.AfterFunc(10*time.Minute, func() {
-			stillTracked := false
-			rm.trackedContainers.Each(func(id string) bool {
-				// Parse the container ID to reliably extract the pod info
-				parts := strings.Split(id, "/")
-				if len(parts) == 3 && parts[0] == namespace && parts[1] == podName {
-					stillTracked = true
-					return true // We found a match, can stop iteration
-				}
-				return false // No match yet, continue looking
-			})
-
-			if !stillTracked {
-				logger.L().Debug("RuleManager - removing pod from podToWlid map",
-					helpers.String("podID", podID))
-				rm.podToWlid.Delete(podID)
-			} else {
+			if rm.podStillTracked(namespace, podName) {
 				logger.L().Debug("RuleManager - keeping pod in podToWlid map due to active containers",
 					helpers.String("podID", podID))
+				return
 			}
+			logger.L().Debug("RuleManager - removing pod from podToWlid map",
+				helpers.String("podID", podID))
+			rm.podToWlid.Delete(podID)
+			rm.purgePodScopeIfPodGone(namespace, podName)
 		})
 
 		rm.containerIdToShimPid.Delete(notif.Container.Runtime.ContainerID)
@@ -163,4 +153,36 @@ func (rm *RuleManager) waitForSharedContainerData(containerID string) (*objectca
 		}
 		return nil, fmt.Errorf("container %s not found in shared data", containerID)
 	}, backoffv5.WithBackOff(backoffv5.NewExponentialBackOff()))
+}
+
+// podStillTracked reports whether any container of this pod is still tracked.
+// A pod's identity spans its containers, so pod-level cleanup can only run once
+// the last of them is gone.
+func (rm *RuleManager) podStillTracked(namespace, podName string) bool {
+	stillTracked := false
+	rm.trackedContainers.Each(func(id string) bool {
+		// Parse the container ID to reliably extract the pod info
+		parts := strings.Split(id, "/")
+		if len(parts) == 3 && parts[0] == namespace && parts[1] == podName {
+			stillTracked = true
+			return true // We found a match, can stop iteration
+		}
+		return false // No match yet, continue looking
+	})
+	return stillTracked
+}
+
+// purgePodScopeIfPodGone reclaims a dead pod's state.
+//
+// Container scope is purged the moment a container goes, but pod scope outlives
+// any single container by design, so it can only be reclaimed once the pod's LAST
+// container has gone -- purging earlier would cut a correlation chain that is
+// still legitimately in progress across a surviving sibling. Without this the
+// bucket survived until TTL, and on a churning node many dead pods' worth of
+// entries counted against the global ceiling at once.
+func (rm *RuleManager) purgePodScopeIfPodGone(namespace, podName string) {
+	if rm.stateStore == nil || rm.podStillTracked(namespace, podName) {
+		return
+	}
+	rm.stateStore.PurgeScope(rulestate.PodScopeID(namespace, podName))
 }

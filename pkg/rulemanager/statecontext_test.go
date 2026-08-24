@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -221,4 +223,57 @@ func TestContainerScopeID_TrimmedRuntimeIDWouldHitTheHostBucket(t *testing.T) {
 	assert.Equal(t, rulestate.HostScopeID(), rulestate.ContainerScopeID(utils.TrimRuntimePrefix(bare)),
 		"which would resolve to the host bucket -- purge must use the untrimmed ID")
 	assert.NotEqual(t, rulestate.HostScopeID(), rulestate.ContainerScopeID(bare))
+}
+
+// Pod scope was reclaimed by nothing. PurgeScope's only production call site
+// passes a CONTAINER scope ID, so `p:<ns>/<pod>` entries outlived the pod they
+// describe and sat in the store until TTL -- on a churning node, many dead pods'
+// worth at once, all of it counting against the global ceiling.
+//
+// The pod is gone only when its LAST container goes, which is why this reuses the
+// same "is any container of this pod still tracked" test the podToWlid cleanup
+// already makes.
+func TestPurgePodScope_ReclaimsWhenTheLastContainerGoes(t *testing.T) {
+	rm := testRuleManager(t)
+	rm.stateStore = rulestate.NewStore(rm.cfg.CelStateStore, rulestate.NoopMetrics{})
+	rm.trackedContainers = mapset.NewSet[string]()
+
+	podEntry := func() (*rulestate.Entry, bool) {
+		return rm.stateStore.Get("R1089", armotypes.StateScopePod,
+			rulestate.PodScopeID("prod", "web-1"), "n", "1")
+	}
+	seed := func() {
+		require.NoError(t, rm.stateStore.Set(&rulestate.Entry{
+			RuleID: "R1089", Name: "n", Key: "1",
+			Scope: armotypes.StateScopePod, ScopeID: rulestate.PodScopeID("prod", "web-1"),
+			Timestamp: time.Now(), ExpiresAt: time.Now().Add(time.Minute),
+		}))
+	}
+
+	// A sibling container of the same pod is still running: the pod is alive, so
+	// its state must survive. Purging here would break a correlation chain that
+	// is still legitimately in progress.
+	seed()
+	rm.trackedContainers.Add(utils.CreateK8sContainerID("prod", "web-1", "sidecar"))
+	rm.purgePodScopeIfPodGone("prod", "web-1")
+	_, ok := podEntry()
+	assert.True(t, ok, "a pod with a container still tracked must keep its state")
+
+	// A container of a DIFFERENT pod must not keep this pod alive.
+	rm.trackedContainers.Clear()
+	rm.trackedContainers.Add(utils.CreateK8sContainerID("prod", "web-2", "app"))
+	rm.purgePodScopeIfPodGone("prod", "web-1")
+	_, ok = podEntry()
+	assert.False(t, ok, "another pod's container must not keep this pod's state alive")
+
+	// And the neighbouring pod is untouched.
+	require.NoError(t, rm.stateStore.Set(&rulestate.Entry{
+		RuleID: "R1089", Name: "n", Key: "1",
+		Scope: armotypes.StateScopePod, ScopeID: rulestate.PodScopeID("prod", "web-2"),
+		Timestamp: time.Now(), ExpiresAt: time.Now().Add(time.Minute),
+	}))
+	rm.purgePodScopeIfPodGone("prod", "web-1")
+	_, ok = rm.stateStore.Get("R1089", armotypes.StateScopePod,
+		rulestate.PodScopeID("prod", "web-2"), "n", "1")
+	assert.True(t, ok, "purging one pod must not touch its neighbour")
 }

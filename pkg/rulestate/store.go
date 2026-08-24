@@ -50,13 +50,23 @@ func (s *Store) shardFor(scopeID string) *shard {
 	return s.shards[h.Sum32()%shardCount]
 }
 
-// scopeCap picks the cap for a bucket. The larger cap applies to both node-wide
-// buckets -- the host pseudo-container and node scope itself. Neither holds one
-// workload: they are shared by every rule and every process on the node, and
-// neither is ever reclaimed by PurgeScope (which is only ever called with a
-// container's scope ID), so both rely on TTL and need the headroom. Bounding node
-// scope by the per-container cap would starve it far sooner than intended on a
-// busy node.
+// scopeCap picks the cap for a bucket.
+//
+// The larger cap applies to the two node-wide buckets -- the host
+// pseudo-container and node scope itself. Neither holds one workload: they are
+// shared by every rule and every process on the node, and neither is ever
+// reclaimed by PurgeScope, so both rely on TTL and need the headroom. Bounding
+// node scope by the per-container cap would starve it far sooner than intended on
+// a busy node.
+//
+// Pod scope deliberately takes the per-container cap. A pod is a single workload,
+// like a container, and it IS reclaimed -- RuleManager purges the bucket once the
+// pod's last container is gone. Note the cap is shared by every container in the
+// pod, so a pod-scoped rule in a many-container pod has less room per container
+// than a container-scoped one; that is intended, because pod scope exists for
+// facts about the pod as a unit rather than per-process markers. If a real
+// workload ever needs more, state_write_rejected_total{reason="scope_cap"} is
+// what says so.
 func (s *Store) scopeCap(scopeID string) int {
 	if IsHostScopeID(scopeID) || scopeID == NodeScopeID() {
 		return s.cfg.MaxEntriesForHost
