@@ -142,3 +142,54 @@ func TestStateWiring_WriteOnExecThenReadOnNetwork(t *testing.T) {
 	assert.True(t, fired,
 		"state written on the exec leg must be readable on the network leg with the same pid")
 }
+
+// _pid lands in the returned map as an unsigned value, while event.pid is what
+// the event exposes. A rule author's first instinct is to compare them directly,
+// so what cel-go actually does with that comparison is worth measuring rather
+// than assuming -- if it errors, the rule does not merely miss, it aborts.
+func TestStateWiring_ComparingStoredPidAgainstEventPid(t *testing.T) {
+	c, store, _ := newStateWiringCEL(t)
+
+	now := time.Now()
+	require.NoError(t, store.Set(&rulestate.Entry{
+		RuleID: "R9911", Name: "probe_exec", Key: "4471",
+		Scope:     armotypes.StateScopeContainer,
+		ScopeID:   rulestate.ContainerScopeID("abc"),
+		EventType: armotypes.EventTypeExec,
+		Timestamp: now, ExpiresAt: now.Add(5 * time.Minute),
+		Process: &armotypes.Process{PID: 4471, Comm: "sh"},
+	}))
+
+	netEvent := networkProbeEvent(4471)
+	ctx := c.CreateEvalContext(netEvent)
+	seedState(c, ctx, store, netEvent, nil)
+
+	t.Run("direct numeric comparison", func(t *testing.T) {
+		got, err := c.EvaluateBoolExpressionWithContext(ctx,
+			`state.get('probe_exec', string(event.pid))._pid == event.pid`)
+		if err != nil {
+			t.Fatalf("comparing _pid to event.pid ABORTS evaluation: %v\n"+
+				"the docs must steer authors away from this form", err)
+		}
+		assert.True(t, got,
+			"the same pid stored and read back must compare equal")
+	})
+
+	// The form the docs already recommend for the join, which cannot depend on
+	// numeric-type agreement at all.
+	t.Run("string comparison", func(t *testing.T) {
+		got, err := c.EvaluateBoolExpressionWithContext(ctx,
+			`string(state.get('probe_exec', string(event.pid))._pid) == string(event.pid)`)
+		require.NoError(t, err)
+		assert.True(t, got)
+	})
+
+	// A miss returns an empty map, so a read of a key that is not there must
+	// degrade rather than abort.
+	t.Run("miss degrades", func(t *testing.T) {
+		got, err := c.EvaluateBoolExpressionWithContext(ctx,
+			`!has(state.get('probe_exec', 'nope')._pid)`)
+		require.NoError(t, err, "a miss must not abort evaluation")
+		assert.True(t, got)
+	})
+}

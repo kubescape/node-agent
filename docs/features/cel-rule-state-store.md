@@ -161,6 +161,13 @@ with `_`, so they can never shadow provenance.
 | `_exe` | string | Executable path. |
 | `_cwd` | string | Working directory. |
 
+`_pid` and `_ppid` are unsigned, while `event.pid` is not, so
+`state.get(...)._pid == event.pid` mixes numeric types. It is safe — cel-go
+compares numbers across types by value, and a test pins that in the production
+evaluator — so the comparison neither errors nor silently returns false. The join
+itself should still go through `key: string(event.pid)`: it is the cheaper lookup
+and does not depend on that behaviour holding.
+
 ### The ancestor functions assume a PID key
 
 `has_ancestor` / `get_ancestor` probe each ancestor PID in turn, so they only
@@ -234,6 +241,25 @@ cites another's entries.
 `RuntimeProcessDetails` continue to describe the *triggering* event, so backend
 incident grouping is unchanged. An alert with no correlations serializes exactly
 as before, with no `correlations` key.
+
+### Which exporters carry it
+
+Only the **HTTP exporter**. That is a property of the payload shapes, not an
+oversight, and it is not expected to change:
+
+| Exporter | Carries `correlations[]`? |
+|---|---|
+| HTTP | yes — the only nested-JSON payload |
+| Alertmanager | no — labels are a flat `map[string]string` |
+| stdout | no — a fixed set of structured log fields |
+| CSV | no — a fixed column set |
+| syslog | no — a flat message |
+
+Every exporter other than HTTP emits a flat, fixed-shape record, so carrying a
+nested array would mean changing that exporter's schema rather than adding a
+field. A rule that correlates still alerts normally on all of them; only the
+evidence of the far leg is absent. If you are asserting on correlation evidence —
+in a test or a downstream consumer — the HTTP exporter is the one to read.
 
 `message` and `uniqueId` are evaluated against the predicate's own context, so
 `state.get()` in a message resolves against the same entries the predicate
