@@ -313,7 +313,7 @@ spec:
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
           ruleExpression:
             - eventType: "network"
-              expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
+              expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
         profileDependency: 0
         profileDataRequired:
           egressAddresses: all
@@ -322,6 +322,31 @@ spec:
         isTriggerAlert: false
         mitreTactic: "TA0010"
         mitreTechnique: "T1041"
+        tags:
+          - "context:kubernetes"
+          - "context:container"
+          - "whitelisted"
+          - "network"
+          - "anomaly"
+          - "networkprofile"
+      - name: "Unexpected Ingress Network Traffic"
+        enabled: true
+        id: "R0012"
+        description: "Detecting unexpected ingress network traffic that is not allowlisted by application profile. Symmetric twin of R0011: internal and external peers alike, only loopback excluded; internal peers are allowlisted narrowly via addresses or resolved serviceRef/serviceSelector entries rather than a serviceCIDR that blinds detection to lateral movement."
+        expressions:
+          message: "'Unexpected ingress network communication from: ' + event.dstAddr + ':' + string(event.dstPort) + ' using ' + event.proto + ' to: ' + event.containerName"
+          uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
+          ruleExpression:
+            - eventType: "network"
+              expression: "event.pktType == 'HOST' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_ingress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
+        profileDependency: 0
+        profileDataRequired:
+          ingressAddresses: all
+        severity: 5 # Medium
+        supportPolicy: false
+        isTriggerAlert: false
+        mitreTactic: "TA0008"
+        mitreTechnique: "T1210"
         tags:
           - "context:kubernetes"
           - "context:container"

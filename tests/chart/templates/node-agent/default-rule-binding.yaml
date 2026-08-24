@@ -39,5 +39,6 @@ spec:
     - ruleName: "Exec to pod"
     - ruleName: "Port forward to pod"
     - ruleName: "Unexpected Egress Network Traffic"
+    - ruleName: "Unexpected Ingress Network Traffic"
     - ruleName: "Unexpected Ptrace Syscall Usage"
     - ruleName: "Unexpected io_uring Operation Detected"
