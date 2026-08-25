@@ -4,14 +4,33 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
+
+func TestSyscallTracerPollInterval(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.Config
+		want time.Duration
+	}{
+		{"unset config falls back to default", config.Config{}, defaultSyscallPollInterval},
+		{"configured interval is used", config.Config{SyscallPollInterval: 5 * time.Second}, 5 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := &SyscallTracer{cfg: tt.cfg}
+			assert.Equal(t, tt.want, st.pollInterval())
+		})
+	}
+}
 
 func TestSyscallFields(t *testing.T) {
 	expectedFields := map[string][]string{

@@ -24,7 +24,26 @@ const (
 	MaxSniffingTimeLabel          = "kubescape.io/max-sniffing-time"
 	MaxWaitForSharedContainerData = 10 * time.Minute
 	MaxWaitForAck                 = 30 * time.Second
+
+	// maxTerminationGracePeriod bounds terminationGracePeriod so that a misconfigured (large)
+	// SyscallPollInterval cannot stall every container termination by that same amount.
+	maxTerminationGracePeriod = 5 * time.Second
 )
+
+// terminationGracePeriod returns how long to wait, right before the final forced profile save
+// on container termination or max-sniffing-time, for the syscall tracer's in-flight poll cycle
+// to land. The eBPF syscall tracer (SyscallTracer) only ever surfaces the syscalls it has
+// decoded from its last periodic map fetch (see pkg/containerwatcher/v2/tracers/syscall.go); if
+// a container terminates between two polls, whatever it executed since the last poll is still
+// sitting in the kernel map and would otherwise be silently discarded once this manager removes
+// the container's data (kubescape/node-agent#922). Waiting one poll interval (capped) gives that
+// last cycle a chance to fetch and report before the profile is snapshotted.
+func (cpm *ContainerProfileManager) terminationGracePeriod() time.Duration {
+	if cpm.cfg.SyscallPollInterval <= 0 || cpm.cfg.SyscallPollInterval > maxTerminationGracePeriod {
+		return maxTerminationGracePeriod
+	}
+	return cpm.cfg.SyscallPollInterval
+}
 
 // createUUID generates a new UUID string
 func createUUID() string {

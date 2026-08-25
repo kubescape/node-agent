@@ -110,6 +110,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.runtime,
 		tf.ociStore,
 		tf.createEventCallback(utils.SyscallEventType),
+		tf.cfg,
 	)
 	manager.RegisterTracer(syscallTracer)
 

@@ -3,6 +3,7 @@ package tracers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
@@ -22,12 +23,17 @@ import (
 const (
 	syscallImageName = "ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.48.1"
 	syscallTraceName = "syscall_tracer"
+
+	// defaultSyscallPollInterval is used when cfg.SyscallPollInterval is unset (e.g. tests
+	// constructing config.Config directly). It matches the config package's own default.
+	defaultSyscallPollInterval = 2 * time.Second
 )
 
 var _ containerwatcher.TracerInterface = (*SyscallTracer)(nil)
 
 // SyscallTracer implements TracerInterface for events
 type SyscallTracer struct {
+	cfg           config.Config
 	eventCallback containerwatcher.ResultCallback
 	gadgetCtx     *gadgetcontext.GadgetContext
 	kubeManager   operators.DataOperator
@@ -41,13 +47,26 @@ func NewSyscallTracer(
 	runtime runtime.Runtime,
 	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
+	cfg config.Config,
 ) *SyscallTracer {
 	return &SyscallTracer{
+		cfg:           cfg,
 		eventCallback: eventCallback,
 		kubeManager:   kubeManager,
 		ociStore:      ociStore,
 		runtime:       runtime,
 	}
+}
+
+// pollInterval returns the configured eBPF map-fetch interval for the advise_seccomp map,
+// falling back to defaultSyscallPollInterval when unset. A long interval widens the window in
+// which a terminating container's last syscalls are never fetched before its profile is saved
+// and its data discarded (kubescape/node-agent#922), so this is kept short by default.
+func (st *SyscallTracer) pollInterval() time.Duration {
+	if st.cfg.SyscallPollInterval > 0 {
+		return st.cfg.SyscallPollInterval
+	}
+	return defaultSyscallPollInterval
 }
 
 // Start initializes and starts the tracer
@@ -68,7 +87,7 @@ func (st *SyscallTracer) Start(ctx context.Context) error {
 	go func() {
 		params := map[string]string{
 			"operator.oci.ebpf.map-fetch-count":    "0",
-			"operator.oci.ebpf.map-fetch-interval": "30s",
+			"operator.oci.ebpf.map-fetch-interval": st.pollInterval().String(),
 		}
 		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
 		if err != nil {

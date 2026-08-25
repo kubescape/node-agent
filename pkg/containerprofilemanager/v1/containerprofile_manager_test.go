@@ -630,3 +630,23 @@ func TestMaxSniffingTimeLabelConstant(t *testing.T) {
 func TestMaxWaitForSharedContainerDataConstant(t *testing.T) {
 	assert.Equal(t, 10*time.Minute, MaxWaitForSharedContainerData)
 }
+
+func TestTerminationGracePeriod(t *testing.T) {
+	tests := []struct {
+		name         string
+		pollInterval time.Duration
+		want         time.Duration
+	}{
+		{"unset falls back to cap", 0, maxTerminationGracePeriod},
+		{"short interval used as-is", 500 * time.Millisecond, 500 * time.Millisecond},
+		{"default interval used as-is", 2 * time.Second, 2 * time.Second},
+		{"interval equal to cap used as-is", maxTerminationGracePeriod, maxTerminationGracePeriod},
+		{"interval above cap is capped", 30 * time.Second, maxTerminationGracePeriod},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpm := &ContainerProfileManager{cfg: config.Config{SyscallPollInterval: tt.pollInterval}}
+			assert.Equal(t, tt.want, cpm.terminationGracePeriod())
+		})
+	}
+}
