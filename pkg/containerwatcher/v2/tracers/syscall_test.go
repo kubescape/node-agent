@@ -32,9 +32,16 @@ func TestSyscallTracerPollInterval(t *testing.T) {
 	}
 }
 
+func TestSyscallTracerPeekDoesNotPanic(t *testing.T) {
+	// With no gadget instance running, this must be a silent no-op (see
+	// ebpfoperator.TriggerManualMapFetch).
+	st := &SyscallTracer{}
+	assert.NotPanics(t, st.Peek)
+}
+
 func TestSyscallFields(t *testing.T) {
 	expectedFields := map[string][]string{
-		"syscalls": {
+		syscallDataSourceName: {
 			"mntns_id_raw",
 			"syscalls",
 		},

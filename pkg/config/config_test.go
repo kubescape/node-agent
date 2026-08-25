@@ -82,7 +82,7 @@ func TestLoadConfig(t *testing.T) {
 				WorkerChannelSize:   750000,
 				BlockEvents:         false,
 				ProcfsScanInterval:  30 * time.Second,
-				SyscallPollInterval: 2 * time.Second,
+				SyscallPollInterval: 30 * time.Second,
 				RuleCoolDown: rulecooldown.RuleCooldownConfig{
 					CooldownDuration:   1 * time.Hour,
 					CooldownAfterCount: 1,

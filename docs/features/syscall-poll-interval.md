@@ -1,67 +1,75 @@
-# Syscall Poll Interval and Termination Grace Period
+# Syscall Termination Flush
 
 Container profiles could end up with 0 or partial syscalls even when the container executed
-tens of distinct syscalls (kubescape/node-agent#922). This documents the root cause and the
-mitigation.
+tens of distinct syscalls (kubescape/node-agent#922). This documents the root cause and the fix.
 
 ## Root cause
 
 `SyscallTracer` (pkg/containerwatcher/v2/tracers/syscall.go) doesn't read the kernel's
 `advise_seccomp` eBPF map on demand. It runs the `advise_seccomp` OCI gadget with a periodic
-map-fetch: every poll interval, the gadget operator drains the whole map
-(`BPF_MAP_LOOKUP_AND_DELETE_BATCH`) and emits one datasource event per entry, which
+map-fetch (`syscallPollInterval`, default `30s`): on each tick, the gadget operator drains the
+whole map (`BPF_MAP_LOOKUP_AND_DELETE_BATCH`) and emits one datasource event per entry, which
 `SyscallTracer.callback` decodes and routes to `ContainerProfileManager.ReportSyscall` by
-container ID. Until the fix below, that interval was hardcoded to 30 seconds.
+container ID.
 
 `ContainerProfileManager` (pkg/containerprofilemanager/v1) reacts to container termination
 synchronously: `deleteContainer` sends `ContainerHasTerminatedError` on the container's sync
 channel, and `monitorContainer` (pkg/containerprofilemanager/v1/monitoring.go) immediately does
 a final forced `saveProfile` and hands the ack back. Whatever syscalls the kernel recorded since
-the tracer's last poll are still sitting in the eBPF map at that moment — they have not been
-fetched yet — and once the profile is saved and the container's entry is removed
-(`removeContainerEntry`), that data is unreachable. A container whose lifetime is shorter than
-the poll interval could complete with zero syscalls recorded; any container has up to one full
-poll interval of syscalls at risk on termination.
+the tracer's last poll are still sitting in the eBPF map at that moment — not yet fetched — and
+once the profile is saved and the container's entry is removed (`removeContainerEntry`), that
+data is unreachable. A container whose lifetime is shorter than the poll interval could complete
+with zero syscalls recorded; any container has up to one full poll interval of syscalls at risk
+on termination.
 
-There is no per-container on-demand flush available from the pinned `advise_seccomp` gadget: the
-eBPF map iterator (`pkg/operators/ebpf/maps.go` in the `inspektor-gadget` fork) only supports a
-fixed interval/count and an optional flush-on-stop that fires when the whole gadget instance
-stops — not when one container among many terminates. Re-introducing a true synchronous
-`Peek()` (as node-agent v1 had) would require changing that upstream gadget's fetch loop to
-support an on-demand trigger, which is out of scope here.
+## Fix: an on-demand flush trigger
 
-## Mitigation
+Rather than shrinking the poll interval (which only narrows the race, and trades it for more
+frequent map fetches at 30s cadence for every container node-wide), this recovers the
+at-risk data directly: `ContainerProfileManager` requests an immediate, out-of-band fetch of the
+eBPF map right before a container's final forced save, instead of waiting for the tracer's next
+scheduled tick.
 
-Two changes narrow the race instead, both purely on the node-agent side:
+This required a small addition to the vendored `inspektor-gadget` fork
+(`github.com/matthyx/inspektor-gadget`, matthyx/inspektor-gadget#12), since the OCI gadget's
+map-iterator mechanism (`pkg/operators/ebpf/maps.go`) previously only supported a fixed
+interval/count schedule, plus an optional flush-on-*stop* that fires when the whole gadget
+instance is torn down — not when node-agent stops tracking one container among many that a
+single shared, long-running gadget instance observes. `ebpfoperator.TriggerManualMapFetch(names
+...string)` adds a package-level, fire-and-forget way to request an immediate fetch from any
+currently running map iterator (optionally filtered by datasource name), independent of its
+normal schedule.
 
-1. **`syscallPollInterval` config** (default `2s`, was hardcoded `30s`) — passed to the gadget as
-   `operator.oci.ebpf.map-fetch-interval` (`SyscallTracer.pollInterval()`). Shortening the
-   interval bounds how much syscall data can be sitting unfetched in the kernel map at any given
-   moment, from up to 30s down to the configured value.
+### The pieces
 
-2. **Termination grace period** — `ContainerProfileManager.terminationGracePeriod()`
-   (pkg/containerprofilemanager/v1/helpers.go) sleeps for `min(syscallPollInterval, 5s)`
-   immediately before the final forced `saveProfile` call on both termination paths
-   (`ContainerHasTerminatedError` and `ContainerReachedMaxTime` in monitoring.go). This gives the
-   next poll cycle — which is already running independently of any single container's lifecycle
-   — a chance to fetch and report the last syscalls before they become unreachable. The 5s cap
-   protects against a misconfigured (large) `syscallPollInterval` stalling every container
-   termination by that same amount; `MaxWaitForAck` (30s) has ample headroom above the cap.
+1. **`SyscallTracer.Peek()`** (pkg/containerwatcher/v2/tracers/syscall.go) calls
+   `ebpfoperator.TriggerManualMapFetch("syscalls")`, targeting only the seccomp tracer's map
+   iterator.
+2. **`ContainerProfileManager.SetSyscallFlusher`**
+   (pkg/containerprofilemanager/containerprofile_manager_interface.go) lets a caller register a
+   flush callback; `TracerFactory.CreateAllTracers` (pkg/containerwatcher/v2/tracers/tracer_factory.go)
+   wires it to `syscallTracer.Peek`, but only when the syscall tracer is actually enabled — an
+   unwired flusher would otherwise cost every container termination a wait for nothing.
+3. **`flushAndSettle`** (pkg/containerprofilemanager/v1/helpers.go) is called on both
+   termination paths (`ContainerHasTerminatedError` and `ContainerReachedMaxTime` in
+   monitoring.go) right before the final forced `saveProfile`. It invokes the registered flusher
+   (no-op if none is registered) and then waits `postSyscallFlushSettleDelay` (`500ms`) — not
+   for the fetch itself, which is comparatively fast, but for the resulting events to travel
+   through the ordered event queue and worker pool into this container's collected data before
+   it's snapshotted and cleared.
 
-Together these shrink the loss window from "up to 30s, every termination" to "up to
-`syscallPollInterval` (default 2s), and only when a poll genuinely didn't fire in that window" —
-without touching the gadget's fetch mechanism.
+`syscallPollInterval` still exists and still defaults to `30s`: it only governs how fresh the
+*live*, still-running profile is between periodic storage updates (`updateDataPeriod`), which is
+an orthogonal concern from termination-time capture now handled by the flush trigger.
 
 ## Known limitations
 
-This is a bounded-race mitigation, not a guarantee. A container that terminates and whose final
-poll cycle is delayed (e.g. by scheduler contention) beyond the grace period can still lose its
-most recent syscalls. Achieving zero-loss capture would require an on-demand, per-container flush
-in the underlying gadget (`matthyx/inspektor-gadget`), tracked as a separate follow-up.
-
-Shortening the poll interval means more frequent map fetches. Each fetch drains the entire
-`advise_seccomp` map for every actively-traced container's mount namespace in one batch (not just
-one), so the added overhead is one small periodic drain rather than N per-container calls; syscall
-events reaching `ContainerProfileManager` are further deduplicated per (mount ns, pid, syscall)
-within a 5s window (`dedupTTLSyscall`, pkg/containerwatcher/v2/event_handler_factory.go), which
-absorbs most of the added repeat-event volume from polling more often.
+`TriggerManualMapFetch` is fire-and-forget — it doesn't block until the fetch completes, and
+`flushAndSettle`'s fixed settle delay is a bounded wait for the event pipeline, not a guarantee
+tied to the fetch itself. Under severe scheduler contention or a saturated event queue, the
+flushed events could in principle still arrive after the delay elapses, in which case termination
+falls back to whatever the tracer already had before the flush — the same race as before, just
+far less likely to be hit since the flush is triggered immediately rather than waiting for a
+30s tick. Achieving an actual guarantee would require synchronously waiting on the specific
+resulting events to be processed for this container, which the event pipeline (queue +
+worker pool) doesn't currently expose a way to do.

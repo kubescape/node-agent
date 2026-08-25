@@ -21,6 +21,11 @@ type ContainerProfileManagerClient interface {
 	ReportDroppedEvent(containerID string)
 	RegisterForContainerEndOfLife(notificationChannel chan *containercollection.Container)
 	OnQueueError(profile *v1beta1.ContainerProfile, containerID string, err error)
+	// SetSyscallFlusher registers a callback invoked right before a container's final
+	// forced profile save (on termination or max-sniffing-time), requesting an immediate
+	// out-of-band fetch of any not-yet-polled syscalls for that container so they aren't
+	// silently discarded (see SyscallTracer.Peek, kubescape/node-agent#922).
+	SetSyscallFlusher(flush func())
 }
 
 type Enricher interface {

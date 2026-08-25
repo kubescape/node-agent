@@ -8,6 +8,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ebpfoperator "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
@@ -24,9 +25,13 @@ const (
 	syscallImageName = "ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.48.1"
 	syscallTraceName = "syscall_tracer"
 
+	// syscallDataSourceName is the advise_seccomp gadget's map-iterator datasource name
+	// (see TestSyscallFields). Peek uses it to target only this tracer's map iterator.
+	syscallDataSourceName = "syscalls"
+
 	// defaultSyscallPollInterval is used when cfg.SyscallPollInterval is unset (e.g. tests
 	// constructing config.Config directly). It matches the config package's own default.
-	defaultSyscallPollInterval = 2 * time.Second
+	defaultSyscallPollInterval = 30 * time.Second
 )
 
 var _ containerwatcher.TracerInterface = (*SyscallTracer)(nil)
@@ -59,14 +64,28 @@ func NewSyscallTracer(
 }
 
 // pollInterval returns the configured eBPF map-fetch interval for the advise_seccomp map,
-// falling back to defaultSyscallPollInterval when unset. A long interval widens the window in
-// which a terminating container's last syscalls are never fetched before its profile is saved
-// and its data discarded (kubescape/node-agent#922), so this is kept short by default.
+// falling back to defaultSyscallPollInterval when unset. This interval only bounds staleness
+// of the live, in-progress profile; termination-time loss (kubescape/node-agent#922) is instead
+// addressed by Peek, which recovers a terminating container's last syscalls immediately rather
+// than waiting on this schedule.
 func (st *SyscallTracer) pollInterval() time.Duration {
 	if st.cfg.SyscallPollInterval > 0 {
 		return st.cfg.SyscallPollInterval
 	}
 	return defaultSyscallPollInterval
+}
+
+// Peek requests an immediate, out-of-band fetch of the advise_seccomp eBPF map, on top of the
+// tracer's normal periodic poll (see pollInterval). It does not block until the fetch completes
+// or until any resulting events have been processed by this tracer's eventCallback — callers
+// needing that must wait separately afterward.
+//
+// This exists so a caller about to stop tracking a container (ContainerProfileManager, on
+// termination or max-sniffing-time) can recover that container's syscalls executed since the
+// tracer's last poll, which would otherwise still be sitting unfetched in the kernel map and
+// become unreachable once the container's data is removed (kubescape/node-agent#922).
+func (st *SyscallTracer) Peek() {
+	ebpfoperator.TriggerManualMapFetch(syscallDataSourceName)
 }
 
 // Start initializes and starts the tracer

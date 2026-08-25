@@ -63,6 +63,10 @@ func (a ContainerProfileManagerMock) RegisterForContainerEndOfLife(_ chan *conta
 	// noop
 }
 
+func (a ContainerProfileManagerMock) SetSyscallFlusher(_ func()) {
+	// noop
+}
+
 func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ utils.NetworkEvent) {
 	// noop
 }

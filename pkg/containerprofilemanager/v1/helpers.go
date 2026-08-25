@@ -25,24 +25,31 @@ const (
 	MaxWaitForSharedContainerData = 10 * time.Minute
 	MaxWaitForAck                 = 30 * time.Second
 
-	// maxTerminationGracePeriod bounds terminationGracePeriod so that a misconfigured (large)
-	// SyscallPollInterval cannot stall every container termination by that same amount.
-	maxTerminationGracePeriod = 5 * time.Second
+	// postSyscallFlushSettleDelay bounds how long flushAndSettle waits, after requesting an
+	// immediate out-of-band syscall fetch (see SetSyscallFlusher), for the resulting events
+	// to travel through the event queue and worker pool into this container's data before its
+	// profile is snapshotted and its data is cleared. It only needs to cover that pipeline's
+	// latency (normally low milliseconds), not any polling interval, since the fetch itself
+	// was already requested rather than waited on.
+	postSyscallFlushSettleDelay = 500 * time.Millisecond
 )
 
-// terminationGracePeriod returns how long to wait, right before the final forced profile save
-// on container termination or max-sniffing-time, for the syscall tracer's in-flight poll cycle
-// to land. The eBPF syscall tracer (SyscallTracer) only ever surfaces the syscalls it has
-// decoded from its last periodic map fetch (see pkg/containerwatcher/v2/tracers/syscall.go); if
-// a container terminates between two polls, whatever it executed since the last poll is still
-// sitting in the kernel map and would otherwise be silently discarded once this manager removes
-// the container's data (kubescape/node-agent#922). Waiting one poll interval (capped) gives that
-// last cycle a chance to fetch and report before the profile is snapshotted.
-func (cpm *ContainerProfileManager) terminationGracePeriod() time.Duration {
-	if cpm.cfg.SyscallPollInterval <= 0 || cpm.cfg.SyscallPollInterval > maxTerminationGracePeriod {
-		return maxTerminationGracePeriod
+// flushAndSettle requests an immediate, out-of-band fetch of any not-yet-polled syscalls (via
+// the flusher registered with SetSyscallFlusher) and briefly waits for the result to land in
+// this container's data. It is a no-op with no wait if no flusher is registered (e.g. the
+// syscall tracer is disabled).
+//
+// Call this right before a container's final forced profile save on termination or
+// max-sniffing-time: the eBPF syscall tracer only ever surfaces syscalls it has decoded from
+// its last periodic map fetch (see pkg/containerwatcher/v2/tracers/syscall.go), so without this
+// a container terminating between two polls would silently lose whatever it executed since the
+// last one once this manager removes its data (kubescape/node-agent#922).
+func (cpm *ContainerProfileManager) flushAndSettle() {
+	if cpm.syscallFlusher == nil {
+		return
 	}
-	return cpm.cfg.SyscallPollInterval
+	cpm.syscallFlusher()
+	time.Sleep(postSyscallFlushSettleDelay)
 }
 
 // createUUID generates a new UUID string

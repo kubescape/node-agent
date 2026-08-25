@@ -472,7 +472,7 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20260824132042-5bba57473b53
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20260825192450-2b683d258349
 
 replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
 

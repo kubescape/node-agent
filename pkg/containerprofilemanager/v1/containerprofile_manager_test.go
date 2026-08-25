@@ -631,22 +631,34 @@ func TestMaxWaitForSharedContainerDataConstant(t *testing.T) {
 	assert.Equal(t, 10*time.Minute, MaxWaitForSharedContainerData)
 }
 
-func TestTerminationGracePeriod(t *testing.T) {
-	tests := []struct {
-		name         string
-		pollInterval time.Duration
-		want         time.Duration
-	}{
-		{"unset falls back to cap", 0, maxTerminationGracePeriod},
-		{"short interval used as-is", 500 * time.Millisecond, 500 * time.Millisecond},
-		{"default interval used as-is", 2 * time.Second, 2 * time.Second},
-		{"interval equal to cap used as-is", maxTerminationGracePeriod, maxTerminationGracePeriod},
-		{"interval above cap is capped", 30 * time.Second, maxTerminationGracePeriod},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cpm := &ContainerProfileManager{cfg: config.Config{SyscallPollInterval: tt.pollInterval}}
-			assert.Equal(t, tt.want, cpm.terminationGracePeriod())
-		})
-	}
+func TestSetSyscallFlusher(t *testing.T) {
+	cpm := &ContainerProfileManager{}
+	assert.Nil(t, cpm.syscallFlusher)
+
+	called := false
+	cpm.SetSyscallFlusher(func() { called = true })
+	assert.NotNil(t, cpm.syscallFlusher)
+
+	cpm.syscallFlusher()
+	assert.True(t, called)
+}
+
+func TestFlushAndSettleNoFlusherIsNoopAndFast(t *testing.T) {
+	cpm := &ContainerProfileManager{}
+	start := time.Now()
+	cpm.flushAndSettle()
+	assert.Less(t, time.Since(start), postSyscallFlushSettleDelay)
+}
+
+func TestFlushAndSettleCallsFlusherAndWaits(t *testing.T) {
+	called := false
+	cpm := &ContainerProfileManager{}
+	cpm.SetSyscallFlusher(func() { called = true })
+
+	start := time.Now()
+	cpm.flushAndSettle()
+	elapsed := time.Since(start)
+
+	assert.True(t, called)
+	assert.GreaterOrEqual(t, elapsed, postSyscallFlushSettleDelay)
 }

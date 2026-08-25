@@ -97,10 +97,20 @@ type ContainerProfileManager struct {
 	completionNotifier objectcache.CompletionNotifier
 
 	lifecycleTracker *otelsetup.ProfileLifecycleTracker
+
+	// syscallFlusher, if set, is called right before a container's final forced profile
+	// save to request an immediate out-of-band fetch of its not-yet-polled syscalls. See
+	// SetSyscallFlusher and kubescape/node-agent#922.
+	syscallFlusher func()
 }
 
 func (cpm *ContainerProfileManager) SetCompletionNotifier(n objectcache.CompletionNotifier) {
 	cpm.completionNotifier = n
+}
+
+// SetSyscallFlusher implements containerprofilemanager.ContainerProfileManagerClient.
+func (cpm *ContainerProfileManager) SetSyscallFlusher(flush func()) {
+	cpm.syscallFlusher = flush
 }
 
 func (cpm *ContainerProfileManager) notifyCompleted(containerID string) {
