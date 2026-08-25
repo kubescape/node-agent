@@ -92,8 +92,9 @@ func HasServiceNeighbors(cp *v1beta1.ContainerProfile) bool {
 	return false
 }
 
+// Must mirror specFromNeighbor's gate: ServiceRefNamespace alone is not a serviceRef.
 func hasServiceFields(n *v1beta1.NetworkNeighbor) bool {
-	return n.ServiceRefNamespace != "" || n.ServiceRefName != "" || n.ServiceSelector != nil || n.Entity != ""
+	return n.ServiceRefName != "" || n.ServiceSelector != nil || n.Entity != ""
 }
 
 // specFromNeighbor extracts a PeerSpec from a NetworkNeighbor, reporting false

@@ -36,6 +36,7 @@ func TestLoadConfig(t *testing.T) {
 				EnableHttpDetection:            false,
 				EnableFIM:                      true,
 				EnableNetworkStreaming:         false,
+				EnableNetworkServiceResolution: true,
 				EnableEmbeddedSboms:            false,
 				EnableHostSensor:               true,
 				HostSensorInterval:             1 * time.Minute,
