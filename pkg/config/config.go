@@ -186,6 +186,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))
 	viper.SetDefault("fimEnabled", false)
 	viper.SetDefault("networkStreamingEnabled", false)
+	viper.SetDefault("networkServiceResolutionEnabled", true)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
 	viper.SetDefault("workerPoolSize", 3000)

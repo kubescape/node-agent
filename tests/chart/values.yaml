@@ -32,8 +32,8 @@ global:
 storage:
   name: "storage"
   image:
-    repository: quay.io/kubescape/storage
-    tag: v0.0.156
+    repository: ghcr.io/k8sstormcenter/storage
+    tag: net-v2-rc1
     pullPolicy: Always
   cleanupInterval: "6h"
   labels:

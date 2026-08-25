@@ -1,4 +1,10 @@
 #/bin/bash
+# go.mod pins the k8sstormcenter storage fork (3844202a); CTs must run its server image.
+if go list -m -f '{{with .Replace}}{{.Path}}{{end}}' github.com/kubescape/storage | grep -q k8sstormcenter/storage; then
+  echo "net-v2-rc1"
+  exit 0
+fi
+
 curl -s https://raw.githubusercontent.com/kubescape/helm-charts/main/charts/kubescape-operator/values.yaml -o values.yaml
 DYNAMIC_TAG=$(yq '.storage.image.tag' < values.yaml | tr -d '"')
 rm -rf values.yaml

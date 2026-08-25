@@ -214,4 +214,9 @@ func TestHasServiceNeighbors(t *testing.T) {
 			t.Errorf("neighbor %+v should be flagged", n)
 		}
 	}
+	nsOnly := &v1beta1.ContainerProfile{}
+	nsOnly.Spec.Ingress = []v1beta1.NetworkNeighbor{{ServiceRefNamespace: "honey"}}
+	if HasServiceNeighbors(nsOnly) {
+		t.Error("ServiceRefNamespace without ServiceRefName must not be flagged (specFromNeighbor rejects it)")
+	}
 }

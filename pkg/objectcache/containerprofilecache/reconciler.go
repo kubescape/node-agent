@@ -495,9 +495,11 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 
 	// Project under the current spec.
 	spec := c.snapshotSpec()
+	// Read gen BEFORE resolving so a concurrent Bump() invalidates this projection.
+	gen := c.listerGen()
 	applyStart := time.Now()
 	projectedCP := Apply(spec, networkpeer.WithResolvedServiceNeighbors(projected, c.serviceLister), tree)
-	projectedCP.ResolvedGen = c.listerGen()
+	projectedCP.ResolvedGen = gen
 	if c.cfg.ProfileProjection.DetailedMetricsEnabled {
 		c.metricsManager.ObserveProjectionApplyDuration(time.Since(applyStart))
 		c.observeMemoryMetrics(projected, projectedCP)
@@ -507,7 +509,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		Projected:             projectedCP,
 		SpecHash:              projectedCP.SpecHash,
 		UsesServiceResolution: networkpeer.HasServiceNeighbors(projected),
-		ListerGen:             c.listerGen(),
+		ListerGen:             gen,
 		State:                 &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
 		CallStackTree:         tree,
 		ContainerName:         prev.ContainerName,

@@ -13,7 +13,7 @@ rules:
   verbs: ["list", "watch", "create"]
 - apiGroups: ["discovery.k8s.io"]
   resources: ["endpointslices"]
-  verbs: ["get", "watch", "list"]
+  verbs: ["watch", "list"]
 - apiGroups: ["batch"]
   resources: ["jobs", "cronjobs"]
   verbs: ["get", "watch", "list"]

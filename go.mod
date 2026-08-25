@@ -32,10 +32,10 @@ require (
 	github.com/iceber/iouring-go v0.0.0-20230403020409-002cfd2e2a90
 	github.com/inspektor-gadget/inspektor-gadget v0.45.1-0.20251020222545-c91c23581ebf
 	github.com/joncrlsn/dque v0.0.0-20241024143830-7723fd131a64
-	github.com/kubescape/backend v0.0.31
+	github.com/kubescape/backend v0.0.39
 	github.com/kubescape/go-logger v0.0.32
 	github.com/kubescape/k8s-interface v0.0.214
-	github.com/kubescape/storage v0.0.0-00010101000000-000000000000
+	github.com/kubescape/storage v0.0.258
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/oleiade/lane/v2 v2.0.0
