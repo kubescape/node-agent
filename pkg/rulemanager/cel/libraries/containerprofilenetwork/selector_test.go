@@ -8,56 +8,99 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-func peer(pod, ns map[string]string) objectcache.PeerSelector {
-	p := objectcache.PeerSelector{PodSelector: &metav1.LabelSelector{MatchLabels: pod}}
-	if ns != nil {
-		p.NamespaceSelector = &metav1.LabelSelector{MatchLabels: ns}
-	}
-	return p
+func podSel(m map[string]string) *metav1.LabelSelector { return &metav1.LabelSelector{MatchLabels: m} }
+func nsSel(name string) *metav1.LabelSelector {
+	return &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": name}}
 }
 
-func TestWasSelectorInPeers(t *testing.T) {
-	// Peer identity as IG's kubeipresolver stamps it onto the event: a namespace
-	// and pod labels, resolved cluster-wide. No IP, no local pod lookup.
-	podLabels := labels.Set{"app": "redis-client"}
-	ns := "redis"
-	profileNs := "redis"
-	nsRedis := map[string]string{"kubernetes.io/metadata.name": "redis"}
+// TestWasSelectorInPeers_TruthTable is the full matrix for peer-selector
+// matching. Rules: matching is on pod LABELS; a nil namespaceSelector does NOT
+// consult the namespace (it is a collision-disambiguator only); an empty
+// podSelector matches NOTHING (fail closed, opposite of NetworkPolicy); an
+// explicit namespaceSelector must match; a peer with no resolvable pod identity
+// never matches (enforced one layer up in wasSelectorIn, tested there).
+func TestWasSelectorInPeers_TruthTable(t *testing.T) {
+	const profileNs = "redis"
+	client := labels.Set{"app": "redis-client"}
+	clientPlus := labels.Set{"app": "redis-client", "tier": "cache"}
+
+	// matchExpressions-based selectors (a non-empty selector expressed without matchLabels).
+	exprIn := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+		{Key: "app", Operator: metav1.LabelSelectorOpIn, Values: []string{"redis-client"}}}}
+	exprExists := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+		{Key: "app", Operator: metav1.LabelSelectorOpExists}}}
+
+	p := func(pod, ns *metav1.LabelSelector) objectcache.PeerSelector {
+		return objectcache.PeerSelector{PodSelector: pod, NamespaceSelector: ns}
+	}
 
 	cases := []struct {
 		name   string
 		peers  []objectcache.PeerSelector
+		labels labels.Set
 		peerNs string
 		want   bool
 	}{
-		{"label+ns match", []objectcache.PeerSelector{peer(map[string]string{"app": "redis-client"}, nsRedis)}, ns, true},
-		{"label mismatch", []objectcache.PeerSelector{peer(map[string]string{"app": "other"}, nsRedis)}, ns, false},
-		{"ns mismatch", []objectcache.PeerSelector{peer(map[string]string{"app": "redis-client"}, map[string]string{"kubernetes.io/metadata.name": "other"})}, ns, false},
-		{"nil ns selector matches the profile namespace", []objectcache.PeerSelector{peer(map[string]string{"app": "redis-client"}, nil)}, ns, true},
-		{"nil ns selector rejects a foreign namespace", []objectcache.PeerSelector{peer(map[string]string{"app": "redis-client"}, nil)}, "attacker", false},
-		{"empty peers", nil, ns, false},
-		{"one of several matches", []objectcache.PeerSelector{peer(map[string]string{"app": "x"}, nil), peer(map[string]string{"app": "redis-client"}, nil)}, ns, true},
+		// --- podSelector shapes ---
+		{"nil podSelector never matches", []objectcache.PeerSelector{p(nil, nil)}, client, "redis", false},
+		{"empty podSelector matches nothing (same ns)", []objectcache.PeerSelector{p(podSel(map[string]string{}), nil)}, client, "redis", false},
+		{"empty podSelector matches nothing (empty labels)", []objectcache.PeerSelector{p(podSel(map[string]string{}), nil)}, labels.Set{}, "redis", false},
+		{"empty podSelector matches nothing (explicit ns)", []objectcache.PeerSelector{p(podSel(map[string]string{}), nsSel("redis"))}, client, "redis", false},
+
+		// --- label matching, nil namespaceSelector (namespace NOT consulted) ---
+		{"label match, nil ns, same ns", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "redis-client"}), nil)}, client, "redis", true},
+		{"label match, nil ns, FOREIGN ns still matches", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "redis-client"}), nil)}, client, "attacker", true},
+		{"label mismatch, nil ns", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "redis-client"}), nil)}, labels.Set{"app": "other"}, "redis", false},
+		{"selector is a subset of pod labels", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "redis-client"}), nil)}, clientPlus, "redis", true},
+		{"non-empty selector vs empty labels", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "redis-client"}), nil)}, labels.Set{}, "redis", false},
+
+		// --- explicit namespaceSelector (must match) ---
+		{"label+ns match", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "redis-client"}), nsSel("redis"))}, client, "redis", true},
+		{"explicit ns mismatch rejects (same labels)", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "redis-client"}), nsSel("redis"))}, client, "attacker", false},
+		{"explicit ns names a third namespace", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "redis-client"}), nsSel("other"))}, client, "redis", false},
+		{"empty (non-nil) ns selector matches any ns", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "redis-client"}), &metav1.LabelSelector{})}, client, "attacker", true},
+
+		// --- matchExpressions ---
+		{"matchExpressions In matches", []objectcache.PeerSelector{p(exprIn, nil)}, client, "redis", true},
+		{"matchExpressions Exists matches labelled pod", []objectcache.PeerSelector{p(exprExists, nil)}, client, "redis", true},
+		{"matchExpressions Exists rejects unlabelled pod", []objectcache.PeerSelector{p(exprExists, nil)}, labels.Set{}, "redis", false},
+
+		// --- list semantics ---
+		{"empty peer list", nil, client, "redis", false},
+		{"one of several matches", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "x"}), nil), p(podSel(map[string]string{"app": "redis-client"}), nil)}, client, "redis", true},
+		{"none of several matches", []objectcache.PeerSelector{p(podSel(map[string]string{"app": "x"}), nil), p(podSel(map[string]string{"app": "y"}), nil)}, client, "redis", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := wasSelectorInPeers(tc.peers, podLabels, tc.peerNs, profileNs); got != tc.want {
+			if got := wasSelectorInPeers(tc.peers, tc.labels, tc.peerNs, profileNs); got != tc.want {
 				t.Fatalf("wasSelectorInPeers = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestWasSelectorInPeers_EmptySelectorAndEmptyLabels(t *testing.T) {
-	profileNs := "redis"
-	emptySelector := []objectcache.PeerSelector{{PodSelector: &metav1.LabelSelector{}}}
-
-	if !wasSelectorInPeers(emptySelector, labels.Set{}, "redis", profileNs) {
-		t.Fatal("an empty podSelector must match a resolved label-less pod in the profile namespace (NetworkPolicyPeer semantics)")
+// TestNamespaceSelectorMatches_TruthTable pins the namespace-disambiguator
+// alone: nil never consults the namespace, an explicit selector must match by
+// the kubernetes.io/metadata.name label.
+func TestNamespaceSelectorMatches_TruthTable(t *testing.T) {
+	cases := []struct {
+		name string
+		sel  *metav1.LabelSelector
+		ns   string
+		want bool
+	}{
+		{"nil matches same ns", nil, "redis", true},
+		{"nil matches foreign ns (not consulted)", nil, "attacker", true},
+		{"nil matches empty ns", nil, "", true},
+		{"explicit matches", nsSel("redis"), "redis", true},
+		{"explicit rejects other", nsSel("redis"), "attacker", false},
+		{"empty explicit matches any", &metav1.LabelSelector{}, "attacker", true},
 	}
-	if wasSelectorInPeers(emptySelector, labels.Set{}, "attacker", profileNs) {
-		t.Fatal("an empty podSelector with nil namespaceSelector must not match a pod outside the profile namespace")
-	}
-	if !wasSelectorInPeers(emptySelector, labels.Set{"app": "anything"}, "redis", profileNs) {
-		t.Fatal("an empty podSelector selects all pods in the namespace, labelled or not")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := namespaceSelectorMatches(tc.sel, tc.ns, "redis"); got != tc.want {
+				t.Fatalf("namespaceSelectorMatches = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

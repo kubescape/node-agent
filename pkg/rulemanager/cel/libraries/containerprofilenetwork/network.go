@@ -252,9 +252,13 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(contain
 // exactly for same-namespace peers, and NetworkPolicyPeer gives an absent
 // namespaceSelector the same meaning. Selectors keyed on other namespace
 // labels are not resolved here.
+// namespaceSelectorMatches: a nil namespaceSelector does NOT consult the
+// namespace — matching is on pod labels alone, and namespace is only used to
+// disambiguate a label collision (an explicitly-set selector). profileNs is
+// unused now but kept in the signature for the collision case.
 func namespaceSelectorMatches(sel *metav1.LabelSelector, ns, profileNs string) bool {
 	if sel == nil {
-		return ns == profileNs
+		return true
 	}
 	s, err := metav1.LabelSelectorAsSelector(sel)
 	if err != nil {
@@ -264,11 +268,14 @@ func namespaceSelectorMatches(sel *metav1.LabelSelector, ns, profileNs string) b
 }
 
 // wasSelectorInPeers reports whether the peer identified by (podLabels, ns)
-// matches any peer entry's podSelector AND its namespaceSelector.
+// matches any peer entry's podSelector AND its namespaceSelector. An empty
+// podSelector matches NOTHING (fail closed → the peer alerts), the opposite of
+// NetworkPolicy's match-all: an allowlist entry must name what it permits.
 func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, ns, profileNs string) bool {
 	for i := range peers {
 		peer := &peers[i]
-		if peer.PodSelector == nil {
+		if peer.PodSelector == nil ||
+			(len(peer.PodSelector.MatchLabels) == 0 && len(peer.PodSelector.MatchExpressions) == 0) {
 			continue
 		}
 		ps, err := metav1.LabelSelectorAsSelector(peer.PodSelector)
@@ -314,8 +321,7 @@ func (l *containerProfileNetworkLibrary) wasSelectorIn(containerID, namespace, p
 	}
 	if nsStr == "" {
 		// The peer did not resolve to a pod (external IP, or the resolver had no
-		// inventory entry): it cannot satisfy any selector. A resolved pod with
-		// zero labels is NOT this case - an empty podSelector may still match it.
+		// inventory entry): a nil peer never satisfies a selector — it alerts.
 		return types.Bool(false)
 	}
 	peerLabels := refValToStringMap(podLabels)
