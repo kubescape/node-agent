@@ -97,7 +97,7 @@ while [[ $line_no -ge 1 ]]; do
     fi
 done
 
-if echo "$comment_block" | grep -qiE 'NOTE'; then
+if echo "$comment_block" | grep -qiw 'NOTE'; then
     if echo "$comment_block" | grep -qiE 're-?pin|merged[[:space:]]+SHA'; then
         echo "" >&2
         echo "check-inspektor-gadget-pin: FAIL" >&2
