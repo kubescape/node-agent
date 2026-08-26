@@ -67,15 +67,38 @@ and *all* fetching — periodic or not — goes through one explicit call:
 
 ## Why this isn't a regression risk for alerting
 
-`SyscallEventType` events fan out to `ContainerProfileManager`, `RuleManager`, and a metrics
-counter alike (`pkg/containerwatcher/v2/event_handler_factory.go`). `RuleManager` evaluates
+`SyscallEventType` events fan out to `RuleManager` and a metrics counter through the generic
+per-event pipeline (`pkg/containerwatcher/v2/event_handler_factory.go`). `RuleManager` evaluates
 rules against each syscall event in real time and drives rule-based alerts through
 `pkg/ruleadapters/adapters/syscall.go` (e.g. "unexpected syscall executed"), including
 post-learning while `EnableRuntimeDetection` keeps the tracer running. Removing the periodic
 schedule entirely (fetching only at `ContainerProfileManager`'s own save points, which happen
 every `updateDataPeriod` — default 10 minutes — or at termination) would have delayed that
 alerting path by the same amount, which is why `syscallPollInterval` still drives a real,
-independent periodic `Peek()` call — it isn't only there for `ContainerProfileManager`.
+independent periodic `Peek()` call — it isn't only there for `ContainerProfileManager`
+(see [Batching](#batching-bypassing-the-generic-pipeline-for-containerprofilemanager) below for
+why `ContainerProfileManager` is no longer one of that fan-out's targets).
+
+## Batching: bypassing the generic pipeline for ContainerProfileManager
+
+`SyscallTracer.callback` decodes one eBPF fetch into a batch of syscall names per container. The
+generic pipeline models one event per occurrence, so turning that batch into individual
+`SyscallEventType` events (one `AddEventDirect`, dedup-key computation, and 2-handler dispatch
+loop each) is pure per-item overhead for a data source that was never actually a discrete event
+stream — it's a periodic snapshot of a persistent per-mntns bitmap. That overhead scales with how
+many *distinct* syscalls a container has executed since its last fetch, which is worst right
+after a container starts.
+
+`RuleManager`'s rule matching and the generic dedup cache both key off a single
+`event.syscall` value, so they still need one event per syscall — batching can't safely change
+that without a breaking rule-schema change (a list field with `in`/`exists` semantics instead of
+scalar `==`). `ContainerProfileManager` has no such constraint: it only ever folds each syscall
+into a per-container `mapset.Set[string]`, so `SyscallTracer.callback` calls
+`ContainerProfileManagerClient.ReportSyscalls(containerID, syscalls []string)` directly — a
+single container-lock acquisition and size update for the whole batch — instead of emitting a
+separate event per syscall for it to pick up off the queue. `containerProfileManager` is
+correspondingly absent from `ehf.handlers[utils.SyscallEventType]`; `RuleManager` and `metrics`
+are unaffected and still receive one event per syscall exactly as before.
 
 ## Known limitations
 

@@ -6,9 +6,6 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
-	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -21,8 +18,11 @@ import (
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Manager represents a component that can receive events
@@ -146,10 +146,11 @@ func NewEventHandlerFactory(
 			if networkEvent, ok := event.(utils.NetworkEvent); ok {
 				containerProfileManager.ReportNetworkEvent(networkEvent.GetContainerID(), networkEvent)
 			}
-		case utils.SyscallEventType:
-			if syscallEvent, ok := event.(utils.SyscallEvent); ok {
-				containerProfileManager.ReportSyscall(syscallEvent.GetContainerID(), syscallEvent.GetSyscall())
-			}
+		// SyscallEventType is intentionally absent: SyscallTracer reports syscalls to
+		// ContainerProfileManager directly, as a batch, bypassing this generic per-event
+		// pipeline entirely (see ContainerProfileManagerClient.ReportSyscalls,
+		// kubescape/node-agent#922). RuleManager and metrics still receive individual
+		// SyscallEventType events through the handlers table below for rule matching.
 		default:
 			// For event types that don't have specific handling, we might need to add them
 			// or handle them generically
@@ -419,7 +420,9 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	ehf.handlers[utils.IoUringEventType] = []Manager{ruleManager, metrics, rulePolicy}
 
 	// Syscall events
-	ehf.handlers[utils.SyscallEventType] = []Manager{containerProfileManager, ruleManager, metrics}
+	// containerProfileManager is deliberately excluded here; see the comment on
+	// SyscallEventType's absence from containerProfileAdapter above.
+	ehf.handlers[utils.SyscallEventType] = []Manager{ruleManager, metrics}
 
 	// Kmod events
 	ehf.handlers[utils.KmodEventType] = []Manager{ruleManager, metrics}

@@ -111,6 +111,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.ociStore,
 		tf.createEventCallback(utils.SyscallEventType),
 		tf.cfg,
+		tf.containerProfileManager.ReportSyscalls,
 	)
 	manager.RegisterTracer(syscallTracer)
 	if syscallTracer.IsEnabled(tf.cfg) {

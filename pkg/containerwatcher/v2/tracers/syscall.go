@@ -45,6 +45,11 @@ type SyscallTracer struct {
 	ociStore      *orasoci.ReadOnlyStore
 	runtime       runtime.Runtime
 
+	// reportSyscalls is called once per fetch with the whole decoded batch for a container,
+	// bypassing the generic per-event pipeline entirely for this consumer (see callback and
+	// ContainerProfileManagerClient.ReportSyscalls, kubescape/node-agent#922).
+	reportSyscalls func(containerID string, syscalls []string)
+
 	// done is closed by Stop to stop the periodic Peek loop started in Start.
 	done chan struct{}
 }
@@ -56,13 +61,15 @@ func NewSyscallTracer(
 	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 	cfg config.Config,
+	reportSyscalls func(containerID string, syscalls []string),
 ) *SyscallTracer {
 	return &SyscallTracer{
-		cfg:           cfg,
-		eventCallback: eventCallback,
-		kubeManager:   kubeManager,
-		ociStore:      ociStore,
-		runtime:       runtime,
+		cfg:            cfg,
+		eventCallback:  eventCallback,
+		kubeManager:    kubeManager,
+		ociStore:       ociStore,
+		runtime:        runtime,
+		reportSyscalls: reportSyscalls,
 	}
 }
 
@@ -187,8 +194,19 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	containerID := event.GetContainerID()
 	processID := event.GetPID()
 
-	syscallsBuffer := event.GetSyscalls()
-	for _, syscall := range decodeSyscalls(syscallsBuffer) {
+	syscallList := decodeSyscalls(event.GetSyscalls())
+	if len(syscallList) == 0 {
+		event.Release()
+		return
+	}
+
+	// Report the whole batch directly, bypassing the generic per-event pipeline entirely for
+	// this consumer (see reportSyscalls' doc comment).
+	st.reportSyscalls(containerID, syscallList)
+
+	// RuleManager and metrics still need one event per syscall (rule matching keys off a
+	// single event.syscall field), so those keep going through the normal event pipeline.
+	for _, syscall := range syscallList {
 		st.eventCallback(&utils.DatasourceEvent{
 			Data:       event.Datasource.DeepCopy(event.Data),
 			Datasource: event.Datasource,
