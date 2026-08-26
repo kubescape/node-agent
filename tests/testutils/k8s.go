@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -34,6 +35,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	apimachineryyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
@@ -106,11 +108,19 @@ func ApplyMultiDocYAML(namespace, resourcePath string) error {
 		return err
 	}
 	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(dc))
-	for _, doc := range strings.Split(string(raw), "\n---") {
-		if strings.TrimSpace(doc) == "" {
+	reader := apimachineryyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(raw)))
+	for {
+		doc, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", resourcePath, err)
+		}
+		if strings.TrimSpace(string(doc)) == "" {
 			continue
 		}
-		jsonData, err := yaml.YAMLToJSON([]byte(doc))
+		jsonData, err := yaml.YAMLToJSON(doc)
 		if err != nil {
 			return fmt.Errorf("%s: %w", resourcePath, err)
 		}
