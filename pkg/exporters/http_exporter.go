@@ -178,12 +178,14 @@ func (config *HTTPExporterConfig) Validate() error {
 // SendRuleAlert implements the Exporter interface
 func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	// Check if alert limit is reached first
-	if e.shouldSendLimitAlert() {
+	if admitted, notify := e.admitAlert(); !admitted {
 		e.metrics.ReportAlertSuppressed(failedRule.GetRuleId(), "rate_limit")
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
-		defer cancel()
-		if err := e.sendAlertLimitReached(ctx); err != nil {
-			logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send alert limit", helpers.Error(err))
+		if notify {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+			defer cancel()
+			if err := e.sendAlertLimitReached(ctx); err != nil {
+				logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send alert limit", helpers.Error(err))
+			}
 		}
 		return
 	}
@@ -207,12 +209,14 @@ func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 // SendMalwareAlert implements the Exporter interface
 func (e *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	// Check if alert limit is reached first
-	if e.shouldSendLimitAlert() {
+	if admitted, notify := e.admitAlert(); !admitted {
 		e.metrics.ReportAlertSuppressed(malwareRuleID, "rate_limit")
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
-		defer cancel()
-		if err := e.sendAlertLimitReached(ctx); err != nil {
-			logger.L().Warning("HTTPExporter.SendMalwareAlert - failed to send alert limit", helpers.Error(err))
+		if notify {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+			defer cancel()
+			if err := e.sendAlertLimitReached(ctx); err != nil {
+				logger.L().Warning("HTTPExporter.SendMalwareAlert - failed to send alert limit", helpers.Error(err))
+			}
 		}
 		return
 	}
@@ -472,21 +476,38 @@ func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload interface{})
 	return nil
 }
 
-func (e *HTTPExporter) shouldSendLimitAlert() bool {
+// admitAlert applies the per-minute alert limit to one send.
+//
+// It returns admitted=false for every send past the limit inside the current
+// minute, and notify=true only for the first one.
+//
+// The previous version returned a single value that combined both decisions,
+// which made it stop limiting after the first drop: the notified flag cleared the
+// condition, so the limiter dropped one alert per minute and let every later one
+// through. A limit of zero or less means no limit; the constructor already
+// replaces a zero with a default, so this only guards a hand-built exporter.
+func (e *HTTPExporter) admitAlert() (admitted bool, notify bool) {
 	e.alertMetrics.Lock()
 	defer e.alertMetrics.Unlock()
 
-	if e.alertMetrics.startTime.IsZero() {
-		e.alertMetrics.startTime = time.Now()
+	if e.config.MaxAlertsPerMinute <= 0 {
+		return true, false
 	}
 
-	if time.Since(e.alertMetrics.startTime) > time.Minute {
+	if e.alertMetrics.startTime.IsZero() || time.Since(e.alertMetrics.startTime) > time.Minute {
 		e.resetAlertMetrics()
-		return false
 	}
 
 	e.alertMetrics.count++
-	return e.alertMetrics.count > e.config.MaxAlertsPerMinute && !e.alertMetrics.isNotified
+	if e.alertMetrics.count <= e.config.MaxAlertsPerMinute {
+		return true, false
+	}
+
+	if !e.alertMetrics.isNotified {
+		e.alertMetrics.isNotified = true
+		return false, true
+	}
+	return false, false
 }
 
 func (e *HTTPExporter) resetAlertMetrics() {
@@ -495,11 +516,9 @@ func (e *HTTPExporter) resetAlertMetrics() {
 	e.alertMetrics.isNotified = false
 }
 
+// sendAlertLimitReached sends the one "limit reached" notice per window. The
+// notified flag is set by admitAlert, which is where that decision is made.
 func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
-	e.alertMetrics.Lock()
-	e.alertMetrics.isNotified = true
-	e.alertMetrics.Unlock()
-
 	alert := armotypes.RuntimeAlert{
 		Message:             "Alert limit reached",
 		HostName:            e.host,
@@ -516,9 +535,13 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		},
 	}
 
+	e.alertMetrics.Lock()
+	alerts, since := e.alertMetrics.count, e.alertMetrics.startTime
+	e.alertMetrics.Unlock()
+
 	logger.L().Ctx(ctx).Warning("Alert limit reached",
-		helpers.Int("alerts", e.alertMetrics.count),
-		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
+		helpers.Int("alerts", alerts),
+		helpers.String("since", since.Format(time.RFC3339)))
 
 	return e.sendAlert(ctx, alert, armotypes.ProcessTree{}, nil)
 }
