@@ -61,9 +61,13 @@ and *all* fetching — periodic or not — goes through one explicit call:
   termination paths in monitoring.go) — closing even the up-to-`syscallPollInterval` gap the
   periodic schedule alone would still leave at exactly the moment a container disappears.
   `flushAndSettle` waits a fixed `postSyscallFlushSettleDelay` (`500ms`) afterward for the
-  resulting events to travel through the event queue/worker pool into the container's data
-  before it's snapshotted and cleared. This wiring only happens when the syscall tracer is
-  actually enabled (`SyscallTracer.IsEnabled`), so a disabled tracer costs nothing.
+  resulting data to land before the profile is snapshotted and cleared. `ContainerProfileManager`
+  no longer goes through the generic event queue/worker pool for syscalls at all (see
+  [Batching](#batching-bypassing-the-generic-pipeline-for-containerprofilemanager) below); the
+  wait covers `SyscallTracer.callback`'s own dispatch goroutine and any per-container
+  `SyncChannel` backpressure in `ContainerProfileManager.ReportSyscalls`, not queue latency. This
+  wiring only happens when the syscall tracer is actually enabled (`SyscallTracer.IsEnabled`), so
+  a disabled tracer costs nothing.
 
 ## Why this isn't a regression risk for alerting
 
