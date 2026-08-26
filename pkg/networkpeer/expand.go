@@ -69,6 +69,18 @@ func WithResolvedServiceNeighbors(cp *v1beta1.ContainerProfile, l Lister) *v1bet
 	return out
 }
 
+// WithHostPeer appends a synthetic entity:host neighbor to both directions so the node's own IPs (kubelet probes, hostNetwork peers, masqueraded traffic) resolve into the address surface and never alert; node infrastructure is ambient, volatile and has no pod identity to learn, so it is allowlisted by default.
+func WithHostPeer(cp *v1beta1.ContainerProfile) *v1beta1.ContainerProfile {
+	if cp == nil {
+		return cp
+	}
+	out := cp.DeepCopy()
+	host := v1beta1.NetworkNeighbor{Identifier: "host-entity", Entity: EntityHost}
+	out.Spec.Egress = append(out.Spec.Egress, host)
+	out.Spec.Ingress = append(out.Spec.Ingress, host)
+	return out
+}
+
 // HasServiceNeighbors reports whether any egress/ingress neighbor declares a
 // serviceRef / serviceSelector / entity — i.e. whether this profile's
 // projection depends on the live cluster view (Service/EndpointSlice/Node) and

@@ -84,6 +84,7 @@ type Config struct {
 	EnableNetworkStreaming         bool                                 `mapstructure:"networkStreamingEnabled"`
 	EnableNetworkTracing           bool                                 `mapstructure:"networkServiceEnabled"`
 	EnableNetworkServiceResolution bool                                 `mapstructure:"networkServiceResolutionEnabled"`
+	AlertOnHostPeers               bool                                 `mapstructure:"alertOnHostPeers"`
 	EnableNodeProfile              bool                                 `mapstructure:"nodeProfileServiceEnabled"`
 	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
@@ -187,6 +188,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("fimEnabled", false)
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("networkServiceResolutionEnabled", true)
+	viper.SetDefault("alertOnHostPeers", false)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
 	viper.SetDefault("workerPoolSize", 3000)

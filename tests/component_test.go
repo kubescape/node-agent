@@ -4270,4 +4270,58 @@ func Test_53_DefaultLearnedNetworkFalsePositives(t *testing.T) {
 		"replayed learn-window egress (kube-dns + nginx service) must not fire R0011; a diff here is a default-posture false positive — the learned svc entry stores the service SELECTOR while kubeipresolver stamps the service metadata LABELS on the event, and nginx-service has none")
 	assert.Equal(t, learnR0012, countRuleAlerts(t, ns.Name, "R0012", "nginx", ""),
 		"replayed learn-window ingress (same client pod) must not fire R0012")
+
+	// Node-IP ingress: a hostNetwork client reaches nginx with source = the node
+	// InternalIP (172.19.0.2 on Kind), which was never in nginx's learn window.
+	// The default host-peer allowlist (alertOnHostPeers=false) resolves entity:host
+	// to the node IPs, so this must add zero R0012 — the (b) leg. The (a) leg
+	// (without the allowlist the node IP is uncovered and would alert) is pinned
+	// at unit level in networkpeer.TestWithHostPeer_ResolvesNodeIPsIntoAddressSurface.
+	t.Run("node_ip_ingress_silenced_by_default", func(t *testing.T) {
+		require.NoError(t, testutils.ApplyMultiDocYAML(ns.Name, path.Join(utils.CurrentDir(), "resources/network-hostnet-client.yaml")), "deploy hostNetwork client")
+		hostClient, err := testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, "Deployment", "hostnet-client")
+		require.NoError(t, err, "resolve hostnet-client")
+		require.NoError(t, hostClient.WaitForReady(80), "hostnet-client ready")
+		before := countRuleAlerts(t, ns.Name, "R0012", "nginx", "")
+		for i := 0; i < 5; i++ {
+			_, _, _ = hostClient.ExecIntoPod([]string{"curl", "-sS", "-m", "5", svcURL}, "curl")
+			time.Sleep(2 * time.Second)
+		}
+		time.Sleep(30 * time.Second)
+		after := countRuleAlerts(t, ns.Name, "R0012", "nginx", "")
+		t.Logf("node-IP ingress: R0012(nginx) before=%d after=%d", before, after)
+		assert.Equal(t, before, after,
+			"ingress from the node IP must be silenced by the default host-peer allowlist (alertOnHostPeers=false)")
+	})
+
+	// Loopback measurement: with the 127.*/::1 rule guards AND the learn-time
+	// loopback drop removed, localhost traffic is subject to R0011/R0012 and is
+	// learnable. A curl sidecar hits loopserver on 127.0.0.1 (shared pod netns),
+	// so both containers baseline the loopback peer; the replay then measures the
+	// residual FP tax. Unique container names (loopclient/loopserver) keep the
+	// counts separate from the main nginx/curl workloads.
+	t.Run("loopback_learn_enforce_measurement", func(t *testing.T) {
+		require.NoError(t, testutils.ApplyMultiDocYAML(ns.Name, path.Join(utils.CurrentDir(), "resources/network-loopback-pod.yaml")), "deploy loopback pod")
+		lb, err := testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, "Deployment", "loopback")
+		require.NoError(t, err, "resolve loopback")
+		require.NoError(t, lb.WaitForReady(80), "loopback ready")
+		loop := func() {
+			for i := 0; i < 5; i++ {
+				_, _, _ = lb.ExecIntoPod([]string{"curl", "-sS", "-m", "5", "http://127.0.0.1:80/"}, "loopclient")
+				time.Sleep(2 * time.Second)
+			}
+		}
+		loop()
+		require.NoError(t, lb.WaitForContainerProfileCompletion(100), "loopback CP completed")
+		time.Sleep(30 * time.Second)
+		learn11 := countRuleAlerts(t, ns.Name, "R0011", "loopclient", "")
+		learn12 := countRuleAlerts(t, ns.Name, "R0012", "loopserver", "")
+		loop()
+		time.Sleep(30 * time.Second)
+		replay11 := countRuleAlerts(t, ns.Name, "R0011", "loopclient", "")
+		replay12 := countRuleAlerts(t, ns.Name, "R0012", "loopserver", "")
+		t.Logf("LOOPBACK FP measurement (guards removed): R0011(loopclient) learn=%d replay=%d | R0012(loopserver) learn=%d replay=%d", learn11, replay11, learn12, replay12)
+		assert.Equal(t, learn11, replay11, "replayed loopback egress must not add R0011 once learned")
+		assert.Equal(t, learn12, replay12, "replayed loopback ingress must not add R0012 once learned")
+	})
 }

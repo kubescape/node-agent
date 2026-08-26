@@ -614,6 +614,9 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 	// the live cluster view and the lister generation it was resolved against,
 	// so the reconciler re-projects it when that view changes.
 	spec := c.snapshotSpec()
+	if !c.cfg.AlertOnHostPeers {
+		userMerged = networkpeer.WithHostPeer(userMerged)
+	}
 	entry.UsesServiceResolution = networkpeer.HasServiceNeighbors(userMerged)
 	entry.ListerGen = c.listerGen()
 	projected := Apply(spec, networkpeer.WithResolvedServiceNeighbors(userMerged, c.serviceLister), tree)

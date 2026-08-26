@@ -497,6 +497,9 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	spec := c.snapshotSpec()
 	// Read gen BEFORE resolving so a concurrent Bump() invalidates this projection.
 	gen := c.listerGen()
+	if !c.cfg.AlertOnHostPeers {
+		projected = networkpeer.WithHostPeer(projected)
+	}
 	applyStart := time.Now()
 	projectedCP := Apply(spec, networkpeer.WithResolvedServiceNeighbors(projected, c.serviceLister), tree)
 	projectedCP.ResolvedGen = gen
