@@ -317,6 +317,7 @@ spec:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
               expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
 =======
               expression: "event.pktType == 'OUTGOING' && !cp.was_address_in_egress(event.containerId, event.dstAddr)"
@@ -330,6 +331,9 @@ spec:
 =======
               expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto) && !cp.was_selector_in_egress(event.containerId, event.dstNamespace, event.dstPodLabels)"
 >>>>>>> 5a17ba03 (rules: consume the peer-selector engine in R0011/R0012)
+=======
+              expression: "event.pktType == 'OUTGOING' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto) && !cp.was_selector_in_egress(event.containerId, event.dstNamespace, event.dstPodLabels)"
+>>>>>>> 96cb0b9a (feat(network): silence node/host peers by default; expose loopback to R0011/R0012)
         profileDependency: 0
         profileDataRequired:
           egressAddresses: all
@@ -354,7 +358,7 @@ spec:
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
           ruleExpression:
             - eventType: "network"
-              expression: "event.pktType == 'HOST' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_ingress(event.containerId, event.dstAddr, event.dstPort, event.proto) && !cp.was_selector_in_ingress(event.containerId, event.dstNamespace, event.dstPodLabels)"
+              expression: "event.pktType == 'HOST' && !cp.was_address_port_protocol_in_ingress(event.containerId, event.dstAddr, event.dstPort, event.proto) && !cp.was_selector_in_ingress(event.containerId, event.dstNamespace, event.dstPodLabels)"
         profileDependency: 0
         profileDataRequired:
           ingressAddresses: all

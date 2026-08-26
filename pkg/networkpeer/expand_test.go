@@ -264,3 +264,47 @@ func TestHasServiceNeighbors(t *testing.T) {
 		t.Error("ServiceRefNamespace without ServiceRefName must not be flagged (specFromNeighbor rejects it)")
 	}
 }
+
+// WithHostPeer injects entity:host into both directions; after resolution the
+// node's InternalIP and CNI gateway land in the address surface, so node-IP
+// traffic (kubelet probes, hostNetwork peers) is covered by the address matcher
+// and never alerts — the default host-peer allowlist (alertOnHostPeers=false).
+func TestWithHostPeer_ResolvesNodeIPsIntoAddressSurface(t *testing.T) {
+	l := realFluxTopology() // hostIPs: node 192.168.0.191, gateway 10.42.0.1
+	cp := &v1beta1.ContainerProfile{}
+
+	withHost := WithResolvedServiceNeighbors(WithHostPeer(cp), l)
+
+	collect := func(ns []v1beta1.NetworkNeighbor) map[string]bool {
+		s := map[string]bool{}
+		for i := range ns {
+			for _, ip := range ns[i].IPAddresses {
+				s[ip] = true
+			}
+		}
+		return s
+	}
+	for _, dir := range []struct {
+		name string
+		ns   []v1beta1.NetworkNeighbor
+	}{{"egress", withHost.Spec.Egress}, {"ingress", withHost.Spec.Ingress}} {
+		got := collect(dir.ns)
+		for _, ip := range []string{"192.168.0.191", "10.42.0.1"} {
+			if !got[ip] {
+				t.Errorf("%s: node IP %s must resolve into the address surface, got %v", dir.name, ip, got)
+			}
+		}
+	}
+}
+
+// A nil profile is a no-op, and WithHostPeer must not mutate its input.
+func TestWithHostPeer_NilAndNoMutation(t *testing.T) {
+	if WithHostPeer(nil) != nil {
+		t.Error("WithHostPeer(nil) must be nil")
+	}
+	cp := &v1beta1.ContainerProfile{Spec: v1beta1.ContainerProfileSpec{Egress: []v1beta1.NetworkNeighbor{{Identifier: "keep"}}}}
+	_ = WithHostPeer(cp)
+	if len(cp.Spec.Egress) != 1 || len(cp.Spec.Ingress) != 0 {
+		t.Errorf("WithHostPeer must not mutate the input; egress=%d ingress=%d", len(cp.Spec.Egress), len(cp.Spec.Ingress))
+	}
+}

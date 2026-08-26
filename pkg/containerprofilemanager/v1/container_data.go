@@ -249,10 +249,6 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 		}
 
 	} else {
-		if networkEvent.Destination.IPAddress == "127.0.0.1" {
-			// No need to generate for localhost
-			return nil
-		}
 		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 
 		if dnsResolverClient != nil {
