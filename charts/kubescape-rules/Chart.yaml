@@ -1,6 +1,0 @@
-apiVersion: v2
-name: kubescape-rules
-description: Kubescape runtime detection rules — symmetric R0011 egress / R0012 ingress, port-aware, selector- and serviceRef-allowlisted internal traffic
-type: application
-version: 0.1.0
-appVersion: "network-v2"
