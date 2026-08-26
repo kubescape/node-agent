@@ -100,6 +100,50 @@ func TestExpandServiceNeighbors_Selector(t *testing.T) {
 	}
 }
 
+func TestExpandServiceNeighbors_NoPortsMeansAnyPort(t *testing.T) {
+	l := realFluxTopology()
+	in := []v1beta1.NetworkNeighbor{
+		{Identifier: "st", Type: "internal", ServiceRefNamespace: "honey", ServiceRefName: "storage"},
+	}
+	out := ExpandServiceNeighbors(in, l)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 synthesized neighbor, got %d", len(out))
+	}
+	if len(out[0].Ports) != 0 {
+		t.Errorf("a portless source neighbor must synthesize a portless (any-port) entry, got %+v", out[0].Ports)
+	}
+	if len(out[0].IPAddresses) != 1 || out[0].IPAddresses[0] != "10.43.70.156" {
+		t.Errorf("storage ClusterIP expected, got %v", out[0].IPAddresses)
+	}
+}
+
+func TestExpandServiceNeighbors_SelectorFQDNFanout(t *testing.T) {
+	l := realFluxTopology()
+	in := []v1beta1.NetworkNeighbor{{
+		Identifier:        "guestbooks",
+		Type:              "internal",
+		ServiceSelector:   &metav1.LabelSelector{MatchLabels: map[string]string{"app": "guestbook"}},
+		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "gitops-demo"}},
+		Ports:             []v1beta1.NetworkPort{port("TCP-80", 80)},
+	}}
+	out := ExpandServiceNeighbors(in, l)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 synthesized neighbor, got %d", len(out))
+	}
+	want := map[string]bool{"guestbook-ui.gitops-demo.svc.cluster.local": false, "helm-guestbook.gitops-demo.svc.cluster.local": false}
+	for _, d := range out[0].DNSNames {
+		if _, ok := want[d]; !ok {
+			t.Errorf("unexpected FQDN %s", d)
+		}
+		want[d] = true
+	}
+	for d, seen := range want {
+		if !seen {
+			t.Errorf("selector fanout must imply FQDN %s, got %v", d, out[0].DNSNames)
+		}
+	}
+}
+
 // TestExpandServiceNeighbors_NilLister: no cluster view, no expansion.
 func TestExpandServiceNeighbors_NilLister(t *testing.T) {
 	in := []v1beta1.NetworkNeighbor{{Identifier: "am", Entity: "host"}}

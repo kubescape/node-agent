@@ -195,8 +195,25 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 
 	pcp.EgressAddrPorts = objectcache.ExtractAddrPorts(cp.Spec.Egress)
 	pcp.IngressAddrPorts = objectcache.ExtractAddrPorts(cp.Spec.Ingress)
+	pcp.EgressPeers = extractMockPeers(cp.Spec.Egress)
+	pcp.IngressPeers = extractMockPeers(cp.Spec.Ingress)
+	pcp.Namespace = cp.Namespace
 
 	return pcp
+}
+
+func extractMockPeers(neighbors []v1beta1.NetworkNeighbor) []objectcache.PeerSelector {
+	var peers []objectcache.PeerSelector
+	for i := range neighbors {
+		if neighbors[i].PodSelector == nil {
+			continue
+		}
+		peers = append(peers, objectcache.PeerSelector{
+			PodSelector:       neighbors[i].PodSelector,
+			NamespaceSelector: neighbors[i].NamespaceSelector,
+		})
+	}
+	return peers
 }
 
 func (r *RuleObjectCacheMock) SetProjectionSpec(spec objectcache.RuleProjectionSpec) {

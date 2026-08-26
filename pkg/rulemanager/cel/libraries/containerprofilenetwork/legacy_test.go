@@ -12,6 +12,7 @@ import (
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 )
 
@@ -68,6 +69,10 @@ func TestLegacyNNMatchesCP(t *testing.T) {
 					{Name: "tcp-80", Protocol: "TCP", Port: ptr.To(int32(80))},
 				},
 			},
+			{
+				Identifier:  "redis-clients",
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "redis-client"}},
+			},
 		},
 		Ingress: []v1beta1.NetworkNeighbor{
 			{
@@ -76,6 +81,10 @@ func TestLegacyNNMatchesCP(t *testing.T) {
 				Ports: []v1beta1.NetworkPort{
 					{Name: "tcp-8080", Protocol: "TCP", Port: ptr.To(int32(8080))},
 				},
+			},
+			{
+				Identifier:  "lb-clients",
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "lb-client"}},
 			},
 		},
 	}
@@ -137,6 +146,24 @@ func TestLegacyNNMatchesCP(t *testing.T) {
 			cp:   `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "TCP")`,
 			nn:   `nn.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "TCP")`,
 			want: true,
+		},
+		{
+			name: "was_selector_in_egress",
+			cp:   `cp.was_selector_in_egress(containerID, "redis", {"app": "redis-client"})`,
+			nn:   `nn.was_selector_in_egress(containerID, "redis", {"app": "redis-client"})`,
+			want: true,
+		},
+		{
+			name: "was_selector_in_ingress",
+			cp:   `cp.was_selector_in_ingress(containerID, "redis", {"app": "lb-client"})`,
+			nn:   `nn.was_selector_in_ingress(containerID, "redis", {"app": "lb-client"})`,
+			want: true,
+		},
+		{
+			name: "was_selector_in_egress (miss)",
+			cp:   `cp.was_selector_in_egress(containerID, "redis", {"app": "unknown"})`,
+			nn:   `nn.was_selector_in_egress(containerID, "redis", {"app": "unknown"})`,
+			want: false,
 		},
 	}
 
