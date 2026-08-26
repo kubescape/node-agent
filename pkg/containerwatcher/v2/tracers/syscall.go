@@ -31,7 +31,7 @@ const (
 
 	// defaultSyscallPollInterval is used when cfg.SyscallPollInterval is unset (e.g. tests
 	// constructing config.Config directly). It matches the config package's own default.
-	defaultSyscallPollInterval = 30 * time.Second
+	defaultSyscallPollInterval = 5 * time.Second
 )
 
 var _ containerwatcher.TracerInterface = (*SyscallTracer)(nil)
@@ -44,6 +44,9 @@ type SyscallTracer struct {
 	kubeManager   operators.DataOperator
 	ociStore      *orasoci.ReadOnlyStore
 	runtime       runtime.Runtime
+
+	// done is closed by Stop to stop the periodic Peek loop started in Start.
+	done chan struct{}
 }
 
 // NewSyscallTracer creates a new tracer
@@ -63,11 +66,8 @@ func NewSyscallTracer(
 	}
 }
 
-// pollInterval returns the configured eBPF map-fetch interval for the advise_seccomp map,
-// falling back to defaultSyscallPollInterval when unset. This interval only bounds staleness
-// of the live, in-progress profile; termination-time loss (kubescape/node-agent#922) is instead
-// addressed by Peek, which recovers a terminating container's last syscalls immediately rather
-// than waiting on this schedule.
+// pollInterval returns the configured cadence at which Start's background loop calls Peek,
+// falling back to defaultSyscallPollInterval when unset.
 func (st *SyscallTracer) pollInterval() time.Duration {
 	if st.cfg.SyscallPollInterval > 0 {
 		return st.cfg.SyscallPollInterval
@@ -75,15 +75,16 @@ func (st *SyscallTracer) pollInterval() time.Duration {
 	return defaultSyscallPollInterval
 }
 
-// Peek requests an immediate, out-of-band fetch of the advise_seccomp eBPF map, on top of the
-// tracer's normal periodic poll (see pollInterval). It does not block until the fetch completes
-// or until any resulting events have been processed by this tracer's eventCallback — callers
-// needing that must wait separately afterward.
+// Peek requests an immediate, out-of-band fetch of the advise_seccomp eBPF map. It does not
+// block until the fetch completes or until any resulting events have been processed by this
+// tracer's eventCallback — callers needing that must wait separately afterward.
 //
-// This exists so a caller about to stop tracking a container (ContainerProfileManager, on
-// termination or max-sniffing-time) can recover that container's syscalls executed since the
-// tracer's last poll, which would otherwise still be sitting unfetched in the kernel map and
-// become unreachable once the container's data is removed (kubescape/node-agent#922).
+// The gadget instance itself runs with no internal fetch schedule (see Start); every fetch,
+// periodic or not, goes through this one call. Start's own background loop calls it on
+// pollInterval for live event delivery (profile-building and rule-based alerting alike), and
+// ContainerProfileManager calls it once more, out of that schedule, right before it stops
+// tracking a container (on termination or max-sniffing-time) to recover that container's last
+// syscalls before they become unreachable (kubescape/node-agent#922).
 func (st *SyscallTracer) Peek() {
 	ebpfoperator.TriggerManualMapFetch(syscallDataSourceName)
 }
@@ -103,23 +104,45 @@ func (st *SyscallTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithName(syscallTraceName),
 		gadgetcontext.WithOrasReadonlyTarget(st.ociStore),
 	)
+	st.done = make(chan struct{})
 	go func() {
+		// map-fetch-interval "0" together with map-fetch-count "0" (unlimited) disables the
+		// gadget's own internal fetch schedule entirely: every fetch is driven by Peek instead
+		// (see the loop below and Peek's doc comment).
 		params := map[string]string{
 			"operator.oci.ebpf.map-fetch-count":    "0",
-			"operator.oci.ebpf.map-fetch-interval": st.pollInterval().String(),
+			"operator.oci.ebpf.map-fetch-interval": "0",
 		}
 		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", st.gadgetCtx.Name()), helpers.Error(err))
 		}
 	}()
+	go st.runPeekLoop()
 	return nil
+}
+
+// runPeekLoop calls Peek every pollInterval until Stop closes st.done.
+func (st *SyscallTracer) runPeekLoop() {
+	ticker := time.NewTicker(st.pollInterval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-st.done:
+			return
+		case <-ticker.C:
+			st.Peek()
+		}
+	}
 }
 
 // Stop gracefully stops the tracer
 func (st *SyscallTracer) Stop() error {
 	if st.gadgetCtx != nil {
 		st.gadgetCtx.Cancel()
+	}
+	if st.done != nil {
+		close(st.done)
 	}
 	return nil
 }

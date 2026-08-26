@@ -22,7 +22,7 @@ func TestSyscallTracerPollInterval(t *testing.T) {
 		want time.Duration
 	}{
 		{"unset config falls back to default", config.Config{}, defaultSyscallPollInterval},
-		{"configured interval is used", config.Config{SyscallPollInterval: 5 * time.Second}, 5 * time.Second},
+		{"configured interval is used", config.Config{SyscallPollInterval: 10 * time.Second}, 10 * time.Second},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -37,6 +37,29 @@ func TestSyscallTracerPeekDoesNotPanic(t *testing.T) {
 	// ebpfoperator.TriggerManualMapFetch).
 	st := &SyscallTracer{}
 	assert.NotPanics(t, st.Peek)
+}
+
+func TestSyscallTracerRunPeekLoopStopsOnDone(t *testing.T) {
+	st := &SyscallTracer{
+		cfg:  config.Config{SyscallPollInterval: 5 * time.Millisecond},
+		done: make(chan struct{}),
+	}
+
+	finished := make(chan struct{})
+	go func() {
+		st.runPeekLoop()
+		close(finished)
+	}()
+
+	// Let a few ticks fire (each a harmless no-op Peek with no gadget running) before stopping.
+	time.Sleep(30 * time.Millisecond)
+	close(st.done)
+
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("runPeekLoop did not return after done was closed")
+	}
 }
 
 func TestSyscallFields(t *testing.T) {

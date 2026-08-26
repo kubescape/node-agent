@@ -206,7 +206,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("exitCleanup::cleanupInterval", 30*time.Second)
 	viper.SetDefault("exitCleanup::cleanupDelay", 5*time.Minute)
 	viper.SetDefault("updateDataPeriod", 10*time.Minute)
-	viper.SetDefault("syscallPollInterval", 30*time.Second)
+	viper.SetDefault("syscallPollInterval", 5*time.Second)
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
 	viper.SetDefault("celConfigCache::maxSize", 100000)
