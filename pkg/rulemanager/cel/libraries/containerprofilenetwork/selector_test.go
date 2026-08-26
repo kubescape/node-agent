@@ -104,3 +104,38 @@ func TestNamespaceSelectorMatches_TruthTable(t *testing.T) {
 		})
 	}
 }
+
+func TestWasSelectorInPeers_InvalidSelectorFailsClosed(t *testing.T) {
+	client := labels.Set{"app": "redis-client"}
+	badPod := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+		{Key: "app", Operator: metav1.LabelSelectorOpIn}}}
+	badNs := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+		{Key: "kubernetes.io/metadata.name", Operator: "BadOp", Values: []string{"redis"}}}}
+	good := podSel(map[string]string{"app": "redis-client"})
+
+	cases := []struct {
+		name  string
+		peers []objectcache.PeerSelector
+		want  bool
+		why   string
+	}{
+		{"invalid podSelector alone", []objectcache.PeerSelector{{PodSelector: badPod}}, false, "unparseable podSelector must never match"},
+		{"invalid podSelector skipped, later valid peer matches", []objectcache.PeerSelector{{PodSelector: badPod}, {PodSelector: good}}, true, "one bad entry must not poison the list"},
+		{"valid podSelector, invalid namespaceSelector", []objectcache.PeerSelector{{PodSelector: good, NamespaceSelector: badNs}}, false, "unparseable namespaceSelector fails closed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := wasSelectorInPeers(tc.peers, client, "redis", "redis"); got != tc.want {
+				t.Fatalf("wasSelectorInPeers = %v, want %v — %s", got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+func TestNamespaceSelectorMatches_InvalidSelectorFailsClosed(t *testing.T) {
+	bad := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+		{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpIn}}}
+	if namespaceSelectorMatches(bad, "redis", "redis") {
+		t.Fatal("an unparseable namespaceSelector must fail closed, not match")
+	}
+}
