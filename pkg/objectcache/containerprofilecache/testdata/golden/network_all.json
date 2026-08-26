@@ -85,7 +85,8 @@
           "app": "redis-client"
         }
       },
-      "NamespaceSelector": null
+      "NamespaceSelector": null,
+      "Ports": null
     },
     {
       "PodSelector": {
@@ -97,7 +98,8 @@
         "matchLabels": {
           "kubernetes.io/metadata.name": "monitoring"
         }
-      }
+      },
+      "Ports": null
     }
   ],
   "egressPeers": [
@@ -107,7 +109,8 @@
           "app": "upstream"
         }
       },
-      "NamespaceSelector": null
+      "NamespaceSelector": null,
+      "Ports": null
     }
   ],
   "execsByPath": null,

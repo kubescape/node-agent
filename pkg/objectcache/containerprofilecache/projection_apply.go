@@ -286,9 +286,20 @@ func extractPeers(neighbors []v1beta1.NetworkNeighbor) []objectcache.PeerSelecto
 		if n.PodSelector == nil {
 			continue
 		}
+		var ports map[string]struct{}
+		if len(n.Ports) > 0 {
+			ports = make(map[string]struct{}, len(n.Ports))
+			for _, p := range n.Ports {
+				if p.Port == nil {
+					continue
+				}
+				ports[objectcache.PortKey(string(p.Protocol), *p.Port)] = struct{}{}
+			}
+		}
 		peers = append(peers, objectcache.PeerSelector{
 			PodSelector:       n.PodSelector,
 			NamespaceSelector: n.NamespaceSelector,
+			Ports:             ports,
 		})
 	}
 	return peers

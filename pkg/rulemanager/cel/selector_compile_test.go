@@ -28,10 +28,10 @@ func TestCompileSelectorRules(t *testing.T) {
 	}
 
 	exprs := []string{
-		`cp.was_selector_in_ingress(event.containerId, event.dstNamespace, event.dstPodLabels)`,
-		`cp.was_selector_in_egress(event.containerId, event.dstNamespace, event.dstPodLabels)`,
+		`cp.was_selector_in_ingress(event.containerId, event.dstNamespace, event.dstPodLabels, event.dstPort, event.proto)`,
+		`cp.was_selector_in_egress(event.containerId, event.dstNamespace, event.dstPodLabels, event.dstPort, event.proto)`,
 		// The full R0012 ingress expression as bound in default-rules.yaml.
-		`event.pktType == 'HOST' && !event.dstAddr.startsWith('127.') && !cp.was_address_in_ingress(event.containerId, event.dstAddr) && !cp.was_selector_in_ingress(event.containerId, event.dstNamespace, event.dstPodLabels)`,
+		`event.pktType == 'HOST' && !event.dstAddr.startsWith('127.') && !cp.was_address_in_ingress(event.containerId, event.dstAddr) && !cp.was_selector_in_ingress(event.containerId, event.dstNamespace, event.dstPodLabels, event.dstPort, event.proto)`,
 	}
 	for _, e := range exprs {
 		if err := c.registerExpression(e); err != nil {

@@ -56,9 +56,9 @@ func TestWasSelectorIn_EvalTruthTable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var res ref.Val
 			if tc.ingress {
-				res = lib.wasSelectorInIngress(types.String(tc.cid), types.String(tc.ns), labelsVal(tc.labels))
+				res = lib.wasSelectorInIngress(types.String(tc.cid), types.String(tc.ns), labelsVal(tc.labels), types.Int(443), types.String("TCP"))
 			} else {
-				res = lib.wasSelectorInEgress(types.String(tc.cid), types.String(tc.ns), labelsVal(tc.labels))
+				res = lib.wasSelectorInEgress(types.String(tc.cid), types.String(tc.ns), labelsVal(tc.labels), types.Int(443), types.String("TCP"))
 			}
 			res = cache.ConvertProfileNotAvailableErrToBool(res, false)
 			assert.Equal(t, types.Bool(tc.want), res, tc.why)
@@ -70,22 +70,22 @@ func TestWasSelectorIn_NoPeersFailsClosed(t *testing.T) {
 	lib := buildLibWithContainer(t, []v1beta1.NetworkNeighbor{
 		{Identifier: "plain-ip", IPAddresses: []string{"10.0.0.5"}},
 	}, nil)
-	res := lib.wasSelectorInEgress(types.String("cid"), types.String("redis"), labelsVal(map[string]string{"app": "redis-client"}))
+	res := lib.wasSelectorInEgress(types.String("cid"), types.String("redis"), labelsVal(map[string]string{"app": "redis-client"}), types.Int(443), types.String("TCP"))
 	res = cache.ConvertProfileNotAvailableErrToBool(res, false)
 	assert.Equal(t, types.Bool(false), res, "a profile with no selector peers must match no peer identity")
-	res = lib.wasSelectorInIngress(types.String("cid"), types.String("redis"), labelsVal(map[string]string{"app": "redis-client"}))
+	res = lib.wasSelectorInIngress(types.String("cid"), types.String("redis"), labelsVal(map[string]string{"app": "redis-client"}), types.Int(443), types.String("TCP"))
 	res = cache.ConvertProfileNotAvailableErrToBool(res, false)
 	assert.Equal(t, types.Bool(false), res)
 }
 
 func TestWasSelectorIn_ErrorEdges(t *testing.T) {
 	nilLib := &containerProfileNetworkLibrary{objectCache: nil}
-	assert.True(t, types.IsError(nilLib.wasSelectorInEgress(types.String("cid"), types.String("ns"), labelsVal(nil))))
-	assert.True(t, types.IsError(nilLib.wasSelectorInIngress(types.String("cid"), types.String("ns"), labelsVal(nil))))
+	assert.True(t, types.IsError(nilLib.wasSelectorInEgress(types.String("cid"), types.String("ns"), labelsVal(nil), types.Int(443), types.String("TCP"))))
+	assert.True(t, types.IsError(nilLib.wasSelectorInIngress(types.String("cid"), types.String("ns"), labelsVal(nil), types.Int(443), types.String("TCP"))))
 
 	lib := buildSelectorLib(t)
-	assert.True(t, types.IsError(lib.wasSelectorInEgress(types.Int(1), types.String("ns"), labelsVal(nil))))
-	assert.True(t, types.IsError(lib.wasSelectorInEgress(types.String("cid"), types.Int(1), labelsVal(nil))))
+	assert.True(t, types.IsError(lib.wasSelectorInEgress(types.Int(1), types.String("ns"), labelsVal(nil), types.Int(443), types.String("TCP"))))
+	assert.True(t, types.IsError(lib.wasSelectorInEgress(types.String("cid"), types.Int(1), labelsVal(nil), types.Int(443), types.String("TCP"))))
 }
 
 func TestRefValToStringMap(t *testing.T) {
@@ -104,11 +104,11 @@ func TestWasSelectorIn_CELEndToEnd(t *testing.T) {
 		want bool
 		why  string
 	}{
-		{`cp.was_selector_in_egress(containerID, "redis", {"app": "redis-client"})`, true, "declared egress peer matches through the CEL binding"},
-		{`cp.was_selector_in_egress(containerID, "", {"app": "redis-client"})`, false, "empty peer namespace fails closed through the binding"},
-		{`cp.was_selector_in_egress(containerID, "redis", {})`, false, "empty label map fails closed"},
-		{`cp.was_selector_in_ingress(containerID, "redis", {"app": "ingress-client"})`, true, "declared ingress peer matches"},
-		{`cp.was_selector_in_ingress(containerID, "redis", {"app": "redis-client"})`, false, "egress-only selector must not open ingress"},
+		{`cp.was_selector_in_egress(containerID, "redis", {"app": "redis-client"}, 443, "TCP")`, true, "declared egress peer matches through the CEL binding"},
+		{`cp.was_selector_in_egress(containerID, "", {"app": "redis-client"}, 443, "TCP")`, false, "empty peer namespace fails closed through the binding"},
+		{`cp.was_selector_in_egress(containerID, "redis", {}, 443, "TCP")`, false, "empty label map fails closed"},
+		{`cp.was_selector_in_ingress(containerID, "redis", {"app": "ingress-client"}, 443, "TCP")`, true, "declared ingress peer matches"},
+		{`cp.was_selector_in_ingress(containerID, "redis", {"app": "redis-client"}, 443, "TCP")`, false, "egress-only selector must not open ingress"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.expr, func(t *testing.T) {
@@ -122,7 +122,7 @@ func TestWasSelectorIn_CELEndToEnd(t *testing.T) {
 		})
 	}
 
-	ast, issues := env.Compile(`cp.was_selector_in_egress(containerID, "redis", {"app": "redis-client"})`)
+	ast, issues := env.Compile(`cp.was_selector_in_egress(containerID, "redis", {"app": "redis-client"}, 443, "TCP")`)
 	assert.NoError(t, issues.Err())
 	prg, err := env.Program(ast)
 	assert.NoError(t, err)

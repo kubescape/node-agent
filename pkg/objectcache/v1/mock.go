@@ -208,9 +208,20 @@ func extractMockPeers(neighbors []v1beta1.NetworkNeighbor) []objectcache.PeerSel
 		if neighbors[i].PodSelector == nil {
 			continue
 		}
+		var ports map[string]struct{}
+		if len(neighbors[i].Ports) > 0 {
+			ports = make(map[string]struct{}, len(neighbors[i].Ports))
+			for _, p := range neighbors[i].Ports {
+				if p.Port == nil {
+					continue
+				}
+				ports[objectcache.PortKey(string(p.Protocol), *p.Port)] = struct{}{}
+			}
+		}
 		peers = append(peers, objectcache.PeerSelector{
 			PodSelector:       neighbors[i].PodSelector,
 			NamespaceSelector: neighbors[i].NamespaceSelector,
+			Ports:             ports,
 		})
 	}
 	return peers

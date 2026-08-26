@@ -255,37 +255,37 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 		},
 		{
 			name:           "Check egress selector peer",
-			expression:     `cp.was_selector_in_egress(containerID, "any-ns", {"app": "db-client"})`,
+			expression:     `cp.was_selector_in_egress(containerID, "any-ns", {"app": "db-client"}, 443, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check egress selector peer wrong labels",
-			expression:     `cp.was_selector_in_egress(containerID, "any-ns", {"app": "attacker"})`,
+			expression:     `cp.was_selector_in_egress(containerID, "any-ns", {"app": "attacker"}, 443, "TCP")`,
 			expectedResult: false,
 		},
 		{
 			name:           "Check egress selector peer unresolved namespace",
-			expression:     `cp.was_selector_in_egress(containerID, "", {"app": "db-client"})`,
+			expression:     `cp.was_selector_in_egress(containerID, "", {"app": "db-client"}, 443, "TCP")`,
 			expectedResult: false,
 		},
 		{
 			name:           "Check ingress selector peer with namespace scope",
-			expression:     `cp.was_selector_in_ingress(containerID, "web", {"app": "frontend"})`,
+			expression:     `cp.was_selector_in_ingress(containerID, "web", {"app": "frontend"}, 443, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check ingress selector peer wrong namespace",
-			expression:     `cp.was_selector_in_ingress(containerID, "prod", {"app": "frontend"})`,
+			expression:     `cp.was_selector_in_ingress(containerID, "prod", {"app": "frontend"}, 443, "TCP")`,
 			expectedResult: false,
 		},
 		{
 			name:           "Selector direction isolation - egress peer not in ingress",
-			expression:     `cp.was_selector_in_ingress(containerID, "any-ns", {"app": "db-client"})`,
+			expression:     `cp.was_selector_in_ingress(containerID, "any-ns", {"app": "db-client"}, 443, "TCP")`,
 			expectedResult: false,
 		},
 		{
 			name:           "Combined address and selector check",
-			expression:     `cp.was_address_in_egress(containerID, "8.8.8.8") && cp.was_selector_in_egress(containerID, "any-ns", {"app": "db-client"})`,
+			expression:     `cp.was_address_in_egress(containerID, "8.8.8.8") && cp.was_selector_in_egress(containerID, "any-ns", {"app": "db-client"}, 443, "TCP")`,
 			expectedResult: true,
 		},
 	}
