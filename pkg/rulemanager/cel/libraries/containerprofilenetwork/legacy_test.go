@@ -149,20 +149,20 @@ func TestLegacyNNMatchesCP(t *testing.T) {
 		},
 		{
 			name: "was_selector_in_egress",
-			cp:   `cp.was_selector_in_egress(containerID, "redis", {"app": "redis-client"})`,
-			nn:   `nn.was_selector_in_egress(containerID, "redis", {"app": "redis-client"})`,
+			cp:   `cp.was_selector_in_egress(containerID, "redis", {"app": "redis-client"}, 443, "TCP")`,
+			nn:   `nn.was_selector_in_egress(containerID, "redis", {"app": "redis-client"}, 443, "TCP")`,
 			want: true,
 		},
 		{
 			name: "was_selector_in_ingress",
-			cp:   `cp.was_selector_in_ingress(containerID, "redis", {"app": "lb-client"})`,
-			nn:   `nn.was_selector_in_ingress(containerID, "redis", {"app": "lb-client"})`,
+			cp:   `cp.was_selector_in_ingress(containerID, "redis", {"app": "lb-client"}, 443, "TCP")`,
+			nn:   `nn.was_selector_in_ingress(containerID, "redis", {"app": "lb-client"}, 443, "TCP")`,
 			want: true,
 		},
 		{
 			name: "was_selector_in_egress (miss)",
-			cp:   `cp.was_selector_in_egress(containerID, "redis", {"app": "unknown"})`,
-			nn:   `nn.was_selector_in_egress(containerID, "redis", {"app": "unknown"})`,
+			cp:   `cp.was_selector_in_egress(containerID, "redis", {"app": "unknown"}, 443, "TCP")`,
+			nn:   `nn.was_selector_in_egress(containerID, "redis", {"app": "unknown"}, 443, "TCP")`,
 			want: false,
 		},
 	}

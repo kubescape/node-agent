@@ -271,7 +271,8 @@ func namespaceSelectorMatches(sel *metav1.LabelSelector, ns, profileNs string) b
 // matches any peer entry's podSelector AND its namespaceSelector. An empty
 // podSelector matches NOTHING (fail closed → the peer alerts), the opposite of
 // NetworkPolicy's match-all: an allowlist entry must name what it permits.
-func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, ns, profileNs string) bool {
+func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, ns, profileNs, protocol string, port int32) bool {
+	key := objectcache.PortKey(protocol, port)
 	for i := range peers {
 		peer := &peers[i]
 		if peer.PodSelector == nil ||
@@ -282,19 +283,25 @@ func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, 
 		if err != nil {
 			continue
 		}
-		if ps.Matches(podLabels) && namespaceSelectorMatches(peer.NamespaceSelector, ns, profileNs) {
+		if !ps.Matches(podLabels) || !namespaceSelectorMatches(peer.NamespaceSelector, ns, profileNs) {
+			continue
+		}
+		if peer.Ports == nil {
+			return true
+		}
+		if _, ok := peer.Ports[key]; ok {
 			return true
 		}
 	}
 	return false
 }
 
-func (l *containerProfileNetworkLibrary) wasSelectorInIngress(containerID, namespace, podLabels ref.Val) ref.Val {
-	return l.wasSelectorIn(containerID, namespace, podLabels, true)
+func (l *containerProfileNetworkLibrary) wasSelectorInIngress(containerID, namespace, podLabels, port, protocol ref.Val) ref.Val {
+	return l.wasSelectorIn(containerID, namespace, podLabels, port, protocol, true)
 }
 
-func (l *containerProfileNetworkLibrary) wasSelectorInEgress(containerID, namespace, podLabels ref.Val) ref.Val {
-	return l.wasSelectorIn(containerID, namespace, podLabels, false)
+func (l *containerProfileNetworkLibrary) wasSelectorInEgress(containerID, namespace, podLabels, port, protocol ref.Val) ref.Val {
+	return l.wasSelectorIn(containerID, namespace, podLabels, port, protocol, false)
 }
 
 // wasSelectorIn reports whether the runtime peer — identified by the namespace
@@ -307,7 +314,7 @@ func (l *containerProfileNetworkLibrary) wasSelectorInEgress(containerID, namesp
 // the event ever reaches CEL. There is deliberately no IP→pod lookup here — that
 // would reintroduce a dependency on node-agent's node-local pod cache, which is
 // exactly what breaks cross-node peers.
-func (l *containerProfileNetworkLibrary) wasSelectorIn(containerID, namespace, podLabels ref.Val, ingress bool) ref.Val {
+func (l *containerProfileNetworkLibrary) wasSelectorIn(containerID, namespace, podLabels, port, protocol ref.Val, ingress bool) ref.Val {
 	if l.objectCache == nil {
 		return types.NewErr("objectCache is nil")
 	}
@@ -318,6 +325,14 @@ func (l *containerProfileNetworkLibrary) wasSelectorIn(containerID, namespace, p
 	nsStr, ok := namespace.Value().(string)
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(namespace)
+	}
+	portInt, ok := port.Value().(int64)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(port)
+	}
+	protocolStr, ok := protocol.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(protocol)
 	}
 	if nsStr == "" {
 		// The peer did not resolve to a pod (external IP, or the resolver had no
@@ -336,7 +351,7 @@ func (l *containerProfileNetworkLibrary) wasSelectorIn(containerID, namespace, p
 	if len(peers) == 0 {
 		return types.Bool(false)
 	}
-	return types.Bool(wasSelectorInPeers(peers, labels.Set(peerLabels), nsStr, cp.Namespace))
+	return types.Bool(wasSelectorInPeers(peers, labels.Set(peerLabels), nsStr, cp.Namespace, protocolStr, int32(portInt)))
 }
 
 // refValToStringMap converts a CEL map argument to a Go map[string]string. A nil

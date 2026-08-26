@@ -145,21 +145,21 @@ var containerProfileNetworkFuncSpecs = []containerProfileNetworkFuncSpec{
 	},
 	{
 		name:       "was_selector_in_egress",
-		argTypes:   []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType)},
+		argTypes:   []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType), cel.IntType, cel.StringType},
 		resultType: cel.BoolType,
-		arity:      3,
+		arity:      5,
 		call: func(l *containerProfileNetworkLibrary, a []ref.Val) ref.Val {
-			return l.wasSelectorInEgress(a[0], a[1], a[2])
+			return l.wasSelectorInEgress(a[0], a[1], a[2], a[3], a[4])
 		},
 		noCache: true,
 	},
 	{
 		name:       "was_selector_in_ingress",
-		argTypes:   []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType)},
+		argTypes:   []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType), cel.IntType, cel.StringType},
 		resultType: cel.BoolType,
-		arity:      3,
+		arity:      5,
 		call: func(l *containerProfileNetworkLibrary, a []ref.Val) ref.Val {
-			return l.wasSelectorInIngress(a[0], a[1], a[2])
+			return l.wasSelectorInIngress(a[0], a[1], a[2], a[3], a[4])
 		},
 		noCache: true,
 	},

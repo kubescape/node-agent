@@ -72,7 +72,7 @@ func TestWasSelectorInPeers_TruthTable(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := wasSelectorInPeers(tc.peers, tc.labels, tc.peerNs, profileNs); got != tc.want {
+			if got := wasSelectorInPeers(tc.peers, tc.labels, tc.peerNs, profileNs, "TCP", 443); got != tc.want {
 				t.Fatalf("wasSelectorInPeers = %v, want %v", got, tc.want)
 			}
 		})
@@ -125,7 +125,7 @@ func TestWasSelectorInPeers_InvalidSelectorFailsClosed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := wasSelectorInPeers(tc.peers, client, "redis", "redis"); got != tc.want {
+			if got := wasSelectorInPeers(tc.peers, client, "redis", "redis", "TCP", 443); got != tc.want {
 				t.Fatalf("wasSelectorInPeers = %v, want %v — %s", got, tc.want, tc.why)
 			}
 		})
@@ -137,5 +137,41 @@ func TestNamespaceSelectorMatches_InvalidSelectorFailsClosed(t *testing.T) {
 		{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpIn}}}
 	if namespaceSelectorMatches(bad, "redis", "redis") {
 		t.Fatal("an unparseable namespaceSelector must fail closed, not match")
+	}
+}
+
+// A selector peer with a Ports set is port-aware, mirroring the address matcher:
+// nil Ports means any port, a declared (proto,port) matches only itself, and an
+// empty-but-non-nil map matches nothing.
+func TestWasSelectorInPeers_PortAware(t *testing.T) {
+	sel := podSel(map[string]string{"app": "redis-client"})
+	client := labels.Set{"app": "redis-client"}
+	withPorts := func(keys ...string) objectcache.PeerSelector {
+		m := map[string]struct{}{}
+		for _, k := range keys {
+			m[k] = struct{}{}
+		}
+		return objectcache.PeerSelector{PodSelector: sel, Ports: m}
+	}
+	k6379 := objectcache.PortKey("TCP", 6379)
+	cases := []struct {
+		name  string
+		peers []objectcache.PeerSelector
+		proto string
+		port  int32
+		want  bool
+	}{
+		{"nil ports matches any port", []objectcache.PeerSelector{{PodSelector: sel}}, "TCP", 6379, true},
+		{"declared port matches", []objectcache.PeerSelector{withPorts(k6379)}, "TCP", 6379, true},
+		{"undeclared port rejected", []objectcache.PeerSelector{withPorts(k6379)}, "TCP", 5432, false},
+		{"wrong protocol rejected", []objectcache.PeerSelector{withPorts(k6379)}, "UDP", 6379, false},
+		{"empty ports map matches nothing", []objectcache.PeerSelector{{PodSelector: sel, Ports: map[string]struct{}{}}}, "TCP", 6379, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := wasSelectorInPeers(tc.peers, client, "redis", "redis", tc.proto, tc.port); got != tc.want {
+				t.Fatalf("wasSelectorInPeers = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

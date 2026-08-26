@@ -18,6 +18,8 @@ import (
 type PeerSelector struct {
 	PodSelector       *metav1.LabelSelector
 	NamespaceSelector *metav1.LabelSelector
+	// Ports mirrors AddrPortGroup.Ports: nil means the neighbor declared no ports stanza and matches any port; a non-empty map matches only its literal (protocol, port) keys.
+	Ports map[string]struct{}
 }
 
 // PathMatcher is implemented by the trie-based matchers in containerprofilecache.
