@@ -1,0 +1,25 @@
+name: Inspektor Gadget Pin Check
+
+# Mechanical guard against merging a go.mod replace directive for
+# github.com/inspektor-gadget/inspektor-gadget that is still pinned to a
+# temporary/unmerged commit (see scripts/check-inspektor-gadget-pin.sh for
+# the full rationale -- ported from armosec/private-node-agent after this
+# exact mistake bit that repo once).
+
+on:
+  pull_request:
+    paths:
+      - "go.mod"
+      - "scripts/check-inspektor-gadget-pin.sh"
+      - ".github/workflows/check-ig-pin.yaml"
+
+jobs:
+  check:
+    name: check-ig-pin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check inspektor-gadget replace pin
+        run: make check-ig-pin
