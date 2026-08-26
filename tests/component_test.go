@@ -4225,3 +4225,49 @@ func Test_51_ServiceRefIngressR0012(t *testing.T) {
 			"ingress from a client no serviceRef names MUST fire R0012")
 	})
 }
+
+// Test_53: default posture (learned CP only, no user-defined profile) — replaying the exact learn-window traffic after completion must yield zero R0011/R0012, and the learn window itself must be alert-free (profile_incomplete suppression), cf Test_01/Test_51.
+func Test_53_DefaultLearnedNetworkFalsePositives(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+
+	server, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	require.NoError(t, err, "create nginx server workload")
+	require.NoError(t, testutils.ApplyMultiDocYAML(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-service.yaml")), "create nginx service")
+	client, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/network-default-client.yaml"))
+	require.NoError(t, err, "create curl client workload")
+	require.NoError(t, server.WaitForReady(80), "server ready")
+	require.NoError(t, client.WaitForReady(80), "client ready")
+
+	time.Sleep(10 * time.Second)
+
+	svcURL := fmt.Sprintf("http://nginx-service.%s.svc.cluster.local./", ns.Name)
+	sendTraffic := func() {
+		for i := 0; i < 3; i++ {
+			_, _, _ = client.ExecIntoPod([]string{"curl", "-sS", "-m", "5", svcURL}, "curl")
+			time.Sleep(2 * time.Second)
+		}
+	}
+	sendTraffic()
+
+	require.NoError(t, client.WaitForContainerProfileCompletion(100), "client CP completed")
+	require.NoError(t, server.WaitForContainerProfileCompletion(100), "server CP completed")
+
+	time.Sleep(30 * time.Second)
+
+	learnR0011 := countRuleAlerts(t, ns.Name, "R0011", "curl", "")
+	learnR0012 := countRuleAlerts(t, ns.Name, "R0012", "nginx", "")
+	assert.Equal(t, 0, learnR0011, "R0011 must be suppressed (profile_incomplete) during the learn window")
+	assert.Equal(t, 0, learnR0012, "R0012 must be suppressed (profile_incomplete) during the learn window")
+
+	sendTraffic()
+
+	time.Sleep(30 * time.Second)
+
+	assert.Equal(t, learnR0011, countRuleAlerts(t, ns.Name, "R0011", "curl", ""),
+		"replayed learn-window egress (kube-dns + nginx service) must not fire R0011; a diff here is a default-posture false positive — the learned svc entry stores the service SELECTOR while kubeipresolver stamps the service metadata LABELS on the event, and nginx-service has none")
+	assert.Equal(t, learnR0012, countRuleAlerts(t, ns.Name, "R0012", "nginx", ""),
+		"replayed learn-window ingress (same client pod) must not fire R0012")
+}
