@@ -21,6 +21,12 @@ binary:
 check-legacy-packages:
 	go test ./tests/containerprofilecache -run TestLegacyPackagesDeleted
 
+# Guard against merging a temporary inspektor-gadget replace pin that was
+# never re-pinned to a merged commit (see scripts/check-inspektor-gadget-pin.sh).
+.PHONY: check-ig-pin
+check-ig-pin:
+	./scripts/check-inspektor-gadget-pin.sh go.mod
+
 docker-build-only:
 	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
 
