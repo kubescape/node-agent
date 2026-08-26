@@ -24,7 +24,34 @@ const (
 	MaxSniffingTimeLabel          = "kubescape.io/max-sniffing-time"
 	MaxWaitForSharedContainerData = 10 * time.Minute
 	MaxWaitForAck                 = 30 * time.Second
+
+	// postSyscallFlushSettleDelay bounds how long flushAndSettle waits, after requesting an
+	// immediate out-of-band syscall fetch (see SetSyscallFlusher), for the resulting events
+	// to travel through the event queue and worker pool into this container's data before its
+	// profile is snapshotted and its data is cleared. It only needs to cover that pipeline's
+	// latency (normally low milliseconds), not any polling interval, since the fetch itself
+	// was already requested rather than waited on.
+	postSyscallFlushSettleDelay = 500 * time.Millisecond
 )
+
+// flushAndSettle requests an immediate, out-of-band fetch of any not-yet-polled syscalls (via
+// the flusher registered with SetSyscallFlusher) and briefly waits for the result to land in
+// this container's data. It is a no-op with no wait if no flusher is registered (e.g. the
+// syscall tracer is disabled).
+//
+// Call this right before a container's final forced profile save on termination or
+// max-sniffing-time: the eBPF syscall tracer only ever surfaces syscalls it has decoded from
+// its last periodic map fetch (see pkg/containerwatcher/v2/tracers/syscall.go), so without this
+// a container terminating between two polls would silently lose whatever it executed since the
+// last one once this manager removes its data (kubescape/node-agent#922).
+func (cpm *ContainerProfileManager) flushAndSettle() {
+	flush := cpm.syscallFlusher.Load()
+	if flush == nil {
+		return
+	}
+	(*flush)()
+	time.Sleep(postSyscallFlushSettleDelay)
+}
 
 // createUUID generates a new UUID string
 func createUUID() string {

@@ -17,10 +17,19 @@ type ContainerProfileManagerClient interface {
 	ReportSymlinkEvent(containerID string, event utils.LinkEvent)
 	ReportHardlinkEvent(containerID string, event utils.LinkEvent)
 	ReportNetworkEvent(containerID string, event utils.NetworkEvent)
-	ReportSyscall(containerID string, syscall string)
+	// ReportSyscalls reports a batch of syscalls for a container in a single operation. The
+	// syscall tracer bypasses the generic per-event pipeline entirely for this method (see
+	// SyscallTracer.callback), so this is the only entry point for syscall data -
+	// ContainerProfileManagerClient intentionally has no single-syscall equivalent.
+	ReportSyscalls(containerID string, syscalls []string)
 	ReportDroppedEvent(containerID string)
 	RegisterForContainerEndOfLife(notificationChannel chan *containercollection.Container)
 	OnQueueError(profile *v1beta1.ContainerProfile, containerID string, err error)
+	// SetSyscallFlusher registers a callback invoked right before a container's final
+	// forced profile save (on termination or max-sniffing-time), requesting an immediate
+	// out-of-band fetch of any not-yet-polled syscalls for that container so they aren't
+	// silently discarded (see SyscallTracer.Peek, kubescape/node-agent#922).
+	SetSyscallFlusher(flush func())
 }
 
 type Enricher interface {

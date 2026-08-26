@@ -3,10 +3,12 @@ package tracers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ebpfoperator "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
@@ -22,17 +24,30 @@ import (
 const (
 	syscallImageName = "ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.48.1"
 	syscallTraceName = "syscall_tracer"
+
+	// syscallDataSourceName is the advise_seccomp gadget's map-iterator datasource name
+	// (see TestSyscallFields). Peek uses it to target only this tracer's map iterator.
+	syscallDataSourceName = "syscalls"
 )
 
 var _ containerwatcher.TracerInterface = (*SyscallTracer)(nil)
 
 // SyscallTracer implements TracerInterface for events
 type SyscallTracer struct {
+	cfg           config.Config
 	eventCallback containerwatcher.ResultCallback
 	gadgetCtx     *gadgetcontext.GadgetContext
 	kubeManager   operators.DataOperator
 	ociStore      *orasoci.ReadOnlyStore
 	runtime       runtime.Runtime
+
+	// reportSyscalls is called once per fetch with the whole decoded batch for a container,
+	// bypassing the generic per-event pipeline entirely for this consumer (see callback and
+	// ContainerProfileManagerClient.ReportSyscalls, kubescape/node-agent#922).
+	reportSyscalls func(containerID string, syscalls []string)
+
+	// done is closed by Stop to stop the periodic Peek loop started in Start.
+	done chan struct{}
 }
 
 // NewSyscallTracer creates a new tracer
@@ -41,13 +56,40 @@ func NewSyscallTracer(
 	runtime runtime.Runtime,
 	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
+	cfg config.Config,
+	reportSyscalls func(containerID string, syscalls []string),
 ) *SyscallTracer {
 	return &SyscallTracer{
-		eventCallback: eventCallback,
-		kubeManager:   kubeManager,
-		ociStore:      ociStore,
-		runtime:       runtime,
+		cfg:            cfg,
+		eventCallback:  eventCallback,
+		kubeManager:    kubeManager,
+		ociStore:       ociStore,
+		runtime:        runtime,
+		reportSyscalls: reportSyscalls,
 	}
+}
+
+// pollInterval returns the configured cadence at which Start's background loop calls Peek,
+// falling back to config.DefaultSyscallPollInterval when unset.
+func (st *SyscallTracer) pollInterval() time.Duration {
+	if st.cfg.SyscallPollInterval > 0 {
+		return st.cfg.SyscallPollInterval
+	}
+	return config.DefaultSyscallPollInterval
+}
+
+// Peek requests an immediate, out-of-band fetch of the advise_seccomp eBPF map. It does not
+// block until the fetch completes or until any resulting events have been processed by this
+// tracer's eventCallback — callers needing that must wait separately afterward.
+//
+// The gadget instance itself runs with no internal fetch schedule (see Start); every fetch,
+// periodic or not, goes through this one call. Start's own background loop calls it on
+// pollInterval for live event delivery (profile-building and rule-based alerting alike), and
+// ContainerProfileManager calls it once more, out of that schedule, right before it stops
+// tracking a container (on termination or max-sniffing-time) to recover that container's last
+// syscalls before they become unreachable (kubescape/node-agent#922).
+func (st *SyscallTracer) Peek() {
+	ebpfoperator.TriggerManualMapFetch(syscallDataSourceName)
 }
 
 // Start initializes and starts the tracer
@@ -65,23 +107,45 @@ func (st *SyscallTracer) Start(ctx context.Context) error {
 		gadgetcontext.WithName(syscallTraceName),
 		gadgetcontext.WithOrasReadonlyTarget(st.ociStore),
 	)
+	st.done = make(chan struct{})
 	go func() {
+		// map-fetch-interval "0" together with map-fetch-count "0" (unlimited) disables the
+		// gadget's own internal fetch schedule entirely: every fetch is driven by Peek instead
+		// (see the loop below and Peek's doc comment).
 		params := map[string]string{
 			"operator.oci.ebpf.map-fetch-count":    "0",
-			"operator.oci.ebpf.map-fetch-interval": "30s",
+			"operator.oci.ebpf.map-fetch-interval": "0",
 		}
 		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
 		if err != nil {
 			logger.L().Error("Error running gadget", helpers.String("gadget", st.gadgetCtx.Name()), helpers.Error(err))
 		}
 	}()
+	go st.runPeekLoop()
 	return nil
+}
+
+// runPeekLoop calls Peek every pollInterval until Stop closes st.done.
+func (st *SyscallTracer) runPeekLoop() {
+	ticker := time.NewTicker(st.pollInterval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-st.done:
+			return
+		case <-ticker.C:
+			st.Peek()
+		}
+	}
 }
 
 // Stop gracefully stops the tracer
 func (st *SyscallTracer) Stop() error {
 	if st.gadgetCtx != nil {
 		st.gadgetCtx.Cancel()
+	}
+	if st.done != nil {
+		close(st.done)
 	}
 	return nil
 }
@@ -126,8 +190,31 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	containerID := event.GetContainerID()
 	processID := event.GetPID()
 
-	syscallsBuffer := event.GetSyscalls()
-	for _, syscall := range decodeSyscalls(syscallsBuffer) {
+	// The map covers every mount namespace on the node, including ones not (yet, or ever)
+	// resolved to a container - e.g. host processes. The generic event pipeline drops those
+	// itself (EventHandlerFactory.ProcessEvent's empty-ContainerID check), but reportSyscalls
+	// is called directly, bypassing that check, so it must be done here instead.
+	if containerID == "" {
+		event.Release()
+		return
+	}
+
+	syscallList := decodeSyscalls(event.GetSyscalls())
+	if len(syscallList) == 0 {
+		event.Release()
+		return
+	}
+
+	// Report the whole batch directly, bypassing the generic per-event pipeline entirely for
+	// this consumer (see reportSyscalls' doc comment). Dispatched on its own goroutine so a
+	// slow or momentarily-blocked container (e.g. withContainer's SyncChannel send on a
+	// profile-size-split signal) can never stall this callback, which the gadget's shared
+	// fetch-processing goroutine calls synchronously for every currently traced container.
+	go st.reportSyscalls(containerID, syscallList)
+
+	// RuleManager and metrics still need one event per syscall (rule matching keys off a
+	// single event.syscall field), so those keep going through the normal event pipeline.
+	for _, syscall := range syscallList {
 		st.eventCallback(&utils.DatasourceEvent{
 			Data:       event.Datasource.DeepCopy(event.Data),
 			Datasource: event.Datasource,
@@ -140,7 +227,7 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 }
 
 func decodeSyscalls(syscallsBuffer []byte) []string {
-	syscallStrings := make([]string, 0)
+	syscallStrings := make([]string, 0, len(syscallsBuffer))
 	// Syscall numbers this build cannot resolve to a name are skipped. Recording a
 	// placeholder name would propagate into the application profile and from there
 	// into generated seccomp profiles, where it is not a valid syscall name. The

@@ -37,18 +37,29 @@ func newTestManager(t *testing.T, containerID string) (*ContainerProfileManager,
 	return cpm, entry
 }
 
-func TestReportSyscallSizeAccounting(t *testing.T) {
+func TestReportSyscallsSizeAccounting(t *testing.T) {
 	cpm, entry := newTestManager(t, "container1")
 
-	cpm.ReportSyscall("container1", "execve")
+	cpm.ReportSyscalls("container1", []string{"execve"})
 	assert.Equal(t, int64(size.Of("execve")), entry.data.size.Load(),
 		"size must grow by the syscall's byte size, not by the set's element-count delta")
 
 	// Re-reporting an already-known syscall is a set-dedup no-op and must not grow the estimate.
-	cpm.ReportSyscall("container1", "execve")
+	cpm.ReportSyscalls("container1", []string{"execve"})
 	assert.Equal(t, int64(size.Of("execve")), entry.data.size.Load())
 
-	cpm.ReportSyscall("container1", "openat")
+	cpm.ReportSyscalls("container1", []string{"openat"})
+	assert.Equal(t, int64(size.Of("execve")+size.Of("openat")), entry.data.size.Load())
+}
+
+func TestReportSyscallsBatchInOneCall(t *testing.T) {
+	cpm, entry := newTestManager(t, "container1")
+
+	// A single batch call mixing a duplicate ("execve" appears twice) and a genuinely new
+	// syscall must dedup within the batch and only charge size for what's actually new.
+	cpm.ReportSyscalls("container1", []string{"execve", "execve", "openat"})
+
+	assert.ElementsMatch(t, []string{"execve", "openat"}, entry.data.syscalls.ToSlice())
 	assert.Equal(t, int64(size.Of("execve")+size.Of("openat")), entry.data.size.Load())
 }
 

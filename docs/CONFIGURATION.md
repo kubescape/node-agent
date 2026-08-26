@@ -173,6 +173,7 @@ correlation is an upgrade, not a dependency.
 | `profilesCacheRefreshRate` | duration | `1m` | Profile cache refresh rate |
 | `procfsScanInterval` | duration | `30s` | Procfs scan interval |
 | `procfsPidScanInterval` | duration | `5s` | Per-PID procfs scan interval |
+| `syscallPollInterval` | duration | `5s` | How often the seccomp syscall tracer fetches its eBPF map for live event delivery (profile-building and rule-based alerting). Termination-time capture is handled separately and doesn't depend on this value — see [docs/features/syscall-poll-interval.md](features/syscall-poll-interval.md). |
 | `maxDelaySeconds` | int | `30` | Max random delay for jitter |
 | `maxJitterPercentage` | int | `5` | Max jitter percentage |
 

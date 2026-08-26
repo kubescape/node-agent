@@ -29,6 +29,12 @@ const NodeNameEnvVar = "NODE_NAME"
 const PodNameEnvVar = "POD_NAME"
 const NamespaceEnvVar = "NAMESPACE_NAME"
 
+// DefaultSyscallPollInterval is SyscallPollInterval's default, matching the pre-PR-#591
+// RuleManager alerting cadence (see pkg/containerwatcher/v2/tracers/syscall.go). Exported so
+// SyscallTracer's own fallback (used when constructed with a zero-value config.Config, e.g. in
+// tests) can reference the same value instead of duplicating the literal.
+const DefaultSyscallPollInterval = 5 * time.Second
+
 // EventDedupConfig controls eBPF event deduplication before CEL rule evaluation.
 // ProfileProjectionConfig controls rule-aware profile projection behaviour.
 type ProfileProjectionConfig struct {
@@ -122,6 +128,7 @@ type Config struct {
 	ProfileProjection              ProfileProjectionConfig              `mapstructure:"profileProjection"`
 	ProfilesCacheRefreshRate       time.Duration                        `mapstructure:"profilesCacheRefreshRate"`
 	StorageRPCBudget               time.Duration                        `mapstructure:"storageRPCBudget"`
+	SyscallPollInterval            time.Duration                        `mapstructure:"syscallPollInterval"`
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig      `mapstructure:"ruleCooldown"`
 	UpdateDataPeriod               time.Duration                        `mapstructure:"updateDataPeriod"`
 	WorkerChannelSize              int                                  `mapstructure:"workerChannelSize"`
@@ -205,6 +212,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("exitCleanup::cleanupInterval", 30*time.Second)
 	viper.SetDefault("exitCleanup::cleanupDelay", 5*time.Minute)
 	viper.SetDefault("updateDataPeriod", 10*time.Minute)
+	viper.SetDefault("syscallPollInterval", DefaultSyscallPollInterval)
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
 	viper.SetDefault("celConfigCache::maxSize", 100000)

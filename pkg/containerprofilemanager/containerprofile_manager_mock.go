@@ -19,7 +19,7 @@ func (a ContainerProfileManagerMock) ContainerCallback(_ containercollection.Pub
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportSyscall(_ string, _ string) {
+func (a ContainerProfileManagerMock) ReportSyscalls(_ string, _ []string) {
 	// noop
 }
 
@@ -60,6 +60,10 @@ func (a ContainerProfileManagerMock) ReportHardlinkEvent(_ string, _ utils.LinkE
 }
 
 func (a ContainerProfileManagerMock) RegisterForContainerEndOfLife(_ chan *containercollection.Container) {
+	// noop
+}
+
+func (a ContainerProfileManagerMock) SetSyscallFlusher(_ func()) {
 	// noop
 }
 

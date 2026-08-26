@@ -45,6 +45,9 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, ContainerHasTerminatedError):
+				// Recover any syscalls not yet surfaced by the tracer's periodic poll before
+				// we snapshot and discard this container's data (see flushAndSettle).
+				cpm.flushAndSettle()
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
 					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on termination", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
@@ -65,6 +68,8 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 			case errors.Is(err, ContainerReachedMaxTime):
 				watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
+				// See the ContainerHasTerminatedError case above.
+				cpm.flushAndSettle()
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
 					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on max time", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),

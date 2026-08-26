@@ -110,8 +110,16 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.runtime,
 		tf.ociStore,
 		tf.createEventCallback(utils.SyscallEventType),
+		tf.cfg,
+		tf.containerProfileManager.ReportSyscalls,
 	)
 	manager.RegisterTracer(syscallTracer)
+	if syscallTracer.IsEnabled(tf.cfg) {
+		// Only wire the flusher when this tracer will actually run; otherwise
+		// ContainerProfileManager would pay flushAndSettle's settle delay on every
+		// container termination for a fetch that can never surface anything.
+		tf.containerProfileManager.SetSyscallFlusher(syscallTracer.Peek)
+	}
 
 	// Create exec tracer
 	execTracer := NewExecTracer(

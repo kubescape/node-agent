@@ -4,18 +4,67 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
+func TestSyscallTracerPollInterval(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.Config
+		want time.Duration
+	}{
+		{"unset config falls back to default", config.Config{}, config.DefaultSyscallPollInterval},
+		{"configured interval is used", config.Config{SyscallPollInterval: 10 * time.Second}, 10 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := &SyscallTracer{cfg: tt.cfg}
+			assert.Equal(t, tt.want, st.pollInterval())
+		})
+	}
+}
+
+func TestSyscallTracerPeekDoesNotPanic(t *testing.T) {
+	// With no gadget instance running, this must be a silent no-op (see
+	// ebpfoperator.TriggerManualMapFetch).
+	st := &SyscallTracer{}
+	assert.NotPanics(t, st.Peek)
+}
+
+func TestSyscallTracerRunPeekLoopStopsOnDone(t *testing.T) {
+	st := &SyscallTracer{
+		cfg:  config.Config{SyscallPollInterval: 5 * time.Millisecond},
+		done: make(chan struct{}),
+	}
+
+	finished := make(chan struct{})
+	go func() {
+		st.runPeekLoop()
+		close(finished)
+	}()
+
+	// Let a few ticks fire (each a harmless no-op Peek with no gadget running) before stopping.
+	time.Sleep(30 * time.Millisecond)
+	close(st.done)
+
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("runPeekLoop did not return after done was closed")
+	}
+}
+
 func TestSyscallFields(t *testing.T) {
 	expectedFields := map[string][]string{
-		"syscalls": {
+		syscallDataSourceName: {
 			"mntns_id_raw",
 			"syscalls",
 		},

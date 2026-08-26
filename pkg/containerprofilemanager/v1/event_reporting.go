@@ -381,18 +381,26 @@ func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
 	logger.L().Debug("dropped event reported", helpers.String("containerID", containerID))
 }
 
-func (cpm *ContainerProfileManager) ReportSyscall(containerID string, syscall string) {
+// ReportSyscalls reports a batch of syscalls for a container in a single locked operation -
+// one container-lock acquisition and one size update, rather than one per syscall. The eBPF
+// syscall tracer decodes a whole periodically- or on-demand-fetched bitmap at once (see
+// pkg/containerwatcher/v2/tracers/syscall.go), so this is called with that whole batch directly,
+// bypassing the generic per-event pipeline entirely for this consumer (kubescape/node-agent#922).
+func (cpm *ContainerProfileManager) ReportSyscalls(containerID string, syscalls []string) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.syscalls == nil {
 			data.syscalls = mapset.NewSet[string]()
 		}
-		// Append returns the number of elements newly added (0 or 1 here), not their
-		// serialized size - using it directly mixed element-count units into a
-		// byte-size accumulator and made syscalls contribute ~0 to MaxTsProfileSize.
-		if data.syscalls.Append(syscall) == 0 {
-			return 0, nil
+		addedSize := 0
+		for _, syscall := range syscalls {
+			// Append returns the number of elements newly added (0 or 1 here), not their
+			// serialized size - using it directly mixed element-count units into a
+			// byte-size accumulator and made syscalls contribute ~0 to MaxTsProfileSize.
+			if data.syscalls.Append(syscall) > 0 {
+				addedSize += size.Of(syscall)
+			}
 		}
-		return size.Of(syscall), nil
+		return addedSize, nil
 	})
 
 	cpm.logEventError(err, "syscalls", containerID)
