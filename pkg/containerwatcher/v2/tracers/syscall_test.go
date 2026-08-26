@@ -21,7 +21,7 @@ func TestSyscallTracerPollInterval(t *testing.T) {
 		cfg  config.Config
 		want time.Duration
 	}{
-		{"unset config falls back to default", config.Config{}, defaultSyscallPollInterval},
+		{"unset config falls back to default", config.Config{}, config.DefaultSyscallPollInterval},
 		{"configured interval is used", config.Config{SyscallPollInterval: 10 * time.Second}, 10 * time.Second},
 	}
 	for _, tt := range tests {

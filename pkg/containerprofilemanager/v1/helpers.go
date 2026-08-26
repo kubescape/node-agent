@@ -45,10 +45,11 @@ const (
 // a container terminating between two polls would silently lose whatever it executed since the
 // last one once this manager removes its data (kubescape/node-agent#922).
 func (cpm *ContainerProfileManager) flushAndSettle() {
-	if cpm.syscallFlusher == nil {
+	flush := cpm.syscallFlusher.Load()
+	if flush == nil {
 		return
 	}
-	cpm.syscallFlusher()
+	(*flush)()
 	time.Sleep(postSyscallFlushSettleDelay)
 }
 

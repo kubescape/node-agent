@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNetworkEventPodLabels(t *testing.T) {
@@ -633,14 +635,35 @@ func TestMaxWaitForSharedContainerDataConstant(t *testing.T) {
 
 func TestSetSyscallFlusher(t *testing.T) {
 	cpm := &ContainerProfileManager{}
-	assert.Nil(t, cpm.syscallFlusher)
+	assert.Nil(t, cpm.syscallFlusher.Load())
 
 	called := false
 	cpm.SetSyscallFlusher(func() { called = true })
-	assert.NotNil(t, cpm.syscallFlusher)
+	flush := cpm.syscallFlusher.Load()
+	require.NotNil(t, flush)
 
-	cpm.syscallFlusher()
+	(*flush)()
 	assert.True(t, called)
+}
+
+// TestSetSyscallFlusherConcurrentWithFlushAndSettle exercises the exact race the review on
+// PR #924 flagged: SetSyscallFlusher (a startup-time write, from TracerFactory) racing with
+// flushAndSettle reads from an already-running per-container monitorContainer goroutine. Run
+// with -race; a plain (non-atomic) field would be flagged here.
+func TestSetSyscallFlusherConcurrentWithFlushAndSettle(t *testing.T) {
+	cpm := &ContainerProfileManager{}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		cpm.SetSyscallFlusher(func() {})
+	}()
+	go func() {
+		defer wg.Done()
+		cpm.flushAndSettle()
+	}()
+	wg.Wait()
 }
 
 func TestFlushAndSettleNoFlusherIsNoopAndFast(t *testing.T) {

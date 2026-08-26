@@ -100,6 +100,36 @@ separate event per syscall for it to pick up off the queue. `containerProfileMan
 correspondingly absent from `ehf.handlers[utils.SyscallEventType]`; `RuleManager` and `metrics`
 are unaffected and still receive one event per syscall exactly as before.
 
+Two things this direct call requires that the generic pipeline used to provide for free:
+
+- **Filtering out unresolved container IDs.** The map covers every mount namespace on the node,
+  including ones never resolved to a container (host processes, etc.) —
+  `EventHandlerFactory.ProcessEvent`'s `if enrichedEvent.ContainerID == "" { return }` used to
+  drop those before they ever reached `ReportSyscall`. `callback` now does that check itself
+  before calling `ReportSyscalls`, to avoid spamming `ContainerProfileManager.withContainer`'s
+  "invalid empty containerID" error on every such row, every tick.
+- **Not blocking the shared fetch-processing path.** Previously `ReportSyscall` reached
+  `ContainerProfileManager` through the generic queue and one of `WorkerPoolSize` pooled
+  goroutines, so a slow or blocked container only ever tied up one interchangeable worker.
+  `callback` is invoked synchronously, once per currently-traced container, by the single
+  goroutine that processes each fetch — and `ContainerProfileManager.ReportSyscalls` can itself
+  block (`withContainer` sends on a container's `SyncChannel`, which is bounded, while holding
+  that container's lock, when a profile crosses `MaxTsProfileSize`). `callback` therefore
+  dispatches `ReportSyscalls` on its own goroutine rather than calling it inline, so one
+  container's backpressure can never stall the processing of every other container's syscalls
+  for that tick, or the next `Peek`-triggered fetch.
+
+## Concurrency
+
+`ContainerProfileManager.syscallFlusher` (the callback `SetSyscallFlusher` registers) is stored
+via `atomic.Pointer[func()]`, not a plain field. `SetSyscallFlusher` is called once during
+startup wiring (`TracerFactory.CreateAllTracers`), but by that point `StartContainerCollection`
+has already begun enumerating existing containers and starting their `monitorContainer`
+goroutines — a container that starts and terminates in that window would call `flushAndSettle`
+(reading `syscallFlusher`) concurrently with that write. A plain field would be an unsynchronized
+data race there, silently able to reintroduce #922's exact bug at exactly the highest-churn
+moment there is: node-agent startup or restart.
+
 ## Known limitations
 
 `TriggerManualMapFetch` is fire-and-forget and `flushAndSettle`'s settle delay is a bounded wait

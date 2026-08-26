@@ -28,10 +28,6 @@ const (
 	// syscallDataSourceName is the advise_seccomp gadget's map-iterator datasource name
 	// (see TestSyscallFields). Peek uses it to target only this tracer's map iterator.
 	syscallDataSourceName = "syscalls"
-
-	// defaultSyscallPollInterval is used when cfg.SyscallPollInterval is unset (e.g. tests
-	// constructing config.Config directly). It matches the config package's own default.
-	defaultSyscallPollInterval = 5 * time.Second
 )
 
 var _ containerwatcher.TracerInterface = (*SyscallTracer)(nil)
@@ -74,12 +70,12 @@ func NewSyscallTracer(
 }
 
 // pollInterval returns the configured cadence at which Start's background loop calls Peek,
-// falling back to defaultSyscallPollInterval when unset.
+// falling back to config.DefaultSyscallPollInterval when unset.
 func (st *SyscallTracer) pollInterval() time.Duration {
 	if st.cfg.SyscallPollInterval > 0 {
 		return st.cfg.SyscallPollInterval
 	}
-	return defaultSyscallPollInterval
+	return config.DefaultSyscallPollInterval
 }
 
 // Peek requests an immediate, out-of-band fetch of the advise_seccomp eBPF map. It does not
@@ -194,6 +190,15 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	containerID := event.GetContainerID()
 	processID := event.GetPID()
 
+	// The map covers every mount namespace on the node, including ones not (yet, or ever)
+	// resolved to a container - e.g. host processes. The generic event pipeline drops those
+	// itself (EventHandlerFactory.ProcessEvent's empty-ContainerID check), but reportSyscalls
+	// is called directly, bypassing that check, so it must be done here instead.
+	if containerID == "" {
+		event.Release()
+		return
+	}
+
 	syscallList := decodeSyscalls(event.GetSyscalls())
 	if len(syscallList) == 0 {
 		event.Release()
@@ -201,8 +206,11 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	}
 
 	// Report the whole batch directly, bypassing the generic per-event pipeline entirely for
-	// this consumer (see reportSyscalls' doc comment).
-	st.reportSyscalls(containerID, syscallList)
+	// this consumer (see reportSyscalls' doc comment). Dispatched on its own goroutine so a
+	// slow or momentarily-blocked container (e.g. withContainer's SyncChannel send on a
+	// profile-size-split signal) can never stall this callback, which the gadget's shared
+	// fetch-processing goroutine calls synchronously for every currently traced container.
+	go st.reportSyscalls(containerID, syscallList)
 
 	// RuleManager and metrics still need one event per syscall (rule matching keys off a
 	// single event.syscall field), so those keep going through the normal event pipeline.
@@ -219,7 +227,7 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 }
 
 func decodeSyscalls(syscallsBuffer []byte) []string {
-	syscallStrings := make([]string, 0)
+	syscallStrings := make([]string, 0, len(syscallsBuffer))
 	// Syscall numbers this build cannot resolve to a name are skipped. Recording a
 	// placeholder name would propagate into the application profile and from there
 	// into generated seccomp profiles, where it is not a valid syscall name. The
