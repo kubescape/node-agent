@@ -46,11 +46,30 @@ type SyscallTracer struct {
 	// ContainerProfileManagerClient.ReportSyscalls, kubescape/node-agent#922).
 	reportSyscalls func(containerID string, syscalls []string)
 
+	// emitUnresolvedContainerEvents controls whether callback's eventCallback fan-out runs for
+	// entries whose mount namespace never resolved to a containerID (host processes, or
+	// containers the container-collection has already dropped -- see callback's doc comment).
+	// The advise_seccomp map re-emits every entry IN FULL on every poll (no lookup-and-delete),
+	// so leaving this true costs a steady-state decode+fan-out+enrich pass, every poll interval,
+	// forever, for every such entry -- worthwhile only for a consumer that actually wants
+	// host-process events (e.g. the host/ECS agent). node-agent's own wiring in
+	// tracer_factory.go sets this false to keep its pre-existing steady-state performance
+	// characteristics unchanged.
+	emitUnresolvedContainerEvents bool
+
 	// done is closed by Stop to stop the periodic Peek loop started in Start.
 	done chan struct{}
 }
 
-// NewSyscallTracer creates a new tracer
+// NewSyscallTracer creates a new tracer.
+//
+// emitUnresolvedContainerEvents controls callback's behavior for events whose containerID
+// could not be resolved (host processes, or stale map entries for terminated containers):
+// pass false to skip eventCallback for them too (node-agent's own pre-existing steady-state
+// behavior, and what tracer_factory.go's internal wiring passes); pass true to still run
+// eventCallback for them, which host/ECS-agent-style consumers that care about host-process
+// syscalls need. reportSyscalls is always skipped for an unresolved containerID regardless of
+// this flag, since it identifies its subject by containerID.
 func NewSyscallTracer(
 	kubeManager operators.DataOperator,
 	runtime runtime.Runtime,
@@ -58,14 +77,16 @@ func NewSyscallTracer(
 	eventCallback containerwatcher.ResultCallback,
 	cfg config.Config,
 	reportSyscalls func(containerID string, syscalls []string),
+	emitUnresolvedContainerEvents bool,
 ) *SyscallTracer {
 	return &SyscallTracer{
-		cfg:            cfg,
-		eventCallback:  eventCallback,
-		kubeManager:    kubeManager,
-		ociStore:       ociStore,
-		runtime:        runtime,
-		reportSyscalls: reportSyscalls,
+		cfg:                           cfg,
+		eventCallback:                 eventCallback,
+		kubeManager:                   kubeManager,
+		ociStore:                      ociStore,
+		runtime:                       runtime,
+		reportSyscalls:                reportSyscalls,
+		emitUnresolvedContainerEvents: emitUnresolvedContainerEvents,
 	}
 }
 
@@ -185,7 +206,10 @@ func (st *SyscallTracer) eventOperator() operators.DataOperator {
 	)
 }
 
-// callback handles events from the tracer
+// callback handles events from the tracer. Whether eventCallback runs for an event whose
+// containerID could not be resolved is controlled by emitUnresolvedContainerEvents (see
+// NewSyscallTracer and the comment above the eventCallback loop below); reportSyscalls is
+// always skipped for those events regardless.
 func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	containerID := event.GetContainerID()
 	processID := event.GetPID()
@@ -210,23 +234,28 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 		go st.reportSyscalls(containerID, syscallList)
 	}
 
-	// eventCallback must run for EVERY decoded syscall regardless of containerID -- unlike
-	// reportSyscalls, this is a caller-supplied callback, and not every consumer of this
-	// tracer drops empty-containerID events itself. node-agent's own EventHandlerFactory.
-	// ProcessEvent still does (its own empty-ContainerID check), so routing these events to
-	// it costs node-agent nothing functionally; other consumers that watch non-containerized
-	// host processes (which have containerID=="") depend on actually receiving these events
-	// here. (Fixed: a prior version of this function early-returned on containerID=="" before
-	// this loop ever ran, silently dropping all host-process syscall events for any consumer
-	// whose eventCallback doesn't already filter them -- see
-	// armosec/private-node-agent#548's review.)
-	for _, syscall := range syscallList {
-		st.eventCallback(&utils.DatasourceEvent{
-			Data:       event.Datasource.DeepCopy(event.Data),
-			Datasource: event.Datasource,
-			EventType:  event.EventType,
-			Syscall:    syscall,
-		}, containerID, processID)
+	// eventCallback is caller-supplied and must see every decoded syscall for a resolved
+	// containerID: not every consumer filters empty containerIDs itself (host processes have
+	// containerID=="", and node-agent's own EventHandlerFactory.ProcessEvent already drops
+	// those, so routing them there costs node-agent nothing functionally). One event per
+	// syscall because rule matching keys off a single event.syscall field.
+	//
+	// For containerID=="" specifically, emitUnresolvedContainerEvents gates this loop: the
+	// advise_seccomp map re-emits every entry in full on every poll (no lookup-and-delete), so
+	// unconditionally fanning these out would cost a steady-state decode+dispatch+enrich pass
+	// per poll interval, forever, for every host process and every stale entry left behind by a
+	// terminated container -- see NewSyscallTracer's doc comment. Consumers that actually want
+	// host-process events (e.g. the host/ECS agent) opt in via that flag; node-agent's own
+	// wiring does not.
+	if containerID != "" || st.emitUnresolvedContainerEvents {
+		for _, syscall := range syscallList {
+			st.eventCallback(&utils.DatasourceEvent{
+				Data:       event.Datasource.DeepCopy(event.Data),
+				Datasource: event.Datasource,
+				EventType:  event.EventType,
+				Syscall:    syscall,
+			}, containerID, processID)
+		}
 	}
 	// Release the original deep-copied data since each sub-event now has its own copy
 	event.Release()

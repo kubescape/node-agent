@@ -19,10 +19,47 @@ import (
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
+// syscallTestDatasourceFields bundles the synthetic "syscalls" datasource shared by every
+// subtest in this file together with its field accessors.
+type syscallTestDatasourceFields struct {
+	ds             datasource.DataSource
+	containerIDAcc datasource.FieldAccessor
+	syscallsAcc    datasource.FieldAccessor
+}
+
+// syscallTestDatasource returns the datasource in syscallTestDatasourceFields, built once and
+// reused across every subtest. DatasourceEvent.getFieldAccessor (pkg/utils/datasource_event.go)
+// caches FieldAccessors in a package-level sync.Map keyed by EventType + field name only, NOT by
+// datasource -- so a fresh datasource per subtest would poison that cache the moment two
+// datasources' fields ever diverged (e.g. a new field, or a reordered AddField call), with
+// accessors silently reading the wrong field instead of failing loudly. Reusing one datasource
+// removes that risk: the schema (fields/order) is identical for every subtest, only the
+// per-event field VALUES vary.
+var syscallTestDatasource = sync.OnceValue(func() syscallTestDatasourceFields {
+	ds, err := datasource.New(datasource.TypeSingle, "syscalls")
+	if err != nil {
+		panic(err)
+	}
+	containerIDAcc, err := ds.AddField("runtime.containerId", api.Kind_String)
+	if err != nil {
+		panic(err)
+	}
+	syscallsAcc, err := ds.AddField("syscalls", api.Kind_Bytes)
+	if err != nil {
+		panic(err)
+	}
+	return syscallTestDatasourceFields{ds: ds, containerIDAcc: containerIDAcc, syscallsAcc: syscallsAcc}
+})
+
 // newSyscallEvent builds a synthetic "syscalls" datasource event carrying a single
 // resolvable syscall, with the given containerID (which may be empty, to stand in for
 // a host process not resolved to any container). It returns a *utils.DatasourceEvent
 // ready to be passed to (*SyscallTracer).callback.
+//
+// Packet ownership: callback releases the packet itself via event.Release() once it has
+// finished with it, so this helper must NOT also register a t.Cleanup release -- doing so
+// would release the same pooled packet twice, corrupting the datasource's pool for any
+// later NewPacketSingle call (see kubescape/node-agent#932's review).
 func newSyscallEvent(t *testing.T, containerID string) *utils.DatasourceEvent {
 	t.Helper()
 
@@ -37,51 +74,66 @@ func newSyscallEvent(t *testing.T, containerID string) *utils.DatasourceEvent {
 	}
 	require.NotEqual(t, -1, knownNumber, "no resolvable syscall number available in this build")
 
-	ds, err := datasource.New(datasource.TypeSingle, "syscalls")
+	fields := syscallTestDatasource()
+
+	data, err := fields.ds.NewPacketSingle()
 	require.NoError(t, err)
 
-	containerIDAcc, err := ds.AddField("runtime.containerId", api.Kind_String)
-	require.NoError(t, err)
-	syscallsAcc, err := ds.AddField("syscalls", api.Kind_Bytes)
-	require.NoError(t, err)
-
-	data, err := ds.NewPacketSingle()
-	require.NoError(t, err)
-	t.Cleanup(func() { ds.Release(data) })
-
-	require.NoError(t, containerIDAcc.PutString(data, containerID))
+	require.NoError(t, fields.containerIDAcc.PutString(data, containerID))
 	buf := make([]byte, knownNumber+1)
 	buf[knownNumber] = 1
-	require.NoError(t, syscallsAcc.PutBytes(data, buf))
+	require.NoError(t, fields.syscallsAcc.PutBytes(data, buf))
 
 	return &utils.DatasourceEvent{
 		Data:       data,
-		Datasource: ds,
+		Datasource: fields.ds,
 		EventType:  utils.SyscallEventType,
 	}
 }
 
-// TestSyscallTracerCallback verifies (armosec/private-node-agent#548's review): eventCallback
-// must fire for every decoded syscall regardless of containerID, while reportSyscalls must
-// only fire for a non-empty containerID (it bypasses the generic pipeline's own drop).
+// TestSyscallTracerCallback verifies: eventCallback must fire for every decoded syscall for a
+// resolved containerID; for an unresolved (empty) containerID, whether eventCallback also fires
+// is gated by emitUnresolvedContainerEvents (kubescape/node-agent#932's review) -- false
+// reproduces the pre-this-PR behavior of skipping it entirely (node-agent's own
+// tracer_factory.go wiring), true keeps this PR's behavior of still emitting it (for consumers
+// like the host/ECS agent that want host-process events). reportSyscalls must only fire for a
+// non-empty containerID regardless of the flag (it bypasses the generic pipeline's own drop and
+// identifies its subject by containerID).
 func TestSyscallTracerCallback(t *testing.T) {
 	tests := []struct {
-		name               string
-		containerID        string
-		wantEventCallback  bool
-		wantReportSyscalls bool
+		name                          string
+		containerID                   string
+		emitUnresolvedContainerEvents bool
+		wantEventCallback             bool
+		wantReportSyscalls            bool
 	}{
 		{
-			name:               "empty containerID still reaches eventCallback but not reportSyscalls",
-			containerID:        "",
-			wantEventCallback:  true,
-			wantReportSyscalls: false,
+			name:                          "empty containerID, flag false: skips eventCallback too (pre-PR / node-agent's own behavior)",
+			containerID:                   "",
+			emitUnresolvedContainerEvents: false,
+			wantEventCallback:             false,
+			wantReportSyscalls:            false,
 		},
 		{
-			name:               "non-empty containerID reaches both",
-			containerID:        "container-123",
-			wantEventCallback:  true,
-			wantReportSyscalls: true,
+			name:                          "empty containerID, flag true: still reaches eventCallback but not reportSyscalls",
+			containerID:                   "",
+			emitUnresolvedContainerEvents: true,
+			wantEventCallback:             true,
+			wantReportSyscalls:            false,
+		},
+		{
+			name:                          "non-empty containerID, flag false: reaches both",
+			containerID:                   "container-123",
+			emitUnresolvedContainerEvents: false,
+			wantEventCallback:             true,
+			wantReportSyscalls:            true,
+		},
+		{
+			name:                          "non-empty containerID, flag true: reaches both",
+			containerID:                   "container-123",
+			emitUnresolvedContainerEvents: true,
+			wantEventCallback:             true,
+			wantReportSyscalls:            true,
 		},
 	}
 
@@ -102,6 +154,7 @@ func TestSyscallTracerCallback(t *testing.T) {
 				reportSyscalls: func(containerID string, _ []string) {
 					reportSyscallsCalled <- containerID
 				},
+				emitUnresolvedContainerEvents: tt.emitUnresolvedContainerEvents,
 			}
 
 			st.callback(newSyscallEvent(t, tt.containerID))

@@ -112,6 +112,11 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.createEventCallback(utils.SyscallEventType),
 		tf.cfg,
 		tf.containerProfileManager.ReportSyscalls,
+		// false: node-agent's own EventHandlerFactory.ProcessEvent already drops
+		// containerID=="" events, so emitting them here would only pay the steady-state
+		// decode/dispatch/enrich cost for every host process and stale map entry on every
+		// poll for no benefit (see NewSyscallTracer's doc comment).
+		false,
 	)
 	manager.RegisterTracer(syscallTracer)
 	if syscallTracer.IsEnabled(tf.cfg) {
