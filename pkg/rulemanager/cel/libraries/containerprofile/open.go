@@ -112,17 +112,36 @@ func (l *containerProfileLibrary) wasPathOpenedWithSuffix(containerID, suffix re
 	}
 
 	if cp.Opens.All {
-		// All entries retained (no rule declared SuffixHits-style
-		// projection). Scan ONLY concrete entries in Values — Patterns
-		// contain wildcard tokens ('*' / '⋯') whose text doesn't safely
-		// answer suffix questions. CodeRabbit PR #43 open.go:79: a
-		// retained Pattern like "/var/log/pods/*/volumes/..." doesn't
-		// end with the concrete suffix "foo.log", but the concrete open
-		// it stands in for might — strings.HasSuffix on the pattern
-		// text returns false and produces a false negative. Patterns
-		// are inherently wildcard-shaped; concrete-path semantics live
-		// in Values (and in SuffixHits when projection is active).
+		// All entries retained (no rule declared SuffixHits-style projection).
+		// Scan Values first, then Patterns.
+		//
+		// Patterns must be scanned. Volatile paths are ALWAYS stored as patterns,
+		// so a correctly learned profile records the kubelet atomic-writer token
+		// open as "/run/secrets/kubernetes.io/serviceaccount/⋯/token" — the
+		// timestamped directory collapses, the "/token" leaf survives. Skipping
+		// Patterns answers "no" for that profile and R0006 fires on every
+		// SA-token read for the life of the workload; R0008 does the same via
+		// "/proc/⋯/environ". See issue #98.
+		//
+		// strings.HasSuffix against pattern text is sound for the concrete
+		// suffixes rules actually query: a pattern's trailing segments after the
+		// last collapse token are literal, so if they end with the suffix then
+		// every concrete path the pattern stands for ends with it too. A pattern
+		// whose LEAF is itself a wildcard ("/var/log/pods/⋯") simply returns
+		// false — the same answer as not scanning it, so this is never worse than
+		// the previous behaviour.
+		//
+		// This also makes the two branches of this helper agree. When projection
+		// is active, projection_apply.go builds SuffixHits with strings.HasSuffix
+		// over every raw entry INCLUDING dynamic ones, so the projected branch
+		// already answers true for "⋯/token". The Opens.All branch answering
+		// false for the same profile was the inconsistency.
 		for openPath := range cp.Opens.Values {
+			if strings.HasSuffix(openPath, suffixStr) {
+				return types.Bool(true)
+			}
+		}
+		for _, openPath := range cp.Opens.Patterns {
 			if strings.HasSuffix(openPath, suffixStr) {
 				return types.Bool(true)
 			}
@@ -160,14 +179,21 @@ func (l *containerProfileLibrary) wasPathOpenedWithPrefix(containerID, prefix re
 	}
 
 	if cp.Opens.All {
-		// All entries retained — scan ONLY Values (concrete paths).
-		// Patterns contain wildcard tokens whose text doesn't safely
-		// answer prefix questions; a pattern starting with "/var/⋯/log"
-		// matches concrete paths starting with "/var/anything/log" but
-		// strings.HasPrefix against the pattern text returns false for
-		// "/var/foo/log...". Same fix as wasPathOpenedWithSuffix above.
-		// CodeRabbit PR #43 open.go:79 (Also applies to 111-123).
+		// All entries retained — scan Values, then Patterns. Symmetric with
+		// wasPathOpenedWithSuffix above; see issue #98.
+		//
+		// A pattern's segments BEFORE the first collapse token are literal, so
+		// strings.HasPrefix is sound for the concrete prefixes rules query: if the
+		// pattern text starts with the prefix, every concrete path that pattern
+		// stands for starts with it too. "/var/⋯/log" genuinely does have prefix
+		// "/var/". A prefix that would reach past the first collapse token simply
+		// fails to match — the same answer as not scanning, never worse.
 		for openPath := range cp.Opens.Values {
+			if strings.HasPrefix(openPath, prefixStr) {
+				return types.Bool(true)
+			}
+		}
+		for _, openPath := range cp.Opens.Patterns {
 			if strings.HasPrefix(openPath, prefixStr) {
 				return types.Bool(true)
 			}
