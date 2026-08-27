@@ -497,6 +497,11 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	spec := c.snapshotSpec()
 	// Read gen BEFORE resolving so a concurrent Bump() invalidates this projection.
 	gen := c.listerGen()
+	// Compute resolution-dependence on the profile's OWN neighbors, before the
+	// synthetic host peer is injected: the host peer resolves to the stable local
+	// node IP at projection time, so it must not mark every profile for
+	// re-projection on unrelated Service/Endpoint lister bumps.
+	usesResolution := networkpeer.HasServiceNeighbors(projected)
 	if !c.cfg.AlertOnHostPeers {
 		projected = networkpeer.WithHostPeer(projected)
 	}
@@ -511,7 +516,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	newEntry := &CachedContainerProfile{
 		Projected:             projectedCP,
 		SpecHash:              projectedCP.SpecHash,
-		UsesServiceResolution: networkpeer.HasServiceNeighbors(projected),
+		UsesServiceResolution: usesResolution,
 		ListerGen:             gen,
 		State:                 &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
 		CallStackTree:         tree,
