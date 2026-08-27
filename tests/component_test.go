@@ -1102,13 +1102,9 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 		t.Fatalf("timeout after %s waiting for %s", timeout, desc)
 	}
 
-	// Give node-agent time to project the authored profile before generating
-	// events (matches Test_28; evaluating an unloaded profile is unreliable).
-	time.Sleep(30 * time.Second)
-
 	// PHASE 1 — subject NOT in the profile must alert. Doubles as the
-	// profile-load gate: once the authored CP is loaded, ls (not allowed)
-	// fires R0001.
+	// profile-load gate: re-exec ls inside the poll until R0001 fires, which only
+	// happens once the authored CP is loaded (no fixed projection sleep needed).
 	waitFor(func() bool {
 		wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
 		return countR0001("ls") > 0
@@ -1126,11 +1122,9 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cur, metav1.UpdateOptions{})
 	require.NoError(t, err, "update CP: add ls, remove id")
 
-	// Propagation delay before the reload gate (not an assertion gate).
-	time.Sleep(20 * time.Second)
-
-	// RELOAD GATE (positive) — the removed canary (id) must now alert, which
-	// proves node-agent reloaded the new revision (which also contains ls).
+	// RELOAD GATE (positive) — re-exec the removed canary (id) inside the poll
+	// until it alerts, which proves node-agent reloaded the new revision (which
+	// also contains ls). No fixed propagation sleep.
 	waitFor(func() bool {
 		wl.ExecIntoPod([]string{"/usr/bin/id"}, containerName)
 		return countR0001("id") > 0
@@ -1138,20 +1132,21 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	t.Logf("reload confirmed: R0001(id)=%d", countR0001("id"))
 
 	// PHASE 2 — the SAME subject, now in the profile, must NOT produce a NEW
-	// R0001. Cooldown headroom (per-container/per-rule, count 10) is untouched
-	// by the id-based gate, so a failed reload here would still let ls alert
-	// and be caught — this is a real enforcement check, not a vacuous pass.
+	// R0001. Snapshot ls before, exec ls, then fire a fresh forbidden SENTINEL
+	// (whoami, never in the profile) AFTER it. node-agent processes events in
+	// order, so once the sentinel alerts, the ls execs have been processed too —
+	// making "no new ls alert" deterministic, not a fixed-sleep guess.
 	before := countR0001("ls")
-	// Guard against phase-1 self-exhaustion: if the per-container/per-rule R0001
-	// cooldown budget (cap 10) were already spent, ls could not alert in phase 2
-	// regardless of enforcement, making the "no NEW R0001" check below vacuous.
 	require.Less(t, before, 10,
 		"phase 1 exhausted the R0001 ls cooldown budget (before=%d, cap=10); phase 2 would pass vacuously", before)
 	_, _, err = wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
 	require.NoError(t, err, "exec ls after profile update")
 	_, _, err = wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
 	require.NoError(t, err, "exec ls after profile update")
-	time.Sleep(20 * time.Second) // settle so any alert would have surfaced
+	waitFor(func() bool {
+		wl.ExecIntoPod([]string{"/usr/bin/whoami"}, containerName)
+		return countR0001("whoami") > 0
+	}, 3*time.Minute, "sentinel whoami (forbidden) must fire R0001 — proves the pipeline drained past the ls execs")
 	after := countR0001("ls")
 	if after != before {
 		logCPs()
@@ -3474,59 +3469,43 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 		path.Join(utils.CurrentDir(), "resources/percontainer-deployment.yaml"))
 	require.NoError(t, err)
 	require.NoError(t, wl.WaitForReady(80))
-	// Cache-load latency on the ContainerProfileCache is bursty; 30s covers the
-	// observed worst case on a loaded runner (matches Test_28).
-	time.Sleep(30 * time.Second)
-
-	// Exercise each container with BOTH binaries. Expected R0001 (unexpected
-	// process) per the inverse allow-lists:
+	// Exercise both binaries in both containers. Re-exec inside the poll so
+	// authored-CP load latency is absorbed deterministically (no fixed learning
+	// sleep). The two FORBIDDEN execs are the sentinels: once both have fired
+	// R0001, the pipeline has processed the whole burst, so the two allowed-exec
+	// negatives below are deterministic — not "hasn't surfaced yet".
 	//   app     : whoami -> R0001 (not allowed) ; id -> allowed (no alert)
 	//   sidecar : id     -> R0001 (not allowed) ; whoami -> allowed (no alert)
-	wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "app")
-	wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
-	wl.ExecIntoPod([]string{"/usr/bin/id"}, "sidecar")
-	wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "sidecar")
-
-	var alerts []testutils.Alert
-	require.Eventually(t, func() bool {
-		var e error
-		alerts, e = testutils.GetAlerts(wl.Namespace)
-		return e == nil
-	}, 60*time.Second, 5*time.Second, "must be able to fetch alerts")
-	// Extra settle time for remaining alerts.
-	time.Sleep(10 * time.Second)
-	alerts, _ = testutils.GetAlerts(wl.Namespace)
-
-	for i, a := range alerts {
-		t.Logf("  [%d] %s(%s) comm=%s container=%s", i,
-			a.Labels["rule_name"], a.Labels["rule_id"], a.Labels["comm"], a.Labels["container_name"])
+	exerciseAll := func() {
+		wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "app")
+		wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		wl.ExecIntoPod([]string{"/usr/bin/id"}, "sidecar")
+		wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "sidecar")
 	}
+	pollUntil(t, exerciseAll, func() bool {
+		return countRuleAlerts(t, ns.Name, "R0001", "app", "whoami") > 0 &&
+			countRuleAlerts(t, ns.Name, "R0001", "sidecar", "id") > 0
+	}, 4*time.Minute, "both forbidden execs (app/whoami, sidecar/id) must fire R0001")
 
-	countR0001 := func(container, comm string) int {
-		n := 0
-		for _, a := range alerts {
-			if a.Labels["rule_id"] == "R0001" &&
-				a.Labels["container_name"] == container &&
-				a.Labels["comm"] == comm {
-				n++
-			}
+	// Truth table — per-container binding, no cross-inheritance. Evaluated after
+	// both sentinels fired, so the wantAlert==false rows are deterministic.
+	for _, r := range []struct {
+		container, comm string
+		wantAlert       bool
+		why             string
+	}{
+		{"app", "whoami", true, "whoami not in percontainer-app -> must fire R0001 in app"},
+		{"sidecar", "id", true, "id not in percontainer-sidecar -> must fire R0001 in sidecar"},
+		{"app", "id", false, "id IS in percontainer-app -> must NOT fire (else sidecar's CP leaked in)"},
+		{"sidecar", "whoami", false, "whoami IS in percontainer-sidecar -> must NOT fire (else app's CP leaked in)"},
+	} {
+		got := countRuleAlerts(t, ns.Name, "R0001", r.container, r.comm)
+		if r.wantAlert {
+			assert.Greater(t, got, 0, r.why)
+		} else {
+			assert.Equal(t, 0, got, r.why)
 		}
-		return n
 	}
-
-	// The forbidden process in each container MUST alert.
-	assert.Greater(t, countR0001("app", "whoami"), 0,
-		"whoami is NOT in percontainer-app (only sidecar's CP allows it) — must fire R0001 in app")
-	assert.Greater(t, countR0001("sidecar", "id"), 0,
-		"id is NOT in percontainer-sidecar (only app's CP allows it) — must fire R0001 in sidecar")
-
-	// The allowed process in each container MUST NOT alert — the
-	// no-cross-inheritance assertion. If both containers shared one CP, one of
-	// these would be non-zero.
-	assert.Equal(t, 0, countR0001("app", "id"),
-		"id IS in percontainer-app — must NOT fire R0001 in app (non-zero => sidecar's CP leaked in)")
-	assert.Equal(t, 0, countR0001("sidecar", "whoami"),
-		"whoami IS in percontainer-sidecar — must NOT fire R0001 in sidecar (non-zero => app's CP leaked in)")
 
 	t.Run("refresh_reprojects_authored_CP_update", func(t *testing.T) {
 		k8sClient := k8sinterface.NewKubernetesApi()
@@ -3543,22 +3522,11 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 		_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cp, v1.UpdateOptions{})
 		require.NoError(t, err, "update percontainer-app to forbid id")
 
-		time.Sleep(45 * time.Second)
-		wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
-
-		require.Eventually(t, func() bool {
-			a2, e := testutils.GetAlerts(wl.Namespace)
-			if e != nil {
-				return false
-			}
-			for _, a := range a2 {
-				if a.Labels["rule_id"] == "R0001" && a.Labels["container_name"] == "app" && a.Labels["comm"] == "id" {
-					return true
-				}
-			}
-			return false
-		}, 90*time.Second, 5*time.Second,
-			"after percontainer-app is updated to forbid id, the reconciler refresh must re-fetch and re-project it so id now fires R0001 in app")
+		// Re-exec id inside the poll: once the reconciler re-fetches and re-projects
+		// the updated CP, id (now forbidden) fires R0001 in app. No fixed sleep.
+		pollUntil(t, func() { wl.ExecIntoPod([]string{"/usr/bin/id"}, "app") }, func() bool {
+			return countRuleAlerts(t, ns.Name, "R0001", "app", "id") > 0
+		}, 3*time.Minute, "reconciler must re-project the updated CP so id now fires R0001 in app")
 	})
 }
 
@@ -3750,6 +3718,27 @@ func countRuleAlerts(t *testing.T, ns, ruleID, container, comm string) int {
 	return n
 }
 
+// pollUntil re-runs act each interval (to absorb profile load / re-projection
+// latency) and returns once cond holds; it fails the test deterministically on
+// timeout instead of relying on a single fixed sleep. act may be nil for a
+// pure wait. Used to gate a NEGATIVE assertion on a POSITIVE sentinel: once the
+// sentinel event (which was generated after the action under test) is observed,
+// the pipeline has demonstrably drained past that action.
+func pollUntil(t *testing.T, act func(), cond func() bool, timeout time.Duration, desc string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if act != nil {
+			act()
+		}
+		if cond() {
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Fatalf("timeout after %s waiting for %s", timeout, desc)
+}
+
 // withNodeAgentConfig mutates config.json + restarts the DaemonSet; the returned func reverts + restarts.
 func withNodeAgentConfig(t *testing.T, mutate func(cfg map[string]any)) func() {
 	t.Helper()
@@ -3771,8 +3760,11 @@ func withNodeAgentConfig(t *testing.T, mutate func(cfg map[string]any)) func() {
 		c.Data["config.json"] = body
 		_, e = k8s.KubernetesClient.CoreV1().ConfigMaps(nsKS).Update(context.Background(), c, metav1.UpdateOptions{})
 		require.NoError(t, e, "update node-agent ConfigMap")
+		// RestartDaemonSet now blocks until the new-config pod is actually rolled
+		// out and ready; a short settle lets node-agent re-attach to running
+		// containers (IG fanotify marks) before the test generates events.
 		require.NoError(t, testutils.RestartDaemonSet(nsKS, cmName), "restart node-agent")
-		time.Sleep(45 * time.Second)
+		time.Sleep(20 * time.Second)
 	}
 	apply(string(updated))
 	return func() { apply(original) }
@@ -3901,26 +3893,38 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		require.NoError(t, err, "control workload")
 		require.NoError(t, ctl.WaitForReady(80))
 
-		time.Sleep(90 * time.Second)
+		// Positive sentinel: the identical, co-deployed CONTROL gets profiled. Once
+		// it has a ContainerProfile, the excluded one would too if it were not
+		// excluded — so the excluded's ABSENCE is deterministic, not "not yet".
+		pollUntil(t, nil, func() bool {
+			cps, _ := ctl.GetContainerProfiles()
+			return len(cps) > 0
+		}, 3*time.Minute, "the non-excluded control workload must be profiled")
 
 		exCPs, _ := exNS.GetContainerProfiles()
-		require.Empty(t, exCPs, "an excluded-namespace workload must produce NO ContainerProfile")
-		ctlCPs, _ := ctl.GetContainerProfiles()
-		require.NotEmpty(t, ctlCPs, "a non-excluded workload must still be profiled (exclusion must be selective)")
+		require.Empty(t, exCPs, "an excluded-namespace workload must produce NO ContainerProfile (the control already has one)")
 
-		for i := 0; i < 5; i++ {
+		// Excluded containers are dropped at IgnoreContainer — no profile AND no
+		// event collection — so id execs cannot alert. The control-CP sentinel
+		// above establishes the timing floor, making 0 deterministic.
+		for i := 0; i < 3; i++ {
 			_, _, _ = exNS.ExecIntoPod([]string{"/usr/bin/id"}, "app")
-			time.Sleep(2 * time.Second)
 		}
-		time.Sleep(20 * time.Second)
 		require.Equal(t, 0, countRuleAlerts(t, excluded.Name, "R0001", "app", "id"),
 			"an excluded container must generate no alerts")
 	})
 
 	t.Run("LearningDurationOverride", func(t *testing.T) {
+		// Drive a short AND frequently-checkpointed learning window. maxSniffing
+		// must be comfortably larger than updateDataPeriod, otherwise the "sniff
+		// window elapsed -> finalize" check can fall between update ticks and the
+		// profile never completes (the observed flake with 30s==30s). 40s sniff +
+		// 10s checkpoints finalizes reliably at ~40-50s, still far under the
+		// multi-minute default so the elapsed bound below stays discriminating.
 		restore := withNodeAgentConfig(t, func(cfg map[string]any) {
-			cfg["maxSniffingTimePerContainer"] = "45s"
-			cfg["initialDelay"] = "10s"
+			cfg["initialDelay"] = "5s"
+			cfg["maxSniffingTimePerContainer"] = "40s"
+			cfg["updateDataPeriod"] = "10s"
 		})
 		defer restore()
 
@@ -3929,10 +3933,20 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		require.NoError(t, err, "workload")
 		require.NoError(t, wl.WaitForReady(80))
 
-		deadline := time.Now().Add(90 * time.Second)
+		// Gate on node-agent actually tracking the workload (its CP exists) before
+		// timing completion, so a slow attach isn't charged against the window.
+		pollUntil(t, nil, func() bool {
+			cps, _ := wl.GetContainerProfiles()
+			return len(cps) > 0
+		}, 2*time.Minute, "node-agent must create the learner ContainerProfile")
+
+		// Completion is the deterministic signal; the elapsed bound is the
+		// discriminator — a sub-2m completion cannot happen under the default
+		// multi-minute learning period.
+		startLearn := time.Now()
 		require.NoError(t, wl.WaitForContainerProfileCompletion(90), "profile must complete within the shortened window")
-		require.True(t, time.Now().Before(deadline),
-			"completion must track the configured maxSniffingTimePerContainer, not a longer default")
+		require.Less(t, time.Since(startLearn), 2*time.Minute,
+			"completion must track the configured ~40s window, not the multi-minute default")
 	})
 }
 

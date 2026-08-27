@@ -775,21 +775,27 @@ func RestartDaemonSet(namespace, name string) error {
 	daemonset.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
 
 	// Update the daemonset
-	_, err = k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Update(ctx, daemonset, metav1.UpdateOptions{})
+	applied, err := k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Update(ctx, daemonset, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update daemonset %s/%s: %w", namespace, name, err)
 	}
+	newGen := applied.Generation
 
-	// Wait for the daemonset to be ready
+	// Wait for the rollout to ACTUALLY complete. The ObservedGeneration gate is
+	// essential: immediately after Update the old pod is still ready and counted
+	// as updated, so NumberReady/UpdatedNumberScheduled both equal Desired and the
+	// checks pass on the pre-restart status — the pod never actually cycles. Only
+	// once the controller has observed the new generation do the ready/updated
+	// counts reflect the new pod template.
 	err = backoff.RetryNotify(func() error {
 		updatedDS, err := k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
 
-		if updatedDS.Status.NumberReady != updatedDS.Status.DesiredNumberScheduled {
-			return fmt.Errorf("daemonset %s/%s not ready: %d/%d pods ready",
-				namespace, name, updatedDS.Status.NumberReady, updatedDS.Status.DesiredNumberScheduled)
+		if updatedDS.Status.ObservedGeneration < newGen {
+			return fmt.Errorf("daemonset %s/%s rollout not observed yet: observedGeneration %d < %d",
+				namespace, name, updatedDS.Status.ObservedGeneration, newGen)
 		}
 
 		if updatedDS.Status.UpdatedNumberScheduled != updatedDS.Status.DesiredNumberScheduled {
@@ -797,8 +803,13 @@ func RestartDaemonSet(namespace, name string) error {
 				namespace, name, updatedDS.Status.UpdatedNumberScheduled, updatedDS.Status.DesiredNumberScheduled)
 		}
 
+		if updatedDS.Status.NumberReady != updatedDS.Status.DesiredNumberScheduled {
+			return fmt.Errorf("daemonset %s/%s not ready: %d/%d pods ready",
+				namespace, name, updatedDS.Status.NumberReady, updatedDS.Status.DesiredNumberScheduled)
+		}
+
 		return nil
-	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 30), func(err error, d time.Duration) {
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 60), func(err error, d time.Duration) {
 		logger.L().Info("waiting for daemonset to be ready",
 			helpers.String("daemonset", name),
 			helpers.String("namespace", namespace),
