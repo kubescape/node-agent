@@ -190,30 +190,36 @@ func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
 	containerID := event.GetContainerID()
 	processID := event.GetPID()
 
-	// The map covers every mount namespace on the node, including ones not (yet, or ever)
-	// resolved to a container - e.g. host processes. The generic event pipeline drops those
-	// itself (EventHandlerFactory.ProcessEvent's empty-ContainerID check), but reportSyscalls
-	// is called directly, bypassing that check, so it must be done here instead.
-	if containerID == "" {
-		event.Release()
-		return
-	}
-
 	syscallList := decodeSyscalls(event.GetSyscalls())
 	if len(syscallList) == 0 {
 		event.Release()
 		return
 	}
 
+	// The map covers every mount namespace on the node, including ones not (yet, or ever)
+	// resolved to a container - e.g. host processes. reportSyscalls is called directly,
+	// bypassing the generic per-event pipeline, so an empty containerID must be skipped
+	// explicitly here rather than relying on that pipeline's own check.
+	//
 	// Report the whole batch directly, bypassing the generic per-event pipeline entirely for
 	// this consumer (see reportSyscalls' doc comment). Dispatched on its own goroutine so a
 	// slow or momentarily-blocked container (e.g. withContainer's SyncChannel send on a
 	// profile-size-split signal) can never stall this callback, which the gadget's shared
 	// fetch-processing goroutine calls synchronously for every currently traced container.
-	go st.reportSyscalls(containerID, syscallList)
+	if containerID != "" {
+		go st.reportSyscalls(containerID, syscallList)
+	}
 
-	// RuleManager and metrics still need one event per syscall (rule matching keys off a
-	// single event.syscall field), so those keep going through the normal event pipeline.
+	// eventCallback must run for EVERY decoded syscall regardless of containerID -- unlike
+	// reportSyscalls, this is a caller-supplied callback, and not every consumer of this
+	// tracer drops empty-containerID events itself. node-agent's own EventHandlerFactory.
+	// ProcessEvent still does (its own empty-ContainerID check), so routing these events to
+	// it costs node-agent nothing functionally; other consumers that watch non-containerized
+	// host processes (which have containerID=="") depend on actually receiving these events
+	// here. (Fixed: a prior version of this function early-returned on containerID=="" before
+	// this loop ever ran, silently dropping all host-process syscall events for any consumer
+	// whose eventCallback doesn't already filter them -- see
+	// armosec/private-node-agent#548's review.)
 	for _, syscall := range syscallList {
 		st.eventCallback(&utils.DatasourceEvent{
 			Data:       event.Datasource.DeepCopy(event.Data),
