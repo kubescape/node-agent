@@ -21,10 +21,12 @@
 #
 # Two independent signals are checked, in order of priority:
 #
-#   1. A `NOTE:`-style comment immediately above the replace line that
-#      mentions "re-pin" / "repin" / "merged SHA" is treated as an explicit,
-#      self-declared "this is a temporary pin, do not merge yet" marker.
-#      Its mere presence is an automatic hard failure. This is the PRIMARY
+#   1. A `NOTE:` comment immediately above the replace line is treated as an
+#      explicit, self-declared "this is a temporary pin, do not merge yet"
+#      marker. Its mere presence (the whole word NOTE, case-insensitive) is an
+#      automatic hard failure -- the block of commentary immediately preceding
+#      this one replace line is dedicated to it, so a NOTE there is already
+#      unambiguous; no further wording is required. This is the PRIMARY
 #      check: it is deterministic, requires no network access, and cannot be
 #      defeated by network flakiness or the target repo being private/
 #      rate-limited. It relies on the convention that whoever does a
@@ -32,17 +34,21 @@
 #      a comment.
 #
 #   2. A best-effort ancestor check against kubescape/inspektor-gadget:main
-#      via the public GitHub REST "compare" API (no auth needed for a public
-#      repo read). This is DEFENSE IN DEPTH for the case where the NOTE
-#      comment is stripped without the pin actually having been updated to a
-#      merged commit. It is deliberately best-effort: if the network call
-#      fails, times out, or the repo/commit can't be reached (e.g. CI
-#      runner has no egress, GitHub API rate limit, repo visibility changes),
-#      this script WARNS but does not fail the build on that alone -- a
-#      flaky network check would make this gate itself unreliable, which is
-#      worse than not having signal #2 at all. It only hard-fails when the
-#      API gives a definitive, unambiguous answer that the pinned commit is
-#      NOT an ancestor of main (compare status "ahead" or "diverged").
+#      via the GitHub REST "compare" API (authenticated with GITHUB_TOKEN
+#      when available, so a private repo or visibility change doesn't turn
+#      into an unauthenticated 404). This is DEFENSE IN DEPTH for the case
+#      where the NOTE comment is stripped without the pin actually having
+#      been updated to a merged commit. It is deliberately best-effort: if
+#      the network call fails, times out, or the repo/commit can't be reached
+#      (e.g. CI runner has no egress, GitHub API rate limit, repo visibility
+#      changes, or the caller isn't authorized to read it -- which surfaces
+#      as HTTP 404, indistinguishable from "commit doesn't exist"), this
+#      script WARNS but does not fail the build on that alone -- a flaky
+#      network check would make this gate itself unreliable, which is worse
+#      than not having signal #2 at all. It only hard-fails when the API
+#      gives a definitive, unambiguous answer: HTTP 422 (malformed/unknown
+#      ref on a repo we *can* read), or compare status "ahead"/"diverged"
+#      (the pinned commit is real but not on main).
 #
 #      Note: `git ls-remote` alone cannot answer an ancestor question (it
 #      only maps refs to their tip SHA, not arbitrary-commit ancestry), so
@@ -52,9 +58,18 @@
 # Usage:
 #   scripts/check-inspektor-gadget-pin.sh [path/to/go.mod]
 #
+# Environment:
+#   GITHUB_TOKEN - optional. When set, sent as a Bearer auth header on the
+#                  compare API call so a private guarded fork (or one whose
+#                  visibility just changed) resolves instead of 404-ing.
+#                  Safe to leave unset -- the header is simply omitted, and
+#                  the call proceeds unauthenticated as before.
+#
 # Exit codes:
 #   0 - OK (no replace directive found, or it passed both checks)
-#   1 - FAIL (NOTE marker present, or commit confirmed not merged to main)
+#   1 - FAIL (NOTE marker present, commit confirmed not merged to main, or
+#       the replace directive is present but in a format this script could
+#       not parse)
 #
 set -euo pipefail
 
@@ -68,10 +83,38 @@ if [[ ! -f "$GOMOD" ]]; then
     exit 1
 fi
 
-# Find the line number of the replace directive for the guarded module.
-replace_line_no=$(grep -nE "^replace[[:space:]]+${TARGET_MODULE//./\\.}[[:space:]]*=>" "$GOMOD" | head -1 | cut -d: -f1 || true)
+# Find the line number of the replace directive for the guarded module. This
+# matches both the single-line form:
+#   replace github.com/inspektor-gadget/inspektor-gadget => ... v0.0.0-...
+# and a line inside a block form:
+#   replace (
+#       github.com/inspektor-gadget/inspektor-gadget => ... v0.0.0-...
+#   )
+# -- i.e. an optional "replace" keyword, optional leading whitespace, then the
+# target module and "=>".
+ESCAPED_TARGET="${TARGET_MODULE//./\\.}"
+replace_line_no=$(grep -nE "^[[:space:]]*(replace[[:space:]]+)?${ESCAPED_TARGET}[[:space:]]*=>" "$GOMOD" | head -1 | cut -d: -f1 || true)
 
 if [[ -z "$replace_line_no" ]]; then
+    # The module might still be present in go.mod in some form this script's
+    # regex above doesn't recognize (e.g. a go.mod syntax variant it wasn't
+    # written to expect). Silently passing in that case would defeat the
+    # whole point of a mechanical guard, so treat "the module string is here,
+    # but not where we expect it" as a loud failure rather than a pass.
+    if grep -qF "$TARGET_MODULE" "$GOMOD"; then
+        echo "" >&2
+        echo "check-inspektor-gadget-pin: FAIL" >&2
+        echo "" >&2
+        echo "'${TARGET_MODULE}' appears in ${GOMOD}, but this script could not find it" >&2
+        echo "as a recognizable 'replace' directive (neither the single-line form nor a" >&2
+        echo "line inside a 'replace ( ... )' block)." >&2
+        echo "" >&2
+        echo "This script does not know how to parse the current go.mod format for this" >&2
+        echo "directive and needs to be updated -- refusing to silently pass rather than" >&2
+        echo "risk missing a stale pin." >&2
+        exit 1
+    fi
+
     echo "check-inspektor-gadget-pin: no 'replace ${TARGET_MODULE} => ...' directive in ${GOMOD}; nothing to check."
     exit 0
 fi
@@ -84,7 +127,11 @@ echo "  ${replace_line}"
 #
 # Walk upward from the replace line collecting the contiguous block of `//`
 # comment lines directly preceding it (stopping at the first blank/non-
-# comment line), then look for a NOTE marker inside that block.
+# comment line), then look for a NOTE marker inside that block. This also
+# works correctly for a replace line inside a `replace ( ... )` block: if the
+# preceding line is another replace entry (or the `replace (` opener) rather
+# than a comment, the walk stops immediately and comment_block stays empty,
+# same as "no NOTE marker" for the single-line form.
 comment_block=""
 line_no=$((replace_line_no - 1))
 while [[ $line_no -ge 1 ]]; do
@@ -98,20 +145,18 @@ while [[ $line_no -ge 1 ]]; do
 done
 
 if echo "$comment_block" | grep -qiw 'NOTE'; then
-    if echo "$comment_block" | grep -qiE 're-?pin|merged[[:space:]]+SHA'; then
-        echo "" >&2
-        echo "check-inspektor-gadget-pin: FAIL" >&2
-        echo "" >&2
-        echo "A NOTE comment above the ${TARGET_MODULE} replace directive marks" >&2
-        echo "this pin as temporary and pending re-pin to a merged SHA:" >&2
-        echo "" >&2
-        echo "$comment_block" | sed 's/^/  /' >&2
-        echo "" >&2
-        echo "This PR must not merge with that marker still in place. Re-pin the" >&2
-        echo "replace directive to the merged commit SHA on the target fork's" >&2
-        echo "main branch, then remove the NOTE comment." >&2
-        exit 1
-    fi
+    echo "" >&2
+    echo "check-inspektor-gadget-pin: FAIL" >&2
+    echo "" >&2
+    echo "A NOTE comment above the ${TARGET_MODULE} replace directive marks" >&2
+    echo "this pin as temporary:" >&2
+    echo "" >&2
+    echo "$comment_block" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "This PR must not merge with that marker still in place. Re-pin the" >&2
+    echo "replace directive to the merged commit SHA on the target fork's" >&2
+    echo "main branch, then remove the NOTE comment." >&2
+    exit 1
 fi
 
 # --- Signal 2: best-effort ancestor check against kubescape/inspektor-gadget:main ---
@@ -119,8 +164,8 @@ fi
 # Only meaningful when the replace target is the guarded fork; other forks
 # (e.g. a developer's personal fork used for short-lived iteration) are not
 # in scope for this specific safeguard.
-replace_module=$(echo "$replace_line" | sed -E 's/^replace[[:space:]]+[^[:space:]]+[[:space:]]*=>[[:space:]]*([^[:space:]]+).*/\1/')
-replace_version=$(echo "$replace_line" | sed -E 's/^replace[[:space:]]+[^[:space:]]+[[:space:]]*=>[[:space:]]*[^[:space:]]+[[:space:]]+([^[:space:]]+).*/\1/')
+replace_module=$(echo "$replace_line" | sed -E 's/^[[:space:]]*(replace[[:space:]]+)?[^[:space:]]+[[:space:]]*=>[[:space:]]*([^[:space:]]+).*/\2/')
+replace_version=$(echo "$replace_line" | sed -E 's/^[[:space:]]*(replace[[:space:]]+)?[^[:space:]]+[[:space:]]*=>[[:space:]]*[^[:space:]]+[[:space:]]+([^[:space:]]+).*/\2/')
 
 if [[ "$replace_module" != "$GUARDED_FORK" ]]; then
     echo "check-inspektor-gadget-pin: replace target is '${replace_module}', not '${GUARDED_FORK}'; skipping ancestor check (only in scope for the guarded fork)."
@@ -139,8 +184,21 @@ fi
 
 echo "check-inspektor-gadget-pin: checking whether ${pinned_commit} is an ancestor of ${GUARDED_FORK}:main ..."
 
+# Authenticate when GITHUB_TOKEN is available so a private guarded fork (or
+# one whose visibility just changed) resolves instead of 404-ing. The header
+# is only added when a token is actually present: unlike an absent header,
+# sending "Authorization: Bearer" with an empty value is NOT treated by
+# GitHub as an unauthenticated request -- it responds 401 "Bad credentials"
+# instead, which would turn every run without a token into a spurious
+# inconclusive result.
+curl_auth_args=()
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    curl_auth_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+fi
+
 compare_response=$(curl -sS --max-time 10 \
     -H "Accept: application/vnd.github+json" \
+    "${curl_auth_args[@]}" \
     -w $'\n%{http_code}' \
     "${GUARDED_FORK_API}/compare/main...${pinned_commit}" 2>/dev/null) || compare_response=""
 
@@ -153,19 +211,27 @@ fi
 http_code="${compare_response##*$'\n'}"
 compare_json="${compare_response%$'\n'*}"
 
-# A 404/422 is a DEFINITIVE answer -- the pinned commit doesn't exist on the
-# guarded fork at all (typo'd hash, never pushed, bad ref) -- not an
-# inconclusive network condition. Fail hard here rather than letting it fall
-# into the generic "unexpected response" WARN+PASS branch below, which would
-# let a clearly-bogus pin slip through as merely inconclusive. Other non-200
-# codes (403 rate-limit, 5xx, etc.) are NOT definitive and still fall through
-# to that WARN+PASS branch, same as before.
+# Only HTTP 422 is a DEFINITIVE answer here -- it means GitHub could read the
+# repo and tells us the ref is malformed/unknown (a typo'd hash, a commit
+# that was never pushed, or an invalid ref). Fail hard on that rather than
+# letting it fall into the generic "unexpected response" WARN+PASS branch
+# below, which would let a clearly-bogus pin slip through as merely
+# inconclusive.
+#
+# HTTP 404 is deliberately NOT treated as definitive: GitHub returns 404, not
+# 403, for any repository the caller cannot read -- a private repo and an
+# unauthenticated read of a repo whose visibility just changed both land
+# here, indistinguishable from "commit doesn't exist". Hard-failing on a 404
+# would contradict this script's own policy of warning (not failing) on
+# "repo can't be reached" conditions, so it falls through to the WARN+PASS
+# branch below, alongside other non-definitive codes (403 rate-limit, 5xx,
+# timeouts, etc.).
 case "$http_code" in
-    404|422)
+    422)
         echo "" >&2
         echo "check-inspektor-gadget-pin: FAIL" >&2
         echo "" >&2
-        echo "GitHub returned HTTP ${http_code} for:" >&2
+        echo "GitHub returned HTTP 422 for:" >&2
         echo "  ${GUARDED_FORK_API}/compare/main...${pinned_commit}" >&2
         echo "-- the pinned commit does not exist on ${GUARDED_FORK} (a typo'd hash, a" >&2
         echo "commit that was never pushed, or an invalid ref). A pin that can't even be" >&2
@@ -173,6 +239,11 @@ case "$http_code" in
         echo "" >&2
         echo "Re-pin the replace directive to a real commit on ${GUARDED_FORK}'s main branch." >&2
         exit 1
+        ;;
+    404)
+        echo "check-inspektor-gadget-pin: WARNING - GitHub returned HTTP 404 for the compare API call. This is not a definitive 'commit does not exist' answer -- GitHub returns 404 (not 403) for any repository the caller cannot read, which a private ${GUARDED_FORK} or an unauthenticated read of a repo whose visibility just changed would also produce. Not failing the build on this alone; relying on signal 1 (NOTE marker check, which passed)."
+        echo "check-inspektor-gadget-pin: PASS (best-effort ancestor check inconclusive, no NOTE marker found)"
+        exit 0
         ;;
 esac
 

@@ -22,4 +22,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check inspektor-gadget replace pin
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: make check-ig-pin
