@@ -4339,3 +4339,85 @@ func Test_53_DefaultLearnedNetworkFalsePositives(t *testing.T) {
 		assert.Equal(t, learn12, replay12, "replayed loopback ingress must not add R0012 once learned")
 	})
 }
+
+// Test_54: peer allowlisting is namespace-INVARIANT — a peer is allowed or
+// blocked by its IDENTITY (pod labels), not its namespace. A serviceRef/
+// podSelector peer with NO namespaceSelector treats the same identity identically
+// regardless of namespace, so "AppB moves ns A->C" and "AppEvil reuses AppB's
+// selector name in another ns" are the same to the matcher. The assertions are
+// signature-agnostic (invariance holds whether or not signatures gate identity);
+// the per-scenario R0012 counts are logged so the sign-OFF run here and the
+// sign-ON run on the fork CT can be compared. cf entlein's #923 comment.
+func Test_54_NamespaceInvariantPeerAllowlisting(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+	port80 := int32(80)
+
+	// One ISOLATED server per scenario (so each server's R0012 is attributable to
+	// its single client). Authored to allowlist ingress from podSelector
+	// {app: nsinv-peer} with NO namespaceSelector, and to allow only /usr/bin/sleep
+	// so an id exec in the server fires R0001 — the drain sentinel.
+	runScenario := func(t *testing.T, name, clientFixture string) int {
+		t.Helper()
+		serverNs := testutils.NewRandomNamespace()
+		clientNs := testutils.NewRandomNamespace()
+
+		cp := &v1beta1.ContainerProfile{
+			ObjectMeta: metav1.ObjectMeta{Name: "nsinv-server-cp", Namespace: serverNs.Name},
+			Spec: v1beta1.ContainerProfileSpec{
+				LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "nsinv-server"}},
+				Execs:         []v1beta1.ExecCalls{{Path: "/usr/bin/sleep"}},
+				Ingress: []v1beta1.NetworkNeighbor{{
+					Identifier:  "allowed-peer",
+					Type:        v1beta1.CommunicationTypeIngress,
+					PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nsinv-peer"}},
+					Ports:       []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: v1beta1.ProtocolTCP, Port: &port80}},
+				}},
+			},
+		}
+		_, err := storageClient.ContainerProfiles(serverNs.Name).Create(context.Background(), cp, metav1.CreateOptions{})
+		require.NoError(t, err, "%s: create server CP", name)
+
+		server, err := testutils.NewTestWorkload(serverNs.Name, path.Join(utils.CurrentDir(), "resources/nsinv-server.yaml"))
+		require.NoError(t, err, "%s: server", name)
+		require.NoError(t, server.WaitForReady(80), "%s: server ready", name)
+		client, err := testutils.NewTestWorkload(clientNs.Name, path.Join(utils.CurrentDir(), "resources/"+clientFixture))
+		require.NoError(t, err, "%s: client", name)
+		require.NoError(t, client.WaitForReady(80), "%s: client ready", name)
+
+		svcURL := fmt.Sprintf("http://nsinv-server.%s.svc.cluster.local./", serverNs.Name)
+		// Re-drive traffic + the server sentinel each poll: the client curls the
+		// server (cross-namespace ingress) and an id exec in the server fires R0001
+		// once the CP loads. In-order processing means once R0001 appears the
+		// ingress has been evaluated too, so the R0012 count below is final.
+		pollUntil(t, func() {
+			_, _, _ = client.ExecIntoPod([]string{"curl", "-sS", "-m", "5", svcURL}, "client")
+			_, _, _ = server.ExecIntoPod([]string{"/usr/bin/id"}, "server")
+		}, func() bool {
+			return countRuleAlerts(t, serverNs.Name, "R0001", "server", "id") > 0
+		}, 4*time.Minute, name+": server sentinel (id) must fire R0001 — proves the ingress drained")
+
+		r0012 := countRuleAlerts(t, serverNs.Name, "R0012", "server", "")
+		t.Logf("scenario %-12s client-ns=%s -> server R0012=%d", name, clientNs.Name, r0012)
+		return r0012
+	}
+
+	// Same identity (app=nsinv-peer), two different client namespaces; plus a
+	// different identity (app=nsinv-other).
+	allowed := runScenario(t, "allowed", "nsinv-client-peer.yaml")
+	moved := runScenario(t, "moved", "nsinv-client-peer.yaml")
+	different := runScenario(t, "different-id", "nsinv-client-other.yaml")
+
+	// Core hypothesis: the SAME identity yields the SAME risk profile regardless of
+	// its namespace. Holds whether or not signatures gate the identity — only the
+	// common value changes (logged above for the sign-OFF vs sign-ON comparison).
+	assert.Equal(t, allowed, moved,
+		"peer allowlisting must be namespace-INVARIANT: identical identity in different namespaces => identical R0012 (allowed=%d moved=%d)", allowed, moved)
+	// A DIFFERENT identity is not in the allowlist, so it alerts regardless of
+	// namespace or signatures — matching is by identity.
+	assert.Greater(t, different, 0,
+		"a peer whose identity is NOT allowlisted must fire R0012 (identity-based matching)")
+}
