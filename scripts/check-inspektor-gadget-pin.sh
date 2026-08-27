@@ -139,15 +139,42 @@ fi
 
 echo "check-inspektor-gadget-pin: checking whether ${pinned_commit} is an ancestor of ${GUARDED_FORK}:main ..."
 
-compare_json=$(curl -sS --max-time 10 \
+compare_response=$(curl -sS --max-time 10 \
     -H "Accept: application/vnd.github+json" \
-    "${GUARDED_FORK_API}/compare/main...${pinned_commit}" 2>/dev/null) || compare_json=""
+    -w $'\n%{http_code}' \
+    "${GUARDED_FORK_API}/compare/main...${pinned_commit}" 2>/dev/null) || compare_response=""
 
-if [[ -z "$compare_json" ]]; then
+if [[ -z "$compare_response" ]]; then
     echo "check-inspektor-gadget-pin: WARNING - could not reach GitHub API to verify ancestry (network issue, rate limit, or private repo without auth). Not failing the build on this alone; relying on signal 1 (NOTE marker check, which passed)."
     echo "check-inspektor-gadget-pin: PASS (best-effort ancestor check inconclusive, no NOTE marker found)"
     exit 0
 fi
+
+http_code="${compare_response##*$'\n'}"
+compare_json="${compare_response%$'\n'*}"
+
+# A 404/422 is a DEFINITIVE answer -- the pinned commit doesn't exist on the
+# guarded fork at all (typo'd hash, never pushed, bad ref) -- not an
+# inconclusive network condition. Fail hard here rather than letting it fall
+# into the generic "unexpected response" WARN+PASS branch below, which would
+# let a clearly-bogus pin slip through as merely inconclusive. Other non-200
+# codes (403 rate-limit, 5xx, etc.) are NOT definitive and still fall through
+# to that WARN+PASS branch, same as before.
+case "$http_code" in
+    404|422)
+        echo "" >&2
+        echo "check-inspektor-gadget-pin: FAIL" >&2
+        echo "" >&2
+        echo "GitHub returned HTTP ${http_code} for:" >&2
+        echo "  ${GUARDED_FORK_API}/compare/main...${pinned_commit}" >&2
+        echo "-- the pinned commit does not exist on ${GUARDED_FORK} (a typo'd hash, a" >&2
+        echo "commit that was never pushed, or an invalid ref). A pin that can't even be" >&2
+        echo "resolved is not a valid pin." >&2
+        echo "" >&2
+        echo "Re-pin the replace directive to a real commit on ${GUARDED_FORK}'s main branch." >&2
+        exit 1
+        ;;
+esac
 
 status=$(echo "$compare_json" | grep -oE '"status"[[:space:]]*:[[:space:]]*"[a-z]+"' | head -1 | sed -E 's/.*"([a-z]+)"$/\1/' || true)
 
