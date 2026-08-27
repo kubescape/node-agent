@@ -10,7 +10,9 @@ capabilities:
   runtimeObservability: enable
   networkPolicyService: enable
   runtimeDetection: enable
-  malwareDetection: enable
+  # No in-tree malware scanner exists, and the test that covered it is gone, so
+  # enabling this only writes a flag nothing reads into every test bundle.
+  malwareDetection: disable
   httpDetection: enable
 
 configurations:
@@ -48,6 +50,9 @@ storage:
       cpu: 500m
       memory: 1500Mi
 nodeAgent:
+  # The component tests run the agent with the Go profiler on. This used to ride
+  # on capabilities.malwareDetection, which had nothing to do with it.
+  enableProfiler: true
   name: node-agent
   image:
     repository: quay.io/kubescape/node-agent

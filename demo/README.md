@@ -98,7 +98,6 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
   -n kubescape --create-namespace \
   --set clusterName=$(kubectl config current-context) \
   --set capabilities.runtimeDetection=enable \
-  --set capabilities.malwareDetection=enable \
   --set alertCRD.installDefault=true \
   --set alertCRD.scopeClustered=true \
   --set nodeAgent.config.alertManagerExporterUrls=alertmanager-operated.monitoring.svc.cluster.local:9093 \
@@ -111,7 +110,6 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
 #   -n kubescape --create-namespace \
 #   --set clusterName=$(kubectl config current-context) \
 #   --set capabilities.runtimeDetection=enable \
-#   --set capabilities.malwareDetection=enable \
 #   --set alertCRD.installDefault=true
 ```
 

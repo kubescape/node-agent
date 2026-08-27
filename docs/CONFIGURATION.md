@@ -47,7 +47,6 @@ data:
     {
       "applicationProfileServiceEnabled": true,
       "runtimeDetectionEnabled": true,
-      "malwareDetectionEnabled": true
     }
 ```
 
@@ -440,7 +439,6 @@ These flags disable specific tracers (useful for debugging):
 {
   "applicationProfileServiceEnabled": true,
   "runtimeDetectionEnabled": true,
-  "malwareDetectionEnabled": true,
   "networkServiceEnabled": true,
   "sbomGenerationEnabled": true,
   "seccompServiceEnabled": true,

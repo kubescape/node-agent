@@ -73,7 +73,7 @@ spec:
               value: "{{ .Values.logger.level }}"
             - name: KS_LOGGER_NAME
               value: "{{ .Values.logger.name }}"
-            {{- if eq .Values.capabilities.malwareDetection "enable" }}
+            {{- if .Values.nodeAgent.enableProfiler }}
             - name: ENABLE_PROFILER
               value: "true"
             {{- end }}

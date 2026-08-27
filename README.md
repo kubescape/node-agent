@@ -104,7 +104,6 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
   -n kubescape --create-namespace \
   --set clusterName=$(kubectl config current-context) \
   --set capabilities.runtimeDetection=enable \
-  --set capabilities.malwareDetection=enable \
   --set alertCRD.installDefault=true \
   --set alertCRD.scopeClustered=true
 ```
@@ -249,7 +248,6 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete configuratio
 {
   "applicationProfileServiceEnabled": true,
   "runtimeDetectionEnabled": true,
-  "malwareDetectionEnabled": true,
   "networkServiceEnabled": true,
   "prometheusExporterEnabled": true
 }
@@ -361,7 +359,6 @@ We provide comprehensive demos showcasing NodeAgent's capabilities:
 |------|-------------|----------|
 | **Web App Attack** | Command injection detection | `demo/general_attack/` |
 | **Fileless Malware** | Memory-only malware detection | `demo/fileless_exec/` |
-| **Malicious Image** | Container image with embedded malware samples | `demo/malwares_image/` |
 | **Crypto Miner** | XMRig mining detection | `demo/miner/` |
 
 ### Running the Demo
@@ -383,10 +380,7 @@ cat demo/README.md
 # 3. Deploy fileless malware
 kubectl apply -f demo/fileless_exec/kubernetes-manifest.yaml
 
-# 4. Deploy image with malware
-kubectl run malware-cryptominer --image=quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2
-
-# 5. Check alerts
+# 4. Check alerts
 kubectl logs -n kubescape -l app=node-agent -f
 ```
 

@@ -379,7 +379,7 @@ func main() {
 
 	// Create the malware manager
 	var malwareManager malwaremanager.MalwareManagerClient
-	if cfg.EnableMalwareDetection {
+	if cfg.EnableMalwareDetection && malwaremanagerv1.HasScanners() {
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider)
 		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, metricsProvider, k8sObjectCache)
@@ -387,6 +387,16 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
 		}
 	} else {
+		if _, present := os.LookupEnv("CLAMAV_SOCKET"); present {
+			logger.L().Warning("CLAMAV_SOCKET is set but the ClamAV scanner was removed from this agent. " +
+				"The sidecar is still running and consuming node resources; update the chart to stop deploying it.")
+		}
+		if cfg.EnableMalwareDetection {
+			// The capability is on but no scanner is compiled in, so the manager could
+			// only do bookkeeping on every exec and every open event and never alert.
+			// Use the mock and say why, rather than pay that cost in silence.
+			logger.L().Warning("malware detection is enabled but no malware scanner is registered, so no malware alert can be produced")
+		}
 		malwareManager = malwaremanager.CreateMalwareManagerMock()
 	}
 
