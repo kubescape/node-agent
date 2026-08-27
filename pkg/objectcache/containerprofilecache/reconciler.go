@@ -497,11 +497,12 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	spec := c.snapshotSpec()
 	// Read gen BEFORE resolving so a concurrent Bump() invalidates this projection.
 	gen := c.listerGen()
-	// Compute resolution-dependence on the profile's OWN neighbors, before the
-	// synthetic host peer is injected: the host peer resolves to the stable local
-	// node IP at projection time, so it must not mark every profile for
-	// re-projection on unrelated Service/Endpoint lister bumps.
-	usesResolution := networkpeer.HasServiceNeighbors(projected)
+	// Resolution-dependent iff the profile has its OWN serviceRef/serviceSelector/
+	// entity neighbors OR the host peer is injected — the latter resolves against
+	// the Node lister (handed over without blocking on sync), so a host-only
+	// profile projected before the lister filled in must be re-projected once it
+	// does, else HostIPs() stays empty and node traffic keeps alerting.
+	usesResolution := networkpeer.HasServiceNeighbors(projected) || !c.cfg.AlertOnHostPeers
 	if !c.cfg.AlertOnHostPeers {
 		projected = networkpeer.WithHostPeer(projected)
 	}

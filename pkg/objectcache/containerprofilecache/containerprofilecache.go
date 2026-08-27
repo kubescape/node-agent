@@ -614,10 +614,14 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 	// the live cluster view and the lister generation it was resolved against,
 	// so the reconciler re-projects it when that view changes.
 	spec := c.snapshotSpec()
-	// Resolution-dependence keys on the profile's OWN neighbors, before the
-	// synthetic host peer is injected (which resolves to the stable local node IP
-	// at projection time and must not force re-projection on unrelated lister bumps).
-	entry.UsesServiceResolution = networkpeer.HasServiceNeighbors(userMerged)
+	// Resolution-dependent iff the profile has its OWN serviceRef/serviceSelector/
+	// entity neighbors OR the synthetic host peer is injected: the host peer
+	// resolves against the Node lister, which main.go hands over WITHOUT blocking
+	// on cache sync, so a host-only profile projected before the lister filled in
+	// must still be re-projected once it does (else HostIPs() stays empty and node
+	// traffic keeps alerting). Computed before the injection so a profile with no
+	// own neighbors is keyed on the injection flag, not the synthetic peer.
+	entry.UsesServiceResolution = networkpeer.HasServiceNeighbors(userMerged) || !c.cfg.AlertOnHostPeers
 	if !c.cfg.AlertOnHostPeers {
 		userMerged = networkpeer.WithHostPeer(userMerged)
 	}
