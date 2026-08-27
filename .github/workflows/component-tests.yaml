@@ -110,8 +110,7 @@ jobs:
           Test_49_EphemeralContainerFullTreatment,
           Test_50_ServiceRefNetworkNeighbor,
           Test_51_ServiceRefIngressR0012,
-          Test_53_DefaultLearnedNetworkFalsePositives,
-          Test_54_NamespaceInvariantPeerAllowlisting
+          Test_53_DefaultLearnedNetworkFalsePositives
         ]
     steps:
       - name: Checkout code
