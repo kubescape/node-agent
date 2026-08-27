@@ -10,7 +10,9 @@ capabilities:
   runtimeObservability: enable
   networkPolicyService: enable
   runtimeDetection: enable
-  malwareDetection: enable
+  # No in-tree malware scanner exists, and the test that covered it is gone, so
+  # enabling this only writes a flag nothing reads into every test bundle.
+  malwareDetection: disable
   httpDetection: enable
 
 configurations:
@@ -48,6 +50,9 @@ storage:
       cpu: 500m
       memory: 1500Mi
 nodeAgent:
+  # The component tests run the agent with the Go profiler on. This used to ride
+  # on capabilities.malwareDetection, which had nothing to do with it.
+  enableProfiler: true
   name: node-agent
   image:
     repository: quay.io/kubescape/node-agent
@@ -115,9 +120,6 @@ nodeAgent:
       name: bpffs
     - mountPath: /data
       name: data
-    - mountPath: /clamav
-      name: clamrun
-      readOnly: false
 
   volumes:
     - hostPath:
@@ -140,54 +142,6 @@ nodeAgent:
       name: debugfs
     - emptyDir:
       name: data
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-          - matchExpressions:
-              - key: kubernetes.io/os
-                operator: In
-                values:
-                  - linux
-  nodeSelector:
-    kubernetes.io/os: linux
-
-clamav:
-  name: clamav
-  image:
-    repository: quay.io/kubescape/klamav
-    tag: 1.3.1-34_base
-    pullPolicy: IfNotPresent
-  resources:
-    limits:
-      cpu: 300m
-      memory: 512Mi
-    requests:
-      cpu: 100m
-      memory: 256Mi
-  volumeMounts:
-    - mountPath: /var/lib/clamav-tmp
-      name: clamdb
-      readOnly: false
-    - mountPath: /etc/clamav
-      name: etc
-      readOnly: true
-    - mountPath: /run/clamav
-      name: clamrun
-      readOnly: false
-  volumes:
-  - name: clamdb
-    emptyDir: {}
-  - name: clamrun
-    emptyDir: {}
-  - name: etc
-    configMap:
-      name: clamav
-      items:
-      - key: clamd.conf
-        path: clamd.conf
-      - key: freshclam.conf
-        path: freshclam.conf
   affinity:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:

@@ -292,7 +292,7 @@ const (
 	testPodUID        = "11111111-2222-3333-4444-555555555555"
 	testPodUIDEscaped = "11111111_2222_3333_4444_555555555555"
 	testNodeAgentID   = "abc1230000000000000000000000000000000000000000000000000000000000"
-	testClamavID      = "def4560000000000000000000000000000000000000000000000000000000000"
+	testSidecarID     = "def4560000000000000000000000000000000000000000000000000000000000"
 	testSBOMScannerID = "0987650000000000000000000000000000000000000000000000000000000000"
 )
 
@@ -335,7 +335,7 @@ func TestResolvePodCgroupMemoryPaths(t *testing.T) {
 	t.Run("three child scopes", func(t *testing.T) {
 		root := t.TempDir()
 		podSlice := mkPodCgroupTree(t, root, parentRel, podFiles,
-			testNodeAgentID, testClamavID, testSBOMScannerID)
+			testNodeAgentID, testSidecarID, testSBOMScannerID)
 		assertPodRead(t, root, podSlice)
 	})
 

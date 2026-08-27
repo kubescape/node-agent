@@ -104,7 +104,7 @@ previously missing event types (`exit`, `fork`).
 | New OTEL name | Description |
 |---|---|
 | `node_agent_ebpf_events_dropped_total{reason}` | eBPF events dropped due to backpressure (`reason=worker_channel_full`) or profile drops |
-| `node_agent_pod_memory_cgroup_bytes` | Pod-level memory usage, read from the parent `kubepods-*-pod<UID>.slice` cgroup (one level above the container `.scope`). Covers every container in the pod, including third-party sidecars with no OTEL instrumentation of their own (e.g. `clamav`, gated behind `capabilities.malwareDetection`). Additive alongside `node_agent_process_memory_cgroup_bytes`, which stays container-scoped and unchanged. |
+| `node_agent_pod_memory_cgroup_bytes` | Pod-level memory usage, read from the parent `kubepods-*-pod<UID>.slice` cgroup (one level above the container `.scope`). Covers every container in the pod, including any sidecar with no OTEL instrumentation of its own. Additive alongside `node_agent_process_memory_cgroup_bytes`, which stays container-scoped and unchanged. |
 | `node_agent_pod_memory_cgroup_limit_bytes` | Pod-level memory limit, paired with `node_agent_pod_memory_cgroup_bytes` (0 = unlimited/unresolved). |
 
 ### Cgroup Scope Resolution Hardening (accuracy fix, no name change)

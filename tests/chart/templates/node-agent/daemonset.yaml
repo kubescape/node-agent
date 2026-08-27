@@ -44,9 +44,6 @@ spec:
       {{- if .Values.volumes }}
       {{- toYaml .Values.volumes | nindent 8 }}
       {{- end }}
-      {{- if .Values.clamav.volumes }}
-      {{- toYaml .Values.clamav.volumes | nindent 8 }}
-      {{- end }}
         - name: profiles
           emptyDir: {}
         - name: {{ .Values.global.cloudConfig }}
@@ -62,22 +59,6 @@ spec:
               - key: "config.json"
                 path: "config.json"
       containers:
-        {{- if eq .Values.capabilities.malwareDetection "enable" }}
-        - name: {{ .Values.clamav.name }}
-          image: "{{ .Values.clamav.image.repository }}:{{ .Values.clamav.image.tag }}"
-          imagePullPolicy: {{ .Values.clamav.image.pullPolicy }}
-          securityContext:
-            runAsUser: 0
-            capabilities:
-              add:
-                - SYS_PTRACE
-          resources:
-{{ toYaml .Values.clamav.resources | indent 12 }}
-          {{- if .Values.clamav.volumeMounts }}
-          volumeMounts:
-            {{- toYaml .Values.clamav.volumeMounts | nindent 10 }}
-          {{- end }}
-        {{- end }}
         - name: {{ .Values.nodeAgent.name }}
           image: "{{ .Values.nodeAgent.image.repository }}:{{ .Values.nodeAgent.image.tag }}"
           imagePullPolicy: {{ .Values.nodeAgent.image.pullPolicy }}
@@ -92,9 +73,7 @@ spec:
               value: "{{ .Values.logger.level }}"
             - name: KS_LOGGER_NAME
               value: "{{ .Values.logger.name }}"
-            {{- if eq .Values.capabilities.malwareDetection "enable" }}
-            - name: CLAMAV_SOCKET
-              value: "/clamav/clamd.sock"
+            {{- if .Values.nodeAgent.enableProfiler }}
             - name: ENABLE_PROFILER
               value: "true"
             {{- end }}

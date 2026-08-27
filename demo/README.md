@@ -12,8 +12,7 @@ This hands-on demo walks you through NodeAgent's runtime threat detection capabi
 |------|-----------------|------------------|
 | [Web App Attack](#-attack-1-web-application-command-injection) | Command Injection (OWASP Top 10) | Unexpected process execution |
 | [Fileless Malware](#-attack-2-fileless-malware) | Memory-only execution | Exec from `/proc/self/fd` |
-| [Malicious Image](#-attack-3-malicious-container-image) | Embedded malware | ClamAV signature detection |
-| [Crypto Mining](#-attack-4-cryptocurrency-mining) | XMRig miner | RandomX instruction detection |
+| [Crypto Mining](#-attack-3-cryptocurrency-mining) | XMRig miner | RandomX instruction detection |
 
 **Time to complete:** ~30 minutes
 
@@ -27,8 +26,7 @@ This hands-on demo walks you through NodeAgent's runtime threat detection capabi
   - [Step 4: Verify Installation](#step-4-verify-installation)
 - [Attack 1: Web Application Command Injection](#-attack-1-web-application-command-injection)
 - [Attack 2: Fileless Malware](#-attack-2-fileless-malware)
-- [Attack 3: Malicious Container Image](#-attack-3-malicious-container-image)
-- [Attack 4: Cryptocurrency Mining](#-attack-4-cryptocurrency-mining)
+- [Attack 3: Cryptocurrency Mining](#-attack-3-cryptocurrency-mining)
 - [Cleanup](#-cleanup)
 - [Next Steps](#-next-steps)
 
@@ -100,7 +98,6 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
   -n kubescape --create-namespace \
   --set clusterName=$(kubectl config current-context) \
   --set capabilities.runtimeDetection=enable \
-  --set capabilities.malwareDetection=enable \
   --set alertCRD.installDefault=true \
   --set alertCRD.scopeClustered=true \
   --set nodeAgent.config.alertManagerExporterUrls=alertmanager-operated.monitoring.svc.cluster.local:9093 \
@@ -113,7 +110,6 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
 #   -n kubescape --create-namespace \
 #   --set clusterName=$(kubectl config current-context) \
 #   --set capabilities.runtimeDetection=enable \
-#   --set capabilities.malwareDetection=enable \
 #   --set alertCRD.installDefault=true
 ```
 
@@ -273,63 +269,7 @@ kubectl logs -n kubescape -l app=node-agent --tail=100 | grep -i fileless
 
 ---
 
-## 🎯 Attack 3: Malicious Container Image
-
-This demo shows NodeAgent's ClamAV-based malware scanning detecting malicious files embedded in container images.
-
-### Deploy the Malicious Container
-
-Using [ruzickap's malware test container](https://github.com/ruzickap/malware-cryptominer-container):
-
-```bash
-kubectl run malware-cryptominer \
-  --image=quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2
-
-# Wait for the container to start
-kubectl wait --for=condition=Ready pod/malware-cryptominer --timeout=120s
-```
-
-### Alternative: Build Your Own
-
-```bash
-# Build locally
-docker build -t malware-cryptominer -f demo/malwares_image/Containerfile .
-
-# Load into your cluster
-# For Minikube:
-minikube image load malware-cryptominer
-
-# For Kind:
-kind load docker-image malware-cryptominer
-```
-
-### View the Detection
-
-```bash
-# Check for malware alerts
-kubectl logs -n kubescape -l app=node-agent --tail=50 | grep -i malware
-```
-
-![Malware Detection](assets/malwares.png)
-
-**Expected alert:** Malware detection with:
-- File path on the node
-- ClamAV signature name
-- Malware type (cryptominer, webshell, etc.)
-
-### About ClamAV Integration
-
-NodeAgent uses [ClamAV](https://www.clamav.net/), an open-source antivirus engine that supports:
-- Signature-based detection
-- YARA rules
-- Bytecode signatures
-- Regular database updates
-
-> 📝 **Note:** Malware detection must be enabled: `--set capabilities.malwareDetection=enable`
-
----
-
-## 🎯 Attack 4: Cryptocurrency Mining
+## 🎯 Attack 3: Cryptocurrency Mining
 
 NodeAgent detects crypto mining by monitoring for RandomX instructions, used by Monero (XMR) miners.
 
@@ -368,7 +308,6 @@ Remove all demo resources:
 # Remove demo applications
 ./demo/general_attack/webapp/cleanup.sh 2>/dev/null || true
 kubectl delete -f demo/fileless_exec/kubernetes-manifest.yaml 2>/dev/null || true
-kubectl delete pod malware-cryptominer 2>/dev/null || true
 kubectl delete -f demo/miner/miner-pod.yaml 2>/dev/null || true
 
 # Remove NodeAgent (optional)

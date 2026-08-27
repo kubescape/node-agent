@@ -20,7 +20,6 @@ require (
 	github.com/dghubble/trie v0.1.0
 	github.com/distribution/distribution v2.8.2+incompatible
 	github.com/dustin/go-humanize v1.0.1
-	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/go-openapi/strfmt v0.23.0
 	github.com/google/cel-go v0.26.1

@@ -81,7 +81,6 @@ jobs:
           Test_06_KillProcessInTheMiddle,
           Test_07_RuleBindingApplyTest,
           Test_08_ContainerProfilePatching,
-          Test_10_MalwareDetectionTest,
           Test_11_EndpointTest,
           Test_12_AuthoredMultiSubtypeProfile,
           Test_13_NaturalLearningLifecycle,

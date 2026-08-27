@@ -39,16 +39,3 @@ data:
         },
         "profileProjection": {{- .Values.nodeAgent.config.profileProjection | toJson }}
     }
----
-{{- if eq .Values.capabilities.malwareDetection "enable" }}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ .Values.clamav.name }}
-  namespace: {{ .Values.ksNamespace }}
-data:
-  clamd.conf: |-
-{{ .Files.Get "clamav/clamd.conf" | indent 4 }}
-  freshclam.conf: |-
-{{ .Files.Get "clamav/freshclam.conf" | indent 4 }}
-{{- end }}

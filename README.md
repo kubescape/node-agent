@@ -38,7 +38,6 @@ NodeAgent monitors container behavior at the kernel level, learns normal applica
 | Category | Features |
 |----------|----------|
 | **Runtime Detection** | Unexpected process execution, shell spawning, privilege escalation, container escape attempts |
-| **Malware Scanning** | ClamAV-powered scanning for trojans, cryptominers, webshells, ransomware |
 | **Network Security** | DNS monitoring, network connection tracking, data exfiltration detection |
 | **Application Profiling** | Automatic baseline learning, seccomp profile generation |
 | **File Integrity** | Real-time file change monitoring (FIM) with fanotify backend |
@@ -105,7 +104,6 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
   -n kubescape --create-namespace \
   --set clusterName=$(kubectl config current-context) \
   --set capabilities.runtimeDetection=enable \
-  --set capabilities.malwareDetection=enable \
   --set alertCRD.installDefault=true \
   --set alertCRD.scopeClustered=true
 ```
@@ -220,7 +218,7 @@ docker run --privileged --pid=host --network=host \
 | **Profile Manager** | Learns and maintains application behavior profiles |
 | **Ordered Event Queue** | Ensures events are processed in correct order with process tree awareness |
 | **Alert Bulk Manager** | Batches alerts for efficient transmission |
-| **Malware Manager** | Coordinates ClamAV scanning for malware detection |
+| **Malware Manager** | Dispatches events to registered malware scanners (no scanner ships in-tree) |
 | **SBOM Manager** | Generates Software Bill of Materials using Syft |
 
 ## ⚙️ Configuration
@@ -250,7 +248,6 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete configuratio
 {
   "applicationProfileServiceEnabled": true,
   "runtimeDetectionEnabled": true,
-  "malwareDetectionEnabled": true,
   "networkServiceEnabled": true,
   "prometheusExporterEnabled": true
 }
@@ -262,7 +259,7 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete configuratio
 |---------|------------|---------|-------------|
 | Application Profiling | `applicationProfileServiceEnabled` | `false` | Learn container behavior |
 | Runtime Detection | `runtimeDetectionEnabled` | `false` | Enable threat detection rules |
-| Malware Detection | `malwareDetectionEnabled` | `false` | ClamAV-based scanning |
+| Malware Detection | `malwareDetectionEnabled` | `false` | Start the malware manager (needs an out-of-tree scanner) |
 | Network Tracing | `networkServiceEnabled` | `false` | Track network connections |
 | SBOM Generation | `sbomGenerationEnabled` | `false` | Generate SBOMs |
 | File Integrity | `fimEnabled` | `false` | Monitor file changes |
@@ -362,7 +359,6 @@ We provide comprehensive demos showcasing NodeAgent's capabilities:
 |------|-------------|----------|
 | **Web App Attack** | Command injection detection | `demo/general_attack/` |
 | **Fileless Malware** | Memory-only malware detection | `demo/fileless_exec/` |
-| **Malicious Image** | Image with embedded malware | `demo/malwares_image/` |
 | **Crypto Miner** | XMRig mining detection | `demo/miner/` |
 
 ### Running the Demo
@@ -384,10 +380,7 @@ cat demo/README.md
 # 3. Deploy fileless malware
 kubectl apply -f demo/fileless_exec/kubernetes-manifest.yaml
 
-# 4. Deploy image with malware
-kubectl run malware-cryptominer --image=quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2
-
-# 5. Check alerts
+# 4. Check alerts
 kubectl logs -n kubescape -l app=node-agent -f
 ```
 
@@ -549,7 +542,7 @@ node-agent/
 │   │   └── v2/tracers/    # eBPF tracer implementations
 │   ├── ebpf/gadgets/      # Image-based eBPF gadgets
 │   ├── exporters/         # Alert exporters (HTTP, AlertManager, etc.)
-│   ├── malwaremanager/    # Malware detection with ClamAV
+│   ├── malwaremanager/    # Malware scanner interface and dispatch
 │   ├── rulemanager/       # CEL-based rule evaluation
 │   ├── sbommanager/       # SBOM generation
 │   └── ...
