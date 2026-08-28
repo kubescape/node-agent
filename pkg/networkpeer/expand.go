@@ -20,14 +20,14 @@ import (
 // Service, selector matching nothing, unknown entity) contribute nothing —
 // never a match-all. Callers append the result to the same direction (egress
 // or ingress) before projecting the profile.
-func ExpandServiceNeighbors(neighbors []v1beta1.NetworkNeighbor, l Lister) []v1beta1.NetworkNeighbor {
+func ExpandServiceNeighbors(neighbors []v1beta1.NetworkNeighbor, profileNs string, l Lister) []v1beta1.NetworkNeighbor {
 	if l == nil {
 		return nil
 	}
 	var out []v1beta1.NetworkNeighbor
 	for i := range neighbors {
 		n := &neighbors[i]
-		spec, ok := specFromNeighbor(n)
+		spec, ok := specFromNeighbor(n, profileNs)
 		if !ok {
 			continue
 		}
@@ -58,8 +58,8 @@ func WithResolvedServiceNeighbors(cp *v1beta1.ContainerProfile, l Lister) *v1bet
 	if cp == nil || l == nil {
 		return cp
 	}
-	egExtra := ExpandServiceNeighbors(cp.Spec.Egress, l)
-	inExtra := ExpandServiceNeighbors(cp.Spec.Ingress, l)
+	egExtra := ExpandServiceNeighbors(cp.Spec.Egress, cp.Namespace, l)
+	inExtra := ExpandServiceNeighbors(cp.Spec.Ingress, cp.Namespace, l)
 	if len(egExtra) == 0 && len(inExtra) == 0 {
 		return cp
 	}
@@ -112,7 +112,7 @@ func hasServiceFields(n *v1beta1.NetworkNeighbor) bool {
 // specFromNeighbor extracts a PeerSpec from a NetworkNeighbor, reporting false
 // if the neighbor declares none of the service/entity selectors (a plain
 // ipAddresses / dnsNames / podSelector neighbor is left untouched).
-func specFromNeighbor(n *v1beta1.NetworkNeighbor) (PeerSpec, bool) {
+func specFromNeighbor(n *v1beta1.NetworkNeighbor, profileNs string) (PeerSpec, bool) {
 	// Cheap-reject a plain ipAddresses/dnsNames neighbor before allocating a
 	// []PortProto it would only discard (hot on every projection's non-service
 	// neighbors).
@@ -133,18 +133,20 @@ func specFromNeighbor(n *v1beta1.NetworkNeighbor) (PeerSpec, bool) {
 			return PeerSpec{}, false
 		}
 		spec.ServiceSelector = n.ServiceSelector.MatchLabels
-		// A namespaceSelector is honored only as the single equality
-		// kubernetes.io/metadata.name=<ns> (the only key the lister scopes on).
-		// Any other form — MatchExpressions, extra keys, or a different key —
-		// would be silently dropped and broaden the match cluster-wide, so fail
-		// closed. A nil namespaceSelector is cluster-wide by design.
-		if n.NamespaceSelector != nil {
-			nsl := n.NamespaceSelector
-			if len(nsl.MatchExpressions) > 0 || len(nsl.MatchLabels) != 1 ||
-				nsl.MatchLabels["kubernetes.io/metadata.name"] == "" {
-				return PeerSpec{}, false
-			}
+		// namespaceSelector, identical tiers to the podSelector path
+		// (namespaceSelectorMatches): OMITTED (nil) => the profile's own
+		// namespace; explicit EMPTY {} => cluster-wide (opt-in); explicit
+		// metadata.name=<ns> => that namespace. The lister scopes only on the
+		// metadata.name equality, so any richer explicit form fails closed.
+		switch nsl := n.NamespaceSelector; {
+		case nsl == nil:
+			spec.NamespaceLabels = map[string]string{"kubernetes.io/metadata.name": profileNs}
+		case len(nsl.MatchExpressions) == 0 && len(nsl.MatchLabels) == 0:
+			// explicit {} => cluster-wide: leave NamespaceLabels nil
+		case len(nsl.MatchExpressions) == 0 && len(nsl.MatchLabels) == 1 && nsl.MatchLabels["kubernetes.io/metadata.name"] != "":
 			spec.NamespaceLabels = nsl.MatchLabels
+		default:
+			return PeerSpec{}, false
 		}
 	default:
 		return PeerSpec{}, false
