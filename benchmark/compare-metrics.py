@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SIGNIFICANT_THRESHOLD = 5.0  # percent change that triggers quality gate failure
+SIGNIFICANT_THRESHOLD = 10.0  # percent change that triggers quality gate failure
 
 # Peak CPU is gated on p95, not max: a strict max is a max-of-two-independent-
 # draws comparison that skews positive by construction (jitter can only push

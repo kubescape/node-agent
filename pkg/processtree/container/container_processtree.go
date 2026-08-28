@@ -200,15 +200,11 @@ func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *armo
 // buildBranchToShim builds a process tree branch from targetNode up to (but not including) shimPID
 // This creates a new process tree containing only the nodes along the path from target to shim
 func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *armotypes.Process, shimPID uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) *armotypes.Process {
-
-	// Create a map to store the branch nodes
-	branchNodes := make(map[uint32]*armotypes.Process)
-
 	if targetNode == nil {
 		return nil
 	}
 
-	var pathNodes []*armotypes.Process
+	pathNodes := make([]*armotypes.Process, 0, 8)
 	current := targetNode
 	for current.PPID != 0 {
 		pathNodes = append(pathNodes, current)
@@ -228,6 +224,9 @@ func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *armotypes.Proce
 	if len(pathNodes) == 0 {
 		return nil
 	}
+
+	// Create a map to store the branch nodes
+	branchNodes := make(map[uint32]*armotypes.Process, len(pathNodes))
 
 	for _, node := range pathNodes {
 		branchNodes[node.PID] = &armotypes.Process{
