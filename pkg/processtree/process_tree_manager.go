@@ -2,7 +2,6 @@ package processtree
 
 import (
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -15,11 +14,16 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
+type treeCacheKey struct {
+	containerID string
+	pid         uint32
+}
+
 // ProcessTreeManagerImpl implements the ProcessTreeManager interface
 type ProcessTreeManagerImpl struct {
 	creator                   processtreecreator.ProcessTreeCreator
 	containerTree             containerprocesstree.ContainerProcessTree
-	containerProcessTreeCache *expirable.LRU[string, armotypes.Process] // containerID:pid -> cached result
+	containerProcessTreeCache *expirable.LRU[treeCacheKey, armotypes.Process] // (containerID, pid) -> cached result
 	mutex                     sync.RWMutex
 	config                    config.Config
 }
@@ -31,7 +35,7 @@ func NewProcessTreeManager(
 	config config.Config,
 ) ProcessTreeManager {
 
-	containerProcessTreeCache := expirable.NewLRU[string, armotypes.Process](10000, nil, 1*time.Minute)
+	containerProcessTreeCache := expirable.NewLRU[treeCacheKey, armotypes.Process](10000, nil, 1*time.Minute)
 
 	ptm := &ProcessTreeManagerImpl{
 		creator:                   creator,
@@ -68,26 +72,13 @@ func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event 
 }
 
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32, useCache bool) (armotypes.Process, error) {
-	cacheKey := containerID + ":" + strconv.FormatUint(uint64(pid), 10)
+	if containerID == "" {
+		return armotypes.Process{}, nil
+	}
+
+	cacheKey := treeCacheKey{containerID: containerID, pid: pid}
 	if cached, exists := ptm.containerProcessTreeCache.Get(cacheKey); exists && useCache {
 		return cached, nil
-	}
-
-	// Get process node first (minimal lock scope)
-	var processNode *armotypes.Process
-	var err error
-	func() {
-		ptm.mutex.RLock()
-		defer ptm.mutex.RUnlock()
-		processNode, err = ptm.creator.GetProcessNode(int(pid))
-	}()
-
-	if err != nil {
-		return armotypes.Process{}, &GetProcessNodeError{Err: err}
-	}
-
-	if processNode == nil {
-		return armotypes.Process{}, &ProcessNotFoundError{Pid: pid, ContainerID: containerID}
 	}
 
 	// Get container subtree (separate lock scope)

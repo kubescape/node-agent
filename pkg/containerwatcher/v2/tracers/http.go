@@ -29,10 +29,22 @@ const (
 
 var _ containerwatcher.TracerInterface = (*HTTPTracer)(nil)
 
+type httpEventKey struct {
+	inode  uint64
+	sockFd uint32
+}
+
+func getHttpEventKey(event utils.HttpRawEvent) httpEventKey {
+	return httpEventKey{
+		inode:  event.GetSocketInode(),
+		sockFd: event.GetSockFd(),
+	}
+}
+
 // HTTPTracer implements TracerInterface for events
 type HTTPTracer struct {
 	eventCallback   containerwatcher.ResultCallback
-	eventsMap       *lru.Cache[string, utils.HttpEvent] // Use golang-lru cache
+	eventsMap       *lru.Cache[httpEventKey, utils.HttpEvent] // Use golang-lru cache
 	gadgetCtx       *gadgetcontext.GadgetContext
 	kubeManager     operators.DataOperator
 	ociStore        *orasoci.ReadOnlyStore
@@ -49,7 +61,7 @@ func NewHTTPTracer(
 	eventCallback containerwatcher.ResultCallback,
 ) *HTTPTracer {
 	// Create a new LRU cache with a specified size
-	cache, err := lru.New[string, utils.HttpEvent](MaxGroupedEventSize)
+	cache, err := lru.New[httpEventKey, utils.HttpEvent](MaxGroupedEventSize)
 	if err != nil {
 		return nil
 	}
@@ -156,16 +168,16 @@ func (ht *HTTPTracer) transmitOrphanRequests() {
 }
 
 func (ht *HTTPTracer) GroupEvents(bpfEvent utils.HttpRawEvent) utils.HttpEvent {
-	id := GetUniqueIdentifier(bpfEvent)
+	key := getHttpEventKey(bpfEvent)
 	switch bpfEvent.GetType() {
 	case utils.Request:
 		event, err := CreateEventFromRequest(bpfEvent)
 		if err != nil {
 			return nil
 		}
-		ht.eventsMap.Add(id, event)
+		ht.eventsMap.Add(key, event)
 	case utils.Response:
-		if exists, ok := ht.eventsMap.Get(id); ok {
+		if exists, ok := ht.eventsMap.Get(key); ok {
 			grouped := exists
 			response, err := ParseHttpResponse(GetValidBuf(bpfEvent), grouped.GetRequest())
 			if err != nil {
@@ -173,7 +185,7 @@ func (ht *HTTPTracer) GroupEvents(bpfEvent utils.HttpRawEvent) utils.HttpEvent {
 			}
 
 			grouped.SetResponse(response)
-			ht.eventsMap.Remove(id)
+			ht.eventsMap.Remove(key)
 			return grouped
 		}
 	}

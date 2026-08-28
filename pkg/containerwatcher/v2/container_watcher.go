@@ -69,6 +69,7 @@ type ContainerWatcher struct {
 
 	// New components
 	orderedEventQueue   *OrderedEventQueue
+	batchBuf            []EventEntry
 	eventHandlerFactory *EventHandlerFactory
 	processTreeManager  processtree.ProcessTreeManager
 	eventEnricher       *EventEnricher
@@ -206,6 +207,7 @@ func CreateContainerWatcher(
 
 		// New components
 		orderedEventQueue:   orderedEventQueue,
+		batchBuf:            make([]EventEntry, 0, cfg.EventBatchSize),
 		eventHandlerFactory: eventHandlerFactory,
 		processTreeManager:  processTreeManager,
 		eventEnricher:       eventEnricher,
@@ -477,16 +479,11 @@ func (cw *ContainerWatcher) workerPoolLoop() {
 
 func (cw *ContainerWatcher) processQueueBatch() {
 	batchSize := cw.cfg.EventBatchSize
-	processedCount := 0
-	for !cw.orderedEventQueue.Empty() && processedCount < batchSize {
-		event, ok := cw.orderedEventQueue.PopEvent()
-		if !ok {
-			break
-		}
-		cw.enrichAndProcess(event)
-		processedCount++
+	cw.batchBuf = cw.orderedEventQueue.PopBatch(batchSize, cw.batchBuf)
+	for i := range cw.batchBuf {
+		cw.enrichAndProcess(cw.batchBuf[i])
+		cw.batchBuf[i] = EventEntry{}
 	}
-
 }
 
 func (cw *ContainerWatcher) enrichAndProcess(entry EventEntry) {

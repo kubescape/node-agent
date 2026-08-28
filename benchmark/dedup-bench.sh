@@ -233,6 +233,21 @@ install_kubescape() {
         die "No node-agent daemonsets found."
     fi
 
+    # Wait for pods to be created before calling kubectl wait (which errors on 0 matches)
+    local pod_names=""
+    retries=30
+    while (( retries > 0 )); do
+        pod_names=$(kubectl get pod -l app.kubernetes.io/component=node-agent -n "$KUBESCAPE_NS" -o jsonpath='{.items[*].metadata.name}')
+        if [[ -n "$pod_names" ]]; then
+            break
+        fi
+        sleep 2
+        (( retries-- ))
+    done
+    if [[ -z "$pod_names" ]]; then
+        die "No node-agent pods found."
+    fi
+
     if ! kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=node-agent \
         -n "$KUBESCAPE_NS" --timeout=600s; then
         log "ERROR: node-agent pod did not become ready. Diagnostics:"

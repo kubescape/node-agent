@@ -7,13 +7,30 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
-	"strconv"
+	"sync"
 	"time"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
+
+var bufioReaderPool = sync.Pool{
+	New: func() any {
+		return bufio.NewReader(nil)
+	},
+}
+
+func getBufioReader(r io.Reader) *bufio.Reader {
+	br := bufioReaderPool.Get().(*bufio.Reader)
+	br.Reset(r)
+	return br
+}
+
+func putBufioReader(br *bufio.Reader) {
+	br.Reset(nil)
+	bufioReaderPool.Put(br)
+}
 
 var ConsistentHeaders = []string{
 	"Accept-Encoding",
@@ -79,7 +96,8 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 	}
 
 	// Parse headers only
-	bufReader := bufio.NewReader(bytes.NewReader(data[:headerEnd]))
+	bufReader := getBufioReader(bytes.NewReader(data[:headerEnd]))
+	defer putBufioReader(bufReader)
 	req, err := http.ReadRequest(bufReader)
 	if err != nil {
 		return fallbackReadRequest(data)
@@ -123,7 +141,8 @@ func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 	}
 
 	// Parse headers only
-	bufReader := bufio.NewReader(bytes.NewReader(data[:headerEnd]))
+	bufReader := getBufioReader(bytes.NewReader(data[:headerEnd]))
+	defer putBufioReader(bufReader)
 	resp, err := http.ReadResponse(bufReader, req)
 	if err != nil {
 		return fallbackReadResponse(data, req)
@@ -170,10 +189,6 @@ func GetValidBuf(event utils.HttpRawEvent) []byte {
 	return buf
 }
 
-func GetUniqueIdentifier(event utils.HttpRawEvent) string {
-	return strconv.FormatUint(event.GetSocketInode(), 10) + strconv.FormatUint(uint64(event.GetSockFd()), 10)
-}
-
 func ToTime(t eventtypes.Time) time.Time {
 	return time.Unix(0, int64(t))
 }
@@ -198,16 +213,30 @@ func PatchHTTPPacket(data []byte) []byte {
 	return append(data, []byte("\r\n\r\n")...)
 }
 
+func detachBody(body io.ReadCloser) io.ReadCloser {
+	if body == nil {
+		return nil
+	}
+	bodyBytes, _ := io.ReadAll(body)
+	_ = body.Close()
+	return io.NopCloser(bytes.NewReader(bodyBytes))
+}
+
 func fallbackReadRequest(data []byte) (*http.Request, error) {
 	cleanedData, err := cleanCorrupted(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to clean request data: %w", err)
 	}
 
-	bufReader := bufio.NewReader(bytes.NewReader(PatchHTTPPacket(cleanedData)))
+	bufReader := getBufioReader(bytes.NewReader(PatchHTTPPacket(cleanedData)))
+	defer putBufioReader(bufReader)
 	req, err := http.ReadRequest(bufReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request even after removing last line: %w", err)
+	}
+
+	if req.Body != nil {
+		req.Body = detachBody(req.Body)
 	}
 
 	return req, nil
@@ -228,9 +257,16 @@ func fallbackReadResponse(data []byte, req *http.Request) (*http.Response, error
 }
 
 func readResponse(data []byte, req *http.Request) (*http.Response, error) {
-	bufReader := bufio.NewReader(bytes.NewReader(PatchHTTPPacket(data)))
+	bufReader := getBufioReader(bytes.NewReader(PatchHTTPPacket(data)))
+	defer putBufioReader(bufReader)
 	resp, err := http.ReadResponse(bufReader, req)
-	return resp, err
+	if err != nil {
+		return nil, err
+	}
+	if resp.Body != nil {
+		resp.Body = detachBody(resp.Body)
+	}
+	return resp, nil
 }
 
 func cleanCorrupted(data []byte) ([]byte, error) {
