@@ -20,7 +20,6 @@ func nsSel(name string) *metav1.LabelSelector {
 // explicit namespaceSelector must match; a peer with no resolvable pod identity
 // never matches (enforced one layer up in wasSelectorIn, tested there).
 func TestWasSelectorInPeers_TruthTable(t *testing.T) {
-	const profileNs = "redis"
 	client := labels.Set{"app": "redis-client"}
 	clientPlus := labels.Set{"app": "redis-client", "tier": "cache"}
 
@@ -72,7 +71,7 @@ func TestWasSelectorInPeers_TruthTable(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := wasSelectorInPeers(tc.peers, tc.labels, tc.peerNs, profileNs, "TCP", 443); got != tc.want {
+			if got := wasSelectorInPeers(tc.peers, tc.labels, tc.peerNs, "TCP", 443); got != tc.want {
 				t.Fatalf("wasSelectorInPeers = %v, want %v", got, tc.want)
 			}
 		})
@@ -98,7 +97,7 @@ func TestNamespaceSelectorMatches_TruthTable(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := namespaceSelectorMatches(tc.sel, tc.ns, "redis"); got != tc.want {
+			if got := namespaceSelectorMatches(tc.sel, tc.ns); got != tc.want {
 				t.Fatalf("namespaceSelectorMatches = %v, want %v", got, tc.want)
 			}
 		})
@@ -125,7 +124,7 @@ func TestWasSelectorInPeers_InvalidSelectorFailsClosed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := wasSelectorInPeers(tc.peers, client, "redis", "redis", "TCP", 443); got != tc.want {
+			if got := wasSelectorInPeers(tc.peers, client, "redis", "TCP", 443); got != tc.want {
 				t.Fatalf("wasSelectorInPeers = %v, want %v — %s", got, tc.want, tc.why)
 			}
 		})
@@ -135,7 +134,7 @@ func TestWasSelectorInPeers_InvalidSelectorFailsClosed(t *testing.T) {
 func TestNamespaceSelectorMatches_InvalidSelectorFailsClosed(t *testing.T) {
 	bad := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
 		{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpIn}}}
-	if namespaceSelectorMatches(bad, "redis", "redis") {
+	if namespaceSelectorMatches(bad, "redis") {
 		t.Fatal("an unparseable namespaceSelector must fail closed, not match")
 	}
 }
@@ -169,7 +168,7 @@ func TestWasSelectorInPeers_PortAware(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := wasSelectorInPeers(tc.peers, client, "redis", "redis", tc.proto, tc.port); got != tc.want {
+			if got := wasSelectorInPeers(tc.peers, client, "redis", tc.proto, tc.port); got != tc.want {
 				t.Fatalf("wasSelectorInPeers = %v, want %v", got, tc.want)
 			}
 		})
