@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
-	"runtime/pprof"
 	"strconv"
 	"sync"
 	"time"
@@ -360,11 +359,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		startTime := time.Now()
-		var shouldAlert bool
-		var err error
-		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
-			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
-		})
+		shouldAlert, err := rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
 		evaluationTime := time.Since(startTime)
 		// Slow-path tracing: only emit a span when evaluation exceeded the threshold.
 		// This protects the hot path from unconditional tracing overhead on millions of events/sec.
@@ -554,11 +549,7 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 		}
 
 		startTime := time.Now()
-		var shouldAlert bool
-		var err error
-		pprof.Do(context.Background(), pprof.Labels("rule", rule.ID), func(_ context.Context) {
-			shouldAlert, err = rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
-		})
+		shouldAlert, err := rm.celEvaluator.EvaluateRuleWithContext(evalContext, eventType, ruleExpressions)
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rm.ctx, rule.ID, eventType, evaluationTime)
 

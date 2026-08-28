@@ -86,7 +86,7 @@ func (tt *TopTracer) GetEventType() utils.EventType {
 
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (tt *TopTracer) IsEnabled(cfg config.Config) bool {
-	return !cfg.DTop && cfg.EnableMetricsExporter
+	return !cfg.DTop && cfg.IsMetricsEnabled()
 }
 
 // topEventCallback handles top events from the tracer

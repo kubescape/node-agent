@@ -25,16 +25,17 @@ func (l *containerProfileLibrary) wasPathOpened(containerID, path ref.Val) ref.V
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
+	if pathStr == "" {
+		return types.Bool(false)
+	}
+
 	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	// All=true means all observed entries were retained in Values — still need to query Values.
-	for openPath := range cp.Opens.Values {
-		if dynamicpathdetector.CompareDynamic(openPath, pathStr) {
-			return types.Bool(true)
-		}
+	if matchLiteralPath(cp.Opens.Values, pathStr) {
+		return types.Bool(true)
 	}
 	// Check Patterns (dynamic-segment entries).
 	for _, openPath := range cp.Opens.Patterns {
@@ -68,6 +69,10 @@ func (l *containerProfileLibrary) wasPathOpenedWithFlags(containerID, path, flag
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
+	if pathStr == "" {
+		return types.Bool(false)
+	}
+
 	// flags projection (OpenFlagsByPath) is out of scope for v1; degrade to path-only matching.
 	if _, err := celparse.ParseList[string](flags); err != nil {
 		return types.NewErr("failed to parse flags: %v", err)
@@ -78,10 +83,8 @@ func (l *containerProfileLibrary) wasPathOpenedWithFlags(containerID, path, flag
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for openPath := range cp.Opens.Values {
-		if dynamicpathdetector.CompareDynamic(openPath, pathStr) {
-			return types.Bool(true)
-		}
+	if matchLiteralPath(cp.Opens.Values, pathStr) {
+		return types.Bool(true)
 	}
 	for _, openPath := range cp.Opens.Patterns {
 		if dynamicpathdetector.CompareDynamic(openPath, pathStr) {

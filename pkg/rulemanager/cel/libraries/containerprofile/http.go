@@ -29,15 +29,17 @@ func (l *containerProfileLibrary) wasEndpointAccessed(containerID, endpoint ref.
 		return types.MaybeNoSuchOverloadErr(endpoint)
 	}
 
+	if endpointStr == "" {
+		return types.Bool(false)
+	}
+
 	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	for ep := range cp.Endpoints.Values {
-		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
-			return types.Bool(true)
-		}
+	if matchLiteralPath(cp.Endpoints.Values, endpointStr) {
+		return types.Bool(true)
 	}
 	for _, ep := range cp.Endpoints.Patterns {
 		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
@@ -66,16 +68,18 @@ func (l *containerProfileLibrary) wasEndpointAccessedWithMethod(containerID, end
 		return types.MaybeNoSuchOverloadErr(method)
 	}
 
+	if endpointStr == "" {
+		return types.Bool(false)
+	}
+
 	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
 	// EndpointMethodsByPath is out of scope for v1 — check path membership only.
-	for ep := range cp.Endpoints.Values {
-		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
-			return types.Bool(true)
-		}
+	if matchLiteralPath(cp.Endpoints.Values, endpointStr) {
+		return types.Bool(true)
 	}
 	for _, ep := range cp.Endpoints.Patterns {
 		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
@@ -101,6 +105,10 @@ func (l *containerProfileLibrary) wasEndpointAccessedWithMethods(containerID, en
 		return types.MaybeNoSuchOverloadErr(endpoint)
 	}
 
+	if endpointStr == "" {
+		return types.Bool(false)
+	}
+
 	if _, err := celparse.ParseList[string](methods); err != nil {
 		return types.NewErr("failed to parse methods: %v", err)
 	}
@@ -111,10 +119,8 @@ func (l *containerProfileLibrary) wasEndpointAccessedWithMethods(containerID, en
 	}
 
 	// EndpointMethodsByPath is out of scope for v1 — check path membership only.
-	for ep := range cp.Endpoints.Values {
-		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {
-			return types.Bool(true)
-		}
+	if matchLiteralPath(cp.Endpoints.Values, endpointStr) {
+		return types.Bool(true)
 	}
 	for _, ep := range cp.Endpoints.Patterns {
 		if dynamicpathdetector.CompareDynamic(ep, endpointStr) {

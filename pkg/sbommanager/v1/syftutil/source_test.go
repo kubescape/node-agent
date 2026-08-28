@@ -1,11 +1,13 @@
 package syftutil
 
 import (
+	"os"
 	"testing"
 
 	"github.com/anchore/syft/syft/source"
 	imagedigest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
@@ -169,4 +171,60 @@ func Test_NewSource_InvalidDiffID(t *testing.T) {
 	assert.Nil(t, src)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid image diff-ids")
+}
+
+func Test_NewSource_LayerOrderingAndDigestSizePairing(t *testing.T) {
+	// Base layer is at index 0 in OCI DiffIDs.
+	// Mounts are top-first: mounts[0] is top layer, mounts[2] is base layer.
+	imageStatus := &runtime.ImageStatusResponse{
+		Image: &runtime.Image{
+			Id:       "test-image-id",
+			RepoTags: []string{"test-image:latest"},
+		},
+		Info: map[string]string{
+			"info": `{
+				"imageSpec": {
+					"architecture": "amd64",
+					"os": "linux",
+					"rootfs": {
+						"type": "layers",
+						"diff_ids": [
+							"sha256:1111111111111111111111111111111111111111111111111111111111111111",
+							"sha256:2222222222222222222222222222222222222222222222222222222222222222",
+							"sha256:3333333333333333333333333333333333333333333333333333333333333333"
+						]
+					}
+				}
+			}`,
+		},
+	}
+
+	tempDir := t.TempDir()
+	mountTop := tempDir + "/top"
+	mountMid := tempDir + "/mid"
+	mountBase := tempDir + "/base"
+	require.NoError(t, os.Mkdir(mountTop, 0755))
+	require.NoError(t, os.Mkdir(mountMid, 0755))
+	require.NoError(t, os.Mkdir(mountBase, 0755))
+	require.NoError(t, os.WriteFile(mountBase+"/file.txt", []byte("base-data"), 0644))
+	mounts := []string{mountTop, mountMid, mountBase}
+
+	src, err := NewSource("test-image:latest", "sha256:digest", "test-image-id", imageStatus, mounts, 1<<30)
+	assert.NoError(t, err)
+	assert.NotNil(t, src)
+
+	// ImageMetadata.Layers must be in base-first order with matching digests
+	meta := src.Describe().Metadata.(source.ImageMetadata)
+	assert.Len(t, meta.Layers, 3)
+	assert.Equal(t, "sha256:1111111111111111111111111111111111111111111111111111111111111111", meta.Layers[0].Digest)
+	assert.Equal(t, "sha256:2222222222222222222222222222222222222222222222222222222222222222", meta.Layers[1].Digest)
+	assert.Equal(t, "sha256:3333333333333333333333333333333333333333333333333333333333333333", meta.Layers[2].Digest)
+	// Base layer (Layers[0]) must pair with base mount (mounts[2]) size
+	assert.Greater(t, meta.Layers[0].Size, int64(0))
+
+	// NodeSource internal layers (used for overlay resolution) must be reversed (top-to-base)
+	assert.Len(t, src.layers, 3)
+	assert.Equal(t, "sha256:3333333333333333333333333333333333333333333333333333333333333333", src.layers[0].String())
+	assert.Equal(t, "sha256:2222222222222222222222222222222222222222222222222222222222222222", src.layers[1].String())
+	assert.Equal(t, "sha256:1111111111111111111111111111111111111111111111111111111111111111", src.layers[2].String())
 }
