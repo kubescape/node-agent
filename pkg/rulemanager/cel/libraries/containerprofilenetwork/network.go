@@ -245,26 +245,29 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(contain
 	return types.Bool(matchAddrPort(cp.IngressAddrPorts, addressStr, protocolStr, int32(portInt)))
 }
 
-// namespaceSelectorMatches: a nil namespaceSelector is cluster-wide — peer
-// identity is the podSelector alone (impersonation is gated by the signed
-// admission overlay that authors the entry, not by the namespace). An explicit
-// selector matches the peer namespace's kubernetes.io/metadata.name label.
-func namespaceSelectorMatches(sel *metav1.LabelSelector, ns string) bool {
+// namespaceSelectorMatches follows NetworkPolicy semantics. An OMITTED (nil)
+// selector means the profile's OWN namespace (peerNs == profileNs): a peer is
+// same-namespace unless it says otherwise, so a pod that merely copies an
+// allowlisted peer's labels in another namespace does not match. An explicit
+// EMPTY selector ({}) is cluster-wide, opt-in (LabelSelectorAsSelector maps {}
+// to Everything). An explicit selector with labels matches the peer namespace by
+// its kubernetes.io/metadata.name label (e.g. kube-system). Unparseable fails closed.
+func namespaceSelectorMatches(sel *metav1.LabelSelector, peerNs, profileNs string) bool {
 	if sel == nil {
-		return true
+		return peerNs == profileNs
 	}
 	s, err := metav1.LabelSelectorAsSelector(sel)
 	if err != nil {
 		return false
 	}
-	return s.Matches(labels.Set{"kubernetes.io/metadata.name": ns})
+	return s.Matches(labels.Set{"kubernetes.io/metadata.name": peerNs})
 }
 
 // wasSelectorInPeers reports whether the peer identified by (podLabels, ns)
 // matches any peer entry's podSelector AND its namespaceSelector. An empty
 // podSelector matches NOTHING (fail closed → the peer alerts), the opposite of
 // NetworkPolicy's match-all: an allowlist entry must name what it permits.
-func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, ns, protocol string, port int32) bool {
+func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, ns, profileNs, protocol string, port int32) bool {
 	key := objectcache.PortKey(protocol, port)
 	for i := range peers {
 		peer := &peers[i]
@@ -276,7 +279,7 @@ func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, 
 		if err != nil {
 			continue
 		}
-		if !ps.Matches(podLabels) || !namespaceSelectorMatches(peer.NamespaceSelector, ns) {
+		if !ps.Matches(podLabels) || !namespaceSelectorMatches(peer.NamespaceSelector, ns, profileNs) {
 			continue
 		}
 		if peer.Ports == nil {
@@ -344,7 +347,7 @@ func (l *containerProfileNetworkLibrary) wasSelectorIn(containerID, namespace, p
 	if len(peers) == 0 {
 		return types.Bool(false)
 	}
-	return types.Bool(wasSelectorInPeers(peers, labels.Set(peerLabels), nsStr, protocolStr, int32(portInt)))
+	return types.Bool(wasSelectorInPeers(peers, labels.Set(peerLabels), nsStr, cp.Namespace, protocolStr, int32(portInt)))
 }
 
 // refValToStringMap converts a CEL map argument to a Go map[string]string. A nil

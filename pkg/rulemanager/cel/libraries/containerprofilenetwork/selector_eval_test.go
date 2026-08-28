@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func buildSelectorLib(t *testing.T) *containerProfileNetworkLibrary {
@@ -39,8 +40,8 @@ func TestWasSelectorIn_EvalTruthTable(t *testing.T) {
 		want    bool
 		why     string
 	}{
-		{"egress label match, nil nsSel", false, "cid", "redis", map[string]string{"app": "redis-client"}, true, "labels match; nil namespaceSelector not consulted"},
-		{"egress label match, foreign ns", false, "cid", "attacker", map[string]string{"app": "redis-client"}, true, "nil namespaceSelector does not scope by namespace"},
+		{"egress label match, omitted nsSel, same ns", false, "cid", "redis", map[string]string{"app": "redis-client"}, true, "labels match; omitted namespaceSelector => the profile's own namespace"},
+		{"egress label match, omitted nsSel, FOREIGN ns rejected", false, "cid", "attacker", map[string]string{"app": "redis-client"}, false, "omitted namespaceSelector is same-namespace; a label-copy in another ns must not match"},
 		{"egress label mismatch", false, "cid", "redis", map[string]string{"app": "other"}, false, "unknown peer identity must alert"},
 		{"egress peer only in ingress list", false, "cid", "redis", map[string]string{"app": "ingress-client"}, false, "direction isolation: ingress-only selector must not open egress"},
 		{"ingress peer matches", true, "cid", "redis", map[string]string{"app": "ingress-client"}, true, "declared ingress selector matches"},
@@ -129,4 +130,36 @@ func TestWasSelectorIn_CELEndToEnd(t *testing.T) {
 	out, _, err := prg.Eval(map[string]interface{}{"containerID": "unknown-cid"})
 	assert.NoError(t, err)
 	assert.Equal(t, false, out.Value(), "profile-unavailable converts to false at the binding, never an error")
+}
+
+// TestWasSelectorIn_VendorPortableProfileEndToEnd drives the concrete vendor
+// example through the real CEL binding: a profile shipped WITHOUT a namespace,
+// installed into "acme". DNS is pinned to kube-system by name; Prometheus and
+// Alertmanager use {} (any namespace, since the vendor can't know the customer's
+// monitoring namespace); the app's own frontend uses an omitted selector (same
+// namespace as the install). The label-copy attacker in "evil" is rejected.
+func TestWasSelectorIn_VendorPortableProfileEndToEnd(t *testing.T) {
+	lib := buildLibWithContainerNS(t, "acme",
+		[]v1beta1.NetworkNeighbor{
+			{Identifier: "dns", PodSelector: podSel(map[string]string{"k8s-app": "kube-dns"}), NamespaceSelector: nsSel("kube-system")},
+			{Identifier: "prometheus", PodSelector: podSel(map[string]string{"app.kubernetes.io/name": "prometheus"}), NamespaceSelector: &metav1.LabelSelector{}},
+			{Identifier: "alertmanager", PodSelector: podSel(map[string]string{"app.kubernetes.io/name": "alertmanager"}), NamespaceSelector: &metav1.LabelSelector{}},
+		},
+		[]v1beta1.NetworkNeighbor{
+			{Identifier: "frontend", PodSelector: podSel(map[string]string{"app.kubernetes.io/name": "acme-frontend"})},
+		})
+
+	eg := func(ns string, l map[string]string) ref.Val {
+		return lib.wasSelectorInEgress(types.String("cid"), types.String(ns), labelsVal(l), types.Int(9090), types.String("TCP"))
+	}
+	ing := func(ns string, l map[string]string) ref.Val {
+		return lib.wasSelectorInIngress(types.String("cid"), types.String(ns), labelsVal(l), types.Int(443), types.String("TCP"))
+	}
+
+	assert.Equal(t, types.Bool(true), eg("kube-system", map[string]string{"k8s-app": "kube-dns"}), "DNS in kube-system matches (metadata.name pin)")
+	assert.Equal(t, types.Bool(false), eg("acme", map[string]string{"k8s-app": "kube-dns"}), "a kube-dns pod in the install ns is NOT the kube-system peer")
+	assert.Equal(t, types.Bool(true), eg("monitoring", map[string]string{"app.kubernetes.io/name": "prometheus"}), "prometheus matches in any ns ({})")
+	assert.Equal(t, types.Bool(true), eg("observability", map[string]string{"app.kubernetes.io/name": "alertmanager"}), "alertmanager matches in any ns ({})")
+	assert.Equal(t, types.Bool(true), ing("acme", map[string]string{"app.kubernetes.io/name": "acme-frontend"}), "frontend in the install ns matches (omitted = same ns)")
+	assert.Equal(t, types.Bool(false), ing("evil", map[string]string{"app.kubernetes.io/name": "acme-frontend"}), "LABEL-COPY: acme-frontend in another ns must not match")
 }
