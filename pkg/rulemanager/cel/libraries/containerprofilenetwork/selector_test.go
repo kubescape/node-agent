@@ -174,3 +174,30 @@ func TestWasSelectorInPeers_PortAware(t *testing.T) {
 		})
 	}
 }
+
+// TestWasSelectorInPeers_NamespaceDisambiguation is the collision case stated
+// outright: two pods carry the IDENTICAL podSelector labels in different
+// namespaces. A nil namespaceSelector matches both (cluster-wide identity); an
+// explicit namespaceSelector pinned to metadata.name matches only the pod in
+// that namespace, disambiguating the same-labelled pod elsewhere. This is the
+// only runtime scoping against a label-copy in a namespace the peer does not own.
+func TestWasSelectorInPeers_NamespaceDisambiguation(t *testing.T) {
+	sameLabels := labels.Set{"app": "frontend"}
+	frontend := podSel(map[string]string{"app": "frontend"})
+
+	nilPeer := []objectcache.PeerSelector{{PodSelector: frontend}}
+	if !wasSelectorInPeers(nilPeer, sameLabels, "prod", "TCP", 443) {
+		t.Fatal("nil ns: frontend in prod must match")
+	}
+	if !wasSelectorInPeers(nilPeer, sameLabels, "attacker", "TCP", 443) {
+		t.Fatal("nil ns: identical-labelled frontend in another ns ALSO matches (cluster-wide)")
+	}
+
+	pinned := []objectcache.PeerSelector{{PodSelector: frontend, NamespaceSelector: nsSel("prod")}}
+	if !wasSelectorInPeers(pinned, sameLabels, "prod", "TCP", 443) {
+		t.Fatal("pinned ns=prod: frontend in prod must match")
+	}
+	if wasSelectorInPeers(pinned, sameLabels, "attacker", "TCP", 443) {
+		t.Fatal("pinned ns=prod: identical-labelled frontend in another ns MUST be rejected (disambiguation)")
+	}
+}
