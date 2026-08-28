@@ -77,6 +77,13 @@ type OTELMetricsManager struct {
 	// Alert suppression funnel
 	alertSuppressedTotal metric.Int64Counter
 
+	// CEL rule state store
+	stateWritesTotal        metric.Int64Counter
+	stateWriteRejectedTotal metric.Int64Counter
+	stateExpiredTotal       metric.Int64Counter
+	statePurgedTotal        metric.Int64Counter
+	stateEntries            metric.Float64Gauge
+
 	// Live container count — incremented on start, decremented on stop.
 	// Exposed as node_agent.container.count observable gauge.
 	containerCount atomic.Int64
@@ -247,6 +254,16 @@ func NewOTELMetricsManager(ownContainerID, ownPodUID string, hostCgroupMounted b
 
 	m.alertSuppressedTotal = mustCounter("node_agent.alert.suppressed.total",
 		"Total alerts suppressed before delivery, labeled by rule_id and reason")
+	m.stateWritesTotal = mustCounter("node_agent.state.writes.total",
+		"Total CEL rule state entries written, labeled by rule_id")
+	m.stateWriteRejectedTotal = mustCounter("node_agent.state.write.rejected.total",
+		"Total CEL rule state writes rejected; a rule is being starved of the state it needs to correlate")
+	m.stateExpiredTotal = mustCounter("node_agent.state.expired.total",
+		"Total CEL rule state entries reclaimed by TTL expiry")
+	m.statePurgedTotal = mustCounter("node_agent.state.purged.total",
+		"Total CEL rule state entries dropped by scope purge, e.g. container removal")
+	m.stateEntries = mustGauge("node_agent.state.entries",
+		"Current CEL rule state entries, labeled by scope")
 
 	registerResourceMetrics(meter, &m.containerCount, ownContainerID, ownPodUID, hostCgroupMounted)
 
@@ -556,4 +573,28 @@ func (m *OTELMetricsManager) suppressedOption(ruleID, reason string) metric.Meas
 
 func (m *OTELMetricsManager) ReportAlertSuppressed(ruleID, reason string) {
 	m.alertSuppressedTotal.Add(context.Background(), 1, m.suppressedOption(ruleID, reason))
+}
+
+// The state counters reuse suppressedOption: it caches a (ruleID, reason)
+// attribute set, which is exactly the label pair these need. Labelling by ruleID
+// only is deliberate -- a state key is unbounded cardinality.
+func (m *OTELMetricsManager) ReportStateWrite(ruleID, result string) {
+	m.stateWritesTotal.Add(context.Background(), 1, m.suppressedOption(ruleID, result))
+}
+
+func (m *OTELMetricsManager) ReportStateWriteRejected(ruleID, reason string) {
+	m.stateWriteRejectedTotal.Add(context.Background(), 1, m.suppressedOption(ruleID, reason))
+}
+
+func (m *OTELMetricsManager) ReportStateExpired(n int) {
+	m.stateExpiredTotal.Add(context.Background(), int64(n))
+}
+
+func (m *OTELMetricsManager) ReportStatePurged(n int) {
+	m.statePurgedTotal.Add(context.Background(), int64(n))
+}
+
+func (m *OTELMetricsManager) ReportStateEntries(scope string, n int) {
+	m.stateEntries.Record(context.Background(), float64(n),
+		metric.WithAttributes(attribute.String("scope", scope)))
 }

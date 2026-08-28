@@ -10,6 +10,7 @@ import (
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulestate"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -101,6 +102,15 @@ func TestLoadConfig(t *testing.T) {
 				CelConfigCache: cache.FunctionCacheConfig{
 					MaxSize: 100000,
 					TTL:     1 * time.Minute,
+				},
+				CelStateStore: rulestate.Config{
+					Enabled:                true,
+					MaxSize:                100000,
+					MaxEntriesPerContainer: 256,
+					MaxEntriesForHost:      4096,
+					MaxTTL:                 30 * time.Minute,
+					SweepInterval:          30 * time.Second,
+					AncestorMaxDepth:       8,
 				},
 				DNSCacheSize:                   50000,
 				ContainerEolNotificationBuffer: 100,

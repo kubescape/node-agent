@@ -7,6 +7,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
+
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
@@ -257,8 +259,7 @@ func networkProfile() *v1beta1.ContainerProfile {
 func mixedFilterRules() []typesv1.Rule {
 	return []typesv1.Rule{
 		{
-			ID:   "RULE-A",
-			Name: "mixed-file-and-net",
+			RuntimeRule: armotypes.RuntimeRule{ID: "RULE-A", Name: "mixed-file-and-net"},
 			ProfileDataRequired: &typesv1.ProfileDataRequired{
 				Opens: declaredPatterns(
 					typesv1.PatternObject{Exact: "/etc/passwd"},
@@ -279,8 +280,7 @@ func mixedFilterRules() []typesv1.Rule {
 		{
 			// A second rule narrows capabilities further and adds an opens
 			// prefix, proving the union merge across rules.
-			ID:   "RULE-B",
-			Name: "extra-caps",
+			RuntimeRule: armotypes.RuntimeRule{ID: "RULE-B", Name: "extra-caps"},
 			ProfileDataRequired: &typesv1.ProfileDataRequired{
 				Capabilities: declaredPatterns(typesv1.PatternObject{Exact: "SYS_PTRACE"}),
 				Opens:        declaredPatterns(typesv1.PatternObject{Prefix: "/data/"}),
@@ -294,8 +294,7 @@ func mixedFilterRules() []typesv1.Rule {
 func netAllRules() []typesv1.Rule {
 	return []typesv1.Rule{
 		{
-			ID:   "RULE-NET",
-			Name: "net-all",
+			RuntimeRule: armotypes.RuntimeRule{ID: "RULE-NET", Name: "net-all"},
 			ProfileDataRequired: &typesv1.ProfileDataRequired{
 				EgressDomains:    declaredAll(),
 				EgressAddresses:  declaredAll(),

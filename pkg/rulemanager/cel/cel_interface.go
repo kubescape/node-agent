@@ -11,6 +11,8 @@ type RuleEvaluator interface {
 	EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error)
 	EvaluateRuleWithContext(evalContext map[string]any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error)
 	EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error)
+	EvaluateBoolExpressionWithContext(evalContext map[string]any, expression string) (bool, error)
+	EvaluateStringExpressionWithContext(evalContext map[string]any, expression string) (string, error)
 	CreateEvalContext(event *events.EnrichedEvent) map[string]any
 	RegisterHelper(function cel.EnvOption) error
 	RegisterCustomType(eventType utils.EventType, obj interface{}) error

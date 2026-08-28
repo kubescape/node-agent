@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/net"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/parse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/process"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/state"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/picatz/xcel"
@@ -58,6 +59,11 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metric
 		cel.Variable("event", eventTyp), // All events accessible via "event" variable
 		cel.Variable("http", eventTyp),  // HTTP events also accessible via "http" variable
 		cel.Variable("eventType", cel.StringType),
+		// The resolved event time, as a top-level variable rather than an event
+		// field: CelFields getters receive an xcel wrapper around the event and
+		// cannot reach EnrichedEvent.Timestamp, so a field would be a second,
+		// divergent source of truth. See ResolveEventTime.
+		cel.Variable("timestamp", cel.TimestampType),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),
@@ -74,6 +80,10 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metric
 		parse.Parse(cfg),
 		net.Net(cfg),
 		process.Process(cfg),
+		// Declares the "state" variable and its read functions. The store and the
+		// per-rule receiver are injected into the eval context, not here -- see
+		// state.Accessor.
+		state.State(cfg),
 	}
 
 	env, err := cel.NewEnv(envOptions...)
@@ -176,6 +186,7 @@ func (c *CEL) CreateEvalContext(event *events.EnrichedEvent) map[string]any {
 	evalContext := map[string]any{
 		"eventType": string(eventType),
 		"event":     obj,
+		"timestamp": ResolveEventTime(event),
 	}
 
 	// For HTTP events, also add "http" variable
@@ -207,6 +218,45 @@ func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[stri
 	}
 
 	return out, nil
+}
+
+// EvaluateBoolExpressionWithContext evaluates a boolean expression against an
+// already-built context. State-write guards use it so the guard sees exactly the
+// same event view -- and the same state -- as the predicate did.
+func (c *CEL) EvaluateBoolExpressionWithContext(evalContext map[string]any, expression string) (bool, error) {
+	out, err := c.evaluateProgramWithContext(expression, evalContext)
+	if err != nil {
+		return false, err
+	}
+	// A nil program means compilation failed and was cached as such.
+	if out == nil {
+		return false, nil
+	}
+	boolVal, ok := out.Value().(bool)
+	if !ok {
+		return false, fmt.Errorf("expression returned %T, expected bool", out.Value())
+	}
+	return boolVal, nil
+}
+
+// EvaluateStringExpressionWithContext evaluates expr against an already-built
+// context. Message and uniqueId expressions must reuse the predicate's context so
+// state.get() resolves against the same entries -- and so uniqueId can be derived
+// from the join key, which is what lets rulecooldown collapse the two legs of a
+// bidirectional rule into one alert.
+func (c *CEL) EvaluateStringExpressionWithContext(evalContext map[string]any, expression string) (string, error) {
+	out, err := c.evaluateProgramWithContext(expression, evalContext)
+	if err != nil {
+		return "", err
+	}
+	if out == nil {
+		return "", nil
+	}
+	strVal, ok := out.Value().(string)
+	if !ok {
+		return "", fmt.Errorf("expression returned %T, expected string", out.Value())
+	}
+	return strVal, nil
 }
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
