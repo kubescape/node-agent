@@ -60,6 +60,7 @@ func TestLegacyNNMatchesCP(t *testing.T) {
 	})
 
 	profile := &v1beta1.ContainerProfile{}
+	profile.Namespace = "redis"
 	profile.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{

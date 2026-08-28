@@ -33,6 +33,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 	})
 
 	nn := &v1beta1.ContainerProfile{}
+	nn.Namespace = "prod"
 	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
@@ -255,12 +256,12 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 		},
 		{
 			name:           "Check egress selector peer",
-			expression:     `cp.was_selector_in_egress(containerID, "any-ns", {"app": "db-client"}, 443, "TCP")`,
+			expression:     `cp.was_selector_in_egress(containerID, "prod", {"app": "db-client"}, 443, "TCP")`,
 			expectedResult: true,
 		},
 		{
 			name:           "Check egress selector peer wrong labels",
-			expression:     `cp.was_selector_in_egress(containerID, "any-ns", {"app": "attacker"}, 443, "TCP")`,
+			expression:     `cp.was_selector_in_egress(containerID, "prod", {"app": "attacker"}, 443, "TCP")`,
 			expectedResult: false,
 		},
 		{
@@ -280,12 +281,12 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 		},
 		{
 			name:           "Selector direction isolation - egress peer not in ingress",
-			expression:     `cp.was_selector_in_ingress(containerID, "any-ns", {"app": "db-client"}, 443, "TCP")`,
+			expression:     `cp.was_selector_in_ingress(containerID, "prod", {"app": "db-client"}, 443, "TCP")`,
 			expectedResult: false,
 		},
 		{
 			name:           "Combined address and selector check",
-			expression:     `cp.was_address_in_egress(containerID, "8.8.8.8") && cp.was_selector_in_egress(containerID, "any-ns", {"app": "db-client"}, 443, "TCP")`,
+			expression:     `cp.was_address_in_egress(containerID, "8.8.8.8") && cp.was_selector_in_egress(containerID, "prod", {"app": "db-client"}, 443, "TCP")`,
 			expectedResult: true,
 		},
 	}
