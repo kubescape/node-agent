@@ -15,7 +15,13 @@ from pathlib import Path
 
 import pandas as pd
 
-SIGNIFICANT_THRESHOLD = 10.0  # percent change that triggers quality gate failure
+SIGNIFICANT_THRESHOLD = 5.0  # percent change that triggers quality gate failure
+
+# Peak CPU is gated on p95, not max: a strict max is a max-of-two-independent-
+# draws comparison that skews positive by construction (jitter can only push
+# an observed peak up, never down -- see #519). p95 drops the single noisiest
+# sample per run, which is where that jitter spike lands in practice.
+PEAK_CPU_P95_THRESHOLD = 10.0
 
 
 def load_csv(directory: Path, name: str) -> pd.DataFrame:
@@ -35,11 +41,15 @@ def load_json(directory: Path, name: str) -> dict | None:
 
 
 def compute_resource_stats(df: pd.DataFrame) -> dict:
-    """Filter to node-agent pods and compute avg/peak."""
+    """Filter to node-agent pods and compute avg/peak/p95."""
     na = df[df["Pod"].str.contains("node-agent", na=False)]
     if na.empty:
-        return {"avg": 0.0, "peak": 0.0}
-    return {"avg": na["Value"].mean(), "peak": na["Value"].max()}
+        return {"avg": 0.0, "peak": 0.0, "p95": 0.0}
+    return {
+        "avg": na["Value"].mean(),
+        "peak": na["Value"].max(),
+        "p95": na["Value"].quantile(0.95),
+    }
 
 
 def format_delta(before: float, after: float) -> str:
@@ -75,6 +85,7 @@ def print_resource_table_text(before_dir: Path, after_dir: Path) -> None:
     rows = [
         ("Avg CPU (cores)", before_cpu["avg"], after_cpu["avg"]),
         ("Peak CPU (cores)", before_cpu["peak"], after_cpu["peak"]),
+        ("Peak CPU p95 (cores)", before_cpu["p95"], after_cpu["p95"]),
         ("Avg Memory (MiB)", before_mem["avg"], after_mem["avg"]),
         ("Peak Memory (MiB)", before_mem["peak"], after_mem["peak"]),
     ]
@@ -147,6 +158,7 @@ def print_resource_table_md(before_dir: Path, after_dir: Path) -> None:
     rows = [
         ("Avg CPU (cores)", before_cpu["avg"], after_cpu["avg"]),
         ("Peak CPU (cores)", before_cpu["peak"], after_cpu["peak"]),
+        ("Peak CPU p95 (cores)", before_cpu["p95"], after_cpu["p95"]),
         ("Avg Memory (MiB)", before_mem["avg"], after_mem["avg"]),
         ("Peak Memory (MiB)", before_mem["peak"], after_mem["peak"]),
     ]
@@ -257,7 +269,12 @@ def _extract_counters(data: dict | None) -> dict[str, float]:
 #  Quality gate
 # ---------------------------------------------------------------
 
-def check_degradation(before_dir: Path, after_dir: Path, threshold: float) -> list[str]:
+def check_degradation(
+    before_dir: Path,
+    after_dir: Path,
+    threshold: float,
+    peak_cpu_threshold: float = PEAK_CPU_P95_THRESHOLD,
+) -> list[str]:
     """Return list of failure messages for metrics that degraded beyond threshold."""
     before_cpu = compute_resource_stats(load_csv(before_dir, "cpu_metrics.csv"))
     after_cpu = compute_resource_stats(load_csv(after_dir, "cpu_metrics.csv"))
@@ -265,19 +282,22 @@ def check_degradation(before_dir: Path, after_dir: Path, threshold: float) -> li
     after_mem = compute_resource_stats(load_csv(after_dir, "memory_metrics.csv"))
 
     checks = [
-        ("Avg CPU", before_cpu["avg"], after_cpu["avg"]),
-        ("Peak CPU", before_cpu["peak"], after_cpu["peak"]),
-        ("Avg Memory", before_mem["avg"], after_mem["avg"]),
-        ("Peak Memory", before_mem["peak"], after_mem["peak"]),
+        ("Avg CPU", before_cpu["avg"], after_cpu["avg"], threshold),
+        # Gated on p95, not max -- see PEAK_CPU_P95_THRESHOLD comment above.
+        ("Peak CPU (p95)", before_cpu["p95"], after_cpu["p95"], peak_cpu_threshold),
+        ("Avg Memory", before_mem["avg"], after_mem["avg"], threshold),
+        ("Peak Memory", before_mem["peak"], after_mem["peak"], threshold),
     ]
 
     failures = []
-    for label, before, after in checks:
+    for label, before, after, metric_threshold in checks:
         if before == 0:
             continue
         pct = (after - before) / before * 100
-        if pct > threshold:
-            failures.append(f"{label}: +{pct:.1f}% (before={before:.3f}, after={after:.3f}, threshold={threshold}%)")
+        if pct > metric_threshold:
+            failures.append(
+                f"{label}: +{pct:.1f}% (before={before:.3f}, after={after:.3f}, threshold={metric_threshold}%)"
+            )
     return failures
 
 
@@ -304,7 +324,13 @@ def main() -> None:
         "--threshold",
         type=float,
         default=SIGNIFICANT_THRESHOLD,
-        help=f"Degradation threshold in percent (default: {SIGNIFICANT_THRESHOLD}%%)",
+        help=f"Degradation threshold in percent for Avg CPU / Avg+Peak Memory (default: {SIGNIFICANT_THRESHOLD}%%)",
+    )
+    parser.add_argument(
+        "--peak-cpu-threshold",
+        type=float,
+        default=PEAK_CPU_P95_THRESHOLD,
+        help=f"Degradation threshold in percent for Peak CPU (p95-gated, default: {PEAK_CPU_P95_THRESHOLD}%%)",
     )
     parser.add_argument("before_dir", type=Path, help="Directory with before metrics")
     parser.add_argument("after_dir", type=Path, help="Directory with after metrics")
@@ -334,14 +360,18 @@ def main() -> None:
         print()
 
     if args.check:
-        failures = check_degradation(args.before_dir, args.after_dir, args.threshold)
+        failures = check_degradation(args.before_dir, args.after_dir, args.threshold, args.peak_cpu_threshold)
         if failures:
             print("QUALITY GATE FAILED: Performance degradation detected", file=sys.stderr)
             for f in failures:
                 print(f"  - {f}", file=sys.stderr)
             sys.exit(1)
         else:
-            print(f"Quality gate passed: no metric degraded beyond {args.threshold}%", file=sys.stderr)
+            print(
+                f"Quality gate passed: no metric degraded beyond its threshold "
+                f"(Peak CPU p95: {args.peak_cpu_threshold}%, others: {args.threshold}%)",
+                file=sys.stderr,
+            )
 
 
 if __name__ == "__main__":
