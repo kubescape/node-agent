@@ -59,13 +59,13 @@ func (l *InformerLister) ServicesByLabels(serviceSelector, namespaceLabels map[s
 	if err != nil {
 		return nil
 	}
-	wantNS := ""
-	if namespaceLabels != nil {
-		wantNS = namespaceLabels["kubernetes.io/metadata.name"]
-	}
+	// nil namespaceLabels => cluster-wide (all namespaces); a non-nil map scopes
+	// strictly to its metadata.name (a present-but-empty name matches nothing).
+	scoped := namespaceLabels != nil
+	wantNS := namespaceLabels["kubernetes.io/metadata.name"]
 	var out []*ServiceInfo
 	for _, svc := range svcs {
-		if wantNS != "" && svc.Namespace != wantNS {
+		if scoped && svc.Namespace != wantNS {
 			continue
 		}
 		out = append(out, l.serviceInfo(svc))

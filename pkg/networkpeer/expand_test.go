@@ -23,7 +23,7 @@ func TestExpandServiceNeighbors_Egress(t *testing.T) {
 		{Identifier: "plain", Type: "internal", IPAddresses: []string{"10.43.0.0/16"}, Ports: []v1beta1.NetworkPort{port("TCP-443", 443)}},
 		{Identifier: "ghost", Type: "internal", ServiceRefNamespace: "honey", ServiceRefName: "missing", Ports: []v1beta1.NetworkPort{port("TCP-1", 1)}},
 	}
-	out := ExpandServiceNeighbors(in, l)
+	out := ExpandServiceNeighbors(in, "", l)
 
 	if len(out) != 1 {
 		t.Fatalf("expected 1 synthesized neighbor (alertmanager only), got %d", len(out))
@@ -61,7 +61,7 @@ func TestExpandServiceNeighbors_HostEntity(t *testing.T) {
 	in := []v1beta1.NetworkNeighbor{
 		{Identifier: "probes", Type: "internal", Entity: "host", Ports: []v1beta1.NetworkPort{port("TCP-9440", 9440)}},
 	}
-	out := ExpandServiceNeighbors(in, l)
+	out := ExpandServiceNeighbors(in, "", l)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 synthesized host neighbor, got %d", len(out))
 	}
@@ -91,7 +91,7 @@ func TestExpandServiceNeighbors_Selector(t *testing.T) {
 		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "gitops-demo"}},
 		Ports:             []v1beta1.NetworkPort{port("TCP-80", 80)},
 	}}
-	out := ExpandServiceNeighbors(in, l)
+	out := ExpandServiceNeighbors(in, "", l)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 synthesized neighbor, got %d", len(out))
 	}
@@ -105,7 +105,7 @@ func TestExpandServiceNeighbors_NoPortsMeansAnyPort(t *testing.T) {
 	in := []v1beta1.NetworkNeighbor{
 		{Identifier: "st", Type: "internal", ServiceRefNamespace: "honey", ServiceRefName: "storage"},
 	}
-	out := ExpandServiceNeighbors(in, l)
+	out := ExpandServiceNeighbors(in, "", l)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 synthesized neighbor, got %d", len(out))
 	}
@@ -126,7 +126,7 @@ func TestExpandServiceNeighbors_SelectorFQDNFanout(t *testing.T) {
 		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "gitops-demo"}},
 		Ports:             []v1beta1.NetworkPort{port("TCP-80", 80)},
 	}}
-	out := ExpandServiceNeighbors(in, l)
+	out := ExpandServiceNeighbors(in, "", l)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 synthesized neighbor, got %d", len(out))
 	}
@@ -147,7 +147,7 @@ func TestExpandServiceNeighbors_SelectorFQDNFanout(t *testing.T) {
 // TestExpandServiceNeighbors_NilLister: no cluster view, no expansion.
 func TestExpandServiceNeighbors_NilLister(t *testing.T) {
 	in := []v1beta1.NetworkNeighbor{{Identifier: "am", Entity: "host"}}
-	if out := ExpandServiceNeighbors(in, nil); out != nil {
+	if out := ExpandServiceNeighbors(in, "", nil); out != nil {
 		t.Errorf("nil lister must expand to nil, got %v", out)
 	}
 }
@@ -165,7 +165,7 @@ func TestExpandServiceNeighbors_SelectorFailClosed(t *testing.T) {
 		{Identifier: "empty", ServiceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{}}, Ports: []v1beta1.NetworkPort{port("TCP-80", 80)}},
 	}
 	for _, n := range cases {
-		if out := ExpandServiceNeighbors([]v1beta1.NetworkNeighbor{n}, l); len(out) != 0 {
+		if out := ExpandServiceNeighbors([]v1beta1.NetworkNeighbor{n}, "", l); len(out) != 0 {
 			t.Errorf("%s: selector must fail closed, got %d", n.Identifier, len(out))
 		}
 	}
@@ -222,16 +222,20 @@ func TestExpandServiceNeighbors_NamespaceSelectorFailClosed(t *testing.T) {
 		{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpExists}}},
 		{MatchLabels: map[string]string{"env": "prod"}},                                          // wrong key
 		{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "gitops-demo", "x": "y"}}, // extra key
-		{MatchLabels: map[string]string{}},                                                       // empty
 	}
 	for i, ns := range bad {
-		if out := ExpandServiceNeighbors([]v1beta1.NetworkNeighbor{withNS(ns)}, l); len(out) != 0 {
+		if out := ExpandServiceNeighbors([]v1beta1.NetworkNeighbor{withNS(ns)}, "", l); len(out) != 0 {
 			t.Errorf("bad namespaceSelector[%d] must fail closed, got %d", i, len(out))
 		}
 	}
 	good := withNS(&metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "gitops-demo"}})
-	if out := ExpandServiceNeighbors([]v1beta1.NetworkNeighbor{good}, l); len(out) != 1 {
+	if out := ExpandServiceNeighbors([]v1beta1.NetworkNeighbor{good}, "", l); len(out) != 1 {
 		t.Errorf("metadata.name namespaceSelector should resolve, got %d", len(out))
+	}
+	// An explicit EMPTY {} namespaceSelector is cluster-wide (opt-in), NOT fail-closed.
+	clusterWide := withNS(&metav1.LabelSelector{})
+	if out := ExpandServiceNeighbors([]v1beta1.NetworkNeighbor{clusterWide}, "gitops-demo", l); len(out) != 1 {
+		t.Errorf("empty {} namespaceSelector must resolve cluster-wide, got %d", len(out))
 	}
 }
 
