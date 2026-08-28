@@ -28,6 +28,8 @@ LOAD_DURATION=600          # 10 minutes
 WARMUP_SECONDS=120         # 2 minutes
 METRICS_DURATION=10        # minutes (matches LOAD_DURATION, excludes warmup)
 PROM_LOCAL_PORT=9090
+PPROF_LOCAL_PORT=6061
+PPROF_CPU_SECONDS=20       # on-CPU sampling window for the cpu.pprof capture
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOAD_SIM_IMAGE="quay.io/armosec/load-simulator:v2"
 OUTPUT_BASE="${OUTPUT_DIR:-${SCRIPT_DIR}/dedup-bench-output}"
@@ -99,6 +101,8 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
+  labels:
+    node.kubernetes.io/instance-type: control-plane
   kubeadmConfigPatches:
   - |
     kind: InitConfiguration
@@ -106,6 +110,8 @@ nodes:
       kubeletExtraArgs:
         system-reserved: cpu=500m,memory=512Mi
 - role: worker
+  labels:
+    node.kubernetes.io/instance-type: worker
 EOF
     kind create cluster --name "$CLUSTER_NAME" --wait 5m --config "$tmpfile"
     rm -f "$tmpfile"
@@ -163,7 +169,9 @@ _helm_install_kubescape_oss() {
         --set alertCRD.scopeClustered=true \
         --set nodeAgent.image.repository="$repo" \
         --set nodeAgent.image.tag="$tag" \
-        --set nodeAgent.image.pullPolicy=IfNotPresent
+        --set nodeAgent.image.pullPolicy=IfNotPresent \
+        --set nodeAgent.env[0].name=ENABLE_PROFILER \
+        --set nodeAgent.env[0].value=1
 }
 
 _helm_install_armo() {
@@ -201,12 +209,30 @@ _helm_install_armo() {
         --set kubescape-operator.alertCRD.scopeClustered=true \
         --set kubescape-operator.nodeAgent.image.repository="$repo" \
         --set kubescape-operator.nodeAgent.image.tag="$tag" \
-        --set kubescape-operator.nodeAgent.image.pullPolicy="$pull_policy"
+        --set kubescape-operator.nodeAgent.image.pullPolicy="$pull_policy" \
+        --set kubescape-operator.nodeAgent.env[0].name=ENABLE_PROFILER \
+        --set kubescape-operator.nodeAgent.env[0].value=1
 }
 
 install_kubescape() {
     log "Installing Kubescape with node-agent $1:$2..."
     _helm_install_kubescape "$1" "$2"
+
+    # Wait for the operator to reconcile and create the daemonsets before waiting for pods
+    local ds_names=""
+    local retries=30
+    while (( retries > 0 )); do
+        ds_names=$(kubectl get daemonset -l app.kubernetes.io/component=node-agent -n "$KUBESCAPE_NS" -o jsonpath='{.items[*].metadata.name}')
+        if [[ -n "$ds_names" ]]; then
+            break
+        fi
+        sleep 2
+        (( retries-- ))
+    done
+    if [[ -z "$ds_names" ]]; then
+        die "No node-agent daemonsets found."
+    fi
+
     if ! kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=node-agent \
         -n "$KUBESCAPE_NS" --timeout=600s; then
         log "ERROR: node-agent pod did not become ready. Diagnostics:"
@@ -221,7 +247,25 @@ install_kubescape() {
 swap_image() {
     log "Swapping node-agent image to $1:$2..."
     _helm_install_kubescape "$1" "$2"
-    kubectl rollout status daemonset/node-agent -n "$KUBESCAPE_NS" --timeout=600s
+    
+    # Wait for the operator to reconcile and create/update the daemonsets
+    local ds_names=""
+    local retries=30
+    while (( retries > 0 )); do
+        ds_names=$(kubectl get daemonset -l app.kubernetes.io/component=node-agent -n "$KUBESCAPE_NS" -o jsonpath='{.items[*].metadata.name}')
+        if [[ -n "$ds_names" ]]; then
+            break
+        fi
+        sleep 2
+        (( retries-- ))
+    done
+    if [[ -z "$ds_names" ]]; then
+        die "No node-agent daemonsets found."
+    fi
+
+    for ds in $ds_names; do
+        kubectl rollout status daemonset/"$ds" -n "$KUBESCAPE_NS" --timeout=600s
+    done
     log "Node-agent rollout complete."
 }
 
@@ -260,8 +304,7 @@ EOF
         -n load-simulator --dry-run=client -o yaml | kubectl apply -f -
 
     kubectl apply -f "$SCRIPT_DIR/load-simulator/daemonset.yaml" -n load-simulator
-    kubectl wait --for=condition=ready pod -l app=load-simulator \
-        -n load-simulator --timeout=300s
+    kubectl rollout status daemonset/load-simulator -n load-simulator --timeout=300s
     log "Load simulator running."
 }
 
@@ -299,6 +342,69 @@ stop_port_forward() {
         PORT_FORWARD_PID=""
         log "Port-forward stopped."
     fi
+}
+
+# ---------------------------------------------------------------
+#  collect_pprof_profiles — heap/allocs/cpu, one per node-agent pod
+# ---------------------------------------------------------------
+# Requires ENABLE_PROFILER (set by _helm_install_*), which binds node-agent's
+# pprof server to localhost:6060 inside the container. kubectl port-forward
+# reaches it the same way it already reaches the Prometheus/OTLP-sink
+# loopback listeners elsewhere in this repo's test tooling: it operates
+# inside the pod's network namespace, so a loopback-only bind is not a
+# problem. Best-effort throughout — a profile capture failing (older
+# before-image without ENABLE_PROFILER support, a pod that rolled mid-call)
+# must never fail the benchmark itself, only skip that file.
+collect_pprof_profiles() {
+    local output_dir="$1"
+    mkdir -p "$output_dir"
+
+    local pods
+    pods=$(kubectl get pods -l app.kubernetes.io/component=node-agent -n "$KUBESCAPE_NS" \
+        -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    if [[ -z "$pods" ]]; then
+        log "WARNING: no node-agent pod found, skipping pprof capture"
+        return 0
+    fi
+
+    local pod
+    for pod in $pods; do
+        log "Capturing pprof profiles from $pod..."
+        kubectl port-forward "pod/$pod" "${PPROF_LOCAL_PORT}:6060" -n "$KUBESCAPE_NS" &>/dev/null &
+        local pf_pid=$!
+
+        local retries=15 ready=0
+        while (( retries > 0 )); do
+            if curl -sf "http://localhost:${PPROF_LOCAL_PORT}/debug/pprof/" &>/dev/null; then
+                ready=1
+                break
+            fi
+            sleep 1
+            (( retries-- ))
+        done
+
+        if (( ! ready )); then
+            log "WARNING: pprof endpoint not reachable on $pod (older image without ENABLE_PROFILER support?), skipping"
+            kill "$pf_pid" 2>/dev/null || true
+            wait "$pf_pid" 2>/dev/null || true
+            continue
+        fi
+
+        local prefix="$output_dir/${pod}"
+        curl -sf "http://localhost:${PPROF_LOCAL_PORT}/debug/pprof/heap" -o "${prefix}_heap.pprof" \
+            || log "WARNING: failed to capture heap profile for $pod"
+        curl -sf "http://localhost:${PPROF_LOCAL_PORT}/debug/pprof/allocs" -o "${prefix}_allocs.pprof" \
+            || log "WARNING: failed to capture allocs profile for $pod"
+        # Blocks for PPROF_CPU_SECONDS while node-agent samples its own on-CPU stacks.
+        curl -sf "http://localhost:${PPROF_LOCAL_PORT}/debug/pprof/profile?seconds=${PPROF_CPU_SECONDS}" \
+            -o "${prefix}_cpu.pprof" \
+            || log "WARNING: failed to capture cpu profile for $pod"
+
+        kill "$pf_pid" 2>/dev/null || true
+        wait "$pf_pid" 2>/dev/null || true
+    done
+
+    log "pprof profiles saved to $output_dir"
 }
 
 # ---------------------------------------------------------------
@@ -418,6 +524,7 @@ main() {
 
     start_port_forward
     collect_metrics "$OUTPUT_BASE/before"
+    collect_pprof_profiles "$OUTPUT_BASE/before"
     stop_port_forward
     remove_load_simulator
 
@@ -435,6 +542,7 @@ main() {
 
     start_port_forward
     collect_metrics "$OUTPUT_BASE/after"
+    collect_pprof_profiles "$OUTPUT_BASE/after"
     stop_port_forward
 
     # --- Compare ---
