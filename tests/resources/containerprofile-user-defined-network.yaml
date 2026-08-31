@@ -58,3 +58,36 @@ spec:
     - name: TCP-80
       protocol: TCP
       port: 80
+  # R0011 excludes only loopback (maximally noisy by design): allow the pod's
+  # own DNS egress to cluster DNS or every nslookup/curl resolution mints R0011.
+  - identifier: cluster-dns
+    type: internal
+    ipAddresses:
+    - 10.96.0.0/12
+    ports:
+    - name: UDP-53
+      protocol: UDP
+      port: 53
+    - name: TCP-53
+      protocol: TCP
+      port: 53
+  - identifier: wildcard-zero-port
+    type: external
+    ipAddress: 9.9.9.9
+    ports:
+    - name: TCP-any
+      protocol: TCP
+      port: 0
+  - identifier: wildcard-empty-ports
+    type: external
+    ipAddress: 208.67.222.222
+  - identifier: cluster-dns-clusterip
+    type: internal
+    ipAddress: 10.96.0.10
+  - identifier: kube-api
+    type: internal
+    ipAddress: 10.96.0.1
+    ports:
+    - name: TCP-443
+      protocol: TCP
+      port: 443

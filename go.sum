@@ -893,8 +893,8 @@ github.com/kubescape/inspektor-gadget v0.0.0-20260826074832-06b0d12baca0 h1:kJzq
 github.com/kubescape/inspektor-gadget v0.0.0-20260826074832-06b0d12baca0/go.mod h1:cwCFczq1LJ6Frpur0Vr5Ncic77a9ihki07Xpwzy+ItI=
 github.com/kubescape/k8s-interface v0.0.214 h1:j7KP0/5VvYOoQdBGV2+gRM3qnR8PWLAGF8RM/k/DmJ0=
 github.com/kubescape/k8s-interface v0.0.214/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
-github.com/kubescape/storage v0.0.303 h1:0nXI6E07lbWsg7iEH04vR4kwiekj//uCQl/La+8j4aM=
-github.com/kubescape/storage v0.0.303/go.mod h1:d/1hqWPda2clsjx2wmQgysnB5dThIo3rDKP7RWx+v+M=
+github.com/kubescape/storage v0.0.320 h1:uKqc6SL9phBMbjiN20uTK1SVOINHuNrklWaxb2U09Ag=
+github.com/kubescape/storage v0.0.320/go.mod h1:d/1hqWPda2clsjx2wmQgysnB5dThIo3rDKP7RWx+v+M=
 github.com/kubescape/syft v1.32.0-ks.2 h1:xdUksUmKEyyVKsTfJDYW8Z5HawVJtelsUolPOsWtDx0=
 github.com/kubescape/syft v1.32.0-ks.2/go.mod h1:E6Kd4iBM2ljUOUQvSt7hVK6vBwaHkMXwcvBZmGMSY5o=
 github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf h1:hI0jVwrB6fT4GJWvuUjzObfci1CUknrZdRHfnRVtKM0=

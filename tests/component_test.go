@@ -1053,13 +1053,9 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 		t.Fatalf("timeout after %s waiting for %s", timeout, desc)
 	}
 
-	// Give node-agent time to project the authored profile before generating
-	// events (matches Test_28; evaluating an unloaded profile is unreliable).
-	time.Sleep(30 * time.Second)
-
 	// PHASE 1 — subject NOT in the profile must alert. Doubles as the
-	// profile-load gate: once the authored CP is loaded, ls (not allowed)
-	// fires R0001.
+	// profile-load gate: re-exec ls inside the poll until R0001 fires, which only
+	// happens once the authored CP is loaded (no fixed projection sleep needed).
 	waitFor(func() bool {
 		wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
 		return countR0001("ls") > 0
@@ -1077,11 +1073,9 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cur, metav1.UpdateOptions{})
 	require.NoError(t, err, "update CP: add ls, remove id")
 
-	// Propagation delay before the reload gate (not an assertion gate).
-	time.Sleep(20 * time.Second)
-
-	// RELOAD GATE (positive) — the removed canary (id) must now alert, which
-	// proves node-agent reloaded the new revision (which also contains ls).
+	// RELOAD GATE (positive) — re-exec the removed canary (id) inside the poll
+	// until it alerts, which proves node-agent reloaded the new revision (which
+	// also contains ls). No fixed propagation sleep.
 	waitFor(func() bool {
 		wl.ExecIntoPod([]string{"/usr/bin/id"}, containerName)
 		return countR0001("id") > 0
@@ -1089,20 +1083,21 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	t.Logf("reload confirmed: R0001(id)=%d", countR0001("id"))
 
 	// PHASE 2 — the SAME subject, now in the profile, must NOT produce a NEW
-	// R0001. Cooldown headroom (per-container/per-rule, count 10) is untouched
-	// by the id-based gate, so a failed reload here would still let ls alert
-	// and be caught — this is a real enforcement check, not a vacuous pass.
+	// R0001. Snapshot ls before, exec ls, then fire a fresh forbidden SENTINEL
+	// (whoami, never in the profile) AFTER it. node-agent processes events in
+	// order, so once the sentinel alerts, the ls execs have been processed too —
+	// making "no new ls alert" deterministic, not a fixed-sleep guess.
 	before := countR0001("ls")
-	// Guard against phase-1 self-exhaustion: if the per-container/per-rule R0001
-	// cooldown budget (cap 10) were already spent, ls could not alert in phase 2
-	// regardless of enforcement, making the "no NEW R0001" check below vacuous.
 	require.Less(t, before, 10,
 		"phase 1 exhausted the R0001 ls cooldown budget (before=%d, cap=10); phase 2 would pass vacuously", before)
 	_, _, err = wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
 	require.NoError(t, err, "exec ls after profile update")
 	_, _, err = wl.ExecIntoPod([]string{"/usr/bin/ls", "-l"}, containerName)
 	require.NoError(t, err, "exec ls after profile update")
-	time.Sleep(20 * time.Second) // settle so any alert would have surfaced
+	waitFor(func() bool {
+		wl.ExecIntoPod([]string{"/usr/bin/whoami"}, containerName)
+		return countR0001("whoami") > 0
+	}, 3*time.Minute, "sentinel whoami (forbidden) must fire R0001 — proves the pipeline drained past the ls execs")
 	after := countR0001("ls")
 	if after != before {
 		logCPs()
@@ -1143,6 +1138,19 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 		fusioncoreIP  = "162.0.217.171"
 	)
 	port80 := int32(80)
+	port53 := int32(53)
+	// R0011 excludes only loopback (maximally noisy by design), so authored
+	// profiles must allow the pod's own DNS egress to cluster DNS or every
+	// nslookup mints an R0011 that skews the before/after counts.
+	clusterDNS := v1beta1.NetworkNeighbor{
+		Identifier:  "cluster-dns",
+		Type:        v1beta1.CommunicationTypeEgress,
+		IPAddresses: []string{"10.96.0.0/12"},
+		Ports: []v1beta1.NetworkPort{
+			{Name: "UDP-53", Protocol: v1beta1.ProtocolUDP, Port: &port53},
+			{Name: "TCP-53", Protocol: v1beta1.ProtocolTCP, Port: &port53},
+		},
+	}
 
 	ns := testutils.NewRandomNamespace()
 	k8sClient := k8sinterface.NewKubernetesApi()
@@ -1171,6 +1179,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 					IPAddress:  fusioncoreIP,
 					Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: v1beta1.ProtocolTCP, Port: &port80}},
 				},
+				clusterDNS,
 			},
 		},
 	}
@@ -1242,6 +1251,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 			IPAddress:  subjectIP,
 			Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: v1beta1.ProtocolTCP, Port: &port80}},
 		},
+		clusterDNS,
 	}
 	_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cur, metav1.UpdateOptions{})
 	require.NoError(t, err, "update CP: add subject IP, remove canary domain")
@@ -2669,6 +2679,52 @@ func Test_28_UserDefinedNetworkNeighborhood(t *testing.T) {
 			"fusioncore.ai IP is in NN — should NOT fire R0011")
 	})
 
+	// 162.0.217.171 is allowed on TCP/80 only; :443 is a port violation → R0011.
+	t.Run("port_violation_different_port_R0011", func(t *testing.T) {
+		wl := setup(t)
+		stdout, stderr, err := wl.ExecIntoPod([]string{"curl", "-sm5", "-k", "https://162.0.217.171"}, "curl")
+		t.Logf("curl https://162.0.217.171 → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		alerts := waitAlerts(t, wl.Namespace)
+		logAlerts(t, alerts)
+		assert.GreaterOrEqual(t, countByRule(alerts, "R0011"), 1,
+			"egress to allowed IP 162.0.217.171 on non-allowed port 443 must fire R0011")
+	})
+
+	// 9.9.9.9 is listed with an explicit port 0 — a literal, NOT a wildcard:
+	// the only port wildcard is an absent ports stanza, so :80/:443 violate.
+	t.Run("port_zero_is_literal_not_wildcard", func(t *testing.T) {
+		wl := setup(t)
+		wl.ExecIntoPod([]string{"curl", "-sm5", "http://9.9.9.9"}, "curl")
+		wl.ExecIntoPod([]string{"curl", "-sm5", "-k", "https://9.9.9.9"}, "curl")
+		alerts := waitAlerts(t, wl.Namespace)
+		logAlerts(t, alerts)
+		assert.GreaterOrEqual(t, countByRule(alerts, "R0011"), 1,
+			"an explicit port-0 entry must not open 9.9.9.9 on other ports")
+	})
+
+	// 208.67.222.222 is allowlisted with no ports stanza (ANY); no port fires R0011.
+	t.Run("port_wildcard_empty_stanza_allows_any", func(t *testing.T) {
+		wl := setup(t)
+		wl.ExecIntoPod([]string{"curl", "-sm5", "http://208.67.222.222"}, "curl")
+		wl.ExecIntoPod([]string{"curl", "-sm5", "-k", "https://208.67.222.222"}, "curl")
+		alerts := waitAlerts(t, wl.Namespace)
+		logAlerts(t, alerts)
+		assert.Equal(t, 0, countByRule(alerts, "R0011"),
+			"208.67.222.222 allowlisted with empty ports stanza (any) must not fire R0011 on any port")
+	})
+
+	// Internal peer 10.96.0.1 (kube-api) is allowlisted on TCP/443 only; :80 is a port violation → R0011.
+	t.Run("internal_port_violation_R0011", func(t *testing.T) {
+		wl := setup(t)
+		wl.ExecIntoPod([]string{"curl", "-sm5", "-k", "https://10.96.0.1"}, "curl")
+		stdout, stderr, err := wl.ExecIntoPod([]string{"curl", "-sm5", "http://10.96.0.1"}, "curl")
+		t.Logf("curl http://10.96.0.1:80 → err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		alerts := waitAlerts(t, wl.Namespace)
+		logAlerts(t, alerts)
+		assert.GreaterOrEqual(t, countByRule(alerts, "R0011"), 1,
+			"egress to internal IP 10.96.0.1 on non-allowed port 80 must fire R0011")
+	})
+
 	// ---------------------------------------------------------------
 	// 28b. Unknown domains — domains NOT in the NN → R0005.
 	//      Uses both nslookup (pure DNS) and curl (DNS + TCP).
@@ -3364,59 +3420,43 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 		path.Join(utils.CurrentDir(), "resources/percontainer-deployment.yaml"))
 	require.NoError(t, err)
 	require.NoError(t, wl.WaitForReady(80))
-	// Cache-load latency on the ContainerProfileCache is bursty; 30s covers the
-	// observed worst case on a loaded runner (matches Test_28).
-	time.Sleep(30 * time.Second)
-
-	// Exercise each container with BOTH binaries. Expected R0001 (unexpected
-	// process) per the inverse allow-lists:
+	// Exercise both binaries in both containers. Re-exec inside the poll so
+	// authored-CP load latency is absorbed deterministically (no fixed learning
+	// sleep). The two FORBIDDEN execs are the sentinels: once both have fired
+	// R0001, the pipeline has processed the whole burst, so the two allowed-exec
+	// negatives below are deterministic — not "hasn't surfaced yet".
 	//   app     : whoami -> R0001 (not allowed) ; id -> allowed (no alert)
 	//   sidecar : id     -> R0001 (not allowed) ; whoami -> allowed (no alert)
-	wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "app")
-	wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
-	wl.ExecIntoPod([]string{"/usr/bin/id"}, "sidecar")
-	wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "sidecar")
-
-	var alerts []testutils.Alert
-	require.Eventually(t, func() bool {
-		var e error
-		alerts, e = testutils.GetAlerts(wl.Namespace)
-		return e == nil
-	}, 60*time.Second, 5*time.Second, "must be able to fetch alerts")
-	// Extra settle time for remaining alerts.
-	time.Sleep(10 * time.Second)
-	alerts, _ = testutils.GetAlerts(wl.Namespace)
-
-	for i, a := range alerts {
-		t.Logf("  [%d] %s(%s) comm=%s container=%s", i,
-			a.Labels["rule_name"], a.Labels["rule_id"], a.Labels["comm"], a.Labels["container_name"])
+	exerciseAll := func() {
+		wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "app")
+		wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		wl.ExecIntoPod([]string{"/usr/bin/id"}, "sidecar")
+		wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "sidecar")
 	}
+	pollUntil(t, exerciseAll, func() bool {
+		return countRuleAlerts(t, ns.Name, "R0001", "app", "whoami") > 0 &&
+			countRuleAlerts(t, ns.Name, "R0001", "sidecar", "id") > 0
+	}, 4*time.Minute, "both forbidden execs (app/whoami, sidecar/id) must fire R0001")
 
-	countR0001 := func(container, comm string) int {
-		n := 0
-		for _, a := range alerts {
-			if a.Labels["rule_id"] == "R0001" &&
-				a.Labels["container_name"] == container &&
-				a.Labels["comm"] == comm {
-				n++
-			}
+	// Truth table — per-container binding, no cross-inheritance. Evaluated after
+	// both sentinels fired, so the wantAlert==false rows are deterministic.
+	for _, r := range []struct {
+		container, comm string
+		wantAlert       bool
+		why             string
+	}{
+		{"app", "whoami", true, "whoami not in percontainer-app -> must fire R0001 in app"},
+		{"sidecar", "id", true, "id not in percontainer-sidecar -> must fire R0001 in sidecar"},
+		{"app", "id", false, "id IS in percontainer-app -> must NOT fire (else sidecar's CP leaked in)"},
+		{"sidecar", "whoami", false, "whoami IS in percontainer-sidecar -> must NOT fire (else app's CP leaked in)"},
+	} {
+		got := countRuleAlerts(t, ns.Name, "R0001", r.container, r.comm)
+		if r.wantAlert {
+			assert.Greater(t, got, 0, r.why)
+		} else {
+			assert.Equal(t, 0, got, r.why)
 		}
-		return n
 	}
-
-	// The forbidden process in each container MUST alert.
-	assert.Greater(t, countR0001("app", "whoami"), 0,
-		"whoami is NOT in percontainer-app (only sidecar's CP allows it) — must fire R0001 in app")
-	assert.Greater(t, countR0001("sidecar", "id"), 0,
-		"id is NOT in percontainer-sidecar (only app's CP allows it) — must fire R0001 in sidecar")
-
-	// The allowed process in each container MUST NOT alert — the
-	// no-cross-inheritance assertion. If both containers shared one CP, one of
-	// these would be non-zero.
-	assert.Equal(t, 0, countR0001("app", "id"),
-		"id IS in percontainer-app — must NOT fire R0001 in app (non-zero => sidecar's CP leaked in)")
-	assert.Equal(t, 0, countR0001("sidecar", "whoami"),
-		"whoami IS in percontainer-sidecar — must NOT fire R0001 in sidecar (non-zero => app's CP leaked in)")
 
 	t.Run("refresh_reprojects_authored_CP_update", func(t *testing.T) {
 		k8sClient := k8sinterface.NewKubernetesApi()
@@ -3433,22 +3473,11 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 		_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cp, v1.UpdateOptions{})
 		require.NoError(t, err, "update percontainer-app to forbid id")
 
-		time.Sleep(45 * time.Second)
-		wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
-
-		require.Eventually(t, func() bool {
-			a2, e := testutils.GetAlerts(wl.Namespace)
-			if e != nil {
-				return false
-			}
-			for _, a := range a2 {
-				if a.Labels["rule_id"] == "R0001" && a.Labels["container_name"] == "app" && a.Labels["comm"] == "id" {
-					return true
-				}
-			}
-			return false
-		}, 90*time.Second, 5*time.Second,
-			"after percontainer-app is updated to forbid id, the reconciler refresh must re-fetch and re-project it so id now fires R0001 in app")
+		// Re-exec id inside the poll: once the reconciler re-fetches and re-projects
+		// the updated CP, id (now forbidden) fires R0001 in app. No fixed sleep.
+		pollUntil(t, func() { wl.ExecIntoPod([]string{"/usr/bin/id"}, "app") }, func() bool {
+			return countRuleAlerts(t, ns.Name, "R0001", "app", "id") > 0
+		}, 3*time.Minute, "reconciler must re-project the updated CP so id now fires R0001 in app")
 	})
 }
 
@@ -3640,6 +3669,27 @@ func countRuleAlerts(t *testing.T, ns, ruleID, container, comm string) int {
 	return n
 }
 
+// pollUntil re-runs act each interval (to absorb profile load / re-projection
+// latency) and returns once cond holds; it fails the test deterministically on
+// timeout instead of relying on a single fixed sleep. act may be nil for a
+// pure wait. Used to gate a NEGATIVE assertion on a POSITIVE sentinel: once the
+// sentinel event (which was generated after the action under test) is observed,
+// the pipeline has demonstrably drained past that action.
+func pollUntil(t *testing.T, act func(), cond func() bool, timeout time.Duration, desc string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if act != nil {
+			act()
+		}
+		if cond() {
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Fatalf("timeout after %s waiting for %s", timeout, desc)
+}
+
 // withNodeAgentConfig mutates config.json + restarts the DaemonSet; the returned func reverts + restarts.
 func withNodeAgentConfig(t *testing.T, mutate func(cfg map[string]any)) func() {
 	t.Helper()
@@ -3661,8 +3711,11 @@ func withNodeAgentConfig(t *testing.T, mutate func(cfg map[string]any)) func() {
 		c.Data["config.json"] = body
 		_, e = k8s.KubernetesClient.CoreV1().ConfigMaps(nsKS).Update(context.Background(), c, metav1.UpdateOptions{})
 		require.NoError(t, e, "update node-agent ConfigMap")
+		// RestartDaemonSet now blocks until the new-config pod is actually rolled
+		// out and ready; a short settle lets node-agent re-attach to running
+		// containers (IG fanotify marks) before the test generates events.
 		require.NoError(t, testutils.RestartDaemonSet(nsKS, cmName), "restart node-agent")
-		time.Sleep(45 * time.Second)
+		time.Sleep(20 * time.Second)
 	}
 	apply(string(updated))
 	return func() { apply(original) }
@@ -3791,26 +3844,38 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		require.NoError(t, err, "control workload")
 		require.NoError(t, ctl.WaitForReady(80))
 
-		time.Sleep(90 * time.Second)
+		// Positive sentinel: the identical, co-deployed CONTROL gets profiled. Once
+		// it has a ContainerProfile, the excluded one would too if it were not
+		// excluded — so the excluded's ABSENCE is deterministic, not "not yet".
+		pollUntil(t, nil, func() bool {
+			cps, _ := ctl.GetContainerProfiles()
+			return len(cps) > 0
+		}, 3*time.Minute, "the non-excluded control workload must be profiled")
 
 		exCPs, _ := exNS.GetContainerProfiles()
-		require.Empty(t, exCPs, "an excluded-namespace workload must produce NO ContainerProfile")
-		ctlCPs, _ := ctl.GetContainerProfiles()
-		require.NotEmpty(t, ctlCPs, "a non-excluded workload must still be profiled (exclusion must be selective)")
+		require.Empty(t, exCPs, "an excluded-namespace workload must produce NO ContainerProfile (the control already has one)")
 
-		for i := 0; i < 5; i++ {
+		// Excluded containers are dropped at IgnoreContainer — no profile AND no
+		// event collection — so id execs cannot alert. The control-CP sentinel
+		// above establishes the timing floor, making 0 deterministic.
+		for i := 0; i < 3; i++ {
 			_, _, _ = exNS.ExecIntoPod([]string{"/usr/bin/id"}, "app")
-			time.Sleep(2 * time.Second)
 		}
-		time.Sleep(20 * time.Second)
 		require.Equal(t, 0, countRuleAlerts(t, excluded.Name, "R0001", "app", "id"),
 			"an excluded container must generate no alerts")
 	})
 
 	t.Run("LearningDurationOverride", func(t *testing.T) {
+		// Drive a short AND frequently-checkpointed learning window. maxSniffing
+		// must be comfortably larger than updateDataPeriod, otherwise the "sniff
+		// window elapsed -> finalize" check can fall between update ticks and the
+		// profile never completes (the observed flake with 30s==30s). 40s sniff +
+		// 10s checkpoints finalizes reliably at ~40-50s, still far under the
+		// multi-minute default so the elapsed bound below stays discriminating.
 		restore := withNodeAgentConfig(t, func(cfg map[string]any) {
-			cfg["maxSniffingTimePerContainer"] = "45s"
-			cfg["initialDelay"] = "10s"
+			cfg["initialDelay"] = "5s"
+			cfg["maxSniffingTimePerContainer"] = "40s"
+			cfg["updateDataPeriod"] = "10s"
 		})
 		defer restore()
 
@@ -3819,10 +3884,20 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		require.NoError(t, err, "workload")
 		require.NoError(t, wl.WaitForReady(80))
 
-		deadline := time.Now().Add(90 * time.Second)
+		// Gate on node-agent actually tracking the workload (its CP exists) before
+		// timing completion, so a slow attach isn't charged against the window.
+		pollUntil(t, nil, func() bool {
+			cps, _ := wl.GetContainerProfiles()
+			return len(cps) > 0
+		}, 2*time.Minute, "node-agent must create the learner ContainerProfile")
+
+		// Completion is the deterministic signal; the elapsed bound is the
+		// discriminator — a sub-2m completion cannot happen under the default
+		// multi-minute learning period.
+		startLearn := time.Now()
 		require.NoError(t, wl.WaitForContainerProfileCompletion(90), "profile must complete within the shortened window")
-		require.True(t, time.Now().Before(deadline),
-			"completion must track the configured maxSniffingTimePerContainer, not a longer default")
+		require.Less(t, time.Since(startLearn), 2*time.Minute,
+			"completion must track the configured ~40s window, not the multi-minute default")
 	})
 }
 
@@ -3856,4 +3931,362 @@ func Test_49_EphemeralContainerFullTreatment(t *testing.T) {
 		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "ephcon")
 		return countRuleAlerts(t, ns.Name, "R0001", "ephcon", "id") > 0
 	}, 2*time.Minute, 10*time.Second, "id was not in the ephemeral container's learned profile — it must fire R0001 (detected + alerted like any other container)")
+}
+
+// Test_50_ServiceRefNetworkNeighbor validates serviceRef/serviceSelector end to
+// end (k8sstormcenter/node-agent#92) against REAL GitOps traffic: a Flux
+// source-controller reconciling HelmRepository CRs. Its egress is authored
+// purely as Kubernetes-native selectors — serviceRef default/kubernetes for the
+// apiserver, serviceRef kube-system/kube-dns for name resolution, and a
+// serviceSelector role=helm-repo fanning across the two repo Services it is
+// allowed to fetch. Nothing is exec'd and no address is hardcoded; the
+// controller's own reconcile loop generates every connection.
+//
+// The negative is the lateral move a broad serviceCIDR entry would hide: the
+// HelmRepository URL is repointed at decoy-repo — a sibling Service on the same
+// port, backed by its own pod, carrying none of the selector's labels — and the
+// controller itself fetches it. R0011 MUST fire for that and MUST NOT fire for
+// the allowlisted Services.
+func Test_50_ServiceRefNetworkNeighbor(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	const (
+		cpName        = "serviceref-flux-cp"
+		containerName = "manager"
+	)
+	port80, port443, port53 := int32(80), int32(443), int32(53)
+
+	ns := testutils.NewRandomNamespace()
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	// Authored profile: NETWORK ONLY. No syscalls/execs — they are irrelevant to
+	// a network test and only add false-positive surface. Every peer is named,
+	// never addressed.
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: cpName, Namespace: ns.Name},
+		Spec: v1beta1.ContainerProfileSpec{
+			LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "source-controller"}},
+			Egress: []v1beta1.NetworkNeighbor{
+				{
+					Identifier:          "apiserver",
+					Type:                v1beta1.CommunicationTypeEgress,
+					ServiceRefNamespace: "default",
+					ServiceRefName:      "kubernetes",
+					Ports:               []v1beta1.NetworkPort{{Name: "TCP-443", Protocol: v1beta1.ProtocolTCP, Port: &port443}},
+				},
+				{
+					Identifier:          "cluster-dns",
+					Type:                v1beta1.CommunicationTypeEgress,
+					ServiceRefNamespace: "kube-system",
+					ServiceRefName:      "kube-dns",
+					Ports: []v1beta1.NetworkPort{
+						{Name: "UDP-53", Protocol: v1beta1.ProtocolUDP, Port: &port53},
+						{Name: "TCP-53", Protocol: v1beta1.ProtocolTCP, Port: &port53},
+					},
+				},
+				{
+					Identifier:        "helm-repos",
+					Type:              v1beta1.CommunicationTypeEgress,
+					ServiceSelector:   &metav1.LabelSelector{MatchLabels: map[string]string{"role": "helm-repo"}},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns.Name}},
+					Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: v1beta1.ProtocolTCP, Port: &port80}},
+				},
+			},
+		},
+	}
+	_, err := storageClient.ContainerProfiles(ns.Name).Create(context.Background(), cp, metav1.CreateOptions{})
+	require.NoError(t, err, "create authored ContainerProfile")
+	require.Eventually(t, func() bool {
+		_, e := storageClient.ContainerProfiles(ns.Name).Get(context.Background(), cpName, v1.GetOptions{})
+		return e == nil
+	}, 30*time.Second, time.Second, "authored CP must be in storage before pod deploy")
+
+	require.NoError(t, testutils.ApplyMultiDocDir(ns.Name, path.Join(utils.CurrentDir(), "resources/serviceref-suite")),
+		"apply flux source-controller + helm repo suite")
+
+	waitDeploy := func(name string) {
+		t.Helper()
+		require.Eventually(t, func() bool {
+			d, e := k8sClient.KubernetesClient.AppsV1().Deployments(ns.Name).Get(context.TODO(), name, metav1.GetOptions{})
+			return e == nil && d.Status.ReadyReplicas > 0
+		}, 3*time.Minute, 5*time.Second, "%s must become ready", name)
+	}
+	waitDeploy("helm-repo")
+	waitDeploy("decoy-repo")
+	waitDeploy("source-controller")
+
+	countRule := func(ruleID string) int {
+		alerts, _ := testutils.GetAlerts(ns.Name)
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID && a.Labels["container_name"] == containerName {
+				n++
+			}
+		}
+		return n
+	}
+
+	helmRepoGVR := schema.GroupVersionResource{Group: "source.toolkit.fluxcd.io", Version: "v1", Resource: "helmrepositories"}
+	repoClient := k8sClient.DynamicClient.Resource(helmRepoGVR).Namespace(ns.Name)
+	newRepo := func(name, svc string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "source.toolkit.fluxcd.io/v1",
+			"kind":       "HelmRepository",
+			"metadata":   map[string]interface{}{"name": name, "namespace": ns.Name},
+			// Trailing-dot FQDN: absolute, so the resolver does not walk the
+			// search list and emit extra lookups.
+			"spec": map[string]interface{}{
+				"interval": "30s",
+				"url":      fmt.Sprintf("http://%s.%s.svc.cluster.local./", svc, ns.Name),
+			},
+		}}
+	}
+	repoReady := func(name string) bool {
+		obj, e := repoClient.Get(context.TODO(), name, metav1.GetOptions{})
+		if e != nil {
+			return false
+		}
+		conds, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+		for _, c := range conds {
+			m, ok := c.(map[string]interface{})
+			if ok && m["type"] == "Ready" && m["status"] == "True" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Let node-agent bind the profile and fill its Service/EndpointSlice caches
+	// before any reconcile traffic is judged.
+	time.Sleep(40 * time.Second)
+
+	// Phase 1 — the controller reconciles both allowlisted repo Services while
+	// continuously talking to the apiserver and cluster DNS. Every one of those
+	// peers is named by the profile, so no egress alert may fire.
+	t.Run("selector_allowed_no_alert", func(t *testing.T) {
+		for _, r := range []struct{ name, svc string }{{"primary", "helm-primary"}, {"mirror", "helm-mirror"}} {
+			_, e := repoClient.Create(context.TODO(), newRepo(r.name, r.svc), metav1.CreateOptions{})
+			require.NoError(t, e, "create HelmRepository %s", r.name)
+		}
+		for _, n := range []string{"primary", "mirror"} {
+			require.Eventually(t, func() bool { return repoReady(n) }, 3*time.Minute, 10*time.Second,
+				"HelmRepository %s must reconcile (real fetch through an allowlisted Service)", n)
+		}
+		// Two further reconcile intervals of steady-state traffic.
+		time.Sleep(90 * time.Second)
+		assert.Equal(t, 0, countRule("R0011"),
+			"apiserver/DNS/helm-repo egress is fully named by serviceRef+serviceSelector — R0011 may not fire")
+	})
+
+	// Phase 2 — the GitOps source of truth is tampered with: primary is
+	// repointed at decoy-repo, a sibling Service on the same port that the
+	// role=helm-repo selector does not cover. source-controller fetches it on
+	// its own next reconcile. This is the lateral move a serviceCIDR entry hides.
+	t.Run("sibling_service_pivot_fires_alert", func(t *testing.T) {
+		before := countRule("R0011")
+		patch := []byte(fmt.Sprintf(`{"spec":{"url":"http://decoy-repo.%s.svc.cluster.local./"}}`, ns.Name))
+		_, e := repoClient.Patch(context.TODO(), "primary", types.MergePatchType, patch, metav1.PatchOptions{})
+		require.NoError(t, e, "repoint HelmRepository at the decoy Service")
+		require.Eventually(t, func() bool {
+			return countRule("R0011") > before
+		}, 4*time.Minute, 15*time.Second,
+			"egress to an unlisted sibling Service MUST fire R0011 — the selector is narrow, not a blanket")
+	})
+}
+
+// Test_51_ServiceRefIngressR0012 is the ingress twin of Test_50: nginx serves
+// two real clients; the profile names one of them (ingress serviceRef, whose
+// resolution covers the client Service's ClusterIP and pod endpoint IPs), and
+// R0012 must stay silent for it while firing for the unlisted one (k6).
+func Test_51_ServiceRefIngressR0012(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	const cpName = "serviceref-ingress-cp"
+	port80 := int32(80)
+
+	ns := testutils.NewRandomNamespace()
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	cp := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: cpName, Namespace: ns.Name},
+		Spec: v1beta1.ContainerProfileSpec{
+			LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "helm-repo"}},
+			Ingress: []v1beta1.NetworkNeighbor{
+				{
+					Identifier:          "gitops-clients",
+					Type:                v1beta1.CommunicationTypeIngress,
+					ServiceRefNamespace: ns.Name,
+					ServiceRefName:      "source-controller",
+					Ports:               []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: v1beta1.ProtocolTCP, Port: &port80}},
+				},
+			},
+		},
+	}
+	_, err := storageClient.ContainerProfiles(ns.Name).Create(context.Background(), cp, metav1.CreateOptions{})
+	require.NoError(t, err, "create authored ContainerProfile")
+
+	require.NoError(t, testutils.ApplyMultiDocDir(ns.Name, path.Join(utils.CurrentDir(), "resources/serviceref-suite")),
+		"apply flux source-controller + helm repo suite")
+
+	patch := []byte(fmt.Sprintf(`{"spec":{"template":{"metadata":{"labels":{"kubescape.io/user-defined-profile":%q}}}}}`, cpName))
+	_, err = k8sClient.KubernetesClient.AppsV1().Deployments(ns.Name).Patch(context.TODO(), "helm-repo", types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	require.NoError(t, err, "bind profile to helm-repo pods")
+
+	waitDeploy := func(name string) {
+		t.Helper()
+		require.Eventually(t, func() bool {
+			d, e := k8sClient.KubernetesClient.AppsV1().Deployments(ns.Name).Get(context.TODO(), name, metav1.GetOptions{})
+			return e == nil && d.Status.ReadyReplicas > 0 && d.Status.UpdatedReplicas == d.Status.ReadyReplicas
+		}, 3*time.Minute, 5*time.Second, "%s must become ready", name)
+	}
+	waitDeploy("helm-repo")
+	waitDeploy("source-controller")
+
+	countR0012 := func() int {
+		alerts, _ := testutils.GetAlerts(ns.Name)
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == "R0012" && a.Labels["container_name"] == "nginx" {
+				n++
+			}
+		}
+		return n
+	}
+
+	helmRepoGVR := schema.GroupVersionResource{Group: "source.toolkit.fluxcd.io", Version: "v1", Resource: "helmrepositories"}
+	repoClient := k8sClient.DynamicClient.Resource(helmRepoGVR).Namespace(ns.Name)
+	repo := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "source.toolkit.fluxcd.io/v1",
+		"kind":       "HelmRepository",
+		"metadata":   map[string]interface{}{"name": "primary", "namespace": ns.Name},
+		"spec": map[string]interface{}{
+			"interval": "30s",
+			"url":      fmt.Sprintf("http://helm-primary.%s.svc.cluster.local./", ns.Name),
+		},
+	}}
+	_, err = repoClient.Create(context.TODO(), repo, metav1.CreateOptions{})
+	require.NoError(t, err, "create HelmRepository")
+
+	time.Sleep(40 * time.Second)
+
+	t.Run("listed_client_no_r0012", func(t *testing.T) {
+		// Two reconcile intervals of real source-controller fetches into nginx.
+		time.Sleep(90 * time.Second)
+		assert.Equal(t, 0, countR0012(),
+			"ingress from the serviceRef-listed client must not fire R0012")
+	})
+
+	t.Run("unlisted_client_fires_r0012", func(t *testing.T) {
+		before := countR0012()
+		require.NoError(t, testutils.ApplyMultiDocYAML(ns.Name, path.Join(utils.CurrentDir(), "resources/serviceref-k6.yaml")),
+			"deploy unlisted k6 client")
+		require.Eventually(t, func() bool {
+			return countR0012() > before
+		}, 4*time.Minute, 15*time.Second,
+			"ingress from a client no serviceRef names MUST fire R0012")
+	})
+}
+
+// Test_53: default posture (learned CP only, no user-defined profile) — replaying the exact learn-window traffic after completion must yield zero R0011/R0012, and the learn window itself must be alert-free (profile_incomplete suppression), cf Test_01/Test_51.
+func Test_53_DefaultLearnedNetworkFalsePositives(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+
+	server, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	require.NoError(t, err, "create nginx server workload")
+	require.NoError(t, testutils.ApplyMultiDocYAML(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-service.yaml")), "create nginx service")
+	client, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/network-default-client.yaml"))
+	require.NoError(t, err, "create curl client workload")
+	require.NoError(t, server.WaitForReady(80), "server ready")
+	require.NoError(t, client.WaitForReady(80), "client ready")
+
+	time.Sleep(10 * time.Second)
+
+	svcURL := fmt.Sprintf("http://nginx-service.%s.svc.cluster.local./", ns.Name)
+	sendTraffic := func() {
+		for i := 0; i < 3; i++ {
+			_, _, _ = client.ExecIntoPod([]string{"curl", "-sS", "-m", "5", svcURL}, "curl")
+			time.Sleep(2 * time.Second)
+		}
+	}
+	sendTraffic()
+
+	require.NoError(t, client.WaitForContainerProfileCompletion(100), "client CP completed")
+	require.NoError(t, server.WaitForContainerProfileCompletion(100), "server CP completed")
+
+	time.Sleep(30 * time.Second)
+
+	learnR0011 := countRuleAlerts(t, ns.Name, "R0011", "curl", "")
+	learnR0012 := countRuleAlerts(t, ns.Name, "R0012", "nginx", "")
+	assert.Equal(t, 0, learnR0011, "R0011 must be suppressed (profile_incomplete) during the learn window")
+	assert.Equal(t, 0, learnR0012, "R0012 must be suppressed (profile_incomplete) during the learn window")
+
+	sendTraffic()
+
+	time.Sleep(30 * time.Second)
+
+	assert.Equal(t, learnR0011, countRuleAlerts(t, ns.Name, "R0011", "curl", ""),
+		"replayed learn-window egress (kube-dns + nginx service) must not fire R0011; a diff here is a default-posture false positive — the learned svc entry stores the service SELECTOR while kubeipresolver stamps the service metadata LABELS on the event, and nginx-service has none")
+	assert.Equal(t, learnR0012, countRuleAlerts(t, ns.Name, "R0012", "nginx", ""),
+		"replayed learn-window ingress (same client pod) must not fire R0012")
+
+	// Node-IP ingress: a hostNetwork client reaches nginx with source = the node
+	// InternalIP (172.19.0.2 on Kind), which was never in nginx's learn window.
+	// The default host-peer allowlist (alertOnHostPeers=false) resolves entity:host
+	// to the node IPs, so this must add zero R0012 — the (b) leg. The (a) leg
+	// (without the allowlist the node IP is uncovered and would alert) is pinned
+	// at unit level in networkpeer.TestWithHostPeer_ResolvesNodeIPsIntoAddressSurface.
+	t.Run("node_ip_ingress_silenced_by_default", func(t *testing.T) {
+		require.NoError(t, testutils.ApplyMultiDocYAML(ns.Name, path.Join(utils.CurrentDir(), "resources/network-hostnet-client.yaml")), "deploy hostNetwork client")
+		hostClient, err := testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, "Deployment", "hostnet-client")
+		require.NoError(t, err, "resolve hostnet-client")
+		require.NoError(t, hostClient.WaitForReady(80), "hostnet-client ready")
+		before := countRuleAlerts(t, ns.Name, "R0012", "nginx", "")
+		for i := 0; i < 5; i++ {
+			_, _, _ = hostClient.ExecIntoPod([]string{"curl", "-sS", "-m", "5", svcURL}, "curl")
+			time.Sleep(2 * time.Second)
+		}
+		time.Sleep(30 * time.Second)
+		after := countRuleAlerts(t, ns.Name, "R0012", "nginx", "")
+		t.Logf("node-IP ingress: R0012(nginx) before=%d after=%d", before, after)
+		assert.Equal(t, before, after,
+			"ingress from the node IP must be silenced by the default host-peer allowlist (alertOnHostPeers=false)")
+	})
+
+	// Loopback measurement: with the 127.*/::1 rule guards AND the learn-time
+	// loopback drop removed, localhost traffic is subject to R0011/R0012 and is
+	// learnable. A curl sidecar hits loopserver on 127.0.0.1 (shared pod netns),
+	// so both containers baseline the loopback peer; the replay then measures the
+	// residual FP tax. Unique container names (loopclient/loopserver) keep the
+	// counts separate from the main nginx/curl workloads.
+	t.Run("loopback_learn_enforce_measurement", func(t *testing.T) {
+		require.NoError(t, testutils.ApplyMultiDocYAML(ns.Name, path.Join(utils.CurrentDir(), "resources/network-loopback-pod.yaml")), "deploy loopback pod")
+		lb, err := testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, "Deployment", "loopback")
+		require.NoError(t, err, "resolve loopback")
+		require.NoError(t, lb.WaitForReady(80), "loopback ready")
+		loop := func() {
+			for i := 0; i < 5; i++ {
+				_, _, _ = lb.ExecIntoPod([]string{"curl", "-sS", "-m", "5", "http://127.0.0.1:80/"}, "loopclient")
+				time.Sleep(2 * time.Second)
+			}
+		}
+		loop()
+		require.NoError(t, lb.WaitForContainerProfileCompletion(100), "loopback CP completed")
+		time.Sleep(30 * time.Second)
+		learn11 := countRuleAlerts(t, ns.Name, "R0011", "loopclient", "")
+		learn12 := countRuleAlerts(t, ns.Name, "R0012", "loopserver", "")
+		loop()
+		time.Sleep(30 * time.Second)
+		replay11 := countRuleAlerts(t, ns.Name, "R0011", "loopclient", "")
+		replay12 := countRuleAlerts(t, ns.Name, "R0012", "loopserver", "")
+		t.Logf("LOOPBACK FP measurement (guards removed): R0011(loopclient) learn=%d replay=%d | R0012(loopserver) learn=%d replay=%d", learn11, replay11, learn12, replay12)
+		assert.Equal(t, learn11, replay11, "replayed loopback egress must not add R0011 once learned")
+		assert.Equal(t, learn12, replay12, "replayed loopback ingress must not add R0012 once learned")
+	})
 }

@@ -34,7 +34,7 @@ require (
 	github.com/kubescape/backend v0.0.39
 	github.com/kubescape/go-logger v0.0.32
 	github.com/kubescape/k8s-interface v0.0.214
-	github.com/kubescape/storage v0.0.303
+	github.com/kubescape/storage v0.0.320
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opcoder0/fanotify v0.4.2

@@ -2,6 +2,7 @@ package containerprofilenetwork
 
 import (
 	"net"
+	"reflect"
 	"strings"
 
 	"github.com/google/cel-go/common/types"
@@ -10,6 +11,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/storage/pkg/registry/file/networkmatch"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 // matchIPField is the wildcard-aware adapter from the projection layer's
@@ -57,6 +60,29 @@ func matchIPField(field *objectcache.ProjectedField, observed string) bool {
 	}
 	entries = append(entries, field.Patterns...)
 	return networkmatch.MatchIP(entries, observed)
+}
+
+// matchAddrPort reports whether observed (address, protocol, port) falls within
+// any single neighbor entry: its addresses match AND the entry allows the port
+// (nil Ports = no ports stanza = any port; a populated map matches literal keys only).
+func matchAddrPort(groups []objectcache.AddrPortGroup, address, protocol string, port int32) bool {
+	if address == "" {
+		return false
+	}
+	key := objectcache.PortKey(protocol, port)
+	for i := range groups {
+		g := &groups[i]
+		if !networkmatch.MatchIP(g.Addrs, address) {
+			continue
+		}
+		if g.Ports == nil {
+			return true
+		}
+		if _, ok := g.Ports[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func matchDNSField(field *objectcache.ProjectedField, observed string) bool {
@@ -171,9 +197,6 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInEgress(containe
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(address)
 	}
-	// port/protocol projection (AddressPortsByAddr) is out of scope for the
-	// projection-v1 layer upstream landed; matchers degrade to address-only.
-	// Wildcards remain enforced via matchIPField.
 	portInt, ok := port.Value().(int64)
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(port)
@@ -181,14 +204,15 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInEgress(containe
 	if portInt < 0 || portInt > 65535 {
 		return types.Bool(false)
 	}
-	if _, ok := protocol.Value().(string); !ok {
+	protocolStr, ok := protocol.Value().(string)
+	if !ok {
 		return types.MaybeNoSuchOverloadErr(protocol)
 	}
 	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
-	return types.Bool(matchIPField(&cp.EgressAddresses, addressStr))
+	return types.Bool(matchAddrPort(cp.EgressAddrPorts, addressStr, protocolStr, int32(portInt)))
 }
 
 func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(containerID, address, port, protocol ref.Val) ref.Val {
@@ -210,12 +234,132 @@ func (l *containerProfileNetworkLibrary) wasAddressPortProtocolInIngress(contain
 	if portInt < 0 || portInt > 65535 {
 		return types.Bool(false)
 	}
-	if _, ok := protocol.Value().(string); !ok {
+	protocolStr, ok := protocol.Value().(string)
+	if !ok {
 		return types.MaybeNoSuchOverloadErr(protocol)
 	}
 	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
 	if err != nil {
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
-	return types.Bool(matchIPField(&cp.IngressAddresses, addressStr))
+	return types.Bool(matchAddrPort(cp.IngressAddrPorts, addressStr, protocolStr, int32(portInt)))
+}
+
+// namespaceSelectorMatches follows NetworkPolicy semantics. An OMITTED (nil)
+// selector means the profile's OWN namespace (peerNs == profileNs): a peer is
+// same-namespace unless it says otherwise, so a pod that merely copies an
+// allowlisted peer's labels in another namespace does not match. An explicit
+// EMPTY selector ({}) is cluster-wide, opt-in (LabelSelectorAsSelector maps {}
+// to Everything). An explicit selector with labels matches the peer namespace by
+// its kubernetes.io/metadata.name label (e.g. kube-system). Unparseable fails closed.
+func namespaceSelectorMatches(sel *metav1.LabelSelector, peerNs, profileNs string) bool {
+	if sel == nil {
+		return peerNs == profileNs
+	}
+	s, err := metav1.LabelSelectorAsSelector(sel)
+	if err != nil {
+		return false
+	}
+	return s.Matches(labels.Set{"kubernetes.io/metadata.name": peerNs})
+}
+
+// wasSelectorInPeers reports whether the peer identified by (podLabels, ns)
+// matches any peer entry's podSelector AND its namespaceSelector. An empty
+// podSelector matches NOTHING (fail closed → the peer alerts), the opposite of
+// NetworkPolicy's match-all: an allowlist entry must name what it permits.
+func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, ns, profileNs, protocol string, port int32) bool {
+	key := objectcache.PortKey(protocol, port)
+	for i := range peers {
+		peer := &peers[i]
+		if peer.PodSelector == nil ||
+			(len(peer.PodSelector.MatchLabels) == 0 && len(peer.PodSelector.MatchExpressions) == 0) {
+			continue
+		}
+		ps, err := metav1.LabelSelectorAsSelector(peer.PodSelector)
+		if err != nil {
+			continue
+		}
+		if !ps.Matches(podLabels) || !namespaceSelectorMatches(peer.NamespaceSelector, ns, profileNs) {
+			continue
+		}
+		if peer.Ports == nil {
+			return true
+		}
+		if _, ok := peer.Ports[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *containerProfileNetworkLibrary) wasSelectorInIngress(containerID, namespace, podLabels, port, protocol ref.Val) ref.Val {
+	return l.wasSelectorIn(containerID, namespace, podLabels, port, protocol, true)
+}
+
+func (l *containerProfileNetworkLibrary) wasSelectorInEgress(containerID, namespace, podLabels, port, protocol ref.Val) ref.Val {
+	return l.wasSelectorIn(containerID, namespace, podLabels, port, protocol, false)
+}
+
+// wasSelectorIn reports whether the runtime peer — identified by the namespace
+// and pod labels that Inspektor Gadget's kubeipresolver stamps onto the network
+// event — matches any of the profile's ingress-or-egress peer selectors.
+//
+// Matching on the peer's identity (namespace + labels) rather than its IP is the
+// whole point: it is stable across pod IP churn AND works across nodes, because
+// kubeipresolver resolves the peer against a cluster-wide pod inventory before
+// the event ever reaches CEL. There is deliberately no IP→pod lookup here — that
+// would reintroduce a dependency on node-agent's node-local pod cache, which is
+// exactly what breaks cross-node peers.
+func (l *containerProfileNetworkLibrary) wasSelectorIn(containerID, namespace, podLabels, port, protocol ref.Val, ingress bool) ref.Val {
+	if l.objectCache == nil {
+		return types.NewErr("objectCache is nil")
+	}
+	containerIDStr, ok := containerID.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(containerID)
+	}
+	nsStr, ok := namespace.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(namespace)
+	}
+	portInt, ok := port.Value().(int64)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(port)
+	}
+	protocolStr, ok := protocol.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(protocol)
+	}
+	if nsStr == "" {
+		// The peer did not resolve to a pod (external IP, or the resolver had no
+		// inventory entry): a nil peer never satisfies a selector — it alerts.
+		return types.Bool(false)
+	}
+	peerLabels := refValToStringMap(podLabels)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
+	if err != nil {
+		return cache.NewProfileNotAvailableErr("%v", err)
+	}
+	peers := cp.EgressPeers
+	if ingress {
+		peers = cp.IngressPeers
+	}
+	if len(peers) == 0 {
+		return types.Bool(false)
+	}
+	return types.Bool(wasSelectorInPeers(peers, labels.Set(peerLabels), nsStr, cp.Namespace, protocolStr, int32(portInt)))
+}
+
+// refValToStringMap converts a CEL map argument to a Go map[string]string. A nil
+// or non-map value yields nil (treated as "peer has no labels").
+func refValToStringMap(v ref.Val) map[string]string {
+	if v == nil {
+		return nil
+	}
+	native, err := v.ConvertToNative(reflect.TypeOf(map[string]string(nil)))
+	if err != nil {
+		return nil
+	}
+	m, _ := native.(map[string]string)
+	return m
 }

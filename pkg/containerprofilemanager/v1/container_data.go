@@ -222,7 +222,6 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 		}
 
 	} else if networkEvent.Destination.Kind == EndpointKindService {
-		// For service, we need to retrieve it and use its selector
 		svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name) // TODO: use IG inventory as this can generate a lot of API calls.
 		if err != nil {
 			logger.L().Warning("failed to get service",
@@ -231,19 +230,16 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 			return nil
 		}
 
+		// The ClusterIP is stable, so record it: detection matches it directly when the event carries the pre-DNAT address, covering selectorless services and the learn/detect label asymmetry.
+		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
+
 		var selector map[string]string
 		if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
-			// The default service has no selectors, in addition, we want to save the default service address
 			selector = svc.GetLabels()
-			neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 		} else {
 			selector = svc.GetServiceSelector()
 		}
-
-		if len(selector) == 0 {
-			// TODO: check if we need to handle services with no selectors
-			return nil
-		} else {
+		if len(selector) > 0 {
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: selector,
 			}
@@ -255,10 +251,6 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 		}
 
 	} else {
-		if networkEvent.Destination.IPAddress == "127.0.0.1" {
-			// No need to generate for localhost
-			return nil
-		}
 		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 
 		if dnsResolverClient != nil {

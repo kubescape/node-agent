@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 )
 
@@ -32,6 +33,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 	})
 
 	nn := &v1beta1.ContainerProfile{}
+	nn.Namespace = "prod"
 	nn.Spec = v1beta1.ContainerProfileSpec{
 		Egress: []v1beta1.NetworkNeighbor{
 			{
@@ -72,6 +74,10 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 					},
 				},
 			},
+			{
+				Identifier:  "db-clients",
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db-client"}},
+			},
 		},
 		Ingress: []v1beta1.NetworkNeighbor{
 			{
@@ -100,6 +106,11 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 						Port:     ptr.To(int32(3000)),
 					},
 				},
+			},
+			{
+				Identifier:        "frontends",
+				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "frontend"}},
+				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "web"}},
 			},
 		},
 	}
@@ -209,28 +220,24 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check non-existent egress address with port and protocol",
 			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 9999, "TCP")`,
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check non-existent ingress address with port and protocol",
 			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 9999, "TCP")`,
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check wrong protocol for existing address and port",
 			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "UDP")`,
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
-			// v1 degradation: port/protocol projection is out of scope; address IS in profile → true.
 			name:           "Check wrong protocol for existing ingress address and port",
 			expression:     `cp.was_address_port_protocol_in_ingress(containerID, "172.16.0.10", 8080, "UDP")`,
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
 			name:           "Complex network check with port and protocol - egress",
@@ -243,9 +250,43 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			// v1 degradation: both sides match on address only → true.
 			name:           "Mixed valid and invalid port protocol checks",
 			expression:     `cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 80, "TCP") && cp.was_address_port_protocol_in_egress(containerID, "192.168.1.100", 9999, "TCP")`,
+			expectedResult: false,
+		},
+		{
+			name:           "Check egress selector peer",
+			expression:     `cp.was_selector_in_egress(containerID, "prod", {"app": "db-client"}, 443, "TCP")`,
+			expectedResult: true,
+		},
+		{
+			name:           "Check egress selector peer wrong labels",
+			expression:     `cp.was_selector_in_egress(containerID, "prod", {"app": "attacker"}, 443, "TCP")`,
+			expectedResult: false,
+		},
+		{
+			name:           "Check egress selector peer unresolved namespace",
+			expression:     `cp.was_selector_in_egress(containerID, "", {"app": "db-client"}, 443, "TCP")`,
+			expectedResult: false,
+		},
+		{
+			name:           "Check ingress selector peer with namespace scope",
+			expression:     `cp.was_selector_in_ingress(containerID, "web", {"app": "frontend"}, 443, "TCP")`,
+			expectedResult: true,
+		},
+		{
+			name:           "Check ingress selector peer wrong namespace",
+			expression:     `cp.was_selector_in_ingress(containerID, "prod", {"app": "frontend"}, 443, "TCP")`,
+			expectedResult: false,
+		},
+		{
+			name:           "Selector direction isolation - egress peer not in ingress",
+			expression:     `cp.was_selector_in_ingress(containerID, "prod", {"app": "db-client"}, 443, "TCP")`,
+			expectedResult: false,
+		},
+		{
+			name:           "Combined address and selector check",
+			expression:     `cp.was_address_in_egress(containerID, "8.8.8.8") && cp.was_selector_in_egress(containerID, "prod", {"app": "db-client"}, 443, "TCP")`,
 			expectedResult: true,
 		},
 	}

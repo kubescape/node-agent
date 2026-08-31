@@ -78,6 +78,41 @@
     "PrefixHits": {},
     "SuffixHits": {}
   },
+  "ingressPeers": [
+    {
+      "PodSelector": {
+        "matchLabels": {
+          "app": "redis-client"
+        }
+      },
+      "NamespaceSelector": null,
+      "Ports": null
+    },
+    {
+      "PodSelector": {
+        "matchLabels": {
+          "app": "probe"
+        }
+      },
+      "NamespaceSelector": {
+        "matchLabels": {
+          "kubernetes.io/metadata.name": "monitoring"
+        }
+      },
+      "Ports": null
+    }
+  ],
+  "egressPeers": [
+    {
+      "PodSelector": {
+        "matchLabels": {
+          "app": "upstream"
+        }
+      },
+      "NamespaceSelector": null,
+      "Ports": null
+    }
+  ],
   "execsByPath": null,
   "policyByRuleId": null,
   "callStacks": null

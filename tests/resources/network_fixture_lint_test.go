@@ -74,6 +74,11 @@ type netEndpoint struct {
 	// declared target for R-NN-12.
 	PodSelector       json.RawMessage `json:"podSelector"`
 	NamespaceSelector json.RawMessage `json:"namespaceSelector"`
+	// Service/entity targets resolved to concrete IPs at projection time.
+	// Presence of any counts as a declared target for R-NN-12.
+	ServiceRefName  string          `json:"serviceRefName"`
+	ServiceSelector json.RawMessage `json:"serviceSelector"`
+	Entity          string          `json:"entity"`
 }
 
 // hasSelector reports whether a raw selector field was set to a real object
@@ -114,7 +119,7 @@ func (v NetViolation) String() string {
 //	R-NN-02 — at least one endpoint (egress or ingress) declared
 //	R-NN-10 — endpoint identifier non-empty
 //	R-NN-11 — endpoint type in {internal, external} (or unset)
-//	R-NN-12 — endpoint declares at least one target (dnsNames/ipAddresses/dns/ipAddress)
+//	R-NN-12 — endpoint declares at least one target (dnsNames/ipAddresses/dns/ipAddress/selector/serviceRef/entity)
 //	R-NN-13 — dnsNames wildcard tokens are whole-label; no recursive "**", no ascii "..."
 //	R-NN-14 — an entry MUST NOT set both singular ipAddress and plural ipAddresses
 //	R-NN-15 — ipAddresses entries are a literal IP, a CIDR, or the "*" sentinel
@@ -176,8 +181,9 @@ func lintEndpoint(dir string, e netEndpoint, add func(rule, msg string)) {
 		add("R-NN-11", where(fmt.Sprintf("type %q is not internal|external", e.Type)))
 	}
 	if len(e.DNSNames) == 0 && len(e.IPAddresses) == 0 && e.DNS == "" && e.IPAddress == "" &&
-		!hasSelector(e.PodSelector) && !hasSelector(e.NamespaceSelector) {
-		add("R-NN-12", where("endpoint declares no target (dnsNames/ipAddresses/dns/ipAddress/selector)"))
+		!hasSelector(e.PodSelector) && !hasSelector(e.NamespaceSelector) &&
+		e.ServiceRefName == "" && !hasSelector(e.ServiceSelector) && e.Entity == "" {
+		add("R-NN-12", where("endpoint declares no target (dnsNames/ipAddresses/dns/ipAddress/selector/serviceRef/entity)"))
 	}
 	if e.IPAddress != "" && len(e.IPAddresses) > 0 {
 		add("R-NN-14", where("sets both singular ipAddress and plural ipAddresses — pick one"))
@@ -205,8 +211,9 @@ func lintEndpoint(dir string, e netEndpoint, add func(rule, msg string)) {
 		if p.Protocol != "TCP" && p.Protocol != "UDP" {
 			add("R-NN-20", where(fmt.Sprintf("port %q protocol %q is not TCP|UDP", p.Name, p.Protocol)))
 		}
-		if p.Port < 1 || p.Port > 65535 {
-			add("R-NN-20", where(fmt.Sprintf("port %q value %d out of range 1..65535", p.Name, p.Port)))
+		// Port 0 is a literal (an explicit 0 entry); the any-port wildcard is an absent ports stanza, not port 0 (matches R0011/R0012 port semantics).
+		if p.Port < 0 || p.Port > 65535 {
+			add("R-NN-20", where(fmt.Sprintf("port %q value %d out of range 0..65535", p.Name, p.Port)))
 		}
 	}
 }

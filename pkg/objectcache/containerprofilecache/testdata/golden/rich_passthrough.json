@@ -97,6 +97,8 @@
     "PrefixHits": {},
     "SuffixHits": {}
   },
+  "ingressPeers": null,
+  "egressPeers": null,
   "execsByPath": {
     "/bin/curl": [
       [

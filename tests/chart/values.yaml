@@ -35,7 +35,7 @@ storage:
   name: "storage"
   image:
     repository: quay.io/kubescape/storage
-    tag: v0.0.156
+    tag: v0.0.320
     pullPolicy: Always
   cleanupInterval: "6h"
   labels:
@@ -63,6 +63,7 @@ nodeAgent:
     maxLearningPeriod: 2m
     learningPeriod: 1m
     updatePeriod: 30s
+    networkServiceResolution: true
     maxDelaySeconds: 1
     prometheusExporter: enable
     httpExporterConfig: {}

@@ -51,6 +51,10 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 	pcp.Execs = projectField(s.Execs, execsPaths, true)
 	pcp.ExecsByPath = extractExecsByPath(cp)
 
+	pcp.Namespace = cp.Namespace
+	pcp.IngressPeers = extractIngressPeers(cp)
+	pcp.EgressPeers = extractEgressPeers(cp)
+
 	endpointPaths := extractEndpointPaths(cp)
 	pcp.Endpoints = projectField(s.Endpoints, endpointPaths, true)
 
@@ -62,6 +66,9 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 
 	pcp.IngressDomains = projectField(s.IngressDomains, extractIngressDomains(cp), false)
 	pcp.IngressAddresses = projectField(s.IngressAddresses, extractIngressAddresses(cp), false)
+
+	pcp.EgressAddrPorts = objectcache.ExtractAddrPorts(cp.Spec.Egress)
+	pcp.IngressAddrPorts = objectcache.ExtractAddrPorts(cp.Spec.Ingress)
 
 	return pcp
 }
@@ -259,4 +266,41 @@ func extractIngressAddresses(cp *v1beta1.ContainerProfile) []string {
 		addrs = append(addrs, n.IPAddresses...)
 	}
 	return addrs
+}
+
+// extractIngressPeers / extractEgressPeers carry the label selectors of each
+// network-neighbor entry so cp.was_selector_in_{ingress,egress} can match a
+// peer by identity. Only entries that actually declare a podSelector are kept.
+func extractIngressPeers(cp *v1beta1.ContainerProfile) []objectcache.PeerSelector {
+	return extractPeers(cp.Spec.Ingress)
+}
+
+func extractEgressPeers(cp *v1beta1.ContainerProfile) []objectcache.PeerSelector {
+	return extractPeers(cp.Spec.Egress)
+}
+
+func extractPeers(neighbors []v1beta1.NetworkNeighbor) []objectcache.PeerSelector {
+	var peers []objectcache.PeerSelector
+	for i := range neighbors {
+		n := &neighbors[i]
+		if n.PodSelector == nil {
+			continue
+		}
+		var ports map[string]struct{}
+		if len(n.Ports) > 0 {
+			ports = make(map[string]struct{}, len(n.Ports))
+			for _, p := range n.Ports {
+				if p.Port == nil {
+					continue
+				}
+				ports[objectcache.PortKey(string(p.Protocol), *p.Port)] = struct{}{}
+			}
+		}
+		peers = append(peers, objectcache.PeerSelector{
+			PodSelector:       n.PodSelector,
+			NamespaceSelector: n.NamespaceSelector,
+			Ports:             ports,
+		})
+	}
+	return peers
 }

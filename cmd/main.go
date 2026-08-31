@@ -40,11 +40,13 @@ import (
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	otelmetrics "github.com/kubescape/node-agent/pkg/metricsmanager/otel"
+	"github.com/kubescape/node-agent/pkg/networkpeer"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	networkstreamv1 "github.com/kubescape/node-agent/pkg/networkstream/v1"
 	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
 	nodeprofilemanagerv1 "github.com/kubescape/node-agent/pkg/nodeprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+
 	"github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
 	"github.com/kubescape/node-agent/pkg/objectcache/dnscache"
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
@@ -73,6 +75,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
 	goruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
+	toolscache "k8s.io/client-go/tools/cache"
 )
 
 func main() {
@@ -324,6 +328,60 @@ func main() {
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
 		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, metricsProvider)
+		// Resolve serviceRef/serviceSelector/entity network neighbors against live
+		// cluster state (Service ClusterIPs + endpoints, Node IPs + CNI gateway) at
+		// projection time. Gated behind networkServiceResolutionEnabled: the
+		// cluster-wide Service+EndpointSlice list+watch (one per DaemonSet node) is
+		// only paid where profiles actually use the feature. Services and
+		// EndpointSlices are watched cluster-wide (a profile may reference any
+		// namespace's Service); the Node informer is field-selected to this agent's
+		// own node — the "host" entity is local, and a cluster-wide Node watch on
+		// every DaemonSet pod is O(nodes^2) traffic for no benefit. A TransformFunc
+		// strips managedFields/annotations (and per-endpoint fields beyond
+		// Addresses) before objects enter the cache to keep its footprint small.
+		if cfg.EnableNetworkServiceResolution {
+			svcInformers := informers.NewSharedInformerFactory(k8sClient.GetKubernetesClient(), 0)
+			nodeInformers := informers.NewSharedInformerFactoryWithOptions(
+				k8sClient.GetKubernetesClient(), 0,
+				informers.WithTweakListOptions(func(o *metav1.ListOptions) {
+					o.FieldSelector = "metadata.name=" + cfg.NodeName
+				}),
+			)
+			svcInformer := svcInformers.Core().V1().Services().Informer()
+			sliceInformer := svcInformers.Discovery().V1().EndpointSlices().Informer()
+			_ = svcInformer.SetTransform(networkpeer.TrimService)
+			_ = sliceInformer.SetTransform(networkpeer.TrimEndpointSlice)
+			serviceLister := networkpeer.NewInformerLister(
+				svcInformers.Core().V1().Services().Lister(),
+				svcInformers.Discovery().V1().EndpointSlices().Lister(),
+				nodeInformers.Core().V1().Nodes().Lister(),
+				cfg.NodeName,
+			)
+			// Advance the lister generation on any Service/EndpointSlice/Node
+			// change, so the reconciler re-projects serviceRef/entity profiles when
+			// the cluster view moves (endpoint churn, or caches that fill after
+			// startup). Per-event cost is a single atomic increment; the
+			// re-projection itself is coalesced onto the reconcile tick, and only
+			// serviceRef-using profiles are eligible.
+			bump := toolscache.ResourceEventHandlerFuncs{
+				AddFunc:    func(interface{}) { serviceLister.Bump() },
+				UpdateFunc: func(_, _ interface{}) { serviceLister.Bump() },
+				DeleteFunc: func(interface{}) { serviceLister.Bump() },
+			}
+			_, _ = svcInformer.AddEventHandler(bump)
+			_, _ = sliceInformer.AddEventHandler(bump)
+			_, _ = nodeInformers.Core().V1().Nodes().Informer().AddEventHandler(bump)
+			// Start the informers and hand the lister over WITHOUT blocking on
+			// cache sync: node-agent's core startup (container watcher, profiling)
+			// must not wait on these, and a bounded wait here previously delayed
+			// learning enough to trip the tight completion budget of Test_22. The
+			// caches fill in the background; serviceRef/entity neighbors resolve on
+			// the next reconcile once populated. nil-until-set is a no-op in
+			// projection.
+			svcInformers.Start(ctx.Done())
+			nodeInformers.Start(ctx.Done())
+			cpc.SetServiceLister(serviceLister)
+		}
 		cpc.Start(ctx)
 		if cpm, ok := containerProfileManager.(*containerprofilemanagerv1.ContainerProfileManager); ok {
 			cpm.SetCompletionNotifier(cpc)

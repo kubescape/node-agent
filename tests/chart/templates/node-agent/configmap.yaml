@@ -14,6 +14,7 @@ data:
         "prometheusExporterEnabled": {{ eq .Values.nodeAgent.config.prometheusExporter "enable" }},
         "runtimeDetectionEnabled": {{ eq .Values.capabilities.runtimeDetection "enable" }},
         "networkServiceEnabled": {{ eq .Values.capabilities.networkPolicyService "enable" }},
+        "networkServiceResolutionEnabled": {{ if hasKey .Values.nodeAgent.config "networkServiceResolution" }}{{ .Values.nodeAgent.config.networkServiceResolution }}{{ else }}true{{ end }},
         "malwareDetectionEnabled": {{ eq .Values.capabilities.malwareDetection "enable" }},
         "httpDetectionEnabled": {{ eq .Values.capabilities.httpDetection "enable" }},
         "initialDelay": "{{ .Values.nodeAgent.config.learningPeriod }}",
