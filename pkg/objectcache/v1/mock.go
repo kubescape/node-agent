@@ -285,9 +285,16 @@ func (r *RuleObjectCacheMock) SetDnsCache(dnsCache map[string]string) {
 	r.dnsCache = dnsCache
 }
 
-func (r *RuleObjectCacheMock) ResolveIpToDomain(_ string, ip string) string {
-	if domain, ok := r.dnsCache[ip]; ok {
-		return domain
+func (r *RuleObjectCacheMock) ResolveIpToDomain(containerID string, ip string) string {
+	if r.dnsCache != nil {
+		if containerID != "" {
+			if domain, ok := r.dnsCache[containerID+":"+ip]; ok {
+				return domain
+			}
+		}
+		if domain, ok := r.dnsCache[ip]; ok {
+			return domain
+		}
 	}
 	return ""
 }

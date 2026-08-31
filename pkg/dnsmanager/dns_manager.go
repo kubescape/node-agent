@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -34,16 +35,20 @@ type cacheEntry struct {
 }
 
 const (
-	defaultPositiveTTL           = 1 * time.Minute // Default TTL for successful lookups
-	defaultNegativeTTL           = 5 * time.Second // Default TTL for failed lookups
-	maxServiceCacheSize          = 50              // Maximum number of cloud services to cache per container
-	defaultPerContainerCacheSize  = 1000            // Default maximum number of DNS resolutions cached per container
-	maxRemovedContainersEntries  = 10000           // Maximum number of removed containers to track to prevent resurrection
-	defaultRemovalGracePeriod    = 2 * time.Minute // Grace period before evicting resolution cache to allow terminal profile save
+	defaultPositiveTTL           = 1 * time.Minute  // Default TTL for successful lookups
+	defaultNegativeTTL           = 5 * time.Second  // Default TTL for failed lookups
+	maxServiceCacheSize          = 50               // Maximum number of cloud services to cache per container
+	defaultPerContainerCacheSize  = 1000             // Default maximum number of DNS resolutions cached per container
+	maxRemovedContainersEntries  = 10000            // Maximum number of removed containers to track to prevent resurrection
+	defaultRemovalGracePeriod    = 10 * time.Second // Grace period before evicting resolution cache to allow terminal profile save
 )
 
 var _ DNSManagerClient = (*DNSManager)(nil)
 var _ DNSResolver = (*DNSManager)(nil)
+
+func isHost(containerID string) bool {
+	return containerID == "" || containerID == armotypes.HostContainerID
+}
 
 func CreateDNSManager(size int) *DNSManager {
 	hostCache, err := lru.New[string, string](size)
@@ -74,7 +79,7 @@ func (dm *DNSManager) isRemoved(containerID string) bool {
 }
 
 func (dm *DNSManager) getContainerCache(containerID string) *lru.Cache[string, string] {
-	if containerID == "" {
+	if isHost(containerID) {
 		return dm.hostAddressToDomain
 	}
 	if dm.isRemoved(containerID) {
@@ -111,7 +116,9 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		if dm.removedContainers != nil {
 			dm.removedContainers.Remove(containerID)
 		}
-		dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
+		if !dm.containerToCloudServices.Has(containerID) {
+			dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
+		}
 		if !dm.containerToAddressToDomain.Has(containerID) {
 			c, err := lru.New[string, string](dm.perContainerCacheSize)
 			if err != nil {
@@ -219,7 +226,7 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 }
 
 func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (string, bool) {
-	if containerID == "" {
+	if isHost(containerID) {
 		if dm.hostAddressToDomain != nil {
 			return dm.hostAddressToDomain.Get(ipAddr)
 		}
