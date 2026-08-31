@@ -138,6 +138,8 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		if dm.removedContainers != nil {
 			dm.removedContainers.Remove(containerID)
 		}
+		// Reset any lingering cache from a previous instance of this container ID
+		dm.containerToAddressToDomain.Remove(containerID)
 		if !dm.containerToCloudServices.Has(containerID) {
 			dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
 		}
@@ -209,7 +211,9 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 		// Use cached addresses
 		if containerCache != nil {
 			for _, addr := range entry.addresses {
-				containerCache.Add(addr, dnsName)
+				if addr != "" {
+					containerCache.Add(addr, dnsName)
+				}
 			}
 		}
 		return
@@ -227,9 +231,11 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	addrStrings := make([]string, 0, len(ipAddresses))
 	for _, addr := range ipAddresses {
 		addrStr := addr.String()
-		addrStrings = append(addrStrings, addrStr)
-		if containerCache != nil {
-			containerCache.Add(addrStr, dnsName)
+		if addrStr != "" {
+			addrStrings = append(addrStrings, addrStr)
+			if containerCache != nil {
+				containerCache.Add(addrStr, dnsName)
+			}
 		}
 	}
 
