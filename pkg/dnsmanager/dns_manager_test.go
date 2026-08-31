@@ -237,6 +237,20 @@ func TestContainerDNSLifecycleCleanup(t *testing.T) {
 	domainAfter, okAfter := dm.ResolveIPAddress(containerID, ip)
 	assert.False(t, okAfter)
 	assert.Equal(t, "", domainAfter)
+
+	// In-flight DNS event arrives after container removal
+	dm.ReportEvent(&utils.StructEvent{
+		EventType:   utils.DnsEventType,
+		ContainerID: containerID,
+		DNSName:     "late-arrival.org",
+		Addresses:   []string{"1.2.3.4"},
+	})
+
+	// Verify no cache is resurrected
+	assert.False(t, dm.containerToAddressToDomain.Has(containerID))
+	domainLate, okLate := dm.ResolveIPAddress(containerID, "1.2.3.4")
+	assert.False(t, okLate)
+	assert.Equal(t, "", domainLate)
 }
 
 func TestCacheFallbackBehavior(t *testing.T) {

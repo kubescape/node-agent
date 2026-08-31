@@ -111,7 +111,7 @@ func TestNetworkNeighborIncrementCoversMaxDNSName(t *testing.T) {
 	}
 
 	cd := &containerData{}
-	neighbor := cd.createNetworkNeighbor(networkEvent, "default", nil, fakeDNSResolver{domain: maxDNSName})
+	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, fakeDNSResolver{domain: maxDNSName})
 	if !assert.NotNil(t, neighbor) {
 		return
 	}
@@ -151,7 +151,7 @@ func TestNetworkNeighborIncrementCoversSelectorPayload(t *testing.T) {
 	// neighbor. watchedContainerData.Namespace is what networkNeighborIncrement reads to make
 	// the same "different namespace" call createNetworkNeighbor's own namespace arg does below.
 	cd := &containerData{watchedContainerData: &objectcache.WatchedContainerData{Namespace: "default"}}
-	neighbor := cd.createNetworkNeighbor(networkEvent, "default", nil, nil)
+	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, nil)
 	if !assert.NotNil(t, neighbor) {
 		return
 	}

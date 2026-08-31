@@ -19,8 +19,10 @@ import (
 // DNSManager is used to manage DNS events and save IP resolutions.
 type DNSManager struct {
 	cacheSize                  int
-	cacheMu                    sync.RWMutex
+	cacheMu                    sync.Mutex
+	hostAddressToDomain        *lru.Cache[string, string]
 	containerToAddressToDomain maps.SafeMap[string, *lru.Cache[string, string]]
+	removedContainers          *lru.Cache[string, struct{}]
 	lookupCache                cache.ExpiringCache                                             // Cache for DNS lookups
 	failureCache               cache.ExpiringCache                                             // Cache for failed lookups
 	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerId, value: map of pid to cloud services
@@ -31,9 +33,10 @@ type cacheEntry struct {
 }
 
 const (
-	defaultPositiveTTL  = 1 * time.Minute // Default TTL for successful lookups
-	defaultNegativeTTL  = 5 * time.Second // Default TTL for failed lookups
-	maxServiceCacheSize = 50              // Maximum number of cloud services to cache per container
+	defaultPositiveTTL          = 1 * time.Minute // Default TTL for successful lookups
+	defaultNegativeTTL          = 5 * time.Second // Default TTL for failed lookups
+	maxServiceCacheSize         = 50              // Maximum number of cloud services to cache per container
+	maxRemovedContainersEntries = 10000           // Maximum number of removed containers to track to prevent resurrection
 )
 
 var _ DNSManagerClient = (*DNSManager)(nil)
@@ -44,22 +47,42 @@ func CreateDNSManager(size int) *DNSManager {
 		size = 1000
 	}
 
+	hostCache, err := lru.New[string, string](size)
+	if err != nil {
+		logger.L().Fatal("creating host lru cache", helpers.Error(err))
+		return nil
+	}
+
+	removedCache, _ := lru.New[string, struct{}](maxRemovedContainersEntries)
+
 	return &DNSManager{
-		cacheSize:    size,
-		lookupCache:  cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
-		failureCache: cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
+		cacheSize:           size,
+		hostAddressToDomain: hostCache,
+		removedContainers:   removedCache,
+		lookupCache:         cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
+		failureCache:        cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
 	}
 }
 
 func (dm *DNSManager) getContainerCache(containerID string) *lru.Cache[string, string] {
+	if containerID == "" {
+		return dm.hostAddressToDomain
+	}
 	if cache, found := dm.containerToAddressToDomain.Load(containerID); found {
 		return cache
 	}
+	if dm.removedContainers != nil && dm.removedContainers.Contains(containerID) {
+		return nil
+	}
+
 	dm.cacheMu.Lock()
 	defer dm.cacheMu.Unlock()
 
 	if cache, found := dm.containerToAddressToDomain.Load(containerID); found {
 		return cache
+	}
+	if dm.removedContainers != nil && dm.removedContainers.Contains(containerID) {
+		return nil
 	}
 
 	cache, err := lru.New[string, string](dm.cacheSize)
@@ -74,13 +97,28 @@ func (dm *DNSManager) getContainerCache(containerID string) *lru.Cache[string, s
 func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		dm.containerToCloudServices.Set(notif.Container.Runtime.ContainerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
-		if c, err := lru.New[string, string](dm.cacheSize); err == nil {
-			dm.containerToAddressToDomain.Set(notif.Container.Runtime.ContainerID, c)
+		containerID := notif.Container.Runtime.ContainerID
+		if dm.removedContainers != nil {
+			dm.removedContainers.Remove(containerID)
 		}
+		dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
+		c, err := lru.New[string, string](dm.cacheSize)
+		if err != nil {
+			logger.L().Error("creating per-container lru cache on add", helpers.Error(err), helpers.String("containerID", containerID))
+			return
+		}
+		dm.cacheMu.Lock()
+		dm.containerToAddressToDomain.Set(containerID, c)
+		dm.cacheMu.Unlock()
 	case containercollection.EventTypeRemoveContainer:
-		dm.containerToCloudServices.Delete(notif.Container.Runtime.ContainerID)
-		dm.containerToAddressToDomain.Delete(notif.Container.Runtime.ContainerID)
+		containerID := notif.Container.Runtime.ContainerID
+		dm.cacheMu.Lock()
+		if dm.removedContainers != nil {
+			dm.removedContainers.Add(containerID, struct{}{})
+		}
+		dm.containerToCloudServices.Delete(containerID)
+		dm.containerToAddressToDomain.Delete(containerID)
+		dm.cacheMu.Unlock()
 	}
 }
 
@@ -163,6 +201,12 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 }
 
 func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (string, bool) {
+	if containerID == "" {
+		if dm.hostAddressToDomain != nil {
+			return dm.hostAddressToDomain.Get(ipAddr)
+		}
+		return "", false
+	}
 	if cache, found := dm.containerToAddressToDomain.Load(containerID); found && cache != nil {
 		domain, found := cache.Get(ipAddr)
 		return domain, found
