@@ -71,7 +71,22 @@ func TestResolveIPAddress(t *testing.T) {
 			wantOk: false,
 		},
 		{
-			name:        "host process with empty container id",
+			name:        "host process with HostContainerID",
+			containerID: armotypes.HostContainerID,
+			ipAddr:      "1.1.1.1",
+			dnsEvent: &utils.StructEvent{
+				EventType:   utils.DnsEventType,
+				ContainerID: armotypes.HostContainerID,
+				DNSName:     "one.one.one.one",
+				Addresses: []string{
+					"1.1.1.1",
+				},
+			},
+			want:   "one.one.one.one",
+			wantOk: true,
+		},
+		{
+			name:        "empty container id returns miss",
 			containerID: "",
 			ipAddr:      "1.1.1.1",
 			dnsEvent: &utils.StructEvent{
@@ -82,8 +97,8 @@ func TestResolveIPAddress(t *testing.T) {
 					"1.1.1.1",
 				},
 			},
-			want:   "one.one.one.one",
-			wantOk: true,
+			want:   "",
+			wantOk: false,
 		},
 	}
 
@@ -198,14 +213,15 @@ func TestContainerDNSIsolation(t *testing.T) {
 		Addresses:   []string{"192.168.1.10"},
 	})
 
-	// Verify both "host" and "" resolve host traffic
+	// Verify "host" resolves host traffic
 	domainHost, okHost := dm.ResolveIPAddress(armotypes.HostContainerID, "192.168.1.10")
 	assert.True(t, okHost)
 	assert.Equal(t, "host-service.internal", domainHost)
 
+	// Verify empty containerID does NOT resolve host traffic
 	domainEmpty, okEmpty := dm.ResolveIPAddress("", "192.168.1.10")
-	assert.True(t, okEmpty)
-	assert.Equal(t, "host-service.internal", domainEmpty)
+	assert.False(t, okEmpty)
+	assert.Equal(t, "", domainEmpty)
 
 	// Verify regular containers do NOT resolve host queries
 	domainContainer1Host, okContainer1Host := dm.ResolveIPAddress(container1, "192.168.1.10")

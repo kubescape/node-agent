@@ -40,7 +40,7 @@ const (
 	defaultDNSCacheSize          = 10000            // Default total host DNS cache size when non-positive size provided
 	maxServiceCacheSize          = 50               // Maximum number of cloud services to cache per container
 	defaultPerContainerCacheSize = 1000             // Default maximum number of DNS resolutions cached per container
-	maxTrackedContainers         = 5000             // Maximum number of concurrent containers with DNS caches
+	minTrackedContainers         = 100              // Minimum number of concurrent containers with DNS caches
 	maxRemovedContainersEntries  = 10000            // Maximum number of removed containers to track to prevent resurrection
 	defaultRemovalGracePeriod    = 10 * time.Second // Grace period before evicting resolution cache to allow terminal profile save
 )
@@ -49,7 +49,7 @@ var _ DNSManagerClient = (*DNSManager)(nil)
 var _ DNSResolver = (*DNSManager)(nil)
 
 func isHost(containerID string) bool {
-	return containerID == "" || containerID == armotypes.HostContainerID
+	return containerID == armotypes.HostContainerID
 }
 
 func CreateDNSManager(size int) *DNSManager {
@@ -68,7 +68,12 @@ func CreateDNSManager(size int) *DNSManager {
 		perContainerSize = size
 	}
 
-	containerCache, err := lru.New[string, *lru.Cache[string, string]](maxTrackedContainers)
+	maxContainers := size / perContainerSize
+	if maxContainers < minTrackedContainers {
+		maxContainers = minTrackedContainers
+	}
+
+	containerCache, err := lru.New[string, *lru.Cache[string, string]](maxContainers)
 	if err != nil {
 		logger.L().Fatal("creating container lru cache", helpers.Error(err))
 		return nil
@@ -99,7 +104,7 @@ func (dm *DNSManager) getContainerCache(containerID string) *lru.Cache[string, s
 	if isHost(containerID) {
 		return dm.hostAddressToDomain
 	}
-	if dm.isRemoved(containerID) {
+	if containerID == "" || dm.isRemoved(containerID) {
 		return nil
 	}
 	if cache, found := dm.containerToAddressToDomain.Get(containerID); found {
@@ -239,6 +244,9 @@ func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (strin
 		if dm.hostAddressToDomain != nil {
 			return dm.hostAddressToDomain.Get(ipAddr)
 		}
+		return "", false
+	}
+	if containerID == "" {
 		return "", false
 	}
 	if cache, found := dm.containerToAddressToDomain.Get(containerID); found && cache != nil {
