@@ -20,18 +20,21 @@ import (
 
 func TestResolveIPAddress(t *testing.T) {
 	tests := []struct {
-		name     string
-		dnsEvent *utils.StructEvent
-		ipAddr   string
-		want     string
-		wantOk   bool
+		name        string
+		containerID string
+		dnsEvent    *utils.StructEvent
+		ipAddr      string
+		want        string
+		wantOk      bool
 	}{
 		{
-			name:   "ip found",
-			ipAddr: "67.225.146.248",
+			name:        "ip found with container id",
+			containerID: "container-123",
+			ipAddr:      "67.225.146.248",
 			dnsEvent: &utils.StructEvent{
-				EventType: utils.DnsEventType,
-				DNSName:   "test.com",
+				EventType:   utils.DnsEventType,
+				ContainerID: "container-123",
+				DNSName:     "test.com",
 				Addresses: []string{
 					"67.225.146.248",
 				},
@@ -40,11 +43,13 @@ func TestResolveIPAddress(t *testing.T) {
 			wantOk: true,
 		},
 		{
-			name:   "ip not found",
-			ipAddr: "67.225.146.248",
+			name:        "ip not found",
+			containerID: "container-123",
+			ipAddr:      "67.225.146.248",
 			dnsEvent: &utils.StructEvent{
-				EventType: utils.DnsEventType,
-				DNSName:   "test.com",
+				EventType:   utils.DnsEventType,
+				ContainerID: "container-123",
+				DNSName:     "test.com",
 				Addresses: []string{
 					"54.23.332.4",
 				},
@@ -53,14 +58,31 @@ func TestResolveIPAddress(t *testing.T) {
 			wantOk: false,
 		},
 		{
-			name:   "no address",
-			ipAddr: "67.225.146.248",
+			name:        "no address",
+			containerID: "container-123",
+			ipAddr:      "67.225.146.248",
 			dnsEvent: &utils.StructEvent{
-				EventType: utils.DnsEventType,
-				DNSName:   "test.com",
+				EventType:   utils.DnsEventType,
+				ContainerID: "container-123",
+				DNSName:     "test.com",
 			},
 			want:   "",
 			wantOk: false,
+		},
+		{
+			name:        "host process with empty container id",
+			containerID: "",
+			ipAddr:      "1.1.1.1",
+			dnsEvent: &utils.StructEvent{
+				EventType:   utils.DnsEventType,
+				ContainerID: "",
+				DNSName:     "one.one.one.one",
+				Addresses: []string{
+					"1.1.1.1",
+				},
+			},
+			want:   "one.one.one.one",
+			wantOk: true,
 		},
 	}
 
@@ -69,7 +91,7 @@ func TestResolveIPAddress(t *testing.T) {
 			dm := CreateDNSManager(1000)
 
 			dm.ReportEvent(tt.dnsEvent)
-			got, ok := dm.ResolveIPAddress(tt.ipAddr)
+			got, ok := dm.ResolveIPAddress(tt.containerID, tt.ipAddr)
 			assert.Equal(t, tt.want, got)
 			assert.Equal(t, tt.wantOk, ok)
 		})
@@ -91,8 +113,9 @@ func TestResolveIPAddressFallback(t *testing.T) {
 		{
 			name: "dns resolution fallback",
 			dnsEvent: &utils.StructEvent{
-				EventType: utils.DnsEventType,
-				DNSName:   "example.com", // Using example.com as it's guaranteed to exist
+				EventType:   utils.DnsEventType,
+				ContainerID: "test-container-fallback",
+				DNSName:     "example.com", // Using example.com as it's guaranteed to exist
 			},
 			want:   "example.com",
 			wantOk: true,
@@ -115,12 +138,105 @@ func TestResolveIPAddressFallback(t *testing.T) {
 			}
 
 			dm.ReportEvent(tt.dnsEvent)
-			got, ok := dm.ResolveIPAddress(addresses[0].String())
+			got, ok := dm.ResolveIPAddress(tt.dnsEvent.ContainerID, addresses[0].String())
 			if got != tt.want || ok != tt.wantOk {
 				t.Errorf("ResolveIPAddress() got = %v, ok = %v, want = %v, wantOk = %v", got, ok, tt.want, tt.wantOk)
 			}
 		})
 	}
+}
+
+func TestContainerDNSIsolation(t *testing.T) {
+	dm := CreateDNSManager(1000)
+
+	container1 := "workload-ai-client-123"
+	container2 := "workload-kube-proxy-456"
+	sharedCDNIP := "104.18.7.192"
+
+	// Container 1 queries an AI provider sitting behind a shared CDN IP
+	dm.ReportEvent(&utils.StructEvent{
+		EventType:   utils.DnsEventType,
+		ContainerID: container1,
+		DNSName:     "api.openai.com",
+		Addresses:   []string{sharedCDNIP},
+	})
+
+	// Container 2 queries an internal/unrelated service
+	dm.ReportEvent(&utils.StructEvent{
+		EventType:   utils.DnsEventType,
+		ContainerID: container2,
+		DNSName:     "internal-service.local",
+		Addresses:   []string{"10.0.0.50"},
+	})
+
+	// Verify Container 1 resolves the IP to api.openai.com
+	domain1, ok1 := dm.ResolveIPAddress(container1, sharedCDNIP)
+	assert.True(t, ok1)
+	assert.Equal(t, "api.openai.com", domain1)
+
+	// Verify Container 2 does NOT inherit api.openai.com when connecting to the same IP
+	domain2, ok2 := dm.ResolveIPAddress(container2, sharedCDNIP)
+	assert.False(t, ok2)
+	assert.Equal(t, "", domain2)
+
+	// Verify Container 2 resolves its own queried domain
+	domain2Internal, ok2Internal := dm.ResolveIPAddress(container2, "10.0.0.50")
+	assert.True(t, ok2Internal)
+	assert.Equal(t, "internal-service.local", domain2Internal)
+
+	// Verify Container 1 does NOT resolve Container 2's domain
+	domain1Internal, ok1Internal := dm.ResolveIPAddress(container1, "10.0.0.50")
+	assert.False(t, ok1Internal)
+	assert.Equal(t, "", domain1Internal)
+}
+
+func TestContainerDNSLifecycleCleanup(t *testing.T) {
+	dm := CreateDNSManager(1000)
+
+	containerID := "short-lived-pod-789"
+	ip := "93.184.216.34"
+
+	// Add container
+	dm.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeAddContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+					ContainerID: containerID,
+				},
+			},
+		},
+	})
+
+	// Report DNS event
+	dm.ReportEvent(&utils.StructEvent{
+		EventType:   utils.DnsEventType,
+		ContainerID: containerID,
+		DNSName:     "example.org",
+		Addresses:   []string{ip},
+	})
+
+	// Verify resolution works before removal
+	domain, ok := dm.ResolveIPAddress(containerID, ip)
+	assert.True(t, ok)
+	assert.Equal(t, "example.org", domain)
+
+	// Remove container
+	dm.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeRemoveContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+					ContainerID: containerID,
+				},
+			},
+		},
+	})
+
+	// Verify resolution is pruned after container removal
+	domainAfter, okAfter := dm.ResolveIPAddress(containerID, ip)
+	assert.False(t, okAfter)
+	assert.Equal(t, "", domainAfter)
 }
 
 func TestCacheFallbackBehavior(t *testing.T) {

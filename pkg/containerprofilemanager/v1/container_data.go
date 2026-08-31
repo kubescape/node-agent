@@ -262,7 +262,11 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 
 		if dnsResolverClient != nil {
-			domain, ok := dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
+			var containerID string
+			if cd.watchedContainerData != nil {
+				containerID = cd.watchedContainerData.ContainerID
+			}
+			domain, ok := dnsResolverClient.ResolveIPAddress(containerID, networkEvent.Destination.IPAddress)
 			if ok {
 				neighborEntry.DNS = domain
 				neighborEntry.DNSNames = []string{domain}

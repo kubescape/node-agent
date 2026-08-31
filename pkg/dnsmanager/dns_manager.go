@@ -3,6 +3,7 @@ package dnsmanager
 import (
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -17,10 +18,12 @@ import (
 
 // DNSManager is used to manage DNS events and save IP resolutions.
 type DNSManager struct {
-	addressToDomainMap       *lru.Cache[string, string]
-	lookupCache              cache.ExpiringCache                                             // Cache for DNS lookups
-	failureCache             cache.ExpiringCache                                             // Cache for failed lookups
-	containerToCloudServices maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerId, value: map of pid to cloud services
+	cacheSize                  int
+	cacheMu                    sync.RWMutex
+	containerToAddressToDomain maps.SafeMap[string, *lru.Cache[string, string]]
+	lookupCache                cache.ExpiringCache                                             // Cache for DNS lookups
+	failureCache               cache.ExpiringCache                                             // Cache for failed lookups
+	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerId, value: map of pid to cloud services
 }
 
 type cacheEntry struct {
@@ -37,32 +40,55 @@ var _ DNSManagerClient = (*DNSManager)(nil)
 var _ DNSResolver = (*DNSManager)(nil)
 
 func CreateDNSManager(size int) *DNSManager {
-	addressToDomainMap, err := lru.New[string, string](size)
-	if err != nil {
-		logger.L().Fatal("creating lru cache", helpers.Error(err))
-		return nil
+	if size <= 0 {
+		size = 1000
 	}
 
 	return &DNSManager{
-		addressToDomainMap: addressToDomainMap,
-		lookupCache:        cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
-		failureCache:       cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
+		cacheSize:    size,
+		lookupCache:  cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
+		failureCache: cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
 	}
+}
+
+func (dm *DNSManager) getContainerCache(containerID string) *lru.Cache[string, string] {
+	if cache, found := dm.containerToAddressToDomain.Load(containerID); found {
+		return cache
+	}
+	dm.cacheMu.Lock()
+	defer dm.cacheMu.Unlock()
+
+	if cache, found := dm.containerToAddressToDomain.Load(containerID); found {
+		return cache
+	}
+
+	cache, err := lru.New[string, string](dm.cacheSize)
+	if err != nil {
+		logger.L().Error("creating per-container lru cache", helpers.Error(err), helpers.String("containerID", containerID))
+		return nil
+	}
+	dm.containerToAddressToDomain.Set(containerID, cache)
+	return cache
 }
 
 func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		dm.containerToCloudServices.Set(notif.Container.Runtime.ContainerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
+		if c, err := lru.New[string, string](dm.cacheSize); err == nil {
+			dm.containerToAddressToDomain.Set(notif.Container.Runtime.ContainerID, c)
+		}
 	case containercollection.EventTypeRemoveContainer:
 		dm.containerToCloudServices.Delete(notif.Container.Runtime.ContainerID)
+		dm.containerToAddressToDomain.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 
 func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	dnsName := dnsEvent.GetDNSName()
+	containerID := dnsEvent.GetContainerID()
 	if isCloudService(dnsName) {
-		if pidToServices, found := dm.containerToCloudServices.Load(dnsEvent.GetContainerID()); found {
+		if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
 			// Guard against cache size getting too large by checking the cardinality per container and pid
 			if services, found := pidToServices.Load(dnsEvent.GetPID()); found {
 				if services.Cardinality() < maxServiceCacheSize {
@@ -77,10 +103,14 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 		}
 	}
 
+	containerCache := dm.getContainerCache(containerID)
+
 	if addresses := dnsEvent.GetAddresses(); len(addresses) > 0 {
-		for _, address := range addresses {
-			if address != "" {
-				dm.addressToDomainMap.Add(address, dnsName)
+		if containerCache != nil {
+			for _, address := range addresses {
+				if address != "" {
+					containerCache.Add(address, dnsName)
+				}
 			}
 		}
 
@@ -100,8 +130,10 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	if cached, found := dm.lookupCache.Get(dnsName); found {
 		entry := cached.(cacheEntry)
 		// Use cached addresses
-		for _, addr := range entry.addresses {
-			dm.addressToDomainMap.Add(addr, dnsName)
+		if containerCache != nil {
+			for _, addr := range entry.addresses {
+				containerCache.Add(addr, dnsName)
+			}
 		}
 		return
 	}
@@ -119,7 +151,9 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	for _, addr := range ipAddresses {
 		addrStr := addr.String()
 		addrStrings = append(addrStrings, addrStr)
-		dm.addressToDomainMap.Add(addrStr, dnsName)
+		if containerCache != nil {
+			containerCache.Add(addrStr, dnsName)
+		}
 	}
 
 	// Cache the successful lookup
@@ -128,9 +162,12 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	})
 }
 
-func (dm *DNSManager) ResolveIPAddress(ipAddr string) (string, bool) {
-	domain, found := dm.addressToDomainMap.Get(ipAddr)
-	return domain, found
+func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (string, bool) {
+	if cache, found := dm.containerToAddressToDomain.Load(containerID); found && cache != nil {
+		domain, found := cache.Get(ipAddr)
+		return domain, found
+	}
+	return "", false
 }
 
 func (dm *DNSManager) ResolveContainerProcessToCloudServices(containerId string, pid uint32) mapset.Set[string] {

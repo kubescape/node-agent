@@ -22,7 +22,7 @@ func (n *DNSManagerMock) ReportEvent(_ utils.DNSEvent) {
 func (n *DNSManagerMock) ContainerCallback(_ containercollection.PubSubEvent) {
 }
 
-func (n *DNSManagerMock) ResolveIPAddress(_ string) (string, bool) {
+func (n *DNSManagerMock) ResolveIPAddress(_ string, _ string) (string, bool) {
 	return "", false
 }
 

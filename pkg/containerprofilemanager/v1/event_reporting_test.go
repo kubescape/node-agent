@@ -17,7 +17,7 @@ import (
 // createNetworkNeighbor's DNS branch without a real dnsmanager.
 type fakeDNSResolver struct{ domain string }
 
-func (f fakeDNSResolver) ResolveIPAddress(string) (string, bool) { return f.domain, true }
+func (f fakeDNSResolver) ResolveIPAddress(string, string) (string, bool) { return f.domain, true }
 func (f fakeDNSResolver) ResolveContainerProcessToCloudServices(string, uint32) mapset.Set[string] {
 	return nil
 }
