@@ -655,3 +655,13 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 			services.Cardinality(), maxServiceCacheSize)
 	}
 }
+
+func TestCreateDNSManager_NonPositiveSize(t *testing.T) {
+	for _, size := range []int{0, -1, -100} {
+		dm := CreateDNSManager(size)
+		assert.NotNil(t, dm, "CreateDNSManager(%d) must not return nil", size)
+		assert.Equal(t, defaultDNSCacheSize, dm.cacheSize)
+		assert.Equal(t, defaultPerContainerCacheSize, dm.perContainerCacheSize)
+		assert.NotNil(t, dm.hostAddressToDomain)
+	}
+}

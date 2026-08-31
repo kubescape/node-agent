@@ -37,6 +37,7 @@ type cacheEntry struct {
 const (
 	defaultPositiveTTL           = 1 * time.Minute  // Default TTL for successful lookups
 	defaultNegativeTTL           = 5 * time.Second  // Default TTL for failed lookups
+	defaultDNSCacheSize          = 10000            // Default total DNS cache size when non-positive size provided
 	maxServiceCacheSize          = 50               // Maximum number of cloud services to cache per container
 	defaultPerContainerCacheSize  = 1000             // Default maximum number of DNS resolutions cached per container
 	maxRemovedContainersEntries  = 10000            // Maximum number of removed containers to track to prevent resurrection
@@ -51,6 +52,10 @@ func isHost(containerID string) bool {
 }
 
 func CreateDNSManager(size int) *DNSManager {
+	if size <= 0 {
+		size = defaultDNSCacheSize
+	}
+
 	hostCache, err := lru.New[string, string](size)
 	if err != nil {
 		logger.L().Fatal("creating host lru cache", helpers.Error(err))

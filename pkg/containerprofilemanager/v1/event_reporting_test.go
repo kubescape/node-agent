@@ -214,3 +214,41 @@ func TestResolveExecPath(t *testing.T) {
 		})
 	}
 }
+
+type trackingDNSResolver struct {
+	lastContainerID string
+	lastIPAddress   string
+}
+
+func (r *trackingDNSResolver) ResolveIPAddress(containerID string, ipAddr string) (string, bool) {
+	r.lastContainerID = containerID
+	r.lastIPAddress = ipAddr
+	return "resolved.domain", true
+}
+
+func (r *trackingDNSResolver) ResolveContainerProcessToCloudServices(string, uint32) mapset.Set[string] {
+	return nil
+}
+
+func TestCreateNetworkNeighbor_EmptyContainerIDWithWatchedContainerData(t *testing.T) {
+	cd := &containerData{
+		watchedContainerData: &objectcache.WatchedContainerData{
+			ContainerID: "watched-container-456",
+		},
+	}
+
+	networkEvent := NetworkEvent{
+		Port:    80,
+		PktType: utils.OutgoingPktType,
+		Destination: Destination{
+			IPAddress: "93.184.216.34",
+		},
+	}
+
+	resolver := &trackingDNSResolver{}
+	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, resolver)
+	assert.NotNil(t, neighbor)
+	assert.Equal(t, "", resolver.lastContainerID, "empty containerID must be preserved so host cache is selected")
+	assert.Equal(t, "93.184.216.34", resolver.lastIPAddress)
+	assert.Equal(t, "resolved.domain", neighbor.DNS)
+}
