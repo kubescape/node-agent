@@ -405,3 +405,11 @@ func (c *FIMConfig) GetFIMExportersConfig() exporters.ExportersConfig {
 		AlertManagerExporterUrls: c.Exporters.AlertManagerExporterUrls,
 	}
 }
+
+// IsMetricsEnabled returns true if metrics export is enabled via config or OTEL env vars.
+func (c *Config) IsMetricsEnabled() bool {
+	return c.EnableMetricsExporter ||
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" ||
+		os.Getenv("OTEL_METRICS_EXPORTER") != "" ||
+		os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != ""
+}

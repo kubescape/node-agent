@@ -7,6 +7,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
+	"github.com/stretchr/testify/assert"
 )
 
 // cpLibForEndpoints wires a containerProfileLibrary to a mock objectCache
@@ -291,4 +292,27 @@ func TestHTTPEvaluatorsNilObjectCache(t *testing.T) {
 			t.Errorf("evaluator #%d with nil objectCache: expected error, got %v", i, r)
 		}
 	}
+}
+
+func TestWasEndpointAccessed_TrailingSlashAndEmptyGuard(t *testing.T) {
+	pcp := endpointsPCP(
+		[]string{
+			"/",
+			"/api/v1/users",
+		},
+		nil,
+	)
+	lib := cpLibForEndpoints(pcp)
+
+	// Empty endpoint must NOT match root "/"
+	gotEmpty := asBool(t, lib.wasEndpointAccessed(types.String("cid"), types.String("")))
+	assert.False(t, gotEmpty, "empty endpoint must not match root '/'")
+
+	// Trailing slash endpoint must match non-trailing entry
+	gotTrailing := asBool(t, lib.wasEndpointAccessed(types.String("cid"), types.String("/api/v1/users/")))
+	assert.True(t, gotTrailing, "/api/v1/users/ must match /api/v1/users")
+
+	// Exact match
+	gotExact := asBool(t, lib.wasEndpointAccessed(types.String("cid"), types.String("/api/v1/users")))
+	assert.True(t, gotExact, "exact match must return true")
 }

@@ -834,3 +834,29 @@ func TestOpenWithFlagsCompilation(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 }
+
+func TestWasPathOpened_TrailingSlashAndEmptyGuard(t *testing.T) {
+	pcp := &objectcache.ProjectedContainerProfile{
+		Opens: objectcache.ProjectedField{
+			All: true,
+			Values: map[string]struct{}{
+				"/":           {},
+				"/etc/passwd": {},
+			},
+		},
+	}
+	objCache := &mockObjectCacheForPattern{pcp: pcp}
+	lib := &containerProfileLibrary{objectCache: objCache}
+
+	// Empty path must NOT match root "/"
+	gotEmpty := lib.wasPathOpened(types.String("test-cid"), types.String(""))
+	assert.False(t, gotEmpty.Value().(bool), "empty path must not match root '/'")
+
+	// Trailing slash path must match non-trailing entry
+	gotTrailing := lib.wasPathOpened(types.String("test-cid"), types.String("/etc/passwd/"))
+	assert.True(t, gotTrailing.Value().(bool), "/etc/passwd/ must match /etc/passwd")
+
+	// Exact match
+	gotExact := lib.wasPathOpened(types.String("test-cid"), types.String("/etc/passwd"))
+	assert.True(t, gotExact.Value().(bool), "exact match must return true")
+}

@@ -3,6 +3,7 @@ package objectcache
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,6 +14,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -96,7 +98,11 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 		pcp.Execs.Values = make(map[string]struct{}, len(cp.Spec.Execs))
 		pcp.ExecsByPath = make(map[string][][]string, len(cp.Spec.Execs))
 		for _, e := range cp.Spec.Execs {
-			pcp.Execs.Values[e.Path] = struct{}{}
+			if strings.Contains(e.Path, dynamicpathdetector.DynamicIdentifier) || strings.Contains(e.Path, dynamicpathdetector.WildcardIdentifier) {
+				pcp.Execs.Patterns = append(pcp.Execs.Patterns, e.Path)
+			} else {
+				pcp.Execs.Values[e.Path] = struct{}{}
+			}
 			// Mirror containerprofilecache.Apply's extractExecsByPath:
 			// append each ExecCalls entry as its own argv vector,
 			// nil-Args projects to a non-nil empty slice.
@@ -114,7 +120,11 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 		pcp.Opens.All = true
 		pcp.Opens.Values = make(map[string]struct{}, len(cp.Spec.Opens))
 		for _, o := range cp.Spec.Opens {
-			pcp.Opens.Values[o.Path] = struct{}{}
+			if strings.Contains(o.Path, dynamicpathdetector.DynamicIdentifier) || strings.Contains(o.Path, dynamicpathdetector.WildcardIdentifier) {
+				pcp.Opens.Patterns = append(pcp.Opens.Patterns, o.Path)
+			} else {
+				pcp.Opens.Values[o.Path] = struct{}{}
+			}
 		}
 	}
 
@@ -122,7 +132,11 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 		pcp.Endpoints.All = true
 		pcp.Endpoints.Values = make(map[string]struct{}, len(cp.Spec.Endpoints))
 		for _, e := range cp.Spec.Endpoints {
-			pcp.Endpoints.Values[e.Endpoint] = struct{}{}
+			if strings.Contains(e.Endpoint, dynamicpathdetector.DynamicIdentifier) || strings.Contains(e.Endpoint, dynamicpathdetector.WildcardIdentifier) {
+				pcp.Endpoints.Patterns = append(pcp.Endpoints.Patterns, e.Endpoint)
+			} else {
+				pcp.Endpoints.Values[e.Endpoint] = struct{}{}
+			}
 		}
 	}
 

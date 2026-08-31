@@ -38,7 +38,11 @@ func (l *containerProfileLibrary) wasExecuted(containerID, path ref.Val) ref.Val
 		return cache.NewProfileNotAvailableErr("%v", err)
 	}
 
-	if _, ok := cp.Execs.Values[pathStr]; ok {
+	if pathStr == "" {
+		return types.Bool(false)
+	}
+
+	if matchLiteralPath(cp.Execs.Values, pathStr) {
 		return types.Bool(true)
 	}
 	// Check Patterns (dynamic-segment entries).

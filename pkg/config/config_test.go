@@ -684,3 +684,58 @@ func TestLoadConfig_BypassSkipsSlotsExponentValidation(t *testing.T) {
 	require.NoError(t, err, "bypass must skip slotsExponent validation")
 	assert.False(t, config.EventDedup.Enabled)
 }
+
+func TestConfig_IsMetricsEnabled(t *testing.T) {
+	tests := []struct {
+		name                   string
+		enableMetricsExporter  bool
+		otelMetricsExporter    string
+		otelOtlpEndpoint       string
+		otelOtlpMetricsEndpoint string
+		want                   bool
+	}{
+		{
+			name:                  "default disabled",
+			enableMetricsExporter: false,
+			want:                  false,
+		},
+		{
+			name:                  "enabled via config",
+			enableMetricsExporter: true,
+			want:                  true,
+		},
+		{
+			name:                "enabled via OTEL_METRICS_EXPORTER",
+			otelMetricsExporter: "prometheus",
+			want:                true,
+		},
+		{
+			name:             "enabled via OTEL_EXPORTER_OTLP_ENDPOINT",
+			otelOtlpEndpoint: "http://collector:4317",
+			want:             true,
+		},
+		{
+			name:                    "enabled via OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+			otelOtlpMetricsEndpoint: "http://collector:4317/v1/metrics",
+			want:                    true,
+		},
+		{
+			name:             "endpoint configured enables metrics regardless of exporter string",
+			otelOtlpEndpoint: "http://collector:4317",
+			want:             true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OTEL_METRICS_EXPORTER", tt.otelMetricsExporter)
+			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", tt.otelOtlpEndpoint)
+			t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", tt.otelOtlpMetricsEndpoint)
+
+			cfg := Config{
+				EnableMetricsExporter: tt.enableMetricsExporter,
+			}
+			assert.Equal(t, tt.want, cfg.IsMetricsEnabled())
+		})
+	}
+}

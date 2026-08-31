@@ -45,7 +45,7 @@ func NewSource(imageName, imageDigest, imageID string, imageStatus *runtime.Imag
 	if err := validateDiffIDs(imageInfo.ImageSpec.RootFS.DiffIDs); err != nil {
 		return nil, fmt.Errorf("invalid image diff-ids: %w", err)
 	}
-	reverseLayers := imageInfo.ImageSpec.RootFS.DiffIDs
+	reverseLayers := slices.Clone(imageInfo.ImageSpec.RootFS.DiffIDs)
 	slices.Reverse(reverseLayers)
 	configFile := v1.ConfigFile{
 		Architecture:  imageInfo.ImageSpec.Architecture,

@@ -2,7 +2,6 @@ package containerwatcher
 
 import (
 	"context"
-	"runtime/pprof"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -353,24 +352,22 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		return
 	}
 
-	pprof.Do(context.Background(), pprof.Labels("event", string(eventType)), func(_ context.Context) {
-		// Process event through each handler
-		for _, handler := range handlers {
-			if enrichedEvent.Duplicate {
-				if _, skip := ehf.dedupSkipSet[handler]; skip {
-					continue
-				}
-			}
-			if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
-				enrichedHandler.ReportEnrichedEvent(enrichedEvent)
-			} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
-				handler.ReportEvent(eventType, enrichedEvent.Event)
+	// Process event through each handler
+	for _, handler := range handlers {
+		if enrichedEvent.Duplicate {
+			if _, skip := ehf.dedupSkipSet[handler]; skip {
+				continue
 			}
 		}
+		if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
+			enrichedHandler.ReportEnrichedEvent(enrichedEvent)
+		} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
+			handler.ReportEvent(eventType, enrichedEvent.Event)
+		}
+	}
 
-		// Report to third-party event receivers
-		ehf.reportEventToThirdPartyTracers(enrichedEvent)
-	})
+	// Report to third-party event receivers
+	ehf.reportEventToThirdPartyTracers(enrichedEvent)
 }
 
 // registerHandlers registers all handlers for different event types
