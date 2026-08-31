@@ -138,8 +138,6 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		if dm.removedContainers != nil {
 			dm.removedContainers.Remove(containerID)
 		}
-		// Reset any lingering cache from a previous instance of this container ID
-		dm.containerToAddressToDomain.Remove(containerID)
 		if !dm.containerToCloudServices.Has(containerID) {
 			dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
 		}
@@ -155,7 +153,7 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 
 		time.AfterFunc(defaultRemovalGracePeriod, func() {
 			dm.cacheMu.Lock()
-			if dm.isRemoved(containerID) {
+			if !dm.containerToCloudServices.Has(containerID) {
 				dm.containerToAddressToDomain.Remove(containerID)
 			}
 			dm.cacheMu.Unlock()
