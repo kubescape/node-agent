@@ -233,10 +233,10 @@ func TestContainerDNSLifecycleCleanup(t *testing.T) {
 		},
 	})
 
-	// Verify resolution is pruned after container removal
-	domainAfter, okAfter := dm.ResolveIPAddress(containerID, ip)
-	assert.False(t, okAfter)
-	assert.Equal(t, "", domainAfter)
+	// Verify existing resolutions remain readable during removal grace period for terminal profile save
+	domainDuringGrace, okDuringGrace := dm.ResolveIPAddress(containerID, ip)
+	assert.True(t, okDuringGrace)
+	assert.Equal(t, "example.org", domainDuringGrace)
 
 	// In-flight DNS event arrives after container removal
 	dm.ReportEvent(&utils.StructEvent{
@@ -246,11 +246,19 @@ func TestContainerDNSLifecycleCleanup(t *testing.T) {
 		Addresses:   []string{"1.2.3.4"},
 	})
 
-	// Verify no cache is resurrected
-	assert.False(t, dm.containerToAddressToDomain.Has(containerID))
+	// Verify no cache was resurrected or updated for late-arriving event
 	domainLate, okLate := dm.ResolveIPAddress(containerID, "1.2.3.4")
 	assert.False(t, okLate)
 	assert.Equal(t, "", domainLate)
+
+	// Explicitly simulate grace period expiration
+	dm.cacheMu.Lock()
+	dm.containerToAddressToDomain.Delete(containerID)
+	dm.cacheMu.Unlock()
+
+	domainAfterGrace, okAfterGrace := dm.ResolveIPAddress(containerID, ip)
+	assert.False(t, okAfterGrace)
+	assert.Equal(t, "", domainAfterGrace)
 }
 
 func TestCacheFallbackBehavior(t *testing.T) {
