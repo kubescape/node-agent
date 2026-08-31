@@ -23,7 +23,7 @@ type DNSManager struct {
 	perContainerCacheSize      int
 	cacheMu                    sync.Mutex
 	hostAddressToDomain        *lru.Cache[string, string]
-	containerToAddressToDomain maps.SafeMap[string, *lru.Cache[string, string]]
+	containerToAddressToDomain *lru.Cache[string, *lru.Cache[string, string]]
 	removedContainers          *lru.Cache[string, struct{}]
 	lookupCache                cache.ExpiringCache                                             // Cache for DNS lookups
 	failureCache               cache.ExpiringCache                                             // Cache for failed lookups
@@ -37,9 +37,10 @@ type cacheEntry struct {
 const (
 	defaultPositiveTTL           = 1 * time.Minute  // Default TTL for successful lookups
 	defaultNegativeTTL           = 5 * time.Second  // Default TTL for failed lookups
-	defaultDNSCacheSize          = 10000            // Default total DNS cache size when non-positive size provided
+	defaultDNSCacheSize          = 10000            // Default total host DNS cache size when non-positive size provided
 	maxServiceCacheSize          = 50               // Maximum number of cloud services to cache per container
 	defaultPerContainerCacheSize = 1000             // Default maximum number of DNS resolutions cached per container
+	maxTrackedContainers         = 5000             // Maximum number of concurrent containers with DNS caches
 	maxRemovedContainersEntries  = 10000            // Maximum number of removed containers to track to prevent resurrection
 	defaultRemovalGracePeriod    = 10 * time.Second // Grace period before evicting resolution cache to allow terminal profile save
 )
@@ -67,6 +68,12 @@ func CreateDNSManager(size int) *DNSManager {
 		perContainerSize = size
 	}
 
+	containerCache, err := lru.New[string, *lru.Cache[string, string]](maxTrackedContainers)
+	if err != nil {
+		logger.L().Fatal("creating container lru cache", helpers.Error(err))
+		return nil
+	}
+
 	removedCache, err := lru.New[string, struct{}](maxRemovedContainersEntries)
 	if err != nil {
 		logger.L().Fatal("creating removed containers cache", helpers.Error(err))
@@ -74,12 +81,13 @@ func CreateDNSManager(size int) *DNSManager {
 	}
 
 	return &DNSManager{
-		cacheSize:             size,
-		perContainerCacheSize: perContainerSize,
-		hostAddressToDomain:   hostCache,
-		removedContainers:     removedCache,
-		lookupCache:           cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
-		failureCache:          cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
+		cacheSize:                  size,
+		perContainerCacheSize:      perContainerSize,
+		hostAddressToDomain:        hostCache,
+		containerToAddressToDomain: containerCache,
+		removedContainers:          removedCache,
+		lookupCache:                cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
+		failureCache:               cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
 	}
 }
 
@@ -94,7 +102,7 @@ func (dm *DNSManager) getContainerCache(containerID string) *lru.Cache[string, s
 	if dm.isRemoved(containerID) {
 		return nil
 	}
-	if cache, found := dm.containerToAddressToDomain.Load(containerID); found {
+	if cache, found := dm.containerToAddressToDomain.Get(containerID); found {
 		return cache
 	}
 
@@ -104,7 +112,7 @@ func (dm *DNSManager) getContainerCache(containerID string) *lru.Cache[string, s
 	if dm.isRemoved(containerID) {
 		return nil
 	}
-	if cache, found := dm.containerToAddressToDomain.Load(containerID); found {
+	if cache, found := dm.containerToAddressToDomain.Get(containerID); found {
 		return cache
 	}
 
@@ -113,7 +121,7 @@ func (dm *DNSManager) getContainerCache(containerID string) *lru.Cache[string, s
 		logger.L().Error("creating per-container lru cache", helpers.Error(err), helpers.String("containerID", containerID))
 		return nil
 	}
-	dm.containerToAddressToDomain.Set(containerID, cache)
+	dm.containerToAddressToDomain.Add(containerID, cache)
 	return cache
 }
 
@@ -141,7 +149,7 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		time.AfterFunc(defaultRemovalGracePeriod, func() {
 			dm.cacheMu.Lock()
 			if dm.isRemoved(containerID) {
-				dm.containerToAddressToDomain.Delete(containerID)
+				dm.containerToAddressToDomain.Remove(containerID)
 			}
 			dm.cacheMu.Unlock()
 		})
@@ -233,7 +241,7 @@ func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (strin
 		}
 		return "", false
 	}
-	if cache, found := dm.containerToAddressToDomain.Load(containerID); found && cache != nil {
+	if cache, found := dm.containerToAddressToDomain.Get(containerID); found && cache != nil {
 		domain, found := cache.Get(ipAddr)
 		return domain, found
 	}

@@ -276,7 +276,7 @@ func TestContainerDNSLifecycleCleanup(t *testing.T) {
 
 	// Explicitly simulate grace period expiration
 	dm.cacheMu.Lock()
-	dm.containerToAddressToDomain.Delete(containerID)
+	dm.containerToAddressToDomain.Remove(containerID)
 	dm.cacheMu.Unlock()
 
 	domainAfterGrace, okAfterGrace := dm.ResolveIPAddress(containerID, ip)
