@@ -248,7 +248,7 @@ func TestCreateNetworkNeighbor_EmptyContainerIDWithWatchedContainerData(t *testi
 	resolver := &trackingDNSResolver{}
 	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, resolver)
 	assert.NotNil(t, neighbor)
-	assert.Equal(t, "", resolver.lastContainerID, "empty containerID must be preserved so host cache is selected")
+	assert.Equal(t, "", resolver.lastContainerID, "empty containerID must be preserved without falling back to watchedContainerData")
 	assert.Equal(t, "93.184.216.34", resolver.lastIPAddress)
 	assert.Equal(t, "resolved.domain", neighbor.DNS)
 }

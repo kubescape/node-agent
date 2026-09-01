@@ -27,7 +27,7 @@ type DNSManager struct {
 	removedContainers          *lru.Cache[string, struct{}]
 	lookupCache                cache.ExpiringCache                                             // Cache for DNS lookups
 	failureCache               cache.ExpiringCache                                             // Cache for failed lookups
-	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerId, value: map of pid to cloud services
+	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerID, value: map of pid to cloud services
 }
 
 type cacheEntry struct {
@@ -40,7 +40,7 @@ const (
 	defaultDNSCacheSize          = 10000            // Default total host DNS cache size when non-positive size provided
 	maxServiceCacheSize          = 50               // Maximum number of cloud services to cache per container
 	defaultPerContainerCacheSize = 1000             // Default maximum number of DNS resolutions cached per container
-	minTrackedContainers         = 100              // Minimum number of concurrent containers with DNS caches
+	minTrackedContainers         = 10               // Minimum number of concurrent containers with DNS caches
 	maxRemovedContainersEntries  = 10000            // Maximum number of removed containers to track to prevent resurrection
 	defaultRemovalGracePeriod    = 10 * time.Second // Grace period before evicting resolution cache to allow terminal profile save
 )
@@ -57,12 +57,6 @@ func CreateDNSManager(size int) *DNSManager {
 		size = defaultDNSCacheSize
 	}
 
-	hostCache, err := lru.New[string, string](size)
-	if err != nil {
-		logger.L().Fatal("creating host lru cache", helpers.Error(err))
-		return nil
-	}
-
 	perContainerSize := defaultPerContainerCacheSize
 	if size < perContainerSize {
 		perContainerSize = size
@@ -71,6 +65,27 @@ func CreateDNSManager(size int) *DNSManager {
 	maxContainers := size / perContainerSize
 	if maxContainers < minTrackedContainers {
 		maxContainers = minTrackedContainers
+		if maxContainers > size {
+			maxContainers = size
+		}
+		if maxContainers < 1 {
+			maxContainers = 1
+		}
+		perContainerSize = size / maxContainers
+		if perContainerSize < 1 {
+			perContainerSize = 1
+		}
+	}
+
+	hostCacheSize := perContainerSize
+	if hostCacheSize < 1 {
+		hostCacheSize = 1
+	}
+
+	hostCache, err := lru.New[string, string](hostCacheSize)
+	if err != nil {
+		logger.L().Fatal("creating host lru cache", helpers.Error(err))
+		return nil
 	}
 
 	containerCache, err := lru.New[string, *lru.Cache[string, string]](maxContainers)
@@ -260,8 +275,8 @@ func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (strin
 	return "", false
 }
 
-func (dm *DNSManager) ResolveContainerProcessToCloudServices(containerId string, pid uint32) mapset.Set[string] {
-	if pidToServices, found := dm.containerToCloudServices.Load(containerId); found {
+func (dm *DNSManager) ResolveContainerProcessToCloudServices(containerID string, pid uint32) mapset.Set[string] {
+	if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
 		if services, found := pidToServices.Load(pid); found {
 			return services
 		}

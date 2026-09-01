@@ -496,7 +496,7 @@ func TestContainerCloudServices(t *testing.T) {
 	t.Run("full container lifecycle with cloud services", func(t *testing.T) {
 		// SETUP
 		dm := CreateDNSManager(1000)
-		containerId := "test-container-123"
+		containerID := "test-container-123"
 		testPid := uint32(1234)
 
 		// Add container
@@ -505,14 +505,14 @@ func TestContainerCloudServices(t *testing.T) {
 			Container: &containercollection.Container{
 				Runtime: containercollection.RuntimeMetadata{
 					BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-						ContainerID: containerId,
+						ContainerID: containerID,
 					},
 				},
 			},
 		})
 
 		// Verify container was added properly
-		pidToServices, found := dm.containerToCloudServices.Load(containerId)
+		pidToServices, found := dm.containerToCloudServices.Load(containerID)
 		if !found {
 			t.Fatal("Container was not added to containerToCloudServices map")
 		}
@@ -525,13 +525,13 @@ func TestContainerCloudServices(t *testing.T) {
 		cloudEvents := []*utils.StructEvent{
 			{
 				EventType:   utils.DnsEventType,
-				ContainerID: containerId,
+				ContainerID: containerID,
 				DNSName:     "test.amazonaws.com.",
 				Pid:         testPid,
 			},
 			{
 				EventType:   utils.DnsEventType,
-				ContainerID: containerId,
+				ContainerID: containerID,
 				DNSName:     "example.azure.com.",
 				Pid:         testPid,
 			},
@@ -544,7 +544,7 @@ func TestContainerCloudServices(t *testing.T) {
 		}
 
 		// Verify services were added
-		resultServices := dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+		resultServices := dm.ResolveContainerProcessToCloudServices(containerID, testPid)
 		if resultServices == nil {
 			t.Fatal("Expected non-nil service set")
 		}
@@ -560,14 +560,14 @@ func TestContainerCloudServices(t *testing.T) {
 			Container: &containercollection.Container{
 				Runtime: containercollection.RuntimeMetadata{
 					BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-						ContainerID: containerId,
+						ContainerID: containerID,
 					},
 				},
 			},
 		})
 
 		// Verify services are removed
-		resultServices = dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+		resultServices = dm.ResolveContainerProcessToCloudServices(containerID, testPid)
 		if resultServices != nil {
 			t.Error("Expected nil services after container removal")
 		}
@@ -575,7 +575,7 @@ func TestContainerCloudServices(t *testing.T) {
 
 	t.Run("max service cache size", func(t *testing.T) {
 		dm := CreateDNSManager(1000)
-		containerId := "test-container-456"
+		containerID := "test-container-456"
 		testPid := uint32(5678)
 
 		// Add container
@@ -584,14 +584,14 @@ func TestContainerCloudServices(t *testing.T) {
 			Container: &containercollection.Container{
 				Runtime: containercollection.RuntimeMetadata{
 					BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-						ContainerID: containerId,
+						ContainerID: containerID,
 					},
 				},
 			},
 		})
 
 		// Initialize the services set for the PID
-		if pidToServices, found := dm.containerToCloudServices.Load(containerId); found {
+		if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
 			services := mapset.NewSet[string]()
 			pidToServices.Set(testPid, services)
 		}
@@ -599,7 +599,7 @@ func TestContainerCloudServices(t *testing.T) {
 		// Add more services than the cache size
 		for i := 0; i <= maxServiceCacheSize+5; i++ {
 			event := &utils.StructEvent{
-				ContainerID: containerId,
+				ContainerID: containerID,
 				DNSName:     fmt.Sprintf("service%d.amazonaws.com.", i),
 				Pid:         testPid,
 			}
@@ -607,7 +607,7 @@ func TestContainerCloudServices(t *testing.T) {
 		}
 
 		// Verify cache size limit is enforced
-		services := dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+		services := dm.ResolveContainerProcessToCloudServices(containerID, testPid)
 		if services == nil {
 			t.Fatal("Expected non-nil service set")
 		}
@@ -620,7 +620,7 @@ func TestContainerCloudServices(t *testing.T) {
 
 func TestCloudServiceCacheLimit(t *testing.T) {
 	dm := CreateDNSManager(1000)
-	containerId := "test-container-456"
+	containerID := "test-container-456"
 	testPid := uint32(5678)
 
 	// Add container
@@ -629,7 +629,7 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-					ContainerID: containerId,
+					ContainerID: containerID,
 				},
 			},
 		},
@@ -639,7 +639,7 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 	for i := 0; i < maxServiceCacheSize+10; i++ {
 		dm.ReportEvent(&utils.StructEvent{
 			EventType:   utils.DnsEventType,
-			ContainerID: containerId,
+			ContainerID: containerID,
 			DNSName:     fmt.Sprintf("service%d.amazonaws.com.", i),
 			Pid:         testPid,
 		})
@@ -648,11 +648,11 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 	// Give some time for events to be processed
 	time.Sleep(100 * time.Millisecond)
 
-	services := dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+	services := dm.ResolveContainerProcessToCloudServices(containerID, testPid)
 	if services == nil {
 		// Debug information
 		t.Log("Debug: Checking container existence")
-		if pidToServices, found := dm.containerToCloudServices.Load(containerId); found {
+		if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
 			t.Log("Container found in map")
 			if services, found := pidToServices.Load(testPid); found {
 				t.Log("PID found in map")
@@ -679,5 +679,50 @@ func TestCreateDNSManager_NonPositiveSize(t *testing.T) {
 		assert.Equal(t, defaultDNSCacheSize, dm.cacheSize)
 		assert.Equal(t, defaultPerContainerCacheSize, dm.perContainerCacheSize)
 		assert.NotNil(t, dm.hostAddressToDomain)
+	}
+}
+
+func TestCreateDNSManager_BoundedSizing(t *testing.T) {
+	testCases := []struct {
+		name                 string
+		configuredSize       int
+		expectedCacheSize    int
+		expectedPerContainer int
+	}{
+		{
+			name:                 "small size scales perContainerSize to bound memory",
+			configuredSize:       1000,
+			expectedCacheSize:    1000,
+			expectedPerContainer: 100,
+		},
+		{
+			name:                 "very small size",
+			configuredSize:       50,
+			expectedCacheSize:    50,
+			expectedPerContainer: 5,
+		},
+		{
+			name:                 "default size",
+			configuredSize:       10000,
+			expectedCacheSize:    10000,
+			expectedPerContainer: defaultPerContainerCacheSize,
+		},
+		{
+			name:                 "large size",
+			configuredSize:       50000,
+			expectedCacheSize:    50000,
+			expectedPerContainer: defaultPerContainerCacheSize,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dm := CreateDNSManager(tc.configuredSize)
+			assert.NotNil(t, dm)
+			assert.Equal(t, tc.expectedCacheSize, dm.cacheSize)
+			assert.Equal(t, tc.expectedPerContainer, dm.perContainerCacheSize)
+			assert.NotNil(t, dm.hostAddressToDomain)
+			assert.NotNil(t, dm.containerToAddressToDomain)
+		})
 	}
 }
