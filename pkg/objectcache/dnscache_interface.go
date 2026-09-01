@@ -1,14 +1,14 @@
 package objectcache
 
 type DnsCache interface {
-	ResolveIpToDomain(ip string) string
+	ResolveIpToDomain(containerID string, ip string) string
 }
 
-var _DnsCache = (*DnsCacheMock)(nil)
+var _ DnsCache = (*DnsCacheMock)(nil)
 
 type DnsCacheMock struct {
 }
 
-func (dc *DnsCacheMock) ResolveIpToDomain(_ string) string {
+func (dc *DnsCacheMock) ResolveIpToDomain(_ string, _ string) string {
 	return ""
 }

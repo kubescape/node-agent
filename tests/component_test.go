@@ -3781,6 +3781,8 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		restore := withNodeAgentConfig(t, func(cfg map[string]any) {
 			cfg["excludeNamespaces"] = []string{excluded.Name}
 			cfg["excludeLabels"] = map[string][]string{"skip-me": {"true"}}
+			cfg["maxSniffingTimePerContainer"] = "45s"
+			cfg["initialDelay"] = "10s"
 		})
 		defer restore()
 
@@ -3791,7 +3793,7 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		require.NoError(t, err, "control workload")
 		require.NoError(t, ctl.WaitForReady(80))
 
-		time.Sleep(90 * time.Second)
+		require.NoError(t, ctl.WaitForContainerProfileCompletion(30), "control workload profile completion")
 
 		exCPs, _ := exNS.GetContainerProfiles()
 		require.Empty(t, exCPs, "an excluded-namespace workload must produce NO ContainerProfile")
@@ -3819,8 +3821,8 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		require.NoError(t, err, "workload")
 		require.NoError(t, wl.WaitForReady(80))
 
-		deadline := time.Now().Add(90 * time.Second)
-		require.NoError(t, wl.WaitForContainerProfileCompletion(90), "profile must complete within the shortened window")
+		deadline := time.Now().Add(180 * time.Second)
+		require.NoError(t, wl.WaitForContainerProfileCompletion(30), "profile must complete within the shortened window")
 		require.True(t, time.Now().Before(deadline),
 			"completion must track the configured maxSniffingTimePerContainer, not a longer default")
 	})

@@ -28,7 +28,7 @@ type stubResolver struct{}
 
 var _ dnsmanager.DNSResolver = (*stubResolver)(nil)
 
-func (stubResolver) ResolveIPAddress(string) (string, bool) { return "", true }
+func (stubResolver) ResolveIPAddress(string, string) (string, bool) { return "", true }
 func (stubResolver) ResolveContainerProcessToCloudServices(string, uint32) mapset.Set[string] {
 	return nil
 }

@@ -488,8 +488,9 @@ func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree
 	var domain string
 	var ok bool
 	dstEndpoint := event.GetDstEndpoint()
+	containerID := event.GetContainerID()
 	if event.GetPktType() == "OUTGOING" {
-		domain, ok = ns.dnsResolver.ResolveIPAddress(dstEndpoint.Addr)
+		domain, ok = ns.dnsResolver.ResolveIPAddress(containerID, dstEndpoint.Addr)
 		if !ok {
 			// Try to resolve the domain name
 			domains, err := net.LookupAddr(dstEndpoint.Addr)
@@ -502,7 +503,7 @@ func (ns *NetworkStream) buildNetworkEvent(event utils.NetworkEvent, processTree
 			}
 		}
 	} else {
-		domain, _ = ns.dnsResolver.ResolveIPAddress(dstEndpoint.Addr)
+		domain, _ = ns.dnsResolver.ResolveIPAddress(containerID, dstEndpoint.Addr)
 	}
 
 	networkEvent := armotypes.NetworkStreamEvent{

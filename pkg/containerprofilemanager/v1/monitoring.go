@@ -207,8 +207,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 			Endpoints:            containerData.getEndpoints(),
 			PolicyByRuleId:       containerData.getRulePolicies(),
 			IdentifiedCallStacks: containerData.getCallStacks(),
-			Egress:               containerData.getEgressNetworkNeighbors(container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
-			Ingress:              containerData.getIngressNetworkNeighbors(container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
+			Egress:               containerData.getEgressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
+			Ingress:              containerData.getIngressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
 			LabelSelector: metav1.LabelSelector{
 				MatchLabels:      watchedContainer.ParentWorkloadSelector.MatchLabels,
 				MatchExpressions: watchedContainer.ParentWorkloadSelector.MatchExpressions,

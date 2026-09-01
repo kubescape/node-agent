@@ -10,6 +10,7 @@ import (
 
 	"math/rand/v2"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
@@ -20,18 +21,21 @@ import (
 
 func TestResolveIPAddress(t *testing.T) {
 	tests := []struct {
-		name     string
-		dnsEvent *utils.StructEvent
-		ipAddr   string
-		want     string
-		wantOk   bool
+		name        string
+		containerID string
+		dnsEvent    *utils.StructEvent
+		ipAddr      string
+		want        string
+		wantOk      bool
 	}{
 		{
-			name:   "ip found",
-			ipAddr: "67.225.146.248",
+			name:        "ip found with container id",
+			containerID: "container-123",
+			ipAddr:      "67.225.146.248",
 			dnsEvent: &utils.StructEvent{
-				EventType: utils.DnsEventType,
-				DNSName:   "test.com",
+				EventType:   utils.DnsEventType,
+				ContainerID: "container-123",
+				DNSName:     "test.com",
 				Addresses: []string{
 					"67.225.146.248",
 				},
@@ -40,11 +44,13 @@ func TestResolveIPAddress(t *testing.T) {
 			wantOk: true,
 		},
 		{
-			name:   "ip not found",
-			ipAddr: "67.225.146.248",
+			name:        "ip not found",
+			containerID: "container-123",
+			ipAddr:      "67.225.146.248",
 			dnsEvent: &utils.StructEvent{
-				EventType: utils.DnsEventType,
-				DNSName:   "test.com",
+				EventType:   utils.DnsEventType,
+				ContainerID: "container-123",
+				DNSName:     "test.com",
 				Addresses: []string{
 					"54.23.332.4",
 				},
@@ -53,11 +59,43 @@ func TestResolveIPAddress(t *testing.T) {
 			wantOk: false,
 		},
 		{
-			name:   "no address",
-			ipAddr: "67.225.146.248",
+			name:        "no address",
+			containerID: "container-123",
+			ipAddr:      "67.225.146.248",
 			dnsEvent: &utils.StructEvent{
-				EventType: utils.DnsEventType,
-				DNSName:   "test.com",
+				EventType:   utils.DnsEventType,
+				ContainerID: "container-123",
+				DNSName:     "test.com",
+			},
+			want:   "",
+			wantOk: false,
+		},
+		{
+			name:        "host process with HostContainerID",
+			containerID: armotypes.HostContainerID,
+			ipAddr:      "1.1.1.1",
+			dnsEvent: &utils.StructEvent{
+				EventType:   utils.DnsEventType,
+				ContainerID: armotypes.HostContainerID,
+				DNSName:     "one.one.one.one",
+				Addresses: []string{
+					"1.1.1.1",
+				},
+			},
+			want:   "one.one.one.one",
+			wantOk: true,
+		},
+		{
+			name:        "empty container id returns miss",
+			containerID: "",
+			ipAddr:      "1.1.1.1",
+			dnsEvent: &utils.StructEvent{
+				EventType:   utils.DnsEventType,
+				ContainerID: "",
+				DNSName:     "one.one.one.one",
+				Addresses: []string{
+					"1.1.1.1",
+				},
 			},
 			want:   "",
 			wantOk: false,
@@ -69,7 +107,7 @@ func TestResolveIPAddress(t *testing.T) {
 			dm := CreateDNSManager(1000)
 
 			dm.ReportEvent(tt.dnsEvent)
-			got, ok := dm.ResolveIPAddress(tt.ipAddr)
+			got, ok := dm.ResolveIPAddress(tt.containerID, tt.ipAddr)
 			assert.Equal(t, tt.want, got)
 			assert.Equal(t, tt.wantOk, ok)
 		})
@@ -91,8 +129,9 @@ func TestResolveIPAddressFallback(t *testing.T) {
 		{
 			name: "dns resolution fallback",
 			dnsEvent: &utils.StructEvent{
-				EventType: utils.DnsEventType,
-				DNSName:   "example.com", // Using example.com as it's guaranteed to exist
+				EventType:   utils.DnsEventType,
+				ContainerID: "test-container-fallback",
+				DNSName:     "example.com", // Using example.com as it's guaranteed to exist
 			},
 			want:   "example.com",
 			wantOk: true,
@@ -115,12 +154,150 @@ func TestResolveIPAddressFallback(t *testing.T) {
 			}
 
 			dm.ReportEvent(tt.dnsEvent)
-			got, ok := dm.ResolveIPAddress(addresses[0].String())
+			got, ok := dm.ResolveIPAddress(tt.dnsEvent.ContainerID, addresses[0].String())
 			if got != tt.want || ok != tt.wantOk {
 				t.Errorf("ResolveIPAddress() got = %v, ok = %v, want = %v, wantOk = %v", got, ok, tt.want, tt.wantOk)
 			}
 		})
 	}
+}
+
+func TestContainerDNSIsolation(t *testing.T) {
+	dm := CreateDNSManager(1000)
+
+	container1 := "workload-ai-client-123"
+	container2 := "workload-kube-proxy-456"
+	sharedCDNIP := "104.18.7.192"
+
+	// Container 1 queries an AI provider sitting behind a shared CDN IP
+	dm.ReportEvent(&utils.StructEvent{
+		EventType:   utils.DnsEventType,
+		ContainerID: container1,
+		DNSName:     "api.openai.com",
+		Addresses:   []string{sharedCDNIP},
+	})
+
+	// Container 2 queries an internal/unrelated service
+	dm.ReportEvent(&utils.StructEvent{
+		EventType:   utils.DnsEventType,
+		ContainerID: container2,
+		DNSName:     "internal-service.local",
+		Addresses:   []string{"10.0.0.50"},
+	})
+
+	// Verify Container 1 resolves the IP to api.openai.com
+	domain1, ok1 := dm.ResolveIPAddress(container1, sharedCDNIP)
+	assert.True(t, ok1)
+	assert.Equal(t, "api.openai.com", domain1)
+
+	// Verify Container 2 does NOT inherit api.openai.com when connecting to the same IP
+	domain2, ok2 := dm.ResolveIPAddress(container2, sharedCDNIP)
+	assert.False(t, ok2)
+	assert.Equal(t, "", domain2)
+
+	// Verify Container 2 resolves its own queried domain
+	domain2Internal, ok2Internal := dm.ResolveIPAddress(container2, "10.0.0.50")
+	assert.True(t, ok2Internal)
+	assert.Equal(t, "internal-service.local", domain2Internal)
+
+	// Verify Container 1 does NOT resolve Container 2's domain
+	domain1Internal, ok1Internal := dm.ResolveIPAddress(container1, "10.0.0.50")
+	assert.False(t, ok1Internal)
+	assert.Equal(t, "", domain1Internal)
+
+	// Host queries a host service
+	dm.ReportEvent(&utils.StructEvent{
+		EventType:   utils.DnsEventType,
+		ContainerID: armotypes.HostContainerID,
+		DNSName:     "host-service.internal",
+		Addresses:   []string{"192.168.1.10"},
+	})
+
+	// Verify "host" resolves host traffic
+	domainHost, okHost := dm.ResolveIPAddress(armotypes.HostContainerID, "192.168.1.10")
+	assert.True(t, okHost)
+	assert.Equal(t, "host-service.internal", domainHost)
+
+	// Verify empty containerID does NOT resolve host traffic
+	domainEmpty, okEmpty := dm.ResolveIPAddress("", "192.168.1.10")
+	assert.False(t, okEmpty)
+	assert.Equal(t, "", domainEmpty)
+
+	// Verify regular containers do NOT resolve host queries
+	domainContainer1Host, okContainer1Host := dm.ResolveIPAddress(container1, "192.168.1.10")
+	assert.False(t, okContainer1Host)
+	assert.Equal(t, "", domainContainer1Host)
+}
+
+func TestContainerDNSLifecycleCleanup(t *testing.T) {
+	dm := CreateDNSManager(1000)
+
+	containerID := "short-lived-pod-789"
+	ip := "93.184.216.34"
+
+	// Add container
+	dm.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeAddContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+					ContainerID: containerID,
+				},
+			},
+		},
+	})
+
+	// Report DNS event
+	dm.ReportEvent(&utils.StructEvent{
+		EventType:   utils.DnsEventType,
+		ContainerID: containerID,
+		DNSName:     "example.org",
+		Addresses:   []string{ip},
+	})
+
+	// Verify resolution works before removal
+	domain, ok := dm.ResolveIPAddress(containerID, ip)
+	assert.True(t, ok)
+	assert.Equal(t, "example.org", domain)
+
+	// Remove container
+	dm.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeRemoveContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+					ContainerID: containerID,
+				},
+			},
+		},
+	})
+
+	// Verify existing resolutions remain readable during removal grace period for terminal profile save
+	domainDuringGrace, okDuringGrace := dm.ResolveIPAddress(containerID, ip)
+	assert.True(t, okDuringGrace)
+	assert.Equal(t, "example.org", domainDuringGrace)
+
+	// In-flight DNS event arrives after container removal
+	dm.ReportEvent(&utils.StructEvent{
+		EventType:   utils.DnsEventType,
+		ContainerID: containerID,
+		DNSName:     "late-arrival.org",
+		Addresses:   []string{"1.2.3.4"},
+	})
+
+	// Verify no cache was resurrected or updated for late-arriving event
+	domainLate, okLate := dm.ResolveIPAddress(containerID, "1.2.3.4")
+	assert.False(t, okLate)
+	assert.Equal(t, "", domainLate)
+
+	// Explicitly simulate grace period expiration
+	dm.cacheMu.Lock()
+	dm.containerToAddressToDomain.Remove(containerID)
+	dm.cacheMu.Unlock()
+
+	domainAfterGrace, okAfterGrace := dm.ResolveIPAddress(containerID, ip)
+	assert.False(t, okAfterGrace)
+	assert.Equal(t, "", domainAfterGrace)
 }
 
 func TestCacheFallbackBehavior(t *testing.T) {
@@ -319,7 +496,7 @@ func TestContainerCloudServices(t *testing.T) {
 	t.Run("full container lifecycle with cloud services", func(t *testing.T) {
 		// SETUP
 		dm := CreateDNSManager(1000)
-		containerId := "test-container-123"
+		containerID := "test-container-123"
 		testPid := uint32(1234)
 
 		// Add container
@@ -328,14 +505,14 @@ func TestContainerCloudServices(t *testing.T) {
 			Container: &containercollection.Container{
 				Runtime: containercollection.RuntimeMetadata{
 					BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-						ContainerID: containerId,
+						ContainerID: containerID,
 					},
 				},
 			},
 		})
 
 		// Verify container was added properly
-		pidToServices, found := dm.containerToCloudServices.Load(containerId)
+		pidToServices, found := dm.containerToCloudServices.Load(containerID)
 		if !found {
 			t.Fatal("Container was not added to containerToCloudServices map")
 		}
@@ -348,13 +525,13 @@ func TestContainerCloudServices(t *testing.T) {
 		cloudEvents := []*utils.StructEvent{
 			{
 				EventType:   utils.DnsEventType,
-				ContainerID: containerId,
+				ContainerID: containerID,
 				DNSName:     "test.amazonaws.com.",
 				Pid:         testPid,
 			},
 			{
 				EventType:   utils.DnsEventType,
-				ContainerID: containerId,
+				ContainerID: containerID,
 				DNSName:     "example.azure.com.",
 				Pid:         testPid,
 			},
@@ -367,7 +544,7 @@ func TestContainerCloudServices(t *testing.T) {
 		}
 
 		// Verify services were added
-		resultServices := dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+		resultServices := dm.ResolveContainerProcessToCloudServices(containerID, testPid)
 		if resultServices == nil {
 			t.Fatal("Expected non-nil service set")
 		}
@@ -383,14 +560,14 @@ func TestContainerCloudServices(t *testing.T) {
 			Container: &containercollection.Container{
 				Runtime: containercollection.RuntimeMetadata{
 					BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-						ContainerID: containerId,
+						ContainerID: containerID,
 					},
 				},
 			},
 		})
 
 		// Verify services are removed
-		resultServices = dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+		resultServices = dm.ResolveContainerProcessToCloudServices(containerID, testPid)
 		if resultServices != nil {
 			t.Error("Expected nil services after container removal")
 		}
@@ -398,7 +575,7 @@ func TestContainerCloudServices(t *testing.T) {
 
 	t.Run("max service cache size", func(t *testing.T) {
 		dm := CreateDNSManager(1000)
-		containerId := "test-container-456"
+		containerID := "test-container-456"
 		testPid := uint32(5678)
 
 		// Add container
@@ -407,14 +584,14 @@ func TestContainerCloudServices(t *testing.T) {
 			Container: &containercollection.Container{
 				Runtime: containercollection.RuntimeMetadata{
 					BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-						ContainerID: containerId,
+						ContainerID: containerID,
 					},
 				},
 			},
 		})
 
 		// Initialize the services set for the PID
-		if pidToServices, found := dm.containerToCloudServices.Load(containerId); found {
+		if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
 			services := mapset.NewSet[string]()
 			pidToServices.Set(testPid, services)
 		}
@@ -422,7 +599,7 @@ func TestContainerCloudServices(t *testing.T) {
 		// Add more services than the cache size
 		for i := 0; i <= maxServiceCacheSize+5; i++ {
 			event := &utils.StructEvent{
-				ContainerID: containerId,
+				ContainerID: containerID,
 				DNSName:     fmt.Sprintf("service%d.amazonaws.com.", i),
 				Pid:         testPid,
 			}
@@ -430,7 +607,7 @@ func TestContainerCloudServices(t *testing.T) {
 		}
 
 		// Verify cache size limit is enforced
-		services := dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+		services := dm.ResolveContainerProcessToCloudServices(containerID, testPid)
 		if services == nil {
 			t.Fatal("Expected non-nil service set")
 		}
@@ -443,7 +620,7 @@ func TestContainerCloudServices(t *testing.T) {
 
 func TestCloudServiceCacheLimit(t *testing.T) {
 	dm := CreateDNSManager(1000)
-	containerId := "test-container-456"
+	containerID := "test-container-456"
 	testPid := uint32(5678)
 
 	// Add container
@@ -452,7 +629,7 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-					ContainerID: containerId,
+					ContainerID: containerID,
 				},
 			},
 		},
@@ -462,7 +639,7 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 	for i := 0; i < maxServiceCacheSize+10; i++ {
 		dm.ReportEvent(&utils.StructEvent{
 			EventType:   utils.DnsEventType,
-			ContainerID: containerId,
+			ContainerID: containerID,
 			DNSName:     fmt.Sprintf("service%d.amazonaws.com.", i),
 			Pid:         testPid,
 		})
@@ -471,11 +648,11 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 	// Give some time for events to be processed
 	time.Sleep(100 * time.Millisecond)
 
-	services := dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+	services := dm.ResolveContainerProcessToCloudServices(containerID, testPid)
 	if services == nil {
 		// Debug information
 		t.Log("Debug: Checking container existence")
-		if pidToServices, found := dm.containerToCloudServices.Load(containerId); found {
+		if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
 			t.Log("Container found in map")
 			if services, found := pidToServices.Load(testPid); found {
 				t.Log("PID found in map")
@@ -492,5 +669,60 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 	if services.Cardinality() > maxServiceCacheSize {
 		t.Errorf("Service cache exceeded maximum size: got %d, want <= %d",
 			services.Cardinality(), maxServiceCacheSize)
+	}
+}
+
+func TestCreateDNSManager_NonPositiveSize(t *testing.T) {
+	for _, size := range []int{0, -1, -100} {
+		dm := CreateDNSManager(size)
+		assert.NotNil(t, dm, "CreateDNSManager(%d) must not return nil", size)
+		assert.Equal(t, defaultDNSCacheSize, dm.cacheSize)
+		assert.Equal(t, defaultPerContainerCacheSize, dm.perContainerCacheSize)
+		assert.NotNil(t, dm.hostAddressToDomain)
+	}
+}
+
+func TestCreateDNSManager_BoundedSizing(t *testing.T) {
+	testCases := []struct {
+		name                 string
+		configuredSize       int
+		expectedCacheSize    int
+		expectedPerContainer int
+	}{
+		{
+			name:                 "small size scales perContainerSize to bound memory",
+			configuredSize:       1000,
+			expectedCacheSize:    1000,
+			expectedPerContainer: 100,
+		},
+		{
+			name:                 "very small size",
+			configuredSize:       50,
+			expectedCacheSize:    50,
+			expectedPerContainer: 5,
+		},
+		{
+			name:                 "default size",
+			configuredSize:       10000,
+			expectedCacheSize:    10000,
+			expectedPerContainer: defaultPerContainerCacheSize,
+		},
+		{
+			name:                 "large size",
+			configuredSize:       50000,
+			expectedCacheSize:    50000,
+			expectedPerContainer: defaultPerContainerCacheSize,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dm := CreateDNSManager(tc.configuredSize)
+			assert.NotNil(t, dm)
+			assert.Equal(t, tc.expectedCacheSize, dm.cacheSize)
+			assert.Equal(t, tc.expectedPerContainer, dm.perContainerCacheSize)
+			assert.NotNil(t, dm.hostAddressToDomain)
+			assert.NotNil(t, dm.containerToAddressToDomain)
+		})
 	}
 }

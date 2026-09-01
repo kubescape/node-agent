@@ -159,7 +159,7 @@ func (cd *containerData) getCallStacks() []v1beta1.IdentifiedCallStack {
 }
 
 // getIngressNetworkNeighbors returns ingress network neighbors for this container
-func (cd *containerData) getIngressNetworkNeighbors(namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
+func (cd *containerData) getIngressNetworkNeighbors(containerID string, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
 	var ingress []v1beta1.NetworkNeighbor
 	if cd.networks == nil {
 		return ingress
@@ -167,7 +167,7 @@ func (cd *containerData) getIngressNetworkNeighbors(namespace string, k8sClient 
 
 	for _, event := range cd.networks.ToSlice() {
 		if event.PktType == utils.HostPktType {
-			neighbor := cd.createNetworkNeighbor(event, namespace, k8sClient, dnsResolverClient)
+			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient)
 			if neighbor == nil {
 				continue
 			}
@@ -179,7 +179,7 @@ func (cd *containerData) getIngressNetworkNeighbors(namespace string, k8sClient 
 }
 
 // getEgressNetworkNeighbors returns egress network neighbors for this container
-func (cd *containerData) getEgressNetworkNeighbors(namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
+func (cd *containerData) getEgressNetworkNeighbors(containerID string, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
 	var egress []v1beta1.NetworkNeighbor
 	if cd.networks == nil {
 		return egress
@@ -187,7 +187,7 @@ func (cd *containerData) getEgressNetworkNeighbors(namespace string, k8sClient k
 
 	for _, event := range cd.networks.ToSlice() {
 		if event.PktType != utils.HostPktType {
-			neighbor := cd.createNetworkNeighbor(event, namespace, k8sClient, dnsResolverClient)
+			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient)
 			if neighbor == nil {
 				continue
 			}
@@ -199,7 +199,7 @@ func (cd *containerData) getEgressNetworkNeighbors(namespace string, k8sClient k
 }
 
 // createNetworkNeighbor creates a network neighbor from a network event
-func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) *v1beta1.NetworkNeighbor {
+func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent NetworkEvent, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) *v1beta1.NetworkNeighbor {
 	var neighborEntry v1beta1.NetworkNeighbor
 
 	portIdentifier := generatePortIdentifierFromEvent(networkEvent)
@@ -262,7 +262,7 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 
 		if dnsResolverClient != nil {
-			domain, ok := dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
+			domain, ok := dnsResolverClient.ResolveIPAddress(containerID, networkEvent.Destination.IPAddress)
 			if ok {
 				neighborEntry.DNS = domain
 				neighborEntry.DNSNames = []string{domain}
