@@ -89,7 +89,10 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metric
 	if err != nil {
 		return nil, fmt.Errorf("failed to create set membership optimizer: %w", err)
 	}
-	staticOptimizer := cel.NewStaticOptimizer(folder, setMembership)
+	staticOptimizer, err := cel.NewStaticOptimizer(folder, setMembership)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create static optimizer: %w", err)
+	}
 
 	c := &CEL{
 		env:             env,
