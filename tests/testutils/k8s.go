@@ -690,16 +690,23 @@ func RestartDaemonSet(namespace, name string) error {
 	daemonset.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
 
 	// Update the daemonset
-	_, err = k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Update(ctx, daemonset, metav1.UpdateOptions{})
+	updated, err := k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Update(ctx, daemonset, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update daemonset %s/%s: %w", namespace, name, err)
 	}
+
+	targetGen := updated.Generation
 
 	// Wait for the daemonset to be ready
 	err = backoff.RetryNotify(func() error {
 		updatedDS, err := k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return err
+		}
+
+		if updatedDS.Status.ObservedGeneration < targetGen {
+			return fmt.Errorf("daemonset %s/%s rollout not observed yet (observed gen %d < target %d)",
+				namespace, name, updatedDS.Status.ObservedGeneration, targetGen)
 		}
 
 		if updatedDS.Status.NumberReady != updatedDS.Status.DesiredNumberScheduled {
