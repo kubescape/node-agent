@@ -18,6 +18,7 @@ package containerprofilecache
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -25,6 +26,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -331,6 +333,56 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 
 	ns := e.Namespace
 
+	// Snapshot the projection spec ONCE, before the fetch, and reuse it for both
+	// the conditional-fetch guard below and the fast-skip further down. The
+	// guard needs it pre-fetch, and reading it twice could straddle a concurrent
+	// SetProjectionSpec and let the two decisions disagree within one tick.
+	// Consequence: a spec swap landing DURING the fetch is now noticed on the
+	// next tick rather than this one. That is self-healing — the next tick's
+	// e.SpecHash != currentSpecHash comparison forces the rebuild regardless.
+	currentSpecHash := ""
+	if spec := c.snapshotSpec(); spec != nil {
+		currentSpecHash = spec.Hash
+	}
+
+	// Offer the stored checksum as a conditional-fetch validator only when an
+	// "unchanged" answer would have led to the fast-skip below anyway — i.e.
+	// when the body is genuinely not needed for anything else this tick:
+	//   - UserCPRef == nil: no authored CP to re-fetch and re-adopt.
+	//   - UserCPRV == "": no authored RV on record either. Without this,
+	//     an entry in the authoredJustDropped shape (a recorded authored RV but
+	//     no authored CP any more) could skip that handling. It mirrors
+	//     rvsMatchCP(nil, e.UserCPRV) in the fast-skip, which is true only for "".
+	//   - SpecHash == currentSpecHash: the projection would be identical.
+	//   - Checksum != "": we actually hold a validator to offer.
+	//   - State is already terminal: see below.
+	//
+	// The state conjunct is not redundant with the others. e.State is derived
+	// from the StatusMetadataKey/CompletionMetadataKey ANNOTATIONS, which sit
+	// outside the content checksum — so a lifecycle flip (partial -> full)
+	// leaves the checksum matching. Without this conjunct such an entry would
+	// answer "unchanged" on that tick AND on every later one (its checksum
+	// stays valid indefinitely), so the rebuild that refreshes e.State would
+	// never fire and the cached state would freeze permanently. That is not
+	// the bounded one-fetch staleness accepted for e.RV: it never self-corrects.
+	// It matters because e.State is not internal bookkeeping — rulemanager gates
+	// HasFinalApplicationProfile on Completed+Full and stamps FailOnProfile on
+	// every alert from it, so a frozen state keeps alerting a completed profile
+	// as partial forever.
+	//
+	// Requiring Completed+Full (rather than isTerminalCPStatus, which also
+	// admits TooLarge) is deliberate: it is the exact predicate rulemanager
+	// treats as final, and it is the only state from which no further lifecycle
+	// transition is expected. A TooLarge profile simply keeps fetching bodies.
+	//
+	// Attached per call, never to the shared ctx: the authored-CP fetch below
+	// derives from the same ctx and must never carry the learned CP's checksum.
+	cpCtx := ctx
+	if e.UserCPRef == nil && e.UserCPRV == "" && e.SpecHash == currentSpecHash && e.Checksum != "" &&
+		e.State != nil && e.State.Status == helpersv1.Completed && e.State.Completion == helpersv1.Full {
+		cpCtx = storage.WithKnownChecksum(ctx, e.Checksum)
+	}
+
 	// Re-fetch all sources. CP fetch errors (including 404) are treated as
 	// "not available right now" — mirroring tryPopulateEntry's behavior. We
 	// leave cp=nil and rely on the RV-match fast-skip below to preserve the
@@ -339,11 +391,24 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	// while the storage-side consolidated CP remains unpublished.
 	var cp *v1beta1.ContainerProfile
 	var cpErr error
-	_ = c.refreshRPC(ctx, func(rctx context.Context) error {
+	_ = c.refreshRPC(cpCtx, func(rctx context.Context) error {
 		cp, cpErr = c.storageClient.GetContainerProfile(rctx, ns, e.CPName)
 		return cpErr
 	})
 	if cpErr != nil {
+		// Checked before IsNotFound: an implementation is free to return a
+		// sentinel that also carries a not-found shape, and "unchanged" is the
+		// more specific claim. The source verified our checksum still matches
+		// and sent no body, so the entry we hold is known-good — leave it
+		// entirely alone. Deliberately does NOT refresh e.RV or e.Checksum:
+		// there is no fresh object to read them from, so e.RV may lag a
+		// metadata-only write until the next unconditional fetch.
+		if errors.Is(cpErr, storage.ErrProfileUnchanged) {
+			logger.L().Debug("refreshOneEntry: CP unchanged (checksum match); keeping cached entry without rebuild",
+				helpers.String("containerID", id),
+				helpers.String("cpName", e.CPName))
+			return
+		}
 		if !apierrors.IsNotFound(cpErr) {
 			logger.L().Debug("refreshOneEntry: CP fetch failed transiently; keeping cached entry",
 				helpers.String("containerID", id),
@@ -413,11 +478,9 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	// this avoids spurious rebuilds when an optional source is still missing,
 	// as long as it was also missing at the last build. Also skip when the
 	// projection spec hash matches: if neither the data nor the spec changed,
-	// the projected output would be identical.
-	currentSpecHash := ""
-	if spec := c.snapshotSpec(); spec != nil {
-		currentSpecHash = spec.Hash
-	}
+	// the projected output would be identical. currentSpecHash is the value
+	// hoisted above the fetch — deliberately not re-read here, so the guard and
+	// this comparison cannot disagree within a tick.
 	if rvsMatchCP(cp, e.RV) &&
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
 		e.SpecHash == currentSpecHash {
@@ -510,6 +573,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		WorkloadName:     prev.WorkloadName,
 		RV:               rvOfCP(cp),
 		UserCPRV:         rvOfCP(userDefinedCP),
+		Checksum:         checksumOfCP(cp),
 		terminatedSeenAt: prev.terminatedSeenAt,
 	}
 	if userDefinedCP != nil {
@@ -539,6 +603,16 @@ func rvOfCP(o *v1beta1.ContainerProfile) string {
 		return ""
 	}
 	return o.ResourceVersion
+}
+
+// checksumOfCP returns the content checksum a ProfileClient stamped on the
+// object, or "" when the object is absent or the source supplied none (the
+// in-cluster CRD-backed client never does). Mirrors rvOfCP.
+func checksumOfCP(o *v1beta1.ContainerProfile) string {
+	if o == nil {
+		return ""
+	}
+	return o.Annotations[storage.ContainerProfileChecksumAnnotationKey]
 }
 
 // observeMemoryMetrics records per-field entry counts, retention ratios, and
