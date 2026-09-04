@@ -71,10 +71,11 @@ var maxServiceSelectorEstimate = func() int {
 // caller, but re-shaping that string into map[string]string costs real additional bytes (Go
 // map bucket overhead), so this measures that wrapper delta exactly from the same data
 // filterLabels/GetDestinationPodLabels would produce, rather than assuming it's zero or
-// guessing a label count. Ports and NamespaceSelector are similarly computed exactly from
-// fields already on the event (Port/Protocol, and the destination namespace compared against
-// the container's own), not estimated, since nothing about their content is deferred to
-// serialization.
+// guessing a label count. NamespaceSelector is computed exactly from fields already on the
+// event. Port/Protocol on Pod and raw branches are also exact from the event; on the Service
+// branch serialization may remap observed socket ports to enforcement (target/endpoint)
+// ports and may emit multiple NetworkPort entries, so the Service case budgets a
+// conservative upper bound instead.
 func networkNeighborIncrement(data *containerData, networkEvent NetworkEvent) int {
 	est := neighborFixedOverhead + size.Of([]v1beta1.NetworkPort{{
 		Name:     generatePortIdentifierFromEvent(networkEvent),
@@ -93,6 +94,11 @@ func networkNeighborIncrement(data *containerData, networkEvent NetworkEvent) in
 	switch networkEvent.Destination.Kind {
 	case EndpointKindService:
 		est += maxServiceSelectorEstimate
+		est += size.Of(v1beta1.NetworkPort{
+			Name:     generatePortIdentifier(networkEvent.Protocol, 65535),
+			Protocol: v1beta1.Protocol(networkEvent.Protocol),
+			Port:     ptr.To(int32(65535)),
+		})
 	case EndpointKindPod:
 		// The label bytes are already on the meter via Destination.PodLabels; only charge the
 		// extra cost of wrapping them into a LabelSelector's map, and never a negative one.
