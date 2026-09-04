@@ -6,12 +6,12 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 )
 
 // emptyEvents clears all event data
@@ -202,12 +202,8 @@ func (cd *containerData) getEgressNetworkNeighbors(containerID string, namespace
 func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent NetworkEvent, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) *v1beta1.NetworkNeighbor {
 	var neighborEntry v1beta1.NetworkNeighbor
 
-	portIdentifier := generatePortIdentifierFromEvent(networkEvent)
-	neighborEntry.Ports = []v1beta1.NetworkPort{{
-		Protocol: v1beta1.Protocol(networkEvent.Protocol),
-		Port:     ptr.To(int32(networkEvent.Port)),
-		Name:     portIdentifier,
-	}}
+	enforcementPorts := []uint16{networkEvent.Port}
+	var serviceWorkload k8sinterface.IWorkload
 
 	if networkEvent.Destination.Kind == EndpointKindPod {
 		// For Pods, we need to remove the default labels
@@ -230,6 +226,7 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 				helpers.String("service name", networkEvent.Destination.Name))
 			return nil
 		}
+		serviceWorkload = svc
 
 		var selector map[string]string
 		if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
@@ -269,6 +266,18 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 			}
 		}
 	}
+
+	if networkEvent.Destination.Kind == EndpointKindService && serviceWorkload != nil && k8sClient != nil {
+		enforcementPorts = resolveServiceEnforcementPorts(
+			k8sClient,
+			networkEvent.Destination.Namespace,
+			networkEvent.Destination.Name,
+			serviceWorkload,
+			networkEvent.Port,
+			networkEvent.Protocol,
+		)
+	}
+	neighborEntry.Ports = buildNetworkPorts(networkEvent.Protocol, enforcementPorts)
 
 	neighborEntry.Type = InternalTrafficType
 	if neighborEntry.NamespaceSelector == nil && neighborEntry.PodSelector == nil {
