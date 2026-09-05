@@ -615,6 +615,39 @@ func TestLoadConfig_NoBypassByDefault(t *testing.T) {
 	assert.True(t, config.FIM.DedupConfig.DedupEnabled, "without bypass, configured suppression is preserved")
 }
 
+func TestLoadConfig_SbomFailureReporting(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name:    "disabled by default",
+			content: `{}`,
+			want:    false,
+		},
+		{
+			name:    "explicitly enabled",
+			content: `{"sbomFailureReportingEnabled": true}`,
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(dir+"/config.json", []byte(tt.content), 0644))
+
+			config, err := LoadConfigOptional(dir, false)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, config.EnableSbomFailureReporting)
+		})
+	}
+}
+
 func TestGetFIMExportersConfig(t *testing.T) {
 	// Create a temporary config file
 	tempDir := t.TempDir()

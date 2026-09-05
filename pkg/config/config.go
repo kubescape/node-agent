@@ -93,6 +93,7 @@ type Config struct {
 	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
 	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
+	EnableSbomFailureReporting     bool                                 `mapstructure:"sbomFailureReportingEnabled"`
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
 	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
 	HostMonitoringEnabled          bool                                 `mapstructure:"hostMonitoringEnabled"`
@@ -197,6 +198,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("workerPoolSize", 3000)
 	viper.SetDefault("eventBatchSize", 15000)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
+	viper.SetDefault("sbomFailureReportingEnabled", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
 	viper.SetDefault("ruleCooldown::ruleCooldownDisabled", false)
 	viper.SetDefault("ruleCooldown::ruleCooldownDuration", 1*time.Hour)
