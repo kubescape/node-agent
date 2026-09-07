@@ -252,3 +252,50 @@ func TestCreateNetworkNeighbor_EmptyContainerIDWithWatchedContainerData(t *testi
 	assert.Equal(t, "93.184.216.34", resolver.lastIPAddress)
 	assert.Equal(t, "resolved.domain", neighbor.DNS)
 }
+
+// TestCreateNetworkNeighbor_StatefulSetPeerStripsPodIdentityLabels ensures per-replica
+// StatefulSet labels are stripped from PodSelector so GeneratedNetworkPolicy peers
+// select the workload, not the replicas observed during learning (#942).
+func TestCreateNetworkNeighbor_StatefulSetPeerStripsPodIdentityLabels(t *testing.T) {
+	tests := []struct {
+		name    string
+		index   string
+		podName string
+	}{
+		{name: "replica-0", index: "0", podName: "db-0"},
+		{name: "replica-1", index: "1", podName: "db-1"},
+		{name: "replica-2", index: "2", podName: "db-2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			networkEvent := NetworkEvent{
+				Port:     5432,
+				Protocol: "TCP",
+				PktType:  utils.OutgoingPktType,
+				Destination: Destination{
+					Kind:      EndpointKindPod,
+					Namespace: "default",
+					Name:      tt.podName,
+				},
+			}
+			networkEvent.SetDestinationPodLabels(map[string]string{
+				"app.kubernetes.io/name":             "db",
+				"apps.kubernetes.io/pod-index":       tt.index,
+				"statefulset.kubernetes.io/pod-name": tt.podName,
+			})
+
+			cd := &containerData{}
+			neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, nil)
+			if !assert.NotNil(t, neighbor) {
+				return
+			}
+			if !assert.NotNil(t, neighbor.PodSelector) {
+				return
+			}
+			assert.Equal(t, map[string]string{"app.kubernetes.io/name": "db"}, neighbor.PodSelector.MatchLabels)
+			assert.NotContains(t, neighbor.PodSelector.MatchLabels, "apps.kubernetes.io/pod-index")
+			assert.NotContains(t, neighbor.PodSelector.MatchLabels, "statefulset.kubernetes.io/pod-name")
+		})
+	}
+}

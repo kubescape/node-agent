@@ -185,6 +185,17 @@ func TestFilterLabels(t *testing.T) {
 			},
 			expected: map[string]string{},
 		},
+		{
+			name: "filter StatefulSet pod-identity labels",
+			input: map[string]string{
+				"app.kubernetes.io/name":             "db",
+				"apps.kubernetes.io/pod-index":       "2",
+				"statefulset.kubernetes.io/pod-name": "db-2",
+			},
+			expected: map[string]string{
+				"app.kubernetes.io/name": "db",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -613,9 +624,11 @@ func TestTrafficTypeConstants(t *testing.T) {
 
 func TestDefaultLabelsToIgnore(t *testing.T) {
 	expectedLabels := map[string]struct{}{
-		"controller-revision-hash": {},
-		"pod-template-generation":  {},
-		"pod-template-hash":        {},
+		"controller-revision-hash":           {},
+		"pod-template-generation":            {},
+		"pod-template-hash":                  {},
+		"apps.kubernetes.io/pod-index":       {},
+		"statefulset.kubernetes.io/pod-name": {},
 	}
 
 	assert.Equal(t, expectedLabels, DefaultLabelsToIgnore)
