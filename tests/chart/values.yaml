@@ -44,10 +44,10 @@ storage:
     app.kubernetes.io/part-of: "kubescape-storage"
   resources:
     requests:
-      cpu: 100m
+      cpu: 500m
       memory: 400Mi
     limits:
-      cpu: 500m
+      cpu: 2000m
       memory: 1500Mi
 nodeAgent:
   # The component tests run the agent with the Go profiler on. This used to ride
