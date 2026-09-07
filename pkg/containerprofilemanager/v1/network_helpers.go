@@ -12,9 +12,11 @@ import (
 type EndpointKind string
 
 var DefaultLabelsToIgnore = map[string]struct{}{
-	"controller-revision-hash": {},
-	"pod-template-generation":  {},
-	"pod-template-hash":        {},
+	"controller-revision-hash":           {},
+	"pod-template-generation":            {},
+	"pod-template-hash":                  {},
+	"apps.kubernetes.io/pod-index":       {},
+	"statefulset.kubernetes.io/pod-name": {},
 }
 
 const (

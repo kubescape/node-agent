@@ -20,6 +20,7 @@ import (
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	iglogger "github.com/inspektor-gadget/inspektor-gadget/pkg/logger"
+	"github.com/kubescape/backend/pkg/servicediscovery/schema"
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -74,6 +75,26 @@ import (
 	goruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+const defaultAPIURL = "api.armosec.io"
+
+func resolveSbomFailureReportReceiverURL(
+	cfg config.Config,
+	apiURL string,
+	loadServices func(string) (schema.IBackendServices, error),
+) string {
+	if !cfg.EnableSbomGeneration || !cfg.EnableSbomFailureReporting {
+		return ""
+	}
+	if apiURL == "" {
+		apiURL = defaultAPIURL
+	}
+	services, err := loadServices(apiURL)
+	if err != nil || services == nil {
+		return ""
+	}
+	return services.GetReportReceiverHttpUrl()
+}
 
 func main() {
 	ctx := context.Background()
@@ -431,13 +452,9 @@ func main() {
 
 	// Create scan failure reporter (sends SBOM failures to careportreceiver for user notifications)
 	var failureReporter sbommanager.SbomFailureReporter
-	apiURL := os.Getenv("API_URL")
-	if apiURL == "" {
-		apiURL = "api.armosec.io"
-	}
-	if services, svcErr := config.LoadServiceURLs(apiURL); svcErr == nil && services.GetReportReceiverHttpUrl() != "" {
-		failureReporter = sbommanagerv1.NewHTTPSbomFailureReporter(services.GetReportReceiverHttpUrl(), accessKey, clusterData.AccountID, clusterData.ClusterName)
-		logger.L().Info("scan failure reporting enabled", helpers.String("eventReceiverURL", services.GetReportReceiverHttpUrl()))
+	if eventReceiverURL := resolveSbomFailureReportReceiverURL(cfg, os.Getenv("API_URL"), config.LoadServiceURLs); eventReceiverURL != "" {
+		failureReporter = sbommanagerv1.NewHTTPSbomFailureReporter(eventReceiverURL, accessKey, clusterData.AccountID, clusterData.ClusterName)
+		logger.L().Info("scan failure reporting enabled", helpers.String("eventReceiverURL", eventReceiverURL))
 	}
 
 	// Create the SBOM manager
