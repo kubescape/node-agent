@@ -156,6 +156,10 @@ func collectEndpointsPorts(
 		return nil
 	}
 
+	if endpointsObj == nil {
+		return nil
+	}
+
 	var endpoints corev1.Endpoints
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(endpointsObj.GetObject(), &endpoints); err != nil {
 		logger.L().Warning("failed to convert endpoints for port resolution",

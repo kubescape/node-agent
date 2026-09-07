@@ -17,7 +17,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 )
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
@@ -73,15 +72,14 @@ var maxServiceSelectorEstimate = func() int {
 // filterLabels/GetDestinationPodLabels would produce, rather than assuming it's zero or
 // guessing a label count. NamespaceSelector is computed exactly from fields already on the
 // event. Port/Protocol on Pod and raw branches are also exact from the event; on the Service
-// branch serialization may remap observed socket ports to enforcement (target/endpoint)
-// ports and may emit multiple NetworkPort entries, so the Service case budgets a
-// conservative upper bound instead.
+// branch the resolved ports are captured at report time and reused at serialization,
+// so every emitted NetworkPort is charged even for heterogeneous backends.
 func networkNeighborIncrement(data *containerData, networkEvent NetworkEvent) int {
-	est := neighborFixedOverhead + size.Of([]v1beta1.NetworkPort{{
-		Name:     generatePortIdentifierFromEvent(networkEvent),
-		Protocol: v1beta1.Protocol(networkEvent.Protocol),
-		Port:     ptr.To(int32(networkEvent.Port)),
-	}})
+	ports := []uint16{networkEvent.Port}
+	if resolved, ok := data.servicePorts[networkEvent]; ok {
+		ports = resolved
+	}
+	est := neighborFixedOverhead + size.Of(buildNetworkPorts(networkEvent.Protocol, ports))
 
 	sourceNamespace := ""
 	if data.watchedContainerData != nil {
@@ -94,11 +92,6 @@ func networkNeighborIncrement(data *containerData, networkEvent NetworkEvent) in
 	switch networkEvent.Destination.Kind {
 	case EndpointKindService:
 		est += maxServiceSelectorEstimate
-		est += size.Of(v1beta1.NetworkPort{
-			Name:     generatePortIdentifier(networkEvent.Protocol, 65535),
-			Protocol: v1beta1.Protocol(networkEvent.Protocol),
-			Port:     ptr.To(int32(65535)),
-		})
 	case EndpointKindPod:
 		// The label bytes are already on the meter via Destination.PodLabels; only charge the
 		// extra cost of wrapping them into a LabelSelector's map, and never a negative one.
@@ -363,6 +356,21 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		// Skip if we already saved this event
 		if data.networks.Contains(networkEvent) {
 			return 0, nil
+		}
+
+		if networkEvent.Destination.Kind == EndpointKindService {
+			ports := []uint16{networkEvent.Port}
+			if cpm.k8sClient != nil {
+				svc, err := cpm.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
+				if err == nil {
+					ports = resolveServiceEnforcementPorts(cpm.k8sClient, networkEvent.Destination.Namespace,
+						networkEvent.Destination.Name, svc, networkEvent.Port, networkEvent.Protocol)
+				}
+			}
+			if data.servicePorts == nil {
+				data.servicePorts = make(map[NetworkEvent][]uint16)
+			}
+			data.servicePorts[networkEvent] = ports
 		}
 
 		data.networks.Add(networkEvent)

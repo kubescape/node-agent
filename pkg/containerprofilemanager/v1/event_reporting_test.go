@@ -1,6 +1,7 @@
 package containerprofilemanager
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -11,6 +12,12 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 )
 
 // fakeDNSResolver resolves every address to a fixed domain, so tests can exercise
@@ -251,4 +258,61 @@ func TestCreateNetworkNeighbor_EmptyContainerIDWithWatchedContainerData(t *testi
 	assert.Equal(t, "", resolver.lastContainerID, "empty containerID must be preserved without falling back to watchedContainerData")
 	assert.Equal(t, "93.184.216.34", resolver.lastIPAddress)
 	assert.Equal(t, "resolved.domain", neighbor.DNS)
+}
+
+func TestReportNetworkEventServicePortMultiplicity(t *testing.T) {
+	cpm, entry := newTestManager(t, "container1")
+	client := &servicePortTestClient{
+		service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
+		}),
+	}
+	var objects []runtime.Object
+	for i, port := range []int32{8080, 9090, 10000} {
+		objects = append(objects, newEndpointSlice(string(rune('a'+i)), "api", discoveryv1.EndpointPort{
+			Name: ptr.To("web"), Port: ptr.To(port),
+		}))
+	}
+	client.kubeClient = fake.NewClientset(objects...)
+	cpm.k8sClient = client
+	event := &utils.StructEvent{
+		DstEndpoint: types.L3Endpoint{Namespace: "default", Name: "api", Kind: types.EndpointKind(EndpointKindService)},
+		DstPort:     80, Proto: "tcp", PktType: utils.OutgoingPktType,
+	}
+	cpm.ReportNetworkEvent("container1", event)
+	neighbor := entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil)
+	require.NotNil(t, neighbor)
+	require.Equal(t, []int32{8080, 9090, 10000}, networkPortValues(neighbor.Ports))
+	// Isolate the port budget so unused selector headroom cannot hide an undercount.
+	want := size.Of(serviceNetworkEvent(80, "tcp")) + neighborFixedOverhead +
+		maxServiceSelectorEstimate + size.Of(&metav1.LabelSelector{MatchLabels: getNamespaceMatchLabels("default", "")}) + size.Of(neighbor.Ports)
+	require.GreaterOrEqual(t, entry.data.size.Load(), int64(want))
+	recordedSize := entry.data.size.Load()
+	cpm.ReportNetworkEvent("container1", event)
+	require.Equal(t, recordedSize, entry.data.size.Load(), "duplicate events must not be charged again")
+
+	// The third port must count toward the split threshold, not just serialization.
+	splitManager, splitEntry := newTestManager(t, "container2")
+	splitManager.k8sClient = client
+	splitManager.cfg.MaxTsProfileSize = int64(want - 1)
+	splitEntry.data.watchedContainerData = &objectcache.WatchedContainerData{SyncChannel: make(chan error, 1)}
+	splitManager.ReportNetworkEvent("container2", event)
+	select {
+	case signal := <-splitEntry.data.watchedContainerData.SyncChannel:
+		require.Equal(t, ProfileRequiresSplit, signal)
+	default:
+		t.Fatal("expected profile split after accounting for all three ports")
+	}
+
+	// Endpoint changes after reporting must not change the budgeted port list.
+	require.NoError(t, client.kubeClient.DiscoveryV1().EndpointSlices("default").Delete(context.Background(), "c", metav1.DeleteOptions{}))
+	neighbor = entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil)
+	require.Equal(t, []int32{8080, 9090, 10000}, networkPortValues(neighbor.Ports))
+
+	// A new profile batch resolves fresh ports instead of keeping the old snapshot.
+	entry.data.emptyEvents()
+	cpm.ReportNetworkEvent("container1", event)
+	neighbor = entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil)
+	require.Equal(t, []int32{8080, 9090}, networkPortValues(neighbor.Ports))
+	require.Less(t, entry.data.size.Load(), recordedSize)
 }

@@ -60,6 +60,9 @@ type containerData struct {
 	networks      mapset.Set[NetworkEvent]
 	droppedEvents bool // Indicates if any events were dropped during monitoring
 
+	// Service port snapshots keep report-time accounting and serialization consistent.
+	servicePorts map[NetworkEvent][]uint16
+
 	// Last reported completion/statuses
 	lastReportedCompletion string
 	lastReportedStatus     string

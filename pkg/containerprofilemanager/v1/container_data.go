@@ -25,6 +25,7 @@ func (cd *containerData) emptyEvents() {
 	cd.rulePolicies = nil
 	cd.callStacks = nil
 	cd.networks = nil
+	cd.servicePorts = nil
 	if cd.watchedContainerData != nil {
 		cd.lastReportedCompletion = string(cd.watchedContainerData.GetCompletionStatus())
 		cd.lastReportedStatus = string(cd.watchedContainerData.GetStatus())
@@ -267,7 +268,9 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 		}
 	}
 
-	if networkEvent.Destination.Kind == EndpointKindService && serviceWorkload != nil && k8sClient != nil {
+	if ports, ok := cd.servicePorts[networkEvent]; ok {
+		enforcementPorts = ports
+	} else if networkEvent.Destination.Kind == EndpointKindService && serviceWorkload != nil && k8sClient != nil {
 		enforcementPorts = resolveServiceEnforcementPorts(
 			k8sClient,
 			networkEvent.Destination.Namespace,

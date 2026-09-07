@@ -239,6 +239,14 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 			wantPorts: []int32{8080, 9090},
 		},
 		{
+			name: "nil endpoints after empty endpointslice lookup keeps observed port",
+			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+				"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
+			}),
+			event:     serviceNetworkEvent(80, "tcp"),
+			wantPorts: []int32{80},
+		},
+		{
 			name: "endpoints fallback when no endpointslice",
 			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
 				"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
