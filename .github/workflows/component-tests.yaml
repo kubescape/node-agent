@@ -153,6 +153,9 @@ jobs:
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s
       - name: Install Node Agent Chart
         run: |
+          # (no-op, throwaway validation PR: confirms component-tests pass
+          # against the actual released kubescape/storage v0.0.333, not a
+          # manually-built test image)
           STORAGE_TAG=$(./tests/scripts/storage-tag.sh)
           echo "Storage tag that will be used: ${STORAGE_TAG}"
           helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${{ needs.build-and-push-image.outputs.image_tag }} --set nodeAgent.image.repository=${{ needs.build-and-push-image.outputs.image_repo }} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 10m --debug
