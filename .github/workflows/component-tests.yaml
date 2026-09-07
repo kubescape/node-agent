@@ -182,3 +182,22 @@ jobs:
           echo "-----------------------------------------"
           echo "Storage logs"
           kubectl logs $(kubectl get pods -n kubescape -o name | grep storage) -n kubescape
+      - name: Diagnose pod restarts and node resource pressure
+        if: always()
+        run: |
+          echo "Node describe (allocatable/capacity vs requests)"
+          kubectl describe nodes
+          echo "-----------------------------------------"
+          echo "Pods across all namespaces, with restart counts"
+          kubectl get pods -A -o wide
+          echo "-----------------------------------------"
+          echo "Pods with non-zero restarts (detail)"
+          for p in $(kubectl get pods -A --no-headers -o custom-columns=":metadata.namespace,:metadata.name,:status.containerStatuses[0].restartCount" | awk '$3!="" && $3!="<none>" && $3+0>0 {print $1"/"$2}'); do
+            ns=$(echo "$p" | cut -d/ -f1)
+            name=$(echo "$p" | cut -d/ -f2)
+            echo "=== $ns/$name ==="
+            kubectl describe pod "$name" -n "$ns"
+          done
+          echo "-----------------------------------------"
+          echo "Cluster events, sorted by time (liveness/readiness probe failures, OOMKilled, etc.)"
+          kubectl get events -A --sort-by=.lastTimestamp
