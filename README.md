@@ -262,10 +262,13 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete configuratio
 | Malware Detection | `malwareDetectionEnabled` | `false` | Start the malware manager (needs an out-of-tree scanner) |
 | Network Tracing | `networkServiceEnabled` | `false` | Track network connections |
 | SBOM Generation | `sbomGenerationEnabled` | `false` | Generate SBOMs |
+| SBOM Failure Reporting | `sbomFailureReportingEnabled` | `false` | Report SBOM generation failures; service discovery runs only when this and SBOM generation are enabled |
 | File Integrity | `fimEnabled` | `false` | Monitor file changes |
 | Seccomp Profiles | `seccompServiceEnabled` | `false` | Generate seccomp profiles |
 | HTTP Detection | `httpDetectionEnabled` | `false` | Parse HTTP traffic |
 | Network Streaming | `networkStreamingEnabled` | `false` | Stream network events |
+
+SBOM failure reporting is opt-in. Setting `API_URL` or mounting `services.json` does not enable it; those sources are consulted only when both `sbomGenerationEnabled` and `sbomFailureReportingEnabled` are `true`.
 
 ## 🔌 Image-Based Gadgets
 

@@ -149,6 +149,7 @@ correlation is an upgrade, not a dependency.
 | `networkServiceEnabled` | bool | `false` | Enable network connection tracking |
 | `networkStreamingEnabled` | bool | `false` | Enable network event streaming |
 | `sbomGenerationEnabled` | bool | `false` | Enable SBOM generation |
+| `sbomFailureReportingEnabled` | bool | `false` | Report SBOM generation failures; service discovery runs only when this and SBOM generation are enabled |
 | `seccompServiceEnabled` | bool | `false` | Enable seccomp profile generation |
 | `nodeProfileServiceEnabled` | bool | `false` | Enable node profiling |
 | `fimEnabled` | bool | `false` | Enable File Integrity Monitoring |
@@ -159,6 +160,8 @@ correlation is an upgrade, not a dependency.
 | `enableEmbeddedSBOMs` | bool | `false` | Use embedded SBOMs from images |
 | `partialProfileGenerationEnabled` | bool | `true` | Allow partial profile generation |
 | `ignoreRuleBindings` | bool | `false` | Apply all rules to all pods regardless of bindings. When enabled, RuntimeAlertRuleBinding objects are not watched, every monitored container is kept for runtime detection, and per-pod binding bookkeeping is skipped (rules are resolved directly from the rule creator). |
+
+SBOM failure reporting is opt-in. Setting `API_URL` or mounting `services.json` does not enable it. Once both SBOM generation and failure reporting are enabled, service discovery retains its existing local-file-first behavior and uses `API_URL` (or `api.armosec.io` when unset) only when no services file exists.
 
 ### Timing & Performance
 
