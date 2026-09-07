@@ -292,6 +292,64 @@ func wasSelectorInPeers(peers []objectcache.PeerSelector, podLabels labels.Set, 
 	return false
 }
 
+// wasSelectorInPeersAnyPort is the port-agnostic form of wasSelectorInPeers:
+// a peer entry matches on podSelector + namespaceSelector alone, regardless of
+// its ports. It backs the 3-argument compatibility overload of the selector
+// verbs (the signature before ports/protocol were added), so an older rule body
+// keeps compiling and keeps its selector allowlisting instead of being
+// disabled wholesale. Same fail-closed rules: an empty podSelector matches
+// nothing.
+func wasSelectorInPeersAnyPort(peers []objectcache.PeerSelector, podLabels labels.Set, ns, profileNs string) bool {
+	for i := range peers {
+		peer := &peers[i]
+		if peer.PodSelector == nil ||
+			(len(peer.PodSelector.MatchLabels) == 0 && len(peer.PodSelector.MatchExpressions) == 0) {
+			continue
+		}
+		ps, err := metav1.LabelSelectorAsSelector(peer.PodSelector)
+		if err != nil {
+			continue
+		}
+		if ps.Matches(podLabels) && namespaceSelectorMatches(peer.NamespaceSelector, ns, profileNs) {
+			return true
+		}
+	}
+	return false
+}
+
+// wasSelectorInAnyPort implements the 3-argument (containerID, namespace,
+// podLabels) selector verbs: selector + namespace match, ports ignored.
+func (l *containerProfileNetworkLibrary) wasSelectorInAnyPort(containerID, namespace, podLabels ref.Val, ingress bool) ref.Val {
+	if l.objectCache == nil {
+		return types.NewErr("objectCache is nil")
+	}
+	containerIDStr, ok := containerID.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(containerID)
+	}
+	nsStr, ok := namespace.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(namespace)
+	}
+	if nsStr == "" {
+		// Not a pod peer (external IP / unresolved): never satisfies a selector.
+		return types.Bool(false)
+	}
+	peerLabels := refValToStringMap(podLabels)
+	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, containerIDStr)
+	if err != nil {
+		return cache.NewProfileNotAvailableErr("%v", err)
+	}
+	peers := cp.EgressPeers
+	if ingress {
+		peers = cp.IngressPeers
+	}
+	if len(peers) == 0 {
+		return types.Bool(false)
+	}
+	return types.Bool(wasSelectorInPeersAnyPort(peers, labels.Set(peerLabels), nsStr, cp.Namespace))
+}
+
 func (l *containerProfileNetworkLibrary) wasSelectorInIngress(containerID, namespace, podLabels, port, protocol ref.Val) ref.Val {
 	return l.wasSelectorIn(containerID, namespace, podLabels, port, protocol, true)
 }

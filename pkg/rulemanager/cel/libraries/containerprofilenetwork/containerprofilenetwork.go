@@ -81,6 +81,10 @@ type containerProfileNetworkFuncSpec struct {
 	argTypes   []*cel.Type
 	resultType *cel.Type
 	arity      int
+	// overloadSuffix disambiguates the overload id when the same name is
+	// registered at more than one arity (CEL requires unique ids per env).
+	// Empty for the canonical overload so existing ids are unchanged.
+	overloadSuffix string
 	// call invokes the shared implementation method on l.
 	call func(l *containerProfileNetworkLibrary, args []ref.Val) ref.Val
 	// noCache bypasses the functionCache: a map argument has no stable scalar
@@ -163,6 +167,33 @@ var containerProfileNetworkFuncSpecs = []containerProfileNetworkFuncSpec{
 		},
 		noCache: true,
 	},
+	// Port-agnostic 3-argument overloads: the selector verbs gained (port,
+	// protocol) during review, and a rule body authored against the earlier
+	// signature would otherwise fail to compile — which disables the WHOLE
+	// rule (R0011/R0012) silently. Keep the old shape callable: it matches on
+	// selector + namespace only, ignoring the peer entry's ports.
+	{
+		name:           "was_selector_in_egress",
+		argTypes:       []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType)},
+		resultType:     cel.BoolType,
+		arity:          3,
+		overloadSuffix: "_anyport",
+		call: func(l *containerProfileNetworkLibrary, a []ref.Val) ref.Val {
+			return l.wasSelectorInAnyPort(a[0], a[1], a[2], false)
+		},
+		noCache: true,
+	},
+	{
+		name:           "was_selector_in_ingress",
+		argTypes:       []*cel.Type{cel.StringType, cel.StringType, cel.MapType(cel.StringType, cel.StringType)},
+		resultType:     cel.BoolType,
+		arity:          3,
+		overloadSuffix: "_anyport",
+		call: func(l *containerProfileNetworkLibrary, a []ref.Val) ref.Val {
+			return l.wasSelectorInAnyPort(a[0], a[1], a[2], true)
+		},
+		noCache: true,
+	},
 }
 
 // declarationsWithPrefix builds the cel.FunctionOpt map for every function in
@@ -177,8 +208,10 @@ func (l *containerProfileNetworkLibrary) declarationsWithPrefix(namePrefix, over
 	for _, spec := range containerProfileNetworkFuncSpecs {
 		spec := spec
 		fullName := namePrefix + spec.name
-		overloadID := overloadIDPrefix + "_" + spec.name
-		decls[fullName] = []cel.FunctionOpt{
+		overloadID := overloadIDPrefix + "_" + spec.name + spec.overloadSuffix
+		// Append: a name may carry several overloads (e.g. the 5-arg port-aware
+		// selector verb and its 3-arg port-agnostic compatibility shape).
+		decls[fullName] = append(decls[fullName],
 			cel.Overload(
 				overloadID, spec.argTypes, spec.resultType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
@@ -199,7 +232,7 @@ func (l *containerProfileNetworkLibrary) declarationsWithPrefix(namePrefix, over
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
 				}),
 			),
-		}
+		)
 	}
 	return decls
 }

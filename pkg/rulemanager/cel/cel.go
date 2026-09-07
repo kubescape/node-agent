@@ -3,6 +3,7 @@ package cel
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
@@ -28,15 +29,21 @@ import (
 var _ RuleEvaluator = (*CEL)(nil)
 
 type CEL struct {
-	env             *cel.Env
-	objectCache     objectcache.ObjectCache
-	programCache    map[string]cel.Program
-	cacheMutex      sync.RWMutex
-	typeMutex       sync.RWMutex
-	ta              xcel.TypeAdapter
-	tp              *xcel.TypeProvider
-	eventConverters map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent
-	staticOptimizer *cel.StaticOptimizer
+	env          *cel.Env
+	objectCache  objectcache.ObjectCache
+	programCache map[string]cel.Program
+	cacheMutex   sync.RWMutex
+	// disabledLoggedAt rate-limits the re-logging of an expression that failed
+	// to compile: a failed compile is cached as a nil program so it is never
+	// retried, but the rule must not fall silent — it is re-reported on every
+	// evaluation attempt, at most once per disabledLogInterval per expression.
+	disabledLoggedAt map[string]time.Time
+	disabledMu       sync.Mutex
+	typeMutex        sync.RWMutex
+	ta               xcel.TypeAdapter
+	tp               *xcel.TypeProvider
+	eventConverters  map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent
+	staticOptimizer  *cel.StaticOptimizer
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metricsmanager.MetricsManager) (*CEL, error) {
@@ -95,13 +102,14 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config, mm ...metric
 	}
 
 	c := &CEL{
-		env:             env,
-		objectCache:     objectCache,
-		programCache:    make(map[string]cel.Program),
-		ta:              ta,
-		tp:              tp,
-		eventConverters: make(map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent),
-		staticOptimizer: staticOptimizer,
+		env:              env,
+		objectCache:      objectCache,
+		programCache:     make(map[string]cel.Program),
+		disabledLoggedAt: make(map[string]time.Time),
+		ta:               ta,
+		tp:               tp,
+		eventConverters:  make(map[utils.EventType]func(utils.K8sEvent) utils.K8sEvent),
+		staticOptimizer:  staticOptimizer,
 	}
 
 	return c, nil
@@ -120,7 +128,7 @@ func (c *CEL) registerExpression(expression string) error {
 	if issues != nil {
 		// Cache nil to prevent repeated compilation attempts for invalid expressions
 		c.programCache[expression] = nil
-		logger.L().Warning("CEL expression disabled: failed to compile", helpers.String("expression", expression), helpers.Error(issues.Err()))
+		logger.L().Error("CEL expression disabled: failed to compile — the rule containing it will NOT evaluate until fixed", helpers.String("expression", expression), helpers.Error(issues.Err()))
 		return fmt.Errorf("failed to compile expression: %s", issues.Err())
 	}
 
@@ -135,7 +143,7 @@ func (c *CEL) registerExpression(expression string) error {
 	if err != nil {
 		// Cache nil to prevent repeated program creation attempts
 		c.programCache[expression] = nil
-		logger.L().Warning("CEL expression disabled: failed to create program", helpers.String("expression", expression), helpers.Error(err))
+		logger.L().Error("CEL expression disabled: failed to create program — the rule containing it will NOT evaluate until fixed", helpers.String("expression", expression), helpers.Error(err))
 		return fmt.Errorf("failed to create program: %s", err)
 	}
 
@@ -143,10 +151,33 @@ func (c *CEL) registerExpression(expression string) error {
 	return nil
 }
 
+// disabledLogInterval bounds how often a disabled expression is re-reported.
+const disabledLogInterval = 5 * time.Minute
+
+// reportDisabled re-logs, at most once per disabledLogInterval per expression,
+// that an expression is disabled because it failed to compile. Without this the
+// only signal was a single warning at first compile; a rule could then sit
+// "enabled" with zero evaluations indefinitely and nothing would say why.
+func (c *CEL) reportDisabled(expression string) {
+	c.disabledMu.Lock()
+	defer c.disabledMu.Unlock()
+	now := time.Now()
+	if last, ok := c.disabledLoggedAt[expression]; ok && now.Sub(last) < disabledLogInterval {
+		return
+	}
+	c.disabledLoggedAt[expression] = now
+	logger.L().Error("CEL expression disabled: previously failed to compile; the rule containing it is NOT evaluating", helpers.String("expression", expression))
+}
+
 func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	c.cacheMutex.RLock()
 	if program, exists := c.programCache[expression]; exists {
 		c.cacheMutex.RUnlock()
+		if program == nil {
+			// Cached compile failure: the expression stays disabled, but say so
+			// again — a rule that is "enabled" yet never evaluates must not be silent.
+			c.reportDisabled(expression)
+		}
 		return program, nil
 	}
 	c.cacheMutex.RUnlock()
