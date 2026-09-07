@@ -315,6 +315,8 @@ func TestReportNetworkEventServicePortMultiplicity(t *testing.T) {
 	neighbor = entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil)
 	require.Equal(t, []int32{8080, 9090}, networkPortValues(neighbor.Ports))
 	require.Less(t, entry.data.size.Load(), recordedSize)
+}
+
 // TestCreateNetworkNeighbor_StatefulSetPeerStripsPodIdentityLabels ensures per-replica
 // StatefulSet labels are stripped from PodSelector so GeneratedNetworkPolicy peers
 // select the workload, not the replicas observed during learning (#942).
