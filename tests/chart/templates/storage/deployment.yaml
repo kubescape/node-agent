@@ -39,6 +39,8 @@ spec:
             value: "{{ .Values.logger.level }}"
           - name: KS_LOGGER_NAME
             value: "{{ .Values.logger.name }}"
+          - name: CUSTOM_REST_ENABLED
+            value: "true"
         volumeMounts:
           - name: "data"
             mountPath: "/data"
