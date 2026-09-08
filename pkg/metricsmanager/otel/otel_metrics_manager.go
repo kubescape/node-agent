@@ -35,13 +35,15 @@ type OTELMetricsManager struct {
 	dedupEventsTotal    metric.Int64Counter
 
 	// ContainerProfile cache
-	profileLegacyLoadTotal   metric.Int64Counter
-	profileCacheEntries      metric.Float64Gauge
-	profileCacheHitTotal     metric.Int64Counter
-	reconcilerDuration       metric.Float64Histogram
-	reconcilerEvictionsTotal metric.Int64Counter
-	profileSplitTotal        metric.Int64Counter
-	profileChunkDroppedTotal metric.Int64Counter
+	profileLegacyLoadTotal                metric.Int64Counter
+	profileCacheEntries                   metric.Float64Gauge
+	profileCacheHitTotal                  metric.Int64Counter
+	reconcilerDuration                    metric.Float64Histogram
+	reconcilerEvictionsTotal              metric.Int64Counter
+	profileConditionalFetchRequestsTotal  metric.Int64Counter
+	profileConditionalFetchResponsesTotal metric.Int64Counter
+	profileSplitTotal                     metric.Int64Counter
+	profileChunkDroppedTotal              metric.Int64Counter
 
 	// Rule projection — always-on
 	projMissingDeclTotal   metric.Int64Counter
@@ -187,6 +189,10 @@ func NewOTELMetricsManager(ownContainerID, ownPodUID string, hostCgroupMounted b
 		"ContainerProfile reconciler phase duration", "s", defBuckets)
 	m.reconcilerEvictionsTotal = mustCounter("node_agent.profile.reconciler.evictions.total",
 		"ContainerProfile cache evictions by reason")
+	m.profileConditionalFetchRequestsTotal = mustCounter("node_agent.profile.conditional_fetch.requests.total",
+		"ContainerProfile conditional-fetch requests by validator mode")
+	m.profileConditionalFetchResponsesTotal = mustCounter("node_agent.profile.conditional_fetch.responses.total",
+		"ContainerProfile conditional-fetch responses by outcome")
 	m.profileSplitTotal = mustCounter("node_agent.profile.split.total",
 		"ContainerProfile chunks halved after a transport-level size rejection")
 	m.profileChunkDroppedTotal = mustCounter("node_agent.profile.chunk.dropped.total",
@@ -383,6 +389,18 @@ func (m *OTELMetricsManager) ReportContainerProfileReconcilerDuration(phase stri
 func (m *OTELMetricsManager) ReportContainerProfileReconcilerEviction(reason string) {
 	m.reconcilerEvictionsTotal.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("reason", reason),
+	))
+}
+
+func (m *OTELMetricsManager) ReportContainerProfileConditionalFetchRequest(mode string) {
+	m.profileConditionalFetchRequestsTotal.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("mode", mode),
+	))
+}
+
+func (m *OTELMetricsManager) ReportContainerProfileConditionalFetchResponse(outcome string) {
+	m.profileConditionalFetchResponsesTotal.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("outcome", outcome),
 	))
 }
 

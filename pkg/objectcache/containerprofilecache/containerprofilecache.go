@@ -84,6 +84,21 @@ type CachedContainerProfile struct {
 	RV       string // ContainerProfile resourceVersion at last load
 	UserCPRV string // user-defined ContainerProfile (label-referenced) RV at last load, "" if not used
 
+	// Checksum is the content checksum of the learned CP at last load, read
+	// from storage.ContainerProfileChecksumAnnotationKey. Best-effort: empty
+	// when the source supplies none, which is always the case for the
+	// in-cluster CRD-backed client. The reconciler offers it back to the source
+	// as a conditional-fetch validator; an empty value simply means every fetch
+	// is unconditional. Like RV, it tracks the LEARNED CP (the object CPName
+	// points at), never an adopted authored one.
+	Checksum string
+
+	// consecutiveUnchanged counts valid ErrProfileUnchanged responses since the
+	// last successful learned-profile body. After the bounded allowance the next
+	// otherwise-eligible refresh suppresses the validator and forces a full body.
+	// It is accessed only while holding this entry's container lock.
+	consecutiveUnchanged int
+
 	// terminatedSeenAt is set by the reconciler the first time it observes the
 	// container Terminated; eviction happens on a later tick once the removal
 	// grace has elapsed. Accessed only from the reconciler goroutine.
@@ -113,9 +128,17 @@ type ContainerProfileCacheImpl struct {
 	k8sObjectCache objectcache.K8sObjectCache
 	metricsManager metricsmanager.MetricsManager
 
-	reconcileEvery    time.Duration
-	rpcBudget         time.Duration
-	refreshInProgress atomic.Bool
+	reconcileEvery time.Duration
+	rpcBudget      time.Duration
+
+	// refreshMu protects the trailing-edge single-flight scheduler. A refresh
+	// request always sets refreshPending. The active worker clears it before each
+	// pass and keeps draining until no request arrived during the preceding pass.
+	// Checking pending and handing ownership back are atomic under this mutex, so
+	// a request cannot get stranded in the final handoff race.
+	refreshMu         sync.Mutex
+	refreshInProgress bool
+	refreshPending    bool
 
 	// removalGrace is how long an entry stays resolvable after the container's
 	// remove callback. Events emitted during the container's life are still in
@@ -133,7 +156,6 @@ type ContainerProfileCacheImpl struct {
 	currentSpec    *objectcache.RuleProjectionSpec
 	specGeneration atomic.Int64  // bumped on each distinct spec hash change
 	nudge          chan struct{} // buffered cap 1; signals reconciler on spec change
-	refreshPending atomic.Bool   // set when a nudge arrives while refresh is running
 }
 
 // NewContainerProfileCache creates a new ContainerProfileCacheImpl.
@@ -456,8 +478,13 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// transient error, freezing the entry so authored-CP edits are never picked
 	// up (review finding on node-agent#864).
 	learnedRV := ""
+	learnedChecksum := ""
 	if cp != nil {
 		learnedRV = cp.ResourceVersion
+		// Captured here for the same reason as learnedRV: entry.Checksum is a
+		// validator for the object entry.CPName points at (the learned slug),
+		// so it must be read before cp is repointed at the authored profile.
+		learnedChecksum = checksumOfCP(cp)
 	}
 
 	// A user-defined ContainerProfile is authoritative for this container: it is
@@ -496,6 +523,10 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// (the learned slug), so leaving the authored RV here makes the permanent 404
 	// on that slug look transient and freezes the entry. Track the learned RV.
 	entry.RV = learnedRV
+	// Same correction for the conditional-fetch validator: buildEntry derived it
+	// from the adopted (possibly authored) cp, but it is offered back on a GET of
+	// the learned slug, so it must describe the learned CP or nothing.
+	entry.Checksum = learnedChecksum
 	// WorkloadName is the synthesize-name source refreshOneEntry uses when it
 	// rebuilds an entry whose consolidated CP is not yet in storage.
 	entry.WorkloadName = workloadName
@@ -555,6 +586,7 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 		WorkloadID:    sharedData.Wlid + "/" + sharedData.InstanceID.GetTemplateHash(),
 		CPName:        cp.Name,
 		RV:            cp.ResourceVersion,
+		Checksum:      checksumOfCP(cp),
 	}
 	if pod != nil {
 		entry.PodUID = string(pod.UID)

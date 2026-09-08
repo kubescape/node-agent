@@ -13,11 +13,13 @@ import (
 var _ MetricsManager = (*MetricsMock)(nil)
 
 type MetricsMock struct {
-	FailedEventCounter   atomic.Int32
-	RuleProcessedCounter maps.SafeMap[string, int]
-	RuleAlertCounter     maps.SafeMap[string, int]
-	EventCounter         maps.SafeMap[utils.EventType, int]
-	RuleEvaluationTime   maps.SafeMap[string, time.Duration] // key: "ruleID:eventType"
+	FailedEventCounter                     atomic.Int32
+	RuleProcessedCounter                   maps.SafeMap[string, int]
+	RuleAlertCounter                       maps.SafeMap[string, int]
+	EventCounter                           maps.SafeMap[utils.EventType, int]
+	RuleEvaluationTime                     maps.SafeMap[string, time.Duration] // key: "ruleID:eventType"
+	ProfileConditionalFetchRequestCounter  maps.SafeMap[string, int]
+	ProfileConditionalFetchResponseCounter maps.SafeMap[string, int]
 }
 
 func NewMetricsMock() *MetricsMock {
@@ -35,6 +37,8 @@ func (m *MetricsMock) Destroy() {
 	m.RuleAlertCounter.Clear()
 	m.EventCounter.Clear()
 	m.RuleEvaluationTime.Clear()
+	m.ProfileConditionalFetchRequestCounter.Clear()
+	m.ProfileConditionalFetchResponseCounter.Clear()
 }
 
 func (m *MetricsMock) ReportFailedEvent() {
@@ -73,29 +77,35 @@ func (m *MetricsMock) SetContainerProfileCacheEntries(_ string, _ float64)      
 func (m *MetricsMock) ReportContainerProfileCacheHit(_ bool)                              {}
 func (m *MetricsMock) ReportContainerProfileReconcilerDuration(_ string, _ time.Duration) {}
 func (m *MetricsMock) ReportContainerProfileReconcilerEviction(_ string)                  {}
-func (m *MetricsMock) ReportContainerProfileSplit()                                       {}
-func (m *MetricsMock) ReportContainerProfileChunkDropped(_ string)                        {}
-func (m *MetricsMock) IncMissingProfileDataRequired(_ string)                             {}
-func (m *MetricsMock) IncProjectionUndeclaredLiteral(_ string)                            {}
-func (m *MetricsMock) SetProjectionStaleEntries(_ float64)                                {}
-func (m *MetricsMock) SetProjectionUndeclaredRules(_ float64)                             {}
-func (m *MetricsMock) IncProjectionSpecCompile()                                          {}
-func (m *MetricsMock) IncProjectionSpecHashChange()                                       {}
-func (m *MetricsMock) SetProjectionSpecPatterns(_, _ string, _ float64)                   {}
-func (m *MetricsMock) SetProjectionSpecAllField(_ string, _ bool)                         {}
-func (m *MetricsMock) ObserveProjectionApplyDuration(_ time.Duration)                     {}
-func (m *MetricsMock) IncProjectionReconcileTriggered(_ string)                           {}
-func (m *MetricsMock) IncHelperCall(_ string)                                             {}
-func (m *MetricsMock) IncUserDefinedProfileUnresolved(_ string)                           {}
-func (m *MetricsMock) IncUserDefinedProfileAdopted(_ string)                              {}
-func (m *MetricsMock) SetProjectionUndeclaredRulesDetail(_ []string)                      {}
-func (m *MetricsMock) ObserveProfileRawSize(_ float64)                                    {}
-func (m *MetricsMock) ObserveProfileProjectedSize(_ float64)                              {}
-func (m *MetricsMock) ObserveProfileEntriesRaw(_ string, _ float64)                       {}
-func (m *MetricsMock) ObserveProfileEntriesRetained(_ string, _ float64)                  {}
-func (m *MetricsMock) ObserveProfileRetentionRatio(_ string, _ float64)                   {}
-func (m *MetricsMock) ReportSBOMScan(_ string)                                            {}
-func (m *MetricsMock) ObserveSBOMScanDuration(_ string, _ time.Duration)                  {}
-func (m *MetricsMock) ReportSBOMScannerRestart()                                          {}
-func (m *MetricsMock) SetSBOMScannerReady(_ bool)                                         {}
-func (m *MetricsMock) ReportAlertSuppressed(_, _ string)                                  {}
+func (m *MetricsMock) ReportContainerProfileConditionalFetchRequest(mode string) {
+	m.ProfileConditionalFetchRequestCounter.Set(mode, m.ProfileConditionalFetchRequestCounter.Get(mode)+1)
+}
+func (m *MetricsMock) ReportContainerProfileConditionalFetchResponse(outcome string) {
+	m.ProfileConditionalFetchResponseCounter.Set(outcome, m.ProfileConditionalFetchResponseCounter.Get(outcome)+1)
+}
+func (m *MetricsMock) ReportContainerProfileSplit()                      {}
+func (m *MetricsMock) ReportContainerProfileChunkDropped(_ string)       {}
+func (m *MetricsMock) IncMissingProfileDataRequired(_ string)            {}
+func (m *MetricsMock) IncProjectionUndeclaredLiteral(_ string)           {}
+func (m *MetricsMock) SetProjectionStaleEntries(_ float64)               {}
+func (m *MetricsMock) SetProjectionUndeclaredRules(_ float64)            {}
+func (m *MetricsMock) IncProjectionSpecCompile()                         {}
+func (m *MetricsMock) IncProjectionSpecHashChange()                      {}
+func (m *MetricsMock) SetProjectionSpecPatterns(_, _ string, _ float64)  {}
+func (m *MetricsMock) SetProjectionSpecAllField(_ string, _ bool)        {}
+func (m *MetricsMock) ObserveProjectionApplyDuration(_ time.Duration)    {}
+func (m *MetricsMock) IncProjectionReconcileTriggered(_ string)          {}
+func (m *MetricsMock) IncHelperCall(_ string)                            {}
+func (m *MetricsMock) IncUserDefinedProfileUnresolved(_ string)          {}
+func (m *MetricsMock) IncUserDefinedProfileAdopted(_ string)             {}
+func (m *MetricsMock) SetProjectionUndeclaredRulesDetail(_ []string)     {}
+func (m *MetricsMock) ObserveProfileRawSize(_ float64)                   {}
+func (m *MetricsMock) ObserveProfileProjectedSize(_ float64)             {}
+func (m *MetricsMock) ObserveProfileEntriesRaw(_ string, _ float64)      {}
+func (m *MetricsMock) ObserveProfileEntriesRetained(_ string, _ float64) {}
+func (m *MetricsMock) ObserveProfileRetentionRatio(_ string, _ float64)  {}
+func (m *MetricsMock) ReportSBOMScan(_ string)                           {}
+func (m *MetricsMock) ObserveSBOMScanDuration(_ string, _ time.Duration) {}
+func (m *MetricsMock) ReportSBOMScannerRestart()                         {}
+func (m *MetricsMock) SetSBOMScannerReady(_ bool)                        {}
+func (m *MetricsMock) ReportAlertSuppressed(_, _ string)                 {}
