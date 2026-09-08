@@ -93,6 +93,12 @@ type CachedContainerProfile struct {
 	// points at), never an adopted authored one.
 	Checksum string
 
+	// consecutiveUnchanged counts valid ErrProfileUnchanged responses since the
+	// last successful learned-profile body. After the bounded allowance the next
+	// otherwise-eligible refresh suppresses the validator and forces a full body.
+	// It is accessed only while holding this entry's container lock.
+	consecutiveUnchanged int
+
 	// terminatedSeenAt is set by the reconciler the first time it observes the
 	// container Terminated; eviction happens on a later tick once the removal
 	// grace has elapsed. Accessed only from the reconciler goroutine.
@@ -122,9 +128,17 @@ type ContainerProfileCacheImpl struct {
 	k8sObjectCache objectcache.K8sObjectCache
 	metricsManager metricsmanager.MetricsManager
 
-	reconcileEvery    time.Duration
-	rpcBudget         time.Duration
-	refreshInProgress atomic.Bool
+	reconcileEvery time.Duration
+	rpcBudget      time.Duration
+
+	// refreshMu protects the trailing-edge single-flight scheduler. A refresh
+	// request always sets refreshPending. The active worker clears it before each
+	// pass and keeps draining until no request arrived during the preceding pass.
+	// Checking pending and handing ownership back are atomic under this mutex, so
+	// a request cannot get stranded in the final handoff race.
+	refreshMu         sync.Mutex
+	refreshInProgress bool
+	refreshPending    bool
 
 	// removalGrace is how long an entry stays resolvable after the container's
 	// remove callback. Events emitted during the container's life are still in
@@ -142,7 +156,6 @@ type ContainerProfileCacheImpl struct {
 	currentSpec    *objectcache.RuleProjectionSpec
 	specGeneration atomic.Int64  // bumped on each distinct spec hash change
 	nudge          chan struct{} // buffered cap 1; signals reconciler on spec change
-	refreshPending atomic.Bool   // set when a nudge arrives while refresh is running
 }
 
 // NewContainerProfileCache creates a new ContainerProfileCacheImpl.

@@ -29,6 +29,8 @@ func (m *MetricsNoop) SetContainerProfileCacheEntries(_ string, _ float64)      
 func (m *MetricsNoop) ReportContainerProfileCacheHit(_ bool)                              {}
 func (m *MetricsNoop) ReportContainerProfileReconcilerDuration(_ string, _ time.Duration) {}
 func (m *MetricsNoop) ReportContainerProfileReconcilerEviction(_ string)                  {}
+func (m *MetricsNoop) ReportContainerProfileConditionalFetchRequest(_ string)             {}
+func (m *MetricsNoop) ReportContainerProfileConditionalFetchResponse(_ string)            {}
 func (m *MetricsNoop) ReportContainerProfileSplit()                                       {}
 func (m *MetricsNoop) ReportContainerProfileChunkDropped(_ string)                        {}
 func (m *MetricsNoop) IncMissingProfileDataRequired(_ string)                             {}

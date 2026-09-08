@@ -26,6 +26,12 @@ type MetricsManager interface {
 	ReportContainerProfileCacheHit(hit bool)
 	ReportContainerProfileReconcilerDuration(phase string, duration time.Duration)
 	ReportContainerProfileReconcilerEviction(reason string)
+	// ReportContainerProfileConditionalFetchRequest counts the closed request modes:
+	// offered, missing, ineligible, and forced_revalidation.
+	ReportContainerProfileConditionalFetchRequest(mode string)
+	// ReportContainerProfileConditionalFetchResponse counts the closed outcomes:
+	// body, unchanged, not_found, error, and protocol_error.
+	ReportContainerProfileConditionalFetchResponse(outcome string)
 	// ReportContainerProfileSplit counts chunks halved after a transport-level size rejection.
 	ReportContainerProfileSplit()
 	// ReportContainerProfileChunkDropped counts chunks discarded because they could not be

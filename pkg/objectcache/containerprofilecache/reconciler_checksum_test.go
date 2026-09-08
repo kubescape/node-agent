@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -302,12 +304,15 @@ func TestAdoptionPathWithNoLearnedCPStoresEmptyChecksum(t *testing.T) {
 func TestGuardOffersChecksumWhenAllConjunctsHold(t *testing.T) {
 	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
 	client := &checksumRecordingClient{learned: learned}
-	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
 	seedChecksumEntry(c, "cid", learned, "sum-1", "")
 
 	c.refreshAllEntries(context.Background())
 
 	assert.Equal(t, []string{"sum-1"}, client.checksumsFor("learned-cp"))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeOffered))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeBody))
 }
 
 // TestGuardDeclinesWhenAuthoredCPPresent — UserCPRef != nil. The body is needed
@@ -360,7 +365,8 @@ func TestGuardDeclinesWhenAuthoredRVRecordedButNoAuthoredCP(t *testing.T) {
 func TestGuardDeclinesWhenSpecHashChanged(t *testing.T) {
 	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
 	client := &checksumRecordingClient{learned: learned}
-	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
 	c.SetProjectionSpec(execsAllSpec("spec-v2"))
 	seedChecksumEntry(c, "cid", learned, "sum-1", "spec-v1")
 
@@ -372,6 +378,69 @@ func TestGuardDeclinesWhenSpecHashChanged(t *testing.T) {
 	after, ok := c.entries.Load("cid")
 	require.True(t, ok)
 	assert.Equal(t, "spec-v2", after.SpecHash, "the rebuild must still happen and adopt the new spec")
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeIneligible))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeBody))
+}
+
+type blockingSpecProfileClient struct {
+	cp      *v1beta1.ContainerProfile
+	entered chan struct{}
+	release chan struct{}
+}
+
+var _ storage.ProfileClient = (*blockingSpecProfileClient)(nil)
+
+func (c *blockingSpecProfileClient) GetContainerProfile(ctx context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
+	select {
+	case c.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-c.release:
+		return c.cp, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// TestSpecReplacementDuringFetchRebuildsUnderPostFetchSpec verifies the two
+// spec snapshots have distinct jobs: the pre-fetch value controls validator
+// eligibility, while the post-fetch value prevents a stale fast-skip.
+func TestSpecReplacementDuringFetchRebuildsUnderPostFetchSpec(t *testing.T) {
+	learned := learnedCPWithChecksum("learned-cp", "1", "")
+	client := &blockingSpecProfileClient{
+		cp:      learned,
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+	c.SetProjectionSpec(execsAllSpec("spec-v1"))
+	before := seedChecksumEntry(c, "cid", learned, "", "spec-v1")
+
+	done := make(chan struct{})
+	go func() {
+		c.refreshAllEntries(context.Background())
+		close(done)
+	}()
+	select {
+	case <-client.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh did not enter the profile fetch")
+	}
+
+	c.SetProjectionSpec(execsAllSpec("spec-v2"))
+	close(client.release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh did not finish after releasing the profile fetch")
+	}
+
+	after, ok := c.entries.Load("cid")
+	require.True(t, ok)
+	assert.NotSame(t, before, after)
+	assert.Equal(t, "spec-v2", after.SpecHash)
+	assert.Equal(t, "spec-v2", after.Projected.SpecHash)
 }
 
 // TestGuardDeclinesWhenNoStoredChecksum — nothing to validate against. An empty
@@ -380,12 +449,15 @@ func TestGuardDeclinesWhenSpecHashChanged(t *testing.T) {
 func TestGuardDeclinesWhenNoStoredChecksum(t *testing.T) {
 	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
 	client := &checksumRecordingClient{learned: learned}
-	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
 	seedChecksumEntry(c, "cid", learned, "", "")
 
 	c.refreshAllEntries(context.Background())
 
 	assert.Equal(t, []string{""}, client.checksumsFor("learned-cp"))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeMissing))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeBody))
 }
 
 // TestChecksumIsAttachedPerCallSiteNotToSharedContext proves R2's defense.
@@ -452,6 +524,12 @@ func (c *conditionalChecksumClient) GetContainerProfile(ctx context.Context, _, 
 	return c.cp, nil
 }
 
+func (c *conditionalChecksumClient) offeredChecksums() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.offered...)
+}
+
 func (c *conditionalChecksumClient) lastOffered() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -467,11 +545,9 @@ func (c *conditionalChecksumClient) lastOffered() string {
 // e.State comes from the status/completion ANNOTATIONS, which sit outside the
 // content checksum. So a profile finishing its learning period — partial ->
 // full, byte-identical content — presents a checksum that still matches. If the
-// guard ignored the cached state, that tick would be answered "unchanged", the
-// rebuild that refreshes e.State would never run, and because the checksum stays
-// valid the SAME thing would happen on every later tick: the state freezes at
-// partial permanently, and rulemanager keeps reporting a completed profile as
-// incomplete.
+// guard ignored the cached state, the transition would remain invisible until
+// the forced full-body request, up to ten refresh intervals later. That delay
+// changes rule enforcement and is therefore not an acceptable optimization.
 //
 // The walkthrough below covers all three phases: declined while learning,
 // state correctly picked up when it terminalizes, and the shortcut engaging
@@ -511,7 +587,7 @@ func TestGuardDeclinesWhileStateNotYetTerminal(t *testing.T) {
 	after, ok := c.entries.Load("cid")
 	require.True(t, ok)
 	assert.Equal(t, helpersv1.Full, after.State.Completion,
-		"the completion flip MUST reach the cache; freezing here is what rulemanager would report as a permanently-partial profile")
+		"the completion flip must reach the cache immediately rather than waiting for forced revalidation")
 	assert.Equal(t, helpersv1.Completed, after.State.Status)
 
 	// Phase 3 — now genuinely terminal, so the shortcut engages and the source
@@ -556,7 +632,8 @@ func TestGuardDeclinesForTooLargeState(t *testing.T) {
 func TestSentinelKeepsEntryPointerIdentical(t *testing.T) {
 	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
 	client := &checksumRecordingClient{learnedErr: storage.ErrProfileUnchanged}
-	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
 	before := seedChecksumEntry(c, "cid", learned, "sum-1", "")
 
 	c.refreshAllEntries(context.Background())
@@ -567,6 +644,32 @@ func TestSentinelKeepsEntryPointerIdentical(t *testing.T) {
 	assert.Equal(t, "sum-1", after.Checksum, "the stored validator is left untouched")
 	assert.Equal(t, []string{"sum-1"}, client.checksumsFor("learned-cp"),
 		"the sentinel is only legitimate in reply to a request that carried a validator")
+	assert.Equal(t, 1, after.consecutiveUnchanged)
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeOffered))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeUnchanged))
+}
+
+// TestUnsolicitedSentinelIsProtocolError proves that ErrProfileUnchanged is
+// trusted only when this exact request offered a checksum. The existing entry
+// is retained as on any transient failure, but the answer is neither counted
+// as a cache hit nor allowed to advance the consecutive-unchanged budget.
+func TestUnsolicitedSentinelIsProtocolError(t *testing.T) {
+	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
+	client := &checksumRecordingClient{learnedErr: storage.ErrProfileUnchanged}
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
+	before := seedChecksumEntry(c, "cid", learned, "", "")
+
+	c.refreshAllEntries(context.Background())
+
+	after, ok := c.entries.Load("cid")
+	require.True(t, ok)
+	assert.Same(t, before, after)
+	assert.Zero(t, after.consecutiveUnchanged)
+	assert.Equal(t, []string{""}, client.checksumsFor("learned-cp"))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeMissing))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeProtocolError))
+	assert.Zero(t, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeUnchanged))
 }
 
 // TestSentinelLeavesResourceVersionIntentionallyStale pins the one accepted
@@ -646,7 +749,8 @@ func TestSentinelIsNotSwallowedByTheNotFoundPath(t *testing.T) {
 func TestNonSentinelErrorIsNotMistakenForUnchanged(t *testing.T) {
 	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
 	client := &checksumRecordingClient{learnedErr: errors.New("container profile unchanged-ish: connection reset")}
-	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
 	before := seedChecksumEntry(c, "cid", learned, "sum-1", "")
 
 	c.refreshAllEntries(context.Background())
@@ -654,11 +758,156 @@ func TestNonSentinelErrorIsNotMistakenForUnchanged(t *testing.T) {
 	after, ok := c.entries.Load("cid")
 	require.True(t, ok)
 	assert.Same(t, before, after, "a transient error also keeps the entry, by the pre-existing path")
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeOffered))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeError))
+}
+
+// TestNotFoundResponseMetric pins the remaining response outcome. The existing
+// eviction behavior is unchanged: without an authored replacement, a missing
+// learned profile removes the cache entry.
+func TestNotFoundResponseMetric(t *testing.T) {
+	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
+	client := &checksumRecordingClient{learnedErr: apierrors.NewNotFound(
+		schema.GroupResource{Resource: "containerprofiles"}, "learned-cp")}
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
+	seedChecksumEntry(c, "cid", learned, "sum-1", "")
+
+	c.refreshAllEntries(context.Background())
+
+	_, ok := c.entries.Load("cid")
+	assert.False(t, ok)
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeNotFound))
+}
+
+// TestConsecutiveUnchangedResponsesForceFullBody bounds how long the cache can
+// rely exclusively on a remote validator. Ten valid unchanged answers are
+// accepted; the next eligible refresh omits the validator, accepts a body, and
+// resets the budget so conditional requests can resume.
+func TestConsecutiveUnchangedResponsesForceFullBody(t *testing.T) {
+	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
+	client := &conditionalChecksumClient{cp: learned}
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
+	before := seedChecksumEntry(c, "cid", learned, "sum-1", "")
+
+	for range maxConsecutiveUnchangedResponses {
+		c.refreshAllEntries(context.Background())
+	}
+	entry, ok := c.entries.Load("cid")
+	require.True(t, ok)
+	assert.Same(t, before, entry)
+	assert.Equal(t, maxConsecutiveUnchangedResponses, entry.consecutiveUnchanged)
+
+	c.refreshAllEntries(context.Background())
+
+	afterBody, ok := c.entries.Load("cid")
+	require.True(t, ok)
+	assert.Same(t, before, afterBody, "a byte-identical forced body may still take the post-fetch fast-skip")
+	assert.Zero(t, afterBody.consecutiveUnchanged, "the successful body clears the forced-revalidation debt")
+
+	c.refreshAllEntries(context.Background())
+	assert.Equal(t, 1, afterBody.consecutiveUnchanged, "conditional requests resume after the successful body")
+
+	offered := client.offeredChecksums()
+	require.Len(t, offered, maxConsecutiveUnchangedResponses+2)
+	for i := range maxConsecutiveUnchangedResponses {
+		assert.Equal(t, "sum-1", offered[i])
+	}
+	assert.Empty(t, offered[maxConsecutiveUnchangedResponses], "the eleventh refresh must force a body")
+	assert.Equal(t, "sum-1", offered[maxConsecutiveUnchangedResponses+1], "the validator is offered again after reset")
+	assert.Equal(t, maxConsecutiveUnchangedResponses+1,
+		metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeOffered))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeForcedRevalidation))
+	assert.Equal(t, maxConsecutiveUnchangedResponses+1,
+		metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeUnchanged))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeBody))
+}
+
+// TestForcedRevalidationRemainsDueAcrossFailures ensures only a successful
+// body resets the counter. A transport error or an unsolicited unchanged
+// sentinel on the validator-suppressed request leaves the entry force-due.
+func TestForcedRevalidationRemainsDueAcrossFailures(t *testing.T) {
+	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
+	client := &checksumRecordingClient{learnedErr: assertErr{}}
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
+	entry := seedChecksumEntry(c, "cid", learned, "sum-1", "")
+	entry.consecutiveUnchanged = maxConsecutiveUnchangedResponses
+
+	c.refreshAllEntries(context.Background())
+	assert.Equal(t, maxConsecutiveUnchangedResponses, entry.consecutiveUnchanged)
+
+	client.mu.Lock()
+	client.learnedErr = storage.ErrProfileUnchanged
+	client.mu.Unlock()
+	c.refreshAllEntries(context.Background())
+	assert.Equal(t, maxConsecutiveUnchangedResponses, entry.consecutiveUnchanged)
+
+	client.mu.Lock()
+	client.learnedErr = nil
+	client.learned = learned
+	client.mu.Unlock()
+	c.refreshAllEntries(context.Background())
+	assert.Zero(t, entry.consecutiveUnchanged)
+
+	assert.Equal(t, []string{"", "", ""}, client.checksumsFor("learned-cp"),
+		"every retry remains an unconditional forced revalidation until a body succeeds")
+	assert.Equal(t, 3, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeForcedRevalidation))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeError))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeProtocolError))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeBody))
 }
 
 // ---------------------------------------------------------------------------
 // Rebuild path
 // ---------------------------------------------------------------------------
+
+// TestChecksumChangeRebuildsDespiteMatchingResourceVersion covers remote
+// profiles whose ResourceVersion is empty or unchanged while the returned body
+// and checksum move. The checksum is a co-equal fast-skip guard, not merely the
+// validator sent on the request.
+func TestChecksumChangeRebuildsDespiteMatchingResourceVersion(t *testing.T) {
+	for _, rv := range []string{"", "1"} {
+		t.Run(fmt.Sprintf("rv_%q", rv), func(t *testing.T) {
+			oldCP := learnedCPWithChecksum("learned-cp", rv, "sum-1")
+			freshCP := learnedCPWithChecksum("learned-cp", rv, "sum-2")
+			freshCP.Spec.Execs[0].Path = "/bin/fresh"
+			client := &checksumRecordingClient{learned: freshCP}
+			c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+			before := seedChecksumEntry(c, "cid", oldCP, "sum-1", "")
+
+			c.refreshAllEntries(context.Background())
+
+			after, ok := c.entries.Load("cid")
+			require.True(t, ok)
+			assert.NotSame(t, before, after, "changed content must rebuild even when ResourceVersion still matches")
+			assert.Equal(t, "sum-2", after.Checksum)
+			_, hasFresh := after.Projected.Execs.Values["/bin/fresh"]
+			assert.True(t, hasFresh, "the rebuilt projection must contain the fresh body")
+		})
+	}
+}
+
+// TestFirstChecksumAcquisitionRebuildsEmptyChecksumEntry ensures a legacy or
+// in-cluster-shaped entry acquires the first validator even when body and
+// ResourceVersion otherwise match. Fast-skipping here would leave the
+// optimization inert for that entry's lifetime.
+func TestFirstChecksumAcquisitionRebuildsEmptyChecksumEntry(t *testing.T) {
+	oldCP := learnedCPWithChecksum("learned-cp", "1", "")
+	freshCP := learnedCPWithChecksum("learned-cp", "1", "sum-1")
+	client := &checksumRecordingClient{learned: freshCP}
+	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+	before := seedChecksumEntry(c, "cid", oldCP, "", "")
+
+	c.refreshAllEntries(context.Background())
+
+	after, ok := c.entries.Load("cid")
+	require.True(t, ok)
+	assert.NotSame(t, before, after, "first checksum acquisition must invalidate an empty-checksum entry")
+	assert.Equal(t, "sum-1", after.Checksum)
+	assert.Equal(t, "1", after.RV)
+}
 
 // TestRebuildRefreshesStoredChecksum — a genuine content change must roll the
 // stored validator forward, or the next tick would offer a checksum describing
@@ -702,6 +951,186 @@ func TestRebuildStoresLearnedChecksumNotAuthored(t *testing.T) {
 	assert.NotSame(t, e, after, "an authored CP appearing must rebuild the entry")
 	assert.Equal(t, "sum-learned", after.Checksum,
 		"the validator tracks the learned CP even when an authored CP is the projection base")
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler
+// ---------------------------------------------------------------------------
+
+type blockingFetchClient struct {
+	profiles  map[string]*v1beta1.ContainerProfile
+	blockCall int
+	entered   chan struct{}
+	release   chan struct{}
+
+	mu        sync.Mutex
+	calls     []string
+	active    atomic.Int64
+	maxActive atomic.Int64
+}
+
+var _ storage.ProfileClient = (*blockingFetchClient)(nil)
+
+func (c *blockingFetchClient) GetContainerProfile(ctx context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
+	active := c.active.Add(1)
+	defer c.active.Add(-1)
+	for {
+		maxActive := c.maxActive.Load()
+		if active <= maxActive || c.maxActive.CompareAndSwap(maxActive, active) {
+			break
+		}
+	}
+
+	c.mu.Lock()
+	c.calls = append(c.calls, name)
+	callNumber := len(c.calls)
+	cp := c.profiles[name]
+	c.mu.Unlock()
+
+	if callNumber == c.blockCall {
+		close(c.entered)
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if cp == nil {
+		return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, name)
+	}
+	return cp, nil
+}
+
+func (c *blockingFetchClient) snapshotCalls() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.calls...)
+}
+
+// TestNudgeDuringTickerRefreshRunsTrailingPass starts the real tick loop and
+// blocks its first ticker-owned refresh after one entry has already been
+// processed. A spec nudge during that pass must schedule a trailing pass, so
+// the early entry is rebuilt immediately rather than waiting for another tick.
+func TestNudgeDuringTickerRefreshRunsTrailingPass(t *testing.T) {
+	cpA := learnedCPWithChecksum("cp-a", "1", "")
+	cpB := learnedCPWithChecksum("cp-b", "1", "")
+	client := &blockingFetchClient{
+		profiles:  map[string]*v1beta1.ContainerProfile{"cp-a": cpA, "cp-b": cpB},
+		blockCall: 2,
+		entered:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+	c.reconcileEvery = 250 * time.Millisecond
+	c.SetProjectionSpec(execsAllSpec("spec-v1"))
+	select {
+	case <-c.nudge:
+	default:
+		t.Fatal("initial spec installation did not enqueue its nudge")
+	}
+	before := map[string]*CachedContainerProfile{
+		"cp-a": seedChecksumEntry(c, "cid-a", cpA, "", "spec-v1"),
+		"cp-b": seedChecksumEntry(c, "cid-b", cpB, "", "spec-v1"),
+	}
+	idByName := map[string]string{"cp-a": "cid-a", "cp-b": "cid-b"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		c.tickLoop(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("tick loop did not stop after cancellation")
+		}
+	})
+
+	select {
+	case <-client.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ticker-owned refresh did not reach its second profile fetch")
+	}
+	calls := client.snapshotCalls()
+	require.Len(t, calls, 2)
+	firstName := calls[0]
+	firstID := idByName[firstName]
+	stillOld, ok := c.entries.Load(firstID)
+	require.True(t, ok)
+	assert.Same(t, before[firstName], stillOld, "the first entry was already fast-skipped under the old spec")
+
+	c.SetProjectionSpec(execsAllSpec("spec-v2"))
+	require.Eventually(t, func() bool {
+		c.refreshMu.Lock()
+		defer c.refreshMu.Unlock()
+		return c.refreshInProgress && c.refreshPending
+	}, time.Second, time.Millisecond, "the nudge must queue a trailing pass behind the ticker-owned refresh")
+	close(client.release)
+
+	require.Eventually(t, func() bool {
+		for _, id := range idByName {
+			entry, ok := c.entries.Load(id)
+			if !ok || entry.SpecHash != "spec-v2" {
+				return false
+			}
+		}
+		c.refreshMu.Lock()
+		defer c.refreshMu.Unlock()
+		return !c.refreshInProgress && !c.refreshPending
+	}, 2*time.Second, time.Millisecond, "the trailing pass must rebuild every entry under the new spec")
+
+	updatedFirst, ok := c.entries.Load(firstID)
+	require.True(t, ok)
+	assert.NotSame(t, before[firstName], updatedFirst, "the trailing pass must revisit the already-processed entry")
+	assert.GreaterOrEqual(t, len(client.snapshotCalls()), 4)
+	assert.Equal(t, int64(1), client.maxActive.Load(), "ticker and nudge refreshes must remain single-flight")
+}
+
+// TestRefreshSchedulerFinalHandoffDoesNotStrandRequest places a new request at
+// the boundary where the active worker is trying to observe no pending work and
+// become idle. Whether the worker or requester acquires refreshMu first, the
+// second request must own or extend a refresh pass rather than disappear.
+func TestRefreshSchedulerFinalHandoffDoesNotStrandRequest(t *testing.T) {
+	cp := learnedCPWithChecksum("cp", "1", "")
+	client := &blockingFetchClient{
+		profiles:  map[string]*v1beta1.ContainerProfile{"cp": cp},
+		blockCall: 1,
+		entered:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
+	seedChecksumEntry(c, "cid", cp, "", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.scheduleRefresh(ctx)
+	select {
+	case <-client.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first scheduled refresh did not enter the profile fetch")
+	}
+
+	// Hold the scheduler mutex before the first pass can perform its final
+	// pending/ownership handoff, then queue the competing request.
+	c.refreshMu.Lock()
+	close(client.release)
+	requestStarted := make(chan struct{})
+	go func() {
+		close(requestStarted)
+		c.scheduleRefresh(ctx)
+	}()
+	<-requestStarted
+	c.refreshMu.Unlock()
+
+	require.Eventually(t, func() bool {
+		c.refreshMu.Lock()
+		defer c.refreshMu.Unlock()
+		return len(client.snapshotCalls()) == 2 && !c.refreshInProgress && !c.refreshPending
+	}, 2*time.Second, time.Millisecond, "the handoff request must produce a second refresh")
+	assert.Equal(t, int64(1), client.maxActive.Load(), "handoff must not overlap refresh workers")
 }
 
 // ---------------------------------------------------------------------------
