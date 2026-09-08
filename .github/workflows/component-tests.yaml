@@ -159,6 +159,16 @@ jobs:
           # Check that the node-agent pod is running
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=node-agent -n kubescape --timeout=600s
           sleep 5
+      - name: Apply CollapseConfiguration CR (falsification experiment)
+        run: |
+          for i in $(seq 1 12); do
+            if kubectl apply -f tests/chart/artifacts/collapseconfiguration-default.yaml; then
+              break
+            fi
+            echo "retrying kubectl apply of CollapseConfiguration ($i/12)..."
+            sleep 5
+          done
+          kubectl get collapseconfigurations.spdx.softwarecomposition.kubescape.io default -o yaml
       - name: Run Port Forwarding
         run: |
           ./tests/scripts/port-forward.sh
