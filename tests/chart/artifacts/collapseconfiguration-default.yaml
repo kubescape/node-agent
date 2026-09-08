@@ -1,0 +1,34 @@
+# THROWAWAY, experiment-only: applied by a workflow step (not a chart
+# template) in the throwaway/falsify-collapse-stall branch to test whether
+# the presence of a CollapseConfiguration/default CR reduces component-tests
+# CI flakiness. See kubescape/storage's
+# .omc/plans/collapse-settings-self-stall.md for the root-cause writeup:
+# with no CR present, storage's collapse-settings cache refresh can
+# self-stall a consolidation goroutine on its own held SQLite write lock for
+# up to the full busy timeout. Applying this CR makes the refresh a pure
+# read, which cannot self-stall.
+#
+# Copied verbatim from kubescape/storage's
+# artifacts/collapseconfiguration-default-sample.yaml (compiled-in defaults,
+# so this does not change collapsing behavior versus no CR — only removes
+# the self-stall trigger).
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: CollapseConfiguration
+metadata:
+  name: default
+spec:
+  openDynamicThreshold: 50
+  endpointDynamicThreshold: 100
+  collapseConfigs:
+    - prefix: /etc
+      threshold: 100
+    - prefix: /etc/apache2
+      threshold: 50
+    - prefix: /opt
+      threshold: 50
+    - prefix: /var/run
+      threshold: 50
+    - prefix: /app
+      threshold: 50
+  networkIPGroupThreshold: 50
+  networkCIDRFloorBits: 24
