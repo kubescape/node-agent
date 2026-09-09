@@ -9,5 +9,7 @@ metadata:
 data:
   config.json: |
     {
-      "cleanupInterval": "{{ .Values.storage.cleanupInterval }}"
+      "cleanupInterval": "{{ .Values.storage.cleanupInterval }}",
+      "singleWriterEnabled": true,
+      "containerProfileSqliteBackend": true
     }
