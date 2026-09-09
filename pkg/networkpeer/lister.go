@@ -2,7 +2,9 @@ package networkpeer
 
 import (
 	"net"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -27,7 +29,15 @@ type InformerLister struct {
 	// generation advances on every observed Service/EndpointSlice/Node change
 	// (bumped from informer event handlers wired in cmd/main.go).
 	generation atomic.Int64
+	// readLocalAddrs is injectable so the host filesystem is not a test dependency.
+	readLocalAddrs func() []string
+	localCache     []string
+	localReadAt    time.Time
+	localMu        sync.Mutex
 }
+
+// localAddrTTL bounds staleness: interfaces change rarely, projections happen constantly.
+const localAddrTTL = 30 * time.Second
 
 // Generation returns the current cluster-view generation.
 func (l *InformerLister) Generation() int64 { return l.generation.Load() }
@@ -36,7 +46,39 @@ func (l *InformerLister) Generation() int64 { return l.generation.Load() }
 func (l *InformerLister) Bump() { l.generation.Add(1) }
 
 func NewInformerLister(services corelisters.ServiceLister, slices discoverylisters.EndpointSliceLister, nodes corelisters.NodeLister, nodeName string) *InformerLister {
-	return &InformerLister{services: services, slices: slices, nodes: nodes, nodeName: nodeName}
+	return &InformerLister{services: services, slices: slices, nodes: nodes, nodeName: nodeName, readLocalAddrs: localHostIPv4s}
+}
+
+// localAddrs returns the node's own addresses, cached briefly.
+func (l *InformerLister) localAddrs() []string {
+	if l.readLocalAddrs == nil {
+		return nil
+	}
+	l.localMu.Lock()
+	defer l.localMu.Unlock()
+	if time.Since(l.localReadAt) < localAddrTTL && l.localReadAt != (time.Time{}) {
+		return l.localCache
+	}
+	fresh := l.readLocalAddrs()
+	// A changed set must re-project profiles built on the old one.
+	if !sameStrings(fresh, l.localCache) {
+		l.generation.Add(1)
+	}
+	l.localCache = fresh
+	l.localReadAt = time.Now()
+	return fresh
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 var _ Lister = (*InformerLister)(nil)
@@ -93,7 +135,10 @@ func (l *InformerLister) HostIPs() []string {
 				ips = append(ips, gw)
 			}
 		}
+		// A CNI's router address need not be the InternalIP nor lie in the node's podCIDR.
+		ips = append(ips, nodeAnnotatedRouterIPs(n)...)
 	}
+	ips = append(ips, l.localAddrs()...)
 	return dedupe(ips)
 }
 
