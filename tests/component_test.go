@@ -3846,17 +3846,7 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		require.NoError(t, err, "control workload")
 		require.NoError(t, ctl.WaitForReady(80))
 
-<<<<<<< HEAD
 		require.NoError(t, ctl.WaitForContainerProfileCompletion(30), "control workload profile completion")
-=======
-		// Positive sentinel: the identical, co-deployed CONTROL gets profiled. Once
-		// it has a ContainerProfile, the excluded one would too if it were not
-		// excluded — so the excluded's ABSENCE is deterministic, not "not yet".
-		pollUntil(t, nil, func() bool {
-			cps, _ := ctl.GetContainerProfiles()
-			return len(cps) > 0
-		}, 3*time.Minute, "the non-excluded control workload must be profiled")
->>>>>>> 7aa43ae4 (test(component): make Test_20/30/36 deterministic — kill the flakes)
 
 		exCPs, _ := exNS.GetContainerProfiles()
 		require.Empty(t, exCPs, "an excluded-namespace workload must produce NO ContainerProfile (the control already has one)")
@@ -3890,27 +3880,10 @@ func Test_30_IgnoreExcludeAndLearningDuration(t *testing.T) {
 		require.NoError(t, err, "workload")
 		require.NoError(t, wl.WaitForReady(80))
 
-<<<<<<< HEAD
 		deadline := time.Now().Add(180 * time.Second)
 		require.NoError(t, wl.WaitForContainerProfileCompletion(30), "profile must complete within the shortened window")
 		require.True(t, time.Now().Before(deadline),
 			"completion must track the configured maxSniffingTimePerContainer, not a longer default")
-=======
-		// Gate on node-agent actually tracking the workload (its CP exists) before
-		// timing completion, so a slow attach isn't charged against the window.
-		pollUntil(t, nil, func() bool {
-			cps, _ := wl.GetContainerProfiles()
-			return len(cps) > 0
-		}, 2*time.Minute, "node-agent must create the learner ContainerProfile")
-
-		// Completion is the deterministic signal; the elapsed bound is the
-		// discriminator — a sub-2m completion cannot happen under the default
-		// multi-minute learning period.
-		startLearn := time.Now()
-		require.NoError(t, wl.WaitForContainerProfileCompletion(90), "profile must complete within the shortened window")
-		require.Less(t, time.Since(startLearn), 2*time.Minute,
-			"completion must track the configured ~40s window, not the multi-minute default")
->>>>>>> 7aa43ae4 (test(component): make Test_20/30/36 deterministic — kill the flakes)
 	})
 }
 

@@ -546,12 +546,8 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	if rvsMatchCP(cp, e.RV) &&
 		checksumOfCP(cp) == e.Checksum &&
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
-<<<<<<< HEAD
-		e.SpecHash == postFetchSpecHash {
-=======
-		e.SpecHash == currentSpecHash &&
+		e.SpecHash == postFetchSpecHash &&
 		(!e.UsesServiceResolution || e.ListerGen == c.listerGen()) {
->>>>>>> 283098d8 (feat(cel/network): serviceRef/serviceSelector/host neighbor resolution)
 		return
 	}
 
@@ -640,24 +636,6 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	newEntry := &CachedContainerProfile{
-<<<<<<< HEAD
-		Projected:            projectedCP,
-		SpecHash:             projectedCP.SpecHash,
-		State:                &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
-		CallStackTree:        tree,
-		ContainerName:        prev.ContainerName,
-		PodName:              prev.PodName,
-		Namespace:            prev.Namespace,
-		PodUID:               podUID,
-		WorkloadID:           prev.WorkloadID,
-		CPName:               prev.CPName,
-		WorkloadName:         prev.WorkloadName,
-		RV:                   rvOfCP(cp),
-		UserCPRV:             rvOfCP(userDefinedCP),
-		Checksum:             checksumOfCP(cp),
-		consecutiveUnchanged: prev.consecutiveUnchanged,
-		terminatedSeenAt:     prev.terminatedSeenAt,
-=======
 		Projected:             projectedCP,
 		SpecHash:              projectedCP.SpecHash,
 		UsesServiceResolution: usesResolution,
@@ -673,8 +651,9 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		WorkloadName:          prev.WorkloadName,
 		RV:                    rvOfCP(cp),
 		UserCPRV:              rvOfCP(userDefinedCP),
+		Checksum:              checksumOfCP(cp),
+		consecutiveUnchanged:  prev.consecutiveUnchanged,
 		terminatedSeenAt:      prev.terminatedSeenAt,
->>>>>>> 283098d8 (feat(cel/network): serviceRef/serviceSelector/host neighbor resolution)
 	}
 	if userDefinedCP != nil {
 		// The user-authored CP is authoritative and complete by definition (no

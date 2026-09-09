@@ -313,31 +313,7 @@ spec:
           uniqueId: "event.dstAddr + '_' + string(event.dstPort) + '_' + event.proto"
           ruleExpression:
             - eventType: "network"
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-              expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
-=======
-              expression: "event.pktType == 'OUTGOING' && !cp.was_address_in_egress(event.containerId, event.dstAddr)"
->>>>>>> 6f30d65a (feat(cel/network): real-Flux component test, RBAC + perf fixes for serviceRef)
-=======
-              expression: "event.pktType == 'OUTGOING' && !net.is_private_ip(event.dstAddr) && !cp.was_address_in_egress(event.containerId, event.dstAddr)"
->>>>>>> 7d294ca3 (test(component): scope the internal-egress rule to the serviceRef suite)
-=======
-              expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto)"
->>>>>>> 9537cf0e (feat(rules): R0011/R0012 symmetric egress/ingress, no IP-class gate)
-=======
-              expression: "event.pktType == 'OUTGOING' && !event.dstAddr.startsWith('127.') && event.dstAddr != '::1' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto) && !cp.was_selector_in_egress(event.containerId, event.dstNamespace, event.dstPodLabels)"
->>>>>>> 5a17ba03 (rules: consume the peer-selector engine in R0011/R0012)
-=======
-              expression: "event.pktType == 'OUTGOING' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto) && !cp.was_selector_in_egress(event.containerId, event.dstNamespace, event.dstPodLabels)"
->>>>>>> 96cb0b9a (feat(network): silence node/host peers by default; expose loopback to R0011/R0012)
-=======
               expression: "event.pktType == 'OUTGOING' && !cp.was_address_port_protocol_in_egress(event.containerId, event.dstAddr, event.dstPort, event.proto) && !cp.was_selector_in_egress(event.containerId, event.dstNamespace, event.dstPodLabels, event.dstPort, event.proto)"
->>>>>>> 36ae8104 (fix(network): address review — port-aware selector matching + CR nits)
         profileDependency: 0
         profileDataRequired:
           egressAddresses: all

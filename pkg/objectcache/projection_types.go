@@ -127,13 +127,10 @@ type ProjectedContainerProfile struct {
 	IngressPeers []PeerSelector
 	EgressPeers  []PeerSelector
 
-<<<<<<< HEAD
-=======
 	// IngressAddrPorts / EgressAddrPorts group each neighbor's addresses with its ports for was_address_port_protocol_in_*.
 	IngressAddrPorts []AddrPortGroup
 	EgressAddrPorts  []AddrPortGroup
 
->>>>>>> e6b7faba (Allow alert from unexpected Ports, allow Port=0 as intentional wildcard)
 	// ExecsByPath carries the per-Path Args slices from cp.Spec.Execs so
 	// downstream consumers (e.g. dynamicpathdetector.CompareExecArgs used
 	// by R0040 in node-agent#807) can run wildcard-aware argv matching

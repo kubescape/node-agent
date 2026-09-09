@@ -61,14 +61,14 @@ func TestCreateNetworkNeighbor_ServiceRecordsClusterIP(t *testing.T) {
 	}
 
 	withSel := &fakeServiceClient{selector: map[string]interface{}{"app": "nginx"}}
-	n := cd.createNetworkNeighbor(ev, "default", withSel, nil)
+	n := cd.createNetworkNeighbor("", ev, "default", withSel, nil)
 	require.NotNil(t, n)
 	assert.Equal(t, clusterIP, n.IPAddress, "a service neighbor must record its stable ClusterIP")
 	require.NotNil(t, n.PodSelector, "a service with a selector keeps its pod selector")
 	assert.Equal(t, "nginx", n.PodSelector.MatchLabels["app"])
 
 	noSel := &fakeServiceClient{}
-	n2 := cd.createNetworkNeighbor(ev, "default", noSel, nil)
+	n2 := cd.createNetworkNeighbor("", ev, "default", noSel, nil)
 	require.NotNil(t, n2, "a selectorless service must not be dropped — the ClusterIP identifies it")
 	assert.Equal(t, clusterIP, n2.IPAddress)
 	assert.Nil(t, n2.PodSelector, "no selector to learn when the service defines none")
@@ -91,7 +91,7 @@ func TestCreateNetworkNeighbor_LoopbackAliasesLearned(t *testing.T) {
 				IPAddress: ip,
 			},
 		}
-		n := cd.createNetworkNeighbor(ev, "default", nil, nil)
+		n := cd.createNetworkNeighbor("", ev, "default", nil, nil)
 		require.NotNil(t, n, "loopback/localhost %s must be learned (guard removed), not dropped", ip)
 		assert.Equal(t, ip, n.IPAddress, "loopback %s recorded as an address neighbor", ip)
 	}
