@@ -20,6 +20,17 @@ const (
 	// It says nothing about the aggregate, so learning must continue: the chunk is halved
 	// and both halves are requeued.
 	failureSplit
+	// failureAlreadyDelivered means the object under this name already exists, which for a
+	// delta profile means this exact write already landed.
+	//
+	// Every delta is named with a fresh UUID suffix (InstanceID.GetOneTimeSlug, mirrored by
+	// freshOneTimeSlug for split halves), so the name is unique per write and a 409 cannot
+	// be two different deltas colliding. It is the same delta arriving twice — the create
+	// succeeded and its response was lost, or the item was requeued after landing.
+	//
+	// Retrying can therefore never succeed, and patching would apply the delta a second
+	// time. The only correct reaction is to treat it as delivered and drop it.
+	failureAlreadyDelivered
 )
 
 // classifyFailure maps an error returned by storage.ProfileCreator onto the queue's reaction.
@@ -60,6 +71,15 @@ func classifyFailure(err error) (failureKind, error) {
 	// matches on the status code alone, which is what makes this work against a plain-text body.
 	if apierrors.IsRequestEntityTooLargeError(err) {
 		return failureSplit, err
+	}
+
+	// A 409 on a UUID-suffixed name is a duplicate delivery, never a collision. Without this
+	// case it fell through to failureRetryable and re-attempted a create that cannot succeed:
+	// observed in CI at 84 and 339 attempts on a single item, and because requeue appends to
+	// the tail while enforceMaxSize evicts from the head, a couple of such items push out
+	// every newer profile until nothing is written at all.
+	if apierrors.IsAlreadyExists(err) {
+		return failureAlreadyDelivered, err
 	}
 
 	return failureRetryable, err

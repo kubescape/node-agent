@@ -136,13 +136,42 @@ func TestClassifyFailure(t *testing.T) {
 			wantKind: failureRetryable,
 		},
 		{
-			name:     "conflict is retryable",
+			// CHANGED with the AlreadyExists fix, deliberately. client-go maps a 409 to
+			// reason AlreadyExists when the verb is POST (and to Conflict otherwise), and
+			// this queue only ever POSTs — CreateContainerProfileDirect issues a Create.
+			// So a 409 reaching here is always "this name already exists", never an
+			// optimistic-concurrency conflict, and retrying it could never have succeeded.
+			// The previous expectation encoded the bug: it is what kept the item cycling.
+			name:     "a POST conflict is AlreadyExists, so it is delivered rather than retried",
 			err:      genericStatusError(http.StatusConflict),
-			wantKind: failureRetryable,
+			wantKind: failureAlreadyDelivered,
 		},
 		{
 			name:     "internal server error is retryable",
 			err:      genericStatusError(http.StatusInternalServerError),
+			wantKind: failureRetryable,
+		},
+		{
+			// A delta's name carries a fresh UUID suffix, so a 409 is the same write
+			// arriving twice rather than two writes colliding. Retrying it can never
+			// succeed.
+			name:     "AlreadyExists is delivered, not retryable",
+			err:      apierrors.NewAlreadyExists(schema.GroupResource{Group: "spdx.softwarecomposition.kubescape.io", Resource: "containerprofiles"}, "replicaset-x-app-1234-abcd-0123456789abcdef0123456789abcdef"),
+			wantKind: failureAlreadyDelivered,
+		},
+		{
+			// The apiserver relays the conflict as a StatusError with reason AlreadyExists;
+			// classification must key on the reason, not on the message text.
+			name:     "relayed AlreadyExists is delivered, not retryable",
+			err:      &apierrors.StatusError{ErrStatus: metav1.Status{Status: metav1.StatusFailure, Code: http.StatusConflict, Reason: metav1.StatusReasonAlreadyExists, Message: `containerprofiles.spdx.softwarecomposition.kubescape.io "x" already exists`}},
+			wantKind: failureAlreadyDelivered,
+		},
+		{
+			// A 409 that is NOT an AlreadyExists — an optimistic-concurrency conflict — is a
+			// genuinely transient race and must stay retryable. Without this the fix would
+			// swallow write conflicts as though the data had landed.
+			name:     "a non-AlreadyExists 409 stays retryable",
+			err:      apierrors.NewConflict(schema.GroupResource{Resource: "containerprofiles"}, "x", errors.New("object was modified")),
 			wantKind: failureRetryable,
 		},
 	}

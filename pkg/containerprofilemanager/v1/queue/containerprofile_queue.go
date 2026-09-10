@@ -567,6 +567,15 @@ processLoop:
 					qd.errorCallback.OnQueueError(queuedProfile.Profile, queuedProfile.ContainerID, reported)
 				}
 
+			case failureAlreadyDelivered:
+				// The delta is already in storage under this exact name, so this is the
+				// success path arrived at by a different route: no requeue, no error
+				// callback, and deliberately no stitch — the report chain is intact
+				// precisely because the write landed.
+				logger.L().Debug("container profile already present, treating as delivered",
+					helpers.String("name", queuedProfile.Profile.Name),
+					helpers.String("namespace", queuedProfile.Profile.Namespace))
+
 			case failureSplit:
 				// A bare 413 rejects this one delta for its size; it says nothing about the
 				// container, so learning continues and only the chunk is shed.
