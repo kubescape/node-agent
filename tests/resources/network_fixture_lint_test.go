@@ -221,7 +221,7 @@ func dnsNameProblem(d string) string {
 	if strings.Contains(d, "...") {
 		return `contains "..." — use the single-codepoint ellipsis "⋯" (U+22EF) for a mid-label wildcard`
 	}
-	for _, label := range strings.Split(d, ".") {
+	for label := range strings.SplitSeq(d, ".") {
 		if label == "" {
 			continue // apex / trailing-dot slot
 		}

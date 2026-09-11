@@ -120,11 +120,9 @@ func richProfile() *v1beta1.ContainerProfile {
 			{CallID: "cs-a"},
 			{CallID: "cs-b"},
 		},
-		LabelSelector: metav1.LabelSelector{
-			MatchLabels: map[string]string{"k": "v"},
-			MatchExpressions: []metav1.LabelSelectorRequirement{
-				{Key: "k", Operator: metav1.LabelSelectorOpExists},
-			},
+		MatchLabels: map[string]string{"k": "v"},
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{Key: "k", Operator: metav1.LabelSelectorOpExists},
 		},
 		Ingress: []v1beta1.NetworkNeighbor{{Identifier: "in-a"}, {Identifier: "in-b"}},
 		Egress:  []v1beta1.NetworkNeighbor{{Identifier: "eg-a"}, {Identifier: "eg-b"}},

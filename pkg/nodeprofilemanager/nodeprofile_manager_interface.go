@@ -1,9 +1,9 @@
 package nodeprofilemanager
 
 import (
-	"golang.org/x/net/context"
+	context0 "context"
 )
 
 type NodeProfileManagerClient interface {
-	Start(ctx context.Context)
+	Start(ctx context0.Context)
 }

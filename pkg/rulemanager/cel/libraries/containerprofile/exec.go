@@ -1,6 +1,8 @@
 package containerprofile
 
 import (
+	"slices"
+
 	"github.com/google/cel-go/common/types"
 
 	"github.com/google/cel-go/common/types/ref"
@@ -189,28 +191,22 @@ func (l *containerProfileLibrary) isExecInPodSpec(containerID, path ref.Val) ref
 		for _, container := range podSpec.Containers {
 			if container.Name == containerName {
 				if container.Command != nil {
-					for _, exec := range container.Command {
-						if exec == pathStr {
-							return types.Bool(true)
-						}
+					if slices.Contains(container.Command, pathStr) {
+						return types.Bool(true)
 					}
 				}
 				if container.Lifecycle != nil {
 					if container.Lifecycle.PreStop != nil && container.Lifecycle.PreStop.Exec != nil && container.Lifecycle.PreStop.Exec.Command != nil {
-						for _, exec := range container.Lifecycle.PreStop.Exec.Command {
-							if exec == pathStr {
-								if l.preStopCache != nil {
-									l.preStopCache.MarkPreStopTriggered(containerIDStr)
-								}
-								return types.Bool(true)
+						if slices.Contains(container.Lifecycle.PreStop.Exec.Command, pathStr) {
+							if l.preStopCache != nil {
+								l.preStopCache.MarkPreStopTriggered(containerIDStr)
 							}
+							return types.Bool(true)
 						}
 					}
 					if container.Lifecycle.PostStart != nil && container.Lifecycle.PostStart.Exec != nil && container.Lifecycle.PostStart.Exec.Command != nil {
-						for _, exec := range container.Lifecycle.PostStart.Exec.Command {
-							if exec == pathStr {
-								return types.Bool(true)
-							}
+						if slices.Contains(container.Lifecycle.PostStart.Exec.Command, pathStr) {
+							return types.Bool(true)
 						}
 					}
 				}
@@ -223,28 +219,22 @@ func (l *containerProfileLibrary) isExecInPodSpec(containerID, path ref.Val) ref
 		for _, container := range podSpec.InitContainers {
 			if container.Name == containerName {
 				if container.Command != nil {
-					for _, exec := range container.Command {
-						if exec == pathStr {
-							return types.Bool(true)
-						}
+					if slices.Contains(container.Command, pathStr) {
+						return types.Bool(true)
 					}
 				}
 				if container.Lifecycle != nil {
 					if container.Lifecycle.PreStop != nil && container.Lifecycle.PreStop.Exec != nil && container.Lifecycle.PreStop.Exec.Command != nil {
-						for _, exec := range container.Lifecycle.PreStop.Exec.Command {
-							if exec == pathStr {
-								if l.preStopCache != nil {
-									l.preStopCache.MarkPreStopTriggered(containerIDStr)
-								}
-								return types.Bool(true)
+						if slices.Contains(container.Lifecycle.PreStop.Exec.Command, pathStr) {
+							if l.preStopCache != nil {
+								l.preStopCache.MarkPreStopTriggered(containerIDStr)
 							}
+							return types.Bool(true)
 						}
 					}
 					if container.Lifecycle.PostStart != nil && container.Lifecycle.PostStart.Exec != nil && container.Lifecycle.PostStart.Exec.Command != nil {
-						for _, exec := range container.Lifecycle.PostStart.Exec.Command {
-							if exec == pathStr {
-								return types.Bool(true)
-							}
+						if slices.Contains(container.Lifecycle.PostStart.Exec.Command, pathStr) {
+							return types.Bool(true)
 						}
 					}
 				}
@@ -257,28 +247,22 @@ func (l *containerProfileLibrary) isExecInPodSpec(containerID, path ref.Val) ref
 		for _, container := range podSpec.EphemeralContainers {
 			if container.Name == containerName {
 				if container.Command != nil {
-					for _, exec := range container.Command {
-						if exec == pathStr {
-							return types.Bool(true)
-						}
+					if slices.Contains(container.Command, pathStr) {
+						return types.Bool(true)
 					}
 				}
 				if container.Lifecycle != nil {
 					if container.Lifecycle.PreStop != nil && container.Lifecycle.PreStop.Exec != nil && container.Lifecycle.PreStop.Exec.Command != nil {
-						for _, exec := range container.Lifecycle.PreStop.Exec.Command {
-							if exec == pathStr {
-								if l.preStopCache != nil {
-									l.preStopCache.MarkPreStopTriggered(containerIDStr)
-								}
-								return types.Bool(true)
+						if slices.Contains(container.Lifecycle.PreStop.Exec.Command, pathStr) {
+							if l.preStopCache != nil {
+								l.preStopCache.MarkPreStopTriggered(containerIDStr)
 							}
+							return types.Bool(true)
 						}
 					}
 					if container.Lifecycle.PostStart != nil && container.Lifecycle.PostStart.Exec != nil && container.Lifecycle.PostStart.Exec.Command != nil {
-						for _, exec := range container.Lifecycle.PostStart.Exec.Command {
-							if exec == pathStr {
-								return types.Bool(true)
-							}
+						if slices.Contains(container.Lifecycle.PostStart.Exec.Command, pathStr) {
+							return types.Bool(true)
 						}
 					}
 				}

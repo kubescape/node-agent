@@ -338,7 +338,7 @@ func TestExitManager_ThreadSafety(t *testing.T) {
 	defer pt.Stop()
 
 	// Create multiple processes
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		pid := uint32(i + 1)
 		parent := createTestProcess(pid, 1, "parent")
 		pt.processMap.Set(pid, parent)
@@ -347,10 +347,8 @@ func TestExitManager_ThreadSafety(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Concurrent addition of pending exits
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 50; i++ {
+	wg.Go(func() {
+		for i := range 50 {
 			pid := uint32(i + 1)
 			pt.mutex.Lock()
 			event := createTestExitEvent(pid, uint64(i))
@@ -358,30 +356,26 @@ func TestExitManager_ThreadSafety(t *testing.T) {
 			pt.mutex.Unlock()
 			time.Sleep(1 * time.Millisecond)
 		}
-	}()
+	})
 
 	// Concurrent reading of pending exit count
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 50; i++ {
+	wg.Go(func() {
+		for range 50 {
 			pt.mutex.RLock()
 			count := len(pt.pendingExits)
 			pt.mutex.RUnlock()
 			assert.GreaterOrEqual(t, count, 0, "Count should be non-negative")
 			time.Sleep(1 * time.Millisecond)
 		}
-	}()
+	})
 
 	// Concurrent cleanup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 10; i++ {
+	wg.Go(func() {
+		for range 10 {
 			pt.performExitCleanup()
 			time.Sleep(5 * time.Millisecond)
 		}
-	}()
+	})
 
 	wg.Wait()
 

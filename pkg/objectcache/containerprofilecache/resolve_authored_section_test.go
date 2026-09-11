@@ -6,27 +6,24 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Pins the one narrative both add (tryPopulateEntry) and refresh (refreshOneEntry) share via resolveAuthoredSection. 404/transient handling around it is in reconciler_notfound_test.go.
 func TestResolveAuthoredSection_SharedNarrative(t *testing.T) {
 	flat := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "flat", Namespace: "default"},
-		Spec:       v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
+		Name: "flat", Namespace: "default",
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
 	}
 	grouped := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "grouped", Namespace: "default"},
+		Name: "grouped", Namespace: "default",
 		Spec: v1beta1.ContainerProfileSpec{
 			Containers: []v1beta1.ContainerProfileContainer{{Name: "app", Capabilities: []string{"NET_ADMIN"}}},
 		},
 	}
 	learned := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "learned", Namespace: "default",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
-		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
+		Name: "learned", Namespace: "default",
+		Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		Spec:        v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
 	}
 
 	t.Run("nil-in-nil-out", func(t *testing.T) {

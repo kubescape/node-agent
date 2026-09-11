@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/utils/ptr"
 )
 
 // fakeDNSResolver resolves every address to a fixed domain, so tests can exercise
@@ -263,14 +262,14 @@ func TestCreateNetworkNeighbor_EmptyContainerIDWithWatchedContainerData(t *testi
 func TestReportNetworkEventServicePortMultiplicity(t *testing.T) {
 	cpm, entry := newTestManager(t, "container1")
 	client := &servicePortTestClient{
-		service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+		service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 			"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
 		}),
 	}
 	var objects []runtime.Object
 	for i, port := range []int32{8080, 9090, 10000} {
 		objects = append(objects, newEndpointSlice(string(rune('a'+i)), "api", discoveryv1.EndpointPort{
-			Name: ptr.To("web"), Port: ptr.To(port),
+			Name: new("web"), Port: new(port),
 		}))
 	}
 	client.kubeClient = fake.NewClientset(objects...)

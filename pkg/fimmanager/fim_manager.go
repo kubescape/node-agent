@@ -123,8 +123,8 @@ func (fm *FIMManager) IsRunning() bool {
 }
 
 // GetStatus returns the current status of the FIM manager
-func (fm *FIMManager) GetStatus() map[string]interface{} {
-	status := map[string]interface{}{
+func (fm *FIMManager) GetStatus() map[string]any {
+	status := map[string]any{
 		"enabled":     fm.cfg.EnableFIM,
 		"running":     fm.running,
 		"directories": len(fm.cfg.FIM.Directories),

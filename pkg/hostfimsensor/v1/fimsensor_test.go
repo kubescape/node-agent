@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package hostfimsensor
 
@@ -85,7 +84,7 @@ func TestHostFimSensor_CreateFileTriggersExporter(t *testing.T) {
 	f.Close()
 
 	found := false
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		time.Sleep(100 * time.Millisecond)
 		mockExp.mu.Lock()
 		for _, evt := range mockExp.fimEvents {
@@ -163,7 +162,7 @@ func TestHostFimSensor_CreateNestedFileTriggersExporter(t *testing.T) {
 
 	// Wait for the event to be picked up (fsnotify is async)
 	found := false
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		time.Sleep(100 * time.Millisecond)
 		mockExp.mu.Lock()
 		for _, evt := range mockExp.fimEvents {
@@ -232,7 +231,7 @@ func TestHostFimSensor_Batching(t *testing.T) {
 		defer sensor.Stop()
 
 		// Create 3 files to trigger batch sending
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			testFile := filepath.Join(tmpDir, fmt.Sprintf("testfile%d.txt", i))
 			f, err := os.Create(testFile)
 			if err != nil {
@@ -346,7 +345,7 @@ func TestHostFimSensor_Batching(t *testing.T) {
 		defer sensor.Stop()
 
 		// Create 4 files rapidly to test parallel batch sending
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			testFile := filepath.Join(tmpDir, fmt.Sprintf("parallel_test%d.txt", i))
 			f, err := os.Create(testFile)
 			if err != nil {

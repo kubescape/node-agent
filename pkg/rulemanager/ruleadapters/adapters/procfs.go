@@ -25,7 +25,7 @@ func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enri
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = procfsEvent.PID
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["ppid"] = procfsEvent.PPID
 	baseRuntimeAlert.Arguments["start_time_ns"] = procfsEvent.StartTimeNs

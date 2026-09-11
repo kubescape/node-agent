@@ -280,7 +280,7 @@ func TestGetValidBuf(t *testing.T) {
 	t.Run("buf_len < len(buf) truncates correctly", func(t *testing.T) {
 		// Normal case: buf_len indicates valid data is shorter than buffer.
 		buf := makeBPFBuffer(httpData)
-		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: buf}, bufLen: uint16(len(httpData))}
+		event := &mockHttpRawEvent{Buf: buf, bufLen: uint16(len(httpData))}
 		result := GetValidBuf(event)
 		assert.Equal(t, len(httpData), len(result), "should truncate to buf_len")
 		assert.Equal(t, httpData, string(result))
@@ -289,7 +289,7 @@ func TestGetValidBuf(t *testing.T) {
 	t.Run("buf_len=0 returns full buffer (backward compatibility)", func(t *testing.T) {
 		// When buf_len is 0 (error case), we fall back to returning the full buffer.
 		buf := makeBPFBuffer(httpData)
-		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: buf}, bufLen: 0}
+		event := &mockHttpRawEvent{Buf: buf, bufLen: 0}
 		result := GetValidBuf(event)
 		assert.Equal(t, len(buf), len(result), "buf_len=0 should return full buffer")
 	})
@@ -297,20 +297,20 @@ func TestGetValidBuf(t *testing.T) {
 	t.Run("buf_len > len(buf) returns full buffer (safety)", func(t *testing.T) {
 		// If buf_len exceeds buffer size, return full buffer as safety measure.
 		buf := []byte(httpData)
-		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: buf}, bufLen: uint16(len(buf) + 100)}
+		event := &mockHttpRawEvent{Buf: buf, bufLen: uint16(len(buf) + 100)}
 		result := GetValidBuf(event)
 		assert.Equal(t, len(buf), len(result), "buf_len > len(buf) should return full buffer")
 	})
 
 	t.Run("empty buffer", func(t *testing.T) {
-		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: []byte{}}, bufLen: 0}
+		event := &mockHttpRawEvent{Buf: []byte{}, bufLen: 0}
 		result := GetValidBuf(event)
 		assert.Empty(t, result)
 	})
 
 	t.Run("buf_len equals buffer length", func(t *testing.T) {
 		buf := []byte(httpData)
-		event := &mockHttpRawEvent{StructEvent: utils.StructEvent{Buf: buf}, bufLen: uint16(len(buf))}
+		event := &mockHttpRawEvent{Buf: buf, bufLen: uint16(len(buf))}
 		result := GetValidBuf(event)
 		assert.Equal(t, len(buf), len(result))
 		assert.Equal(t, httpData, string(result))

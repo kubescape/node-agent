@@ -38,7 +38,7 @@ func (s *OsReleaseSensor) GetPluralKind() string {
 }
 
 // Sense collects the OS release data from the host
-func (s *OsReleaseSensor) Sense() (interface{}, error) {
+func (s *OsReleaseSensor) Sense() (any, error) {
 	osFileName, err := s.getOsReleaseFile()
 	if err != nil {
 		return nil, fmt.Errorf("failed to find os-release file: %w", err)

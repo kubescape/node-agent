@@ -40,7 +40,6 @@ func TestExecTTYDocRuleYAMLIsParseable(t *testing.T) {
 	}
 
 	for i, block := range blocks {
-		block := block
 		t.Run("block", func(t *testing.T) {
 			// The example in the doc is a YAML sequence fragment (a single
 			// list item), matching the shape of RulesSpec.Rules ([]Rule), not

@@ -72,10 +72,8 @@ func TestSeccompProfileWatcher_HandleAdd(t *testing.T) {
 	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
 
 	profile := &v1beta1api.SeccompProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-profile",
-			Namespace: "test-namespace",
-		},
+		Name:      "test-profile",
+		Namespace: "test-namespace",
 		Spec: v1beta1api.SeccompProfileSpec{
 			Containers: []v1beta1api.SingleSeccompProfile{
 				{Name: "container1"},
@@ -96,10 +94,8 @@ func TestSeccompProfileWatcher_HandleModify(t *testing.T) {
 	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
 
 	profile := &v1beta1api.SeccompProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-profile",
-			Namespace: "test-namespace",
-		},
+		Name:      "test-profile",
+		Namespace: "test-namespace",
 	}
 
 	ctx := context.Background()
@@ -115,10 +111,8 @@ func TestSeccompProfileWatcher_HandleDelete(t *testing.T) {
 	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
 
 	profile := &v1beta1api.SeccompProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-profile",
-			Namespace: "test-namespace",
-		},
+		Name:      "test-profile",
+		Namespace: "test-namespace",
 	}
 
 	// First add the profile
@@ -139,16 +133,12 @@ func TestSeccompProfileWatcher_ListExisting(t *testing.T) {
 	// Add some profiles to the mock client
 	mockClient.Profiles = []*v1beta1api.SeccompProfile{
 		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "profile1",
-				Namespace: "ns1",
-			},
+			Name:      "profile1",
+			Namespace: "ns1",
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "profile2",
-				Namespace: "ns2",
-			},
+			Name:      "profile2",
+			Namespace: "ns2",
 		},
 	}
 
@@ -165,11 +155,9 @@ func TestSeccompProfileWatcher_ProcessEvents(t *testing.T) {
 	watcher := NewSeccompProfileWatcher(mockClient, mockManager)
 
 	profile := &v1beta1api.SeccompProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "test-profile",
-			Namespace:       "test-namespace",
-			ResourceVersion: "123",
-		},
+		Name:            "test-profile",
+		Namespace:       "test-namespace",
+		ResourceVersion: "123",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -252,7 +240,7 @@ func (c *erroringClient) ListSeccompProfiles(_ string, _ metav1.ListOptions) (*v
 	c.mu.Lock()
 	c.listCalls++
 	c.mu.Unlock()
-	return &v1beta1api.SeccompProfileList{ListMeta: metav1.ListMeta{ResourceVersion: "fresh"}}, nil
+	return &v1beta1api.SeccompProfileList{ResourceVersion: "fresh"}, nil
 }
 
 func (c *erroringClient) GetSeccompProfile(_ string, _ string) (*v1beta1api.SeccompProfile, error) {

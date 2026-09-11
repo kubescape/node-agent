@@ -11,7 +11,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
-	"k8s.io/utils/ptr"
 )
 
 func TestNetworkNeighborhoodCaching(t *testing.T) {
@@ -40,7 +39,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 					{
 						Name:     "tcp-80",
 						Protocol: "TCP",
-						Port:     ptr.To(int32(80)),
+						Port:     new(int32(80)),
 					},
 				},
 			},
@@ -51,7 +50,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 					{
 						Name:     "tcp-5432",
 						Protocol: "TCP",
-						Port:     ptr.To(int32(5432)),
+						Port:     new(int32(5432)),
 					},
 				},
 			},
@@ -64,7 +63,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 					{
 						Name:     "tcp-8080",
 						Protocol: "TCP",
-						Port:     ptr.To(int32(8080)),
+						Port:     new(int32(8080)),
 					},
 				},
 			},
@@ -91,13 +90,13 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 	testCases := []struct {
 		name       string
 		expression string
-		vars       map[string]interface{}
+		vars       map[string]any
 		expected   bool
 	}{
 		{
 			name:       "was_address_in_egress caching",
 			expression: `cp.was_address_in_egress(containerID, address)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"address":     "192.168.1.100",
 			},
@@ -106,7 +105,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		{
 			name:       "was_address_in_ingress caching",
 			expression: `cp.was_address_in_ingress(containerID, address)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"address":     "172.16.0.10",
 			},
@@ -115,7 +114,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		{
 			name:       "is_domain_in_egress caching",
 			expression: `cp.is_domain_in_egress(containerID, domain)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"domain":      "api.example.com",
 			},
@@ -124,7 +123,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		{
 			name:       "is_domain_in_ingress caching",
 			expression: `cp.is_domain_in_ingress(containerID, domain)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"domain":      "loadbalancer.example.com",
 			},
@@ -133,7 +132,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		{
 			name:       "was_address_port_protocol_in_egress caching",
 			expression: `cp.was_address_port_protocol_in_egress(containerID, address, port, protocol)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"address":     "192.168.1.100",
 				"port":        int64(80),
@@ -144,7 +143,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		{
 			name:       "was_address_port_protocol_in_ingress caching",
 			expression: `cp.was_address_port_protocol_in_ingress(containerID, address, port, protocol)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"address":     "172.16.0.10",
 				"port":        int64(8080),
@@ -239,7 +238,7 @@ func TestNetworkNeighborhoodCacheDifferentArguments(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Call with first address
-	result1, _, err := program.Eval(map[string]interface{}{
+	result1, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"address":     "192.168.1.100",
 	})
@@ -250,7 +249,7 @@ func TestNetworkNeighborhoodCacheDifferentArguments(t *testing.T) {
 	assert.Equal(t, 1, cacheSize1, "Cache should have 1 entry")
 
 	// Call with second address - should create new cache entry
-	result2, _, err := program.Eval(map[string]interface{}{
+	result2, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"address":     "10.0.0.50",
 	})
@@ -261,7 +260,7 @@ func TestNetworkNeighborhoodCacheDifferentArguments(t *testing.T) {
 	assert.Equal(t, 2, cacheSize2, "Cache should have 2 entries for different arguments")
 
 	// Call with non-existent address - should create third cache entry
-	result3, _, err := program.Eval(map[string]interface{}{
+	result3, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"address":     "1.1.1.1",
 	})
@@ -322,7 +321,7 @@ func TestNetworkNeighborhoodCacheExpiration(t *testing.T) {
 	program, err := env.Program(ast)
 	assert.NoError(t, err)
 
-	vars := map[string]interface{}{
+	vars := map[string]any{
 		"containerID": "test-container-id",
 		"address":     "192.168.1.100",
 	}
@@ -393,7 +392,7 @@ func TestNetworkNeighborhoodCachePerformance(t *testing.T) {
 	program, err := env.Program(ast)
 	assert.NoError(t, err)
 
-	vars := map[string]interface{}{
+	vars := map[string]any{
 		"containerID": "test-container-id",
 		"address":     "192.168.1.100",
 	}
@@ -487,7 +486,7 @@ func TestNetworkNeighborhoodCacheMultipleFunctions(t *testing.T) {
 		assert.NoError(t, err)
 
 		// First call - should cache the result
-		result1, _, err := program.Eval(map[string]interface{}{
+		result1, _, err := program.Eval(map[string]any{
 			"containerID": "test-container-id",
 		})
 		assert.NoError(t, err)
@@ -498,7 +497,7 @@ func TestNetworkNeighborhoodCacheMultipleFunctions(t *testing.T) {
 		assert.Equal(t, i+1, cacheSize1, "Cache should have %d entries", i+1)
 
 		// Second call with same parameters - should use cache
-		result2, _, err := program.Eval(map[string]interface{}{
+		result2, _, err := program.Eval(map[string]any{
 			"containerID": "test-container-id",
 		})
 		assert.NoError(t, err)
@@ -555,7 +554,7 @@ func TestNetworkNeighborhoodCacheClearCache(t *testing.T) {
 	program, err := env.Program(ast)
 	assert.NoError(t, err)
 
-	vars := map[string]interface{}{
+	vars := map[string]any{
 		"containerID": "test-container-id",
 		"address":     "192.168.1.100",
 	}
@@ -630,7 +629,7 @@ func TestNetworkNeighborhoodCacheKeyGeneration(t *testing.T) {
 
 	// Test that same arguments in different order produce same cache result
 	// (cache key generation should be order-independent where possible)
-	vars1 := map[string]interface{}{
+	vars1 := map[string]any{
 		"containerID": "test-container-id",
 		"address":     "192.168.1.100",
 	}

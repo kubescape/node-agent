@@ -28,7 +28,7 @@ func (c *SSHAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["src_ip"] = sshEvent.GetSrcIP()
 	baseRuntimeAlert.Arguments["dst_ip"] = dstIP

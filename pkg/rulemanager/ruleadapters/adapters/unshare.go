@@ -30,7 +30,7 @@ func (c *UnshareAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["exePath"] = exePath
 	baseRuntimeAlert.Identifiers = &common.Identifiers{

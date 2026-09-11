@@ -32,7 +32,7 @@ func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["oldPath"] = oldPath
 	baseRuntimeAlert.Arguments["newPath"] = symlinkEvent.GetNewPath()

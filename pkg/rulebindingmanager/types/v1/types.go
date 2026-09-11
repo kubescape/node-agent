@@ -8,16 +8,16 @@ import (
 
 type RuntimeAlertRuleBindingList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
+	metav1.ListMeta `json:"metadata"`
 	// Items is the list of RuntimeAlertRuleBinding
 	Items []RuntimeAlertRuleBinding `json:"items"`
 }
 
 type RuntimeAlertRuleBinding struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 	// Specification of the desired behavior of the RuntimeAlertRuleBinding
-	Spec RuntimeAlertRuleBindingSpec `json:"spec,omitempty"`
+	Spec RuntimeAlertRuleBindingSpec `json:"spec"`
 }
 
 type RuntimeAlertRuleBindingSpec struct {
@@ -27,11 +27,11 @@ type RuntimeAlertRuleBindingSpec struct {
 }
 
 type RuntimeAlertRuleBindingRule struct {
-	Parameters map[string]interface{} `json:"parameters" yaml:"parameters"`
-	RuleName   string                 `json:"ruleName" yaml:"ruleName"`
-	RuleID     string                 `json:"ruleID" yaml:"ruleID"`
-	Severity   string                 `json:"severity" yaml:"severity"`
-	RuleTags   []string               `json:"ruleTags" yaml:"ruleTags"`
+	Parameters map[string]any `json:"parameters" yaml:"parameters"`
+	RuleName   string         `json:"ruleName" yaml:"ruleName"`
+	RuleID     string         `json:"ruleID" yaml:"ruleID"`
+	Severity   string         `json:"severity" yaml:"severity"`
+	RuleTags   []string       `json:"ruleTags" yaml:"ruleTags"`
 }
 
 func (r *RuntimeAlertRuleBindingRule) Equal(other *RuntimeAlertRuleBindingRule) bool {

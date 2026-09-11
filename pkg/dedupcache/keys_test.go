@@ -18,7 +18,7 @@ func TestComputeOpenKey_DifferentInputs(t *testing.T) {
 	k5 := ComputeOpenKey(123456, 42, "/etc/passwd", 0x04)
 
 	keys := []uint64{k1, k2, k3, k4, k5}
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		for j := i + 1; j < len(keys); j++ {
 			if keys[i] == keys[j] {
 				t.Fatalf("collision between key[%d]=%x and key[%d]=%x", i, keys[i], j, keys[j])

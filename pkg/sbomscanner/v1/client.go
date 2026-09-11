@@ -13,9 +13,9 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
-	grpcstats "google.golang.org/grpc/stats"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	grpcstats "google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 )
 

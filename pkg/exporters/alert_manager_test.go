@@ -53,13 +53,13 @@ func TestSendAlert(t *testing.T) {
 	bytesData := <-receivedData
 
 	// Assert the request body is correct
-	var alerts []map[string]interface{}
+	var alerts []map[string]any
 	if err := json.Unmarshal(bytesData, &alerts); err != nil {
 		t.Fatalf("Failed to unmarshal request body: %v", err)
 	}
 	assert.Equal(t, 1, len(alerts))
 	alert := alerts[0]
-	alertLabels := alert["labels"].(map[string]interface{})
+	alertLabels := alert["labels"].(map[string]any)
 	assert.Equal(t, "KubescapeRuleViolated", alertLabels["alertname"])
 	assert.Equal(t, "testrule", alertLabels["rule_name"])
 	assert.Equal(t, "testcontainerid", alertLabels["container_id"])
@@ -68,8 +68,8 @@ func TestSendAlert(t *testing.T) {
 	assert.Equal(t, "testpodname", alertLabels["pod_name"])
 	assert.Equal(t, "", alertLabels["node_name"])
 	assert.Equal(t, "0", alertLabels["severity"])
-	assert.Equal(t, "Rule 'testrule' in 'testpodname' namespace 'testnamespace' failed", alert["annotations"].(map[string]interface{})["summary"])
-	assert.Equal(t, "Application profile is missing", alert["annotations"].(map[string]interface{})["message"])
+	assert.Equal(t, "Rule 'testrule' in 'testpodname' namespace 'testnamespace' failed", alert["annotations"].(map[string]any)["summary"])
+	assert.Equal(t, "Application profile is missing", alert["annotations"].(map[string]any)["message"])
 	assert.Equal(t, strings.HasPrefix(fmt.Sprint(alert["generatorURL"]), "https://armosec.github.io/kubecop/alertviewer/"), true)
 }
 
@@ -114,13 +114,13 @@ func TestSendMalwareAlert(t *testing.T) {
 	bytesData := <-receivedData
 
 	// Assert the request body is correct
-	var alerts []map[string]interface{}
+	var alerts []map[string]any
 	if err := json.Unmarshal(bytesData, &alerts); err != nil {
 		t.Fatalf("Failed to unmarshal request body: %v", err)
 	}
 	assert.Equal(t, 1, len(alerts))
 	alert := alerts[0]
-	alertLabels := alert["labels"].(map[string]interface{})
+	alertLabels := alert["labels"].(map[string]any)
 	assert.Equal(t, "KubescapeMalwareDetected", alertLabels["alertname"])
 	assert.Equal(t, "testmalwarecontainerid", alertLabels["container_id"])
 	assert.Equal(t, "testmalwarecontainername", alertLabels["container_name"])

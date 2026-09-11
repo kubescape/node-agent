@@ -91,7 +91,7 @@ func TestExecInProfile(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": tc.containerID,
 				"path":        tc.path,
 			})
@@ -127,7 +127,7 @@ func TestExecNoProfile(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 
-	result, _, err := program.Eval(map[string]interface{}{
+	result, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/bin/ls",
 	})
@@ -254,7 +254,7 @@ func TestExecWithArgsInProfile(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": tc.containerID,
 				"path":        tc.path,
 				"args":        tc.args,
@@ -292,7 +292,7 @@ func TestExecWithArgsNoProfile(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 
-	result, _, err := program.Eval(map[string]interface{}{
+	result, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/bin/ls",
 		"args":        []string{"-la", "/tmp"},
@@ -411,7 +411,7 @@ func TestExecWithArgsWildcardInProfile(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": "test-container-id",
 				"path":        tc.path,
 				"args":        tc.args,

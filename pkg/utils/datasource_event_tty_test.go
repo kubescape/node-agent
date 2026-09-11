@@ -71,8 +71,11 @@ func newExecEvent(t *testing.T, f ttyFields) *DatasourceEvent {
 	}
 }
 
-func i32(v int32) *int32   { return &v }
-func u32(v uint32) *uint32 { return &v }
+//go:fix inline
+func i32(v int32) *int32 { return new(v) }
+
+//go:fix inline
+func u32(v uint32) *uint32 { return new(v) }
 
 func TestDatasourceEventFieldPresent(t *testing.T) {
 	// Phase-1 gadget shape: only "tty" is emitted.
@@ -240,7 +243,7 @@ func TestTTYGettersDoNotLog(t *testing.T) {
 	resetLog(t, f)
 
 	// The property under test.
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		e.GetHasTTY()
 		e.GetTTY()
 		e.GetTTYMajor()
@@ -288,7 +291,7 @@ func TestTTYGettersUseTheirOwnDatasource(t *testing.T) {
 		commAcc, err := ds.AddField("comm", api.Kind_String)
 		require.NoError(t, err)
 		padAccs := make([]datasource.FieldAccessor, pads)
-		for i := 0; i < pads; i++ {
+		for i := range pads {
 			padAccs[i], err = ds.AddField("pad"+string(rune('a'+i)), api.Kind_Uint64)
 			require.NoError(t, err)
 		}

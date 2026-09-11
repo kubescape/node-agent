@@ -36,7 +36,7 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["exec"] = execPath
 	baseRuntimeAlert.Arguments["args"] = execEvent.GetArgs()

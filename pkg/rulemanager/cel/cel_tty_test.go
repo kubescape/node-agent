@@ -145,8 +145,11 @@ func TestCELForwardCompatibility(t *testing.T) {
 	require.False(t, evalTTY(t, phase1, expr))
 }
 
-func ptrInt32(v int32) *int32    { return &v }
-func ptrUint32(v uint32) *uint32 { return &v }
+//go:fix inline
+func ptrInt32(v int32) *int32 { return new(v) }
+
+//go:fix inline
+func ptrUint32(v uint32) *uint32 { return new(v) }
 
 // --- DatasourceEvent coverage -----------------------------------------------
 //

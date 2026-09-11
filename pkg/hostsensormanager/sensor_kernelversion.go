@@ -34,7 +34,7 @@ func (s *KernelVersionSensor) GetPluralKind() string {
 }
 
 // Sense collects the kernel version data from the host
-func (s *KernelVersionSensor) Sense() (interface{}, error) {
+func (s *KernelVersionSensor) Sense() (any, error) {
 	content, err := readFileOnHostFileSystem(path.Join(procDirName, kernelVersionFileName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read kernel version file: %w", err)

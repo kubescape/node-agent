@@ -30,7 +30,7 @@ func (s *CloudProviderInfoSensor) GetPluralKind() string {
 }
 
 // Sense collects the cloud provider info data from the host
-func (s *CloudProviderInfoSensor) Sense() (interface{}, error) {
+func (s *CloudProviderInfoSensor) Sense() (any, error) {
 	ret := CloudProviderInfoSpec{
 		ProviderMetaDataAPIAccess: s.hasMetaDataAPIAccess(),
 		NodeName:                  s.nodeName,

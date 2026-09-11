@@ -181,7 +181,7 @@ func TestProcfsFeeder_BroadcastEvent(t *testing.T) {
 
 	// Check that both subscribers received the event
 	timeout := time.After(100 * time.Millisecond)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case receivedEvent := <-ch1:
 			assert.Equal(t, event, receivedEvent)
@@ -196,8 +196,7 @@ func TestProcfsFeeder_BroadcastEvent(t *testing.T) {
 func TestProcfsFeeder_ScanProcfs(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
 	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	err := feeder.Start(ctx)
 	require.NoError(t, err)
@@ -244,8 +243,7 @@ ReceiveLoop:
 func TestProcfsFeeder_ProcessSpecificPID(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
 	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	err := feeder.Start(ctx)
 	require.NoError(t, err)

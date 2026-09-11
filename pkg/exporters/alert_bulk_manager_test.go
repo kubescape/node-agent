@@ -11,17 +11,13 @@ import (
 
 func createTestAlert(containerID string, alertName string) armotypes.RuntimeAlert {
 	return armotypes.RuntimeAlert{
-		Message: alertName,
-		RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{
-			ContainerID:   containerID,
-			ContainerName: "test-container",
-			PodName:       "test-pod",
-			Namespace:     "test-ns",
-		},
-		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
-			AlertName: alertName,
-			Timestamp: time.Now(),
-		},
+		Message:       alertName,
+		ContainerID:   containerID,
+		ContainerName: "test-container",
+		PodName:       "test-pod",
+		Namespace:     "test-ns",
+		AlertName:     alertName,
+		Timestamp:     time.Now(),
 	}
 }
 
@@ -228,7 +224,7 @@ func TestContainerBulk_ShouldFlushSize(t *testing.T) {
 	}
 
 	// Add 4 alerts - should not flush
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		alert := createTestAlert("container-123", "test-alert")
 		processTree := createTestProcessTree(uint32(100 + i))
 		bulk.addAlert(alert, processTree, nil)
@@ -271,7 +267,7 @@ func TestContainerBulk_Flush(t *testing.T) {
 	}
 
 	// Add alerts
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		alert := createTestAlert("container-123", "test-alert")
 		processTree := createTestProcessTree(uint32(100 + i))
 		bulk.addAlert(alert, processTree, []string{"service-" + string(rune(i))})
@@ -332,7 +328,7 @@ func TestAlertBulkManager_FlushOnSizeLimit(t *testing.T) {
 	containerID := "container-123"
 
 	// Add 5 alerts - should trigger immediate flush
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		alert := createTestAlert(containerID, "test-alert")
 		processTree := createTestProcessTree(uint32(100 + i))
 		manager.AddAlert(alert, processTree, nil)
@@ -399,14 +395,14 @@ func TestAlertBulkManager_MultipleContainers(t *testing.T) {
 	defer manager.Stop()
 
 	// Add alerts for container 1
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		alert := createTestAlert("container-1", "test-alert")
 		processTree := createTestProcessTree(uint32(100 + i))
 		manager.AddAlert(alert, processTree, nil)
 	}
 
 	// Add alerts for container 2
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		alert := createTestAlert("container-2", "test-alert")
 		processTree := createTestProcessTree(uint32(200 + i))
 		manager.AddAlert(alert, processTree, nil)
@@ -442,7 +438,7 @@ func TestAlertBulkManager_FlushContainer(t *testing.T) {
 	containerID := "container-123"
 
 	// Add alerts
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		alert := createTestAlert(containerID, "test-alert")
 		processTree := createTestProcessTree(uint32(100 + i))
 		manager.AddAlert(alert, processTree, nil)
@@ -480,9 +476,9 @@ func TestAlertBulkManager_FlushAll(t *testing.T) {
 	defer manager.Stop()
 
 	// Add alerts for multiple containers
-	for c := 0; c < 3; c++ {
+	for c := range 3 {
 		containerID := "container-" + string(rune('1'+c))
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			alert := createTestAlert(containerID, "test-alert")
 			processTree := createTestProcessTree(uint32(100 + i))
 			manager.AddAlert(alert, processTree, nil)
@@ -550,28 +546,24 @@ func TestAlertBulkManager_RaceConditionProtection(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Goroutine 1: Add alerts rapidly to trigger size-based flush
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 5; i++ {
+	wg.Go(func() {
+		for i := range 5 {
 			alert := createTestAlert(containerID, "test-alert")
 			processTree := createTestProcessTree(uint32(100 + i))
 			manager.AddAlert(alert, processTree, nil)
 			time.Sleep(10 * time.Millisecond)
 		}
-	}()
+	})
 
 	// Goroutine 2: Add alerts to a different bulk
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 3; i++ {
+	wg.Go(func() {
+		for i := range 3 {
 			alert := createTestAlert("container-2", "test-alert")
 			processTree := createTestProcessTree(uint32(200 + i))
 			manager.AddAlert(alert, processTree, nil)
 			time.Sleep(10 * time.Millisecond)
 		}
-	}()
+	})
 
 	// Wait for goroutines to complete
 	wg.Wait()
@@ -611,7 +603,7 @@ func TestSendQueue_SuccessfulSendThroughQueue(t *testing.T) {
 	defer manager.Stop()
 
 	// Add alerts to trigger flush
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		alert := createTestAlert("container-1", "test-alert")
 		processTree := createTestProcessTree(uint32(100 + i))
 		manager.AddAlert(alert, processTree, nil)
@@ -648,7 +640,7 @@ func TestSendQueue_RetryOnFailure(t *testing.T) {
 	defer manager.Stop()
 
 	// Add alerts to trigger flush
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		alert := createTestAlert("container-1", "test-alert")
 		processTree := createTestProcessTree(uint32(100 + i))
 		manager.AddAlert(alert, processTree, nil)
@@ -680,7 +672,7 @@ func TestSendQueue_MaxRetriesExceeded(t *testing.T) {
 	defer manager.Stop()
 
 	// Add alerts to trigger flush
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		alert := createTestAlert("container-1", "test-alert")
 		processTree := createTestProcessTree(uint32(100 + i))
 		manager.AddAlert(alert, processTree, nil)
@@ -715,8 +707,8 @@ func TestSendQueue_QueueFullHandling(t *testing.T) {
 	}()
 
 	// Try to enqueue more items than queue can hold
-	for i := 0; i < 10; i++ {
-		for j := 0; j < 5; j++ {
+	for i := range 10 {
+		for j := range 5 {
 			alert := createTestAlert("container-"+string(rune('1'+i)), "test-alert")
 			processTree := createTestProcessTree(uint32(100 + j))
 			manager.AddAlert(alert, processTree, nil)
@@ -747,8 +739,8 @@ func TestSendQueue_GracefulShutdownWithDrain(t *testing.T) {
 	manager.Start()
 
 	// Enqueue several bulks
-	for i := 0; i < 3; i++ {
-		for j := 0; j < 5; j++ {
+	for i := range 3 {
+		for j := range 5 {
 			alert := createTestAlert("container-"+string(rune('1'+i)), "test-alert")
 			processTree := createTestProcessTree(uint32(100 + j))
 			manager.AddAlert(alert, processTree, nil)
@@ -788,11 +780,11 @@ func TestSendQueue_ConcurrentEnqueueing(t *testing.T) {
 	numGoroutines := 10
 	alertsPerGoroutine := 5
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < alertsPerGoroutine; j++ {
+			for j := range alertsPerGoroutine {
 				alert := createTestAlert("container-"+string(rune('A'+id)), "test-alert")
 				processTree := createTestProcessTree(uint32(100 + j))
 				manager.AddAlert(alert, processTree, nil)
@@ -833,7 +825,7 @@ func TestSendQueue_ExponentialBackoff(t *testing.T) {
 	defer manager.Stop()
 
 	// Add alerts to trigger flush
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		alert := createTestAlert("container-1", "test-alert")
 		processTree := createTestProcessTree(uint32(100 + i))
 		manager.AddAlert(alert, processTree, nil)
@@ -890,7 +882,7 @@ func TestSendQueue_FIFOOrderingWithRetry(t *testing.T) {
 
 	// Enqueue three bulks in order: container-1, container-2, container-3
 	for i := 1; i <= 3; i++ {
-		for j := 0; j < 5; j++ {
+		for j := range 5 {
 			alert := createTestAlert("container-"+string(rune('0'+i)), "test-alert")
 			processTree := createTestProcessTree(uint32(100*i + j))
 			manager.AddAlert(alert, processTree, nil)

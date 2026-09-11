@@ -51,7 +51,7 @@ var maxServiceSelectorEstimate = func() int {
 	maxLabelKey := strings.Repeat("k", 253)
 	maxLabelValue := strings.Repeat("v", 63)
 	labels := make(map[string]string, maxBudgetedServiceLabels)
-	for i := 0; i < maxBudgetedServiceLabels; i++ {
+	for i := range maxBudgetedServiceLabels {
 		// Trailing rune only exists to keep the map keys distinct; length is still ~maxLabelKey.
 		labels[maxLabelKey+string(rune('a'+i))] = maxLabelValue
 	}

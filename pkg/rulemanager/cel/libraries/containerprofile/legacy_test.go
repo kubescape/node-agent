@@ -149,8 +149,8 @@ func TestLegacyAPMatchesCP_ExecOpenSyscallCapability(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cpResult := evalBool(t, env, tc.cp, map[string]interface{}{"containerID": "test-container-id"})
-			apResult := evalBool(t, env, tc.ap, map[string]interface{}{"containerID": "test-container-id"})
+			cpResult := evalBool(t, env, tc.cp, map[string]any{"containerID": "test-container-id"})
+			apResult := evalBool(t, env, tc.ap, map[string]any{"containerID": "test-container-id"})
 			assert.Equal(t, tc.want, cpResult, "cp.* result for %s", tc.name)
 			assert.Equal(t, cpResult, apResult, "ap.* must match cp.* for %s", tc.name)
 		})
@@ -228,8 +228,8 @@ func TestLegacyAPMatchesCP_HTTPAndHost(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cpResult := evalBool(t, env, tc.cp, map[string]interface{}{"containerID": "cid"})
-			apResult := evalBool(t, env, tc.ap, map[string]interface{}{"containerID": "cid"})
+			cpResult := evalBool(t, env, tc.cp, map[string]any{"containerID": "cid"})
+			apResult := evalBool(t, env, tc.ap, map[string]any{"containerID": "cid"})
 			assert.Equal(t, tc.want, cpResult, "cp.* result for %s", tc.name)
 			assert.Equal(t, cpResult, apResult, "ap.* must match cp.* for %s", tc.name)
 		})
@@ -238,7 +238,7 @@ func TestLegacyAPMatchesCP_HTTPAndHost(t *testing.T) {
 
 // evalBool compiles and evaluates a CEL boolean expression against env,
 // failing the test on any compile/program/eval error.
-func evalBool(t *testing.T, env *cel.Env, expr string, activation map[string]interface{}) bool {
+func evalBool(t *testing.T, env *cel.Env, expr string, activation map[string]any) bool {
 	t.Helper()
 	ast, issues := env.Compile(expr)
 	if issues != nil && issues.Err() != nil {

@@ -1,6 +1,7 @@
 package filetree
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,9 +96,7 @@ func (n *FileNode) GetChildren() map[string]*FileNode {
 	defer n.mu.RUnlock()
 
 	children := make(map[string]*FileNode)
-	for name, child := range n.Children {
-		children[name] = child
-	}
+	maps.Copy(children, n.Children)
 	return children
 }
 

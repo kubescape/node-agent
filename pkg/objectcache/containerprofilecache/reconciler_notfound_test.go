@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -38,12 +37,10 @@ func notFound(name string) error {
 func TestRefresh_LearnedCP_NotFoundEvictsVsTransientKeeps(t *testing.T) {
 	learned := func() *v1beta1.ContainerProfile {
 		return &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cp", Namespace: "default", ResourceVersion: "100",
-				Annotations: map[string]string{
-					helpersv1.StatusMetadataKey:     helpersv1.Completed,
-					helpersv1.CompletionMetadataKey: helpersv1.Full,
-				},
+			Name: "cp", Namespace: "default", ResourceVersion: "100",
+			Annotations: map[string]string{
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
 			},
 			Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
 		}
@@ -81,10 +78,8 @@ func TestRefresh_LearnedCP_NotFoundEvictsVsTransientKeeps(t *testing.T) {
 func TestRefresh_AuthoredCP_NotFoundUnpinsVsTransientKeeps(t *testing.T) {
 	for _, learnedStatus := range []string{helpersv1.Completed, helpersv1.Learning} {
 		learned := &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cp", Namespace: "default", ResourceVersion: "100",
-				Annotations: map[string]string{helpersv1.StatusMetadataKey: learnedStatus},
-			},
+			Name: "cp", Namespace: "default", ResourceVersion: "100",
+			Annotations: map[string]string{helpersv1.StatusMetadataKey: learnedStatus},
 		}
 		mkAuthoredEntry := func() *CachedContainerProfile {
 			return &CachedContainerProfile{
@@ -147,8 +142,8 @@ func TestRefresh_AuthoredCP_NotFoundUnpinsVsTransientKeeps(t *testing.T) {
 // regardless of UserCPRV's prior value.
 func TestRefresh_AuthoredCP_TransientErrorBeforeFirstFetchKeepsEntry(t *testing.T) {
 	priorLearned := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "50"},
-		Spec:       v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
+		Name: "cp", Namespace: "default", ResourceVersion: "50",
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
 	}
 	client := &scriptedProfileClient{
 		errByName: map[string]error{
@@ -193,8 +188,8 @@ func TestRefresh_AuthoredCP_TransientErrorBeforeFirstFetchKeepsEntry(t *testing.
 // (transient error), not confirmed gone.
 func TestRefresh_LearnedCP_TransientErrorBeforeFirstFetchKeepsEntry(t *testing.T) {
 	priorAuthored := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default", ResourceVersion: "9"},
-		Spec:       v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
+		Name: "override", Namespace: "default", ResourceVersion: "9",
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
 	}
 	client := &scriptedProfileClient{
 		errByName: map[string]error{
@@ -234,8 +229,8 @@ func TestRefresh_NoSourcesAfterDelete_EvictsInsteadOfSyntheticComplete(t *testin
 	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
 
 	prior := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "override", Namespace: "default"},
-		Spec:       v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
+		Name: "override", Namespace: "default",
+		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
 	}
 	entry := &CachedContainerProfile{
 		Projected:     Apply(nil, prior, nil),

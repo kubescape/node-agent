@@ -51,7 +51,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 	_ "modernc.org/sqlite" // required for rpmdb and other features
@@ -214,10 +213,10 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 		// filesystem on the host regardless of the underlying snapshotter.
 		return []string{filepath.Join(s.procDir, pid, "root")}, nil
 	}
-	for _, option := range strings.Split(mounts[0].VFSOptions, ",") {
+	for option := range strings.SplitSeq(mounts[0].VFSOptions, ",") {
 		if strings.HasPrefix(option, "lowerdir=") {
 			var volumes []string
-			for _, volume := range strings.Split(option[9:], ":") {
+			for volume := range strings.SplitSeq(option[9:], ":") {
 				// FIXME this is a workaround
 				if !strings.HasPrefix(volume, "/") {
 					volume = "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/" + volume
@@ -362,17 +361,15 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 	// try to create a SBOM with initializing status to reserve our slot
 	normalizedID := normalizeImageID(imageTag, imageID)
 	wipSbom := &v1beta1.SBOMSyft{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: sbomName,
-			Annotations: map[string]string{
-				helpersv1.ImageIDMetadataKey:     normalizedID,
-				helpersv1.ImageTagMetadataKey:    imageTag,
-				helpersv1.StatusMetadataKey:      helpersv1.Initializing,
-				NodeNameMetadataKey:              s.cfg.NodeName,
-				helpersv1.ToolVersionMetadataKey: s.version,
-			},
-			Labels: labelsFromImageID(normalizedID),
+		Name: sbomName,
+		Annotations: map[string]string{
+			helpersv1.ImageIDMetadataKey:     normalizedID,
+			helpersv1.ImageTagMetadataKey:    imageTag,
+			helpersv1.StatusMetadataKey:      helpersv1.Initializing,
+			NodeNameMetadataKey:              s.cfg.NodeName,
+			helpersv1.ToolVersionMetadataKey: s.version,
 		},
+		Labels: labelsFromImageID(normalizedID),
 	}
 	wipSbom, err = s.storageClient.CreateSBOM(wipSbom)
 	// wipSbomHadContent is true only when we're about to reprocess an SBOM that previously

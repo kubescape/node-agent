@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -148,7 +147,7 @@ func newEntry(cp *v1beta1.ContainerProfile, containerName, podName, namespace, p
 // on busy nodes; evicting on "pod not found" churned every entry per tick.
 // Cleanup for terminated containers flows through deleteContainer.
 func TestReconcilerKeepsEntryWhenPodMissing(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache() // GetPod returns nil for everything
 	metrics := newCountingMetrics()
@@ -166,12 +165,12 @@ func TestReconcilerKeepsEntryWhenPodMissing(t *testing.T) {
 // TestReconcilerEvictsTerminatedContainer — entry whose container has
 // clearly transitioned to Terminated state IS evicted.
 func TestReconcilerEvictsTerminatedContainer(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
 	id := "terminated123"
 	k8s.setPod("default", "nginx-abc", &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "nginx-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Name: "nginx-abc", Namespace: "default", UID: types.UID("uid-1"),
 		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
 			Name:        "nginx",
 			ContainerID: "containerd://" + id,
@@ -200,12 +199,12 @@ func TestReconcilerEvictsTerminatedContainer(t *testing.T) {
 // state (e.g. newly-started or pre-running init container with empty ID)
 // must NOT be evicted.
 func TestReconcilerKeepsWaitingContainer(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
 	id := "waitingabc"
 	k8s.setPod("default", "nginx-abc", &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "nginx-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Name: "nginx-abc", Namespace: "default", UID: types.UID("uid-1"),
 		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
 			Name:        "nginx",
 			ContainerID: "containerd://" + id,
@@ -225,12 +224,12 @@ func TestReconcilerKeepsWaitingContainer(t *testing.T) {
 // TestReconcilerKeepsRunningContainer — entry is kept when pod has a Running
 // container status matching `id`.
 func TestReconcilerKeepsRunningContainer(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
 	id := "abc123"
 	k8s.setPod("default", "nginx-abc", &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "nginx-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Name: "nginx-abc", Namespace: "default", UID: types.UID("uid-1"),
 		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
 			Name:        "nginx",
 			ContainerID: "containerd://" + id,
@@ -255,16 +254,16 @@ func TestReconcilerKeepsRunningContainer(t *testing.T) {
 // permanent (no re-add path) and silently suppressed every
 // ProfileDependency=Required rule for the container's entire life.
 func TestReconcilerKeepsJustAttachedEphemeralContainer(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
 	id := "ephdebug123"
 	k8s.setPod("default", "mc-abc", &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1"),
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{Name: "app"}},
 			EphemeralContainers: []corev1.EphemeralContainer{{
-				EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug"},
+				Name: "debug",
 			}},
 		},
 		// Statuses are published for the regular container only — the
@@ -290,15 +289,15 @@ func TestReconcilerKeepsJustAttachedEphemeralContainer(t *testing.T) {
 // the fix above: once the ephemeral container's status IS published with a
 // Terminated state, the entry is evicted normally.
 func TestReconcilerEvictsEphemeralContainerAfterTermination(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
 	id := "ephdebug123"
 	k8s.setPod("default", "mc-abc", &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1"),
 		Spec: corev1.PodSpec{
 			EphemeralContainers: []corev1.EphemeralContainer{{
-				EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug"},
+				Name: "debug",
 			}},
 		},
 		Status: corev1.PodStatus{EphemeralContainerStatuses: []corev1.ContainerStatus{{
@@ -327,12 +326,12 @@ func TestReconcilerEvictsEphemeralContainerAfterTermination(t *testing.T) {
 // unreachable and sent the live init container into the "absent = reaped"
 // eviction.
 func TestReconcilerKeepsInitContainerWithEmptyStoredPodUID(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
 	id := "initsetup123"
 	k8s.setPod("default", "mc-abc", &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
+		Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1"),
 		Spec: corev1.PodSpec{
 			InitContainers: []corev1.Container{{Name: "setup"}},
 			Containers:     []corev1.Container{{Name: "app"}},
@@ -364,13 +363,13 @@ func TestReconcilerKeepsInitContainerWithEmptyStoredPodUID(t *testing.T) {
 // container absent from BOTH the pod spec and every status list is genuinely
 // reaped and must still be evicted.
 func TestReconcilerEvictsContainerGoneFromSpecAndStatus(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
 	id := "gonecontainer1"
 	k8s.setPod("default", "mc-abc", &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1"),
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
 		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
 			Name:        "app",
 			ContainerID: "containerd://appid456",
@@ -396,13 +395,13 @@ func TestReconcilerEvictsContainerGoneFromSpecAndStatus(t *testing.T) {
 // instance is reaped and must be evicted even though the name is still in the
 // pod spec.
 func TestReconcilerEvictsReplacedContainerInstance(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
 	oldID := "oldinstance1"
 	k8s.setPod("default", "mc-abc", &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1")},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		Name: "mc-abc", Namespace: "default", UID: types.UID("uid-1"),
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
 		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
 			Name:        "app",
 			ContainerID: "containerd://newinstance2",
@@ -425,7 +424,7 @@ func TestReconcilerEvictsReplacedContainerInstance(t *testing.T) {
 // TestReconcilerExitsOnCtxCancel — R2 from plan risks, delta #3. Cancelling
 // ctx mid-Range stops iteration early.
 func TestReconcilerExitsOnCtxCancel(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -444,7 +443,7 @@ func TestReconcilerExitsOnCtxCancel(t *testing.T) {
 	c := newReconcilerCache(t, client, k8s, metrics)
 
 	// Populate 100 entries.
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		id := "c-" + itoa(i)
 		c.entries.Set(id, newEntry(cp, "nginx", "pod-"+itoa(i), "default", "uid-"+itoa(i)))
 	}
@@ -462,11 +461,9 @@ func TestReconcilerExitsOnCtxCancel(t *testing.T) {
 // TestRefreshRebuildsOnCPChange — CP RV changed; entry rebuilds with fresh CP.
 func TestRefreshRebuildsOnCPChange(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp", Namespace: "default", ResourceVersion: "101",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
-		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
+		Name: "cp", Namespace: "default", ResourceVersion: "101",
+		Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
+		Spec:        v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}},
 	}
 	client := &countingProfileClient{cp: cp}
 	k8s := newControllableK8sCache()
@@ -474,7 +471,7 @@ func TestRefreshRebuildsOnCPChange(t *testing.T) {
 	c := newReconcilerCache(t, client, k8s, metrics)
 
 	oldCP := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "100"},
+		Name: "cp", Namespace: "default", ResourceVersion: "100",
 	}
 	id := "c1"
 	entry := newEntry(oldCP, "nginx", "nginx-abc", "default", "uid-1")
@@ -490,7 +487,7 @@ func TestRefreshRebuildsOnCPChange(t *testing.T) {
 // TestRefreshNoEntryWhenCPGetFails — storage error on CP keeps the existing
 // entry unchanged (no deletion).
 func TestRefreshNoEntryWhenCPGetFails(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "100"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "100"}
 	failing := &failingProfileClient{cpErr: assertErr{}}
 	k8s := newControllableK8sCache()
 	metrics := newCountingMetrics()
@@ -521,12 +518,10 @@ func TestRefreshPreservesEntryOnTransientUserCPError(t *testing.T) {
 	// the base fetch succeeds without an early return and refreshOneEntry reaches
 	// the user-defined CP fetch.
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp", Namespace: "default", ResourceVersion: "100",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
+		Name: "cp", Namespace: "default", ResourceVersion: "100",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Full,
+			helpersv1.StatusMetadataKey:     helpersv1.Completed,
 		},
 		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
 	}
@@ -641,7 +636,7 @@ func TestRefreshHonorsContextCancellationMidRPC(t *testing.T) {
 		unblock: unblock,
 	}
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "cp-1", Namespace: "default", ResourceVersion: "42"},
+		Name: "cp-1", Namespace: "default", ResourceVersion: "42",
 	}
 	// Seed an existing entry so refreshOneEntry attempts a CP re-fetch.
 	k8s := newControllableK8sCache()
@@ -710,12 +705,10 @@ func (b *blockingProfileClient) GetContainerProfile(ctx context.Context, _, _ st
 // rule evaluation short-circuits as "no profile".
 func TestRetryPendingEntries_CPCreatedAfterAdd(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-pending",
-			Namespace:       "default",
-			ResourceVersion: "1",
-			Annotations:     map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
+		Name:            "cp-pending",
+		Namespace:       "default",
+		ResourceVersion: "1",
+		Annotations:     map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
 	}
 
 	// Start with storage returning 404 for the initial GET.
@@ -791,14 +784,12 @@ func (e *testNotFoundErr) Error() string { return "container profile " + e.name 
 // data coverage, not caching eligibility — only Status matters.
 func TestPartialCP_Accepted(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-partial",
-			Namespace:       "default",
-			ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Partial,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
+		Name:            "cp-partial",
+		Namespace:       "default",
+		ResourceVersion: "1",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Partial,
+			helpersv1.StatusMetadataKey:     helpersv1.Completed,
 		},
 	}
 	client := &fakeProfileClient{cp: cp}
@@ -816,14 +807,12 @@ func TestPartialCP_Accepted(t *testing.T) {
 // accept a partial CP when Status=Completed (same rule as non-PreRunning).
 func TestPartialCP_PreRunning_Accepted(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-partial-prerunning",
-			Namespace:       "default",
-			ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Partial,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
+		Name:            "cp-partial-prerunning",
+		Namespace:       "default",
+		ResourceVersion: "1",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Partial,
+			helpersv1.StatusMetadataKey:     helpersv1.Completed,
 		},
 	}
 	client := &fakeProfileClient{cp: cp}
@@ -844,10 +833,8 @@ func TestPartialCP_PreRunning_Accepted(t *testing.T) {
 // NOT re-insert it.
 func TestRefreshDoesNotResurrectDeletedEntry(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp-resurrect", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
+		Name: "cp-resurrect", Namespace: "default", ResourceVersion: "1",
+		Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
 	}
 	client := &fakeProfileClient{cp: cp}
 	c, k8s := newTestCache(t, client)
@@ -889,14 +876,12 @@ func primePreRunningSharedData(t *testing.T, k8s *objectcache.K8sObjectCacheMock
 // from false to true (Test_17 / Test_19 semantics).
 func TestRefreshUpdatesCPStatus(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-ready",
-			Namespace:       "default",
-			ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Learning, // not yet completed
-			},
+		Name:            "cp-ready",
+		Namespace:       "default",
+		ResourceVersion: "1",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Full,
+			helpersv1.StatusMetadataKey:     helpersv1.Learning, // not yet completed
 		},
 	}
 	client := &fakeProfileClient{cp: cp}
@@ -914,14 +899,12 @@ func TestRefreshUpdatesCPStatus(t *testing.T) {
 
 	// Storage transitions CP to Status=completed.
 	client.cp = &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-ready",
-			Namespace:       "default",
-			ResourceVersion: "2",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
+		Name:            "cp-ready",
+		Namespace:       "default",
+		ResourceVersion: "2",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Full,
+			helpersv1.StatusMetadataKey:     helpersv1.Completed,
 		},
 	}
 
@@ -942,14 +925,12 @@ func TestRefreshUpdatesCPStatus(t *testing.T) {
 // pending since the manager never transitions TooLarge → Completed.
 func TestTooLargeCP_Accepted(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-too-large",
-			Namespace:       "default",
-			ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Partial,
-				helpersv1.StatusMetadataKey:     helpersv1.TooLarge,
-			},
+		Name:            "cp-too-large",
+		Namespace:       "default",
+		ResourceVersion: "1",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Partial,
+			helpersv1.StatusMetadataKey:     helpersv1.TooLarge,
 		},
 		Spec: v1beta1.ContainerProfileSpec{
 			Execs: []v1beta1.ExecCalls{{Path: "/bin/sh"}},
@@ -1000,14 +981,12 @@ func TestNotifyContainerTerminal_TooLarge(t *testing.T) {
 
 	// Storage now has a TooLarge terminal CP.
 	client.cp = &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-too-large",
-			Namespace:       "default",
-			ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Partial,
-				helpersv1.StatusMetadataKey:     helpersv1.TooLarge,
-			},
+		Name:            "cp-too-large",
+		Namespace:       "default",
+		ResourceVersion: "1",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Partial,
+			helpersv1.StatusMetadataKey:     helpersv1.TooLarge,
 		},
 		Spec: v1beta1.ContainerProfileSpec{
 			Execs: []v1beta1.ExecCalls{{Path: "/bin/sh"}},
@@ -1048,14 +1027,12 @@ func TestNotifyContainerTerminal_Completed(t *testing.T) {
 
 	// Simulate the lifecycle: container exits → CP written with Status=Completed.
 	client.cp = &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-exited",
-			Namespace:       "default",
-			ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
+		Name:            "cp-exited",
+		Namespace:       "default",
+		ResourceVersion: "1",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Full,
+			helpersv1.StatusMetadataKey:     helpersv1.Completed,
 		},
 	}
 
@@ -1080,10 +1057,8 @@ func TestNotifyContainerTerminal_Completed(t *testing.T) {
 // tests cannot wait for the background goroutine, so we drive it explicitly.
 func TestSpecChange_TriggersReprojection(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
+		Name: "cp", Namespace: "default", ResourceVersion: "1",
+		Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
 		Spec: v1beta1.ContainerProfileSpec{
 			Capabilities: []string{"SYS_PTRACE", "NET_ADMIN"},
 		},

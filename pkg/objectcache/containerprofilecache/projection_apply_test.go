@@ -9,7 +9,6 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // --- helpers ---
@@ -30,8 +29,8 @@ func prefixSpecBuilt(prefixes ...string) objectcache.FieldSpec {
 	f := objectcache.FieldSpec{
 		InUse:    true,
 		Prefixes: prefixes,
-	}
-	f.PrefixMatcher = newTrie(prefixes)
+
+		PrefixMatcher: newTrie(prefixes)}
 	return f
 }
 
@@ -39,8 +38,8 @@ func suffixSpecBuilt(suffixes ...string) objectcache.FieldSpec {
 	f := objectcache.FieldSpec{
 		InUse:    true,
 		Suffixes: suffixes,
-	}
-	f.SuffixMatcher = &suffixTrieMatcher{t: newSuffixTrie(suffixes)}
+
+		SuffixMatcher: &suffixTrieMatcher{t: newSuffixTrie(suffixes)}}
 	return f
 }
 
@@ -327,10 +326,8 @@ func TestApply_Idempotent(t *testing.T) {
 func TestApply_SyncChecksum(t *testing.T) {
 	spec := &objectcache.RuleProjectionSpec{}
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Annotations: map[string]string{
-				helpersv1.SyncChecksumMetadataKey: "abc123",
-			},
+		Annotations: map[string]string{
+			helpersv1.SyncChecksumMetadataKey: "abc123",
 		},
 	}
 

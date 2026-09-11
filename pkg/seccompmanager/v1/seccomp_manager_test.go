@@ -7,7 +7,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 //func TestName(t *testing.T) {
@@ -47,10 +46,8 @@ func TestSeccompManager(t *testing.T) {
 		{
 			name: "create seccomp profile",
 			obj: &v1beta1.SeccompProfile{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "replicaset-nginx-77b4fdf86c",
-					Namespace: "default",
-				},
+				Name:      "replicaset-nginx-77b4fdf86c",
+				Namespace: "default",
 				Spec: v1beta1.SeccompProfileSpec{
 					Containers: []v1beta1.SingleSeccompProfile{{
 						Name: "nginx",

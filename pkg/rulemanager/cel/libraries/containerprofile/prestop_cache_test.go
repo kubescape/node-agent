@@ -145,11 +145,11 @@ func TestPreStopHookCache_ConcurrentAccess(t *testing.T) {
 	numOperations := 100
 
 	// Concurrent writes
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < numOperations; j++ {
+			for range numOperations {
 				containerID := "container-" + string(rune('A'+id%26))
 				cache.MarkPreStopTriggered(containerID)
 			}
@@ -157,11 +157,11 @@ func TestPreStopHookCache_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Concurrent reads
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < numOperations; j++ {
+			for range numOperations {
 				containerID := "container-" + string(rune('A'+id%26))
 				cache.WasPreStopTriggered(containerID)
 			}

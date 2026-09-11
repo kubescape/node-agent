@@ -2,6 +2,7 @@ package nodeprofilemanager
 
 import (
 	"bytes"
+	context0 "context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,7 +23,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/net/context"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -59,7 +59,7 @@ func NewNodeProfileManager(config config.Config, clusterData armometadata.Cluste
 
 var _ nodeprofilemanager.NodeProfileManagerClient = (*NodeProfileManager)(nil)
 
-func (n *NodeProfileManager) Start(ctx context.Context) {
+func (n *NodeProfileManager) Start(ctx context0.Context) {
 	go func() {
 		time.Sleep(utils.AddJitter(n.config.InitialDelay, n.config.MaxJitterPercentage))
 		for {

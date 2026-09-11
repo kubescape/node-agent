@@ -423,9 +423,9 @@ func readPodCgroupMem(ownContainerID, ownPodUID string, hostCgroupMounted bool) 
 // /proc/self/cgroup and ok=true when that line is present (path may be "/", the
 // namespace root). ok=false means no cgroupv2 line (e.g. cgroupv1-only).
 func parseSelfCgroupV2(content string) (string, bool) {
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, "0::") {
-			return strings.TrimPrefix(line, "0::"), true
+	for line := range strings.SplitSeq(content, "\n") {
+		if after, ok := strings.CutPrefix(line, "0::"); ok {
+			return after, true
 		}
 	}
 	return "", false

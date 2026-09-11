@@ -169,7 +169,7 @@ func CreateContainerWatcher(
 	eventEnricher := NewEventEnricher(processTreeManager)
 
 	// Create worker pool for processing individual events
-	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
+	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i any) {
 		enrichedEvent := i.(*events.EnrichedEvent)
 		eventHandlerFactory.ProcessEvent(enrichedEvent)
 		enrichedEvent.Event.Release() // at this time we should not need the event anymore

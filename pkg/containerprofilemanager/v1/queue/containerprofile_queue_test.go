@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // MockProfileCreator implements ProfileCreator for testing.
@@ -92,10 +91,8 @@ func TestQueueBasicOperations(t *testing.T) {
 
 	// Test enqueue
 	profile := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-profile",
-			Namespace: "default",
-		},
+		Name:      "test-profile",
+		Namespace: "default",
 	}
 
 	err = queueData.Enqueue(profile, "test-container-id")
@@ -149,12 +146,10 @@ func TestQueueLRUEviction(t *testing.T) {
 	defer queueData.Close()
 
 	// Add more items than max size
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		profile := &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("test-profile-%d", i),
-				Namespace: "default",
-			},
+			Name:      fmt.Sprintf("test-profile-%d", i),
+			Namespace: "default",
 		}
 		err = queueData.Enqueue(profile, "test-container-id")
 		if err != nil {
@@ -175,7 +170,7 @@ func TestQueueLRUEviction(t *testing.T) {
 	// the stitch is still sitting unprocessed at the head. The survivors are therefore the
 	// repair stitch followed by the two newest real profiles.
 	dequeued := make([]*QueuedContainerProfile, 0, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		item, err := queueData.queue.Dequeue()
 		if err != nil {
 			t.Fatalf("Failed to dequeue item %d: %v", i, err)
@@ -226,10 +221,8 @@ func TestQueueRetryMechanism(t *testing.T) {
 	defer queueData.Close()
 
 	profile := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "retry-test-profile",
-			Namespace: "default",
-		},
+		Name:      "retry-test-profile",
+		Namespace: "default",
 	}
 
 	err = queueData.Enqueue(profile, "test-container-id")
@@ -282,10 +275,8 @@ func TestQueuePersistence(t *testing.T) {
 	}
 
 	profile := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "persistence-test-profile",
-			Namespace: "default",
-		},
+		Name:      "persistence-test-profile",
+		Namespace: "default",
 	}
 
 	err = queueData1.Enqueue(profile, "test-container-id")
@@ -354,12 +345,10 @@ func TestQueueStats(t *testing.T) {
 	defer queueData.Close()
 
 	// Add some items
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		profile := &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("stats-test-profile-%d", i),
-				Namespace: "default",
-			},
+			Name:      fmt.Sprintf("stats-test-profile-%d", i),
+			Namespace: "default",
 		}
 		err = queueData.Enqueue(profile, "test-container-id")
 		if err != nil {
@@ -411,12 +400,10 @@ func TestQueueEmptyOperation(t *testing.T) {
 	defer queueData.Close()
 
 	// Add some items
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		profile := &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("empty-test-profile-%d", i),
-				Namespace: "default",
-			},
+			Name:      fmt.Sprintf("empty-test-profile-%d", i),
+			Namespace: "default",
 		}
 		err = queueData.Enqueue(profile, "test-container-id")
 		if err != nil {
@@ -469,16 +456,14 @@ func TestQueueConcurrentOperations(t *testing.T) {
 	itemsPerGoroutine := 5
 	done := make(chan bool, numGoroutines)
 
-	for g := 0; g < numGoroutines; g++ {
+	for g := range numGoroutines {
 		go func(goroutineID int) {
 			defer func() { done <- true }()
 
-			for i := 0; i < itemsPerGoroutine; i++ {
+			for i := range itemsPerGoroutine {
 				profile := &v1beta1.ContainerProfile{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      fmt.Sprintf("concurrent-profile-%d-%d", goroutineID, i),
-						Namespace: "default",
-					},
+					Name:      fmt.Sprintf("concurrent-profile-%d-%d", goroutineID, i),
+					Namespace: "default",
 				}
 
 				err := queueData.Enqueue(profile, "test-container-id")
@@ -490,7 +475,7 @@ func TestQueueConcurrentOperations(t *testing.T) {
 	}
 
 	// Wait for all goroutines to complete
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		<-done
 	}
 
@@ -533,10 +518,8 @@ func TestQueueStopAndRestart(t *testing.T) {
 
 	// Add an item
 	profile := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "stop-restart-profile",
-			Namespace: "default",
-		},
+		Name:      "stop-restart-profile",
+		Namespace: "default",
 	}
 
 	err = queueData.Enqueue(profile, "test-container-id")
@@ -614,10 +597,8 @@ func TestQueueWithDifferentConfigurations(t *testing.T) {
 
 			// Test basic functionality
 			profile := &v1beta1.ContainerProfile{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      fmt.Sprintf("config-test-profile-%s", tc.name),
-					Namespace: "default",
-				},
+				Name:      fmt.Sprintf("config-test-profile-%s", tc.name),
+				Namespace: "default",
 			}
 
 			err = queueData.Enqueue(profile, "test-container-id")
@@ -662,10 +643,8 @@ func BenchmarkQueueEnqueue(b *testing.B) {
 	defer queueData.Close()
 
 	profile := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "benchmark-profile",
-			Namespace: "default",
-		},
+		Name:      "benchmark-profile",
+		Namespace: "default",
 	}
 
 	b.ResetTimer()
@@ -702,10 +681,8 @@ func BenchmarkQueueProcessing(b *testing.B) {
 	// Pre-populate queue
 	for i := 0; i < b.N; i++ {
 		profile := &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("benchmark-profile-%d", i),
-				Namespace: "default",
-			},
+			Name:      fmt.Sprintf("benchmark-profile-%d", i),
+			Namespace: "default",
 		}
 		queueData.Enqueue(profile, "test-container-id")
 	}
@@ -744,10 +721,8 @@ func TestQueueCorruptedSegmentHandling(t *testing.T) {
 
 	// Add a profile to the queue
 	profile := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "corrupted-test-profile",
-			Namespace: "default",
-		},
+		Name:      "corrupted-test-profile",
+		Namespace: "default",
 	}
 
 	err = queueData1.Enqueue(profile, "test-container-id")
@@ -800,10 +775,8 @@ func TestQueueCorruptedSegmentHandling(t *testing.T) {
 
 	// Test that the queue still works normally after recovery
 	newProfile := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "recovery-test-profile",
-			Namespace: "default",
-		},
+		Name:      "recovery-test-profile",
+		Namespace: "default",
 	}
 
 	err = queueData2.Enqueue(newProfile, "test-container-id")

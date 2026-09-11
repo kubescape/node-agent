@@ -67,13 +67,13 @@ func TestApplicationProfileCaching(t *testing.T) {
 	testCases := []struct {
 		name       string
 		expression string
-		vars       map[string]interface{}
+		vars       map[string]any
 		expected   bool
 	}{
 		{
 			name:       "was_path_opened caching",
 			expression: `cp.was_path_opened(containerID, path)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"path":        "/etc/passwd",
 			},
@@ -82,7 +82,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 		{
 			name:       "was_executed caching",
 			expression: `cp.was_executed(containerID, path)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"path":        "/bin/ls",
 			},
@@ -91,7 +91,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 		{
 			name:       "was_executed_with_args caching",
 			expression: `cp.was_executed_with_args(containerID, path, args)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"path":        "/bin/ls",
 				"args":        []string{"-la"},
@@ -101,7 +101,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 		{
 			name:       "was_syscall_used caching",
 			expression: `cp.was_syscall_used(containerID, syscall)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"syscall":     "open",
 			},
@@ -110,7 +110,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 		{
 			name:       "was_capability_used caching",
 			expression: `cp.was_capability_used(containerID, capability)`,
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"containerID": "test-container-id",
 				"capability":  "CAP_NET_ADMIN",
 			},
@@ -203,7 +203,7 @@ func TestApplicationProfileCacheDifferentArguments(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Call with first path
-	result1, _, err := program.Eval(map[string]interface{}{
+	result1, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/etc/passwd",
 	})
@@ -214,7 +214,7 @@ func TestApplicationProfileCacheDifferentArguments(t *testing.T) {
 	assert.Equal(t, 1, cacheSize1, "Cache should have 1 entry")
 
 	// Call with second path - should create new cache entry
-	result2, _, err := program.Eval(map[string]interface{}{
+	result2, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/tmp/test.txt",
 	})
@@ -225,7 +225,7 @@ func TestApplicationProfileCacheDifferentArguments(t *testing.T) {
 	assert.Equal(t, 2, cacheSize2, "Cache should have 2 entries for different arguments")
 
 	// Call with non-existent path - should create third cache entry
-	result3, _, err := program.Eval(map[string]interface{}{
+	result3, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/nonexistent",
 	})
@@ -286,7 +286,7 @@ func TestApplicationProfileCacheExpiration(t *testing.T) {
 	program, err := env.Program(ast)
 	assert.NoError(t, err)
 
-	vars := map[string]interface{}{
+	vars := map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/etc/passwd",
 	}
@@ -357,7 +357,7 @@ func TestApplicationProfileCachePerformance(t *testing.T) {
 	program, err := env.Program(ast)
 	assert.NoError(t, err)
 
-	vars := map[string]interface{}{
+	vars := map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/etc/passwd",
 	}
@@ -433,7 +433,7 @@ func TestApplicationProfileCacheClearCache(t *testing.T) {
 	program, err := env.Program(ast)
 	assert.NoError(t, err)
 
-	vars := map[string]interface{}{
+	vars := map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/etc/passwd",
 	}

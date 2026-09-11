@@ -45,7 +45,7 @@ func (s *ControlPlaneInfoSensor) GetPluralKind() string {
 }
 
 // Sense collects the control plane info data from the host
-func (s *ControlPlaneInfoSensor) Sense() (interface{}, error) {
+func (s *ControlPlaneInfoSensor) Sense() (any, error) {
 	ctx := context.Background()
 	ret := ControlPlaneInfoSpec{
 		NodeName: s.nodeName,
@@ -54,10 +54,8 @@ func (s *ControlPlaneInfoSensor) Sense() (interface{}, error) {
 	// API Server
 	if proc, err := LocateProcessByExecSuffix(apiServerExe); err == nil {
 		ret.APIServerInfo = &ApiServerInfo{
-			ProcessInfo: ProcessInfo{
-				CmdLine:   proc.RawCmd(),
-				SpecsFile: makeHostFileInfoVerbose(ctx, apiServerSpecsPath, false),
-			},
+			CmdLine:         proc.RawCmd(),
+			SpecsFile:       makeHostFileInfoVerbose(ctx, apiServerSpecsPath, false),
 			AuditPolicyFile: makeContaineredFileInfoVerbose(ctx, proc, auditPolicyFileArg, false),
 		}
 	}

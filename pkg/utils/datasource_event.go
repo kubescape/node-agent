@@ -77,7 +77,7 @@ type DatasourceEvent struct {
 	Request         *http.Request
 	Response        *http.Response
 	Syscall         string
-	extra           interface{}
+	extra           any
 }
 
 var _ BpfEvent = (*DatasourceEvent)(nil)
@@ -370,16 +370,14 @@ func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
 	port, _ := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
 	proto, _ := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
 	return types.L4Endpoint{
-		L3Endpoint: types.L3Endpoint{
-			Addr:      rawIPv4ToString(addr),
-			Version:   version,
-			Namespace: namespace,
-			Name:      name,
-			Kind:      types.EndpointKind(kind),
-			PodLabels: parseStringToMap(podLabels),
-		},
-		Port:  port,
-		Proto: proto,
+		Addr:      rawIPv4ToString(addr),
+		Version:   version,
+		Namespace: namespace,
+		Name:      name,
+		Kind:      types.EndpointKind(kind),
+		PodLabels: parseStringToMap(podLabels),
+		Port:      port,
+		Proto:     proto,
 	}
 }
 
@@ -489,7 +487,7 @@ func (e *DatasourceEvent) GetExitCode() uint32 {
 	return exitCode
 }
 
-func (e *DatasourceEvent) GetExtra() interface{} {
+func (e *DatasourceEvent) GetExtra() any {
 	return e.extra
 }
 
@@ -933,7 +931,7 @@ func (e *DatasourceEvent) Release() {
 	e.Datasource.Release(e.Data)
 }
 
-func (e *DatasourceEvent) SetExtra(extra interface{}) {
+func (e *DatasourceEvent) SetExtra(extra any) {
 	e.extra = extra
 }
 

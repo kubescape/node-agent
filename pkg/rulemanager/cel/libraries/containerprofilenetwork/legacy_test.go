@@ -12,7 +12,6 @@ import (
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
-	"k8s.io/utils/ptr"
 )
 
 // TestLegacyNNDeclarationsMirrorCP is a drift guard: NN() must expose
@@ -65,7 +64,7 @@ func TestLegacyNNMatchesCP(t *testing.T) {
 				IPAddress: "192.168.1.100",
 				DNSNames:  []string{"api.example.com"},
 				Ports: []v1beta1.NetworkPort{
-					{Name: "tcp-80", Protocol: "TCP", Port: ptr.To(int32(80))},
+					{Name: "tcp-80", Protocol: "TCP", Port: new(int32(80))},
 				},
 			},
 		},
@@ -74,7 +73,7 @@ func TestLegacyNNMatchesCP(t *testing.T) {
 				IPAddress: "172.16.0.10",
 				DNSNames:  []string{"loadbalancer.example.com"},
 				Ports: []v1beta1.NetworkPort{
-					{Name: "tcp-8080", Protocol: "TCP", Port: ptr.To(int32(8080))},
+					{Name: "tcp-8080", Protocol: "TCP", Port: new(int32(8080))},
 				},
 			},
 		},
@@ -142,8 +141,8 @@ func TestLegacyNNMatchesCP(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cpResult := evalBool(t, env, tc.cp, map[string]interface{}{"containerID": "test-container-id"})
-			nnResult := evalBool(t, env, tc.nn, map[string]interface{}{"containerID": "test-container-id"})
+			cpResult := evalBool(t, env, tc.cp, map[string]any{"containerID": "test-container-id"})
+			nnResult := evalBool(t, env, tc.nn, map[string]any{"containerID": "test-container-id"})
 			assert.Equal(t, tc.want, cpResult, "cp.* result for %s", tc.name)
 			assert.Equal(t, cpResult, nnResult, "nn.* must match cp.* for %s", tc.name)
 		})
@@ -152,7 +151,7 @@ func TestLegacyNNMatchesCP(t *testing.T) {
 
 // evalBool compiles and evaluates a CEL boolean expression against env,
 // failing the test on any compile/program/eval error.
-func evalBool(t *testing.T, env *cel.Env, expr string, activation map[string]interface{}) bool {
+func evalBool(t *testing.T, env *cel.Env, expr string, activation map[string]any) bool {
 	t.Helper()
 	ast, issues := env.Compile(expr)
 	if issues != nil && issues.Err() != nil {

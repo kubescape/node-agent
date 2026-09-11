@@ -27,7 +27,7 @@ func TestAlertLimitKeepsLimitingAfterTheFirstDrop(t *testing.T) {
 	assert.False(t, admitted, "the second alert is past the limit")
 	assert.True(t, notify, "and it triggers the one notice")
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		admitted, notify = e.admitAlert()
 		assert.False(t, admitted, "alert %d must stay dropped inside the window", i+3)
 		assert.False(t, notify, "the notice is sent once per window")
@@ -60,7 +60,7 @@ func TestAlertLimitZeroMeansNoLimit(t *testing.T) {
 		config:       HTTPExporterConfig{MaxAlertsPerMinute: 0},
 		alertMetrics: &alertMetrics{},
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		admitted, notify := e.admitAlert()
 		assert.True(t, admitted, "alert %d must be admitted when there is no limit", i)
 		assert.False(t, notify)
@@ -78,11 +78,9 @@ func TestAlertLimitUnderConcurrentSenders(t *testing.T) {
 
 	var admitted, notified atomic.Int64
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 20; j++ {
+	for range 20 {
+		wg.Go(func() {
+			for range 20 {
 				ok, notify := e.admitAlert()
 				if ok {
 					admitted.Add(1)
@@ -91,7 +89,7 @@ func TestAlertLimitUnderConcurrentSenders(t *testing.T) {
 					notified.Add(1)
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

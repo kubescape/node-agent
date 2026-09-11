@@ -34,7 +34,7 @@ func (s *LinuxSecurityHardeningSensor) GetPluralKind() string {
 }
 
 // Sense collects the security hardening data from the host
-func (s *LinuxSecurityHardeningSensor) Sense() (interface{}, error) {
+func (s *LinuxSecurityHardeningSensor) Sense() (any, error) {
 	return &LinuxSecurityHardeningSpec{
 		AppArmor: s.getAppArmorStatus(),
 		SeLinux:  s.getSELinuxStatus(),

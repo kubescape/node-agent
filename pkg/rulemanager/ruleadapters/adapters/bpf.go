@@ -32,7 +32,7 @@ func (c *BpfAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["cmd"] = cmd
 	baseRuntimeAlert.Arguments["attrSize"] = attrSize

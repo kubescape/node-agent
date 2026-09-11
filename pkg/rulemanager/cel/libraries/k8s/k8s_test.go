@@ -11,7 +11,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestK8sLibrary(t *testing.T) {
@@ -27,10 +26,8 @@ func TestK8sLibrary(t *testing.T) {
 
 	// Create a proper Pod object and add it to the cache
 	testPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
-			Namespace: "default",
-		},
+		Name:      "test-pod",
+		Namespace: "default",
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
@@ -80,8 +77,8 @@ func TestK8sLibrary(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 
-	result, _, err := program.Eval(map[string]interface{}{
-		"event": map[string]interface{}{
+	result, _, err := program.Eval(map[string]any{
+		"event": map[string]any{
 			"namespace":     "default",
 			"podName":       "test-pod",
 			"containerName": "test-container",
@@ -111,10 +108,8 @@ func TestK8sLibraryGetContainerByName(t *testing.T) {
 
 	// Create a test Pod with multiple containers
 	testPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
-			Namespace: "default",
-		},
+		Name:      "test-pod",
+		Namespace: "default",
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
@@ -187,8 +182,8 @@ func TestK8sLibraryGetContainerByName(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
-				"event": map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
+				"event": map[string]any{
 					"namespace":     "default",
 					"podName":       "test-pod",
 					"containerName": "main-container",

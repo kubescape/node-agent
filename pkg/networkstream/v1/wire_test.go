@@ -119,7 +119,7 @@ func TestBuildWireStream_DeeperChainWins(t *testing.T) {
 
 	// Repeated because map iteration order is randomised per range: the outcome
 	// must not depend on which entry is visited first.
-	for i := 0; i < 32; i++ {
+	for range 32 {
 		snapshot := outboundOnly("c1", map[string]armotypes.NetworkStreamEvent{
 			"1.2.3.4/443/TCP/101/5000000000": {ProcessRef: ref, ProcessTree: shallow},
 			"9.9.9.9/53/UDP/101/5000000000":  {ProcessRef: ref, ProcessTree: deep},
@@ -299,14 +299,11 @@ func TestCapCmdline(t *testing.T) {
 // produces a ~1.2 KB tree however large a size it is asked for.
 func bigTree(pid uint32, sizeBytes int) *armotypes.ProcessTree {
 	const perNode = processNodeOverheadBytes + maxCmdlineBytes
-	nodes := (sizeBytes + perNode - 1) / perNode
-	if nodes < 1 {
-		nodes = 1
-	}
+	nodes := max((sizeBytes+perNode-1)/perNode, 1)
 	cmdline := strings.Repeat("a", maxCmdlineBytes)
 
 	var root, prev *armotypes.Process
-	for i := 0; i < nodes; i++ {
+	for i := range nodes {
 		// The leaf carries the process's own pid; ancestors get synthetic ones.
 		nodePID := pid
 		if i < nodes-1 {
@@ -423,7 +420,7 @@ func TestSelectProcessTrees_IsDeterministic(t *testing.T) {
 	}
 	sort.Strings(firstRefs)
 
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		again := build()
 		refs := make([]string, 0, len(again))
 		for ref := range again {
@@ -446,7 +443,7 @@ func TestSelectProcessTrees_PrefersSmallestTrees(t *testing.T) {
 	}
 	// Chatty processes with large trees that together blow the budget.
 	for pid := uint32(100); pid < 1100; pid++ {
-		for c := 0; c < 5; c++ {
+		for c := range 5 {
 			ref := &armotypes.ProcessRef{PID: pid, StartTimeNs: 10_000_000}
 			events[fmt.Sprintf("10.3.%d.%d/%d/TCP/%d/10000000", pid/256, pid%256, c, pid)] =
 				armotypes.NetworkStreamEvent{ProcessRef: ref, ProcessTree: bigTree(pid, 12288)}
@@ -468,7 +465,7 @@ func TestSelectProcessTrees_PrefersSmallestTrees(t *testing.T) {
 func TestSelectProcessTrees_OversizedTreeIsExcluded(t *testing.T) {
 	huge := armotypes.ProcessRef{PID: 1, StartTimeNs: 10_000_000}
 	oversized := &armotypes.Process{PID: 1, Comm: "p", ChildrenMap: map[armotypes.CommPID]*armotypes.Process{}}
-	for i := 0; i < 4000; i++ {
+	for i := range 4000 {
 		child := &armotypes.Process{PID: uint32(10_000 + i), Comm: "p",
 			Cmdline: strings.Repeat("a", maxCmdlineBytes), ChildrenMap: map[armotypes.CommPID]*armotypes.Process{}}
 		oversized.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
@@ -581,7 +578,7 @@ const escapeHeavyComm = "<<<<<<<<<<<<<<<"
 
 func escapeHeavyCommTree(children int) *armotypes.ProcessTree {
 	root := realisticNode(1, "sh")
-	for i := 0; i < children; i++ {
+	for i := range children {
 		child := realisticNode(uint32(1000+i), "/usr/bin/curl https://example.com")
 		child.Comm = escapeHeavyComm
 		root.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
@@ -591,7 +588,7 @@ func escapeHeavyCommTree(children int) *armotypes.ProcessTree {
 
 func escapeHeavyCommLegacyTree(children int) *armotypes.ProcessTree {
 	root := realisticNode(1, "sh")
-	for i := 0; i < children; i++ {
+	for i := range children {
 		child := realisticNode(uint32(1000+i), "/usr/bin/curl https://example.com")
 		child.Comm = escapeHeavyComm
 		root.Children = append(root.Children, *child)
@@ -601,7 +598,7 @@ func escapeHeavyCommLegacyTree(children int) *armotypes.ProcessTree {
 
 func unboundedCommTree(children, commBytes int) *armotypes.ProcessTree {
 	root := realisticNode(1, "sh")
-	for i := 0; i < children; i++ {
+	for i := range children {
 		child := realisticNode(uint32(1000+i), "/usr/bin/curl https://example.com")
 		child.Comm = strings.Repeat("<", commBytes)
 		root.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
@@ -611,7 +608,7 @@ func unboundedCommTree(children, commBytes int) *armotypes.ProcessTree {
 
 func unboundedCommLegacyTree(children, commBytes int) *armotypes.ProcessTree {
 	root := realisticNode(1, "sh")
-	for i := 0; i < children; i++ {
+	for i := range children {
 		child := realisticNode(uint32(1000+i), "/usr/bin/curl https://example.com")
 		child.Comm = strings.Repeat("<", commBytes)
 		root.Children = append(root.Children, *child)
@@ -621,7 +618,7 @@ func unboundedCommLegacyTree(children, commBytes int) *armotypes.ProcessTree {
 
 func escapeHeavyCommChain(nodes int) *armotypes.ProcessTree {
 	var root, prev *armotypes.Process
-	for i := 0; i < nodes; i++ {
+	for i := range nodes {
 		node := realisticNode(uint32(100+i), "/usr/bin/curl https://example.com")
 		node.Comm = escapeHeavyComm
 		if prev == nil {
@@ -641,7 +638,7 @@ func escapeHeavyCommChain(nodes int) *armotypes.ProcessTree {
 func TestEstimateTreeBytes_NeverUnderestimates(t *testing.T) {
 	deepChain := func(nodes int, cmdline string) *armotypes.Process {
 		var root, prev *armotypes.Process
-		for i := 0; i < nodes; i++ {
+		for i := range nodes {
 			node := realisticNode(uint32(100+i), cmdline)
 			if prev == nil {
 				root = node
@@ -653,7 +650,7 @@ func TestEstimateTreeBytes_NeverUnderestimates(t *testing.T) {
 		return root
 	}
 	wide := realisticNode(1, "sh")
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		child := realisticNode(uint32(1000+i), "worker --shard=<n> & echo \"done\"")
 		wide.ChildrenMap[armotypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
 	}
@@ -762,7 +759,7 @@ func TestEstimateTreeBytes_NeverUnderestimatesRandom(t *testing.T) {
 		return string(b)
 	}
 
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		node := &armotypes.Process{
 			PID: uint32(rng.Intn(1 << 20)), PPID: uint32(rng.Intn(1 << 20)),
 			Comm: randomBytes(rng.Intn(24)), Pcomm: randomBytes(rng.Intn(24)),
@@ -781,7 +778,7 @@ func TestEstimateTreeBytes_NeverUnderestimatesRandom(t *testing.T) {
 		// which skews the distribution badly (5 children becomes ~1.5% likely instead of
 		// ~16.7%) and starves the high-fan-out cases this generator exists to reach.
 		children := rng.Intn(6)
-		for c := 0; c < children; c++ {
+		for range children {
 			uid, gid := uint32(rng.Intn(70000)), uint32(rng.Intn(70000))
 			upper := rng.Intn(2) == 0
 			child := &armotypes.Process{

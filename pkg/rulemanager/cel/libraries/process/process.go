@@ -52,7 +52,7 @@ func (l *processLibrary) getProcessEnv(pid ref.Val) ref.Val {
 	}
 
 	// Convert map[string]string to map[string]interface{} for CEL
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	for k, v := range envMap {
 		result[k] = v
 	}

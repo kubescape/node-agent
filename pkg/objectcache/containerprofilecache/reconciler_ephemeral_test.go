@@ -9,7 +9,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -41,12 +40,12 @@ func seedNamedEntry(c *ContainerProfileCacheImpl, id, containerName, podName, na
 // ephemeralContainerStatuses entry for it.
 func podWithEphemeralSpecNoStatus(namespace, podName, podUID, ephemeralName string) *corev1.Pod {
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: namespace, UID: types.UID(podUID)},
+		Name: podName, Namespace: namespace, UID: types.UID(podUID),
 		Spec: corev1.PodSpec{
 			Containers:     []corev1.Container{{Name: "app"}},
 			InitContainers: []corev1.Container{{Name: "setup"}},
 			EphemeralContainers: []corev1.EphemeralContainer{{
-				EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: ephemeralName},
+				Name: ephemeralName,
 			}},
 		},
 		Status: corev1.PodStatus{
@@ -110,7 +109,7 @@ func TestReconciler_KeepsInitContainerAwaitingStatusWithEmptyPodUID(t *testing.T
 	// PodUID unknown at entry-creation time.
 	seedNamedEntry(c, "init-id", "setup", "pod-init", "ns-init", "")
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "pod-init", Namespace: "ns-init", UID: types.UID("uid-init")},
+		Name: "pod-init", Namespace: "ns-init", UID: types.UID("uid-init"),
 		Spec: corev1.PodSpec{
 			Containers:     []corev1.Container{{Name: "app"}},
 			InitContainers: []corev1.Container{{Name: "setup"}},
@@ -142,8 +141,8 @@ func TestReconciler_EvictsContainerRemovedFromSpecAndStatus(t *testing.T) {
 
 	seedNamedEntry(c, "gone-id", "gone", "pod-gone", "ns-gone", "uid-gone")
 	k8s.setPod("ns-gone", "pod-gone", &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "pod-gone", Namespace: "ns-gone", UID: types.UID("uid-gone")},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		Name: "pod-gone", Namespace: "ns-gone", UID: types.UID("uid-gone"),
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{{
 				Name:        "app",
@@ -171,8 +170,8 @@ func TestReconciler_TerminationMarkResetsWhenContainerReappears(t *testing.T) {
 	seedNamedEntry(c, "flap-id", "flap", "pod-flap", "ns-flap", "uid-flap")
 
 	reaped := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "pod-flap", Namespace: "ns-flap", UID: types.UID("uid-flap")},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		Name: "pod-flap", Namespace: "ns-flap", UID: types.UID("uid-flap"),
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{{
 				Name:        "app",

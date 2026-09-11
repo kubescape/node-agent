@@ -13,6 +13,6 @@ type RuleEvaluator interface {
 	EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error)
 	CreateEvalContext(event *events.EnrichedEvent) map[string]any
 	RegisterHelper(function cel.EnvOption) error
-	RegisterCustomType(eventType utils.EventType, obj interface{}) error
+	RegisterCustomType(eventType utils.EventType, obj any) error
 	RegisterEventConverter(eventType utils.EventType, converter func(utils.K8sEvent) utils.K8sEvent)
 }

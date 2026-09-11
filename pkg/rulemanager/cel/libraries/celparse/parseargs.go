@@ -29,7 +29,7 @@ func ParseList[T any](list ref.Val) ([]T, error) {
 	}
 
 	result := make([]T, size)
-	for i := int64(0); i < size; i++ {
+	for i := range size {
 		val := argsList.Get(types.Int(i))
 		typedVal, ok := val.Value().(T)
 		if !ok {

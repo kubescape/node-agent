@@ -304,7 +304,7 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 	})
 
 	// Fill up the cache
-	for i := 0; i < maxSize; i++ {
+	for i := range maxSize {
 		failure := &types.GenericRuleFailure{
 			BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
 				UniqueID: fmt.Sprintf("test-alert-%d", i),

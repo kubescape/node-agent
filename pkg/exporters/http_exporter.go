@@ -410,7 +410,7 @@ func (e *HTTPExporter) getCloudMetadata(cloudServices []string) armotypes.CloudM
 	return metadata
 }
 
-func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload interface{}) error {
+func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
@@ -524,15 +524,11 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		HostName:            e.host,
 		AlertType:           armotypes.AlertTypeRule,
 		AlertSourcePlatform: e.alertSourcePlatform,
-		BaseRuntimeAlert: armotypes.BaseRuntimeAlert{
-			AlertName: string(AlertTypeLimitReached),
-			// Severity:       ruleengine.RulePrioritySystemIssue,
-			FixSuggestions: "Check logs for more information",
-		},
-		RuntimeAlertK8sDetails: armotypes.RuntimeAlertK8sDetails{
-			NodeName:    e.nodeName,
-			ClusterName: e.clusterName,
-		},
+		AlertName:           string(AlertTypeLimitReached),
+		// Severity:       ruleengine.RulePrioritySystemIssue,
+		FixSuggestions: "Check logs for more information",
+		NodeName:       e.nodeName,
+		ClusterName:    e.clusterName,
 	}
 
 	e.alertMetrics.Lock()

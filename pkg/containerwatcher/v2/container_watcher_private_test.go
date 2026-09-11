@@ -8,8 +8,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -19,10 +17,8 @@ import (
 
 func TestAddRunningContainers(t *testing.T) {
 	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pod1",
-			Namespace: "namespace1",
-		},
+		Name:      "pod1",
+		Namespace: "namespace1",
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{

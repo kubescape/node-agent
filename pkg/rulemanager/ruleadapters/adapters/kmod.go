@@ -30,7 +30,7 @@ func (c *KmodAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["module"] = module
 	baseRuntimeAlert.Arguments["syscall"] = kmodEvent.GetSyscall()

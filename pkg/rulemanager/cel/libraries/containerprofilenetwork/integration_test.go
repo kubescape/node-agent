@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
-	"k8s.io/utils/ptr"
 )
 
 func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
@@ -41,12 +40,12 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 					{
 						Name:     "tcp-80",
 						Protocol: "TCP",
-						Port:     ptr.To(int32(80)),
+						Port:     new(int32(80)),
 					},
 					{
 						Name:     "tcp-443",
 						Protocol: "TCP",
-						Port:     ptr.To(int32(443)),
+						Port:     new(int32(443)),
 					},
 				},
 			},
@@ -57,7 +56,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 					{
 						Name:     "tcp-5432",
 						Protocol: "TCP",
-						Port:     ptr.To(int32(5432)),
+						Port:     new(int32(5432)),
 					},
 				},
 			},
@@ -68,7 +67,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 					{
 						Name:     "udp-53",
 						Protocol: "UDP",
-						Port:     ptr.To(int32(53)),
+						Port:     new(int32(53)),
 					},
 				},
 			},
@@ -81,12 +80,12 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 					{
 						Name:     "tcp-8080",
 						Protocol: "TCP",
-						Port:     ptr.To(int32(8080)),
+						Port:     new(int32(8080)),
 					},
 					{
 						Name:     "tcp-9090",
 						Protocol: "TCP",
-						Port:     ptr.To(int32(9090)),
+						Port:     new(int32(9090)),
 					},
 				},
 			},
@@ -97,7 +96,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 					{
 						Name:     "tcp-3000",
 						Protocol: "TCP",
-						Port:     ptr.To(int32(3000)),
+						Port:     new(int32(3000)),
 					},
 				},
 			},
@@ -262,7 +261,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": "test-container-id",
 			})
 			if err != nil {

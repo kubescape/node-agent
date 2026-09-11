@@ -81,7 +81,7 @@ func (e *netCostEstimator) EstimateCallCost(function, overloadID string, target 
 		// IP parsing O(1) + byte comparison across 6 IP ranges O(6) = O(1)
 		cost = 8
 	}
-	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+	return &checker.CallEstimate{Min: uint64(cost), Max: uint64(cost)}
 }
 
 func (e *netCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {

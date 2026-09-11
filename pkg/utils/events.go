@@ -36,7 +36,7 @@ type EnrichEvent interface {
 	GetContainerImage() string
 	GetContainerImageDigest() string
 	GetError() int64
-	GetExtra() interface{}
+	GetExtra() any
 	FieldPresent(name string) bool
 	GetGid() *uint32
 	GetHostNetwork() bool
@@ -47,7 +47,7 @@ type EnrichEvent interface {
 	GetPodLabels() map[string]string
 	GetPpid() uint32
 	GetUid() *uint32
-	SetExtra(extra interface{})
+	SetExtra(extra any)
 
 	// ECS-specific methods
 	GetEcsClusterName() string

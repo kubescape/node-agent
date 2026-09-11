@@ -25,11 +25,7 @@ import (
 )
 
 // Manager represents a component that can receive events
-type Manager interface {
-	// TODO: Find a better way to handle this
-	// containerwatcher.EventReceiver
-	// containerwatcher.EnrichedEventReceiver
-}
+type Manager any
 
 // ManagerAdapter adapts different manager interfaces to the common Manager interface
 type ManagerAdapter struct {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 
@@ -14,7 +15,6 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // This file adds a golden-corpus CHARACTERIZATION oracle for Apply.
@@ -134,9 +134,9 @@ func declaredPatterns(pats ...typesv1.PatternObject) typesv1.FieldRequirement {
 // tree-builder skips it), so the frames become one leaf path.
 func linearCallStack(id string, frames [][2]string) v1beta1.IdentifiedCallStack {
 	var children []v1beta1.CallStackNode
-	for i := len(frames) - 1; i >= 0; i-- {
+	for _, frame := range slices.Backward(frames) {
 		children = []v1beta1.CallStackNode{{
-			Frame:    v1beta1.StackFrame{FileID: frames[i][0], Lineno: frames[i][1]},
+			Frame:    v1beta1.StackFrame{FileID: frame[0], Lineno: frame[1]},
 			Children: children,
 		}}
 	}
@@ -178,10 +178,8 @@ var (
 // PolicyByRuleId. It also carries the SyncChecksum annotation.
 func richProfile() *v1beta1.ContainerProfile {
 	return &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Annotations: map[string]string{
-				"kubescape.io/sync-checksum": "sync-abc123",
-			},
+		Annotations: map[string]string{
+			"kubescape.io/sync-checksum": "sync-abc123",
 		},
 		Spec: v1beta1.ContainerProfileSpec{
 			Capabilities: []string{"NET_ADMIN", "SYS_PTRACE"},
@@ -335,7 +333,6 @@ func TestApply_Golden(t *testing.T) {
 	update := os.Getenv("UPDATE_GOLDEN") != ""
 
 	for _, tc := range goldenCorpus() {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			spec := CompileSpec(tc.rules)
 			tree := buildTree(tc.cp)
@@ -368,7 +365,6 @@ func TestApply_Golden(t *testing.T) {
 // the same spec + profile twice yields byte-identical projected output.
 func TestApply_Golden_Idempotent(t *testing.T) {
 	for _, tc := range goldenCorpus() {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			spec := CompileSpec(tc.rules)
 			tree := buildTree(tc.cp)
@@ -388,7 +384,6 @@ func TestApply_Golden_Idempotent(t *testing.T) {
 // produces the same SpecHash, and that Apply copies it into the projection.
 func TestApply_Golden_SpecHashStable(t *testing.T) {
 	for _, tc := range goldenCorpus() {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			specA := CompileSpec(tc.rules)
 			specB := CompileSpec(tc.rules)

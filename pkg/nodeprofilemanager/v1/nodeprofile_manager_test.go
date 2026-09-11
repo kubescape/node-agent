@@ -367,11 +367,9 @@ func TestGetProfile_AppLabel(t *testing.T) {
 			k8sCache := &localK8sCache{
 				pods: []*corev1.Pod{
 					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "test-pod",
-							Namespace: "default",
-							Labels:    tt.labels,
-						},
+						Name:      "test-pod",
+						Namespace: "default",
+						Labels:    tt.labels,
 					},
 				},
 			}
@@ -563,10 +561,8 @@ func TestGetEphemeralContainers(t *testing.T) {
 	t.Run("ephemeral containers", func(t *testing.T) {
 		containers := []corev1.EphemeralContainer{
 			{
-				EphemeralContainerCommon: corev1.EphemeralContainerCommon{
-					Name:  "debug",
-					Image: "busybox:latest",
-				},
+				Name:  "debug",
+				Image: "busybox:latest",
 			},
 		}
 		statuses := map[string]corev1.ContainerStatus{

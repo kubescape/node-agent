@@ -3,6 +3,7 @@ package objectcache
 import (
 	"fmt"
 	"iter"
+	"maps"
 	"strings"
 	"time"
 
@@ -102,9 +103,7 @@ func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *Watched
 	labels := watchedContainer.InstanceID.GetLabels()
 	labels[helpersv1.LearningPeriodMetadataKey] = formatDuration(watchedContainer.LearningPeriod)
 	// Apply label overrides
-	for k, v := range watchedContainer.LabelOverrides {
-		labels[k] = v
-	}
+	maps.Copy(labels, watchedContainer.LabelOverrides)
 	if watchedContainer.ParentResourceVersion != "" {
 		labels[helpersv1.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
 	}
@@ -228,7 +227,7 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 
 func containersIterator(c []v1.Container) iter.Seq2[int, v1.Container] {
 	return func(yield func(int, v1.Container) bool) {
-		for i := 0; i < len(c); i++ {
+		for i := range c {
 			if !yield(i, c[i]) {
 				return
 			}
@@ -238,7 +237,7 @@ func containersIterator(c []v1.Container) iter.Seq2[int, v1.Container] {
 
 func ephemeralContainersIterator(c []v1.EphemeralContainer) iter.Seq2[int, v1.Container] {
 	return func(yield func(int, v1.Container) bool) {
-		for i := 0; i < len(c); i++ {
+		for i := range c {
 			if !yield(i, v1.Container(c[i].EphemeralContainerCommon)) {
 				return
 			}

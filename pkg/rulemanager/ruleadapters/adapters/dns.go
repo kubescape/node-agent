@@ -33,7 +33,7 @@ func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["domain"] = dnsName
 	baseRuntimeAlert.Arguments["addresses"] = dnsEvent.GetAddresses()

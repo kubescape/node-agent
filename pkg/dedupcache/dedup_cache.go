@@ -53,7 +53,7 @@ func (c *DedupCache) CheckAndSet(key uint64, ttlBuckets uint16, currentBucket ui
 
 	stored := c.slots[idx].Load()
 	storedKey, storedExpiry := unpack(stored)
-	if storedKey == (key & 0xFFFFFFFFFFFF0000) && int16(storedExpiry-currentBucket) > 0 {
+	if storedKey == (key&0xFFFFFFFFFFFF0000) && int16(storedExpiry-currentBucket) > 0 {
 		return true // duplicate
 	}
 

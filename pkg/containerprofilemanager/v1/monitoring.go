@@ -176,25 +176,23 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	watchedContainer.CurrentReportTimestamp = time.Now()
 
 	containerProfile := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      slug,
-			Namespace: container.K8s.Namespace,
-			Annotations: map[string]string{
-				helpersv1.InstanceIDMetadataKey:              watchedContainer.InstanceID.GetStringFormatted(),
-				helpersv1.WlidMetadataKey:                    watchedContainer.Wlid,
-				helpersv1.CompletionMetadataKey:              string(watchedContainer.GetCompletionStatus()),
-				helpersv1.StatusMetadataKey:                  string(watchedContainer.GetStatus()),
-				helpersv1.ContainerTypeMetadataKey:           watchedContainer.ContainerType.String(),
-				helpersv1.ReportSeriesIdMetadataKey:          watchedContainer.SeriesID,
-				helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
-				helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
-				helpersv1.OtelSpanIDMetadataKey:              cpm.lifecycleTracker.LearningSpanID(watchedContainer.ContainerID),
-				// Full W3C traceparent so kubescape/storage can create a properly
-				// parented child span for the aggregation step.
-				helpersv1.OtelTraceparentMetadataKey: cpm.lifecycleTracker.LearningTraceparent(watchedContainer.ContainerID),
-			},
-			Labels: objectcache.GetLabels(cpm.cloudMetadata, watchedContainer, false),
+		Name:      slug,
+		Namespace: container.K8s.Namespace,
+		Annotations: map[string]string{
+			helpersv1.InstanceIDMetadataKey:              watchedContainer.InstanceID.GetStringFormatted(),
+			helpersv1.WlidMetadataKey:                    watchedContainer.Wlid,
+			helpersv1.CompletionMetadataKey:              string(watchedContainer.GetCompletionStatus()),
+			helpersv1.StatusMetadataKey:                  string(watchedContainer.GetStatus()),
+			helpersv1.ContainerTypeMetadataKey:           watchedContainer.ContainerType.String(),
+			helpersv1.ReportSeriesIdMetadataKey:          watchedContainer.SeriesID,
+			helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
+			helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
+			helpersv1.OtelSpanIDMetadataKey:              cpm.lifecycleTracker.LearningSpanID(watchedContainer.ContainerID),
+			// Full W3C traceparent so kubescape/storage can create a properly
+			// parented child span for the aggregation step.
+			helpersv1.OtelTraceparentMetadataKey: cpm.lifecycleTracker.LearningTraceparent(watchedContainer.ContainerID),
 		},
+		Labels: objectcache.GetLabels(cpm.cloudMetadata, watchedContainer, false),
 		Spec: v1beta1.ContainerProfileSpec{
 			Architectures:        []string{runtime.GOARCH},
 			ImageID:              containerInfo.ImageID,

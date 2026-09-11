@@ -55,4 +55,3 @@ func TestCreateSeccompProfileClient_InvalidBackendDefaultsToStorage(t *testing.T
 	_, ok := client.(*StorageSeccompProfileClient)
 	assert.True(t, ok, "Expected StorageSeccompProfileClient for invalid backend (should default to storage)")
 }
-

@@ -88,7 +88,7 @@ func TestSyscallInProfile(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": tc.containerID,
 				"syscallName": tc.syscallName,
 			})
@@ -124,7 +124,7 @@ func TestSyscallNoProfile(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 
-	result, _, err := program.Eval(map[string]interface{}{
+	result, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"syscallName": "open",
 	})

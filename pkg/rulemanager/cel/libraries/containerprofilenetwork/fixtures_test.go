@@ -223,7 +223,7 @@ func findFixturesDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	require.NoError(t, err)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		candidate := filepath.Join(dir, "tests", "resources", "network-wildcards")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate

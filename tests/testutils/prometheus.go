@@ -111,7 +111,7 @@ func PlotNodeAgentPrometheusMemoryUsage(testcase string, startTime, endTime time
 }
 
 // Function to execute PromQL query
-func executePromQLQuery(prometheusURL, query string, timeStart, timeEnd time.Time, steps string) ([]interface{}, error) {
+func executePromQLQuery(prometheusURL, query string, timeStart, timeEnd time.Time, steps string) ([]any, error) {
 	// Prepare the query parameters
 	params := url.Values{}
 	params.Set("query", query)
@@ -139,7 +139,7 @@ func executePromQLQuery(prometheusURL, query string, timeStart, timeEnd time.Tim
 	var result struct {
 		Status string `json:"status"`
 		Data   struct {
-			Result []interface{} `json:"result"`
+			Result []any `json:"result"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -177,13 +177,13 @@ func sendPromQLQueryToProm(query string, timeStart, timeEnd time.Time, steps str
 
 	// Assuming data is correctly structured as per Prometheus API
 	// Extract timestamps and values assuming the format is correct
-	result := data[0].(map[string]interface{})
-	values := result["values"].([]interface{})
+	result := data[0].(map[string]any)
+	values := result["values"].([]any)
 	timestamps := make([]float64, len(values))
 	vals := make([]float64, len(values))
 
 	for i, v := range values {
-		valuePair := v.([]interface{})
+		valuePair := v.([]any)
 		timestamp := int64(valuePair[0].(float64)) // Convert to int64
 		timestamps[i] = float64(time.Unix(timestamp, 0).Unix())
 		valString := fmt.Sprint(valuePair[1])

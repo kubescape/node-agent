@@ -72,7 +72,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 			UniqueID:  uniqueID,
 			AlertName: rule.Name,
 			Severity:  rule.Severity,
-			Arguments: map[string]interface{}{
+			Arguments: map[string]any{
 				"apChecksum": apChecksum,
 				"message":    message,
 			},
