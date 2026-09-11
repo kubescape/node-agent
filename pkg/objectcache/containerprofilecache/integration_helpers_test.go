@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -39,11 +38,9 @@ func makeTestContainer(id, podName, namespace, containerName string) *containerc
 // makeTestPod builds a *corev1.Pod with the provided container statuses.
 func makeTestPod(name, namespace, uid string, containerStatuses []corev1.ContainerStatus, initStatuses []corev1.ContainerStatus) *corev1.Pod {
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			UID:       types.UID(uid),
-		},
+		Name:      name,
+		Namespace: namespace,
+		UID:       types.UID(uid),
 		Status: corev1.PodStatus{
 			ContainerStatuses:     containerStatuses,
 			InitContainerStatuses: initStatuses,

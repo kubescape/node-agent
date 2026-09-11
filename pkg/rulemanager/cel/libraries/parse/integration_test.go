@@ -52,8 +52,8 @@ func TestParseLibraryIntegration(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
-				"data": map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
+				"data": map[string]any{
 					"args": []string{},
 					"comm": "test",
 				},

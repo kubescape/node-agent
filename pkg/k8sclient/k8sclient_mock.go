@@ -20,32 +20,32 @@ type K8sClientMock struct {
 var _ K8sClientInterface = (*K8sClientMock)(nil)
 
 func (k *K8sClientMock) GetWorkload(namespace, _, name string) (k8sinterface.IWorkload, error) {
-	return workloadinterface.NewWorkloadObj(map[string]interface{}{
+	return workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      name,
 			"namespace": namespace,
 		},
-		"spec": map[string]interface{}{
-			"containers": []interface{}{
-				map[string]interface{}{
+		"spec": map[string]any{
+			"containers": []any{
+				map[string]any{
 					"name":  "log",
 					"image": "fluentbit",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"name":  "cont",
 					"image": "nginx",
 				},
 			},
 		},
-		"status": map[string]interface{}{
-			"containerStatuses": []interface{}{
-				map[string]interface{}{
+		"status": map[string]any{
+			"containerStatuses": []any{
+				map[string]any{
 					"name":    "log",
 					"imageID": storage.FluentBitImageID,
 				},
-				map[string]interface{}{
+				map[string]any{
 					"name":    "cont",
 					"imageID": storage.NginxImageID,
 				},

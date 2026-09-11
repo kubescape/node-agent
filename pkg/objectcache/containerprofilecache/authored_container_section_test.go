@@ -16,13 +16,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func groupedDoc() *v1beta1.ContainerProfile {
 	return &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{Name: "mc-doc", Namespace: "default", ResourceVersion: "1"},
+		Name: "mc-doc", Namespace: "default", ResourceVersion: "1",
 		Spec: v1beta1.ContainerProfileSpec{
 			Architectures: []string{"amd64"},
 			Containers: []v1beta1.ContainerProfileContainer{
@@ -47,7 +46,7 @@ func TestResolveAuthoredContainerSection(t *testing.T) {
 
 	t.Run("flat document passes through unchanged", func(t *testing.T) {
 		flat := &v1beta1.ContainerProfile{
-			ObjectMeta: metav1.ObjectMeta{Name: "flat", Namespace: "default"},
+			Name: "flat", Namespace: "default",
 			Spec: v1beta1.ContainerProfileSpec{
 				Execs: []v1beta1.ExecCalls{{Path: "/bin/only"}},
 			},

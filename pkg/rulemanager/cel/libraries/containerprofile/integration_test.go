@@ -127,7 +127,7 @@ func TestIntegrationWithAllFunctions(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": "test-container-id",
 			})
 			if err != nil {

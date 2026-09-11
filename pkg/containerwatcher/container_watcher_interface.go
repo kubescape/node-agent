@@ -39,8 +39,7 @@ type CustomTracerInitializer interface {
 	) (TracerInterface, error)
 }
 
-type GenericEventReceiver interface { // TODO: either EventReceiver or EnrichedEventReceiver
-}
+type GenericEventReceiver any
 
 type EventReceiver interface {
 	ReportEvent(eventType utils.EventType, event utils.K8sEvent)

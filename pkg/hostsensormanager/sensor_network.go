@@ -43,7 +43,7 @@ func (s *OpenPortsSensor) GetPluralKind() string {
 }
 
 // Sense collects the open ports data from the host
-func (s *OpenPortsSensor) Sense() (interface{}, error) {
+func (s *OpenPortsSensor) Sense() (any, error) {
 	res := &OpenPortsSpec{
 		TcpPorts:  make([]Connection, 0),
 		UdpPorts:  make([]Connection, 0),

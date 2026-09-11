@@ -37,4 +37,3 @@ func (c *StorageSeccompProfileClient) GetSeccompProfile(namespace, name string) 
 		ResourceVersion: softwarecomposition.ResourceVersionFullSpec,
 	})
 }
-

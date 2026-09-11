@@ -1,6 +1,6 @@
 module github.com/kubescape/node-agent
 
-go 1.25.8
+go 1.27
 
 require (
 	github.com/DmitriyVTitov/size v1.5.0

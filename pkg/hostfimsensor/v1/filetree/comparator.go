@@ -476,9 +476,9 @@ func (tc *TreeComparator) stripHostPath(filePath, hostPath string) string {
 	}
 
 	// Check if the file path starts with the host path
-	if strings.HasPrefix(normalizedFilePath, normalizedHostPath) {
+	if after, ok := strings.CutPrefix(normalizedFilePath, normalizedHostPath); ok {
 		// Remove the host path prefix but keep any leading slash
-		stripped := strings.TrimPrefix(normalizedFilePath, normalizedHostPath)
+		stripped := after
 		if !strings.HasPrefix(stripped, "/") {
 			stripped = "/" + stripped
 		}

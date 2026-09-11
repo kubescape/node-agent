@@ -83,11 +83,11 @@ func parseAzureResourceGroup(providerID string) string {
 	}
 	start := idx + len(marker)
 	rest := providerID[start:]
-	end := strings.Index(rest, "/")
-	if end == -1 {
+	before, _, ok := strings.Cut(rest, "/")
+	if !ok {
 		return rest
 	}
-	return rest[:end]
+	return before
 }
 
 // GetCloudMetadataWithIMDS retrieves cloud metadata for a given node using IMDS

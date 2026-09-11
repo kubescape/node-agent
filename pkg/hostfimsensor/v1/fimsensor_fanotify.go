@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package hostfimsensor
 
@@ -155,8 +154,8 @@ func (h *HostFimSensorFanotify) getFanotifyEventTypes(config HostFimPathConfig) 
 // stripHostPath removes the host path prefix from a file path
 func (h *HostFimSensorFanotify) stripHostPath(fullPath string) string {
 	// Remove the host path prefix to get the actual host path
-	if strings.HasPrefix(fullPath, h.hostPath) {
-		relativePath := strings.TrimPrefix(fullPath, h.hostPath)
+	if after, ok := strings.CutPrefix(fullPath, h.hostPath); ok {
+		relativePath := after
 		// Ensure the path starts with "/" for absolute paths
 		if !strings.HasPrefix(relativePath, "/") {
 			relativePath = "/" + relativePath

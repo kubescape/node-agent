@@ -11,7 +11,6 @@ import (
 	cpc "github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -58,11 +57,9 @@ func TestInitContainerEvictionViaRemoveEvent(t *testing.T) {
 	)
 
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-test",
-			Namespace:       namespace,
-			ResourceVersion: "1",
-		},
+		Name:            "cp-test",
+		Namespace:       namespace,
+		ResourceVersion: "1",
 	}
 	store := newFakeStorage(cp)
 	k8s := newFakeK8sCache()
@@ -109,11 +106,9 @@ func TestMissedRemoveEventEvictedByReconciler(t *testing.T) {
 	)
 
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-reconcile",
-			Namespace:       namespace,
-			ResourceVersion: "1",
-		},
+		Name:            "cp-reconcile",
+		Namespace:       namespace,
+		ResourceVersion: "1",
 	}
 	store := newFakeStorage(cp)
 	k8s := newFakeK8sCache()

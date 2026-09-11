@@ -33,7 +33,7 @@ func newSpinningExitManagerCreator() *processTreeCreatorImpl {
 // below keeps the test from being entirely vacuous there, but race evidence for
 // this package has to come from a local -race run.
 func TestExitManager_StopIsRaceFreeAgainstCleanupLoop(t *testing.T) {
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		pt := newSpinningExitManagerCreator()
 		pt.Start()
 		// Let the loop reach its select and start cycling through iterations.
@@ -48,17 +48,15 @@ func TestExitManager_StopIsRaceFreeAgainstCleanupLoop(t *testing.T) {
 // and the second panicked with "close of closed channel". The check and the close
 // have to be one atomic transition, which is what the lifecycle mutex makes them.
 func TestExitManager_ConcurrentStopDoesNotPanic(t *testing.T) {
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		pt := newSpinningExitManagerCreator()
 		pt.Start()
 
 		var wg sync.WaitGroup
-		for g := 0; g < 8; g++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 8 {
+			wg.Go(func() {
 				pt.Stop()
-			}()
+			})
 		}
 		wg.Wait()
 	}

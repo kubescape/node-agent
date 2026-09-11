@@ -2,7 +2,6 @@ package processtree
 
 import "fmt"
 
-
 type GetContainerSubtreeError struct {
 	Err error
 }

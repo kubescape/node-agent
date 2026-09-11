@@ -13,7 +13,7 @@ type mockContextInfo struct {
 }
 
 func (m *mockContextInfo) Context() contextdetection.EventSourceContext { return m.ctx }
-func (m *mockContextInfo) WorkloadID() string                          { return m.workloadID }
+func (m *mockContextInfo) WorkloadID() string                           { return m.workloadID }
 
 func TestRuleAppliesToContext(t *testing.T) {
 	tests := []struct {

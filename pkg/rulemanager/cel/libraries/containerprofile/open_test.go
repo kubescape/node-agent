@@ -192,7 +192,7 @@ func TestOpenInProfile(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": tc.containerID,
 				"path":        tc.path,
 			})
@@ -228,7 +228,7 @@ func TestOpenNoProfile(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 
-	result, _, err := program.Eval(map[string]interface{}{
+	result, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/etc/passwd",
 	})
@@ -375,7 +375,7 @@ func TestOpenWithSuffixInProfile(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": tc.containerID,
 				"suffix":      tc.suffix,
 			})
@@ -411,7 +411,7 @@ func TestOpenWithSuffixNoProfile(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 
-	result, _, err := program.Eval(map[string]interface{}{
+	result, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"suffix":      ".txt",
 	})
@@ -545,7 +545,7 @@ func TestOpenWithPrefixInProfile(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": tc.containerID,
 				"prefix":      tc.prefix,
 			})
@@ -581,7 +581,7 @@ func TestOpenWithPrefixNoProfile(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 
-	result, _, err := program.Eval(map[string]interface{}{
+	result, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"prefix":      "/etc",
 	})
@@ -758,7 +758,7 @@ func TestOpenWithFlagsInProfile(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID": tc.containerID,
 				"path":        tc.path,
 				"flags":       tc.flags,
@@ -796,7 +796,7 @@ func TestOpenWithFlagsNoProfile(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 
-	result, _, err := program.Eval(map[string]interface{}{
+	result, _, err := program.Eval(map[string]any{
 		"containerID": "test-container-id",
 		"path":        "/etc/passwd",
 		"flags":       []string{"O_RDONLY"},

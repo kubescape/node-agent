@@ -2,6 +2,7 @@ package prefilter
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 
@@ -146,12 +147,9 @@ func ParseWithDefaults(ruleState map[string]any, bindingParams map[string]any) *
 	}
 
 	merged := make(map[string]any, len(ruleState)+len(bindingParams))
-	for k, v := range ruleState {
-		merged[k] = v
-	}
-	for k, v := range bindingParams {
-		merged[k] = v // binding overrides state
-	}
+	maps.Copy(merged, ruleState)
+	// binding overrides state
+	maps.Copy(merged, bindingParams)
 
 	buf, err := json.Marshal(merged)
 	if err != nil {

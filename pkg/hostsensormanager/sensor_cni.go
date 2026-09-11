@@ -30,7 +30,7 @@ func (s *CNIInfoSensor) GetPluralKind() string {
 }
 
 // Sense collects the CNI info data from the host
-func (s *CNIInfoSensor) Sense() (interface{}, error) {
+func (s *CNIInfoSensor) Sense() (any, error) {
 	ctx := context.Background()
 	ret := CNIInfoSpec{
 		NodeName: s.nodeName,

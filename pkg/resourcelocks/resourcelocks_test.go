@@ -173,7 +173,7 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Add(numGoroutines)
 	locks := make([]*sync.Mutex, numGoroutines)
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(index int) {
 			defer wg.Done()
 			locks[index] = cl.GetLock(containerID)
@@ -196,19 +196,19 @@ func TestConcurrentWithLock(t *testing.T) {
 	containerID := "test-container"
 	numGoroutines := 50
 	var wg sync.WaitGroup
-	var counter int64
+	var counter atomic.Int64
 
 	wg.Add(numGoroutines)
 
 	// Test that WithLock properly serializes access
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		go func() {
 			defer wg.Done()
 			cl.WithLock(containerID, func() {
 				// Simulate some work and increment counter
-				current := atomic.LoadInt64(&counter)
+				current := counter.Load()
 				time.Sleep(1 * time.Millisecond) // Small delay to increase contention
-				atomic.StoreInt64(&counter, current+1)
+				counter.Store(current + 1)
 			})
 		}()
 	}
@@ -216,7 +216,7 @@ func TestConcurrentWithLock(t *testing.T) {
 	wg.Wait()
 
 	// Counter should equal the number of goroutines if locking worked properly
-	assert.Equal(t, int64(numGoroutines), atomic.LoadInt64(&counter))
+	assert.Equal(t, int64(numGoroutines), counter.Load())
 }
 
 func TestConcurrentMultipleContainers(t *testing.T) {
@@ -229,8 +229,8 @@ func TestConcurrentMultipleContainers(t *testing.T) {
 	wg.Add(numContainers * numGoroutinesPerContainer)
 
 	// Test concurrent access to multiple containers
-	for containerIndex := 0; containerIndex < numContainers; containerIndex++ {
-		for goroutineIndex := 0; goroutineIndex < numGoroutinesPerContainer; goroutineIndex++ {
+	for containerIndex := range numContainers {
+		for range numGoroutinesPerContainer {
 			go func(cIndex int) {
 				defer wg.Done()
 				containerID := fmt.Sprintf("container-%d", cIndex)
@@ -248,7 +248,7 @@ func TestConcurrentMultipleContainers(t *testing.T) {
 	wg.Wait()
 
 	// Each container should have been incremented the correct number of times
-	for i := 0; i < numContainers; i++ {
+	for i := range numContainers {
 		assert.Equal(t, int64(numGoroutinesPerContainer), atomic.LoadInt64(&counters[i]),
 			"Container %d counter mismatch", i)
 	}

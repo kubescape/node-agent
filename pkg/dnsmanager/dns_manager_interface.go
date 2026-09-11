@@ -15,4 +15,3 @@ type DNSResolver interface {
 	ResolveIPAddress(containerID string, ipAddr string) (string, bool)
 	ResolveContainerProcessToCloudServices(containerID string, pid uint32) mapset.Set[string]
 }
-

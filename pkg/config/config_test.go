@@ -720,12 +720,12 @@ func TestLoadConfig_BypassSkipsSlotsExponentValidation(t *testing.T) {
 
 func TestConfig_IsMetricsEnabled(t *testing.T) {
 	tests := []struct {
-		name                   string
-		enableMetricsExporter  bool
-		otelMetricsExporter    string
-		otelOtlpEndpoint       string
+		name                    string
+		enableMetricsExporter   bool
+		otelMetricsExporter     string
+		otelOtlpEndpoint        string
 		otelOtlpMetricsEndpoint string
-		want                   bool
+		want                    bool
 	}{
 		{
 			name:                  "default disabled",

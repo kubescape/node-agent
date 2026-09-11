@@ -24,7 +24,7 @@ type GenericRuleFailure struct {
 	RuleID                 string
 	CloudServices          []string
 	HttpRuleAlert          armotypes.HttpRuleAlert
-	Extra                  interface{}
+	Extra                  any
 	IsTriggerAlert         bool
 	SourceContext          contextdetection.EventSourceContext
 }
@@ -53,7 +53,7 @@ type RuleFailure interface {
 	// Get Alert Platform
 	GetAlertPlatform() armotypes.AlertSourcePlatform
 	// Get Extra
-	GetExtra() interface{}
+	GetExtra() any
 	// Get Source Context
 	GetSourceContext() contextdetection.EventSourceContext
 
@@ -78,7 +78,7 @@ type RuleFailure interface {
 	// Set Http Rule Alert
 	SetHttpRuleAlert(httpRuleAlert armotypes.HttpRuleAlert)
 	// Set Extra
-	SetExtra(extra interface{})
+	SetExtra(extra any)
 	// Get IsTriggerAlert
 	GetIsTriggerAlert() bool
 	// Set IsTriggerAlert
@@ -115,7 +115,7 @@ func (rule *GenericRuleFailure) GetRuleId() string {
 	return rule.RuleID
 }
 
-func (rule *GenericRuleFailure) GetExtra() interface{} {
+func (rule *GenericRuleFailure) GetExtra() any {
 	return rule.Extra
 }
 
@@ -183,7 +183,7 @@ func (rule *GenericRuleFailure) SetHttpRuleAlert(httpRuleAlert armotypes.HttpRul
 	rule.HttpRuleAlert = httpRuleAlert
 }
 
-func (rule *GenericRuleFailure) SetExtra(extra interface{}) {
+func (rule *GenericRuleFailure) SetExtra(extra any) {
 	rule.Extra = extra
 }
 

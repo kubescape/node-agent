@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -46,11 +45,9 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 	)
 
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-stress",
-			Namespace:       namespace,
-			ResourceVersion: "1",
-		},
+		Name:            "cp-stress",
+		Namespace:       namespace,
+		ResourceVersion: "1",
 	}
 	store := newFakeStorage(cp)
 	k8s := newFakeK8sCache()
@@ -58,7 +55,7 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 	// Prime shared data for each container in the pool so that the internal
 	// waitForSharedContainerData path resolves if needed.
 	containerIDs := make([]string, poolSize)
-	for i := 0; i < poolSize; i++ {
+	for i := range poolSize {
 		id := "stress-container-" + itoa3(i)
 		containerIDs[i] = id
 		primeSharedDataForStress(t, k8s, id, podName, namespace, "container-"+itoa3(i), wlid)
@@ -97,11 +94,11 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(numWorkers)
-	for w := 0; w < numWorkers; w++ {
+	for w := range numWorkers {
 		go func(worker int) {
 			defer wg.Done()
 			r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(worker)))
-			for iter := 0; iter < numIters; iter++ {
+			for range numIters {
 				if ctx.Err() != nil {
 					return
 				}
@@ -166,7 +163,7 @@ func TestLockStressAddEvictInterleaved(t *testing.T) {
 func primeSharedDataForStress(t *testing.T, k8s *stubK8sCache, containerID, podName, namespace, containerName, wlid string) {
 	t.Helper()
 	ids, err := instanceidhandlerV1.GenerateInstanceIDFromPod(&corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: namespace},
+		Name: podName, Namespace: namespace,
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{Name: containerName, Image: "nginx:1.25"}},
 		},

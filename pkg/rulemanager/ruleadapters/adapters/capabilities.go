@@ -26,7 +26,7 @@ func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enri
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["syscall"] = capEvent.GetSyscall()
 	baseRuntimeAlert.Arguments["capability"] = capEvent.GetCapability()

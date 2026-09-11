@@ -42,7 +42,7 @@ func NewCRDClient(nodeName string) (*CRDClient, error) {
 }
 
 // CreateOrUpdateHostData creates or updates a host data CRD
-func (c *CRDClient) CreateOrUpdateHostData(ctx context.Context, resource string, kind string, spec interface{}) error {
+func (c *CRDClient) CreateOrUpdateHostData(ctx context.Context, resource string, kind string, spec any) error {
 	gvr := schema.GroupVersionResource{
 		Group:    HostDataGroup,
 		Version:  HostDataVersion,
@@ -51,14 +51,14 @@ func (c *CRDClient) CreateOrUpdateHostData(ctx context.Context, resource string,
 
 	// Create the unstructured object
 	unstructuredObj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": fmt.Sprintf("%s/%s", HostDataGroup, HostDataVersion),
 			"kind":       kind,
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name": c.nodeName,
 			},
 			"spec": spec,
-			"status": map[string]interface{}{
+			"status": map[string]any{
 				"lastSensed": metav1.Now().UTC().Format(time.RFC3339),
 			},
 		},
@@ -112,7 +112,7 @@ func (c *CRDClient) UpdateStatus(ctx context.Context, resource string, errorMsg 
 		Resource: resource,
 	}
 
-	patchData, err := json.Marshal(map[string]interface{}{
+	patchData, err := json.Marshal(map[string]any{
 		"status": Status{
 			LastSensed: metav1.Now(),
 			Error:      errorMsg,
@@ -131,7 +131,7 @@ func (c *CRDClient) UpdateStatus(ctx context.Context, resource string, errorMsg 
 }
 
 // toUnstructured converts a typed object to unstructured
-func toUnstructured(obj interface{}) (*unstructured.Unstructured, error) {
+func toUnstructured(obj any) (*unstructured.Unstructured, error) {
 	data, err := json.Marshal(obj)
 	if err != nil {
 		return nil, err

@@ -2,7 +2,7 @@ package containerprofilemanager
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 )
 
 func buildNetworkPorts(protocol string, ports []uint16) []v1beta1.NetworkPort {
@@ -25,7 +24,7 @@ func buildNetworkPorts(protocol string, ports []uint16) []v1beta1.NetworkPort {
 	for _, port := range ports {
 		networkPorts = append(networkPorts, v1beta1.NetworkPort{
 			Protocol: v1beta1.Protocol(protocol),
-			Port:     ptr.To(int32(port)),
+			Port:     new(int32(port)),
 			Name:     generatePortIdentifier(protocol, int32(port)),
 		})
 	}
@@ -245,7 +244,7 @@ func dedupeSortPorts(ports []uint16) []uint16 {
 		unique = append(unique, port)
 	}
 
-	sort.Slice(unique, func(i, j int) bool { return unique[i] < unique[j] })
+	slices.Sort(unique)
 	return unique
 }
 

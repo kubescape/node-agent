@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -119,11 +118,9 @@ func learnedCPWithChecksum(name, rv, checksum string) *v1beta1.ContainerProfile 
 		annotations[storage.ContainerProfileChecksumAnnotationKey] = checksum
 	}
 	return &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name, Namespace: "default", ResourceVersion: rv,
-			Annotations: annotations,
-		},
-		Spec: v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: "/bin/learned"}}},
+		Name: name, Namespace: "default", ResourceVersion: rv,
+		Annotations: annotations,
+		Spec:        v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: "/bin/learned"}}},
 	}
 }
 
@@ -556,13 +553,11 @@ func TestGuardDeclinesWhileStateNotYetTerminal(t *testing.T) {
 	// A profile still learning: non-terminal state, but a validator already
 	// stored from a previous fetch.
 	learning := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "learned-cp", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.StatusMetadataKey:                   helpersv1.Completed,
-				helpersv1.CompletionMetadataKey:               helpersv1.Partial,
-				storage.ContainerProfileChecksumAnnotationKey: "sum-1",
-			},
+		Name: "learned-cp", Namespace: "default", ResourceVersion: "1",
+		Annotations: map[string]string{
+			helpersv1.StatusMetadataKey:                   helpersv1.Completed,
+			helpersv1.CompletionMetadataKey:               helpersv1.Partial,
+			storage.ContainerProfileChecksumAnnotationKey: "sum-1",
 		},
 		Spec: v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: "/bin/learned"}}},
 	}
@@ -1104,8 +1099,7 @@ func TestRefreshSchedulerFinalHandoffDoesNotStrandRequest(t *testing.T) {
 	c := newReconcilerCache(t, client, newControllableK8sCache(), newCountingMetrics())
 	seedChecksumEntry(c, "cid", cp, "", "")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	c.scheduleRefresh(ctx)
 	select {
 	case <-client.entered:

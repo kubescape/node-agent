@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strings"
@@ -120,15 +121,13 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 			containerID = ns.nodeName
 		}
 		entity := armotypes.NetworkStreamEntity{
-			Kind: armotypes.NetworkStreamEntityKindContainer,
-			NetworkStreamEntityContainer: armotypes.NetworkStreamEntityContainer{
-				ContainerName: notif.Container.Runtime.ContainerName,
-				ContainerID:   notif.Container.Runtime.ContainerID,
-				PodNamespace:  notif.Container.K8s.Namespace,
-				PodName:       notif.Container.K8s.PodName,
-			},
-			Inbound:  make(map[string]armotypes.NetworkStreamEvent),
-			Outbound: make(map[string]armotypes.NetworkStreamEvent),
+			Kind:          armotypes.NetworkStreamEntityKindContainer,
+			ContainerName: notif.Container.Runtime.ContainerName,
+			ContainerID:   notif.Container.Runtime.ContainerID,
+			PodNamespace:  notif.Container.K8s.Namespace,
+			PodName:       notif.Container.K8s.PodName,
+			Inbound:       make(map[string]armotypes.NetworkStreamEvent),
+			Outbound:      make(map[string]armotypes.NetworkStreamEvent),
 		}
 		// The watcher submits this callback to a worker pool, so the event path may
 		// already have recorded traffic against this container — a new container's
@@ -472,12 +471,10 @@ func (ns *NetworkStream) entityForEventLocked(containerID string) (armotypes.Net
 	}
 
 	entity := armotypes.NetworkStreamEntity{
-		Kind: armotypes.NetworkStreamEntityKindContainer,
-		NetworkStreamEntityContainer: armotypes.NetworkStreamEntityContainer{
-			ContainerID: entityID,
-		},
-		Inbound:  make(map[string]armotypes.NetworkStreamEvent),
-		Outbound: make(map[string]armotypes.NetworkStreamEvent),
+		Kind:        armotypes.NetworkStreamEntityKindContainer,
+		ContainerID: entityID,
+		Inbound:     make(map[string]armotypes.NetworkStreamEvent),
+		Outbound:    make(map[string]armotypes.NetworkStreamEvent),
 	}
 	ns.networkEventsStorage.Entities[entityID] = entity
 	ns.unannouncedEntities[entityID] = struct{}{}
@@ -700,9 +697,7 @@ func snapshotNetworkStream(src *armotypes.NetworkStream) *armotypes.NetworkStrea
 
 func copyEvents(events map[string]armotypes.NetworkStreamEvent) map[string]armotypes.NetworkStreamEvent {
 	out := make(map[string]armotypes.NetworkStreamEvent, len(events))
-	for key, event := range events {
-		out[key] = event
-	}
+	maps.Copy(out, events)
 	return out
 }
 

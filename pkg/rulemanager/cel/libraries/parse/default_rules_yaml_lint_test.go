@@ -109,11 +109,11 @@ func TestDefaultRulesYAML_R1000DetectsDevShmViaArgv(t *testing.T) {
 
 	// Isolate the R1000 rule block: from its id line to the next rule's id line.
 	text := string(data)
-	start := strings.Index(text, `id: "R1000"`)
-	if start < 0 {
+	_, after, ok := strings.Cut(text, `id: "R1000"`)
+	if !ok {
 		t.Fatal(`R1000 rule not found in default-rules.yaml`)
 	}
-	rest := text[start+len(`id: "R1000"`):]
+	rest := after
 	end := strings.Index(rest, `id: "R`)
 	if end < 0 {
 		end = len(rest)

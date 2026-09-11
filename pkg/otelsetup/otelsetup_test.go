@@ -56,7 +56,7 @@ func TestProfileLifecycleTracker_StartEndCompleted(t *testing.T) {
 	assert.Equal(t, "container.profile.cp.saved", spans[0].Name())
 
 	// Verify snapshot.number attribute on the child
-	childAttrs := make(map[string]interface{})
+	childAttrs := make(map[string]any)
 	for _, a := range spans[0].Attributes() {
 		childAttrs[string(a.Key)] = a.Value.AsInterface()
 	}

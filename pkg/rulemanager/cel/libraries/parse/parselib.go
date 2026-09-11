@@ -88,7 +88,7 @@ func (e *parseCostEstimator) EstimateCallCost(function, overloadID string, targe
 		// List parsing + simple array access + string comparison - O(1) operation
 		cost = 5
 	}
-	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+	return &checker.CallEstimate{Min: uint64(cost), Max: uint64(cost)}
 }
 
 func (e *parseCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {

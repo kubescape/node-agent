@@ -31,7 +31,7 @@ func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["flags"] = openEvent.GetFlags()
 	baseRuntimeAlert.Arguments["path"] = fullPath

@@ -24,7 +24,7 @@ type HostSensorManager interface {
 // Sensor represents a single host sensor that can collect data
 type Sensor interface {
 	// Sense collects the data from the host
-	Sense() (interface{}, error)
+	Sense() (any, error)
 	// GetKind returns the CRD kind for this sensor
 	GetKind() string
 	// GetPluralKind returns the plural and lowercase form of CRD kind for this sensor
@@ -33,7 +33,7 @@ type Sensor interface {
 
 // Status contains status information about the sensing (common for all host data CRDs)
 type Status struct {
-	LastSensed metav1.Time `json:"lastSensed,omitempty"`
+	LastSensed metav1.Time `json:"lastSensed"`
 	Error      string      `json:"error,omitempty"`
 }
 
@@ -75,10 +75,10 @@ type Connection struct {
 // OsReleaseFile represents the CRD structure for OS release data
 type OsReleaseFile struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   OsReleaseFileSpec `json:"spec,omitempty"`
-	Status Status            `json:"status,omitempty"`
+	Spec   OsReleaseFileSpec `json:"spec"`
+	Status Status            `json:"status"`
 }
 
 // OsReleaseFileSpec contains the actual OS release file content
@@ -92,10 +92,10 @@ type OsReleaseFileSpec struct {
 // KernelVersion represents the CRD structure for kernel version data
 type KernelVersion struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   KernelVersionSpec `json:"spec,omitempty"`
-	Status Status            `json:"status,omitempty"`
+	Spec   KernelVersionSpec `json:"spec"`
+	Status Status            `json:"status"`
 }
 
 type KernelVersionSpec struct {
@@ -108,10 +108,10 @@ type KernelVersionSpec struct {
 // LinuxSecurityHardening represents the CRD structure for security hardening data
 type LinuxSecurityHardening struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   LinuxSecurityHardeningSpec `json:"spec,omitempty"`
-	Status Status                     `json:"status,omitempty"`
+	Spec   LinuxSecurityHardeningSpec `json:"spec"`
+	Status Status                     `json:"status"`
 }
 
 type LinuxSecurityHardeningSpec struct {
@@ -125,10 +125,10 @@ type LinuxSecurityHardeningSpec struct {
 // OpenPorts represents the CRD structure for open ports data
 type OpenPorts struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   OpenPortsSpec `json:"spec,omitempty"`
-	Status Status        `json:"status,omitempty"`
+	Spec   OpenPortsSpec `json:"spec"`
+	Status Status        `json:"status"`
 }
 
 type OpenPortsSpec struct {
@@ -143,10 +143,10 @@ type OpenPortsSpec struct {
 // LinuxKernelVariables represents the CRD structure for kernel variables data
 type LinuxKernelVariables struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   LinuxKernelVariablesSpec `json:"spec,omitempty"`
-	Status Status                   `json:"status,omitempty"`
+	Spec   LinuxKernelVariablesSpec `json:"spec"`
+	Status Status                   `json:"status"`
 }
 
 type LinuxKernelVariablesSpec struct {
@@ -159,10 +159,10 @@ type LinuxKernelVariablesSpec struct {
 // KubeletInfo represents the CRD structure for kubelet info data
 type KubeletInfo struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   KubeletInfoSpec `json:"spec,omitempty"`
-	Status Status          `json:"status,omitempty"`
+	Spec   KubeletInfoSpec `json:"spec"`
+	Status Status          `json:"status"`
 }
 
 type KubeletInfoSpec struct {
@@ -179,10 +179,10 @@ type KubeletInfoSpec struct {
 // KubeProxyInfo represents the CRD structure for kube-proxy info data
 type KubeProxyInfo struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   KubeProxyInfoSpec `json:"spec,omitempty"`
-	Status Status            `json:"status,omitempty"`
+	Spec   KubeProxyInfoSpec `json:"spec"`
+	Status Status            `json:"status"`
 }
 
 type KubeProxyInfoSpec struct {
@@ -196,10 +196,10 @@ type KubeProxyInfoSpec struct {
 // ControlPlaneInfo represents the CRD structure for control plane info data
 type ControlPlaneInfo struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   ControlPlaneInfoSpec `json:"spec,omitempty"`
-	Status Status               `json:"status,omitempty"`
+	Spec   ControlPlaneInfoSpec `json:"spec"`
+	Status Status               `json:"status"`
 }
 
 type ControlPlaneInfoSpec struct {
@@ -233,10 +233,10 @@ type ApiServerInfo struct {
 // CloudProviderInfo represents the CRD structure for cloud provider info data
 type CloudProviderInfo struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   CloudProviderInfoSpec `json:"spec,omitempty"`
-	Status Status                `json:"status,omitempty"`
+	Spec   CloudProviderInfoSpec `json:"spec"`
+	Status Status                `json:"status"`
 }
 
 type CloudProviderInfoSpec struct {
@@ -249,10 +249,10 @@ type CloudProviderInfoSpec struct {
 // CNIInfo represents the CRD structure for CNI info data
 type CNIInfo struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   CNIInfoSpec `json:"spec,omitempty"`
-	Status Status      `json:"status,omitempty"`
+	Spec   CNIInfoSpec `json:"spec"`
+	Status Status      `json:"status"`
 }
 
 type CNIInfoSpec struct {

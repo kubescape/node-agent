@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -387,13 +388,7 @@ func (w *TestWorkload) WaitForContainerProfileCompletionWithDenylist(maxRetries 
 		}
 		fresh := 0
 		for i := range cps {
-			denied := false
-			for _, item := range denylist {
-				if cps[i].Name == item {
-					denied = true
-					break
-				}
-			}
+			denied := slices.Contains(denylist, cps[i].Name)
 			if denied {
 				continue
 			}
@@ -440,16 +435,14 @@ func NewRandomNamespace() TestNamespace {
 	return NewNamespace(generateRandomNamespaceName())
 }
 func NewNamespace(name string) TestNamespace {
-	ns := TestNamespace{}
-	ns.Name = name
+	ns := TestNamespace{
+		Name: name}
 
 	k8sClient := k8sinterface.NewKubernetesApi()
 	_, err := k8sClient.KubernetesClient.CoreV1().Namespaces().Get(context.TODO(), ns.Name, metav1.GetOptions{})
 	if err != nil {
 		nsSpec := &v1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: ns.Name,
-			},
+			Name: ns.Name,
 		}
 
 		_, err := k8sClient.KubernetesClient.CoreV1().Namespaces().Create(context.TODO(), nsSpec, metav1.CreateOptions{})
@@ -470,7 +463,7 @@ func generateRandomNamespaceName() string {
 	var sb strings.Builder
 	prefix := "node-agent-test-"
 	sb.WriteString(prefix)
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		randomIndex := rand.Intn(len(letters))
 		sb.WriteByte(letters[randomIndex])
 	}
@@ -506,7 +499,7 @@ func IncreaseNodeAgentSniffingTime(newDuration string) {
 		panic(err)
 	}
 	val := cm.Data["config.json"]
-	config := map[string]interface{}{}
+	config := map[string]any{}
 	err = json.Unmarshal([]byte(val), &config)
 	if err != nil {
 		panic(err)
@@ -832,11 +825,9 @@ func (w *TestWorkload) AddEphemeralContainer(name, image string, command []strin
 		return err
 	}
 	current.Spec.EphemeralContainers = append(current.Spec.EphemeralContainers, v1.EphemeralContainer{
-		EphemeralContainerCommon: v1.EphemeralContainerCommon{
-			Name:    name,
-			Image:   image,
-			Command: command,
-		},
+		Name:    name,
+		Image:   image,
+		Command: command,
 	})
 	if _, err := k8sClient.KubernetesClient.CoreV1().Pods(w.Namespace).UpdateEphemeralContainers(
 		context.TODO(), pod.Name, current, metav1.UpdateOptions{}); err != nil {

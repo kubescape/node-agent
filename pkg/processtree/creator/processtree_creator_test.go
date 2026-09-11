@@ -642,11 +642,11 @@ func TestConcurrentAccess(t *testing.T) {
 	const numOperations = 100
 
 	// Launch goroutines that feed events
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(goroutineID int) {
 			defer wg.Done()
-			for j := 0; j < numOperations; j++ {
+			for j := range numOperations {
 				pid := uint32(goroutineID*numOperations + j + 1000)
 				event := conversion.ProcessEvent{
 					Type: conversion.ForkEvent,
@@ -660,11 +660,9 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Launch goroutines that read data
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < numOperations; j++ {
+	for range numGoroutines {
+		wg.Go(func() {
+			for range numOperations {
 				_, err := creator.GetRootTree()
 				assert.NoError(t, err)
 
@@ -675,7 +673,7 @@ func TestConcurrentAccess(t *testing.T) {
 				_, err = creator.GetProcessNode(1234)
 				assert.NoError(t, err)
 			}
-		}()
+		})
 	}
 
 	// Wait for all goroutines to complete
@@ -1067,7 +1065,7 @@ func TestPerformanceWithManyProcesses(t *testing.T) {
 	start := time.Now()
 
 	// Create many processes
-	for i := 0; i < numProcesses; i++ {
+	for i := range numProcesses {
 		event := conversion.ProcessEvent{
 			Type: conversion.ForkEvent,
 			PID:  uint32(i + 1000),
@@ -1096,7 +1094,7 @@ func TestPerformanceWithManyProcesses(t *testing.T) {
 
 	// Test retrieval performance
 	start = time.Now()
-	for i := 0; i < 100; i++ { // Reduced from 1000 to 100 for faster test
+	for range 100 { // Reduced from 1000 to 100 for faster test
 		_, err := creator.GetRootTree()
 		assert.NoError(t, err)
 	}

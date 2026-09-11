@@ -151,15 +151,13 @@ func (pf *ProcfsFeeder) scanProcfs() {
 	resultsChan := make(chan procInfo, len(pids))
 	var wg sync.WaitGroup
 
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range numWorkers {
+		wg.Go(func() {
 			for pid := range pidChan {
 				event, err := pf.readProcessInfo(pid)
 				resultsChan <- procInfo{event: event, err: err}
 			}
-		}()
+		})
 	}
 
 	for _, pid := range pids {

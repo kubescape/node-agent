@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	maps0 "maps"
 	"strconv"
 	"sync"
 	"time"
@@ -689,9 +690,7 @@ func cloneState(state map[string]any) map[string]any {
 	}
 
 	stateCopy := make(map[string]any, len(state))
-	for k, v := range state {
-		stateCopy[k] = v
-	}
+	maps0.Copy(stateCopy, state)
 
 	return stateCopy
 }

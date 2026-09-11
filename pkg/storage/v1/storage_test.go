@@ -9,7 +9,6 @@ import (
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestGetMultiplier(t *testing.T) {
@@ -203,17 +202,15 @@ func TestStorage_CreateContainerProfile(t *testing.T) {
 		{
 			name: "create basic container profile",
 			profile: &v1beta1.ContainerProfile{
-				ObjectMeta: v1.ObjectMeta{
-					Name: "test-container-profile",
-					Annotations: map[string]string{
-						"kubescape.io/instance-id": "test-instance-123",
-						"kubescape.io/wlid":        "wlid://cluster-test/namespace-default/deployment-nginx",
-						"kubescape.io/completion":  "complete",
-						"kubescape.io/status":      "ready",
-					},
-					Labels: map[string]string{
-						"app": "nginx",
-					},
+				Name: "test-container-profile",
+				Annotations: map[string]string{
+					"kubescape.io/instance-id": "test-instance-123",
+					"kubescape.io/wlid":        "wlid://cluster-test/namespace-default/deployment-nginx",
+					"kubescape.io/completion":  "complete",
+					"kubescape.io/status":      "ready",
+				},
+				Labels: map[string]string{
+					"app": "nginx",
 				},
 				Spec: v1beta1.ContainerProfileSpec{
 					Architectures: []string{"amd64"},
@@ -241,12 +238,10 @@ func TestStorage_CreateContainerProfile(t *testing.T) {
 		{
 			name: "create container profile with network data",
 			profile: &v1beta1.ContainerProfile{
-				ObjectMeta: v1.ObjectMeta{
-					Name: "test-container-with-network",
-					Annotations: map[string]string{
-						"kubescape.io/instance-id": "test-instance-456",
-						"kubescape.io/wlid":        "wlid://cluster-test/namespace-default/deployment-web",
-					},
+				Name: "test-container-with-network",
+				Annotations: map[string]string{
+					"kubescape.io/instance-id": "test-instance-456",
+					"kubescape.io/wlid":        "wlid://cluster-test/namespace-default/deployment-web",
 				},
 				Spec: v1beta1.ContainerProfileSpec{
 					Architectures: []string{"amd64"},

@@ -14,8 +14,8 @@ import (
 func TestNamespaceListHasName(t *testing.T) {
 	list := &corev1.NamespaceList{
 		Items: []corev1.Namespace{
-			{ObjectMeta: metav1.ObjectMeta{Name: "devel"}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "production"}},
+			{Name: "devel"},
+			{Name: "production"},
 		},
 	}
 
@@ -83,14 +83,14 @@ func TestUnstructuredToRuleBinding(t *testing.T) {
 		{
 			name: "Test with valid rule binding",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "RuntimeAlertRuleBinding",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name":      "rule-1",
 						"namespace": "default",
 					},
-					"spec": map[string]interface{}{
+					"spec": map[string]any{
 						"ruleName": "rule-1",
 					},
 				},
@@ -122,10 +122,10 @@ func TestUnstructuredToRuleBinding(t *testing.T) {
 		{
 			name: "Test with invalid rule binding",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "RuntimeAlertRuleBinding",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name":      "rule-1",
 						"namespace": "default",
 					},
@@ -156,88 +156,72 @@ func TestUniqueName(t *testing.T) {
 		{
 			name: "Pod with valid namespace and name",
 			obj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod-1",
-					Namespace: "default",
-				},
+				Name:      "pod-1",
+				Namespace: "default",
 			},
 			expected: "default/pod-1",
 		},
 		{
 			name: "Pod with empty namespace",
 			obj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod-1",
-					Namespace: "",
-				},
+				Name:      "pod-1",
+				Namespace: "",
 			},
 			expected: "/pod-1",
 		},
 		{
 			name: "Pod with empty name",
 			obj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "",
-					Namespace: "default",
-				},
+				Name:      "",
+				Namespace: "default",
 			},
 			expected: "default/",
 		},
 		{
 			name: "Pod with empty namespace and name",
 			obj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "",
-					Namespace: "",
-				},
+				Name:      "",
+				Namespace: "",
 			},
 			expected: "/",
 		},
 		{
 			name: "RuntimeAlertRuleBinding with valid namespace and name",
 			obj: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "name-1",
-					Namespace: "default",
-				},
+				Name:      "name-1",
+				Namespace: "default",
 			},
 			expected: "default/name-1",
 		},
 		{
 			name: "RuntimeAlertRuleBinding with empty namespace",
 			obj: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "name-1",
-					Namespace: "",
-				},
+				Name:      "name-1",
+				Namespace: "",
 			},
 			expected: "/name-1",
 		},
 		{
 			name: "RuntimeAlertRuleBinding with empty name",
 			obj: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "",
-					Namespace: "default",
-				},
+				Name:      "",
+				Namespace: "default",
 			},
 			expected: "default/",
 		},
 		{
 			name: "RuntimeAlertRuleBinding with empty namespace and name",
 			obj: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "",
-					Namespace: "",
-				},
+				Name:      "",
+				Namespace: "",
 			},
 			expected: "/",
 		},
 		{
 			name: "Unstructured with valid namespace and name",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"metadata": map[string]interface{}{
+				Object: map[string]any{
+					"metadata": map[string]any{
 						"name":      "name-1",
 						"namespace": "default",
 					},
@@ -248,8 +232,8 @@ func TestUniqueName(t *testing.T) {
 		{
 			name: "Unstructured with empty namespace",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"metadata": map[string]interface{}{
+				Object: map[string]any{
+					"metadata": map[string]any{
 						"name":      "name-1",
 						"namespace": "",
 					},
@@ -260,8 +244,8 @@ func TestUniqueName(t *testing.T) {
 		{
 			name: "Unstructured with empty name",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"metadata": map[string]interface{}{
+				Object: map[string]any{
+					"metadata": map[string]any{
 						"name":      "",
 						"namespace": "default",
 					},
@@ -272,8 +256,8 @@ func TestUniqueName(t *testing.T) {
 		{
 			name: "Unstructured with empty namespace and name",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"metadata": map[string]interface{}{
+				Object: map[string]any{
+					"metadata": map[string]any{
 						"name":      "",
 						"namespace": "",
 					},

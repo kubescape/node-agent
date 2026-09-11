@@ -101,8 +101,8 @@ func TestNetLibrary(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
-				"event": map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
+				"event": map[string]any{
 					"ip": "test",
 				},
 			})
@@ -169,8 +169,8 @@ func TestNetLibraryErrorCases(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			_, _, err = program.Eval(map[string]interface{}{
-				"event": map[string]interface{}{
+			_, _, err = program.Eval(map[string]any{
+				"event": map[string]any{
 					"ip": "test",
 				},
 			})

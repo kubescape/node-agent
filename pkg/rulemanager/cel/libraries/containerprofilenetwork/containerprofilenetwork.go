@@ -152,7 +152,6 @@ var containerProfileNetworkFuncSpecs = []containerProfileNetworkFuncSpec{
 func (l *containerProfileNetworkLibrary) declarationsWithPrefix(namePrefix, overloadIDPrefix string) map[string][]cel.FunctionOpt {
 	decls := make(map[string][]cel.FunctionOpt, len(containerProfileNetworkFuncSpecs))
 	for _, spec := range containerProfileNetworkFuncSpecs {
-		spec := spec
 		fullName := namePrefix + spec.name
 		overloadID := overloadIDPrefix + "_" + spec.name
 		decls[fullName] = []cel.FunctionOpt{
@@ -248,8 +247,8 @@ type legacyNetworkCostEstimator struct {
 }
 
 func (e *legacyNetworkCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
-	if strings.HasPrefix(function, e.legacyPrefix) {
-		function = e.canonicalPrefix + strings.TrimPrefix(function, e.legacyPrefix)
+	if after, ok := strings.CutPrefix(function, e.legacyPrefix); ok {
+		function = e.canonicalPrefix + after
 	}
 	return e.inner.EstimateCallCost(function, overloadID, target, args)
 }
@@ -276,7 +275,7 @@ func (e *containerProfileNetworkCostEstimator) EstimateCallCost(function, overlo
 	default:
 		return nil
 	}
-	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+	return &checker.CallEstimate{Min: uint64(cost), Max: uint64(cost)}
 }
 
 func (e *containerProfileNetworkCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {

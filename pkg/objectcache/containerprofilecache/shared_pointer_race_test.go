@@ -29,7 +29,6 @@ import (
 	cpc "github.com/kubescape/node-agent/pkg/objectcache/containerprofilecache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
@@ -42,11 +41,9 @@ func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 
 	// cpV1 — what is seeded initially (RV="1")
 	cpV1 := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-race",
-			Namespace:       "default",
-			ResourceVersion: "1",
-		},
+		Name:            "cp-race",
+		Namespace:       "default",
+		ResourceVersion: "1",
 		Spec: v1beta1.ContainerProfileSpec{
 			Execs:        []v1beta1.ExecCalls{{Path: "/bin/sh", Args: []string{"a", "b", "c"}}},
 			Opens:        []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}},
@@ -57,11 +54,9 @@ func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 	// cpV2 — what storage returns after a refresh (RV="2"); the reconciler will
 	// create a brand-new entry pointing to cpV2 (never mutating cpV1).
 	cpV2 := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-race",
-			Namespace:       "default",
-			ResourceVersion: "2",
-		},
+		Name:            "cp-race",
+		Namespace:       "default",
+		ResourceVersion: "2",
 		Spec: v1beta1.ContainerProfileSpec{
 			Execs:        []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"x", "y"}}},
 			Opens:        []v1beta1.OpenCalls{{Path: "/etc/shadow", Flags: []string{"O_WRONLY"}}},
@@ -113,7 +108,7 @@ func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 
 	// 50 reader goroutines — read-only traversal of the returned projected profile.
 	wg.Add(numReaders)
-	for i := 0; i < numReaders; i++ {
+	for range numReaders {
 		go func() {
 			defer wg.Done()
 			for ctx.Err() == nil {
@@ -133,15 +128,13 @@ func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 
 	// 1 writer goroutine: alternate refresh (rebuilds entry → cpV2) and reset
 	// (reseeds entry → cpV1) to keep the refresh loop active across the window.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for ctx.Err() == nil {
 			cache.RefreshAllEntriesForTest(ctx)
 			// Reset to cpV1 so the next refresh sees a stale RV and rebuilds again.
 			seedV1()
 		}
-	}()
+	})
 
 	wg.Wait()
 
@@ -161,11 +154,9 @@ func TestSharedPointerReadersDoNotCorruptCache(t *testing.T) {
 // the removed Shared/Profile fields.
 func TestProjectedEntryPersistsThroughRefresh(t *testing.T) {
 	cpInStorage := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-identity",
-			Namespace:       "default",
-			ResourceVersion: "99",
-		},
+		Name:            "cp-identity",
+		Namespace:       "default",
+		ResourceVersion: "99",
 	}
 	store := newFakeStorage(cpInStorage)
 	k8s := newFakeK8sCache()

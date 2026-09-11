@@ -39,7 +39,7 @@ func (s *LinuxKernelVariablesSensor) GetPluralKind() string {
 }
 
 // Sense collects the kernel variables data from the host
-func (s *LinuxKernelVariablesSensor) Sense() (interface{}, error) {
+func (s *LinuxKernelVariablesSensor) Sense() (any, error) {
 	hProcSysKernelDir := hostPath(procSysKernelDir)
 	procDir, err := os.Open(hProcSysKernelDir)
 	if err != nil {

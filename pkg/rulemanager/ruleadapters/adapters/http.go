@@ -25,7 +25,7 @@ func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = httpEvent.GetPID()
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["internal"] = httpEvent.GetInternal()
 	baseRuntimeAlert.Arguments["direction"] = httpEvent.GetDirection()

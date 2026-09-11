@@ -14,8 +14,7 @@ func RunCommand(name string, args ...string) int {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		var exiterr *exec.ExitError
-		if errors.As(err, &exiterr) {
+		if exiterr, ok := errors.AsType[*exec.ExitError](err); ok {
 			if stderr.Len() > 0 {
 				fmt.Printf("Command '%s %v' failed: %s\n", name, args, stderr.String())
 			}

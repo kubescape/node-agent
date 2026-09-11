@@ -58,7 +58,7 @@ func ExtractConsistentHeaders(headers http.Header) map[string][]string {
 	result := make(map[string][]string)
 	for _, header := range ConsistentHeaders {
 		if value, ok := headers[header]; ok {
-			switch typedValue := interface{}(value).(type) {
+			switch typedValue := any(value).(type) {
 			case []string:
 				result[header] = typedValue
 			case string:
@@ -171,7 +171,7 @@ func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 }
 
 func FromCString(in []byte) []byte {
-	for i := 0; i < len(in); i++ {
+	for i := range in {
 		if in[i] == 0 {
 			return in[:i]
 		}

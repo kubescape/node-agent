@@ -41,20 +41,16 @@ func TestRuntimeObjAddHandler(t *testing.T) {
 			args: args{
 				c: NewCacheMock(""),
 				pod: &corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPod",
-						Namespace: "testNamespace",
-						Labels: map[string]string{
-							"app": "testPod",
-						},
+					Name:      "testPod",
+					Namespace: "testNamespace",
+					Labels: map[string]string{
+						"app": "testPod",
 					},
 				},
 				rb: []typesv1.RuntimeAlertRuleBinding{
 					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "testRB",
-							Namespace: "testNamespace",
-						},
+						Name:      "testRB",
+						Namespace: "testNamespace",
 						Spec: typesv1.RuntimeAlertRuleBindingSpec{
 							PodSelector: metav1.LabelSelector{
 								MatchLabels: map[string]string{
@@ -81,20 +77,16 @@ func TestRuntimeObjAddHandler(t *testing.T) {
 			args: args{
 				c: NewCacheMock(""),
 				pod: &corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPod",
-						Namespace: "testNamespace",
-						Labels: map[string]string{
-							"app": "testPod",
-						},
+					Name:      "testPod",
+					Namespace: "testNamespace",
+					Labels: map[string]string{
+						"app": "testPod",
 					},
 				},
 				rb: []typesv1.RuntimeAlertRuleBinding{
 					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "testRB",
-							Namespace: "testNamespace",
-						},
+						Name:      "testRB",
+						Namespace: "testNamespace",
 						Spec: typesv1.RuntimeAlertRuleBindingSpec{
 							PodSelector: metav1.LabelSelector{
 								MatchExpressions: []metav1.LabelSelectorRequirement{
@@ -125,20 +117,16 @@ func TestRuntimeObjAddHandler(t *testing.T) {
 			args: args{
 				c: NewCacheMock(""),
 				pod: &corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPod",
-						Namespace: "testNamespace",
-						Labels: map[string]string{
-							"app": "testPod",
-						},
+					Name:      "testPod",
+					Namespace: "testNamespace",
+					Labels: map[string]string{
+						"app": "testPod",
 					},
 				},
 				rb: []typesv1.RuntimeAlertRuleBinding{
 					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "testRB",
-							Namespace: "testNamespace",
-						},
+						Name:      "testRB",
+						Namespace: "testNamespace",
 						Spec: typesv1.RuntimeAlertRuleBindingSpec{
 							PodSelector: metav1.LabelSelector{
 								MatchLabels: map[string]string{
@@ -238,10 +226,8 @@ func TestDeleteHandler(t *testing.T) {
 		{
 			name: "Test with Pod kind",
 			obj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod-1",
-					Namespace: "default",
-				},
+				Name:      "pod-1",
+				Namespace: "default",
 			},
 			expected: expected{
 				pod:  "default/pod-1",
@@ -251,9 +237,9 @@ func TestDeleteHandler(t *testing.T) {
 		{
 			name: "Test with RuntimeRuleBindingAlert kind",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"kind": "RuntimeRuleAlertBinding",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name":      "rule-1",
 						"namespace": "default",
 					},
@@ -296,10 +282,8 @@ func TestModifyHandler(t *testing.T) {
 		{
 			name: "Test with Pod kind",
 			obj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod-1",
-					Namespace: "default",
-				},
+				Name:      "pod-1",
+				Namespace: "default",
 			},
 			addedPod: true,
 			addedRB:  false,
@@ -311,9 +295,9 @@ func TestModifyHandler(t *testing.T) {
 		{
 			name: "Test with RuntimeRuleBindingAlert kind",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"kind": "RuntimeRuleAlertBinding",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name":      "rule-1",
 						"namespace": "default",
 					},
@@ -329,10 +313,10 @@ func TestModifyHandler(t *testing.T) {
 		{
 			name: "Test with invalid RuntimeRuleBindingAlert kind",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "RuntimeAlertRuleBinding",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name":      "rule-1",
 						"namespace": "default",
 					},
@@ -349,14 +333,14 @@ func TestModifyHandler(t *testing.T) {
 		{
 			name: "Test with invalid Pod kind",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "Pod",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name":      "pod-1",
 						"namespace": "default",
 					},
-					"spec": map[string]interface{}{
+					"spec": map[string]any{
 						"containers": "invalid",
 					},
 				},
@@ -405,10 +389,8 @@ func TestAddHandler(t *testing.T) {
 		{
 			name: "Test with Pod kind",
 			obj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pod-1",
-					Namespace: "default",
-				},
+				Name:      "pod-1",
+				Namespace: "default",
 			},
 			addedPod: true,
 			addedRB:  false,
@@ -420,9 +402,9 @@ func TestAddHandler(t *testing.T) {
 		{
 			name: "Test with RuntimeRuleBindingAlert kind",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"kind": "RuntimeRuleAlertBinding",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name":      "rule-1",
 						"namespace": "default",
 					},
@@ -438,10 +420,10 @@ func TestAddHandler(t *testing.T) {
 		{
 			name: "Test with invalid RuntimeRuleBindingAlert kind",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "RuntimeAlertRuleBinding",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name":      "rule-1",
 						"namespace": "default",
 					},
@@ -458,14 +440,14 @@ func TestAddHandler(t *testing.T) {
 		{
 			name: "Test with invalid Pod kind",
 			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "Pod",
-					"metadata": map[string]interface{}{
+					"metadata": map[string]any{
 						"name":      "pod-1",
 						"namespace": "default",
 					},
-					"spec": map[string]interface{}{
+					"spec": map[string]any{
 						"containers": "invalid",
 					},
 				},
@@ -603,17 +585,17 @@ func TestAddRuleBinding(t *testing.T) {
 	k8sClient := k8sinterface.NewKubernetesApiMock()
 	var r []runtime.Object
 	mocks.NAMESPACE = "default"
-	r = append(r, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mocks.NAMESPACE, Labels: map[string]string{"app": mocks.NAMESPACE}}})
+	r = append(r, &corev1.Namespace{Name: mocks.NAMESPACE, Labels: map[string]string{"app": mocks.NAMESPACE}})
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection))
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx))
 
 	mocks.NAMESPACE = "other"
-	r = append(r, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mocks.NAMESPACE, Labels: map[string]string{"app": mocks.NAMESPACE}}})
+	r = append(r, &corev1.Namespace{Name: mocks.NAMESPACE, Labels: map[string]string{"app": mocks.NAMESPACE}})
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection))
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx))
 
 	mocks.NAMESPACE = "test"
-	r = append(r, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mocks.NAMESPACE, Labels: map[string]string{"app": mocks.NAMESPACE}}})
+	r = append(r, &corev1.Namespace{Name: mocks.NAMESPACE, Labels: map[string]string{"app": mocks.NAMESPACE}})
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection))
 	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx))
 
@@ -628,9 +610,7 @@ func TestAddRuleBinding(t *testing.T) {
 		{
 			name: "Add roleBinding",
 			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "rb1",
-				},
+				Name: "rb1",
 				Spec: typesv1.RuntimeAlertRuleBindingSpec{
 					Rules: []typesv1.RuntimeAlertRuleBindingRule{
 						{
@@ -651,9 +631,7 @@ func TestAddRuleBinding(t *testing.T) {
 		{
 			name: "Add roleBinding namespace 'other'",
 			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "rb1",
-				},
+				Name: "rb1",
 				Spec: typesv1.RuntimeAlertRuleBindingSpec{
 					NamespaceSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
@@ -682,10 +660,8 @@ func TestAddRuleBinding(t *testing.T) {
 		{
 			name: "Add namespaced roleBinding",
 			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "rb1",
-					Namespace: "other",
-				},
+				Name:      "rb1",
+				Namespace: "other",
 				Spec: typesv1.RuntimeAlertRuleBindingSpec{
 					NamespaceSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
@@ -714,10 +690,8 @@ func TestAddRuleBinding(t *testing.T) {
 		{
 			name: "Add namespaced roleBinding without pods",
 			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "rb1",
-					Namespace: "blabla",
-				},
+				Name:      "rb1",
+				Namespace: "blabla",
 				Spec: typesv1.RuntimeAlertRuleBindingSpec{
 					NamespaceSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
@@ -743,9 +717,7 @@ func TestAddRuleBinding(t *testing.T) {
 		{
 			name: "Add roleBinding exclude namespace 'other'",
 			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "rb1",
-				},
+				Name: "rb1",
 				Spec: typesv1.RuntimeAlertRuleBindingSpec{
 					NamespaceSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
@@ -776,9 +748,7 @@ func TestAddRuleBinding(t *testing.T) {
 		{
 			name: "Add roleBinding MatchLabels",
 			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "rb1",
-				},
+				Name: "rb1",
 				Spec: typesv1.RuntimeAlertRuleBindingSpec{
 					NamespaceSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
@@ -807,9 +777,7 @@ func TestAddRuleBinding(t *testing.T) {
 		{
 			name: "Namespace does not exists",
 			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "rb1",
-				},
+				Name: "rb1",
 				Spec: typesv1.RuntimeAlertRuleBindingSpec{
 					NamespaceSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
@@ -828,9 +796,7 @@ func TestAddRuleBinding(t *testing.T) {
 		{
 			name: "Invalid ns selector",
 			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "rb1",
-				},
+				Name: "rb1",
 				Spec: typesv1.RuntimeAlertRuleBindingSpec{
 					NamespaceSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
@@ -854,9 +820,7 @@ func TestAddRuleBinding(t *testing.T) {
 		{
 			name: "Invalid label selector",
 			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "rb1",
-				},
+				Name: "rb1",
 				Spec: typesv1.RuntimeAlertRuleBindingSpec{
 					PodSelector: metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
@@ -1054,9 +1018,9 @@ func TestCreateRulePrefilter(t *testing.T) {
 			name: "parameters propagate to prefilter",
 			binding: &typesv1.RuntimeAlertRuleBindingRule{
 				RuleID: "R0002",
-				Parameters: map[string]interface{}{
-					"ignorePrefixes":  []interface{}{"/tmp", "/var/log"},
-					"includePrefixes": []interface{}{"/etc"},
+				Parameters: map[string]any{
+					"ignorePrefixes":  []any{"/tmp", "/var/log"},
+					"includePrefixes": []any{"/etc"},
 				},
 			},
 			wantIgnore: []string{"/tmp", "/var/log"},

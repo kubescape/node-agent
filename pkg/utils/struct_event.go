@@ -27,14 +27,14 @@ type StructEvent struct {
 	DNSName              string                  `json:"dnsName,omitempty" yaml:"dnsName,omitempty"`
 	Dir                  bool                    `json:"dir,omitempty" yaml:"dir,omitempty"`
 	Direction            consts.NetworkDirection `json:"direction,omitempty" yaml:"direction,omitempty"`
-	DstEndpoint          types.L3Endpoint        `json:"dstEndpoint,omitempty" yaml:"dstEndpoint,omitempty"`
+	DstEndpoint          types.L3Endpoint        `json:"dstEndpoint" yaml:"dstEndpoint,omitempty"`
 	DstIP                string                  `json:"dstIP,omitempty" yaml:"dstIP,omitempty"`
 	DstPort              uint16                  `json:"dstPort,omitempty" yaml:"dstPort,omitempty"`
 	Error                int64                   `json:"error,omitempty" yaml:"error,omitempty"`
 	EventType            EventType               `json:"eventType,omitempty" yaml:"eventType,omitempty"`
 	ExePath              string                  `json:"exePath,omitempty" yaml:"exePath,omitempty"`
 	ExitCode             uint32                  `json:"exitCode,omitempty" yaml:"exitCode,omitempty"`
-	Extra                interface{}             `json:"extra,omitempty" yaml:"extra,omitempty"`
+	Extra                any                     `json:"extra,omitempty" yaml:"extra,omitempty"`
 	Flags                []string                `json:"flags,omitempty" yaml:"flags,omitempty"`
 	FlagsRaw             uint32                  `json:"flagsRaw,omitempty" yaml:"flagsRaw,omitempty"`
 	FullPath             string                  `json:"fullPath,omitempty" yaml:"fullPath,omitempty"`
@@ -265,7 +265,7 @@ func (e *StructEvent) GetExitCode() uint32 {
 	return e.ExitCode
 }
 
-func (e *StructEvent) GetExtra() interface{} {
+func (e *StructEvent) GetExtra() any {
 	return e.Extra
 }
 
@@ -506,7 +506,7 @@ func (e *StructEvent) MakeHttpEvent(request *http.Request, direction consts.Netw
 
 func (e *StructEvent) Release() {}
 
-func (e *StructEvent) SetExtra(extra interface{}) {
+func (e *StructEvent) SetExtra(extra any) {
 	e.Extra = extra
 }
 

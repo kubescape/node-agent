@@ -35,10 +35,10 @@ func TestHandleProcfsEvent_RecordsStartTime(t *testing.T) {
 }
 
 func TestExitByPid_DeletesStartTimeEntry(t *testing.T) {
-	cfg := config.Config{}
-	cfg.ExitCleanup = processtreecreatorconfig.ExitCleanupConfig{
-		MaxPendingExits: 10, CleanupInterval: time.Hour, CleanupDelay: 0,
-	}
+	cfg := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 10, CleanupInterval: time.Hour, CleanupDelay: 0,
+		}}
 	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, cfg).(*processTreeCreatorImpl)
 	creator.FeedEvent(conversion.ProcessEvent{
 		Type: conversion.ProcfsEvent, PID: 100, PPID: 1, Comm: "nginx",
@@ -140,10 +140,10 @@ func TestHandleForkEvent_IgnoresEventStartTimeNs_OnReadFailure(t *testing.T) {
 // return: the node is absent from processMap, but a stale side-map entry must
 // still be reclaimed rather than leaking for the lifetime of the agent.
 func TestExitByPid_DeletesStartTimeEntry_NodeAlreadyGone(t *testing.T) {
-	cfg := config.Config{}
-	cfg.ExitCleanup = processtreecreatorconfig.ExitCleanupConfig{
-		MaxPendingExits: 10, CleanupInterval: time.Hour, CleanupDelay: 0,
-	}
+	cfg := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 10, CleanupInterval: time.Hour, CleanupDelay: 0,
+		}}
 	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, cfg).(*processTreeCreatorImpl)
 
 	creator.mutex.Lock()
@@ -203,12 +203,12 @@ func TestProcfsStartTimeReader_ReadsRealProcess(t *testing.T) {
 // Scoped to this package's side map only. This is NOT pid-reuse hardening: the
 // shared tree node still carries the dead process's comm, cmdline and path.
 func TestHandleForkEvent_RecycledPidDoesNotInheritDeadProcessStartTime(t *testing.T) {
-	cfg := config.Config{}
-	cfg.ExitCleanup = processtreecreatorconfig.ExitCleanupConfig{
-		MaxPendingExits: 1000,
-		CleanupInterval: 30 * time.Second,
-		CleanupDelay:    5 * time.Minute, // shipped default
-	}
+	cfg := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 1000,
+			CleanupInterval: 30 * time.Second,
+			CleanupDelay:    5 * time.Minute, // shipped default
+		}}
 	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, cfg).(*processTreeCreatorImpl)
 
 	const aStart = uint64(1_000_000_000) // process A, boot+1s
@@ -283,10 +283,10 @@ func TestHandleForkEvent_ReadsStartTimeWithoutHoldingTreeLock(t *testing.T) {
 // good scan-recorded value whenever the on-demand read then fails, so the wipe
 // is gated on there actually being a pending exit for the pid.
 func TestHandleForkEvent_DoesNotWipeKnownStartTimeWithoutAPendingExit(t *testing.T) {
-	cfg := config.Config{}
-	cfg.ExitCleanup = processtreecreatorconfig.ExitCleanupConfig{
-		MaxPendingExits: 1000, CleanupInterval: time.Hour, CleanupDelay: time.Minute,
-	}
+	cfg := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 1000, CleanupInterval: time.Hour, CleanupDelay: time.Minute,
+		}}
 	creator := NewProcessTreeCreator(&mockContainerProcessTree{}, cfg).(*processTreeCreatorImpl)
 	creator.readStartTime = func(pid uint32) (uint64, time.Time) { return 0, time.Time{} } // read fails
 

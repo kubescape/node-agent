@@ -125,7 +125,7 @@ const (
 var ErrQueueNotRunning = errors.New("queue is not running")
 
 // QueuedContainerProfileBuilder creates a new QueuedContainerProfile instance for dque
-func QueuedContainerProfileBuilder() interface{} {
+func QueuedContainerProfileBuilder() any {
 	return &QueuedContainerProfile{}
 }
 
@@ -219,8 +219,7 @@ func NewQueueData(ctx context.Context, creator storage.ProfileCreator, config Qu
 	// Create or open the queue
 	queue, err := dque.NewOrOpen(config.QueueName, config.QueueDir, config.ItemsPerSegment, QueuedContainerProfileBuilder)
 	if err != nil {
-		var corruptedError dque.ErrCorruptedSegment
-		if errors.As(err, &corruptedError) {
+		if _, ok := errors.AsType[dque.ErrCorruptedSegment](err); ok {
 			logger.L().Info("queue corrupted, deleting and recreating", helpers.Error(err))
 
 			// Delete the specific queue's data directory.
@@ -520,7 +519,7 @@ func (qd *QueueData) processAllItems() {
 
 	// Process each item in the queue
 processLoop:
-	for i := 0; i < queueSize; i++ {
+	for range queueSize {
 		// Try to get an item from the queue
 		iface, err := qd.queue.Dequeue()
 		if err != nil {
@@ -791,14 +790,14 @@ func (qd *QueueData) GetQueueSize() int {
 }
 
 // GetQueueStats returns basic statistics about the queue
-func (qd *QueueData) GetQueueStats() map[string]interface{} {
+func (qd *QueueData) GetQueueStats() map[string]any {
 	// running is written under qd.mu by Close, so it must be read under it too.
 	qd.mu.Lock()
 	running := qd.running
 	size := qd.GetQueueSize()
 	qd.mu.Unlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"size":             size,
 		"maxQueueSize":     qd.maxQueueSize,
 		"maxSplitDepth":    qd.maxSplitDepth,

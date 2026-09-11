@@ -17,8 +17,8 @@ func matchLiteralPath(values map[string]struct{}, query string) bool {
 		return true
 	}
 	if query != "/" && !strings.HasSuffix(query, "//") {
-		if strings.HasSuffix(query, "/") {
-			trimmed := strings.TrimSuffix(query, "/")
+		if before, ok := strings.CutSuffix(query, "/"); ok {
+			trimmed := before
 			if trimmed != "" && !strings.HasSuffix(trimmed, "/") {
 				if _, ok := values[trimmed]; ok {
 					return true

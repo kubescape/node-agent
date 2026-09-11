@@ -142,7 +142,7 @@ func TestCallStackSearchTreeBranching(t *testing.T) {
 		{"2918313636494991837", "867979"},
 	}
 
-	for i := 0; i < len(expectedFrames); i++ {
+	for i := range expectedFrames {
 		expected := expectedFrames[i]
 		fmt.Printf("\nVerifying depth %d:\n", i)
 		fmt.Printf("Current frame: {%s %s}\n", current.Frame.FileID, current.Frame.Lineno)

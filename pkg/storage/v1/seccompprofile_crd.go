@@ -47,14 +47,12 @@ func (c *CRDSeccompProfileClient) ListSeccompProfiles(namespace string, opts met
 	}
 
 	result := &v1beta1.SeccompProfileList{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "SeccompProfileList",
-			APIVersion: "spdx.softwarecomposition.kubescape.io/v1beta1",
-		},
+		Kind:       "SeccompProfileList",
+		APIVersion: "spdx.softwarecomposition.kubescape.io/v1beta1",
 	}
 
 	// Set ListMeta from unstructured
-	if metadata, ok := unstructuredList.Object["metadata"].(map[string]interface{}); ok {
+	if metadata, ok := unstructuredList.Object["metadata"].(map[string]any); ok {
 		if rv, ok := metadata["resourceVersion"].(string); ok {
 			result.ListMeta.ResourceVersion = rv
 		}
@@ -170,4 +168,3 @@ func (cw *convertingWatch) Stop() {
 func (cw *convertingWatch) ResultChan() <-chan watch.Event {
 	return cw.result
 }
-

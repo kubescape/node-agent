@@ -300,14 +300,12 @@ func testProfile() *v1beta1.ContainerProfile {
 	rt := time.Now()
 
 	return &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "cattle-cluster-agent-0123456789abcdef0123456789abcdef",
-			Namespace: "cattle-system",
-			Annotations: map[string]string{
-				helpersv1.ReportSeriesIdMetadataKey:          "test-series-id",
-				helpersv1.PreviousReportTimestampMetadataKey: prev.String(),
-				helpersv1.ReportTimestampMetadataKey:         rt.String(),
-			},
+		Name:      "cattle-cluster-agent-0123456789abcdef0123456789abcdef",
+		Namespace: "cattle-system",
+		Annotations: map[string]string{
+			helpersv1.ReportSeriesIdMetadataKey:          "test-series-id",
+			helpersv1.PreviousReportTimestampMetadataKey: prev.String(),
+			helpersv1.ReportTimestampMetadataKey:         rt.String(),
 		},
 	}
 }
@@ -780,12 +778,12 @@ func TestEnforceMaxSize_BacklogBoundsRepairCost(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = qd.Close() })
 
-	for i := 0; i < maxQueueSize; i++ {
+	for i := range maxQueueSize {
 		require.NoError(t, qd.Enqueue(testProfile(), fmt.Sprintf("container-%d", i)))
 	}
 	require.Equal(t, maxQueueSize, qd.GetQueueSize())
 
-	for i := 0; i < maxQueueSize*3; i++ {
+	for i := range maxQueueSize * 3 {
 		require.NoError(t, qd.Enqueue(testProfile(), fmt.Sprintf("container-burst-%d", i)))
 		require.LessOrEqual(t, qd.stitchBacklog.Load(), qd.maxStitchBacklog, "stitch backlog must never exceed its bound")
 	}

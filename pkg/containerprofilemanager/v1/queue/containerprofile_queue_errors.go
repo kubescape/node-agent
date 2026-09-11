@@ -80,8 +80,7 @@ func matchesSentinel(err, sentinel error) bool {
 		return true
 	}
 
-	var statusErr *apierrors.StatusError
-	if errors.As(err, &statusErr) {
+	if statusErr, ok := errors.AsType[*apierrors.StatusError](err); ok {
 		return strings.Contains(statusErr.ErrStatus.Message, sentinel.Error())
 	}
 

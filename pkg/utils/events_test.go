@@ -121,7 +121,7 @@ func TestDatasourceEventGetDirection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear package-level fieldCaches maps so we don't bleed cache between tests
-			fieldCaches.Range(func(key, val interface{}) bool {
+			fieldCaches.Range(func(key, val any) bool {
 				fieldCaches.Delete(key)
 				return true
 			})

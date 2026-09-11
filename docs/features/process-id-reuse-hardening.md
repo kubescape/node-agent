@@ -273,7 +273,7 @@ Linux container:
 
 ```bash
 docker run --rm -v "$PWD":/src -v "$(go env GOMODCACHE)":/go/pkg/mod -w /src \
-  -e GOFLAGS=-mod=mod golang:1.25 go test -race ./pkg/processtree/...
+  -e GOFLAGS=-mod=mod golang:1.27 go test -race ./pkg/processtree/...
 ```
 
 Every reproduction and guard test lives in

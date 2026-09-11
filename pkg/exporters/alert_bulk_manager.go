@@ -437,10 +437,7 @@ func (abm *AlertBulkManager) processSendQueueItem(item *bulkQueueItem) {
 		item.lastAttemptAt = time.Now()
 
 		// Calculate delay: min(baseDelay * 2^(retryCount-1), maxDelay)
-		delay := time.Duration(float64(abm.retryBaseDelay) * math.Pow(2, float64(item.retryCount-1)))
-		if delay > abm.retryMaxDelay {
-			delay = abm.retryMaxDelay
-		}
+		delay := min(time.Duration(float64(abm.retryBaseDelay)*math.Pow(2, float64(item.retryCount-1))), abm.retryMaxDelay)
 
 		logger.L().Warning("Bulk send failed, will retry",
 			helpers.String("containerID", item.containerID),

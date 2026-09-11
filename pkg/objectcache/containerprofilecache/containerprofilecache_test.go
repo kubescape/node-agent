@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -95,7 +94,7 @@ func newTestCache(t *testing.T, client storage.ProfileClient) (*ContainerProfile
 func primeSharedData(t *testing.T, k8s *objectcache.K8sObjectCacheMock, containerID, wlid string) {
 	t.Helper()
 	ids, err := instanceidhandlerV1.GenerateInstanceIDFromPod(&corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "nginx-abc", Namespace: "default"},
+		Name: "nginx-abc", Namespace: "default",
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{Name: "nginx", Image: "nginx:1.25"}},
 		},
@@ -130,14 +129,12 @@ func eventContainer(id string) *containercollection.Container {
 // same CP yield entries with populated projected profiles.
 func TestSharedFastPath_NoOverlay(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "cp-shared",
-			Namespace:       "default",
-			ResourceVersion: "7",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
+		Name:            "cp-shared",
+		Namespace:       "default",
+		ResourceVersion: "7",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Full,
+			helpersv1.StatusMetadataKey:     helpersv1.Completed,
 		},
 		Spec: v1beta1.ContainerProfileSpec{
 			Capabilities: []string{"NET_ADMIN"},
@@ -170,11 +167,9 @@ func TestOverlayPath_UserDefinedCP_NewWay(t *testing.T) {
 	// annotation would be treated as learned and ignored (see
 	// TestUserDefinedCP_LearnedProfileIgnored).
 	userCP := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "override", Namespace: "default", ResourceVersion: "uc1",
-			Annotations: map[string]string{
-				helpersv1.ManagedByMetadataKey: helpersv1.ManagedByUserValue,
-			},
+		Name: "override", Namespace: "default", ResourceVersion: "uc1",
+		Annotations: map[string]string{
+			helpersv1.ManagedByMetadataKey: helpersv1.ManagedByUserValue,
 		},
 		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"NET_BIND_SERVICE"}},
 	}
@@ -213,12 +208,10 @@ func TestOverlayPath_CPFetchTransientError_RecordsUserCPRef(t *testing.T) {
 	// CP fetch at the overlay name errors transiently, so userDefinedCP is nil
 	// for this add and the entry is built from the base CP.
 	baseCP := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp-base", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
+		Name: "cp-base", Namespace: "default", ResourceVersion: "1",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Full,
+			helpersv1.StatusMetadataKey:     helpersv1.Completed,
 		},
 		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_PTRACE"}},
 	}
@@ -254,10 +247,8 @@ func TestOverlayPath_CPFetchTransientError_RecordsUserCPRef(t *testing.T) {
 // fresh mutex.
 func TestDeleteContainer_LockAndCleanup(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp-delete", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
+		Name: "cp-delete", Namespace: "default", ResourceVersion: "1",
+		Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
 	}
 	client := &fakeProfileClient{cp: cp}
 	c, k8s := newTestCache(t, client)
@@ -280,7 +271,7 @@ func TestDeleteContainer_LockAndCleanup(t *testing.T) {
 // TestContainerCallback_IgnoredContainer verifies IgnoreContainer short-circuits
 // before any storage call is issued.
 func TestContainerCallback_IgnoredContainer(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "default", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "default", ResourceVersion: "1"}
 	client := &fakeProfileClient{cp: cp}
 	c, _ := newTestCache(t, client)
 	c.cfg.ExcludeNamespaces = []string{"kube-system"}
@@ -306,7 +297,7 @@ func TestContainerCallback_IgnoredContainer(t *testing.T) {
 // trigger IgnoreContainer even when their namespace is in ExcludeNamespaces
 // (host events carry namespace="host" after override, not the original one).
 func TestContainerCallback_HostContainer(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "cp", Namespace: "host", ResourceVersion: "1"}}
+	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "host", ResourceVersion: "1"}
 	client := &fakeProfileClient{cp: cp}
 	c, _ := newTestCache(t, client)
 	// Even with every namespace excluded, host containers bypass the check.
@@ -333,10 +324,8 @@ func TestContainerCallback_HostContainer(t *testing.T) {
 // GetCallStackSearchTree.
 func TestCallStackIndexBuiltFromProfile(t *testing.T) {
 	cp := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cp-stack", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
-		},
+		Name: "cp-stack", Namespace: "default", ResourceVersion: "1",
+		Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Completed},
 		Spec: v1beta1.ContainerProfileSpec{
 			IdentifiedCallStacks: []v1beta1.IdentifiedCallStack{
 				{
@@ -372,11 +361,9 @@ func TestCallStackIndexBuiltFromProfile(t *testing.T) {
 // the projection.
 func authoredCP(name, execPath, rv string) *v1beta1.ContainerProfile {
 	return &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name, Namespace: "default", ResourceVersion: rv,
-			Annotations: map[string]string{
-				helpersv1.ManagedByMetadataKey: helpersv1.ManagedByUserValue,
-			},
+		Name: name, Namespace: "default", ResourceVersion: rv,
+		Annotations: map[string]string{
+			helpersv1.ManagedByMetadataKey: helpersv1.ManagedByUserValue,
 		},
 		Spec: v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: execPath}}},
 	}
@@ -475,12 +462,10 @@ func TestUserDefinedCP_SingleContainerBareFallback(t *testing.T) {
 // stays pending.
 func TestUserDefinedCP_LearnedProfileIgnored(t *testing.T) {
 	learnedAtLabel := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "ready-cp", Namespace: "default", ResourceVersion: "1",
-			Annotations: map[string]string{
-				helpersv1.StatusMetadataKey:     helpersv1.Learning, // status: ready → still learning
-				helpersv1.CompletionMetadataKey: helpersv1.Partial,
-			},
+		Name: "ready-cp", Namespace: "default", ResourceVersion: "1",
+		Annotations: map[string]string{
+			helpersv1.StatusMetadataKey:     helpersv1.Learning, // status: ready → still learning
+			helpersv1.CompletionMetadataKey: helpersv1.Partial,
 		},
 		Spec: v1beta1.ContainerProfileSpec{Execs: []v1beta1.ExecCalls{{Path: "/bin/leaked"}}},
 	}
@@ -594,12 +579,10 @@ func TestRefreshUserCP_NoLearnedCP(t *testing.T) {
 // fast-skips and preserves the entry pointer.
 func TestRefreshUserCP_FastSkipWhenRVsMatch(t *testing.T) {
 	learned := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "learned-base", Namespace: "default", ResourceVersion: "L1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
+		Name: "learned-base", Namespace: "default", ResourceVersion: "L1",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Full,
+			helpersv1.StatusMetadataKey:     helpersv1.Completed,
 		},
 		Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"NET_ADMIN"}},
 	}
@@ -633,12 +616,10 @@ func TestRefreshUserCP_FastSkipWhenRVsMatch(t *testing.T) {
 // reflected.
 func TestRefreshUserCP_RebuildWhenUserCPRVChanges(t *testing.T) {
 	learned := &v1beta1.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "learned-base", Namespace: "default", ResourceVersion: "L1",
-			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Full,
-				helpersv1.StatusMetadataKey:     helpersv1.Completed,
-			},
+		Name: "learned-base", Namespace: "default", ResourceVersion: "L1",
+		Annotations: map[string]string{
+			helpersv1.CompletionMetadataKey: helpersv1.Full,
+			helpersv1.StatusMetadataKey:     helpersv1.Completed,
 		},
 	}
 	authored := authoredCP("authored-cp-nginx", "/bin/v1", "a1")

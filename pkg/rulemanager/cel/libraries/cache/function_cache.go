@@ -111,19 +111,20 @@ func HashForContainerProfile(oc objectcache.ObjectCache) func([]ref.Val) string 
 // is appended to the key — use HashForContainerProfile to invalidate on spec changes.
 func (fc *FunctionCache) WithCache(fn CelFunction, functionName string, extraKeyFn ...func([]ref.Val) string) CelFunction {
 	return func(values ...ref.Val) ref.Val {
-		key := fc.generateCacheKey(functionName, values...)
+		var key strings.Builder
+		key.WriteString(fc.generateCacheKey(functionName, values...))
 		for _, fn := range extraKeyFn {
-			key += "|" + fn(values)
+			key.WriteString("|" + fn(values))
 		}
 
-		if cached, found := fc.cache.Get(key); found {
+		if cached, found := fc.cache.Get(key.String()); found {
 			return cached
 		}
 
 		result := fn(values...)
 
 		if !types.IsError(result) {
-			fc.cache.Add(key, result)
+			fc.cache.Add(key.String(), result)
 		}
 
 		return result
@@ -156,7 +157,7 @@ func (fc *FunctionCache) valueToString(val ref.Val) string {
 		return fmt.Sprintf("%d", v)
 	case float64:
 		return fmt.Sprintf("%f", v)
-	case []interface{}:
+	case []any:
 		var parts []string
 		for _, item := range v {
 			parts = append(parts, fmt.Sprintf("%v", item))

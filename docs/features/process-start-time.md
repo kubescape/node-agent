@@ -195,7 +195,7 @@ excludes darwin and everything under `pkg/processtree` imports it transitively.
 
 ```bash
 docker run --rm -v "$PWD":/src -v "$(go env GOMODCACHE)":/go/pkg/mod -w /src \
-  -e GOFLAGS=-mod=mod golang:1.25 go test ./pkg/processtree/... ./pkg/utils/...
+  -e GOFLAGS=-mod=mod golang:1.27 go test ./pkg/processtree/... ./pkg/utils/...
 ```
 
 The tick conversion is defined once per package (feeder and creator). Both are

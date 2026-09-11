@@ -20,17 +20,17 @@ func TestParseWithDefaults(t *testing.T) {
 		},
 		{
 			name:          "binding params only — ignorePrefixes",
-			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/tmp", "/var/log"}},
+			bindingParams: map[string]any{"ignorePrefixes": []any{"/tmp", "/var/log"}},
 			expect:        &Params{IgnorePrefixes: []string{"/tmp", "/var/log"}},
 		},
 		{
 			name:          "trailing slash stripped from prefix",
-			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/tmp/", "/var/log/"}},
+			bindingParams: map[string]any{"ignorePrefixes": []any{"/tmp/", "/var/log/"}},
 			expect:        &Params{IgnorePrefixes: []string{"/tmp", "/var/log"}},
 		},
 		{
 			name:      "rule state only — direction and methods",
-			ruleState: map[string]any{"direction": "inbound", "methods": []interface{}{"POST", "PUT"}},
+			ruleState: map[string]any{"direction": "inbound", "methods": []any{"POST", "PUT"}},
 			expect:    &Params{Dir: DirInbound, MethodMask: MethodPOST | MethodPUT},
 		},
 		{
@@ -41,18 +41,18 @@ func TestParseWithDefaults(t *testing.T) {
 		},
 		{
 			name:          "merge: state has direction, binding has prefixes",
-			ruleState:     map[string]any{"direction": "inbound", "methods": []interface{}{"POST"}},
-			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/tmp"}},
+			ruleState:     map[string]any{"direction": "inbound", "methods": []any{"POST"}},
+			bindingParams: map[string]any{"ignorePrefixes": []any{"/tmp"}},
 			expect:        &Params{Dir: DirInbound, MethodMask: MethodPOST, IgnorePrefixes: []string{"/tmp"}},
 		},
 		{
 			name:          "ports (float64 from JSON)",
-			bindingParams: map[string]any{"ports": []interface{}{float64(22), float64(2222)}},
+			bindingParams: map[string]any{"ports": []any{float64(22), float64(2222)}},
 			expect:        &Params{Ports: []uint16{22, 2222}},
 		},
 		{
 			name:          "file path prefix not broken by trailing-slash normalization",
-			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/etc/passwd"}},
+			bindingParams: map[string]any{"ignorePrefixes": []any{"/etc/passwd"}},
 			expect:        &Params{IgnorePrefixes: []string{"/etc/passwd"}},
 		},
 		{
@@ -62,20 +62,20 @@ func TestParseWithDefaults(t *testing.T) {
 		},
 		{
 			name:          "non-filterable keys only",
-			bindingParams: map[string]any{"enforceArgs": true, "additionalPaths": []interface{}{"/etc/shadow"}},
+			bindingParams: map[string]any{"enforceArgs": true, "additionalPaths": []any{"/etc/shadow"}},
 			expect:        nil,
 		},
 		{
 			name:          "non-filterable in state, filterable in binding",
 			ruleState:     map[string]any{"enforceArgs": true},
-			bindingParams: map[string]any{"ignorePrefixes": []interface{}{"/tmp"}},
+			bindingParams: map[string]any{"ignorePrefixes": []any{"/tmp"}},
 			expect:        &Params{IgnorePrefixes: []string{"/tmp"}},
 		},
 		{
 			name: "excludeProcesses parsed",
 			bindingParams: map[string]any{
-				"excludeProcesses": []interface{}{
-					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd"},
+				"excludeProcesses": []any{
+					map[string]any{"name": "dockerd", "path": "/usr/bin/dockerd"},
 				},
 			},
 			expect: &Params{
@@ -87,9 +87,9 @@ func TestParseWithDefaults(t *testing.T) {
 		{
 			name: "excludeParentProcesses parsed with multiple entries",
 			bindingParams: map[string]any{
-				"excludeParentProcesses": []interface{}{
-					map[string]interface{}{"name": "inspectorssmplu", "path": "/usr/bin/inspector-ssm-plugin"},
-					map[string]interface{}{"name": "ssm-agent-worke", "path": "/usr/bin/ssm-agent-worker"},
+				"excludeParentProcesses": []any{
+					map[string]any{"name": "inspectorssmplu", "path": "/usr/bin/inspector-ssm-plugin"},
+					map[string]any{"name": "ssm-agent-worke", "path": "/usr/bin/ssm-agent-worker"},
 				},
 			},
 			expect: &Params{
@@ -102,9 +102,9 @@ func TestParseWithDefaults(t *testing.T) {
 		{
 			name: "excludeProcesses mixed valid and invalid entries",
 			bindingParams: map[string]any{
-				"excludeProcesses": []interface{}{
-					map[string]interface{}{"name": "", "path": "/usr/bin/foo"},
-					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd"},
+				"excludeProcesses": []any{
+					map[string]any{"name": "", "path": "/usr/bin/foo"},
+					map[string]any{"name": "dockerd", "path": "/usr/bin/dockerd"},
 				},
 			},
 			expect: &Params{
@@ -116,10 +116,10 @@ func TestParseWithDefaults(t *testing.T) {
 		{
 			name: "excludeProcesses path normalized (trailing slash, missing leading slash, redundant segments)",
 			bindingParams: map[string]any{
-				"excludeProcesses": []interface{}{
-					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd/"},
-					map[string]interface{}{"name": "rpm", "path": "usr/bin/rpm"},
-					map[string]interface{}{"name": "curl", "path": "/usr/./bin/curl"},
+				"excludeProcesses": []any{
+					map[string]any{"name": "dockerd", "path": "/usr/bin/dockerd/"},
+					map[string]any{"name": "rpm", "path": "usr/bin/rpm"},
+					map[string]any{"name": "curl", "path": "/usr/./bin/curl"},
 				},
 			},
 			expect: &Params{
@@ -133,10 +133,10 @@ func TestParseWithDefaults(t *testing.T) {
 		{
 			name: "excludeProcesses path that normalizes to root is dropped",
 			bindingParams: map[string]any{
-				"excludeProcesses": []interface{}{
-					map[string]interface{}{"name": "wildcard", "path": "."},
-					map[string]interface{}{"name": "root", "path": "/"},
-					map[string]interface{}{"name": "dockerd", "path": "/usr/bin/dockerd"},
+				"excludeProcesses": []any{
+					map[string]any{"name": "wildcard", "path": "."},
+					map[string]any{"name": "root", "path": "/"},
+					map[string]any{"name": "dockerd", "path": "/usr/bin/dockerd"},
 				},
 			},
 			expect: &Params{

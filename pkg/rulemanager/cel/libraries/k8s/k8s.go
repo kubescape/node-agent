@@ -224,7 +224,7 @@ func (e *k8sCostEstimator) EstimateCallCost(function, overloadID string, target 
 		// Cache lookup + O(n) search through 3 container types by name
 		cost = 15
 	}
-	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+	return &checker.CallEstimate{Min: uint64(cost), Max: uint64(cost)}
 }
 
 func (e *k8sCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {

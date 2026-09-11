@@ -58,39 +58,39 @@ func (c *servicePortTestClient) GetDynamicClient() dynamic.Interface {
 	return nil
 }
 
-func newServiceWorkload(name string, selector map[string]interface{}, ports ...map[string]interface{}) k8sinterface.IWorkload {
-	portEntries := make([]interface{}, 0, len(ports))
+func newServiceWorkload(name string, selector map[string]any, ports ...map[string]any) k8sinterface.IWorkload {
+	portEntries := make([]any, 0, len(ports))
 	for _, port := range ports {
 		portEntries = append(portEntries, port)
 	}
-	return workloadinterface.NewWorkloadObj(map[string]interface{}{
+	return workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Service",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      name,
 			"namespace": "default",
 		},
-		"spec": map[string]interface{}{
+		"spec": map[string]any{
 			"selector": selector,
 			"ports":    portEntries,
 		},
 	})
 }
 
-func newEndpointsWorkload(name string, ports ...map[string]interface{}) k8sinterface.IWorkload {
-	portEntries := make([]interface{}, 0, len(ports))
+func newEndpointsWorkload(name string, ports ...map[string]any) k8sinterface.IWorkload {
+	portEntries := make([]any, 0, len(ports))
 	for _, port := range ports {
 		portEntries = append(portEntries, port)
 	}
-	return workloadinterface.NewWorkloadObj(map[string]interface{}{
+	return workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Endpoints",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      name,
 			"namespace": "default",
 		},
-		"subsets": []interface{}{
-			map[string]interface{}{
+		"subsets": []any{
+			map[string]any{
 				"ports": portEntries,
 			},
 		},
@@ -99,12 +99,10 @@ func newEndpointsWorkload(name string, ports ...map[string]interface{}) k8sinter
 
 func newEndpointSlice(name, serviceName string, ports ...discoveryv1.EndpointPort) *discoveryv1.EndpointSlice {
 	return &discoveryv1.EndpointSlice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: "default",
-			Labels: map[string]string{
-				discoveryv1.LabelServiceName: serviceName,
-			},
+		Name:      name,
+		Namespace: "default",
+		Labels: map[string]string{
+			discoveryv1.LabelServiceName: serviceName,
 		},
 		Ports: ports,
 	}
@@ -134,7 +132,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 	}{
 		{
 			name: "numeric remap",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"port": 80, "targetPort": 8080, "protocol": "TCP",
 			}),
 			event:     serviceNetworkEvent(80, "tcp"),
@@ -142,7 +140,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "unchanged when port equals targetPort",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"port": 8080, "targetPort": 8080, "protocol": "TCP",
 			}),
 			event:     serviceNetworkEvent(8080, "tcp"),
@@ -150,7 +148,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "omitted targetPort defaults to service port",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"port": 80, "protocol": "TCP",
 			}),
 			event:     serviceNetworkEvent(80, "tcp"),
@@ -158,7 +156,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "udp remap",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"port": 53, "targetPort": 5353, "protocol": "UDP",
 			}),
 			event:     serviceNetworkEvent(53, "udp"),
@@ -166,16 +164,16 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "multi-port service selects matching service port",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"},
-				map[string]interface{}{"port": 80, "targetPort": 8080, "protocol": "TCP"},
-				map[string]interface{}{"port": 443, "targetPort": 8443, "protocol": "TCP"},
+			service: newServiceWorkload("api", map[string]any{"app": "api"},
+				map[string]any{"port": 80, "targetPort": 8080, "protocol": "TCP"},
+				map[string]any{"port": 443, "targetPort": 8443, "protocol": "TCP"},
 			),
 			event:     serviceNetworkEvent(443, "tcp"),
 			wantPorts: []int32{8443},
 		},
 		{
 			name: "protocol mismatch keeps observed port",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"port": 80, "targetPort": 8080, "protocol": "TCP",
 			}),
 			event:     serviceNetworkEvent(80, "udp"),
@@ -183,7 +181,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "unknown observed port falls back",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"port": 80, "targetPort": 8080, "protocol": "TCP",
 			}),
 			event:     serviceNetworkEvent(9999, "tcp"),
@@ -191,12 +189,12 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "malformed service falls back safely",
-			service: workloadinterface.NewWorkloadObj(map[string]interface{}{
+			service: workloadinterface.NewWorkloadObj(map[string]any{
 				"apiVersion": "v1",
 				"kind":       "Service",
-				"metadata":   map[string]interface{}{"name": "api", "namespace": "default"},
-				"spec": map[string]interface{}{
-					"selector": map[string]interface{}{"app": "api"},
+				"metadata":   map[string]any{"name": "api", "namespace": "default"},
+				"spec": map[string]any{
+					"selector": map[string]any{"app": "api"},
 					"ports":    "invalid",
 				},
 			}),
@@ -205,13 +203,13 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "named targetPort resolves via endpointslice on service port name",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
 			}),
 			endpointSlice: []*discoveryv1.EndpointSlice{
 				newEndpointSlice("api-a", "api", discoveryv1.EndpointPort{
-					Name:     ptr.To("web"),
-					Port:     ptr.To(int32(8080)),
+					Name:     new("web"),
+					Port:     new(int32(8080)),
 					Protocol: ptr.To(corev1.ProtocolTCP),
 				}),
 			},
@@ -220,18 +218,18 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "heterogeneous named targetPort collects all endpoint ports",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
 			}),
 			endpointSlice: []*discoveryv1.EndpointSlice{
 				newEndpointSlice("api-a", "api", discoveryv1.EndpointPort{
-					Name:     ptr.To("web"),
-					Port:     ptr.To(int32(8080)),
+					Name:     new("web"),
+					Port:     new(int32(8080)),
 					Protocol: ptr.To(corev1.ProtocolTCP),
 				}),
 				newEndpointSlice("api-b", "api", discoveryv1.EndpointPort{
-					Name:     ptr.To("web"),
-					Port:     ptr.To(int32(9090)),
+					Name:     new("web"),
+					Port:     new(int32(9090)),
 					Protocol: ptr.To(corev1.ProtocolTCP),
 				}),
 			},
@@ -240,7 +238,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "nil endpoints after empty endpointslice lookup keeps observed port",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
 			}),
 			event:     serviceNetworkEvent(80, "tcp"),
@@ -248,10 +246,10 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 		},
 		{
 			name: "endpoints fallback when no endpointslice",
-			service: newServiceWorkload("api", map[string]interface{}{"app": "api"}, map[string]interface{}{
+			service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
 				"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
 			}),
-			endpoints: newEndpointsWorkload("api", map[string]interface{}{
+			endpoints: newEndpointsWorkload("api", map[string]any{
 				"name": "web", "port": 8080, "protocol": "TCP",
 			}),
 			event:     serviceNetworkEvent(80, "tcp"),
@@ -318,7 +316,7 @@ func TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged(t *testing.T) {
 }
 
 func TestGenerateNetworkPolicy_ServiceTargetPortRoundTrip(t *testing.T) {
-	service := newServiceWorkload("api", map[string]interface{}{"app.kubernetes.io/name": "api"}, map[string]interface{}{
+	service := newServiceWorkload("api", map[string]any{"app.kubernetes.io/name": "api"}, map[string]any{
 		"port": 80, "targetPort": 8080, "protocol": "TCP",
 	})
 	client := &servicePortTestClient{
@@ -341,16 +339,14 @@ func TestGenerateNetworkPolicy_ServiceTargetPortRoundTrip(t *testing.T) {
 	}
 
 	cp := &softwarecomposition.ContainerProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "deployment-client",
-			Namespace: "default",
-			Labels: map[string]string{
-				helpersv1.RelatedKindMetadataKey: "Deployment",
-				helpersv1.RelatedNameMetadataKey: "client",
-			},
-			Annotations: map[string]string{
-				helpersv1.StatusMetadataKey: helpersv1.Completed,
-			},
+		Name:      "deployment-client",
+		Namespace: "default",
+		Labels: map[string]string{
+			helpersv1.RelatedKindMetadataKey: "Deployment",
+			helpersv1.RelatedNameMetadataKey: "client",
+		},
+		Annotations: map[string]string{
+			helpersv1.StatusMetadataKey: helpersv1.Completed,
 		},
 		Spec: softwarecomposition.ContainerProfileSpec{
 			LabelSelector: metav1.LabelSelector{

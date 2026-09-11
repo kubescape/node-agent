@@ -57,30 +57,15 @@ func CreateDNSManager(size int) *DNSManager {
 		size = defaultDNSCacheSize
 	}
 
-	perContainerSize := defaultPerContainerCacheSize
-	if size < perContainerSize {
-		perContainerSize = size
-	}
+	perContainerSize := min(size, defaultPerContainerCacheSize)
 
 	maxContainers := size / perContainerSize
 	if maxContainers < minTrackedContainers {
-		maxContainers = minTrackedContainers
-		if maxContainers > size {
-			maxContainers = size
-		}
-		if maxContainers < 1 {
-			maxContainers = 1
-		}
-		perContainerSize = size / maxContainers
-		if perContainerSize < 1 {
-			perContainerSize = 1
-		}
+		maxContainers = max(min(minTrackedContainers, size), 1)
+		perContainerSize = max(size/maxContainers, 1)
 	}
 
-	hostCacheSize := perContainerSize
-	if hostCacheSize < 1 {
-		hostCacheSize = 1
-	}
+	hostCacheSize := max(perContainerSize, 1)
 
 	hostCache, err := lru.New[string, string](hostCacheSize)
 	if err != nil {

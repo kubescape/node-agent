@@ -58,8 +58,8 @@ func (ne *NetworkEvent) GetDestinationPodLabels() map[string]string {
 		return podLabels
 	}
 
-	podLabelsSlice := strings.Split(ne.Destination.PodLabels, ",")
-	for _, podLabel := range podLabelsSlice {
+	podLabelsSlice := strings.SplitSeq(ne.Destination.PodLabels, ",")
+	for podLabel := range podLabelsSlice {
 		podLabelSlice := strings.Split(podLabel, "=")
 		if len(podLabelSlice) == 2 {
 			podLabels[podLabelSlice[0]] = podLabelSlice[1]

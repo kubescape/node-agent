@@ -32,7 +32,7 @@ func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enriched
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = pid
 	if baseRuntimeAlert.Arguments == nil {
-		baseRuntimeAlert.Arguments = make(map[string]interface{})
+		baseRuntimeAlert.Arguments = make(map[string]any)
 	}
 	baseRuntimeAlert.Arguments["oldPath"] = oldPath
 	baseRuntimeAlert.Arguments["newPath"] = hardlinkEvent.GetNewPath()

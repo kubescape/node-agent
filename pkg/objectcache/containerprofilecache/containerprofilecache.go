@@ -730,7 +730,7 @@ func (c *ContainerProfileCacheImpl) NotifyContainerCompleted(containerID string)
 		return
 	}
 	go func() {
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			if i > 0 {
 				time.Sleep(3 * time.Second)
 			}

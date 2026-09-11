@@ -10,7 +10,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
-	"k8s.io/utils/ptr"
 )
 
 // Helper: build a ready-to-use library with a single-container profile.
@@ -267,7 +266,7 @@ func TestWasAddressPortProtocolInEgress_PortWrapRejected(t *testing.T) {
 		{
 			IPAddress: "10.1.2.3",
 			Ports: []v1beta1.NetworkPort{
-				{Name: "TCP-443", Protocol: "TCP", Port: ptr.To(int32(443))},
+				{Name: "TCP-443", Protocol: "TCP", Port: new(int32(443))},
 			},
 		},
 	}, nil)
@@ -345,7 +344,7 @@ func TestWasAddressPortProtocolInEgress_WithCIDR(t *testing.T) {
 		{
 			IPAddresses: []string{"10.0.0.0/8"},
 			Ports: []v1beta1.NetworkPort{
-				{Name: "TCP-443", Protocol: "TCP", Port: ptr.To(int32(443))},
+				{Name: "TCP-443", Protocol: "TCP", Port: new(int32(443))},
 			},
 		},
 	}, nil)

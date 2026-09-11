@@ -60,7 +60,7 @@ func TestDeclarationsCompileEachOverload(t *testing.T) {
 	// Activation for the eval pass: an empty objectCache has no profile, so
 	// every helper resolves to false via ConvertProfileNotAvailableErrToBool.
 	// Eval exercises each declared function's binding closure end-to-end.
-	activation := map[string]interface{}{
+	activation := map[string]any{
 		"containerID": "cid",
 		"s":           "x",
 		"strs":        []string{"a", "b"},

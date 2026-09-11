@@ -342,7 +342,7 @@ func TestCacheFallbackBehavior(t *testing.T) {
 
 	// Test cache hit behavior
 	hitCount := 0
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if cached, found := dm.lookupCache.Get(event.DNSName); found {
 			entry := cached.(cacheEntry)
 			if len(entry.addresses) > 0 {
@@ -384,11 +384,11 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Launch multiple goroutines to concurrently access the cache
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		go func() {
 			defer wg.Done()
 
-			for j := 0; j < numOperations; j++ {
+			for range numOperations {
 				// Randomly choose between writing and reading
 				if rand.Float32() < 0.5 {
 					// Write operation
@@ -636,7 +636,7 @@ func TestCloudServiceCacheLimit(t *testing.T) {
 	})
 
 	// Add more than maxServiceCacheSize cloud services
-	for i := 0; i < maxServiceCacheSize+10; i++ {
+	for i := range maxServiceCacheSize + 10 {
 		dm.ReportEvent(&utils.StructEvent{
 			EventType:   utils.DnsEventType,
 			ContainerID: containerID,

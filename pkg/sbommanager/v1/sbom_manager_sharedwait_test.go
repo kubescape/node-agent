@@ -103,8 +103,7 @@ func addContainerNotif(containerID string) containercollection.PubSubEvent {
 // wait ran inline on the pool worker again, A would head-of-line-block B — so B's work reaching
 // the worker while A is stuck is exactly what the fix guarantees.
 func Test_awaitAndSubmit_StuckContainerDoesNotBlockOthers(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // unblocks container A's still-waiting goroutine at test end
+	ctx := t.Context() // unblocks container A's still-waiting goroutine at test end
 
 	imageTag := "quay.io/kubescape/kubevuln:v0.3.2"
 	imageID := "sha256:94cbbb94f8d6bdf2529d5f9c5279ac4c7411182f4e8e5a3d0b5e8f10a465f73a"
@@ -150,8 +149,7 @@ func Test_awaitAndSubmit_StuckContainerDoesNotBlockOthers(t *testing.T) {
 // Test_cancelWait_StopsInFlightWait proves the container-remove path cancels the wait promptly so
 // a short-lived container can't park a goroutine for the full timeout.
 func Test_cancelWait_StopsInFlightWait(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	sm := &SbomManager{
 		ctx:            ctx,

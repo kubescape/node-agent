@@ -35,7 +35,7 @@ func (s *KubeProxyInfoSensor) GetPluralKind() string {
 }
 
 // Sense collects the kube-proxy info data from the host
-func (s *KubeProxyInfoSensor) Sense() (interface{}, error) {
+func (s *KubeProxyInfoSensor) Sense() (any, error) {
 	ctx := context.Background()
 	ret := KubeProxyInfoSpec{
 		NodeName: s.nodeName,

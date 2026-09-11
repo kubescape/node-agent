@@ -66,7 +66,7 @@ func newSyscallEvent(t *testing.T, containerID string) *utils.DatasourceEvent {
 	// Find a syscall number this build can resolve, so decodeSyscalls returns a
 	// non-empty list (callback returns early otherwise, before either signal fires).
 	knownNumber := -1
-	for i := 0; i < 512; i++ {
+	for i := range 512 {
 		if _, exist := syscalls.GetSyscallNameByNumber(i); exist {
 			knownNumber = i
 			break

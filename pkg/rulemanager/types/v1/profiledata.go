@@ -10,15 +10,15 @@ import (
 // ProfileDataRequired declares the per-rule profile fields the rule queries.
 // Nil means the rule reads no profile data.
 type ProfileDataRequired struct {
-	Opens            FieldRequirement `json:"opens,omitempty"            yaml:"opens,omitempty"`
-	Execs            FieldRequirement `json:"execs,omitempty"            yaml:"execs,omitempty"`
-	Capabilities     FieldRequirement `json:"capabilities,omitempty"     yaml:"capabilities,omitempty"`
-	Syscalls         FieldRequirement `json:"syscalls,omitempty"         yaml:"syscalls,omitempty"`
-	Endpoints        FieldRequirement `json:"endpoints,omitempty"        yaml:"endpoints,omitempty"`
-	EgressDomains    FieldRequirement `json:"egressDomains,omitempty"    yaml:"egressDomains,omitempty"`
-	EgressAddresses  FieldRequirement `json:"egressAddresses,omitempty"  yaml:"egressAddresses,omitempty"`
-	IngressDomains   FieldRequirement `json:"ingressDomains,omitempty"   yaml:"ingressDomains,omitempty"`
-	IngressAddresses FieldRequirement `json:"ingressAddresses,omitempty" yaml:"ingressAddresses,omitempty"`
+	Opens            FieldRequirement `json:"opens"            yaml:"opens,omitempty"`
+	Execs            FieldRequirement `json:"execs"            yaml:"execs,omitempty"`
+	Capabilities     FieldRequirement `json:"capabilities"     yaml:"capabilities,omitempty"`
+	Syscalls         FieldRequirement `json:"syscalls"         yaml:"syscalls,omitempty"`
+	Endpoints        FieldRequirement `json:"endpoints"        yaml:"endpoints,omitempty"`
+	EgressDomains    FieldRequirement `json:"egressDomains"    yaml:"egressDomains,omitempty"`
+	EgressAddresses  FieldRequirement `json:"egressAddresses"  yaml:"egressAddresses,omitempty"`
+	IngressDomains   FieldRequirement `json:"ingressDomains"   yaml:"ingressDomains,omitempty"`
+	IngressAddresses FieldRequirement `json:"ingressAddresses" yaml:"ingressAddresses,omitempty"`
 }
 
 var profileDataRequiredKnownFields = map[string]bool{

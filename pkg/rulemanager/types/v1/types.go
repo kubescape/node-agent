@@ -9,9 +9,9 @@ import (
 
 type Rules struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
 
-	Spec RulesSpec `json:"spec,omitempty"`
+	Spec RulesSpec `json:"spec"`
 }
 
 type RulesSpec struct {

@@ -76,7 +76,7 @@ func (s *KubeletInfoSensor) GetPluralKind() string {
 }
 
 // Sense collects the kubelet info data from the host
-func (s *KubeletInfoSensor) Sense() (interface{}, error) {
+func (s *KubeletInfoSensor) Sense() (any, error) {
 	ctx := context.Background()
 	ret := KubeletInfoSpec{
 		NodeName: s.nodeName,

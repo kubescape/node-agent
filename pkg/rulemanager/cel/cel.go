@@ -169,7 +169,7 @@ func (c *CEL) CreateEvalContext(event *events.EnrichedEvent) map[string]any {
 	eventType := event.Event.GetEventType()
 
 	// Apply event converter if one is registered, otherwise cast to CelEvent
-	var obj interface{}
+	var obj any
 	if converter, exists := c.eventConverters[eventType]; exists {
 		obj, _ = xcel.NewObject(converter(event.Event))
 	} else {
@@ -278,7 +278,7 @@ func (c *CEL) RegisterHelper(function cel.EnvOption) error {
 	return nil
 }
 
-func (c *CEL) RegisterCustomType(eventType utils.EventType, obj interface{}) error {
+func (c *CEL) RegisterCustomType(eventType utils.EventType, obj any) error {
 	c.typeMutex.Lock()
 	defer c.typeMutex.Unlock()
 

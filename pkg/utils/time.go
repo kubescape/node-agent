@@ -34,6 +34,6 @@ func RandomDuration(max int, duration time.Duration) time.Duration {
 	return time.Duration(rand.Intn(1+max-mini)+mini) * duration
 }
 
-func FuncName(i interface{}) string {
+func FuncName(i any) string {
 	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }

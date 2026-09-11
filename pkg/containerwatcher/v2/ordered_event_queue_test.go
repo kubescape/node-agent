@@ -100,7 +100,7 @@ func TestOrderedEventQueue_FullQueueAlert(t *testing.T) {
 	queue := NewOrderedEventQueue(10*time.Millisecond, 3)
 
 	// Add events up to the limit
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		event := &utils.StructEvent{ID: fmt.Sprintf("event_%d", i), Timestamp: int64(i)}
 		queue.AddEventDirect(utils.ExecveEventType, event, fmt.Sprintf("container_%d", i), uint32(i+100))
 	}
@@ -208,7 +208,7 @@ func TestOrderedEventQueue_LargeNumberOfEvents(t *testing.T) {
 
 	// Add events with random-ish timestamps
 	expectedOrder := make([]int, numEvents)
-	for i := 0; i < numEvents; i++ {
+	for i := range numEvents {
 		// Use reverse order timestamps so we can verify sorting works
 		timestamp := baseTime + int64((numEvents-i)*1000)
 		event := &utils.StructEvent{ID: fmt.Sprintf("event_%d", i), Timestamp: timestamp}
@@ -219,7 +219,7 @@ func TestOrderedEventQueue_LargeNumberOfEvents(t *testing.T) {
 	assert.Equal(t, numEvents, queue.Size())
 
 	// Pop all events and verify they come out in timestamp order
-	for i := 0; i < numEvents; i++ {
+	for i := range numEvents {
 		event, ok := queue.PopEvent()
 		require.True(t, ok, "Should be able to pop event %d", i)
 

@@ -129,10 +129,10 @@ func TestCheckAndSet_ConcurrentHammer(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < opsPerGoroutine; i++ {
+			for i := range opsPerGoroutine {
 				key := uint64(id*opsPerGoroutine+i) << 16
 				c.CheckAndSet(key, 156, uint16(1000))
 			}

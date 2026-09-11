@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	configmap       = unstructured.Unstructured{Object: map[string]interface{}{"kind": "ConfigMap", "metadata": map[string]interface{}{"uid": "748ad4a8-e5ff-44da-ba94-309992c97820"}}}
-	deployment      = unstructured.Unstructured{Object: map[string]interface{}{"kind": "Deployment", "metadata": map[string]interface{}{"uid": "6b1a0c50-277f-4aa1-a4f9-9fc278ce4fe2"}}}
-	pod             = unstructured.Unstructured{Object: map[string]interface{}{"kind": "Pod", "metadata": map[string]interface{}{"uid": "aa5e3e8f-2da5-4c38-93c0-210d3280d10f"}}}
+	configmap       = unstructured.Unstructured{Object: map[string]any{"kind": "ConfigMap", "metadata": map[string]any{"uid": "748ad4a8-e5ff-44da-ba94-309992c97820"}}}
+	deployment      = unstructured.Unstructured{Object: map[string]any{"kind": "Deployment", "metadata": map[string]any{"uid": "6b1a0c50-277f-4aa1-a4f9-9fc278ce4fe2"}}}
+	pod             = unstructured.Unstructured{Object: map[string]any{"kind": "Pod", "metadata": map[string]any{"uid": "aa5e3e8f-2da5-4c38-93c0-210d3280d10f"}}}
 	deploymentAdded = watch.Event{Type: watch.Added, Object: &deployment}
 	podAdded        = watch.Event{Type: watch.Added, Object: &pod}
 	podModified     = watch.Event{Type: watch.Modified, Object: &pod}
@@ -68,7 +68,7 @@ func TestCooldownQueue_StopDuringEviction(t *testing.T) {
 	const shortCooldown = 10 * time.Millisecond
 	const shortInterval = 5 * time.Millisecond
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		q := NewCooldownQueue[watch.Event](shortCooldown, shortInterval)
 
 		// Enqueue an event so there is something to evict.
@@ -77,13 +77,11 @@ func TestCooldownQueue_StopDuringEviction(t *testing.T) {
 		// Drain the result channel in a separate goroutine so the callback is
 		// not blocked on an unread receiver when we call Stop().
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			//nolint:revive // intentionally drain all events without processing them to unblock the relay goroutine
 			for range q.ResultChan() {
 			}
-		}()
+		})
 
 		// Sleep briefly so the TTL evicter goroutine is likely firing
 		// concurrently with the Stop() call below.

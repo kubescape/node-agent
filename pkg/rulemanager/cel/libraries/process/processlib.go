@@ -99,7 +99,7 @@ func (e *processCostEstimator) EstimateCallCost(function, overloadID string, tar
 		// File I/O + O(n) environment parsing + O(m) LD_PRELOAD array search (m=41 constants)
 		cost = 60
 	}
-	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+	return &checker.CallEstimate{Min: uint64(cost), Max: uint64(cost)}
 }
 
 func (e *processCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {

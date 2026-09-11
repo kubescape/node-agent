@@ -2,6 +2,7 @@ package process
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/google/cel-go/cel"
@@ -24,12 +25,12 @@ func TestProcessLibrary(t *testing.T) {
 	tests := []struct {
 		name     string
 		expr     string
-		expected interface{}
+		expected any
 	}{
 		{
 			name:     "get_process_env with current process PID",
 			expr:     fmt.Sprintf("process.get_process_env(%d)", currentPID),
-			expected: map[string]interface{}{}, // This will be empty for PID 1, but the function should work
+			expected: map[string]any{}, // This will be empty for PID 1, but the function should work
 		},
 		{
 			name:     "get_ld_hook_var with current process PID",
@@ -50,8 +51,8 @@ func TestProcessLibrary(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
-				"event": map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
+				"event": map[string]any{
 					"pid": 1234,
 				},
 			})
@@ -72,7 +73,7 @@ func TestProcessLibrary(t *testing.T) {
 			// For get_process_env, we expect a map (could be empty)
 			// For get_ld_hook_var, we expect a string (could be empty)
 			if tt.name == "get_process_env with current process PID" {
-				_, isMap := actual.(map[string]interface{})
+				_, isMap := actual.(map[string]any)
 				assert.True(t, isMap, "get_process_env should return a map")
 			} else if tt.name == "get_ld_hook_var with current process PID" {
 				_, isString := actual.(string)
@@ -146,8 +147,8 @@ func TestProcessLibraryErrorCases(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			_, _, err = program.Eval(map[string]interface{}{
-				"event": map[string]interface{}{
+			_, _, err = program.Eval(map[string]any{
+				"event": map[string]any{
 					"pid": 1234,
 				},
 			})
@@ -232,13 +233,7 @@ func TestLD_PRELOAD_ENV_VARS(t *testing.T) {
 	}
 
 	for _, expectedVar := range expectedVars {
-		found := false
-		for _, actualVar := range LD_PRELOAD_ENV_VARS {
-			if actualVar == expectedVar {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(LD_PRELOAD_ENV_VARS, expectedVar)
 		assert.True(t, found, "Expected LD environment variable %s not found in LD_PRELOAD_ENV_VARS", expectedVar)
 	}
 }

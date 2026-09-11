@@ -86,7 +86,7 @@ func TestCapabilityInProfile(t *testing.T) {
 				t.Fatalf("failed to create program: %v", err)
 			}
 
-			result, _, err := program.Eval(map[string]interface{}{
+			result, _, err := program.Eval(map[string]any{
 				"containerID":    tc.containerID,
 				"capabilityName": tc.capabilityName,
 			})
@@ -122,7 +122,7 @@ func TestCapabilityNoProfile(t *testing.T) {
 		t.Fatalf("failed to create program: %v", err)
 	}
 
-	result, _, err := program.Eval(map[string]interface{}{
+	result, _, err := program.Eval(map[string]any{
 		"containerID":    "test-container-id",
 		"capabilityName": "NET_ADMIN",
 	})
