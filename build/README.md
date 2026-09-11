@@ -68,7 +68,7 @@ make gadgets
 
 ## Build Prerequisites
 
-- **Go 1.25+** - For building the binary
+- **Go 1.27+** - For building the binary
 - **Docker** with buildx - For building container images
 - **Linux** - Required for eBPF gadget compilation
 - **Root/sudo** - Required for running gadget builds

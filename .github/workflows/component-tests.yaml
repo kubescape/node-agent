@@ -168,7 +168,7 @@ jobs:
           CGO_ENABLED: 0
         uses: actions/setup-go@v4
         with:
-          go-version: "1.25"
+          go-version: "1.27"
       - name: Set unlimited memlock limit
         run: |
           sudo sh -c "ulimit -l unlimited"

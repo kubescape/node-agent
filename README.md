@@ -467,7 +467,7 @@ ls -la /sys/kernel/btf/vmlinux
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.27+
 - Linux with kernel 5.4+ (for eBPF)
 - Docker (for building images)
 - kubectl & helm (for testing)
