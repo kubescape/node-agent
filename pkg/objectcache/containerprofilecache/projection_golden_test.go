@@ -119,14 +119,14 @@ func toGolden(pcp *objectcache.ProjectedContainerProfile, tree *callstackcache.C
 // --- fixture construction helpers ---
 
 // declaredAll returns a FieldRequirement declaring the whole surface.
-func declaredAll() typesv1.FieldRequirement {
-	return typesv1.FieldRequirement{Declared: true, All: true}
+func declaredAll() *typesv1.FieldRequirement {
+	return &typesv1.FieldRequirement{All: true}
 }
 
 // declaredPatterns returns a FieldRequirement declaring a set of pattern
 // selectors (exact / prefix / suffix / contains).
-func declaredPatterns(pats ...typesv1.PatternObject) typesv1.FieldRequirement {
-	return typesv1.FieldRequirement{Declared: true, Patterns: pats}
+func declaredPatterns(pats ...typesv1.PatternObject) *typesv1.FieldRequirement {
+	return &typesv1.FieldRequirement{Patterns: pats}
 }
 
 // linearCallStack builds a single-path identified call stack from an ordered

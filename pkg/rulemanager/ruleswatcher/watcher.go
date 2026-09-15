@@ -2,6 +2,7 @@ package ruleswatcher
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/Masterminds/semver/v3"
@@ -118,12 +119,54 @@ func (w *RulesWatcherImpl) InitialSync(ctx context.Context) error {
 }
 
 func unstructuredToRules(obj *unstructured.Unstructured) (*typesv1.Rules, error) {
+	if err := validateRawProfileDataInUnstructured(obj); err != nil {
+		return nil, err
+	}
+
 	rule := &typesv1.Rules{}
 	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &rule); err != nil {
 		return nil, err
 	}
 
+	for _, r := range rule.Spec.Rules {
+		if r.ProfileDataRequired != nil {
+			if err := r.ProfileDataRequired.Validate(); err != nil {
+				return nil, fmt.Errorf("rule %q invalid profileDataRequired: %w", r.ID, err)
+			}
+		}
+	}
+
 	return rule, nil
+}
+
+func validateRawProfileDataInUnstructured(obj *unstructured.Unstructured) error {
+	if obj == nil || obj.Object == nil {
+		return nil
+	}
+	spec, ok := obj.Object["spec"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	rulesRaw, ok := spec["rules"].([]any)
+	if !ok {
+		return nil
+	}
+	for i, r := range rulesRaw {
+		ruleMap, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if pdr, exists := ruleMap["profileDataRequired"]; exists && pdr != nil {
+			if err := typesv1.ValidateRawProfileDataRequired(pdr); err != nil {
+				ruleID, _ := ruleMap["id"].(string)
+				if ruleID != "" {
+					return fmt.Errorf("rule %q: %w", ruleID, err)
+				}
+				return fmt.Errorf("rule[%d]: %w", i, err)
+			}
+		}
+	}
+	return nil
 }
 
 // isAgentVersionCompatible checks if the current agent version satisfies the given requirement

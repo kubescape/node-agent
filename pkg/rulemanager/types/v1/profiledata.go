@@ -1,214 +1,142 @@
 package types
 
 import (
-	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
-// ProfileDataRequired declares the per-rule profile fields the rule queries.
-// Nil means the rule reads no profile data.
-type ProfileDataRequired struct {
-	Opens            FieldRequirement `json:"opens"            yaml:"opens,omitempty"`
-	Execs            FieldRequirement `json:"execs"            yaml:"execs,omitempty"`
-	Capabilities     FieldRequirement `json:"capabilities"     yaml:"capabilities,omitempty"`
-	Syscalls         FieldRequirement `json:"syscalls"         yaml:"syscalls,omitempty"`
-	Endpoints        FieldRequirement `json:"endpoints"        yaml:"endpoints,omitempty"`
-	EgressDomains    FieldRequirement `json:"egressDomains"    yaml:"egressDomains,omitempty"`
-	EgressAddresses  FieldRequirement `json:"egressAddresses"  yaml:"egressAddresses,omitempty"`
-	IngressDomains   FieldRequirement `json:"ingressDomains"   yaml:"ingressDomains,omitempty"`
-	IngressAddresses FieldRequirement `json:"ingressAddresses" yaml:"ingressAddresses,omitempty"`
-}
+// The profileDataRequired schema (the type, its match patterns, and the custom
+// JSON/YAML/BSON (un)marshalling) lives in armoapi-go/armotypes — the single
+// module imported by every consumer: node-agent (this query side: projection /
+// was_path_opened), storage (the generation side: rule-aware collapse), and the
+// backend (rules persisted in MongoDB). Defining it once there guarantees the
+// matcher can never drift between the side that records a profile and the side
+// that queries it.
+//
+// These aliases preserve node-agent's historical type names. Note the shape
+// change versus the old node-agent-local schema: a surface is now a *pointer*
+// (ProfileDataRequired.Opens is *ProfileDataField); a nil pointer means "this
+// rule does not declare this surface" — the role the old `Declared` bool played.
+type (
+	ProfileDataRequired = armotypes.ProfileDataRequired
+	FieldRequirement    = armotypes.ProfileDataField
+	PatternObject       = armotypes.ProfileDataPattern
+)
 
-var profileDataRequiredKnownFields = map[string]bool{
-	"opens": true, "execs": true, "capabilities": true,
-	"syscalls": true, "endpoints": true,
-	"egressDomains": true, "egressAddresses": true,
-	"ingressDomains": true, "ingressAddresses": true,
-}
+var (
+	// KnownProfileDataSurfaces and KnownProfileDataPatternFields are extracted
+	// dynamically from the canonical armotypes structs so node-agent never
+	// duplicates the field lists and automatically inherits any new surfaces.
+	KnownProfileDataSurfaces      = extractJSONFieldNames(reflect.TypeOf(armotypes.ProfileDataRequired{}))
+	KnownProfileDataPatternFields = extractJSONFieldNames(reflect.TypeOf(armotypes.ProfileDataPattern{}))
+)
 
-// UnmarshalJSON rejects unknown fields.
-func (p *ProfileDataRequired) UnmarshalJSON(data []byte) error {
-	*p = ProfileDataRequired{} // reset to avoid stale state if receiver is reused
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+func extractJSONFieldNames(t reflect.Type) map[string]bool {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
 	}
-	for k := range raw {
-		if !profileDataRequiredKnownFields[k] {
+	m := make(map[string]bool, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name != "" {
+			m[name] = true
+		}
+	}
+	return m
+}
+
+// ValidateRawProfileDataRequired inspects raw, untyped profileDataRequired
+// definitions (e.g. from an unstructured CRD or JSON/YAML map) before conversion
+// to armotypes.ProfileDataRequired discards unknown keys.
+func ValidateRawProfileDataRequired(raw any) error {
+	if raw == nil {
+		return nil
+	}
+	rawMap, ok := toStringMap(raw)
+	if !ok {
+		return fmt.Errorf("profileDataRequired must be a map, got %T", raw)
+	}
+
+	for k, v := range rawMap {
+		if !KnownProfileDataSurfaces[k] {
 			return fmt.Errorf("profileDataRequired: unknown field %q", k)
 		}
-	}
-	type plain ProfileDataRequired
-	return json.Unmarshal(data, (*plain)(p))
-}
-
-// UnmarshalYAML rejects unknown fields.
-func (p *ProfileDataRequired) UnmarshalYAML(value *yaml.Node) error {
-	*p = ProfileDataRequired{} // reset to avoid stale state if receiver is reused
-	if value.Kind == yaml.MappingNode {
-		for i := 0; i < len(value.Content)-1; i += 2 {
-			key := value.Content[i].Value
-			if !profileDataRequiredKnownFields[key] {
-				return fmt.Errorf("profileDataRequired: unknown field %q", key)
-			}
+		if v == nil {
+			continue
 		}
-	}
-	type plain ProfileDataRequired
-	return value.Decode((*plain)(p))
-}
-
-// FieldRequirement is the per-field declaration. After unmarshalling, exactly
-// one of (All, Patterns) is meaningful. Declared=true when the YAML key was
-// present, letting the spec compiler distinguish absent-from-this-rule vs
-// explicitly declared.
-type FieldRequirement struct {
-	All      bool
-	Patterns []PatternObject
-	Declared bool
-}
-
-// PatternObject — exactly one of {Exact, Prefix, Suffix, Contains} is non-empty.
-// Multi-key or empty objects are rejected at unmarshal time.
-type PatternObject struct {
-	Exact    string `json:"exact,omitempty"    yaml:"exact,omitempty"`
-	Prefix   string `json:"prefix,omitempty"   yaml:"prefix,omitempty"`
-	Suffix   string `json:"suffix,omitempty"   yaml:"suffix,omitempty"`
-	Contains string `json:"contains,omitempty" yaml:"contains,omitempty"`
-}
-
-var patternObjectKnownFields = map[string]bool{
-	"exact": true, "prefix": true, "suffix": true, "contains": true,
-}
-
-// UnmarshalJSON rejects unknown fields in a PatternObject so typos in rule
-// YAML/JSON are caught at load time rather than silently ignored.
-func (p *PatternObject) UnmarshalJSON(data []byte) error {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	for k := range raw {
-		if !patternObjectKnownFields[k] {
-			return fmt.Errorf("PatternObject: unknown field %q", k)
+		if err := validateRawProfileDataField(k, v); err != nil {
+			return err
 		}
-	}
-	type plain PatternObject
-	return json.Unmarshal(data, (*plain)(p))
-}
-
-// UnmarshalYAML rejects unknown fields in a PatternObject.
-func (p *PatternObject) UnmarshalYAML(value *yaml.Node) error {
-	if value.Kind == yaml.MappingNode {
-		for i := 0; i < len(value.Content)-1; i += 2 {
-			key := value.Content[i].Value
-			if !patternObjectKnownFields[key] {
-				return fmt.Errorf("PatternObject: unknown field %q", key)
-			}
-		}
-	}
-	type plain PatternObject
-	return value.Decode((*plain)(p))
-}
-
-// validate checks that exactly one field is set.
-func (p PatternObject) validate() error {
-	count := 0
-	if p.Exact != "" {
-		count++
-	}
-	if p.Prefix != "" {
-		count++
-	}
-	if p.Suffix != "" {
-		count++
-	}
-	if p.Contains != "" {
-		count++
-	}
-	if count == 0 {
-		return fmt.Errorf("PatternObject must have exactly one non-empty field (exact/prefix/suffix/contains), got none")
-	}
-	if count > 1 {
-		return fmt.Errorf("PatternObject must have exactly one non-empty field (exact/prefix/suffix/contains), got %d", count)
 	}
 	return nil
 }
 
-// UnmarshalJSON for FieldRequirement: accepts the string "all" or a non-empty
-// JSON array of PatternObject.
-func (f *FieldRequirement) UnmarshalJSON(data []byte) error {
-	*f = FieldRequirement{} // reset to clear any stale All/Patterns before decode
-	f.Declared = true
-
-	// Try string "all"
-	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
+func validateRawProfileDataField(surface string, val any) error {
+	if s, ok := val.(string); ok {
 		if s != "all" {
-			return fmt.Errorf("FieldRequirement string value must be \"all\", got %q", s)
+			return fmt.Errorf("profileDataRequired.%s: string value must be \"all\", got %q", surface, s)
 		}
-		f.All = true
 		return nil
 	}
 
-	// Try array of PatternObject
-	var patterns []PatternObject
-	if err := json.Unmarshal(data, &patterns); err != nil {
-		return fmt.Errorf("FieldRequirement must be \"all\" or a list of pattern objects: %w", err)
+	slice, ok := toSlice(val)
+	if !ok {
+		return fmt.Errorf("profileDataRequired.%s: expected \"all\" or pattern list, got %T", surface, val)
 	}
-	if len(patterns) == 0 {
-		return fmt.Errorf("FieldRequirement pattern list must be non-empty; use \"all\" to retain all entries")
+	if len(slice) == 0 {
+		return fmt.Errorf("profileDataRequired.%s: pattern list must not be empty", surface)
 	}
-	for i, p := range patterns {
-		if err := p.validate(); err != nil {
-			return fmt.Errorf("FieldRequirement[%d]: %w", i, err)
+
+	for i, pat := range slice {
+		patMap, ok := toStringMap(pat)
+		if !ok {
+			return fmt.Errorf("profileDataRequired.%s[%d]: pattern must be an object, got %T", surface, i, pat)
+		}
+		if len(patMap) == 0 {
+			return fmt.Errorf("profileDataRequired.%s[%d]: empty pattern object", surface, i)
+		}
+		for pk := range patMap {
+			if !KnownProfileDataPatternFields[pk] {
+				return fmt.Errorf("profileDataRequired.%s[%d]: unknown field %q", surface, i, pk)
+			}
 		}
 	}
-	f.Patterns = patterns
 	return nil
 }
 
-// MarshalJSON for FieldRequirement: emits "all" or the pattern list.
-func (f FieldRequirement) MarshalJSON() ([]byte, error) {
-	if !f.Declared {
-		return []byte("null"), nil
+func toStringMap(v any) (map[string]any, bool) {
+	if m, ok := v.(map[string]any); ok {
+		return m, true
 	}
-	if f.All {
-		return []byte(`"all"`), nil
+	val := reflect.ValueOf(v)
+	if val.Kind() == reflect.Map {
+		res := make(map[string]any, val.Len())
+		for _, key := range val.MapKeys() {
+			res[fmt.Sprint(key.Interface())] = val.MapIndex(key).Interface()
+		}
+		return res, true
 	}
-	return json.Marshal(f.Patterns)
+	return nil, false
 }
 
-// UnmarshalYAML for FieldRequirement: accepts the string "all" or a non-empty
-// sequence of pattern objects.
-func (f *FieldRequirement) UnmarshalYAML(unmarshal func(any) error) error {
-	*f = FieldRequirement{} // reset to clear any stale All/Patterns before decode
-	f.Declared = true
-
-	// Try string first.
-	var s string
-	if err := unmarshal(&s); err == nil {
-		if s != "all" {
-			return fmt.Errorf("FieldRequirement string value must be \"all\", got %q", s)
+func toSlice(v any) ([]any, bool) {
+	if s, ok := v.([]any); ok {
+		return s, true
+	}
+	val := reflect.ValueOf(v)
+	if val.Kind() == reflect.Slice {
+		res := make([]any, val.Len())
+		for i := 0; i < val.Len(); i++ {
+			res[i] = val.Index(i).Interface()
 		}
-		f.All = true
-		return nil
+		return res, true
 	}
-
-	// Try slice of PatternObject.
-	var patterns []PatternObject
-	if err := unmarshal(&patterns); err != nil {
-		return fmt.Errorf("FieldRequirement must be \"all\" or a list of pattern objects: %w", err)
-	}
-	if len(patterns) == 0 {
-		return fmt.Errorf("FieldRequirement pattern list must be non-empty; use \"all\" to retain all entries")
-	}
-	for i, p := range patterns {
-		if err := p.validate(); err != nil {
-			return fmt.Errorf("FieldRequirement[%d]: %w", i, err)
-		}
-	}
-	f.Patterns = patterns
-	return nil
+	return nil, false
 }
