@@ -1,11 +1,14 @@
 package ruleswatcher
 
 import (
+	"os"
 	"testing"
 
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
 func TestUnstructuredToRules_ProfileDataRequired(t *testing.T) {
@@ -105,3 +108,30 @@ func TestUnstructuredToRules_ProfileDataRequired(t *testing.T) {
 		assert.Contains(t, err.Error(), "exactly one of {exact, prefix, suffix, contains} must be set")
 	})
 }
+
+func TestUnstructuredToRules_DefaultRulesYAML(t *testing.T) {
+	data, err := os.ReadFile("../../../tests/chart/templates/node-agent/default-rules.yaml")
+	require.NoError(t, err)
+
+	var objMap map[string]any
+	err = yaml.Unmarshal(data, &objMap)
+	require.NoError(t, err)
+
+	obj := &unstructured.Unstructured{Object: objMap}
+	rules, err := unstructuredToRules(obj)
+	require.NoError(t, err)
+	require.NotEmpty(t, rules.Spec.Rules)
+
+	var r0001 *typesv1.Rule
+	for i := range rules.Spec.Rules {
+		if rules.Spec.Rules[i].ID == "R0001" {
+			r0001 = &rules.Spec.Rules[i]
+			break
+		}
+	}
+	require.NotNil(t, r0001)
+	require.NotNil(t, r0001.ProfileDataRequired)
+	require.NotNil(t, r0001.ProfileDataRequired.Execs)
+	assert.True(t, r0001.ProfileDataRequired.Execs.All)
+}
+
