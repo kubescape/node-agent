@@ -37,6 +37,10 @@ func GetContainerName(objectCache objectcache.ObjectCache, containerID string) s
 	return containerInfos[sharedData.ContainerIndex].Name
 }
 
+// GetPodSpec returns the Kubernetes pod spec associated with containerID's
+// shared container data. For the host pseudo-container, which has no real
+// backing Pod, it returns an explicitly empty PodSpec rather than attempting
+// a lookup that would always miss.
 func GetPodSpec(objectCache objectcache.ObjectCache, containerID string) (*corev1.PodSpec, error) {
 	sharedData := objectCache.K8sObjectCache().GetSharedContainerData(containerID)
 	if sharedData == nil {

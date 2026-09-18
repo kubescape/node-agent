@@ -73,6 +73,8 @@ func ResolveHostID(cfg *config.Config) (string, error) {
 	return machineID, nil
 }
 
+// trimTrailingNewline strips a single trailing newline from b, matching the
+// common shape of a single-line file such as /etc/machine-id.
 func trimTrailingNewline(b []byte) string {
 	s := string(b)
 	for len(s) > 0 && (s[len(s)-1] == '\n' || s[len(s)-1] == '\r') {

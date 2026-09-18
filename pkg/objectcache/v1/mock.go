@@ -225,6 +225,9 @@ func (r *RuleObjectCacheMock) SetContainerProfile(cp *v1beta1.ContainerProfile) 
 	r.cp = cp
 }
 
+// GetContainerProfileState returns the state set via SetContainerProfileState,
+// or a synthetic "not found" error state by default. It never returns nil,
+// mirroring the real ContainerProfileCache implementation.
 func (r *RuleObjectCacheMock) GetContainerProfileState(_ string) *objectcache.ProfileState {
 	if r.profileState != nil {
 		return r.profileState

@@ -154,6 +154,9 @@ type SbomManager struct {
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
+// CreateSbomManager builds a SbomManager wired with the given dependencies,
+// including the host filesystem root (HOST_ROOT, defaulting to /host) used
+// by the separate host SBOM scan branch.
 func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter, metrics metricsmanager.MetricsManager) (*SbomManager, error) {
 	if metrics == nil {
 		metrics = &metricsmanager.MetricsNoop{}
@@ -257,6 +260,10 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 	return nil, fmt.Errorf("failed to find lowerdir in %s", mounts[0].VFSOptions)
 }
 
+// ContainerCallback handles add/remove container-collection events. Host
+// pseudo-container events are routed to the separate host SBOM scan branch
+// (startHostSbomLifecycle); everything else follows the image/mount-driven
+// container SBOM path.
 func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:

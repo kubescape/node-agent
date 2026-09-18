@@ -174,6 +174,9 @@ func LoadConfig(path string) (Config, error) {
 	return LoadConfigOptional(path, true)
 }
 
+// LoadConfigOptional reads configuration from path, applying defaults for
+// every unset field. When errNotFound is false, a missing config file is
+// tolerated and defaults are used instead of returning an error.
 func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.AddConfigPath(path)
 	viper.SetConfigName("config")

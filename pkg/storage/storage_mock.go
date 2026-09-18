@@ -36,6 +36,10 @@ var _ ProfileCreator = (*StorageHttpClientMock)(nil)
 var _ SbomClient = (*StorageHttpClientMock)(nil)
 var _ StorageClient = (*StorageHttpClientMock)(nil)
 
+// CreateContainerProfileDirect records profile as if it had been persisted to
+// storage. Guarded by containerProfilesMu since it may be invoked from a
+// caller's own background goroutine (e.g. the container profile manager's
+// persistent queue processing loop).
 func (sc *StorageHttpClientMock) CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error {
 	sc.containerProfilesMu.Lock()
 	defer sc.containerProfilesMu.Unlock()
@@ -60,6 +64,8 @@ func (sc *StorageHttpClientMock) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SB
 	return SBOM, nil
 }
 
+// GetContainerProfile finds a previously recorded profile by namespace and
+// name, or (nil, nil) if none matches.
 func (sc *StorageHttpClientMock) GetContainerProfile(_ context.Context, namespace, name string) (*v1beta1.ContainerProfile, error) {
 	sc.containerProfilesMu.Lock()
 	defer sc.containerProfilesMu.Unlock()
