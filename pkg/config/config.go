@@ -97,6 +97,7 @@ type Config struct {
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
 	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
 	HostMonitoringEnabled          bool                                 `mapstructure:"hostMonitoringEnabled"`
+	HostSBOMRescanInterval         time.Duration                        `mapstructure:"hostSBOMRescanInterval"`
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
@@ -228,6 +229,14 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
 	viper.SetDefault("hostMonitoringEnabled", false)
+	// HostSBOMRescanInterval is how often the host's root-filesystem SBOM is
+	// regenerated. It is scoped exclusively to the host SBOM lifecycle (see
+	// pkg/sbommanager/v1/host_sbom.go): the container SBOM path stays one-shot
+	// plus tool-version-bump reprocessing and is never driven by this interval.
+	// A value <= 0 leaves the host SBOM one-shot too. 24h matches the cadence at
+	// which a node's installed packages realistically change (patching windows),
+	// while keeping a full root-filesystem walk off the node's hot path.
+	viper.SetDefault("hostSBOMRescanInterval", 24*time.Hour)
 	viper.SetDefault("standaloneMonitoringEnabled", false)
 	// HTTP Exporter Alert Bulking defaults
 	viper.SetDefault("exporters::httpExporterConfig::bulkMaxAlerts", 50)

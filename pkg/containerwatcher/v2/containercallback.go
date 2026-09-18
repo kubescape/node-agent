@@ -5,6 +5,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -13,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/hostidentity"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -64,7 +66,19 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 		cw.metrics.ReportContainerStart()
 
 		if utils.IsHostContainer(notif.Container) {
-			logger.L().Debug("ContainerWatcher.containerCallback - skipping shared data setup for virtual host container")
+			// The virtual host pseudo-container has no backing Kubernetes
+			// workload, so it must never go through setSharedWatchedContainerData:
+			// that path calls k8sClient.GetWorkload("", "") in an unbounded
+			// exponential-backoff retry loop for a workload that will never
+			// exist, leaking a goroutine per node forever. Use the synthetic
+			// identity built by pkg/hostidentity instead.
+			hostID, err := hostidentity.ResolveHostID(&cw.cfg)
+			if err != nil {
+				logger.L().Error("ContainerWatcher.containerCallback - failed to resolve host ID for virtual host container", helpers.Error(err))
+				return
+			}
+			hostWatchedContainerData := hostidentity.BuildHostWatchedContainerData(hostID)
+			cw.objectCache.K8sObjectCache().SetSharedContainerData(armotypes.HostContainerID, hostWatchedContainerData)
 			return
 		}
 

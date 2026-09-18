@@ -123,11 +123,6 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 		return
 	}
 
-	// Skip profile metadata for host containers - they don't have profiles
-	if triggerEvent.GetContainerID() == armotypes.HostContainerID {
-		return
-	}
-
 	var profileType armotypes.ProfileType
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 	profileRequirment := rule.ProfileDependency
@@ -147,7 +142,13 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 	switch profileType {
 	case armotypes.ApplicationProfile:
 		state := objectCache.ContainerProfileCache().GetContainerProfileState(triggerEvent.GetContainerID())
-		if state != nil {
+		// Presence-based check: GetContainerProfileState never returns nil --
+		// it synthesizes an error state when no entry exists yet for this
+		// container (any container, host included, very early in its
+		// lifecycle before a profile has been primed). Only attach profile
+		// metadata when a profile is genuinely present; otherwise skip,
+		// exactly as we would for any container with no profile data yet.
+		if state.Error == nil {
 			profileMetadata := &armotypes.ProfileMetadata{
 				Status:            state.Status,
 				Completion:        state.Completion,
@@ -156,15 +157,12 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 				Type:              armotypes.ApplicationProfile,
 				ProfileDependency: profileRequirment,
 			}
-			if state.Error != nil {
-				profileMetadata.Error = state.Error.Error()
-			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
 
 	case armotypes.NetworkProfile:
 		state := objectCache.ContainerProfileCache().GetContainerProfileState(triggerEvent.GetContainerID())
-		if state != nil {
+		if state.Error == nil {
 			profileMetadata := &armotypes.ProfileMetadata{
 				Status:            state.Status,
 				Completion:        state.Completion,
@@ -172,9 +170,6 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 				FailOnProfile:     state.Status == helpersv1.Completed,
 				Type:              armotypes.NetworkProfile,
 				ProfileDependency: profileRequirment,
-			}
-			if state.Error != nil {
-				profileMetadata.Error = state.Error.Error()
 			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
@@ -313,6 +308,18 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 	containerID := runtimek8sdetails.ContainerID
 	namespace := runtimek8sdetails.Namespace
 	podName := runtimek8sdetails.PodName
+
+	// The host pseudo-container is not backed by a Kubernetes Pod or workload.
+	// Its shared container data is synthetic (see pkg/hostidentity), so neither
+	// the WorkloadUID it carries nor a pod-cache lookup on its synthetic
+	// Namespace/PodName describes real cluster state - leave both UIDs empty
+	// rather than fabricating them. This guard is separate from setProfileMetadata's
+	// presence-based profile-metadata check (state.Error == nil) - the two functions
+	// guard different data (profile metadata vs. K8s pod/workload UIDs).
+	if containerID == armotypes.HostContainerID {
+		ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
+		return
+	}
 
 	// Try to get WorkloadUID from shared container data (pre-computed from WLID)
 	if containerID != "" {

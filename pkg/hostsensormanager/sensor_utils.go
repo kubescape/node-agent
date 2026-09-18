@@ -28,6 +28,24 @@ func init() {
 
 // --- File Utilities ---
 
+// HostFSPrefix returns the configured mount point for the host filesystem
+// (defaults to "/host_fs", overridable via the HOST_ROOT env var). Exported so
+// other packages (e.g. pkg/hostidentity, sbommanager) can reuse the same
+// host-root derivation instead of re-reading the env var themselves.
+func HostFSPrefix() string {
+	return hostFSPrefix
+}
+
+// SetHostFSPrefixForTest overrides the host filesystem prefix and returns a
+// restore func. It exists so tests in other packages (e.g. pkg/hostidentity)
+// can exercise host-root-relative code paths without depending on the
+// HOST_ROOT env var being set before this package's init() runs.
+func SetHostFSPrefixForTest(prefix string) (restore func()) {
+	orig := hostFSPrefix
+	hostFSPrefix = prefix
+	return func() { hostFSPrefix = orig }
+}
+
 // hostPath converts a path to the host filesystem path
 func hostPath(p string) string {
 	if strings.HasPrefix(p, hostFSPrefix) {

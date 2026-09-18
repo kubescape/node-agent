@@ -1,0 +1,137 @@
+package containerwatcher
+
+import (
+	"sync"
+	"testing"
+
+	"github.com/armosec/armoapi-go/armotypes"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/workerpool"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// countingK8sObjectCache wraps objectcache.K8sObjectCacheMock and records how
+// many times SetSharedContainerData is invoked, and with what container ID,
+// so the test can assert exactly-once semantics for the host pseudo-container.
+type countingK8sObjectCache struct {
+	objectcache.K8sObjectCacheMock
+
+	mu            sync.Mutex
+	setCalls      int
+	setContainers []string
+}
+
+func (c *countingK8sObjectCache) SetSharedContainerData(containerID string, data *objectcache.WatchedContainerData) {
+	c.mu.Lock()
+	c.setCalls++
+	c.setContainers = append(c.setContainers, containerID)
+	c.mu.Unlock()
+	c.K8sObjectCacheMock.SetSharedContainerData(containerID, data)
+}
+
+// countingObjectCache implements objectcache.ObjectCache and always returns
+// the same countingK8sObjectCache instance, so calls across multiple
+// callback invocations accumulate on one counter instead of a fresh mock.
+type countingObjectCache struct {
+	k8sCache *countingK8sObjectCache
+}
+
+func (c *countingObjectCache) K8sObjectCache() objectcache.K8sObjectCache {
+	return c.k8sCache
+}
+func (c *countingObjectCache) ContainerProfileCache() objectcache.ContainerProfileCache {
+	return &objectcache.ContainerProfileCacheMock{}
+}
+func (c *countingObjectCache) DnsCache() objectcache.DnsCache {
+	return &objectcache.DnsCacheMock{}
+}
+
+var _ objectcache.ObjectCache = (*countingObjectCache)(nil)
+
+// TestContainerCallbackAsync_HostContainer_UsesSyntheticIdentity proves that
+// the host pseudo-container ends up with real (synthetic) shared data
+// available via GetSharedContainerData("host") after the callback fires, and
+// that the data is Wlid-based (not a zero-value struct).
+func TestContainerCallbackAsync_HostContainer_UsesSyntheticIdentity(t *testing.T) {
+	k8sCache := &countingK8sObjectCache{}
+	oc := &countingObjectCache{k8sCache: k8sCache}
+
+	cw := &ContainerWatcher{
+		cfg:         config.Config{NodeName: "test-node"},
+		objectCache: oc,
+		metrics:     metricsmanager.NewMetricsMock(),
+		// k8sClient is intentionally left nil: if the host branch ever falls
+		// through to setSharedWatchedContainerData, it will call
+		// cw.k8sClient.GetWorkload(...) on a nil *k8sinterface.KubernetesApi
+		// and panic, failing this test.
+	}
+
+	container := &containercollection.Container{}
+	container.Runtime.ContainerID = armotypes.HostContainerID
+
+	require.NotPanics(t, func() {
+		cw.containerCallbackAsync(containercollection.PubSubEvent{
+			Type:      containercollection.EventTypeAddContainer,
+			Container: container,
+		})
+	})
+
+	data := k8sCache.GetSharedContainerData(armotypes.HostContainerID)
+	require.NotNil(t, data, "expected shared container data to be set for host")
+	assert.Equal(t, armotypes.HostContainerID, data.ContainerID)
+	assert.NotEmpty(t, data.Wlid, "expected a synthetic Wlid to be built for the host pseudo-container")
+	assert.Contains(t, data.Wlid, "test-node")
+
+	assert.Equal(t, 1, k8sCache.setCalls, "expected exactly one SetSharedContainerData call for host")
+	assert.Equal(t, []string{armotypes.HostContainerID}, k8sCache.setContainers)
+}
+
+// TestContainerCallback_HostContainer_SingleCallSite proves that dispatching
+// the host AddContainer event through the same containerCallback/pool path
+// used by StartContainerCollection's manual trigger (container_watcher_collection.go)
+// results in exactly one SetSharedContainerData call for "host" - i.e. there
+// is no second, racing call site.
+func TestContainerCallback_HostContainer_SingleCallSite(t *testing.T) {
+	k8sCache := &countingK8sObjectCache{}
+	oc := &countingObjectCache{k8sCache: k8sCache}
+
+	cw := &ContainerWatcher{
+		// NamespaceName must be non-empty and distinct from the (empty)
+		// synthetic container's namespace, otherwise Config.IgnoreContainer
+		// treats every "" namespace container (including the host
+		// pseudo-container) as belonging to node-agent's own namespace and
+		// drops it via removeContainer instead of routing it to callbacks.
+		cfg:         config.Config{NodeName: "test-node", NamespaceName: "kubescape"},
+		objectCache: oc,
+		metrics:     metricsmanager.NewMetricsMock(),
+		pool:        workerpool.New(2),
+	}
+	cw.callbacks = []containercollection.FuncNotify{
+		cw.containerCallbackAsync,
+	}
+
+	container := &containercollection.Container{}
+	container.Runtime.ContainerID = armotypes.HostContainerID
+
+	require.NotPanics(t, func() {
+		cw.containerCallback(containercollection.PubSubEvent{
+			Type:      containercollection.EventTypeAddContainer,
+			Container: container,
+		})
+	})
+
+	// containerCallback dispatches to the pool asynchronously; wait for all
+	// submitted work to finish before asserting.
+	cw.pool.StopWait()
+
+	assert.Equal(t, 1, k8sCache.setCalls, "expected exactly one SetSharedContainerData call for host across the full registration flow")
+	assert.Equal(t, []string{armotypes.HostContainerID}, k8sCache.setContainers)
+
+	data := k8sCache.GetSharedContainerData(armotypes.HostContainerID)
+	require.NotNil(t, data)
+	assert.NotEmpty(t, data.Wlid)
+}

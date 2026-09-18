@@ -3,6 +3,7 @@ package profilehelper
 import (
 	"errors"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -40,6 +41,16 @@ func GetPodSpec(objectCache objectcache.ObjectCache, containerID string) (*corev
 	sharedData := objectCache.K8sObjectCache().GetSharedContainerData(containerID)
 	if sharedData == nil {
 		return nil, errors.New("shared data not found")
+	}
+
+	// The host pseudo-container has synthetic shared data (Namespace "host",
+	// PodName "host-<hostID>") that is not backed by any real Kubernetes Pod.
+	// Looking it up would always miss and surface as "pod spec not found",
+	// which reads like a transient error. Return an explicitly empty pod spec
+	// instead: callers iterate podSpec.Containers, so an empty spec means
+	// "nothing declared in a pod spec", which is exactly true for the host.
+	if containerID == armotypes.HostContainerID {
+		return &corev1.PodSpec{}, nil
 	}
 
 	podSpec := objectCache.K8sObjectCache().GetPodSpec(sharedData.Namespace, sharedData.PodName)

@@ -42,6 +42,7 @@ func TestLoadConfig(t *testing.T) {
 				KubernetesMode:                 true,
 				NetworkStreamingInterval:       2 * time.Minute,
 				InitialDelay:                   2 * time.Minute,
+				HostSBOMRescanInterval:         24 * time.Hour,
 				MaxSniffingTime:                24 * time.Hour,
 				UpdateDataPeriod:               10 * time.Minute,
 				NodeProfileInterval:            1 * time.Minute,
@@ -769,6 +770,44 @@ func TestConfig_IsMetricsEnabled(t *testing.T) {
 				EnableMetricsExporter: tt.enableMetricsExporter,
 			}
 			assert.Equal(t, tt.want, cfg.IsMetricsEnabled())
+		})
+	}
+}
+
+func TestLoadConfig_HostSBOMRescanInterval(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	tests := []struct {
+		name    string
+		content string
+		want    time.Duration
+	}{
+		{
+			name:    "defaults to 24h",
+			content: `{}`,
+			want:    24 * time.Hour,
+		},
+		{
+			name:    "overridable",
+			content: `{"hostSBOMRescanInterval": "6h"}`,
+			want:    6 * time.Hour,
+		},
+		{
+			name:    "zero disables rescanning",
+			content: `{"hostSBOMRescanInterval": "0s"}`,
+			want:    0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(dir+"/config.json", []byte(tt.content), 0644))
+
+			config, err := LoadConfigOptional(dir, false)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, config.HostSBOMRescanInterval)
 		})
 	}
 }

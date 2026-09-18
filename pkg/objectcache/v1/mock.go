@@ -35,6 +35,11 @@ type RuleObjectCacheMock struct {
 
 	projectionSpecMu sync.RWMutex
 	projectionSpec   objectcache.RuleProjectionSpec
+
+	// profileState, when set via SetContainerProfileState, is returned by
+	// GetContainerProfileState instead of the default "not found" error state.
+	// Lets tests exercise the presence-based ProfileMetadata path.
+	profileState *objectcache.ProfileState
 }
 
 func (r *RuleObjectCacheMock) GetCallStackSearchTree(string) *callstackcache.CallStackSearchTree {
@@ -221,7 +226,16 @@ func (r *RuleObjectCacheMock) SetContainerProfile(cp *v1beta1.ContainerProfile) 
 }
 
 func (r *RuleObjectCacheMock) GetContainerProfileState(_ string) *objectcache.ProfileState {
+	if r.profileState != nil {
+		return r.profileState
+	}
 	return &objectcache.ProfileState{Error: errors.New("mock: profile not found")}
+}
+
+// SetContainerProfileState overrides the state returned by
+// GetContainerProfileState (default: a synthetic "not found" error state).
+func (r *RuleObjectCacheMock) SetContainerProfileState(state *objectcache.ProfileState) {
+	r.profileState = state
 }
 
 func (r *RuleObjectCacheMock) Start(_ context.Context) {}
