@@ -92,11 +92,6 @@ type ContainerProfileManager struct {
 	maxSniffTimeNotificationChan []chan *containercollection.Container
 	notificationMu               sync.RWMutex
 
-	// Host profile support
-	hostProfile   *v1beta1.ContainerProfile
-	hostProfileMu sync.RWMutex
-	hostID        string
-
 	completionNotifier objectcache.CompletionNotifier
 
 	lifecycleTracker *otelsetup.ProfileLifecycleTracker

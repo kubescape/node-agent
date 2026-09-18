@@ -140,17 +140,20 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	// Set container data fields
 	cpm.setContainerData(container, sharedData)
 
-	// Setup monitoring timer
-	sniffingTime := cpm.calculateSniffingTime(container)
-	sharedData.LearningPeriod = sniffingTime
-	timer := time.AfterFunc(sniffingTime, func() {
-		cpm.handleContainerMaxTime(container)
-	})
+	// Setup monitoring timer. The host pseudo-container runs indefinitely and must
+	// never be finalized/deleted via the max sniffing time timer, so skip arming it.
+	if !utils.IsHostContainer(container) {
+		sniffingTime := cpm.calculateSniffingTime(container)
+		sharedData.LearningPeriod = sniffingTime
+		timer := time.AfterFunc(sniffingTime, func() {
+			cpm.handleContainerMaxTime(container)
+		})
 
-	// Store timer in container data for cleanup
-	entry.mu.Lock()
-	entry.data.timer = timer
-	entry.mu.Unlock()
+		// Store timer in container data for cleanup
+		entry.mu.Lock()
+		entry.data.timer = timer
+		entry.mu.Unlock()
+	}
 
 	// Start monitoring in separate goroutine
 	go cpm.startContainerMonitoring(container, sharedData)

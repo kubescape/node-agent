@@ -5,6 +5,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -13,9 +14,31 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/hostidentity"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
+
+// resolveHostID resolves and caches the node's host identity for the
+// lifetime of the ContainerWatcher. It is memoized here (rather than relying
+// on callers to call hostidentity.ResolveHostID once) because the host
+// add-container notification can be delivered more than once. Only a
+// successful resolution is cached: a transient failure (e.g. the HOST_ROOT
+// mount not yet ready on the first replay) is retried on the next call
+// instead of being locked in forever.
+func (cw *ContainerWatcher) resolveHostID() (string, error) {
+	cw.hostIdentityMu.Lock()
+	defer cw.hostIdentityMu.Unlock()
+	if cw.cachedHostID != "" {
+		return cw.cachedHostID, nil
+	}
+	hostID, err := hostidentity.ResolveHostID(&cw.cfg)
+	if err != nil {
+		return "", err
+	}
+	cw.cachedHostID = hostID
+	return hostID, nil
+}
 
 // containerCallback handles container events synchronously
 func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
@@ -64,7 +87,19 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 		cw.metrics.ReportContainerStart()
 
 		if utils.IsHostContainer(notif.Container) {
-			logger.L().Debug("ContainerWatcher.containerCallback - skipping shared data setup for virtual host container")
+			// The virtual host pseudo-container has no backing Kubernetes
+			// workload, so it must never go through setSharedWatchedContainerData:
+			// that path calls k8sClient.GetWorkload("", "") in an unbounded
+			// exponential-backoff retry loop for a workload that will never
+			// exist, leaking a goroutine per node forever. Use the synthetic
+			// identity built by pkg/hostidentity instead.
+			hostID, err := cw.resolveHostID()
+			if err != nil {
+				logger.L().Error("ContainerWatcher.containerCallback - failed to resolve host ID for virtual host container", helpers.Error(err))
+				return
+			}
+			hostWatchedContainerData := hostidentity.BuildHostWatchedContainerData(hostID)
+			cw.objectCache.K8sObjectCache().SetSharedContainerData(armotypes.HostContainerID, hostWatchedContainerData)
 			return
 		}
 

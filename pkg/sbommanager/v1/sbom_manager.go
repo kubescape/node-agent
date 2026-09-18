@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
@@ -21,6 +22,8 @@ import (
 	"github.com/anchore/syft/syft/cataloging"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
+	"github.com/anchore/syft/syft/sbom"
+	"github.com/anchore/syft/syft/source"
 	"github.com/aquilax/truncate"
 	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/cenkalti/backoff/v5"
@@ -35,6 +38,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/hostsensormanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
@@ -123,10 +127,36 @@ type SbomManager struct {
 	// (retaining notif/mounts/imageStatus) until the timeout (#850).
 	waitCancels   map[string]context.CancelFunc
 	waitCancelsMu sync.Mutex
+	// hostFSPrefix is the mount point of the node's root filesystem inside this
+	// pod, read from pkg/hostsensormanager rather than re-derived from HOST_ROOT,
+	// so host scanning and host sensing agree on one path. Used only by the host
+	// SBOM branch.
+	hostFSPrefix string
+	// hostLoopStarted guards the host SBOM lifecycle so the (possibly repeated)
+	// host add-container notification starts exactly one rescan loop.
+	hostLoopStarted atomic.Bool
+	// hostScanFn is the host scan entry point. It is nil in production (meaning
+	// processHostSbom) and exists purely as a test seam, so the rescan ticker can
+	// be observed without running a real filesystem scan.
+	hostScanFn func(hostID string)
+	// hostSyftScanFn is the function processHostSbom calls to run the actual Syft
+	// scan. It is nil in production (meaning syft.CreateSBOM) and exists purely as
+	// a test seam, so the host scan timeout (hostScanTimeout) can be exercised
+	// deterministically with a fake scan that blocks until its context is done,
+	// instead of relying on real filesystem timing.
+	hostSyftScanFn func(ctx context.Context, src source.Source, cfg *syft.CreateSBOMConfig) (*sbom.SBOM, error)
+	// hostScanTimeoutOverride, when non-zero, replaces the hostScanTimeout
+	// constant for the host scan's context.WithTimeout. It exists purely as a
+	// test seam so the timeout path can be exercised on a bounded test clock
+	// instead of waiting out the real 16-minute production value.
+	hostScanTimeoutOverride time.Duration
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
+// CreateSbomManager builds a SbomManager wired with the given dependencies,
+// including the host filesystem root (HOST_ROOT, defaulting to /host) used
+// by the separate host SBOM scan branch.
 func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter, metrics metricsmanager.MetricsManager) (*SbomManager, error) {
 	if metrics == nil {
 		metrics = &metricsmanager.MetricsNoop{}
@@ -176,6 +206,7 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		failureReporter:    failureReporter,
 		metrics:            metrics,
 		waitCancels:        make(map[string]context.CancelFunc),
+		hostFSPrefix:       hostsensormanager.HostFSPrefix(),
 	}
 	if scannerClient != nil {
 		sm.startScannerReadinessWatcher()
@@ -229,6 +260,10 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 	return nil, fmt.Errorf("failed to find lowerdir in %s", mounts[0].VFSOptions)
 }
 
+// ContainerCallback handles add/remove container-collection events. Host
+// pseudo-container events are routed to the separate host SBOM scan branch
+// (startHostSbomLifecycle); everything else follows the image/mount-driven
+// container SBOM path.
 func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
@@ -242,6 +277,10 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		return
 	}
 	if utils.IsHostContainer(notif.Container) {
+		// The host is not an image: it has no CRI image status, no overlay
+		// mounts and no image name, so everything below this point is
+		// inapplicable. It gets its own scan branch (host_sbom.go) instead.
+		s.startHostSbomLifecycle(notif)
 		return
 	}
 	if notif.Container.Runtime.ContainerImageName == "" {
