@@ -10,12 +10,10 @@
 #   R9901 / R9902  isolate hasTty from the plumbing. R9902 fires on every probe
 #                  exec, so if R9902 is silent the trigger or the rule pipeline
 #                  is broken, not the TTY field.
-#   R9903 / R9904  pin down has() presence testing. Exactly one must fire.
-#                  Both silent would mean ttyMajor is unregistered (compile
-#                  failure); both firing is impossible. Today ttyMajor is not
-#                  emitted by the pinned gadget, so R9904 fires and R9903 does
-#                  not. When phase 2 lands (gadget emits tty_major/tty_minor)
-#                  these two swap, making this file the phase-2 acceptance test.
+#   R9903 / R9904  pin down has() presence testing. R9903 fires for every
+#                  v0.55.0 exec event because tty_major is emitted even when
+#                  its value is zero for a process without a terminal. R9904
+#                  must stay silent.
 #
 # All rules use profileDependency 2 (NotRequired) so the test never waits for
 # application-profile completion, and uniqueId includes the pid so per-rule
@@ -70,7 +68,7 @@ spec:
     - name: "TEST ttyMajor present"
       enabled: true
       id: "R9903"
-      description: "Test rule: fires only where the gadget emits the tty device number. Must NOT fire before phase 2."
+      description: "Test rule: fires where v0.55.0 emits the tty device number, including no-TTY events with a zero value."
       expressions:
         message: "'ttyMajor present: ' + string(event.ttyMajor)"
         uniqueId: "'R9903_' + event.comm + '_' + string(event.pid)"
@@ -89,7 +87,7 @@ spec:
     - name: "TEST ttyMajor absent"
       enabled: true
       id: "R9904"
-      description: "Test rule: fires while the gadget does not emit the tty device number. Proves ttyMajor is registered but honestly absent."
+      description: "Test rule: fires only when ttyMajor is absent on an older gadget. Must stay silent for v0.55.0."
       expressions:
         message: "'ttyMajor absent for ' + event.comm"
         uniqueId: "'R9904_' + event.comm + '_' + string(event.pid)"
