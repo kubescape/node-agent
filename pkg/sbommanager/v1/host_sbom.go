@@ -298,18 +298,32 @@ func (s *SbomManager) prepareHostSbom(sbomName, hostID string) (*v1beta1.SBOMSyf
 			// stays false.
 			existing.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
 			return existing, false, true
-		case helpersv1.Incomplete, helpersv1.Learning:
-			// Both statuses mean prior content exists and must be preserved
-			// as hadContent==true: Incomplete is only ever set when a scan
-			// had content but was still oversized (see the hadContent==true
-			// write path) -- reporting false here would route a still-too-
-			// large rescan into the TooLarge branch, wiping that retained
-			// content instead of degrading to Incomplete again. Learning is
-			// a completed scan; unlike the container path -- which skips a
-			// completed SBOM unless the tool version changed -- the host
-			// SBOM is meant to track a mutating, long-lived filesystem, so a
-			// completed SBOM is exactly what the rescan ticker exists to
-			// refresh.
+		case helpersv1.Incomplete:
+			// Incomplete is AMBIGUOUS, unlike Learning below: handleGenericFailure
+			// sets it via an annotation-only patch (markSBOMStatus never touches
+			// Spec) after repeated scan failures, which fires whether or not this
+			// SBOM ever completed a scan. So it covers two different cases: an
+			// SBOM that never had content (every attempt failed before a size
+			// could be computed), and one that previously had good or oversized
+			// content preserved from before the failures started (the
+			// hadContent==true write-path below only sets Incomplete, never
+			// clears Spec). Assuming either answer unconditionally is wrong: always
+			// true would let a content-less SBOM dodge TooLarge forever; always
+			// false would wipe genuinely retained content via the TooLarge branch
+			// on the next oversized scan. ResourceSizeMetadataKey is set exactly
+			// once a scan actually completes (success or oversized) and is never
+			// cleared by markSBOMStatus, so its presence reliably distinguishes
+			// the two.
+			hadContent := existing.Annotations[helpersv1.ResourceSizeMetadataKey] != ""
+			existing.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
+			return existing, hadContent, true
+		case helpersv1.Learning:
+			// Unlike the container path -- which skips a completed SBOM unless
+			// the tool version changed -- the host SBOM is meant to track a
+			// mutating, long-lived filesystem, so a completed SBOM is exactly
+			// what the rescan ticker exists to refresh. Learning is reached only
+			// via a successful, under-budget scan, so it unambiguously had
+			// content.
 			existing.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
 			return existing, true, true
 		}

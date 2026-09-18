@@ -351,23 +351,42 @@ func Test_PrepareHostSbom_LearningIsRescanned(t *testing.T) {
 	assert.True(t, hadContent, "a completed SBOM has content, so a later size trip must be Incomplete, not TooLarge")
 }
 
-// Test_PrepareHostSbom_IncompleteRetainsContent proves the same invariant as
-// Test_PrepareHostSbom_LearningIsRescanned for the Incomplete status: it is
-// only ever written when a scan already had content but was still oversized
-// (see processHostSbom's hadContent==true write path), so a rescan of it must
-// report hadContent==true. Reporting false here would misroute a
-// still-too-large rescan into the TooLarge branch, which wipes wipSbom.Spec --
-// destroying content that Incomplete specifically exists to preserve.
-func Test_PrepareHostSbom_IncompleteRetainsContent(t *testing.T) {
+// Test_PrepareHostSbom_IncompleteContentBearingRetainsContent proves that an
+// Incomplete SBOM which previously completed a scan (ResourceSizeMetadataKey
+// present -- set once a scan finishes, never cleared by the annotation-only
+// markSBOMStatus patch) is treated as hadContent==true on rescan. Reporting
+// false here would misroute a still-too-large rescan into the TooLarge
+// branch, which wipes wipSbom.Spec -- destroying content that was genuinely
+// retained.
+func Test_PrepareHostSbom_IncompleteContentBearingRetainsContent(t *testing.T) {
 	sm, store, _ := newHostSbomManager(t, hostCfg("node-1"), t.TempDir())
 	seedHostSbom(t, store, map[string]string{
-		helpersv1.StatusMetadataKey:      helpersv1.Incomplete,
-		helpersv1.ToolVersionMetadataKey: sm.version,
+		helpersv1.StatusMetadataKey:       helpersv1.Incomplete,
+		helpersv1.ToolVersionMetadataKey:  sm.version,
+		helpersv1.ResourceSizeMetadataKey: "123456",
 	})
 
 	_, hadContent, ok := sm.prepareHostSbom("host-node-1", "node-1")
 	assert.True(t, ok, "the host rescan must retry an Incomplete SBOM at the same tool version")
-	assert.True(t, hadContent, "Incomplete only ever means content was retained; a rescan must not report hadContent=false")
+	assert.True(t, hadContent, "an Incomplete SBOM that already completed a scan must report hadContent=true")
+}
+
+// Test_PrepareHostSbom_IncompleteEmptyDoesNotClaimContent proves the other
+// half: an Incomplete SBOM that never completed a scan (handleGenericFailure
+// can mark a brand-new, never-scanned SBOM Incomplete via an annotation-only
+// patch after repeated failures) must NOT be treated as hadContent==true --
+// that would let a content-less SBOM dodge the TooLarge size gate forever.
+func Test_PrepareHostSbom_IncompleteEmptyDoesNotClaimContent(t *testing.T) {
+	sm, store, _ := newHostSbomManager(t, hostCfg("node-1"), t.TempDir())
+	seedHostSbom(t, store, map[string]string{
+		helpersv1.StatusMetadataKey:      helpersv1.Incomplete,
+		helpersv1.ToolVersionMetadataKey: sm.version,
+		// No ResourceSizeMetadataKey: this SBOM never completed a scan.
+	})
+
+	_, hadContent, ok := sm.prepareHostSbom("host-node-1", "node-1")
+	assert.True(t, ok, "the host rescan must retry an Incomplete SBOM at the same tool version")
+	assert.False(t, hadContent, "an Incomplete SBOM that never completed a scan must not claim hadContent=true")
 }
 
 // Test_ProcessHostSbom_RescanReplacesExistingSBOM proves the rescan path
