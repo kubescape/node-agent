@@ -142,37 +142,39 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 	switch profileType {
 	case armotypes.ApplicationProfile:
 		state := objectCache.ContainerProfileCache().GetContainerProfileState(triggerEvent.GetContainerID())
-		// Presence-based check: GetContainerProfileState never returns nil --
-		// it synthesizes an error state when no entry exists yet for this
-		// container (any container, host included, very early in its
-		// lifecycle before a profile has been primed). Only attach profile
-		// metadata when a profile is genuinely present; otherwise skip,
-		// exactly as we would for any container with no profile data yet.
-		if state.Error == nil {
-			profileMetadata := &armotypes.ProfileMetadata{
-				Status:            state.Status,
-				Completion:        state.Completion,
-				Name:              state.Name,
-				FailOnProfile:     state.Status == helpersv1.Completed,
-				Type:              armotypes.ApplicationProfile,
-				ProfileDependency: profileRequirment,
-			}
-			baseRuntimeAlert.ProfileMetadata = profileMetadata
+		// GetContainerProfileState never returns nil -- it synthesizes an
+		// error state when no entry exists yet for this container (any
+		// container, host included, very early in its lifecycle before a
+		// profile has been primed). Always attach profile metadata so the
+		// error signal reaches alert consumers; state.Error is surfaced via
+		// the Error field rather than gating attachment on its absence.
+		profileMetadata := &armotypes.ProfileMetadata{
+			Status:            state.Status,
+			Completion:        state.Completion,
+			Name:              state.Name,
+			FailOnProfile:     state.Status == helpersv1.Completed,
+			Type:              armotypes.ApplicationProfile,
+			ProfileDependency: profileRequirment,
 		}
+		if state.Error != nil {
+			profileMetadata.Error = state.Error.Error()
+		}
+		baseRuntimeAlert.ProfileMetadata = profileMetadata
 
 	case armotypes.NetworkProfile:
 		state := objectCache.ContainerProfileCache().GetContainerProfileState(triggerEvent.GetContainerID())
-		if state.Error == nil {
-			profileMetadata := &armotypes.ProfileMetadata{
-				Status:            state.Status,
-				Completion:        state.Completion,
-				Name:              state.Name,
-				FailOnProfile:     state.Status == helpersv1.Completed,
-				Type:              armotypes.NetworkProfile,
-				ProfileDependency: profileRequirment,
-			}
-			baseRuntimeAlert.ProfileMetadata = profileMetadata
+		profileMetadata := &armotypes.ProfileMetadata{
+			Status:            state.Status,
+			Completion:        state.Completion,
+			Name:              state.Name,
+			FailOnProfile:     state.Status == helpersv1.Completed,
+			Type:              armotypes.NetworkProfile,
+			ProfileDependency: profileRequirment,
 		}
+		if state.Error != nil {
+			profileMetadata.Error = state.Error.Error()
+		}
+		baseRuntimeAlert.ProfileMetadata = profileMetadata
 	default:
 		profileMetadata := &armotypes.ProfileMetadata{
 			ProfileDependency: profileRequirment,

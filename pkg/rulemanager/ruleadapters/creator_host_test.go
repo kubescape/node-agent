@@ -135,10 +135,10 @@ func TestSetRuntimeAlertK8sDetails_NonHostStillEnriches(t *testing.T) {
 }
 
 // TestSetProfileMetadata_PresenceBased_HostUsesProfileWhenPresent is a
-// creator.go:126-129 test: the old blanket "skip profile metadata for host"
-// check is gone. When a profile genuinely exists for host
-// (GetContainerProfileState returns no Error), it must be attached exactly as
-// it would be for any other container.
+// creator.go test: the old blanket "skip profile metadata for host" check is
+// gone. When a profile genuinely exists for host (GetContainerProfileState
+// returns no Error), it is attached exactly as it would be for any other
+// container.
 func TestSetProfileMetadata_PresenceBased_HostUsesProfileWhenPresent(t *testing.T) {
 	objCache := newK8sLookupSpy()
 	objCache.SetContainerProfileState(&objectcache.ProfileState{
@@ -166,12 +166,12 @@ func TestSetProfileMetadata_PresenceBased_HostUsesProfileWhenPresent(t *testing.
 	assert.Empty(t, pm.Error)
 }
 
-// TestSetProfileMetadata_PresenceBased_HostSkipsWhenAbsent proves the other
-// half of the presence-based check: with no profile primed yet (the mock's
-// default "not found" state), host is skipped exactly like any other
-// container with no profile yet -- not given fabricated/error metadata, and
-// not treated as a special case anymore.
-func TestSetProfileMetadata_PresenceBased_HostSkipsWhenAbsent(t *testing.T) {
+// TestSetProfileMetadata_HostSurfacesErrorWhenAbsent proves that with no
+// profile primed yet (the mock's default "not found" state), host still gets
+// ProfileMetadata attached -- with the Error field populated -- exactly like
+// any other container with no profile yet. Metadata is never withheld: the
+// error signal must reach alert consumers instead of being silently dropped.
+func TestSetProfileMetadata_HostSurfacesErrorWhenAbsent(t *testing.T) {
 	objCache := newK8sLookupSpy() // default GetContainerProfileState -> absent/error
 
 	rule := typesv1.Rule{
@@ -185,17 +185,18 @@ func TestSetProfileMetadata_PresenceBased_HostSkipsWhenAbsent(t *testing.T) {
 	creator := &RuleFailureCreator{}
 	creator.setProfileMetadata(rule, ruleFailure, objCache)
 
-	assert.Nil(t, ruleFailure.GetBaseRuntimeAlert().ProfileMetadata, "host must be skipped, not given fabricated metadata, when no profile exists yet")
+	pm := ruleFailure.GetBaseRuntimeAlert().ProfileMetadata
+	require.NotNil(t, pm, "host must still receive profile metadata carrying the error, not be silently skipped")
+	assert.NotEmpty(t, pm.Error)
+	assert.False(t, pm.FailOnProfile)
 }
 
-// TestSetProfileMetadata_PresenceBased_RealContainerUnaffected pins that the
-// new presence-based check behaves identically for a real (non-host)
-// container: present -> attach, absent -> skip. This is the "preserve
-// existing behavior for real containers where profile data is legitimately
-// absent" half of the acceptance criteria -- real containers now skip
-// (rather than attach an Error-only ProfileMetadata) exactly the same way
-// host does, so there is no host-specific divergence left in this function.
-func TestSetProfileMetadata_PresenceBased_RealContainerUnaffected(t *testing.T) {
+// TestSetProfileMetadata_RealContainerUnaffected pins that real (non-host)
+// containers behave identically before and after the host fix: present ->
+// full metadata with no error; absent -> metadata with the Error field
+// populated (never withheld) so the error signal still reaches alert
+// consumers, exactly as it did before host support was added.
+func TestSetProfileMetadata_RealContainerUnaffected(t *testing.T) {
 	rule := typesv1.Rule{
 		ProfileDependency: armotypes.Required,
 		Tags:              []string{types.ApplicationProfile},
@@ -210,12 +211,15 @@ func TestSetProfileMetadata_PresenceBased_RealContainerUnaffected(t *testing.T) 
 		pm := ruleFailure.GetBaseRuntimeAlert().ProfileMetadata
 		require.NotNil(t, pm)
 		assert.Equal(t, "real-cp", pm.Name)
+		assert.Empty(t, pm.Error)
 	})
 
 	t.Run("absent (early lifecycle)", func(t *testing.T) {
 		objCache := newK8sLookupSpy()
 		ruleFailure := &types.GenericRuleFailure{TriggerEvent: &MockEnrichEvent{containerID: "real-container"}}
 		creator.setProfileMetadata(rule, ruleFailure, objCache)
-		assert.Nil(t, ruleFailure.GetBaseRuntimeAlert().ProfileMetadata)
+		pm := ruleFailure.GetBaseRuntimeAlert().ProfileMetadata
+		require.NotNil(t, pm, "profile metadata must still be attached so the error reaches alert consumers")
+		assert.NotEmpty(t, pm.Error)
 	})
 }
