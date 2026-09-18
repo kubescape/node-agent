@@ -19,6 +19,17 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
+// resolveHostID resolves and caches the node's host identity for the
+// lifetime of the ContainerWatcher. It is memoized here (rather than relying
+// on callers to call hostidentity.ResolveHostID once) because the host
+// add-container notification can be delivered more than once.
+func (cw *ContainerWatcher) resolveHostID() (string, error) {
+	cw.hostIdentityOnce.Do(func() {
+		cw.cachedHostID, cw.cachedHostIDErr = hostidentity.ResolveHostID(&cw.cfg)
+	})
+	return cw.cachedHostID, cw.cachedHostIDErr
+}
+
 // containerCallback handles container events synchronously
 func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
 	logger.L().Debug("ContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
@@ -72,7 +83,7 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 			// exponential-backoff retry loop for a workload that will never
 			// exist, leaking a goroutine per node forever. Use the synthetic
 			// identity built by pkg/hostidentity instead.
-			hostID, err := hostidentity.ResolveHostID(&cw.cfg)
+			hostID, err := cw.resolveHostID()
 			if err != nil {
 				logger.L().Error("ContainerWatcher.containerCallback - failed to resolve host ID for virtual host container", helpers.Error(err))
 				return

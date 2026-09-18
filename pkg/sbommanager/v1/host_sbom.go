@@ -124,6 +124,14 @@ func hostSbomName(hostID string) string {
 // ScanRequest is image-shaped: ImageID/ImageTag/LayerPaths/ImageStatus), and no
 // image digest to report failures against. The host therefore always scans
 // in-process with Syft over a directory source.
+//
+// It also never calls the kubevuln failure-reporting path on any failure
+// branch below: scanfailure.ScanFailureReport is keyed by ImageTag and
+// ImageHash and carries a WorkloadIdentifier (namespace/pod/container). A host
+// has none of these, so calling it would either send an empty-image report the
+// backend cannot correlate, or dereference container metadata the host
+// notification does not carry. Omitting it is the explicit decision;
+// Test_ProcessHostSbom_NeverReportsFailure locks it in.
 func (s *SbomManager) processHostSbom(hostID string) {
 	sbomName := hostSbomName(hostID)
 
@@ -143,8 +151,6 @@ func (s *SbomManager) processHostSbom(hostID string) {
 			helpers.String("path", s.hostFSPrefix),
 			helpers.String("sbomName", sbomName))
 		s.handleGenericFailure(sbomName)
-		// No reportFailure here: see reportHostFailureOmitted.
-		s.reportHostFailureOmitted()
 		return
 	}
 	defer func() {
@@ -185,8 +191,6 @@ func (s *SbomManager) processHostSbom(hostID string) {
 		// otherwise unchanged), letting the next rescan tick try again
 		// instead of being permanently stuck.
 		s.handleGenericFailure(sbomName)
-		// No reportFailure here: see reportHostFailureOmitted.
-		s.reportHostFailureOmitted()
 		return
 	}
 	s.metrics.ReportSBOMScan("success")
@@ -218,7 +222,6 @@ func (s *SbomManager) processHostSbom(hostID string) {
 			wipSbom.Annotations[ScannerMemoryLimitAnnotation] = fmt.Sprintf("%d", s.scannerMemLimit)
 			wipSbom.Spec = v1beta1.SBOMSyftSpec{}
 		}
-		s.reportHostFailureOmitted()
 	} else {
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Learning
 	}
@@ -227,7 +230,6 @@ func (s *SbomManager) processHostSbom(hostID string) {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to save host SBOM",
 			helpers.Error(err),
 			helpers.String("sbomName", sbomName))
-		s.reportHostFailureOmitted()
 		return
 	}
 	logger.L().Debug("SbomManager - saved host SBOM after successful processing",
@@ -287,6 +289,10 @@ func (s *SbomManager) prepareHostSbom(sbomName, hostID string) (*v1beta1.SBOMSyf
 			}
 			logger.L().Debug("SbomManager - host SBOM too-large conditions changed, rescanning",
 				helpers.String("sbomName", sbomName))
+			fallthrough
+		default:
+			// Incomplete, Initializing, an interrupted run, or a TooLarge SBOM
+			// whose blocking conditions have just changed (fallthrough above): retry.
 			existing.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
 			return existing, false, true
 		case helpersv1.Learning:
@@ -296,10 +302,6 @@ func (s *SbomManager) prepareHostSbom(sbomName, hostID string) (*v1beta1.SBOMSyf
 			// what the rescan ticker exists to refresh.
 			existing.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
 			return existing, true, true
-		default:
-			// Incomplete, Initializing, or an interrupted run: retry.
-			existing.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
-			return existing, false, true
 		}
 	case err != nil:
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to create empty host SBOM before processing",
@@ -336,17 +338,6 @@ func hostSbomLabels(hostID string) map[string]string {
 	}
 	return labels
 }
-
-// reportHostFailureOmitted documents, in one greppable place, that the
-// kubevuln failure-reporting path is intentionally NOT invoked for the host.
-//
-// scanfailure.ScanFailureReport is keyed by ImageTag and ImageHash and carries
-// a WorkloadIdentifier (namespace/pod/container). A host has no image tag, no
-// image digest and no pod, so calling reportFailure here would either send an
-// empty-image report the backend cannot correlate, or dereference container
-// metadata the host notification does not carry. Omitting it is the explicit
-// decision; Test_ProcessHostSbom_NeverReportsFailure locks it in.
-func (s *SbomManager) reportHostFailureOmitted() {}
 
 // hostSbomConfig mirrors the container in-process fallback's Syft configuration
 // (same cataloger removals, same embedded-SBOM opt-in) so host and container

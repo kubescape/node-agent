@@ -13,6 +13,7 @@ import (
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type processTreeCreatorImpl struct {
@@ -308,7 +309,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
-		if pt.config.KubernetesMode && event.ContainerID == armotypes.HostContainerID { // If we are in Kubernetes mode and the container ID is "host", don't create the process.
+		if pt.config.KubernetesMode && utils.IsHost(event.ContainerID) { // If we are in Kubernetes mode and the container ID is "host", don't create the process.
 			return
 		}
 
@@ -344,7 +345,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 				// Re-apply the host-process policy the absent-node path above
 				// enforces. Rebuilding unconditionally would let a host procfs
 				// event materialise a node that a first sighting would refuse.
-				if pt.config.KubernetesMode && event.ContainerID == armotypes.HostContainerID {
+				if pt.config.KubernetesMode && utils.IsHost(event.ContainerID) {
 					return
 				}
 

@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -47,10 +46,6 @@ const (
 
 var _ DNSManagerClient = (*DNSManager)(nil)
 var _ DNSResolver = (*DNSManager)(nil)
-
-func isHost(containerID string) bool {
-	return containerID == armotypes.HostContainerID
-}
 
 func CreateDNSManager(size int) *DNSManager {
 	if size <= 0 {
@@ -101,7 +96,7 @@ func (dm *DNSManager) isRemoved(containerID string) bool {
 }
 
 func (dm *DNSManager) getContainerCache(containerID string) *lru.Cache[string, string] {
-	if isHost(containerID) {
+	if utils.IsHost(containerID) {
 		return dm.hostAddressToDomain
 	}
 	if containerID == "" || dm.isRemoved(containerID) {
@@ -244,7 +239,7 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 }
 
 func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (string, bool) {
-	if isHost(containerID) {
+	if utils.IsHost(containerID) {
 		if dm.hostAddressToDomain != nil {
 			return dm.hostAddressToDomain.Get(ipAddr)
 		}

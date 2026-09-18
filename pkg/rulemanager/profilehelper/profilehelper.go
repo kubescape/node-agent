@@ -3,8 +3,8 @@ package profilehelper
 import (
 	"errors"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -53,7 +53,7 @@ func GetPodSpec(objectCache objectcache.ObjectCache, containerID string) (*corev
 	// which reads like a transient error. Return an explicitly empty pod spec
 	// instead: callers iterate podSpec.Containers, so an empty spec means
 	// "nothing declared in a pod spec", which is exactly true for the host.
-	if containerID == armotypes.HostContainerID {
+	if utils.IsHost(containerID) {
 		return &corev1.PodSpec{}, nil
 	}
 

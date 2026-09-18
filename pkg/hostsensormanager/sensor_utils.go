@@ -8,6 +8,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/kubescape/go-logger"
@@ -18,12 +19,18 @@ const (
 	procDirName = "/proc"
 )
 
-var hostFSPrefix = "/host_fs" // Mount point for host filesystem
+// hostFSPrefix holds the mount point for the host filesystem. It is an
+// atomic.Pointer rather than a plain string so that HostFSPrefix() and
+// SetHostFSPrefixForTest -- called from a different goroutine or a different
+// package's test -- never race under go test -race.
+var hostFSPrefix atomic.Pointer[string]
 
 func init() {
+	prefix := "/host_fs"
 	if val := os.Getenv("HOST_ROOT"); val != "" { // use HOST_ROOT as inspektor gadget
-		hostFSPrefix = val
+		prefix = val
 	}
+	hostFSPrefix.Store(&prefix)
 }
 
 // --- File Utilities ---
@@ -33,7 +40,7 @@ func init() {
 // other packages (e.g. pkg/hostidentity, sbommanager) can reuse the same
 // host-root derivation instead of re-reading the env var themselves.
 func HostFSPrefix() string {
-	return hostFSPrefix
+	return *hostFSPrefix.Load()
 }
 
 // SetHostFSPrefixForTest overrides the host filesystem prefix and returns a
@@ -41,17 +48,18 @@ func HostFSPrefix() string {
 // can exercise host-root-relative code paths without depending on the
 // HOST_ROOT env var being set before this package's init() runs.
 func SetHostFSPrefixForTest(prefix string) (restore func()) {
-	orig := hostFSPrefix
-	hostFSPrefix = prefix
-	return func() { hostFSPrefix = orig }
+	orig := hostFSPrefix.Load()
+	hostFSPrefix.Store(&prefix)
+	return func() { hostFSPrefix.Store(orig) }
 }
 
 // hostPath converts a path to the host filesystem path
 func hostPath(p string) string {
-	if strings.HasPrefix(p, hostFSPrefix) {
+	prefix := HostFSPrefix()
+	if strings.HasPrefix(p, prefix) {
 		return p
 	}
-	return path.Join(hostFSPrefix, p)
+	return path.Join(prefix, p)
 }
 
 // readFileOnHostFileSystem reads a file from the host filesystem
@@ -193,7 +201,7 @@ func LocateProcessByExecSuffix(processSuffix string) (*ProcessDetails, error) {
 // --- Verbose Helpers ---
 
 func makeHostFileInfoVerbose(ctx context.Context, filePath string, readContent bool, failMsgs ...helpers.IDetails) *FileInfo {
-	fileInfo, err := MakeChangedRootFileInfo(hostFSPrefix, filePath, readContent)
+	fileInfo, err := MakeChangedRootFileInfo(HostFSPrefix(), filePath, readContent)
 	if err != nil {
 		logArgs := append([]helpers.IDetails{helpers.String("path", filePath), helpers.Error(err)}, failMsgs...)
 		logger.L().Ctx(ctx).Debug("failed to MakeHostFileInfo", logArgs...)

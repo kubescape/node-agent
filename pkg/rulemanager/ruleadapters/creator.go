@@ -140,41 +140,9 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 	}
 
 	switch profileType {
-	case armotypes.ApplicationProfile:
+	case armotypes.ApplicationProfile, armotypes.NetworkProfile:
 		state := objectCache.ContainerProfileCache().GetContainerProfileState(triggerEvent.GetContainerID())
-		// GetContainerProfileState never returns nil -- it synthesizes an
-		// error state when no entry exists yet for this container (any
-		// container, host included, very early in its lifecycle before a
-		// profile has been primed). Always attach profile metadata so the
-		// error signal reaches alert consumers; state.Error is surfaced via
-		// the Error field rather than gating attachment on its absence.
-		profileMetadata := &armotypes.ProfileMetadata{
-			Status:            state.Status,
-			Completion:        state.Completion,
-			Name:              state.Name,
-			FailOnProfile:     state.Status == helpersv1.Completed,
-			Type:              armotypes.ApplicationProfile,
-			ProfileDependency: profileRequirment,
-		}
-		if state.Error != nil {
-			profileMetadata.Error = state.Error.Error()
-		}
-		baseRuntimeAlert.ProfileMetadata = profileMetadata
-
-	case armotypes.NetworkProfile:
-		state := objectCache.ContainerProfileCache().GetContainerProfileState(triggerEvent.GetContainerID())
-		profileMetadata := &armotypes.ProfileMetadata{
-			Status:            state.Status,
-			Completion:        state.Completion,
-			Name:              state.Name,
-			FailOnProfile:     state.Status == helpersv1.Completed,
-			Type:              armotypes.NetworkProfile,
-			ProfileDependency: profileRequirment,
-		}
-		if state.Error != nil {
-			profileMetadata.Error = state.Error.Error()
-		}
-		baseRuntimeAlert.ProfileMetadata = profileMetadata
+		baseRuntimeAlert.ProfileMetadata = buildProfileMetadata(state, profileType, profileRequirment)
 	default:
 		profileMetadata := &armotypes.ProfileMetadata{
 			ProfileDependency: profileRequirment,
@@ -184,6 +152,28 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 		baseRuntimeAlert.ProfileMetadata = profileMetadata
 	}
 	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
+}
+
+// buildProfileMetadata builds the ProfileMetadata for an ApplicationProfile or
+// NetworkProfile alert from a container's profile state. GetContainerProfileState
+// never returns nil -- it synthesizes an error state when no entry exists yet
+// for this container (any container, host included, very early in its
+// lifecycle before a profile has been primed). Metadata is always attached so
+// the error signal reaches alert consumers; state.Error is surfaced via the
+// Error field rather than gating attachment on its absence.
+func buildProfileMetadata(state *objectcache.ProfileState, profileType armotypes.ProfileType, profileRequirment armotypes.ProfileDependency) *armotypes.ProfileMetadata {
+	profileMetadata := &armotypes.ProfileMetadata{
+		Status:            state.Status,
+		Completion:        state.Completion,
+		Name:              state.Name,
+		FailOnProfile:     state.Status == helpersv1.Completed,
+		Type:              profileType,
+		ProfileDependency: profileRequirment,
+	}
+	if state.Error != nil {
+		profileMetadata.Error = state.Error.Error()
+	}
+	return profileMetadata
 }
 
 func (r *RuleFailureCreator) setCloudServices(ruleFailure *types.GenericRuleFailure) {
@@ -318,7 +308,7 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 	// rather than fabricating them. This guard is separate from setProfileMetadata's
 	// presence-based profile-metadata check (state.Error == nil) - the two functions
 	// guard different data (profile metadata vs. K8s pod/workload UIDs).
-	if containerID == armotypes.HostContainerID {
+	if utils.IsHost(containerID) {
 		ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
 		return
 	}
