@@ -12,7 +12,8 @@ Four CEL fields on exec events describe the process's controlling terminal:
 ## Not every agent measures this
 
 `ttyMajor`/`ttyMinor` require a gadget version that emits the terminal device
-number. On older agents those fields are absent, and `has()` reports it:
+number. Agents bundling an older `trace_exec` gadget may leave those fields
+absent, and `has()` reports that capability:
 
 ```cel
 has(event.ttyMajor)   // false when this agent cannot measure the device number
@@ -33,7 +34,9 @@ event.hasTty && event.comm in ["bash", "sh", "zsh"]
 number, `hasTty` is derived from the ambiguous index, where `0` is read as "no
 terminal" — which is wrong for `/dev/pts/0`, the usual first `kubectl exec`
 into a pod. A rule asserting "not interactive" would fire on genuinely
-interactive shells. Such a rule must carry an `agentVersionRequirement`:
+interactive shells. Such a rule must carry an `agentVersionRequirement` for
+the minimum node-agent release in the target fleet; do not infer or guess that
+release from the gadget version alone:
 
 ```yaml
 - name: "Non-interactive download tool"
@@ -43,7 +46,7 @@ interactive shells. Such a rule must carry an `agentVersionRequirement`:
         expression: |
           !event.hasTty &&
           event.exepath in ["/usr/bin/curl", "/usr/bin/wget"]
-  agentVersionRequirement: ">=<version that ships the device number>"
+  agentVersionRequirement: ">=<minimum node-agent release in your fleet>"
 ```
 
 ## Comparing the numeric fields
@@ -63,13 +66,14 @@ has(event.ttyMajor) && event.ttyMajor == uint(136)
 
 `tests/component_test.go:Test_35_ExecTTYFieldTest` proves the fields work
 end-to-end against real eBPF, using four test-only rules in
-`tests/resources/exec-tty-rules.yaml`. Measured on kind with
-`trace_exec:v0.48.1`:
+`tests/resources/exec-tty-rules.yaml`. With `trace_exec:v0.55.0`, the expected
+results on kind are:
 
 ```
-R9901 (hasTty)   c-none=0  c-pts0=0  c-conc=1
+R9901 (hasTty)   c-none=0  c-pts0>0  c-conc>0
 R9902 (control)  total=3
-R9903/R9904      0 / 3
+R9903 (has field) c-none>0  c-pts0>0  c-conc>0
+R9904 (absent)   total=0
 ```
 
 Three properties the test pins down, each for a reason:
@@ -80,15 +84,15 @@ Three properties the test pins down, each for a reason:
   never ran". R9902 shares the trigger without the TTY predicate, so it
   separates the two. Verified by mutation: pointing R9901 at a nonexistent
   field drops it to 0 while R9902 stays at 3.
-- **R9903/R9904 are mutually exclusive.** Exactly one must fire. Both silent
-  would mean `ttyMajor` is unregistered rather than absent. This is what makes
-  `has()` presence testing trustworthy, and it doubles as the phase-2
-  acceptance test — the two swap when the gadget starts emitting the device
-  number.
-- **`c-pts0` expecting zero alerts is deliberate.** A single exec into a fresh
-  container lands on `/dev/pts/0`, which phase 1 cannot distinguish from "no
-  terminal". Confirmed directly against the gadget: a process with no terminal
-  and a process on `pts/0` both report `tty=0`. Do not "fix" that expectation.
+- **R9903/R9904 prove field presence.** R9903 must fire for all three events,
+  including the no-TTY event whose `tty_major` value is zero. R9904 must stay
+  silent. Both silent would mean `ttyMajor` is unregistered rather than
+  absent, while R9903 firing confirms `has()` sees the emitted field.
+- **`c-pts0` must fire.** A single exec into a fresh container lands on
+  `/dev/pts/0`; v0.55.0 reports its nonzero terminal major even though the raw
+  `tty` index is zero. This is the regression fixed by #975. The concurrent
+  trigger still exercises a nonzero index so both representations remain
+  covered.
 
 Two environment facts the test depends on, both verified rather than assumed:
 
@@ -104,8 +108,7 @@ Two environment facts the test depends on, both verified rather than assumed:
 
 Because pts indices are not reclaimed instantly, the concurrent trigger waits
 for the holder to *report* its own tty path rather than launching it and
-sleeping. A probe fired before the holder's pty exists lands on `pts/0` and
-reads as "no terminal" — indistinguishable from a broken feature.
+sleeping. This makes the nonzero-index coverage deterministic.
 
 See `projects/2026-07-27-exec-tty-cel-field/spec.md` in shared-designs-and-docs
-for the full design and the phase-2 checklist.
+for the full design and the test rationale.
