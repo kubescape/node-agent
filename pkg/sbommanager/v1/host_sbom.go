@@ -291,15 +291,25 @@ func (s *SbomManager) prepareHostSbom(sbomName, hostID string) (*v1beta1.SBOMSyf
 				helpers.String("sbomName", sbomName))
 			fallthrough
 		default:
-			// Incomplete, Initializing, an interrupted run, or a TooLarge SBOM
-			// whose blocking conditions have just changed (fallthrough above): retry.
+			// Initializing, an interrupted run, or a TooLarge SBOM whose
+			// blocking conditions have just changed (fallthrough above):
+			// neither case ever retained content (TooLarge always clears
+			// Spec, see the hadContent==false write path), so hadContent
+			// stays false.
 			existing.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
 			return existing, false, true
-		case helpersv1.Learning:
-			// Unlike the container path -- which skips a completed SBOM unless
-			// the tool version changed -- the host SBOM is meant to track a
-			// mutating, long-lived filesystem, so a completed SBOM is exactly
-			// what the rescan ticker exists to refresh.
+		case helpersv1.Incomplete, helpersv1.Learning:
+			// Both statuses mean prior content exists and must be preserved
+			// as hadContent==true: Incomplete is only ever set when a scan
+			// had content but was still oversized (see the hadContent==true
+			// write path) -- reporting false here would route a still-too-
+			// large rescan into the TooLarge branch, wiping that retained
+			// content instead of degrading to Incomplete again. Learning is
+			// a completed scan; unlike the container path -- which skips a
+			// completed SBOM unless the tool version changed -- the host
+			// SBOM is meant to track a mutating, long-lived filesystem, so a
+			// completed SBOM is exactly what the rescan ticker exists to
+			// refresh.
 			existing.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
 			return existing, true, true
 		}

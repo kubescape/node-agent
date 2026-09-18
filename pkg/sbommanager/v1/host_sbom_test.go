@@ -351,6 +351,25 @@ func Test_PrepareHostSbom_LearningIsRescanned(t *testing.T) {
 	assert.True(t, hadContent, "a completed SBOM has content, so a later size trip must be Incomplete, not TooLarge")
 }
 
+// Test_PrepareHostSbom_IncompleteRetainsContent proves the same invariant as
+// Test_PrepareHostSbom_LearningIsRescanned for the Incomplete status: it is
+// only ever written when a scan already had content but was still oversized
+// (see processHostSbom's hadContent==true write path), so a rescan of it must
+// report hadContent==true. Reporting false here would misroute a
+// still-too-large rescan into the TooLarge branch, which wipes wipSbom.Spec --
+// destroying content that Incomplete specifically exists to preserve.
+func Test_PrepareHostSbom_IncompleteRetainsContent(t *testing.T) {
+	sm, store, _ := newHostSbomManager(t, hostCfg("node-1"), t.TempDir())
+	seedHostSbom(t, store, map[string]string{
+		helpersv1.StatusMetadataKey:      helpersv1.Incomplete,
+		helpersv1.ToolVersionMetadataKey: sm.version,
+	})
+
+	_, hadContent, ok := sm.prepareHostSbom("host-node-1", "node-1")
+	assert.True(t, ok, "the host rescan must retry an Incomplete SBOM at the same tool version")
+	assert.True(t, hadContent, "Incomplete only ever means content was retained; a rescan must not report hadContent=false")
+}
+
 // Test_ProcessHostSbom_RescanReplacesExistingSBOM proves the rescan path
 // actually persists a fresh document rather than no-oping.
 func Test_ProcessHostSbom_RescanReplacesExistingSBOM(t *testing.T) {

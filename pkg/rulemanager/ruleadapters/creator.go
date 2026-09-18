@@ -155,13 +155,24 @@ func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *
 }
 
 // buildProfileMetadata builds the ProfileMetadata for an ApplicationProfile or
-// NetworkProfile alert from a container's profile state. GetContainerProfileState
-// never returns nil -- it synthesizes an error state when no entry exists yet
-// for this container (any container, host included, very early in its
-// lifecycle before a profile has been primed). Metadata is always attached so
-// the error signal reaches alert consumers; state.Error is surfaced via the
-// Error field rather than gating attachment on its absence.
+// NetworkProfile alert from a container's profile state. Every current
+// GetContainerProfileState implementation never returns nil -- it synthesizes
+// an error state when no entry exists yet for this container (any container,
+// host included, very early in its lifecycle before a profile has been
+// primed) -- but a nil state is still guarded here defensively, since this is
+// an interface contract a future or alternate implementation could violate.
+// Metadata is always attached so the error signal reaches alert consumers;
+// state.Error is surfaced via the Error field rather than gating attachment
+// on its absence.
 func buildProfileMetadata(state *objectcache.ProfileState, profileType armotypes.ProfileType, profileRequirment armotypes.ProfileDependency) *armotypes.ProfileMetadata {
+	if state == nil {
+		return &armotypes.ProfileMetadata{
+			Type:              profileType,
+			ProfileDependency: profileRequirment,
+			FailOnProfile:     false,
+			Error:             "profile state unavailable",
+		}
+	}
 	profileMetadata := &armotypes.ProfileMetadata{
 		Status:            state.Status,
 		Completion:        state.Completion,

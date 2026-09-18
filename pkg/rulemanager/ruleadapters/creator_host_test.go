@@ -223,3 +223,18 @@ func TestSetProfileMetadata_RealContainerUnaffected(t *testing.T) {
 		assert.NotEmpty(t, pm.Error)
 	})
 }
+
+// TestBuildProfileMetadata_NilStateDoesNotPanic guards a defensive check that
+// has no reachable production caller today (every current
+// GetContainerProfileState implementation synthesizes a non-nil error state
+// instead of returning nil), but nil is still a valid value under the
+// GetContainerProfileState interface contract, so a future or alternate
+// implementation returning nil must not panic here.
+func TestBuildProfileMetadata_NilStateDoesNotPanic(t *testing.T) {
+	require.NotPanics(t, func() {
+		pm := buildProfileMetadata(nil, armotypes.ApplicationProfile, armotypes.Required)
+		require.NotNil(t, pm)
+		assert.NotEmpty(t, pm.Error)
+		assert.False(t, pm.FailOnProfile)
+	})
+}
