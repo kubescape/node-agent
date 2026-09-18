@@ -87,13 +87,15 @@ type ContainerWatcher struct {
 	thirdPartyEnricher            containerwatcher.TaskBasedEnricher
 	thirdPartyContainerReceivers  mapset.Set[containerwatcher.ContainerReceiver]
 
-	// hostIdentityOnce caches the result of hostidentity.ResolveHostID: the
-	// host add-container notification can be delivered more than once (e.g.
-	// the container-watcher collection replays it), and resolution can read
-	// /etc/machine-id from disk, so it must not be redone on every replay.
-	hostIdentityOnce sync.Once
-	cachedHostID     string
-	cachedHostIDErr  error
+	// hostIdentityMu guards cachedHostID: the host add-container notification
+	// can be delivered more than once (e.g. the container-watcher collection
+	// replays it), and hostidentity.ResolveHostID can read /etc/machine-id
+	// from disk, so a successful resolution must not be redone on every
+	// replay. Only a SUCCESSFUL resolution is cached -- a transient failure
+	// (e.g. the HOST_ROOT mount not yet ready) must be retried on the next
+	// notification, not locked in forever the way sync.Once would.
+	hostIdentityMu sync.Mutex
+	cachedHostID   string
 
 	// Cache and state
 	objectCache             objectcache.ObjectCache

@@ -199,9 +199,18 @@ func TestNonHostContainerStillFinalizesAtMaxSniffingTime(t *testing.T) {
 
 	entry, ok := cpm.getContainerEntry(containerID)
 	require.True(t, ok)
-	entry.mu.RLock()
-	timerArmed := entry.data.timer != nil
-	entry.mu.RUnlock()
+	timerArmed := func() bool {
+		entry.mu.RLock()
+		defer entry.mu.RUnlock()
+		// The timer's deadline is short enough (see MaxSniffingTime above) that
+		// it could in principle have already fired and cleared entry.data by
+		// the time this lock is acquired. require.NotNil calls t.FailNow(),
+		// which exits via runtime.Goexit -- routing it through this closure
+		// (rather than inline) ensures the deferred RUnlock still runs instead
+		// of leaving the mutex held forever.
+		require.NotNil(t, entry.data, "container entry data was cleared before the timer-armed assertion could run")
+		return entry.data.timer != nil
+	}()
 	assert.True(t, timerArmed, "non-host container must still have the max-sniffing-time timer armed")
 
 	// The timer fires, handleContainerMaxTime sends ContainerReachedMaxTime through

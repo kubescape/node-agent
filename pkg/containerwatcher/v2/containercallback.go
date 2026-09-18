@@ -22,12 +22,22 @@ import (
 // resolveHostID resolves and caches the node's host identity for the
 // lifetime of the ContainerWatcher. It is memoized here (rather than relying
 // on callers to call hostidentity.ResolveHostID once) because the host
-// add-container notification can be delivered more than once.
+// add-container notification can be delivered more than once. Only a
+// successful resolution is cached: a transient failure (e.g. the HOST_ROOT
+// mount not yet ready on the first replay) is retried on the next call
+// instead of being locked in forever.
 func (cw *ContainerWatcher) resolveHostID() (string, error) {
-	cw.hostIdentityOnce.Do(func() {
-		cw.cachedHostID, cw.cachedHostIDErr = hostidentity.ResolveHostID(&cw.cfg)
-	})
-	return cw.cachedHostID, cw.cachedHostIDErr
+	cw.hostIdentityMu.Lock()
+	defer cw.hostIdentityMu.Unlock()
+	if cw.cachedHostID != "" {
+		return cw.cachedHostID, nil
+	}
+	hostID, err := hostidentity.ResolveHostID(&cw.cfg)
+	if err != nil {
+		return "", err
+	}
+	cw.cachedHostID = hostID
+	return hostID, nil
 }
 
 // containerCallback handles container events synchronously

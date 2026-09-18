@@ -7,6 +7,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/hostsensormanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/workerpool"
@@ -134,4 +135,37 @@ func TestContainerCallback_HostContainer_SingleCallSite(t *testing.T) {
 	data := k8sCache.GetSharedContainerData(armotypes.HostContainerID)
 	require.NotNil(t, data)
 	assert.NotEmpty(t, data.Wlid)
+}
+
+// TestResolveHostID_RetriesAfterFailure proves that a failed resolution is
+// NOT cached: only a successful hostID is memoized, so a transient failure
+// (e.g. the HOST_ROOT mount not yet ready on an early replay) is retried on
+// the next call instead of permanently breaking host monitoring for the
+// process lifetime. Using sync.Once here would fail this test, since Once
+// locks in the first call's outcome -- success or failure -- forever.
+func TestResolveHostID_RetriesAfterFailure(t *testing.T) {
+	// NodeName empty and no machine-id file underneath: ResolveHostID must fail.
+	restore := hostsensormanager.SetHostFSPrefixForTest(t.TempDir())
+
+	cw := &ContainerWatcher{cfg: config.Config{NodeName: ""}}
+
+	_, err := cw.resolveHostID()
+	require.Error(t, err, "resolveHostID must fail when neither NodeName nor machine-id is available")
+	assert.Empty(t, cw.cachedHostID, "a failed resolution must not populate the cache")
+
+	// The underlying condition clears (NodeName becomes available, as it would
+	// once the DaemonSet's downward-API env var is actually populated).
+	restore()
+	cw.cfg.NodeName = "test-node"
+
+	hostID, err := cw.resolveHostID()
+	require.NoError(t, err, "resolveHostID must retry and succeed once the transient failure clears")
+	assert.Equal(t, "test-node", hostID)
+	assert.Equal(t, "test-node", cw.cachedHostID, "a successful resolution must now be cached")
+
+	// A further call must reuse the cached value rather than re-resolving.
+	cw.cfg.NodeName = "different-node"
+	hostID, err = cw.resolveHostID()
+	require.NoError(t, err)
+	assert.Equal(t, "test-node", hostID, "once cached, a successful hostID must not be re-derived from a later cfg mutation")
 }
