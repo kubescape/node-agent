@@ -189,12 +189,12 @@ func TestNonHostContainerStillFinalizesAtMaxSniffingTime(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		entry, ok := cpm.getContainerEntry(containerID)
-		if !ok || entry.data == nil {
+		if !ok {
 			return false
 		}
 		entry.mu.RLock()
 		defer entry.mu.RUnlock()
-		return entry.data.watchedContainerData != nil
+		return entry.data != nil && entry.data.watchedContainerData != nil
 	}, 2*time.Second, 10*time.Millisecond, "container was never registered in the profile manager")
 
 	entry, ok := cpm.getContainerEntry(containerID)

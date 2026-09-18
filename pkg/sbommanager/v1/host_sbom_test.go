@@ -292,6 +292,21 @@ func Test_PrepareHostSbom_TooLargeBlocksThisRescanOnly(t *testing.T) {
 	})
 }
 
+// Test_PrepareHostSbom_NilAnnotationsDoNotPanic proves that an existing host
+// SBOM fetched with a nil Annotations map (ObjectMeta.Annotations is
+// optional) does not panic on the map write that stamps ToolVersionMetadataKey.
+// The host scan runs on its own goroutine with no recovery, so this write
+// panicking would take down the whole node-agent process.
+func Test_PrepareHostSbom_NilAnnotationsDoNotPanic(t *testing.T) {
+	sm, store, _ := newHostSbomManager(t, hostCfg("node-1"), t.TempDir())
+	seedHostSbom(t, store, nil)
+
+	require.NotPanics(t, func() {
+		_, _, ok := sm.prepareHostSbom("host-node-1", "node-1")
+		assert.True(t, ok, "a nil-annotation SBOM has no status marker, so it must retry like any Incomplete/Initializing scan")
+	})
+}
+
 // Test_HostSbomLoop_KeepsTickingAfterTooLarge proves the other half of the
 // decision: the ticker itself is never stopped by a TooLarge trip, so the host
 // SBOM resumes automatically as soon as the block is released.

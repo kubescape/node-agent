@@ -275,6 +275,9 @@ func (s *SbomManager) prepareHostSbom(sbomName, hostID string) (*v1beta1.SBOMSyf
 				helpers.String("sbomName", sbomName))
 			return nil, false, false
 		}
+		if existing.Annotations == nil {
+			existing.Annotations = map[string]string{}
+		}
 		switch existing.Annotations[helpersv1.StatusMetadataKey] {
 		case helpersv1.TooLarge:
 			if !s.hostTooLargeReleased(existing) {
