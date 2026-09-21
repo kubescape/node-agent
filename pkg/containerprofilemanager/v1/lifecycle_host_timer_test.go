@@ -630,3 +630,96 @@ func TestDeleteContainer_HostSkipsTerminationExitCodeLookup(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond,
 		"deleteContainer took far too long for host -- it likely fell through to GetTerminationExitCode's 30s backoff")
 }
+
+// TestDeleteContainer_HostStopsMonitorEvenAfterReachingCompleted proves the
+// fix for a leak in the interaction between two earlier host fixes:
+// monitorContainer deliberately keeps ticking after host reaches Completed
+// (so it can keep collecting/saving indefinitely), but deleteContainer's
+// "signal termination only if monitoring is still active" guard used to key
+// off status alone (GetStatus() != Completed && != TooLarge) -- a check that
+// is only valid for a real container, whose monitor loop actually returns
+// once it reaches one of those statuses. For host it is not: once Completed,
+// that guard skipped the whole termination-signal block, so removal never
+// told the monitor goroutine to stop -- it kept ticking and calling
+// saveProfile against an entry the map no longer referenced, forever.
+//
+// This proves both halves: removal actually happens (not blocked forever
+// waiting on an ack nothing will ever send), and no further profile saves
+// occur afterward -- the tick that would prove a leak never fires, because
+// the monitor loop has actually returned.
+func TestDeleteContainer_HostStopsMonitorEvenAfterReachingCompleted(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "host-completed-delete-queue-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	t.Setenv("QUEUE_DIR", tempDir)
+
+	cfg := config.Config{
+		InitialDelay:        20 * time.Millisecond,
+		UpdateDataPeriod:    20 * time.Millisecond,
+		MaxSniffingTime:     5 * time.Millisecond, // must have elapsed well before the first tick
+		MaxJitterPercentage: 0,
+		MaxTsProfileSize:    10 * 1024 * 1024,
+	}
+
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	hostData := hostidentity.BuildHostWatchedContainerData("node-1")
+	k8sObjectCacheMock.SetSharedContainerData(armotypes.HostContainerID, hostData)
+
+	store := &storage.StorageHttpClientMock{}
+	notifier := &completionNotifierMock{completed: make(chan string, 1)}
+
+	cpm, err := NewContainerProfileManager(
+		context.Background(),
+		cfg,
+		&k8sclient.K8sClientMock{},
+		k8sObjectCacheMock,
+		store,
+		&dnsmanager.DNSManagerMock{},
+		&seccompmanager.SeccompManagerMock{},
+		nil,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	defer cpm.Close()
+	cpm.SetCompletionNotifier(notifier)
+
+	hostContainer := newHostPseudoContainer()
+	cpm.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: hostContainer,
+	})
+
+	select {
+	case containerID := <-notifier.completed:
+		assert.Equal(t, armotypes.HostContainerID, containerID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("host profile never reached Completed once its learning window elapsed")
+	}
+
+	removeStart := time.Now()
+	cpm.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeRemoveContainer,
+		Container: hostContainer,
+	})
+
+	require.Eventually(t, func() bool {
+		_, exists := cpm.getContainerEntry(armotypes.HostContainerID)
+		return !exists
+	}, 3*time.Second, 10*time.Millisecond,
+		"removal must complete -- it must not block forever waiting on an ack from a monitor loop that was never actually signalled")
+	assert.Less(t, time.Since(removeStart), MaxWaitForAck,
+		"removal must not need anywhere near the full ack timeout: the monitor loop is idle in its select and acks essentially immediately once signalled")
+
+	profileCountAfterRemoval := len(store.ContainerProfilesSnapshot())
+
+	// If the monitor loop were still ticking (the leak this test guards
+	// against), several more UpdateDataPeriod ticks would fire in this
+	// window, each calling saveProfile again -- against an entry the map no
+	// longer references, reproducing the "container not found" errors the
+	// underlying review comment described.
+	time.Sleep(10 * cfg.UpdateDataPeriod)
+
+	assert.Equal(t, profileCountAfterRemoval, len(store.ContainerProfilesSnapshot()),
+		"no further profile saves must occur after removal -- the monitor goroutine must have actually returned, not kept ticking against a removed entry")
+}

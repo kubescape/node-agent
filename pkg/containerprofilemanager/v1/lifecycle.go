@@ -339,23 +339,33 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			entry.data.timer = nil
 		}
 
-		// Signal termination if monitoring is active
-		if entry.data.watchedContainerData != nil &&
-			entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusCompleted &&
-			entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusTooLarge {
+		// Signal termination if monitoring is active. For a real container,
+		// reaching Completed/TooLarge means monitorContainer has already
+		// returned from its loop on its own (see ContainerReachedMaxTime and
+		// handleSaveProfileError), so there is nothing left listening on
+		// SyncChannel -- sending to it here would block deleteContainer
+		// forever. Host is the one exception: monitorContainer deliberately
+		// keeps running past Completed (see monitoring.go's isHost tick
+		// branch), so its status reaching Completed does NOT mean its loop
+		// has stopped. Without this exception, removing an already-Completed
+		// host would skip the signal entirely, remove the entry from the map
+		// below, and leave the still-running monitor goroutine ticking
+		// forever against an entry that no longer exists.
+		isHost := utils.IsHostContainer(container)
+		monitoringActive := entry.data.watchedContainerData != nil &&
+			(isHost ||
+				(entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusCompleted &&
+					entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusTooLarge))
 
-			if utils.IsHostContainer(container) {
+		if monitoringActive {
+			if isHost {
 				// The host pseudo-container has no real Kubernetes Pod, so
 				// GetTerminationExitCode below would retry for its full
 				// 30-second backoff window looking for a pod status that
 				// will never exist, then mark the profile Failed. Host
-				// removal is not expected in practice -- by the time this
-				// branch could be reached, monitorContainer's own
-				// Completed-transition will usually have already fired,
-				// which is why the status guard above skips this block
-				// entirely -- but if it is ever reached, treat it as a
-				// clean Completed rather than a spurious Failed after a
-				// needless delay.
+				// removal is not expected in practice, but if it is ever
+				// reached, treat it as a clean Completed rather than a
+				// spurious Failed after a needless delay.
 				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusCompleted)
 			} else if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace,
 				container.K8s.PodName, container.K8s.ContainerName, containerID) == 0 {
