@@ -295,9 +295,13 @@ func (s *SbomManager) processHostSbom(hostID string) {
 // TooLarge interaction (explicit decision): a TooLarge trip does NOT permanently
 // stop the rescan ticker -- the loop keeps ticking -- but it DOES cause each
 // subsequent rescan to return here without scanning, for as long as the
-// conditions that produced it are unchanged. It is released when either the
-// scanner memory limit or the Syft tool version changes, which are exactly the
-// two escape hatches the container path already honours.
+// conditions that produced it are unchanged. It is released when either
+// cfg.MaxSBOMSize (recorded via HostMaxSBOMSizeAnnotation) or the Syft tool
+// version changes. This is host's own analogue of the container path's two
+// escape hatches (a Syft tool-version bump or a change to the sidecar's
+// scanner-memory-limit annotation) rather than a literal reuse of them: host
+// always scans in-process (it has no sidecar), so its size-based escape hatch
+// is cfg.MaxSBOMSize, not the sidecar's scanner memory limit.
 //
 // The alternative (rescan unconditionally) was rejected: TooLarge is a one-way
 // door in the storage layer -- GuaranteedUpdate silently drops every write once
