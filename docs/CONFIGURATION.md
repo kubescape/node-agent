@@ -178,6 +178,7 @@ SBOM failure reporting is opt-in. Setting `API_URL` or mounting `services.json` 
 | `syscallPollInterval` | duration | `5s` | How often the seccomp syscall tracer fetches its eBPF map for live event delivery (profile-building and rule-based alerting). Termination-time capture is handled separately and doesn't depend on this value — see [docs/features/syscall-poll-interval.md](features/syscall-poll-interval.md). |
 | `maxDelaySeconds` | int | `30` | Max random delay for jitter |
 | `maxJitterPercentage` | int | `5` | Max jitter percentage |
+| `hostSBOMRescanInterval` | duration | `24h` | How often the host's root-filesystem SBOM is rescanned (only applies when `hostMonitoringEnabled` and `sbomGenerationEnabled` are both set — see [docs/features/host-monitoring-completion.md](features/host-monitoring-completion.md)) |
 
 ### Size Limits
 

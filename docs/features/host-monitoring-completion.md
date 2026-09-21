@@ -151,6 +151,10 @@ A Copilot pass found a real follow-on race in the fourth round's own fix (the du
 
 This round's overview again re-listed "host profile never terminal," "SBOM content preservation," "use an existing namespace," and "allow host events through namespace filtering" as open -- all four remain already fixed earlier in this PR, reverified against current code.
 
+## Seventh review round: a documentation gap, no code changes
+
+A Copilot pass found no new code issues -- the sixth round's fix ("prevent failed registration cleanup from deleting newer entries") is now marked resolved, and the same four stale carryovers ("host profile never terminal," "SBOM content preservation," "use an existing namespace," "allow host events through namespace filtering") were reverified against current code and remain already fixed. One real documentation gap: `hostSBOMRescanInterval` (`pkg/config/config.go`, default `24h`) had no entry in `docs/CONFIGURATION.md`'s timing table, so operators had no documented way to discover or override the host rescan cadence. Added.
+
 ## What is still out of scope
 
 - Manual/live-cluster verification (`kubectl get sbomsyft`/`containerprofile` against a real host, observing live malware/alert events) was not performed — no live cluster is available in the environment this work was done in. The automated tests described above substitute for it: end-to-end profile-content population, real-Syft-scan exclusion fixtures, and Wlid-enrichment assertions on real malware events.
