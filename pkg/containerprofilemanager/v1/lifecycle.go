@@ -87,11 +87,16 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 	case err := <-done:
 		if err != nil {
 			logger.L().Error("failed to add container to the container profile manager", helpers.Error(err))
-			// Close ready channel and remove entry on error
+			// Close ready channel and remove entry on error. Conditional on
+			// this still being the entry this goroutine registered: a
+			// duplicate-registration retry (the loop above) may have already
+			// installed a newer, successfully-registered entry for the same
+			// containerID by the time this failure is observed here, and an
+			// unconditional removal would delete that newer entry instead.
 			entry.readyOnce.Do(func() {
 				close(entry.ready)
 			})
-			cpm.removeContainerEntry(containerID)
+			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
 	case <-ctx.Done():
 		logger.L().Error("timeout while adding container to the container profile manager",
@@ -99,11 +104,12 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
-		// Close ready channel and remove entry on timeout
+		// Close ready channel and remove entry on timeout (see the error
+		// branch above for why this must be conditional on entry match).
 		entry.readyOnce.Do(func() {
 			close(entry.ready)
 		})
-		cpm.removeContainerEntry(containerID)
+		cpm.removeContainerEntryIfMatch(containerID, entry)
 	}
 }
 
@@ -150,8 +156,8 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			entry.readyOnce.Do(func() {
 				close(entry.ready)
 			})
+			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
-		cpm.removeContainerEntry(containerID)
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
 
@@ -170,8 +176,8 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			entry.readyOnce.Do(func() {
 				close(entry.ready)
 			})
+			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
-		cpm.removeContainerEntry(containerID)
 		return nil
 	}
 
@@ -186,8 +192,8 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			entry.readyOnce.Do(func() {
 				close(entry.ready)
 			})
+			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
-		cpm.removeContainerEntry(containerID)
 		return nil
 	}
 

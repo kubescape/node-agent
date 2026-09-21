@@ -120,3 +120,24 @@ func (cpm *ContainerProfileManager) removeContainerEntry(containerID string) (*C
 
 	return entry, exists
 }
+
+// removeContainerEntryIfMatch removes containerID's entry only if it is still
+// exactly expected, returning whether it did. addContainerWithTimeout's
+// duplicate-registration retry (see lifecycle.go) means a failed attempt's
+// cleanup can run after a replayed attempt has already installed a newer,
+// successfully-registered entry for the same containerID; an unconditional
+// removeContainerEntry(containerID) there would delete that newer entry out
+// from under it, leaving its monitor goroutine running with no tracked entry
+// to ever signal it to stop. Every cleanup path tied to a specific entry
+// value (as opposed to deleteContainer's, which owns the only removal for a
+// container that was never concurrently retried) must use this instead.
+func (cpm *ContainerProfileManager) removeContainerEntryIfMatch(containerID string, expected *ContainerEntry) bool {
+	cpm.containersMu.Lock()
+	defer cpm.containersMu.Unlock()
+
+	if cpm.containers[containerID] != expected {
+		return false
+	}
+	delete(cpm.containers, containerID)
+	return true
+}
