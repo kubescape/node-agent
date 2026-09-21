@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -216,8 +219,19 @@ func (s *SbomManager) processHostSbom(hostID string) {
 	if s.hostScanTimeoutOverride > 0 {
 		timeout = s.hostScanTimeoutOverride
 	}
+	parallelism := s.resolveHostScanParallelism()
+	// Logged unconditionally at scan start: the resolved value is the single
+	// variable this cap exists to control, and an unlogged one is exactly what
+	// would let a silent regression back to unbounded parallelism (n ==
+	// NumCPU) pass an otherwise all-green live-cluster verification. Info,
+	// not Debug, so that verification does not additionally depend on the
+	// deployment running at a raised log level; it fires once per rescan
+	// interval (24h by default), not per container.
+	logger.L().Info("SbomManager - starting host SBOM scan",
+		helpers.String("sbomName", sbomName),
+		helpers.Int("parallelism", parallelism))
 	scanCtx, scanCancel := context.WithTimeout(s.ctx, timeout)
-	syftSBOM, err := scanFn(scanCtx, src, hostSbomConfig(s.version, s.cfg.EnableEmbeddedSboms))
+	syftSBOM, err := scanFn(scanCtx, src, hostSbomConfig(s.version, s.cfg.EnableEmbeddedSboms, parallelism))
 	scanCancel()
 	if err != nil {
 		scanDuration := time.Since(scanStart)
@@ -424,10 +438,80 @@ func hostSbomLabels(hostID string) map[string]string {
 	return labels
 }
 
+// cpuLimitMillisEnvVar carries this container's own declared CPU limit, in
+// integer millicores, supplied by the chart via the Kubernetes downward API
+// (resourceFieldRef: {resource: limits.cpu, divisor: "1m"}).
+//
+// The downward API is used deliberately in preference to reading the cgroup
+// CPU quota directly: node-agent bind-mounts the HOST's /sys/fs/cgroup over
+// its own (see pkg/metricsmanager/otel/resource_metrics.go, which had to build
+// container-scope cgroup resolution for exactly this reason), so a naive
+// root-level cgroup read inside this container returns the node's quota, not
+// the container's -- and its failure direction is invisible: it falls back to
+// runtime.NumCPU(), i.e. exactly the unbounded behaviour the cap exists to
+// prevent. resourceFieldRef is resolved by kubelet at pod-admission time from
+// the container's own spec and is immune to that trap entirely.
+const cpuLimitMillisEnvVar = "CPU_LIMIT_MILLIS"
+
+// parallelismFromCPULimitMillis converts a CPU_LIMIT_MILLIS value into a Syft
+// cataloger parallelism. The bool reports whether the raw value was usable;
+// false means the caller must take the runtime.NumCPU() fallback (see
+// resolveHostScanParallelism), and is returned rather than silently folding
+// the fallback in here so the fallback branch itself is directly testable.
+//
+// Whole CPUs are used (integer division): 394m -> 0 -> clamped to 1, 1000m ->
+// 1, 2500m -> 2. A sub-1-CPU limit therefore yields single-threaded
+// cataloging, which is the point -- Syft's default parallelism is 0, meaning
+// runtime.NumCPU(), so on an 8-CPU node a 394m container would schedule work
+// across 8 goroutines against a quota of well under half a CPU and get
+// CFS-throttled hard enough to starve node-agent's own liveness endpoint.
+func parallelismFromCPULimitMillis(raw string) (int, bool) {
+	millis, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || millis <= 0 {
+		return 0, false
+	}
+	n := millis / 1000
+	if n < 1 {
+		n = 1
+	}
+	return n, true
+}
+
+// resolveHostScanParallelism decides the Syft cataloger parallelism for this
+// host scan: the cfg.HostSbomScanParallelism override when set, otherwise the
+// value computed from CPU_LIMIT_MILLIS, otherwise runtime.NumCPU().
+//
+// The fallback is logged at WARN, not Debug/Info, whenever host SBOM scanning
+// is actually enabled: it means the cap is NOT in effect and the scan runs
+// with today's unbounded parallelism, which is a condition an operator needs
+// to see rather than an incidental detail. It is reached when the chart has
+// not yet been updated to supply CPU_LIMIT_MILLIS; note that a chart-wired
+// deployment with no CPU limit configured does not leave the variable unset --
+// Kubernetes substitutes the node's allocatable CPU, which converges on the
+// same NumCPU()-equivalent behaviour by a different route.
+func (s *SbomManager) resolveHostScanParallelism() int {
+	if s.cfg.HostSbomScanParallelism > 0 {
+		return s.cfg.HostSbomScanParallelism
+	}
+	if n, ok := parallelismFromCPULimitMillis(os.Getenv(cpuLimitMillisEnvVar)); ok {
+		return n
+	}
+	if s.cfg.EnableSbomGeneration && s.cfg.HostMonitoringEnabled {
+		logger.L().Warning("SbomManager - CPU_LIMIT_MILLIS unset or unparseable, host SBOM scan falls back to unbounded Syft parallelism",
+			helpers.String("envVar", cpuLimitMillisEnvVar),
+			helpers.Int("parallelism", runtime.NumCPU()))
+	}
+	return runtime.NumCPU()
+}
+
 // hostSbomConfig mirrors the container in-process fallback's Syft configuration
 // (same cataloger removals, same embedded-SBOM opt-in) so host and container
 // SBOMs are produced by comparable tooling.
-func hostSbomConfig(version string, embeddedSboms bool) *syft.CreateSBOMConfig {
+//
+// parallelism is resolved by the caller (resolveHostScanParallelism) rather
+// than here: this function is package-level and has no access to s.cfg or the
+// environment.
+func hostSbomConfig(version string, embeddedSboms bool, parallelism int) *syft.CreateSBOMConfig {
 	cfg := syft.DefaultCreateSBOMConfig()
 	cfg.ToolName = "syft"
 	cfg.ToolVersion = version
@@ -438,6 +522,9 @@ func hostSbomConfig(version string, embeddedSboms bool) *syft.CreateSBOMConfig {
 			"file-executable-cataloger",
 		),
 	)
+	// Syft's own default is 0, which it reads as runtime.NumCPU(); an explicit
+	// value here is what bounds the scan to this container's CPU quota.
+	cfg = cfg.WithParallelism(parallelism)
 	if embeddedSboms {
 		cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
 	}
