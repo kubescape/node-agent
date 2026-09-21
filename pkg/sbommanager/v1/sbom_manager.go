@@ -773,6 +773,12 @@ func (s *SbomManager) waitForSharedContainerData(ctx context.Context, containerI
 // falls back to Incomplete, since a threshold crossing that includes even one non-crash failure
 // isn't evidence the image doesn't fit in the scanner's memory limit.
 func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollection.PubSubEvent, scanErr error, imageTag, imageID string, hadContent bool) {
+	// See handleGenericFailure: a crash is a genuine failure unrelated to
+	// admission contention, so any busy-retry count from an earlier cycle
+	// must not carry forward.
+	if s.busyRetries != nil {
+		s.busyRetries.Remove(sbomName)
+	}
 	retryCount := s.incrementFailureCount(sbomName)
 	crashLoopCount := s.incrementCrashLoopCount(sbomName)
 
@@ -971,6 +977,20 @@ func (s *SbomManager) incrementCrashLoopCount(sbomName string) int {
 // The retry budget is shared with handleScannerCrash via incrementFailureCount, so failures
 // alternating between generic and scanner-crash categories count against the same budget.
 func (s *SbomManager) handleGenericFailure(sbomName string) {
+	// A genuine (non-busy) failure means the sidecar was reached and actually
+	// attempted the scan, which is unrelated to admission contention -- any
+	// busy-retry count accumulated on an earlier cycle must not carry forward
+	// and silently halve this image's contention tolerance the next time it
+	// merely goes busy (busyRetries otherwise only clears on a full success,
+	// per its own doc comment, and never on this path). This is also reached
+	// from the host path (handleHostSidecarFailure), whose lighter-weight test
+	// managers do not construct a busyRetries LRU at all -- nil-safe rather
+	// than requiring every such manager (including host_sbom_test.go, frozen
+	// by Requirement 3's mechanical check) to carry a field only the
+	// container path otherwise uses.
+	if s.busyRetries != nil {
+		s.busyRetries.Remove(sbomName)
+	}
 	if s.incrementFailureCount(sbomName) < maxScanRetries {
 		return
 	}

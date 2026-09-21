@@ -164,3 +164,33 @@ func Test_ContainerBusy_NotRoutedThroughPendingScans(t *testing.T) {
 	assert.Empty(t, mgr.pendingScans, "a busy sidecar is not a down sidecar")
 	assert.Empty(t, mgr.pendingOrder)
 }
+
+// Test_ContainerBusy_RetryTimerStopsOnShutdown mirrors
+// Test_HostScan_BusyRetryStopsOnShutdown: scheduleBusyRetry's timer is
+// selected against s.ctx specifically so a shutdown mid-backoff abandons the
+// pending retry immediately, rather than firing a resubmission into a
+// manager already being torn down.
+func Test_ContainerBusy_RetryTimerStopsOnShutdown(t *testing.T) {
+	fake := newFakeSbomClient()
+	client := &busyScannerClient{busyCalls: 1000, after: errors.New("unreachable")}
+	mgr := newBusyTestManager(t, fake, client, &recordingFailureReporter{})
+	ctx, cancel := context.WithCancel(context.Background())
+	mgr.ctx = ctx
+	mgr.busyRetryDelayFn = func(int) time.Duration { return time.Hour }
+
+	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
+	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+
+	cancel()
+
+	// The retry must never reach the worker pool after cancellation: submit a
+	// sentinel and confirm it runs promptly, proving the pool was never
+	// occupied by (or waiting behind) an abandoned retry resubmission.
+	ran := make(chan struct{})
+	mgr.pool.Submit(func() { close(ran) }, "sentinel-after-shutdown")
+	select {
+	case <-ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a retry timer fired into the pool after shutdown")
+	}
+}

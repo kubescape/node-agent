@@ -227,11 +227,24 @@ func (s *SbomManager) processHostSbom(hostID string) {
 			// exists to avoid. Wait for the next rescan tick instead.
 			s.handleHostSidecarFailure(sbomName)
 			return
+		case hostScanAborted:
+			// Manager shutting down mid-busy-retry: the sidecar was never
+			// confirmed to have failed. Touch nothing -- no counters, no
+			// storage write into a manager being torn down.
+			return
 		case hostScanBusyFallback:
 			// Pre-dispatch: the sidecar never started any work, so there is no
 			// double-scan cost and falling back in-process is free. This is a
 			// one-cycle exception; the sidecar stays the default next tick.
 			logger.L().Warning("SbomManager - scanner sidecar stayed busy, running this host scan in-process for one cycle",
+				helpers.String("sbomName", sbomName))
+		case hostScanRejected:
+			// Pre-dispatch, like busy fallback -- but this is a configuration
+			// defect (bad source_name, or a HOST_ROOT that doesn't resolve to
+			// a plausible host filesystem), not transient contention. Falling
+			// back in-process is equally free (no scan was attempted), but the
+			// operator needs to actually notice this one.
+			logger.L().Warning("SbomManager - scanner sidecar rejected the host scan before dispatch, running this host scan in-process for one cycle",
 				helpers.String("sbomName", sbomName))
 		}
 	}
@@ -261,6 +274,20 @@ const (
 	hostScanFailed
 	hostScanBusyFallback
 	hostScanTooLargeToTransfer
+	// hostScanAborted means the manager is shutting down mid-retry: the sidecar
+	// was never confirmed to have failed (the last thing observed was "busy"),
+	// so this must not touch any failure counter or issue a storage write into
+	// a manager being torn down. It is deliberately distinct from
+	// hostScanBusyFallback (which still runs an in-process scan for this
+	// cycle) and hostScanFailed (which does touch failure accounting): on
+	// shutdown, processHostSbom must simply return.
+	hostScanAborted
+	// hostScanRejected is a pre-dispatch configuration-error rejection (a bad
+	// source_name, or a HOST_ROOT that does not resolve): like
+	// hostScanBusyFallback, no scan work was attempted, so falling back
+	// in-process for this cycle is free -- unlike a busy rejection, this is a
+	// defect an operator can fix, so it is logged distinctly.
+	hostScanRejected
 )
 
 // hostSidecarFailureWarnThreshold is how many consecutive post-dispatch sidecar
@@ -283,7 +310,14 @@ func (s *SbomManager) hostScanViaSidecar(sbomName string) (v1beta1.SyftDocument,
 
 	for attempt := 1; ; attempt++ {
 		scanStart := time.Now()
-		scanCtx, scanCancel := context.WithTimeout(s.ctx, timeout)
+		// The client's own deadline must cover BOTH the server's admission
+		// wait (up to sbomscanner.AdmissionWindow, spent queueing before the
+		// server's own timeout_seconds clock even starts) AND the scan
+		// itself (timeout) -- using just timeout here would let a scan
+		// admitted late be killed client-side as a false DeadlineExceeded
+		// before the server's own deadline, misreporting an in-budget scan
+		// as a client timeout.
+		scanCtx, scanCancel := context.WithTimeout(s.ctx, timeout+sbomscanner.AdmissionWindow)
 		result, err := s.scannerClient.ScanHostFilesystem(scanCtx, sbomscanner.HostScanRequest{
 			SourceName: sbomName,
 			// The sidecar resolves its own HOST_ROOT and compiles in the host
@@ -312,9 +346,21 @@ func (s *SbomManager) hostScanViaSidecar(sbomName string) (v1beta1.SyftDocument,
 				helpers.Int("attempt", attempt),
 				helpers.Int("maxAttempts", busyRetryMaxAttempts))
 			if !s.waitForBusyRetry(attempt) {
-				// Manager shutting down: neither a failure nor a fallback.
-				return v1beta1.SyftDocument{}, hostScanFailed, 0
+				// Manager shutting down: neither a failure nor a fallback --
+				// the sidecar was never confirmed to have failed, so this must
+				// not touch failure accounting.
+				return v1beta1.SyftDocument{}, hostScanAborted, 0
 			}
+
+		case errors.Is(err, sbomscanner.ErrScannerHostScanRejected):
+			// Pre-dispatch configuration-error rejection: no scan work was
+			// attempted, so this is free to fall back on, like busy -- but
+			// it's a defect the operator can fix, not transient contention.
+			s.metrics.ReportSBOMScan("rejected", metricsmanager.ScanPathSidecar)
+			logger.L().Warning("SbomManager - scanner sidecar rejected the host scan request before dispatch",
+				helpers.Error(err),
+				helpers.String("sbomName", sbomName))
+			return v1beta1.SyftDocument{}, hostScanRejected, 0
 
 		case errors.Is(err, sbomscanner.ErrHostDocumentTooLargeToTransfer):
 			var tooLarge *sbomscanner.HostDocumentTooLargeError

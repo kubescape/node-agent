@@ -32,6 +32,14 @@ var (
 	// whole root filesystem every rescan interval forever, which is exactly the
 	// outcome the TooLarge state machine exists to prevent.
 	ErrHostDocumentTooLargeToTransfer = errors.New("host SBOM document exceeds the gRPC transfer budget")
+	// ErrScannerHostScanRejected reports a pre-dispatch rejection of a host scan
+	// request (an invalid source_name, or a HOST_ROOT that does not resolve to a
+	// plausible host filesystem). Like ErrScannerBusy, no scan work was
+	// dispatched, so the caller may fall back in-process for this one cycle at
+	// no double-scan cost -- unlike ErrScannerBusy, this is a configuration
+	// defect, not transient contention, so the caller logs it at a level an
+	// operator will notice rather than treating it as routine.
+	ErrScannerHostScanRejected = errors.New("SBOM scanner sidecar rejected the host scan request before dispatch")
 )
 
 type ScanRequest struct {

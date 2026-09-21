@@ -335,4 +335,11 @@ func Test_HostScan_BusyRetryStopsOnShutdown(t *testing.T) {
 		t.Fatal("the busy backoff did not abandon the scan on shutdown")
 	}
 	assert.Zero(t, inProcess.Load(), "a shutdown must not start a fresh in-process scan")
+	// The sidecar was never confirmed to have failed -- the last observed
+	// outcome was "busy" -- so an abort on shutdown must not touch any
+	// failure accounting, exactly like a genuine busy fallback. Before the
+	// hostScanAborted outcome was introduced, this path fell through to
+	// handleHostSidecarFailure, incrementing the counter and potentially
+	// issuing a storage write into a manager already being torn down.
+	assert.Zero(t, sm.hostSidecarFailures, "shutdown mid-busy-retry must not count as a sidecar failure")
 }

@@ -49,7 +49,18 @@ const (
 	// every momentary overlap into a reported failure would regress it. A short
 	// wait absorbs normal overlap; exceeding it yields ErrScannerBusy, which
 	// both callers treat as "retry soon", never as a scan failure.
+	//
+	// Exported as AdmissionWindow so callers (host_sbom.go's ScanHostFilesystem
+	// call) can size their OWN request context to timeout+AdmissionWindow,
+	// not just timeout -- otherwise a scan admitted late (having spent up to
+	// this long queueing before the server even starts its own
+	// timeout_seconds clock) could still be killed client-side exactly at the
+	// scan timeout, before the server's own deadline, misreporting a
+	// legitimately-in-budget scan as a client timeout.
 	admissionWindow = 45 * time.Second
+	// AdmissionWindow is admissionWindow, exported for callers outside this
+	// package that need to size a request deadline around it.
+	AdmissionWindow = admissionWindow
 
 	// hostScanTransferSafetyMargin is held back from MaxgRPCMessageSize when
 	// deciding whether a host document can be sent. The serialized document is
@@ -112,13 +123,22 @@ type scannerServer struct {
 	// governs is otherwise unobservable in a unit test.
 	admissionTimeout time.Duration
 
-	// hostRootOnce/hostRoot/hostRootErr memoise HOST_ROOT resolution and
+	// hostRootMu/hostRootResolved/hostRoot memoise HOST_ROOT resolution and
 	// validation, so the resolved path is logged exactly once rather than on
 	// every rescan, while still being resolved lazily (the env var is read at
 	// first use, which keeps NewScannerServer free of I/O and testable).
-	hostRootOnce sync.Once
-	hostRoot     string
-	hostRootErr  error
+	//
+	// This is deliberately a mutex-guarded bool, not sync.Once: a host scan
+	// runs at most once per HostSBOMRescanInterval (24h by default), so a
+	// single transient stat failure (a mount not yet settled, a slow
+	// CSI-backed /host, an EIO) memoised by Once would permanently disable
+	// host offload for the sidecar's entire lifetime -- costing a day or more
+	// of host SBOM coverage for a condition that may no longer hold on the
+	// very next call. Only a SUCCESSFUL resolution is memoised; a failure is
+	// re-attempted on every call.
+	hostRootMu       sync.Mutex
+	hostRootResolved bool
+	hostRoot         string
 
 	// hostScanFn is a test seam replacing the real syft.CreateSBOM for the host
 	// RPC. Nil in production.
@@ -180,30 +200,45 @@ func contextStatusError(ctx context.Context) error {
 // the wrong filesystem produces a structurally valid SBOM that describes the
 // wrong machine, which no downstream consumer can detect.
 func (s *scannerServer) resolveHostRoot() (string, error) {
-	s.hostRootOnce.Do(func() {
-		root := os.Getenv(hostRootEnvVar)
-		if root == "" {
-			root = defaultHostRoot
-		}
-		s.hostRoot = root
-		info, err := os.Stat(root)
-		if err != nil {
-			s.hostRootErr = fmt.Errorf("host root %q is not accessible: %w", root, err)
-		} else if !info.IsDir() {
-			s.hostRootErr = fmt.Errorf("host root %q is not a directory", root)
-		} else if missing := missingHostRootMarkers(root); len(missing) > 0 {
-			s.hostRootErr = fmt.Errorf("host root %q does not look like a node root filesystem (missing %s)",
+	s.hostRootMu.Lock()
+	defer s.hostRootMu.Unlock()
+
+	if s.hostRootResolved {
+		return s.hostRoot, nil
+	}
+
+	root := os.Getenv(hostRootEnvVar)
+	if root == "" {
+		root = defaultHostRoot
+	}
+	var err error
+	info, statErr := os.Stat(root)
+	switch {
+	case statErr != nil:
+		err = fmt.Errorf("host root %q is not accessible: %w", root, statErr)
+	case !info.IsDir():
+		err = fmt.Errorf("host root %q is not a directory", root)
+	default:
+		if missing := missingHostRootMarkers(root); len(missing) > 0 {
+			err = fmt.Errorf("host root %q does not look like a node root filesystem (missing %s)",
 				root, strings.Join(missing, ", "))
 		}
-		if s.hostRootErr != nil {
-			logger.L().Error("sbom-scanner: host root validation failed",
-				helpers.Error(s.hostRootErr),
-				helpers.String("hostRoot", root))
-			return
-		}
-		logger.L().Info("sbom-scanner: host root resolved", helpers.String("hostRoot", root))
-	})
-	return s.hostRoot, s.hostRootErr
+	}
+	if err != nil {
+		// Deliberately NOT memoised: a transient condition (a mount not yet
+		// settled, a slow CSI-backed /host, an EIO) must not permanently
+		// disable host offload for this process's lifetime -- see the struct
+		// field doc comment. Every call re-validates until one succeeds.
+		logger.L().Error("sbom-scanner: host root validation failed",
+			helpers.Error(err),
+			helpers.String("hostRoot", root))
+		return "", err
+	}
+
+	s.hostRoot = root
+	s.hostRootResolved = true
+	logger.L().Info("sbom-scanner: host root resolved", helpers.String("hostRoot", root))
+	return root, nil
 }
 
 func missingHostRootMarkers(root string) []string {
@@ -229,7 +264,17 @@ func scanParallelism() int {
 	if n, ok := syftutil.ParallelismFromCPULimitMillis(os.Getenv(cpuLimitMillisEnv)); ok {
 		return n
 	}
-	return gort.NumCPU()
+	// Mirrors node-agent's own PR 1 fix: an unlogged fallback here is exactly
+	// what could let a partial chart rollout (this container's own
+	// CPU_LIMIT_MILLIS env var shipping in a separate chart change from
+	// node-agent's) go unnoticed while the sidecar runs uncapped in a 1 CPU
+	// container -- the identical CFS-throttling failure mode this whole
+	// feature exists to prevent, just relocated to this process.
+	n := gort.NumCPU()
+	logger.L().Warning("sbom-scanner: CPU_LIMIT_MILLIS unset or unparseable, scan falls back to runtime.NumCPU() parallelism (cap not in effect)",
+		helpers.String("envVar", cpuLimitMillisEnv),
+		helpers.Int("parallelism", n))
+	return n
 }
 
 // scanConfig builds the Syft configuration shared by both RPCs.
