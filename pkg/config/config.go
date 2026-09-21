@@ -99,6 +99,7 @@ type Config struct {
 	HostMonitoringEnabled          bool                                 `mapstructure:"hostMonitoringEnabled"`
 	HostSBOMRescanInterval         time.Duration                        `mapstructure:"hostSBOMRescanInterval"`
 	HostSbomScanParallelism        int                                  `mapstructure:"hostSbomScanParallelism"`
+	HostSbomOffloadEnabled         bool                                 `mapstructure:"hostSbomOffloadEnabled"`
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
@@ -249,6 +250,15 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	// positive value forces that parallelism instead, so a computed value that
 	// proves wrong in the field can be corrected without a new image build.
 	viper.SetDefault("hostSbomScanParallelism", 0)
+	// HostSbomOffloadEnabled routes the host root-filesystem scan through the
+	// sbom-scanner sidecar when one is configured and ready, falling back to
+	// the in-process scan otherwise. It is a kill switch separate from
+	// SBOM_SCANNER_SOCKET deliberately: that socket also gates the container
+	// image path, so disabling it to isolate a host-scan problem would take
+	// container SBOM offload down with it. Setting this false leaves the host
+	// on the in-process path (which carries its own parallelism cap) while
+	// container scans keep using the sidecar.
+	viper.SetDefault("hostSbomOffloadEnabled", true)
 	viper.SetDefault("standaloneMonitoringEnabled", false)
 	// HTTP Exporter Alert Bulking defaults
 	viper.SetDefault("exporters::httpExporterConfig::bulkMaxAlerts", 50)

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +20,9 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/hostidentity"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager/v1/syftutil"
+	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -34,11 +35,17 @@ const HostSbomNameLabelKey = "kubescape.io/host"
 // HostMaxSBOMSizeAnnotation records cfg.MaxSBOMSize at the time a host SBOM
 // was marked TooLarge, so hostTooLargeReleased can detect a later config
 // change and release the block. It is a dedicated key, not
-// ScannerMemoryLimitAnnotation: that annotation records the sidecar
-// scanner's memory limit, which never applies to the host branch (host
-// always scans in-process with Syft, never via the sidecar) -- recording it
-// here would mean cfg.MaxSBOMSize, the value that actually gates the host
-// size check, could never unblock a stuck TooLarge host SBOM.
+// ScannerMemoryLimitAnnotation.
+//
+// The host scan can now run in the sbom-scanner sidecar, so "the host has no
+// sidecar" is no longer why -- but the conclusion is unchanged, and for a
+// sharper reason: ScannerMemoryLimitAnnotation records the limit that decides
+// whether the SIDECAR's own memory is exceeded, whereas what marks a host SBOM
+// TooLarge is always cfg.MaxSBOMSize (either via size.Of client-side, or via
+// the sidecar's transfer-budget check, which is likewise unrelated to the
+// scanner's memory limit). Recording the scanner memory limit here would mean
+// cfg.MaxSBOMSize -- the value that actually gates the host size check -- could
+// never unblock a stuck TooLarge host SBOM.
 const HostMaxSBOMSizeAnnotation = "kubescape.io/host-max-sbom-size"
 
 // hostScanTimeout bounds a single host root-filesystem scan. Without it, a
@@ -173,10 +180,18 @@ func hostSbomName(hostID string) string {
 // processHostSbom generates (or regenerates) the host's SBOM.
 //
 // It shares no code with processContainerWithMetadata by design: there is no
-// imageStatus to marshal, no layer paths to hand to the scanner sidecar (whose
-// ScanRequest is image-shaped: ImageID/ImageTag/LayerPaths/ImageStatus), and no
-// image digest to report failures against. The host therefore always scans
-// in-process with Syft over a directory source.
+// imageStatus to marshal, no layer paths, and no image digest to report
+// failures against. It does, however, share the sbom-scanner sidecar: since the
+// dedicated ScanHostFilesystem RPC exists, a ready sidecar (with offload
+// enabled) runs the scan in its own, generously-provisioned process, and the
+// in-process Syft scan over a directory source is the permanent fallback for
+// everything else.
+//
+// The dispatch is deliberately TWO-way (sidecar-ready vs. everything else),
+// unlike the container path's three-way branch. The container path can afford
+// to park a scan in pendingScans until the sidecar comes back, because another
+// container start will drive it. A host is always present and has no such
+// second trigger, so it must never silently stall waiting on a sidecar.
 //
 // It also never calls the kubevuln failure-reporting path on any failure
 // branch below: scanfailure.ScanFailureReport is keyed by ImageTag and
@@ -196,6 +211,182 @@ func (s *SbomManager) processHostSbom(hostID string) {
 	s.processing.Add(sbomName)
 	defer s.processing.Remove(sbomName)
 
+	if s.hostOffloadAvailable() {
+		doc, outcome, transferSize := s.hostScanViaSidecar(sbomName)
+		switch outcome {
+		case hostScanOK:
+			s.finishHostSbom(wipSbom, sbomName, hostID, doc, hadContent)
+			return
+		case hostScanTooLargeToTransfer:
+			s.finishHostSbomOversizedTransfer(wipSbom, sbomName, hostID, transferSize, hadContent)
+			return
+		case hostScanFailed:
+			// Post-dispatch failure: the sidecar actually attempted the scan,
+			// so retrying in-process in the same cycle would pay the full cost
+			// of a second root-filesystem walk -- exactly what offloading
+			// exists to avoid. Wait for the next rescan tick instead.
+			s.handleHostSidecarFailure(sbomName)
+			return
+		case hostScanBusyFallback:
+			// Pre-dispatch: the sidecar never started any work, so there is no
+			// double-scan cost and falling back in-process is free. This is a
+			// one-cycle exception; the sidecar stays the default next tick.
+			logger.L().Warning("SbomManager - scanner sidecar stayed busy, running this host scan in-process for one cycle",
+				helpers.String("sbomName", sbomName))
+		}
+	}
+
+	doc, ok := s.hostScanInProcess(sbomName)
+	if !ok {
+		return
+	}
+	s.finishHostSbom(wipSbom, sbomName, hostID, doc, hadContent)
+}
+
+// hostOffloadAvailable reports whether this cycle's scan should go to the
+// sidecar. cfg.HostSbomOffloadEnabled is checked first so the kill switch takes
+// effect without a health probe.
+func (s *SbomManager) hostOffloadAvailable() bool {
+	return s.cfg.HostSbomOffloadEnabled && s.scannerClient != nil && s.scannerClient.Ready()
+}
+
+// hostScanOutcome classifies a sidecar host-scan attempt. The distinction that
+// matters is whether the sidecar actually dispatched the scan: a busy rejection
+// did not, so it costs nothing to fall back in-process, whereas any other
+// failure did, so falling back would double the work.
+type hostScanOutcome int
+
+const (
+	hostScanOK hostScanOutcome = iota
+	hostScanFailed
+	hostScanBusyFallback
+	hostScanTooLargeToTransfer
+)
+
+// hostSidecarFailureWarnThreshold is how many consecutive post-dispatch sidecar
+// failures are tolerated before the host SBOM is declared degraded in the log.
+// Crossing it changes nothing about the retry cadence -- the scan keeps
+// retrying on the normal rescan interval, and it never pins a status.
+const hostSidecarFailureWarnThreshold = 3
+
+// hostScanViaSidecar runs one host scan through the sidecar, including the
+// bounded busy-retry window.
+//
+// The returned document is already stripped and serialized by the sidecar, so
+// it converges with the in-process path one step later than the scan call
+// itself -- at the wipSbom.Spec.Syft assignment in finishHostSbom, not here.
+func (s *SbomManager) hostScanViaSidecar(sbomName string) (v1beta1.SyftDocument, hostScanOutcome, int64) {
+	timeout := hostScanTimeout
+	if s.hostScanTimeoutOverride > 0 {
+		timeout = s.hostScanTimeoutOverride
+	}
+
+	for attempt := 1; ; attempt++ {
+		scanStart := time.Now()
+		scanCtx, scanCancel := context.WithTimeout(s.ctx, timeout)
+		result, err := s.scannerClient.ScanHostFilesystem(scanCtx, sbomscanner.HostScanRequest{
+			SourceName: sbomName,
+			// The sidecar resolves its own HOST_ROOT and compiles in the host
+			// exclusion set, so neither is sent.
+			EnableEmbeddedSBOMs: s.cfg.EnableEmbeddedSboms,
+			Timeout:             timeout,
+		})
+		scanCancel()
+		scanDuration := time.Since(scanStart)
+
+		switch {
+		case err == nil:
+			s.metrics.ReportSBOMScan("success", metricsmanager.ScanPathSidecar)
+			s.metrics.ObserveSBOMScanDuration("success", metricsmanager.ScanPathSidecar, scanDuration)
+			return result.SyftDocument, hostScanOK, result.SBOMSize
+
+		case errors.Is(err, sbomscanner.ErrScannerBusy):
+			// Explicitly NOT a failure: nothing was scanned, nothing crashed.
+			// No failure counter is touched on this branch.
+			s.metrics.ReportSBOMScan("busy", metricsmanager.ScanPathSidecar)
+			if attempt > busyRetryMaxAttempts {
+				return v1beta1.SyftDocument{}, hostScanBusyFallback, 0
+			}
+			logger.L().Debug("SbomManager - scanner sidecar busy, retrying host scan",
+				helpers.String("sbomName", sbomName),
+				helpers.Int("attempt", attempt),
+				helpers.Int("maxAttempts", busyRetryMaxAttempts))
+			if !s.waitForBusyRetry(attempt) {
+				// Manager shutting down: neither a failure nor a fallback.
+				return v1beta1.SyftDocument{}, hostScanFailed, 0
+			}
+
+		case errors.Is(err, sbomscanner.ErrHostDocumentTooLargeToTransfer):
+			var tooLarge *sbomscanner.HostDocumentTooLargeError
+			var reported int64
+			if errors.As(err, &tooLarge) {
+				reported = tooLarge.Size
+			}
+			s.metrics.ReportSBOMScan("too_large", metricsmanager.ScanPathSidecar)
+			s.metrics.ObserveSBOMScanDuration("too_large", metricsmanager.ScanPathSidecar, scanDuration)
+			logger.L().Warning("SbomManager - host SBOM too large to transfer from the scanner sidecar",
+				helpers.Error(err),
+				helpers.String("sbomName", sbomName),
+				helpers.Int("reportedSize", int(reported)))
+			return v1beta1.SyftDocument{}, hostScanTooLargeToTransfer, reported
+
+		default:
+			status := "error"
+			if errors.Is(err, context.DeadlineExceeded) {
+				status = "timeout"
+			}
+			s.metrics.ReportSBOMScan(status, metricsmanager.ScanPathSidecar)
+			s.metrics.ObserveSBOMScanDuration(status, metricsmanager.ScanPathSidecar, scanDuration)
+			logger.L().Ctx(s.ctx).Error("SbomManager - host SBOM scan via the scanner sidecar failed",
+				helpers.Error(err),
+				helpers.String("sbomName", sbomName))
+			return v1beta1.SyftDocument{}, hostScanFailed, 0
+		}
+	}
+}
+
+// waitForBusyRetry sleeps out one backoff step, reporting false if the manager
+// is shutting down. It is a timer selected against s.ctx rather than a bare
+// sleep so a shutdown is not delayed by up to 60 seconds. Unlike the container
+// path's equivalent, it may block its goroutine: the host scan has a goroutine
+// of its own and shares it with nothing.
+func (s *SbomManager) waitForBusyRetry(attempt int) bool {
+	timer := time.NewTimer(s.retryDelay(attempt))
+	defer timer.Stop()
+	select {
+	case <-s.ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+// handleHostSidecarFailure records a post-dispatch sidecar failure against the
+// host's OWN counter.
+//
+// That counter is deliberately not the container path's crashLoopRetries.
+// crashLoopRetries is the one mechanism that can pin an SBOM into the TooLarge
+// one-way door, and its meaning there is "the image does not fit in the
+// scanner's memory limit". Sidecar connectivity failures say nothing about the
+// host document's size, so feeding them into that counter would let a flapping
+// sidecar permanently freeze the host SBOM as TooLarge -- a state only a
+// genuine size overage may ever produce.
+func (s *SbomManager) handleHostSidecarFailure(sbomName string) {
+	s.hostSidecarFailures++
+	if s.hostSidecarFailures >= hostSidecarFailureWarnThreshold {
+		logger.L().Warning("SbomManager - host SBOM scanning via the scanner sidecar is degraded; still retrying on the normal rescan interval",
+			helpers.String("sbomName", sbomName),
+			helpers.Int("consecutiveFailures", s.hostSidecarFailures))
+	}
+	// Generic (retryable, at worst Incomplete) failure handling, identical to
+	// the in-process path's. It can never reach TooLarge.
+	s.handleGenericFailure(sbomName)
+}
+
+// hostScanInProcess runs the host scan inside node-agent, bounded by the
+// CPU-limit-derived parallelism cap. It reports false once the failure has been
+// fully handled.
+func (s *SbomManager) hostScanInProcess(sbomName string) (v1beta1.SyftDocument, bool) {
 	scanStart := time.Now()
 	src, err := syftutil.NewHostSource(s.hostFSPrefix, sbomName, s.version)
 	if err != nil {
@@ -204,7 +395,7 @@ func (s *SbomManager) processHostSbom(hostID string) {
 			helpers.String("path", s.hostFSPrefix),
 			helpers.String("sbomName", sbomName))
 		s.handleGenericFailure(sbomName)
-		return
+		return v1beta1.SyftDocument{}, false
 	}
 	defer func() {
 		_ = src.Close()
@@ -235,39 +426,45 @@ func (s *SbomManager) processHostSbom(hostID string) {
 	if err != nil {
 		scanDuration := time.Since(scanStart)
 		if errors.Is(err, context.DeadlineExceeded) {
-			s.metrics.ReportSBOMScan("timeout")
-			s.metrics.ObserveSBOMScanDuration("timeout", scanDuration)
+			s.metrics.ReportSBOMScan("timeout", metricsmanager.ScanPathInProcess)
+			s.metrics.ObserveSBOMScanDuration("timeout", metricsmanager.ScanPathInProcess, scanDuration)
 			logger.L().Ctx(s.ctx).Error("SbomManager - host SBOM scan timed out",
 				helpers.Error(err),
 				helpers.String("sbomName", sbomName),
 				helpers.String("timeout", timeout.String()))
 		} else {
-			s.metrics.ReportSBOMScan("error")
-			s.metrics.ObserveSBOMScanDuration("error", scanDuration)
+			s.metrics.ReportSBOMScan("error", metricsmanager.ScanPathInProcess)
+			s.metrics.ObserveSBOMScanDuration("error", metricsmanager.ScanPathInProcess, scanDuration)
 			logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate host SBOM",
 				helpers.Error(err),
 				helpers.String("sbomName", sbomName))
 		}
-		// handleGenericFailure/processing.Remove (deferred above) both run
-		// regardless of the failure's cause, so a timeout -- like any other
+		// handleGenericFailure/processing.Remove (deferred by the caller) both
+		// run regardless of the failure's cause, so a timeout -- like any other
 		// scan error -- clears the in-flight marker and leaves the SBOM in a
 		// retryable status (Incomplete once maxScanRetries is reached,
 		// otherwise unchanged), letting the next rescan tick try again
 		// instead of being permanently stuck.
 		s.handleGenericFailure(sbomName)
-		return
+		return v1beta1.SyftDocument{}, false
 	}
-	s.metrics.ReportSBOMScan("success")
-	s.metrics.ObserveSBOMScanDuration("success", time.Since(scanStart))
+	s.metrics.ReportSBOMScan("success", metricsmanager.ScanPathInProcess)
+	s.metrics.ObserveSBOMScanDuration("success", metricsmanager.ScanPathInProcess, time.Since(scanStart))
 	v1beta1.StripSBOM(syftSBOM)
+	return syftutil.ToSyftDocument(syftSBOM), true
+}
 
-	s.failureRetries.Remove(sbomName)
-	s.crashLoopRetries.Remove(sbomName)
-	delete(wipSbom.Annotations, NodeNameMetadataKey)
-	wipSbom.Spec.Metadata.Report.CreatedAt = wipSbom.CreationTimestamp
-	wipSbom.Spec.Metadata.Tool.Name = "syft"
-	wipSbom.Spec.Metadata.Tool.Version = s.version
-	wipSbom.Spec.Syft = syftutil.ToSyftDocument(syftSBOM)
+// finishHostSbom is where the two scan paths converge: both hand over a
+// finished SyftDocument, and everything from here -- metadata stamping, the
+// size gate, persistence -- is identical regardless of which produced it.
+//
+// The size gate in particular is untouched by the sidecar work: it is still
+// size.Of(wipSbom) against cfg.MaxSBOMSize, measured client-side after the
+// document is attached, exactly as before.
+func (s *SbomManager) finishHostSbom(wipSbom *v1beta1.SBOMSyft, sbomName, hostID string, doc v1beta1.SyftDocument, hadContent bool) {
+	s.resetHostSbomCounters(sbomName)
+	s.stampHostSbomMetadata(wipSbom)
+	wipSbom.Spec.Syft = doc
 
 	sz := size.Of(wipSbom)
 	wipSbom.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
@@ -276,20 +473,70 @@ func (s *SbomManager) processHostSbom(hostID string) {
 			helpers.String("sbomName", sbomName),
 			helpers.Int("maxSBOMSize", s.cfg.MaxSBOMSize),
 			helpers.Int("size", sz))
-		// TooLarge is a one-way door in the storage layer, so a host SBOM that
-		// already carries real content must never be pushed through it -- the
-		// same rule the container path applies via wipSbomHadContent.
-		if hadContent {
-			wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Incomplete
-		} else {
-			wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
-			wipSbom.Annotations[HostMaxSBOMSizeAnnotation] = fmt.Sprintf("%d", s.cfg.MaxSBOMSize)
-			wipSbom.Spec = v1beta1.SBOMSyftSpec{}
-		}
+		s.markHostSbomOversized(wipSbom, hadContent)
 	} else {
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Learning
 	}
 
+	s.saveHostSbom(wipSbom, sbomName, hostID)
+}
+
+// finishHostSbomOversizedTransfer handles a host scan that succeeded in the
+// sidecar but produced a document too large to send back.
+//
+// It routes into exactly the same hadContent/TooLarge/Incomplete branch
+// finishHostSbom uses, so this document reaches the same terminal state it
+// would have reached in-process. Only the size INPUT differs: the sidecar's
+// measured serialized-byte count stands in for size.Of's deep-object
+// measurement, since the document itself never arrived to be measured. The two
+// track the same underlying quantity to within a constant factor, and under the
+// default configuration (128MB transfer budget vs. a 20MB size limit) the
+// mapping is unambiguous -- a document that cannot be transferred is many times
+// over the size limit either way.
+func (s *SbomManager) finishHostSbomOversizedTransfer(wipSbom *v1beta1.SBOMSyft, sbomName, hostID string, transferSize int64, hadContent bool) {
+	s.resetHostSbomCounters(sbomName)
+	s.stampHostSbomMetadata(wipSbom)
+	wipSbom.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", transferSize)
+	s.markHostSbomOversized(wipSbom, hadContent)
+	s.saveHostSbom(wipSbom, sbomName, hostID)
+}
+
+// markHostSbomOversized applies the shared oversized-document decision.
+//
+// TooLarge is a one-way door in the storage layer, so a host SBOM that already
+// carries real content must never be pushed through it -- the same rule the
+// container path applies via wipSbomHadContent.
+func (s *SbomManager) markHostSbomOversized(wipSbom *v1beta1.SBOMSyft, hadContent bool) {
+	if hadContent {
+		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Incomplete
+		return
+	}
+	wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
+	wipSbom.Annotations[HostMaxSBOMSizeAnnotation] = fmt.Sprintf("%d", s.cfg.MaxSBOMSize)
+	wipSbom.Spec = v1beta1.SBOMSyftSpec{}
+}
+
+// stampHostSbomMetadata records the document's own self-description.
+//
+// Tool.Version is node-agent's s.version on BOTH paths, not the sidecar's. The
+// two are the same expression (packageVersion("github.com/anchore/syft"))
+// resolved from the same go.mod, so in any real deployment they are the same
+// string -- which is also why ScanHostFilesystemResponse carries no
+// tool_version field to reconcile.
+func (s *SbomManager) stampHostSbomMetadata(wipSbom *v1beta1.SBOMSyft) {
+	delete(wipSbom.Annotations, NodeNameMetadataKey)
+	wipSbom.Spec.Metadata.Report.CreatedAt = wipSbom.CreationTimestamp
+	wipSbom.Spec.Metadata.Tool.Name = "syft"
+	wipSbom.Spec.Metadata.Tool.Version = s.version
+}
+
+func (s *SbomManager) resetHostSbomCounters(sbomName string) {
+	s.failureRetries.Remove(sbomName)
+	s.crashLoopRetries.Remove(sbomName)
+	s.hostSidecarFailures = 0
+}
+
+func (s *SbomManager) saveHostSbom(wipSbom *v1beta1.SBOMSyft, sbomName, hostID string) {
 	if _, err := s.storageClient.ReplaceSBOM(wipSbom); err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to save host SBOM",
 			helpers.Error(err),
@@ -312,9 +559,20 @@ func (s *SbomManager) processHostSbom(hostID string) {
 // cfg.MaxSBOMSize (recorded via HostMaxSBOMSizeAnnotation) or the Syft tool
 // version changes. This is host's own analogue of the container path's two
 // escape hatches (a Syft tool-version bump or a change to the sidecar's
-// scanner-memory-limit annotation) rather than a literal reuse of them: host
-// always scans in-process (it has no sidecar), so its size-based escape hatch
-// is cfg.MaxSBOMSize, not the sidecar's scanner memory limit.
+// scanner-memory-limit annotation) rather than a literal reuse of them: what
+// marks a host SBOM TooLarge is always cfg.MaxSBOMSize, on both the in-process
+// and the sidecar path, so that is its size-based escape hatch -- not the
+// sidecar's scanner memory limit, which gates a different thing entirely.
+//
+// The tool-version half stays keyed on node-agent's OWN s.version even when the
+// sidecar produced the scan. That is not an oversight: this annotation is
+// written in prepareHostSbom, BEFORE the scan that would report a version even
+// runs, so a sidecar-reported version could not participate in this condition
+// even if the response carried one. Both binaries resolve the same Syft version
+// from the same go.mod, so the two agree in any real deployment. The accepted
+// consequence is that bumping Syft in the sidecar alone would not release a
+// stuck TooLarge host SBOM; node-agent's own version (which ships in the same
+// image) must change too.
 //
 // The alternative (rescan unconditionally) was rejected: TooLarge is a one-way
 // door in the storage layer -- GuaranteedUpdate silently drops every write once
@@ -453,31 +711,15 @@ func hostSbomLabels(hostID string) map[string]string {
 const cpuLimitMillisEnvVar = "CPU_LIMIT_MILLIS"
 
 // parallelismFromCPULimitMillis converts a CPU_LIMIT_MILLIS value into a Syft
-// cataloger parallelism. The bool reports whether the raw value was usable;
-// false means the caller must take the serial fallback (see
-// resolveHostScanParallelism), and is returned rather than silently folding
-// the fallback in here so the fallback branch itself is directly testable.
+// cataloger parallelism. See syftutil.ParallelismFromCPULimitMillis for the
+// full rationale (downward API vs. cgroup read, and why the vendored fork's
+// uncapped default is NumCPU()*4 rather than NumCPU()).
 //
-// Whole CPUs are used (integer division): 394m -> 0 -> clamped to 1, 1000m ->
-// 1, 2500m -> 2. n==1 is passed to Syft as parallelism 1, which the vendored
-// fork (github.com/kubescape/syft, see go.mod's replace directive) special-
-// cases to mean fully serial, no cataloger goroutines at all -- stronger than
-// "one goroutine". This matters because that fork's default (parallelism 0)
-// is NOT runtime.NumCPU(): syft/create_sbom.go resolves 0 to
-// runtime.NumCPU()*4, so on an 8-CPU node a 394m container would schedule
-// cataloger work across 32 goroutines against a quota of well under half a
-// CPU -- 4x worse than the naive "NumCPU()" story suggests -- and get
-// CFS-throttled hard enough to starve node-agent's own liveness endpoint.
+// The logic lives in syftutil because the sbom-scanner sidecar applies the
+// identical cap to its own scans from a different package; this wrapper keeps
+// the host path's call sites and tests reading naturally.
 func parallelismFromCPULimitMillis(raw string) (int, bool) {
-	millis, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || millis <= 0 {
-		return 0, false
-	}
-	n := millis / 1000
-	if n < 1 {
-		n = 1
-	}
-	return n, true
+	return syftutil.ParallelismFromCPULimitMillis(raw)
 }
 
 // resolveHostScanParallelism uses a positive config override, then the

@@ -7,6 +7,16 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
+// Scan-path labels for ReportSBOMScan/ObserveSBOMScanDuration. Closed set.
+const (
+	// ScanPathInProcess marks a scan run inside node-agent itself -- the
+	// container path's no-sidecar fallback, or the host path's fallback
+	// (which is bounded by the CPU-limit-derived parallelism cap).
+	ScanPathInProcess = "in_process"
+	// ScanPathSidecar marks a scan delegated to the sbom-scanner sidecar.
+	ScanPathSidecar = "sidecar"
+)
+
 // MetricsManager is an interface for reporting metrics
 type MetricsManager interface {
 	Start()
@@ -63,9 +73,14 @@ type MetricsManager interface {
 	ObserveProfileEntriesRetained(field string, count float64)
 	ObserveProfileRetentionRatio(field string, ratio float64)
 
-	// SBOM scan metrics.
-	ReportSBOMScan(status string)
-	ObserveSBOMScanDuration(status string, d time.Duration)
+	// SBOM scan metrics. path is which process actually produced the scan --
+	// ScanPathInProcess or ScanPathSidecar. It is a separate label rather than
+	// more status values because status and path are independent: either path
+	// can succeed, error or time out, and a run that trivially "passes" because
+	// the sidecar was never exercised has to be distinguishable from one that
+	// genuinely went through it.
+	ReportSBOMScan(status, path string)
+	ObserveSBOMScanDuration(status, path string, d time.Duration)
 	ReportSBOMScannerRestart()
 	SetSBOMScannerReady(ready bool)
 

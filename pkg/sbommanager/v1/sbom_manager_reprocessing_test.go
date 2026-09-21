@@ -112,6 +112,9 @@ type fakeScannerClient struct{ err error }
 func (f *fakeScannerClient) CreateSBOM(_ context.Context, _ sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
 	return nil, f.err
 }
+func (f *fakeScannerClient) ScanHostFilesystem(_ context.Context, _ sbomscanner.HostScanRequest) (*sbomscanner.HostScanResult, error) {
+	return nil, f.err
+}
 func (f *fakeScannerClient) Ready() bool  { return true }
 func (f *fakeScannerClient) Close() error { return nil }
 
@@ -138,6 +141,7 @@ func newTestManagerWithScannerErr(fake *fakeSbomClient, version string, scannerE
 		version:          version,
 		failureRetries:   newFailureRetries(),
 		crashLoopRetries: newCrashLoopRetries(),
+		busyRetries:      newFailureRetries(),
 	}
 }
 
@@ -152,6 +156,7 @@ func newTestManagerInProcess(fake *fakeSbomClient, version string, maxImageSize 
 		version:          version,
 		failureRetries:   newFailureRetries(),
 		crashLoopRetries: newCrashLoopRetries(),
+		busyRetries:      newFailureRetries(),
 	}
 }
 
@@ -348,6 +353,12 @@ func (a *alternatingScannerClient) CreateSBOM(_ context.Context, _ sbomscanner.S
 	}
 	return nil, sbomscanner.ErrScannerCrashed
 }
+
+// ScanHostFilesystem is unused by these container-path tests; it exists so the fake
+// still satisfies sbomscanner.SBOMScannerClient.
+func (a *alternatingScannerClient) ScanHostFilesystem(_ context.Context, _ sbomscanner.HostScanRequest) (*sbomscanner.HostScanResult, error) {
+	return nil, errors.New("not used")
+}
 func (a *alternatingScannerClient) Ready() bool  { return true }
 func (a *alternatingScannerClient) Close() error { return nil }
 
@@ -386,6 +397,7 @@ func Test_processContainerWithMetadata_MixedFailureCategoriesShareBudget(t *test
 		version:          "v2.0.0",
 		failureRetries:   newFailureRetries(),
 		crashLoopRetries: newCrashLoopRetries(),
+		busyRetries:      newFailureRetries(),
 	}
 
 	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
@@ -531,6 +543,12 @@ func (a *genericThenCrashScannerClient) CreateSBOM(_ context.Context, _ sbomscan
 	}
 	return nil, sbomscanner.ErrScannerCrashed
 }
+
+// ScanHostFilesystem is unused by these container-path tests; it exists so the fake
+// still satisfies sbomscanner.SBOMScannerClient.
+func (a *genericThenCrashScannerClient) ScanHostFilesystem(_ context.Context, _ sbomscanner.HostScanRequest) (*sbomscanner.HostScanResult, error) {
+	return nil, errors.New("not used")
+}
 func (a *genericThenCrashScannerClient) Ready() bool  { return true }
 func (a *genericThenCrashScannerClient) Close() error { return nil }
 
@@ -556,6 +574,7 @@ func Test_processContainerWithMetadata_MixedFailureCategoriesPinIncomplete(t *te
 		scannerMemLimit:  1024,
 		failureRetries:   newFailureRetries(),
 		crashLoopRetries: newCrashLoopRetries(),
+		busyRetries:      newFailureRetries(),
 	}
 
 	for range 3 {
@@ -590,6 +609,7 @@ func Test_processContainerWithMetadata_MarksContentlessImageTooLargeOnPureCrashL
 		scannerMemLimit:  2048,
 		failureRetries:   newFailureRetries(),
 		crashLoopRetries: newCrashLoopRetries(),
+		busyRetries:      newFailureRetries(),
 	}
 
 	for range 3 {
@@ -625,6 +645,7 @@ func Test_processContainerWithMetadata_CrashLoopBackstopSurvivesSparseCadence(t 
 		scannerMemLimit:  4096,
 		failureRetries:   expirable.NewLRU[string, int](maxFailureRetryEntries, nil, 5*time.Millisecond),
 		crashLoopRetries: expirable.NewLRU[string, int](maxFailureRetryEntries, nil, 5*time.Second),
+		busyRetries:      newFailureRetries(),
 	}
 
 	for i := range 3 {
