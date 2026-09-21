@@ -27,6 +27,16 @@ import (
 // none of the image-derived labels (image ID/name/tag) apply to a host.
 const HostSbomNameLabelKey = "kubescape.io/host"
 
+// HostMaxSBOMSizeAnnotation records cfg.MaxSBOMSize at the time a host SBOM
+// was marked TooLarge, so hostTooLargeReleased can detect a later config
+// change and release the block. It is a dedicated key, not
+// ScannerMemoryLimitAnnotation: that annotation records the sidecar
+// scanner's memory limit, which never applies to the host branch (host
+// always scans in-process with Syft, never via the sidecar) -- recording it
+// here would mean cfg.MaxSBOMSize, the value that actually gates the host
+// size check, could never unblock a stuck TooLarge host SBOM.
+const HostMaxSBOMSizeAnnotation = "kubescape.io/host-max-sbom-size"
+
 // hostScanTimeout bounds a single host root-filesystem scan. Without it, a
 // syft.CreateSBOM call that hangs on a slow or unresponsive mount would block
 // the host scan goroutine (see hostSbomLoop) forever: the ticker never fires
@@ -219,7 +229,7 @@ func (s *SbomManager) processHostSbom(hostID string) {
 			wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Incomplete
 		} else {
 			wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
-			wipSbom.Annotations[ScannerMemoryLimitAnnotation] = fmt.Sprintf("%d", s.scannerMemLimit)
+			wipSbom.Annotations[HostMaxSBOMSizeAnnotation] = fmt.Sprintf("%d", s.cfg.MaxSBOMSize)
 			wipSbom.Spec = v1beta1.SBOMSyftSpec{}
 		}
 	} else {
@@ -343,8 +353,8 @@ func (s *SbomManager) hostTooLargeReleased(existing *v1beta1.SBOMSyft) bool {
 	if existing.Annotations[helpersv1.ToolVersionMetadataKey] != s.version {
 		return true
 	}
-	recordedLimit := existing.Annotations[ScannerMemoryLimitAnnotation]
-	return recordedLimit != "" && s.scannerMemLimit > 0 && recordedLimit != fmt.Sprintf("%d", s.scannerMemLimit)
+	recordedLimit := existing.Annotations[HostMaxSBOMSizeAnnotation]
+	return recordedLimit != "" && s.cfg.MaxSBOMSize > 0 && recordedLimit != fmt.Sprintf("%d", s.cfg.MaxSBOMSize)
 }
 
 // hostSbomLabels builds the host SBOM's labels from the host identity. The

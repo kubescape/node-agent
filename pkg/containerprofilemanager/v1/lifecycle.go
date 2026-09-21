@@ -15,18 +15,24 @@ import (
 
 // ContainerCallback handles container lifecycle events
 func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// The host pseudo-container has no real Kubernetes namespace/pod, so
+	// generic ignore-list rules (an empty namespace colliding with
+	// cfg.NamespaceName, an IncludeNamespaces allow-list that doesn't list
+	// "", etc.) must never apply to it, mirroring the IsHostContainer
+	// exemption already used elsewhere (rule_manager.go, malware_manager.go).
+	isHost := utils.IsHostContainer(notif.Container)
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if utils.IsHostContainer(notif.Container) {
+		if isHost {
 			logger.L().Debug("adding host container to the container profile manager",
 				helpers.String("containerID", notif.Container.Runtime.ContainerID))
 		}
-		if cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+		if !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
 		go cpm.addContainerWithTimeout(notif.Container)
 	case containercollection.EventTypeRemoveContainer:
-		if cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+		if !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
 		go cpm.deleteContainer(notif.Container)
@@ -76,6 +82,25 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 	}
 }
 
+// hostContainerWithIdentity returns container unchanged for a real container,
+// or -- for the host pseudo-container -- a shallow copy carrying sharedData's
+// synthetic Namespace/PodName in K8s. GetHostAsContainer (pkg/containerwatcher/
+// v2/container_watcher_collection.go) builds the real host object with an
+// empty K8s.Namespace/PodName (it has no backing Kubernetes object), but
+// saveContainerProfile reads container.K8s.Namespace directly for the CR's
+// own Namespace field -- an empty namespace would fail the Kubernetes create
+// for the very first host profile save. The copy leaves the container object
+// shared with every other subscriber of the add-container event untouched.
+func hostContainerWithIdentity(container *containercollection.Container, sharedData *objectcache.WatchedContainerData) *containercollection.Container {
+	if !utils.IsHostContainer(container) {
+		return container
+	}
+	hostContainer := *container
+	hostContainer.K8s.Namespace = sharedData.Namespace
+	hostContainer.K8s.PodName = sharedData.PodName
+	return &hostContainer
+}
+
 // addContainer adds a container to the container profile manager
 func (cpm *ContainerProfileManager) addContainer(container *containercollection.Container, ctx context.Context) error {
 	containerID := container.Runtime.ContainerID
@@ -92,6 +117,8 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		cpm.removeContainerEntry(containerID)
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
+
+	container = hostContainerWithIdentity(container, sharedData)
 
 	// Check if the container should use a user-defined profile
 	if sharedData.UserDefinedProfile != "" {

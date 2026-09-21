@@ -47,8 +47,13 @@ func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEv
 		logger.L().Info("ContainerWatcher.containerCallback - container is nil or has empty ContainerID")
 		return
 	}
-	// check if the container should be ignored
-	if cw.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+	// check if the container should be ignored -- the host pseudo-container has
+	// no real Kubernetes namespace/pod, so generic ignore-list rules (an empty
+	// namespace colliding with cw.cfg.NamespaceName, an IncludeNamespaces
+	// allow-list that doesn't list "", etc.) must never apply to it, mirroring
+	// the IsHostContainer exemption already used elsewhere (rule_manager.go,
+	// malware_manager.go, sbom_manager.go).
+	if !utils.IsHostContainer(notif.Container) && cw.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		logger.L().Info("ContainerWatcher.containerCallback - container ignored",
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("podName", notif.Container.K8s.PodName),

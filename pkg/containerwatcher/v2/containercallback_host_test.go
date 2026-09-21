@@ -137,6 +137,41 @@ func TestContainerCallback_HostContainer_SingleCallSite(t *testing.T) {
 	assert.NotEmpty(t, data.Wlid)
 }
 
+// TestContainerCallback_HostBypassesIgnoreContainer proves containerCallback's
+// own IgnoreContainer gate -- which runs before any callback (including
+// containerCallbackAsync's host branch) is ever dispatched -- does not drop
+// the real host pseudo-container. GetHostAsContainer (container_watcher_
+// collection.go) builds it with an empty K8s.Namespace, and an
+// IncludeNamespaces allow-list that doesn't list "" is a realistic production
+// config that would otherwise silently disable host monitoring entirely.
+func TestContainerCallback_HostBypassesIgnoreContainer(t *testing.T) {
+	k8sCache := &countingK8sObjectCache{}
+	oc := &countingObjectCache{k8sCache: k8sCache}
+
+	cw := &ContainerWatcher{
+		cfg:         config.Config{NodeName: "test-node", IncludeNamespaces: []string{"kube-system"}},
+		objectCache: oc,
+		metrics:     metricsmanager.NewMetricsMock(),
+		pool:        workerpool.New(2),
+	}
+	cw.callbacks = []containercollection.FuncNotify{
+		cw.containerCallbackAsync,
+	}
+
+	container := &containercollection.Container{}
+	container.Runtime.ContainerID = armotypes.HostContainerID
+	// K8s left at its zero value: this is what GetHostAsContainer produces.
+
+	cw.containerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: container,
+	})
+	cw.pool.StopWait()
+
+	assert.Equal(t, 1, k8sCache.setCalls,
+		"host must be processed even though its empty namespace is not in IncludeNamespaces")
+}
+
 // TestResolveHostID_RetriesAfterFailure proves that a failed resolution is
 // NOT cached: only a successful hostID is memoized, so a transient failure
 // (e.g. the HOST_ROOT mount not yet ready on an early replay) is retried on

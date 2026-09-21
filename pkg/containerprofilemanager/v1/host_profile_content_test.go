@@ -129,8 +129,13 @@ func TestHostContainerProfile_ContentPopulated(t *testing.T) {
 
 	// Force an immediate save (mirrors the termination/max-time forced-save
 	// callers already in monitoring.go) rather than waiting on the real
-	// UpdateDataTicker, whose exact fire time is not worth racing.
-	require.NoError(t, cpm.saveProfile(hostData, hostContainer, true))
+	// UpdateDataTicker, whose exact fire time is not worth racing. This call
+	// bypasses addContainer (which already applied hostContainerWithIdentity
+	// to the container it passes to startContainerMonitoring), so apply the
+	// same patch here -- otherwise this direct save would use the raw,
+	// empty-K8s hostContainer and this test's own Namespace assertion below
+	// would no longer be exercising what production actually saves.
+	require.NoError(t, cpm.saveProfile(hostData, hostContainerWithIdentity(hostContainer, hostData), true))
 
 	// The queue is disk-backed; the storage client is only invoked from the
 	// queue's own background processing loop, so poll for delivery instead of

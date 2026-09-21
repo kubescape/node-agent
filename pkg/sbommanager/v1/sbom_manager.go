@@ -38,7 +38,6 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/hostsensormanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
@@ -128,9 +127,10 @@ type SbomManager struct {
 	waitCancels   map[string]context.CancelFunc
 	waitCancelsMu sync.Mutex
 	// hostFSPrefix is the mount point of the node's root filesystem inside this
-	// pod, read from pkg/hostsensormanager rather than re-derived from HOST_ROOT,
-	// so host scanning and host sensing agree on one path. Used only by the host
-	// SBOM branch.
+	// pod. It is always set equal to hostRoot (both resolved from HOST_ROOT,
+	// falling back to /host) rather than read from pkg/hostsensormanager's own
+	// accessor, whose fallback (/host_fs) is a different default for the same
+	// env var. Used only by the host SBOM branch.
 	hostFSPrefix string
 	// hostLoopStarted guards the host SBOM lifecycle so the (possibly repeated)
 	// host add-container notification starts exactly one rescan loop.
@@ -206,7 +206,13 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		failureReporter:    failureReporter,
 		metrics:            metrics,
 		waitCancels:        make(map[string]context.CancelFunc),
-		hostFSPrefix:       hostsensormanager.HostFSPrefix(),
+		// Reuse hostRoot (resolved above from HOST_ROOT, falling back to
+		// /host) rather than calling hostsensormanager.HostFSPrefix()
+		// separately: that accessor's own fallback is /host_fs, a different
+		// default for the same HOST_ROOT env var. With no override set,
+		// the two would silently disagree and the host scan would open a
+		// path the DaemonSet never mounts.
+		hostFSPrefix: hostRoot,
 	}
 	if scannerClient != nil {
 		sm.startScannerReadinessWatcher()

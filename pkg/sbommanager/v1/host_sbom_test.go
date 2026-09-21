@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -258,7 +259,7 @@ func Test_PrepareHostSbom_TooLargeBlocksThisRescanOnly(t *testing.T) {
 		seedHostSbom(t, store, map[string]string{
 			helpersv1.StatusMetadataKey:      helpersv1.TooLarge,
 			helpersv1.ToolVersionMetadataKey: sm.version,
-			ScannerMemoryLimitAnnotation:     "0",
+			HostMaxSBOMSizeAnnotation:        fmt.Sprintf("%d", sm.cfg.MaxSBOMSize),
 		})
 
 		_, _, ok := sm.prepareHostSbom("host-node-1", "node-1")
@@ -278,17 +279,22 @@ func Test_PrepareHostSbom_TooLargeBlocksThisRescanOnly(t *testing.T) {
 		assert.Equal(t, sm.version, wip.Annotations[helpersv1.ToolVersionMetadataKey])
 	})
 
-	t.Run("scanner memory limit changed: rescan proceeds", func(t *testing.T) {
-		sm, store, _ := newHostSbomManager(t, hostCfg("node-1"), t.TempDir())
-		sm.scannerMemLimit = 2048
+	// Host always scans in-process with Syft (never via the sidecar), so the
+	// release condition must be keyed on cfg.MaxSBOMSize -- the value that
+	// actually gates the host size check -- not the sidecar's scanner memory
+	// limit, which never applies to this branch.
+	t.Run("max SBOM size changed: rescan proceeds", func(t *testing.T) {
+		cfg := hostCfg("node-1")
+		cfg.MaxSBOMSize = 2048
+		sm, store, _ := newHostSbomManager(t, cfg, t.TempDir())
 		seedHostSbom(t, store, map[string]string{
 			helpersv1.StatusMetadataKey:      helpersv1.TooLarge,
 			helpersv1.ToolVersionMetadataKey: sm.version,
-			ScannerMemoryLimitAnnotation:     "1024",
+			HostMaxSBOMSizeAnnotation:        "1024",
 		})
 
 		_, _, ok := sm.prepareHostSbom("host-node-1", "node-1")
-		assert.True(t, ok, "a scanner memory-limit change must release the TooLarge block")
+		assert.True(t, ok, "a MaxSBOMSize change must release the TooLarge block")
 	})
 }
 

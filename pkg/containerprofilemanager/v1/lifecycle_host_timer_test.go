@@ -37,16 +37,21 @@ import (
 // newHostPseudoContainer builds the host pseudo-container event
 // (ContainerPID == 1 is what utils.IsHostContainer keys on), shared by the
 // host tests in this package that need to drive ContainerCallback.
+//
+// K8s is deliberately left at its zero value, matching the real production
+// object built by GetHostAsContainer (pkg/containerwatcher/v2/
+// container_watcher_collection.go) -- it has no backing Kubernetes Pod, so
+// K8s.Namespace/PodName are empty there too. Pre-populating them here (as an
+// earlier version of this helper did) would mask the exact bug this shape
+// exists to catch: saveContainerProfile used to read container.K8s.Namespace
+// directly for the CR's own Namespace field, so an empty K8s here reaching it
+// unmodified would produce an empty-namespace CR that fails on create.
 func newHostPseudoContainer() *containercollection.Container {
 	return &containercollection.Container{
 		Runtime: containercollection.RuntimeMetadata{BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
 			ContainerID:   armotypes.HostContainerID,
 			ContainerName: "host",
 			ContainerPID:  1,
-		}},
-		K8s: containercollection.K8sMetadata{BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-			Namespace: "host",
-			PodName:   "host-node-1",
 		}},
 	}
 }

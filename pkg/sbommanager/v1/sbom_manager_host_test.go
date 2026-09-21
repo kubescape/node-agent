@@ -2,6 +2,7 @@ package v1
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -106,4 +107,25 @@ func Test_sharedDataSpy_CountsReads(t *testing.T) {
 	require.NotNil(t, data)
 	assert.Equal(t, armotypes.HostContainerID, data.ContainerID)
 	assert.Positive(t, spy.reads, "the spy must count reads, otherwise the zero-read assertion is vacuous")
+}
+
+// Test_CreateSbomManager_HostFSPrefixMatchesHostRoot proves hostFSPrefix and
+// hostRoot always agree. They used to be resolved independently: hostRoot
+// from a local HOST_ROOT lookup falling back to "/host" (matching the
+// DaemonSet's actual mount, see tests/chart/templates/node-agent/
+// daemonset.yaml), and hostFSPrefix from hostsensormanager.HostFSPrefix(),
+// whose own fallback is "/host_fs" -- a different default for the same env
+// var. With HOST_ROOT unset, the host SBOM scan would have silently opened a
+// path the DaemonSet never mounts.
+func Test_CreateSbomManager_HostFSPrefixMatchesHostRoot(t *testing.T) {
+	if orig, ok := os.LookupEnv("HOST_ROOT"); ok {
+		t.Cleanup(func() { _ = os.Setenv("HOST_ROOT", orig) })
+	}
+	require.NoError(t, os.Unsetenv("HOST_ROOT"))
+
+	sm, err := CreateSbomManager(t.Context(), config.Config{}, "/tmp/sbom-manager-test.sock", nil, nil, nil, nil, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/host", sm.hostFSPrefix, "hostFSPrefix must fall back to the same default as hostRoot")
+	assert.Equal(t, sm.hostRoot, sm.hostFSPrefix, "hostFSPrefix and hostRoot must always agree")
 }

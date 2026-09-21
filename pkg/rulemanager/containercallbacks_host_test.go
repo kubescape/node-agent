@@ -6,9 +6,12 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/hostidentity"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,6 +46,34 @@ func TestStartRuleManager_HostNeverWaitsForSharedData(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("startRuleManager did not return for the host container")
 	}
+}
+
+// TestContainerCallback_HostBypassesIgnoreContainer proves ContainerCallback's
+// own IgnoreContainer gate -- which runs before startRuleManager's
+// IsHostContainer bypass is ever reached -- does not drop the real host
+// pseudo-container. GetHostAsContainer (pkg/containerwatcher/v2/
+// container_watcher_collection.go) builds it with an empty K8s.Namespace, and
+// an IncludeNamespaces allow-list that doesn't list "" is a realistic
+// production config that would otherwise silently disable rule/alert
+// evaluation for host entirely.
+func TestContainerCallback_HostBypassesIgnoreContainer(t *testing.T) {
+	rm := newTestRuleManager(t.Context())
+	rm.cfg = config.Config{IncludeNamespaces: []string{"kube-system"}}
+
+	container := &containercollection.Container{}
+	container.Runtime.ContainerID = armotypes.HostContainerID
+	container.Runtime.ContainerPID = 1
+	// K8s left at its zero value: this is what GetHostAsContainer produces.
+
+	k8sContainerID := utils.CreateK8sContainerID(container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
+
+	rm.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: container,
+	})
+
+	assert.True(t, rm.trackedContainers.Contains(k8sContainerID),
+		"host must be tracked even though its empty namespace is not in IncludeNamespaces")
 }
 
 // TestWaitForSharedContainerData_HostResolves covers the site itself: if the
