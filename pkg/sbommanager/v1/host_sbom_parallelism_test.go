@@ -72,9 +72,11 @@ func Test_ResolveHostScanParallelism_FromEnv(t *testing.T) {
 }
 
 // Test_ResolveHostScanParallelism_FallsBackToNumCPU covers the older-chart
-// case: no CPU_LIMIT_MILLIS at all, so the scan runs at Syft's historical
-// parallelism rather than failing. The WARN log that accompanies this is the
-// operator-visible signal that the cap is not in effect.
+// case: no CPU_LIMIT_MILLIS at all, so the scan runs at runtime.NumCPU()
+// rather than failing -- note this is already a 4x reduction from Syft's own
+// default (NumCPU()*4 in the vendored fork), though still uncapped relative
+// to the container's actual CPU limit. The WARN log that accompanies this is
+// the operator-visible signal that the cap is not in effect.
 func Test_ResolveHostScanParallelism_FallsBackToNumCPU(t *testing.T) {
 	unsetCPULimitMillis(t)
 	cfg := hostCfg("node-1")

@@ -460,10 +460,14 @@ const cpuLimitMillisEnvVar = "CPU_LIMIT_MILLIS"
 // the fallback in here so the fallback branch itself is directly testable.
 //
 // Whole CPUs are used (integer division): 394m -> 0 -> clamped to 1, 1000m ->
-// 1, 2500m -> 2. A sub-1-CPU limit therefore yields single-threaded
-// cataloging, which is the point -- Syft's default parallelism is 0, meaning
-// runtime.NumCPU(), so on an 8-CPU node a 394m container would schedule work
-// across 8 goroutines against a quota of well under half a CPU and get
+// 1, 2500m -> 2. n==1 is passed to Syft as parallelism 1, which the vendored
+// fork (github.com/kubescape/syft, see go.mod's replace directive) special-
+// cases to mean fully serial, no cataloger goroutines at all -- stronger than
+// "one goroutine". This matters because that fork's default (parallelism 0)
+// is NOT runtime.NumCPU(): syft/create_sbom.go resolves 0 to
+// runtime.NumCPU()*4, so on an 8-CPU node a 394m container would schedule
+// cataloger work across 32 goroutines against a quota of well under half a
+// CPU -- 4x worse than the naive "NumCPU()" story suggests -- and get
 // CFS-throttled hard enough to starve node-agent's own liveness endpoint.
 func parallelismFromCPULimitMillis(raw string) (int, bool) {
 	millis, err := strconv.Atoi(strings.TrimSpace(raw))
@@ -482,13 +486,16 @@ func parallelismFromCPULimitMillis(raw string) (int, bool) {
 // value computed from CPU_LIMIT_MILLIS, otherwise runtime.NumCPU().
 //
 // The fallback is logged at WARN, not Debug/Info, whenever host SBOM scanning
-// is actually enabled: it means the cap is NOT in effect and the scan runs
-// with today's unbounded parallelism, which is a condition an operator needs
+// is actually enabled: it means the cap is NOT in effect and the scan runs at
+// runtime.NumCPU() -- itself already a 4x reduction from Syft's own default of
+// NumCPU()*4 (see parallelismFromCPULimitMillis), but still uncapped relative
+// to the container's actual CPU limit, which is a condition an operator needs
 // to see rather than an incidental detail. It is reached when the chart has
 // not yet been updated to supply CPU_LIMIT_MILLIS; note that a chart-wired
 // deployment with no CPU limit configured does not leave the variable unset --
-// Kubernetes substitutes the node's allocatable CPU, which converges on the
-// same NumCPU()-equivalent behaviour by a different route.
+// Kubernetes substitutes the node's allocatable CPU, which converges on this
+// same NumCPU()-equivalent (not Syft's native NumCPU()*4) fallback by a
+// different route.
 func (s *SbomManager) resolveHostScanParallelism() int {
 	if s.cfg.HostSbomScanParallelism > 0 {
 		return s.cfg.HostSbomScanParallelism
@@ -497,7 +504,7 @@ func (s *SbomManager) resolveHostScanParallelism() int {
 		return n
 	}
 	if s.cfg.EnableSbomGeneration && s.cfg.HostMonitoringEnabled {
-		logger.L().Warning("SbomManager - CPU_LIMIT_MILLIS unset or unparseable, host SBOM scan falls back to unbounded Syft parallelism",
+		logger.L().Warning("SbomManager - CPU_LIMIT_MILLIS unset or unparseable, host SBOM scan falls back to runtime.NumCPU() parallelism (cap not in effect)",
 			helpers.String("envVar", cpuLimitMillisEnvVar),
 			helpers.Int("parallelism", runtime.NumCPU()))
 	}
