@@ -205,7 +205,10 @@ func Test_ProcessHostSbom_ProducesHostNamedCR(t *testing.T) {
 	assert.NotEmpty(t, sbom.Spec.Syft.Artifacts, "the host scan must have catalogued the fixture package")
 	assert.NotContains(t, sbom.Annotations, helpersv1.ImageIDMetadataKey)
 	assert.NotContains(t, sbom.Annotations, helpersv1.ImageTagMetadataKey)
-	assert.Equal(t, "node-1", sbom.Labels[HostSbomNameLabelKey])
+	assert.True(t, strings.HasPrefix(sbom.Labels[HostSbomNameLabelKey], "node-1-"),
+		"label %q must be identity-derived", sbom.Labels[HostSbomNameLabelKey])
+	assert.Equal(t, sbom.Labels[HostSbomNameLabelKey], sbom.Labels[NodeNameMetadataKey],
+		"both host labels must carry the same collision-resistant identifier")
 	assert.Zero(t, reporter.count(), "the host path must not report to the image-keyed failure endpoint")
 	assert.Zero(t, sm.processing.Cardinality(), "the processing slot must be released")
 }
@@ -258,6 +261,25 @@ func Test_HostSbomName_NoCollisionOnSanitizedPrefix(t *testing.T) {
 	long2 := strings.Repeat("a", 70) + "-two"
 	assert.NotEqual(t, hostSbomName(long1), hostSbomName(long2),
 		"distinct hostIDs sharing a long common prefix must not collide after truncation")
+}
+
+// Test_HostSbomLabels_NoCollisionOnSanitizedPrefix mirrors
+// Test_HostSbomName_NoCollisionOnSanitizedPrefix for the labels: the CR name
+// alone being unique is not enough if a label-based consumer can still
+// mistake one node's SBOM for another's.
+func Test_HostSbomLabels_NoCollisionOnSanitizedPrefix(t *testing.T) {
+	labelsA := hostSbomLabels("node.a")
+	labelsB := hostSbomLabels("node-a")
+	assert.NotEqual(t, labelsA[HostSbomNameLabelKey], labelsB[HostSbomNameLabelKey],
+		"distinct hostIDs that sanitize to the same base must not collide on the host label")
+	assert.NotEqual(t, labelsA[NodeNameMetadataKey], labelsB[NodeNameMetadataKey],
+		"distinct hostIDs that sanitize to the same base must not collide on the node-name label")
+
+	for _, labels := range []map[string]string{labelsA, labelsB} {
+		for key, value := range labels {
+			assert.Empty(t, validation.IsDNS1123Label(value), "label %s=%q must be a valid DNS-1123 label", key, value)
+		}
+	}
 }
 
 // --- TooLarge interaction -------------------------------------------------

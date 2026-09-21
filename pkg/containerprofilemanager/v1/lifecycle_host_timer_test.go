@@ -291,3 +291,181 @@ func TestContainerCallback_ReplayedAddDoesNotOrphanEarlierEntry(t *testing.T) {
 	assert.Same(t, firstEntry, secondEntry,
 		"a replayed add must not replace the tracked entry -- the original monitor must remain the one in the map")
 }
+
+// TestHostContainerProfile_ReachesCompletedWithoutStopping proves the fix for
+// the deeper consequence of skipping host's max-sniffing-time timer:
+// containerprofilecache.go's tryPopulateEntry only caches profiles whose
+// status is terminal (Completed or TooLarge) -- without a separate path to
+// Completed, the host profile would never be installed for
+// GetProjectedContainerProfile or visible to profile-dependent CEL rules, no
+// matter how much data it collected. monitorContainer now flips status to
+// Completed once the same duration a real container's timer would use has
+// elapsed, but -- unlike ContainerReachedMaxTime -- does not stop monitoring:
+// this proves both halves, that Completed is reached AND that the container
+// is still tracked (and still ticking) well past that point.
+func TestHostContainerProfile_ReachesCompletedWithoutStopping(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "host-completed-queue-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	t.Setenv("QUEUE_DIR", tempDir)
+
+	cfg := config.Config{
+		InitialDelay:        20 * time.Millisecond,
+		UpdateDataPeriod:    20 * time.Millisecond,
+		MaxSniffingTime:     5 * time.Millisecond, // must have elapsed well before the first tick
+		MaxJitterPercentage: 0,
+		MaxTsProfileSize:    10 * 1024 * 1024,
+	}
+
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	hostData := hostidentity.BuildHostWatchedContainerData("node-1")
+	k8sObjectCacheMock.SetSharedContainerData(armotypes.HostContainerID, hostData)
+
+	cpm, err := NewContainerProfileManager(
+		context.Background(),
+		cfg,
+		&k8sclient.K8sClientMock{},
+		k8sObjectCacheMock,
+		&storage.StorageHttpClientMock{},
+		&dnsmanager.DNSManagerMock{},
+		&seccompmanager.SeccompManagerMock{},
+		nil,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	defer cpm.Close()
+
+	// WatchedContainerData has no internal lock -- by design, it is only ever
+	// mutated from the single monitorContainer goroutine that owns it. Reading
+	// its fields from this goroutine while that one is concurrently ticking
+	// would itself be a data race, so synchronize on the same
+	// completionNotifier callback production code already uses to announce a
+	// Completed transition (see monitoring.go), rather than polling entry
+	// state directly.
+	notifier := &completionNotifierMock{completed: make(chan string, 1)}
+	cpm.SetCompletionNotifier(notifier)
+
+	cpm.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: newHostPseudoContainer(),
+	})
+
+	select {
+	case containerID := <-notifier.completed:
+		assert.Equal(t, armotypes.HostContainerID, containerID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("host profile never reached Completed once its learning window elapsed")
+	}
+
+	// Prove monitoring did not stop: the entry must still exist well after
+	// the Completed transition, and no second completion notification must
+	// fire on subsequent ticks (Completed must not be re-announced or regress
+	// to Ready).
+	time.Sleep(100 * time.Millisecond)
+	_, ok := cpm.getContainerEntry(armotypes.HostContainerID)
+	require.True(t, ok, "host must still be tracked well after reaching Completed -- Completed must not stop monitoring")
+	select {
+	case containerID := <-notifier.completed:
+		t.Fatalf("completion must only be notified once, got a second notification for %q", containerID)
+	default:
+	}
+}
+
+// completionNotifierMock implements objectcache.CompletionNotifier, recording
+// each NotifyContainerCompleted call onto a channel so tests can synchronize
+// on the same happens-before edge production code uses (channel send/receive)
+// instead of racily polling WatchedContainerData fields from outside its
+// owning goroutine.
+type completionNotifierMock struct {
+	completed chan string
+}
+
+func (m *completionNotifierMock) NotifyContainerCompleted(containerID string) {
+	m.completed <- containerID
+}
+
+// TestDeleteContainer_HostSkipsTerminationExitCodeLookup proves that if the
+// host pseudo-container is ever removed before its profile reaches a
+// terminal status (an unexpected but possible ordering), deleteContainer
+// does not call GetTerminationExitCode -- which would retry for its full
+// 30-second backoff window looking for a Kubernetes pod status that will
+// never exist for host, then mark the profile Failed. This uses a long
+// InitialDelay/MaxSniffingTime so the Completed-transition tick has not
+// fired yet, isolating this guard from monitorContainer's own fix.
+func TestDeleteContainer_HostSkipsTerminationExitCodeLookup(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "host-delete-queue-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	t.Setenv("QUEUE_DIR", tempDir)
+
+	cfg := config.Config{
+		InitialDelay:        time.Hour, // no tick within this test's window
+		UpdateDataPeriod:    time.Hour,
+		MaxSniffingTime:     time.Hour,
+		MaxJitterPercentage: 0,
+		MaxTsProfileSize:    10 * 1024 * 1024,
+	}
+
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	hostData := hostidentity.BuildHostWatchedContainerData("node-1")
+	k8sObjectCacheMock.SetSharedContainerData(armotypes.HostContainerID, hostData)
+
+	cpm, err := NewContainerProfileManager(
+		context.Background(),
+		cfg,
+		&k8sclient.K8sClientMock{},
+		k8sObjectCacheMock,
+		&storage.StorageHttpClientMock{},
+		&dnsmanager.DNSManagerMock{},
+		&seccompmanager.SeccompManagerMock{},
+		nil,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	defer cpm.Close()
+
+	hostContainer := newHostPseudoContainer()
+	cpm.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: hostContainer,
+	})
+
+	var entry *ContainerEntry
+	require.Eventually(t, func() bool {
+		e, ok := cpm.getContainerEntry(armotypes.HostContainerID)
+		if !ok {
+			return false
+		}
+		entry = e
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "host was never registered")
+
+	// addContainer writes watchedContainerData (via setContainerData) from its
+	// own goroutine and only closes entry.ready once that is done, so
+	// synchronizing on the channel -- instead of racily reading entry.data.*
+	// from this goroutine -- gives the required happens-before relationship.
+	select {
+	case <-entry.ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("host container was never fully registered in the profile manager")
+	}
+
+	// Status is still Ready/Initializing here (no tick has fired): removal
+	// must not hang for anywhere near GetTerminationExitCode's 30s budget.
+	// ContainerCallback dispatches deleteContainer on its own goroutine, so
+	// wait on the entry actually being removed from the map (deleteContainer's
+	// own completion signal) rather than on ContainerCallback's (immediate)
+	// return.
+	cpm.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeRemoveContainer,
+		Container: hostContainer,
+	})
+
+	require.Eventually(t, func() bool {
+		_, exists := cpm.getContainerEntry(armotypes.HostContainerID)
+		return !exists
+	}, 3*time.Second, 10*time.Millisecond,
+		"deleteContainer took far too long for host -- it likely fell through to GetTerminationExitCode's 30s backoff")
+}

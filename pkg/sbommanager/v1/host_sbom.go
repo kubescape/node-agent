@@ -126,28 +126,41 @@ func (s *SbomManager) runHostScan(hostID string) {
 // explicitly not image-derived: the host has no image tag or digest, so
 // names.ImageInfoToSlug (used by the container path) is inapplicable.
 // hostIDHashSuffixLen is the number of hex characters from a hostID's SHA-256
-// appended to hostSbomName, so two distinct host identities that happen to
-// sanitize/truncate to the same label don't collide on the same storage key.
+// appended to collision-resistant host identifiers (hostSbomName and
+// hostSbomLabels), so two distinct host identities that happen to
+// sanitize/truncate to the same base don't collide.
 const hostIDHashSuffixLen = 8
 
-func hostSbomName(hostID string) string {
-	// sanitize is lossy (character replacement, then truncation to 63 chars),
-	// so two distinct hostIDs can produce the same sanitized base -- e.g.
-	// "node.a" and "node-a", or two names sharing a common 63-char prefix.
-	// Since this name is the SBOM's storage key, a collision would let one
-	// node silently overwrite another's SBOM. Hash the RAW hostID (before any
-	// lossy transform) and append it, re-truncating the sanitized base to
-	// leave room within the 63-char DNS-1123 label limit.
+// hostIDHashSuffix returns a short, deterministic hash of the RAW hostID
+// (before any lossy sanitize/truncate transform), used to make otherwise
+// colliding sanitized identifiers unique again.
+func hostIDHashSuffix(hostID string) string {
 	sum := sha256.Sum256([]byte(hostID))
-	suffix := hex.EncodeToString(sum[:])[:hostIDHashSuffixLen]
+	return hex.EncodeToString(sum[:])[:hostIDHashSuffixLen]
+}
 
-	const prefix = "host-"
+// collisionResistantLabel builds a DNS-1123-label-safe identifier from
+// hostID with the given fixed prefix, appending hostIDHashSuffix so two
+// distinct hostIDs that sanitize to the same base (e.g. "node.a"/"node-a",
+// or two names sharing a long common prefix) don't collide -- whether used
+// as a storage key (hostSbomName) or a label value (hostSbomLabels).
+func collisionResistantLabel(prefix, hostID string) string {
+	suffix := hostIDHashSuffix(hostID)
 	base := sanitize(strings.ToLower(hostID))
 	maxBaseLen := 63 - len(prefix) - len("-") - len(suffix)
 	if len(base) > maxBaseLen {
 		base = strings.TrimRight(base[:maxBaseLen], "-")
 	}
 	return prefix + base + "-" + suffix
+}
+
+func hostSbomName(hostID string) string {
+	// sanitize is lossy (character replacement, then truncation to 63 chars),
+	// so two distinct hostIDs can produce the same sanitized base -- e.g.
+	// "node.a" and "node-a", or two names sharing a common 63-char prefix.
+	// Since this name is the SBOM's storage key, a collision would let one
+	// node silently overwrite another's SBOM.
+	return collisionResistantLabel("host-", hostID)
 }
 
 // processHostSbom generates (or regenerates) the host's SBOM.
@@ -384,9 +397,15 @@ func (s *SbomManager) hostTooLargeReleased(existing *v1beta1.SBOMSyft) bool {
 // container path's labelsFromImageID is unusable here: it parses an image
 // reference, and a host has none.
 func hostSbomLabels(hostID string) map[string]string {
+	// Both label values get the same collision-resistant suffix as
+	// hostSbomName: without it, two distinct node identities that sanitize
+	// to the same base (e.g. "node.a"/"node-a") would produce identical
+	// label values, so a label-based lookup for one node's SBOM could match
+	// the other's even though their CR names (hostSbomName) are unique.
+	identifier := collisionResistantLabel("", hostID)
 	labels := map[string]string{
-		HostSbomNameLabelKey: sanitize(strings.ToLower(hostID)),
-		NodeNameMetadataKey:  sanitize(strings.ToLower(hostID)),
+		HostSbomNameLabelKey: identifier,
+		NodeNameMetadataKey:  identifier,
 	}
 	for key, value := range labels {
 		if errs := validation.IsDNS1123Label(value); len(errs) != 0 {

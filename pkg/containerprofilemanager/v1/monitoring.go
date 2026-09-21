@@ -24,6 +24,28 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 		container.K8s.PodName,
 		container.Runtime.ContainerImageName,
 	)
+
+	// The host pseudo-container never receives the max-sniffing-time timer
+	// (addContainer skips arming it, since host must never be finalized or
+	// deleted -- it runs indefinitely). Without a separate path to Completed,
+	// its profile status would stay Initializing/Ready/Learning forever:
+	// containerprofilecache.go's tryPopulateEntry only caches profiles whose
+	// status is terminal (Completed or TooLarge), so the host profile would
+	// never be installed for GetProjectedContainerProfile or visible to
+	// profile-dependent CEL rules, no matter how much data it collected.
+	//
+	// hostLearningDeadline reuses the exact duration a real container's timer
+	// would use (calculateSniffingTime), so host reaches Completed on the
+	// same schedule a real container's initial learning window would. Unlike
+	// ContainerReachedMaxTime, crossing this deadline does not return from
+	// this loop: host keeps collecting and periodically saving fresh data
+	// indefinitely, just under a status callers can actually consume.
+	isHost := utils.IsHostContainer(container)
+	var hostLearningDeadline time.Time
+	if isHost {
+		hostLearningDeadline = time.Now().Add(cpm.calculateSniffingTime(container))
+	}
+
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
@@ -35,7 +57,21 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				}
 			}
 
-			watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
+			if isHost && !time.Now().Before(hostLearningDeadline) {
+				alreadyCompleted := watchedContainer.GetStatus() == objectcache.WatchedContainerStatusCompleted
+				watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
+				if !alreadyCompleted {
+					// Every other transition to Completed in this file notifies
+					// completionNotifier so the CP cache can promote the entry
+					// without waiting for its next reconciler tick; this path
+					// must do the same, and only once (this tick fires on every
+					// subsequent UpdateDataPeriod interval too, since host must
+					// keep monitoring after reaching Completed).
+					cpm.notifyCompleted(watchedContainer.ContainerID)
+				}
+			} else {
+				watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
+			}
 			if err := cpm.saveProfile(watchedContainer, container, false); err != nil {
 				if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != nil {
 					return handledErr

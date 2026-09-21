@@ -320,8 +320,20 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusCompleted &&
 			entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusTooLarge {
 
-			// Set exit code based status if applicable
-			if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace,
+			if utils.IsHostContainer(container) {
+				// The host pseudo-container has no real Kubernetes Pod, so
+				// GetTerminationExitCode below would retry for its full
+				// 30-second backoff window looking for a pod status that
+				// will never exist, then mark the profile Failed. Host
+				// removal is not expected in practice -- by the time this
+				// branch could be reached, monitorContainer's own
+				// Completed-transition will usually have already fired,
+				// which is why the status guard above skips this block
+				// entirely -- but if it is ever reached, treat it as a
+				// clean Completed rather than a spurious Failed after a
+				// needless delay.
+				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusCompleted)
+			} else if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace,
 				container.K8s.PodName, container.K8s.ContainerName, containerID) == 0 {
 				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusCompleted)
 			} else {
