@@ -59,6 +59,11 @@ func TestHostContainerProfile_ContentPopulated(t *testing.T) {
 		MaxSniffingTime:     time.Hour, // must not fire during this test
 		MaxJitterPercentage: 0,
 		MaxTsProfileSize:    10 * 1024 * 1024,
+		// The host pseudo-container has no real backing namespace, so its
+		// ContainerProfile CR is stored in node-agent's own deployment
+		// namespace (which is guaranteed to exist) rather than the
+		// synthetic "host" identity label -- see hostContainerWithIdentity.
+		NamespaceName: "kubescape",
 	}
 
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
@@ -135,7 +140,7 @@ func TestHostContainerProfile_ContentPopulated(t *testing.T) {
 	// same patch here -- otherwise this direct save would use the raw,
 	// empty-K8s hostContainer and this test's own Namespace assertion below
 	// would no longer be exercising what production actually saves.
-	require.NoError(t, cpm.saveProfile(hostData, hostContainerWithIdentity(hostContainer, hostData), true))
+	require.NoError(t, cpm.saveProfile(hostData, hostContainerWithIdentity(hostContainer, hostData, cfg.NamespaceName), true))
 
 	// The queue is disk-backed; the storage client is only invoked from the
 	// queue's own background processing loop, so poll for delivery instead of
@@ -151,7 +156,7 @@ func TestHostContainerProfile_ContentPopulated(t *testing.T) {
 	require.Len(t, profiles, 1)
 	cr := profiles[0]
 
-	assert.Equal(t, "host", cr.Namespace)
+	assert.Equal(t, "kubescape", cr.Namespace, "host CR must be stored in node-agent's own (real, existing) namespace, not the synthetic 'host' identity label")
 	assert.NotEmpty(t, cr.Name)
 
 	assert.NotEmpty(t, cr.Spec.Execs, "host CR must carry real exec data, not an empty shell")

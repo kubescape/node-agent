@@ -2,6 +2,8 @@ package v1
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -123,8 +125,29 @@ func (s *SbomManager) runHostScan(hostID string) {
 // hostSbomName derives the SBOM CR name from the host identity. It is
 // explicitly not image-derived: the host has no image tag or digest, so
 // names.ImageInfoToSlug (used by the container path) is inapplicable.
+// hostIDHashSuffixLen is the number of hex characters from a hostID's SHA-256
+// appended to hostSbomName, so two distinct host identities that happen to
+// sanitize/truncate to the same label don't collide on the same storage key.
+const hostIDHashSuffixLen = 8
+
 func hostSbomName(hostID string) string {
-	return "host-" + sanitize(strings.ToLower(hostID))
+	// sanitize is lossy (character replacement, then truncation to 63 chars),
+	// so two distinct hostIDs can produce the same sanitized base -- e.g.
+	// "node.a" and "node-a", or two names sharing a common 63-char prefix.
+	// Since this name is the SBOM's storage key, a collision would let one
+	// node silently overwrite another's SBOM. Hash the RAW hostID (before any
+	// lossy transform) and append it, re-truncating the sanitized base to
+	// leave room within the 63-char DNS-1123 label limit.
+	sum := sha256.Sum256([]byte(hostID))
+	suffix := hex.EncodeToString(sum[:])[:hostIDHashSuffixLen]
+
+	const prefix = "host-"
+	base := sanitize(strings.ToLower(hostID))
+	maxBaseLen := 63 - len(prefix) - len("-") - len(suffix)
+	if len(base) > maxBaseLen {
+		base = strings.TrimRight(base[:maxBaseLen], "-")
+	}
+	return prefix + base + "-" + suffix
 }
 
 // processHostSbom generates (or regenerates) the host's SBOM.

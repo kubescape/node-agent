@@ -48,7 +48,14 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 		data:  &containerData{},
 		ready: make(chan struct{}),
 	}
-	cpm.addContainerEntry(containerID, entry)
+	if !cpm.addContainerEntryIfAbsent(containerID, entry) {
+		logger.L().Debug("container already tracked in the container profile manager, skipping duplicate add",
+			helpers.String("containerID", containerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+			helpers.String("podName", container.K8s.PodName),
+			helpers.String("namespace", container.K8s.Namespace))
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), MaxWaitForSharedContainerData)
 	defer cancel()
@@ -83,20 +90,32 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 }
 
 // hostContainerWithIdentity returns container unchanged for a real container,
-// or -- for the host pseudo-container -- a shallow copy carrying sharedData's
-// synthetic Namespace/PodName in K8s. GetHostAsContainer (pkg/containerwatcher/
-// v2/container_watcher_collection.go) builds the real host object with an
-// empty K8s.Namespace/PodName (it has no backing Kubernetes object), but
+// or -- for the host pseudo-container -- a shallow copy carrying a usable
+// K8s.Namespace/PodName. GetHostAsContainer (pkg/containerwatcher/v2/
+// container_watcher_collection.go) builds the real host object with an empty
+// K8s.Namespace/PodName (it has no backing Kubernetes object), but
 // saveContainerProfile reads container.K8s.Namespace directly for the CR's
 // own Namespace field -- an empty namespace would fail the Kubernetes create
-// for the very first host profile save. The copy leaves the container object
-// shared with every other subscriber of the add-container event untouched.
-func hostContainerWithIdentity(container *containercollection.Container, sharedData *objectcache.WatchedContainerData) *containercollection.Container {
+// for the very first host profile save.
+//
+// storageNamespace (the caller's cfg.NamespaceName, node-agent's own
+// deployment namespace) is used here rather than sharedData.Namespace
+// ("host"): sharedData.Namespace is a synthetic identity label embedded in
+// the Wlid/InstanceID, not a real Kubernetes namespace -- creating a
+// ContainerProfile CR there would fail with NotFound on any cluster that
+// doesn't happen to have a namespace literally named "host". Node-agent's own
+// namespace is guaranteed to exist and node-agent already has permissions
+// there. containerprofilecache.go's own host handling must use the same
+// value, since it reads back the CR this write creates.
+//
+// The copy leaves the container object shared with every other subscriber of
+// the add-container event untouched.
+func hostContainerWithIdentity(container *containercollection.Container, sharedData *objectcache.WatchedContainerData, storageNamespace string) *containercollection.Container {
 	if !utils.IsHostContainer(container) {
 		return container
 	}
 	hostContainer := *container
-	hostContainer.K8s.Namespace = sharedData.Namespace
+	hostContainer.K8s.Namespace = storageNamespace
 	hostContainer.K8s.PodName = sharedData.PodName
 	return &hostContainer
 }
@@ -118,7 +137,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
 
-	container = hostContainerWithIdentity(container, sharedData)
+	container = hostContainerWithIdentity(container, sharedData, cpm.cfg.NamespaceName)
 
 	// Check if the container should use a user-defined profile
 	if sharedData.UserDefinedProfile != "" {

@@ -18,14 +18,36 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/containerinstance"
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/hostsensormanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // machineIDPath is the well-known location of the machine ID file, relative
-// to the host filesystem root (see hostsensormanager.HostFSPrefix).
+// to the host filesystem root.
 const machineIDPath = "/etc/machine-id"
+
+// machineIDHostRoot resolves the host filesystem root for the machine-id
+// fallback from HOST_ROOT, falling back to /host -- matching the DaemonSet's
+// actual mount (tests/chart/templates/node-agent/daemonset.yaml) and
+// pkg/sbommanager/v1's own CreateSbomManager resolution.
+//
+// This is deliberately NOT hostsensormanager.HostFSPrefix(): that accessor's
+// own fallback is /host_fs, a different default for the same HOST_ROOT env
+// var, used by an established, separate host-sensor feature that predates
+// this package. Changing that shared default would be a wider, riskier
+// change than this package's own scope; resolving HOST_ROOT independently
+// here (mirroring sbom_manager.go's identical inline resolution, which
+// pkg/hostidentity cannot import without an import cycle -- sbommanager
+// already imports hostidentity) keeps the fix contained to the one place
+// that was actually wrong. With no HOST_ROOT override, the two would
+// otherwise disagree and this fallback would always fail to find
+// /etc/machine-id, even though the host filesystem is correctly mounted.
+func machineIDHostRoot() string {
+	if hostRoot, ok := os.LookupEnv("HOST_ROOT"); ok {
+		return hostRoot
+	}
+	return "/host"
+}
 
 // hostInstanceApiVersion/Kind/Namespace/Type are the synthetic workload
 // identity components used to build the host's IInstanceID. There is no real
@@ -47,11 +69,10 @@ const (
 // and already available with no new mechanism required.
 //
 // Fallback (only when NodeName is empty): the host's /etc/machine-id, read
-// through the HOST_ROOT-aware host filesystem prefix used elsewhere in the
-// codebase (see pkg/hostsensormanager.HostFSPrefix). Note this only resolves
-// to the true node's machine-id when HOST_ROOT is mounted from the host (as
-// the DaemonSet does); reading a container-local /etc/machine-id would return
-// the container's own id, not the node's.
+// through machineIDHostRoot's HOST_ROOT-aware resolution. Note this only
+// resolves to the true node's machine-id when HOST_ROOT is mounted from the
+// host (as the DaemonSet does); reading a container-local /etc/machine-id
+// would return the container's own id, not the node's.
 func ResolveHostID(cfg *config.Config) (string, error) {
 	if cfg != nil {
 		if nodeName := cfg.NodeName; nodeName != "" {
@@ -59,7 +80,7 @@ func ResolveHostID(cfg *config.Config) (string, error) {
 		}
 	}
 
-	machineIDFile := path.Join(hostsensormanager.HostFSPrefix(), machineIDPath)
+	machineIDFile := path.Join(machineIDHostRoot(), machineIDPath)
 	content, err := os.ReadFile(machineIDFile)
 	if err != nil {
 		return "", fmt.Errorf("resolveHostID: NodeName is empty and failed to read machine-id from %s: %w", machineIDFile, err)

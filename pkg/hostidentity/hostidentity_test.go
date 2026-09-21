@@ -8,7 +8,6 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/hostsensormanager"
 )
 
 func TestResolveHostID_NodeNamePresent(t *testing.T) {
@@ -31,8 +30,7 @@ func TestResolveHostID_FallsBackToMachineIDWhenNodeNameEmpty(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, "etc", "machine-id"), []byte("abc123\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	restore := hostsensormanager.SetHostFSPrefixForTest(tmp)
-	defer restore()
+	t.Setenv("HOST_ROOT", tmp)
 
 	cfg := &config.Config{NodeName: ""}
 
@@ -53,8 +51,7 @@ func TestResolveHostID_NilConfigFallsBackToMachineID(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, "etc", "machine-id"), []byte("def456"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	restore := hostsensormanager.SetHostFSPrefixForTest(tmp)
-	defer restore()
+	t.Setenv("HOST_ROOT", tmp)
 
 	hostID, err := ResolveHostID(nil)
 	if err != nil {
@@ -70,8 +67,7 @@ func TestResolveHostID_NilConfigFallsBackToMachineID(t *testing.T) {
 // missing, ResolveHostID must return an error, not "", nil.
 func TestResolveHostID_NeverSilentlyEmpty(t *testing.T) {
 	tmp := t.TempDir() // deliberately no etc/machine-id file underneath
-	restore := hostsensormanager.SetHostFSPrefixForTest(tmp)
-	defer restore()
+	t.Setenv("HOST_ROOT", tmp)
 
 	cfg := &config.Config{NodeName: ""}
 
@@ -94,8 +90,7 @@ func TestResolveHostID_NeverSilentlyEmpty_EmptyMachineIDFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, "etc", "machine-id"), []byte("\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	restore := hostsensormanager.SetHostFSPrefixForTest(tmp)
-	defer restore()
+	t.Setenv("HOST_ROOT", tmp)
 
 	cfg := &config.Config{NodeName: ""}
 
@@ -105,6 +100,26 @@ func TestResolveHostID_NeverSilentlyEmpty_EmptyMachineIDFile(t *testing.T) {
 	}
 	if hostID != "" {
 		t.Fatalf("ResolveHostID() = %q, want empty string alongside the error", hostID)
+	}
+}
+
+// TestMachineIDHostRoot_DefaultsMatchDeployedMount proves the machine-id
+// fallback's default host root is "/host" -- matching the DaemonSet's actual
+// mount and pkg/sbommanager/v1's own CreateSbomManager resolution -- not
+// hostsensormanager.HostFSPrefix()'s "/host_fs" default, a different fallback
+// for the same HOST_ROOT env var that would otherwise make this fallback
+// always fail to find /etc/machine-id even though the host filesystem is
+// correctly mounted.
+func TestMachineIDHostRoot_DefaultsMatchDeployedMount(t *testing.T) {
+	if orig, ok := os.LookupEnv("HOST_ROOT"); ok {
+		t.Cleanup(func() { _ = os.Setenv("HOST_ROOT", orig) })
+	}
+	if err := os.Unsetenv("HOST_ROOT"); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := machineIDHostRoot(); got != "/host" {
+		t.Fatalf("machineIDHostRoot() = %q, want %q", got, "/host")
 	}
 }
 

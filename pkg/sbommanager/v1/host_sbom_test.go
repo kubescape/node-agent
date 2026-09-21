@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,8 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	_ "modernc.org/sqlite" // required by syft's RPM cataloger, mirrors sbom_manager.go
 )
 
@@ -196,7 +199,7 @@ func Test_ProcessHostSbom_ProducesHostNamedCR(t *testing.T) {
 
 	sm.processHostSbom("node-1")
 
-	sbom := store.get("host-node-1")
+	sbom := store.get(hostSbomName("node-1"))
 	require.NotNil(t, sbom, "host SBOM must be named from the host identity, not from an image")
 	assert.Equal(t, helpersv1.Learning, sbom.Annotations[helpersv1.StatusMetadataKey])
 	assert.NotEmpty(t, sbom.Spec.Syft.Artifacts, "the host scan must have catalogued the fixture package")
@@ -221,7 +224,7 @@ func Test_ProcessHostSbom_NeverReportsFailure(t *testing.T) {
 	assert.NotPanics(t, func() { sm.processHostSbom("node-1") })
 
 	assert.Zero(t, reporter.count(), "host failures must not be sent to the image-keyed endpoint")
-	sbom := store.get("host-node-1")
+	sbom := store.get(hostSbomName("node-1"))
 	require.NotNil(t, sbom)
 	assert.Equal(t, helpersv1.Initializing, sbom.Annotations[helpersv1.StatusMetadataKey],
 		"a single failure must not pin the host SBOM")
@@ -229,9 +232,32 @@ func Test_ProcessHostSbom_NeverReportsFailure(t *testing.T) {
 
 // Test_HostSbomName_IsIdentityDerived pins the naming scheme.
 func Test_HostSbomName_IsIdentityDerived(t *testing.T) {
-	assert.Equal(t, "host-node-1", hostSbomName("node-1"))
-	assert.Equal(t, "host-ip-10-0-1-5-eu-west-1-compute-internal",
-		hostSbomName("ip-10-0-1-5.eu-west-1.compute.internal"))
+	name := hostSbomName("node-1")
+	assert.True(t, strings.HasPrefix(name, "host-node-1-"), "name %q must be identity-derived, not opaque", name)
+	assert.Empty(t, validation.IsDNS1123Label(name), "name %q must be a valid DNS-1123 label", name)
+	assert.LessOrEqual(t, len(name), 63)
+
+	longName := hostSbomName("ip-10-0-1-5.eu-west-1.compute.internal")
+	assert.True(t, strings.HasPrefix(longName, "host-ip-10-0-1-5-eu-west-1-compute-internal-"))
+	assert.Empty(t, validation.IsDNS1123Label(longName))
+	assert.LessOrEqual(t, len(longName), 63)
+
+	assert.Equal(t, hostSbomName("node-1"), hostSbomName("node-1"), "must be deterministic for the same hostID")
+}
+
+// Test_HostSbomName_NoCollisionOnSanitizedPrefix is the regression test for
+// the bug the hash suffix exists to prevent: sanitize is lossy (it replaces
+// "._: /@" with "-" and truncates to 63 chars), so without a uniqueness
+// suffix, two genuinely distinct hostIDs could sanitize to the identical
+// name and silently overwrite each other's SBOM in storage.
+func Test_HostSbomName_NoCollisionOnSanitizedPrefix(t *testing.T) {
+	assert.NotEqual(t, hostSbomName("node.a"), hostSbomName("node-a"),
+		"distinct hostIDs that sanitize to the same base must not collide")
+
+	long1 := strings.Repeat("a", 70) + "-one"
+	long2 := strings.Repeat("a", 70) + "-two"
+	assert.NotEqual(t, hostSbomName(long1), hostSbomName(long2),
+		"distinct hostIDs sharing a long common prefix must not collide after truncation")
 }
 
 // --- TooLarge interaction -------------------------------------------------
@@ -240,7 +266,7 @@ func Test_HostSbomName_IsIdentityDerived(t *testing.T) {
 // status/annotations, so prepareHostSbom takes its AlreadyExists path.
 func seedHostSbom(t *testing.T, store *fakeSbomClient, annotations map[string]string) {
 	t.Helper()
-	_, err := store.CreateSBOM(&v1beta1.SBOMSyft{Name: "host-node-1", Annotations: annotations})
+	_, err := store.CreateSBOM(&v1beta1.SBOMSyft{Name: hostSbomName("node-1"), Annotations: annotations})
 	require.NoError(t, err)
 }
 
@@ -262,7 +288,7 @@ func Test_PrepareHostSbom_TooLargeBlocksThisRescanOnly(t *testing.T) {
 			HostMaxSBOMSizeAnnotation:        fmt.Sprintf("%d", sm.cfg.MaxSBOMSize),
 		})
 
-		_, _, ok := sm.prepareHostSbom("host-node-1", "node-1")
+		_, _, ok := sm.prepareHostSbom(hostSbomName("node-1"), "node-1")
 		assert.False(t, ok, "a TooLarge host SBOM must not be rescanned under unchanged conditions")
 	})
 
@@ -273,7 +299,7 @@ func Test_PrepareHostSbom_TooLargeBlocksThisRescanOnly(t *testing.T) {
 			helpersv1.ToolVersionMetadataKey: "v0.9.0-old",
 		})
 
-		wip, hadContent, ok := sm.prepareHostSbom("host-node-1", "node-1")
+		wip, hadContent, ok := sm.prepareHostSbom(hostSbomName("node-1"), "node-1")
 		require.True(t, ok, "a tool-version bump must release the TooLarge block")
 		assert.False(t, hadContent, "a TooLarge SBOM has had its spec cleared, so it carries no content")
 		assert.Equal(t, sm.version, wip.Annotations[helpersv1.ToolVersionMetadataKey])
@@ -293,7 +319,7 @@ func Test_PrepareHostSbom_TooLargeBlocksThisRescanOnly(t *testing.T) {
 			HostMaxSBOMSizeAnnotation:        "1024",
 		})
 
-		_, _, ok := sm.prepareHostSbom("host-node-1", "node-1")
+		_, _, ok := sm.prepareHostSbom(hostSbomName("node-1"), "node-1")
 		assert.True(t, ok, "a MaxSBOMSize change must release the TooLarge block")
 	})
 }
@@ -308,7 +334,7 @@ func Test_PrepareHostSbom_NilAnnotationsDoNotPanic(t *testing.T) {
 	seedHostSbom(t, store, nil)
 
 	require.NotPanics(t, func() {
-		_, _, ok := sm.prepareHostSbom("host-node-1", "node-1")
+		_, _, ok := sm.prepareHostSbom(hostSbomName("node-1"), "node-1")
 		assert.True(t, ok, "a nil-annotation SBOM has no status marker, so it must retry like any Incomplete/Initializing scan")
 	})
 }
@@ -352,7 +378,7 @@ func Test_PrepareHostSbom_LearningIsRescanned(t *testing.T) {
 		helpersv1.ToolVersionMetadataKey: sm.version,
 	})
 
-	_, hadContent, ok := sm.prepareHostSbom("host-node-1", "node-1")
+	_, hadContent, ok := sm.prepareHostSbom(hostSbomName("node-1"), "node-1")
 	assert.True(t, ok, "the host rescan must refresh a completed SBOM at the same tool version")
 	assert.True(t, hadContent, "a completed SBOM has content, so a later size trip must be Incomplete, not TooLarge")
 }
@@ -372,7 +398,7 @@ func Test_PrepareHostSbom_IncompleteContentBearingRetainsContent(t *testing.T) {
 		helpersv1.ResourceSizeMetadataKey: "123456",
 	})
 
-	_, hadContent, ok := sm.prepareHostSbom("host-node-1", "node-1")
+	_, hadContent, ok := sm.prepareHostSbom(hostSbomName("node-1"), "node-1")
 	assert.True(t, ok, "the host rescan must retry an Incomplete SBOM at the same tool version")
 	assert.True(t, hadContent, "an Incomplete SBOM that already completed a scan must report hadContent=true")
 }
@@ -390,7 +416,7 @@ func Test_PrepareHostSbom_IncompleteEmptyDoesNotClaimContent(t *testing.T) {
 		// No ResourceSizeMetadataKey: this SBOM never completed a scan.
 	})
 
-	_, hadContent, ok := sm.prepareHostSbom("host-node-1", "node-1")
+	_, hadContent, ok := sm.prepareHostSbom(hostSbomName("node-1"), "node-1")
 	assert.True(t, ok, "the host rescan must retry an Incomplete SBOM at the same tool version")
 	assert.False(t, hadContent, "an Incomplete SBOM that never completed a scan must not claim hadContent=true")
 }
@@ -443,7 +469,7 @@ func Test_ProcessHostSbom_ScanTimeoutIsAborted(t *testing.T) {
 	assert.True(t, sawDeadline.Load(), "the scan's context must have been cancelled with DeadlineExceeded")
 	assert.Zero(t, reporter.count(), "host failures must not be sent to the image-keyed endpoint")
 
-	sbomCR := store.get("host-node-1")
+	sbomCR := store.get(hostSbomName("node-1"))
 	require.NotNil(t, sbomCR)
 	assert.Equal(t, helpersv1.Initializing, sbomCR.Annotations[helpersv1.StatusMetadataKey],
 		"a single scan timeout must not pin the host SBOM to a terminal status")
@@ -479,7 +505,7 @@ func Test_ProcessHostSbom_TimeoutDoesNotBlockLaterRescan(t *testing.T) {
 	sm.hostScanTimeoutOverride = 5 * time.Second
 	sm.processHostSbom("node-1")
 
-	sbomCR := store.get("host-node-1")
+	sbomCR := store.get(hostSbomName("node-1"))
 	require.NotNil(t, sbomCR)
 	assert.Equal(t, helpersv1.Learning, sbomCR.Annotations[helpersv1.StatusMetadataKey],
 		"a rescan following a timeout must be able to complete successfully")

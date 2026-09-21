@@ -86,12 +86,26 @@ func (cpm *ContainerProfileManager) getContainerEntry(containerID string) (*Cont
 	return entry, exists
 }
 
-// addContainerEntry safely adds a new container entry to the map
-func (cpm *ContainerProfileManager) addContainerEntry(containerID string, entry *ContainerEntry) {
+// addContainerEntryIfAbsent atomically inserts entry for containerID only if
+// no entry already exists, returning whether the insert happened. This is a
+// get-or-insert rather than an unconditional overwrite: a replayed
+// AddContainer notification for an already-tracked container (the
+// container-watcher collection is known to replay events, notably for the
+// host pseudo-container -- see host_sbom.go's identical comment) must not
+// silently orphan the earlier entry's monitor goroutine. deleteContainer only
+// ever looks up "the current" entry in the map, so an unconditional overwrite
+// here would leave the first monitor with no way to ever be signalled to
+// stop -- it keeps ticking and calling saveProfile against an entry the map
+// no longer references, which fails once the (second) entry is removed.
+func (cpm *ContainerProfileManager) addContainerEntryIfAbsent(containerID string, entry *ContainerEntry) bool {
 	cpm.containersMu.Lock()
 	defer cpm.containersMu.Unlock()
 
+	if _, exists := cpm.containers[containerID]; exists {
+		return false
+	}
 	cpm.containers[containerID] = entry
+	return true
 }
 
 // removeContainerEntry safely removes a container entry from the map

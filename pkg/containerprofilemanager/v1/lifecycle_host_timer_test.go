@@ -225,3 +225,69 @@ func TestNonHostContainerStillFinalizesAtMaxSniffingTime(t *testing.T) {
 		return !exists
 	}, 2*time.Second, 10*time.Millisecond, "non-host container must still be finalized/deleted once MaxSniffingTime elapses")
 }
+
+// TestContainerCallback_ReplayedAddDoesNotOrphanEarlierEntry proves
+// registration is a get-or-insert, not an unconditional overwrite. The
+// container-watcher collection is known to replay AddContainer notifications
+// (see host_sbom.go's identical comment about the host pseudo-container).
+// Before the fix, a replay created a second ContainerEntry and goroutine
+// while the first kept running with no way to ever be signalled to stop by
+// deleteContainer, which only ever looks up "the current" entry in the map.
+func TestContainerCallback_ReplayedAddDoesNotOrphanEarlierEntry(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "host-replay-queue-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	t.Setenv("QUEUE_DIR", tempDir)
+
+	cfg := config.Config{
+		InitialDelay:        time.Minute,
+		UpdateDataPeriod:    time.Minute,
+		MaxSniffingTime:     time.Hour,
+		MaxJitterPercentage: 0,
+		MaxTsProfileSize:    10 * 1024 * 1024,
+	}
+
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	hostData := hostidentity.BuildHostWatchedContainerData("node-1")
+	k8sObjectCacheMock.SetSharedContainerData(armotypes.HostContainerID, hostData)
+
+	cpm, err := NewContainerProfileManager(
+		context.Background(),
+		cfg,
+		&k8sclient.K8sClientMock{},
+		k8sObjectCacheMock,
+		&storage.StorageHttpClientMock{},
+		&dnsmanager.DNSManagerMock{},
+		&seccompmanager.SeccompManagerMock{},
+		nil,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	defer cpm.Close()
+
+	addEvent := containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: newHostPseudoContainer(),
+	}
+	cpm.ContainerCallback(addEvent)
+
+	var firstEntry *ContainerEntry
+	require.Eventually(t, func() bool {
+		entry, ok := cpm.getContainerEntry(armotypes.HostContainerID)
+		if !ok {
+			return false
+		}
+		firstEntry = entry
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "container was never registered after the first add")
+
+	// Replay the exact same AddContainer notification.
+	cpm.ContainerCallback(addEvent)
+	time.Sleep(50 * time.Millisecond) // let a (wrongly) spawned second add settle, if any
+
+	secondEntry, ok := cpm.getContainerEntry(armotypes.HostContainerID)
+	require.True(t, ok)
+	assert.Same(t, firstEntry, secondEntry,
+		"a replayed add must not replace the tracked entry -- the original monitor must remain the one in the map")
+}

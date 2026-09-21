@@ -149,6 +149,39 @@ func TestProcessEvent_DeliversEventForJustRemovedContainer(t *testing.T) {
 	assert.Equal(t, "eol-container", spy.received[0].ContainerID)
 }
 
+// TestProcessEvent_HostBypassesIgnoreContainer proves ProcessEvent's own
+// IgnoreContainer gate -- a separate, later check from the one guarded in
+// containerCallback (containercallback.go) -- does not silently drop runtime
+// events (exec/open/syscall/network) for the host pseudo-container. Without
+// this exemption, host would still get registered by the lifecycle callback
+// under an IncludeNamespaces config, but every actual runtime event would be
+// dropped here, silently starving the profile/rule/malware handlers of any
+// host behavior data.
+func TestProcessEvent_HostBypassesIgnoreContainer(t *testing.T) {
+	cc := &containercollection.ContainerCollection{}
+	spy := &enrichedEventSpy{}
+	factory := newRemovalTestFactory(t, cc, spy)
+	factory.cfg = config.Config{IncludeNamespaces: []string{"kube-system"}}
+
+	c := &containercollection.Container{
+		Runtime: containercollection.RuntimeMetadata{
+			BasicRuntimeMetadata: igtypes.BasicRuntimeMetadata{
+				ContainerID:   "host",
+				ContainerName: "host",
+				ContainerPID:  1,
+			},
+		},
+		// K8s left at its zero value: this is what GetHostAsContainer produces.
+	}
+	cc.AddContainer(c)
+
+	factory.ProcessEvent(makeExecEnrichedEvent("host"))
+
+	require.Len(t, spy.received, 1,
+		"host runtime events must be dispatched even though its empty namespace is not in IncludeNamespaces")
+	assert.Equal(t, "host", spy.received[0].ContainerID)
+}
+
 // TestProcessEvent_DeliversEventForJustRemovedContainer_NoPriorEvent pins the
 // worst case observed in ladder run1 (total loss): no earlier event ever
 // populated any lazy cache for the container, and the only event of its life
