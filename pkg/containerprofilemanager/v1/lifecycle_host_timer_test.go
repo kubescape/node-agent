@@ -292,6 +292,167 @@ func TestContainerCallback_ReplayedAddDoesNotOrphanEarlierEntry(t *testing.T) {
 		"a replayed add must not replace the tracked entry -- the original monitor must remain the one in the map")
 }
 
+// TestContainerCallback_ReplayDuringFailingRegistrationRetries proves that a
+// replayed AddContainer notification which races in while an earlier
+// registration attempt for the same container is still pending -- and that
+// earlier attempt then fails -- retries registration itself instead of
+// silently leaving the container untracked forever.
+//
+// addContainerEntryIfAbsent's ready channel closes on BOTH success and
+// failure of a registration attempt (see addContainerWithTimeout's
+// error/timeout branches), so a replay that only waited for closure and then
+// assumed success would be wrong: it must check whether the entry survived,
+// and if not, retry the get-or-insert with its own entry.
+func TestContainerCallback_ReplayDuringFailingRegistrationRetries(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "host-replay-fail-queue-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	t.Setenv("QUEUE_DIR", tempDir)
+
+	cfg := config.Config{
+		InitialDelay:        time.Minute,
+		UpdateDataPeriod:    time.Minute,
+		MaxSniffingTime:     time.Hour,
+		MaxJitterPercentage: 0,
+		MaxTsProfileSize:    10 * 1024 * 1024,
+	}
+
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	hostData := hostidentity.BuildHostWatchedContainerData("node-1")
+	k8sObjectCacheMock.SetSharedContainerData(armotypes.HostContainerID, hostData)
+
+	cpm, err := NewContainerProfileManager(
+		context.Background(),
+		cfg,
+		&k8sclient.K8sClientMock{},
+		k8sObjectCacheMock,
+		&storage.StorageHttpClientMock{},
+		&dnsmanager.DNSManagerMock{},
+		&seccompmanager.SeccompManagerMock{},
+		nil,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	defer cpm.Close()
+
+	containerID := armotypes.HostContainerID
+
+	// Simulate a first registration attempt that is already in-flight (its
+	// own goroutine hasn't reached success or failure yet): insert a bare
+	// entry directly, exactly as addContainerWithTimeout does before it calls
+	// addContainer.
+	firstAttempt := &ContainerEntry{data: &containerData{}, ready: make(chan struct{})}
+	require.True(t, cpm.addContainerEntryIfAbsent(containerID, firstAttempt))
+
+	// Start the "replay" -- a second AddContainer notification racing in
+	// while the first attempt is still pending -- on its own goroutine, since
+	// it blocks on <-firstAttempt.ready.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cpm.addContainerWithTimeout(newHostPseudoContainer())
+	}()
+
+	// Give the replay goroutine time to observe the existing entry and start
+	// waiting on its ready channel.
+	time.Sleep(20 * time.Millisecond)
+
+	// Now fail the first attempt, exactly as addContainerWithTimeout's own
+	// error/timeout branches do: close ready, then remove the entry.
+	firstAttempt.readyOnce.Do(func() { close(firstAttempt.ready) })
+	cpm.removeContainerEntry(containerID)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("replay never completed after the first attempt failed")
+	}
+
+	entry, ok := cpm.getContainerEntry(containerID)
+	require.True(t, ok, "the replay must retry registration and end up tracked, not silently give up because entry.ready was already closed by the failed first attempt")
+	assert.NotSame(t, firstAttempt, entry, "the tracked entry must be the replay's own successful registration, not the failed first attempt")
+
+	require.Eventually(t, func() bool {
+		e, ok := cpm.getContainerEntry(containerID)
+		if !ok {
+			return false
+		}
+		e.mu.RLock()
+		defer e.mu.RUnlock()
+		return e.data != nil && e.data.watchedContainerData != nil
+	}, 2*time.Second, 10*time.Millisecond, "the retried registration must actually complete with shared data attached")
+}
+
+// TestAddContainer_HostRecordsLearningPeriodWithoutArmingTimer proves that
+// skipping the max-sniffing-time timer for host does not also skip recording
+// LearningPeriod on the shared data. objectcache.GetLabels emits
+// LearningPeriod regardless of container type, and monitorContainer's own
+// Completed-transition deadline for host now reuses this same field (rather
+// than recomputing it, since calculateSniffingTime applies random jitter and
+// a second call would silently drift from the value reported here) -- so a
+// zero LearningPeriod would both misreport "0s" in host profile labels and
+// make host's Completed transition fire immediately.
+func TestAddContainer_HostRecordsLearningPeriodWithoutArmingTimer(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "host-learning-period-queue-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	t.Setenv("QUEUE_DIR", tempDir)
+
+	cfg := config.Config{
+		InitialDelay:        time.Minute,
+		UpdateDataPeriod:    time.Minute,
+		MaxSniffingTime:     time.Hour,
+		MaxJitterPercentage: 0,
+		MaxTsProfileSize:    10 * 1024 * 1024,
+	}
+
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	hostData := hostidentity.BuildHostWatchedContainerData("node-1")
+	k8sObjectCacheMock.SetSharedContainerData(armotypes.HostContainerID, hostData)
+
+	cpm, err := NewContainerProfileManager(
+		context.Background(),
+		cfg,
+		&k8sclient.K8sClientMock{},
+		k8sObjectCacheMock,
+		&storage.StorageHttpClientMock{},
+		&dnsmanager.DNSManagerMock{},
+		&seccompmanager.SeccompManagerMock{},
+		nil,
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	defer cpm.Close()
+
+	cpm.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: newHostPseudoContainer(),
+	})
+
+	require.Eventually(t, func() bool {
+		entry, ok := cpm.getContainerEntry(armotypes.HostContainerID)
+		if !ok {
+			return false
+		}
+		entry.mu.RLock()
+		defer entry.mu.RUnlock()
+		return entry.data != nil && entry.data.watchedContainerData != nil
+	}, 2*time.Second, 10*time.Millisecond, "host was never registered")
+
+	entry, ok := cpm.getContainerEntry(armotypes.HostContainerID)
+	require.True(t, ok)
+	entry.mu.RLock()
+	learningPeriod := entry.data.watchedContainerData.LearningPeriod
+	timerArmed := entry.data.timer != nil
+	entry.mu.RUnlock()
+
+	assert.NotZero(t, learningPeriod, "LearningPeriod must be recorded for host, matching cfg.MaxSniffingTime, even though its timer is never armed")
+	assert.Equal(t, cfg.MaxSniffingTime, learningPeriod)
+	assert.False(t, timerArmed, "the max-sniffing-time timer must still never be armed for host")
+}
+
 // TestHostContainerProfile_ReachesCompletedWithoutStopping proves the fix for
 // the deeper consequence of skipping host's max-sniffing-time timer:
 // containerprofilecache.go's tryPopulateEntry only caches profiles whose

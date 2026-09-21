@@ -240,8 +240,11 @@ func Test_HostSbomName_IsIdentityDerived(t *testing.T) {
 	assert.Empty(t, validation.IsDNS1123Label(name), "name %q must be a valid DNS-1123 label", name)
 	assert.LessOrEqual(t, len(name), 63)
 
+	// The wider (32-hex-char) hash suffix leaves less room for the sanitized
+	// base than a short suffix would, so a long hostname's base is truncated
+	// here -- only a shared prefix, not the full sanitized name, survives.
 	longName := hostSbomName("ip-10-0-1-5.eu-west-1.compute.internal")
-	assert.True(t, strings.HasPrefix(longName, "host-ip-10-0-1-5-eu-west-1-compute-internal-"))
+	assert.True(t, strings.HasPrefix(longName, "host-ip-10-0-1-5-eu-west-1-"))
 	assert.Empty(t, validation.IsDNS1123Label(longName))
 	assert.LessOrEqual(t, len(longName), 63)
 

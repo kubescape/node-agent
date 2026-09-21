@@ -128,8 +128,13 @@ func (s *SbomManager) runHostScan(hostID string) {
 // hostIDHashSuffixLen is the number of hex characters from a hostID's SHA-256
 // appended to collision-resistant host identifiers (hostSbomName and
 // hostSbomLabels), so two distinct host identities that happen to
-// sanitize/truncate to the same base don't collide.
-const hostIDHashSuffixLen = 8
+// sanitize/truncate to the same base don't collide. The full 32 hex
+// characters (128 bits) are used -- not a short prefix -- since even an
+// 8-character (32-bit) prefix leaves a non-negligible collision chance across
+// a large enough fleet, and collisionResistantLabel's maxBaseLen computation
+// already accounts for whatever length is chosen here, so there is no
+// DNS-1123-label-limit reason to keep it short.
+const hostIDHashSuffixLen = 32
 
 // hostIDHashSuffix returns a short, deterministic hash of the RAW hostID
 // (before any lossy sanitize/truncate transform), used to make otherwise

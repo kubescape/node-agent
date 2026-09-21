@@ -180,6 +180,13 @@ func TestContainerCallback_HostBypassesIgnoreContainer(t *testing.T) {
 // locks in the first call's outcome -- success or failure -- forever.
 func TestResolveHostID_RetriesAfterFailure(t *testing.T) {
 	// NodeName empty and no machine-id file underneath: ResolveHostID must fail.
+	// hostidentity.ResolveHostID's machine-id fallback reads HOST_ROOT directly
+	// (see hostidentity.go's machineIDHostRoot) rather than through
+	// hostsensormanager, so this test must control HOST_ROOT itself --
+	// SetHostFSPrefixForTest alone does not affect the path this test
+	// exercises, and without it the test would depend on whether the sandbox
+	// running it happens to have a real /host/etc/machine-id.
+	t.Setenv("HOST_ROOT", t.TempDir())
 	restore := hostsensormanager.SetHostFSPrefixForTest(t.TempDir())
 
 	cw := &ContainerWatcher{cfg: config.Config{NodeName: ""}}

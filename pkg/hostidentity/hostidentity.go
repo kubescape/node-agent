@@ -43,7 +43,7 @@ const machineIDPath = "/etc/machine-id"
 // otherwise disagree and this fallback would always fail to find
 // /etc/machine-id, even though the host filesystem is correctly mounted.
 func machineIDHostRoot() string {
-	if hostRoot, ok := os.LookupEnv("HOST_ROOT"); ok {
+	if hostRoot, ok := os.LookupEnv("HOST_ROOT"); ok && hostRoot != "" {
 		return hostRoot
 	}
 	return "/host"

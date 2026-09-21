@@ -48,13 +48,31 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 		data:  &containerData{},
 		ready: make(chan struct{}),
 	}
-	if !cpm.addContainerEntryIfAbsent(containerID, entry) {
-		logger.L().Debug("container already tracked in the container profile manager, skipping duplicate add",
-			helpers.String("containerID", containerID),
-			helpers.String("containerName", container.Runtime.ContainerName),
-			helpers.String("podName", container.K8s.PodName),
-			helpers.String("namespace", container.K8s.Namespace))
-		return
+	for !cpm.addContainerEntryIfAbsent(containerID, entry) {
+		// Another goroutine is already registering (or has registered) this
+		// container. entry.ready closes on BOTH success and failure of that
+		// attempt (see the error/timeout branches below), so closure alone
+		// doesn't mean the container ended up tracked. Wait for that attempt
+		// to settle, then check whether its entry is still in the map: if it
+		// failed and cleaned up, this replayed add must retry the
+		// get-or-insert itself, or the container would be silently left
+		// untracked forever.
+		existing, ok := cpm.getContainerEntry(containerID)
+		if ok {
+			<-existing.ready
+			if _, stillTracked := cpm.getContainerEntry(containerID); stillTracked {
+				logger.L().Debug("container already tracked in the container profile manager, skipping duplicate add",
+					helpers.String("containerID", containerID),
+					helpers.String("containerName", container.Runtime.ContainerName),
+					helpers.String("podName", container.K8s.PodName),
+					helpers.String("namespace", container.K8s.Namespace))
+				return
+			}
+		}
+		// The prior attempt failed (or was never observed at all -- it may
+		// have already failed and cleaned up between the check above and
+		// here) before this replay could join it as tracked; loop and retry
+		// the get-or-insert with the same entry.
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), MaxWaitForSharedContainerData)
@@ -186,11 +204,17 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	// Set container data fields
 	cpm.setContainerData(container, sharedData)
 
-	// Setup monitoring timer. The host pseudo-container runs indefinitely and must
-	// never be finalized/deleted via the max sniffing time timer, so skip arming it.
+	// LearningPeriod is reported (objectcache.GetLabels) regardless of container
+	// type, so it must be set even for host -- only arming the max-sniffing-time
+	// timer is host-specific: the host pseudo-container runs indefinitely and
+	// must never be finalized/deleted via that timer. monitorContainer computes
+	// this same duration again (via calculateSniffingTime) to derive its own
+	// Completed-transition deadline for host, so both stay in sync.
+	sniffingTime := cpm.calculateSniffingTime(container)
+	entry.mu.Lock()
+	sharedData.LearningPeriod = sniffingTime
+	entry.mu.Unlock()
 	if !utils.IsHostContainer(container) {
-		sniffingTime := cpm.calculateSniffingTime(container)
-		sharedData.LearningPeriod = sniffingTime
 		timer := time.AfterFunc(sniffingTime, func() {
 			cpm.handleContainerMaxTime(container)
 		})

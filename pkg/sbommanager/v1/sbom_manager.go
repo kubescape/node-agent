@@ -163,7 +163,7 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 	}
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
-	if !exists {
+	if !exists || hostRoot == "" {
 		hostRoot = "/host"
 	}
 	// use securejoin to join the two, add proc and store in procDir
