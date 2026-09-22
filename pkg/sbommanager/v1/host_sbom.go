@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -455,7 +454,7 @@ const cpuLimitMillisEnvVar = "CPU_LIMIT_MILLIS"
 
 // parallelismFromCPULimitMillis converts a CPU_LIMIT_MILLIS value into a Syft
 // cataloger parallelism. The bool reports whether the raw value was usable;
-// false means the caller must take the runtime.NumCPU() fallback (see
+// false means the caller must take the serial fallback (see
 // resolveHostScanParallelism), and is returned rather than silently folding
 // the fallback in here so the fallback branch itself is directly testable.
 //
@@ -481,21 +480,9 @@ func parallelismFromCPULimitMillis(raw string) (int, bool) {
 	return n, true
 }
 
-// resolveHostScanParallelism decides the Syft cataloger parallelism for this
-// host scan: the cfg.HostSbomScanParallelism override when set, otherwise the
-// value computed from CPU_LIMIT_MILLIS, otherwise runtime.NumCPU().
-//
-// The fallback is logged at WARN, not Debug/Info, whenever host SBOM scanning
-// is actually enabled: it means the cap is NOT in effect and the scan runs at
-// runtime.NumCPU() -- itself already a 4x reduction from Syft's own default of
-// NumCPU()*4 (see parallelismFromCPULimitMillis), but still uncapped relative
-// to the container's actual CPU limit, which is a condition an operator needs
-// to see rather than an incidental detail. It is reached when the chart has
-// not yet been updated to supply CPU_LIMIT_MILLIS; note that a chart-wired
-// deployment with no CPU limit configured does not leave the variable unset --
-// Kubernetes substitutes the node's allocatable CPU, which converges on this
-// same NumCPU()-equivalent (not Syft's native NumCPU()*4) fallback by a
-// different route.
+// resolveHostScanParallelism uses a positive config override, then the
+// container's CPU limit, then serial scanning. Missing or invalid CPU limits
+// must not restore host-wide parallelism in a CPU-constrained container.
 func (s *SbomManager) resolveHostScanParallelism() int {
 	if s.cfg.HostSbomScanParallelism > 0 {
 		return s.cfg.HostSbomScanParallelism
@@ -504,11 +491,11 @@ func (s *SbomManager) resolveHostScanParallelism() int {
 		return n
 	}
 	if s.cfg.EnableSbomGeneration && s.cfg.HostMonitoringEnabled {
-		logger.L().Warning("SbomManager - CPU_LIMIT_MILLIS unset or unparseable, host SBOM scan falls back to runtime.NumCPU() parallelism (cap not in effect)",
+		logger.L().Warning("SbomManager - CPU_LIMIT_MILLIS missing or invalid, host SBOM scan falls back to serial parallelism",
 			helpers.String("envVar", cpuLimitMillisEnvVar),
-			helpers.Int("parallelism", runtime.NumCPU()))
+			helpers.Int("parallelism", 1))
 	}
-	return runtime.NumCPU()
+	return 1
 }
 
 // hostSbomConfig mirrors the container in-process fallback's Syft configuration
@@ -529,7 +516,7 @@ func hostSbomConfig(version string, embeddedSboms bool, parallelism int) *syft.C
 			"file-executable-cataloger",
 		),
 	)
-	// Syft's own default is 0, which it reads as runtime.NumCPU(); an explicit
+	// The vendored Syft fork resolves 0 to runtime.NumCPU()*4; an explicit
 	// value here is what bounds the scan to this container's CPU quota.
 	cfg = cfg.WithParallelism(parallelism)
 	if embeddedSboms {

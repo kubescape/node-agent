@@ -3,7 +3,6 @@ package v1
 import (
 	"context"
 	"os"
-	"runtime"
 	"testing"
 
 	"github.com/anchore/syft/syft"
@@ -30,7 +29,7 @@ func unsetCPULimitMillis(t *testing.T) {
 // Test_ParallelismFromCPULimitMillis pins the millicores-to-parallelism
 // computation, including the clamp that makes a sub-1-CPU limit (the observed
 // production case, 394m) resolve to 1 rather than 0 -- 0 is Syft's own
-// "use runtime.NumCPU()" sentinel, so an unclamped integer division would
+// "use runtime.NumCPU()*4" sentinel, so an unclamped integer division would
 // silently reinstate exactly the unbounded behaviour the cap exists to remove.
 //
 // The unusable cases assert the returned ok == false, i.e. that the fallback
@@ -71,19 +70,23 @@ func Test_ResolveHostScanParallelism_FromEnv(t *testing.T) {
 	assert.Equal(t, 1, sm.resolveHostScanParallelism())
 }
 
-// Test_ResolveHostScanParallelism_FallsBackToNumCPU covers the older-chart
-// case: no CPU_LIMIT_MILLIS at all, so the scan runs at runtime.NumCPU()
-// rather than failing -- note this is already a 4x reduction from Syft's own
-// default (NumCPU()*4 in the vendored fork), though still uncapped relative
-// to the container's actual CPU limit. The WARN log that accompanies this is
-// the operator-visible signal that the cap is not in effect.
-func Test_ResolveHostScanParallelism_FallsBackToNumCPU(t *testing.T) {
-	unsetCPULimitMillis(t)
-	cfg := hostCfg("node-1")
-	cfg.EnableSbomGeneration = true
-	sm, _, _ := newHostSbomManager(t, cfg, t.TempDir())
-
-	assert.Equal(t, runtime.NumCPU(), sm.resolveHostScanParallelism())
+// Missing or invalid CPU limits must keep host scanning serial even on a
+// multi-CPU host, where the container may have only a fractional CPU quota.
+func Test_ResolveHostScanParallelism_FallsBackToSerial(t *testing.T) {
+	for _, raw := range []string{"", "394m", "0", "-1"} {
+		t.Run("invalid_"+raw, func(t *testing.T) {
+			t.Setenv(cpuLimitMillisEnvVar, raw)
+			cfg := hostCfg("node-1")
+			cfg.EnableSbomGeneration = true
+			sm, _, _ := newHostSbomManager(t, cfg, t.TempDir())
+			assert.Equal(t, 1, sm.resolveHostScanParallelism())
+		})
+	}
+	t.Run("unset", func(t *testing.T) {
+		unsetCPULimitMillis(t)
+		sm, _, _ := newHostSbomManager(t, hostCfg("node-1"), t.TempDir())
+		assert.Equal(t, 1, sm.resolveHostScanParallelism())
+	})
 }
 
 // Test_ResolveHostScanParallelism_ConfigOverrideTakesPrecedence proves the
@@ -107,7 +110,7 @@ func Test_ResolveHostScanParallelism_ConfigOverrideTakesPrecedence(t *testing.T)
 
 // Test_HostSbomConfig_SetsParallelism proves the resolved value actually
 // reaches Syft's config rather than being computed and dropped. Parallelism
-// left at 0 is Syft's "use runtime.NumCPU()" default, which is the exact
+// left at 0 is Syft's "use runtime.NumCPU()*4" default, which is the exact
 // no-op failure mode this assertion exists to catch.
 func Test_HostSbomConfig_SetsParallelism(t *testing.T) {
 	assert.Equal(t, 0, syft.DefaultCreateSBOMConfig().Parallelism,

@@ -179,7 +179,7 @@ SBOM failure reporting is opt-in. Setting `API_URL` or mounting `services.json` 
 | `maxDelaySeconds` | int | `30` | Max random delay for jitter |
 | `maxJitterPercentage` | int | `5` | Max jitter percentage |
 | `hostSBOMRescanInterval` | duration | `24h` | How often the host's root-filesystem SBOM is rescanned (only applies when `hostMonitoringEnabled` and `sbomGenerationEnabled` are both set — see [docs/features/host-monitoring-completion.md](features/host-monitoring-completion.md)) |
-| `hostSbomScanParallelism` | int | `0` (computed) | Syft cataloger parallelism for the host root-filesystem scan. `0` means "derive it from this container's own CPU limit", read from the `CPU_LIMIT_MILLIS` env var the chart supplies via the Kubernetes downward API (`n = max(1, millis / 1000)`), falling back to `runtime.NumCPU()` — logged at `WARN`, and itself already a 4x reduction from the vendored Syft fork's own uncapped default of `NumCPU() * 4` — when that variable is absent. A non-zero value forces that parallelism instead. See [docs/features/host-monitoring-completion.md](features/host-monitoring-completion.md) |
+| `hostSbomScanParallelism` | int | `0` (computed) | Syft cataloger parallelism for the host root-filesystem scan. A positive value forces that parallelism. Otherwise, derive it from this container's own CPU limit, read from the `CPU_LIMIT_MILLIS` env var the chart supplies via the Kubernetes downward API (`n = max(1, millis / 1000)`). If that variable is absent, unparseable, or nonpositive, use conservative serial parallelism (`1`) and log the fallback at `WARN` when host SBOM generation is enabled. See [docs/features/host-monitoring-completion.md](features/host-monitoring-completion.md) |
 
 ### Size Limits
 
