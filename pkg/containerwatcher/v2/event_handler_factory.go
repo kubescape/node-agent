@@ -313,7 +313,16 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		return
 	}
 
-	if ehf.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels) {
+	// The host pseudo-container has no real Kubernetes namespace/pod (see
+	// GetHostAsContainer), so generic ignore-list rules (an empty namespace
+	// colliding with cfg.NamespaceName, an IncludeNamespaces allow-list that
+	// doesn't list "", etc.) must never apply to it. Without this exemption,
+	// every runtime event (exec/open/syscall/network) for host would be
+	// silently dropped here under a realistic production config -- even
+	// though the container-add lifecycle callback (containercallback.go) is
+	// separately exempted, this is a different gate on the ongoing event
+	// stream, not just registration.
+	if !utils.IsHostContainer(container) && ehf.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels) {
 		return
 	}
 

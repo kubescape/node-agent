@@ -20,9 +20,8 @@ func TestGetOsReleaseFileIgnoresDecoyReleaseFiles(t *testing.T) {
 		}
 	}
 
-	origPrefix := hostFSPrefix
-	hostFSPrefix = tmp
-	defer func() { hostFSPrefix = origPrefix }()
+	restore := SetHostFSPrefixForTest(tmp)
+	defer restore()
 
 	s := &OsReleaseSensor{}
 	got, err := s.getOsReleaseFile()
@@ -44,9 +43,8 @@ func TestGetOsReleaseFileNotFoundAmongDecoysOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	origPrefix := hostFSPrefix
-	hostFSPrefix = tmp
-	defer func() { hostFSPrefix = origPrefix }()
+	restore := SetHostFSPrefixForTest(tmp)
+	defer restore()
 
 	s := &OsReleaseSensor{}
 	if _, err := s.getOsReleaseFile(); err == nil {

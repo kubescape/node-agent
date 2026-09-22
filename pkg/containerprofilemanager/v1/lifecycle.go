@@ -15,18 +15,24 @@ import (
 
 // ContainerCallback handles container lifecycle events
 func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// The host pseudo-container has no real Kubernetes namespace/pod, so
+	// generic ignore-list rules (an empty namespace colliding with
+	// cfg.NamespaceName, an IncludeNamespaces allow-list that doesn't list
+	// "", etc.) must never apply to it, mirroring the IsHostContainer
+	// exemption already used elsewhere (rule_manager.go, malware_manager.go).
+	isHost := utils.IsHostContainer(notif.Container)
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if utils.IsHostContainer(notif.Container) {
+		if isHost {
 			logger.L().Debug("adding host container to the container profile manager",
 				helpers.String("containerID", notif.Container.Runtime.ContainerID))
 		}
-		if cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+		if !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
 		go cpm.addContainerWithTimeout(notif.Container)
 	case containercollection.EventTypeRemoveContainer:
-		if cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+		if !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
 		go cpm.deleteContainer(notif.Container)
@@ -42,7 +48,32 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 		data:  &containerData{},
 		ready: make(chan struct{}),
 	}
-	cpm.addContainerEntry(containerID, entry)
+	for !cpm.addContainerEntryIfAbsent(containerID, entry) {
+		// Another goroutine is already registering (or has registered) this
+		// container. entry.ready closes on BOTH success and failure of that
+		// attempt (see the error/timeout branches below), so closure alone
+		// doesn't mean the container ended up tracked. Wait for that attempt
+		// to settle, then check whether its entry is still in the map: if it
+		// failed and cleaned up, this replayed add must retry the
+		// get-or-insert itself, or the container would be silently left
+		// untracked forever.
+		existing, ok := cpm.getContainerEntry(containerID)
+		if ok {
+			<-existing.ready
+			if _, stillTracked := cpm.getContainerEntry(containerID); stillTracked {
+				logger.L().Debug("container already tracked in the container profile manager, skipping duplicate add",
+					helpers.String("containerID", containerID),
+					helpers.String("containerName", container.Runtime.ContainerName),
+					helpers.String("podName", container.K8s.PodName),
+					helpers.String("namespace", container.K8s.Namespace))
+				return
+			}
+		}
+		// The prior attempt failed (or was never observed at all -- it may
+		// have already failed and cleaned up between the check above and
+		// here) before this replay could join it as tracked; loop and retry
+		// the get-or-insert with the same entry.
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), MaxWaitForSharedContainerData)
 	defer cancel()
@@ -56,11 +87,16 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 	case err := <-done:
 		if err != nil {
 			logger.L().Error("failed to add container to the container profile manager", helpers.Error(err))
-			// Close ready channel and remove entry on error
+			// Close ready channel and remove entry on error. Conditional on
+			// this still being the entry this goroutine registered: a
+			// duplicate-registration retry (the loop above) may have already
+			// installed a newer, successfully-registered entry for the same
+			// containerID by the time this failure is observed here, and an
+			// unconditional removal would delete that newer entry instead.
 			entry.readyOnce.Do(func() {
 				close(entry.ready)
 			})
-			cpm.removeContainerEntry(containerID)
+			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
 	case <-ctx.Done():
 		logger.L().Error("timeout while adding container to the container profile manager",
@@ -68,12 +104,44 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
-		// Close ready channel and remove entry on timeout
+		// Close ready channel and remove entry on timeout (see the error
+		// branch above for why this must be conditional on entry match).
 		entry.readyOnce.Do(func() {
 			close(entry.ready)
 		})
-		cpm.removeContainerEntry(containerID)
+		cpm.removeContainerEntryIfMatch(containerID, entry)
 	}
+}
+
+// hostContainerWithIdentity returns container unchanged for a real container,
+// or -- for the host pseudo-container -- a shallow copy carrying a usable
+// K8s.Namespace/PodName. GetHostAsContainer (pkg/containerwatcher/v2/
+// container_watcher_collection.go) builds the real host object with an empty
+// K8s.Namespace/PodName (it has no backing Kubernetes object), but
+// saveContainerProfile reads container.K8s.Namespace directly for the CR's
+// own Namespace field -- an empty namespace would fail the Kubernetes create
+// for the very first host profile save.
+//
+// storageNamespace (the caller's cfg.NamespaceName, node-agent's own
+// deployment namespace) is used here rather than sharedData.Namespace
+// ("host"): sharedData.Namespace is a synthetic identity label embedded in
+// the Wlid/InstanceID, not a real Kubernetes namespace -- creating a
+// ContainerProfile CR there would fail with NotFound on any cluster that
+// doesn't happen to have a namespace literally named "host". Node-agent's own
+// namespace is guaranteed to exist and node-agent already has permissions
+// there. containerprofilecache.go's own host handling must use the same
+// value, since it reads back the CR this write creates.
+//
+// The copy leaves the container object shared with every other subscriber of
+// the add-container event untouched.
+func hostContainerWithIdentity(container *containercollection.Container, sharedData *objectcache.WatchedContainerData, storageNamespace string) *containercollection.Container {
+	if !utils.IsHostContainer(container) {
+		return container
+	}
+	hostContainer := *container
+	hostContainer.K8s.Namespace = storageNamespace
+	hostContainer.K8s.PodName = sharedData.PodName
+	return &hostContainer
 }
 
 // addContainer adds a container to the container profile manager
@@ -88,10 +156,12 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			entry.readyOnce.Do(func() {
 				close(entry.ready)
 			})
+			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
-		cpm.removeContainerEntry(containerID)
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
+
+	container = hostContainerWithIdentity(container, sharedData, cpm.cfg.NamespaceName)
 
 	// Check if the container should use a user-defined profile
 	if sharedData.UserDefinedProfile != "" {
@@ -106,8 +176,8 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			entry.readyOnce.Do(func() {
 				close(entry.ready)
 			})
+			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
-		cpm.removeContainerEntry(containerID)
 		return nil
 	}
 
@@ -122,8 +192,8 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			entry.readyOnce.Do(func() {
 				close(entry.ready)
 			})
+			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
-		cpm.removeContainerEntry(containerID)
 		return nil
 	}
 
@@ -140,17 +210,26 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	// Set container data fields
 	cpm.setContainerData(container, sharedData)
 
-	// Setup monitoring timer
+	// LearningPeriod is reported (objectcache.GetLabels) regardless of container
+	// type, so it must be set even for host -- only arming the max-sniffing-time
+	// timer is host-specific: the host pseudo-container runs indefinitely and
+	// must never be finalized/deleted via that timer. monitorContainer computes
+	// this same duration again (via calculateSniffingTime) to derive its own
+	// Completed-transition deadline for host, so both stay in sync.
 	sniffingTime := cpm.calculateSniffingTime(container)
-	sharedData.LearningPeriod = sniffingTime
-	timer := time.AfterFunc(sniffingTime, func() {
-		cpm.handleContainerMaxTime(container)
-	})
-
-	// Store timer in container data for cleanup
 	entry.mu.Lock()
-	entry.data.timer = timer
+	sharedData.LearningPeriod = sniffingTime
 	entry.mu.Unlock()
+	if !utils.IsHostContainer(container) {
+		timer := time.AfterFunc(sniffingTime, func() {
+			cpm.handleContainerMaxTime(container)
+		})
+
+		// Store timer in container data for cleanup
+		entry.mu.Lock()
+		entry.data.timer = timer
+		entry.mu.Unlock()
+	}
 
 	// Start monitoring in separate goroutine
 	go cpm.startContainerMonitoring(container, sharedData)
@@ -266,13 +345,35 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			entry.data.timer = nil
 		}
 
-		// Signal termination if monitoring is active
-		if entry.data.watchedContainerData != nil &&
-			entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusCompleted &&
-			entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusTooLarge {
+		// Signal termination if monitoring is active. For a real container,
+		// reaching Completed/TooLarge means monitorContainer has already
+		// returned from its loop on its own (see ContainerReachedMaxTime and
+		// handleSaveProfileError), so there is nothing left listening on
+		// SyncChannel -- sending to it here would block deleteContainer
+		// forever. Host is the one exception: monitorContainer deliberately
+		// keeps running past Completed (see monitoring.go's isHost tick
+		// branch), so its status reaching Completed does NOT mean its loop
+		// has stopped. Without this exception, removing an already-Completed
+		// host would skip the signal entirely, remove the entry from the map
+		// below, and leave the still-running monitor goroutine ticking
+		// forever against an entry that no longer exists.
+		isHost := utils.IsHostContainer(container)
+		monitoringActive := entry.data.watchedContainerData != nil &&
+			(isHost ||
+				(entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusCompleted &&
+					entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusTooLarge))
 
-			// Set exit code based status if applicable
-			if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace,
+		if monitoringActive {
+			if isHost {
+				// The host pseudo-container has no real Kubernetes Pod, so
+				// GetTerminationExitCode below would retry for its full
+				// 30-second backoff window looking for a pod status that
+				// will never exist, then mark the profile Failed. Host
+				// removal is not expected in practice, but if it is ever
+				// reached, treat it as a clean Completed rather than a
+				// spurious Failed after a needless delay.
+				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusCompleted)
+			} else if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace,
 				container.K8s.PodName, container.K8s.ContainerName, containerID) == 0 {
 				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusCompleted)
 			} else {

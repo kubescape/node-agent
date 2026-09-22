@@ -293,31 +293,13 @@ func TestContainerCallback_IgnoredContainer(t *testing.T) {
 	assert.Equal(t, 0, client.getCPCalls, "IgnoreContainer must short-circuit before any storage call")
 }
 
-// TestContainerCallback_HostContainer verifies that host containers do NOT
-// trigger IgnoreContainer even when their namespace is in ExcludeNamespaces
-// (host events carry namespace="host" after override, not the original one).
-func TestContainerCallback_HostContainer(t *testing.T) {
-	cp := &v1beta1.ContainerProfile{Name: "cp", Namespace: "host", ResourceVersion: "1"}
-	client := &fakeProfileClient{cp: cp}
-	c, _ := newTestCache(t, client)
-	// Even with every namespace excluded, host containers bypass the check.
-	c.cfg.ExcludeNamespaces = []string{"default", "host"}
-
-	hostContainer := &containercollection.Container{
-		Runtime: containercollection.RuntimeMetadata{BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-			ContainerID: "host-c", ContainerPID: 1, ContainerName: "host",
-		}},
-		K8s: containercollection.K8sMetadata{BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-			Namespace: "default", PodName: "",
-		}},
-	}
-	c.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeAddContainer, Container: hostContainer})
-	// The callback dispatches a goroutine that will stall on backoff (no
-	// shared data is primed) — we only assert the callback returns without
-	// panic and did not short-circuit on IgnoreContainer. We cannot assert
-	// storage was called without racing the backoff; just confirm no panic.
-	time.Sleep(20 * time.Millisecond)
-}
+// NOTE: the host-container ContainerCallback behavior formerly asserted here
+// (host bypasses IgnoreContainer even when its namespace is excluded) is now
+// covered — together with proof that the callback actually reaches storage
+// instead of stalling on backoff — by TestContainerCallback_HostReachesStorage
+// in host_shared_data_test.go. That test primes the
+// synthetic shared data and asserts GetContainerProfile is actually called,
+// which this test could not do without racing the (now-eliminated) stall.
 
 // TestCallStackIndexBuiltFromProfile verifies that the call-stack tree is
 // populated from CP.Spec.IdentifiedCallStacks and retrievable via
