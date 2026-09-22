@@ -12,6 +12,7 @@ import (
 	"github.com/anchore/syft/syft/source"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
@@ -64,8 +65,8 @@ func (h *hostScannerSpy) Ready() bool  { return h.ready }
 func (h *hostScannerSpy) Close() error { return nil }
 
 // newOffloadManager wires a host manager with a sidecar and an instant busy
-// backoff, so the five-attempt retry ceiling is exercised without waiting out
-// the real ~2-minute window.
+// backoff, so the 22-retry ceiling is exercised without waiting out
+// the real ~19-minute backoff window (plus admission waits).
 func newOffloadManager(t *testing.T, cfg config.Config, spy *hostScannerSpy) (*SbomManager, *fakeSbomClient) {
 	t.Helper()
 	cfg.HostSbomOffloadEnabled = true
@@ -342,4 +343,40 @@ func Test_HostScan_BusyRetryStopsOnShutdown(t *testing.T) {
 	// handleHostSidecarFailure, incrementing the counter and potentially
 	// issuing a storage write into a manager already being torn down.
 	assert.Zero(t, sm.hostSidecarFailures, "shutdown mid-busy-retry must not count as a sidecar failure")
+}
+
+// hostReadinessMetrics records only the readiness gauge; other metrics are no-ops.
+type hostReadinessMetrics struct {
+	metricsmanager.MetricsMock
+	values []bool
+}
+
+func (m *hostReadinessMetrics) SetSBOMScannerReady(ready bool) {
+	m.values = append(m.values, ready)
+}
+
+func Test_HostOffload_RecordsReadiness(t *testing.T) {
+	spy := &hostScannerSpy{ready: true}
+	sm, _ := newOffloadManager(t, hostCfg("node-1"), spy)
+	metrics := &hostReadinessMetrics{}
+	sm.metrics = metrics
+	assert.True(t, sm.hostOffloadAvailable())
+	spy.ready = false
+	assert.False(t, sm.hostOffloadAvailable())
+	sm.scannerClient = nil
+	assert.False(t, sm.hostOffloadAvailable())
+	spy.ready = true
+	sm.scannerClient = spy
+	sm.cfg.HostSbomOffloadEnabled = false
+	assert.False(t, sm.hostOffloadAvailable())
+	assert.Equal(t, []bool{true, false, false, true}, metrics.values)
+}
+
+func Test_HostOffload_FailureClearsReadiness(t *testing.T) {
+	spy := &hostScannerSpy{ready: true, errs: []error{errors.New("scanner disconnected")}}
+	sm, _ := newOffloadManager(t, hostCfg("node-1"), spy)
+	metrics := &hostReadinessMetrics{}
+	sm.metrics = metrics
+	sm.processHostSbom("node-1")
+	assert.Equal(t, []bool{true, false}, metrics.values)
 }

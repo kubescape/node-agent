@@ -243,7 +243,8 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	// while keeping a full root-filesystem walk off the node's hot path.
 	viper.SetDefault("hostSBOMRescanInterval", 24*time.Hour)
 	// HostSbomScanParallelism overrides the Syft cataloger parallelism used by
-	// the host root-filesystem scan (see pkg/sbommanager/v1/host_sbom.go). The
+	// host root-filesystem scans inside node-agent only; the sidecar uses its
+	// own CPU limit and does not receive this override. The
 	// default, 0, means "compute it from the container's own CPU limit"
 	// (CPU_LIMIT_MILLIS, supplied by the chart via the Kubernetes downward
 	// API), falling back to serial scanning when that is unavailable. A

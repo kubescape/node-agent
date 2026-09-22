@@ -133,10 +133,8 @@ func Test_ContainerBusy_BecomesARealFailureAtTheCeiling(t *testing.T) {
 	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
 	require.NoError(t, err)
 
-	// Drive the ceiling directly: each call consumes one busy-retry attempt.
-	for range busyRetryMaxAttempts + 1 {
-		mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
-	}
+	// Drive the ceiling through the actual scheduled retry chain.
+	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
 
 	assert.Eventually(t, func() bool {
 		count, ok := mgr.failureRetries.Get(sbomName)
@@ -182,6 +180,11 @@ func Test_ContainerBusy_RetryTimerStopsOnShutdown(t *testing.T) {
 	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
 
 	cancel()
+	require.Eventually(t, func() bool {
+		mgr.busyMu.Lock()
+		defer mgr.busyMu.Unlock()
+		return len(mgr.busyPending) == 0
+	}, time.Second, time.Millisecond)
 
 	// The retry must never reach the worker pool after cancellation: submit a
 	// sentinel and confirm it runs promptly, proving the pool was never
@@ -193,4 +196,68 @@ func Test_ContainerBusy_RetryTimerStopsOnShutdown(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("a retry timer fired into the pool after shutdown")
 	}
+}
+
+// Repeated container notifications must not bypass the scheduled backoff or
+// exhaust its budget before the retry actually runs.
+func Test_ContainerBusy_DeduplicatesNotificationsDuringBackoff(t *testing.T) {
+	client := &busyScannerClient{busyCalls: 1000}
+	mgr := newBusyTestManager(t, newFakeSbomClient(), client, &recordingFailureReporter{})
+	mgr.busyRetryDelayFn = func(int) time.Duration { return time.Hour }
+	notif, status, tag, id := testNotifAndImageStatus()
+	name, err := names.ImageInfoToSlug(tag, id)
+	require.NoError(t, err)
+	for range busyRetryMaxAttempts + 1 {
+		mgr.processContainerWithMetadata(notif, nil, status, tag, id)
+	}
+	assert.Equal(t, int32(1), client.calls.Load())
+	attempts, ok := mgr.busyRetries.Get(name)
+	require.True(t, ok)
+	assert.Equal(t, 1, attempts)
+}
+
+func Test_ContainerBusy_DeduplicatesQueuedRetry(t *testing.T) {
+	client := &busyScannerClient{busyCalls: 1, after: errors.New("scan failed")}
+	mgr := newBusyTestManager(t, newFakeSbomClient(), client, &recordingFailureReporter{})
+	blocked := make(chan struct{})
+	unblock := make(chan struct{})
+	mgr.pool.Submit(func() { close(blocked); <-unblock }, "block-worker")
+	<-blocked
+	defer mgr.pool.StopWait()
+	defer close(unblock)
+	notif, status, tag, id := testNotifAndImageStatus()
+	name, err := names.ImageInfoToSlug(tag, id)
+	require.NoError(t, err)
+	mgr.processContainerWithMetadata(notif, nil, status, tag, id)
+	require.Eventually(t, func() bool { return mgr.pool.WaitingQueueSize() == 1 }, time.Second, time.Millisecond)
+	for range 5 {
+		mgr.processContainerWithMetadata(notif, nil, status, tag, id)
+	}
+	assert.Equal(t, int32(1), client.calls.Load())
+	attempts, _ := mgr.busyRetries.Get(name)
+	assert.Equal(t, 1, attempts)
+	assert.Equal(t, 1, mgr.pool.WaitingQueueSize())
+}
+
+func Test_ContainerBusy_QueuedRetryStopsOnShutdown(t *testing.T) {
+	mgr := newBusyTestManager(t, newFakeSbomClient(), &busyScannerClient{}, &recordingFailureReporter{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr.ctx = ctx
+	blocked := make(chan struct{})
+	unblock := make(chan struct{})
+	mgr.pool.Submit(func() { close(blocked); <-unblock }, "block-worker")
+	<-blocked
+	var calls atomic.Int32
+	require.True(t, mgr.scheduleBusyRetry("image", func() { calls.Add(1) }))
+	require.Eventually(t, func() bool { return mgr.pool.WaitingQueueSize() == 1 }, time.Second, time.Millisecond)
+	cancel()
+	require.Eventually(t, func() bool {
+		mgr.busyMu.Lock()
+		defer mgr.busyMu.Unlock()
+		return len(mgr.busyPending) == 0
+	}, time.Second, time.Millisecond)
+	close(unblock)
+	mgr.pool.StopWait()
+	assert.Zero(t, calls.Load())
 }

@@ -124,6 +124,36 @@ func TestScanHostFilesystem_HostRootValidation(t *testing.T) {
 	})
 }
 
+func TestResolveHostRoot_RejectsContainerRoot(t *testing.T) {
+	alias := filepath.Join(t.TempDir(), "root")
+	require.NoError(t, os.Symlink("/", alias))
+	for _, root := range []string{"/", "/etc/..", alias} {
+		t.Run(root, func(t *testing.T) {
+			t.Setenv(hostRootEnvVar, root)
+			srv := newScannerServer()
+			_, err := srv.resolveHostRoot()
+			require.ErrorContains(t, err, "is the scanner's own root filesystem")
+			assert.False(t, srv.hostRootResolved)
+
+			// A corrected mount must be accepted after an initial rejection.
+			validRoot := fakeHostRoot(t)
+			t.Setenv(hostRootEnvVar, validRoot)
+			resolved, err := srv.resolveHostRoot()
+			require.NoError(t, err)
+			assert.Equal(t, validRoot, resolved)
+		})
+	}
+}
+
+func TestResolveHostRoot_AcceptsHostRootSymlink(t *testing.T) {
+	alias := filepath.Join(t.TempDir(), "host")
+	require.NoError(t, os.Symlink(fakeHostRoot(t), alias))
+	t.Setenv(hostRootEnvVar, alias)
+	resolved, err := newScannerServer().resolveHostRoot()
+	require.NoError(t, err)
+	assert.Equal(t, alias, resolved)
+}
+
 func TestScanHostFilesystem_Timeout(t *testing.T) {
 	t.Setenv(hostRootEnvVar, fakeHostRoot(t))
 	srv := newScannerServer()

@@ -97,10 +97,9 @@ const (
 )
 
 // hostRootMarkerDirs are the directories a plausible Linux host root must
-// contain. Requiring ALL of them (rather than any) is deliberate: the failure
-// this guards against is a HOST_ROOT pointing at some other mounted path, and
-// an "any" check would be satisfied by a container rootfs, which also has /etc
-// and /usr.
+// contain. These markers reject incomplete or unrelated directories, but do
+// not establish host identity: container root filesystems have them too.
+// resolveHostRoot separately rejects the scanner's own root filesystem.
 var hostRootMarkerDirs = []string{"etc", "usr", "var"}
 
 type scannerServer struct {
@@ -193,8 +192,8 @@ func contextStatusError(ctx context.Context) error {
 	return status.Error(codes.Canceled, "scan canceled")
 }
 
-// resolveHostRoot resolves and validates the sidecar's own HOST_ROOT exactly
-// once, logging the resolved path.
+// resolveHostRoot validates the sidecar's own HOST_ROOT, caching and logging
+// the first successful result. Failed validation is retried on the next call.
 //
 // Validation is a hard precondition rather than a warning: silently scanning
 // the wrong filesystem produces a structurally valid SBOM that describes the
@@ -219,7 +218,14 @@ func (s *scannerServer) resolveHostRoot() (string, error) {
 	case !info.IsDir():
 		err = fmt.Errorf("host root %q is not a directory", root)
 	default:
-		if missing := missingHostRootMarkers(root); len(missing) > 0 {
+		// Stat follows symlinks, and SameFile compares filesystem identity,
+		// covering both path aliases and bind mounts of the scanner's root.
+		containerRoot, rootErr := os.Stat("/")
+		if rootErr != nil {
+			err = fmt.Errorf("cannot validate host root %q against scanner root: %w", root, rootErr)
+		} else if os.SameFile(info, containerRoot) {
+			err = fmt.Errorf("host root %q is the scanner's own root filesystem", root)
+		} else if missing := missingHostRootMarkers(root); len(missing) > 0 {
 			err = fmt.Errorf("host root %q does not look like a node root filesystem (missing %s)",
 				root, strings.Join(missing, ", "))
 		}

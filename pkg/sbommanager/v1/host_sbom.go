@@ -257,10 +257,12 @@ func (s *SbomManager) processHostSbom(hostID string) {
 }
 
 // hostOffloadAvailable reports whether this cycle's scan should go to the
-// sidecar. cfg.HostSbomOffloadEnabled is checked first so the kill switch takes
-// effect without a health probe.
+// sidecar. Readiness is recorded independently of the host offload switch:
+// a healthy sidecar may still serve container scans when host offload is off.
 func (s *SbomManager) hostOffloadAvailable() bool {
-	return s.cfg.HostSbomOffloadEnabled && s.scannerClient != nil && s.scannerClient.Ready()
+	ready := s.scannerClient != nil && s.scannerClient.Ready()
+	s.metrics.SetSBOMScannerReady(ready)
+	return s.cfg.HostSbomOffloadEnabled && ready
 }
 
 // hostScanOutcome classifies a sidecar host-scan attempt. The distinction that
@@ -418,6 +420,7 @@ func (s *SbomManager) waitForBusyRetry(attempt int) bool {
 // sidecar permanently freeze the host SBOM as TooLarge -- a state only a
 // genuine size overage may ever produce.
 func (s *SbomManager) handleHostSidecarFailure(sbomName string) {
+	s.metrics.SetSBOMScannerReady(false)
 	s.hostSidecarFailures++
 	if s.hostSidecarFailures >= hostSidecarFailureWarnThreshold {
 		logger.L().Warning("SbomManager - host SBOM scanning via the scanner sidecar is degraded; still retrying on the normal rescan interval",

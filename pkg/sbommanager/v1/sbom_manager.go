@@ -131,7 +131,10 @@ type SbomManager struct {
 	// busyRetries counts the bounded ErrScannerBusy retries per sbomName on the container
 	// path. Busy is not a failure, so it gets its own budget rather than consuming
 	// failureRetries -- which would let contention alone push an image to Incomplete.
-	busyRetries     *expirable.LRU[string, int]
+	busyRetries *expirable.LRU[string, int]
+	// busyPending reserves each image throughout backoff and worker-pool queuing.
+	busyPending     map[string]chan struct{}
+	busyMu          sync.Mutex
 	pendingScans    map[string]pendingScan
 	pendingOrder    []string
 	pendingMu       sync.Mutex
@@ -167,8 +170,8 @@ type SbomManager struct {
 	// instead of waiting out the real 16-minute production value.
 	hostScanTimeoutOverride time.Duration
 	// busyRetryDelayFn replaces busyRetryDelay for the bounded ErrScannerBusy backoff. It
-	// is nil in production and exists purely as a test seam, so the full five-attempt
-	// ceiling can be exercised without waiting out the real ~2-minute window.
+	// is nil in production and exists purely as a test seam, so the full 22-attempt
+	// ceiling can be exercised without ~19 minutes of backoff, excluding admission waits.
 	busyRetryDelayFn func(attempt int) time.Duration
 }
 
@@ -422,6 +425,12 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 			helpers.String("container", notif.Container.K8s.ContainerName),
 			helpers.String("imageName", imageTag),
 			helpers.String("imageDigest", imageID))
+		return
+	}
+	s.busyMu.Lock()
+	_, busyPending := s.busyPending[sbomName]
+	s.busyMu.Unlock()
+	if busyPending {
 		return
 	}
 	// try to create a SBOM with initializing status to reserve our slot
@@ -818,6 +827,14 @@ func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollect
 // pool being asynchronous. The timer is selected against s.ctx, so a shutdown drops the
 // pending retry immediately instead of firing into a torn-down manager.
 func (s *SbomManager) scheduleBusyRetry(sbomName string, retry func()) bool {
+	s.busyMu.Lock()
+	defer s.busyMu.Unlock()
+	if s.ctx.Err() != nil {
+		return true
+	}
+	if _, pending := s.busyPending[sbomName]; pending {
+		return true
+	}
 	attempt, _ := s.busyRetries.Get(sbomName)
 	attempt++
 	if attempt > busyRetryMaxAttempts {
@@ -825,6 +842,19 @@ func (s *SbomManager) scheduleBusyRetry(sbomName string, retry func()) bool {
 		return false
 	}
 	s.busyRetries.Add(sbomName, attempt)
+	if s.busyPending == nil {
+		s.busyPending = make(map[string]chan struct{})
+	}
+	started := make(chan struct{})
+	s.busyPending[sbomName] = started
+	release := func() {
+		s.busyMu.Lock()
+		defer s.busyMu.Unlock()
+		// A running retry may already have scheduled its next backoff.
+		if s.busyPending[sbomName] == started {
+			delete(s.busyPending, sbomName)
+		}
+	}
 	delay := s.retryDelay(attempt)
 
 	logger.L().Debug("SbomManager - scanner sidecar busy, scheduling scan retry",
@@ -834,6 +864,7 @@ func (s *SbomManager) scheduleBusyRetry(sbomName string, retry func()) bool {
 		helpers.String("delay", delay.String()))
 
 	go func() {
+		defer release()
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		select {
@@ -843,7 +874,18 @@ func (s *SbomManager) scheduleBusyRetry(sbomName string, retry func()) bool {
 			if s.ctx.Err() != nil {
 				return
 			}
-			s.pool.Submit(retry, utils.FuncName(s.processContainerWithMetadata))
+			s.pool.Submit(func() {
+				release()
+				close(started)
+				if s.ctx.Err() == nil {
+					retry()
+				}
+			}, utils.FuncName(s.processContainerWithMetadata))
+			// Keep the reservation while queued, but release it promptly on shutdown.
+			select {
+			case <-started:
+			case <-s.ctx.Done():
+			}
 		}
 	}()
 	return true

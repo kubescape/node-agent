@@ -70,7 +70,7 @@ func busyRetryDelay(attempt int) time.Duration {
 
 // retryDelay resolves the delay through the manager's test seam when one is
 // installed, so tests can exercise the full attempt ceiling without waiting out
-// the real ~2-minute window.
+// the 22-attempt backoff (~19 minutes, excluding admission waits).
 func (s *SbomManager) retryDelay(attempt int) time.Duration {
 	if s.busyRetryDelayFn != nil {
 		return s.busyRetryDelayFn(attempt)
