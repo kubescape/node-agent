@@ -327,9 +327,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		if !RuleAppliesToContext(&rule, enrichedEvent.SourceContext) {
 			continue
 		}
-		// Skip profile dependency checks for non-K8s contexts (profiles are K8s-specific)
-		// Only K8s contexts should enforce profile dependencies
-		if isK8sContext && !profileExists && rule.ProfileDependency == armotypes.Required {
+		// Kubernetes host events use the Host context, but their required baseline
+		// must also finish learning before evaluation. Standalone contexts retain
+		// their existing profile-independent behavior.
+		requiresProfile := isK8sContext || (rm.cfg.RequireKubernetesHostIdentity && utils.IsHost(enrichedEvent.ContainerID))
+		if requiresProfile && !profileExists && rule.ProfileDependency == armotypes.Required {
 			rm.metrics.ReportAlertSuppressed(rule.ID, "profile_incomplete")
 			continue
 		}
