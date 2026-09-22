@@ -2,12 +2,14 @@ package containerprofilemanager
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/hostidentity"
@@ -41,6 +43,12 @@ import (
 // assembling the CR -- host's first save panicked on a nil-map/out-of-range
 // index. Fixed alongside this test (see pkg/hostidentity/hostidentity.go).
 func TestHostContainerProfile_ContentPopulated(t *testing.T) {
+	for _, kubernetes := range []bool{false, true} {
+		t.Run(fmt.Sprintf("kubernetes=%t", kubernetes), func(t *testing.T) { testHostContainerProfileContent(t, kubernetes) })
+	}
+}
+
+func testHostContainerProfileContent(t *testing.T, kubernetes bool) {
 	tempDir, err := os.MkdirTemp("", "host-profile-queue-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
@@ -68,6 +76,14 @@ func TestHostContainerProfile_ContentPopulated(t *testing.T) {
 
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
 	hostData := hostidentity.BuildHostWatchedContainerData("node-1")
+	if kubernetes {
+		identity := armotypes.KubernetesHostIdentity{Version: 1, ClusterUID: "cluster-uid", ClusterName: "cluster-a", NodeUID: "node-uid", NodeName: "node-a"}
+		identity.MachineFingerprint, err = armotypes.KubernetesHostMachineFingerprint("0123456789abcdef0123456789abcdef")
+		require.NoError(t, err)
+		identity.Key, err = armotypes.KubernetesHostKey(identity.ClusterUID, identity.NodeUID, identity.MachineFingerprint)
+		require.NoError(t, err)
+		hostData = hostidentity.BuildKubernetesHostWatchedContainerData(identity)
+	}
 	k8sObjectCacheMock.SetSharedContainerData(armotypes.HostContainerID, hostData)
 
 	storageClient := &storage.StorageHttpClientMock{}
@@ -158,6 +174,20 @@ func TestHostContainerProfile_ContentPopulated(t *testing.T) {
 
 	assert.Equal(t, "kubescape", cr.Namespace, "host CR must be stored in node-agent's own (real, existing) namespace, not the synthetic 'host' identity label")
 	assert.NotEmpty(t, cr.Name)
+	if kubernetes {
+		encoded, err := hostData.KubernetesHostIdentity.CanonicalJSON()
+		require.NoError(t, err)
+		require.Equal(t, encoded, cr.Annotations[armotypes.KubernetesHostIdentityAnnotation])
+		require.Equal(t, hostData.KubernetesHostIdentity.Key, cr.Labels[armotypes.KubernetesHostKeyLabel])
+		require.Equal(t, "cluster-a", cr.Labels[helpersv1.ClusterMetadataKey])
+		require.Equal(t, hostData.Wlid, cr.Annotations[helpersv1.WlidMetadataKey])
+		stable, err := hostData.InstanceID.GetSlug(false)
+		require.NoError(t, err)
+		require.Contains(t, cr.Name, stable)
+	} else {
+		require.NotContains(t, cr.Labels, armotypes.KubernetesHostKeyLabel)
+		require.NotContains(t, cr.Annotations, armotypes.KubernetesHostIdentityAnnotation)
+	}
 
 	assert.NotEmpty(t, cr.Spec.Execs, "host CR must carry real exec data, not an empty shell")
 	assert.NotEmpty(t, cr.Spec.Opens, "host CR must carry real open data, not an empty shell")

@@ -2,8 +2,11 @@ package containerprofilemanager
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"time"
+
+	"github.com/armosec/armoapi-go/armotypes"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -253,6 +256,14 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 				MatchExpressions: watchedContainer.ParentWorkloadSelector.MatchExpressions,
 			},
 		},
+	}
+
+	if watchedContainer.ContainerID == armotypes.HostContainerID && watchedContainer.KubernetesHostIdentity != nil {
+		identityJSON, err := watchedContainer.KubernetesHostIdentity.CanonicalJSON()
+		if err != nil {
+			return fmt.Errorf("encode Kubernetes host identity: %w", err)
+		}
+		containerProfile.Annotations[armotypes.KubernetesHostIdentityAnnotation] = identityJSON
 	}
 
 	if err := cpm.enqueueContainerProfile(containerProfile, watchedContainer.ContainerID); err != nil {
