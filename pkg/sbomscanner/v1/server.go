@@ -264,17 +264,12 @@ func scanParallelism() int {
 	if n, ok := syftutil.ParallelismFromCPULimitMillis(os.Getenv(cpuLimitMillisEnv)); ok {
 		return n
 	}
-	// Mirrors node-agent's own PR 1 fix: an unlogged fallback here is exactly
-	// what could let a partial chart rollout (this container's own
-	// CPU_LIMIT_MILLIS env var shipping in a separate chart change from
-	// node-agent's) go unnoticed while the sidecar runs uncapped in a 1 CPU
-	// container -- the identical CFS-throttling failure mode this whole
-	// feature exists to prevent, just relocated to this process.
-	n := gort.NumCPU()
-	logger.L().Warning("sbom-scanner: CPU_LIMIT_MILLIS unset or unparseable, scan falls back to runtime.NumCPU() parallelism (cap not in effect)",
+	// Older charts and custom manifests may omit the limit. Keep both host
+	// and image scans serial rather than using the host's CPU count.
+	logger.L().Warning("sbom-scanner: CPU_LIMIT_MILLIS missing or invalid, scan falls back to serial parallelism",
 		helpers.String("envVar", cpuLimitMillisEnv),
-		helpers.Int("parallelism", n))
-	return n
+		helpers.Int("parallelism", 1))
+	return 1
 }
 
 // scanConfig builds the Syft configuration shared by both RPCs.

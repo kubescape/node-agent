@@ -255,3 +255,22 @@ func TestScanParallelism_CapsToCPULimit(t *testing.T) {
 	assert.Equal(t, 1, srv.scanConfig(false).Parallelism,
 		"the cap must actually reach the Syft config, not just be computed")
 }
+
+func TestScanParallelism_FallsBackToSerial(t *testing.T) {
+	for _, raw := range []string{"", "394m", "0", "-1"} {
+		t.Run("invalid_"+raw, func(t *testing.T) {
+			t.Setenv(cpuLimitMillisEnv, raw)
+			assert.Equal(t, 1, scanParallelism())
+			srv := newScannerServer()
+			for _, embedded := range []bool{false, true} {
+				assert.Equal(t, 1, srv.scanConfig(embedded).Parallelism,
+					"both RPCs must receive serial Syft configuration")
+			}
+		})
+	}
+	t.Run("unset", func(t *testing.T) {
+		t.Setenv(cpuLimitMillisEnv, "")
+		require.NoError(t, os.Unsetenv(cpuLimitMillisEnv))
+		assert.Equal(t, 1, newScannerServer().scanConfig(false).Parallelism)
+	})
+}

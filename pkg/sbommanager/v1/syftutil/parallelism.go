@@ -10,7 +10,7 @@ import (
 // chart via the Kubernetes downward API (resourceFieldRef: {resource:
 // limits.cpu, divisor: "1m"}) -- into a Syft cataloger parallelism. The bool
 // reports whether the raw value was usable; false means the caller must take
-// its runtime.NumCPU() fallback, and is returned rather than silently folding
+// its serial fallback, and is returned rather than silently folding
 // the fallback in here so the fallback branch itself is directly testable.
 //
 // The downward API is used deliberately in preference to reading the cgroup CPU
