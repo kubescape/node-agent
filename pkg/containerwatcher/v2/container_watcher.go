@@ -94,8 +94,12 @@ type ContainerWatcher struct {
 	// replay. Only a SUCCESSFUL resolution is cached -- a transient failure
 	// (e.g. the HOST_ROOT mount not yet ready) must be retried on the next
 	// notification, not locked in forever the way sync.Once would.
-	hostIdentityMu sync.Mutex
-	cachedHostID   string
+	hostIdentityMu            sync.Mutex
+	cachedHostID              string
+	hostNotificationMu        sync.Mutex
+	pendingHostNotification   *containercollection.PubSubEvent
+	hostNotificationCancel    chan struct{}
+	hostNotificationDelivered bool
 
 	// Cache and state
 	objectCache             objectcache.ObjectCache

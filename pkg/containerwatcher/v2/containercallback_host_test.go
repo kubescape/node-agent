@@ -1,8 +1,11 @@
 package containerwatcher
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -210,4 +213,94 @@ func TestResolveHostID_RetriesAfterFailure(t *testing.T) {
 	hostID, err = cw.resolveHostID()
 	require.NoError(t, err)
 	assert.Equal(t, "test-node", hostID, "once cached, a successful hostID must not be re-derived from a later cfg mutation")
+}
+
+type pendingKubernetesIdentity struct {
+	ready    chan struct{}
+	identity armotypes.KubernetesHostIdentity
+}
+
+func (p *pendingKubernetesIdentity) Ready() <-chan struct{} { return p.ready }
+func (p *pendingKubernetesIdentity) Identity() (armotypes.KubernetesHostIdentity, bool) {
+	select {
+	case <-p.ready:
+		return p.identity, true
+	default:
+		return armotypes.KubernetesHostIdentity{}, false
+	}
+}
+
+func TestRequiredKubernetesHostGate(t *testing.T) {
+	for _, mode := range []string{"recover", "remove", "cancel", "disabled"} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				identity := armotypes.KubernetesHostIdentity{Version: 1, ClusterUID: "cluster-uid", ClusterName: "cluster-a", NodeUID: "node-uid", NodeName: "node-a"}
+				var err error
+				identity.MachineFingerprint, err = armotypes.KubernetesHostMachineFingerprint("0123456789abcdef0123456789abcdef")
+				require.NoError(t, err)
+				identity.Key, err = armotypes.KubernetesHostKey(identity.ClusterUID, identity.NodeUID, identity.MachineFingerprint)
+				require.NoError(t, err)
+				provider := &pendingKubernetesIdentity{ready: make(chan struct{}), identity: identity}
+				cache := &countingK8sObjectCache{}
+				cw := &ContainerWatcher{ctx: ctx, cfg: config.Config{HostMonitoringEnabled: mode != "disabled", RequireKubernetesHostIdentity: true, KubernetesHostIdentity: provider}, objectCache: &countingObjectCache{k8sCache: cache}, metrics: metricsmanager.NewMetricsMock(), pool: workerpool.New(2)}
+				defer cw.pool.StopWait()
+				delivered := make(chan containercollection.PubSubEvent, 10)
+				cw.callbacks = []containercollection.FuncNotify{cw.containerCallbackAsync, func(event containercollection.PubSubEvent) {
+					data := cache.GetSharedContainerData(armotypes.HostContainerID)
+					if data == nil || data.KubernetesHostIdentity == nil || data.KubernetesHostIdentity.Key != identity.Key {
+						t.Error("callback preceded shared identity publication")
+					}
+					delivered <- event
+				}}
+				container := &containercollection.Container{}
+				container.Runtime.ContainerID = armotypes.HostContainerID
+				add := containercollection.PubSubEvent{Type: containercollection.EventTypeAddContainer, Container: container}
+				var wg sync.WaitGroup
+				for range 20 {
+					wg.Go(func() { cw.containerCallback(add) })
+				}
+				wg.Wait()
+				select {
+				case <-delivered:
+					t.Fatal("callback before identity ready")
+				case <-time.After(11 * time.Minute):
+				}
+				require.Nil(t, cache.GetSharedContainerData(armotypes.HostContainerID))
+				if mode == "remove" {
+					cw.containerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeRemoveContainer, Container: container})
+				}
+				if mode == "cancel" {
+					cancel()
+				}
+				close(provider.ready)
+				if mode == "recover" {
+					select {
+					case event := <-delivered:
+						require.Equal(t, containercollection.EventTypeAddContainer, event.Type)
+					case <-time.After(time.Second):
+						t.Fatal("late identity did not release host Add")
+					}
+					for range 20 {
+						wg.Go(func() { cw.containerCallback(add) })
+					}
+					wg.Wait()
+				}
+				select {
+				case <-delivered:
+					t.Fatal("unexpected duplicate/cancelled callback")
+				case <-time.After(15 * time.Millisecond):
+				}
+				cache.mu.Lock()
+				calls := cache.setCalls
+				cache.mu.Unlock()
+				if mode == "recover" {
+					require.Equal(t, 1, calls)
+				} else {
+					require.Zero(t, calls)
+				}
+			})
+		})
+	}
 }

@@ -2,8 +2,9 @@ package containerwatcher
 
 import (
 	"fmt"
-	corev1 "k8s.io/api/core/v1"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -47,6 +48,14 @@ func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEv
 		logger.L().Info("ContainerWatcher.containerCallback - container is nil or has empty ContainerID")
 		return
 	}
+	if utils.IsHostContainer(notif.Container) && cw.cfg.RequireKubernetesHostIdentity {
+		cw.kubernetesHostCallback(notif)
+		return
+	}
+	cw.dispatchContainerCallback(notif)
+}
+
+func (cw *ContainerWatcher) dispatchContainerCallback(notif containercollection.PubSubEvent) {
 	// check if the container should be ignored -- the host pseudo-container has
 	// no real Kubernetes namespace/pod, so generic ignore-list rules (an empty
 	// namespace colliding with cw.cfg.NamespaceName, an IncludeNamespaces
@@ -92,6 +101,10 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 		cw.metrics.ReportContainerStart()
 
 		if utils.IsHostContainer(notif.Container) {
+			if cw.cfg.RequireKubernetesHostIdentity {
+				// Published before callback fanout.
+				return
+			}
 			// The virtual host pseudo-container has no backing Kubernetes
 			// workload, so it must never go through setSharedWatchedContainerData:
 			// that path calls k8sClient.GetWorkload("", "") in an unbounded
@@ -296,4 +309,55 @@ func (cw *ContainerWatcher) removeContainer(container *containercollection.Conta
 
 	cw.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 	cw.objectCache.K8sObjectCache().DeleteSharedContainerData(container.Runtime.ContainerID)
+}
+
+// kubernetesHostCallback coalesces collection notifications and the explicit
+// startup replay. No manager sees an Add until shared identity is available.
+func (cw *ContainerWatcher) kubernetesHostCallback(notif containercollection.PubSubEvent) {
+	cw.hostNotificationMu.Lock()
+	defer cw.hostNotificationMu.Unlock()
+	if notif.Type == containercollection.EventTypeRemoveContainer {
+		if cw.hostNotificationCancel != nil {
+			close(cw.hostNotificationCancel)
+			cw.hostNotificationCancel = nil
+		}
+		cw.pendingHostNotification = nil
+		if cw.hostNotificationDelivered {
+			cw.dispatchContainerCallback(notif)
+		}
+		cw.hostNotificationDelivered = false
+		return
+	}
+	if notif.Type != containercollection.EventTypeAddContainer || cw.hostNotificationDelivered || cw.pendingHostNotification != nil {
+		return
+	}
+	if !cw.cfg.HostMonitoringEnabled || cw.cfg.KubernetesHostIdentity == nil || cw.ctx == nil || cw.ctx.Err() != nil {
+		return
+	}
+	cw.pendingHostNotification = &notif
+	cancel := make(chan struct{})
+	cw.hostNotificationCancel = cancel
+	go func() {
+		select {
+		case <-cw.ctx.Done():
+			return
+		case <-cancel:
+			return
+		case <-cw.cfg.KubernetesHostIdentity.Ready():
+		}
+		cw.hostNotificationMu.Lock()
+		defer cw.hostNotificationMu.Unlock()
+		if cw.ctx.Err() != nil || cw.hostNotificationCancel != cancel || cw.pendingHostNotification == nil {
+			return
+		}
+		identity, ok := cw.cfg.KubernetesHostIdentity.Identity()
+		if !ok {
+			return
+		}
+		cw.objectCache.K8sObjectCache().SetSharedContainerData(armotypes.HostContainerID, hostidentity.BuildKubernetesHostWatchedContainerData(identity))
+		pending := *cw.pendingHostNotification
+		cw.pendingHostNotification = nil
+		cw.hostNotificationDelivered = true
+		cw.dispatchContainerCallback(pending)
+	}()
 }
