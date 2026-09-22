@@ -98,6 +98,7 @@ type Config struct {
 	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
 	HostMonitoringEnabled          bool                                 `mapstructure:"hostMonitoringEnabled"`
 	HostSBOMRescanInterval         time.Duration                        `mapstructure:"hostSBOMRescanInterval"`
+	HostSbomScanParallelism        int                                  `mapstructure:"hostSbomScanParallelism"`
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
@@ -240,6 +241,14 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	// which a node's installed packages realistically change (patching windows),
 	// while keeping a full root-filesystem walk off the node's hot path.
 	viper.SetDefault("hostSBOMRescanInterval", 24*time.Hour)
+	// HostSbomScanParallelism overrides the Syft cataloger parallelism used by
+	// the host root-filesystem scan (see pkg/sbommanager/v1/host_sbom.go). The
+	// default, 0, means "compute it from the container's own CPU limit"
+	// (CPU_LIMIT_MILLIS, supplied by the chart via the Kubernetes downward
+	// API), falling back to serial scanning when that is unavailable. A
+	// positive value forces that parallelism instead, so a computed value that
+	// proves wrong in the field can be corrected without a new image build.
+	viper.SetDefault("hostSbomScanParallelism", 0)
 	viper.SetDefault("standaloneMonitoringEnabled", false)
 	// HTTP Exporter Alert Bulking defaults
 	viper.SetDefault("exporters::httpExporterConfig::bulkMaxAlerts", 50)

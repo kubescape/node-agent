@@ -811,3 +811,38 @@ func TestLoadConfig_HostSBOMRescanInterval(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfig_HostSbomScanParallelism(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	tests := []struct {
+		name    string
+		content string
+		want    int
+	}{
+		{
+			// 0 is the sentinel for "derive it from the container's own CPU
+			// limit", not for "unbounded" -- see host_sbom.go.
+			name:    "defaults to 0 (computed)",
+			content: `{}`,
+			want:    0,
+		},
+		{
+			name:    "overridable",
+			content: `{"hostSbomScanParallelism": 3}`,
+			want:    3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(dir+"/config.json", []byte(tt.content), 0644))
+
+			config, err := LoadConfigOptional(dir, false)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, config.HostSbomScanParallelism)
+		})
+	}
+}
