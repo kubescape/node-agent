@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/cilium/ebpf/rlimit"
@@ -36,6 +38,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/fimmanager"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
+	"github.com/kubescape/node-agent/pkg/hostidentity"
 	"github.com/kubescape/node-agent/pkg/hostsensormanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
@@ -211,6 +214,20 @@ func main() {
 
 	// Fetch cluster UID from kube-system namespace
 	clusterUID := utils.GetClusterUID(k8sClient.GetKubernetesClient())
+	if cfg.HostMonitoringEnabled {
+		cfg.RequireKubernetesHostIdentity = true
+		cfg.KubernetesHostIdentity = hostidentity.NewKubernetesHostCoordinator(ctx,
+			func(ctx context.Context) (string, error) {
+				namespace, err := k8sClient.GetKubernetesClient().CoreV1().Namespaces().Get(ctx, "kube-system", metav1.GetOptions{})
+				if err != nil {
+					return "", err
+				}
+				return string(namespace.UID), nil
+			}, clusterData.ClusterName, cfg.NodeName,
+			func(ctx context.Context) (*corev1.Node, error) {
+				return k8sClient.GetKubernetesClient().CoreV1().Nodes().Get(ctx, cfg.NodeName, metav1.GetOptions{})
+			})
+	}
 
 	storageClient, err := storage.CreateStorage(clusterData.Namespace)
 	if err != nil {
@@ -338,7 +355,7 @@ func main() {
 
 	if cfg.EnableRuntimeDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider, cfg.KubernetesHostIdentity)
 		dWatcher.AddAdaptor(ruleBindingCache)
 
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
@@ -405,7 +422,7 @@ func main() {
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection && malwaremanagerv1.HasScanners() {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider, cfg.KubernetesHostIdentity)
 		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, metricsProvider, k8sObjectCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
@@ -473,7 +490,7 @@ func main() {
 	if cfg.EnableFIM {
 		// Initialize FIM-specific exporters
 		fimExportersConfig := cfg.FIM.GetFIMExportersConfig()
-		fimExporter := exporters.InitExporters(fimExportersConfig, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider)
+		fimExporter := exporters.InitExporters(fimExportersConfig, clusterData.ClusterName, cfg.NodeName, cloudMetadata, clusterUID, armotypes.AlertSourcePlatformK8sAgent, metricsProvider, cfg.KubernetesHostIdentity)
 
 		fimManager, err = fimmanager.NewFIMManager(cfg, clusterData.ClusterName, fimExporter, cloudMetadata)
 		if err != nil {

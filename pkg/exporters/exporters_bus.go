@@ -30,7 +30,7 @@ type ExporterBus struct {
 }
 
 // InitExporters initializes all exporters.
-func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string, cloudMetadata *armotypes.CloudMetadata, clusterUID string, alertSourcePlatform armotypes.AlertSourcePlatform, metrics metricsmanager.MetricsManager) *ExporterBus {
+func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string, cloudMetadata *armotypes.CloudMetadata, clusterUID string, alertSourcePlatform armotypes.AlertSourcePlatform, metrics metricsmanager.MetricsManager, hostIdentity ...KubernetesHostIdentityProvider) *ExporterBus {
 	var exporters []Exporter
 	for _, url := range exportersConfig.AlertManagerExporterUrls {
 		alertMan := InitAlertManagerExporter(url)
@@ -57,7 +57,11 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 		}
 	}
 	if exportersConfig.HTTPExporterConfig != nil {
-		httpExporter, err := NewHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName, cloudMetadata, clusterUID, alertSourcePlatform, metrics)
+		httpConfig := *exportersConfig.HTTPExporterConfig
+		if len(hostIdentity) > 0 {
+			httpConfig.KubernetesHostIdentity = hostIdentity[0]
+		}
+		httpExporter, err := NewHTTPExporter(httpConfig, clusterName, nodeName, cloudMetadata, clusterUID, alertSourcePlatform, metrics)
 		if err == nil {
 			exporters = append(exporters, httpExporter)
 		} else {

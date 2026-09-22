@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -254,4 +256,47 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 		Method: "DELETE",
 	}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
 	assert.Error(t, err)
+}
+
+type testHostIdentityProvider struct {
+	identity armotypes.KubernetesHostIdentity
+	ready    bool
+}
+
+func (p testHostIdentityProvider) Identity() (armotypes.KubernetesHostIdentity, bool) {
+	return p.identity, p.ready
+}
+
+func TestHTTPPayloadKubernetesHostIdentitySnapshot(t *testing.T) {
+	identity := armotypes.KubernetesHostIdentity{Key: "test-generation"}
+	metadata := &armotypes.CloudMetadata{InstanceID: "cloud-instance", HostType: armotypes.HostTypeKubernetes}
+	for _, tc := range []struct {
+		name        string
+		ids         []string
+		ready, want bool
+	}{
+		{"host", []string{armotypes.HostContainerID}, true, true},
+		{"pod", []string{"pod-container"}, true, false},
+		{"mixed", []string{armotypes.HostContainerID, "pod-container"}, true, false},
+		{"pending", []string{armotypes.HostContainerID}, false, false},
+		{"empty", nil, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exporter := &HTTPExporter{cloudMetadata: metadata, config: HTTPExporterConfig{KubernetesHostIdentity: testHostIdentityProvider{identity: identity, ready: tc.ready}}}
+			alerts := make([]armotypes.RuntimeAlert, len(tc.ids))
+			for i, id := range tc.ids {
+				alerts[i].ContainerID = id
+			}
+			payload := exporter.createAlertPayload(alerts, armotypes.ProcessTree{}, nil)
+			require.Equal(t, "cloud-instance", payload.Spec.CloudMetadata.InstanceID)
+			require.Nil(t, metadata.KubernetesHostIdentity)
+			if tc.want {
+				require.Equal(t, &identity, payload.Spec.CloudMetadata.KubernetesHostIdentity)
+				payload.Spec.CloudMetadata.KubernetesHostIdentity.Key = "mutated"
+				require.Equal(t, "test-generation", identity.Key)
+			} else {
+				require.Nil(t, payload.Spec.CloudMetadata.KubernetesHostIdentity)
+			}
+		})
+	}
 }

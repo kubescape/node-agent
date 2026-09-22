@@ -44,14 +44,20 @@ type HTTPKeyValues struct {
 	Value string `json:"value"`
 }
 
+// KubernetesHostIdentityProvider supplies a value copy after identity resolution.
+type KubernetesHostIdentityProvider interface {
+	Identity() (armotypes.KubernetesHostIdentity, bool)
+}
+
 type HTTPExporterConfig struct {
-	URL                string          `json:"url"`
-	Path               *string         `json:"path,omitempty"`
-	QueryParams        []HTTPKeyValues `json:"queryParams,omitempty"`
-	Headers            []HTTPKeyValues `json:"headers"`
-	TimeoutSeconds     int             `json:"timeoutSeconds"`
-	Method             string          `json:"method"`
-	MaxAlertsPerMinute int             `json:"maxAlertsPerMinute"`
+	KubernetesHostIdentity KubernetesHostIdentityProvider `json:"-" mapstructure:"-"`
+	URL                    string                         `json:"url"`
+	Path                   *string                        `json:"path,omitempty"`
+	QueryParams            []HTTPKeyValues                `json:"queryParams,omitempty"`
+	Headers                []HTTPKeyValues                `json:"headers"`
+	TimeoutSeconds         int                            `json:"timeoutSeconds"`
+	Method                 string                         `json:"method"`
+	MaxAlertsPerMinute     int                            `json:"maxAlertsPerMinute"`
 	// Alert bulking configuration
 	EnableAlertBulking bool `json:"enableAlertBulking"`
 	BulkMaxAlerts      int  `json:"bulkMaxAlerts"`
@@ -378,6 +384,22 @@ func (e *HTTPExporter) sendAlert(ctx context.Context, alert armotypes.RuntimeAle
 
 func (e *HTTPExporter) createAlertPayload(alertList []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) HTTPAlertsList {
 	cloudMetadata := e.getCloudMetadata(cloudServices)
+	// Batches are grouped by container. Require every alert to be a host alert
+	// before attaching host-only identity; never mutate the shared cloud metadata.
+	if e.config.KubernetesHostIdentity != nil && len(alertList) > 0 {
+		hostOnly := true
+		for _, alert := range alertList {
+			if alert.ContainerID != armotypes.HostContainerID {
+				hostOnly = false
+				break
+			}
+		}
+		if hostOnly {
+			if identity, ok := e.config.KubernetesHostIdentity.Identity(); ok {
+				cloudMetadata.KubernetesHostIdentity = &identity
+			}
+		}
+	}
 
 	var name string
 	var namespace string
