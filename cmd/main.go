@@ -242,9 +242,10 @@ func main() {
 	var hostSensorManager hostsensormanager.HostSensorManager
 	if cfg.EnableHostSensor {
 		hostSensorConfig := hostsensormanager.Config{
-			Enabled:  cfg.EnableHostSensor,
-			Interval: cfg.HostSensorInterval,
-			NodeName: cfg.NodeName,
+			Enabled:         cfg.EnableHostSensor,
+			Interval:        cfg.HostSensorInterval,
+			ExcludedSensors: cfg.HostSensorExcludedSensors,
+			NodeName:        cfg.NodeName,
 		}
 		hostSensorManager, err = hostsensormanager.NewHostSensorManager(hostSensorConfig)
 		if err != nil {

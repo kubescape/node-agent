@@ -3,6 +3,7 @@ package hostsensormanager
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,23 +35,14 @@ func NewHostSensorManager(config Config) (HostSensorManager, error) {
 		config.Interval = 5 * time.Minute // Default to 5 minutes
 	}
 
+	sensors, err := filterSensors(newSensors(config.NodeName), config.ExcludedSensors)
+	if err != nil {
+		return nil, err
+	}
+
 	crdClient, err := NewCRDClient(config.NodeName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CRD client: %w", err)
-	}
-
-	// Initialize sensors
-	sensors := []Sensor{
-		NewOsReleaseSensor(config.NodeName),
-		NewKernelVersionSensor(config.NodeName),
-		NewLinuxSecurityHardeningSensor(config.NodeName),
-		NewOpenPortsSensor(config.NodeName),
-		NewLinuxKernelVariablesSensor(config.NodeName),
-		NewKubeletInfoSensor(config.NodeName),
-		NewKubeProxyInfoSensor(config.NodeName),
-		NewControlPlaneInfoSensor(config.NodeName),
-		NewCloudProviderInfoSensor(config.NodeName),
-		NewCNIInfoSensor(config.NodeName),
 	}
 
 	return &manager{
@@ -59,6 +51,49 @@ func NewHostSensorManager(config Config) (HostSensorManager, error) {
 		sensors:   sensors,
 		stopCh:    make(chan struct{}),
 	}, nil
+}
+
+// newSensors returns the host sensors in sensing order.
+func newSensors(nodeName string) []Sensor {
+	return []Sensor{
+		NewOsReleaseSensor(nodeName),
+		NewKernelVersionSensor(nodeName),
+		NewLinuxSecurityHardeningSensor(nodeName),
+		NewOpenPortsSensor(nodeName),
+		NewLinuxKernelVariablesSensor(nodeName),
+		NewKubeletInfoSensor(nodeName),
+		NewKubeProxyInfoSensor(nodeName),
+		NewControlPlaneInfoSensor(nodeName),
+		NewCloudProviderInfoSensor(nodeName),
+		NewCNIInfoSensor(nodeName),
+	}
+}
+
+// filterSensors validates exclusions against the registered kinds and preserves sensing order.
+func filterSensors(sensors []Sensor, excludedKinds []string) ([]Sensor, error) {
+	valid := make(map[string]bool, len(sensors))
+	kinds := make([]string, 0, len(sensors))
+	for _, sensor := range sensors {
+		kind := sensor.GetKind()
+		valid[kind] = true
+		kinds = append(kinds, kind)
+	}
+
+	excluded := make(map[string]bool, len(excludedKinds))
+	for _, kind := range excludedKinds {
+		if !valid[kind] {
+			return nil, fmt.Errorf("unknown excluded host sensor %q; valid sensors: %s", kind, strings.Join(kinds, ", "))
+		}
+		excluded[kind] = true
+	}
+
+	filtered := make([]Sensor, 0, len(sensors))
+	for _, sensor := range sensors {
+		if !excluded[sensor.GetKind()] {
+			filtered = append(filtered, sensor)
+		}
+	}
+	return filtered, nil
 }
 
 // Start begins the sensing loop
