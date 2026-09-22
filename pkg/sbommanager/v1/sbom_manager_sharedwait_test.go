@@ -121,6 +121,7 @@ func Test_awaitAndSubmit_StuckContainerDoesNotBlockOthers(t *testing.T) {
 		version:          "v1.0.0",
 		failureRetries:   newFailureRetries(),
 		crashLoopRetries: newCrashLoopRetries(),
+		busyRetries:      newFailureRetries(),
 		waitCancels:      make(map[string]context.CancelFunc),
 	}
 
