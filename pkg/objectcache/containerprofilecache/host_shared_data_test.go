@@ -6,6 +6,10 @@ import (
 	"testing"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -134,4 +138,65 @@ var _ storage.ProfileClient = (*signallingProfileClient)(nil)
 func (c *signallingProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	c.once.Do(func() { close(c.reached) })
 	return c.cp, nil
+}
+
+// The cache queries the same stable child identity the producer consolidates,
+// stays pending while learning, and never reuses a predecessor on replacement.
+func TestKubernetesHostGenerationCacheLifecycle(t *testing.T) {
+	identity := armotypes.KubernetesHostIdentity{Version: 1, ClusterUID: "cluster-uid", ClusterName: "cluster-a", NodeUID: "node-uid", NodeName: "node-a"}
+	var err error
+	identity.MachineFingerprint, err = armotypes.KubernetesHostMachineFingerprint("0123456789abcdef0123456789abcdef")
+	require.NoError(t, err)
+	identity.Key, err = armotypes.KubernetesHostKey(identity.ClusterUID, identity.NodeUID, identity.MachineFingerprint)
+	require.NoError(t, err)
+	data := hostidentity.BuildKubernetesHostWatchedContainerData(identity)
+	child, err := data.InstanceID.GetSlug(false)
+	require.NoError(t, err)
+	cp := &v1beta1.ContainerProfile{Name: child, Namespace: "kubescape", ResourceVersion: "1", Annotations: map[string]string{helpersv1.StatusMetadataKey: helpersv1.Learning, helpersv1.CompletionMetadataKey: helpersv1.Full}, Spec: v1beta1.ContainerProfileSpec{Syscalls: []string{"openat"}}}
+	client := &generationProfileClient{t: t, profiles: map[string]*v1beta1.ContainerProfile{child: cp}}
+	c, k8s := newTestCache(t, client)
+	c.cfg.NamespaceName = "kubescape"
+	c.SetProjectionSpec(objectcache.RuleProjectionSpec{Hash: "syscalls", Syscalls: objectcache.FieldSpec{InUse: true, All: true}})
+	k8s.SetSharedContainerData(armotypes.HostContainerID, data)
+	// addContainer is the synchronous part of the callback, after its namespace
+	// rewrite. Running it directly makes reconciliation assertions deterministic.
+	container := hostEventContainer()
+	container.K8s.Namespace = c.cfg.NamespaceName
+	require.NoError(t, c.addContainer(container, t.Context()))
+	require.Nil(t, c.GetProjectedContainerProfile(armotypes.HostContainerID))
+	require.Equal(t, 1, c.pending.Len())
+	cp.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Completed
+	c.retryPendingEntries(t.Context())
+	actual := c.GetProjectedContainerProfile(armotypes.HostContainerID)
+	require.NotNil(t, actual)
+	require.Contains(t, actual.Syscalls.Values, "openat")
+	require.NotContains(t, actual.Syscalls.Values, "execve")
+	require.Equal(t, child, c.GetContainerProfileState(armotypes.HostContainerID).Name)
+	// A new cache after restart reloads exactly this eligible child.
+	restart, restartK8s := newTestCache(t, client)
+	restartK8s.SetSharedContainerData(armotypes.HostContainerID, hostidentity.BuildKubernetesHostWatchedContainerData(identity))
+	require.NoError(t, restart.addContainer(container, t.Context()))
+	require.NotNil(t, restart.GetProjectedContainerProfile(armotypes.HostContainerID))
+	identity.NodeUID = "replacement-node"
+	identity.Key, err = armotypes.KubernetesHostKey(identity.ClusterUID, identity.NodeUID, identity.MachineFingerprint)
+	require.NoError(t, err)
+	replacement, replacementK8s := newTestCache(t, client)
+	replacementK8s.SetSharedContainerData(armotypes.HostContainerID, hostidentity.BuildKubernetesHostWatchedContainerData(identity))
+	require.NoError(t, replacement.addContainer(container, t.Context()))
+	require.Nil(t, replacement.GetProjectedContainerProfile(armotypes.HostContainerID))
+	require.Equal(t, 1, replacement.pending.Len())
+	require.Contains(t, client.profiles, child, "predecessor retained")
+}
+
+type generationProfileClient struct {
+	t        *testing.T
+	profiles map[string]*v1beta1.ContainerProfile
+}
+
+func (c *generationProfileClient) GetContainerProfile(_ context.Context, namespace, name string) (*v1beta1.ContainerProfile, error) {
+	require.Equal(c.t, "kubescape", namespace)
+	if cp, ok := c.profiles[name]; ok {
+		return cp, nil
+	}
+	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "containerprofiles"}, name)
 }

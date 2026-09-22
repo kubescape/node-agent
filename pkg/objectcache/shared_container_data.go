@@ -56,6 +56,7 @@ func (c ContainerType) String() string {
 }
 
 type WatchedContainerData struct {
+	KubernetesHostIdentity  *armotypes.KubernetesHostIdentity
 	InstanceID              instanceidhandler.IInstanceID
 	UpdateDataTicker        *time.Ticker
 	SyncChannel             chan error
@@ -121,6 +122,10 @@ func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *Watched
 		if region := cloudMetadata.Region; region != "" {
 			labels[helpersv1.RegionMetadataKey] = region
 		}
+	}
+	if watchedContainer.ContainerID == armotypes.HostContainerID && watchedContainer.KubernetesHostIdentity != nil {
+		labels[armotypes.KubernetesHostKeyLabel] = watchedContainer.KubernetesHostIdentity.Key
+		labels[helpersv1.ClusterMetadataKey] = watchedContainer.KubernetesHostIdentity.ClusterName
 	}
 	// Sanitize labels
 	for i := range labels {

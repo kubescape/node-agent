@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
 	servicediscoveryv3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
@@ -57,7 +58,15 @@ type AlertDeduplicationConfig struct {
 	Bypass bool `mapstructure:"bypass"`
 }
 
+// KubernetesHostIdentityProvider publishes one immutable identity per agent lifetime.
+type KubernetesHostIdentityProvider interface {
+	Ready() <-chan struct{}
+	Identity() (armotypes.KubernetesHostIdentity, bool)
+}
+
 type Config struct {
+	RequireKubernetesHostIdentity  bool                                 `mapstructure:"-"`
+	KubernetesHostIdentity         KubernetesHostIdentityProvider       `mapstructure:"-"`
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
 	ContainerEolNotificationBuffer int                                  `mapstructure:"containerEolNotificationBuffer"`

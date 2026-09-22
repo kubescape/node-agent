@@ -75,6 +75,14 @@ const (
 // would return the container's own id, not the node's.
 func ResolveHostID(cfg *config.Config) (string, error) {
 	if cfg != nil {
+		if cfg.RequireKubernetesHostIdentity {
+			if cfg.KubernetesHostIdentity != nil {
+				if identity, ok := cfg.KubernetesHostIdentity.Identity(); ok {
+					return identity.Key, nil
+				}
+			}
+			return "", fmt.Errorf("kubernetes host identity is pending")
+		}
 		if nodeName := cfg.NodeName; nodeName != "" {
 			return nodeName, nil
 		}
@@ -159,4 +167,13 @@ func BuildHostWatchedContainerData(hostID string) *objectcache.WatchedContainerD
 		UserDefinedProfile:     "",
 		ParentWorkloadSelector: &metav1.LabelSelector{},
 	}
+}
+
+// BuildKubernetesHostWatchedContainerData uses the same generation for profile
+// production and runtime lookup. Cloud identity never affects the slug.
+func BuildKubernetesHostWatchedContainerData(identity armotypes.KubernetesHostIdentity) *objectcache.WatchedContainerData {
+	data := BuildHostWatchedContainerData(identity.Key)
+	data.KubernetesHostIdentity = &identity
+	data.Wlid = fmt.Sprintf("wlid://cluster-%s/namespace-host/host-%s", identity.ClusterName, identity.Key)
+	return data
 }
