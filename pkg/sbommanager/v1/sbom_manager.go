@@ -583,15 +583,16 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				// and busy-loop. It is retried under the shared bounded backoff
 				// instead, and only becomes a real failure once that ceiling is
 				// reached.
-				s.metrics.ReportSBOMScan("busy", metricsmanager.ScanPathSidecar)
 				if s.scheduleBusyRetry(sbomName, func() {
 					s.processContainerWithMetadata(notif, mounts, imageStatus, imageTag, imageID)
 				}) {
+					s.metrics.ReportSBOMScan("busy", metricsmanager.ScanPathSidecar)
 					return
 				}
 				logger.L().Ctx(s.ctx).Error("SbomManager - scanner sidecar stayed busy through the retry ceiling",
 					helpers.Error(scanErr),
 					helpers.String("sbomName", sbomName))
+				s.metrics.ReportSBOMScan("error", metricsmanager.ScanPathSidecar)
 				s.metrics.ObserveSBOMScanDuration("error", metricsmanager.ScanPathSidecar, scanDuration)
 				s.handleGenericFailure(sbomName)
 				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)

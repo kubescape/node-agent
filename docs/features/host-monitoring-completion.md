@@ -93,7 +93,7 @@ Live-cluster verification of the host SBOM branch surfaced a production bug the 
 
 **Live-cluster confirmation.** Re-deployed on the same test cluster and node with `sbomGenerationEnabled`/`hostMonitoringEnabled` both on and `node-agent` back at its original 394m/682Mi limits (not the earlier experimentally-raised 3 CPU/3Gi): the scan-start log confirmed `parallelism:1` was actually reached, `node-agent` ran 20+ minutes through the full scan cycle with zero restarts (every prior attempt had died by ~5.5 minutes), and the host `SBOMSyft` CR advanced from its permanently-stuck `resourceVersion=1`/`Initializing` to `resourceVersion=2`/`Learning` with 461,801 bytes of real content. This measurement validates the in-process cap in [PR #978](https://github.com/kubescape/node-agent/pull/978).
 
-The `sbom-scanner` sidecar has the identical unbounded-parallelism exposure and is deliberately **not** capped here: this change's live verification exercises the in-process path only, so capping the sidecar too would ship unverified. That lands alongside routing host scans through the sidecar in [PR #979](https://github.com/kubescape/node-agent/pull/979). Live-cluster verification must capture the logged `n` and confirm it is `1` at 394m, as in the in-process measurement above.
+The in-process cap was introduced and live-verified in [PR #978](https://github.com/kubescape/node-agent/pull/978). [PR #979](https://github.com/kubescape/node-agent/pull/979) extends CPU-limit-derived parallelism and serial fallback to the sidecar while adding host-scan offload, as described below. The sidecar is therefore capped too; each process uses its own CPU-limit env var.
 
 ## Offloading the host scan to the `sbom-scanner` sidecar
 

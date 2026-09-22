@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,11 +25,17 @@ type busyScannerClient struct {
 	busyCalls int32
 	calls     atomic.Int32
 	after     error
+	entered   chan struct{}
+	release   <-chan struct{}
 }
 
 func (b *busyScannerClient) CreateSBOM(_ context.Context, _ sbomscanner.ScanRequest) (*sbomscanner.ScanResult, error) {
 	if b.calls.Add(1) <= b.busyCalls {
 		return nil, sbomscanner.ErrScannerBusy
+	}
+	if b.entered != nil {
+		close(b.entered)
+		<-b.release
 	}
 	return nil, b.after
 }
@@ -70,16 +77,25 @@ func newBusyTestManager(t *testing.T, fake *fakeSbomClient, client sbomscanner.S
 func Test_ContainerBusy_IsNotAScanFailure(t *testing.T) {
 	fake := newFakeSbomClient()
 	reporter := &recordingFailureReporter{}
-	// Busy for the first attempt, then succeed-shaped failure never reached: the
-	// retry lands on a non-busy response.
-	client := &busyScannerClient{busyCalls: 1, after: errors.New("scan failed")}
+	// Hold the second scan until the busy-state assertions are complete.
+	entered, release := make(chan struct{}), make(chan struct{})
+	client := &busyScannerClient{busyCalls: 1, after: errors.New("scan failed"), entered: entered, release: release}
 	mgr := newBusyTestManager(t, fake, client, reporter)
+
+	defer mgr.pool.StopWait()
+	defer close(release)
 
 	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
 	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
 	require.NoError(t, err)
 
 	mgr.processContainerWithMetadata(notif, nil, imageStatus, imageTag, imageID)
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the busy scan was not re-submitted to the worker pool")
+	}
 
 	// Immediately after the busy response, nothing has been reported or counted.
 	assert.Zero(t, reporter.count(), "a busy sidecar must not be reported as a scan failure")
@@ -88,11 +104,6 @@ func Test_ContainerBusy_IsNotAScanFailure(t *testing.T) {
 	_, crashCounted := mgr.crashLoopRetries.Get(sbomName)
 	assert.False(t, crashCounted, "a busy sidecar must not consume the crash-loop budget")
 	assert.Zero(t, fake.patchCalls, "a busy sidecar must not mark any terminal status")
-
-	// The retry is scheduled onto the pool rather than slept out inline, so the
-	// call above returned promptly and the second attempt arrives shortly after.
-	assert.Eventually(t, func() bool { return client.calls.Load() >= 2 }, 2*time.Second, 5*time.Millisecond,
-		"the busy scan must be re-submitted to the worker pool")
 }
 
 // Test_ContainerBusy_DoesNotBlockTheWorkerPool proves the backoff runs off the
@@ -129,6 +140,9 @@ func Test_ContainerBusy_BecomesARealFailureAtTheCeiling(t *testing.T) {
 	client := &busyScannerClient{busyCalls: 1000, after: errors.New("unreachable")}
 	mgr := newBusyTestManager(t, fake, client, reporter)
 
+	metrics := &busyScanMetrics{}
+	mgr.metrics = metrics
+
 	notif, imageStatus, imageTag, imageID := testNotifAndImageStatus()
 	sbomName, err := names.ImageInfoToSlug(imageTag, imageID)
 	require.NoError(t, err)
@@ -142,6 +156,12 @@ func Test_ContainerBusy_BecomesARealFailureAtTheCeiling(t *testing.T) {
 	}, 2*time.Second, 5*time.Millisecond,
 		"once the retry ceiling is reached, a persistently busy sidecar becomes a real failure")
 	assert.Eventually(t, func() bool { return reporter.count() > 0 }, 2*time.Second, 5*time.Millisecond)
+	statuses := metrics.snapshot()
+	require.Len(t, statuses, busyRetryMaxAttempts+1)
+	assert.Equal(t, "error", statuses[len(statuses)-1])
+	for _, status := range statuses[:len(statuses)-1] {
+		assert.Equal(t, "busy", status)
+	}
 }
 
 // Test_ContainerBusy_NotRoutedThroughPendingScans pins the mechanism choice.
@@ -260,4 +280,22 @@ func Test_ContainerBusy_QueuedRetryStopsOnShutdown(t *testing.T) {
 	close(unblock)
 	mgr.pool.StopWait()
 	assert.Zero(t, calls.Load())
+}
+
+type busyScanMetrics struct {
+	metricsmanager.MetricsMock
+	mu       sync.Mutex
+	statuses []string
+}
+
+func (m *busyScanMetrics) ReportSBOMScan(status, _ string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.statuses = append(m.statuses, status)
+}
+
+func (m *busyScanMetrics) snapshot() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.statuses...)
 }

@@ -151,13 +151,12 @@ func (c *sbomScannerClient) ScanHostFilesystem(ctx context.Context, req HostScan
 		if ok && isScannerBusyStatus(st) {
 			return nil, fmt.Errorf("%w: %v", ErrScannerBusy, err)
 		}
-		if ok && (st.Code() == codes.InvalidArgument || st.Code() == codes.FailedPrecondition) {
-			// Pre-dispatch rejection (bad source_name, or a HOST_ROOT that
-			// doesn't resolve): no scan work was attempted, so this is safe to
-			// fall back in-process for this cycle, exactly like ErrScannerBusy
-			// -- but it is a configuration defect, not transient contention, so
-			// it gets its own error the caller logs at a level an operator will
-			// notice rather than silently retrying forever.
+		if ok && (st.Code() == codes.InvalidArgument || st.Code() == codes.FailedPrecondition || st.Code() == codes.Unimplemented) {
+			// Pre-dispatch rejection (bad source_name, a HOST_ROOT that
+			// doesn't resolve, or an older sidecar without the host RPC):
+			// no scan work was attempted, so falling back in-process is safe.
+			// Unlike busy admission, this configuration or compatibility issue
+			// gets its own error so the caller can warn the operator.
 			return nil, fmt.Errorf("%w: %v", ErrScannerHostScanRejected, err)
 		}
 		if ok && st.Code() == codes.OutOfRange && strings.HasPrefix(st.Message(), hostDocTooLargeStatusPrefix) {

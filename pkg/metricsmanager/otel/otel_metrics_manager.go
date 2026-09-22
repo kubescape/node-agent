@@ -243,7 +243,7 @@ func NewOTELMetricsManager(ownContainerID, ownPodUID string, hostCgroupMounted b
 	// SBOM scan buckets: covers 1s–15min (scans can take several minutes for large images).
 	sbomBuckets := []float64{1, 2, 5, 10, 30, 60, 120, 300, 600, 900}
 	m.sbomScanTotal = mustCounter("node_agent.sbom.scan.total",
-		"Total SBOM scan attempts by status (success/error/timeout/oom_killed/busy) and path (in_process/sidecar)")
+		"Total SBOM scan attempts by status (success/error/timeout/oom_killed/busy/rejected/too_large) and path (in_process/sidecar)")
 	m.sbomScanDuration = mustHistogram("node_agent.sbom.scan.duration",
 		"SBOM scan duration by status and path (in_process/sidecar)", "s", sbomBuckets)
 	m.sbomRestarts = mustCounter("node_agent.sbom.scanner.restarts.total",
