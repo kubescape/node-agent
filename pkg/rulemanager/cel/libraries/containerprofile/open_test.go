@@ -423,6 +423,202 @@ func TestOpenWithSuffixNoProfile(t *testing.T) {
 	assert.False(t, actualResult, "cp.was_path_opened_with_suffix should return false when no profile is available")
 }
 
+func TestOpenWithSuffix_WildcardPatternsInProfile(t *testing.T) {
+	objCache := objectcachev1.RuleObjectCacheMock{
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+	}
+
+	objCache.SetSharedContainerData("test-container-id", &objectcache.WatchedContainerData{
+		ContainerType: objectcache.Container,
+		ContainerInfos: map[objectcache.ContainerType][]objectcache.ContainerInfo{
+			objectcache.Container: {
+				{
+					Name: "test-container",
+				},
+			},
+		},
+	})
+
+	profile := &v1beta1.ContainerProfile{
+		Spec: v1beta1.ContainerProfileSpec{
+			Opens: []v1beta1.OpenCalls{
+				{
+					Path:  "/*/serviceaccount/..2026_07_08_22_08_37.3187605842/token",
+					Flags: []string{"O_RDONLY"},
+				},
+				{
+					Path:  "/*/token",
+					Flags: []string{"O_RDONLY"},
+				},
+				{
+					Path:  "/proc/⋯/environ",
+					Flags: []string{"O_RDONLY"},
+				},
+			},
+		},
+	}
+	objCache.SetContainerProfile(profile)
+
+	env, err := cel.NewEnv(
+		cel.Variable("containerID", cel.StringType),
+		cel.Variable("suffix", cel.StringType),
+		CP(&objCache, config.Config{}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create env: %v", err)
+	}
+
+	testCases := []struct {
+		name           string
+		containerID    string
+		suffix         string
+		expectedResult bool
+	}{
+		{
+			name:           "Wildcard pattern in serviceaccount path matches suffix /token",
+			containerID:    "test-container-id",
+			suffix:         "/token",
+			expectedResult: true,
+		},
+		{
+			name:           "Wildcard pattern /*/token matches suffix /token",
+			containerID:    "test-container-id",
+			suffix:         "/token",
+			expectedResult: true,
+		},
+		{
+			name:           "Dynamic identifier pattern matches suffix /environ",
+			containerID:    "test-container-id",
+			suffix:         "/environ",
+			expectedResult: true,
+		},
+		{
+			name:           "Suffix doesn't match any pattern",
+			containerID:    "test-container-id",
+			suffix:         "/nonexistent",
+			expectedResult: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, issues := env.Compile(`cp.was_path_opened_with_suffix(containerID, suffix)`)
+			if issues != nil {
+				t.Fatalf("failed to compile expression: %v", issues.Err())
+			}
+
+			program, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("failed to create program: %v", err)
+			}
+
+			result, _, err := program.Eval(map[string]any{
+				"containerID": tc.containerID,
+				"suffix":      tc.suffix,
+			})
+			if err != nil {
+				t.Fatalf("failed to eval program: %v", err)
+			}
+
+			actualResult := result.Value().(bool)
+			assert.Equal(t, tc.expectedResult, actualResult, "cp.was_path_opened_with_suffix result should match expected value")
+		})
+	}
+}
+
+func TestOpenWithPrefix_WildcardPatternsInProfile(t *testing.T) {
+	objCache := objectcachev1.RuleObjectCacheMock{
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+	}
+
+	objCache.SetSharedContainerData("test-container-id", &objectcache.WatchedContainerData{
+		ContainerType: objectcache.Container,
+		ContainerInfos: map[objectcache.ContainerType][]objectcache.ContainerInfo{
+			objectcache.Container: {
+				{
+					Name: "test-container",
+				},
+			},
+		},
+	})
+
+	profile := &v1beta1.ContainerProfile{
+		Spec: v1beta1.ContainerProfileSpec{
+			Opens: []v1beta1.OpenCalls{
+				{
+					Path:  "/run/secrets/kubernetes.io/serviceaccount/*/token",
+					Flags: []string{"O_RDONLY"},
+				},
+				{
+					Path:  "/var/run/secrets/⋯/token",
+					Flags: []string{"O_RDONLY"},
+				},
+			},
+		},
+	}
+	objCache.SetContainerProfile(profile)
+
+	env, err := cel.NewEnv(
+		cel.Variable("containerID", cel.StringType),
+		cel.Variable("prefix", cel.StringType),
+		CP(&objCache, config.Config{}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create env: %v", err)
+	}
+
+	testCases := []struct {
+		name           string
+		containerID    string
+		prefix         string
+		expectedResult bool
+	}{
+		{
+			name:           "Prefix matches pattern with wildcard",
+			containerID:    "test-container-id",
+			prefix:         "/run/secrets/kubernetes.io/serviceaccount",
+			expectedResult: true,
+		},
+		{
+			name:           "Prefix matches pattern with dynamic segment",
+			containerID:    "test-container-id",
+			prefix:         "/var/run/secrets",
+			expectedResult: true,
+		},
+		{
+			name:           "Non-matching prefix against patterns",
+			containerID:    "test-container-id",
+			prefix:         "/etc/passwd",
+			expectedResult: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ast, issues := env.Compile(`cp.was_path_opened_with_prefix(containerID, prefix)`)
+			if issues != nil {
+				t.Fatalf("failed to compile expression: %v", issues.Err())
+			}
+
+			program, err := env.Program(ast)
+			if err != nil {
+				t.Fatalf("failed to create program: %v", err)
+			}
+
+			result, _, err := program.Eval(map[string]any{
+				"containerID": tc.containerID,
+				"prefix":      tc.prefix,
+			})
+			if err != nil {
+				t.Fatalf("failed to eval program: %v", err)
+			}
+
+			actualResult := result.Value().(bool)
+			assert.Equal(t, tc.expectedResult, actualResult, "cp.was_path_opened_with_prefix result should match expected value")
+		})
+	}
+}
+
 func TestOpenWithPrefixInProfile(t *testing.T) {
 	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
