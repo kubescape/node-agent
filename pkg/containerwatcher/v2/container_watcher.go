@@ -34,6 +34,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/workerpool"
 	"github.com/panjf2000/ants/v2"
 	"go.opentelemetry.io/otel/attribute"
@@ -44,12 +45,13 @@ import (
 type ContainerWatcher struct {
 	running bool
 	// Configuration
-	cfg               config.Config
-	containerSelector containercollection.ContainerSelector
-	ctx               context.Context
-	cancel            context.CancelFunc
-	clusterName       string
-	agentStartTime    time.Time
+	cfg                 config.Config
+	containerSelector   containercollection.ContainerSelector
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	namespaceFilterDone chan struct{}
+	clusterName         string
+	agentStartTime      time.Time
 
 	// Clients
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
@@ -112,7 +114,8 @@ type ContainerWatcher struct {
 	containerEolNotificationChannel chan *containercollection.Container
 
 	// Container callbacks
-	callbacks []containercollection.FuncNotify
+	callbacks      []containercollection.FuncNotify
+	lifecycleQueue utils.LifecycleQueue
 }
 
 var _ containerwatcher.ContainerWatcher = (*ContainerWatcher)(nil)
@@ -323,7 +326,7 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	// Start container collection (similar to v1 startContainerCollection)
 	var containerCollectionErr error
 	logger.L().TimedWrapper("StartContainerCollection", 5*time.Second, func() {
-		if err := cw.StartContainerCollection(ctx); err != nil {
+		if err := cw.StartContainerCollection(cw.ctx); err != nil {
 			containerCollectionErr = err
 			logger.L().Error("error starting container collection", helpers.Error(err))
 		}
@@ -369,6 +372,15 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	cw.tracerManagerV2 = tracerManagerV2
 
 	cw.running = true
+	if cw.cfg.NamespaceFilterFile != "" {
+		cw.namespaceFilterDone = make(chan struct{})
+		go func() {
+			defer close(cw.namespaceFilterDone)
+			ticker := time.NewTicker(namespaceFilterPollInterval)
+			defer ticker.Stop()
+			cw.watchNamespaceFilter(cw.ctx, ticker.C)
+		}()
+	}
 	logger.L().Info("ContainerWatcher started successfully")
 	return nil
 }
@@ -391,6 +403,11 @@ func (cw *ContainerWatcher) Stop() {
 	// would leak both goroutines and silently drop events on the released pool.
 	if cw.cancel != nil {
 		cw.cancel()
+	}
+
+	// Finish reload/reconciliation before closing the container collection.
+	if cw.namespaceFilterDone != nil {
+		<-cw.namespaceFilterDone
 	}
 
 	// Stop container manager

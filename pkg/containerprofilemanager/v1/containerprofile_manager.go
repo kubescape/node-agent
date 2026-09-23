@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -70,6 +71,7 @@ type containerData struct {
 
 // ContainerProfileManager manages container profiles and their lifecycle
 type ContainerProfileManager struct {
+	lifecycleQueue    utils.LifecycleQueue
 	ctx               context.Context
 	cfg               config.Config
 	k8sClient         k8sclient.K8sClientInterface

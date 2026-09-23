@@ -659,3 +659,20 @@ func TestStorageError_NoEntry(t *testing.T) {
 	_, ok := c.entries.Load(id)
 	assert.False(t, ok, "storage error must not create a cache entry")
 }
+
+func TestNamespaceFilterReadmissionCancelsCacheEviction(t *testing.T) {
+	c, k8s := newTestCache(t, &fakeProfileClient{})
+	c.removalGrace = 30 * time.Millisecond
+	container := &containercollection.Container{}
+	container.Runtime.ContainerID = "readmitted"
+	container.K8s.Namespace = "default"
+	container.K8s.PodName = "nginx-abc"
+	container.K8s.ContainerName = "nginx"
+	primeSharedData(t, k8s, "readmitted", "wlid://cluster-test/namespace-default/deployment-nginx")
+	c.entries.Set("readmitted", &CachedContainerProfile{})
+	c.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeRemoveContainer, Container: container})
+	c.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeAddContainer, Container: container})
+	// The original remove timer expires during this interval; it must not evict
+	// the new admission. Polling also exercises concurrent timer/cache reads.
+	require.Never(t, func() bool { _, ok := c.entries.Load("readmitted"); return !ok }, 100*time.Millisecond, time.Millisecond)
+}

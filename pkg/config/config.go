@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kubescape/backend/pkg/servicediscovery"
@@ -121,6 +122,7 @@ type Config struct {
 	MaxSBOMSize                    int                                  `mapstructure:"maxSBOMSize"`
 	MaxSniffingTime                time.Duration                        `mapstructure:"maxSniffingTimePerContainer"`
 	MaxTsProfileSize               int64                                `mapstructure:"maxTsProfileSize"`
+	NamespaceFilterFile            string                               `mapstructure:"namespaceFilterFile"`
 	NamespaceName                  string                               `mapstructure:"namespaceName"`
 	NetworkStreamingInterval       time.Duration                        `mapstructure:"networkStreamingInterval"`
 	NodeName                       string                               `mapstructure:"nodeName"`
@@ -140,6 +142,9 @@ type Config struct {
 	// Host sensor configuration
 	EnableHostSensor   bool          `mapstructure:"hostSensorEnabled"`
 	HostSensorInterval time.Duration `mapstructure:"hostSensorInterval"`
+
+	// namespaceFilter is shared by Config copies; published snapshots are immutable.
+	namespaceFilter *atomic.Pointer[NamespaceFilter]
 }
 
 // FIMConfig defines the configuration for File Integrity Monitoring
@@ -226,6 +231,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("celConfigCache::maxSize", 100000)
 	viper.SetDefault("celConfigCache::ttl", 1*time.Minute)
 	viper.SetDefault("ignoreRuleBindings", false)
+	viper.SetDefault("namespaceFilterFile", "")
 
 	viper.SetDefault("eventDedup::enabled", true)
 	viper.SetDefault("eventDedup::slotsExponent", 18)
@@ -324,6 +330,9 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 			config.EventDedup.SlotsExponent)
 	}
 
+	if err := config.InitializeNamespaceFilter(); err != nil {
+		return Config{}, err
+	}
 	return config, nil
 }
 
@@ -356,6 +365,9 @@ func (c *Config) IgnoreContainer(ns, podName string, labels map[string]string) b
 }
 
 func (c *Config) SkipNamespace(ns string) bool {
+	if c.namespaceFilter != nil {
+		return c.namespaceFilter.Load().SkipNamespace(ns)
+	}
 	if includeNamespaces := c.IncludeNamespaces; len(includeNamespaces) > 0 {
 		if !slices.Contains(includeNamespaces, ns) {
 			// skip ns not in IncludeNamespaces

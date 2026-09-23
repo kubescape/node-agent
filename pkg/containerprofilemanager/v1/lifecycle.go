@@ -21,6 +21,22 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 	// "", etc.) must never apply to it, mirroring the IsHostContainer
 	// exemption already used elsewhere (rule_manager.go, malware_manager.go).
 	isHost := utils.IsHostContainer(notif.Container)
+	if cpm.cfg.NamespaceFilterFile != "" {
+		excluded := !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels)
+		// Finish deletion before readmission of the same running container.
+		// The regular callbacks deliberately launch asynchronous work.
+		cpm.lifecycleQueue.Submit(notif.Container.Runtime.ContainerID, func() {
+			switch notif.Type {
+			case containercollection.EventTypeAddContainer:
+				if isHost || !cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+					cpm.addContainerWithTimeout(notif.Container)
+				}
+			case containercollection.EventTypeRemoveContainer:
+				cpm.deleteContainerWithReason(notif.Container, excluded)
+			}
+		})
+		return
+	}
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		if isHost {
@@ -32,9 +48,7 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 		}
 		go cpm.addContainerWithTimeout(notif.Container)
 	case containercollection.EventTypeRemoveContainer:
-		if !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
-			return
-		}
+		// A namespace may have been excluded since admission; always clean up.
 		go cpm.deleteContainer(notif.Container)
 	}
 }
@@ -306,6 +320,10 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 
 // deleteContainer removes a container from the container profile manager
 func (cpm *ContainerProfileManager) deleteContainer(container *containercollection.Container) {
+	cpm.deleteContainerWithReason(container, cpm.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels))
+}
+
+func (cpm *ContainerProfileManager) deleteContainerWithReason(container *containercollection.Container, excluded bool) {
 	containerID := container.Runtime.ContainerID
 
 	// Get the container entry
@@ -364,7 +382,8 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 					entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusTooLarge))
 
 		if monitoringActive {
-			if isHost {
+			if isHost || excluded {
+				// Exclusion is a monitoring stop, not a container failure.
 				// The host pseudo-container has no real Kubernetes Pod, so
 				// GetTerminationExitCode below would retry for its full
 				// 30-second backoff window looking for a pod status that

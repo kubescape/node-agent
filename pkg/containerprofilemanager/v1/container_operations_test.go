@@ -112,3 +112,18 @@ func TestAddContainerWithTimeout_StaleFailureCleanupDoesNotDeleteNewerEntry(t *t
 	require.True(t, ok, "the newer entry must survive the failed attempt's stale cleanup")
 	assert.Same(t, newerEntry, tracked)
 }
+
+func TestNamespaceFilterRemovalCleansProfileState(t *testing.T) {
+	cpm := &ContainerProfileManager{
+		cfg:        config.Config{ExcludeNamespaces: []string{"payments"}},
+		containers: make(map[string]*ContainerEntry),
+	}
+	c := &containercollection.Container{}
+	c.Runtime.ContainerID = "excluded-container"
+	c.K8s.Namespace = "payments"
+	entry := &ContainerEntry{ready: make(chan struct{})}
+	close(entry.ready)
+	cpm.containers[c.Runtime.ContainerID] = entry
+	cpm.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeRemoveContainer, Container: c})
+	require.Eventually(t, func() bool { _, ok := cpm.getContainerEntry(c.Runtime.ContainerID); return !ok }, time.Second, time.Millisecond)
+}

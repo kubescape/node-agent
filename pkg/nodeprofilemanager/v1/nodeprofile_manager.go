@@ -95,6 +95,11 @@ func (n *NodeProfileManager) getProfile() (*armotypes.NodeProfile, error) {
 		CloudMetadata:           n.cloudMetadata,
 	}
 	for _, pod := range n.k8sObjectCache.GetPods() {
+		// Dynamic filtering retains metadata for excluded namespaces. Apply
+		// the current filter at report time rather than relying on cache gaps.
+		if n.config.SkipNamespace(pod.Namespace) {
+			continue
+		}
 		var app string
 		if pod.Labels != nil {
 			for _, k := range []string{"app", "app.kubernetes.io/name"} {
