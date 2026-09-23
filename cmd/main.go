@@ -218,6 +218,9 @@ func main() {
 		cfg.RequireKubernetesHostIdentity = true
 		cfg.KubernetesHostIdentity = hostidentity.NewKubernetesHostCoordinator(ctx,
 			func(ctx context.Context) (string, error) {
+				if clusterUID != "" {
+					return clusterUID, nil
+				}
 				namespace, err := k8sClient.GetKubernetesClient().CoreV1().Namespaces().Get(ctx, "kube-system", metav1.GetOptions{})
 				if err != nil {
 					return "", err
