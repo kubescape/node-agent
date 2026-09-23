@@ -115,17 +115,14 @@ func (l *containerProfileLibrary) wasPathOpenedWithSuffix(containerID, suffix re
 	}
 
 	if cp.Opens.All {
-		// All entries retained (no rule declared SuffixHits-style
-		// projection). Scan ONLY concrete entries in Values — Patterns
-		// contain wildcard tokens ('*' / '⋯') whose text doesn't safely
-		// answer suffix questions. CodeRabbit PR #43 open.go:79: a
-		// retained Pattern like "/var/log/pods/*/volumes/..." doesn't
-		// end with the concrete suffix "foo.log", but the concrete open
-		// it stands in for might — strings.HasSuffix on the pattern
-		// text returns false and produces a false negative. Patterns
-		// are inherently wildcard-shaped; concrete-path semantics live
-		// in Values (and in SuffixHits when projection is active).
 		for openPath := range cp.Opens.Values {
+			if strings.HasSuffix(openPath, suffixStr) {
+				return types.Bool(true)
+			}
+		}
+		// Also scan Patterns: dynamic/wildcard entries (e.g. /*/token or
+		// /*/serviceaccount/.../token) that end with the suffix.
+		for _, openPath := range cp.Opens.Patterns {
 			if strings.HasSuffix(openPath, suffixStr) {
 				return types.Bool(true)
 			}
@@ -163,14 +160,13 @@ func (l *containerProfileLibrary) wasPathOpenedWithPrefix(containerID, prefix re
 	}
 
 	if cp.Opens.All {
-		// All entries retained — scan ONLY Values (concrete paths).
-		// Patterns contain wildcard tokens whose text doesn't safely
-		// answer prefix questions; a pattern starting with "/var/⋯/log"
-		// matches concrete paths starting with "/var/anything/log" but
-		// strings.HasPrefix against the pattern text returns false for
-		// "/var/foo/log...". Same fix as wasPathOpenedWithSuffix above.
-		// CodeRabbit PR #43 open.go:79 (Also applies to 111-123).
 		for openPath := range cp.Opens.Values {
+			if strings.HasPrefix(openPath, prefixStr) {
+				return types.Bool(true)
+			}
+		}
+		// Also scan Patterns: dynamic/wildcard entries that start with the prefix.
+		for _, openPath := range cp.Opens.Patterns {
 			if strings.HasPrefix(openPath, prefixStr) {
 				return types.Bool(true)
 			}
