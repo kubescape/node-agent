@@ -137,6 +137,47 @@ func TestKubernetesCoordinatorCancellationNeverFallsBack(t *testing.T) {
 	}
 }
 
+func TestKubernetesCoordinatorRetriesTimedOutLookups(t *testing.T) {
+	t.Setenv("HOST_ROOT", t.TempDir())
+	for _, stalledLookup := range []string{"cluster", "node"} {
+		t.Run(stalledLookup, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c := &KubernetesHostCoordinator{ready: make(chan struct{})}
+				var attempts int
+				var lookupContexts []context.Context
+				go c.resolve(t.Context(), func(ctx context.Context) (string, error) {
+					attempts++
+					lookupContexts = append(lookupContexts, ctx)
+					if stalledLookup == "cluster" && attempts == 1 {
+						<-ctx.Done()
+						return "", ctx.Err()
+					}
+					return "cluster-uid", nil
+				}, "cluster-a", "node-a", func(ctx context.Context) (*corev1.Node, error) {
+					lookupContexts = append(lookupContexts, ctx)
+					if stalledLookup == "node" && attempts == 1 {
+						<-ctx.Done()
+						return nil, ctx.Err()
+					}
+					return identityNode(), nil
+				}, func(string) ([]byte, error) { return nil, os.ErrNotExist }, time.Second)
+				time.Sleep(9 * time.Second)
+				_, ready := c.Identity()
+				require.False(t, ready)
+				time.Sleep(3 * time.Second)
+				synctest.Wait()
+				identity, ready := c.Identity()
+				require.True(t, ready, "stalled lookup must time out and retry")
+				require.NoError(t, identity.Validate())
+				require.Equal(t, 2, attempts)
+				for _, ctx := range lookupContexts {
+					require.Error(t, ctx.Err(), "completed attempts must release their contexts")
+				}
+			})
+		})
+	}
+}
+
 func TestKubernetesCoordinatorRecoversAfterRegistrationTimeout(t *testing.T) {
 	t.Setenv("HOST_ROOT", t.TempDir())
 	synctest.Test(t, func(t *testing.T) {

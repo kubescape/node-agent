@@ -305,6 +305,7 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	// (eventProcessingLoop) and consumer (workerPoolLoop) goroutines, which both
 	// select on cw.ctx.Done(). The parent ctx is honored too.
 	cw.ctx, cw.cancel = context.WithCancel(ctx)
+	ctx = cw.ctx
 
 	go func() {
 		// Read from the container EOL notification channel and call unregisterContainer
@@ -393,9 +394,16 @@ func (cw *ContainerWatcher) Stop() {
 	// use (worker pool, channels). Without this, Stop() is only safe because its
 	// sole caller runs immediately before process exit; called mid-process it
 	// would leak both goroutines and silently drop events on the released pool.
+	cw.hostNotificationMu.Lock()
 	if cw.cancel != nil {
 		cw.cancel()
 	}
+	if cw.hostNotificationCancel != nil {
+		close(cw.hostNotificationCancel)
+		cw.hostNotificationCancel = nil
+	}
+	cw.pendingHostNotification = nil
+	cw.hostNotificationMu.Unlock()
 
 	// Stop container manager
 	cw.StopContainerCollection()

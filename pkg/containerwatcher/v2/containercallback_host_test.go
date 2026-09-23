@@ -9,6 +9,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/hostsensormanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -231,7 +232,7 @@ func (p *pendingKubernetesIdentity) Identity() (armotypes.KubernetesHostIdentity
 }
 
 func TestRequiredKubernetesHostGate(t *testing.T) {
-	for _, mode := range []string{"recover", "remove", "cancel", "disabled"} {
+	for _, mode := range []string{"recover", "remove", "cancel", "stop", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
@@ -245,6 +246,14 @@ func TestRequiredKubernetesHostGate(t *testing.T) {
 				provider := &pendingKubernetesIdentity{ready: make(chan struct{}), identity: identity}
 				cache := &countingK8sObjectCache{}
 				cw := &ContainerWatcher{ctx: ctx, cfg: config.Config{HostMonitoringEnabled: mode != "disabled", RequireKubernetesHostIdentity: true, KubernetesHostIdentity: provider}, objectCache: &countingObjectCache{k8sCache: cache}, metrics: metricsmanager.NewMetricsMock(), pool: workerpool.New(2)}
+				if mode == "stop" {
+					// Stop must invalidate the pending notification even if a collection
+					// caller supplied a parent context that remains live.
+					cw.ctx = t.Context()
+					cw.cancel = cancel
+					cw.running = true
+					cw.gadgetRuntime = local.New()
+				}
 				defer cw.pool.StopWait()
 				delivered := make(chan containercollection.PubSubEvent, 10)
 				cw.callbacks = []containercollection.FuncNotify{cw.containerCallbackAsync, func(event containercollection.PubSubEvent) {
@@ -273,6 +282,12 @@ func TestRequiredKubernetesHostGate(t *testing.T) {
 				}
 				if mode == "cancel" {
 					cancel()
+				}
+				if mode == "stop" {
+					cw.Stop()
+					require.NoError(t, cw.ctx.Err())
+					require.Nil(t, cw.pendingHostNotification)
+					require.Nil(t, cw.hostNotificationCancel)
 				}
 				close(provider.ready)
 				if mode == "recover" {

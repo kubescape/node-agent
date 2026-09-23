@@ -43,15 +43,17 @@ func (c *KubernetesHostCoordinator) resolve(ctx context.Context, getClusterUID f
 	lastReason := ""
 	for ctx.Err() == nil {
 		reason := "cluster-uid-unavailable"
-		clusterUID, err := getClusterUID(ctx)
+		attemptCtx, cancelAttempt := context.WithTimeout(ctx, 10*time.Second)
+		clusterUID, err := getClusterUID(attemptCtx)
 		if err == nil && clusterUID == "" {
 			err = fmt.Errorf("kubernetes cluster UID is unavailable")
 		}
 		var node *corev1.Node
 		if err == nil {
 			reason = "node-unavailable"
-			node, err = getNode(ctx)
+			node, err = getNode(attemptCtx)
 		}
+		cancelAttempt()
 		if err == nil {
 			var identity armotypes.KubernetesHostIdentity
 			identity, err = resolveKubernetesHostIdentity(clusterUID, clusterName, nodeName, node, readFile)
