@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	execImageName = "ghcr.io/inspektor-gadget/gadget/trace_exec:v0.55.0"
+	execImageName = "ghcr.io/inspektor-gadget/gadget/trace_exec:v0.48.1-tty"
 	execTraceName = "trace_exec"
 )
 
