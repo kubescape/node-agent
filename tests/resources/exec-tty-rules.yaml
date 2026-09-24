@@ -11,7 +11,7 @@
 #                  exec, so if R9902 is silent the trigger or the rule pipeline
 #                  is broken, not the TTY field.
 #   R9903 / R9904  pin down has() presence testing. R9903 fires for every
-#                  v0.55.0 exec event because tty_major is emitted even when
+#                  backported exec event because tty_major is emitted even when
 #                  its value is zero for a process without a terminal. R9904
 #                  must stay silent.
 #
@@ -68,7 +68,7 @@ spec:
     - name: "TEST ttyMajor present"
       enabled: true
       id: "R9903"
-      description: "Test rule: fires where v0.55.0 emits the tty device number, including no-TTY events with a zero value."
+      description: "Test rule: fires where the backported gadget emits the tty device number, including no-TTY events with a zero value."
       expressions:
         message: "'ttyMajor present: ' + string(event.ttyMajor)"
         uniqueId: "'R9903_' + event.comm + '_' + string(event.pid)"
@@ -87,7 +87,7 @@ spec:
     - name: "TEST ttyMajor absent"
       enabled: true
       id: "R9904"
-      description: "Test rule: fires only when ttyMajor is absent on an older gadget. Must stay silent for v0.55.0."
+      description: "Test rule: fires only when ttyMajor is absent on an older gadget. Must stay silent for the backported gadget."
       expressions:
         message: "'ttyMajor absent for ' + event.comm"
         uniqueId: "'R9904_' + event.comm + '_' + string(event.pid)"

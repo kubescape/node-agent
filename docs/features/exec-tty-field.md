@@ -11,6 +11,11 @@ Four CEL fields on exec events describe the process's controlling terminal:
 
 ## Not every agent measures this
 
+The bundled `trace_exec:v0.48.1-tty` is built from v0.48.1 with upstream
+commit `c6fc831a` backported for terminal device numbers. It preserves the
+execve pathname in `args[0]`, keeping existing profile argument matching
+and executable-path consumers compatible.
+
 `ttyMajor`/`ttyMinor` require a gadget version that emits the terminal device
 number. Agents bundling an older `trace_exec` gadget may leave those fields
 absent, and `has()` reports that capability:
@@ -66,7 +71,7 @@ has(event.ttyMajor) && event.ttyMajor == uint(136)
 
 `tests/component_test.go:Test_35_ExecTTYFieldTest` proves the fields work
 end-to-end against real eBPF, using four test-only rules in
-`tests/resources/exec-tty-rules.yaml`. With `trace_exec:v0.55.0`, the expected
+`tests/resources/exec-tty-rules.yaml`. With `trace_exec:v0.48.1-tty`, the expected
 results on kind are:
 
 ```
@@ -89,10 +94,10 @@ Three properties the test pins down, each for a reason:
   silent. Both silent would mean `ttyMajor` is unregistered rather than
   absent, while R9903 firing confirms `has()` sees the emitted field.
 - **`c-pts0` must fire.** A single exec into a fresh container lands on
-  `/dev/pts/0`; v0.55.0 reports its nonzero terminal major even though the raw
-  `tty` index is zero. This is the regression fixed by #975. The concurrent
-  trigger still exercises a nonzero index so both representations remain
-  covered.
+  `/dev/pts/0`; the backported gadget reports its nonzero terminal major even
+  though the raw `tty` index is zero. This covers the bug reported in #975.
+  The concurrent trigger still exercises a nonzero index so both
+  representations remain covered.
 
 Two environment facts the test depends on, both verified rather than assumed:
 

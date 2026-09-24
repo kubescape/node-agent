@@ -2,18 +2,20 @@ DOCKERFILE_PATH=./build/Dockerfile
 BINARY_NAME=node-agent
 
 IMAGE?=quay.io/kubescape/$(BINARY_NAME)
-# GADGETS are pulled unmodified from upstream IG. trace_exec is pinned
-# separately because its TTY device-number fields were added in v0.55.0.
+# GADGETS are pulled unmodified from upstream IG. trace_exec is built from
+# v0.48.1 with the TTY device-number backport to preserve argument semantics.
 # trace_open is intentionally NOT here: it is vendored and built from source
 # (see BUILT_GADGETS) so the fpath resolver can resolve relative opens against
 # their dirfd/cwd.
 GADGETS=advise_seccomp trace_capabilities trace_dns
 VERSION=v0.48.1
-TRACE_EXEC_VERSION=v0.55.0
+TRACE_EXEC_VERSION=v0.48.1-tty
 KUBESCAPE_GADGETS=bpf exit fork hardlink http iouring_new iouring_old kmod network ptrace randomx ssh symlink unshare
-# BUILT_GADGETS are vendored under pkg/ebpf/gadgets and built under their full
-# upstream image name+tag so node-agent's pinned openImageName keeps resolving.
-BUILT_GADGETS=trace_open
+# BUILT_GADGETS are vendored under pkg/ebpf/gadgets. Their exported references
+# must match the runtime image names; the TTY backport has a distinct tag.
+BUILT_GADGETS=trace_open trace_exec
+GADGET_VERSION_trace_exec=$(TRACE_EXEC_VERSION)
+gadget_version = $(or $(GADGET_VERSION_$(1)),$(VERSION))
 TAG?=test
 # TAG?=v0.0.1
 
@@ -41,7 +43,6 @@ docker-push: docker-build
 
 gadgets:
 	$(foreach img,$(KUBESCAPE_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=$(img) TAG=latest;)
-	$(foreach img,$(BUILT_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=ghcr.io/inspektor-gadget/gadget/$(img) TAG=$(VERSION);)
+	$(foreach img,$(BUILT_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=ghcr.io/inspektor-gadget/gadget/$(img) TAG=$(call gadget_version,$(img));)
 	$(foreach img,$(GADGETS),sudo ig image pull ghcr.io/inspektor-gadget/gadget/$(img):$(VERSION);)
-	sudo ig image pull ghcr.io/inspektor-gadget/gadget/trace_exec:$(TRACE_EXEC_VERSION)
-	sudo ig image export $(foreach img,$(GADGETS) $(BUILT_GADGETS),ghcr.io/inspektor-gadget/gadget/$(img):$(VERSION)) ghcr.io/inspektor-gadget/gadget/trace_exec:$(TRACE_EXEC_VERSION) $(foreach img,$(KUBESCAPE_GADGETS),$(img):latest) tracers.tar
+	sudo ig image export $(foreach img,$(GADGETS) $(BUILT_GADGETS),ghcr.io/inspektor-gadget/gadget/$(img):$(call gadget_version,$(img))) $(foreach img,$(KUBESCAPE_GADGETS),$(img):latest) tracers.tar

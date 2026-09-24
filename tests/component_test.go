@@ -3337,14 +3337,14 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 	assert.Greater(t, count(alerts, "R9901", "c-conc"), 0,
 		"R9901 must fire for an exec on a nonzero PTY index")
 
-	// has() presence testing is honest: the v0.55.0 gadget emits tty_major for
+	// has() presence testing is honest: the backported gadget emits tty_major for
 	// all exec events, including no-TTY events whose value is zero.
 	for _, container := range []string{"c-none", "c-pts0", "c-conc"} {
 		assert.Greater(t, count(alerts, "R9903", container), 0,
 			"R9903 must fire for %s because ttyMajor is present", container)
 	}
 	assert.Equal(t, 0, total(alerts, "R9904"),
-		"R9904 must not fire: ttyMajor is present on every v0.55.0 exec event")
+		"R9904 must not fire: ttyMajor is present on every backported exec event")
 }
 
 // Test_36_MultiContainerPerContainerBinding shows per-container binding: a
