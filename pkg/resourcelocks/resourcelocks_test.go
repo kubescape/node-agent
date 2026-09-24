@@ -351,3 +351,18 @@ func BenchmarkMultipleContainers(b *testing.B) {
 		})
 	}
 }
+
+func TestConcurrentFirstLockUse(t *testing.T) {
+	for range 50 {
+		locks := New()
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := range 16 {
+			wg.Add(1)
+			go func() { defer wg.Done(); <-start; locks.WithLock(fmt.Sprint(i), func() {}) }()
+		}
+		close(start)
+		wg.Wait()
+		assert.Equal(t, 16, locks.ActiveLocks())
+	}
+}

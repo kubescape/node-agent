@@ -121,6 +121,7 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 			go cw.setSharedWatchedContainerData(notif.Container)
 		}
 	case containercollection.EventTypeRemoveContainer:
+		cw.lateAdmissions.Delete(notif.Container)
 		logger.L().Debug("ContainerWatcher.containerCallback - remove container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID),
@@ -165,14 +166,22 @@ func (cw *ContainerWatcher) setSharedWatchedContainerData(container *containerco
 	cw.objectCache.K8sObjectCache().SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 }
 
+// newWatchedContainerData records whether monitoring missed the container's start.
+func (cw *ContainerWatcher) newWatchedContainerData(container *containercollection.Container) objectcache.WatchedContainerData {
+	_, late := cw.lateAdmissions.Load(container)
+	return objectcache.WatchedContainerData{
+		ContainerID:         container.Runtime.ContainerID,
+		PodName:             container.K8s.PodName,
+		Namespace:           container.K8s.Namespace,
+		PreRunningContainer: time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(cw.agentStartTime),
+		LateAdmission:       late,
+		// ImageID and ImageTag come from the pod spec for consistency with operator.
+	}
+}
+
 // getSharedWatchedContainerData gets shared container data from Kubernetes
 func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*objectcache.WatchedContainerData, error) {
-	watchedContainer := objectcache.WatchedContainerData{
-		ContainerID: container.Runtime.ContainerID,
-		PodName:     container.K8s.PodName,
-		Namespace:   container.K8s.Namespace,
-		// we get ImageID and ImageTag from the pod spec for consistency with operator
-	}
+	watchedContainer := cw.newWatchedContainerData(container)
 
 	wl, err := cw.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
 	if err != nil {
@@ -241,8 +250,6 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 		return nil, fmt.Errorf("failed to get selector: %w", err)
 	}
 	watchedContainer.ParentWorkloadSelector = selector
-	preRunning := time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(cw.agentStartTime)
-	watchedContainer.PreRunningContainer = preRunning
 	// find instanceID - this has to be the last one
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod, cw.cfg.ExcludeJsonPaths)
 	if err != nil {

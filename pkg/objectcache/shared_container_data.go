@@ -78,6 +78,7 @@ type WatchedContainerData struct {
 	ParentWorkloadSelector  *metav1.LabelSelector
 	SeccompProfilePath      *string
 	PreRunningContainer     bool
+	LateAdmission           bool // Monitoring started after namespace inclusion, missing earlier activity.
 	SeriesID                string
 	PreviousReportTimestamp time.Time
 	CurrentReportTimestamp  time.Time

@@ -92,3 +92,23 @@ func TestNamespaceFilterRapidProfileReadmission(t *testing.T) {
 	notify(containercollection.EventTypeRemoveContainer)
 	require.Eventually(t, func() bool { _, ok := manager.getContainerEntry("running"); return !ok }, 3*time.Second, time.Millisecond)
 }
+
+func TestNamespaceFilterLateAdmissionProducesPartialProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		late, preRunning bool
+		want             objectcache.WatchedContainerCompletionStatus
+	}{
+		{"ordinary", false, false, objectcache.WatchedContainerCompletionStatusFull},
+		{"pre-running", false, true, objectcache.WatchedContainerCompletionStatusPartial},
+		{"late namespace inclusion", true, false, objectcache.WatchedContainerCompletionStatusPartial},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := &ContainerProfileManager{cfg: config.Config{InitialDelay: time.Hour}}
+			data := &objectcache.WatchedContainerData{PreRunningContainer: tc.preRunning, LateAdmission: tc.late}
+			manager.setContainerData(&containercollection.Container{}, data)
+			defer data.UpdateDataTicker.Stop()
+			require.Equal(t, tc.want, data.GetCompletionStatus())
+		})
+	}
+}

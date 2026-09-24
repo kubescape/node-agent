@@ -12,6 +12,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -53,6 +54,7 @@ func TestNamespaceFilterReconcilesRunningContainers(t *testing.T) {
 		return []containercollection.Container{*existing, *payments, *completed, *excludedLabel, *host, *own}, nil
 	}
 	// Exclusions take effect even when the API is temporarily unavailable.
+	cw.removeExcludedNamespaceContainers()
 	require.Error(t, cw.reconcileNamespaceFilter(t.Context(), previous, func(context.Context, *config.NamespaceFilter) ([]containercollection.Container, error) {
 		return nil, errors.New("API unavailable")
 	}))
@@ -73,6 +75,7 @@ func TestNamespaceFilterReconcilesRunningContainers(t *testing.T) {
 	write(`{"includeNamespaces":[],"excludeNamespaces":["payments"]}`)
 	_, err = cfg.ReloadNamespaceFilter()
 	require.NoError(t, err)
+	cw.removeExcludedNamespaceContainers()
 	require.NoError(t, cw.reconcileNamespaceFilter(t.Context(), previous, list))
 	require.NotNil(t, cc.GetContainer("existing"))
 	require.Nil(t, cc.GetContainer("payments"))
@@ -184,4 +187,28 @@ func TestNamespaceFilterRetainsRuleBindingsWhileExcluded(t *testing.T) {
 	require.True(t, cw.ruleManagedPods.Contains("payments/pay"))
 	cw.addRunningContainers(&rulebindingmanager.RuleBindingNotify{Action: rulebindingmanager.Removed, Pod: pod})
 	require.False(t, cw.ruleManagedPods.Contains("payments/pay"))
+}
+
+func TestNamespaceFilterMarksLateAdmissionAfterAgentStartup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "filter.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"includeNamespaces":[],"excludeNamespaces":["payments"]}`), 0600))
+	cfg := config.Config{NamespaceFilterFile: path}
+	require.NoError(t, cfg.InitializeNamespaceFilter())
+	cw := &ContainerWatcher{cfg: cfg, containerCollection: &containercollection.ContainerCollection{}, agentStartTime: time.Now().Add(-time.Minute)}
+	container := makeTestContainer("late", "payments", "pay", "app", 1)
+	container.Runtime.ContainerStartedAt = igtypes.Time(time.Now().Add(-time.Second).UnixNano())
+	previous := cfg.NamespaceFilterSnapshot()
+	require.NoError(t, os.WriteFile(path, []byte(`{"includeNamespaces":[],"excludeNamespaces":[]}`), 0600))
+	_, err := cfg.ReloadNamespaceFilter()
+	require.NoError(t, err)
+	require.NoError(t, cw.reconcileNamespaceFilter(t.Context(), previous, func(context.Context, *config.NamespaceFilter) ([]containercollection.Container, error) {
+		return []containercollection.Container{*container}, nil
+	}))
+	admitted := cw.containerCollection.GetContainer("late")
+	require.NotNil(t, admitted)
+	data := cw.newWatchedContainerData(admitted)
+	require.False(t, data.PreRunningContainer, "started after agent startup")
+	require.True(t, data.LateAdmission, "activity before namespace inclusion was missed")
+	ordinary := cw.newWatchedContainerData(container)
+	require.False(t, ordinary.LateAdmission, "a different lifecycle must not inherit the marker")
 }

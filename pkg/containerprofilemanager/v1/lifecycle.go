@@ -195,8 +195,8 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		return nil
 	}
 
-	if sharedData.PreRunningContainer && !(cpm.cfg.EnableRuntimeDetection || cpm.cfg.EnablePartialProfileGeneration) {
-		logger.L().Debug("ignoring pre-running container without runtime detection or partial profile generation",
+	if (sharedData.PreRunningContainer || sharedData.LateAdmission) && !(cpm.cfg.EnableRuntimeDetection || cpm.cfg.EnablePartialProfileGeneration) {
+		logger.L().Debug("ignoring container with unobserved startup without runtime detection or partial profile generation",
 			helpers.String("containerID", containerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
@@ -444,7 +444,7 @@ func (cpm *ContainerProfileManager) startContainerMonitoring(container *containe
 // setContainerData sets the container data for the container profile manager
 func (cpm *ContainerProfileManager) setContainerData(container *containercollection.Container, sharedData *objectcache.WatchedContainerData) {
 	// Set completion status & status as soon as we start monitoring the container
-	if sharedData.PreRunningContainer {
+	if sharedData.PreRunningContainer || sharedData.LateAdmission {
 		sharedData.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial)
 	} else {
 		sharedData.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusFull)

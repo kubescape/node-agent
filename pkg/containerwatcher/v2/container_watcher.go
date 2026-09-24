@@ -50,6 +50,7 @@ type ContainerWatcher struct {
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	namespaceFilterDone chan struct{}
+	lateAdmissions      sync.Map // keyed by container pointer to distinguish readmissions
 	clusterName         string
 	agentStartTime      time.Time
 

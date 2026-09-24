@@ -252,7 +252,11 @@ Host monitoring and pod-label exclusions keep their existing behavior.
 The file is polled every five seconds **after Kubernetes propagates the ConfigMap
 volume update**. This is eventual, not immediate. Node-agent reopens the path to
 handle projected-volume symlink replacements. Discovery failures are retried;
-newer valid exclusions still take effect during retries.
+newer valid exclusions still take effect during retries. Runtime discovery has a
+30-second deadline and runs independently of filter polling, so a stalled runtime
+cannot block newer exclusions or shutdown. Containers admitted after namespace
+inclusion produce partial profiles because their earlier activity was not observed;
+this also respects the existing partial-profile generation setting.
 
 Both fields must be arrays of exact Kubernetes namespace names. A non-empty
 `includeNamespaces` list takes precedence over `excludeNamespaces`, matching
