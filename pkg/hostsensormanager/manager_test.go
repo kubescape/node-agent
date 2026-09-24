@@ -43,6 +43,7 @@ func TestFilterSensors(t *testing.T) {
 		{"all", all, []string{}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, ValidateExcludedSensors(tt.excluded))
 			got, err := filterSensors(sensors, tt.excluded)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, sensorKinds(got))
@@ -51,6 +52,7 @@ func TestFilterSensors(t *testing.T) {
 	}
 	for _, invalid := range []string{"", "kubeproxyinfo", "KubeProxy", " KubeProxyInfo"} {
 		t.Run("invalid/"+invalid, func(t *testing.T) {
+			require.EqualError(t, ValidateExcludedSensors([]string{invalid}), fmt.Sprintf("unknown excluded host sensor %q; valid sensors: %s", invalid, strings.Join(all, ", ")))
 			_, err := filterSensors(sensors, []string{invalid})
 			require.EqualError(t, err, fmt.Sprintf("unknown excluded host sensor %q; valid sensors: %s", invalid, strings.Join(all, ", ")))
 		})

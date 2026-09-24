@@ -69,6 +69,13 @@ func newSensors(nodeName string) []Sensor {
 	}
 }
 
+// ValidateExcludedSensors checks names without initializing Kubernetes clients or
+// sensing the host. Startup and constructor callers use the same validation.
+func ValidateExcludedSensors(excludedKinds []string) error {
+	_, err := filterSensors(newSensors(""), excludedKinds)
+	return err
+}
+
 // filterSensors validates exclusions against the registered kinds and preserves sensing order.
 func filterSensors(sensors []Sensor, excludedKinds []string) ([]Sensor, error) {
 	valid := make(map[string]bool, len(sensors))

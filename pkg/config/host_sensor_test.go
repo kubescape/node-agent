@@ -16,6 +16,7 @@ func TestLoadHostSensorExclusions(t *testing.T) {
 		{"omitted", `{}`, "", []string{}},
 		{"empty", `{"hostSensorExcludedSensors":[]}`, "", []string{}},
 		{"json", `{"hostSensorExcludedSensors":["KubeProxyInfo","CNIInfo"]}`, "", []string{"KubeProxyInfo", "CNIInfo"}},
+		{"empty environment preserves file", `{"hostSensorExcludedSensors":["KubeProxyInfo"]}`, "", []string{"KubeProxyInfo"}},
 		{"environment", `{}`, "KubeProxyInfo", []string{"KubeProxyInfo"}},
 		{"comma-separated environment", `{}`, "KubeProxyInfo,CNIInfo", []string{"KubeProxyInfo", "CNIInfo"}},
 		{"environment overrides file", `{"hostSensorExcludedSensors":["CNIInfo"]}`, "KubeProxyInfo", []string{"KubeProxyInfo"}},

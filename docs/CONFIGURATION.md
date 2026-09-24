@@ -189,13 +189,18 @@ startup configuration error listing valid names when host sensing is enabled.
 When host sensing is disabled, exclusion-name validation is skipped. Excluding
 all sensors is allowed: the manager starts normally but performs no sensing.
 
-Environment variables can also configure exclusions and override the JSON list:
+Nonempty environment variables can also configure exclusions and override the JSON list:
 
 ```bash
 HOSTSENSOREXCLUDEDSENSORS=KubeProxyInfo
 # Or exclude multiple sensors (comma-separated, without spaces):
 HOSTSENSOREXCLUDEDSENSORS=KubeProxyInfo,CNIInfo
 ```
+
+An empty `HOSTSENSOREXCLUDEDSENSORS=` value is treated as unset and does not
+override exclusions from JSON. To clear exclusions, set the JSON
+`hostSensorExcludedSensors` list to `[]` and remove any nonempty environment
+override. Restart node-agent to apply the change.
 
 For Helm chart versions supporting the `nodeAgent.config.extra` passthrough, use:
 

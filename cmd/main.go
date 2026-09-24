@@ -109,6 +109,12 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
 
+	if cfg.EnableHostSensor {
+		if err := hostsensormanager.ValidateExcludedSensors(cfg.HostSensorExcludedSensors); err != nil {
+			logger.L().Ctx(ctx).Fatal("invalid host sensor configuration", helpers.Error(err))
+		}
+	}
+
 	clusterData, err := utilsmetadata.LoadConfig("/etc/config/clusterData.json")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
