@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -17,10 +18,17 @@ const (
 )
 
 type StorageHttpClientMock struct {
-	SyftSBOMs         []*spdxv1beta1.SBOMSyft
-	ContainerProfiles []*v1beta1.ContainerProfile
-	ImageCounters     map[string]int
-	mockSBOM          *v1beta1.SBOMSyft
+	// containerProfilesMu guards ContainerProfiles: CreateContainerProfileDirect
+	// can be invoked from a caller's own background goroutine (e.g. the
+	// container profile manager's persistent queue processing loop), so a
+	// test reading ContainerProfiles from a different goroutine while that
+	// loop is still running must go through ContainerProfilesSnapshot instead
+	// of reading the field directly.
+	containerProfilesMu sync.Mutex
+	SyftSBOMs           []*spdxv1beta1.SBOMSyft
+	ContainerProfiles   []*v1beta1.ContainerProfile
+	ImageCounters       map[string]int
+	mockSBOM            *v1beta1.SBOMSyft
 }
 
 var _ ProfileClient = (*StorageHttpClientMock)(nil)
@@ -28,9 +36,27 @@ var _ ProfileCreator = (*StorageHttpClientMock)(nil)
 var _ SbomClient = (*StorageHttpClientMock)(nil)
 var _ StorageClient = (*StorageHttpClientMock)(nil)
 
+// CreateContainerProfileDirect records profile as if it had been persisted to
+// storage. Guarded by containerProfilesMu since it may be invoked from a
+// caller's own background goroutine (e.g. the container profile manager's
+// persistent queue processing loop).
 func (sc *StorageHttpClientMock) CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error {
+	sc.containerProfilesMu.Lock()
+	defer sc.containerProfilesMu.Unlock()
 	sc.ContainerProfiles = append(sc.ContainerProfiles, profile)
 	return nil
+}
+
+// ContainerProfilesSnapshot returns a thread-safe copy of the container
+// profiles recorded so far. Use this instead of reading ContainerProfiles
+// directly when CreateContainerProfileDirect may still be called
+// concurrently (e.g. while polling for delivery via require.Eventually).
+func (sc *StorageHttpClientMock) ContainerProfilesSnapshot() []*v1beta1.ContainerProfile {
+	sc.containerProfilesMu.Lock()
+	defer sc.containerProfilesMu.Unlock()
+	out := make([]*v1beta1.ContainerProfile, len(sc.ContainerProfiles))
+	copy(out, sc.ContainerProfiles)
+	return out
 }
 
 func (sc *StorageHttpClientMock) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
@@ -38,7 +64,11 @@ func (sc *StorageHttpClientMock) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SB
 	return SBOM, nil
 }
 
+// GetContainerProfile finds a previously recorded profile by namespace and
+// name, or (nil, nil) if none matches.
 func (sc *StorageHttpClientMock) GetContainerProfile(_ context.Context, namespace, name string) (*v1beta1.ContainerProfile, error) {
+	sc.containerProfilesMu.Lock()
+	defer sc.containerProfilesMu.Unlock()
 	for _, p := range sc.ContainerProfiles {
 		if p != nil && p.Namespace == namespace && p.Name == name {
 			return p, nil

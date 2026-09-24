@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
@@ -92,6 +94,9 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 		if ok && (st.Code() == codes.Unavailable || st.Code() == codes.Aborted) {
 			return nil, fmt.Errorf("%w: %v", ErrScannerCrashed, err)
 		}
+		if ok && isScannerBusyStatus(st) {
+			return nil, fmt.Errorf("%w: %v", ErrScannerBusy, err)
+		}
 		if ok && st.Code() == codes.FailedPrecondition {
 			return nil, fmt.Errorf("%w: %v", ErrImageTooLarge, err)
 		}
@@ -104,6 +109,75 @@ func (c *sbomScannerClient) CreateSBOM(ctx context.Context, req ScanRequest) (*S
 	}
 
 	return &ScanResult{
+		SyftDocument: doc,
+		SBOMSize:     resp.SbomSize,
+	}, nil
+}
+
+// isScannerBusyStatus reports whether st is the sidecar's own admission-window
+// rejection.
+//
+// The code alone is not sufficient: gRPC returns ResourceExhausted for its own
+// message-size limits too, and misreading one of those as "just busy" would
+// make the caller retry a payload that can never fit. The marker is a constant
+// shared with the server (see scannerBusyStatusMarker), so the two ends cannot
+// drift apart.
+func isScannerBusyStatus(st *status.Status) bool {
+	return st.Code() == codes.ResourceExhausted && strings.Contains(st.Message(), scannerBusyStatusMarker)
+}
+
+// ScanHostFilesystem asks the sidecar to scan its own view of the node root
+// filesystem.
+//
+// Error mapping follows CreateSBOM's pattern, with two host-specific additions:
+// ErrScannerBusy (admission window exhausted -- no scan was dispatched, so the
+// caller must not count it as a failure) and *HostDocumentTooLargeError (the
+// scan succeeded but its document cannot cross the socket, which the caller
+// maps onto the same TooLarge/Incomplete branch an oversized in-process scan
+// reaches).
+func (c *sbomScannerClient) ScanHostFilesystem(ctx context.Context, req HostScanRequest) (*HostScanResult, error) {
+	pbReq := &pb.ScanHostFilesystemRequest{
+		SourceName:          req.SourceName,
+		EnableEmbeddedSboms: req.EnableEmbeddedSBOMs,
+		TimeoutSeconds:      int64(req.Timeout.Seconds()),
+	}
+
+	resp, err := c.client.ScanHostFilesystem(ctx, pbReq)
+	if err != nil {
+		st, ok := status.FromError(err)
+		if ok && (st.Code() == codes.Unavailable || st.Code() == codes.Aborted) {
+			return nil, fmt.Errorf("%w: %v", ErrScannerCrashed, err)
+		}
+		if ok && isScannerBusyStatus(st) {
+			return nil, fmt.Errorf("%w: %v", ErrScannerBusy, err)
+		}
+		if ok && (st.Code() == codes.InvalidArgument || st.Code() == codes.FailedPrecondition || st.Code() == codes.Unimplemented) {
+			// Pre-dispatch rejection (bad source_name, a HOST_ROOT that
+			// doesn't resolve, or an older sidecar without the host RPC):
+			// no scan work was attempted, so falling back in-process is safe.
+			// Unlike busy admission, this configuration or compatibility issue
+			// gets its own error so the caller can warn the operator.
+			return nil, fmt.Errorf("%w: %v", ErrScannerHostScanRejected, err)
+		}
+		if ok && st.Code() == codes.OutOfRange && strings.HasPrefix(st.Message(), hostDocTooLargeStatusPrefix) {
+			size, convErr := strconv.ParseInt(strings.TrimPrefix(st.Message(), hostDocTooLargeStatusPrefix), 10, 64)
+			if convErr != nil {
+				// The classification still holds even if the size did not
+				// survive; 0 simply means "unknown", which the caller records
+				// as-is rather than mistaking for a transient failure.
+				size = 0
+			}
+			return nil, &HostDocumentTooLargeError{Size: size}
+		}
+		return nil, err
+	}
+
+	var doc v1beta1.SyftDocument
+	if err := json.Unmarshal(resp.SbomDocument, &doc); err != nil {
+		return nil, fmt.Errorf("failed to deserialize host SBOM document: %w", err)
+	}
+
+	return &HostScanResult{
 		SyftDocument: doc,
 		SBOMSize:     resp.SbomSize,
 	}, nil

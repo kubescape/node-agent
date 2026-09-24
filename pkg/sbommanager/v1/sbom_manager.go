@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DmitriyVTitov/size"
@@ -21,6 +22,8 @@ import (
 	"github.com/anchore/syft/syft/cataloging"
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
 	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
+	"github.com/anchore/syft/syft/sbom"
+	"github.com/anchore/syft/syft/source"
 	"github.com/aquilax/truncate"
 	"github.com/armosec/armoapi-go/scanfailure"
 	"github.com/cenkalti/backoff/v5"
@@ -113,27 +116,77 @@ type SbomManager struct {
 	// is the sole path to a TooLarge classification and survives the wider gaps a slow-cadence
 	// crash loop needs.
 	crashLoopRetries *expirable.LRU[string, int]
-	pendingScans     map[string]pendingScan
-	pendingOrder     []string
-	pendingMu        sync.Mutex
-	failureReporter  sbommanager.SbomFailureReporter
-	metrics          metricsmanager.MetricsManager
+	// hostSidecarFailures counts consecutive POST-DISPATCH sidecar failures for the host
+	// SBOM. It is deliberately a separate counter from crashLoopRetries and never feeds it:
+	// crashLoopRetries is the one mechanism that can pin an SBOM into the TooLarge one-way
+	// door, and it means "this image does not fit the scanner's memory limit". Sidecar
+	// connectivity failures say nothing about the host document's size, so routing them
+	// through crashLoopRetries would let a flapping sidecar permanently freeze the host SBOM
+	// as TooLarge. This counter only drives a degraded-service warning.
+	//
+	// It is a plain int, not an LRU keyed by sbomName like the container counters: a node has
+	// exactly one host SBOM, scanned by one goroutine (hostSbomLoop) strictly sequentially,
+	// so there is neither a second key nor a second writer to account for.
+	hostSidecarFailures int
+	// busyRetries counts the bounded ErrScannerBusy retries per sbomName on the container
+	// path. Busy is not a failure, so it gets its own budget rather than consuming
+	// failureRetries -- which would let contention alone push an image to Incomplete.
+	busyRetries *expirable.LRU[string, int]
+	// busyPending reserves each image throughout backoff and worker-pool queuing.
+	busyPending     map[string]chan struct{}
+	busyMu          sync.Mutex
+	pendingScans    map[string]pendingScan
+	pendingOrder    []string
+	pendingMu       sync.Mutex
+	failureReporter sbommanager.SbomFailureReporter
+	metrics         metricsmanager.MetricsManager
 	// waitCancels holds the cancel func for each in-flight shared-data wait, keyed by container
 	// ID, so a container-remove event cancels the wait immediately instead of leaking a goroutine
 	// (retaining notif/mounts/imageStatus) until the timeout (#850).
 	waitCancels   map[string]context.CancelFunc
 	waitCancelsMu sync.Mutex
+	// hostFSPrefix is the mount point of the node's root filesystem inside this
+	// pod. It is always set equal to hostRoot (both resolved from HOST_ROOT,
+	// falling back to /host) rather than read from pkg/hostsensormanager's own
+	// accessor, whose fallback (/host_fs) is a different default for the same
+	// env var. Used only by the host SBOM branch.
+	hostFSPrefix string
+	// hostLoopStarted guards the host SBOM lifecycle so the (possibly repeated)
+	// host add-container notification starts exactly one rescan loop.
+	hostLoopStarted atomic.Bool
+	// hostScanFn is the host scan entry point. It is nil in production (meaning
+	// processHostSbom) and exists purely as a test seam, so the rescan ticker can
+	// be observed without running a real filesystem scan.
+	hostScanFn func(hostID string)
+	// hostSyftScanFn is the function processHostSbom calls to run the actual Syft
+	// scan. It is nil in production (meaning syft.CreateSBOM) and exists purely as
+	// a test seam, so the host scan timeout (hostScanTimeout) can be exercised
+	// deterministically with a fake scan that blocks until its context is done,
+	// instead of relying on real filesystem timing.
+	hostSyftScanFn func(ctx context.Context, src source.Source, cfg *syft.CreateSBOMConfig) (*sbom.SBOM, error)
+	// hostScanTimeoutOverride, when non-zero, replaces the hostScanTimeout
+	// constant for the host scan's context.WithTimeout. It exists purely as a
+	// test seam so the timeout path can be exercised on a bounded test clock
+	// instead of waiting out the real 16-minute production value.
+	hostScanTimeoutOverride time.Duration
+	// busyRetryDelayFn replaces busyRetryDelay for the bounded ErrScannerBusy backoff. It
+	// is nil in production and exists purely as a test seam, so the full 22-attempt
+	// ceiling can be exercised without ~19 minutes of backoff, excluding admission waits.
+	busyRetryDelayFn func(attempt int) time.Duration
 }
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
+// CreateSbomManager builds a SbomManager wired with the given dependencies,
+// including the host filesystem root (HOST_ROOT, defaulting to /host) used
+// by the separate host SBOM scan branch.
 func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.SbomClient, k8sObjectCache objectcache.K8sObjectCache, scannerClient sbomscanner.SBOMScannerClient, failureReporter sbommanager.SbomFailureReporter, metrics metricsmanager.MetricsManager) (*SbomManager, error) {
 	if metrics == nil {
 		metrics = &metricsmanager.MetricsNoop{}
 	}
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
-	if !exists {
+	if !exists || hostRoot == "" {
 		hostRoot = "/host"
 	}
 	// use securejoin to join the two, add proc and store in procDir
@@ -172,10 +225,18 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		scannerMemLimit:    scannerMemLimit,
 		failureRetries:     expirable.NewLRU[string, int](maxFailureRetryEntries, nil, failureRetryTTL),
 		crashLoopRetries:   expirable.NewLRU[string, int](maxFailureRetryEntries, nil, crashLoopRetryTTL),
+		busyRetries:        expirable.NewLRU[string, int](maxFailureRetryEntries, nil, failureRetryTTL),
 		pendingScans:       make(map[string]pendingScan),
 		failureReporter:    failureReporter,
 		metrics:            metrics,
 		waitCancels:        make(map[string]context.CancelFunc),
+		// Reuse hostRoot (resolved above from HOST_ROOT, falling back to
+		// /host) rather than calling hostsensormanager.HostFSPrefix()
+		// separately: that accessor's own fallback is /host_fs, a different
+		// default for the same HOST_ROOT env var. With no override set,
+		// the two would silently disagree and the host scan would open a
+		// path the DaemonSet never mounts.
+		hostFSPrefix: hostRoot,
 	}
 	if scannerClient != nil {
 		sm.startScannerReadinessWatcher()
@@ -229,6 +290,10 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 	return nil, fmt.Errorf("failed to find lowerdir in %s", mounts[0].VFSOptions)
 }
 
+// ContainerCallback handles add/remove container-collection events. Host
+// pseudo-container events are routed to the separate host SBOM scan branch
+// (startHostSbomLifecycle); everything else follows the image/mount-driven
+// container SBOM path.
 func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
@@ -242,6 +307,10 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		return
 	}
 	if utils.IsHostContainer(notif.Container) {
+		// The host is not an image: it has no CRI image status, no overlay
+		// mounts and no image name, so everything below this point is
+		// inapplicable. It gets its own scan branch (host_sbom.go) instead.
+		s.startHostSbomLifecycle(notif)
 		return
 	}
 	if notif.Container.Runtime.ContainerImageName == "" {
@@ -356,6 +425,12 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 			helpers.String("container", notif.Container.K8s.ContainerName),
 			helpers.String("imageName", imageTag),
 			helpers.String("imageDigest", imageID))
+		return
+	}
+	s.busyMu.Lock()
+	_, busyPending := s.busyPending[sbomName]
+	s.busyMu.Unlock()
+	if busyPending {
 		return
 	}
 	// try to create a SBOM with initializing status to reserve our slot
@@ -498,17 +573,42 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 		})
 		if scanErr != nil {
 			scanDuration := time.Since(scanStart)
+			if errors.Is(scanErr, sbomscanner.ErrScannerBusy) {
+				// The sidecar declined to ADMIT this scan: nothing was
+				// dispatched, so this is not a scan failure and must not touch
+				// reportFailure, failureRetries or crashLoopRetries. It is also
+				// not queued in pendingScans, whose drain condition
+				// (scannerClient.Ready() == true) a merely-busy sidecar already
+				// satisfies -- parking it there would re-submit it immediately
+				// and busy-loop. It is retried under the shared bounded backoff
+				// instead, and only becomes a real failure once that ceiling is
+				// reached.
+				if s.scheduleBusyRetry(sbomName, func() {
+					s.processContainerWithMetadata(notif, mounts, imageStatus, imageTag, imageID)
+				}) {
+					s.metrics.ReportSBOMScan("busy", metricsmanager.ScanPathSidecar)
+					return
+				}
+				logger.L().Ctx(s.ctx).Error("SbomManager - scanner sidecar stayed busy through the retry ceiling",
+					helpers.Error(scanErr),
+					helpers.String("sbomName", sbomName))
+				s.metrics.ReportSBOMScan("error", metricsmanager.ScanPathSidecar)
+				s.metrics.ObserveSBOMScanDuration("error", metricsmanager.ScanPathSidecar, scanDuration)
+				s.handleGenericFailure(sbomName)
+				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)
+				return
+			}
 			if errors.Is(scanErr, sbomscanner.ErrScannerCrashed) {
-				s.metrics.ReportSBOMScan("oom_killed")
-				s.metrics.ObserveSBOMScanDuration("oom_killed", scanDuration)
+				s.metrics.ReportSBOMScan("oom_killed", metricsmanager.ScanPathSidecar)
+				s.metrics.ObserveSBOMScanDuration("oom_killed", metricsmanager.ScanPathSidecar, scanDuration)
 				s.metrics.ReportSBOMScannerRestart()
 				s.metrics.SetSBOMScannerReady(false)
 				s.handleScannerCrash(sbomName, notif, scanErr, imageTag, imageID, wipSbomHadContent)
 				return
 			}
 			if errors.Is(scanErr, sbomscanner.ErrImageTooLarge) {
-				s.metrics.ReportSBOMScan("error")
-				s.metrics.ObserveSBOMScanDuration("error", scanDuration)
+				s.metrics.ReportSBOMScan("error", metricsmanager.ScanPathSidecar)
+				s.metrics.ObserveSBOMScanDuration("error", metricsmanager.ScanPathSidecar, scanDuration)
 				logger.L().Ctx(s.ctx).Error("SbomManager - sidecar image too large",
 					helpers.Error(scanErr),
 					helpers.String("namespace", notif.Container.K8s.Namespace),
@@ -523,8 +623,8 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 				s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonImageTooLarge, scanErr)
 				return
 			}
-			s.metrics.ReportSBOMScan("error")
-			s.metrics.ObserveSBOMScanDuration("error", scanDuration)
+			s.metrics.ReportSBOMScan("error", metricsmanager.ScanPathSidecar)
+			s.metrics.ObserveSBOMScanDuration("error", metricsmanager.ScanPathSidecar, scanDuration)
 			logger.L().Ctx(s.ctx).Error("SbomManager - sidecar scan failed",
 				helpers.Error(scanErr),
 				helpers.String("namespace", notif.Container.K8s.Namespace),
@@ -535,8 +635,8 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 			s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonSBOMGenerationFailed, scanErr)
 			return
 		}
-		s.metrics.ReportSBOMScan("success")
-		s.metrics.ObserveSBOMScanDuration("success", time.Since(scanStart))
+		s.metrics.ReportSBOMScan("success", metricsmanager.ScanPathSidecar)
+		s.metrics.ObserveSBOMScanDuration("success", metricsmanager.ScanPathSidecar, time.Since(scanStart))
 		syftDoc = result.SyftDocument
 	} else if s.scannerClient != nil {
 		s.metrics.SetSBOMScannerReady(false)
@@ -620,6 +720,7 @@ func (s *SbomManager) processContainerWithMetadata(notif containercollection.Pub
 	// prepare the SBOM
 	s.failureRetries.Remove(sbomName)
 	s.crashLoopRetries.Remove(sbomName)
+	s.busyRetries.Remove(sbomName)
 	delete(wipSbom.Annotations, NodeNameMetadataKey)
 	wipSbom.Spec.Metadata.Report.CreatedAt = wipSbom.CreationTimestamp
 	wipSbom.Spec.Metadata.Tool.Name = "syft"
@@ -682,6 +783,12 @@ func (s *SbomManager) waitForSharedContainerData(ctx context.Context, containerI
 // falls back to Incomplete, since a threshold crossing that includes even one non-crash failure
 // isn't evidence the image doesn't fit in the scanner's memory limit.
 func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollection.PubSubEvent, scanErr error, imageTag, imageID string, hadContent bool) {
+	// See handleGenericFailure: a crash is a genuine failure unrelated to
+	// admission contention, so any busy-retry count from an earlier cycle
+	// must not carry forward.
+	if s.busyRetries != nil {
+		s.busyRetries.Remove(sbomName)
+	}
 	retryCount := s.incrementFailureCount(sbomName)
 	crashLoopCount := s.incrementCrashLoopCount(sbomName)
 
@@ -709,6 +816,80 @@ func (s *SbomManager) handleScannerCrash(sbomName string, notif containercollect
 	}
 	// Report OOM regardless of persist success — the user should know the scan failed
 	s.reportFailure(notif, imageTag, imageID, scanfailure.ReasonScannerOOMKilled, scanErr)
+}
+
+// scheduleBusyRetry arms one bounded backoff step for a container scan the sidecar declined
+// to admit, reporting false once the attempt ceiling is reached (at which point the caller
+// treats the busy condition as a real failure).
+//
+// The wait happens on its own goroutine, NOT as a sleep inside the pool's single worker:
+// workerpool.New(1) means one sleeping worker would head-of-line-block every other
+// container's SBOM generation on the node for the whole backoff, defeating the point of the
+// pool being asynchronous. The timer is selected against s.ctx, so a shutdown drops the
+// pending retry immediately instead of firing into a torn-down manager.
+func (s *SbomManager) scheduleBusyRetry(sbomName string, retry func()) bool {
+	s.busyMu.Lock()
+	defer s.busyMu.Unlock()
+	if s.ctx.Err() != nil {
+		return true
+	}
+	if _, pending := s.busyPending[sbomName]; pending {
+		return true
+	}
+	attempt, _ := s.busyRetries.Get(sbomName)
+	attempt++
+	if attempt > busyRetryMaxAttempts {
+		s.busyRetries.Remove(sbomName)
+		return false
+	}
+	s.busyRetries.Add(sbomName, attempt)
+	if s.busyPending == nil {
+		s.busyPending = make(map[string]chan struct{})
+	}
+	started := make(chan struct{})
+	s.busyPending[sbomName] = started
+	release := func() {
+		s.busyMu.Lock()
+		defer s.busyMu.Unlock()
+		// A running retry may already have scheduled its next backoff.
+		if s.busyPending[sbomName] == started {
+			delete(s.busyPending, sbomName)
+		}
+	}
+	delay := s.retryDelay(attempt)
+
+	logger.L().Debug("SbomManager - scanner sidecar busy, scheduling scan retry",
+		helpers.String("sbomName", sbomName),
+		helpers.Int("attempt", attempt),
+		helpers.Int("maxAttempts", busyRetryMaxAttempts),
+		helpers.String("delay", delay.String()))
+
+	go func() {
+		defer release()
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-timer.C:
+			if s.ctx.Err() != nil {
+				return
+			}
+			s.pool.Submit(func() {
+				release()
+				close(started)
+				if s.ctx.Err() == nil {
+					retry()
+				}
+			}, utils.FuncName(s.processContainerWithMetadata))
+			// Keep the reservation while queued, but release it promptly on shutdown.
+			select {
+			case <-started:
+			case <-s.ctx.Done():
+			}
+		}
+	}()
+	return true
 }
 
 func (s *SbomManager) startScannerReadinessWatcher() {
@@ -839,6 +1020,20 @@ func (s *SbomManager) incrementCrashLoopCount(sbomName string) int {
 // The retry budget is shared with handleScannerCrash via incrementFailureCount, so failures
 // alternating between generic and scanner-crash categories count against the same budget.
 func (s *SbomManager) handleGenericFailure(sbomName string) {
+	// A genuine (non-busy) failure means the sidecar was reached and actually
+	// attempted the scan, which is unrelated to admission contention -- any
+	// busy-retry count accumulated on an earlier cycle must not carry forward
+	// and silently halve this image's contention tolerance the next time it
+	// merely goes busy (busyRetries otherwise only clears on a full success,
+	// per its own doc comment, and never on this path). This is also reached
+	// from the host path (handleHostSidecarFailure), whose lighter-weight test
+	// managers do not construct a busyRetries LRU at all -- nil-safe rather
+	// than requiring every such manager (including host_sbom_test.go, frozen
+	// by Requirement 3's mechanical check) to carry a field only the
+	// container path otherwise uses.
+	if s.busyRetries != nil {
+		s.busyRetries.Remove(sbomName)
+	}
 	if s.incrementFailureCount(sbomName) < maxScanRetries {
 		return
 	}

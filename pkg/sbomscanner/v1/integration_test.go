@@ -131,6 +131,23 @@ func TestIntegration_ImageTooLarge(t *testing.T) {
 	assert.ErrorIs(t, err, ErrImageTooLarge)
 }
 
+// TestIntegration_HostScanScannerCrashed mirrors TestIntegration_SimulatedOOM
+// for the host RPC: a sidecar that dies mid-scan must surface as
+// ErrScannerCrashed, so the host path counts it as a post-dispatch failure
+// rather than mistaking it for a busy or oversized condition.
+func TestIntegration_HostScanScannerCrashed(t *testing.T) {
+	t.Setenv(hostRootEnvVar, fakeHostRoot(t))
+	client, srv, sock := startIntegrationServer(t)
+	defer os.Remove(sock)
+	defer client.Close()
+
+	srv.Stop()
+
+	_, err := client.ScanHostFilesystem(context.Background(), HostScanRequest{SourceName: "host-node-1"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrScannerCrashed)
+}
+
 func TestIntegration_ReadyCheck(t *testing.T) {
 	client, srv, sock := startIntegrationServer(t)
 	defer os.Remove(sock)

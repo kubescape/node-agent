@@ -97,6 +97,9 @@ type Config struct {
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
 	EnableSeccomp                  bool                                 `mapstructure:"seccompServiceEnabled"`
 	HostMonitoringEnabled          bool                                 `mapstructure:"hostMonitoringEnabled"`
+	HostSBOMRescanInterval         time.Duration                        `mapstructure:"hostSBOMRescanInterval"`
+	HostSbomScanParallelism        int                                  `mapstructure:"hostSbomScanParallelism"`
+	HostSbomOffloadEnabled         bool                                 `mapstructure:"hostSbomOffloadEnabled"`
 	StandaloneMonitoringEnabled    bool                                 `mapstructure:"standaloneMonitoringEnabled"`
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
@@ -174,6 +177,9 @@ func LoadConfig(path string) (Config, error) {
 	return LoadConfigOptional(path, true)
 }
 
+// LoadConfigOptional reads configuration from path, applying defaults for
+// every unset field. When errNotFound is false, a missing config file is
+// tolerated and defaults are used instead of returning an error.
 func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.AddConfigPath(path)
 	viper.SetConfigName("config")
@@ -229,6 +235,32 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
 	viper.SetDefault("hostMonitoringEnabled", false)
+	// HostSBOMRescanInterval is how often the host's root-filesystem SBOM is
+	// regenerated. It is scoped exclusively to the host SBOM lifecycle (see
+	// pkg/sbommanager/v1/host_sbom.go): the container SBOM path stays one-shot
+	// plus tool-version-bump reprocessing and is never driven by this interval.
+	// A value <= 0 leaves the host SBOM one-shot too. 24h matches the cadence at
+	// which a node's installed packages realistically change (patching windows),
+	// while keeping a full root-filesystem walk off the node's hot path.
+	viper.SetDefault("hostSBOMRescanInterval", 24*time.Hour)
+	// HostSbomScanParallelism overrides the Syft cataloger parallelism used by
+	// host root-filesystem scans inside node-agent only; the sidecar uses its
+	// own CPU limit and does not receive this override. The
+	// default, 0, means "compute it from the container's own CPU limit"
+	// (CPU_LIMIT_MILLIS, supplied by the chart via the Kubernetes downward
+	// API), falling back to serial scanning when that is unavailable. A
+	// positive value forces that parallelism instead, so a computed value that
+	// proves wrong in the field can be corrected without a new image build.
+	viper.SetDefault("hostSbomScanParallelism", 0)
+	// HostSbomOffloadEnabled routes the host root-filesystem scan through the
+	// sbom-scanner sidecar when one is configured and ready, falling back to
+	// the in-process scan otherwise. It is a kill switch separate from
+	// SBOM_SCANNER_SOCKET deliberately: that socket also gates the container
+	// image path, so disabling it to isolate a host-scan problem would take
+	// container SBOM offload down with it. Setting this false leaves the host
+	// on the in-process path (which carries its own parallelism cap) while
+	// container scans keep using the sidecar.
+	viper.SetDefault("hostSbomOffloadEnabled", true)
 	viper.SetDefault("standaloneMonitoringEnabled", false)
 	// HTTP Exporter Alert Bulking defaults
 	viper.SetDefault("exporters::httpExporterConfig::bulkMaxAlerts", 50)

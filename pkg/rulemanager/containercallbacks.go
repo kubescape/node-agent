@@ -44,8 +44,13 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 }
 
 func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) {
-	// check if the container should be ignored
-	if rm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+	// The host pseudo-container has no real Kubernetes namespace/pod, so
+	// generic ignore-list rules (an empty namespace colliding with
+	// cfg.NamespaceName, an IncludeNamespaces allow-list that doesn't list
+	// "", etc.) must never apply to it -- startRuleManager's own
+	// IsHostContainer bypass (rule_manager.go:220-231) is unreachable if this
+	// earlier, unconditional check already dropped the host event.
+	if !utils.IsHostContainer(notif.Container) && rm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return
 	}
 

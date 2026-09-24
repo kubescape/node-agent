@@ -15,12 +15,11 @@ func TestKubeProxyInfoSense(t *testing.T) {
 			name = "present"
 		}
 		t.Run(name, func(t *testing.T) {
-			old := hostFSPrefix
-			hostFSPrefix = t.TempDir()
-			t.Cleanup(func() { hostFSPrefix = old })
-			require.NoError(t, os.MkdirAll(filepath.Join(hostFSPrefix, "proc"), 0755))
+			prefix := t.TempDir()
+			t.Cleanup(SetHostFSPrefixForTest(prefix))
+			require.NoError(t, os.MkdirAll(filepath.Join(prefix, "proc"), 0755))
 			if present {
-				proc := filepath.Join(hostFSPrefix, "proc", "123")
+				proc := filepath.Join(prefix, "proc", "123")
 				require.NoError(t, os.MkdirAll(proc, 0755))
 				require.NoError(t, os.WriteFile(filepath.Join(proc, "cmdline"), []byte("/usr/bin/kube-proxy\x00--hostname-override=test-node\x00"), 0644))
 			}

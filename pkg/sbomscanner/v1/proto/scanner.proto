@@ -5,6 +5,7 @@ option go_package = "github.com/kubescape/node-agent/pkg/sbomscanner/v1/proto";
 
 service SBOMScanner {
   rpc CreateSBOM(CreateSBOMRequest) returns (CreateSBOMResponse);
+  rpc ScanHostFilesystem(ScanHostFilesystemRequest) returns (ScanHostFilesystemResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
 }
 
@@ -20,6 +21,34 @@ message CreateSBOMRequest {
 }
 
 message CreateSBOMResponse {
+  bytes sbom_document = 1;
+  int64 sbom_size = 2;
+}
+
+// ScanHostFilesystemRequest is deliberately minimal.
+//
+// There is no root_path: the sidecar resolves (and validates) its own HOST_ROOT
+// rather than trusting a path supplied by a peer container that resolved a
+// different env var. There are no exclude_globs: the host exclusion set is
+// compiled in (syftutil.HostExclusionPatterns) and shared by both processes.
+// There is no max_sbom_size: the size gate stays entirely client-side, so the
+// host SBOM state machine behaves identically regardless of which path
+// produced the document.
+message ScanHostFilesystemRequest {
+  // source_name is the Syft source alias name. It is not derivable inside the
+  // sidecar: it is the host SBOM's CR name, derived from the host identity that
+  // only node-agent resolves, and it feeds source.Alias, which Syft uses to
+  // derive the artifact's stable ID.
+  string source_name = 1;
+  bool enable_embedded_sboms = 2;
+  int64 timeout_seconds = 3;
+}
+
+// ScanHostFilesystemResponse carries no tool_version: node-agent's and the
+// sidecar's Syft version are the same expression resolved from the same
+// go.mod, so Spec.Metadata.Tool.Version is stamped from node-agent's own
+// version unconditionally on both paths.
+message ScanHostFilesystemResponse {
   bytes sbom_document = 1;
   int64 sbom_size = 2;
 }

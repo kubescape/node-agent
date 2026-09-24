@@ -243,9 +243,9 @@ func NewOTELMetricsManager(ownContainerID, ownPodUID string, hostCgroupMounted b
 	// SBOM scan buckets: covers 1s–15min (scans can take several minutes for large images).
 	sbomBuckets := []float64{1, 2, 5, 10, 30, 60, 120, 300, 600, 900}
 	m.sbomScanTotal = mustCounter("node_agent.sbom.scan.total",
-		"Total SBOM scan attempts by status (success/error/oom_killed)")
+		"Total SBOM scan attempts by status (success/error/timeout/oom_killed/busy/rejected/too_large) and path (in_process/sidecar)")
 	m.sbomScanDuration = mustHistogram("node_agent.sbom.scan.duration",
-		"SBOM scan duration by status", "s", sbomBuckets)
+		"SBOM scan duration by status and path (in_process/sidecar)", "s", sbomBuckets)
 	m.sbomRestarts = mustCounter("node_agent.sbom.scanner.restarts.total",
 		"Total SBOM scanner sidecar restarts detected via connection loss")
 	m.sbomReady = mustGauge("node_agent.sbom.scanner.ready",
@@ -539,12 +539,18 @@ func (m *OTELMetricsManager) ObserveProfileRetentionRatio(field string, ratio fl
 	))
 }
 
-func (m *OTELMetricsManager) ReportSBOMScan(status string) {
-	m.sbomScanTotal.Add(context.Background(), 1, metric.WithAttributes(attribute.String("status", status)))
+func (m *OTELMetricsManager) ReportSBOMScan(status, path string) {
+	m.sbomScanTotal.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("status", status),
+		attribute.String("path", path),
+	))
 }
 
-func (m *OTELMetricsManager) ObserveSBOMScanDuration(status string, d time.Duration) {
-	m.sbomScanDuration.Record(context.Background(), d.Seconds(), metric.WithAttributes(attribute.String("status", status)))
+func (m *OTELMetricsManager) ObserveSBOMScanDuration(status, path string, d time.Duration) {
+	m.sbomScanDuration.Record(context.Background(), d.Seconds(), metric.WithAttributes(
+		attribute.String("status", status),
+		attribute.String("path", path),
+	))
 }
 
 func (m *OTELMetricsManager) ReportSBOMScannerRestart() {

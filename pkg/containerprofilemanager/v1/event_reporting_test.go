@@ -39,7 +39,7 @@ func newTestManager(t *testing.T, containerID string) (*ContainerProfileManager,
 		containers: map[string]*ContainerEntry{},
 	}
 	entry := &ContainerEntry{data: &containerData{}}
-	cpm.addContainerEntry(containerID, entry)
+	cpm.addContainerEntryIfAbsent(containerID, entry)
 	return cpm, entry
 }
 

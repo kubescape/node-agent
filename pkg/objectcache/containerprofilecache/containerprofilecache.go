@@ -218,7 +218,14 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 	isHost := utils.IsHostContainer(notif.Container)
 	namespace := notif.Container.K8s.Namespace
 	if isHost {
-		namespace = "host"
+		// The host pseudo-container has no real backing namespace. Use
+		// node-agent's own deployment namespace (guaranteed to exist),
+		// matching where containerprofilemanager actually creates the CR
+		// (hostContainerWithIdentity, lifecycle.go) -- not the synthetic
+		// "host" identity label embedded in the Wlid/InstanceID, which is
+		// not a real Kubernetes namespace and would make GetContainerProfile
+		// below query a namespace that doesn't exist.
+		namespace = c.cfg.NamespaceName
 	}
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:

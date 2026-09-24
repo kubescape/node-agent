@@ -447,7 +447,7 @@ func (ns *NetworkStream) handleNetworkEvent(event utils.NetworkEvent, processTre
 // Callers must hold eventsStorageMutex for writing.
 func (ns *NetworkStream) entityForEventLocked(containerID string) (armotypes.NetworkStreamEntity, string, bool) {
 	entityID := containerID
-	if entityID == "" || entityID == armotypes.HostContainerID {
+	if entityID == "" || utils.IsHost(entityID) {
 		entityID = ns.nodeName
 	}
 
