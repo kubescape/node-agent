@@ -10,6 +10,7 @@ This document provides a comprehensive reference for all NodeAgent configuration
 - [Configuration File Options](#configuration-file-options)
   - [Core Settings](#core-settings)
   - [Feature Toggles](#feature-toggles)
+  - [Host Sensors](#host-sensors)
   - [Timing & Performance](#timing--performance)
   - [Filtering Options](#filtering-options)
   - [Exporter Configuration](#exporter-configuration)
@@ -162,6 +163,66 @@ correlation is an upgrade, not a dependency.
 | `ignoreRuleBindings` | bool | `false` | Apply all rules to all pods regardless of bindings. When enabled, RuntimeAlertRuleBinding objects are not watched, every monitored container is kept for runtime detection, and per-pod binding bookkeeping is skipped (rules are resolved directly from the rule creator). |
 
 SBOM failure reporting is opt-in. Setting `API_URL` or mounting `services.json` does not enable it. Once both SBOM generation and failure reporting are enabled, service discovery retains its existing local-file-first behavior and uses `API_URL` (or `api.armosec.io` when unset) only when no services file exists.
+
+### Host Sensors
+
+Host sensing is disabled by default (`hostSensorEnabled: false`). When enabled,
+`hostSensorInterval` defaults to `5m` and `hostSensorExcludedSensors` defaults to
+an empty list, so all host sensors run.
+
+For a cluster that intentionally replaces kube-proxy, exclude only its sensor:
+
+```json
+{
+  "hostSensorEnabled": true,
+  "hostSensorExcludedSensors": ["KubeProxyInfo"]
+}
+```
+
+Exclusions use exact, case-sensitive sensor kind names:
+`OsReleaseFile`, `KernelVersion`, `LinuxSecurityHardeningStatus`, `OpenPortsList`,
+`LinuxKernelVariables`, `KubeletInfo`, `KubeProxyInfo`, `ControlPlaneInfo`,
+`CloudProviderInfo`, and `CNIInfo`.
+
+Duplicate names are harmless. Unknown names (including empty entries) cause a
+startup configuration error listing valid names when host sensing is enabled.
+When host sensing is disabled, exclusion-name validation is skipped. Excluding
+all sensors is allowed: the manager starts normally but performs no sensing.
+
+Nonempty environment variables can also configure exclusions and override the JSON list:
+
+```bash
+HOSTSENSOREXCLUDEDSENSORS=KubeProxyInfo
+# Or exclude multiple sensors (comma-separated, without spaces):
+HOSTSENSOREXCLUDEDSENSORS=KubeProxyInfo,CNIInfo
+```
+
+An empty `HOSTSENSOREXCLUDEDSENSORS=` value is treated as unset and does not
+override exclusions from JSON. To clear exclusions, set the JSON
+`hostSensorExcludedSensors` list to `[]` and remove any nonempty environment
+override. Restart node-agent to apply the change.
+
+For Helm chart versions supporting the `nodeAgent.config.extra` passthrough, use:
+
+```yaml
+nodeAgent:
+  config:
+    hostSensor:
+      enabled: true
+    extra:
+      hostSensorExcludedSensors:
+        - KubeProxyInfo
+```
+
+Check that your chart renders `hostSensorExcludedSensors` into the node-agent
+ConfigMap's `config.json`; older chart versions may not support this passthrough.
+The node-agent image must also include support for this setting.
+
+Restart node-agent after enabling host sensing or changing exclusions. Exclusion
+prevents future sensing and status updates; existing host-data objects are neither
+deleted nor cleared and may contain stale data or error status. Other sensors
+continue running and reporting failures normally. Without an explicit exclusion,
+a missing kube-proxy process still produces a sensor failure.
 
 ### Timing & Performance
 
