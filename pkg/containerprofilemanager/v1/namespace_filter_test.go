@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerinstance "github.com/kubescape/k8s-interface/instanceidhandler/v1/containerinstance"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
@@ -42,7 +44,8 @@ func TestNamespaceFilterRapidProfileReadmission(t *testing.T) {
 		}
 	}
 	cache.SetSharedContainerData("running", shared())
-	manager, err := NewContainerProfileManager(t.Context(), cfg, &k8sclient.K8sClientMock{}, cache, &storage.StorageHttpClientMock{}, &dnsmanager.DNSManagerMock{}, &seccompmanager.SeccompManagerMock{}, nil, nil, nil)
+	store := &storage.StorageHttpClientMock{}
+	manager, err := NewContainerProfileManager(t.Context(), cfg, &k8sclient.K8sClientMock{}, cache, store, &dnsmanager.DNSManagerMock{}, &seccompmanager.SeccompManagerMock{}, nil, nil, nil)
 	require.NoError(t, err)
 	defer manager.Close()
 	container := &containercollection.Container{}
@@ -74,6 +77,12 @@ func TestNamespaceFilterRapidProfileReadmission(t *testing.T) {
 	}
 	notify(containercollection.EventTypeAddContainer)
 	initial := readyEntry(nil)
+	initial.mu.Lock()
+	// Ordinary admission observes startup and begins with a full profile.
+	initialCompletion := initial.data.watchedContainerData.GetCompletionStatus()
+	initial.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusReady)
+	initial.mu.Unlock()
+	require.Equal(t, objectcache.WatchedContainerCompletionStatusFull, initialCompletion)
 	write(true)
 	_, err = cfg.ReloadNamespaceFilter()
 	require.NoError(t, err)
@@ -91,6 +100,13 @@ func TestNamespaceFilterRapidProfileReadmission(t *testing.T) {
 	require.NoError(t, err)
 	notify(containercollection.EventTypeRemoveContainer)
 	require.Eventually(t, func() bool { _, ok := manager.getContainerEntry("running"); return !ok }, 3*time.Second, time.Millisecond)
+	// Exercise the real monitor termination and disk-backed delivery queue.
+	// Both learning sessions were cut short, including the one immediately readmitted.
+	require.Eventually(t, func() bool { return len(store.ContainerProfilesSnapshot()) == 2 }, 8*time.Second, 10*time.Millisecond)
+	for _, profile := range store.ContainerProfilesSnapshot() {
+		require.Equal(t, string(objectcache.WatchedContainerStatusCompleted), profile.Annotations[helpersv1.StatusMetadataKey])
+		require.Equal(t, string(objectcache.WatchedContainerCompletionStatusPartial), profile.Annotations[helpersv1.CompletionMetadataKey])
+	}
 }
 
 func TestNamespaceFilterLateAdmissionProducesPartialProfile(t *testing.T) {
@@ -109,6 +125,37 @@ func TestNamespaceFilterLateAdmissionProducesPartialProfile(t *testing.T) {
 			manager.setContainerData(&containercollection.Container{}, data)
 			defer data.UpdateDataTicker.Stop()
 			require.Equal(t, tc.want, data.GetCompletionStatus())
+		})
+	}
+}
+
+func TestNamespaceExclusionPreservesHostAndCompletedProfiles(t *testing.T) {
+	for _, tc := range []struct {
+		name, id  string
+		status    objectcache.WatchedContainerStatus
+		signalled bool
+	}{
+		{"active host", armotypes.HostContainerID, objectcache.WatchedContainerStatusReady, true},
+		{"completed host", armotypes.HostContainerID, objectcache.WatchedContainerStatusCompleted, true},
+		{"completed workload", "done", objectcache.WatchedContainerStatusCompleted, false},
+		{"too large workload", "large", objectcache.WatchedContainerStatusTooLarge, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := &objectcache.WatchedContainerData{SyncChannel: make(chan error, 1), AckChan: make(chan struct{}, 1)}
+			data.SetStatus(tc.status)
+			data.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusFull)
+			data.AckChan <- struct{}{}
+			entry := &ContainerEntry{ready: make(chan struct{}), data: &containerData{watchedContainerData: data}}
+			close(entry.ready)
+			manager := &ContainerProfileManager{containers: map[string]*ContainerEntry{tc.id: entry}}
+			container := &containercollection.Container{}
+			container.Runtime.ContainerID = tc.id
+			manager.deleteContainerWithReason(container, true)
+			require.Equal(t, objectcache.WatchedContainerCompletionStatusFull, data.GetCompletionStatus())
+			require.Equal(t, tc.signalled, len(data.SyncChannel) == 1)
+			if !tc.signalled {
+				require.Equal(t, tc.status, data.GetStatus())
+			}
 		})
 	}
 }

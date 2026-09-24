@@ -382,6 +382,10 @@ func (cpm *ContainerProfileManager) deleteContainerWithReason(container *contain
 					entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusTooLarge))
 
 		if monitoringActive {
+			if excluded && !isHost {
+				// Exclusion cuts learning short: preserve that fact in the final save.
+				entry.data.watchedContainerData.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial)
+			}
 			if isHost || excluded {
 				// Exclusion is a monitoring stop, not a container failure.
 				// The host pseudo-container has no real Kubernetes Pod, so
