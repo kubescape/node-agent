@@ -3213,9 +3213,8 @@ func Test_34_NetworkNeighborsCIDRCollapse(t *testing.T) {
 //
 // Why three containers: containers in a pod have separate mount namespaces and
 // therefore separate /dev/pts instances, so each trigger gets a pristine pts
-// index. That matters because pts indices are not reclaimed instantly -- with a
-// shared devpts a "single" exec can land on index >= 1 and make the phase-1
-// expectation below flap.
+// index. The test still holds a second PTY open to exercise both pts/0 and a
+// nonzero index, while tty_major makes both values unambiguous.
 func Test_35_ExecTTYFieldTest(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
@@ -3272,14 +3271,14 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 	t.Logf("holder holds %s", holderTTY)
 
 	// Confirm the environment really does hand out a nonzero index here. If this
-	// fails the assertions below would be testing nothing.
+	// fails the nonzero-index coverage below would be testing nothing.
 	out, _, err := wl.ExecIntoPod([]string{"tty"}, "c-conc")
 	require.NoError(t, err, "tty check in c-conc")
 	probeTTY := strings.TrimSpace(strings.ReplaceAll(out, "\r", ""))
 	t.Logf("concurrent probe sees %s", probeTTY)
 	require.True(t, strings.HasPrefix(probeTTY, "/dev/pts/"), "concurrent exec must get a terminal, got %q", probeTTY)
 	require.NotEqual(t, "/dev/pts/0", probeTTY,
-		"concurrent exec landed on pts/0; phase 1 cannot distinguish that from no terminal, so trigger C would prove nothing")
+		"concurrent exec must exercise a nonzero PTY index")
 
 	_, _, err = wl.ExecIntoPod(probe, "c-conc")
 	require.NoError(t, err, "concurrent-tty probe")
@@ -3303,10 +3302,9 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 		return n
 	}
 
-	// Wait on the *control* rule reaching all three containers. R9901 and R9902
-	// evaluate the same exec event, so once R9902 has arrived for a container the
-	// verdict on R9901 for that same event is already decided -- which is what
-	// makes the negative assertions below sound rather than merely un-elapsed.
+	// Wait until every positive rule result needed for the verdict has reached
+	// Alertmanager. Waiting only on the control rule can race asynchronous alert
+	// delivery for R9901 or R9903 and make the following assertions premature.
 	var alerts []testutils.Alert
 	require.Eventually(t, func() bool {
 		alerts, err = testutils.GetAlerts(ns.Name)
@@ -3315,33 +3313,38 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 		}
 		return count(alerts, "R9902", "c-none") > 0 &&
 			count(alerts, "R9902", "c-pts0") > 0 &&
-			count(alerts, "R9902", "c-conc") > 0
+			count(alerts, "R9902", "c-conc") > 0 &&
+			count(alerts, "R9901", "c-pts0") > 0 &&
+			count(alerts, "R9901", "c-conc") > 0 &&
+			count(alerts, "R9903", "c-none") > 0 &&
+			count(alerts, "R9903", "c-pts0") > 0 &&
+			count(alerts, "R9903", "c-conc") > 0
 	}, 180*time.Second, 5*time.Second,
-		"control rule R9902 must fire for all three probe execs -- if it does not, the trigger or the rule pipeline is broken, not the TTY field")
+		"positive TTY and field-presence rules must fire for all expected probe execs")
+	alerts, err = testutils.GetAlerts(ns.Name)
+	require.NoError(t, err, "final alert fetch")
 
 	t.Logf("alert counts: R9901 none=%d pts0=%d conc=%d | R9902 total=%d | R9903=%d R9904=%d",
 		count(alerts, "R9901", "c-none"), count(alerts, "R9901", "c-pts0"), count(alerts, "R9901", "c-conc"),
 		total(alerts, "R9902"), total(alerts, "R9903"), total(alerts, "R9904"))
 
-	// The feature: hasTty discriminates.
-	assert.Greater(t, count(alerts, "R9901", "c-conc"), 0,
-		"R9901 must fire for the exec that held a nonzero pts index -- this is the actual TTY-field proof")
+	// The feature: hasTty discriminates both TTY-bearing events from the
+	// genuinely terminal-free event, including the first /dev/pts/0 allocation.
 	assert.Equal(t, 0, count(alerts, "R9901", "c-none"),
 		"R9901 must not fire for an exec with no controlling terminal")
-	// Deliberate: phase 1 reads the ambiguous per-driver index, where 0 means
-	// both /dev/pts/0 and "no terminal". A single exec into a fresh container is
-	// pts/0 and so is invisible to hasTty. This is a known, documented
-	// limitation, not a bug -- do not "fix" this expectation. It flips when
-	// phase 2 lands (gadget emits tty_major/tty_minor).
-	assert.Equal(t, 0, count(alerts, "R9901", "c-pts0"),
-		"phase 1: an exec on pts/0 is indistinguishable from no terminal, so R9901 must stay silent here")
+	assert.Greater(t, count(alerts, "R9901", "c-pts0"), 0,
+		"R9901 must fire for an exec on /dev/pts/0")
+	assert.Greater(t, count(alerts, "R9901", "c-conc"), 0,
+		"R9901 must fire for an exec on a nonzero PTY index")
 
-	// has() presence testing is honest, and ttyMajor is registered rather than
-	// silently unresolvable. Exactly one of these two must fire.
-	assert.Equal(t, 0, total(alerts, "R9903"),
-		"R9903 must not fire: the pinned gadget does not emit tty_major, so has(event.ttyMajor) is false")
-	assert.Greater(t, total(alerts, "R9904"), 0,
-		"R9904 must fire: !has(event.ttyMajor) proves ttyMajor is a registered field that is honestly absent, not a compile failure")
+	// has() presence testing is honest: the backported gadget emits tty_major for
+	// all exec events, including no-TTY events whose value is zero.
+	for _, container := range []string{"c-none", "c-pts0", "c-conc"} {
+		assert.Greater(t, count(alerts, "R9903", container), 0,
+			"R9903 must fire for %s because ttyMajor is present", container)
+	}
+	assert.Equal(t, 0, total(alerts, "R9904"),
+		"R9904 must not fire: ttyMajor is present on every backported exec event")
 }
 
 // Test_36_MultiContainerPerContainerBinding shows per-container binding: a

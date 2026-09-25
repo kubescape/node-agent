@@ -47,6 +47,8 @@ func TestExecFields(t *testing.T) {
 			"sessionid",
 			"timestamp_raw",
 			"tty",
+			"tty_major",
+			"tty_minor",
 			"upper_layer",
 		},
 	}
