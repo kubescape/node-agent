@@ -209,8 +209,70 @@ SBOM failure reporting is opt-in. Setting `API_URL` or mounting `services.json` 
 |-----|------|---------|-------------|
 | `excludeNamespaces` | []string | `[]` | Namespaces to ignore |
 | `includeNamespaces` | []string | `[]` | Only monitor these namespaces |
+| `namespaceFilterFile` | string | `""` | Optional mounted JSON file for live namespace filtering; overrides the two static namespace lists |
 | `excludeLabels` | map[string][]string | `{}` | Pod labels to exclude |
 | `excludeJsonPaths` | []string | `[]` | JSON paths to exclude from profiles |
+
+#### Live namespace filtering
+
+By default, namespace filters are read only at startup. To enable live updates,
+set `namespaceFilterFile` in node-agent's startup configuration (or set
+`NAMESPACEFILTERFILE`):
+
+```json
+{
+  "namespaceFilterFile": "/etc/namespace-filter/filter.json"
+}
+```
+
+Mount a ConfigMap as a **directory volume**, without `subPath`, at
+`/etc/namespace-filter`. Its `filter.json` entry must contain both arrays:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: namespace-filter
+  namespace: kubescape
+data:
+  filter.json: |
+    {
+      "includeNamespaces": [],
+      "excludeNamespaces": ["kube-system", "payments"]
+    }
+```
+
+For example, removing `payments` from `excludeNamespaces` starts monitoring
+already-running containers in that namespace. Adding it back stops their
+monitoring and initiates normal manager cleanup, without restarting node-agent
+or those workloads. Existing reports are retained, and work already in flight
+may finish. Unrelated namespaces do not restart completed profiling sessions.
+Host monitoring and pod-label exclusions keep their existing behavior.
+
+The file is polled every five seconds **after Kubernetes propagates the ConfigMap
+volume update**. This is eventual, not immediate. Node-agent reopens the path to
+handle projected-volume symlink replacements. Discovery failures are retried;
+newer valid exclusions still take effect during retries. Runtime discovery has a
+30-second deadline and runs independently of filter polling, so a stalled runtime
+cannot block newer exclusions or shutdown. Containers admitted after namespace
+inclusion produce partial profiles because their earlier activity was not observed;
+this also respects the existing partial-profile generation setting.
+
+Both fields must be arrays of exact Kubernetes namespace names. A non-empty
+`includeNamespaces` list takes precedence over `excludeNamespaces`, matching
+static filtering. Use two empty arrays to monitor all otherwise eligible
+namespaces. Regexes, null/missing arrays, and unknown fields are rejected. An
+unreadable or invalid file prevents startup when the option is enabled; later
+invalid or missing files log a warning and retain the last valid settings.
+
+The option and file path are startup settings. Only the two lists in the
+referenced file reload. With this feature enabled, node-agent keeps Kubernetes
+metadata and rule bindings for excluded namespaces available so later admission
+does not depend on a pod update. Monitoring still respects the active filter.
+
+This implements the node-agent portion of `kubescape/helm-charts#664`. Creating
+and mounting the ConfigMap requires deployment configuration; this repository
+change does not configure other Kubescape components or modify the Helm chart.
 
 **Example filtering:**
 ```json

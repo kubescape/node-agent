@@ -53,16 +53,13 @@ func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEv
 	// allow-list that doesn't list "", etc.) must never apply to it, mirroring
 	// the IsHostContainer exemption already used elsewhere (rule_manager.go,
 	// malware_manager.go, sbom_manager.go).
-	if !utils.IsHostContainer(notif.Container) && cw.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+	if notif.Type == containercollection.EventTypeAddContainer && !utils.IsHostContainer(notif.Container) && cw.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		logger.L().Info("ContainerWatcher.containerCallback - container ignored",
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("podName", notif.Container.K8s.PodName),
 			helpers.String("containerID", notif.Container.Runtime.ContainerID))
-		// avoid loops when the container is being removed
-		if notif.Type == containercollection.EventTypeAddContainer {
-			// ignored containers must be dropped regardless of rule bindings / runtime detection
-			cw.removeContainer(notif.Container)
-		}
+		// Ignored containers must be dropped regardless of rule bindings.
+		cw.removeContainer(notif.Container)
 		return
 	}
 	// scale up the pool size if needed pkg/config/config.go:66
@@ -71,7 +68,14 @@ func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEv
 		helpers.String("namespace", notif.Container.K8s.Namespace),
 		helpers.String("podName", notif.Container.K8s.PodName),
 		helpers.Int("callbackCount", len(cw.callbacks)))
-	for _, callback := range cw.callbacks {
+	for i, callback := range cw.callbacks {
+		if cw.cfg.NamespaceFilterFile != "" {
+			// Preserve add/remove/re-add order for each receiver. Different
+			// receivers run independently: one may wait for another's metadata.
+			key := fmt.Sprintf("%d/%s", i, notif.Container.Runtime.ContainerID)
+			cw.lifecycleQueue.Submit(key, func() { callback(notif) })
+			continue
+		}
 		cw.pool.Submit(func() {
 			callback(notif)
 		}, utils.FuncName(callback))
@@ -109,8 +113,15 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 		}
 
 		// Set shared watched container data
-		go cw.setSharedWatchedContainerData(notif.Container)
+		if cw.cfg.NamespaceFilterFile != "" {
+			// The per-receiver lifecycle queue orders this write before removal,
+			// preventing an old async lookup from resurrecting deleted metadata.
+			cw.setSharedWatchedContainerData(notif.Container)
+		} else {
+			go cw.setSharedWatchedContainerData(notif.Container)
+		}
 	case containercollection.EventTypeRemoveContainer:
+		cw.lateAdmissions.Delete(notif.Container)
 		logger.L().Debug("ContainerWatcher.containerCallback - remove container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID),
@@ -126,6 +137,11 @@ func (cw *ContainerWatcher) setSharedWatchedContainerData(container *containerco
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
 	var sharedWatchedContainerData *objectcache.WatchedContainerData
 	err := backoff.Retry(func() error {
+		if cw.cfg.NamespaceFilterFile != "" &&
+			(cw.ctx.Err() != nil || cw.containerCollection.GetContainer(container.Runtime.ContainerID) != container ||
+				cw.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels)) {
+			return backoff.Permanent(fmt.Errorf("container no longer monitored"))
+		}
 		data, err := cw.getSharedWatchedContainerData(container)
 		if err != nil {
 			return err
@@ -150,14 +166,22 @@ func (cw *ContainerWatcher) setSharedWatchedContainerData(container *containerco
 	cw.objectCache.K8sObjectCache().SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 }
 
+// newWatchedContainerData records whether monitoring missed the container's start.
+func (cw *ContainerWatcher) newWatchedContainerData(container *containercollection.Container) objectcache.WatchedContainerData {
+	_, late := cw.lateAdmissions.Load(container)
+	return objectcache.WatchedContainerData{
+		ContainerID:         container.Runtime.ContainerID,
+		PodName:             container.K8s.PodName,
+		Namespace:           container.K8s.Namespace,
+		PreRunningContainer: time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(cw.agentStartTime),
+		LateAdmission:       late,
+		// ImageID and ImageTag come from the pod spec for consistency with operator.
+	}
+}
+
 // getSharedWatchedContainerData gets shared container data from Kubernetes
 func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*objectcache.WatchedContainerData, error) {
-	watchedContainer := objectcache.WatchedContainerData{
-		ContainerID: container.Runtime.ContainerID,
-		PodName:     container.K8s.PodName,
-		Namespace:   container.K8s.Namespace,
-		// we get ImageID and ImageTag from the pod spec for consistency with operator
-	}
+	watchedContainer := cw.newWatchedContainerData(container)
 
 	wl, err := cw.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
 	if err != nil {
@@ -226,8 +250,6 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 		return nil, fmt.Errorf("failed to get selector: %w", err)
 	}
 	watchedContainer.ParentWorkloadSelector = selector
-	preRunning := time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(cw.agentStartTime)
-	watchedContainer.PreRunningContainer = preRunning
 	// find instanceID - this has to be the last one
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod, cw.cfg.ExcludeJsonPaths)
 	if err != nil {

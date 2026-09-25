@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -585,4 +587,25 @@ func TestGetEphemeralContainers(t *testing.T) {
 		result := npm.getEphemeralContainers("default", "pod", nil, nil)
 		assert.Nil(t, result)
 	})
+}
+
+func TestNamespaceFilterNodeProfileUsesLatestSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "filter.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"includeNamespaces":[],"excludeNamespaces":["payments"]}`), 0600))
+	cfg := newTestConfig("http://localhost", "POST", 5)
+	cfg.NamespaceFilterFile = path
+	require.NoError(t, cfg.InitializeNamespaceFilter())
+	cache := &localK8sCache{pods: []*corev1.Pod{{Name: "pay", Namespace: "payments"}, {Name: "web", Namespace: "default"}}}
+	manager := NewNodeProfileManager(cfg, armometadata.ClusterConfig{}, "node", cache, rulemanager.CreateRuleManagerMock(), nil)
+	profile, err := manager.getProfile()
+	require.NoError(t, err)
+	require.Len(t, profile.PodStatuses, 1)
+	require.Equal(t, "default", profile.PodStatuses[0].Namespace)
+	require.NoError(t, os.WriteFile(path, []byte(`{"includeNamespaces":["payments"],"excludeNamespaces":[]}`), 0600))
+	_, err = cfg.ReloadNamespaceFilter()
+	require.NoError(t, err)
+	profile, err = manager.getProfile()
+	require.NoError(t, err)
+	require.Len(t, profile.PodStatuses, 1)
+	require.Equal(t, "payments", profile.PodStatuses[0].Namespace)
 }

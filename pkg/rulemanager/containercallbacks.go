@@ -50,7 +50,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 	// "", etc.) must never apply to it -- startRuleManager's own
 	// IsHostContainer bypass (rule_manager.go:220-231) is unreachable if this
 	// earlier, unconditional check already dropped the host event.
-	if !utils.IsHostContainer(notif.Container) && rm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+	if notif.Type == containercollection.EventTypeAddContainer && !utils.IsHostContainer(notif.Container) && rm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return
 	}
 

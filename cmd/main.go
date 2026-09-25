@@ -232,6 +232,9 @@ func main() {
 
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.GetStorageClient(), cfg.SkipNamespace)
+	if cfg.NamespaceFilterFile != "" {
+		dWatcher.EnableDynamicNamespaceFiltering()
+	}
 	k8sObjectCache, err := k8scache.NewK8sObjectCache(cfg.NodeName, k8sClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))

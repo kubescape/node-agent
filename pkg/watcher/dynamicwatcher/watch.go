@@ -37,12 +37,13 @@ type resourceVersionGetter interface {
 type SkipNamespaceFunc func(string) bool
 
 type WatchHandler struct {
-	k8sClient         k8sclient.K8sClientInterface
-	storageClient     spdxv1beta1.SpdxV1beta1Interface
-	resources         map[string]watcher.WatchResource
-	eventQueues       map[string]*cooldownqueue.CooldownQueue[watch.Event]
-	handlers          []watcher.Watcher
-	skipNamespaceFunc SkipNamespaceFunc
+	k8sClient                 k8sclient.K8sClientInterface
+	storageClient             spdxv1beta1.SpdxV1beta1Interface
+	resources                 map[string]watcher.WatchResource
+	eventQueues               map[string]*cooldownqueue.CooldownQueue[watch.Event]
+	handlers                  []watcher.Watcher
+	skipNamespaceFunc         SkipNamespaceFunc
+	dynamicNamespaceFiltering bool
 }
 
 var errWatchClosed = errors.New("watch channel closed")
@@ -56,6 +57,30 @@ func NewWatchHandler(k8sClient k8sclient.K8sClientInterface, storageClient spdxv
 		eventQueues:       make(map[string]*cooldownqueue.CooldownQueue[watch.Event]),
 		skipNamespaceFunc: skipNamespaceFunc,
 	}
+}
+
+// EnableDynamicNamespaceFiltering retains metadata for excluded namespaces.
+// Monitoring remains gated by Config; metadata must be ready when a namespace
+// is included later, even if its existing pods never emit another update.
+// Call before Start.
+func (wh *WatchHandler) EnableDynamicNamespaceFiltering() {
+	wh.dynamicNamespaceFiltering = true
+	wh.skipNamespaceFunc = func(string) bool { return false }
+}
+
+// seedPods initializes node-local pod metadata and returns the LIST's resource
+// version, so the following watch does not miss changes during initialization.
+func (wh *WatchHandler) seedPods(ctx context.Context, options metav1.ListOptions) (string, error) {
+	pods, err := wh.k8sClient.GetKubernetesClient().CoreV1().Pods("").List(ctx, options)
+	if err != nil {
+		return "", err
+	}
+	for i := range pods.Items {
+		for _, handler := range wh.handlers {
+			handler.AddHandler(ctx, &pods.Items[i])
+		}
+	}
+	return pods.ResourceVersion, nil
 }
 
 func (wh *WatchHandler) AddAdaptor(adaptor watcher.Adaptor) {
@@ -76,7 +101,7 @@ func (wh *WatchHandler) Start(ctx context.Context) {
 
 	for k, v := range wh.resources {
 		go func(r string, w watcher.WatchResource) {
-			if err := wh.watch(ctx, w, wh.eventQueues[r]); err != nil {
+			if err := wh.watch(ctx, w, wh.eventQueues[r]); err != nil && ctx.Err() == nil {
 				logger.L().Fatal("WatchHandler - failed to watch resource", helpers.Error(err), helpers.String("resource", r))
 			}
 		}(k, v)
@@ -115,6 +140,16 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 			}); err != nil {
 				return fmt.Errorf("giving up get existing objects: %w", err)
 			}
+		}
+	}
+
+	if wh.dynamicNamespaceFiltering && res.Group == "" && res.Resource == "pods" {
+		if err := backoff.Retry(func() error {
+			var err error
+			opt.ResourceVersion, err = wh.seedPods(ctx, opt)
+			return err
+		}, backoff.WithContext(newBackOff(), ctx)); err != nil {
+			return err
 		}
 	}
 

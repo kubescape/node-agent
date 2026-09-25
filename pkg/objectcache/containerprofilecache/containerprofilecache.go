@@ -150,6 +150,7 @@ type ContainerProfileCacheImpl struct {
 	// removalPending marks containers whose remove callback fired and whose
 	// deferred deletion is scheduled; reconcileOnce must not evict them early.
 	removalPending maps.SafeMap[string, time.Time]
+	removalMu      sync.Mutex
 
 	// Projection spec — installed by SetProjectionSpec when rulemanager loads rules.
 	currentSpecMu  sync.RWMutex
@@ -232,6 +233,9 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 		if !isHost && c.cfg.IgnoreContainer(namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
+		c.removalMu.Lock()
+		c.removalPending.Delete(notif.Container.Runtime.ContainerID)
+		c.removalMu.Unlock()
 		container := notif.Container
 		if isHost {
 			containerCopy := *notif.Container
@@ -253,10 +257,25 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 		// ProfileDependency=Required rules suppress those events as
 		// profile_incomplete (issue #79).
 		containerID := notif.Container.Runtime.ContainerID
-		c.removalPending.Set(containerID, time.Now())
+		removedAt := time.Now()
+		c.removalMu.Lock()
+		c.removalPending.Set(containerID, removedAt)
+		c.removalMu.Unlock()
 		time.AfterFunc(c.removalGrace, func() {
-			c.removalPending.Delete(containerID)
-			c.deleteContainer(containerID)
+			// Registration can wait for shared metadata while holding this lock.
+			// Never hold removalMu during that wait: other containers must proceed.
+			c.containerLocks.WithLock(containerID, func() {
+				c.removalMu.Lock()
+				defer c.removalMu.Unlock()
+				if current, ok := c.removalPending.Load(containerID); !ok || current != removedAt {
+					return // Readmitted while waiting, or a newer removal owns cleanup.
+				}
+				c.removalPending.Delete(containerID)
+				c.entries.Delete(containerID)
+				c.pending.Delete(containerID)
+			})
+			c.metricsManager.SetContainerProfileCacheEntries("container", float64(c.entries.Len()))
+			c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))
 		})
 	}
 }

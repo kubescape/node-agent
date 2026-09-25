@@ -100,3 +100,27 @@ func TestWaitForSharedContainerData_HostResolves(t *testing.T) {
 	assert.Equal(t, "wlid://cluster-unknown/namespace-host/host-node-1", data.Wlid,
 		"the caller stores sharedData.Wlid; an empty one would be silently dropped")
 }
+
+func TestNamespaceFilterRemovalCleansRuleState(t *testing.T) {
+	rm := newTestRuleManager(t.Context())
+	rm.cfg = config.Config{ExcludeNamespaces: []string{"payments"}}
+	c := &containercollection.Container{}
+	c.Runtime.ContainerID = "excluded-container"
+	c.K8s.Namespace = "payments"
+	c.K8s.PodName = "pay"
+	c.K8s.ContainerName = "app"
+	key := utils.CreateK8sContainerID("payments", "pay", "app")
+	done := make(chan struct{})
+	rm.trackedContainers.Add(key)
+	rm.trackedContainerDone.Set(key, done)
+	rm.containerIdToPid.Set(c.Runtime.ContainerID, 42)
+	rm.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeRemoveContainer, Container: c})
+	require.False(t, rm.trackedContainers.Contains(key))
+	select {
+	case <-done:
+	default:
+		t.Fatal("rule monitor was not stopped")
+	}
+	_, hasPID := rm.containerIdToPid.Load(c.Runtime.ContainerID)
+	require.False(t, hasPID)
+}

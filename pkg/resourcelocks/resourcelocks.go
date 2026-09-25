@@ -16,9 +16,11 @@ type ResourceLocks struct {
 
 // New creates a new ResourceLocks instance
 func New() *ResourceLocks {
-	return &ResourceLocks{
-		locks: maps.SafeMap[string, *sync.Mutex]{},
-	}
+	rl := &ResourceLocks{}
+	// SafeMap v1.3.0 reads its backing-map pointer before acquiring its lock.
+	// Initialize it before concurrent GetLock calls can race with the first Set.
+	rl.locks.Copy(maps.StdMap[string, *sync.Mutex]{})
+	return rl
 }
 
 // GetLock returns a mutex for the given resource ID, creating one if it doesn't exist
