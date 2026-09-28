@@ -63,14 +63,22 @@ struct {
     __type(value, struct http_continuation);
 } http_continuations SEC(".maps");
 
-// Bounded diagnostic counters: capture cap, ring reservation, user-memory read.
+// Per-CPU diagnostics avoid cross-CPU contention on the syscall hot path.
+// Readers sum CPU slots for each reason: cap, ring reservation, user read.
 enum http_capture_loss { HTTP_LOSS_LIMIT, HTTP_LOSS_RESERVE, HTTP_LOSS_READ, HTTP_LOSS_COUNT };
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, HTTP_LOSS_COUNT);
     __type(key, __u32);
     __type(value, __u64);
 } capture_loss SEC(".maps");
+// Diagnostic-only per-CPU counters; readers sum CPU slots per reason.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, HTTP_CONTINUATION_STAT_COUNT);
+    __type(key, __u32);
+    __type(value, __u64);
+} continuation_stats SEC(".maps");
 
 static __always_inline __u64 min_size(__u64 a, __u64 b) {
     return a < b ? a : b;
@@ -235,6 +243,13 @@ static __always_inline int get_http_type(struct syscall_trace_exit *ctx, void *d
     return 0;
 }
 
+static __always_inline void count_continuation_stat(__u32 reason)
+{
+    __u64 *counter = bpf_map_lookup_elem(&continuation_stats, &reason);
+    if (counter)
+        (*counter)++;
+}
+
 // resolve_http_type recognizes a message start or continues a recently seen
 // message on the same socket direction. Userspace owns HTTP framing and drops
 // data outside its own message boundary; this map only prevents body-only
@@ -260,23 +275,40 @@ static __always_inline int resolve_http_type(struct syscall_trace_exit *ctx, __u
             .remaining_bytes = HTTP_CONTINUATION_MAX_BYTES,
             .type = type,
         };
-        if (total_size >= continuation.remaining_bytes)
+        if (total_size >= continuation.remaining_bytes) {
+            count_continuation_stat(HTTP_CONTINUATION_BUDGET_EXHAUSTED);
             bpf_map_delete_elem(&http_continuations, &key);
-        else {
+        } else {
             continuation.remaining_bytes -= total_size;
-            bpf_map_update_elem(&http_continuations, &key, &continuation, BPF_ANY);
+            if (bpf_map_update_elem(&http_continuations, &key, &continuation, BPF_ANY))
+                count_continuation_stat(HTTP_CONTINUATION_STORE_FAILED);
         }
         return type;
     }
 
     struct http_continuation *continuation = bpf_map_lookup_elem(&http_continuations, &key);
-    if (!continuation)
+    if (!continuation) {
+        count_continuation_stat(HTTP_CONTINUATION_MISS);
         return 0;
-    if (now > continuation->expires_at_ns || total_size >= continuation->remaining_bytes) {
+    }
+    if (now > continuation->expires_at_ns) {
+        count_continuation_stat(HTTP_CONTINUATION_EXPIRED);
+        bpf_map_delete_elem(&http_continuations, &key);
+        return 0;
+    }
+    if (total_size > continuation->remaining_bytes) {
+        count_continuation_stat(HTTP_CONTINUATION_BUDGET_EXHAUSTED);
         bpf_map_delete_elem(&http_continuations, &key);
         return 0;
     }
 
+    // Forward the last bytes inside the budget before retiring the direction.
+    int continuation_type = continuation->type;
+    if (total_size == continuation->remaining_bytes) {
+        count_continuation_stat(HTTP_CONTINUATION_BUDGET_EXHAUSTED);
+        bpf_map_delete_elem(&http_continuations, &key);
+        return continuation_type;
+    }
     continuation->remaining_bytes -= total_size;
     // This is an idle timeout, not an absolute deadline: a streaming HTTP
     // response can legitimately run longer than the timeout while continuing
@@ -297,7 +329,7 @@ static __always_inline void capture_failed(__u32 sockfd, bool is_rx, __u32 reaso
     bpf_map_delete_elem(&http_continuations, &key);
     __u64 *count = bpf_map_lookup_elem(&capture_loss, &reason);
     if (count)
-        __sync_fetch_and_add(count, 1);
+        (*count)++;
 }
 
 static __always_inline void capture_read_failed(__u32 sockfd, bool is_rx, bool tracked)
@@ -459,6 +491,9 @@ static __always_inline int pre_process_msg(struct syscall_trace_enter *ctx)
     struct packet_msg write_args = {};
     write_args.fd = sockfd;
 
+    // A failed argument read must not leave a previous syscall available to
+    // the exit probe. In particular, receive peeks intentionally skip entry.
+    bpf_map_delete_elem(&msg_packets, &id);
     struct user_msghdr msghdr = {};
     if (bpf_probe_read_user(&msghdr, sizeof(msghdr), (void *)ctx->args[1]) != 0)
     {
@@ -610,8 +645,11 @@ int sys_enter_recvfrom(struct syscall_trace_enter *ctx)
         return 0;
     }
 
-    if (is_msg_peek(ctx->args[3]))
+    if (is_msg_peek(ctx->args[3])) {
+        __u64 id = bpf_get_current_pid_tgid();
+        bpf_map_delete_elem(&buffer_packets, &id);
         return 0;
+    }
     pre_receive_syscalls(ctx);
     return 0;
 }
@@ -634,8 +672,11 @@ int syscall__probe_entry_recvmsg(struct syscall_trace_enter *ctx)
         return 0;
     }
 
-    if (is_msg_peek(ctx->args[2]))
+    if (is_msg_peek(ctx->args[2])) {
+        __u64 id = bpf_get_current_pid_tgid();
+        bpf_map_delete_elem(&msg_packets, &id);
         return 0;
+    }
     pre_process_msg(ctx);
     return 0;
 }

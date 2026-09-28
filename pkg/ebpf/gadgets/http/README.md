@@ -60,9 +60,11 @@ those transferred bytes once, independently of chunking.
 Reservation failures, user-memory copy failures and work-limit exhaustion stop
 capture for that syscall and invalidate its direction's continuation entry.
 Later body-only data is suppressed until another HTTP start is recognized. The
-`capture_loss` array contains cumulative counts of failed known-HTTP captures:
+`capture_loss` per-CPU array contains cumulative counts of failed known-HTTP captures:
 index 0 is work-limit exhaustion, 1 is reservation failure, 2 is user-memory read
-failure. These are capture failures, not counts of lost bytes or HTTP messages.
+failure. Readers sum all possible CPU slots per reason; local counter increments
+avoid cross-CPU contention. Keys remain `u32`, with one `u64` value per CPU.
+These are capture failures, not counts of lost bytes or HTTP messages.
 
 The existing event ABI has no cumulative offsets or explicit loss marker. This
 change prevents subsequent chunks in a failed syscall from bridging a hole, but

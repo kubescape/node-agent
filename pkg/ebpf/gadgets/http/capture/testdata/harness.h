@@ -14,7 +14,7 @@ typedef uint64_t __u64;
 typedef uint64_t gadget_timestamp;
 #define SEC(s)
 #define __noinline __attribute__((noinline))
-#define __uint(name, value) int *name
+#define __uint(name, value) int (*name)[value]
 #define __type(name, value) value *name
 #define BPF_MAP_TYPE_LRU_HASH 1
 #define BPF_MAP_TYPE_ARRAY 2
@@ -59,7 +59,8 @@ static void *gadget_reserve_buf(void *map, size_t n) { (void)map; if (++reserve_
 static void gadget_discard_buf(void *e) { free(e); reserved=NULL; }
 static void gadget_submit_buf(void *, void *, void *, size_t);
 static struct entry { void *map; size_t keylen; unsigned char key[32]; union { __u64 align; unsigned char bytes[256]; } value; } entries[32];
-static __u64 losses[3];
+static __u64 losses[3], other_cpu_losses[3];
+static unsigned current_cpu;
 static void *lookup(void *map, const void *key, size_t keylen);
 static int update(void *map, const void *key, size_t keylen, const void *v, size_t n) {
     for (int i=0;i<32;i++) if (entries[i].map==map && !memcmp(entries[i].key,key,keylen)) { memcpy(entries[i].value.bytes,v,n); return 0; }
