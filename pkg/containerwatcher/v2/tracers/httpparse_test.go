@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const bpfBufSize = 4096 // MAX_DATAEVENT_BUFFER in program.h
+const bpfBufSize = 16 * 1024 // MAX_DATAEVENT_BUFFER in program.h
 
 // makeBPFBuffer simulates a BPF ring-buffer slot: real HTTP data followed by
 // uninitialised memory (0xFF bytes with no null terminator).
@@ -38,7 +38,7 @@ func TestFromCString(t *testing.T) {
 	})
 }
 
-// TestBPFBufferGarbageRequest simulates the real bug: BPF submits a 4096-byte
+// TestBPFBufferGarbageRequest simulates the real bug: BPF submits a 16 KiB
 // struct where only the first N bytes contain valid HTTP data and the rest is
 // uninitialised memory with no null terminator.
 func TestBPFBufferGarbageRequest(t *testing.T) {

@@ -105,8 +105,8 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 
 	// Set body directly without re-reading.
 	// Use Content-Length (when present) to discard trailing garbage from the
-	// fixed-size BPF ring-buffer.  The kernel-side gadget submits the entire
-	// 4 KiB struct regardless of how many bytes were actually captured, so
+	// fixed-size BPF ring-buffer. The kernel-side gadget submits the entire
+	// 16 KiB struct regardless of how many bytes were actually captured, so
 	// everything past the real payload is uninitialised memory.
 	bodyData := data[headerEnd:]
 	if len(req.TransferEncoding) > 0 && req.TransferEncoding[0] == "chunked" {

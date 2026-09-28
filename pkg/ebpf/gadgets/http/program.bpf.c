@@ -6,6 +6,10 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
 
+// The perf-buffer fallback allocates this many bytes per CPU event slot. Keep
+// it above the 16 KiB httpevent ABI before gadget/buffer.h consumes the macro.
+#define GADGET_MAX_EVENT_SIZE (20 * 1024)
+
 // Inspektor Gadget buffer
 #include <gadget/buffer.h>
 
@@ -26,8 +30,8 @@
 
 #include "program.h"
 
-// events is the name of the buffer map and 1024 * 256 (256KB) is its size.
-GADGET_TRACER_MAP(events, 1024 * 256);
+// A 1 MiB ring preserves approximately the pre-16-KiB event burst capacity.
+GADGET_TRACER_MAP(events, 1024 * 1024);
 
 // Define a tracer
 GADGET_TRACER(http, events, httpevent);
