@@ -48,6 +48,17 @@ struct {
     __type(value, struct packet_msg);
 } msg_packets SEC(".maps");
 
+// Tracks an HTTP request/response direction after its start line has been
+// observed. The next write/read frequently contains only body bytes, which do
+// not start with an HTTP method or status line and therefore cannot be
+// classified independently.
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 16384);
+    __type(key, struct http_continuation_key);
+    __type(value, struct http_continuation);
+} http_continuations SEC(".maps");
+
 static __always_inline __u64 min_size(__u64 a, __u64 b) {
     return a < b ? a : b;
 }
@@ -55,6 +66,36 @@ static __always_inline __u64 min_size(__u64 a, __u64 b) {
 static __always_inline bool is_msg_peek(__u32 flags)
 {
     return flags & MSG_PEEK;
+}
+
+static __always_inline __u64 get_socket_inode(__u32 sockfd)
+{
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task)
+        return 0;
+
+    struct files_struct *files = BPF_CORE_READ(task, files);
+    if (!files)
+        return 0;
+
+    struct fdtable *fdt = BPF_CORE_READ(files, fdt);
+    if (!fdt)
+        return 0;
+
+    struct file **fd_array = BPF_CORE_READ(fdt, fd);
+    if (!fd_array)
+        return 0;
+
+    struct file *file_ptr;
+    bpf_probe_read(&file_ptr, sizeof(file_ptr), &fd_array[sockfd]);
+    if (!file_ptr)
+        return 0;
+
+    struct inode *inode_ptr = BPF_CORE_READ(file_ptr, f_inode);
+    if (!inode_ptr)
+        return 0;
+
+    return BPF_CORE_READ(inode_ptr, i_ino);
 }
 
 // is_rx: true if this is an inbound packet (read/recv), false if outbound (write/send)
@@ -92,10 +133,7 @@ static __always_inline int populate_httpevent(struct httpevent *event, __u32 soc
         goto out;
 
     // Get socket inode from file->f_inode->i_ino
-    struct inode *inode_ptr = BPF_CORE_READ(file_ptr, f_inode);
-    if (inode_ptr) {
-        event->socket_inode = BPF_CORE_READ(inode_ptr, i_ino);
-    }
+    event->socket_inode = get_socket_inode(sockfd);
 
     // Get socket from file->private_data
     struct socket *sock = BPF_CORE_READ(file_ptr, private_data);
@@ -174,6 +212,52 @@ static __always_inline int get_http_type(struct syscall_trace_exit *ctx, void *d
     return 0;
 }
 
+// resolve_http_type recognizes a message start or continues a recently seen
+// message on the same socket direction. Userspace owns HTTP framing and drops
+// data outside its own message boundary; this map only prevents body-only
+// syscalls from being discarded before userspace can see them.
+static __always_inline int resolve_http_type(struct syscall_trace_exit *ctx, __u32 sockfd,
+                                              bool is_rx, void *data, int size,
+                                              __u32 total_size)
+{
+    int type = get_http_type(ctx, data, size);
+    __u64 socket_inode = get_socket_inode(sockfd);
+    if (!socket_inode)
+        return type;
+
+    struct http_continuation_key key = {
+        .socket_inode = socket_inode,
+        .is_rx = is_rx,
+    };
+    __u64 now = bpf_ktime_get_boot_ns();
+
+    if (type) {
+        struct http_continuation continuation = {
+            .expires_at_ns = now + HTTP_CONTINUATION_TTL_NS,
+            .remaining_bytes = HTTP_CONTINUATION_MAX_BYTES,
+            .type = type,
+        };
+        if (total_size >= continuation.remaining_bytes)
+            bpf_map_delete_elem(&http_continuations, &key);
+        else {
+            continuation.remaining_bytes -= total_size;
+            bpf_map_update_elem(&http_continuations, &key, &continuation, BPF_ANY);
+        }
+        return type;
+    }
+
+    struct http_continuation *continuation = bpf_map_lookup_elem(&http_continuations, &key);
+    if (!continuation)
+        return 0;
+    if (now > continuation->expires_at_ns || total_size >= continuation->remaining_bytes) {
+        bpf_map_delete_elem(&http_continuations, &key);
+        return 0;
+    }
+
+    continuation->remaining_bytes -= total_size;
+    return continuation->type;
+}
+
 // Store the arguments of the receive syscalls in a map
 static void inline pre_receive_syscalls(struct syscall_trace_enter *ctx)
 {
@@ -211,7 +295,8 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
     if (read_size < 0)
         return 0;
 
-    int type = get_http_type(ctx, buf, min_size(total_size, PACKET_CHUNK_SIZE));
+    int type = resolve_http_type(ctx, packet->sockfd, is_rx, buf,
+                                 min_size(total_size, PACKET_CHUNK_SIZE), total_size);
     if (!type)
         return 0;
 
@@ -298,7 +383,7 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
         if (ret < 0)
             break;
 
-        int type = get_http_type(ctx, buffer, seg_len);
+        int type = resolve_http_type(ctx, msg->fd, is_rx, buffer, seg_len, iov.iov_len);
         if (type)
         {
             seg_len = iov.iov_len;
