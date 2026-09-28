@@ -63,6 +63,15 @@ struct {
     __type(value, struct http_continuation);
 } http_continuations SEC(".maps");
 
+// Bounded diagnostic counters: capture cap, ring reservation, user-memory read.
+enum http_capture_loss { HTTP_LOSS_LIMIT, HTTP_LOSS_RESERVE, HTTP_LOSS_READ, HTTP_LOSS_COUNT };
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, HTTP_LOSS_COUNT);
+    __type(key, __u32);
+    __type(value, __u64);
+} capture_loss SEC(".maps");
+
 static __always_inline __u64 min_size(__u64 a, __u64 b) {
     return a < b ? a : b;
 }
@@ -102,8 +111,18 @@ static __always_inline __u64 get_socket_inode(__u32 sockfd)
     return BPF_CORE_READ(inode_ptr, i_ino);
 }
 
+// Metadata is constant throughout one syscall. Resolve it once rather than
+// repeating the process/socket walk for every captured payload chunk.
+struct http_metadata {
+    gadget_timestamp timestamp_raw;
+    struct gadget_process proc;
+    struct gadget_l4endpoint_t src;
+    struct gadget_l4endpoint_t dst;
+    __u64 socket_inode;
+};
+
 // is_rx: true if this is an inbound packet (read/recv), false if outbound (write/send)
-static __always_inline int populate_httpevent(struct httpevent *event, __u32 sockfd, bool is_rx)
+static __noinline int populate_http_metadata(struct http_metadata *event, __u32 sockfd, bool is_rx)
 {
     if (!event)
         return -1;
@@ -266,6 +285,115 @@ static __always_inline int resolve_http_type(struct syscall_trace_exit *ctx, __u
     return continuation->type;
 }
 
+// A failed chunk must not be followed by later bytes from this syscall or by
+// body-only continuations. The unchanged event ABI has no offset/loss marker;
+// userspace can still only recognize the incomplete body when it closes it.
+static __always_inline void capture_failed(__u32 sockfd, bool is_rx, __u32 reason)
+{
+    struct http_continuation_key key = {
+        .socket_inode = get_socket_inode(sockfd),
+        .is_rx = is_rx,
+    };
+    bpf_map_delete_elem(&http_continuations, &key);
+    __u64 *count = bpf_map_lookup_elem(&capture_loss, &reason);
+    if (count)
+        __sync_fetch_and_add(count, 1);
+}
+
+static __always_inline void capture_read_failed(__u32 sockfd, bool is_rx, bool tracked)
+{
+    struct http_continuation_key key = {
+        .socket_inode = get_socket_inode(sockfd),
+        .is_rx = is_rx,
+    };
+    if (tracked || bpf_map_lookup_elem(&http_continuations, &key))
+        capture_failed(sockfd, is_rx, HTTP_LOSS_READ);
+}
+
+// Share a total byte budget across all iovecs; a large vector count must not
+// multiply the per-syscall work bound. Classify and charge continuation bytes
+// once at the caller, not once per chunk.
+struct payload_args {
+    char syscall[MAX_SYSCALL];
+    __u32 sockfd;
+    int type;
+    bool is_rx;
+    struct http_metadata meta;
+    __u64 remaining, actual_len, offset, base;
+    __u32 index, captured;
+};
+
+// Syscall tracepoints execute without preemption. Keep the per-call metadata
+// off the BPF stack so vector traversal stays within the 512-byte stack limit.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct payload_args);
+} payload_scratch SEC(".maps");
+
+static __always_inline struct payload_args *payload_context(char *syscall, __u32 sockfd, bool is_rx)
+{
+    __u32 zero = 0;
+    struct payload_args *args = bpf_map_lookup_elem(&payload_scratch, &zero);
+    if (!args)
+        return 0;
+    __builtin_memset(args, 0, sizeof(*args));
+    args->sockfd = sockfd;
+    args->is_rx = is_rx;
+    bpf_probe_read_str(args->syscall, sizeof(args->syscall), syscall);
+    return args;
+}
+
+static __noinline int emit_chunk(struct syscall_trace_exit *ctx, struct payload_args *args,
+                                 __u64 buf, __u32 size)
+{
+    // Give both the compiler and verifier an explicit event bound.
+    if (size > MAX_DATAEVENT_BUFFER)
+        return -1;
+    struct httpevent *event = gadget_reserve_buf(&events, sizeof(*event));
+    if (!event) {
+        capture_failed(args->sockfd, args->is_rx, HTTP_LOSS_RESERVE);
+        return -1;
+    }
+    if (bpf_probe_read_user(event->buf, size, (void *)buf)) {
+        gadget_discard_buf(event);
+        capture_failed(args->sockfd, args->is_rx, HTTP_LOSS_READ);
+        return -1;
+    }
+    event->timestamp_raw = args->meta.timestamp_raw;
+    event->proc = args->meta.proc;
+    event->src = args->meta.src;
+    event->dst = args->meta.dst;
+    event->socket_inode = args->meta.socket_inode;
+    event->type = args->type;
+    event->sock_fd = args->sockfd;
+    event->buf_len = size;
+    bpf_probe_read_str(event->syscall, sizeof(event->syscall), args->syscall);
+    gadget_submit_buf(ctx, &events, event, sizeof(*event));
+    return 0;
+}
+
+static __noinline int emit_payload(struct syscall_trace_exit *ctx, struct payload_args *args,
+                                        const void *buf, __u64 len)
+{
+    __u64 offset = 0;
+    #pragma unroll
+    for (int i = 0; i < HTTP_MAX_CHUNKS; i++) {
+        if (offset >= len)
+            return 0;
+        __u32 size = min_size(len - offset, MAX_DATAEVENT_BUFFER);
+        if (emit_chunk(ctx, args, (__u64)buf + offset, size))
+            return -1;
+        offset += size;
+    }
+    if (offset < len) {
+        capture_failed(args->sockfd, args->is_rx, HTTP_LOSS_LIMIT);
+        return -1;
+    }
+    return 0;
+}
+
 // Store the arguments of the receive syscalls in a map
 static void inline pre_receive_syscalls(struct syscall_trace_enter *ctx)
 {
@@ -300,34 +428,23 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
         return 0;
 
     int read_size = bpf_probe_read_user(buf, min_size(packet->len, PACKET_CHUNK_SIZE), (void *)packet->buf);
-    if (read_size < 0)
+    if (read_size < 0) {
+        capture_read_failed(packet->sockfd, is_rx, false);
+        bpf_map_delete_elem(&buffer_packets, &id);
         return 0;
+    }
 
     int type = resolve_http_type(ctx, packet->sockfd, is_rx, buf,
                                  min_size(total_size, PACKET_CHUNK_SIZE), total_size);
     if (!type)
         return 0;
 
-    struct httpevent *dataevent = gadget_reserve_buf(&events, sizeof(*dataevent));
-    if (!dataevent)
-        return 0;
-
-    // Populate event with socket inode for tracking
-    // Pass is_rx to determine src/dst
-    populate_httpevent(dataevent, packet->sockfd, is_rx);
-
-    dataevent->type = type;
-    dataevent->sock_fd = packet->sockfd;
-
-    bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
-
-    __u64 buf_copy_len = min_size(total_size, MAX_DATAEVENT_BUFFER);
-    dataevent->buf_len = (__u16)buf_copy_len;
-    bpf_probe_read_user(&dataevent->buf, buf_copy_len, (void *)packet->buf);
-
-    dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
-
-    gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
+    struct payload_args *args = payload_context(syscall, packet->sockfd, is_rx);
+    if (args) {
+        args->type = type;
+        populate_http_metadata(&args->meta, args->sockfd, args->is_rx);
+        emit_payload(ctx, args, (void *)packet->buf, total_size);
+    }
 
     bpf_map_delete_elem(&buffer_packets, &id);
     return 0;
@@ -368,6 +485,46 @@ static __always_inline int pre_process_iovec(struct syscall_trace_enter *ctx)
     return 0;
 }
 
+// Cursor fields live in scratch memory so each bounded step can be verified
+// independently instead of multiplying scalar states across the whole syscall.
+static __noinline int emit_iov_step(struct syscall_trace_exit *ctx, struct payload_args *args,
+                                    struct packet_msg *msg)
+{
+    if (args->offset == args->actual_len) {
+        if (!args->remaining)
+            return 0;
+        __u32 index = args->index;
+        if (index >= msg->iovlen || index >= 28) {
+            capture_failed(msg->fd, args->is_rx, HTTP_LOSS_LIMIT);
+            return 0;
+        }
+        struct iovec iov = {};
+        if (bpf_probe_read_user(&iov, sizeof(iov), (void *)(msg->iovec_ptr + index * sizeof(iov)))) {
+            capture_failed(msg->fd, args->is_rx, HTTP_LOSS_READ);
+            return 0;
+        }
+        args->index = index + 1;
+        args->actual_len = min_size(iov.iov_len, args->remaining);
+        args->remaining -= args->actual_len;
+        args->offset = 0;
+        args->base = (__u64)iov.iov_base;
+        if (!args->actual_len)
+            return 1;
+    }
+    __u32 captured = args->captured;
+    if (captured >= HTTP_MAX_CHUNKS * MAX_DATAEVENT_BUFFER) {
+        capture_failed(msg->fd, args->is_rx, HTTP_LOSS_LIMIT);
+        return 0;
+    }
+    __u32 size = min_size(args->actual_len - args->offset, MAX_DATAEVENT_BUFFER);
+    size = min_size(size, HTTP_MAX_CHUNKS * MAX_DATAEVENT_BUFFER - captured);
+    if (emit_chunk(ctx, args, args->base + args->offset, size))
+        return 0;
+    args->offset += size;
+    args->captured = captured + size;
+    return 1;
+}
+
 static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *syscall, bool is_rx)
 {
     __u64 id = bpf_get_current_pid_tgid();
@@ -379,60 +536,44 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
         return 0;
     }
 
-    // recvmsg/readv return the aggregate number of bytes actually copied, not
-    // the iovec capacities captured at entry. Consume that value across iovecs
-    // so continuation accounting never charges unread buffer space.
-    __u64 remaining = (__u64)ctx->ret;
-
-    for (__u64 i = 0; i < msg->iovlen && i < 28; i++)
-    {
-        if (remaining == 0)
-            break;
-        struct iovec iov = {};
-        int ret = bpf_probe_read_user(&iov, sizeof(iov), (void *)(msg->iovec_ptr + i * sizeof(struct iovec)));
-        if (ret < 0)
-            break;
-
-        __u64 actual_len = min_size(iov.iov_len, remaining);
-        remaining -= actual_len;
-        if (actual_len == 0)
-            continue;
-        __u64 probe_len = min_size(actual_len, PACKET_CHUNK_SIZE);
-
-        char buffer[PACKET_CHUNK_SIZE] = {0};
-        ret = bpf_probe_read_user(buffer, probe_len, iov.iov_base);
-        if (ret < 0)
-            break;
-
-        int type = resolve_http_type(ctx, msg->fd, is_rx, buffer, probe_len, actual_len);
-        if (type)
-        {
-            // Get the event from the map
-            struct httpevent *dataevent = gadget_reserve_buf(&events, sizeof(*dataevent));
-            if (!dataevent)
-                return 0;
-
-            // Populate event with socket inode for tracking
-            // Pass is_rx to determine src/dst
-            populate_httpevent(dataevent, msg->fd, is_rx);
-
-            dataevent->type = type;
-            dataevent->sock_fd = msg->fd;
-
-            __u64 copy_len = actual_len;
-            if (copy_len > MAX_DATAEVENT_BUFFER)
-                copy_len = MAX_DATAEVENT_BUFFER;
-
-            dataevent->buf_len = (__u16)copy_len;
-            bpf_probe_read_user(&dataevent->buf, copy_len, iov.iov_base);
-            bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
-
-            dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
-
-            gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
+    // Classify once from the first transferred bytes, just like a scalar
+    // syscall. Charge the aggregate successful return once, not each chunk.
+    struct payload_args *args = payload_context(syscall, msg->fd, is_rx);
+    if (!args)
+        goto out;
+    for (__u32 i = 0; i < 28; i++) {
+        if (i >= msg->iovlen)
+            goto out;
+        struct iovec first = {};
+        if (bpf_probe_read_user(&first, sizeof(first), (void *)(msg->iovec_ptr + i * sizeof(first)))) {
+            capture_read_failed(msg->fd, is_rx, false);
+            goto out;
         }
+        if (!first.iov_len)
+            continue;
+        __u32 size = min_size(min_size(first.iov_len, ctx->ret), PACKET_CHUNK_SIZE);
+        char buffer[PACKET_CHUNK_SIZE] = {};
+        if (bpf_probe_read_user(buffer, size, first.iov_base)) {
+            capture_read_failed(msg->fd, is_rx, false);
+            goto out;
+        }
+        args->type = resolve_http_type(ctx, msg->fd, is_rx, buffer, size, ctx->ret);
+        break;
     }
+    if (!args->type)
+        goto out;
 
+    populate_http_metadata(&args->meta, args->sockfd, args->is_rx);
+    args->remaining = ctx->ret;
+    // At most 28 descriptors plus 16 extra chunks, sharing a 256-KiB byte cap.
+    for (int step = 0; step < 28 + HTTP_MAX_CHUNKS; step++) {
+        if (!emit_iov_step(ctx, args, msg))
+            goto out;
+    }
+    if (args->remaining || args->offset < args->actual_len)
+        capture_failed(msg->fd, is_rx, HTTP_LOSS_LIMIT);
+
+out:
     bpf_map_delete_elem(&msg_packets, &id);
     return 0;
 }

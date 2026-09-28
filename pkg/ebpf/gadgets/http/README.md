@@ -45,3 +45,37 @@ RUNTIME.CONTAINERNAME  COMM       PID    TID    TYPE  SOCK_FD  SYSCALL
 - Event schema: `program.h`
 - Metadata and columns: `gadget.yaml`
 
+
+### Capture bounds and loss
+
+A successful scalar syscall is split into at most 16 events of 16 KiB (256 KiB
+per syscall). Vectored syscalls examine at most 28 descriptors and emit at most
+256 KiB in total; this byte budget is shared across all vectors. At most 44
+bounded steps cover descriptors and additional chunks, preserving all 28 small
+vectors. Metadata is collected once per syscall in bounded per-CPU scratch
+storage. Partial syscall
+returns capture only bytes actually transferred. Continuation accounting uses
+those transferred bytes once, independently of chunking.
+
+Reservation failures, user-memory copy failures and work-limit exhaustion stop
+capture for that syscall and invalidate its direction's continuation entry.
+Later body-only data is suppressed until another HTTP start is recognized. The
+`capture_loss` array contains cumulative counts of failed known-HTTP captures:
+index 0 is work-limit exhaustion, 1 is reservation failure, 2 is user-memory read
+failure. These are capture failures, not counts of lost bytes or HTTP messages.
+
+The existing event ABI has no cumulative offsets or explicit loss marker. This
+change prevents subsequent chunks in a failed syscall from bridging a hole, but
+cannot guarantee detection of every loss in userspace or safe recovery across
+concurrent syscalls on one socket. It does not turn the stream into a lossless
+capture transport.
+
+### Native regression tests
+
+`go test -count=1 ./pkg/ebpf/gadgets/http/capture` compiles the actual production
+C probes with native kernel-helper substitutes. A C compiler is required; the
+test skips explicitly if none is installed. Use `-count=1`, since Go's test
+cache does not track the separately compiled C source. Tests cover scalar and
+vectored reads/writes at 10 KiB, 16 KiB boundaries, 20.5 KiB and 40 KiB, partial
+returns, shared work bounds, and injected reservation/copy failures. These tests
+complement rather than replace architecture-specific BPF verifier loads.

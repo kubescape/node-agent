@@ -8,9 +8,10 @@
 #define MAX_PACKET_SIZE 200
 #define PACKET_CHUNK_SIZE 200
 // Keep one plain-HTTP syscall payload on par with the TLS capture chunk size.
-// HTTP continuations still need their own tracking; this avoids clipping a
-// complete request or response that happens to fit in one write/send call.
+// Larger successful syscall buffers are emitted in bounded chunks; body-only
+// later syscalls use the continuation tracking below.
 #define MAX_DATAEVENT_BUFFER (16 * 1024)
+#define HTTP_MAX_CHUNKS 16
 #define MAX_SYSCALL 128
 #define MAX_MSG_COUNT 20
 
@@ -32,6 +33,7 @@ struct packet_buffer {
 struct http_continuation_key {
     __u64 socket_inode;
     __u8 is_rx;
+    __u8 _pad[7];
 };
 
 struct http_continuation {
