@@ -63,17 +63,18 @@ struct {
     __type(value, struct http_continuation);
 } http_continuations SEC(".maps");
 
-// Bounded diagnostic counters: capture cap, ring reservation, user-memory read.
+// Per-CPU diagnostics avoid cross-CPU contention on the syscall hot path.
+// Readers sum CPU slots for each reason: cap, ring reservation, user read.
 enum http_capture_loss { HTTP_LOSS_LIMIT, HTTP_LOSS_RESERVE, HTTP_LOSS_READ, HTTP_LOSS_COUNT };
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, HTTP_LOSS_COUNT);
     __type(key, __u32);
     __type(value, __u64);
 } capture_loss SEC(".maps");
-// Diagnostic-only counters; these do not change the event ABI.
+// Diagnostic-only per-CPU counters; readers sum CPU slots per reason.
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, HTTP_CONTINUATION_STAT_COUNT);
     __type(key, __u32);
     __type(value, __u64);
@@ -246,7 +247,7 @@ static __always_inline void count_continuation_stat(__u32 reason)
 {
     __u64 *counter = bpf_map_lookup_elem(&continuation_stats, &reason);
     if (counter)
-        __sync_fetch_and_add(counter, 1);
+        (*counter)++;
 }
 
 // resolve_http_type recognizes a message start or continues a recently seen
@@ -328,7 +329,7 @@ static __always_inline void capture_failed(__u32 sockfd, bool is_rx, __u32 reaso
     bpf_map_delete_elem(&http_continuations, &key);
     __u64 *count = bpf_map_lookup_elem(&capture_loss, &reason);
     if (count)
-        __sync_fetch_and_add(count, 1);
+        (*count)++;
 }
 
 static __always_inline void capture_read_failed(__u32 sockfd, bool is_rx, bool tracked)

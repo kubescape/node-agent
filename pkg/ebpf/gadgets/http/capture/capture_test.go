@@ -92,3 +92,9 @@ func TestSyscallPartialAndLostChunks(t *testing.T) {
 		})
 	}
 }
+
+func TestDiagnosticCountersPerCPU(t *testing.T) {
+	bin := harness(t)
+	out, err := exec.CommandContext(t.Context(), bin, "percpu", "0", "0", "0", "0").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+}

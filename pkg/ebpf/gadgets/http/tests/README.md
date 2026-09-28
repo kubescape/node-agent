@@ -27,8 +27,9 @@ whereas eight 4 KiB calls retained the complete body. Chunking is addressed
 separately. These tests do not establish that all header-only production
 responses are fixed.
 
-`continuation_stats` is a diagnostic BPF ARRAY with four entries, `u32` keys,
-and `u64` cumulative values:
+`continuation_stats` is a diagnostic BPF PERCPU_ARRAY with four entries, `u32` keys,
+and per-CPU `u64` cumulative values. Readers must sum all possible CPU slots
+for each key. Updates use local increments without a shared atomic counter:
 
 | Key | Meaning |
 | --- | --- |
@@ -37,4 +38,7 @@ and `u64` cumulative values:
 | 2 | A direction reached or exceeded the byte budget; exact completion is counted even though its final bytes are forwarded |
 | 3 | Recording a newly classified direction failed |
 
-No payload or event ABI changes are required to read these counters.
+The same per-CPU layout applies to `capture_loss`; its three reason keys are
+unchanged. Neither map changes the payload/event ABI, but readers of the old
+shared ARRAY layout must adapt to per-CPU values. The native capture harness
+checks the production map types and isolates increments on two simulated CPUs.
