@@ -19,7 +19,18 @@
 // Keep forwarding those chunks for a bounded period so userspace can reassemble
 // the complete message instead of dropping every continuation at classification.
 #define HTTP_CONTINUATION_MAX_BYTES (256 * 1024)
-#define HTTP_CONTINUATION_TTL_NS (30ULL * 1000000000)
+// Allow slow response bodies to resume throughout a two-minute idle window.
+// The fixed-size LRU and byte budget still bound retained directions.
+#define HTTP_CONTINUATION_TTL_NS (120ULL * 1000000000)
+
+// Stable diagnostic indexes. Misses include non-HTTP candidates, not just loss.
+enum http_continuation_stat {
+    HTTP_CONTINUATION_MISS = 0,
+    HTTP_CONTINUATION_EXPIRED = 1,
+    HTTP_CONTINUATION_BUDGET_EXHAUSTED = 2,
+    HTTP_CONTINUATION_STORE_FAILED = 3,
+    HTTP_CONTINUATION_STAT_COUNT = 4,
+};
 
 #define MSG_PEEK 0x02
 

@@ -1,5 +1,7 @@
 static void *lookup(void *map, const void *key, size_t n) {
     static struct payload_args scratch;
+    static __u64 continuation_counts[HTTP_CONTINUATION_STAT_COUNT];
+    if(map==&continuation_stats) return &continuation_counts[*(const __u32 *)key];
     if(map==&payload_scratch) return &scratch;
     if(map==&capture_loss) return &losses[*(const __u32 *)key];
     for(int i=0;i<32;i++) if(entries[i].map==map && entries[i].keylen==n && !memcmp(entries[i].key,key,n)) return entries[i].value.bytes;
