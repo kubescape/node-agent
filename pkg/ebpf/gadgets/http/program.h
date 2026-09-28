@@ -14,6 +14,12 @@
 #define MAX_SYSCALL 128
 #define MAX_MSG_COUNT 20
 
+// A syscall that starts an HTTP message can be followed by body-only syscalls.
+// Keep forwarding those chunks for a bounded period so userspace can reassemble
+// the complete message instead of dropping every continuation at classification.
+#define HTTP_CONTINUATION_MAX_BYTES (256 * 1024)
+#define HTTP_CONTINUATION_TTL_NS (30ULL * 1000000000)
+
 #define MSG_PEEK 0x02
 
 // Packet structs:
@@ -21,6 +27,17 @@ struct packet_buffer {
     int sockfd;
     __u64 buf;
     size_t len;
+};
+
+struct http_continuation_key {
+    __u64 socket_inode;
+    __u8 is_rx;
+};
+
+struct http_continuation {
+    __u64 expires_at_ns;
+    __u32 remaining_bytes;
+    __u8 type;
 };
 
 struct packet_msg {
