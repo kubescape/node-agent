@@ -58,7 +58,7 @@ func TestHTTPResponseContinuations(t *testing.T) {
 	if out, err := exec.Command(cc, "-std=gnu11", "-O2", "-Wall", "-Werror", "-Wno-unknown-pragmas", path, "-o", binary).CombinedOutput(); err != nil {
 		t.Fatalf("compile production probes: %v\n%s", err, out)
 	}
-	for _, scenario := range []string{"read", "readv", "recvmsg", "budget", "peek_scalar", "peek_vector", "failed_msghdr", "slow_body", "expiry", "refresh", "store_failed", "large_read", "large_readv", "large_recvmsg", "split_readv", "split_recvmsg"} {
+	for _, scenario := range []string{"read", "readv", "recvmsg", "budget", "peek_scalar", "peek_vector", "failed_msghdr", "slow_body", "expiry", "refresh", "store_failed", "large_read", "large_readv", "large_recvmsg", "split_readv", "split_recvmsg", "mixed_partial"} {
 		t.Run(scenario, func(t *testing.T) {
 			if out, err := exec.Command(binary, scenario).CombinedOutput(); err != nil {
 				t.Fatalf("%v\n%s", err, out)

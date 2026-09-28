@@ -71,6 +71,10 @@ func TestSyscallPartialAndLostChunks(t *testing.T) {
 		{name: "partial scalar", mode: "w", size: 40960, ret: 20992, want: 20992},
 		{name: "partial vector", mode: "rv", size: 40960, ret: 20992, split: 10000, want: 20992},
 		{name: "reserve second", mode: "w", size: 40960, ret: -1, reserve: 2, want: 16384, alloc: 1},
+		{name: "vector first reservation", mode: "wv", size: 28 * 1024, ret: -1, split: 1024, reserve: 1, want: 0, alloc: 1},
+		{name: "vector final reservation", mode: "rv", size: 28 * 1024, ret: -1, split: 1024, reserve: 2, want: 16384, alloc: 1},
+		{name: "aggregate copy failure", mode: "wv", size: 28000, ret: -1, split: 1000, read: 20, want: 16384, fault: 1},
+		{name: "flush copy failure", mode: "wv", size: 28000, ret: -1, split: 1000, read: -1, want: 0, fault: 1},
 		{name: "read second", mode: "wv", size: 40960, ret: -1, read: 2, want: 16384, fault: 1},
 		{name: "scalar work limit", mode: "w", size: 262145, ret: -1, want: 262144, limit: 1},
 		{name: "scalar exact work limit", mode: "w", size: 262144, ret: -1, want: 262144},
@@ -87,7 +91,8 @@ func TestSyscallPartialAndLostChunks(t *testing.T) {
 			cmd.Stderr = &stderr
 			out, err := cmd.Output()
 			require.NoError(t, err, "%s", stderr.String())
-			require.Equal(t, payload[:tc.want], out)
+			require.Equal(t, tc.want, len(out))
+			require.True(t, bytes.Equal(payload[:tc.want], out), "captured prefix differs")
 			require.True(t, strings.HasSuffix(stderr.String(), fmt.Sprintf(" %d %d %d\n", tc.limit, tc.alloc, tc.fault)), stderr.String())
 		})
 	}
@@ -97,4 +102,37 @@ func TestDiagnosticCountersPerCPU(t *testing.T) {
 	bin := harness(t)
 	out, err := exec.CommandContext(t.Context(), bin, "percpu", "0", "0", "0", "0").CombinedOutput()
 	require.NoError(t, err, "%s", out)
+}
+
+func TestIovecCoalescingEventCounts(t *testing.T) {
+	bin := harness(t)
+	for _, tc := range []struct {
+		name, mode               string
+		size, split, ret, events int
+	}{
+		{"28x1KiB", "wv", 28 * 1024, 1024, -1, 2},
+		{"28x128B", "rv", 28 * 128, 128, -1, 1},
+		{"40KiB_8KiB", "wv", 40 * 1024, 8192, -1, 3},
+		{"partial_vector", "rv", 28 * 1024, 1024, 17000, 2},
+		{"exact_event", "wv", 16384, 1024, -1, 1},
+		{"event_plus_one", "rv", 16385, 1024, -1, 2},
+		{"scalar_unchanged", "w", 40 * 1024, 0, -1, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := []byte("POST / HTTP/1.1\r\nContent-Length: 500000\r\n\r\n" + strings.Repeat("b", tc.size))[:tc.size]
+			cmd := exec.CommandContext(t.Context(), bin, tc.mode, fmt.Sprint(tc.ret), fmt.Sprint(tc.split), "0", "0")
+			cmd.Stdin = bytes.NewReader(payload)
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			out, err := cmd.Output()
+			require.NoError(t, err, "%s", stderr.String())
+			want := tc.size
+			if tc.ret >= 0 {
+				want = tc.ret
+			}
+			require.Equal(t, want, len(out))
+			require.True(t, bytes.Equal(payload[:want], out))
+			require.Equal(t, fmt.Sprintf("%d 0 0 0\n", tc.events), stderr.String())
+		})
+	}
 }

@@ -93,6 +93,7 @@ static int bpf_map_delete_elem(void *map, const void *key) {
     has_continuation = false;
   return 0;
 }
+static int bpf_probe_read(void *dst, size_t len, const void *src) { memcpy(dst, src, len); return 0; }
 static int bpf_probe_read_user(void *dst, size_t len, const void *src) {
   if (!src)
     return -1;
@@ -120,6 +121,8 @@ static void gadget_submit_buf(void *ctx, void *map, struct httpevent *e,
 /* PRODUCTION_PROBES */
 static void *bpf_map_lookup_elem(void *map, const void *key) {
   static struct payload_args scratch;
+  static struct http_aggregate aggregate;
+  if (map == &aggregate_scratch) return &aggregate;
   if (map == &payload_scratch)
     return &scratch;
   if (map == &capture_loss)
@@ -170,7 +173,7 @@ static void receive(const char *kind, char *buf, size_t len) {
 int main(int argc, char **argv) {
   if (argc != 2)
     return 2;
-  memset(body, 'x', sizeof(body));
+  for (size_t i = 0; i < sizeof(body); i++) body[i] = (char)((i * 31 + 17) % 251);
   const char *which = argv[1];
   if (!strncmp(which, "large_", 6)) {
     receive(which + 6, headers, strlen(headers));
@@ -179,14 +182,16 @@ int main(int argc, char **argv) {
     CHECK(event_count == 3);
     CHECK(!memcmp(output[1].buf, body, 16384));
     CHECK(!memcmp(output[2].buf, body + 16384, 16384));
-  } else if (!strncmp(which, "split_", 6)) {
-    // Leading empty iovec followed by headers and a body in the same syscall.
+  } else if (!strncmp(which, "split_", 6) || !strcmp(which, "mixed_partial")) {
+    // Empty vectors interspersed with headers and mixed body lengths.
     struct iovec iov[] = {
-        {NULL, 0}, {headers, strlen(headers)}, {body, sizeof(body)}};
-    struct user_msghdr msg = {.msg_iov = iov, .msg_iovlen = 3};
-    struct syscall_trace_enter enter = {.args = {1, (uint64_t)iov, 3}};
+        {NULL, 0}, {headers, strlen(headers)}, {body, 3000}, {NULL, 0},
+        {body + 3000, 10000}, {body + 13000, sizeof(body) - 13000}};
+    struct user_msghdr msg = {.msg_iov = iov, .msg_iovlen = 6};
+    struct syscall_trace_enter enter = {.args = {1, (uint64_t)iov, 6}};
     struct syscall_trace_exit leave = {.ret = strlen(headers) + sizeof(body)};
-    if (!strcmp(which, "split_readv")) {
+    if (!strcmp(which, "mixed_partial")) leave.ret = 21000;
+    if (!strcmp(which, "split_readv") || !strcmp(which, "mixed_partial")) {
       syscall__probe_entry_readv(&enter);
       syscall__probe_ret_readv(&leave);
     } else {
@@ -195,8 +200,17 @@ int main(int argc, char **argv) {
       syscall__probe_entry_recvmsg(&enter);
       syscall__probe_ret_recvmsg(&leave);
     }
-    CHECK(captured == strlen(headers) + sizeof(body));
-    CHECK(event_count == 3);
+    CHECK(captured == (size_t)leave.ret);
+    CHECK(event_count == (captured + 16383) / 16384);
+    size_t offset = 0;
+    for (size_t i = 0; i < event_count; i++) {
+      CHECK(output[i].type == EVENT_TYPE_RESPONSE);
+      for (size_t j = 0; j < output[i].buf_len; j++, offset++) {
+        unsigned char expected = offset < strlen(headers) ? headers[offset] : body[offset - strlen(headers)];
+        CHECK(output[i].buf[j] == expected);
+      }
+    }
+    CHECK(offset == captured);
     CHECK(continuation.remaining_bytes ==
           HTTP_CONTINUATION_MAX_BYTES - captured);
   } else if (!strcmp(which, "read") || !strcmp(which, "readv") ||

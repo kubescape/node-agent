@@ -352,7 +352,7 @@ struct payload_args {
     bool is_rx;
     struct http_metadata meta;
     __u64 remaining, actual_len, offset, base;
-    __u32 index, captured;
+    __u32 index, captured, buffered;
 };
 
 // Syscall tracepoints execute without preemption. Keep the per-call metadata
@@ -520,8 +520,61 @@ static __always_inline int pre_process_iovec(struct syscall_trace_enter *ctx)
     return 0;
 }
 
-// Cursor fields live in scratch memory so each bounded step can be verified
-// independently instead of multiplying scalar states across the whole syscall.
+// Keep the payload separate: a per-CPU map value cannot exceed 32 KiB.
+// Independent verifier ranges need double storage, while logical writes use
+// only the first 16 KiB, enforced by emit_iov_step.
+struct http_aggregate {
+    __u8 data[2 * MAX_DATAEVENT_BUFFER];
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct http_aggregate);
+} aggregate_scratch SEC(".maps");
+
+// Keep aggregation in per-CPU scratch rather than holding a ring
+// reservation while walking descriptors. A read/reservation failure discards
+// the incomplete aggregate; work limits flush the valid prefix before retiring.
+static __noinline int flush_iov(struct syscall_trace_exit *ctx, struct payload_args *args)
+{
+    __u32 size = args->buffered;
+    if (!size)
+        return 0;
+    if (size > MAX_DATAEVENT_BUFFER)
+        return -1;
+    __u32 zero = 0;
+    struct http_aggregate *aggregate = bpf_map_lookup_elem(&aggregate_scratch, &zero);
+    if (!aggregate) {
+        capture_failed(args->sockfd, args->is_rx, HTTP_LOSS_READ);
+        return -1;
+    }
+    struct httpevent *event = gadget_reserve_buf(&events, sizeof(*event));
+    if (!event) {
+        capture_failed(args->sockfd, args->is_rx, HTTP_LOSS_RESERVE);
+        return -1;
+    }
+    if (bpf_probe_read(event->buf, size, aggregate->data)) {
+        gadget_discard_buf(event);
+        capture_failed(args->sockfd, args->is_rx, HTTP_LOSS_READ);
+        return -1;
+    }
+    event->timestamp_raw = args->meta.timestamp_raw;
+    event->proc = args->meta.proc;
+    event->src = args->meta.src;
+    event->dst = args->meta.dst;
+    event->socket_inode = args->meta.socket_inode;
+    event->type = args->type;
+    event->sock_fd = args->sockfd;
+    event->buf_len = size;
+    bpf_probe_read_str(event->syscall, sizeof(event->syscall), args->syscall);
+    gadget_submit_buf(ctx, &events, event, sizeof(*event));
+    args->buffered = 0;
+    return 0;
+}
+
+// Each step consumes a descriptor or fills an aggregate. Return -1 on loss,
+// zero on completion, or one when more bounded work remains.
 static __noinline int emit_iov_step(struct syscall_trace_exit *ctx, struct payload_args *args,
                                     struct packet_msg *msg)
 {
@@ -530,13 +583,15 @@ static __noinline int emit_iov_step(struct syscall_trace_exit *ctx, struct paylo
             return 0;
         __u32 index = args->index;
         if (index >= msg->iovlen || index >= 28) {
+            if (flush_iov(ctx, args))
+                return -1;
             capture_failed(msg->fd, args->is_rx, HTTP_LOSS_LIMIT);
-            return 0;
+            return -1;
         }
         struct iovec iov = {};
         if (bpf_probe_read_user(&iov, sizeof(iov), (void *)(msg->iovec_ptr + index * sizeof(iov)))) {
             capture_failed(msg->fd, args->is_rx, HTTP_LOSS_READ);
-            return 0;
+            return -1;
         }
         args->index = index + 1;
         args->actual_len = min_size(iov.iov_len, args->remaining);
@@ -548,15 +603,29 @@ static __noinline int emit_iov_step(struct syscall_trace_exit *ctx, struct paylo
     }
     __u32 captured = args->captured;
     if (captured >= HTTP_MAX_CHUNKS * MAX_DATAEVENT_BUFFER) {
+        if (flush_iov(ctx, args))
+            return -1;
         capture_failed(msg->fd, args->is_rx, HTTP_LOSS_LIMIT);
-        return 0;
+        return -1;
     }
-    __u32 size = min_size(args->actual_len - args->offset, MAX_DATAEVENT_BUFFER);
+    __u32 buffered = args->buffered;
+    if (buffered >= MAX_DATAEVENT_BUFFER)
+        return -1;
+    __u32 size = min_size(args->actual_len - args->offset, MAX_DATAEVENT_BUFFER - buffered);
     size = min_size(size, HTTP_MAX_CHUNKS * MAX_DATAEVENT_BUFFER - captured);
-    if (emit_chunk(ctx, args, args->base + args->offset, size))
-        return 0;
+    if (size > MAX_DATAEVENT_BUFFER || buffered + size > MAX_DATAEVENT_BUFFER)
+        return -1;
+    __u32 zero = 0;
+    struct http_aggregate *aggregate = bpf_map_lookup_elem(&aggregate_scratch, &zero);
+    if (!aggregate || bpf_probe_read_user(aggregate->data + buffered, size, (void *)(args->base + args->offset))) {
+        capture_failed(msg->fd, args->is_rx, HTTP_LOSS_READ);
+        return -1;
+    }
     args->offset += size;
     args->captured = captured + size;
+    args->buffered = buffered + size;
+    if (args->buffered == MAX_DATAEVENT_BUFFER && flush_iov(ctx, args))
+        return -1;
     return 1;
 }
 
@@ -602,9 +671,14 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
     args->remaining = ctx->ret;
     // At most 28 descriptors plus 16 extra chunks, sharing a 256-KiB byte cap.
     for (int step = 0; step < 28 + HTTP_MAX_CHUNKS; step++) {
-        if (!emit_iov_step(ctx, args, msg))
+        int result = emit_iov_step(ctx, args, msg);
+        if (result < 0)
             goto out;
+        if (!result)
+            break;
     }
+    if (flush_iov(ctx, args))
+        goto out;
     if (args->remaining || args->offset < args->actual_len)
         capture_failed(msg->fd, is_rx, HTTP_LOSS_LIMIT);
 

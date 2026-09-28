@@ -47,11 +47,15 @@ static __u64 bpf_get_current_pid_tgid(void) { return 1; }
 static __u64 bpf_ktime_get_boot_ns(void) { return 1; }
 static int gadget_should_discard_data_current(void) { return 0; }
 #define gadget_process_populate(proc) ((proc)->pid=1)
-static int bpf_probe_read(void *dst, size_t n, const void *src) { memcpy(dst, src, n); return 0; }
-static void *reserved;
-static int reserve_calls, fail_reserve, copy_calls, fail_copy;
+static int bpf_probe_read(void *dst, size_t n, const void *src);
+static void *reserved, *aggregate_buffer;
+static int reserve_calls, fail_reserve, copy_calls, fail_copy, flush_calls;
+static int bpf_probe_read(void *dst, size_t n, const void *src) {
+    if (reserved && (uintptr_t)dst >= (uintptr_t)reserved && (uintptr_t)dst < (uintptr_t)reserved+20000 && fail_copy < 0 && ++flush_calls == -fail_copy) return -1;
+    memcpy(dst, src, n); return 0;
+}
 static int bpf_probe_read_user(void *dst, size_t n, const void *src) {
-    if (reserved && (uintptr_t)dst >= (uintptr_t)reserved && (uintptr_t)dst < (uintptr_t)reserved+20000 && ++copy_calls == fail_copy) return -1;
+    if (((reserved && (uintptr_t)dst >= (uintptr_t)reserved && (uintptr_t)dst < (uintptr_t)reserved+20000) || (aggregate_buffer && (uintptr_t)dst >= (uintptr_t)aggregate_buffer && (uintptr_t)dst < (uintptr_t)aggregate_buffer+16384)) && ++copy_calls == fail_copy) return -1;
     memcpy(dst, src, n); return 0;
 }
 static int bpf_probe_read_str(void *dst, size_t n, const void *src) { snprintf(dst, n, "%s", (const char *)src); return 0; }
