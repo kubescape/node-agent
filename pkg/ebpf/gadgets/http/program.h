@@ -7,7 +7,10 @@
 
 #define MAX_PACKET_SIZE 200
 #define PACKET_CHUNK_SIZE 200
-#define MAX_DATAEVENT_BUFFER 4096
+// Keep one plain-HTTP syscall payload on par with the TLS capture chunk size.
+// HTTP continuations still need their own tracking; this avoids clipping a
+// complete request or response that happens to fit in one write/send call.
+#define MAX_DATAEVENT_BUFFER (16 * 1024)
 #define MAX_SYSCALL 128
 #define MAX_MSG_COUNT 20
 
