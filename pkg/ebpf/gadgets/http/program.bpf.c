@@ -255,6 +255,10 @@ static __always_inline int resolve_http_type(struct syscall_trace_exit *ctx, __u
     }
 
     continuation->remaining_bytes -= total_size;
+    // This is an idle timeout, not an absolute deadline: a streaming HTTP
+    // response can legitimately run longer than the timeout while continuing
+    // to deliver body chunks.
+    continuation->expires_at_ns = now + HTTP_CONTINUATION_TTL_NS;
     return continuation->type;
 }
 
@@ -366,28 +370,39 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
     struct packet_msg *msg = bpf_map_lookup_elem(&msg_packets, &id);
     if (!msg)
         return 0;
+    if (ctx->ret <= 0) {
+        bpf_map_delete_elem(&msg_packets, &id);
+        return 0;
+    }
+
+    // recvmsg/readv return the aggregate number of bytes actually copied, not
+    // the iovec capacities captured at entry. Consume that value across iovecs
+    // so continuation accounting never charges unread buffer space.
+    __u64 remaining = (__u64)ctx->ret;
 
     for (__u64 i = 0; i < msg->iovlen && i < 28; i++)
     {
+        if (remaining == 0)
+            break;
         struct iovec iov = {};
         int ret = bpf_probe_read_user(&iov, sizeof(iov), (void *)(msg->iovec_ptr + i * sizeof(struct iovec)));
         if (ret < 0)
             break;
 
-        __u64 seg_len = iov.iov_len;
-        if (seg_len > PACKET_CHUNK_SIZE)
-            seg_len = PACKET_CHUNK_SIZE;
+        __u64 actual_len = min_size(iov.iov_len, remaining);
+        remaining -= actual_len;
+        if (actual_len == 0)
+            continue;
+        __u64 probe_len = min_size(actual_len, PACKET_CHUNK_SIZE);
 
         char buffer[PACKET_CHUNK_SIZE] = {0};
-        ret = bpf_probe_read_user(buffer, seg_len, iov.iov_base);
+        ret = bpf_probe_read_user(buffer, probe_len, iov.iov_base);
         if (ret < 0)
             break;
 
-        int type = resolve_http_type(ctx, msg->fd, is_rx, buffer, seg_len, iov.iov_len);
+        int type = resolve_http_type(ctx, msg->fd, is_rx, buffer, probe_len, actual_len);
         if (type)
         {
-            seg_len = iov.iov_len;
-
             // Get the event from the map
             struct httpevent *dataevent = gadget_reserve_buf(&events, sizeof(*dataevent));
             if (!dataevent)
@@ -400,7 +415,7 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
             dataevent->type = type;
             dataevent->sock_fd = msg->fd;
 
-            __u64 copy_len = seg_len;
+            __u64 copy_len = actual_len;
             if (copy_len > MAX_DATAEVENT_BUFFER)
                 copy_len = MAX_DATAEVENT_BUFFER;
 
@@ -411,7 +426,6 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
             dataevent->timestamp_raw = bpf_ktime_get_boot_ns();
 
             gadget_submit_buf(ctx, &events, dataevent, sizeof(*dataevent));
-            break;
         }
     }
 
