@@ -81,3 +81,32 @@ cache does not track the separately compiled C source. Tests cover scalar and
 vectored reads/writes at 10 KiB, 16 KiB boundaries, 20.5 KiB and 40 KiB, partial
 returns, shared work bounds, and injected reservation/copy failures. These tests
 complement rather than replace architecture-specific BPF verifier loads.
+
+### Small-iovec coalescing
+
+Vectored syscalls pack consecutive transferred bytes into 16 KiB events instead
+of submitting a mostly empty fixed-size event for every small vector. One final
+partial event is flushed at syscall completion. Classification, metadata and
+continuation accounting still occur once per syscall; scalar capture is
+unchanged. Empty vectors consume descriptor work but emit no empty events.
+
+Native byte-exact fixtures measure these event counts:
+
+| Input | Previous | Coalesced |
+| --- | ---: | ---: |
+| 28 × 1 KiB vectors | 28 | 2 |
+| 28 × 128 B vectors | 28 | 1 |
+| 40 KiB in 8 KiB vectors | 5 | 3 |
+| 40 KiB scalar | 3 | 3 |
+
+The 256 KiB byte bound, 28-vector bound and bounded loop remain unchanged. At a
+work limit, the valid prefix is flushed before the direction is retired. A
+user-memory read, scratch-copy or reservation failure discards the pending
+aggregate and retires the direction, preserving only events already submitted.
+
+The tradeoff is an additional copy for vectored bytes and 32 KiB of scratch
+storage per possible CPU. Only the first 16 KiB is logically writable; the
+second half supplies verifier headroom for independently bounded offset and
+length registers. Scratch payload bytes are not zeroed on scalar calls, and
+only successfully copied bytes are submitted. Event-count reductions alone do
+not establish lower CPU usage or fewer production drops.

@@ -1,3 +1,4 @@
+_Static_assert(sizeof(struct http_aggregate) == 32768, "aggregation scratch must fit the per-CPU value limit");
 _Static_assert(sizeof(*capture_loss.type) / sizeof(int) == BPF_MAP_TYPE_PERCPU_ARRAY,
                "capture losses must not share counter storage across CPUs");
 _Static_assert(sizeof(*continuation_stats.type) / sizeof(int) == BPF_MAP_TYPE_PERCPU_ARRAY,
@@ -7,6 +8,8 @@ static void *lookup(void *map, const void *key, size_t n) {
     static __u64 continuation_counts[2][HTTP_CONTINUATION_STAT_COUNT];
     if(map==&continuation_stats) return &continuation_counts[current_cpu][*(const __u32 *)key];
     if(map==&payload_scratch) return &scratch;
+    static struct http_aggregate aggregate;
+    if(map==&aggregate_scratch) { aggregate_buffer=aggregate.data; return &aggregate; }
     if(map==&capture_loss) return current_cpu ? &other_cpu_losses[*(const __u32 *)key] : &losses[*(const __u32 *)key];
     for(int i=0;i<32;i++) if(entries[i].map==map && entries[i].keylen==n && !memcmp(entries[i].key,key,n)) return entries[i].value.bytes;
     return NULL;
