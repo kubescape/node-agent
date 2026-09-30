@@ -72,6 +72,7 @@ type containerData struct {
 // ContainerProfileManager manages container profiles and their lifecycle
 type ContainerProfileManager struct {
 	lifecycleQueue    utils.LifecycleQueue
+	pendingAdds       utils.PendingAdds
 	ctx               context.Context
 	cfg               config.Config
 	k8sClient         k8sclient.K8sClientInterface

@@ -23,13 +23,24 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 	isHost := utils.IsHostContainer(notif.Container)
 	if cpm.cfg.NamespaceFilterFile != "" {
 		excluded := !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels)
+		// Track or abort registrations before queueing: a queued removal
+		// would otherwise wait behind a registration that can never finish.
+		var parent context.Context
+		var release func()
+		switch notif.Type {
+		case containercollection.EventTypeAddContainer:
+			parent, release = cpm.pendingAdds.Track(notif.Container.Runtime.ContainerID)
+		case containercollection.EventTypeRemoveContainer:
+			cpm.pendingAdds.Cancel(notif.Container.Runtime.ContainerID)
+		}
 		// Finish deletion before readmission of the same running container.
 		// The regular callbacks deliberately launch asynchronous work.
 		cpm.lifecycleQueue.Submit(notif.Container.Runtime.ContainerID, func() {
 			switch notif.Type {
 			case containercollection.EventTypeAddContainer:
+				defer release()
 				if isHost || !cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
-					cpm.addContainerWithTimeout(notif.Container)
+					cpm.addContainerWithTimeout(parent, notif.Container)
 				}
 			case containercollection.EventTypeRemoveContainer:
 				cpm.deleteContainerWithReason(notif.Container, excluded)
@@ -46,15 +57,21 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 		if !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
-		go cpm.addContainerWithTimeout(notif.Container)
+		parent, release := cpm.pendingAdds.Track(notif.Container.Runtime.ContainerID)
+		go func() {
+			defer release()
+			cpm.addContainerWithTimeout(parent, notif.Container)
+		}()
 	case containercollection.EventTypeRemoveContainer:
+		cpm.pendingAdds.Cancel(notif.Container.Runtime.ContainerID)
 		// A namespace may have been excluded since admission; always clean up.
 		go cpm.deleteContainer(notif.Container)
 	}
 }
 
-// addContainerWithTimeout handles adding a container with a timeout to prevent hanging
-func (cpm *ContainerProfileManager) addContainerWithTimeout(container *containercollection.Container) {
+// addContainerWithTimeout handles adding a container with a timeout to prevent
+// hanging. parent is canceled when the container is removed meanwhile.
+func (cpm *ContainerProfileManager) addContainerWithTimeout(parent context.Context, container *containercollection.Container) {
 	containerID := container.Runtime.ContainerID
 
 	// Create container entry early with nil watchedContainerData
@@ -89,7 +106,7 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 		// the get-or-insert with the same entry.
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), MaxWaitForSharedContainerData)
+	ctx, cancel := context.WithTimeout(parent, MaxWaitForSharedContainerData)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -100,7 +117,7 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 	select {
 	case err := <-done:
 		if err != nil {
-			cpm.logAddFailure(containerID)("failed to add container to the container profile manager", helpers.Error(err))
+			utils.AddFailureLogger(ctx)("failed to add container to the container profile manager", helpers.Error(err))
 			// Close ready channel and remove entry on error. Conditional on
 			// this still being the entry this goroutine registered: a
 			// duplicate-registration retry (the loop above) may have already
@@ -113,7 +130,7 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
 	case <-ctx.Done():
-		cpm.logAddFailure(containerID)("timeout while adding container to the container profile manager",
+		utils.AddFailureLogger(ctx)("timeout while adding container to the container profile manager",
 			helpers.String("containerID", container.Runtime.ContainerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
@@ -125,14 +142,6 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 		})
 		cpm.removeContainerEntryIfMatch(containerID, entry)
 	}
-}
-
-// logAddFailure logs at Debug once the container is gone, Error otherwise.
-func (cpm *ContainerProfileManager) logAddFailure(containerID string) func(string, ...helpers.IDetails) {
-	if cpm.k8sObjectCache.GetSharedContainerData(containerID) == nil {
-		return logger.L().Debug
-	}
-	return logger.L().Error
 }
 
 // hostContainerWithIdentity returns container unchanged for a real container,
