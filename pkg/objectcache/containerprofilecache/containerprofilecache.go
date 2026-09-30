@@ -287,8 +287,8 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 }
 
 // addContainerWithTimeout runs addContainer with a 10-minute cap to prevent
-// a stuck storage client from wedging the callback goroutine. parent is
-// canceled when the container is removed meanwhile.
+// a stuck storage client from wedging the callback goroutine.
+// parent is canceled if the container is removed meanwhile.
 func (c *ContainerProfileCacheImpl) addContainerWithTimeout(parent context.Context, container *containercollection.Container) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
 	defer cancel()

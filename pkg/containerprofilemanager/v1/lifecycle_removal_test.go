@@ -18,15 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newRemovalTestManager(t *testing.T, cfg config.Config) (*ContainerProfileManager, *objectcache.K8sObjectCacheMock) {
+func newRemovalTestManager(t *testing.T, cfg config.Config, k8s objectcache.K8sObjectCache) *ContainerProfileManager {
 	t.Helper()
 	t.Setenv("QUEUE_DIR", t.TempDir())
-	k8s := &objectcache.K8sObjectCacheMock{}
 	cpm, err := NewContainerProfileManager(context.Background(), cfg, &k8sclient.K8sClientMock{}, k8s,
 		&storage.StorageHttpClientMock{}, &dnsmanager.DNSManagerMock{}, &seccompmanager.SeccompManagerMock{}, nil, nil, nil)
 	require.NoError(t, err)
 	t.Cleanup(cpm.Close)
-	return cpm, k8s
+	return cpm
 }
 
 func removalTestContainer(id string) *containercollection.Container {
@@ -43,16 +42,30 @@ func removalTestContainer(id string) *containercollection.Container {
 	}
 }
 
-// A container removed before its shared data exists must abort its pending
-// registration right away instead of waiting out the timeout, on both the
-// regular and the namespace-filter callback paths.
+func newEntry() *ContainerEntry {
+	return &ContainerEntry{data: &containerData{}, ready: make(chan struct{})}
+}
+
+// fetchHookK8sCache runs onGet before each shared-data lookup.
+type fetchHookK8sCache struct {
+	*objectcache.K8sObjectCacheMock
+	onGet func()
+}
+
+func (k *fetchHookK8sCache) GetSharedContainerData(containerID string) *objectcache.WatchedContainerData {
+	k.onGet()
+	return k.K8sObjectCacheMock.GetSharedContainerData(containerID)
+}
+
+// Removal before shared data exists aborts the registration at once.
+// Covers the regular and namespace-filter paths.
 func TestContainerCallback_RemovalAbortsPendingRegistration(t *testing.T) {
 	for name, cfg := range map[string]config.Config{
 		"regular":          {MaxSniffingTime: time.Hour},
 		"namespace filter": {MaxSniffingTime: time.Hour, NamespaceFilterFile: "filter.yaml"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			cpm, _ := newRemovalTestManager(t, cfg)
+			cpm := newRemovalTestManager(t, cfg, &objectcache.K8sObjectCacheMock{})
 			container := removalTestContainer("short-lived")
 
 			cpm.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeAddContainer, Container: container})
@@ -70,10 +83,53 @@ func TestContainerCallback_RemovalAbortsPendingRegistration(t *testing.T) {
 	}
 }
 
-// Only a removal downgrades the failure; a live container whose shared data
-// never arrives, or a failure with shared data present, stays an error.
+// Removal after shared data arrived must not close ready early.
+// A deletion would then hit a nil SyncChannel.
+func TestAddContainerWithTimeout_RemovalAfterSharedDataWaitsForRegistration(t *testing.T) {
+	mock := &objectcache.K8sObjectCacheMock{}
+	mock.SetSharedContainerData("racing", &objectcache.WatchedContainerData{ContainerID: "racing"})
+	var cpm *ContainerProfileManager
+	k8s := &fetchHookK8sCache{K8sObjectCacheMock: mock, onGet: func() { cpm.pendingAdds.Cancel("racing") }}
+	cpm = newRemovalTestManager(t, config.Config{MaxSniffingTime: time.Hour, InitialDelay: time.Minute, UpdateDataPeriod: time.Minute}, k8s)
+
+	parent, release := cpm.pendingAdds.Track("racing")
+	defer release()
+	cpm.addContainerWithTimeout(parent, removalTestContainer("racing"))
+
+	entry, ok := cpm.getContainerEntry("racing")
+	require.True(t, ok, "registration past the shared-data wait must complete")
+	select {
+	case <-entry.ready:
+	default:
+		t.Fatal("ready must be closed once registration completes")
+	}
+	entry.mu.RLock()
+	defer entry.mu.RUnlock()
+	require.NotNil(t, entry.data.watchedContainerData)
+	assert.NotNil(t, entry.data.watchedContainerData.SyncChannel, "ready must not be released before SyncChannel exists")
+}
+
+// A replayed add woken by ready must find the failed entry gone.
+func TestAbandonEntry_UntracksBeforeReleasingWaiters(t *testing.T) {
+	cpm := &ContainerProfileManager{containers: make(map[string]*ContainerEntry)}
+	entry := newEntry()
+	require.True(t, cpm.addContainerEntryIfAbsent("c", entry))
+
+	stillTracked := make(chan bool, 1)
+	go func() {
+		<-entry.ready
+		_, ok := cpm.getContainerEntry("c")
+		stillTracked <- ok
+	}()
+	cpm.abandonEntry("c", entry)
+	assert.False(t, <-stillTracked)
+}
+
+// Only a removal downgrades the failure.
+// Live container at the deadline, or shared data present: still an error.
 func TestAddContainer_FailureClassification(t *testing.T) {
-	cpm, k8s := newRemovalTestManager(t, config.Config{MaxSniffingTime: time.Hour})
+	k8s := &objectcache.K8sObjectCacheMock{}
+	cpm := newRemovalTestManager(t, config.Config{MaxSniffingTime: time.Hour, InitialDelay: time.Minute, UpdateDataPeriod: time.Minute}, k8s)
 
 	t.Run("removed while waiting for shared data", func(t *testing.T) {
 		parent, release := cpm.pendingAdds.Track("removed")
@@ -82,7 +138,7 @@ func TestAddContainer_FailureClassification(t *testing.T) {
 		defer cancel()
 		time.AfterFunc(20*time.Millisecond, func() { cpm.pendingAdds.Cancel("removed") })
 
-		require.Error(t, cpm.addContainer(removalTestContainer("removed"), ctx))
+		require.Error(t, cpm.addContainer(removalTestContainer("removed"), newEntry(), ctx))
 		assert.True(t, utils.RemovedDuringAdd(ctx))
 	})
 
@@ -92,7 +148,7 @@ func TestAddContainer_FailureClassification(t *testing.T) {
 		ctx, cancel := context.WithTimeout(parent, 50*time.Millisecond)
 		defer cancel()
 
-		require.Error(t, cpm.addContainer(removalTestContainer("live"), ctx))
+		require.Error(t, cpm.addContainer(removalTestContainer("live"), newEntry(), ctx))
 		assert.False(t, utils.RemovedDuringAdd(ctx))
 	})
 
@@ -103,8 +159,8 @@ func TestAddContainer_FailureClassification(t *testing.T) {
 		ctx, cancel := context.WithTimeout(parent, time.Minute)
 		defer cancel()
 
-		// No registered entry: addContainer fails after the shared-data wait.
-		require.Error(t, cpm.addContainer(removalTestContainer("present"), ctx))
+		// Untracked entry: addContainer fails after the shared-data wait.
+		require.Error(t, cpm.addContainer(removalTestContainer("present"), newEntry(), ctx))
 		assert.False(t, utils.RemovedDuringAdd(ctx))
 	})
 }

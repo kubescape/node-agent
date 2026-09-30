@@ -2,29 +2,48 @@ package containerprofilecache
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// A container removed before its shared data exists must abort its pending
-// registration right away instead of waiting out the 10-minute timeout.
+// waitSignalK8sCache closes waiting on the first shared-data lookup.
+// The cache does that lookup under the container lock.
+type waitSignalK8sCache struct {
+	*objectcache.K8sObjectCacheMock
+	once    sync.Once
+	waiting chan struct{}
+}
+
+func (k *waitSignalK8sCache) GetSharedContainerData(containerID string) *objectcache.WatchedContainerData {
+	k.once.Do(func() { close(k.waiting) })
+	return k.K8sObjectCacheMock.GetSharedContainerData(containerID)
+}
+
+// Removal before shared data exists aborts the registration at once.
 func TestContainerCallback_RemovalAbortsPendingRegistration(t *testing.T) {
-	c, _ := newTestCache(t, &fakeProfileClient{})
+	k8s := &waitSignalK8sCache{K8sObjectCacheMock: &objectcache.K8sObjectCacheMock{}, waiting: make(chan struct{})}
+	c := NewContainerProfileCache(config.Config{ProfilesCacheRefreshRate: 30 * time.Second}, &fakeProfileClient{}, k8s, nil)
 	container := eventContainer("short-lived")
 
 	c.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeAddContainer, Container: container})
-	require.Equal(t, 1, c.pendingAdds.Len("short-lived"), "the add callback must track the registration synchronously")
+	select {
+	case <-k8s.waiting:
+	case <-time.After(2 * time.Second):
+		t.Fatal("registration never started waiting for shared data")
+	}
 
 	c.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeRemoveContainer, Container: container})
-	assert.Zero(t, c.pendingAdds.Len("short-lived"))
 
-	// The registration goroutine holds the container lock while it waits;
-	// taking the lock proves the aborted wait returned.
+	// The wait holds the container lock.
+	// Taking it proves the aborted wait returned.
 	acquired := make(chan struct{})
 	go func() {
 		c.containerLocks.WithLock("short-lived", func() {})
@@ -37,8 +56,8 @@ func TestContainerCallback_RemovalAbortsPendingRegistration(t *testing.T) {
 	}
 }
 
-// Only a removal downgrades the failure; a live container whose shared data
-// never arrives stays an error.
+// Only a removal downgrades the failure.
+// Live container at the deadline: still an error.
 func TestAddContainer_FailureClassification(t *testing.T) {
 	c, _ := newTestCache(t, &fakeProfileClient{})
 

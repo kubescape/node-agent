@@ -141,3 +141,12 @@ func (cpm *ContainerProfileManager) removeContainerEntryIfMatch(containerID stri
 	delete(cpm.containers, containerID)
 	return true
 }
+
+// abandonEntry untracks a failed or skipped registration, then closes ready.
+// Removing first lets a waiting replayed add see the entry gone and retry.
+func (cpm *ContainerProfileManager) abandonEntry(containerID string, entry *ContainerEntry) {
+	cpm.removeContainerEntryIfMatch(containerID, entry)
+	entry.readyOnce.Do(func() {
+		close(entry.ready)
+	})
+}

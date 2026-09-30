@@ -9,15 +9,13 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
-// ErrContainerRemoved is the cancellation cause of a registration aborted by
-// the container's remove event.
+// ErrContainerRemoved is the cancel cause when a remove event aborts a registration.
 var ErrContainerRemoved = errors.New("container removed")
 
-// PendingAdds tracks in-flight container registrations so the container's
-// remove event can abort them. A registration that fails because of that
-// abort is expected (the container exited first, see #848), while any other
-// failure, including a timeout for a live container, is not. The zero value
-// is ready for use.
+// PendingAdds tracks in-flight registrations so a remove event can abort them.
+// A failure from that abort is expected: the container exited first (#848).
+// Any other failure is not.
+// The zero value is ready for use.
 type PendingAdds struct {
 	mu   sync.Mutex
 	adds map[string]map[*pendingAdd]struct{}
@@ -27,11 +25,11 @@ type pendingAdd struct {
 	cancel context.CancelCauseFunc
 }
 
-// Track registers a registration for key. The returned context is canceled
-// with ErrContainerRemoved by a later Cancel(key). Call release once the
-// registration settles. Track must run in the add callback itself, not in a
-// goroutine it spawns, so a remove callback that follows it always observes
-// the registration.
+// Track registers a registration for key.
+// A later Cancel(key) cancels the returned context with ErrContainerRemoved.
+// Call release once the registration settles.
+// Call Track in the add callback itself, not in a spawned goroutine,
+// so the following remove callback always sees it.
 func (p *PendingAdds) Track(key string) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	add := &pendingAdd{cancel: cancel}
@@ -55,9 +53,8 @@ func (p *PendingAdds) Track(key string) (context.Context, func()) {
 	}
 }
 
-// Cancel aborts every registration tracked for key with ErrContainerRemoved.
-// Registrations tracked after this call are not affected, so a readmitted
-// container registers normally.
+// Cancel aborts every registration tracked for key.
+// Later Track calls are not affected, so readmission works.
 func (p *PendingAdds) Cancel(key string) {
 	p.mu.Lock()
 	adds := p.adds[key]
@@ -75,16 +72,14 @@ func (p *PendingAdds) Len(key string) int {
 	return len(p.adds[key])
 }
 
-// RemovedDuringAdd reports whether ctx, or a parent of it, was canceled by
-// PendingAdds.Cancel.
+// RemovedDuringAdd reports whether PendingAdds.Cancel canceled ctx or a parent.
 func RemovedDuringAdd(ctx context.Context) bool {
 	return errors.Is(context.Cause(ctx), ErrContainerRemoved)
 }
 
-// AddFailureLogger returns the Debug logger for a registration aborted by the
-// container's removal, and the Error logger otherwise. Missing shared data
-// alone is no proof of removal: its producer may still be retrying for a live
-// container.
+// AddFailureLogger returns Debug if removal aborted the registration, else Error.
+// Missing shared data alone is no proof of removal:
+// its producer may still be retrying for a live container.
 func AddFailureLogger(ctx context.Context) func(string, ...helpers.IDetails) {
 	if RemovedDuringAdd(ctx) {
 		return logger.L().Debug
