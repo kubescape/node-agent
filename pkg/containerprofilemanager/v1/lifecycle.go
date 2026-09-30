@@ -100,7 +100,7 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 	select {
 	case err := <-done:
 		if err != nil {
-			logger.L().Error("failed to add container to the container profile manager", helpers.Error(err))
+			cpm.logAddFailure(containerID)("failed to add container to the container profile manager", helpers.Error(err))
 			// Close ready channel and remove entry on error. Conditional on
 			// this still being the entry this goroutine registered: a
 			// duplicate-registration retry (the loop above) may have already
@@ -113,7 +113,7 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 			cpm.removeContainerEntryIfMatch(containerID, entry)
 		}
 	case <-ctx.Done():
-		logger.L().Error("timeout while adding container to the container profile manager",
+		cpm.logAddFailure(containerID)("timeout while adding container to the container profile manager",
 			helpers.String("containerID", container.Runtime.ContainerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
@@ -125,6 +125,14 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 		})
 		cpm.removeContainerEntryIfMatch(containerID, entry)
 	}
+}
+
+// logAddFailure logs at Debug once the container is gone, Error otherwise.
+func (cpm *ContainerProfileManager) logAddFailure(containerID string) func(string, ...helpers.IDetails) {
+	if cpm.k8sObjectCache.GetSharedContainerData(containerID) == nil {
+		return logger.L().Debug
+	}
+	return logger.L().Error
 }
 
 // hostContainerWithIdentity returns container unchanged for a real container,

@@ -294,15 +294,23 @@ func (c *ContainerProfileCacheImpl) addContainerWithTimeout(container *container
 	select {
 	case err := <-done:
 		if err != nil {
-			logger.L().Error("failed to add container to the container-profile cache", helpers.Error(err))
+			c.logAddFailure(container.Runtime.ContainerID)("failed to add container to the container-profile cache", helpers.Error(err))
 		}
 	case <-ctx.Done():
-		logger.L().Error("timeout while adding container to the container-profile cache",
+		c.logAddFailure(container.Runtime.ContainerID)("timeout while adding container to the container-profile cache",
 			helpers.String("containerID", container.Runtime.ContainerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
 	}
+}
+
+// logAddFailure logs at Debug once the container is gone, Error otherwise.
+func (c *ContainerProfileCacheImpl) logAddFailure(containerID string) func(string, ...helpers.IDetails) {
+	if c.k8sObjectCache.GetSharedContainerData(containerID) == nil {
+		return logger.L().Debug
+	}
+	return logger.L().Error
 }
 
 // addContainer builds and stores a cache entry for the container: fetches
@@ -315,7 +323,8 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 	return c.containerLocks.WithLockAndError(containerID, func() error {
 		sharedData, err := c.waitForSharedContainerData(containerID, ctx)
 		if err != nil {
-			logger.L().Error("failed to get shared data for container",
+			// Only ctx expiry: container exited before registration (#848).
+			logger.L().Debug("failed to get shared data for container",
 				helpers.String("containerID", containerID),
 				helpers.Error(err))
 			return err
