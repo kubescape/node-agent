@@ -14,14 +14,19 @@ import (
 )
 
 func TestPermanentRejectionStopsMonitoringWithoutCompletion(t *testing.T) {
-	for _, host := range []bool{false, true} {
-		name := "container"
-		if host {
-			name = "host"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		host     bool
+		finalize error
+	}{
+		{name: "container"},
+		{name: "host", host: true},
+		{name: "termination_flush", finalize: ContainerHasTerminatedError},
+		{name: "max_time_flush", finalize: ContainerReachedMaxTime},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			container := newHostPseudoContainer()
-			if !host {
+			if !tc.host {
 				container.Runtime.ContainerID = "container"
 				container.Runtime.ContainerPID = 2
 			}
@@ -47,23 +52,31 @@ func TestPermanentRejectionStopsMonitoringWithoutCompletion(t *testing.T) {
 			}
 			cause := errors.New("invalid report")
 			rejection := fmt.Errorf("backend response: %w", backoff.Permanent(cause))
-			// Fill the control channel and deliver multiple already queued report
-			// failures before monitoring starts. None may block under the entry lock.
-			for range cap(watched.SyncChannel) {
-				watched.SyncChannel <- ContainerReachedMaxTime
-			}
-			delivered := make(chan struct{})
-			go func() {
-				cpm.OnQueueError(nil, id, rejection)
-				for range 64 {
-					cpm.OnQueueError(nil, id, backoff.Permanent(errors.New("later rejection")))
+			if tc.finalize != nil {
+				// Reject during the final syscall flush, after the monitor has
+				// already checked the queue and accepted the lifecycle signal.
+				watched.SetStatus(objectcache.WatchedContainerStatusCompleted)
+				cpm.SetSyscallFlusher(func() { cpm.OnQueueError(nil, id, rejection) })
+				watched.SyncChannel <- tc.finalize
+			} else {
+				// Fill the control channel and deliver multiple already queued report
+				// failures before monitoring starts. None may block under the entry lock.
+				for range cap(watched.SyncChannel) {
+					watched.SyncChannel <- ContainerReachedMaxTime
 				}
-				close(delivered)
-			}()
-			select {
-			case <-delivered:
-			case <-time.After(time.Second):
-				t.Fatal("repeated queue callbacks blocked with a full control channel")
+				delivered := make(chan struct{})
+				go func() {
+					cpm.OnQueueError(nil, id, rejection)
+					for range 64 {
+						cpm.OnQueueError(nil, id, backoff.Permanent(errors.New("later rejection")))
+					}
+					close(delivered)
+				}()
+				select {
+				case <-delivered:
+				case <-time.After(time.Second):
+					t.Fatal("repeated queue callbacks blocked with a full control channel")
+				}
 			}
 			done := make(chan error, 1)
 			go func() { done <- cpm.monitorContainer(container, watched, entry.data) }()
@@ -73,7 +86,7 @@ func TestPermanentRejectionStopsMonitoringWithoutCompletion(t *testing.T) {
 				var permanent *backoff.PermanentError
 				require.ErrorAs(t, result, &permanent)
 				require.Contains(t, result.Error(), cause.Error())
-			case <-time.After(time.Second):
+			case <-time.After(3 * time.Second):
 				t.Fatal("permanent rejection deadlocked monitoring cleanup")
 			}
 			require.Equal(t, objectcache.WatchedContainerStatusRejected, watched.GetStatus())

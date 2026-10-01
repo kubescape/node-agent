@@ -116,6 +116,9 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				// Recover any syscalls not yet surfaced by the tracer's periodic poll before
 				// we snapshot and discard this container's data (see flushAndSettle).
 				cpm.flushAndSettle()
+				if pendingErr := handlePendingQueueError(); pendingErr != nil {
+					return pendingErr
+				}
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
 					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on termination", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
@@ -138,6 +141,9 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 				// See the ContainerHasTerminatedError case above.
 				cpm.flushAndSettle()
+				if pendingErr := handlePendingQueueError(); pendingErr != nil {
+					return pendingErr
+				}
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
 					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on max time", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
@@ -333,9 +339,6 @@ func (cpm *ContainerProfileManager) enqueueContainerProfile(containerProfile *v1
 func (cpm *ContainerProfileManager) OnQueueError(_ *v1beta1.ContainerProfile, containerID string, err error) {
 	err = cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 		if data.watchedContainerData != nil {
-			if data.queueErrors == nil {
-				data.queueErrors = make(chan error, 1)
-			}
 			// Retain the first terminal verdict independently of lifecycle/control
 			// signals. Further rejections cannot block cleanup on the entry lock.
 			select {
