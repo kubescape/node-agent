@@ -23,13 +23,24 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 	isHost := utils.IsHostContainer(notif.Container)
 	if cpm.cfg.NamespaceFilterFile != "" {
 		excluded := !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels)
+		// Track or abort before queueing.
+		// Otherwise a queued removal waits behind a stuck registration.
+		var parent context.Context
+		var release func()
+		switch notif.Type {
+		case containercollection.EventTypeAddContainer:
+			parent, release = cpm.pendingAdds.Track(notif.Container.Runtime.ContainerID)
+		case containercollection.EventTypeRemoveContainer:
+			cpm.pendingAdds.Cancel(notif.Container.Runtime.ContainerID)
+		}
 		// Finish deletion before readmission of the same running container.
 		// The regular callbacks deliberately launch asynchronous work.
 		cpm.lifecycleQueue.Submit(notif.Container.Runtime.ContainerID, func() {
 			switch notif.Type {
 			case containercollection.EventTypeAddContainer:
+				defer release()
 				if isHost || !cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
-					cpm.addContainerWithTimeout(notif.Container)
+					cpm.addContainerWithTimeout(parent, notif.Container)
 				}
 			case containercollection.EventTypeRemoveContainer:
 				cpm.deleteContainerWithReason(notif.Container, excluded)
@@ -46,15 +57,21 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 		if !isHost && cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
-		go cpm.addContainerWithTimeout(notif.Container)
+		parent, release := cpm.pendingAdds.Track(notif.Container.Runtime.ContainerID)
+		go func() {
+			defer release()
+			cpm.addContainerWithTimeout(parent, notif.Container)
+		}()
 	case containercollection.EventTypeRemoveContainer:
+		cpm.pendingAdds.Cancel(notif.Container.Runtime.ContainerID)
 		// A namespace may have been excluded since admission; always clean up.
 		go cpm.deleteContainer(notif.Container)
 	}
 }
 
-// addContainerWithTimeout handles adding a container with a timeout to prevent hanging
-func (cpm *ContainerProfileManager) addContainerWithTimeout(container *containercollection.Container) {
+// addContainerWithTimeout adds a container with a timeout.
+// parent is canceled if the container is removed meanwhile.
+func (cpm *ContainerProfileManager) addContainerWithTimeout(parent context.Context, container *containercollection.Container) {
 	containerID := container.Runtime.ContainerID
 
 	// Create container entry early with nil watchedContainerData
@@ -65,7 +82,7 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 	for !cpm.addContainerEntryIfAbsent(containerID, entry) {
 		// Another goroutine is already registering (or has registered) this
 		// container. entry.ready closes on BOTH success and failure of that
-		// attempt (see the error/timeout branches below), so closure alone
+		// attempt (see abandonEntry), so closure alone
 		// doesn't mean the container ended up tracked. Wait for that attempt
 		// to settle, then check whether its entry is still in the map: if it
 		// failed and cleaned up, this replayed add must retry the
@@ -89,41 +106,19 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 		// the get-or-insert with the same entry.
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), MaxWaitForSharedContainerData)
+	ctx, cancel := context.WithTimeout(parent, MaxWaitForSharedContainerData)
 	defer cancel()
 
-	done := make(chan error, 1)
-	go func() {
-		done <- cpm.addContainer(container, ctx)
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			logger.L().Error("failed to add container to the container profile manager", helpers.Error(err))
-			// Close ready channel and remove entry on error. Conditional on
-			// this still being the entry this goroutine registered: a
-			// duplicate-registration retry (the loop above) may have already
-			// installed a newer, successfully-registered entry for the same
-			// containerID by the time this failure is observed here, and an
-			// unconditional removal would delete that newer entry instead.
-			entry.readyOnce.Do(func() {
-				close(entry.ready)
-			})
-			cpm.removeContainerEntryIfMatch(containerID, entry)
-		}
-	case <-ctx.Done():
-		logger.L().Error("timeout while adding container to the container profile manager",
-			helpers.String("containerID", container.Runtime.ContainerID),
+	// Run inline: addContainer only blocks in the ctx-bound wait.
+	// Closing ready earlier lets a deletion hit a nil SyncChannel.
+	if err := cpm.addContainer(container, entry, ctx); err != nil {
+		utils.AddFailureLogger(ctx)("failed to add container to the container profile manager",
+			helpers.String("containerID", containerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
-			helpers.String("namespace", container.K8s.Namespace))
-		// Close ready channel and remove entry on timeout (see the error
-		// branch above for why this must be conditional on entry match).
-		entry.readyOnce.Do(func() {
-			close(entry.ready)
-		})
-		cpm.removeContainerEntryIfMatch(containerID, entry)
+			helpers.String("namespace", container.K8s.Namespace),
+			helpers.Error(err))
+		cpm.abandonEntry(containerID, entry)
 	}
 }
 
@@ -158,20 +153,15 @@ func hostContainerWithIdentity(container *containercollection.Container, sharedD
 	return &hostContainer
 }
 
-// addContainer adds a container to the container profile manager
-func (cpm *ContainerProfileManager) addContainer(container *containercollection.Container, ctx context.Context) error {
+// addContainer completes the registration of entry.
+// The caller has already inserted entry.
+func (cpm *ContainerProfileManager) addContainer(container *containercollection.Container, entry *ContainerEntry, ctx context.Context) error {
 	containerID := container.Runtime.ContainerID
 
 	// Wait for shared container data with timeout
 	sharedData, err := cpm.waitForSharedContainerData(containerID, ctx)
 	if err != nil {
-		// Close ready channel and remove the container entry if we fail
-		if entry, exists := cpm.getContainerEntry(containerID); exists {
-			entry.readyOnce.Do(func() {
-				close(entry.ready)
-			})
-			cpm.removeContainerEntryIfMatch(containerID, entry)
-		}
+		cpm.abandonEntry(containerID, entry)
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
 
@@ -185,13 +175,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace),
 			helpers.String("userDefinedProfile", sharedData.UserDefinedProfile))
-		// Close ready channel before removing entry
-		if entry, exists := cpm.getContainerEntry(containerID); exists {
-			entry.readyOnce.Do(func() {
-				close(entry.ready)
-			})
-			cpm.removeContainerEntryIfMatch(containerID, entry)
-		}
+		cpm.abandonEntry(containerID, entry)
 		return nil
 	}
 
@@ -201,19 +185,12 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
-		// Close ready channel before removing entry
-		if entry, exists := cpm.getContainerEntry(containerID); exists {
-			entry.readyOnce.Do(func() {
-				close(entry.ready)
-			})
-			cpm.removeContainerEntryIfMatch(containerID, entry)
-		}
+		cpm.abandonEntry(containerID, entry)
 		return nil
 	}
 
-	// Update the existing container entry with watchedContainerData
-	entry, exists := cpm.getContainerEntry(containerID)
-	if !exists || entry.data == nil {
+	// Update the container entry with watchedContainerData
+	if current, exists := cpm.getContainerEntry(containerID); !exists || current != entry || entry.data == nil {
 		// Should not happen, but guard just in case
 		return fmt.Errorf("container entry missing for %s after shared data ready", containerID)
 	}

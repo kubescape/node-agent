@@ -124,6 +124,7 @@ type ContainerProfileCacheImpl struct {
 	entries        maps.SafeMap[string, *CachedContainerProfile]
 	pending        maps.SafeMap[string, *pendingContainer]
 	containerLocks *resourcelocks.ResourceLocks
+	pendingAdds    utils.PendingAdds
 	storageClient  storage.ProfileClient
 	k8sObjectCache objectcache.K8sObjectCache
 	metricsManager metricsmanager.MetricsManager
@@ -242,8 +243,13 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 			containerCopy.K8s.Namespace = namespace
 			container = &containerCopy
 		}
-		go c.addContainerWithTimeout(container)
+		parent, release := c.pendingAdds.Track(container.Runtime.ContainerID)
+		go func() {
+			defer release()
+			c.addContainerWithTimeout(parent, container)
+		}()
 	case containercollection.EventTypeRemoveContainer:
+		c.pendingAdds.Cancel(notif.Container.Runtime.ContainerID)
 		// Skip the ignore check on Remove: a container added before its pod
 		// labels matched the ignore filter would otherwise leak in the cache.
 		// The reconciler eviction path is the safety net, but a Remove event
@@ -282,8 +288,9 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 
 // addContainerWithTimeout runs addContainer with a 10-minute cap to prevent
 // a stuck storage client from wedging the callback goroutine.
-func (c *ContainerProfileCacheImpl) addContainerWithTimeout(container *containercollection.Container) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+// parent is canceled if the container is removed meanwhile.
+func (c *ContainerProfileCacheImpl) addContainerWithTimeout(parent context.Context, container *containercollection.Container) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -294,10 +301,10 @@ func (c *ContainerProfileCacheImpl) addContainerWithTimeout(container *container
 	select {
 	case err := <-done:
 		if err != nil {
-			logger.L().Error("failed to add container to the container-profile cache", helpers.Error(err))
+			utils.AddFailureLogger(ctx)("failed to add container to the container-profile cache", helpers.Error(err))
 		}
 	case <-ctx.Done():
-		logger.L().Error("timeout while adding container to the container-profile cache",
+		utils.AddFailureLogger(ctx)("timeout while adding container to the container-profile cache",
 			helpers.String("containerID", container.Runtime.ContainerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
@@ -315,7 +322,8 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 	return c.containerLocks.WithLockAndError(containerID, func() error {
 		sharedData, err := c.waitForSharedContainerData(containerID, ctx)
 		if err != nil {
-			logger.L().Error("failed to get shared data for container",
+			// Debug only when the container was removed first (#848).
+			utils.AddFailureLogger(ctx)("failed to get shared data for container",
 				helpers.String("containerID", containerID),
 				helpers.Error(err))
 			return err
