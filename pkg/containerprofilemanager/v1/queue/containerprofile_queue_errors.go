@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/cenkalti/backoff/v5"
 	"github.com/kubescape/storage/pkg/registry/file"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
@@ -32,7 +32,7 @@ const (
 //
 // Failures reach us in these shapes, all of which must be recognised:
 //
-//   - an explicit storage.PermanentProfileError, preserving its rejection details;
+//   - an explicit backoff.PermanentError, preserving its rejection details;
 //   - a wrapped sentinel, when storage is used as a library (errors.Is matches);
 //   - a sentinel as the message of a k8s StatusError, when the apiserver relays it verbatim
 //     (StatusError.Error() returns only the message, so a substring match is needed - storage
@@ -64,7 +64,7 @@ func classifyFailure(err error) (failureKind, error) {
 		return failureSplit, err
 	}
 
-	if storage.IsPermanentProfileError(err) {
+	if _, permanent := errors.AsType[*backoff.PermanentError](err); permanent {
 		return failureTerminal, err
 	}
 

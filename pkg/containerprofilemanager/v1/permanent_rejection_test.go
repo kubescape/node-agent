@@ -6,16 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cenkalti/backoff/v5"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/otelsetup"
-	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/stretchr/testify/require"
 )
-
-type permanentRejection struct{ error }
-
-func (permanentRejection) Permanent() bool { return true }
 
 func TestPermanentRejectionStopsMonitoringWithoutCompletion(t *testing.T) {
 	for _, host := range []bool{false, true} {
@@ -50,7 +46,7 @@ func TestPermanentRejectionStopsMonitoringWithoutCompletion(t *testing.T) {
 				maxSniffTimeNotificationChan: []chan *containercollection.Container{ended},
 			}
 			cause := errors.New("invalid report")
-			rejection := fmt.Errorf("backend response: %w", permanentRejection{cause})
+			rejection := fmt.Errorf("backend response: %w", backoff.Permanent(cause))
 			// Fill the control channel and deliver multiple already queued report
 			// failures before monitoring starts. None may block under the entry lock.
 			for range cap(watched.SyncChannel) {
@@ -60,7 +56,7 @@ func TestPermanentRejectionStopsMonitoringWithoutCompletion(t *testing.T) {
 			go func() {
 				cpm.OnQueueError(nil, id, rejection)
 				for range 64 {
-					cpm.OnQueueError(nil, id, permanentRejection{errors.New("later rejection")})
+					cpm.OnQueueError(nil, id, backoff.Permanent(errors.New("later rejection")))
 				}
 				close(delivered)
 			}()
@@ -74,7 +70,8 @@ func TestPermanentRejectionStopsMonitoringWithoutCompletion(t *testing.T) {
 			select {
 			case result := <-done:
 				require.ErrorIs(t, result, rejection)
-				require.True(t, storage.IsPermanentProfileError(result))
+				var permanent *backoff.PermanentError
+				require.ErrorAs(t, result, &permanent)
 				require.Contains(t, result.Error(), cause.Error())
 			case <-time.After(time.Second):
 				t.Fatal("permanent rejection deadlocked monitoring cleanup")

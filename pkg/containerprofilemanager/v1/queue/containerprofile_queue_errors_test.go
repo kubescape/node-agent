@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cenkalti/backoff/v5"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
@@ -914,15 +915,6 @@ func TestRequeueSplit_QueueNotRunningDropsBothHalvesAndAttemptsStitch(t *testing
 		"both the lost-halves case and the stitch-also-failed case must still each report a metric sample")
 }
 
-type markedRejection struct {
-	err       error
-	permanent bool
-}
-
-func (e *markedRejection) Error() string   { return e.err.Error() }
-func (e *markedRejection) Unwrap() error   { return e.err }
-func (e *markedRejection) Permanent() bool { return e.permanent }
-
 func TestClassifyPermanentProfileRejection(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -930,12 +922,12 @@ func TestClassifyPermanentProfileRejection(t *testing.T) {
 		kind failureKind
 		want error
 	}{
-		{name: "wrapped permanent", err: fmt.Errorf("send: %w", &markedRejection{err: errors.New("invalid request: missing host identity"), permanent: true}), kind: failureTerminal},
-		{name: "false marker", err: &markedRejection{err: errors.New("temporary rejection")}, kind: failureRetryable},
+		{name: "wrapped permanent", err: fmt.Errorf("send: %w", backoff.Permanent(errors.New("invalid request: missing host identity"))), kind: failureTerminal},
+		{name: "transient", err: errors.New("temporary rejection"), kind: failureRetryable},
 		{name: "unknown", err: errors.New("unknown rejection"), kind: failureRetryable},
-		{name: "completion precedence", err: &markedRejection{err: file.ObjectCompletedError, permanent: true}, kind: failureTerminal, want: file.ObjectCompletedError},
-		{name: "size precedence", err: &markedRejection{err: file.ObjectTooLargeError, permanent: true}, kind: failureTerminal, want: file.ObjectTooLargeError},
-		{name: "transport size precedence", err: &markedRejection{err: genericStatusError(http.StatusRequestEntityTooLarge), permanent: true}, kind: failureSplit},
+		{name: "completion precedence", err: backoff.Permanent(file.ObjectCompletedError), kind: failureTerminal, want: file.ObjectCompletedError},
+		{name: "size precedence", err: backoff.Permanent(file.ObjectTooLargeError), kind: failureTerminal, want: file.ObjectTooLargeError},
+		{name: "transport size precedence", err: backoff.Permanent(genericStatusError(http.StatusRequestEntityTooLarge)), kind: failureSplit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			kind, reported := classifyFailure(tc.err)
@@ -950,7 +942,7 @@ func TestClassifyPermanentProfileRejection(t *testing.T) {
 }
 
 func TestQueuePermanentRejectionDoesNotRetry(t *testing.T) {
-	rejection := &markedRejection{err: errors.New("invalid request: missing host identity"), permanent: true}
+	rejection := backoff.Permanent(errors.New("invalid request: missing host identity"))
 	wrapped := fmt.Errorf("send report: %w", rejection)
 	creator := &alwaysFailingCreator{err: wrapped}
 	callback := &recordingCallback{}

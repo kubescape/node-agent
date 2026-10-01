@@ -5,12 +5,12 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/cenkalti/backoff/v5"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file"
@@ -173,7 +173,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 // handleSaveProfileError handles common error cases for saveProfile operations
 func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container, data *containerData) error {
-	if storage.IsPermanentProfileError(err) {
+	if _, permanent := errors.AsType[*backoff.PermanentError](err); permanent {
 		logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("storage permanently rejected container profile, stopping learning",
 			helpers.Error(err), helpers.String("containerID", watchedContainer.ContainerID))
 		if err := cpm.withContainerNoSizeUpdate(watchedContainer.ContainerID, func(*containerData) error {
