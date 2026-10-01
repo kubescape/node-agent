@@ -10,6 +10,7 @@ This document provides a comprehensive reference for all NodeAgent configuration
 - [Configuration File Options](#configuration-file-options)
   - [Core Settings](#core-settings)
   - [Feature Toggles](#feature-toggles)
+  - [Host Sensors and Orphan Cleanup](#host-sensors-and-orphan-cleanup)
   - [Timing & Performance](#timing--performance)
   - [Filtering Options](#filtering-options)
   - [Exporter Configuration](#exporter-configuration)
@@ -162,6 +163,31 @@ correlation is an upgrade, not a dependency.
 | `ignoreRuleBindings` | bool | `false` | Apply all rules to all pods regardless of bindings. When enabled, RuntimeAlertRuleBinding objects are not watched, every monitored container is kept for runtime detection, and per-pod binding bookkeeping is skipped (rules are resolved directly from the rule creator). |
 
 SBOM failure reporting is opt-in. Setting `API_URL` or mounting `services.json` does not enable it. Once both SBOM generation and failure reporting are enabled, service discovery retains its existing local-file-first behavior and uses `API_URL` (or `api.armosec.io` when unset) only when no services file exists.
+
+### Host sensors and orphan cleanup
+
+When `hostSensorEnabled` is enabled, each agent senses its own Node. One agent,
+selected using the `kubescape-hostdata-gc` Lease in `namespaceName` (normally
+provided by `NAMESPACE_NAME`), also removes orphaned resources from all ten
+supported host-data types. It sweeps immediately on becoming leader and every
+`hostSensorInterval` (default `5m`), independently of sensing.
+
+Cleanup deletes nothing if the complete Node list fails or is empty. It keeps
+records for present Nodes, including terminating Nodes, and checks a missing
+Node again before deleting its records with UID/resource-version preconditions.
+API failures preserve the affected records for a later sweep. Cleanup stops when
+leadership is lost or the manager shuts down; failure to obtain a Lease does not
+stop sensing. A missing namespace disables cleanup with a warning.
+
+Install the companion Helm RBAC update before or alongside the updated agent:
+Node reads, deletion of the ten host-data types, and namespaced Lease creation
+plus get/update of `kubescape-hostdata-gc` are required. Election coordinates
+agents in one installation namespace; separate namespaces elect independently.
+All agents share these permissions. Lease election is not strict fencing, and
+checking a Node and deleting a different resource cannot be atomic, so request
+cancellation and conditional deletion remain necessary. No cleanup runs while
+there is no surviving enabled agent; an empty cluster is cleaned after Nodes and
+an enabled agent return.
 
 ### Timing & Performance
 

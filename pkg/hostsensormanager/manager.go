@@ -12,12 +12,16 @@ import (
 
 // manager implements the HostSensorManager interface
 type manager struct {
-	config    Config
-	crdClient *CRDClient
-	sensors   []Sensor
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
-	startOnce sync.Once
+	config      Config
+	crdClient   *CRDClient
+	sensors     []Sensor
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
+	startOnce   sync.Once
+	lifecycleMu sync.Mutex
+	stopped     bool
+	cancel      context.CancelFunc
+	collector   *garbageCollector
 }
 
 // NewHostSensorManager creates a new host sensor manager
@@ -39,58 +43,79 @@ func NewHostSensorManager(config Config) (HostSensorManager, error) {
 		return nil, fmt.Errorf("failed to create CRD client: %w", err)
 	}
 
-	// Initialize sensors
-	sensors := []Sensor{
-		NewOsReleaseSensor(config.NodeName),
-		NewKernelVersionSensor(config.NodeName),
-		NewLinuxSecurityHardeningSensor(config.NodeName),
-		NewOpenPortsSensor(config.NodeName),
-		NewLinuxKernelVariablesSensor(config.NodeName),
-		NewKubeletInfoSensor(config.NodeName),
-		NewKubeProxyInfoSensor(config.NodeName),
-		NewControlPlaneInfoSensor(config.NodeName),
-		NewCloudProviderInfoSensor(config.NodeName),
-		NewCNIInfoSensor(config.NodeName),
+	var collector *garbageCollector
+	if config.Namespace == "" {
+		logger.L().Warning("host-data cleanup disabled: namespace is missing")
+	} else {
+		collector, err = newGarbageCollector(config, crdClient)
+		if err != nil {
+			logger.L().Warning("host-data cleanup disabled: cannot create election client", helpers.Error(err))
+		}
 	}
 
 	return &manager{
 		config:    config,
+		collector: collector,
 		crdClient: crdClient,
-		sensors:   sensors,
+		sensors:   supportedHostSensors(config.NodeName),
 		stopCh:    make(chan struct{}),
 	}, nil
+}
+
+func supportedHostSensors(nodeName string) []Sensor {
+	return []Sensor{
+		NewOsReleaseSensor(nodeName),
+		NewKernelVersionSensor(nodeName),
+		NewLinuxSecurityHardeningSensor(nodeName),
+		NewOpenPortsSensor(nodeName),
+		NewLinuxKernelVariablesSensor(nodeName),
+		NewKubeletInfoSensor(nodeName),
+		NewKubeProxyInfoSensor(nodeName),
+		NewControlPlaneInfoSensor(nodeName),
+		NewCloudProviderInfoSensor(nodeName),
+		NewCNIInfoSensor(nodeName),
+	}
 }
 
 // Start begins the sensing loop
 func (m *manager) Start(ctx context.Context) error {
 	m.startOnce.Do(func() {
+		m.lifecycleMu.Lock()
+		if m.stopped {
+			m.lifecycleMu.Unlock()
+			return
+		}
+		ctx, m.cancel = context.WithCancel(ctx)
 		logger.L().Info("starting host sensor manager",
 			helpers.String("nodeName", m.config.NodeName),
 			helpers.String("interval", m.config.Interval.String()))
-
-		// Run initial sensing immediately
-		m.runSensing(ctx)
-
-		// Start periodic sensing
+		if m.collector != nil {
+			m.wg.Add(1)
+			go func() { defer m.wg.Done(); m.collector.run(ctx) }()
+		}
+		// Register sensing before unlocking so Stop can safely wait even during
+		// initial sensing, without holding the mutex needed to cancel its requests.
 		m.wg.Add(1)
+		m.lifecycleMu.Unlock()
+		m.runSensing(ctx)
 		go m.sensingLoop(ctx)
 	})
-
 	return nil
 }
 
-// Stop gracefully stops the manager
+// Stop cancels background operations and waits for them. A stopped manager is
+// not restartable; concurrent and repeated calls are safe.
 func (m *manager) Stop() error {
-	logger.L().Info("stopping host sensor manager")
-	select {
-	case <-m.stopCh:
-		// Already closed
-		return nil
-	default:
+	m.lifecycleMu.Lock()
+	if !m.stopped {
+		m.stopped = true
 		close(m.stopCh)
+		if m.cancel != nil {
+			m.cancel()
+		}
 	}
+	m.lifecycleMu.Unlock()
 	m.wg.Wait()
-	logger.L().Info("host sensor manager stopped")
 	return nil
 }
 
@@ -120,6 +145,9 @@ func (m *manager) runSensing(ctx context.Context) {
 	logger.L().Debug("running host sensors", helpers.Int("sensorCount", len(m.sensors)))
 
 	for _, sensor := range m.sensors {
+		if ctx.Err() != nil {
+			return
+		}
 		if err := m.runSensor(ctx, sensor); err != nil {
 			logger.L().Warning("sensor failed",
 				helpers.String("kind", sensor.GetKind()),
