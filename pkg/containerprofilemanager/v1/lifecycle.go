@@ -59,7 +59,7 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 
 	// Create container entry early with nil watchedContainerData
 	entry := &ContainerEntry{
-		data:  &containerData{},
+		data:  &containerData{monitorDone: make(chan struct{}), queueErrors: make(chan error, 1)},
 		ready: make(chan struct{}),
 	}
 	for !cpm.addContainerEntryIfAbsent(containerID, entry) {
@@ -219,6 +219,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	}
 	entry.mu.Lock()
 	entry.data.watchedContainerData = sharedData
+	monitorData := entry.data
 	entry.mu.Unlock()
 
 	// Set container data fields
@@ -246,7 +247,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	}
 
 	// Start monitoring in separate goroutine
-	go cpm.startContainerMonitoring(container, sharedData)
+	go cpm.startContainerMonitoring(container, sharedData, monitorData)
 
 	// Signal that the container entry is ready
 	entry.readyOnce.Do(func() {
@@ -292,26 +293,47 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 		helpers.String("podName", container.K8s.PodName),
 		helpers.String("namespace", container.K8s.Namespace))
 
-	var ackChan chan struct{}
+	var watched *objectcache.WatchedContainerData
+	var syncChannel chan error
+	var ackChan, monitorDone chan struct{}
 	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 		if data.watchedContainerData != nil {
-			// Send container max time signal (blocking send, safe because monitoring goroutine is always running)
-			data.watchedContainerData.SyncChannel <- ContainerReachedMaxTime
+			watched = data.watchedContainerData
+			syncChannel = watched.SyncChannel
 			ackChan = data.watchedContainerData.AckChan
+			monitorDone = data.monitorDone
 		}
 		return nil
 	})
 
+	if syncChannel != nil {
+		select {
+		case <-monitorDone:
+			return
+		default:
+		}
+		select {
+		case syncChannel <- ContainerReachedMaxTime:
+		case <-monitorDone:
+			return
+		}
+	}
 	if ackChan != nil {
 		select {
 		case <-ackChan:
-			// Ack received
+		case <-monitorDone:
+			if watched.GetStatus() == objectcache.WatchedContainerStatusRejected {
+				return
+			}
 		case <-time.After(MaxWaitForAck):
 			logger.L().Warning("timeout waiting for ack from monitoring goroutine after max time",
 				helpers.String("containerID", containerID))
 		}
 	}
 
+	if watched != nil && watched.GetStatus() == objectcache.WatchedContainerStatusRejected {
+		return
+	}
 	if err == nil {
 		cpm.notifyContainerEndOfLife(container)
 		cpm.deleteContainer(container)
@@ -353,7 +375,8 @@ func (cpm *ContainerProfileManager) deleteContainerWithReason(container *contain
 			helpers.String("namespace", container.K8s.Namespace))
 	}
 
-	var ackChan chan struct{}
+	var syncChannel chan error
+	var ackChan, monitorDone chan struct{}
 	// Clean up container resources
 	entry.mu.Lock()
 	if entry.data != nil {
@@ -376,7 +399,15 @@ func (cpm *ContainerProfileManager) deleteContainerWithReason(container *contain
 		// below, and leave the still-running monitor goroutine ticking
 		// forever against an entry that no longer exists.
 		isHost := utils.IsHostContainer(container)
-		monitoringActive := entry.data.watchedContainerData != nil &&
+		monitorStopped := false
+		select {
+		case <-entry.data.monitorDone:
+			monitorStopped = true
+		default:
+		}
+		// A permanent rejection stops monitoring even for the host container.
+		monitoringActive := !monitorStopped && entry.data.watchedContainerData != nil &&
+			entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusRejected &&
 			(isHost ||
 				(entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusCompleted &&
 					entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusTooLarge))
@@ -403,17 +434,32 @@ func (cpm *ContainerProfileManager) deleteContainerWithReason(container *contain
 				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusFailed)
 			}
 
-			// Send container termination signal (blocking send, safe because monitoring goroutine is always running)
-			entry.data.watchedContainerData.SyncChannel <- ContainerHasTerminatedError
+			// Capture controls while locked; sending must not hold the lock
+			// needed by the monitor to save or reject this profile.
+			syncChannel = entry.data.watchedContainerData.SyncChannel
 			ackChan = entry.data.watchedContainerData.AckChan
+			monitorDone = entry.data.monitorDone
 		}
 	}
 	entry.mu.Unlock()
 
+	if syncChannel != nil {
+		select {
+		case <-monitorDone:
+			ackChan = nil
+		default:
+			select {
+			case syncChannel <- ContainerHasTerminatedError:
+			case <-monitorDone:
+				ackChan = nil
+			}
+		}
+	}
 	if ackChan != nil {
 		select {
 		case <-ackChan:
 			// Ack received
+		case <-monitorDone:
 		case <-time.After(MaxWaitForAck):
 			logger.L().Warning("timeout waiting for ack from monitoring goroutine after termination",
 				helpers.String("containerID", containerID))
@@ -434,8 +480,8 @@ func (cpm *ContainerProfileManager) deleteContainerWithReason(container *contain
 }
 
 // startContainerMonitoring starts monitoring a container
-func (cpm *ContainerProfileManager) startContainerMonitoring(container *containercollection.Container, sharedData *objectcache.WatchedContainerData) {
-	if err := cpm.monitorContainer(container, sharedData); err != nil {
+func (cpm *ContainerProfileManager) startContainerMonitoring(container *containercollection.Container, sharedData *objectcache.WatchedContainerData, data *containerData) {
+	if err := cpm.monitorContainer(container, sharedData, data); err != nil {
 		logger.L().Info("stopped recording container profile",
 			helpers.String("reason", err.Error()),
 			helpers.String("containerID", container.Runtime.ContainerID),

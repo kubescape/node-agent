@@ -41,6 +41,8 @@ const (
 
 	WatchedContainerStatusMissingRuntime WatchedContainerStatus = helpersv1.MissingRuntime
 	WatchedContainerStatusTooLarge       WatchedContainerStatus = helpersv1.TooLarge
+	// Rejected means storage permanently refused the report; no completed baseline exists.
+	WatchedContainerStatusRejected WatchedContainerStatus = "rejected"
 )
 
 type WatchedContainerCompletionStatus string

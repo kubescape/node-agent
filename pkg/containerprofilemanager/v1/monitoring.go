@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/cenkalti/backoff/v5"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -17,7 +18,9 @@ import (
 )
 
 // monitorContainer monitors a container and saves its profile periodically
-func (cpm *ContainerProfileManager) monitorContainer(container *containercollection.Container, watchedContainer *objectcache.WatchedContainerData) error {
+func (cpm *ContainerProfileManager) monitorContainer(container *containercollection.Container, watchedContainer *objectcache.WatchedContainerData, data *containerData) error {
+	queueErrors := data.queueErrors
+	defer data.stopMonitoring()
 	cpm.lifecycleTracker.OnLearningStarted(
 		watchedContainer.ContainerID,
 		container.K8s.Namespace,
@@ -51,9 +54,30 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 		hostLearningDeadline = time.Now().Add(watchedContainer.LearningPeriod)
 	}
 
-	for {
+	handlePendingQueueError := func() error {
 		select {
+		case err := <-queueErrors:
+			return cpm.handleSaveProfileError(err, watchedContainer, container, data)
+		default:
+			return nil
+		}
+	}
+
+	for {
+		// An already delivered storage verdict takes precedence over lifecycle
+		// finalization, which must not announce a rejected baseline as completed.
+		if err := handlePendingQueueError(); err != nil {
+			return err
+		}
+		select {
+		case err := <-queueErrors:
+			if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container, data); handledErr != nil {
+				return handledErr
+			}
 		case <-watchedContainer.UpdateDataTicker.C:
+			if err := handlePendingQueueError(); err != nil {
+				return err
+			}
 			// Adjust ticker after first tick for faster initial updates
 			if !watchedContainer.InitialDelayExpired {
 				watchedContainer.InitialDelayExpired = true
@@ -78,17 +102,23 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
 			}
 			if err := cpm.saveProfile(watchedContainer, container, false); err != nil {
-				if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != nil {
+				if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container, data); handledErr != nil {
 					return handledErr
 				}
 			}
 
 		case err := <-watchedContainer.SyncChannel:
+			if pendingErr := handlePendingQueueError(); pendingErr != nil {
+				return pendingErr
+			}
 			switch {
 			case errors.Is(err, ContainerHasTerminatedError):
 				// Recover any syscalls not yet surfaced by the tracer's periodic poll before
 				// we snapshot and discard this container's data (see flushAndSettle).
 				cpm.flushAndSettle()
+				if pendingErr := handlePendingQueueError(); pendingErr != nil {
+					return pendingErr
+				}
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
 					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on termination", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
@@ -111,6 +141,9 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 				// See the ContainerHasTerminatedError case above.
 				cpm.flushAndSettle()
+				if pendingErr := handlePendingQueueError(); pendingErr != nil {
+					return pendingErr
+				}
 				if err := cpm.saveProfile(watchedContainer, container, true); err != nil {
 					logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("failed to save container profile on max time", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
@@ -129,14 +162,14 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 			case errors.Is(err, ProfileRequiresSplit):
 				if err := cpm.saveProfile(watchedContainer, container, false); err != nil {
-					if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != nil {
+					if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container, data); handledErr != nil {
 						return handledErr
 					}
 				}
 
 			default:
-				// Handle queue errors (ObjectTooLargeError or ObjectCompletedError)
-				if err := cpm.handleSaveProfileError(err, watchedContainer, container); err != nil {
+				// Handle terminal queue errors, including permanent storage rejection.
+				if err := cpm.handleSaveProfileError(err, watchedContainer, container, data); err != nil {
 					return err
 				}
 			}
@@ -145,9 +178,31 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 }
 
 // handleSaveProfileError handles common error cases for saveProfile operations
-func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container) error {
+func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container, data *containerData) error {
+	if _, permanent := errors.AsType[*backoff.PermanentError](err); permanent {
+		logger.L().Ctx(cpm.lifecycleTracker.LearningCtx(watchedContainer.ContainerID)).Error("storage permanently rejected container profile, stopping learning",
+			helpers.Error(err), helpers.String("containerID", watchedContainer.ContainerID))
+		if err := cpm.withContainerNoSizeUpdate(watchedContainer.ContainerID, func(*containerData) error {
+			watchedContainer.SetStatus(objectcache.WatchedContainerStatusRejected)
+			data.stopMonitoring()
+			return nil
+		}); err != nil {
+			// Runtime cleanup may already have removed the entry. The owning
+			// monitor must still finish with the storage rejection verdict.
+			watchedContainer.SetStatus(objectcache.WatchedContainerStatusRejected)
+			data.stopMonitoring()
+		}
+		if watchedContainer.UpdateDataTicker != nil {
+			watchedContainer.UpdateDataTicker.Stop()
+		}
+		cpm.deleteContainer(container)
+		cpm.notifyContainerEndOfLife(container)
+		cpm.lifecycleTracker.OnLearningEnded(watchedContainer.ContainerID, "rejected")
+		return err
+	}
 	if err.Error() == file.ObjectTooLargeError.Error() {
 		watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
+		data.stopMonitoring()
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
 		cpm.notifyCompleted(watchedContainer.ContainerID)
@@ -155,6 +210,7 @@ func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedCon
 		return file.ObjectTooLargeError
 	} else if err.Error() == file.ObjectCompletedError.Error() {
 		watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
+		data.stopMonitoring()
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
 		cpm.notifyCompleted(watchedContainer.ContainerID)
@@ -279,11 +335,16 @@ func (cpm *ContainerProfileManager) enqueueContainerProfile(containerProfile *v1
 }
 
 // OnQueueError implements the queue.ErrorCallback interface
-// This method is called by the queue when it encounters ObjectTooLargeError or ObjectCompletedError
+// This method is called by the queue for terminal storage errors.
 func (cpm *ContainerProfileManager) OnQueueError(_ *v1beta1.ContainerProfile, containerID string, err error) {
 	err = cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 		if data.watchedContainerData != nil {
-			data.watchedContainerData.SyncChannel <- err
+			// Retain the first terminal verdict independently of lifecycle/control
+			// signals. Further rejections cannot block cleanup on the entry lock.
+			select {
+			case data.queueErrors <- err:
+			default:
+			}
 		}
 		return nil
 	})

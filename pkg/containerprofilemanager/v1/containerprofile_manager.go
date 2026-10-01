@@ -43,6 +43,9 @@ type ContainerEntry struct {
 type containerData struct {
 	// Core container information
 	watchedContainerData *objectcache.WatchedContainerData
+	queueErrors          chan error // One retained terminal verdict; accessed under the entry lock.
+	monitorDone          chan struct{}
+	monitorDoneOnce      sync.Once
 
 	// Apparent size
 	size atomic.Int64
@@ -67,6 +70,13 @@ type containerData struct {
 	// Last reported completion/statuses
 	lastReportedCompletion string
 	lastReportedStatus     string
+}
+
+// stopMonitoring unblocks lifecycle signal producers before terminal cleanup.
+func (data *containerData) stopMonitoring() {
+	if data.monitorDone != nil {
+		data.monitorDoneOnce.Do(func() { close(data.monitorDone) })
+	}
 }
 
 // ContainerProfileManager manages container profiles and their lifecycle
