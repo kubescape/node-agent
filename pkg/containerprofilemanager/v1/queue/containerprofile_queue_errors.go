@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/registry/file"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
@@ -24,13 +25,14 @@ const (
 
 // classifyFailure maps an error returned by storage.ProfileCreator onto the queue's reaction.
 //
-// For failureTerminal it also returns the sentinel to hand to ErrorCallback, so that
+// For failureTerminal it returns a sentinel or the permanent rejection to ErrorCallback, so that
 // ContainerProfileManager.handleSaveProfileError can end learning with the right status.
 // That contract applies to failureTerminal only: for failureSplit the raw error is returned
 // for logging, and it must never reach ErrorCallback.
 //
-// Failures reach us in three shapes, all of which must be recognised:
+// Failures reach us in these shapes, all of which must be recognised:
 //
+//   - an explicit storage.PermanentProfileError, preserving its rejection details;
 //   - a wrapped sentinel, when storage is used as a library (errors.Is matches);
 //   - a sentinel as the message of a k8s StatusError, when the apiserver relays it verbatim
 //     (StatusError.Error() returns only the message, so a substring match is needed - storage
@@ -60,6 +62,10 @@ func classifyFailure(err error) (failureKind, error) {
 	// matches on the status code alone, which is what makes this work against a plain-text body.
 	if apierrors.IsRequestEntityTooLargeError(err) {
 		return failureSplit, err
+	}
+
+	if storage.IsPermanentProfileError(err) {
+		return failureTerminal, err
 	}
 
 	return failureRetryable, err

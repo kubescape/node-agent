@@ -559,9 +559,8 @@ processLoop:
 					helpers.String("name", queuedProfile.Profile.Name),
 					helpers.Error(err))
 
-				// Call error callback if provided to propagate the error. The sentinel is
-				// reported rather than err itself, so that the manager can map it onto the
-				// right terminal container status even when the transport lost the sentinel.
+				// Normalize known sentinels for the manager status mapping, while
+				// preserving explicit permanent rejections and their backend details.
 				if qd.errorCallback != nil {
 					qd.errorCallback.OnQueueError(queuedProfile.Profile, queuedProfile.ContainerID, reported)
 				}

@@ -131,7 +131,7 @@ func (t *ProfileLifecycleTracker) OnEntrySaved(containerID string, hasDropped bo
 }
 
 // OnLearningEnded ends the lifecycle span with the given reason
-// ("completed", "evicted", "too_large", "terminated").
+// ("completed", "evicted", "too_large", "terminated", "rejected").
 func (t *ProfileLifecycleTracker) OnLearningEnded(containerID, reason string) {
 	t.mu.Lock()
 	span, ok := t.spans[containerID]

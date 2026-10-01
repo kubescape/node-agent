@@ -44,7 +44,12 @@ func (cpm *ContainerProfileManager) withContainer(containerID string, fn func(*c
 					helpers.Int("maxSize", int(cpm.cfg.MaxTsProfileSize)),
 					helpers.String("containerID", containerID),
 					helpers.String("wlid", entry.data.watchedContainerData.Wlid))
-				entry.data.watchedContainerData.SyncChannel <- ProfileRequiresSplit
+				// A pending split or lifecycle signal already causes a save.
+				// Never block while holding the entry lock the monitor needs.
+				select {
+				case entry.data.watchedContainerData.SyncChannel <- ProfileRequiresSplit:
+				default:
+				}
 				entry.data.size.Store(0) // Prevent multiple splits (race condition)
 			}
 		}

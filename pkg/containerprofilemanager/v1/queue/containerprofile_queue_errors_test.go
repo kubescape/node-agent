@@ -913,3 +913,54 @@ func TestRequeueSplit_QueueNotRunningDropsBothHalvesAndAttemptsStitch(t *testing
 	assert.Equal(t, []string{string(dropReasonEnqueueFailed), string(dropReasonEnqueueFailed)}, spy.droppedReasons(),
 		"both the lost-halves case and the stitch-also-failed case must still each report a metric sample")
 }
+
+type markedRejection struct {
+	err       error
+	permanent bool
+}
+
+func (e *markedRejection) Error() string   { return e.err.Error() }
+func (e *markedRejection) Unwrap() error   { return e.err }
+func (e *markedRejection) Permanent() bool { return e.permanent }
+
+func TestClassifyPermanentProfileRejection(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		kind failureKind
+		want error
+	}{
+		{name: "wrapped permanent", err: fmt.Errorf("send: %w", &markedRejection{err: errors.New("invalid request: missing host identity"), permanent: true}), kind: failureTerminal},
+		{name: "false marker", err: &markedRejection{err: errors.New("temporary rejection")}, kind: failureRetryable},
+		{name: "unknown", err: errors.New("unknown rejection"), kind: failureRetryable},
+		{name: "completion precedence", err: &markedRejection{err: file.ObjectCompletedError, permanent: true}, kind: failureTerminal, want: file.ObjectCompletedError},
+		{name: "size precedence", err: &markedRejection{err: file.ObjectTooLargeError, permanent: true}, kind: failureTerminal, want: file.ObjectTooLargeError},
+		{name: "transport size precedence", err: &markedRejection{err: genericStatusError(http.StatusRequestEntityTooLarge), permanent: true}, kind: failureSplit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kind, reported := classifyFailure(tc.err)
+			require.Equal(t, tc.kind, kind)
+			if tc.want != nil {
+				require.Same(t, tc.want, reported)
+			} else {
+				require.Same(t, tc.err, reported, "preserve original rejection and wrapping details")
+			}
+		})
+	}
+}
+
+func TestQueuePermanentRejectionDoesNotRetry(t *testing.T) {
+	rejection := &markedRejection{err: errors.New("invalid request: missing host identity"), permanent: true}
+	wrapped := fmt.Errorf("send report: %w", rejection)
+	creator := &alwaysFailingCreator{err: wrapped}
+	callback := &recordingCallback{}
+	qd := startQueue(t, creator, callback, QueueConfig{RetryInterval: 20 * time.Millisecond})
+	require.NoError(t, qd.Enqueue(testProfile(), "container-id"))
+	require.Eventually(t, func() bool { return len(callback.captured()) == 1 }, time.Second, 10*time.Millisecond)
+	require.Same(t, wrapped, callback.captured()[0])
+	require.ErrorIs(t, callback.captured()[0], rejection)
+	require.Contains(t, callback.captured()[0].Error(), "missing host identity")
+	assert.Never(t, func() bool {
+		return qd.GetQueueSize() != 0 || creator.callCount() != 1 || len(callback.captured()) != 1
+	}, 100*time.Millisecond, 10*time.Millisecond, "terminal rejection must neither retry nor enqueue a stitch")
+}
