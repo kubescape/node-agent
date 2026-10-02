@@ -1,5 +1,34 @@
 # Plain HTTP response continuation regression tests
 
+## Kernel verifier and live iovec capture
+
+On a disposable Linux host with root access, Docker, Python 3 and IG `v0.48.1`:
+
+```sh
+sudo python3 pkg/ebpf/gadgets/http/tests/verifier_capture.py \
+  --output-dir /var/tmp/http-verifier-regression
+```
+
+The runner builds current HTTP source under a unique local tag, loads and
+attaches it with registry pulling disabled, and requires an actual HTTP event
+before checking capture. It verifies byte-for-byte payloads and the 16 KiB
+event / 256 KiB syscall limits through real TCP `sendmsg`, `recvmsg`, `writev`
+and `readv` calls, including empty/split vectors and short receive buffers.
+It retains environment information, JSON events, generated ELF files and
+verbose load logs. Any load, capture or fixture failure exits nonzero; missing
+privileges are not treated as a pass. It traces only the runner's PID.
+
+To compare an already imported release artifact, add `--image IMAGE:TAG` and
+use a separate output directory. Run both versions on COS 121 build
+`18867.624.2`, kernel `6.6.157+`, and confirm the baseline ELF digest is
+`d278a0cf36ffcd8e95dad1b97da80422ba2e9c7d92342da4b9ff1857baa1151d`.
+The baseline must reject loading and the patched image must pass. A pass on
+another kernel does not establish COS compatibility. Repeat the patched run
+to check detach and reattachment. The runner does not deploy node-agent or
+establish backend/profile integration.
+
+## Native continuation tests
+
 Run `go test ./pkg/ebpf/gadgets/http/tests` from the repository root. A native C
 compiler (`cc`) is required; the test explicitly skips when it is unavailable.
 The harness compiles the production HTTP classifier and syscall entry/exit
