@@ -1,6 +1,7 @@
 package objectcache
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -114,4 +115,35 @@ func Test_formatDuration(t *testing.T) {
 			assert.Equal(t, tt.want, formatDuration(tt.d))
 		})
 	}
+}
+
+func TestWatchedContainerData_StatusConcurrency(t *testing.T) {
+	data := &WatchedContainerData{}
+	var wg sync.WaitGroup
+
+	for i := 0; i < 50; i++ {
+		wg.Add(4)
+		go func() {
+			defer wg.Done()
+			data.SetStatus(WatchedContainerStatusReady)
+			_ = data.GetStatus()
+		}()
+		go func() {
+			defer wg.Done()
+			data.SetStatus(WatchedContainerStatusCompleted)
+			_ = data.GetStatus()
+		}()
+		go func() {
+			defer wg.Done()
+			data.SetCompletionStatus(WatchedContainerCompletionStatusPartial)
+			_ = data.GetCompletionStatus()
+		}()
+		go func() {
+			defer wg.Done()
+			data.SetCompletionStatus(WatchedContainerCompletionStatusFull)
+			_ = data.GetCompletionStatus()
+		}()
+	}
+
+	wg.Wait()
 }
