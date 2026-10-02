@@ -9,6 +9,7 @@ import (
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
@@ -75,6 +76,23 @@ func (sc *StorageHttpClientMock) GetContainerProfile(_ context.Context, namespac
 		}
 	}
 	return nil, nil
+}
+
+func (sc *StorageHttpClientMock) ListContainerProfiles(_ context.Context, namespace string, opts metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	sc.containerProfilesMu.Lock()
+	defer sc.containerProfilesMu.Unlock()
+	sel, _ := labels.Parse(opts.LabelSelector)
+	out := &v1beta1.ContainerProfileList{}
+	for _, p := range sc.ContainerProfiles {
+		if p == nil || p.Namespace != namespace {
+			continue
+		}
+		if sel != nil && !sel.Matches(labels.Set(p.Labels)) {
+			continue
+		}
+		out.Items = append(out.Items, *p)
+	}
+	return out, nil
 }
 
 func (sc *StorageHttpClientMock) GetSBOMMeta(_ string) (*v1beta1.SBOMSyft, error) {
