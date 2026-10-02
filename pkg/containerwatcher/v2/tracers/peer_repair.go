@@ -57,13 +57,38 @@ func newPeerRepair() *peerRepair {
 	return r
 }
 
-func podByIP(pods []*common.SlimPod, ip string) *common.SlimPod {
+func podByIP(pods []*common.SlimPod, ip, expectedNamespace, expectedName string) *common.SlimPod {
+	var matches []*common.SlimPod
 	for _, p := range pods {
 		if p == nil || p.Spec.HostNetwork || p.Status.PodIP != ip {
 			continue
 		}
+		matches = append(matches, p)
+	}
+	if len(matches) == 0 {
+		return nil
+	}
+	if len(matches) == 1 {
+		p := matches[0]
+		if expectedName != "" && (p.Name != expectedName || (expectedNamespace != "" && p.Namespace != expectedNamespace)) {
+			return nil
+		}
 		return p
 	}
+	// Ambiguous matches: multiple pods claim the same IP (terminating pod + replacement pod in cachedmap).
+	if expectedName != "" {
+		var disambiguated *common.SlimPod
+		for _, p := range matches {
+			if p.Name == expectedName && (expectedNamespace == "" || p.Namespace == expectedNamespace) {
+				if disambiguated != nil {
+					return nil
+				}
+				disambiguated = p
+			}
+		}
+		return disambiguated
+	}
+	// Without expected name, decline repair to avoid nondeterministically emitting stale identity.
 	return nil
 }
 
@@ -140,10 +165,8 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 				// Ownership validation: validate cached positive hit against current pod list
 				// and against any expected pod metadata from upstream.
 				pods := r.pods()
-				p := podByIP(pods, ip)
-				if p != nil && p.Name == hit.name && p.Namespace == hit.namespace &&
-					(expectedName == "" || p.Name == expectedName) &&
-					(expectedNamespace == "" || p.Namespace == expectedNamespace) {
+				p := podByIP(pods, ip, expectedNamespace, expectedName)
+				if p != nil && p.Name == hit.name && p.Namespace == hit.namespace {
 					return hit, true
 				}
 				delete(r.byIP, ip)
@@ -155,10 +178,8 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 
 	id := peerIdentity{at: now}
 	pods := r.pods()
-	if p := podByIP(pods, ip); p != nil {
-		if expectedName == "" || p.Name == expectedName {
-			id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
-		}
+	if p := podByIP(pods, ip, expectedNamespace, expectedName); p != nil {
+		id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
 	}
 	if !id.found && expectedName != "" {
 		for _, p := range pods {

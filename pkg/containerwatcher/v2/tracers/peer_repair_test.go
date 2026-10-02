@@ -55,10 +55,18 @@ func TestPeerRepair_ReusedAddressResolvesToTheCurrentPod(t *testing.T) {
 	require.True(t, ok, "a miss is retried after its short TTL and finds the pod that appeared")
 	require.Equal(t, "late", id.name)
 
-	// Rapid churn: pod address reassigned without advancing time past peerHitTTL
-	pods[0] = slim("shop", "api-newer", "10.42.0.48", false, map[string]string{"app": "api"})
-	id, _ = r.lookup("10.42.0.48")
-	require.Equal(t, "api-newer", id.name, "ownership validation detects address handed to another pod without waiting for TTL")
+	// Rapid churn: during IP reuse, both old terminating pod and replacement pod exist in inventory
+	pods = append(pods, slim("shop", "api-newer", "10.42.0.48", false, map[string]string{"app": "api"}))
+	// Expected pod name disambiguates duplicate IP candidates
+	id, ok = r.lookupWithExpected("10.42.0.48", "shop", "api-newer")
+	require.True(t, ok)
+	require.Equal(t, "api-newer", id.name, "expected pod identity disambiguates duplicate IP candidates during churn")
+
+	// Once old terminating pod is evicted from inventory, raw lookup also resolves to the new pod
+	pods = pods[1:]
+	id, ok = r.lookup("10.42.0.48")
+	require.True(t, ok)
+	require.Equal(t, "api-newer", id.name)
 }
 
 func TestPodByIP_FirstNonHostMatch(t *testing.T) {
@@ -67,9 +75,23 @@ func TestPodByIP_FirstNonHostMatch(t *testing.T) {
 		slim("a", "hostnet", "10.0.0.1", true, nil),
 		slim("a", "real", "10.0.0.1", false, nil),
 	}
-	require.Equal(t, "real", podByIP(pods, "10.0.0.1").Name)
-	require.Nil(t, podByIP(pods, "10.0.0.2"))
+	require.Equal(t, "real", podByIP(pods, "10.0.0.1", "", "").Name)
+	require.Nil(t, podByIP(pods, "10.0.0.2", "", ""))
 	require.Equal(t, "", labelString(nil))
+}
+
+func TestPodByIP_AmbiguousMatches(t *testing.T) {
+	pods := []*common.SlimPod{
+		slim("shop", "api-old", "10.42.0.48", false, map[string]string{"app": "api", "version": "v1"}),
+		slim("shop", "api-newer", "10.42.0.48", false, map[string]string{"app": "api", "version": "v2"}),
+	}
+	// Without expected name, ambiguous matches are declined to prevent nondeterministic stale attribution
+	require.Nil(t, podByIP(pods, "10.42.0.48", "", ""), "ambiguous IP match without expected name must be declined")
+
+	// With expected name, ambiguous matches are correctly disambiguated
+	matched := podByIP(pods, "10.42.0.48", "shop", "api-newer")
+	require.NotNil(t, matched)
+	require.Equal(t, "api-newer", matched.Name)
 }
 
 func TestPeerRepair_OwnershipValidationOnRapidChurn(t *testing.T) {
