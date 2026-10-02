@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -120,6 +121,18 @@ func NewEventHandlerFactory(
 		case utils.ExecveEventType:
 			if execEvent, ok := event.(utils.ExecEvent); ok {
 				containerProfileManager.ReportFileExec(execEvent.GetContainerID(), execEvent)
+			}
+		case utils.ProcfsEventType:
+			// A process the agent found already running. Its exec happened
+			// before the tracer attached and cannot be replayed, but the
+			// process is still there and procfs carries what it ran
+			// (entlein/node-agent#22).
+			if pe, ok := event.(*events.ProcfsEvent); ok {
+				argv := pe.Argv
+				if len(argv) == 0 {
+					argv = strings.Fields(pe.Cmdline)
+				}
+				containerProfileManager.ReportProcfsExec(pe.ContainerID, pe.Path, argv)
 			}
 		case utils.OpenEventType:
 			if openEvent, ok := event.(utils.OpenEvent); ok {
@@ -390,6 +403,11 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// Exec events
 	ehf.handlers[utils.ExecveEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics, rulePolicy}
+
+	// Procfs events: the learning retry for a process whose exec the agent
+	// missed. The process tree consumes these on its own path; this entry is
+	// what carries them to learning.
+	ehf.handlers[utils.ProcfsEventType] = []Manager{containerProfileManager}
 
 	// Open events
 	ehf.handlers[utils.OpenEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics}

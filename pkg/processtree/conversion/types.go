@@ -23,6 +23,7 @@ type ProcessEvent struct {
 	Comm        string
 	Pcomm       string
 	Cmdline     string
+	Argv        []string
 	Uid         *uint32
 	Gid         *uint32
 	Cwd         string

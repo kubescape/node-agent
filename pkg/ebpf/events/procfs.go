@@ -16,6 +16,7 @@ type ProcfsEvent struct {
 	Comm        string          `json:"comm"`
 	Pcomm       string          `json:"pcomm"`
 	Cmdline     string          `json:"cmdline"`
+	Argv        []string        `json:"argv,omitempty"`
 	Uid         *uint32         `json:"uid"`
 	Gid         *uint32         `json:"gid"`
 	Cwd         string          `json:"cwd"`

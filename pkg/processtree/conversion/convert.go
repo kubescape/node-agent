@@ -126,6 +126,7 @@ func convertProcfsEvent(procfsEvent *events.ProcfsEvent) ProcessEvent {
 		Comm:        procfsEvent.Comm,
 		Pcomm:       procfsEvent.Pcomm,
 		Cmdline:     procfsEvent.Cmdline,
+		Argv:        procfsEvent.Argv,
 		Uid:         procfsEvent.Uid,
 		Gid:         procfsEvent.Gid,
 		Cwd:         procfsEvent.Cwd,

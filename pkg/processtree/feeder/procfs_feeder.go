@@ -271,6 +271,7 @@ func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (conversion.ProcessEvent, er
 			event.Cmdline = stat.Comm
 		} else {
 			event.Cmdline = strings.Join(cmdline, " ")
+			event.Argv = append([]string(nil), cmdline...)
 		}
 	}
 

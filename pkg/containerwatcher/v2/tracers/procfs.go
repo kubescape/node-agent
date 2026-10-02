@@ -156,6 +156,7 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 		Comm:           event.Comm,
 		Pcomm:          event.Pcomm,
 		Cmdline:        event.Cmdline,
+		Argv:           event.Argv,
 		Uid:            event.Uid,
 		Gid:            event.Gid,
 		Cwd:            event.Cwd,

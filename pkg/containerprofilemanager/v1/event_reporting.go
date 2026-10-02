@@ -160,6 +160,37 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event uti
 	cpm.logEventError(err, "file exec", containerID)
 }
 
+// ReportProcfsExec records a process the agent found already running, from the
+// procfs scan rather than from an exec event (entlein/node-agent#22).
+//
+// An exec that happened before the tracer attached cannot be replayed, but the
+// process it started is usually still there, and procfs carries the same two
+// facts an exec event would have: the resolved binary and the argv. So the
+// learning is retried against the live process rather than reconstructed from
+// the pod spec, which would state what was asked for instead of what ran.
+//
+// Same identifier as an observed exec, so a process seen both ways is recorded
+// once and neither source shadows the other.
+func (cpm *ContainerProfileManager) ReportProcfsExec(containerID string, path string, argv []string) {
+	if path == "" {
+		return
+	}
+	args := append([]string(nil), argv...)
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+		if data.execs == nil {
+			data.execs = &maps.SafeMap[string, []string]{}
+		}
+		execIdentifier := utils.CalculateSHA256FileExecHash(path, args)
+		if data.execs.Has(execIdentifier) {
+			return 0, nil
+		}
+		exec := append([]string{path}, args...)
+		data.execs.Set(execIdentifier, exec)
+		return size.Of(exec), nil
+	})
+	cpm.logEventError(err, "procfs exec", containerID)
+}
+
 // ReportFileOpen reports a file open event for a container
 func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event utils.OpenEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
