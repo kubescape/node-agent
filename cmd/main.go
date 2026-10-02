@@ -109,6 +109,12 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
 
+	if cfg.EnableHostSensor {
+		if err := hostsensormanager.ValidateExcludedSensors(cfg.HostSensorExcludedSensors); err != nil {
+			logger.L().Ctx(ctx).Fatal("invalid host sensor configuration", helpers.Error(err))
+		}
+	}
+
 	clusterData, err := utilsmetadata.LoadConfig("/etc/config/clusterData.json")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
@@ -245,10 +251,11 @@ func main() {
 	var hostSensorManager hostsensormanager.HostSensorManager
 	if cfg.EnableHostSensor {
 		hostSensorConfig := hostsensormanager.Config{
-			Namespace: cfg.NamespaceName,
-			Enabled:   cfg.EnableHostSensor,
-			Interval:  cfg.HostSensorInterval,
-			NodeName:  cfg.NodeName,
+			Namespace:       cfg.NamespaceName,
+			Enabled:         cfg.EnableHostSensor,
+			Interval:        cfg.HostSensorInterval,
+			ExcludedSensors: cfg.HostSensorExcludedSensors,
+			NodeName:        cfg.NodeName,
 		}
 		hostSensorManager, err = hostsensormanager.NewHostSensorManager(hostSensorConfig)
 		if err != nil {

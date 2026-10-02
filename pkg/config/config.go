@@ -140,8 +140,9 @@ type Config struct {
 	WorkerChannelSize              int                                  `mapstructure:"workerChannelSize"`
 	WorkerPoolSize                 int                                  `mapstructure:"workerPoolSize"`
 	// Host sensor configuration
-	EnableHostSensor   bool          `mapstructure:"hostSensorEnabled"`
-	HostSensorInterval time.Duration `mapstructure:"hostSensorInterval"`
+	EnableHostSensor          bool          `mapstructure:"hostSensorEnabled"`
+	HostSensorInterval        time.Duration `mapstructure:"hostSensorInterval"`
+	HostSensorExcludedSensors []string      `mapstructure:"hostSensorExcludedSensors"`
 
 	// namespaceFilter is shared by Config copies; published snapshots are immutable.
 	namespaceFilter *atomic.Pointer[NamespaceFilter]
@@ -291,6 +292,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	// Host sensor defaults
 	viper.SetDefault("hostSensorEnabled", false)
 	viper.SetDefault("hostSensorInterval", 5*time.Minute)
+	viper.SetDefault("hostSensorExcludedSensors", []string{})
 
 	viper.AutomaticEnv()
 
