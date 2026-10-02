@@ -275,10 +275,18 @@ func TestPeerRepair_RepairPodEndpointWithMissingLabels(t *testing.T) {
 	repaired = r.repair(ds, data, ev)
 	require.False(t, repaired, "service endpoints must not be repaired by peer repair")
 
-	// Case 3: Pod endpoint that already has labels -> must NOT be repaired
-	ds, data, ev = newNetworkTestEvent(t, "10.42.1.20", string(igtypes.EndpointKindPod), "production", "frontend", "app=existing")
+	// Case 3: Pod endpoint that already has current labels -> must NOT be modified
+	ds, data, ev = newNetworkTestEvent(t, "10.42.1.20", string(igtypes.EndpointKindPod), "production", "frontend", "app=frontend,tier=web")
 	repaired = r.repair(ds, data, ev)
-	require.False(t, repaired, "pod endpoints with existing labels must not be modified")
+	require.False(t, repaired, "pod endpoints with current labels must not be modified")
+
+	// Case 3b: Pod endpoint with outdated labels -> should be refreshed to current labels
+	ds, data, ev = newNetworkTestEvent(t, "10.42.1.20", string(igtypes.EndpointKindPod), "production", "frontend", "app=old")
+	repaired = r.repair(ds, data, ev)
+	require.True(t, repaired, "pod endpoints with outdated labels should be updated")
+	labels, err = fields.labelsAcc.String(data)
+	require.NoError(t, err)
+	require.Equal(t, "app=frontend,tier=web", labels)
 
 	// Case 4: Kind is raw (KubeIPResolver miss) -> should be repaired into Pod with full metadata
 	ds, data, ev = newNetworkTestEvent(t, "10.42.1.20", string(igtypes.EndpointKindRaw), "", "", "")
@@ -556,5 +564,69 @@ func TestPeerRepair_NilIPIndexValidatedAgainstFullPodSet(t *testing.T) {
 	require.True(t, ok, "unambiguous full-IP owner must be accepted even when IP index is nil")
 	require.Equal(t, "api-new", id.name)
 }
+
+func TestPeerRepair_StaleFullyPopulatedPodEndpointRepairedOnIPReuse(t *testing.T) {
+	newPod := slim("shop", "api-new", "10.42.0.48", false, map[string]string{"app": "api", "version": "v2"})
+	inv := &mockInventory{
+		podsByName: map[string]*common.SlimPod{
+			"shop/api-new": newPod,
+		},
+		podsByIP: map[string]*common.SlimPod{
+			"10.42.0.48": newPod,
+		},
+	}
+	r := newTestPeerRepairWithInv(inv)
+
+	// An event was stamped by KubeIPResolver with stale terminating pod metadata (api-old, version=v1)
+	ds, data, ev := newNetworkTestEvent(t, "10.42.0.48", string(igtypes.EndpointKindPod), "shop", "api-old", "app=api,version=v1")
+	repaired := r.repair(ds, data, ev)
+	require.True(t, repaired, "stale pod endpoint should be repaired with current IP owner")
+
+	fields := networkTestDatasource()
+	name, err := fields.nameAcc.String(data)
+	require.NoError(t, err)
+	require.Equal(t, "api-new", name)
+
+	labels, err := fields.labelsAcc.String(data)
+	require.NoError(t, err)
+	require.Contains(t, labels, "version=v2")
+}
+
+func TestPeerRepair_StaleFullyPopulatedPodEndpointClearedWhenAmbiguous(t *testing.T) {
+	oldPod := slim("shop", "api-old", "10.42.0.48", false, map[string]string{"app": "api", "version": "v1"})
+	newPod := slim("shop", "api-new", "10.42.0.48", false, map[string]string{"app": "api", "version": "v2"})
+	inv := &mockInventory{
+		podsByName: map[string]*common.SlimPod{
+			"shop/api-old": oldPod,
+			"shop/api-new": newPod,
+		},
+		podsByIP: map[string]*common.SlimPod{
+			// In churn, GetPodByIp may already point to newPod or be ambiguous
+			"10.42.0.48": newPod,
+		},
+	}
+	r := newTestPeerRepairWithInv(inv)
+	// Clear podsByIP to simulate ambiguity in churn where neither can be uniquely determined
+	delete(inv.podsByIP, "10.42.0.48")
+
+	// Event was stamped with stale terminating pod api-old
+	ds, data, ev := newNetworkTestEvent(t, "10.42.0.48", string(igtypes.EndpointKindPod), "shop", "api-old", "app=api,version=v1")
+	repaired := r.repair(ds, data, ev)
+	require.True(t, repaired, "stale pod endpoint must be cleared when IP owner cannot be uniquely determined")
+
+	fields := networkTestDatasource()
+	kind, err := fields.kindAcc.String(data)
+	require.NoError(t, err)
+	require.Equal(t, string(igtypes.EndpointKindRaw), kind, "stale pod endpoint must revert to raw")
+
+	name, err := fields.nameAcc.String(data)
+	require.NoError(t, err)
+	require.Empty(t, name, "stale pod name must be cleared")
+
+	labels, err := fields.labelsAcc.String(data)
+	require.NoError(t, err)
+	require.Empty(t, labels, "stale pod labels must be cleared")
+}
+
 
 

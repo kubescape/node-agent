@@ -335,24 +335,45 @@ func (r *peerRepair) repair(d datasource.DataSource, data datasource.Data, ev *u
 	if ep.Addr == "" || ep.Addr == "0.0.0.0" || strings.HasPrefix(ep.Addr, "127.") {
 		return false
 	}
-	// An endpoint is eligible for repair if:
-	// 1. It is unresolved (empty kind or EndpointKindRaw from KubeIPResolver), OR
-	// 2. It is resolved as a Pod but missing labels (partial enrichment).
-	// Other resolved kinds (e.g. services) and pods that already possess labels are preserved.
-	if ep.Kind != "" && ep.Kind != igtypes.EndpointKindRaw {
-		if ep.Kind != igtypes.EndpointKindPod || len(ep.PodLabels) > 0 {
-			return false
-		}
-	}
-	id, ok := r.lookupWithExpected(ep.Addr, ep.Namespace, ep.Name)
-	if !ok {
+	// Non-pod resolved endpoints (e.g. services) are preserved.
+	if ep.Kind != "" && ep.Kind != igtypes.EndpointKindRaw && ep.Kind != igtypes.EndpointKindPod {
 		return false
 	}
+
+	var target peerIdentity
+	if ep.Kind == igtypes.EndpointKindPod && ep.Name != "" {
+		// Validate that the existing pod identity still owns the IP.
+		if id, ok := r.lookupWithExpected(ep.Addr, ep.Namespace, ep.Name); ok {
+			// Pod still owns the IP. If labels are already current, nothing to repair.
+			if len(ep.PodLabels) > 0 && id.labels == labelString(ep.PodLabels) {
+				return false
+			}
+			target = id
+		} else {
+			// Existing pod identity is stale (e.g. IP reused during pod churn).
+			// Attempt to resolve the true current IP owner.
+			if id, ok := r.lookup(ep.Addr); ok {
+				target = id
+			} else {
+				// Ambiguous or unknown; clear stale pod identity to avoid misattribution.
+				r.clearPodEndpoint(d, data)
+				return true
+			}
+		}
+	} else {
+		// Unresolved endpoint or pod without name: look up current IP owner.
+		id, ok := r.lookupWithExpected(ep.Addr, ep.Namespace, ep.Name)
+		if !ok {
+			return false
+		}
+		target = id
+	}
+
 	for name, value := range map[string]string{
 		"endpoint.k8s.kind":      string(igtypes.EndpointKindPod),
-		"endpoint.k8s.namespace": id.namespace,
-		"endpoint.k8s.name":      id.name,
-		"endpoint.k8s.labels":    id.labels,
+		"endpoint.k8s.namespace": target.namespace,
+		"endpoint.k8s.name":      target.name,
+		"endpoint.k8s.labels":    target.labels,
 	} {
 		f := d.GetField(name)
 		if f == nil {
@@ -363,4 +384,15 @@ func (r *peerRepair) repair(d datasource.DataSource, data datasource.Data, ev *u
 		}
 	}
 	return true
+}
+
+func (r *peerRepair) clearPodEndpoint(d datasource.DataSource, data datasource.Data) {
+	if f := d.GetField("endpoint.k8s.kind"); f != nil {
+		_ = f.PutString(data, string(igtypes.EndpointKindRaw))
+	}
+	for _, name := range []string{"endpoint.k8s.namespace", "endpoint.k8s.name", "endpoint.k8s.labels"} {
+		if f := d.GetField(name); f != nil {
+			_ = f.PutString(data, "")
+		}
+	}
 }
