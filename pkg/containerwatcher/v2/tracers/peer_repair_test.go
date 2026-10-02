@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
@@ -52,7 +51,7 @@ func TestPeerRepair_ReusedAddressResolvesToTheCurrentPod(t *testing.T) {
 	calls := 0
 	r := newTestPeerRepair(func() []*common.SlimPod { calls++; return pods })
 	// Use short miss TTL for testing retry after miss
-	r.negative = expirable.NewLRU[string, struct{}](maxPeerEntries, nil, 20*time.Millisecond)
+	r.missTTL = 20 * time.Millisecond
 
 	id, ok := r.lookup("10.42.0.48")
 	require.True(t, ok)
@@ -164,7 +163,7 @@ func TestPeerRepair_InvalidateOnInventoryChange(t *testing.T) {
 
 func TestPeerRepair_BoundedCacheAndExpiration(t *testing.T) {
 	r := newTestPeerRepair(func() []*common.SlimPod { return nil })
-	r.negative = expirable.NewLRU[string, struct{}](maxPeerEntries, nil, 10*time.Millisecond)
+	r.missTTL = 10 * time.Millisecond
 
 	// Insert more entries than maxPeerEntries
 	for i := 0; i < maxPeerEntries+50; i++ {
@@ -174,8 +173,7 @@ func TestPeerRepair_BoundedCacheAndExpiration(t *testing.T) {
 	require.LessOrEqual(t, r.negative.Len(), maxPeerEntries, "negative cache must be bounded to maxPeerEntries")
 
 	time.Sleep(15 * time.Millisecond)
-	_, inCache := r.negative.Get("192.168.0.0")
-	require.False(t, inCache, "expired entries must not be returned")
+	require.False(t, r.isNegative("192.168.0.0"), "expired entries must not be returned")
 }
 
 type networkTestDatasourceFields struct {
@@ -534,4 +532,29 @@ func TestNewNetworkTracer_KubernetesModeGate(t *testing.T) {
 	// Clean up to prevent any lingering background state
 	_ = tracerOn.Stop()
 }
+
+func TestPeerRepair_NilIPIndexValidatedAgainstFullPodSet(t *testing.T) {
+	oldPod := slim("shop", "api-old", "10.42.0.48", false, map[string]string{"app": "api", "version": "v1"})
+	newPod := slim("shop", "api-new", "10.42.0.48", false, map[string]string{"app": "api", "version": "v2"})
+	inv := &mockInventory{
+		podsByName: map[string]*common.SlimPod{
+			"shop/api-old": oldPod,
+			"shop/api-new": newPod,
+		},
+		podsByIP: map[string]*common.SlimPod{}, // IP index entry was pruned or not yet populated (nil)
+	}
+	r := newTestPeerRepairWithInv(inv)
+
+	// Multiple pods claim 10.42.0.48 in GetPods. Even though GetPodByName returns api-old,
+	// the nil-index case detects the ambiguity via unambiguous full-IP lookup and declines repair.
+	_, ok := r.lookupWithExpected("10.42.0.48", "shop", "api-old")
+	require.False(t, ok, "must decline repair when IP index is nil but multiple pods claim the IP")
+
+	// When old pod is gone from inventory and only newPod claims the IP, unambiguous lookup succeeds
+	delete(inv.podsByName, "shop/api-old")
+	id, ok := r.lookupWithExpected("10.42.0.48", "shop", "api-new")
+	require.True(t, ok, "unambiguous full-IP owner must be accepted even when IP index is nil")
+	require.Equal(t, "api-new", id.name)
+}
+
 
