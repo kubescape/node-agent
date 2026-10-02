@@ -16,6 +16,7 @@ import (
 func TestOpenFields(t *testing.T) {
 	expectedFields := map[string][]string{
 		"open": {
+			"dfd",
 			"error_raw",
 			"fd",
 			"flags_raw",

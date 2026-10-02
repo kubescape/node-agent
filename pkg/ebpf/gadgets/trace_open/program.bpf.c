@@ -35,6 +35,7 @@ struct event {
 	struct gadget_user_stack ustack;
 	char fname[NAME_MAX];
 	char fpath[GADGET_PATH_MAX];
+	int dfd;
 };
 
 const volatile bool targ_failed = false;
@@ -147,6 +148,7 @@ static __always_inline int trace_exit(struct syscall_trace_exit *ctx)
 	event->mode_raw = ap->mode;
 	event->error_raw = errval;
 	event->fd = fd;
+	event->dfd = ap->dfd;
 	event->timestamp_raw = bpf_ktime_get_boot_ns();
 
 	/* emit event */

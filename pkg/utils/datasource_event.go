@@ -534,14 +534,10 @@ func (e *DatasourceEvent) GetFullPath() string {
 	pid := e.GetPID()
 	fd, _ := e.getFieldAccessor("fd").Uint32(e.Data)
 	var dirfd int32 = AT_FDCWD
-	if accessor := e.getFieldAccessor("dfd"); accessor != nil {
-		if d, err := accessor.Int32(e.Data); err == nil {
-			dirfd = d
-		}
-	} else if accessor := e.getFieldAccessor("dirfd"); accessor != nil {
-		if d, err := accessor.Int32(e.Data); err == nil {
-			dirfd = d
-		}
+	if d, err := e.getFieldAccessor("dfd").Int32(e.Data); err == nil {
+		dirfd = d
+	} else if d, err := e.getFieldAccessor("dirfd").Int32(e.Data); err == nil {
+		dirfd = d
 	}
 	if resolved := ResolveOpenPathProc(pid, fd, e.GetError() == 0, raw, dirfd); resolved != "" {
 		return NormalizePath(resolved)
