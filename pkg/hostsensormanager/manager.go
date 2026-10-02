@@ -3,6 +3,7 @@ package hostsensormanager
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +39,11 @@ func NewHostSensorManager(config Config) (HostSensorManager, error) {
 		config.Interval = 5 * time.Minute // Default to 5 minutes
 	}
 
+	sensors, err := filterSensors(supportedHostSensors(config.NodeName), config.ExcludedSensors)
+	if err != nil {
+		return nil, err
+	}
+
 	crdClient, err := NewCRDClient(config.NodeName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CRD client: %w", err)
@@ -57,7 +63,7 @@ func NewHostSensorManager(config Config) (HostSensorManager, error) {
 		config:    config,
 		collector: collector,
 		crdClient: crdClient,
-		sensors:   supportedHostSensors(config.NodeName),
+		sensors:   sensors,
 		stopCh:    make(chan struct{}),
 	}, nil
 }
@@ -75,6 +81,40 @@ func supportedHostSensors(nodeName string) []Sensor {
 		NewCloudProviderInfoSensor(nodeName),
 		NewCNIInfoSensor(nodeName),
 	}
+}
+
+// ValidateExcludedSensors checks names without initializing Kubernetes clients or
+// sensing the host. Startup and constructor callers use the same validation.
+func ValidateExcludedSensors(excludedKinds []string) error {
+	_, err := filterSensors(supportedHostSensors(""), excludedKinds)
+	return err
+}
+
+// filterSensors validates exclusions against the registered kinds and preserves sensing order.
+func filterSensors(sensors []Sensor, excludedKinds []string) ([]Sensor, error) {
+	valid := make(map[string]bool, len(sensors))
+	kinds := make([]string, 0, len(sensors))
+	for _, sensor := range sensors {
+		kind := sensor.GetKind()
+		valid[kind] = true
+		kinds = append(kinds, kind)
+	}
+
+	excluded := make(map[string]bool, len(excludedKinds))
+	for _, kind := range excludedKinds {
+		if !valid[kind] {
+			return nil, fmt.Errorf("unknown excluded host sensor %q; valid sensors: %s", kind, strings.Join(kinds, ", "))
+		}
+		excluded[kind] = true
+	}
+
+	filtered := make([]Sensor, 0, len(sensors))
+	for _, sensor := range sensors {
+		if !excluded[sensor.GetKind()] {
+			filtered = append(filtered, sensor)
+		}
+	}
+	return filtered, nil
 }
 
 // Start begins the sensing loop
