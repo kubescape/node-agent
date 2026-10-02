@@ -316,6 +316,7 @@ type mockInventory struct {
 	byNameCalls  int
 	byIPCalls    int
 	getPodsCalls int
+	stopCalls    int
 }
 
 func (m *mockInventory) GetPodByName(ns, name string) *common.SlimPod {
@@ -337,6 +338,10 @@ func (m *mockInventory) GetPods() []*common.SlimPod {
 	return res
 }
 
+func (m *mockInventory) Stop() {
+	m.stopCalls++
+}
+
 func TestPeerRepair_IndexedInventoryValidation(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	pod := slim("shop", "api", "10.42.0.48", false, map[string]string{"app": "api"})
@@ -351,19 +356,88 @@ func TestPeerRepair_IndexedInventoryValidation(t *testing.T) {
 		pods:      inv.GetPods,
 	}
 
-	// Initial lookup uses indexed GetPodByIp
-	id, ok := r.lookup("10.42.0.48")
+	// Identity-constrained lookup uses indexed GetPodByName
+	id, ok := r.lookupWithExpected("10.42.0.48", "shop", "api")
 	require.True(t, ok)
 	require.Equal(t, "api", id.name)
-	require.Equal(t, 1, inv.byIPCalls)
+	require.Equal(t, 1, inv.byNameCalls, "constrained lookup should use GetPodByName")
 	require.Equal(t, 0, inv.getPodsCalls, "indexed lookup should not call GetPods")
 
-	// Cache hit uses indexed GetPodByName to validate without full scan
+	// Constrained hit validation also uses GetPodByName
+	id, ok = r.lookupWithExpected("10.42.0.48", "shop", "api")
+	require.True(t, ok)
+	require.Equal(t, "api", id.name)
+	require.Equal(t, 2, inv.byNameCalls, "constrained hit validation should use GetPodByName")
+	require.Equal(t, 0, inv.getPodsCalls, "constrained hit validation should not call GetPods")
+
+	// Raw lookup consults full pod set to detect potential IP recycling ambiguity
+	r.invalidate()
 	id, ok = r.lookup("10.42.0.48")
 	require.True(t, ok)
 	require.Equal(t, "api", id.name)
-	require.Equal(t, 1, inv.byNameCalls, "hit validation should use GetPodByName")
-	require.Equal(t, 0, inv.getPodsCalls, "cache hit validation should not call GetPods")
+	require.Equal(t, 1, inv.getPodsCalls, "raw lookup must consult GetPods to ensure address is unambiguous")
+}
+
+func TestPeerRepair_AmbiguousIPRawLookupDeclinesRepair(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	oldPod := slim("default", "terminating-pod", "10.42.0.99", false, map[string]string{"app": "old"})
+	newPod := slim("default", "replacement-pod", "10.42.0.99", false, map[string]string{"app": "new"})
+	inv := &mockInventory{
+		podsByName: map[string]*common.SlimPod{
+			"default/terminating-pod": oldPod,
+			"default/replacement-pod": newPod,
+		},
+		podsByIP: map[string]*common.SlimPod{"10.42.0.99": newPod}, // indexed cache picked newPod
+	}
+	r := &peerRepair{
+		byIP:      map[string]peerIdentity{},
+		now:       func() time.Time { return now },
+		inventory: inv,
+		pods:      inv.GetPods,
+	}
+
+	// Raw lookup must not pick indexed winner; it must consult complete pod set and decline repair on ambiguity
+	_, ok := r.lookup("10.42.0.99")
+	require.False(t, ok, "raw lookup must decline repair when multiple pods claim the recycled IP")
+
+	// Constrained lookup with expected pod name disambiguates successfully
+	id, ok := r.lookupWithExpected("10.42.0.99", "default", "replacement-pod")
+	require.True(t, ok)
+	require.Equal(t, "replacement-pod", id.name)
+}
+
+func TestPeerRepair_StaleExpectedIdentityDoesNotAssignPodOnDifferentIP(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	// Stale pod metadata points to "api-old", but "api-old" was moved to a different IP or deleted
+	oldPod := slim("shop", "api-old", "10.42.0.99", false, map[string]string{"app": "api"})
+	r := &peerRepair{
+		byIP: map[string]peerIdentity{},
+		now:  func() time.Time { return now },
+		pods: func() []*common.SlimPod { return []*common.SlimPod{oldPod} },
+	}
+
+	// An event comes with recycled IP "10.42.0.50", but carries stale metadata expectedName="api-old"
+	_, ok := r.lookupWithExpected("10.42.0.50", "shop", "api-old")
+	require.False(t, ok, "must decline repair when expected pod does not own the event IP")
+	require.NotContains(t, r.byIP, "10.42.0.50", "negative entry should not be cached for constrained miss")
+}
+
+func TestPeerRepair_StopReleasesInventory(t *testing.T) {
+	inv := &mockInventory{
+		podsByName: map[string]*common.SlimPod{},
+	}
+	r := &peerRepair{
+		byIP:      map[string]peerIdentity{},
+		inventory: inv,
+	}
+
+	r.stop()
+	require.Equal(t, 1, inv.stopCalls, "stop must decrement inventory reference count")
+	require.Nil(t, r.inventory, "inventory reference must be cleared after stop")
+
+	// Subsequent stop is a no-op
+	r.stop()
+	require.Equal(t, 1, inv.stopCalls, "subsequent stop must not call inventory Stop again")
 }
 
 func TestPeerRepair_IdentityConstrainedMissDoesNotPoisonRawLookup(t *testing.T) {

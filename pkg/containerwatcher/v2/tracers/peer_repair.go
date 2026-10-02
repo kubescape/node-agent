@@ -58,6 +58,15 @@ func newPeerRepair() *peerRepair {
 	return r
 }
 
+func (r *peerRepair) stop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.inventory != nil {
+		r.inventory.Stop()
+		r.inventory = nil
+	}
+}
+
 func podByIP(pods []*common.SlimPod, ip, expectedNamespace, expectedName string) *common.SlimPod {
 	var matches []*common.SlimPod
 	for _, p := range pods {
@@ -168,12 +177,13 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 		} else {
 			if now.Sub(hit.at) < peerHitTTL {
 				// Validate cached positive hit: prefer indexed GetPodByName to avoid scanning
-				// all pods under mutex, and reserve full inventory scan for index misses or ambiguity.
+				// all pods under mutex when expected pod identity matches, and reserve full inventory scan
+				// for unconstrained raw lookups, index misses, or ambiguity.
 				var p *common.SlimPod
-				if r.inventory != nil {
+				if r.inventory != nil && expectedName != "" {
 					cand := r.inventory.GetPodByName(hit.namespace, hit.name)
 					if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip &&
-						(expectedName == "" || cand.Name == expectedName) &&
+						cand.Name == expectedName &&
 						(expectedNamespace == "" || cand.Namespace == expectedNamespace) {
 						p = cand
 					}
@@ -197,18 +207,10 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 
 	id := peerIdentity{at: now}
 	var p *common.SlimPod
-	if r.inventory != nil {
-		if expectedName != "" && expectedNamespace != "" {
-			cand := r.inventory.GetPodByName(expectedNamespace, expectedName)
-			if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip {
-				p = cand
-			}
-		}
-		if p == nil && expectedName == "" {
-			cand := r.inventory.GetPodByIp(ip)
-			if cand != nil && !cand.Spec.HostNetwork {
-				p = cand
-			}
+	if r.inventory != nil && expectedName != "" && expectedNamespace != "" {
+		cand := r.inventory.GetPodByName(expectedNamespace, expectedName)
+		if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip {
+			p = cand
 		}
 	}
 	if p == nil {
@@ -217,16 +219,6 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 	}
 	if p != nil {
 		id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
-	} else if expectedName != "" {
-		for _, pod := range r.pods() {
-			if pod == nil || pod.Spec.HostNetwork {
-				continue
-			}
-			if pod.Name == expectedName && (expectedNamespace == "" || pod.Namespace == expectedNamespace) {
-				id.found, id.namespace, id.name, id.labels = true, pod.Namespace, pod.Name, labelString(pod.Labels)
-				break
-			}
-		}
 	}
 
 	// Do not cache negative entries for identity-constrained lookups

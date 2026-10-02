@@ -100,6 +100,9 @@ func (nt *NetworkTracer) Stop() error {
 	if nt.gadgetCtx != nil {
 		nt.gadgetCtx.Cancel()
 	}
+	if nt.peers != nil {
+		nt.peers.stop()
+	}
 	return nil
 }
 
