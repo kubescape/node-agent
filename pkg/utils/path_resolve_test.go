@@ -17,24 +17,33 @@ func TestResolveOpenPathProc(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	want, _ := filepath.EvalSymlinks(f.Name())
 
-	got := ResolveOpenPathProc(self, uint32(f.Fd()), "ignored-when-fd-resolves")
+	got := ResolveOpenPathProc(self, uint32(f.Fd()), true, "ignored-when-fd-resolves")
 	if resolved, _ := filepath.EvalSymlinks(got); resolved != want {
 		t.Fatalf("fd resolution = %q, want %q", got, want)
 	}
 
+	// When fdValid is true and fd is 0, descriptor 0 is resolved from procfs.
+	if fd0Target, err := os.Readlink("/proc/self/fd/0"); err == nil && len(fd0Target) > 0 {
+		got = ResolveOpenPathProc(self, 0, true, "ignored-when-fd0-resolves")
+		if got != fd0Target {
+			t.Fatalf("fd 0 resolution = %q, want %q", got, fd0Target)
+		}
+	}
+
+	// When fdValid is false, fd 0 is not inspected and relative path falls back to cwd-join.
 	cwd, _ := os.Getwd()
-	got = ResolveOpenPathProc(self, 0, "some/rel/name")
+	got = ResolveOpenPathProc(self, 0, false, "some/rel/name")
 	if want := filepath.Join(cwd, "some/rel/name"); got != want {
 		t.Fatalf("cwd-join = %q, want %q", got, want)
 	}
 
-	if got = ResolveOpenPathProc(self, 0, ""); got != "" {
+	if got = ResolveOpenPathProc(self, 0, false, ""); got != "" {
 		t.Fatalf("empty path must not resolve, got %q", got)
 	}
-	if got = ResolveOpenPathProc(0, 0, "x"); got != "" {
+	if got = ResolveOpenPathProc(0, 0, false, "x"); got != "" {
 		t.Fatalf("pid 0 must not resolve, got %q", got)
 	}
 }

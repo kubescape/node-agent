@@ -33,15 +33,16 @@ func IsResolvedFullPath(p string) bool {
 }
 
 // ResolveOpenPathProc resolves a non-absolute open path via procfs (the agent
-// runs hostPID). The returned fd names the opened object exactly — covering
-// ".", relative names and AT_EMPTY_PATH re-opens; a FAILED relative open still
-// resolves to the caller's intent via cwd-join. An empty raw with no usable fd
-// is unresolvable by kernel semantics: openat("") names no filesystem object.
-func ResolveOpenPathProc(pid, fd uint32, raw string) string {
+// runs hostPID). When fdValid is true (error_raw == 0), the returned fd names
+// the opened object exactly — covering ".", relative names, descriptor 0 and
+// AT_EMPTY_PATH re-opens; a FAILED relative open (fdValid == false) still resolves
+// to the caller's intent via cwd-join. An empty raw with no usable fd is unresolvable
+// by kernel semantics: openat("") names no filesystem object.
+func ResolveOpenPathProc(pid, fd uint32, fdValid bool, raw string) string {
 	if pid == 0 {
 		return ""
 	}
-	if fd > 0 {
+	if fdValid {
 		if target, err := os.Readlink("/proc/" + strconv.FormatUint(uint64(pid), 10) + "/fd/" + strconv.FormatUint(uint64(fd), 10)); err == nil && strings.HasPrefix(target, "/") {
 			return target
 		}
