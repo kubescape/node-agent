@@ -70,6 +70,7 @@ type EventHandlerFactory struct {
 	metrics                  metricsmanager.MetricsManager
 	dedupSkipSet             map[Manager]struct{} // Managers to skip when event is duplicate
 	ebpfDropCounter          metric.Int64Counter
+	listeners                *listenerCache
 	// removalGracePeriod overrides removedContainerGracePeriod when > 0.
 	// Settable in tests; production uses the default.
 	removalGracePeriod time.Duration
@@ -104,6 +105,7 @@ func NewEventHandlerFactory(
 		containerCache:           &maps.SafeMap[string, *containercollection.Container]{},
 		containerProfileManager:  containerProfileManager,
 		dedupCache:               dedupCache,
+		listeners:                newListenerCache(),
 		metrics:                  metrics,
 		dedupSkipSet:             make(map[Manager]struct{}),
 		ebpfDropCounter:          ebpfDropCounter,
@@ -326,6 +328,22 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		return
 	}
 
+	// Always report dropped events regardless of dedup status or unsolicited ingress filtering
+	if enrichedEvent.Event.HasDroppedEvents() {
+		ehf.containerProfileManager.ReportDroppedEvent(enrichedEvent.Event.GetContainerID())
+		ehf.ebpfDropCounter.Add(context.Background(),
+			1,
+			metric.WithAttributes(
+				attribute.String("event_type", string(enrichedEvent.Event.GetEventType())),
+				attribute.String("reason", "profile_drop"),
+			),
+		)
+	}
+
+	if ehf.unsolicitedIngress(enrichedEvent, container) {
+		return
+	}
+
 	// Dedup check: compute key and check cache before dispatching to handlers
 	if ehf.dedupCache != nil {
 		key, ttl, shouldDedup := computeEventDedupKey(enrichedEvent)
@@ -336,18 +354,6 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 			}
 			ehf.metrics.ReportDedupEvent(enrichedEvent.Event.GetEventType(), duplicate)
 		}
-	}
-
-	// Always report dropped events regardless of dedup status
-	if enrichedEvent.Event.HasDroppedEvents() {
-		ehf.containerProfileManager.ReportDroppedEvent(enrichedEvent.Event.GetContainerID())
-		ehf.ebpfDropCounter.Add(context.Background(),
-			1,
-			metric.WithAttributes(
-				attribute.String("event_type", string(enrichedEvent.Event.GetEventType())),
-				attribute.String("reason", "profile_drop"),
-			),
-		)
 	}
 
 	// Get handlers for this event type
@@ -475,6 +481,9 @@ func (ehf *EventHandlerFactory) ContainerCallback(notif containercollection.PubS
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		ehf.containerCache.Set(containerID, notif.Container)
+		if ehf.listeners != nil && containerID != "" {
+			ehf.listeners.forget(containerID)
+		}
 	case containercollection.EventTypeRemoveContainer:
 		// Keep the entry resolvable for the grace window, then evict. This
 		// also fixes the previous behavior of never evicting lazily-cached
@@ -486,6 +495,9 @@ func (ehf *EventHandlerFactory) ContainerCallback(notif containercollection.PubS
 		}
 		time.AfterFunc(grace, func() {
 			ehf.containerCache.Delete(containerID)
+			if ehf.listeners != nil && containerID != "" {
+				ehf.listeners.forget(containerID)
+			}
 		})
 	}
 }
