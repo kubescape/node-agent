@@ -44,25 +44,16 @@ func newPeerRepair() *peerRepair {
 		negative: expirable.NewLRU[string, struct{}](maxPeerEntries, nil, peerMissTTL),
 	}
 	r.initInv = func() common.K8sInventoryCache {
-		if r.stopped || r.inventory != nil {
-			return r.inventory
-		}
 		inv, err := common.GetK8sInventoryCache()
 		if err != nil {
 			logger.L().Warning("network tracer: peer repair has no inventory", helpers.Error(err))
 			return nil
 		}
 		inv.Start()
-		r.inventory = inv
-		return r.inventory
+		return inv
 	}
 	r.pods = func() []*common.SlimPod {
-		r.mu.Lock()
-		inv := r.inventory
-		if inv == nil && r.initInv != nil {
-			inv = r.initInv()
-		}
-		r.mu.Unlock()
+		inv := r.getInventory()
 		if inv == nil {
 			return nil
 		}
@@ -71,13 +62,33 @@ func newPeerRepair() *peerRepair {
 	return r
 }
 
-func (r *peerRepair) initCachesLocked() {
+func (r *peerRepair) initCaches() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.positive == nil {
 		r.positive = expirable.NewLRU[string, peerIdentity](maxPeerEntries, nil, peerHitTTL)
 	}
 	if r.negative == nil {
 		r.negative = expirable.NewLRU[string, struct{}](maxPeerEntries, nil, peerMissTTL)
 	}
+}
+
+func (r *peerRepair) getInventory() common.K8sInventoryCache {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stopped {
+		return nil
+	}
+	if r.inventory == nil && r.initInv != nil {
+		r.inventory = r.initInv()
+	}
+	return r.inventory
+}
+
+func (r *peerRepair) isStopped() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stopped
 }
 
 func (r *peerRepair) stop() {
@@ -146,9 +157,7 @@ func labelString(labels map[string]string) string {
 
 // invalidate clears cached IP entries, or all entries if no IPs are specified.
 func (r *peerRepair) invalidate(ips ...string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.initCachesLocked()
+	r.initCaches()
 	if len(ips) == 0 {
 		r.positive.Purge()
 		r.negative.Purge()
@@ -165,15 +174,11 @@ func (r *peerRepair) lookup(ip string) (peerIdentity, bool) {
 }
 
 func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName string) (peerIdentity, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.stopped {
+	if r.isStopped() {
 		return peerIdentity{}, false
 	}
-	r.initCachesLocked()
-	if r.inventory == nil && r.initInv != nil {
-		r.initInv()
-	}
+	r.initCaches()
+	inv := r.getInventory()
 
 	// If expected identity is provided, bypass negative cache
 	if expectedName != "" {
@@ -183,16 +188,16 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 	}
 
 	if hit, ok := r.positive.Get(ip); ok {
-		// Validate cached positive hit using indexed lookups to avoid scanning all pods
-		// under mutex, while ensuring the pod still owns ip and no new pod took it over.
+		// Validate cached positive hit using indexed lookups to avoid scanning all pods,
+		// while ensuring the pod still owns ip and no new pod took it over.
 		var p *common.SlimPod
-		if r.inventory != nil {
-			cand := r.inventory.GetPodByName(hit.namespace, hit.name)
+		if inv != nil {
+			cand := inv.GetPodByName(hit.namespace, hit.name)
 			if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip &&
 				(expectedName == "" || cand.Name == expectedName) &&
 				(expectedNamespace == "" || cand.Namespace == expectedNamespace) {
 				// Ensure IP has not been reassigned to a different pod in the IP index
-				if byIP := r.inventory.GetPodByIp(ip); byIP == nil || (byIP.Name == hit.name && byIP.Namespace == hit.namespace) {
+				if byIP := inv.GetPodByIp(ip); byIP == nil || (byIP.Name == hit.name && byIP.Namespace == hit.namespace) {
 					p = cand
 				}
 			}
@@ -210,8 +215,8 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 	}
 
 	var p *common.SlimPod
-	if r.inventory != nil && expectedName != "" && expectedNamespace != "" {
-		cand := r.inventory.GetPodByName(expectedNamespace, expectedName)
+	if inv != nil && expectedName != "" && expectedNamespace != "" {
+		cand := inv.GetPodByName(expectedNamespace, expectedName)
 		if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip {
 			p = cand
 		}
@@ -234,12 +239,9 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 }
 
 func (r *peerRepair) repair(d datasource.DataSource, data datasource.Data, ev *utils.DatasourceEvent) bool {
-	r.mu.Lock()
-	if r.stopped {
-		r.mu.Unlock()
+	if r.isStopped() {
 		return false
 	}
-	r.mu.Unlock()
 
 	ep := ev.GetDstEndpoint()
 	if ep.Addr == "" || ep.Addr == "0.0.0.0" || strings.HasPrefix(ep.Addr, "127.") {
