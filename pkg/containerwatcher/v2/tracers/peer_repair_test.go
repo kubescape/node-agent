@@ -376,6 +376,12 @@ func TestPeerRepair_IndexedInventoryValidation(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "api", id.name)
 	require.Equal(t, 1, inv.getPodsCalls, "raw lookup must consult GetPods to ensure address is unambiguous")
+
+	// Raw lookup on CACHE HIT validates via indexed lookup in O(1) without calling GetPods
+	id, ok = r.lookup("10.42.0.48")
+	require.True(t, ok)
+	require.Equal(t, "api", id.name)
+	require.Equal(t, 1, inv.getPodsCalls, "raw hit validation must use indexed lookups, not GetPods")
 }
 
 func TestPeerRepair_AmbiguousIPRawLookupDeclinesRepair(t *testing.T) {
@@ -404,6 +410,38 @@ func TestPeerRepair_AmbiguousIPRawLookupDeclinesRepair(t *testing.T) {
 	id, ok := r.lookupWithExpected("10.42.0.99", "default", "replacement-pod")
 	require.True(t, ok)
 	require.Equal(t, "replacement-pod", id.name)
+}
+
+func TestPeerRepair_RawHitInvalidatedWhenIPRecycled(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	oldPod := slim("shop", "api-old", "10.42.0.48", false, map[string]string{"app": "api"})
+	newPod := slim("shop", "api-new", "10.42.0.48", false, map[string]string{"app": "api"})
+	inv := &mockInventory{
+		podsByName: map[string]*common.SlimPod{"shop/api-old": oldPod},
+		podsByIP:   map[string]*common.SlimPod{"10.42.0.48": oldPod},
+	}
+	r := &peerRepair{
+		byIP:      map[string]peerIdentity{},
+		now:       func() time.Time { return now },
+		inventory: inv,
+		pods:      inv.GetPods,
+	}
+
+	// Cache oldPod
+	id, ok := r.lookup("10.42.0.48")
+	require.True(t, ok)
+	require.Equal(t, "api-old", id.name)
+
+	// IP is reassigned in index to newPod and oldPod is deleted
+	delete(inv.podsByName, "shop/api-old")
+	inv.podsByName["shop/api-new"] = newPod
+	inv.podsByIP["10.42.0.48"] = newPod
+
+	// Subsequent raw lookup detects that byIP index points to a different pod, invalidating the old hit
+	// and immediately resolving to the new pod owner
+	id, ok = r.lookup("10.42.0.48")
+	require.True(t, ok)
+	require.Equal(t, "api-new", id.name)
 }
 
 func TestPeerRepair_StaleExpectedIdentityDoesNotAssignPodOnDifferentIP(t *testing.T) {
@@ -438,6 +476,29 @@ func TestPeerRepair_StopReleasesInventory(t *testing.T) {
 	// Subsequent stop is a no-op
 	r.stop()
 	require.Equal(t, 1, inv.stopCalls, "subsequent stop must not call inventory Stop again")
+}
+
+func TestPeerRepair_StopPreventsLateInitialization(t *testing.T) {
+	initCalls := 0
+	inv := &mockInventory{podsByName: map[string]*common.SlimPod{}}
+	r := &peerRepair{
+		byIP: map[string]peerIdentity{},
+		now:  time.Now,
+	}
+	r.initInv = func() common.K8sInventoryCache {
+		initCalls++
+		r.inventory = inv
+		return inv
+	}
+
+	r.stop()
+	require.True(t, r.stopped)
+
+	// Late lookup after stop must refuse initialization
+	_, ok := r.lookup("10.42.0.1")
+	require.False(t, ok)
+	require.Equal(t, 0, initCalls, "late lookup after stop must not initialize inventory")
+	require.Nil(t, r.inventory)
 }
 
 func TestPeerRepair_IdentityConstrainedMissDoesNotPoisonRawLookup(t *testing.T) {
