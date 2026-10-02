@@ -47,7 +47,7 @@ func TestPeerRepair_ReusedAddressResolvesToTheCurrentPod(t *testing.T) {
 	require.Equal(t, 3, calls)
 	_, _ = r.lookup("10.42.0.48")
 	_, _ = r.lookup("10.42.9.9")
-	require.Equal(t, 3, calls, "hits and misses are both cached")
+	require.Equal(t, 4, calls, "misses are cached while positive hits validate current pod ownership")
 
 	now = now.Add(peerMissTTL + time.Second)
 	pods = append(pods, slim("shop", "late", "10.42.9.9", false, map[string]string{"app": "late"}))
@@ -55,10 +55,10 @@ func TestPeerRepair_ReusedAddressResolvesToTheCurrentPod(t *testing.T) {
 	require.True(t, ok, "a miss is retried after its short TTL and finds the pod that appeared")
 	require.Equal(t, "late", id.name)
 
-	now = now.Add(peerHitTTL + time.Second)
+	// Rapid churn: pod address reassigned without advancing time past peerHitTTL
 	pods[0] = slim("shop", "api-newer", "10.42.0.48", false, map[string]string{"app": "api"})
 	id, _ = r.lookup("10.42.0.48")
-	require.Equal(t, "api-newer", id.name, "a hit is re-resolved after its TTL, so an address handed to another pod follows it")
+	require.Equal(t, "api-newer", id.name, "ownership validation detects address handed to another pod without waiting for TTL")
 }
 
 func TestPodByIP_FirstNonHostMatch(t *testing.T) {

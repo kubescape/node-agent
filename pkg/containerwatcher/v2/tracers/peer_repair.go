@@ -130,21 +130,26 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 	r.pruneExpired(now)
 
 	if hit, ok := r.byIP[ip]; ok {
-		ttl := peerMissTTL
-		if hit.found {
-			ttl = peerHitTTL
-		}
-		if now.Sub(hit.at) < ttl {
-			// Ownership validation: if the caller knows the expected pod identity,
-			// verify that the cached positive hit belongs to that pod.
-			// If not, the IP was reassigned to a new pod during rapid churn.
-			if hit.found && expectedName != "" && (hit.name != expectedName || (expectedNamespace != "" && hit.namespace != expectedNamespace)) {
+		if !hit.found {
+			if now.Sub(hit.at) < peerMissTTL {
+				return hit, false
+			}
+			delete(r.byIP, ip)
+		} else {
+			if now.Sub(hit.at) < peerHitTTL {
+				// Ownership validation: validate cached positive hit against current pod list
+				// and against any expected pod metadata from upstream.
+				pods := r.pods()
+				p := podByIP(pods, ip)
+				if p != nil && p.Name == hit.name && p.Namespace == hit.namespace &&
+					(expectedName == "" || p.Name == expectedName) &&
+					(expectedNamespace == "" || p.Namespace == expectedNamespace) {
+					return hit, true
+				}
 				delete(r.byIP, ip)
 			} else {
-				return hit, hit.found
+				delete(r.byIP, ip)
 			}
-		} else {
-			delete(r.byIP, ip)
 		}
 	}
 
