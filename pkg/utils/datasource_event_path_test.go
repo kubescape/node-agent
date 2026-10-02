@@ -14,6 +14,7 @@ type openFields struct {
 	fpath        *string
 	fname        *string
 	pid          *uint32
+	tid          *uint32
 	fd           *uint32
 	errorRaw     *int32
 	dfd          *int32
@@ -44,6 +45,9 @@ func newOpenEvent(t *testing.T, f openFields) *DatasourceEvent {
 	pidAcc, err := ds.AddField("proc.pid", api.Kind_Uint32)
 	require.NoError(t, err)
 
+	tidAcc, err := ds.AddField("proc.tid", api.Kind_Uint32)
+	require.NoError(t, err)
+
 	fdAcc, err := ds.AddField("fd", api.Kind_Uint32)
 	require.NoError(t, err)
 
@@ -72,6 +76,15 @@ func newOpenEvent(t *testing.T, f openFields) *DatasourceEvent {
 	}
 	if f.pid != nil {
 		require.NoError(t, pidAcc.PutUint32(data, *f.pid))
+	}
+	tidVal := uint32(0)
+	if f.tid != nil {
+		tidVal = *f.tid
+	} else if f.pid != nil {
+		tidVal = *f.pid
+	}
+	if tidVal != 0 {
+		require.NoError(t, tidAcc.PutUint32(data, tidVal))
 	}
 	if f.fd != nil {
 		require.NoError(t, fdAcc.PutUint32(data, *f.fd))
@@ -165,23 +178,41 @@ func TestDatasourceEventGetFullPath_DfdRouting(t *testing.T) {
 		require.Equal(t, filepath.Join(wantDir, "config.yaml"), event.GetFullPath())
 	})
 
-	t.Run("regular-file dfd does not resolve and falls back to normalized raw", func(t *testing.T) {
+	t.Run("regular-file dfd rejects fabricated fpath and falls back to normalized raw", func(t *testing.T) {
 		f, err := os.CreateTemp(dir, "regfile")
 		require.NoError(t, err)
 		defer func() { _ = f.Close() }()
 
 		dfdVal := int32(f.Fd())
 		errVal := int32(-20) // ENOTDIR
+		// Production scenario: unpatched gadget emitted fabricated fpath <regular-file>/sub/child
+		fabricatedFpath := f.Name() + "/sub/child"
 		event := newOpenEvent(t, openFields{
-			fpath:      str(""),
+			fpath:      str(fabricatedFpath),
 			fname:      str("sub/child"),
 			pid:        &self,
 			dfd:        &dfdVal,
 			errorRaw:   &errVal,
 			includeDfd: true,
 		})
-		// Does not join regular file as base directory; normalizes raw instead
+		// Does not trust fabricated fpath or join regular file as base directory; normalizes raw instead
 		require.Equal(t, "/sub/child", event.GetFullPath())
+	})
+
+	t.Run("resolves via proc.tid when leader pid is 0 or exited", func(t *testing.T) {
+		dfdVal := int32(dirFile.Fd())
+		errVal := int32(-2)
+		pid0 := uint32(0)
+		event := newOpenEvent(t, openFields{
+			fpath:      str(""),
+			fname:      str("via_tid.txt"),
+			pid:        &pid0,
+			tid:        &self,
+			dfd:        &dfdVal,
+			errorRaw:   &errVal,
+			includeDfd: true,
+		})
+		require.Equal(t, filepath.Join(wantDir, "via_tid.txt"), event.GetFullPath())
 	})
 }
 
