@@ -8,6 +8,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Marshal serializes a JSON-marshalable object into deterministic compact YAML.
+//
+// Following Kubernetes conventions (consistent with sigs.k8s.io/yaml and bobctl),
+// serialization routes through a JSON intermediate representation so that standard `json:"..."`
+// struct tags and Kubernetes schema definitions are preserved. As a consequence, inputs are
+// restricted to JSON-marshalable objects; YAML-specific struct tags (`yaml:"..."`) and
+// yaml.Marshaler implementations are not evaluated.
 func Marshal(obj any) ([]byte, error) {
 	raw, err := json.Marshal(obj)
 	if err != nil {
