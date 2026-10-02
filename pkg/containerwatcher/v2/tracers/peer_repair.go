@@ -157,10 +157,14 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 
 	if hit, ok := r.byIP[ip]; ok {
 		if !hit.found {
-			if now.Sub(hit.at) < peerMissTTL {
+			// Do not reuse negative entries for lookups with an expected identity
+			if expectedName != "" {
+				delete(r.byIP, ip)
+			} else if now.Sub(hit.at) < peerMissTTL {
 				return hit, false
+			} else {
+				delete(r.byIP, ip)
 			}
-			delete(r.byIP, ip)
 		} else {
 			if now.Sub(hit.at) < peerHitTTL {
 				// Validate cached positive hit: prefer indexed GetPodByName to avoid scanning
@@ -223,6 +227,11 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 				break
 			}
 		}
+	}
+
+	// Do not cache negative entries for identity-constrained lookups
+	if !id.found && expectedName != "" {
+		return id, false
 	}
 
 	if len(r.byIP) >= maxPeerEntries {

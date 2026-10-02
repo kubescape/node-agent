@@ -365,3 +365,23 @@ func TestPeerRepair_IndexedInventoryValidation(t *testing.T) {
 	require.Equal(t, 1, inv.byNameCalls, "hit validation should use GetPodByName")
 	require.Equal(t, 0, inv.getPodsCalls, "cache hit validation should not call GetPods")
 }
+
+func TestPeerRepair_IdentityConstrainedMissDoesNotPoisonRawLookup(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	pod := slim("shop", "api-new", "10.42.0.48", false, map[string]string{"app": "api"})
+	r := &peerRepair{
+		byIP: map[string]peerIdentity{},
+		now:  func() time.Time { return now },
+		pods: func() []*common.SlimPod { return []*common.SlimPod{pod} },
+	}
+
+	// Lookup with a stale expected pod name fails
+	_, ok := r.lookupWithExpected("10.42.0.48", "shop", "stale-pod")
+	require.False(t, ok)
+	require.NotContains(t, r.byIP, "10.42.0.48", "constrained miss must not cache negative entry under IP")
+
+	// Subsequent unconstrained (raw) lookup finds the true IP owner immediately
+	id, ok := r.lookup("10.42.0.48")
+	require.True(t, ok)
+	require.Equal(t, "api-new", id.name)
+}
