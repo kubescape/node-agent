@@ -32,7 +32,7 @@ func TestListenerCache_TTLAndUnknown(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	reads := 0
 	currentPorts := map[uint16]struct{}{8443: {}}
-	c := &listenerCache{byContainer: map[string]listenerSnapshot{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
+	c := &listenerCache{byContainer: map[string]*containerEntry{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
 		reads++
 		if pid == 404 {
 			return nil, errors.New("no such process")
@@ -81,12 +81,24 @@ func TestListenerCache_TTLAndUnknown(t *testing.T) {
 	// A process whose procfs cannot be read yields no verdict (known=false).
 	_, known = c.listening("cont-404", 404, 8443)
 	require.False(t, known, "a process whose procfs cannot be read yields no verdict, and the event is kept")
+	readsBefore := reads
+
+	// Within errorSnapshotTTL, subsequent queries for the failing process reuse the cached error without re-reading.
+	_, known = c.listening("cont-404", 404, 8443)
+	require.False(t, known)
+	require.Equal(t, readsBefore, reads, "read failure within errorSnapshotTTL must not trigger procfs open")
+
+	// After errorSnapshotTTL expires, procfs is re-queried.
+	now = now.Add(errorSnapshotTTL + time.Millisecond)
+	_, known = c.listening("cont-404", 404, 8443)
+	require.False(t, known)
+	require.Equal(t, readsBefore+1, reads, "after errorSnapshotTTL expires, procfs read is retried")
 }
 
 func TestListenerCache_Forget(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	reads := 0
-	c := &listenerCache{byContainer: map[string]listenerSnapshot{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
+	c := &listenerCache{byContainer: map[string]*containerEntry{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
 		reads++
 		return map[uint16]struct{}{8443: {}}, nil
 	}}
@@ -106,7 +118,7 @@ func TestListenerCache_PIDReuseIsolated(t *testing.T) {
 	portsByPid := map[uint32]map[uint16]struct{}{
 		100: {8443: {}},
 	}
-	c := &listenerCache{byContainer: map[string]listenerSnapshot{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
+	c := &listenerCache{byContainer: map[string]*containerEntry{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
 		reads++
 		return portsByPid[pid], nil
 	}}
@@ -142,8 +154,7 @@ func TestListenerCache_CoalescesConcurrentReads(t *testing.T) {
 	allCallersEntered := make(chan struct{})
 
 	c := &listenerCache{
-		byContainer: map[string]listenerSnapshot{},
-		generations: map[string]uint64{},
+		byContainer: map[string]*containerEntry{},
 		now:         func() time.Time { return now },
 		onQuery: func() {
 			if atomic.AddInt32(&callersEntered, 1) == numCallers {
@@ -183,8 +194,7 @@ func TestListenerCache_ForgetInvalidatesInFlightRefresh(t *testing.T) {
 	gate := make(chan struct{})
 
 	c := &listenerCache{
-		byContainer: map[string]listenerSnapshot{},
-		generations: map[string]uint64{},
+		byContainer: map[string]*containerEntry{},
 		now:         func() time.Time { return now },
 		read: func(pid uint32) (map[uint16]struct{}, error) {
 			close(readStarted)
@@ -213,4 +223,66 @@ func TestListenerCache_ForgetInvalidatesInFlightRefresh(t *testing.T) {
 	_, exists := c.byContainer["cont-abandoned"]
 	c.mu.Unlock()
 	require.False(t, exists, "in-flight read must not recreate cache entry after forget")
+}
+
+func TestListenerCache_ReclaimsGenerationsOnForget(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	c := &listenerCache{
+		byContainer: map[string]*containerEntry{},
+		now:         func() time.Time { return now },
+		read: func(pid uint32) (map[uint16]struct{}, error) {
+			return map[uint16]struct{}{8080: {}}, nil
+		},
+	}
+
+	c.listening("cont-transient", 100, 8080)
+	c.mu.Lock()
+	require.Len(t, c.byContainer, 1)
+	c.mu.Unlock()
+
+	c.forget("cont-transient")
+	c.mu.Lock()
+	require.Len(t, c.byContainer, 0, "forget without in-flight reads must immediately reclaim container entry")
+	c.mu.Unlock()
+}
+
+func TestListenerCache_FlightKeyIsolatesPIDAndGeneration(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	readStarted := make(chan struct{})
+	gate := make(chan struct{})
+	var reads int32
+
+	portsByPid := map[uint32]map[uint16]struct{}{
+		10: {8080: {}},
+		20: {9090: {}},
+	}
+
+	c := &listenerCache{
+		byContainer: map[string]*containerEntry{},
+		now:         func() time.Time { return now },
+		read: func(pid uint32) (map[uint16]struct{}, error) {
+			r := atomic.AddInt32(&reads, 1)
+			if r == 1 {
+				close(readStarted)
+				<-gate
+			}
+			return portsByPid[pid], nil
+		},
+	}
+
+	// Start read for cont-1 with pid 10
+	go func() {
+		c.listening("cont-1", 10, 8080)
+	}()
+
+	<-readStarted
+	// While read for pid 10 is in-flight, forget cont-1
+	c.forget("cont-1")
+
+	// New lookup for cont-1 with pid 20 should NOT join the in-flight read
+	listening, known := c.listening("cont-1", 20, 9090)
+	require.True(t, known && listening)
+	require.Equal(t, int32(2), atomic.LoadInt32(&reads), "post-forget lookup must not join pre-forget flight")
+
+	close(gate)
 }

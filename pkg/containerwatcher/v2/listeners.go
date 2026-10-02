@@ -19,18 +19,23 @@ import (
 const (
 	listenerSnapshotTTL = 5 * time.Second
 	negativeSnapshotTTL = 500 * time.Millisecond
+	errorSnapshotTTL    = 500 * time.Millisecond
 )
 
-type listenerSnapshot struct {
-	pid   uint32
-	ports map[uint16]struct{}
-	at    time.Time
+type containerEntry struct {
+	pid        uint32
+	ports      map[uint16]struct{}
+	err        error
+	at         time.Time
+	generation uint64
+	inFlight   int
+	forgotten  bool
 }
 
 type listenerCache struct {
 	mu          sync.Mutex
-	byContainer map[string]listenerSnapshot
-	generations map[string]uint64
+	byContainer map[string]*containerEntry
+	genSeq      uint64
 	sf          singleflight.Group
 	now         func() time.Time
 	read        func(pid uint32) (map[uint16]struct{}, error)
@@ -39,8 +44,8 @@ type listenerCache struct {
 
 func newListenerCache() *listenerCache {
 	return &listenerCache{
-		byContainer: map[string]listenerSnapshot{},
-		generations: map[string]uint64{},
+		byContainer: map[string]*containerEntry{},
+		genSeq:      1,
 		now:         time.Now,
 		read:        listeningTCPPorts,
 	}
@@ -53,15 +58,28 @@ func (c *listenerCache) listening(containerID string, pid uint32, port uint16) (
 	now := c.now()
 
 	c.mu.Lock()
-	snap, ok := c.byContainer[containerID]
-	gen := uint64(0)
-	if c.generations != nil {
-		gen = c.generations[containerID]
+	if c.byContainer == nil {
+		c.byContainer = map[string]*containerEntry{}
 	}
-	if ok && snap.pid == pid {
-		age := now.Sub(snap.at)
-		if age <= listenerSnapshotTTL {
-			if _, listening := snap.ports[port]; listening {
+	entry := c.byContainer[containerID]
+	if entry != nil && (entry.forgotten || entry.pid != pid) {
+		entry.forgotten = true
+		c.genSeq++
+		entry.generation = c.genSeq
+		if entry.inFlight == 0 {
+			delete(c.byContainer, containerID)
+		}
+		entry = nil
+	}
+	if entry != nil {
+		age := now.Sub(entry.at)
+		if entry.err != nil {
+			if age <= errorSnapshotTTL {
+				c.mu.Unlock()
+				return false, false
+			}
+		} else if age <= listenerSnapshotTTL {
+			if _, listening := entry.ports[port]; listening {
 				c.mu.Unlock()
 				return true, true
 			}
@@ -73,28 +91,48 @@ func (c *listenerCache) listening(containerID string, pid uint32, port uint16) (
 			}
 		}
 	}
+
+	if entry == nil {
+		c.genSeq++
+		entry = &containerEntry{pid: pid, generation: c.genSeq}
+		c.byContainer[containerID] = entry
+	}
+	entry.inFlight++
+	gen := entry.generation
 	c.mu.Unlock()
 
-	// Snapshot is missing, expired, PID changed, or a stale negative verdict:
-	// read procfs outside the mutex, coalescing concurrent reads per container.
-	res, err, _ := c.sf.Do(containerID, func() (any, error) {
+	// Snapshot is missing, expired, PID changed, or a stale negative/error verdict:
+	// read procfs outside the mutex, coalescing concurrent reads per container, PID, and generation.
+	flightKey := fmt.Sprintf("%s:%d:%d", containerID, pid, gen)
+	res, err, _ := c.sf.Do(flightKey, func() (any, error) {
 		return c.read(pid)
 	})
-	if err != nil {
-		// When procfs cannot be read, return unknown so the event is kept.
-		return false, false
-	}
-	ports, ok := res.(map[uint16]struct{})
-	if !ok {
-		return false, false
+
+	var ports map[uint16]struct{}
+	if err == nil {
+		if p, ok := res.(map[uint16]struct{}); ok {
+			ports = p
+		}
 	}
 
 	c.mu.Lock()
-	// Only publish if no forget occurred for this container while the read was in-flight.
-	if c.generations == nil || c.generations[containerID] == gen {
-		c.byContainer[containerID] = listenerSnapshot{pid: pid, ports: ports, at: c.now()}
+	entry.inFlight--
+	if !entry.forgotten && entry.generation == gen && entry.pid == pid {
+		entry.ports = ports
+		entry.err = err
+		entry.at = c.now()
+	}
+	if entry.forgotten && entry.inFlight == 0 {
+		if c.byContainer[containerID] == entry {
+			delete(c.byContainer, containerID)
+		}
 	}
 	c.mu.Unlock()
+
+	if err != nil || ports == nil {
+		// When procfs cannot be read, return unknown so the event is kept.
+		return false, false
+	}
 
 	_, listening := ports[port]
 	return listening, true
@@ -103,11 +141,19 @@ func (c *listenerCache) listening(containerID string, pid uint32, port uint16) (
 func (c *listenerCache) forget(containerID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.byContainer, containerID)
-	if c.generations == nil {
-		c.generations = map[string]uint64{}
+	if c.byContainer == nil {
+		return
 	}
-	c.generations[containerID]++
+	entry, ok := c.byContainer[containerID]
+	if !ok {
+		return
+	}
+	entry.forgotten = true
+	c.genSeq++
+	entry.generation = c.genSeq
+	if entry.inFlight == 0 {
+		delete(c.byContainer, containerID)
+	}
 }
 
 func listeningTCPPorts(pid uint32) (map[uint16]struct{}, error) {

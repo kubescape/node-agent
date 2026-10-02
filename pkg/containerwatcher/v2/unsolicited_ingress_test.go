@@ -21,7 +21,7 @@ import (
 )
 
 func gateUnderTest(ports map[uint32]map[uint16]struct{}) *EventHandlerFactory {
-	return &EventHandlerFactory{listeners: &listenerCache{byContainer: map[string]listenerSnapshot{}, now: time.Now, read: func(pid uint32) (map[uint16]struct{}, error) {
+	return &EventHandlerFactory{listeners: &listenerCache{byContainer: map[string]*containerEntry{}, now: time.Now, read: func(pid uint32) (map[uint16]struct{}, error) {
 		p, ok := ports[pid]
 		if !ok {
 			return nil, errors.New("no such process")
@@ -105,7 +105,7 @@ func TestProcessEvent_UnsolicitedIngressAccountsDroppedEvents(t *testing.T) {
 		nil,
 	)
 	factory.listeners = &listenerCache{
-		byContainer: map[string]listenerSnapshot{},
+		byContainer: map[string]*containerEntry{},
 		now:         time.Now,
 		read: func(pid uint32) (map[uint16]struct{}, error) {
 			return map[uint16]struct{}{8443: {}}, nil
@@ -158,7 +158,7 @@ func TestContainerCallback_EvictionForgetsListeners(t *testing.T) {
 	)
 	factory.removalGracePeriod = 20 * time.Millisecond
 	factory.listeners = &listenerCache{
-		byContainer: map[string]listenerSnapshot{},
+		byContainer: map[string]*containerEntry{},
 		now:         time.Now,
 		read: func(pid uint32) (map[uint16]struct{}, error) {
 			return map[uint16]struct{}{8443: {}}, nil
