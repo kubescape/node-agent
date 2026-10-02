@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	peerHitTTL  = 30 * time.Second
-	peerMissTTL = 10 * time.Second
+	peerHitTTL     = 30 * time.Second
+	peerMissTTL    = 10 * time.Second
+	maxPeerEntries = 1024
 )
 
 type peerIdentity struct {
@@ -79,21 +80,95 @@ func labelString(labels map[string]string) string {
 	return strings.Join(parts, ",")
 }
 
-func (r *peerRepair) lookup(ip string) (peerIdentity, bool) {
+func (r *peerRepair) pruneExpired(now time.Time) {
+	for ip, hit := range r.byIP {
+		ttl := peerMissTTL
+		if hit.found {
+			ttl = peerHitTTL
+		}
+		if now.Sub(hit.at) >= ttl {
+			delete(r.byIP, ip)
+		}
+	}
+}
+
+func (r *peerRepair) evictOldest() {
+	var oldestIP string
+	var oldestTime time.Time
+	for ip, hit := range r.byIP {
+		if oldestIP == "" || hit.at.Before(oldestTime) {
+			oldestIP = ip
+			oldestTime = hit.at
+		}
+	}
+	if oldestIP != "" {
+		delete(r.byIP, oldestIP)
+	}
+}
+
+// invalidate clears cached IP entries, or all entries if no IPs are specified.
+func (r *peerRepair) invalidate(ips ...string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if len(ips) == 0 {
+		r.byIP = make(map[string]peerIdentity)
+		return
+	}
+	for _, ip := range ips {
+		delete(r.byIP, ip)
+	}
+}
+
+func (r *peerRepair) lookup(ip string) (peerIdentity, bool) {
+	return r.lookupWithExpected(ip, "", "")
+}
+
+func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName string) (peerIdentity, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.now()
+	r.pruneExpired(now)
+
 	if hit, ok := r.byIP[ip]; ok {
 		ttl := peerMissTTL
 		if hit.found {
 			ttl = peerHitTTL
 		}
-		if r.now().Sub(hit.at) < ttl {
-			return hit, hit.found
+		if now.Sub(hit.at) < ttl {
+			// Ownership validation: if the caller knows the expected pod identity,
+			// verify that the cached positive hit belongs to that pod.
+			// If not, the IP was reassigned to a new pod during rapid churn.
+			if hit.found && expectedName != "" && (hit.name != expectedName || (expectedNamespace != "" && hit.namespace != expectedNamespace)) {
+				delete(r.byIP, ip)
+			} else {
+				return hit, hit.found
+			}
+		} else {
+			delete(r.byIP, ip)
 		}
 	}
-	id := peerIdentity{at: r.now()}
-	if p := podByIP(r.pods(), ip); p != nil {
-		id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
+
+	id := peerIdentity{at: now}
+	pods := r.pods()
+	if p := podByIP(pods, ip); p != nil {
+		if expectedName == "" || p.Name == expectedName {
+			id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
+		}
+	}
+	if !id.found && expectedName != "" {
+		for _, p := range pods {
+			if p == nil || p.Spec.HostNetwork {
+				continue
+			}
+			if p.Name == expectedName && (expectedNamespace == "" || p.Namespace == expectedNamespace) {
+				id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
+				break
+			}
+		}
+	}
+
+	if len(r.byIP) >= maxPeerEntries {
+		r.evictOldest()
 	}
 	r.byIP[ip] = id
 	return id, id.found
@@ -101,10 +176,13 @@ func (r *peerRepair) lookup(ip string) (peerIdentity, bool) {
 
 func (r *peerRepair) repair(d datasource.DataSource, data datasource.Data, ev *utils.DatasourceEvent) bool {
 	ep := ev.GetDstEndpoint()
-	if ep.Kind != "" || ep.Addr == "" || ep.Addr == "0.0.0.0" || strings.HasPrefix(ep.Addr, "127.") {
+	if ep.Addr == "" || ep.Addr == "0.0.0.0" || strings.HasPrefix(ep.Addr, "127.") {
 		return false
 	}
-	id, ok := r.lookup(ep.Addr)
+	if ep.Kind != "" && (ep.Kind != igtypes.EndpointKindPod || len(ep.PodLabels) > 0) {
+		return false
+	}
+	id, ok := r.lookupWithExpected(ep.Addr, ep.Namespace, ep.Name)
 	if !ok {
 		return false
 	}
