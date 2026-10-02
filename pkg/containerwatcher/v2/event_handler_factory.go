@@ -70,6 +70,7 @@ type EventHandlerFactory struct {
 	metrics                  metricsmanager.MetricsManager
 	dedupSkipSet             map[Manager]struct{} // Managers to skip when event is duplicate
 	ebpfDropCounter          metric.Int64Counter
+	listeners                *listenerCache
 	// removalGracePeriod overrides removedContainerGracePeriod when > 0.
 	// Settable in tests; production uses the default.
 	removalGracePeriod time.Duration
@@ -104,6 +105,7 @@ func NewEventHandlerFactory(
 		containerCache:           &maps.SafeMap[string, *containercollection.Container]{},
 		containerProfileManager:  containerProfileManager,
 		dedupCache:               dedupCache,
+		listeners:                newListenerCache(),
 		metrics:                  metrics,
 		dedupSkipSet:             make(map[Manager]struct{}),
 		ebpfDropCounter:          ebpfDropCounter,
@@ -323,6 +325,10 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	// separately exempted, this is a different gate on the ongoing event
 	// stream, not just registration.
 	if !utils.IsHostContainer(container) && ehf.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels) {
+		return
+	}
+
+	if ehf.unsolicitedIngress(enrichedEvent, container) {
 		return
 	}
 
