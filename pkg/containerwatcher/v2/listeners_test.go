@@ -29,23 +29,63 @@ func TestParseListeningPorts(t *testing.T) {
 func TestListenerCache_TTLAndUnknown(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	reads := 0
+	currentPorts := map[uint16]struct{}{8443: {}}
 	c := &listenerCache{byPid: map[uint32]listenerSnapshot{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
 		reads++
 		if pid == 404 {
 			return nil, errors.New("no such process")
 		}
-		return map[uint16]struct{}{8443: {}}, nil
+		return currentPorts, nil
 	}}
 	listening, known := c.listening(7, 8443)
 	require.True(t, known)
 	require.True(t, listening)
+	require.Equal(t, 1, reads)
+
+	// Second query for the same listening port within TTL uses the cached positive result and does not re-read.
+	listening, known = c.listening(7, 8443)
+	require.True(t, known)
+	require.True(t, listening)
+	require.Equal(t, 1, reads, "positive verdict within TTL uses cache without re-reading")
+
+	// Query for an unrecorded port revalidates procfs to avoid dropping newly opened ports.
+	currentPorts = map[uint16]struct{}{8443: {}, 8444: {}}
 	listening, known = c.listening(7, 8444)
 	require.True(t, known)
+	require.True(t, listening)
+	require.Equal(t, 2, reads, "miss within TTL revalidates procfs and discovers newly opened port")
+
+	// Query for a closed port revalidates procfs and confirms not listening.
+	listening, known = c.listening(7, 9999)
+	require.True(t, known)
 	require.False(t, listening)
-	require.Equal(t, 1, reads, "the second question within the TTL reads nothing")
+	require.Equal(t, 3, reads, "miss for closed port revalidates procfs and yields false")
+
+	// After the TTL expires, the cache is refreshed even for previously listening ports.
 	now = now.Add(listenerSnapshotTTL + time.Second)
-	c.listening(7, 8443)
-	require.Equal(t, 2, reads, "after the TTL the snapshot is refreshed")
+	listening, known = c.listening(7, 8443)
+	require.True(t, known)
+	require.True(t, listening)
+	require.Equal(t, 4, reads, "after the TTL the snapshot is refreshed")
+
+	// A process whose procfs cannot be read yields no verdict (known=false).
 	_, known = c.listening(404, 8443)
 	require.False(t, known, "a process whose procfs cannot be read yields no verdict, and the event is kept")
+}
+
+func TestListenerCache_Forget(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	reads := 0
+	c := &listenerCache{byPid: map[uint32]listenerSnapshot{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
+		reads++
+		return map[uint16]struct{}{8443: {}}, nil
+	}}
+	listening, known := c.listening(7, 8443)
+	require.True(t, known && listening)
+	require.Equal(t, 1, reads)
+
+	c.forget(7)
+	listening, known = c.listening(7, 8443)
+	require.True(t, known && listening)
+	require.Equal(t, 2, reads, "forget evicted cached entry for pid")
 }

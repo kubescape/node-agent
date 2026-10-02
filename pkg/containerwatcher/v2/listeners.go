@@ -36,14 +36,19 @@ func (c *listenerCache) listening(pid uint32, port uint16) (bool, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	snap, ok := c.byPid[pid]
-	if !ok || c.now().Sub(snap.at) > listenerSnapshotTTL {
-		ports, err := c.read(pid)
-		if err != nil {
-			return false, false
+	if ok && c.now().Sub(snap.at) <= listenerSnapshotTTL {
+		if _, listening := snap.ports[port]; listening {
+			return true, true
 		}
-		snap = listenerSnapshot{ports: ports, at: c.now()}
-		c.byPid[pid] = snap
+		// Revalidate cached misses before dropping: the application may have
+		// opened the listening socket after snap.at.
 	}
+	ports, err := c.read(pid)
+	if err != nil {
+		return false, false
+	}
+	snap = listenerSnapshot{ports: ports, at: c.now()}
+	c.byPid[pid] = snap
 	_, listening := snap.ports[port]
 	return listening, true
 }
@@ -57,6 +62,7 @@ func (c *listenerCache) forget(pid uint32) {
 func listeningTCPPorts(pid uint32) (map[uint16]struct{}, error) {
 	ports := map[uint16]struct{}{}
 	var firstErr error
+	opened := 0
 	for _, path := range []string{fmt.Sprintf("/proc/%d/net/tcp", pid), fmt.Sprintf("/proc/%d/net/tcp6", pid)} {
 		f, err := os.Open(path)
 		if err != nil {
@@ -65,11 +71,11 @@ func listeningTCPPorts(pid uint32) (map[uint16]struct{}, error) {
 			}
 			continue
 		}
+		opened++
 		parseListeningPorts(f, ports)
 		f.Close()
-		firstErr = nil
 	}
-	if len(ports) == 0 && firstErr != nil {
+	if opened == 0 && firstErr != nil {
 		return nil, firstErr
 	}
 	return ports, nil

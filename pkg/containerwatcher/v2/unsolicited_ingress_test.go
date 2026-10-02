@@ -7,7 +7,15 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	metricsmanager "github.com/kubescape/node-agent/pkg/metricsmanager"
+	"github.com/kubescape/node-agent/pkg/networkstream"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/require"
 )
@@ -58,4 +66,133 @@ func TestUnsolicitedIngress_NonNetworkEventsAndNilGate(t *testing.T) {
 	exec := &events.EnrichedEvent{Event: &utils.StructEvent{EventType: utils.ExecveEventType}}
 	require.False(t, ehf.unsolicitedIngress(exec, withPid(1)))
 	require.False(t, (&EventHandlerFactory{}).unsolicitedIngress(syn(utils.HostPktType, "TCP", 0, 9999), withPid(1)), "a factory without the cache gates nothing")
+}
+
+type spyProfileManager struct {
+	containerprofilemanager.ContainerProfileManagerMock
+	dropped []string
+}
+
+func (s *spyProfileManager) ReportDroppedEvent(containerID string) {
+	s.dropped = append(s.dropped, containerID)
+}
+
+type eventWithDrops struct {
+	*utils.StructEvent
+}
+
+func (e *eventWithDrops) HasDroppedEvents() bool {
+	return true
+}
+
+func TestProcessEvent_UnsolicitedIngressAccountsDroppedEvents(t *testing.T) {
+	pmSpy := &spyProfileManager{}
+	ruleMock := &rulemanager.RuleManagerMock{}
+	cc := &containercollection.ContainerCollection{}
+
+	factory := NewEventHandlerFactory(
+		config.Config{},
+		cc,
+		pmSpy,
+		&dnsmanager.DNSManagerMock{},
+		ruleMock,
+		&malwaremanager.MalwareManagerMock{},
+		&networkstream.NetworkStreamMock{},
+		metricsmanager.NewMetricsMock(),
+		nil,
+		nil,
+		rulepolicy.NewRulePolicyReporter(ruleMock, pmSpy),
+		nil,
+	)
+	factory.listeners = &listenerCache{
+		byPid: map[uint32]listenerSnapshot{},
+		now:   time.Now,
+		read: func(pid uint32) (map[uint16]struct{}, error) {
+			return map[uint16]struct{}{8443: {}}, nil
+		},
+	}
+
+	container := makeTestContainer("c-dropped", "ns", "pod", "c", 100)
+	container.Runtime.BasicRuntimeMetadata.ContainerPID = 4242
+	factory.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: container,
+	})
+
+	// An unsolicited SYN to a closed port (9999) with HasDroppedEvents()=true
+	ev := &events.EnrichedEvent{
+		ContainerID: "c-dropped",
+		Event: &eventWithDrops{
+			StructEvent: &utils.StructEvent{
+				ContainerID: "c-dropped",
+				EventType:   utils.NetworkEventType,
+				PktType:     utils.HostPktType,
+				Proto:       "TCP",
+				Pid:         0,
+				DstPort:     9999,
+			},
+		},
+	}
+
+	factory.ProcessEvent(ev)
+
+	// Dropped event was accounted for even though the event was dropped as unsolicited ingress
+	require.Equal(t, []string{"c-dropped"}, pmSpy.dropped)
+}
+
+func TestContainerCallback_EvictionForgetsListeners(t *testing.T) {
+	cc := &containercollection.ContainerCollection{}
+	factory := NewEventHandlerFactory(
+		config.Config{},
+		cc,
+		&containerprofilemanager.ContainerProfileManagerMock{},
+		&dnsmanager.DNSManagerMock{},
+		&rulemanager.RuleManagerMock{},
+		&malwaremanager.MalwareManagerMock{},
+		&networkstream.NetworkStreamMock{},
+		metricsmanager.NewMetricsMock(),
+		nil,
+		nil,
+		rulepolicy.NewRulePolicyReporter(&rulemanager.RuleManagerMock{}, &containerprofilemanager.ContainerProfileManagerMock{}),
+		nil,
+	)
+	factory.removalGracePeriod = 20 * time.Millisecond
+	factory.listeners = &listenerCache{
+		byPid: map[uint32]listenerSnapshot{},
+		now:   time.Now,
+		read: func(pid uint32) (map[uint16]struct{}, error) {
+			return map[uint16]struct{}{8443: {}}, nil
+		},
+	}
+
+	container := makeTestContainer("c-eol", "ns", "pod", "c", 101)
+	container.Runtime.BasicRuntimeMetadata.ContainerPID = 5555
+	factory.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: container,
+	})
+
+	// Populate listeners cache
+	listening, known := factory.listeners.listening(5555, 80)
+	require.True(t, known)
+	require.False(t, listening)
+
+	factory.listeners.mu.Lock()
+	_, exists := factory.listeners.byPid[5555]
+	factory.listeners.mu.Unlock()
+	require.True(t, exists, "listeners cache has entry for pid 5555")
+
+	// Trigger container removal
+	factory.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeRemoveContainer,
+		Container: container,
+	})
+
+	// Verify that after grace period, the entry is forgotten
+	require.Eventually(t, func() bool {
+		factory.listeners.mu.Lock()
+		defer factory.listeners.mu.Unlock()
+		_, ok := factory.listeners.byPid[5555]
+		return !ok
+	}, time.Second, 5*time.Millisecond, "listeners cache should forget pid 5555 after container removal")
 }

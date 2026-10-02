@@ -328,6 +328,18 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		return
 	}
 
+	// Always report dropped events regardless of dedup status or unsolicited ingress filtering
+	if enrichedEvent.Event.HasDroppedEvents() {
+		ehf.containerProfileManager.ReportDroppedEvent(enrichedEvent.Event.GetContainerID())
+		ehf.ebpfDropCounter.Add(context.Background(),
+			1,
+			metric.WithAttributes(
+				attribute.String("event_type", string(enrichedEvent.Event.GetEventType())),
+				attribute.String("reason", "profile_drop"),
+			),
+		)
+	}
+
 	if ehf.unsolicitedIngress(enrichedEvent, container) {
 		return
 	}
@@ -342,18 +354,6 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 			}
 			ehf.metrics.ReportDedupEvent(enrichedEvent.Event.GetEventType(), duplicate)
 		}
-	}
-
-	// Always report dropped events regardless of dedup status
-	if enrichedEvent.Event.HasDroppedEvents() {
-		ehf.containerProfileManager.ReportDroppedEvent(enrichedEvent.Event.GetContainerID())
-		ehf.ebpfDropCounter.Add(context.Background(),
-			1,
-			metric.WithAttributes(
-				attribute.String("event_type", string(enrichedEvent.Event.GetEventType())),
-				attribute.String("reason", "profile_drop"),
-			),
-		)
 	}
 
 	// Get handlers for this event type
@@ -492,6 +492,11 @@ func (ehf *EventHandlerFactory) ContainerCallback(notif containercollection.PubS
 		}
 		time.AfterFunc(grace, func() {
 			ehf.containerCache.Delete(containerID)
+			if ehf.listeners != nil && notif.Container != nil {
+				if pid := notif.Container.ContainerPid(); pid != 0 {
+					ehf.listeners.forget(pid)
+				}
+			}
 		})
 	}
 }
