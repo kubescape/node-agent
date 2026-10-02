@@ -218,7 +218,13 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 	if inv != nil && expectedName != "" && expectedNamespace != "" {
 		cand := inv.GetPodByName(expectedNamespace, expectedName)
 		if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip {
-			p = cand
+			if byIP := inv.GetPodByIp(ip); byIP == nil || (byIP.Name == cand.Name && byIP.Namespace == cand.Namespace) {
+				p = cand
+			} else {
+				// The IP has been reassigned to a different pod in the IP index (IP reuse).
+				// Do not let the expected-name fallback select the stale terminating pod.
+				return peerIdentity{}, false
+			}
 		}
 	}
 	if p == nil && r.pods != nil {

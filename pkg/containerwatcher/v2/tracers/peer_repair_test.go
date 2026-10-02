@@ -497,3 +497,41 @@ func TestPeerRepair_IdentityConstrainedMissDoesNotPoisonRawLookup(t *testing.T) 
 	require.True(t, ok)
 	require.Equal(t, "api-new", id.name)
 }
+
+func TestPeerRepair_StaleExpectedIdentityRejectedDuringIPReuse(t *testing.T) {
+	oldPod := slim("shop", "api-old", "10.42.0.48", false, map[string]string{"app": "api", "version": "v1"})
+	newPod := slim("shop", "api-new", "10.42.0.48", false, map[string]string{"app": "api", "version": "v2"})
+	inv := &mockInventory{
+		podsByName: map[string]*common.SlimPod{
+			"shop/api-old": oldPod,
+			"shop/api-new": newPod,
+		},
+		podsByIP: map[string]*common.SlimPod{
+			"10.42.0.48": newPod,
+		},
+	}
+	r := newTestPeerRepairWithInv(inv)
+
+	// An event arrives with recycled IP "10.42.0.48", but carries stale metadata expectedName="api-old".
+	// Even though api-old is still in inventory (terminating) and reports 10.42.0.48,
+	// GetPodByIp already points to api-new. The lookup must decline repair and not fall back to api-old.
+	_, ok := r.lookupWithExpected("10.42.0.48", "shop", "api-old")
+	require.False(t, ok, "must decline repair when expected pod is stale and IP belongs to replacement pod")
+
+	// Constrained lookup with the true current owner succeeds
+	id, ok := r.lookupWithExpected("10.42.0.48", "shop", "api-new")
+	require.True(t, ok)
+	require.Equal(t, "api-new", id.name)
+	require.Contains(t, id.labels, "version=v2")
+}
+
+func TestNewNetworkTracer_KubernetesModeGate(t *testing.T) {
+	tracerOff := NewNetworkTracer(nil, nil, nil, nil, nil, nil, nil, nil, false)
+	require.Nil(t, tracerOff.peers, "peers must be nil when kubernetesMode is false")
+
+	tracerOn := NewNetworkTracer(nil, nil, nil, nil, nil, nil, nil, nil, true)
+	require.NotNil(t, tracerOn.peers, "peers must be initialized when kubernetesMode is true")
+	// Clean up to prevent any lingering background state
+	_ = tracerOn.Stop()
+}
+

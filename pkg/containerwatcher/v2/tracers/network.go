@@ -51,7 +51,12 @@ func NewNetworkTracer(
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	socketEnricherOp *socketenricher.SocketEnricher,
+	kubernetesMode bool,
 ) *NetworkTracer {
+	var peers *peerRepair
+	if kubernetesMode {
+		peers = newPeerRepair()
+	}
 	return &NetworkTracer{
 		eventCallback:      eventCallback,
 		kubeIPResolver:     kubeIPResolver,
@@ -61,7 +66,7 @@ func NewNetworkTracer(
 		runtime:            runtime,
 		thirdPartyEnricher: thirdPartyEnricher,
 		socketEnricherOp:   socketEnricherOp,
-		peers:              newPeerRepair(),
+		peers:              peers,
 	}
 }
 
