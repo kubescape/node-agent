@@ -134,19 +134,33 @@ func TestListenerCache_PIDReuseIsolated(t *testing.T) {
 func TestListenerCache_CoalescesConcurrentReads(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	var reads int64
-	started := make(chan struct{})
+	readStarted := make(chan struct{})
 	gate := make(chan struct{})
 
-	c := &listenerCache{byContainer: map[string]listenerSnapshot{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
-		if atomic.AddInt64(&reads, 1) == 1 {
-			close(started)
-		}
-		<-gate
-		return map[uint16]struct{}{8080: {}}, nil
-	}}
+	const numCallers = 5
+	var callersEntered int32
+	allCallersEntered := make(chan struct{})
+
+	c := &listenerCache{
+		byContainer: map[string]listenerSnapshot{},
+		generations: map[string]uint64{},
+		now:         func() time.Time { return now },
+		onQuery: func() {
+			if atomic.AddInt32(&callersEntered, 1) == numCallers {
+				close(allCallersEntered)
+			}
+		},
+		read: func(pid uint32) (map[uint16]struct{}, error) {
+			if atomic.AddInt64(&reads, 1) == 1 {
+				close(readStarted)
+			}
+			<-gate
+			return map[uint16]struct{}{8080: {}}, nil
+		},
+	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
+	for i := 0; i < numCallers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -155,9 +169,48 @@ func TestListenerCache_CoalescesConcurrentReads(t *testing.T) {
 		}()
 	}
 
-	<-started
+	<-readStarted
+	<-allCallersEntered
 	close(gate)
 	wg.Wait()
 
 	require.Equal(t, int64(1), atomic.LoadInt64(&reads), "concurrent queries for the same container coalesce into a single read")
+}
+
+func TestListenerCache_ForgetInvalidatesInFlightRefresh(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	readStarted := make(chan struct{})
+	gate := make(chan struct{})
+
+	c := &listenerCache{
+		byContainer: map[string]listenerSnapshot{},
+		generations: map[string]uint64{},
+		now:         func() time.Time { return now },
+		read: func(pid uint32) (map[uint16]struct{}, error) {
+			close(readStarted)
+			<-gate
+			return map[uint16]struct{}{8080: {}}, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.listening("cont-abandoned", 10, 8080)
+	}()
+
+	<-readStarted
+	// While the read is in-flight, the container is removed/forgotten
+	c.forget("cont-abandoned")
+
+	// Release the in-flight read
+	close(gate)
+	wg.Wait()
+
+	// Verify that the completed in-flight read did NOT recreate the entry in byContainer
+	c.mu.Lock()
+	_, exists := c.byContainer["cont-abandoned"]
+	c.mu.Unlock()
+	require.False(t, exists, "in-flight read must not recreate cache entry after forget")
 }
