@@ -481,6 +481,9 @@ func (ehf *EventHandlerFactory) ContainerCallback(notif containercollection.PubS
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		ehf.containerCache.Set(containerID, notif.Container)
+		if ehf.listeners != nil && containerID != "" {
+			ehf.listeners.forget(containerID)
+		}
 	case containercollection.EventTypeRemoveContainer:
 		// Keep the entry resolvable for the grace window, then evict. This
 		// also fixes the previous behavior of never evicting lazily-cached
@@ -492,10 +495,8 @@ func (ehf *EventHandlerFactory) ContainerCallback(notif containercollection.PubS
 		}
 		time.AfterFunc(grace, func() {
 			ehf.containerCache.Delete(containerID)
-			if ehf.listeners != nil && notif.Container != nil {
-				if pid := notif.Container.ContainerPid(); pid != 0 {
-					ehf.listeners.forget(pid)
-				}
+			if ehf.listeners != nil && containerID != "" {
+				ehf.listeners.forget(containerID)
 			}
 		})
 	}

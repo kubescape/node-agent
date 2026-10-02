@@ -22,28 +22,29 @@ const (
 )
 
 type listenerSnapshot struct {
+	pid   uint32
 	ports map[uint16]struct{}
 	at    time.Time
 }
 
 type listenerCache struct {
-	mu    sync.Mutex
-	byPid map[uint32]listenerSnapshot
-	sf    singleflight.Group
-	now   func() time.Time
-	read  func(pid uint32) (map[uint16]struct{}, error)
+	mu          sync.Mutex
+	byContainer map[string]listenerSnapshot
+	sf          singleflight.Group
+	now         func() time.Time
+	read        func(pid uint32) (map[uint16]struct{}, error)
 }
 
 func newListenerCache() *listenerCache {
-	return &listenerCache{byPid: map[uint32]listenerSnapshot{}, now: time.Now, read: listeningTCPPorts}
+	return &listenerCache{byContainer: map[string]listenerSnapshot{}, now: time.Now, read: listeningTCPPorts}
 }
 
-func (c *listenerCache) listening(pid uint32, port uint16) (bool, bool) {
+func (c *listenerCache) listening(containerID string, pid uint32, port uint16) (bool, bool) {
 	now := c.now()
 
 	c.mu.Lock()
-	snap, ok := c.byPid[pid]
-	if ok {
+	snap, ok := c.byContainer[containerID]
+	if ok && snap.pid == pid {
 		age := now.Sub(snap.at)
 		if age <= listenerSnapshotTTL {
 			if _, listening := snap.ports[port]; listening {
@@ -60,9 +61,9 @@ func (c *listenerCache) listening(pid uint32, port uint16) (bool, bool) {
 	}
 	c.mu.Unlock()
 
-	// Snapshot is missing, expired, or a stale negative verdict: read procfs
-	// outside the mutex, coalescing concurrent reads for the same PID.
-	res, err, _ := c.sf.Do(strconv.FormatUint(uint64(pid), 10), func() (any, error) {
+	// Snapshot is missing, expired, PID changed, or a stale negative verdict:
+	// read procfs outside the mutex, coalescing concurrent reads per container.
+	res, err, _ := c.sf.Do(containerID, func() (any, error) {
 		return c.read(pid)
 	})
 	if err != nil {
@@ -75,17 +76,17 @@ func (c *listenerCache) listening(pid uint32, port uint16) (bool, bool) {
 	}
 
 	c.mu.Lock()
-	c.byPid[pid] = listenerSnapshot{ports: ports, at: c.now()}
+	c.byContainer[containerID] = listenerSnapshot{pid: pid, ports: ports, at: c.now()}
 	c.mu.Unlock()
 
 	_, listening := ports[port]
 	return listening, true
 }
 
-func (c *listenerCache) forget(pid uint32) {
+func (c *listenerCache) forget(containerID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.byPid, pid)
+	delete(c.byContainer, containerID)
 }
 
 func listeningTCPPorts(pid uint32) (map[uint16]struct{}, error) {
@@ -151,6 +152,10 @@ func (ehf *EventHandlerFactory) unsolicitedIngress(enrichedEvent *events.Enriche
 	if pid == 0 {
 		return false
 	}
-	listening, known := ehf.listeners.listening(pid, ne.GetDstPort())
+	containerID := container.Runtime.ContainerID
+	if containerID == "" {
+		return false
+	}
+	listening, known := ehf.listeners.listening(containerID, pid, ne.GetDstPort())
 	return known && !listening
 }

@@ -21,7 +21,7 @@ import (
 )
 
 func gateUnderTest(ports map[uint32]map[uint16]struct{}) *EventHandlerFactory {
-	return &EventHandlerFactory{listeners: &listenerCache{byPid: map[uint32]listenerSnapshot{}, now: time.Now, read: func(pid uint32) (map[uint16]struct{}, error) {
+	return &EventHandlerFactory{listeners: &listenerCache{byContainer: map[string]listenerSnapshot{}, now: time.Now, read: func(pid uint32) (map[uint16]struct{}, error) {
 		p, ok := ports[pid]
 		if !ok {
 			return nil, errors.New("no such process")
@@ -34,8 +34,8 @@ func syn(pktType, proto string, pid uint32, port uint16) *events.EnrichedEvent {
 	return &events.EnrichedEvent{Event: &utils.StructEvent{EventType: utils.NetworkEventType, PktType: pktType, Proto: proto, Pid: pid, DstPort: port}}
 }
 
-func withPid(pid uint32) *containercollection.Container {
-	return &containercollection.Container{Runtime: containercollection.RuntimeMetadata{BasicRuntimeMetadata: igtypes.BasicRuntimeMetadata{ContainerPID: pid}}}
+func withPid(id string, pid uint32) *containercollection.Container {
+	return &containercollection.Container{Runtime: containercollection.RuntimeMetadata{BasicRuntimeMetadata: igtypes.BasicRuntimeMetadata{ContainerID: id, ContainerPID: pid}}}
 }
 
 func TestUnsolicitedIngress_TruthTable(t *testing.T) {
@@ -56,7 +56,7 @@ func TestUnsolicitedIngress_TruthTable(t *testing.T) {
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
-			require.Equal(t, r.drop, ehf.unsolicitedIngress(r.ev, withPid(r.pid)))
+			require.Equal(t, r.drop, ehf.unsolicitedIngress(r.ev, withPid("c-truth", r.pid)))
 		})
 	}
 }
@@ -64,8 +64,8 @@ func TestUnsolicitedIngress_TruthTable(t *testing.T) {
 func TestUnsolicitedIngress_NonNetworkEventsAndNilGate(t *testing.T) {
 	ehf := gateUnderTest(nil)
 	exec := &events.EnrichedEvent{Event: &utils.StructEvent{EventType: utils.ExecveEventType}}
-	require.False(t, ehf.unsolicitedIngress(exec, withPid(1)))
-	require.False(t, (&EventHandlerFactory{}).unsolicitedIngress(syn(utils.HostPktType, "TCP", 0, 9999), withPid(1)), "a factory without the cache gates nothing")
+	require.False(t, ehf.unsolicitedIngress(exec, withPid("c-1", 1)))
+	require.False(t, (&EventHandlerFactory{}).unsolicitedIngress(syn(utils.HostPktType, "TCP", 0, 9999), withPid("c-1", 1)), "a factory without the cache gates nothing")
 }
 
 type spyProfileManager struct {
@@ -105,8 +105,8 @@ func TestProcessEvent_UnsolicitedIngressAccountsDroppedEvents(t *testing.T) {
 		nil,
 	)
 	factory.listeners = &listenerCache{
-		byPid: map[uint32]listenerSnapshot{},
-		now:   time.Now,
+		byContainer: map[string]listenerSnapshot{},
+		now:         time.Now,
 		read: func(pid uint32) (map[uint16]struct{}, error) {
 			return map[uint16]struct{}{8443: {}}, nil
 		},
@@ -158,8 +158,8 @@ func TestContainerCallback_EvictionForgetsListeners(t *testing.T) {
 	)
 	factory.removalGracePeriod = 20 * time.Millisecond
 	factory.listeners = &listenerCache{
-		byPid: map[uint32]listenerSnapshot{},
-		now:   time.Now,
+		byContainer: map[string]listenerSnapshot{},
+		now:         time.Now,
 		read: func(pid uint32) (map[uint16]struct{}, error) {
 			return map[uint16]struct{}{8443: {}}, nil
 		},
@@ -173,14 +173,14 @@ func TestContainerCallback_EvictionForgetsListeners(t *testing.T) {
 	})
 
 	// Populate listeners cache
-	listening, known := factory.listeners.listening(5555, 80)
+	listening, known := factory.listeners.listening("c-eol", 5555, 80)
 	require.True(t, known)
 	require.False(t, listening)
 
 	factory.listeners.mu.Lock()
-	_, exists := factory.listeners.byPid[5555]
+	_, exists := factory.listeners.byContainer["c-eol"]
 	factory.listeners.mu.Unlock()
-	require.True(t, exists, "listeners cache has entry for pid 5555")
+	require.True(t, exists, "listeners cache has entry for containerID c-eol")
 
 	// Trigger container removal
 	factory.ContainerCallback(containercollection.PubSubEvent{
@@ -192,7 +192,7 @@ func TestContainerCallback_EvictionForgetsListeners(t *testing.T) {
 	require.Eventually(t, func() bool {
 		factory.listeners.mu.Lock()
 		defer factory.listeners.mu.Unlock()
-		_, ok := factory.listeners.byPid[5555]
+		_, ok := factory.listeners.byContainer["c-eol"]
 		return !ok
-	}, time.Second, 5*time.Millisecond, "listeners cache should forget pid 5555 after container removal")
+	}, time.Second, 5*time.Millisecond, "listeners cache should forget containerID c-eol after container removal")
 }
