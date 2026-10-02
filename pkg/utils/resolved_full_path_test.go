@@ -26,7 +26,7 @@ func TestIsResolvedFullPath(t *testing.T) {
 		{"absolute file", "/etc/passwd", true},
 		{"resolved symlink target", "/usr/lib/libtinfo.so.6.6", true},
 		{"atomic writer target", "/health/..2026_08_03_16_47_11.8011833/ping_readiness_local.sh", true},
-		{"headless proc, re-rooted later by NormalizePath", "/23240/setgroups", true},
+		{"absolute numeric leading segment", "/23240/setgroups", true},
 		{"root", "/", true},
 	}
 	for _, tt := range tests {

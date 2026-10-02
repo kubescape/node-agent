@@ -529,7 +529,8 @@ func (e *DatasourceEvent) GetFullPath() string {
 	}
 	// Relative/empty open the gadget could not walk (failed openat has no fd
 	// to resolve in-kernel): resolve in userspace via procfs so profile AND
-	// rule evaluation see the true absolute path — never a fabricated one.
+	// rule evaluation see the true absolute path. If procfs resolution fails,
+	// fall back to normalizing the raw argument as a best effort.
 	pid := e.GetPID()
 	fd, _ := e.getFieldAccessor("fd").Uint32(e.Data)
 	if resolved := ResolveOpenPathProc(pid, fd, raw); resolved != "" {
