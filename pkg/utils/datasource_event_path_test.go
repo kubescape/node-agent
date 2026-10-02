@@ -254,3 +254,31 @@ func TestDatasourceEventGetFullPath_ErrorRawForwarding(t *testing.T) {
 		require.Equal(t, filepath.Join(cwd, "relative/arg"), event.GetFullPath())
 	})
 }
+
+func TestDatasourceEventGetFullPath_AbsoluteSymlink(t *testing.T) {
+	self := uint32(os.Getpid())
+
+	t.Run("successful open prefers resolved fpath over raw absolute symlink name", func(t *testing.T) {
+		errVal := int32(0) // success
+		event := newOpenEvent(t, openFields{
+			fpath:      str("/usr/lib/os-release"), // resolved symlink target
+			fname:      str("/etc/os-release"),     // raw syscall argument
+			pid:        &self,
+			errorRaw:   &errVal,
+			includeDfd: true,
+		})
+		require.Equal(t, "/usr/lib/os-release", event.GetFullPath())
+	})
+
+	t.Run("failed open uses raw absolute name and rejects stale fpath", func(t *testing.T) {
+		errVal := int32(-2) // ENOENT
+		event := newOpenEvent(t, openFields{
+			fpath:      str("/stale/from/previous/event"), // stale scratch buffer path
+			fname:      str("/etc/nonexistent-config"),
+			pid:        &self,
+			errorRaw:   &errVal,
+			includeDfd: true,
+		})
+		require.Equal(t, "/etc/nonexistent-config", event.GetFullPath())
+	})
+}

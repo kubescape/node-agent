@@ -517,20 +517,16 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 }
 
 func (e *DatasourceEvent) GetFullPath() string {
+	fpath, _ := e.getFieldAccessor("fpath").String(e.Data)
+	// For successful opens (GetError() == 0), the gadget-resolved fpath is post-resolution
+	// (following symlinks to their canonical targets). Prefer it whenever it is a valid full path.
+	if IsResolvedFullPath(fpath) && e.GetError() == 0 {
+		return NormalizePath(fpath)
+	}
+
 	raw, _ := e.getFieldAccessor("fname").String(e.Data)
 	if IsResolvedFullPath(raw) || e.EventType != OpenEventType {
 		return NormalizePath(raw)
-	}
-
-	path, _ := e.getFieldAccessor("fpath").String(e.Data)
-	// Non-absolute fpath = stale scratch-buffer content, not this event's path
-	// (see IsResolvedFullPath) — fall back to the raw syscall argument.
-	// For successful opens (GetError() == 0), an absolute fpath is trustworthy.
-	// For failed openat calls with relative raw names, do not trust fpath
-	// unconditionally because an unpatched gadget can emit a fabricated path
-	// when dfd is a regular file.
-	if IsResolvedFullPath(path) && e.GetError() == 0 {
-		return NormalizePath(path)
 	}
 
 	// Relative/empty open the gadget could not walk (failed openat has no fd
@@ -545,18 +541,22 @@ func (e *DatasourceEvent) GetFullPath() string {
 	}
 	fd, _ := e.getFieldAccessor("fd").Uint32(e.Data)
 	dirfd := AT_FDCWD
-	if d, err := e.getFieldAccessor("dfd").Int32(e.Data); err == nil {
-		dirfd = d
-	} else if d, err := e.getFieldAccessor("dirfd").Int32(e.Data); err == nil {
-		dirfd = d
+	if acc := e.localFieldAccessor("dfd"); acc != nil {
+		if d, err := acc.Int32(e.Data); err == nil {
+			dirfd = d
+		}
+	} else if acc := e.localFieldAccessor("dirfd"); acc != nil {
+		if d, err := acc.Int32(e.Data); err == nil {
+			dirfd = d
+		}
 	}
 	if resolved := ResolveOpenPathProc(tid, fd, e.GetError() == 0, raw, dirfd); resolved != "" {
 		return NormalizePath(resolved)
 	}
 	// When dirfd is AT_FDCWD, cwd is guaranteed to be a directory; if procfs resolution
 	// was unavailable (e.g. short-lived process exited), a gadget-resolved absolute fpath is safe.
-	if dirfd == AT_FDCWD && IsResolvedFullPath(path) {
-		return NormalizePath(path)
+	if dirfd == AT_FDCWD && IsResolvedFullPath(fpath) {
+		return NormalizePath(fpath)
 	}
 	return NormalizePath(raw)
 }
