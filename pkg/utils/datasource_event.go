@@ -518,10 +518,24 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 
 func (e *DatasourceEvent) GetFullPath() string {
 	path, _ := e.getFieldAccessor("fpath").String(e.Data)
-	if path == "" {
-		path, _ = e.getFieldAccessor("fname").String(e.Data)
+	// Non-absolute fpath = stale scratch-buffer content, not this event's path
+	// (see IsResolvedFullPath) — fall back to the raw syscall argument.
+	if IsResolvedFullPath(path) {
+		return NormalizePath(path)
 	}
-	return NormalizePath(path)
+	raw, _ := e.getFieldAccessor("fname").String(e.Data)
+	if IsResolvedFullPath(raw) || e.EventType != OpenEventType {
+		return NormalizePath(raw)
+	}
+	// Relative/empty open the gadget could not walk (failed openat has no fd
+	// to resolve in-kernel): resolve in userspace via procfs so profile AND
+	// rule evaluation see the true absolute path — never a fabricated one.
+	pid := e.GetPID()
+	fd, _ := e.getFieldAccessor("fd").Uint32(e.Data)
+	if resolved := ResolveOpenPathProc(pid, fd, raw); resolved != "" {
+		return NormalizePath(resolved)
+	}
+	return NormalizePath(raw)
 }
 
 func (e *DatasourceEvent) GetGid() *uint32 {
