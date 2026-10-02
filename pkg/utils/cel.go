@@ -5,9 +5,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync"
 
 	celtypes "github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/picatz/xcel"
 )
 
@@ -200,6 +202,39 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, errCelObjectNil
 			}
 			return celtypes.Int(x.Raw.GetDstPort()), nil
+		}),
+	},
+	// dstNamespace / dstPodLabels carry the peer identity that IG's
+	// kubeipresolver resolves cluster-wide (independent of node-agent's
+	// node-local pod cache), so selector rules can match a peer on any node.
+	"dstNamespace": {
+		Type:  celtypes.StringType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.String(x.Raw.GetDstEndpoint().Namespace), nil
+		}),
+	},
+	"dstPodLabels": {
+		Type:  celtypes.MapType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			ep := x.Raw.GetDstEndpoint()
+			pl := ep.PodLabels
+			if len(pl) == 0 && ep.Kind == igtypes.EndpointKindService {
+				pl = ServicePeerLabels(ep.Namespace, ep.Name)
+			}
+			if pl == nil {
+				pl = map[string]string{}
+			}
+			return pl, nil
 		}),
 	},
 	"exepath": {
@@ -612,4 +647,24 @@ var HttpRequestFields = map[string]*celtypes.FieldType{
 			return celtypes.String(""), nil
 		}),
 	},
+}
+
+var (
+	servicePeerLabelsMu sync.RWMutex
+	servicePeerLabels   func(namespace, name string) map[string]string
+)
+
+func SetServicePeerLabels(f func(namespace, name string) map[string]string) {
+	servicePeerLabelsMu.Lock()
+	defer servicePeerLabelsMu.Unlock()
+	servicePeerLabels = f
+}
+
+func ServicePeerLabels(namespace, name string) map[string]string {
+	servicePeerLabelsMu.RLock()
+	defer servicePeerLabelsMu.RUnlock()
+	if servicePeerLabels == nil {
+		return nil
+	}
+	return servicePeerLabels(namespace, name)
 }
