@@ -162,7 +162,6 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
-	r.pruneExpired(now)
 
 	if hit, ok := r.byIP[ip]; ok {
 		if !hit.found {
@@ -227,7 +226,10 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 	}
 
 	if len(r.byIP) >= maxPeerEntries {
-		r.evictOldest()
+		r.pruneExpired(now)
+		if len(r.byIP) >= maxPeerEntries {
+			r.evictOldest()
+		}
 	}
 	r.byIP[ip] = id
 	return id, id.found
