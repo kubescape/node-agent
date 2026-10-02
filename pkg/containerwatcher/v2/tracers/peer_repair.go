@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -25,22 +26,23 @@ type peerIdentity struct {
 	namespace string
 	name      string
 	labels    string
-	at        time.Time
-	found     bool
 }
 
 type peerRepair struct {
 	mu        sync.Mutex
 	stopped   bool
-	byIP      map[string]peerIdentity
-	now       func() time.Time
+	positive  *expirable.LRU[string, peerIdentity]
+	negative  *expirable.LRU[string, struct{}]
 	pods      func() []*common.SlimPod
 	inventory common.K8sInventoryCache
 	initInv   func() common.K8sInventoryCache
 }
 
 func newPeerRepair() *peerRepair {
-	r := &peerRepair{byIP: map[string]peerIdentity{}, now: time.Now}
+	r := &peerRepair{
+		positive: expirable.NewLRU[string, peerIdentity](maxPeerEntries, nil, peerHitTTL),
+		negative: expirable.NewLRU[string, struct{}](maxPeerEntries, nil, peerMissTTL),
+	}
 	r.initInv = func() common.K8sInventoryCache {
 		if r.stopped || r.inventory != nil {
 			return r.inventory
@@ -69,6 +71,15 @@ func newPeerRepair() *peerRepair {
 	return r
 }
 
+func (r *peerRepair) initCachesLocked() {
+	if r.positive == nil {
+		r.positive = expirable.NewLRU[string, peerIdentity](maxPeerEntries, nil, peerHitTTL)
+	}
+	if r.negative == nil {
+		r.negative = expirable.NewLRU[string, struct{}](maxPeerEntries, nil, peerMissTTL)
+	}
+}
+
 func (r *peerRepair) stop() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -76,6 +87,12 @@ func (r *peerRepair) stop() {
 	if r.inventory != nil {
 		r.inventory.Stop()
 		r.inventory = nil
+	}
+	if r.positive != nil {
+		r.positive.Purge()
+	}
+	if r.negative != nil {
+		r.negative.Purge()
 	}
 }
 
@@ -127,42 +144,19 @@ func labelString(labels map[string]string) string {
 	return strings.Join(parts, ",")
 }
 
-func (r *peerRepair) pruneExpired(now time.Time) {
-	for ip, hit := range r.byIP {
-		ttl := peerMissTTL
-		if hit.found {
-			ttl = peerHitTTL
-		}
-		if now.Sub(hit.at) >= ttl {
-			delete(r.byIP, ip)
-		}
-	}
-}
-
-func (r *peerRepair) evictOldest() {
-	var oldestIP string
-	var oldestTime time.Time
-	for ip, hit := range r.byIP {
-		if oldestIP == "" || hit.at.Before(oldestTime) {
-			oldestIP = ip
-			oldestTime = hit.at
-		}
-	}
-	if oldestIP != "" {
-		delete(r.byIP, oldestIP)
-	}
-}
-
 // invalidate clears cached IP entries, or all entries if no IPs are specified.
 func (r *peerRepair) invalidate(ips ...string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.initCachesLocked()
 	if len(ips) == 0 {
-		r.byIP = make(map[string]peerIdentity)
+		r.positive.Purge()
+		r.negative.Purge()
 		return
 	}
 	for _, ip := range ips {
-		delete(r.byIP, ip)
+		r.positive.Remove(ip)
+		r.negative.Remove(ip)
 	}
 }
 
@@ -176,54 +170,45 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 	if r.stopped {
 		return peerIdentity{}, false
 	}
+	r.initCachesLocked()
 	if r.inventory == nil && r.initInv != nil {
 		r.initInv()
 	}
-	now := r.now()
 
-	if hit, ok := r.byIP[ip]; ok {
-		if !hit.found {
-			// Do not reuse negative entries for lookups with an expected identity
-			if expectedName != "" {
-				delete(r.byIP, ip)
-			} else if now.Sub(hit.at) < peerMissTTL {
-				return hit, false
-			} else {
-				delete(r.byIP, ip)
-			}
-		} else {
-			if now.Sub(hit.at) < peerHitTTL {
-				// Validate cached positive hit using indexed lookups to avoid scanning all pods
-				// under mutex, while ensuring the pod still owns ip and no new pod took it over.
-				var p *common.SlimPod
-				if r.inventory != nil {
-					cand := r.inventory.GetPodByName(hit.namespace, hit.name)
-					if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip &&
-						(expectedName == "" || cand.Name == expectedName) &&
-						(expectedNamespace == "" || cand.Namespace == expectedNamespace) {
-						// Ensure IP has not been reassigned to a different pod in the IP index
-						if byIP := r.inventory.GetPodByIp(ip); byIP == nil || (byIP.Name == hit.name && byIP.Namespace == hit.namespace) {
-							p = cand
-						}
-					}
-				} else if r.pods != nil {
-					pods := r.pods()
-					p = podByIP(pods, ip, expectedNamespace, expectedName)
-				}
-				if p != nil && p.Name == hit.name && p.Namespace == hit.namespace {
-					// Refresh cached labels in case the pod was relabeled
-					hit.labels = labelString(p.Labels)
-					r.byIP[ip] = hit
-					return hit, true
-				}
-				delete(r.byIP, ip)
-			} else {
-				delete(r.byIP, ip)
-			}
-		}
+	// If expected identity is provided, bypass negative cache
+	if expectedName != "" {
+		r.negative.Remove(ip)
+	} else if _, ok := r.negative.Get(ip); ok {
+		return peerIdentity{}, false
 	}
 
-	id := peerIdentity{at: now}
+	if hit, ok := r.positive.Get(ip); ok {
+		// Validate cached positive hit using indexed lookups to avoid scanning all pods
+		// under mutex, while ensuring the pod still owns ip and no new pod took it over.
+		var p *common.SlimPod
+		if r.inventory != nil {
+			cand := r.inventory.GetPodByName(hit.namespace, hit.name)
+			if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip &&
+				(expectedName == "" || cand.Name == expectedName) &&
+				(expectedNamespace == "" || cand.Namespace == expectedNamespace) {
+				// Ensure IP has not been reassigned to a different pod in the IP index
+				if byIP := r.inventory.GetPodByIp(ip); byIP == nil || (byIP.Name == hit.name && byIP.Namespace == hit.namespace) {
+					p = cand
+				}
+			}
+		} else if r.pods != nil {
+			pods := r.pods()
+			p = podByIP(pods, ip, expectedNamespace, expectedName)
+		}
+		if p != nil && p.Name == hit.name && p.Namespace == hit.namespace {
+			// Refresh cached labels in case the pod was relabeled
+			hit.labels = labelString(p.Labels)
+			r.positive.Add(ip, hit)
+			return hit, true
+		}
+		r.positive.Remove(ip)
+	}
+
 	var p *common.SlimPod
 	if r.inventory != nil && expectedName != "" && expectedNamespace != "" {
 		cand := r.inventory.GetPodByName(expectedNamespace, expectedName)
@@ -236,22 +221,16 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 		p = podByIP(pods, ip, expectedNamespace, expectedName)
 	}
 	if p != nil {
-		id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
+		id := peerIdentity{namespace: p.Namespace, name: p.Name, labels: labelString(p.Labels)}
+		r.positive.Add(ip, id)
+		return id, true
 	}
 
 	// Do not cache negative entries for identity-constrained lookups
-	if !id.found && expectedName != "" {
-		return id, false
+	if expectedName == "" {
+		r.negative.Add(ip, struct{}{})
 	}
-
-	if len(r.byIP) >= maxPeerEntries {
-		r.pruneExpired(now)
-		if len(r.byIP) >= maxPeerEntries {
-			r.evictOldest()
-		}
-	}
-	r.byIP[ip] = id
-	return id, id.found
+	return peerIdentity{}, false
 }
 
 func (r *peerRepair) repair(d datasource.DataSource, data datasource.Data, ev *utils.DatasourceEvent) bool {

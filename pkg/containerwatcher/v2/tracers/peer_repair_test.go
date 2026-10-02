@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
@@ -24,14 +25,34 @@ func slim(ns, name, ip string, host bool, labels map[string]string) *common.Slim
 	return p
 }
 
+func newTestPeerRepair(pods func() []*common.SlimPod) *peerRepair {
+	r := newPeerRepair()
+	r.initInv = nil
+	if pods != nil {
+		r.pods = pods
+	}
+	return r
+}
+
+func newTestPeerRepairWithInv(inv common.K8sInventoryCache) *peerRepair {
+	r := newPeerRepair()
+	r.initInv = nil
+	r.inventory = inv
+	if inv != nil {
+		r.pods = inv.GetPods
+	}
+	return r
+}
+
 func TestPeerRepair_ReusedAddressResolvesToTheCurrentPod(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	pods := []*common.SlimPod{
 		slim("shop", "api-new", "10.42.0.48", false, map[string]string{"app": "api", "pod-template-hash": "cc49b4b9f"}),
 		slim("kube-system", "kube-proxy-x", "172.16.0.3", true, map[string]string{"k8s-app": "kube-proxy"}),
 	}
 	calls := 0
-	r := &peerRepair{byIP: map[string]peerIdentity{}, now: func() time.Time { return now }, pods: func() []*common.SlimPod { calls++; return pods }}
+	r := newTestPeerRepair(func() []*common.SlimPod { calls++; return pods })
+	// Use short miss TTL for testing retry after miss
+	r.negative = expirable.NewLRU[string, struct{}](maxPeerEntries, nil, 20*time.Millisecond)
 
 	id, ok := r.lookup("10.42.0.48")
 	require.True(t, ok)
@@ -49,7 +70,7 @@ func TestPeerRepair_ReusedAddressResolvesToTheCurrentPod(t *testing.T) {
 	_, _ = r.lookup("10.42.9.9")
 	require.Equal(t, 4, calls, "misses are cached while positive hits validate current pod ownership")
 
-	now = now.Add(peerMissTTL + time.Second)
+	time.Sleep(25 * time.Millisecond)
 	pods = append(pods, slim("shop", "late", "10.42.9.9", false, map[string]string{"app": "late"}))
 	id, ok = r.lookup("10.42.9.9")
 	require.True(t, ok, "a miss is retried after its short TTL and finds the pod that appeared")
@@ -95,22 +116,19 @@ func TestPodByIP_AmbiguousMatches(t *testing.T) {
 }
 
 func TestPeerRepair_OwnershipValidationOnRapidChurn(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	pods := []*common.SlimPod{
 		slim("shop", "api-old", "10.42.0.48", false, map[string]string{"app": "api", "version": "v1"}),
 	}
-	r := &peerRepair{byIP: map[string]peerIdentity{}, now: func() time.Time { return now }, pods: func() []*common.SlimPod { return pods }}
+	r := newTestPeerRepair(func() []*common.SlimPod { return pods })
 
 	id, ok := r.lookup("10.42.0.48")
 	require.True(t, ok)
 	require.Equal(t, "api-old", id.name)
 
-	// Rapid churn happens 2 seconds later (well within the 30s peerHitTTL)
-	now = now.Add(2 * time.Second)
+	// Rapid churn happens: pod is replaced with api-newer on same IP
 	pods[0] = slim("shop", "api-newer", "10.42.0.48", false, map[string]string{"app": "api", "version": "v2"})
 
-	// Plain lookup without expected pod would still hit cache if unvalidated
-	// But lookupWithExpected validates that the cached hit matches the expected identity from upstream
+	// Plain lookup without expected pod validates against inventory; ownership mismatch drops old hit
 	id, ok = r.lookupWithExpected("10.42.0.48", "shop", "api-newer")
 	require.True(t, ok)
 	require.Equal(t, "api-newer", id.name, "ownership mismatch invalidates stale cache hit immediately")
@@ -118,11 +136,10 @@ func TestPeerRepair_OwnershipValidationOnRapidChurn(t *testing.T) {
 }
 
 func TestPeerRepair_InvalidateOnInventoryChange(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	pods := []*common.SlimPod{
 		slim("shop", "api-v1", "10.42.0.48", false, map[string]string{"app": "api"}),
 	}
-	r := &peerRepair{byIP: map[string]peerIdentity{}, now: func() time.Time { return now }, pods: func() []*common.SlimPod { return pods }}
+	r := newTestPeerRepair(func() []*common.SlimPod { return pods })
 
 	id, ok := r.lookup("10.42.0.48")
 	require.True(t, ok)
@@ -146,21 +163,19 @@ func TestPeerRepair_InvalidateOnInventoryChange(t *testing.T) {
 }
 
 func TestPeerRepair_BoundedCacheAndExpiration(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	r := &peerRepair{byIP: map[string]peerIdentity{}, now: func() time.Time { return now }, pods: func() []*common.SlimPod { return nil }}
+	r := newTestPeerRepair(func() []*common.SlimPod { return nil })
+	r.negative = expirable.NewLRU[string, struct{}](maxPeerEntries, nil, 10*time.Millisecond)
 
 	// Insert more entries than maxPeerEntries
 	for i := 0; i < maxPeerEntries+50; i++ {
 		ip := fmt.Sprintf("192.168.%d.%d", i/256, i%256)
 		r.lookup(ip)
 	}
-	require.LessOrEqual(t, len(r.byIP), maxPeerEntries, "cache must be bounded to maxPeerEntries")
+	require.LessOrEqual(t, r.negative.Len(), maxPeerEntries, "negative cache must be bounded to maxPeerEntries")
 
-	// Advance time past miss TTL
-	now = now.Add(peerMissTTL + time.Second)
-	// Next lookup should prune expired entries
-	r.lookup("1.2.3.4")
-	require.Equal(t, 1, len(r.byIP), "expired entries must be pruned")
+	time.Sleep(15 * time.Millisecond)
+	_, inCache := r.negative.Get("192.168.0.0")
+	require.False(t, inCache, "expired entries must not be returned")
 }
 
 type networkTestDatasourceFields struct {
@@ -242,11 +257,10 @@ func newNetworkTestEvent(t *testing.T, ipStr, kind, namespace, name, labels stri
 }
 
 func TestPeerRepair_RepairPodEndpointWithMissingLabels(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	pods := []*common.SlimPod{
 		slim("production", "frontend", "10.42.1.20", false, map[string]string{"app": "frontend", "tier": "web"}),
 	}
-	r := &peerRepair{byIP: map[string]peerIdentity{}, now: func() time.Time { return now }, pods: func() []*common.SlimPod { return pods }}
+	r := newTestPeerRepair(func() []*common.SlimPod { return pods })
 
 	// Case 1: Kind is pod, but labels are empty -> should be repaired!
 	ds, data, ev := newNetworkTestEvent(t, "10.42.1.20", string(igtypes.EndpointKindPod), "production", "frontend", "")
@@ -290,13 +304,8 @@ func TestPeerRepair_RepairPodEndpointWithMissingLabels(t *testing.T) {
 }
 
 func TestPeerRepair_CachedLabelsRefreshedOnRelabeling(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	pod := slim("shop", "api", "10.42.0.48", false, map[string]string{"version": "v1"})
-	r := &peerRepair{
-		byIP: map[string]peerIdentity{},
-		now:  func() time.Time { return now },
-		pods: func() []*common.SlimPod { return []*common.SlimPod{pod} },
-	}
+	r := newTestPeerRepair(func() []*common.SlimPod { return []*common.SlimPod{pod} })
 
 	id, ok := r.lookup("10.42.0.48")
 	require.True(t, ok)
@@ -343,18 +352,12 @@ func (m *mockInventory) Stop() {
 }
 
 func TestPeerRepair_IndexedInventoryValidation(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	pod := slim("shop", "api", "10.42.0.48", false, map[string]string{"app": "api"})
 	inv := &mockInventory{
 		podsByName: map[string]*common.SlimPod{"shop/api": pod},
 		podsByIP:   map[string]*common.SlimPod{"10.42.0.48": pod},
 	}
-	r := &peerRepair{
-		byIP:      map[string]peerIdentity{},
-		now:       func() time.Time { return now },
-		inventory: inv,
-		pods:      inv.GetPods,
-	}
+	r := newTestPeerRepairWithInv(inv)
 
 	// Identity-constrained lookup uses indexed GetPodByName
 	id, ok := r.lookupWithExpected("10.42.0.48", "shop", "api")
@@ -385,7 +388,6 @@ func TestPeerRepair_IndexedInventoryValidation(t *testing.T) {
 }
 
 func TestPeerRepair_AmbiguousIPRawLookupDeclinesRepair(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	oldPod := slim("default", "terminating-pod", "10.42.0.99", false, map[string]string{"app": "old"})
 	newPod := slim("default", "replacement-pod", "10.42.0.99", false, map[string]string{"app": "new"})
 	inv := &mockInventory{
@@ -395,12 +397,7 @@ func TestPeerRepair_AmbiguousIPRawLookupDeclinesRepair(t *testing.T) {
 		},
 		podsByIP: map[string]*common.SlimPod{"10.42.0.99": newPod}, // indexed cache picked newPod
 	}
-	r := &peerRepair{
-		byIP:      map[string]peerIdentity{},
-		now:       func() time.Time { return now },
-		inventory: inv,
-		pods:      inv.GetPods,
-	}
+	r := newTestPeerRepairWithInv(inv)
 
 	// Raw lookup must not pick indexed winner; it must consult complete pod set and decline repair on ambiguity
 	_, ok := r.lookup("10.42.0.99")
@@ -413,19 +410,13 @@ func TestPeerRepair_AmbiguousIPRawLookupDeclinesRepair(t *testing.T) {
 }
 
 func TestPeerRepair_RawHitInvalidatedWhenIPRecycled(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	oldPod := slim("shop", "api-old", "10.42.0.48", false, map[string]string{"app": "api"})
 	newPod := slim("shop", "api-new", "10.42.0.48", false, map[string]string{"app": "api"})
 	inv := &mockInventory{
 		podsByName: map[string]*common.SlimPod{"shop/api-old": oldPod},
 		podsByIP:   map[string]*common.SlimPod{"10.42.0.48": oldPod},
 	}
-	r := &peerRepair{
-		byIP:      map[string]peerIdentity{},
-		now:       func() time.Time { return now },
-		inventory: inv,
-		pods:      inv.GetPods,
-	}
+	r := newTestPeerRepairWithInv(inv)
 
 	// Cache oldPod
 	id, ok := r.lookup("10.42.0.48")
@@ -445,29 +436,22 @@ func TestPeerRepair_RawHitInvalidatedWhenIPRecycled(t *testing.T) {
 }
 
 func TestPeerRepair_StaleExpectedIdentityDoesNotAssignPodOnDifferentIP(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	// Stale pod metadata points to "api-old", but "api-old" was moved to a different IP or deleted
 	oldPod := slim("shop", "api-old", "10.42.0.99", false, map[string]string{"app": "api"})
-	r := &peerRepair{
-		byIP: map[string]peerIdentity{},
-		now:  func() time.Time { return now },
-		pods: func() []*common.SlimPod { return []*common.SlimPod{oldPod} },
-	}
+	r := newTestPeerRepair(func() []*common.SlimPod { return []*common.SlimPod{oldPod} })
 
 	// An event comes with recycled IP "10.42.0.50", but carries stale metadata expectedName="api-old"
 	_, ok := r.lookupWithExpected("10.42.0.50", "shop", "api-old")
 	require.False(t, ok, "must decline repair when expected pod does not own the event IP")
-	require.NotContains(t, r.byIP, "10.42.0.50", "negative entry should not be cached for constrained miss")
+	_, inNeg := r.negative.Get("10.42.0.50")
+	require.False(t, inNeg, "negative entry should not be cached for constrained miss")
 }
 
 func TestPeerRepair_StopReleasesInventory(t *testing.T) {
 	inv := &mockInventory{
 		podsByName: map[string]*common.SlimPod{},
 	}
-	r := &peerRepair{
-		byIP:      map[string]peerIdentity{},
-		inventory: inv,
-	}
+	r := newTestPeerRepairWithInv(inv)
 
 	r.stop()
 	require.Equal(t, 1, inv.stopCalls, "stop must decrement inventory reference count")
@@ -481,10 +465,7 @@ func TestPeerRepair_StopReleasesInventory(t *testing.T) {
 func TestPeerRepair_StopPreventsLateInitialization(t *testing.T) {
 	initCalls := 0
 	inv := &mockInventory{podsByName: map[string]*common.SlimPod{}}
-	r := &peerRepair{
-		byIP: map[string]peerIdentity{},
-		now:  time.Now,
-	}
+	r := newPeerRepair()
 	r.initInv = func() common.K8sInventoryCache {
 		initCalls++
 		r.inventory = inv
@@ -502,18 +483,14 @@ func TestPeerRepair_StopPreventsLateInitialization(t *testing.T) {
 }
 
 func TestPeerRepair_IdentityConstrainedMissDoesNotPoisonRawLookup(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
 	pod := slim("shop", "api-new", "10.42.0.48", false, map[string]string{"app": "api"})
-	r := &peerRepair{
-		byIP: map[string]peerIdentity{},
-		now:  func() time.Time { return now },
-		pods: func() []*common.SlimPod { return []*common.SlimPod{pod} },
-	}
+	r := newTestPeerRepair(func() []*common.SlimPod { return []*common.SlimPod{pod} })
 
 	// Lookup with a stale expected pod name fails
 	_, ok := r.lookupWithExpected("10.42.0.48", "shop", "stale-pod")
 	require.False(t, ok)
-	require.NotContains(t, r.byIP, "10.42.0.48", "constrained miss must not cache negative entry under IP")
+	_, inNeg := r.negative.Get("10.42.0.48")
+	require.False(t, inNeg, "constrained miss must not cache negative entry under IP")
 
 	// Subsequent unconstrained (raw) lookup finds the true IP owner immediately
 	id, ok := r.lookup("10.42.0.48")
