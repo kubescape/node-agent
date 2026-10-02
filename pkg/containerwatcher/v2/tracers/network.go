@@ -38,6 +38,7 @@ type NetworkTracer struct {
 	runtime            runtime.Runtime
 	socketEnricherOp   *socketenricher.SocketEnricher
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher
+	peers              *peerRepair
 }
 
 // NewNetworkTracer creates a new tracer
@@ -60,6 +61,7 @@ func NewNetworkTracer(
 		runtime:            runtime,
 		thirdPartyEnricher: thirdPartyEnricher,
 		socketEnricherOp:   socketEnricherOp,
+		peers:              newPeerRepair(),
 	}
 }
 
@@ -124,7 +126,12 @@ func (nt *NetworkTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					nt.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.NetworkEventType})
+					copied := source.DeepCopy(data)
+					ev := &utils.DatasourceEvent{Datasource: d, Data: copied, EventType: utils.NetworkEventType}
+					if nt.peers != nil && nt.peers.repair(d, copied, ev) {
+						ev = &utils.DatasourceEvent{Datasource: d, Data: copied, EventType: utils.NetworkEventType}
+					}
+					nt.callback(ev)
 					return nil
 				}, opPriority)
 				if err != nil {
