@@ -69,6 +69,12 @@ func TestResolveOpenPathProc(t *testing.T) {
 		t.Fatalf("invalid dirfd 99999 must not resolve, got %q", got)
 	}
 
+	// When dirfd points to a regular file (not a directory), relative openat fails with ENOTDIR;
+	// resolution must return "" rather than fabricating a <file>/<raw> path.
+	if got = ResolveOpenPathProc(self, 0, false, "sub/file", int32(f.Fd())); got != "" {
+		t.Fatalf("regular-file dirfd must not resolve, got %q", got)
+	}
+
 	if got = ResolveOpenPathProc(self, 0, false, ""); got != "" {
 		t.Fatalf("empty path must not resolve, got %q", got)
 	}

@@ -39,9 +39,10 @@ func IsResolvedFullPath(p string) bool {
 // the opened object exactly — covering ".", relative names, descriptor 0 and
 // AT_EMPTY_PATH re-opens. When fdValid is false, a relative open resolves against
 // its base directory: if dirfd is AT_FDCWD (or omitted), it joins with /proc/<pid>/cwd;
-// if dirfd is a valid descriptor, it joins with /proc/<pid>/fd/<dirfd>; an invalid
-// dirfd fails resolution to avoid attributing to cwd. An empty raw with no usable fd
-// is unresolvable by kernel semantics: openat("") names no filesystem object.
+// if dirfd is a valid directory descriptor, it joins with /proc/<pid>/fd/<dirfd>; an invalid
+// or non-directory dirfd fails resolution to avoid attributing to cwd or fabricating
+// a path. An empty raw with no usable fd is unresolvable by kernel semantics:
+// openat("") names no filesystem object.
 func ResolveOpenPathProc(pid, fd uint32, fdValid bool, raw string, dirfd ...int32) string {
 	if pid == 0 {
 		return ""
@@ -66,8 +67,11 @@ func ResolveOpenPathProc(pid, fd uint32, fdValid bool, raw string, dirfd ...int3
 		return ""
 	}
 	if dfd >= 0 {
-		if base, err := os.Readlink("/proc/" + pidStr + "/fd/" + strconv.FormatInt(int64(dfd), 10)); err == nil && strings.HasPrefix(base, "/") {
-			return path.Join(base, raw)
+		fdPath := "/proc/" + pidStr + "/fd/" + strconv.FormatInt(int64(dfd), 10)
+		if fi, err := os.Stat(fdPath); err == nil && fi.IsDir() {
+			if base, err := os.Readlink(fdPath); err == nil && strings.HasPrefix(base, "/") {
+				return path.Join(base, raw)
+			}
 		}
 	}
 	return ""
