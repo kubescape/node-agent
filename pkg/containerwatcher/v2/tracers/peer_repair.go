@@ -184,8 +184,14 @@ func (r *peerRepair) repair(d datasource.DataSource, data datasource.Data, ev *u
 	if ep.Addr == "" || ep.Addr == "0.0.0.0" || strings.HasPrefix(ep.Addr, "127.") {
 		return false
 	}
-	if ep.Kind != "" && (ep.Kind != igtypes.EndpointKindPod || len(ep.PodLabels) > 0) {
-		return false
+	// An endpoint is eligible for repair if:
+	// 1. It is unresolved (empty kind or EndpointKindRaw from KubeIPResolver), OR
+	// 2. It is resolved as a Pod but missing labels (partial enrichment).
+	// Other resolved kinds (e.g. services) and pods that already possess labels are preserved.
+	if ep.Kind != "" && ep.Kind != igtypes.EndpointKindRaw {
+		if ep.Kind != igtypes.EndpointKindPod || len(ep.PodLabels) > 0 {
+			return false
+		}
 	}
 	id, ok := r.lookupWithExpected(ep.Addr, ep.Namespace, ep.Name)
 	if !ok {

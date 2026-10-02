@@ -245,4 +245,24 @@ func TestPeerRepair_RepairPodEndpointWithMissingLabels(t *testing.T) {
 	ds, data, ev = newNetworkTestEvent(t, "10.42.1.20", string(igtypes.EndpointKindPod), "production", "frontend", "app=existing")
 	repaired = r.repair(ds, data, ev)
 	require.False(t, repaired, "pod endpoints with existing labels must not be modified")
+
+	// Case 4: Kind is raw (KubeIPResolver miss) -> should be repaired into Pod with full metadata
+	ds, data, ev = newNetworkTestEvent(t, "10.42.1.20", string(igtypes.EndpointKindRaw), "", "", "")
+	repaired = r.repair(ds, data, ev)
+	require.True(t, repaired, "raw endpoint from resolver miss should be repaired into pod")
+
+	kind, err := fields.kindAcc.String(data)
+	require.NoError(t, err)
+	require.Equal(t, string(igtypes.EndpointKindPod), kind)
+	name, err := fields.nameAcc.String(data)
+	require.NoError(t, err)
+	require.Equal(t, "frontend", name)
+	labels, err = fields.labelsAcc.String(data)
+	require.NoError(t, err)
+	require.Equal(t, "app=frontend,tier=web", labels)
+
+	// Case 5: Kind is empty (unresolved) -> should be repaired into Pod
+	ds, data, ev = newNetworkTestEvent(t, "10.42.1.20", "", "", "", "")
+	repaired = r.repair(ds, data, ev)
+	require.True(t, repaired, "empty kind endpoint should be repaired into pod")
 }
