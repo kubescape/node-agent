@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+// AT_FDCWD is the Linux sentinel indicating paths are relative to the current working directory.
+const AT_FDCWD int32 = -100
 
 // IsResolvedFullPath reports whether p is usable as a gadget-resolved full
 // path (the "fpath" field of an open event).
@@ -35,10 +37,12 @@ func IsResolvedFullPath(p string) bool {
 // ResolveOpenPathProc resolves a non-absolute open path via procfs (the agent
 // runs hostPID). When fdValid is true (error_raw == 0), the returned fd names
 // the opened object exactly — covering ".", relative names, descriptor 0 and
-// AT_EMPTY_PATH re-opens; a FAILED relative open (fdValid == false) still resolves
-// to the caller's intent via cwd-join. An empty raw with no usable fd is unresolvable
-// by kernel semantics: openat("") names no filesystem object.
-func ResolveOpenPathProc(pid, fd uint32, fdValid bool, raw string) string {
+// AT_EMPTY_PATH re-opens. When fdValid is false, a relative open resolves against
+// its base directory: if dirfd is AT_FDCWD (or omitted), it joins with /proc/<pid>/cwd;
+// if dirfd is a valid descriptor, it joins with /proc/<pid>/fd/<dirfd>; an invalid
+// dirfd fails resolution to avoid attributing to cwd. An empty raw with no usable fd
+// is unresolvable by kernel semantics: openat("") names no filesystem object.
+func ResolveOpenPathProc(pid, fd uint32, fdValid bool, raw string, dirfd ...int32) string {
 	if pid == 0 {
 		return ""
 	}
@@ -50,8 +54,21 @@ func ResolveOpenPathProc(pid, fd uint32, fdValid bool, raw string) string {
 	if raw == "" {
 		return ""
 	}
-	if cwd, err := os.Readlink("/proc/" + strconv.FormatUint(uint64(pid), 10) + "/cwd"); err == nil && strings.HasPrefix(cwd, "/") {
-		return path.Join(cwd, raw)
+	dfd := AT_FDCWD
+	if len(dirfd) > 0 {
+		dfd = dirfd[0]
+	}
+	pidStr := strconv.FormatUint(uint64(pid), 10)
+	if dfd == AT_FDCWD {
+		if cwd, err := os.Readlink("/proc/" + pidStr + "/cwd"); err == nil && strings.HasPrefix(cwd, "/") {
+			return path.Join(cwd, raw)
+		}
+		return ""
+	}
+	if dfd >= 0 {
+		if base, err := os.Readlink("/proc/" + pidStr + "/fd/" + strconv.FormatInt(int64(dfd), 10)); err == nil && strings.HasPrefix(base, "/") {
+			return path.Join(base, raw)
+		}
 	}
 	return ""
 }

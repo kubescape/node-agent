@@ -3,6 +3,7 @@ package utils
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -25,8 +26,9 @@ func TestResolveOpenPathProc(t *testing.T) {
 		t.Fatalf("fd resolution = %q, want %q", got, want)
 	}
 
-	// When fdValid is true and fd is 0, descriptor 0 is resolved from procfs.
-	if fd0Target, err := os.Readlink("/proc/self/fd/0"); err == nil && len(fd0Target) > 0 {
+	// When fdValid is true and fd is 0, descriptor 0 is resolved from procfs
+	// only if the target is an absolute filesystem path (rejecting pipes/sockets).
+	if fd0Target, err := os.Readlink("/proc/self/fd/0"); err == nil && strings.HasPrefix(fd0Target, "/") {
 		got = ResolveOpenPathProc(self, 0, true, "ignored-when-fd0-resolves")
 		if got != fd0Target {
 			t.Fatalf("fd 0 resolution = %q, want %q", got, fd0Target)
@@ -38,6 +40,33 @@ func TestResolveOpenPathProc(t *testing.T) {
 	got = ResolveOpenPathProc(self, 0, false, "some/rel/name")
 	if want := filepath.Join(cwd, "some/rel/name"); got != want {
 		t.Fatalf("cwd-join = %q, want %q", got, want)
+	}
+
+	// When dirfd is explicitly AT_FDCWD, it joins with cwd.
+	got = ResolveOpenPathProc(self, 0, false, "some/rel/name", AT_FDCWD)
+	if want := filepath.Join(cwd, "some/rel/name"); got != want {
+		t.Fatalf("AT_FDCWD join = %q, want %q", got, want)
+	}
+
+	// When dirfd is a valid directory descriptor, relative path resolves against dirfd.
+	dir := t.TempDir()
+	dirFile, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = dirFile.Close() }()
+	wantDir, _ := filepath.EvalSymlinks(dir)
+	got = ResolveOpenPathProc(self, 0, false, "sub/file", int32(dirFile.Fd()))
+	if want := filepath.Join(wantDir, "sub/file"); got != want {
+		t.Fatalf("dirfd join = %q, want %q", got, want)
+	}
+
+	// When dirfd is invalid (not AT_FDCWD and not a valid fd), it must not resolve to cwd.
+	if got = ResolveOpenPathProc(self, 0, false, "sub/file", -1); got != "" {
+		t.Fatalf("invalid dirfd -1 must not resolve, got %q", got)
+	}
+	if got = ResolveOpenPathProc(self, 0, false, "sub/file", 99999); got != "" {
+		t.Fatalf("invalid dirfd 99999 must not resolve, got %q", got)
 	}
 
 	if got = ResolveOpenPathProc(self, 0, false, ""); got != "" {
