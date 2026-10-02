@@ -6,6 +6,10 @@ sourceURL: https://github.com/inspektor-gadget/inspektor-gadget/tree/main/gadget
 datasources:
   open:
     fields:
+      dfd:
+        annotations:
+          columns.hidden: "true"
+          description: Directory file descriptor for openat (AT_FDCWD if cwd)
       error_raw:
         annotations:
           columns.hidden: "true"
