@@ -190,6 +190,7 @@ func TestLoadConfig(t *testing.T) {
 func TestIgnoreContainer(t *testing.T) {
 	config := Config{
 		NamespaceName: "test-namespace",
+		PodName:       "node-agent-abc12",
 		ExcludeLabels: map[string][]string{
 			"app.kubernetes.io/name": {"test-app"},
 		},
@@ -206,11 +207,13 @@ func TestIgnoreContainer(t *testing.T) {
 		want     bool
 	}{
 		{
-			name:    "Ignore pod in the same namespace",
+			// The hard-exclude is narrowed to node-agent pods only,
+			// so a non-agent pod in the agent namespace is now TRACED.
+			name:    "Trace a non-agent pod in the agent namespace",
 			ns:      "test-namespace",
 			podName: "some-pod",
 			labels:  map[string]string{},
-			want:    true,
+			want:    false,
 		},
 		{
 			name:     "Ignore node-agent pod when MULTIPLY is true",
@@ -885,3 +888,84 @@ func TestLoadConfig_HostSbomOffloadEnabled(t *testing.T) {
 		})
 	}
 }
+
+// TestIgnoreContainer_SelfSBOB_TruthTable is the E-series exclusion truth table
+// for the narrowed hard-exclude. The agent's own DaemonSet pods are
+// still skipped (a tracer processing its own syscalls is a feedback loop, and
+// the cluster-wide untraced sweep would otherwise have each agent classify
+// OTHER nodes' node-agent pods), but the exclusion is narrowed from
+// namespace-wide to node-agent-DS-pods-only — so stack peers (storage,
+// operator) and honey workloads co-located in the agent namespace are TRACED
+// (the stack is governed by its self-SBOB; honey learns + is detected).
+//
+// Precedence (first match wins):
+//
+//	E1a  podName == PodName (exact self, any ns)            -> IGNORE
+//	E1b  ns == NamespaceName AND node-agent DS-prefix match -> IGNORE (siblings via cluster sweep)
+//	E2   MULTIPLY AND podName has "node-agent" prefix       -> IGNORE (multi-tenant test mode)
+//	E3   SkipNamespace(ns)                                  -> IGNORE (config ns rules)
+//	E4   pod carries an excluded label                      -> IGNORE
+//	E5   else                                               -> TRACE
+func TestIgnoreContainer_SelfSBOB_TruthTable(t *testing.T) {
+	base := Config{
+		NamespaceName: "kubescape",
+		PodName:       "node-agent-x7k2p", // this agent's own DaemonSet pod
+		ExcludeLabels: map[string][]string{"kubescape.io/ignore": {"true"}},
+	}
+	tests := []struct {
+		id, name string
+		cfg      Config
+		ns       string
+		podName  string
+		labels   map[string]string
+		multiply bool
+		want     bool
+	}{
+		// ── the fix: honey / stack workloads in the agent namespace are TRACED ──
+		{"E5-honey", "honey workload in kubescape ns is traced", base, "kubescape", "redis-honey-6f5b54dd58-abcde", nil, false, false},
+		{"E5-storage", "storage in kubescape ns is traced (self-SBOB governs it)", base, "kubescape", "storage-844bd4847b-mk8s8", nil, false, false},
+		{"E5-operator", "operator in kubescape ns is traced", base, "kubescape", "operator-77c7-xyz12", nil, false, false},
+
+		// ── E1a/E1b: the node-agent's own pods are still skipped ──
+		{"E1a-self", "the agent's own pod is ignored (exact self)", base, "kubescape", "node-agent-x7k2p", nil, false, true},
+		{"E1b-sibling", "a sibling node-agent DS pod (seen via cluster sweep) is ignored", base, "kubescape", "node-agent-a9m3q", nil, false, true},
+		{"E1a-self-otherns", "exact self match ignores even if ns is mis-set", base, "", "node-agent-x7k2p", nil, false, true},
+
+		// ── edge: honey pod NAMED like the agent DS in the agent ns (spoof residual) ──
+		{"E1b-spoof", "a pod sharing the node-agent DS prefix in the agent ns is ignored (documented spoof residual)", base, "kubescape", "node-agent-decoy", nil, false, true},
+		{"E5-nearspoof", "a node-agentish name that is NOT the DS prefix is traced", base, "kubescape", "node-agentless-app-1", nil, false, false},
+
+		// ── node-agent pods in OTHER namespaces ──
+		{"E5-na-otherns", "a node-agent pod in another ns is traced when MULTIPLY off", base, "team-a", "node-agent-zzzzz", nil, false, false},
+		{"E2-multiply", "MULTIPLY ignores node-agent pods in any ns", base, "team-a", "node-agent-zzzzz", nil, true, true},
+
+		// ── E3: config namespace rules still dominate ──
+		{"E3-exclude", "an excludeNamespaces entry still skips (chart must DROP kubescape here)",
+			Config{NamespaceName: "kubescape", PodName: "node-agent-x7k2p", ExcludeNamespaces: []string{"kube-system"}}, "kube-system", "coredns-1", nil, false, true},
+		{"E3-include-allowlist", "allowlist mode skips a ns not on the list",
+			Config{NamespaceName: "kubescape", PodName: "node-agent-x7k2p", IncludeNamespaces: []string{"honey"}}, "kubescape", "redis-honey-1", nil, false, true},
+		{"E3-include-honey", "allowlist mode traces a ns ON the list",
+			Config{NamespaceName: "kubescape", PodName: "node-agent-x7k2p", IncludeNamespaces: []string{"honey"}}, "honey", "redis-honey-1", nil, false, false},
+
+		// ── E4: label exclusion still applies to any pod ──
+		{"E4-label", "an excluded label skips a honey pod", base, "kubescape", "redis-honey-1", map[string]string{"kubescape.io/ignore": "true"}, false, true},
+
+		// ── empty PodName fallback to the literal DS name ──
+		{"E1b-fallback", "with PodName unset, the literal node-agent prefix guards self",
+			Config{NamespaceName: "kubescape"}, "kubescape", "node-agent-q5ltv", nil, false, true},
+		{"E5-fallback-honey", "with PodName unset, a honey pod in the agent ns is still traced",
+			Config{NamespaceName: "kubescape"}, "kubescape", "redis-honey-1", nil, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id+"_"+tt.name, func(t *testing.T) {
+			if tt.multiply {
+				t.Setenv("MULTIPLY", "true")
+			} else {
+				t.Setenv("MULTIPLY", "")
+			}
+			got := tt.cfg.IgnoreContainer(tt.ns, tt.podName, tt.labels)
+			assert.Equalf(t, tt.want, got, "%s: IgnoreContainer(%q,%q)", tt.id, tt.ns, tt.podName)
+		})
+	}
+}
+

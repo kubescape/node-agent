@@ -337,11 +337,18 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 }
 
 func (c *Config) IgnoreContainer(ns, podName string, labels map[string]string) bool {
-	// do not trace any of our pods
-	if ns == c.NamespaceName {
+	// E1: never trace the node-agent's OWN DaemonSet pods — a tracer processing
+	// its own syscalls is a feedback loop. Narrowed from "the whole agent
+	// namespace" to node-agent pods only, so stack peers (storage, operator)
+	// and honey workloads co-located in the agent namespace ARE traced: the
+	// stack is governed by its self-SBOB, and honey must learn + be detected.
+	// Matches the local pod (exact PodName) and — for the cluster-wide
+	// untraced sweep, which sees every node's node-agent pod — siblings
+	// sharing this agent's DaemonSet name prefix.
+	if c.IsOwnAgentPod(ns, podName) {
 		return true
 	}
-	// do not trace the node-agent pods if MULTIPLY is set
+	// E2: MULTIPLY test mode ignores node-agent pods in ANY namespace.
 	if m := os.Getenv("MULTIPLY"); m == "true" {
 		if strings.HasPrefix(podName, "node-agent") {
 			return true
@@ -362,6 +369,43 @@ func (c *Config) IgnoreContainer(ns, podName string, labels map[string]string) b
 		}
 	}
 	return false
+}
+
+// IsOwnAgentPod reports whether podName is one of the node-agent DaemonSet's
+// own pods, which must never be traced (E1). It matches the local agent exactly
+// by PodName (any namespace, so a mis-set namespace cannot expose the agent to
+// self-tracing) and, within the agent namespace, any pod sharing the
+// DaemonSet's name prefix (the sibling node-agent pods the cluster-wide untraced
+// sweep surfaces). A pod deliberately named with the node-agent prefix inside
+// the agent namespace is a documented spoof residual — evading it requires
+// pod-create rights in the agent namespace, which is already privileged.
+func (c *Config) IsOwnAgentPod(ns, podName string) bool {
+	if podName == "" {
+		return false
+	}
+	if c.PodName != "" && podName == c.PodName {
+		return true
+	}
+	return ns == c.NamespaceName && workloadNamePrefix(podName) == c.agentWorkloadPrefix()
+}
+
+// agentWorkloadPrefix is the node-agent DaemonSet name derived from this pod's
+// own name; when PodName is unset it falls back to the conventional
+// "node-agent" so the self-guard still holds.
+func (c *Config) agentWorkloadPrefix() string {
+	if c.PodName == "" {
+		return "node-agent"
+	}
+	return workloadNamePrefix(c.PodName)
+}
+
+// workloadNamePrefix strips the trailing "-<hash>" instance suffix a controller
+// appends to a pod name (DaemonSet: one segment), yielding the workload name.
+func workloadNamePrefix(podName string) string {
+	if i := strings.LastIndex(podName, "-"); i > 0 {
+		return podName[:i]
+	}
+	return podName
 }
 
 func (c *Config) SkipNamespace(ns string) bool {
