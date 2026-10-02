@@ -47,6 +47,7 @@ func newPeerRepair() *peerRepair {
 				logger.L().Warning("network tracer: peer repair has no inventory", helpers.Error(err))
 				return
 			}
+			inv.Start()
 			r.inventory = inv
 		})
 		if r.inventory == nil {
@@ -162,11 +163,25 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 			delete(r.byIP, ip)
 		} else {
 			if now.Sub(hit.at) < peerHitTTL {
-				// Ownership validation: validate cached positive hit against current pod list
-				// and against any expected pod metadata from upstream.
-				pods := r.pods()
-				p := podByIP(pods, ip, expectedNamespace, expectedName)
+				// Validate cached positive hit: prefer indexed GetPodByName to avoid scanning
+				// all pods under mutex, and reserve full inventory scan for index misses or ambiguity.
+				var p *common.SlimPod
+				if r.inventory != nil {
+					cand := r.inventory.GetPodByName(hit.namespace, hit.name)
+					if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip &&
+						(expectedName == "" || cand.Name == expectedName) &&
+						(expectedNamespace == "" || cand.Namespace == expectedNamespace) {
+						p = cand
+					}
+				}
+				if p == nil {
+					pods := r.pods()
+					p = podByIP(pods, ip, expectedNamespace, expectedName)
+				}
 				if p != nil && p.Name == hit.name && p.Namespace == hit.namespace {
+					// Refresh cached labels in case the pod was relabeled
+					hit.labels = labelString(p.Labels)
+					r.byIP[ip] = hit
 					return hit, true
 				}
 				delete(r.byIP, ip)
@@ -177,17 +192,34 @@ func (r *peerRepair) lookupWithExpected(ip, expectedNamespace, expectedName stri
 	}
 
 	id := peerIdentity{at: now}
-	pods := r.pods()
-	if p := podByIP(pods, ip, expectedNamespace, expectedName); p != nil {
-		id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
+	var p *common.SlimPod
+	if r.inventory != nil {
+		if expectedName != "" && expectedNamespace != "" {
+			cand := r.inventory.GetPodByName(expectedNamespace, expectedName)
+			if cand != nil && !cand.Spec.HostNetwork && cand.Status.PodIP == ip {
+				p = cand
+			}
+		}
+		if p == nil && expectedName == "" {
+			cand := r.inventory.GetPodByIp(ip)
+			if cand != nil && !cand.Spec.HostNetwork {
+				p = cand
+			}
+		}
 	}
-	if !id.found && expectedName != "" {
-		for _, p := range pods {
-			if p == nil || p.Spec.HostNetwork {
+	if p == nil {
+		pods := r.pods()
+		p = podByIP(pods, ip, expectedNamespace, expectedName)
+	}
+	if p != nil {
+		id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
+	} else if expectedName != "" {
+		for _, pod := range r.pods() {
+			if pod == nil || pod.Spec.HostNetwork {
 				continue
 			}
-			if p.Name == expectedName && (expectedNamespace == "" || p.Namespace == expectedNamespace) {
-				id.found, id.namespace, id.name, id.labels = true, p.Namespace, p.Name, labelString(p.Labels)
+			if pod.Name == expectedName && (expectedNamespace == "" || pod.Namespace == expectedNamespace) {
+				id.found, id.namespace, id.name, id.labels = true, pod.Namespace, pod.Name, labelString(pod.Labels)
 				break
 			}
 		}

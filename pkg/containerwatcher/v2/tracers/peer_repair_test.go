@@ -288,3 +288,80 @@ func TestPeerRepair_RepairPodEndpointWithMissingLabels(t *testing.T) {
 	repaired = r.repair(ds, data, ev)
 	require.True(t, repaired, "empty kind endpoint should be repaired into pod")
 }
+
+func TestPeerRepair_CachedLabelsRefreshedOnRelabeling(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	pod := slim("shop", "api", "10.42.0.48", false, map[string]string{"version": "v1"})
+	r := &peerRepair{
+		byIP: map[string]peerIdentity{},
+		now:  func() time.Time { return now },
+		pods: func() []*common.SlimPod { return []*common.SlimPod{pod} },
+	}
+
+	id, ok := r.lookup("10.42.0.48")
+	require.True(t, ok)
+	require.Equal(t, "version=v1", id.labels)
+
+	// Pod is relabeled without IP or name change
+	pod.Labels = map[string]string{"version": "v2", "env": "prod"}
+	id, ok = r.lookup("10.42.0.48")
+	require.True(t, ok)
+	require.Equal(t, "env=prod,version=v2", id.labels, "cached labels must be refreshed on relabeling")
+}
+
+type mockInventory struct {
+	common.K8sInventoryCache
+	podsByName   map[string]*common.SlimPod
+	podsByIP     map[string]*common.SlimPod
+	byNameCalls  int
+	byIPCalls    int
+	getPodsCalls int
+}
+
+func (m *mockInventory) GetPodByName(ns, name string) *common.SlimPod {
+	m.byNameCalls++
+	return m.podsByName[ns+"/"+name]
+}
+
+func (m *mockInventory) GetPodByIp(ip string) *common.SlimPod {
+	m.byIPCalls++
+	return m.podsByIP[ip]
+}
+
+func (m *mockInventory) GetPods() []*common.SlimPod {
+	m.getPodsCalls++
+	var res []*common.SlimPod
+	for _, p := range m.podsByName {
+		res = append(res, p)
+	}
+	return res
+}
+
+func TestPeerRepair_IndexedInventoryValidation(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	pod := slim("shop", "api", "10.42.0.48", false, map[string]string{"app": "api"})
+	inv := &mockInventory{
+		podsByName: map[string]*common.SlimPod{"shop/api": pod},
+		podsByIP:   map[string]*common.SlimPod{"10.42.0.48": pod},
+	}
+	r := &peerRepair{
+		byIP:      map[string]peerIdentity{},
+		now:       func() time.Time { return now },
+		inventory: inv,
+		pods:      inv.GetPods,
+	}
+
+	// Initial lookup uses indexed GetPodByIp
+	id, ok := r.lookup("10.42.0.48")
+	require.True(t, ok)
+	require.Equal(t, "api", id.name)
+	require.Equal(t, 1, inv.byIPCalls)
+	require.Equal(t, 0, inv.getPodsCalls, "indexed lookup should not call GetPods")
+
+	// Cache hit uses indexed GetPodByName to validate without full scan
+	id, ok = r.lookup("10.42.0.48")
+	require.True(t, ok)
+	require.Equal(t, "api", id.name)
+	require.Equal(t, 1, inv.byNameCalls, "hit validation should use GetPodByName")
+	require.Equal(t, 0, inv.getPodsCalls, "cache hit validation should not call GetPods")
+}
