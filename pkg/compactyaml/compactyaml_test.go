@@ -131,3 +131,17 @@ func TestMarshalSortsKeysLikeBobctl(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "apiVersion: v1\nkind: ContainerProfile\nspec:\n  execs:\n    - {args: [\"6379\"], path: /y}\n  opens:\n    - {args: [a], path: /x}\n", string(out))
 }
+
+func TestMarshalRestrictedToJSONMarshalableInputs(t *testing.T) {
+	// Verifies that JSON struct tags are honored over YAML struct tags
+	type tagged struct {
+		Field string `json:"jsonName" yaml:"yamlName"`
+	}
+	out, err := Marshal(tagged{Field: "value"})
+	require.NoError(t, err)
+	require.Equal(t, "jsonName: value\n", string(out))
+
+	// Verifies non-JSON-marshalable inputs fail at the JSON encoding boundary
+	_, err = Marshal(make(chan int))
+	require.Error(t, err)
+}
