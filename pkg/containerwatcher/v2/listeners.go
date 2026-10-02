@@ -3,6 +3,7 @@ package containerwatcher
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -12,9 +13,13 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"golang.org/x/sync/singleflight"
 )
 
-const listenerSnapshotTTL = 5 * time.Second
+const (
+	listenerSnapshotTTL = 5 * time.Second
+	negativeSnapshotTTL = 500 * time.Millisecond
+)
 
 type listenerSnapshot struct {
 	ports map[uint16]struct{}
@@ -24,6 +29,7 @@ type listenerSnapshot struct {
 type listenerCache struct {
 	mu    sync.Mutex
 	byPid map[uint32]listenerSnapshot
+	sf    singleflight.Group
 	now   func() time.Time
 	read  func(pid uint32) (map[uint16]struct{}, error)
 }
@@ -33,23 +39,46 @@ func newListenerCache() *listenerCache {
 }
 
 func (c *listenerCache) listening(pid uint32, port uint16) (bool, bool) {
+	now := c.now()
+
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	snap, ok := c.byPid[pid]
-	if ok && c.now().Sub(snap.at) <= listenerSnapshotTTL {
-		if _, listening := snap.ports[port]; listening {
-			return true, true
+	if ok {
+		age := now.Sub(snap.at)
+		if age <= listenerSnapshotTTL {
+			if _, listening := snap.ports[port]; listening {
+				c.mu.Unlock()
+				return true, true
+			}
+			// If the snapshot is fresh, a negative verdict is valid and
+			// avoids hammering procfs during scan bursts.
+			if age <= negativeSnapshotTTL {
+				c.mu.Unlock()
+				return false, true
+			}
 		}
-		// Revalidate cached misses before dropping: the application may have
-		// opened the listening socket after snap.at.
 	}
-	ports, err := c.read(pid)
+	c.mu.Unlock()
+
+	// Snapshot is missing, expired, or a stale negative verdict: read procfs
+	// outside the mutex, coalescing concurrent reads for the same PID.
+	res, err, _ := c.sf.Do(strconv.FormatUint(uint64(pid), 10), func() (any, error) {
+		return c.read(pid)
+	})
 	if err != nil {
+		// When procfs cannot be read, return unknown so the event is kept.
 		return false, false
 	}
-	snap = listenerSnapshot{ports: ports, at: c.now()}
-	c.byPid[pid] = snap
-	_, listening := snap.ports[port]
+	ports, ok := res.(map[uint16]struct{})
+	if !ok {
+		return false, false
+	}
+
+	c.mu.Lock()
+	c.byPid[pid] = listenerSnapshot{ports: ports, at: c.now()}
+	c.mu.Unlock()
+
+	_, listening := ports[port]
 	return listening, true
 }
 
@@ -66,22 +95,31 @@ func listeningTCPPorts(pid uint32) (map[uint16]struct{}, error) {
 	for _, path := range []string{fmt.Sprintf("/proc/%d/net/tcp", pid), fmt.Sprintf("/proc/%d/net/tcp6", pid)} {
 		f, err := os.Open(path)
 		if err != nil {
+			if strings.HasSuffix(path, "tcp6") && os.IsNotExist(err) {
+				continue
+			}
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
 		opened++
-		parseListeningPorts(f, ports)
+		scanErr := parseListeningPorts(f, ports)
 		f.Close()
+		if scanErr != nil && firstErr == nil {
+			firstErr = scanErr
+		}
 	}
-	if opened == 0 && firstErr != nil {
-		return nil, firstErr
+	if opened == 0 || firstErr != nil {
+		if firstErr != nil {
+			return nil, firstErr
+		}
+		return nil, fmt.Errorf("no tcp procfs tables could be opened for pid %d", pid)
 	}
 	return ports, nil
 }
 
-func parseListeningPorts(r interface{ Read([]byte) (int, error) }, ports map[uint16]struct{}) {
+func parseListeningPorts(r io.Reader, ports map[uint16]struct{}) error {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
@@ -98,6 +136,7 @@ func parseListeningPorts(r interface{ Read([]byte) (int, error) }, ports map[uin
 		}
 		ports[uint16(p)] = struct{}{}
 	}
+	return sc.Err()
 }
 
 func (ehf *EventHandlerFactory) unsolicitedIngress(enrichedEvent *events.EnrichedEvent, container *containercollection.Container) bool {

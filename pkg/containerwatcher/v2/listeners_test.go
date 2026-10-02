@@ -3,6 +3,8 @@ package containerwatcher
 import (
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,18 +50,26 @@ func TestListenerCache_TTLAndUnknown(t *testing.T) {
 	require.True(t, listening)
 	require.Equal(t, 1, reads, "positive verdict within TTL uses cache without re-reading")
 
-	// Query for an unrecorded port revalidates procfs to avoid dropping newly opened ports.
+	// A query for an unrecorded port within negativeSnapshotTTL reuses the fresh negative verdict without re-reading.
+	listening, known = c.listening(7, 9999)
+	require.True(t, known)
+	require.False(t, listening)
+	require.Equal(t, 1, reads, "fresh negative verdict within negativeSnapshotTTL uses cache without re-reading")
+
+	// Once negativeSnapshotTTL elapses, miss revalidates procfs to discover newly opened ports.
+	now = now.Add(negativeSnapshotTTL + time.Millisecond)
 	currentPorts = map[uint16]struct{}{8443: {}, 8444: {}}
 	listening, known = c.listening(7, 8444)
 	require.True(t, known)
 	require.True(t, listening)
-	require.Equal(t, 2, reads, "miss within TTL revalidates procfs and discovers newly opened port")
+	require.Equal(t, 2, reads, "stale negative verdict revalidates procfs and discovers newly opened port")
 
-	// Query for a closed port revalidates procfs and confirms not listening.
+	// Query for a closed port after negativeSnapshotTTL confirms not listening.
+	now = now.Add(negativeSnapshotTTL + time.Millisecond)
 	listening, known = c.listening(7, 9999)
 	require.True(t, known)
 	require.False(t, listening)
-	require.Equal(t, 3, reads, "miss for closed port revalidates procfs and yields false")
+	require.Equal(t, 3, reads, "stale negative verdict revalidates procfs and yields false")
 
 	// After the TTL expires, the cache is refreshed even for previously listening ports.
 	now = now.Add(listenerSnapshotTTL + time.Second)
@@ -88,4 +98,35 @@ func TestListenerCache_Forget(t *testing.T) {
 	listening, known = c.listening(7, 8443)
 	require.True(t, known && listening)
 	require.Equal(t, 2, reads, "forget evicted cached entry for pid")
+}
+
+func TestListenerCache_CoalescesConcurrentReads(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	var reads int64
+	started := make(chan struct{})
+	gate := make(chan struct{})
+
+	c := &listenerCache{byPid: map[uint32]listenerSnapshot{}, now: func() time.Time { return now }, read: func(pid uint32) (map[uint16]struct{}, error) {
+		if atomic.AddInt64(&reads, 1) == 1 {
+			close(started)
+		}
+		<-gate
+		return map[uint16]struct{}{8080: {}}, nil
+	}}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			listening, known := c.listening(10, 8080)
+			require.True(t, known && listening)
+		}()
+	}
+
+	<-started
+	close(gate)
+	wg.Wait()
+
+	require.Equal(t, int64(1), atomic.LoadInt64(&reads), "concurrent queries for the same PID coalesce into a single read")
 }
