@@ -55,6 +55,11 @@ func CreateStorage(namespace string) (*Storage, error) {
 	// force GRPC
 	cfg.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
 	cfg.ContentType = "application/vnd.kubernetes.protobuf"
+	// The client-go defaults (QPS 5 / Burst 10) starve the reconciler: per-tick
+	// CP refresh GETs plus profile operations exceed 5 QPS on busy nodes,
+	// causing queued waiters to expire on context deadlines.
+	cfg.QPS = 50
+	cfg.Burst = 100
 
 	clientset, err := versioned.NewForConfig(cfg)
 	if err != nil {
