@@ -33,11 +33,14 @@ on:
       GITGUARDIAN_API_KEY:
         required: false
 
+permissions: read-all
+
 jobs:
   test:
     permissions:
-      pull-requests: write
-      security-events: write
+      contents: read
+      actions: read
+      security-events: write  # Pass CodeQL permissions to the test workflow.
     uses: ./.github/workflows/go-basic-tests.yaml
     with:
       GO_VERSION: ${{ inputs.GO_VERSION }}

@@ -36,8 +36,11 @@ on:
       GITGUARDIAN_API_KEY:
         required: false
 
+permissions: read-all
+
 jobs:
   Check-secret:
+    permissions: {}
     name: check if secrets are set
     runs-on: ubuntu-latest
     outputs:
@@ -69,6 +72,10 @@ jobs:
   #         fi
 
   Environment-Test:
+    permissions:
+      contents: read
+      actions: read
+      security-events: write  # Upload CodeQL results.
     name: Create cross-platform build
     # needs: [ Setup-Environment ]
     runs-on: ubuntu-latest

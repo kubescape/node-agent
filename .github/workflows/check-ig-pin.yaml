@@ -13,6 +13,8 @@ on:
       - "scripts/check-inspektor-gadget-pin.sh"
       - ".github/workflows/check-ig-pin.yaml"
 
+permissions: read-all
+
 jobs:
   check:
     name: check-ig-pin

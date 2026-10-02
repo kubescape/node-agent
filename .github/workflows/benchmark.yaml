@@ -28,8 +28,13 @@ concurrency:
   group: benchmark-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: read-all
+
 jobs:
   benchmark:
+    permissions:
+      contents: read
+      pull-requests: write  # Post the benchmark report on the PR.
     runs-on: ubuntu-large
     steps:
       - name: Checkout
