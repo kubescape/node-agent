@@ -100,12 +100,26 @@ func hasServiceFields(n *v1beta1.NetworkNeighbor) bool {
 // if the neighbor declares none of the service/entity selectors (a plain
 // ipAddresses / dnsNames / podSelector neighbor is left untouched).
 func specFromNeighbor(n *v1beta1.NetworkNeighbor) (PeerSpec, bool) {
-	// Cheap-reject a plain ipAddresses/dnsNames neighbor before allocating a
-	// []PortProto it would only discard (hot on every projection's non-service
-	// neighbors).
-	if n.Entity == "" && n.ServiceRefName == "" && n.ServiceSelector == nil {
+	// Count how many target kinds are present to enforce the one-of contract.
+	kinds := 0
+	if n.Entity != "" {
+		kinds++
+	}
+	if n.ServiceRefName != "" || n.ServiceRefNamespace != "" {
+		// A valid serviceRef requires both namespace and name. If either is missing,
+		// or if other target kinds are present, fail closed.
+		if n.ServiceRefName == "" || n.ServiceRefNamespace == "" {
+			return PeerSpec{}, false
+		}
+		kinds++
+	}
+	if n.ServiceSelector != nil {
+		kinds++
+	}
+	if kinds != 1 {
 		return PeerSpec{}, false
 	}
+
 	spec := PeerSpec{Ports: portsFromNeighbor(n.Ports)}
 	switch {
 	case n.Entity != "":
@@ -133,8 +147,6 @@ func specFromNeighbor(n *v1beta1.NetworkNeighbor) (PeerSpec, bool) {
 			}
 			spec.NamespaceLabels = nsl.MatchLabels
 		}
-	default:
-		return PeerSpec{}, false
 	}
 	return spec, true
 }

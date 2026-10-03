@@ -215,3 +215,54 @@ func TestHasServiceNeighbors(t *testing.T) {
 		}
 	}
 }
+
+func TestExpandServiceNeighbors_RejectAmbiguousAndIncomplete(t *testing.T) {
+	l := realFluxTopology()
+	cases := []struct {
+		name     string
+		neighbor v1beta1.NetworkNeighbor
+	}{
+		{
+			name: "entity plus serviceRef",
+			neighbor: v1beta1.NetworkNeighbor{
+				Entity:              "host",
+				ServiceRefNamespace: "honey",
+				ServiceRefName:      "alertmanager",
+			},
+		},
+		{
+			name: "entity plus serviceSelector",
+			neighbor: v1beta1.NetworkNeighbor{
+				Entity:          "host",
+				ServiceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+			},
+		},
+		{
+			name: "serviceRef plus serviceSelector",
+			neighbor: v1beta1.NetworkNeighbor{
+				ServiceRefNamespace: "honey",
+				ServiceRefName:      "alertmanager",
+				ServiceSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{"app": "x"}},
+			},
+		},
+		{
+			name: "serviceRef missing namespace",
+			neighbor: v1beta1.NetworkNeighbor{
+				ServiceRefName: "alertmanager",
+			},
+		},
+		{
+			name: "serviceRef missing name",
+			neighbor: v1beta1.NetworkNeighbor{
+				ServiceRefNamespace: "honey",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if out := ExpandServiceNeighbors([]v1beta1.NetworkNeighbor{tc.neighbor}, l); len(out) != 0 {
+				t.Fatalf("expected ambiguous/incomplete neighbor to fail closed, got %d results: %+v", len(out), out)
+			}
+		})
+	}
+}

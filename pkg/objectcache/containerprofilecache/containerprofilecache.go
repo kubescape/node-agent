@@ -67,6 +67,11 @@ type CachedContainerProfile struct {
 	// initial projection). Non-resolving profiles keep the RV/spec fast-skip.
 	UsesServiceResolution bool
 	ListerGen             int64
+	// rawProfile retains the unexpanded base profile solely when UsesServiceResolution
+	// is true, allowing the reconciler to re-project service/endpoint churn locally
+	// without having to re-fetch the full body from storage when the remote object
+	// is unchanged.
+	rawProfile *v1beta1.ContainerProfile
 
 	ContainerName string
 	PodName       string
@@ -674,6 +679,9 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 	spec := c.snapshotSpec()
 	entry.UsesServiceResolution = networkpeer.HasServiceNeighbors(userMerged)
 	entry.ListerGen = c.listerGen()
+	if entry.UsesServiceResolution {
+		entry.rawProfile = userMerged
+	}
 	projected := Apply(spec, networkpeer.WithResolvedServiceNeighbors(userMerged, c.serviceLister), tree)
 	projected.ResolvedGen = entry.ListerGen
 	entry.Projected = projected

@@ -413,7 +413,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	// derives from the same ctx and must never carry the learned CP's checksum.
 	validatorEligible := e.UserCPRef == nil && e.UserCPRV == "" && e.SpecHash == preFetchSpecHash &&
 		e.State != nil && e.State.Status == helpersv1.Completed && e.State.Completion == helpersv1.Full &&
-		(!e.UsesServiceResolution || e.ListerGen == c.listerGen())
+		(!e.UsesServiceResolution || e.rawProfile != nil || e.ListerGen == c.listerGen())
 	validatorOffered := false
 	requestMode := conditionalFetchModeMissing
 	cpCtx := ctx
@@ -463,6 +463,13 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		}
 		c.metricsManager.ReportContainerProfileConditionalFetchResponse(conditionalFetchOutcomeUnchanged)
 		e.consecutiveUnchanged++
+		if e.UsesServiceResolution && e.ListerGen != c.listerGen() && e.rawProfile != nil {
+			logger.L().Debug("refreshOneEntry: CP unchanged from storage but cluster view moved; re-projecting retained profile",
+				helpers.String("containerID", id),
+				helpers.String("cpName", e.CPName))
+			c.rebuildEntryFromSources(id, e, e.rawProfile, nil)
+			return
+		}
 		logger.L().Debug("refreshOneEntry: CP unchanged (checksum match); keeping cached entry without rebuild",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName))
@@ -647,6 +654,9 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		Checksum:              checksumOfCP(cp),
 		consecutiveUnchanged:  prev.consecutiveUnchanged,
 		terminatedSeenAt:      prev.terminatedSeenAt,
+	}
+	if newEntry.UsesServiceResolution {
+		newEntry.rawProfile = effectiveCP
 	}
 	if userDefinedCP != nil {
 		// The user-authored CP is authoritative and complete by definition (no

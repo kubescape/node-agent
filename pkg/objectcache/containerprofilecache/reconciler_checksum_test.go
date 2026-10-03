@@ -137,7 +137,8 @@ func authoredCPWithChecksum(name, execPath, rv, checksum string) *v1beta1.Contai
 // each conjunct of the conditional-fetch guard can be varied independently.
 func seedChecksumEntry(c *ContainerProfileCacheImpl, id string, cp *v1beta1.ContainerProfile, checksum, specHash string) *CachedContainerProfile {
 	e := &CachedContainerProfile{
-		Projected: Apply(nil, cp, nil),
+		Projected:  Apply(nil, cp, nil),
+		rawProfile: cp,
 		// Mirrors what both real construction sites store, so a test can tell
 		// whether the cached State was re-derived from a fresh body.
 		State: &objectcache.ProfileState{
@@ -1143,9 +1144,10 @@ func TestKnownChecksumContextRoundTrip(t *testing.T) {
 	assert.Empty(t, storage.KnownChecksumFromContext(context.Background()))
 }
 
-func TestListerGenerationChangeForcesBodyFetchAndRebuild(t *testing.T) {
+func TestListerGenerationChangeRebuildsLocallyOnUnchangedStorage(t *testing.T) {
 	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
-	client := &checksumRecordingClient{learned: learned}
+	learned.Spec.Egress = []v1beta1.NetworkNeighbor{{Entity: "host"}}
+	client := &checksumRecordingClient{learnedErr: storage.ErrProfileUnchanged}
 	metrics := newCountingMetrics()
 	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
 
@@ -1160,15 +1162,33 @@ func TestListerGenerationChangeForcesBodyFetchAndRebuild(t *testing.T) {
 	c.refreshAllEntries(context.Background())
 	assert.Equal(t, []string{"sum-1"}, client.checksumsFor("learned-cp"))
 	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeOffered))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeUnchanged))
 
-	// When cluster view moves (lister.gen bumps), validatorEligible must be false,
-	// forcing a full-body fetch (ineligible mode) and rebuilding the entry with new ListerGen.
+	// When cluster view moves (lister.gen bumps), conditional fetch is STILL offered
+	// (avoiding full-body download amplification), and on ErrProfileUnchanged the reconciler
+	// re-projects the retained rawProfile locally, updating ListerGen to 2.
 	lister.gen = 2
 	c.refreshAllEntries(context.Background())
-	assert.Equal(t, []string{"sum-1", ""}, client.checksumsFor("learned-cp"))
-	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeIneligible))
+	assert.Equal(t, []string{"sum-1", "sum-1"}, client.checksumsFor("learned-cp"))
+	assert.Equal(t, 2, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeOffered))
+	assert.Equal(t, 2, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeUnchanged))
 
 	refreshed, ok := c.entries.Load("cid")
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), refreshed.ListerGen)
+
+	// If rawProfile is nil (fallback) and lister.gen moves, validatorEligible becomes false,
+	// forcing a full-body fetch.
+	refreshed.rawProfile = nil
+	lister.gen = 3
+	client.learnedErr = nil
+	client.learned = learned
+	c.refreshAllEntries(context.Background())
+	assert.Equal(t, []string{"sum-1", "sum-1", ""}, client.checksumsFor("learned-cp"))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeIneligible))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchResponseCounter.Get(conditionalFetchOutcomeBody))
+
+	refreshedAfterBody, ok := c.entries.Load("cid")
+	assert.True(t, ok)
+	assert.Equal(t, int64(3), refreshedAfterBody.ListerGen)
 }
