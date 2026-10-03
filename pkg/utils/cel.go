@@ -227,9 +227,11 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, errCelObjectNil
 			}
 			ep := x.Raw.GetDstEndpoint()
-			pl := ep.PodLabels
-			if len(pl) == 0 && ep.Kind == igtypes.EndpointKindService {
+			var pl map[string]string
+			if ep.Kind == igtypes.EndpointKindService {
 				pl = ServicePeerLabels(ep.Namespace, ep.Name)
+			} else {
+				pl = ep.PodLabels
 			}
 			if pl == nil {
 				pl = map[string]string{}

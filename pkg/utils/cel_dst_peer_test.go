@@ -46,7 +46,7 @@ func TestCelFields_DstNamespaceAndDstPodLabels(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"app": "api", "tier": "backend"}, val)
 
-	// 2. Service peer without pod labels falls back to ServicePeerLabels hook
+	// 2. Service peer with metadata labels resolves through ServicePeerLabels hook
 	SetServicePeerLabels(func(ns, name string) map[string]string {
 		if ns == "prod" && name == "api-service" {
 			return map[string]string{"app": "api-resolved"}
@@ -61,6 +61,7 @@ func TestCelFields_DstNamespaceAndDstPodLabels(t *testing.T) {
 				Namespace: "prod",
 				Name:      "api-service",
 				Kind:      igtypes.EndpointKindService,
+				PodLabels: map[string]string{"app.kubernetes.io/name": "service-metadata-only"},
 			},
 		},
 	}
