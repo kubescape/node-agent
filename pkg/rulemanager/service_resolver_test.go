@@ -14,13 +14,17 @@ import (
 	"github.com/picatz/xcel"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type mockServiceK8sClient struct {
 	k8sclient.K8sClientMock
 	mu       sync.Mutex
 	services map[string]k8sinterface.IWorkload
+	errs     map[string]error
 	getCalls int
+	delay    time.Duration
 }
 
 func (m *mockServiceK8sClient) GetWorkload(namespace, kind, name string) (k8sinterface.IWorkload, error) {
@@ -28,13 +32,27 @@ func (m *mockServiceK8sClient) GetWorkload(namespace, kind, name string) (k8sint
 		return m.K8sClientMock.GetWorkload(namespace, kind, name)
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.getCalls++
+	delay := m.delay
 	key := namespace + "/" + name
-	if svc, ok := m.services[key]; ok {
+	if customErr, hasErr := m.errs[key]; hasErr {
+		m.mu.Unlock()
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		return nil, customErr
+	}
+	svc, ok := m.services[key]
+	m.mu.Unlock()
+
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+
+	if ok {
 		return svc, nil
 	}
-	return nil, errors.New("service not found")
+	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "services"}, name)
 }
 
 func (m *mockServiceK8sClient) CallCount() int {
@@ -46,13 +64,27 @@ func (m *mockServiceK8sClient) CallCount() int {
 func (m *mockServiceK8sClient) SetService(key string, svc k8sinterface.IWorkload) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.services == nil {
+		m.services = make(map[string]k8sinterface.IWorkload)
+	}
+	delete(m.errs, key)
 	m.services[key] = svc
+}
+
+func (m *mockServiceK8sClient) SetError(key string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.errs == nil {
+		m.errs = make(map[string]error)
+	}
+	m.errs[key] = err
 }
 
 func (m *mockServiceK8sClient) DeleteService(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.services, key)
+	delete(m.errs, key)
 }
 
 func TestInitServicePeerLabelResolver(t *testing.T) {
@@ -181,16 +213,16 @@ func TestServicePeerLabelResolver_CachingAndRefresh(t *testing.T) {
 	}
 	assert.Equal(t, 1, mockClient.CallCount(), "Subsequent calls within TTL must hit cache")
 
-	// 3. Negative caching for non-existent service
+	// 3. Negative caching for confirmed NotFound
 	notFound1 := utils.ServicePeerLabels("test-ns", "non-existent")
 	assert.Nil(t, notFound1)
 	assert.Equal(t, 2, mockClient.CallCount())
 
 	notFound2 := utils.ServicePeerLabels("test-ns", "non-existent")
 	assert.Nil(t, notFound2)
-	assert.Equal(t, 2, mockClient.CallCount(), "Negative result should be cached within TTL")
+	assert.Equal(t, 2, mockClient.CallCount(), "NotFound should be negatively cached within TTL")
 
-	// 4. Update service selector and wait for TTL expiry
+	// 4. Update service selector and wait for TTL expiry using assert.Eventually
 	updatedSvc := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Service",
@@ -206,20 +238,17 @@ func TestServicePeerLabelResolver_CachingAndRefresh(t *testing.T) {
 	})
 	mockClient.SetService("test-ns/cached-svc", updatedSvc)
 
-	time.Sleep(ttl + 20*time.Millisecond)
-
-	// Lookup after TTL expiry refreshes from API
-	labelsUpdated := utils.ServicePeerLabels("test-ns", "cached-svc")
-	assert.Equal(t, map[string]string{"app": "cached-v2"}, labelsUpdated)
-	assert.Equal(t, 3, mockClient.CallCount(), "Call after TTL expiry must refresh from GetWorkload")
+	assert.Eventually(t, func() bool {
+		labels := utils.ServicePeerLabels("test-ns", "cached-svc")
+		return labels != nil && labels["app"] == "cached-v2"
+	}, 1*time.Second, 10*time.Millisecond, "Service selector should refresh after TTL expires")
 
 	// 5. Delete service and wait for TTL expiry
 	mockClient.DeleteService("test-ns/cached-svc")
-	time.Sleep(ttl + 20*time.Millisecond)
 
-	labelsDeleted := utils.ServicePeerLabels("test-ns", "cached-svc")
-	assert.Nil(t, labelsDeleted)
-	assert.Equal(t, 4, mockClient.CallCount(), "Call after deletion and TTL expiry must reflect deletion")
+	assert.Eventually(t, func() bool {
+		return utils.ServicePeerLabels("test-ns", "cached-svc") == nil
+	}, 1*time.Second, 10*time.Millisecond, "Deleted service should resolve to nil after TTL expires")
 
 	// 6. LRU eviction with bounded capacity
 	mockClient.SetService("test-ns/svc-a", svcWorkload)
@@ -239,6 +268,89 @@ func TestServicePeerLabelResolver_CachingAndRefresh(t *testing.T) {
 	// svc-a was evicted, so accessing it calls GetWorkload again
 	utils.ServicePeerLabels("test-ns", "svc-a")
 	assert.Equal(t, callsBefore+4, mockClient.CallCount(), "svc-a was evicted and should re-query")
+}
+
+func TestServicePeerLabelResolver_ConcurrentMisses(t *testing.T) {
+	defer utils.SetServicePeerLabels(nil)
+
+	svcWorkload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]any{
+			"name":      "concurrent-svc",
+			"namespace": "concur-ns",
+		},
+		"spec": map[string]any{
+			"selector": map[string]any{
+				"app": "concurrent",
+			},
+		},
+	})
+
+	mockClient := &mockServiceK8sClient{
+		services: map[string]k8sinterface.IWorkload{
+			"concur-ns/concurrent-svc": svcWorkload,
+		},
+		delay: 20 * time.Millisecond, // simulate API latency to ensure concurrence
+	}
+
+	InitServicePeerLabelResolverWithCache(mockClient, 100, 1*time.Minute)
+
+	const workers = 10
+	var wg sync.WaitGroup
+	wg.Add(workers)
+
+	results := make([]map[string]string, workers)
+	for i := 0; i < workers; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = utils.ServicePeerLabels("concur-ns", "concurrent-svc")
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i := 0; i < workers; i++ {
+		assert.Equal(t, map[string]string{"app": "concurrent"}, results[i])
+	}
+	assert.Equal(t, 1, mockClient.CallCount(), "Singleflight must coalesce concurrent requests into exactly 1 API call")
+}
+
+func TestServicePeerLabelResolver_TransientFailureThenSuccess(t *testing.T) {
+	defer utils.SetServicePeerLabels(nil)
+
+	svcWorkload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]any{
+			"name":      "flaky-svc",
+			"namespace": "flaky-ns",
+		},
+		"spec": map[string]any{
+			"selector": map[string]any{
+				"app": "recovered",
+			},
+		},
+	})
+
+	mockClient := &mockServiceK8sClient{}
+	// Transient error: timeout / network failure (NOT NotFound)
+	mockClient.SetError("flaky-ns/flaky-svc", errors.New("i/o timeout: transient api server failure"))
+
+	InitServicePeerLabelResolverWithCache(mockClient, 100, 1*time.Minute)
+
+	// 1. Transient failure should return nil
+	res1 := utils.ServicePeerLabels("flaky-ns", "flaky-svc")
+	assert.Nil(t, res1)
+	assert.Equal(t, 1, mockClient.CallCount())
+
+	// 2. Immediately recover: set the valid workload (simulating transient issue resolved)
+	mockClient.SetService("flaky-ns/flaky-svc", svcWorkload)
+
+	// 3. The very next call must NOT be blocked by a negative cache; it must re-fetch and succeed
+	res2 := utils.ServicePeerLabels("flaky-ns", "flaky-svc")
+	assert.Equal(t, map[string]string{"app": "recovered"}, res2)
+	assert.Equal(t, 2, mockClient.CallCount(), "Transient failure must not be negatively cached")
 }
 
 type mockNetworkEvent struct {

@@ -92,7 +92,6 @@ func CreateRuleManager(
 ) (*RuleManager, error) {
 	rulePolicyValidator := NewRulePolicyValidator(objectCache)
 	detectorManager := detectors.NewDetectorManager(mntnsRegistry)
-	InitServicePeerLabelResolver(k8sClient)
 
 	r := &RuleManager{
 		cfg:                 cfg,
