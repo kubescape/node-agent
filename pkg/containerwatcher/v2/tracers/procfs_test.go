@@ -90,6 +90,8 @@ func TestProcfsTracer_StartStop(t *testing.T) {
 	err = tracer.Start(ctx)
 	assert.NoError(t, err)
 	assert.True(t, tracer.started)
+	assert.NotNil(t, tracer.eventChan)
+	assert.NotNil(t, tracer.cancel)
 
 	// Test double start
 	err = tracer.Start(ctx)
@@ -100,6 +102,14 @@ func TestProcfsTracer_StartStop(t *testing.T) {
 	err = tracer.Stop()
 	assert.NoError(t, err)
 	assert.False(t, tracer.started)
+	assert.Nil(t, tracer.eventChan)
+	assert.Nil(t, tracer.cancel)
+
+	// Test restart after stop
+	err = tracer.Start(ctx)
+	assert.NoError(t, err)
+	assert.True(t, tracer.started)
+	assert.NoError(t, tracer.Stop())
 
 	// Test stop when not started
 	err = tracer.Stop()

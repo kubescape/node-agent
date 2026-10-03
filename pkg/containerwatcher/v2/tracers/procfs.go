@@ -34,6 +34,8 @@ type ProcfsTracer struct {
 	procfsEventCallback func(utils.K8sEvent, string, uint32)
 	exitEventCallback   func(utils.K8sEvent, string, uint32)
 	procfsFeeder        *feeder.ProcfsFeeder
+	eventChan           chan conversion.ProcessEvent
+	cancel              context.CancelFunc
 	started             bool
 }
 
@@ -63,15 +65,23 @@ func (pt *ProcfsTracer) Start(ctx context.Context) error {
 		return fmt.Errorf("procfs tracer already started")
 	}
 
+	consumerCtx, cancel := context.WithCancel(ctx)
+	pt.cancel = cancel
+
 	// Subscribe to procfs events before starting the feeder so the initial scan is never missed
-	eventChan := make(chan conversion.ProcessEvent, 1000)
-	pt.procfsFeeder.Subscribe(eventChan)
+	pt.eventChan = make(chan conversion.ProcessEvent, 1000)
+	pt.procfsFeeder.Subscribe(pt.eventChan)
 
 	// Start event processing goroutine before starting the feeder so consumer is actively draining
-	go pt.processEvents(ctx, eventChan)
+	go pt.processEvents(consumerCtx, pt.eventChan)
 
 	// Start the procfs feeder
 	if err := pt.procfsFeeder.Start(ctx); err != nil {
+		// Clean up consumer and subscription on startup failure
+		pt.cancel()
+		pt.cancel = nil
+		pt.procfsFeeder.Unsubscribe(pt.eventChan)
+		pt.eventChan = nil
 		return fmt.Errorf("starting procfs feeder: %w", err)
 	}
 
@@ -86,7 +96,16 @@ func (pt *ProcfsTracer) Stop() error {
 		return nil
 	}
 
+	if pt.cancel != nil {
+		pt.cancel()
+		pt.cancel = nil
+	}
+
 	if pt.procfsFeeder != nil {
+		if pt.eventChan != nil {
+			pt.procfsFeeder.Unsubscribe(pt.eventChan)
+			pt.eventChan = nil
+		}
 		if err := pt.procfsFeeder.Stop(); err != nil {
 			logger.L().Error("error stopping procfs feeder", helpers.Error(err))
 		}

@@ -113,6 +113,19 @@ func (pf *ProcfsFeeder) Subscribe(ch chan<- conversion.ProcessEvent) {
 	pf.subscribers = append(pf.subscribers, ch)
 }
 
+// Unsubscribe removes a channel from the subscribers list.
+func (pf *ProcfsFeeder) Unsubscribe(ch chan<- conversion.ProcessEvent) {
+	pf.mutex.Lock()
+	defer pf.mutex.Unlock()
+
+	for i, sub := range pf.subscribers {
+		if sub == ch {
+			pf.subscribers = append(pf.subscribers[:i], pf.subscribers[i+1:]...)
+			break
+		}
+	}
+}
+
 // feedLoop is the main loop that reads procfs and feeds events.
 func (pf *ProcfsFeeder) feedLoop() {
 	// Capture context locally. This is safe now because pf.ctx is never set to nil

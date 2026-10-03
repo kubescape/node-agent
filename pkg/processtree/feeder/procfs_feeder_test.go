@@ -83,6 +83,28 @@ func TestProcfsFeeder_Subscribe(t *testing.T) {
 	assert.Equal(t, (chan<- conversion.ProcessEvent)(ch2), feeder.subscribers[1])
 }
 
+func TestProcfsFeeder_Unsubscribe(t *testing.T) {
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
+	ch1 := make(chan conversion.ProcessEvent, 1)
+	ch2 := make(chan conversion.ProcessEvent, 1)
+
+	feeder.Subscribe(ch1)
+	feeder.Subscribe(ch2)
+	require.Len(t, feeder.subscribers, 2)
+
+	feeder.Unsubscribe(ch1)
+	require.Len(t, feeder.subscribers, 1)
+	assert.Equal(t, (chan<- conversion.ProcessEvent)(ch2), feeder.subscribers[0])
+
+	// Unsubscribing non-existent channel is a no-op
+	feeder.Unsubscribe(ch1)
+	require.Len(t, feeder.subscribers, 1)
+
+	feeder.Unsubscribe(ch2)
+	require.Empty(t, feeder.subscribers)
+}
+
 func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
 	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
