@@ -66,4 +66,22 @@ func TestStorageHttpClientMock_ListContainerProfiles(t *testing.T) {
 	list, err = mock.ListContainerProfiles(context.Background(), "nonexistent", metav1.ListOptions{})
 	require.NoError(t, err)
 	assert.Empty(t, list.Items)
+
+	// 5. List cluster-wide across all namespaces (metav1.NamespaceAll / "")
+	list, err = mock.ListContainerProfiles(context.Background(), metav1.NamespaceAll, metav1.ListOptions{})
+	require.NoError(t, err)
+	assert.Len(t, list.Items, 3)
+
+	// 6. List cluster-wide with label selector
+	list, err = mock.ListContainerProfiles(context.Background(), metav1.NamespaceAll, metav1.ListOptions{
+		LabelSelector: "app=frontend",
+	})
+	require.NoError(t, err)
+	assert.Len(t, list.Items, 2)
+
+	// 7. Invalid label selector returns error
+	_, err = mock.ListContainerProfiles(context.Background(), "default", metav1.ListOptions{
+		LabelSelector: "invalid===selector",
+	})
+	require.Error(t, err)
 }

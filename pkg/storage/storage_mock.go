@@ -81,13 +81,16 @@ func (sc *StorageHttpClientMock) GetContainerProfile(_ context.Context, namespac
 func (sc *StorageHttpClientMock) ListContainerProfiles(_ context.Context, namespace string, opts metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
 	sc.containerProfilesMu.Lock()
 	defer sc.containerProfilesMu.Unlock()
-	sel, _ := labels.Parse(opts.LabelSelector)
+	sel, err := labels.Parse(opts.LabelSelector)
+	if err != nil {
+		return nil, err
+	}
 	out := &v1beta1.ContainerProfileList{}
 	for _, p := range sc.ContainerProfiles {
-		if p == nil || p.Namespace != namespace {
+		if p == nil || (namespace != metav1.NamespaceAll && p.Namespace != namespace) {
 			continue
 		}
-		if sel != nil && !sel.Matches(labels.Set(p.Labels)) {
+		if !sel.Matches(labels.Set(p.Labels)) {
 			continue
 		}
 		out.Items = append(out.Items, *p)
