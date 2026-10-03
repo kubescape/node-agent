@@ -29,6 +29,10 @@ type ProcfsEvent struct {
 	ContainerID    string    `json:"container_id"`
 	ContainerMntNs uint64    `json:"container_mnt_ns"`
 	ContainerNetNs uint64    `json:"container_net_ns"`
+	// AmbiguousContainer is true when container attribution could not be
+	// resolved by mount namespace and fell back to an ambiguous source (such
+	// as network namespace, which is shared among all containers in a pod).
+	AmbiguousContainer bool `json:"ambiguous_container,omitempty"`
 	HostPID        int       `json:"host_pid"`
 	HostPPID       int       `json:"host_ppid"`
 }

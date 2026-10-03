@@ -179,6 +179,7 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 		if len(containersByNetns) > 0 {
 			// We don't care which container it is, we just need to find one
 			container = containersByNetns[0]
+			procfsEvent.AmbiguousContainer = true
 		}
 	}
 

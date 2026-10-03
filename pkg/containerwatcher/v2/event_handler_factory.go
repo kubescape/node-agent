@@ -126,7 +126,13 @@ func NewEventHandlerFactory(
 			// before the tracer attached and cannot be replayed, but the
 			// process is still there and procfs carries what it ran
 			// (entlein/node-agent#22).
+			// Skip events where container attribution is ambiguous (such as
+			// network-namespace fallbacks in multi-container pods) to avoid
+			// poisoning container profiles with another container's processes.
 			if pe, ok := event.(*events.ProcfsEvent); ok {
+				if pe.AmbiguousContainer {
+					return
+				}
 				containerProfileManager.ReportProcfsExec(pe.ContainerID, pe.Path, pe.Argv)
 			}
 		case utils.OpenEventType:
