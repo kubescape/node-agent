@@ -120,7 +120,11 @@ func (l *InformerLister) endpointIPs(namespace, service string) []string {
 	var ips []string
 	for _, es := range slices {
 		for i := range es.Endpoints {
-			ips = append(ips, es.Endpoints[i].Addresses...)
+			ep := &es.Endpoints[i]
+			if ep.Conditions.Ready != nil && !*ep.Conditions.Ready {
+				continue
+			}
+			ips = append(ips, ep.Addresses...)
 		}
 	}
 	return dedupe(ips)
@@ -128,10 +132,11 @@ func (l *InformerLister) endpointIPs(namespace, service string) []string {
 
 // TrimService and TrimEndpointSlice are informer TransformFuncs that drop the
 // bulk the resolver never reads — managedFields and annotations (1–4 KiB per
-// real object), and for EndpointSlices every per-endpoint field but Addresses —
-// before objects enter the cluster-wide cache. Wire via Informer().SetTransform
-// so a DaemonSet's per-node Service/EndpointSlice cache stays small. Identity
-// and resourceVersion are preserved so listing/indexing is unaffected.
+// real object), and for EndpointSlices every per-endpoint field but Addresses
+// and Conditions.Ready — before objects enter the cluster-wide cache. Wire via
+// Informer().SetTransform so a DaemonSet's per-node Service/EndpointSlice cache
+// stays small. Identity and resourceVersion are preserved so listing/indexing
+// is unaffected.
 func TrimService(obj interface{}) (interface{}, error) {
 	if svc, ok := obj.(*corev1.Service); ok {
 		svc.ManagedFields = nil
@@ -145,7 +150,12 @@ func TrimEndpointSlice(obj interface{}) (interface{}, error) {
 		es.ManagedFields = nil
 		es.Annotations = nil
 		for i := range es.Endpoints {
-			es.Endpoints[i] = discoveryv1.Endpoint{Addresses: es.Endpoints[i].Addresses}
+			es.Endpoints[i] = discoveryv1.Endpoint{
+				Addresses: es.Endpoints[i].Addresses,
+				Conditions: discoveryv1.EndpointConditions{
+					Ready: es.Endpoints[i].Conditions.Ready,
+				},
+			}
 		}
 	}
 	return obj, nil
@@ -172,6 +182,10 @@ func gatewayIP(cidr string) string {
 	}
 	ip := ipNet.IP.To4()
 	if ip == nil {
+		return ""
+	}
+	ones, bits := ipNet.Mask.Size()
+	if bits == 32 && ones >= 31 {
 		return ""
 	}
 	gw := make(net.IP, len(ip))

@@ -126,6 +126,7 @@ func TestGatewayIP(t *testing.T) {
 		"10.42.0.0/24":       "10.42.0.1",
 		"10.244.5.0/24":      "10.244.5.1",
 		"2001:db8::/64":      "",
+		"10.42.0.0/31":       "", // /31 point-to-point: no gateway within subnet
 		"10.42.0.5/32":       "", // /32 host: incremented gateway is outside the CIDR
 		"255.255.255.255/32": "", // overflow to 0.0.0.0, out of CIDR
 	}
@@ -133,6 +134,85 @@ func TestGatewayIP(t *testing.T) {
 		if got := gatewayIP(cidr); got != want {
 			t.Errorf("gatewayIP(%s)=%q want %q", cidr, got, want)
 		}
+	}
+}
+
+func TestTrimEndpointSlice_PreservesReady(t *testing.T) {
+	ready := true
+	unready := false
+	es := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "slice1",
+			Namespace:       "default",
+			ManagedFields:   []metav1.ManagedFieldsEntry{{Manager: "test"}},
+			Annotations:     map[string]string{"foo": "bar"},
+			ResourceVersion: "123",
+		},
+		Endpoints: []discoveryv1.Endpoint{
+			{Addresses: []string{"10.0.0.1"}, Conditions: discoveryv1.EndpointConditions{Ready: &ready}},
+			{Addresses: []string{"10.0.0.2"}, Conditions: discoveryv1.EndpointConditions{Ready: &unready}},
+			{Addresses: []string{"10.0.0.3"}, Conditions: discoveryv1.EndpointConditions{Ready: nil}},
+		},
+	}
+	trimmedObj, err := TrimEndpointSlice(es)
+	if err != nil {
+		t.Fatalf("TrimEndpointSlice failed: %v", err)
+	}
+	trimmed := trimmedObj.(*discoveryv1.EndpointSlice)
+	if trimmed.ManagedFields != nil || trimmed.Annotations != nil {
+		t.Errorf("expected managedFields and annotations to be stripped")
+	}
+	if len(trimmed.Endpoints) != 3 {
+		t.Fatalf("expected 3 endpoints, got %d", len(trimmed.Endpoints))
+	}
+	if trimmed.Endpoints[0].Conditions.Ready == nil || !*trimmed.Endpoints[0].Conditions.Ready {
+		t.Errorf("endpoint 0 ready condition lost")
+	}
+	if trimmed.Endpoints[1].Conditions.Ready == nil || *trimmed.Endpoints[1].Conditions.Ready {
+		t.Errorf("endpoint 1 unready condition lost")
+	}
+	if trimmed.Endpoints[2].Conditions.Ready != nil {
+		t.Errorf("endpoint 2 nil ready condition should remain nil")
+	}
+}
+
+func TestInformerLister_EndpointReadiness(t *testing.T) {
+	ready := true
+	unready := false
+	client := fake.NewClientset(
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "prod", Name: "api"},
+			Spec:       corev1.ServiceSpec{ClusterIP: "10.43.0.1"},
+		},
+		&discoveryv1.EndpointSlice{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "prod", Name: "api-1", Labels: map[string]string{discoveryv1.LabelServiceName: "api"}},
+			Endpoints: []discoveryv1.Endpoint{
+				{Addresses: []string{"10.42.1.10"}, Conditions: discoveryv1.EndpointConditions{Ready: &ready}},
+				{Addresses: []string{"10.42.1.11"}, Conditions: discoveryv1.EndpointConditions{Ready: &unready}},
+				{Addresses: []string{"10.42.1.12"}, Conditions: discoveryv1.EndpointConditions{Ready: nil}}, // nil is treated as ready
+			},
+		},
+	)
+	factory := informers.NewSharedInformerFactory(client, 0)
+	l := NewInformerLister(
+		factory.Core().V1().Services().Lister(),
+		factory.Discovery().V1().EndpointSlices().Lister(),
+		factory.Core().V1().Nodes().Lister(),
+		"",
+	)
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	factory.Start(stop)
+	factory.WaitForCacheSync(stop)
+
+	svc, ok := l.ServiceByName("prod", "api")
+	if !ok {
+		t.Fatalf("expected api service to resolve")
+	}
+	// 10.42.1.10 (ready) and 10.42.1.12 (nil) should be present; 10.42.1.11 (unready) excluded.
+	wantEndpoints := []string{"10.42.1.10", "10.42.1.12"}
+	if len(svc.EndpointIPs) != len(wantEndpoints) || svc.EndpointIPs[0] != wantEndpoints[0] || svc.EndpointIPs[1] != wantEndpoints[1] {
+		t.Errorf("got EndpointIPs %v, want %v", svc.EndpointIPs, wantEndpoints)
 	}
 }
 

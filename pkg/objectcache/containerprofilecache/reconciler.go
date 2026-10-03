@@ -386,6 +386,8 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	//     no authored CP any more) could skip that handling. It mirrors
 	//     rvsMatchCP(nil, e.UserCPRV) in the fast-skip, which is true only for "".
 	//   - SpecHash == preFetchSpecHash: the projection would be identical.
+	//   - !UsesServiceResolution || ListerGen == listerGen(): resolved endpoints
+	//     are still fresh; a moved cluster view forces a body and rebuild.
 	//   - Checksum != "": we actually hold a validator to offer.
 	//   - State is already terminal: see below.
 	//
@@ -410,7 +412,8 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	// Attached per call, never to the shared ctx: the authored-CP fetch below
 	// derives from the same ctx and must never carry the learned CP's checksum.
 	validatorEligible := e.UserCPRef == nil && e.UserCPRV == "" && e.SpecHash == preFetchSpecHash &&
-		e.State != nil && e.State.Status == helpersv1.Completed && e.State.Completion == helpersv1.Full
+		e.State != nil && e.State.Status == helpersv1.Completed && e.State.Completion == helpersv1.Full &&
+		(!e.UsesServiceResolution || e.ListerGen == c.listerGen())
 	validatorOffered := false
 	requestMode := conditionalFetchModeMissing
 	cpCtx := ctx

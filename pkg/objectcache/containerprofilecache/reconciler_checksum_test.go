@@ -1142,3 +1142,33 @@ func TestKnownChecksumContextRoundTrip(t *testing.T) {
 	// fetch clean.
 	assert.Empty(t, storage.KnownChecksumFromContext(context.Background()))
 }
+
+func TestListerGenerationChangeForcesBodyFetchAndRebuild(t *testing.T) {
+	learned := learnedCPWithChecksum("learned-cp", "1", "sum-1")
+	client := &checksumRecordingClient{learned: learned}
+	metrics := newCountingMetrics()
+	c := newReconcilerCache(t, client, newControllableK8sCache(), metrics)
+
+	lister := &genLister{gen: 1}
+	c.SetServiceLister(lister)
+
+	entry := seedChecksumEntry(c, "cid", learned, "sum-1", "")
+	entry.UsesServiceResolution = true
+	entry.ListerGen = 1
+
+	// When ListerGen matches lister.Generation(), the entry is eligible for conditional fetch.
+	c.refreshAllEntries(context.Background())
+	assert.Equal(t, []string{"sum-1"}, client.checksumsFor("learned-cp"))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeOffered))
+
+	// When cluster view moves (lister.gen bumps), validatorEligible must be false,
+	// forcing a full-body fetch (ineligible mode) and rebuilding the entry with new ListerGen.
+	lister.gen = 2
+	c.refreshAllEntries(context.Background())
+	assert.Equal(t, []string{"sum-1", ""}, client.checksumsFor("learned-cp"))
+	assert.Equal(t, 1, metrics.ProfileConditionalFetchRequestCounter.Get(conditionalFetchModeIneligible))
+
+	refreshed, ok := c.entries.Load("cid")
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), refreshed.ListerGen)
+}
