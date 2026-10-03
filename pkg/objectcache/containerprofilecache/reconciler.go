@@ -24,6 +24,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/node-agent/pkg/networkpeer"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/storage"
@@ -385,6 +386,8 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	//     no authored CP any more) could skip that handling. It mirrors
 	//     rvsMatchCP(nil, e.UserCPRV) in the fast-skip, which is true only for "".
 	//   - SpecHash == preFetchSpecHash: the projection would be identical.
+	//   - !UsesServiceResolution || ListerGen == listerGen(): resolved endpoints
+	//     are still fresh; a moved cluster view forces a body and rebuild.
 	//   - Checksum != "": we actually hold a validator to offer.
 	//   - State is already terminal: see below.
 	//
@@ -409,7 +412,8 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	// Attached per call, never to the shared ctx: the authored-CP fetch below
 	// derives from the same ctx and must never carry the learned CP's checksum.
 	validatorEligible := e.UserCPRef == nil && e.UserCPRV == "" && e.SpecHash == preFetchSpecHash &&
-		e.State != nil && e.State.Status == helpersv1.Completed && e.State.Completion == helpersv1.Full
+		e.State != nil && e.State.Status == helpersv1.Completed && e.State.Completion == helpersv1.Full &&
+		(!e.UsesServiceResolution || e.rawProfile != nil || e.ListerGen == c.listerGen())
 	validatorOffered := false
 	requestMode := conditionalFetchModeMissing
 	cpCtx := ctx
@@ -459,6 +463,13 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		}
 		c.metricsManager.ReportContainerProfileConditionalFetchResponse(conditionalFetchOutcomeUnchanged)
 		e.consecutiveUnchanged++
+		if e.UsesServiceResolution && e.ListerGen != c.listerGen() && e.rawProfile != nil {
+			logger.L().Debug("refreshOneEntry: CP unchanged from storage but cluster view moved; re-projecting retained profile",
+				helpers.String("containerID", id),
+				helpers.String("cpName", e.CPName))
+			c.rebuildEntryFromSources(id, e, e.rawProfile, nil)
+			return
+		}
 		logger.L().Debug("refreshOneEntry: CP unchanged (checksum match); keeping cached entry without rebuild",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName))
@@ -534,6 +545,10 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	// ResourceVersion alone is insufficient for remote profiles: the backend may
 	// leave it empty or unchanged while returning a different body. Checksum also
 	// detects first-time validator acquisition on an otherwise identical object.
+	// serviceRef/entity profiles must also re-project when the cluster view
+	// changed since they were resolved (endpoint churn, or caches that filled
+	// after projection). Non-resolving profiles ignore the lister generation and
+	// keep the cheap RV/spec fast-skip.
 	postFetchSpecHash := ""
 	if spec := c.snapshotSpec(); spec != nil {
 		postFetchSpecHash = spec.Hash
@@ -541,7 +556,8 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	if rvsMatchCP(cp, e.RV) &&
 		checksumOfCP(cp) == e.Checksum &&
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
-		e.SpecHash == postFetchSpecHash {
+		e.SpecHash == postFetchSpecHash &&
+		(!e.UsesServiceResolution || e.ListerGen == c.listerGen()) {
 		return
 	}
 
@@ -611,29 +627,36 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	// Project under the current spec.
 	spec := c.snapshotSpec()
 	applyStart := time.Now()
-	projectedCP := Apply(spec, projected, tree)
+	listerGen := c.listerGen()
+	projectedCP := Apply(spec, networkpeer.WithResolvedServiceNeighbors(projected, c.serviceLister), tree)
+	projectedCP.ResolvedGen = listerGen
 	if c.cfg.ProfileProjection.DetailedMetricsEnabled {
 		c.metricsManager.ObserveProjectionApplyDuration(time.Since(applyStart))
 		c.observeMemoryMetrics(projected, projectedCP)
 	}
 
 	newEntry := &CachedContainerProfile{
-		Projected:            projectedCP,
-		SpecHash:             projectedCP.SpecHash,
-		State:                &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
-		CallStackTree:        tree,
-		ContainerName:        prev.ContainerName,
-		PodName:              prev.PodName,
-		Namespace:            prev.Namespace,
-		PodUID:               podUID,
-		WorkloadID:           prev.WorkloadID,
-		CPName:               prev.CPName,
-		WorkloadName:         prev.WorkloadName,
-		RV:                   rvOfCP(cp),
-		UserCPRV:             rvOfCP(userDefinedCP),
-		Checksum:             checksumOfCP(cp),
-		consecutiveUnchanged: prev.consecutiveUnchanged,
-		terminatedSeenAt:     prev.terminatedSeenAt,
+		Projected:             projectedCP,
+		SpecHash:              projectedCP.SpecHash,
+		UsesServiceResolution: networkpeer.HasServiceNeighbors(projected),
+		ListerGen:             listerGen,
+		State:                 &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},
+		CallStackTree:         tree,
+		ContainerName:         prev.ContainerName,
+		PodName:               prev.PodName,
+		Namespace:             prev.Namespace,
+		PodUID:                podUID,
+		WorkloadID:            prev.WorkloadID,
+		CPName:                prev.CPName,
+		WorkloadName:          prev.WorkloadName,
+		RV:                    rvOfCP(cp),
+		UserCPRV:              rvOfCP(userDefinedCP),
+		Checksum:              checksumOfCP(cp),
+		consecutiveUnchanged:  prev.consecutiveUnchanged,
+		terminatedSeenAt:      prev.terminatedSeenAt,
+	}
+	if newEntry.UsesServiceResolution {
+		newEntry.rawProfile = effectiveCP
 	}
 	if userDefinedCP != nil {
 		// The user-authored CP is authoritative and complete by definition (no

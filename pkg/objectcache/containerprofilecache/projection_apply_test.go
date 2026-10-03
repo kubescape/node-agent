@@ -5,6 +5,7 @@ import (
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
@@ -345,6 +346,32 @@ func TestApply_SyncChecksum_MissingAnnotation(t *testing.T) {
 	pcp := Apply(spec, cp, nil)
 	require.NotNil(t, pcp)
 	assert.Empty(t, pcp.SyncChecksum)
+}
+
+// TestApply_BackendChecksum verifies that the BackendChecksum annotation value is
+// copied to pcp.BackendChecksum.
+func TestApply_BackendChecksum(t *testing.T) {
+	spec := &objectcache.RuleProjectionSpec{}
+	cp := &v1beta1.ContainerProfile{
+		Annotations: map[string]string{
+			storage.ContainerProfileChecksumAnnotationKey: "chk123",
+		},
+	}
+
+	pcp := Apply(spec, cp, nil)
+	require.NotNil(t, pcp)
+	assert.Equal(t, "chk123", pcp.BackendChecksum)
+}
+
+// TestApply_BackendChecksum_MissingAnnotation verifies that when the annotation is
+// absent, BackendChecksum is empty (not panics or errors).
+func TestApply_BackendChecksum_MissingAnnotation(t *testing.T) {
+	spec := &objectcache.RuleProjectionSpec{}
+	cp := emptyCP()
+
+	pcp := Apply(spec, cp, nil)
+	require.NotNil(t, pcp)
+	assert.Empty(t, pcp.BackendChecksum)
 }
 
 // TestApply_SpecHashInResult verifies that the spec's Hash value is copied to

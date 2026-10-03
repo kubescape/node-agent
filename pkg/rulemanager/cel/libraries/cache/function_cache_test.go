@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -200,4 +201,81 @@ func TestFunctionCache_GenerateCacheKey(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+type testObjectCacheMock struct {
+	objectcache.ObjectCacheMock
+	cpc objectcache.ContainerProfileCache
+}
+
+func (m *testObjectCacheMock) ContainerProfileCache() objectcache.ContainerProfileCache {
+	return m.cpc
+}
+
+type testCPCacheMock struct {
+	objectcache.ContainerProfileCacheMock
+	profile *objectcache.ProjectedContainerProfile
+}
+
+func (m *testCPCacheMock) GetProjectedContainerProfile(string) *objectcache.ProjectedContainerProfile {
+	return m.profile
+}
+
+func TestFunctionCache_HashForContainerProfile(t *testing.T) {
+	t.Run("nil objectcache", func(t *testing.T) {
+		hasher := HashForContainerProfile(nil)
+		assert.Equal(t, "", hasher([]ref.Val{types.String("cont1")}))
+	})
+
+	t.Run("empty arguments", func(t *testing.T) {
+		oc := &testObjectCacheMock{}
+		hasher := HashForContainerProfile(oc)
+		assert.Equal(t, "", hasher([]ref.Val{}))
+	})
+
+	t.Run("non-string container id", func(t *testing.T) {
+		oc := &testObjectCacheMock{}
+		hasher := HashForContainerProfile(oc)
+		assert.Equal(t, "", hasher([]ref.Val{types.Int(123)}))
+	})
+
+	t.Run("nil containerprofilecache", func(t *testing.T) {
+		oc := &testObjectCacheMock{cpc: nil}
+		hasher := HashForContainerProfile(oc)
+		assert.Equal(t, "", hasher([]ref.Val{types.String("cont1")}))
+	})
+
+	t.Run("profile not found", func(t *testing.T) {
+		cpc := &testCPCacheMock{profile: nil}
+		oc := &testObjectCacheMock{cpc: cpc}
+		hasher := HashForContainerProfile(oc)
+		assert.Equal(t, "", hasher([]ref.Val{types.String("cont1")}))
+	})
+
+	t.Run("includes SpecHash SyncChecksum BackendChecksum SourceRV and ResolvedGen", func(t *testing.T) {
+		cpc := &testCPCacheMock{
+			profile: &objectcache.ProjectedContainerProfile{
+				SpecHash:        "spec123",
+				SyncChecksum:    "sync456",
+				BackendChecksum: "sum789",
+				SourceRV:        "rv101",
+				ResolvedGen:     42,
+			},
+		}
+		oc := &testObjectCacheMock{cpc: cpc}
+		hasher := HashForContainerProfile(oc)
+		assert.Equal(t, "spec123|sync456|sum789|rv101|42", hasher([]ref.Val{types.String("cont1")}))
+
+		// When ResolvedGen changes, hash changes
+		cpc.profile.ResolvedGen = 43
+		assert.Equal(t, "spec123|sync456|sum789|rv101|43", hasher([]ref.Val{types.String("cont1")}))
+
+		// When backend checksum changes (remote body updated), hash changes
+		cpc.profile.BackendChecksum = "sum790"
+		assert.Equal(t, "spec123|sync456|sum790|rv101|43", hasher([]ref.Val{types.String("cont1")}))
+
+		// When authored profile is updated (SourceRV changes), hash changes
+		cpc.profile.SourceRV = "rv102"
+		assert.Equal(t, "spec123|sync456|sum790|rv102|43", hasher([]ref.Val{types.String("cont1")}))
+	})
 }
