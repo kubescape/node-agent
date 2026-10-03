@@ -153,8 +153,12 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event uti
 		}
 
 		exec := append([]string{path}, args...)
+		delta := size.Of(exec)
+		if data.execs.Has(execIdentifier) {
+			delta = 0
+		}
 		data.execs.Set(execIdentifier, exec)
-		return size.Of(exec), nil
+		return delta, nil
 	})
 
 	cpm.logEventError(err, "file exec", containerID)

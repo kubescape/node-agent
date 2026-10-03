@@ -64,6 +64,29 @@ func TestProcfsExec_AgreesWithAnObservedExecRatherThanDuplicatingIt(t *testing.T
 	cpm.ReportProcfsExec("cid", "/bin/sh", args)
 
 	assert.Equal(t, []string{"/bin/sh"}, execPaths(t, cpm, "cid"))
+
+	// Reverse order: procfs found it first, then an observed exec arrives later.
+	// Must still result in one entry and must not double-count profile size.
+	cpm2 := withEmptyContainer(t, "cid2")
+	cpm2.ReportProcfsExec("cid2", "/bin/sh", args)
+	var sizeAfterProcfs int64
+	_ = cpm2.withContainer("cid2", func(d *containerData) (int, error) {
+		sizeAfterProcfs = d.size.Load()
+		return 0, nil
+	})
+
+	cpm2.ReportFileExec("cid2", &utils.StructEvent{
+		ExePath: "/bin/sh",
+		Args:    args,
+	})
+	var sizeAfterFileExec int64
+	_ = cpm2.withContainer("cid2", func(d *containerData) (int, error) {
+		sizeAfterFileExec = d.size.Load()
+		return 0, nil
+	})
+
+	assert.Equal(t, []string{"/bin/sh"}, execPaths(t, cpm2, "cid2"))
+	assert.Equal(t, sizeAfterProcfs, sizeAfterFileExec, "file exec after procfs exec must not double-count profile size")
 }
 
 func TestProcfsExec_DifferentArgvIsADifferentEntry(t *testing.T) {

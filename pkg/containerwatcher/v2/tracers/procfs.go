@@ -63,14 +63,14 @@ func (pt *ProcfsTracer) Start(ctx context.Context) error {
 		return fmt.Errorf("procfs tracer already started")
 	}
 
+	// Subscribe to procfs events before starting the feeder so the initial scan is never missed
+	eventChan := make(chan conversion.ProcessEvent, 1000)
+	pt.procfsFeeder.Subscribe(eventChan)
+
 	// Start the procfs feeder
 	if err := pt.procfsFeeder.Start(ctx); err != nil {
 		return fmt.Errorf("starting procfs feeder: %w", err)
 	}
-
-	// Subscribe to procfs events
-	eventChan := make(chan conversion.ProcessEvent, 1000)
-	pt.procfsFeeder.Subscribe(eventChan)
 
 	// Start event processing goroutine
 	go pt.processEvents(ctx, eventChan)
