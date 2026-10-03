@@ -11,6 +11,10 @@ import (
 
 type ProfileClient interface {
 	GetContainerProfile(ctx context.Context, namespace, name string) (*v1beta1.ContainerProfile, error)
+	// ListContainerProfiles lists ContainerProfiles in a namespace, optionally
+	// filtered by a label selector — used to gather the fragments of a signed
+	// bundle (label signature.kubescape.io/bundle=<name>).
+	ListContainerProfiles(ctx context.Context, namespace string, opts metav1.ListOptions) (*v1beta1.ContainerProfileList, error)
 }
 
 // ProfileCreator defines the interface for creating container profiles

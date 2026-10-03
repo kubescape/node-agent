@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -75,6 +76,10 @@ type countingProfileClient struct {
 }
 
 var _ storage.ProfileClient = (*countingProfileClient)(nil)
+
+func (f *countingProfileClient) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
+}
 
 func (f *countingProfileClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
 	f.cpCalls.Add(1)
@@ -568,6 +573,10 @@ type userCPErrorClient struct {
 
 var _ storage.ProfileClient = (*userCPErrorClient)(nil)
 
+func (o *userCPErrorClient) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
+}
+
 func (o *userCPErrorClient) GetContainerProfile(_ context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
 	if name == o.userName {
 		return nil, o.userCPErr
@@ -612,6 +621,10 @@ type failingProfileClient struct {
 }
 
 var _ storage.ProfileClient = (*failingProfileClient)(nil)
+
+func (f *failingProfileClient) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return nil, f.cpErr
+}
 
 func (f *failingProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	return nil, f.cpErr
@@ -686,6 +699,10 @@ type blockingProfileClient struct {
 }
 
 var _ storage.ProfileClient = (*blockingProfileClient)(nil)
+
+func (b *blockingProfileClient) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
+}
 
 func (b *blockingProfileClient) GetContainerProfile(ctx context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	b.blocked <- struct{}{} // buffered(1): stored if reader hasn't arrived yet
