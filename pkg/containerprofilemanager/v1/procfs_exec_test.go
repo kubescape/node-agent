@@ -3,6 +3,7 @@ package containerprofilemanager
 import (
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,16 +57,13 @@ func TestProcfsExec_AgreesWithAnObservedExecRatherThanDuplicatingIt(t *testing.T
 
 	// The same process, seen both ways: the tracer caught the exec, and the
 	// scan then found it still running. One entry, not two.
-	err := cpm.withContainer("cid", func(d *containerData) (int, error) {
-		d.execs = nil
-		return 0, nil
+	cpm.ReportFileExec("cid", &utils.StructEvent{
+		ExePath: "/bin/sh",
+		Args:    args,
 	})
-	require.NoError(t, err)
-	cpm.ReportProcfsExec("cid", "/bin/sh", []string{"/bin/sh", "-c", "sleep 3600"})
-	cpm.ReportProcfsExec("cid", "/bin/sh", []string{"/bin/sh", "-c", "sleep 3600"})
+	cpm.ReportProcfsExec("cid", "/bin/sh", args)
 
 	assert.Equal(t, []string{"/bin/sh"}, execPaths(t, cpm, "cid"))
-	_ = args
 }
 
 func TestProcfsExec_DifferentArgvIsADifferentEntry(t *testing.T) {
@@ -109,4 +107,13 @@ func TestProcfsExec_ArgvKeepsElementBoundaries(t *testing.T) {
 	require.Len(t, recorded, 1)
 	assert.Equal(t, []string{"/bin/sh", "/bin/sh", "-c", "while true; do cat /etc/hostname; sleep 5; done"}, recorded[0],
 		"the shell script is one argument; whitespace inside an argument is not an element boundary")
+}
+
+func TestProcfsExec_ArgvBoundaryCollisionsAreNotDiscarded(t *testing.T) {
+	cpm := withEmptyContainer(t, "cid")
+	cpm.ReportProcfsExec("cid", "/bin/sh", []string{"/bin/sh", "a b"})
+	cpm.ReportProcfsExec("cid", "/bin/sh", []string{"/bin/sh", "a", "b"})
+
+	assert.Len(t, execPaths(t, cpm, "cid"), 2,
+		"distinct argv boundaries must produce different exec entries and not collide")
 }
