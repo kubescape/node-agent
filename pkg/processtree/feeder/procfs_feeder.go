@@ -157,7 +157,11 @@ func (pf *ProcfsFeeder) feedLoop(ctx context.Context) {
 			pf.scanProcfs()
 		case <-exitTicker.C:
 			pids := pf.getPids()
-			go pf.sendExitEvents(pids)
+			pf.wg.Add(1)
+			go func(p []uint32) {
+				defer pf.wg.Done()
+				pf.sendExitEvents(p)
+			}(pids)
 		}
 	}
 }

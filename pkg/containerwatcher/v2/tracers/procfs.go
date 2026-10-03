@@ -3,6 +3,7 @@ package tracers
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -36,6 +37,7 @@ type ProcfsTracer struct {
 	procfsFeeder        *feeder.ProcfsFeeder
 	eventChan           chan conversion.ProcessEvent
 	cancel              context.CancelFunc
+	consumerWg          sync.WaitGroup
 	started             bool
 }
 
@@ -73,12 +75,17 @@ func (pt *ProcfsTracer) Start(ctx context.Context) error {
 	pt.procfsFeeder.Subscribe(pt.eventChan)
 
 	// Start event processing goroutine before starting the feeder so consumer is actively draining
-	go pt.processEvents(consumerCtx, pt.eventChan)
+	pt.consumerWg.Add(1)
+	go func() {
+		defer pt.consumerWg.Done()
+		pt.processEvents(consumerCtx, pt.eventChan)
+	}()
 
 	// Start the procfs feeder
 	if err := pt.procfsFeeder.Start(ctx); err != nil {
 		// Clean up consumer and subscription on startup failure
 		pt.cancel()
+		pt.consumerWg.Wait()
 		pt.cancel = nil
 		pt.procfsFeeder.Unsubscribe(pt.eventChan)
 		pt.eventChan = nil
@@ -98,6 +105,7 @@ func (pt *ProcfsTracer) Stop() error {
 
 	if pt.cancel != nil {
 		pt.cancel()
+		pt.consumerWg.Wait()
 		pt.cancel = nil
 	}
 
@@ -138,6 +146,9 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conv
 		case <-ctx.Done():
 			return
 		case event := <-eventChan:
+			if ctx.Err() != nil {
+				return
+			}
 			switch event.Type {
 			case conversion.ExitEvent:
 				pt.handleExitEvent(event)
