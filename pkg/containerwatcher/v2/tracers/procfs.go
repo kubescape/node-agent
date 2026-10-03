@@ -109,7 +109,7 @@ func (pt *ProcfsTracer) GetEventType() utils.EventType {
 
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (pt *ProcfsTracer) IsEnabled(cfg config.Config) bool {
-	return cfg.EnableRuntimeDetection
+	return cfg.EnableRuntimeDetection || cfg.EnableApplicationProfile
 }
 
 // processEvents processes events from the procfs feeder

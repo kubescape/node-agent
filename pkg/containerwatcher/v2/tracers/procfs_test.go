@@ -59,8 +59,12 @@ func TestProcfsTracer_IsEnabled(t *testing.T) {
 	cfg := config.Config{EnableRuntimeDetection: true}
 	assert.True(t, tracer.IsEnabled(cfg))
 
-	// Test with runtime detection disabled
-	cfg.EnableRuntimeDetection = false
+	// Test with application profile enabled
+	cfg = config.Config{EnableApplicationProfile: true}
+	assert.True(t, tracer.IsEnabled(cfg))
+
+	// Test with both disabled
+	cfg = config.Config{}
 	assert.False(t, tracer.IsEnabled(cfg))
 }
 

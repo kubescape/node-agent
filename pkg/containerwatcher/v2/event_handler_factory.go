@@ -2,7 +2,6 @@ package containerwatcher
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -128,11 +127,7 @@ func NewEventHandlerFactory(
 			// process is still there and procfs carries what it ran
 			// (entlein/node-agent#22).
 			if pe, ok := event.(*events.ProcfsEvent); ok {
-				argv := pe.Argv
-				if len(argv) == 0 {
-					argv = strings.Fields(pe.Cmdline)
-				}
-				containerProfileManager.ReportProcfsExec(pe.ContainerID, pe.Path, argv)
+				containerProfileManager.ReportProcfsExec(pe.ContainerID, pe.Path, pe.Argv)
 			}
 		case utils.OpenEventType:
 			if openEvent, ok := event.(utils.OpenEvent); ok {
