@@ -1,11 +1,13 @@
 package containerprofilecache
 
 import (
-	"strconv"
 	"testing"
 
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/networkpeer"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
 // genLister is a cluster view whose generation the test drives directly.
@@ -17,6 +19,24 @@ func (g *genLister) ServicesByLabels(map[string]string, map[string]string) []*ne
 }
 func (g *genLister) HostIPs() []string { return nil }
 func (g *genLister) Generation() int64 { return g.gen }
+
+type testObjCacheDouble struct {
+	objectcache.ObjectCacheMock
+	cpc objectcache.ContainerProfileCache
+}
+
+func (m *testObjCacheDouble) ContainerProfileCache() objectcache.ContainerProfileCache {
+	return m.cpc
+}
+
+type testCPCacheDouble struct {
+	objectcache.ContainerProfileCacheMock
+	profile *objectcache.ProjectedContainerProfile
+}
+
+func (m *testCPCacheDouble) GetProjectedContainerProfile(string) *objectcache.ProjectedContainerProfile {
+	return m.profile
+}
 
 // TestProjectedResolvedGenFeedsCacheKey: the CEL result cache keys on the
 // projected profile's SpecHash+SyncChecksum+ResolvedGen. Re-resolving against a
@@ -34,15 +54,23 @@ func TestProjectedResolvedGenFeedsCacheKey(t *testing.T) {
 		t.Fatalf("listerGen: got %d want 7", got)
 	}
 
-	key := func(p *objectcache.ProjectedContainerProfile) string {
-		return p.SpecHash + "|" + p.SyncChecksum + "|" + strconv.FormatInt(p.ResolvedGen, 10)
+	cpc := &testCPCacheDouble{
+		profile: &objectcache.ProjectedContainerProfile{SpecHash: "spec", ResolvedGen: c.listerGen()},
 	}
-	before := &objectcache.ProjectedContainerProfile{SpecHash: "spec", ResolvedGen: c.listerGen()}
+	oc := &testObjCacheDouble{cpc: cpc}
+
+	hasher := cache.HashForContainerProfile(oc)
+	args := []ref.Val{types.String("cont1")}
+	beforeKey := hasher(args)
 
 	l.gen = 8
-	after := &objectcache.ProjectedContainerProfile{SpecHash: "spec", ResolvedGen: c.listerGen()}
+	cpc.profile = &objectcache.ProjectedContainerProfile{SpecHash: "spec", ResolvedGen: c.listerGen()}
+	afterKey := hasher(args)
 
-	if key(before) == key(after) {
-		t.Errorf("cache key must change when the profile is re-resolved against a moved cluster view")
+	if beforeKey == "" || afterKey == "" {
+		t.Fatalf("expected non-empty cache keys, got before=%q after=%q", beforeKey, afterKey)
+	}
+	if beforeKey == afterKey {
+		t.Errorf("cache key must change when the profile is re-resolved against a moved cluster view: before=%q after=%q", beforeKey, afterKey)
 	}
 }

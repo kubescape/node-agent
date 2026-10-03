@@ -13,13 +13,13 @@ import (
 //
 // The synthesized neighbors are ordinary selector-free ipAddresses entries
 // (plus, for Service-backed specs, the Service's cluster FQDN as a dnsName so a
-// client dialling it by name is allowlisted too), so the existing
-// port-sensitive address matcher and DNS matcher handle them with no further
-// change — a serviceRef/host neighbor becomes exactly the narrow, resolved
-// entry it stands for. Neighbors that resolve to nothing (unknown
-// Service, selector matching nothing, unknown entity) contribute nothing —
-// never a match-all. Callers append the result to the same direction (egress
-// or ingress) before projecting the profile.
+// client dialling it by name is allowlisted too), carrying the source
+// neighbor's Ports for downstream matchers, so the existing address matcher
+// and DNS matcher handle them with no further change — a serviceRef/host
+// neighbor becomes exactly the resolved entry it stands for. Neighbors that
+// resolve to nothing (unknown Service, selector matching nothing, unknown entity)
+// contribute nothing — never a match-all. Callers append the result to the same
+// direction (egress or ingress) before projecting the profile.
 func ExpandServiceNeighbors(neighbors []v1beta1.NetworkNeighbor, l Lister) []v1beta1.NetworkNeighbor {
 	if l == nil {
 		return nil
