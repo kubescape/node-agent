@@ -225,11 +225,11 @@ func BenchmarkHasServiceNeighbors_1kPlain(b *testing.B) {
 	}
 }
 
-// TestInformerCacheMemoryEstimate approximates the heap retained by a
+// BenchmarkInformerCacheMemoryEstimate approximates the heap retained by a
 // cluster-wide Service + EndpointSlice informer cache at 1k Services / 5k
-// EndpointSlices (10 endpoints each), vs Services alone. Run with -run
-// InformerCacheMemoryEstimate -v.
-func TestInformerCacheMemoryEstimate(t *testing.T) {
+// EndpointSlices (10 endpoints each), vs Services alone. Run with -bench
+// BenchmarkInformerCacheMemoryEstimate -v.
+func BenchmarkInformerCacheMemoryEstimate(b *testing.B) {
 	measure := func(build func() []interface{}) uint64 {
 		runtime.GC()
 		var before, after runtime.MemStats
@@ -277,7 +277,7 @@ func TestInformerCacheMemoryEstimate(t *testing.T) {
 		}
 		return []interface{}{idx}
 	})
-	t.Logf("1000 Services in indexer: ~%d KiB total, ~%d B/object", svcBytes/1024, svcBytes/1000)
-	t.Logf("5000 EndpointSlices (10 endpoints each) in indexer: ~%d KiB total, ~%d B/object", sliceBytes/1024, sliceBytes/5000)
-	t.Logf("5000 STRIPPED EndpointSlices (addresses+labels only, SetTransform mitigation): ~%d KiB total, ~%d B/object", strippedBytes/1024, strippedBytes/5000)
+	b.Logf("1000 Services in indexer: ~%d KiB total, ~%d B/object", svcBytes/1024, svcBytes/1000)
+	b.Logf("5000 EndpointSlices (10 endpoints each) in indexer: ~%d KiB total, ~%d B/object", sliceBytes/1024, sliceBytes/5000)
+	b.Logf("5000 STRIPPED EndpointSlices (addresses+labels only, SetTransform mitigation): ~%d KiB total, ~%d B/object", strippedBytes/1024, strippedBytes/5000)
 }

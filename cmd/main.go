@@ -353,7 +353,7 @@ func main() {
 
 		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, metricsProvider)
 		// Resolve serviceRef/serviceSelector/entity network neighbors against live
-		// cluster state (Service ClusterIPs + endpoints, Node IPs + CNI gateway) at
+		// cluster state (Service ClusterIPs + endpoints, Node IPs) at
 		// projection time. Gated behind networkServiceResolutionEnabled: the
 		// cluster-wide Service+EndpointSlice list+watch (one per DaemonSet node) is
 		// only paid where profiles actually use the feature. Services and

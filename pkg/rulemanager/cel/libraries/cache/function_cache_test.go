@@ -252,25 +252,30 @@ func TestFunctionCache_HashForContainerProfile(t *testing.T) {
 		assert.Equal(t, "", hasher([]ref.Val{types.String("cont1")}))
 	})
 
-	t.Run("includes SpecHash SyncChecksum SourceRV and ResolvedGen", func(t *testing.T) {
+	t.Run("includes SpecHash SyncChecksum BackendChecksum SourceRV and ResolvedGen", func(t *testing.T) {
 		cpc := &testCPCacheMock{
 			profile: &objectcache.ProjectedContainerProfile{
-				SpecHash:     "spec123",
-				SyncChecksum: "sync456",
-				SourceRV:     "rv789",
-				ResolvedGen:  42,
+				SpecHash:        "spec123",
+				SyncChecksum:    "sync456",
+				BackendChecksum: "sum789",
+				SourceRV:        "rv101",
+				ResolvedGen:     42,
 			},
 		}
 		oc := &testObjectCacheMock{cpc: cpc}
 		hasher := HashForContainerProfile(oc)
-		assert.Equal(t, "spec123|sync456|rv789|42", hasher([]ref.Val{types.String("cont1")}))
+		assert.Equal(t, "spec123|sync456|sum789|rv101|42", hasher([]ref.Val{types.String("cont1")}))
 
 		// When ResolvedGen changes, hash changes
 		cpc.profile.ResolvedGen = 43
-		assert.Equal(t, "spec123|sync456|rv789|43", hasher([]ref.Val{types.String("cont1")}))
+		assert.Equal(t, "spec123|sync456|sum789|rv101|43", hasher([]ref.Val{types.String("cont1")}))
+
+		// When backend checksum changes (remote body updated), hash changes
+		cpc.profile.BackendChecksum = "sum790"
+		assert.Equal(t, "spec123|sync456|sum790|rv101|43", hasher([]ref.Val{types.String("cont1")}))
 
 		// When authored profile is updated (SourceRV changes), hash changes
-		cpc.profile.SourceRV = "rv790"
-		assert.Equal(t, "spec123|sync456|rv790|43", hasher([]ref.Val{types.String("cont1")}))
+		cpc.profile.SourceRV = "rv102"
+		assert.Equal(t, "spec123|sync456|sum790|rv102|43", hasher([]ref.Val{types.String("cont1")}))
 	})
 }

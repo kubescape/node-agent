@@ -8,6 +8,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/callstackcache"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
@@ -36,6 +37,7 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 	pcp.SourceRV = cp.ResourceVersion
 	if cp.Annotations != nil {
 		pcp.SyncChecksum = cp.Annotations[helpersv1.SyncChecksumMetadataKey]
+		pcp.BackendChecksum = cp.Annotations[storage.ContainerProfileChecksumAnnotationKey]
 	}
 
 	// Shallow copy PolicyByRuleId — values are value-typed structs.

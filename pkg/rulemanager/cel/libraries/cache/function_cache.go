@@ -100,12 +100,12 @@ func HashForContainerProfile(oc objectcache.ObjectCache) func([]ref.Val) string 
 		if pcp == nil {
 			return ""
 		}
-		// Include SyncChecksum and SourceRV so the key changes when profile content
-		// is updated under the same projection spec, preventing stale cached results after
-		// the profile learns new paths/execs/etc. or authored profiles are edited.
+		// Include SyncChecksum, BackendChecksum, and SourceRV so the key changes when profile
+		// content is updated under the same projection spec, preventing stale cached results after
+		// the profile learns new paths/execs/etc., remote bodies are updated, or authored profiles are edited.
 		// ResolvedGen covers the same hazard for serviceRef/entity neighbors, whose
 		// projected addresses move with the cluster view while other components stay put.
-		return pcp.SpecHash + "|" + pcp.SyncChecksum + "|" + pcp.SourceRV + "|" + strconv.FormatInt(pcp.ResolvedGen, 10)
+		return pcp.SpecHash + "|" + pcp.SyncChecksum + "|" + pcp.BackendChecksum + "|" + pcp.SourceRV + "|" + strconv.FormatInt(pcp.ResolvedGen, 10)
 	}
 }
 

@@ -78,7 +78,7 @@ func TestInformerLister_ServiceByName(t *testing.T) {
 func TestInformerLister_HostIPs(t *testing.T) {
 	l := newTestLister(t)
 	ips := l.HostIPs()
-	want := map[string]bool{"192.168.0.191": false, "10.42.0.1": false}
+	want := map[string]bool{"192.168.0.191": false}
 	for _, ip := range ips {
 		if _, ok := want[ip]; ok {
 			want[ip] = true
@@ -90,7 +90,7 @@ func TestInformerLister_HostIPs(t *testing.T) {
 		}
 	}
 	for _, ip := range ips {
-		if ip == "192.168.0.99" || ip == "10.42.9.1" {
+		if ip == "192.168.0.99" {
 			t.Errorf("HostIPs must be scoped to the local node; leaked other node's %s", ip)
 		}
 	}
@@ -118,22 +118,6 @@ func TestInformerLister_ServicesByLabels(t *testing.T) {
 	// a wrong-namespace filter yields nothing.
 	if got := l.ServicesByLabels(map[string]string{"app": "guestbook"}, map[string]string{"kubernetes.io/metadata.name": "other"}); len(got) != 0 {
 		t.Errorf("namespace filter should exclude, got %v", got)
-	}
-}
-
-func TestGatewayIP(t *testing.T) {
-	cases := map[string]string{
-		"10.42.0.0/24":       "10.42.0.1",
-		"10.244.5.0/24":      "10.244.5.1",
-		"2001:db8::/64":      "",
-		"10.42.0.0/31":       "", // /31 point-to-point: no gateway within subnet
-		"10.42.0.5/32":       "", // /32 host: incremented gateway is outside the CIDR
-		"255.255.255.255/32": "", // overflow to 0.0.0.0, out of CIDR
-	}
-	for cidr, want := range cases {
-		if got := gatewayIP(cidr); got != want {
-			t.Errorf("gatewayIP(%s)=%q want %q", cidr, got, want)
-		}
 	}
 }
 

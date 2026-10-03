@@ -76,6 +76,11 @@ type ProjectedContainerProfile struct {
 	// forever. Zero for profiles that resolve nothing.
 	ResolvedGen    int64
 	SyncChecksum   string
+	// BackendChecksum is the remote profile checksum from
+	// storage.ContainerProfileChecksumAnnotationKey. It participates in the CEL
+	// result-cache key to invalidate cached results when remote profiles are
+	// updated by the backend with unchanged or empty ResourceVersion.
+	BackendChecksum string
 	// SourceRV is the resourceVersion of the source ContainerProfile (e.g. authored
 	// or learned CRD). It participates in the CEL result-cache key to invalidate
 	// cached results when authored profiles (which carry no SyncChecksum) change.

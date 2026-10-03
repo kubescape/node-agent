@@ -20,7 +20,7 @@ package networkpeer
 import "strings"
 
 // EntityHost is the reserved entity naming the local node: its InternalIP(s)
-// and the CNI gateway address. It is the one peer class no Service object can
+// and ExternalIP(s). It is the one peer class no Service object can
 // represent (kubelet health probes, node-sourced / masqueraded traffic).
 const EntityHost = "host"
 
