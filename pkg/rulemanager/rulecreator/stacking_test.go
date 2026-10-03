@@ -6,6 +6,7 @@
 package rulecreator
 
 import (
+	"sync"
 	"testing"
 
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
@@ -178,4 +179,58 @@ func TestRuleStacking_UpdateRuleCompositeKey(t *testing.T) {
 
 	baseRule := r.CreateRulesByID("R0001")[0]
 	assert.Equal(t, "base-exec-updated", baseRule.Name)
+}
+
+// Test Concurrent Read/Write safety for lookup methods
+func TestRuleStacking_ConcurrentReadWrite(t *testing.T) {
+	r := NewRuleCreator()
+	r.SyncRules([]typesv1.Rule{
+		rule("", "R0001", "base-exec", true),
+		rule("tenant", "R0001", "tenant-exec", false),
+		rule("tenant", "R0002", "tenant-open", false),
+	})
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// Writer goroutines
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					r.UpdateRule(rule("tenant", "R0001", "tenant-exec-updated", false))
+					r.SyncRules([]typesv1.Rule{
+						rule("", "R0001", "base-exec", true),
+						rule("tenant", "R0001", "tenant-exec", false),
+						rule("tenant", "R0002", "tenant-open", false),
+					})
+				}
+			}
+		}()
+	}
+
+	// Reader goroutines
+	var readerWg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		readerWg.Add(1)
+		go func() {
+			defer readerWg.Done()
+			for j := 0; j < 200; j++ {
+				_ = r.CreateRulesByID("R0001")
+				_ = r.CreateRulesByName("base-exec")
+				_ = r.CreateRuleByID("R0001")
+				_ = r.CreateRuleByName("tenant-exec")
+				_ = r.GetAllRuleIDs()
+			}
+		}()
+	}
+
+	readerWg.Wait()
+	close(stop)
+	wg.Wait()
 }

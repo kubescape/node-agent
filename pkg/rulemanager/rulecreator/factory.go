@@ -44,6 +44,9 @@ func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []typesv1.Rule {
 // (scopeRulesToBundle). If no cluster-wide variant exists, the first match
 // wins.
 func (r *RuleCreatorImpl) CreateRuleByID(id string) typesv1.Rule {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
 	var fallback typesv1.Rule
 	var found bool
 	for _, rule := range r.Rules {
@@ -63,6 +66,9 @@ func (r *RuleCreatorImpl) CreateRuleByID(id string) typesv1.Rule {
 // CreateRuleByName returns the rule with the given name, preferring the
 // cluster-wide variant for the same reason as CreateRuleByID.
 func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.Rule {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
 	var fallback typesv1.Rule
 	var found bool
 	for _, rule := range r.Rules {
@@ -85,6 +91,9 @@ func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.Rule {
 // rule-binding cache, which knows the pod's bundle.
 // Ordering follows registration order, so it is deterministic.
 func (r *RuleCreatorImpl) CreateRulesByID(id string) []typesv1.Rule {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
 	var rules []typesv1.Rule
 	for _, rule := range r.Rules {
 		if rule.ID == id {
@@ -97,6 +106,9 @@ func (r *RuleCreatorImpl) CreateRulesByID(id string) []typesv1.Rule {
 // CreateRulesByName returns EVERY rule carrying the given name, for the same
 // reason as CreateRulesByID.
 func (r *RuleCreatorImpl) CreateRulesByName(name string) []typesv1.Rule {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
 	var rules []typesv1.Rule
 	for _, rule := range r.Rules {
 		if rule.Name == name {
