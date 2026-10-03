@@ -124,8 +124,8 @@ func (pf *ProcfsFeeder) feedLoop() {
 	defer ticker.Stop()
 	defer exitTicker.Stop()
 
-	// Initial scan
-	pf.scanProcfs()
+	// Initial scan with backpressure to guarantee lossless delivery to subscribers
+	pf.scanProcfsWithBackpressure(ctx)
 
 	for {
 		select {
@@ -141,6 +141,14 @@ func (pf *ProcfsFeeder) feedLoop() {
 }
 
 func (pf *ProcfsFeeder) scanProcfs() {
+	pf.scanProcfsInternal(nil)
+}
+
+func (pf *ProcfsFeeder) scanProcfsWithBackpressure(ctx context.Context) {
+	pf.scanProcfsInternal(ctx)
+}
+
+func (pf *ProcfsFeeder) scanProcfsInternal(blockingCtx context.Context) {
 	pids := pf.getPids()
 	if len(pids) == 0 {
 		return
@@ -181,9 +189,9 @@ func (pf *ProcfsFeeder) scanProcfs() {
 		if parentProc, ok := procMap[event.PPID]; ok {
 			eventWithPcomm := event
 			eventWithPcomm.Pcomm = parentProc.Comm
-			pf.broadcastEvent(eventWithPcomm)
+			pf.broadcastEventWithBackpressure(blockingCtx, eventWithPcomm)
 		} else {
-			pf.broadcastEvent(event)
+			pf.broadcastEventWithBackpressure(blockingCtx, event)
 		}
 	}
 }
@@ -301,15 +309,34 @@ func (pf *ProcfsFeeder) getProcessComm(pid uint32) (string, error) {
 	return proc.Comm()
 }
 
-// broadcastEvent sends an event to all subscribers.
+// broadcastEvent sends an event to all subscribers using non-blocking send.
 func (pf *ProcfsFeeder) broadcastEvent(event conversion.ProcessEvent) {
-	pf.mutex.RLock()
-	defer pf.mutex.RUnlock()
+	pf.broadcastEventWithBackpressure(nil, event)
+}
 
-	for _, ch := range pf.subscribers {
-		select {
-		case ch <- event:
-		default:
+// broadcastEventWithBackpressure sends an event to all subscribers, waiting on
+// channel capacity when blockingCtx is non-nil to provide lossless delivery.
+func (pf *ProcfsFeeder) broadcastEventWithBackpressure(blockingCtx context.Context, event conversion.ProcessEvent) {
+	pf.mutex.RLock()
+	if len(pf.subscribers) == 0 {
+		pf.mutex.RUnlock()
+		return
+	}
+	subscribers := append([]chan<- conversion.ProcessEvent(nil), pf.subscribers...)
+	pf.mutex.RUnlock()
+
+	for _, ch := range subscribers {
+		if blockingCtx != nil {
+			select {
+			case ch <- event:
+			case <-blockingCtx.Done():
+				return
+			}
+		} else {
+			select {
+			case ch <- event:
+			default:
+			}
 		}
 	}
 }

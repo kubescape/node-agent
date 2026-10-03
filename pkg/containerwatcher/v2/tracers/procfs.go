@@ -67,13 +67,13 @@ func (pt *ProcfsTracer) Start(ctx context.Context) error {
 	eventChan := make(chan conversion.ProcessEvent, 1000)
 	pt.procfsFeeder.Subscribe(eventChan)
 
+	// Start event processing goroutine before starting the feeder so consumer is actively draining
+	go pt.processEvents(ctx, eventChan)
+
 	// Start the procfs feeder
 	if err := pt.procfsFeeder.Start(ctx); err != nil {
 		return fmt.Errorf("starting procfs feeder: %w", err)
 	}
-
-	// Start event processing goroutine
-	go pt.processEvents(ctx, eventChan)
 
 	pt.started = true
 	logger.L().Info("ProcfsTracer started successfully")

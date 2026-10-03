@@ -3,6 +3,7 @@ package feeder
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -267,4 +268,38 @@ func TestProcfsFeeder_ProcessSpecificPID(t *testing.T) {
 	// Test processing a non-existent PID
 	err = feeder.ProcessSpecificPID(999999)
 	assert.Error(t, err)
+}
+
+func TestProcfsFeeder_ScanProcfsWithBackpressure_Lossless(t *testing.T) {
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(10*time.Second, 10*time.Second, mockManager)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// Channel buffer of 1 - much smaller than total processes on machine
+	ch := make(chan conversion.ProcessEvent, 1)
+	feeder.Subscribe(ch)
+
+	receivedAtLeast5 := make(chan struct{})
+	var once sync.Once
+	count := 0
+	go func() {
+		for range ch {
+			count++
+			if count >= 5 {
+				once.Do(func() { close(receivedAtLeast5) })
+			}
+		}
+	}()
+
+	err := feeder.Start(ctx)
+	require.NoError(t, err)
+	defer feeder.Stop()
+
+	select {
+	case <-receivedAtLeast5:
+		assert.GreaterOrEqual(t, count, 5, "backpressure must allow delivering multiple events even with a buffer of 1")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for backpressure scan to deliver events")
+	}
 }
