@@ -149,7 +149,7 @@ correlation is an upgrade, not a dependency.
 | `malwareDetectionEnabled` | bool | `false` | Start the malware manager (needs an out-of-tree scanner) |
 | `networkServiceEnabled` | bool | `false` | Enable network connection tracking |
 | `networkStreamingEnabled` | bool | `false` | Enable network event streaming |
-| `networkServiceResolutionEnabled` | bool | `false` | Enable dynamic ServiceRef and EndpointSlice network peer resolution for ContainerProfile rules. Starts cluster-wide Service, EndpointSlice, and Node informers; requires read RBAC (`list`/`watch`) for `services`, `endpointslices`, and `nodes`. |
+| `networkServiceResolutionEnabled` | bool | `false` | Enable dynamic ServiceRef and EndpointSlice network peer resolution for ContainerProfile rules. Starts cluster-wide Service and EndpointSlice informers and a local-node Node informer; requires read RBAC (`list`/`watch`) for `services`, `endpointslices`, and `nodes`. |
 | `sbomGenerationEnabled` | bool | `false` | Enable SBOM generation |
 | `sbomFailureReportingEnabled` | bool | `false` | Report SBOM generation failures; service discovery runs only when this and SBOM generation are enabled |
 | `seccompServiceEnabled` | bool | `false` | Enable seccomp profile generation |

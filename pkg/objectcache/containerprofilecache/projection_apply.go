@@ -33,6 +33,7 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 		return pcp
 	}
 
+	pcp.SourceRV = cp.ResourceVersion
 	if cp.Annotations != nil {
 		pcp.SyncChecksum = cp.Annotations[helpersv1.SyncChecksumMetadataKey]
 	}

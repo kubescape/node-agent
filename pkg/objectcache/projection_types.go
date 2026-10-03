@@ -76,6 +76,10 @@ type ProjectedContainerProfile struct {
 	// forever. Zero for profiles that resolve nothing.
 	ResolvedGen    int64
 	SyncChecksum   string
+	// SourceRV is the resourceVersion of the source ContainerProfile (e.g. authored
+	// or learned CRD). It participates in the CEL result-cache key to invalidate
+	// cached results when authored profiles (which carry no SyncChecksum) change.
+	SourceRV       string
 	PolicyByRuleId map[string]v1beta1.RulePolicy
 	CallStackTree  *callstackcache.CallStackSearchTree
 }
