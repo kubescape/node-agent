@@ -38,7 +38,9 @@ type ProcfsFeeder struct {
 	// bootTime is /proc/stat's btime, read once at Start. Used only to derive the
 	// display-only wall-clock start time; it has whole-second resolution, which is
 	// why boot-relative nanoseconds remain the sole process-identity source.
-	bootTime time.Time
+	bootTime           time.Time
+	running            bool
+	wg                 sync.WaitGroup
 }
 
 // procInfo is a helper struct to pass results from worker goroutines.
@@ -62,8 +64,8 @@ func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 	pf.mutex.Lock()
 	defer pf.mutex.Unlock()
 
-	// Use pf.cancel as the guard to check if the feeder is running.
-	if pf.cancel != nil {
+	// Use pf.running as the guard to check if the feeder is running.
+	if pf.running {
 		return fmt.Errorf("procfs feeder already started")
 	}
 
@@ -83,8 +85,10 @@ func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 
 	// Create a cancellable context for graceful shutdown
 	pf.ctx, pf.cancel = context.WithCancel(ctx)
+	pf.running = true
 
-	go pf.feedLoop()
+	pf.wg.Add(1)
+	go pf.feedLoop(pf.ctx)
 
 	return nil
 }
@@ -92,15 +96,22 @@ func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 // Stop stops the procfs feeder.
 func (pf *ProcfsFeeder) Stop() error {
 	pf.mutex.Lock()
-	defer pf.mutex.Unlock()
-
-	if pf.cancel != nil {
-		pf.cancel()
-		// Setting cancel to nil indicates the feeder is stopped and can be started again.
-		pf.cancel = nil
-		// DO NOT set pf.ctx to nil here. The feedLoop goroutine needs it
-		// to gracefully shut down when it reads from ctx.Done().
+	if !pf.running {
+		pf.mutex.Unlock()
+		return nil
 	}
+	cancel := pf.cancel
+	pf.mutex.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	pf.wg.Wait()
+
+	pf.mutex.Lock()
+	pf.running = false
+	pf.cancel = nil
+	pf.mutex.Unlock()
 
 	return nil
 }
@@ -127,10 +138,8 @@ func (pf *ProcfsFeeder) Unsubscribe(ch chan<- conversion.ProcessEvent) {
 }
 
 // feedLoop is the main loop that reads procfs and feeds events.
-func (pf *ProcfsFeeder) feedLoop() {
-	// Capture context locally. This is safe now because pf.ctx is never set to nil
-	// during the feeder's lifecycle.
-	ctx := pf.ctx
+func (pf *ProcfsFeeder) feedLoop(ctx context.Context) {
+	defer pf.wg.Done()
 
 	ticker := time.NewTicker(pf.interval)
 	exitTicker := time.NewTicker(pf.pidScanInterval)

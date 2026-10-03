@@ -60,9 +60,13 @@ func TestProcfsFeeder_Stop(t *testing.T) {
 
 	err = feeder.Stop()
 	assert.NoError(t, err)
-	// After stopping, cancel should be nil to allow a restart.
-	// The context itself is intentionally not nilled out to prevent a race condition.
 	assert.Nil(t, feeder.cancel, "Cancel func should be nil after stop")
+
+	// Test rapid restart after stop joins old loop cleanly
+	err = feeder.Start(ctx)
+	require.NoError(t, err)
+	err = feeder.Stop()
+	assert.NoError(t, err)
 }
 
 func TestProcfsFeeder_Subscribe(t *testing.T) {
