@@ -39,10 +39,9 @@ func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []typesv1.Rule {
 // Since signed bundle overlays may carry a rule ID that also exists
 // cluster-wide, an ID can now match several entries. This single-return lookup
 // deliberately prefers the CLUSTER-WIDE variant (Bundle == "") so its result is
-// identical to the pre-signing behaviour for every existing caller; bundle
-// overriding is resolved later, per pod, in the rule-binding cache
-// (scopeRulesToBundle). If no cluster-wide variant exists, the first match
-// wins.
+// identical to the pre-signing behaviour for existing callers; bundle
+// overriding is intended to be resolved per pod by callers equipped for bundle scoping.
+// If no cluster-wide variant exists, the first match wins.
 func (r *RuleCreatorImpl) CreateRuleByID(id string) typesv1.Rule {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
@@ -87,8 +86,8 @@ func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.Rule {
 
 // CreateRulesByID returns EVERY rule carrying the given ID: the cluster-wide
 // rule and each bundle overlay that overrides it. Unlike CreateRuleByID this
-// makes no choice — the choice belongs to the per-pod resolution in the
-// rule-binding cache, which knows the pod's bundle.
+// returns all variants without selection, leaving bundle-specific scoping to
+// callers that know the target workload's bundle.
 // Ordering follows registration order, so it is deterministic.
 func (r *RuleCreatorImpl) CreateRulesByID(id string) []typesv1.Rule {
 	r.mutex.RLock()
@@ -193,11 +192,10 @@ func (r *RuleCreatorImpl) CreateRulesForContext(ctx contextdetection.EventSource
 }
 
 // ruleKey identifies a rule inside the creator's rule set. A rule ID alone is
-// NOT unique any more: a signed bundle overlay may carry the same rule ID as the
-// cluster-wide rule it overrides for that bundle, and the two must coexist here
-// (bundle resolution happens later, in the rule-binding cache). Cluster-wide
-// rules have an empty Bundle, so their key is "/<id>" and the pre-signing
-// behaviour is unchanged.
+// NOT unique: a signed bundle overlay may carry the same rule ID as the
+// cluster-wide rule it overrides for that bundle, and both can coexist here.
+// Cluster-wide rules have an empty Bundle, so their key is "/<id>" and the
+// pre-signing behaviour is unchanged.
 func ruleKey(rule typesv1.Rule) string {
 	return rule.Bundle + "/" + rule.ID
 }

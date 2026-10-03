@@ -28,11 +28,9 @@ type RuleCreator interface {
 
 	// CreateRulesByID / CreateRulesByName return EVERY variant carrying that ID
 	// or name — the cluster-wide rule plus each bundle overlay.
-	// Callers that resolve rules per pod (the rule-binding cache) must use these,
-	// otherwise a bundle overlay can never override the cluster-wide rule it is
-	// meant to replace: the override is decided later, per bundle, by
-	// scopeRulesToBundle, which can only choose between variants it was
-	// given. Order is the creator's registration order, hence deterministic.
+	// Intended for callers that resolve rules per pod (planned in the rule-binding
+	// cache), allowing bundle overlays to be selected over cluster-wide defaults
+	// based on the workload's bundle scope. Order follows registration order.
 	CreateRulesByID(id string) []typesv1.Rule
 	CreateRulesByName(name string) []typesv1.Rule
 	RegisterRule(rule typesv1.Rule)

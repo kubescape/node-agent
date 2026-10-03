@@ -36,15 +36,12 @@ type Rule struct {
 	MitreTechnique          string                      `json:"mitreTechnique" yaml:"mitreTechnique"`
 	Prefilter               *prefilter.Params           `json:"-" yaml:"-"`
 
-	// Provenance of the rule, established by the rules watcher after the
-	// carrying Rules object was admitted. Bundle is the SIGNED bundle the
-	// admitted overlay fragment belongs to — the same bundle its ContainerProfile
-	// half carries — so the rule applies to exactly the workloads that opted into
-	// that bundle via the kubescape.io/user-defined-profile pod label, in any
-	// namespace. ClusterWide marks a rule from a base fragment, which applies to
-	// every workload and belongs to no bundle. Both bundle membership and the
-	// fragment class are signed, so an installer can neither re-target an overlay
-	// nor promote it to cluster-wide.
+	// Provenance of the rule, populated after the carrying Rules object is admitted
+	// (wired in the rules watcher). Bundle is the signed bundle the admitted overlay
+	// fragment belongs to — the same bundle its ContainerProfile half carries — so the
+	// rule applies to workloads that opt into that bundle via the
+	// kubescape.io/user-defined-profile pod label. ClusterWide marks a rule from a
+	// base fragment, which applies cluster-wide and belongs to no bundle.
 	//
 	// These MUST stay json:"-" / yaml:"-": Rule is inside RulesSpec, which IS
 	// the signed content, so making them serialisable would change every
