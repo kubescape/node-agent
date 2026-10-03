@@ -171,10 +171,31 @@ func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *Watched
 	return labels
 }
 
+// IsTerminal reports whether the status represents a terminal lifecycle state.
+func (s WatchedContainerStatus) IsTerminal() bool {
+	switch s {
+	case WatchedContainerStatusCompleted,
+		WatchedContainerStatusFailed,
+		WatchedContainerStatusMissingRuntime,
+		WatchedContainerStatusTooLarge,
+		WatchedContainerStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 func (watchedContainer *WatchedContainerData) GetStatus() WatchedContainerStatus {
 	watchedContainer.statusMu.RLock()
 	defer watchedContainer.statusMu.RUnlock()
 	return watchedContainer.status
+}
+
+// IsTerminal reports whether the container has reached a terminal status.
+func (watchedContainer *WatchedContainerData) IsTerminal() bool {
+	watchedContainer.statusMu.RLock()
+	defer watchedContainer.statusMu.RUnlock()
+	return watchedContainer.status.IsTerminal()
 }
 
 func (watchedContainer *WatchedContainerData) GetCompletionStatus() WatchedContainerCompletionStatus {
@@ -187,6 +208,19 @@ func (watchedContainer *WatchedContainerData) SetStatus(newStatus WatchedContain
 	watchedContainer.statusMu.Lock()
 	defer watchedContainer.statusMu.Unlock()
 	watchedContainer.status = newStatus
+}
+
+// SetReadyUnlessTerminal sets the container status to Ready unless it has already
+// reached a terminal state (Completed, Failed, MissingRuntime, TooLarge, Rejected).
+// It reports whether the status was updated to Ready.
+func (watchedContainer *WatchedContainerData) SetReadyUnlessTerminal() bool {
+	watchedContainer.statusMu.Lock()
+	defer watchedContainer.statusMu.Unlock()
+	if watchedContainer.status.IsTerminal() {
+		return false
+	}
+	watchedContainer.status = WatchedContainerStatusReady
+	return true
 }
 
 func (watchedContainer *WatchedContainerData) SetCompletionStatus(newStatus WatchedContainerCompletionStatus) {

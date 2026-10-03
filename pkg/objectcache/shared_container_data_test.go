@@ -147,3 +147,69 @@ func TestWatchedContainerData_StatusConcurrency(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestWatchedContainerData_SetReadyUnlessTerminal(t *testing.T) {
+	// Non-terminal states can transition to Ready
+	data := &WatchedContainerData{}
+	assert.False(t, data.IsTerminal())
+	assert.True(t, data.SetReadyUnlessTerminal())
+	assert.Equal(t, WatchedContainerStatusReady, data.GetStatus())
+
+	data.SetStatus(WatchedContainerStatusInitializing)
+	assert.False(t, data.IsTerminal())
+	assert.True(t, data.SetReadyUnlessTerminal())
+	assert.Equal(t, WatchedContainerStatusReady, data.GetStatus())
+
+	// Terminal states cannot transition to Ready
+	terminalStates := []WatchedContainerStatus{
+		WatchedContainerStatusCompleted,
+		WatchedContainerStatusFailed,
+		WatchedContainerStatusMissingRuntime,
+		WatchedContainerStatusTooLarge,
+		WatchedContainerStatusRejected,
+	}
+
+	for _, state := range terminalStates {
+		t.Run(string(state), func(t *testing.T) {
+			assert.True(t, state.IsTerminal())
+			data.SetStatus(state)
+			assert.True(t, data.IsTerminal())
+			assert.False(t, data.SetReadyUnlessTerminal())
+			assert.Equal(t, state, data.GetStatus())
+		})
+	}
+}
+
+func TestWatchedContainerData_SetReadyUnlessTerminal_ConcurrentTermination(t *testing.T) {
+	for iter := 0; iter < 100; iter++ {
+		data := &WatchedContainerData{}
+		data.SetStatus(WatchedContainerStatusReady)
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+
+		// Ticker simulator
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := 0; i < 50; i++ {
+				data.SetReadyUnlessTerminal()
+			}
+		}()
+
+		// Deletion simulator
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			data.SetStatus(WatchedContainerStatusCompleted)
+		}()
+
+		close(start)
+		wg.Wait()
+
+		// Once completed, it must not regress to Ready
+		assert.Equal(t, WatchedContainerStatusCompleted, data.GetStatus())
+	}
+}
