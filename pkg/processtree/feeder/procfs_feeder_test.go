@@ -3,7 +3,6 @@ package feeder
 import (
 	"context"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -270,36 +269,67 @@ func TestProcfsFeeder_ProcessSpecificPID(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestProcfsFeeder_ScanProcfsWithBackpressure_Lossless(t *testing.T) {
+func TestProcfsFeeder_BroadcastEventWithBackpressure_Lossless(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
 	feeder := NewProcfsFeeder(10*time.Second, 10*time.Second, mockManager)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
 
-	// Channel buffer of 1 - much smaller than total processes on machine
+	// Channel buffer of 1 - will block if not drained
 	ch := make(chan conversion.ProcessEvent, 1)
 	feeder.Subscribe(ch)
 
-	receivedAtLeast5 := make(chan struct{})
-	var once sync.Once
-	count := 0
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	const totalEvents = 10
+	var received []conversion.ProcessEvent
+	done := make(chan struct{})
+
 	go func() {
-		for range ch {
-			count++
-			if count >= 5 {
-				once.Do(func() { close(receivedAtLeast5) })
+		defer close(done)
+		for {
+			select {
+			case ev := <-ch:
+				received = append(received, ev)
+				if len(received) == totalEvents {
+					return
+				}
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
 
-	err := feeder.Start(ctx)
-	require.NoError(t, err)
-	defer feeder.Stop()
+	for i := uint32(1); i <= totalEvents; i++ {
+		feeder.broadcastEventWithBackpressure(ctx, conversion.ProcessEvent{PID: i})
+	}
 
 	select {
-	case <-receivedAtLeast5:
-		assert.GreaterOrEqual(t, count, 5, "backpressure must allow delivering multiple events even with a buffer of 1")
+	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for backpressure scan to deliver events")
+		t.Fatal("timed out waiting for events")
+	}
+
+	assert.Len(t, received, totalEvents)
+	for i, ev := range received {
+		assert.Equal(t, uint32(i+1), ev.PID)
+	}
+
+	// Also verify context cancellation unblocks broadcastEventWithBackpressure when buffer is full
+	cancelingCtx, cancelBroadcast := context.WithCancel(t.Context())
+	// Fill buffer of size 1
+	feeder.broadcastEventWithBackpressure(ctx, conversion.ProcessEvent{PID: 100})
+	unblocked := make(chan struct{})
+	go func() {
+		feeder.broadcastEventWithBackpressure(cancelingCtx, conversion.ProcessEvent{PID: 101})
+		close(unblocked)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancelBroadcast()
+
+	select {
+	case <-unblocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("broadcastEventWithBackpressure did not unblock on context cancellation")
 	}
 }
