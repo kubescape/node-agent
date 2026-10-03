@@ -31,6 +31,10 @@ func (a ContainerProfileManagerMock) ReportFileExec(_ string, _ utils.ExecEvent)
 	// noop
 }
 
+func (a ContainerProfileManagerMock) ReportProcfsExec(_, _ string, _ []string) {
+	// noop
+}
+
 func (a ContainerProfileManagerMock) ReportFileOpen(_ string, _ utils.OpenEvent) {
 	// noop
 }

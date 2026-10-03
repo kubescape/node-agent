@@ -3,6 +3,7 @@ package tracers
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -34,6 +35,9 @@ type ProcfsTracer struct {
 	procfsEventCallback func(utils.K8sEvent, string, uint32)
 	exitEventCallback   func(utils.K8sEvent, string, uint32)
 	procfsFeeder        *feeder.ProcfsFeeder
+	eventChan           chan conversion.ProcessEvent
+	cancel              context.CancelFunc
+	consumerWg          sync.WaitGroup
 	started             bool
 }
 
@@ -63,17 +67,30 @@ func (pt *ProcfsTracer) Start(ctx context.Context) error {
 		return fmt.Errorf("procfs tracer already started")
 	}
 
+	consumerCtx, cancel := context.WithCancel(ctx)
+	pt.cancel = cancel
+
+	// Subscribe to procfs events before starting the feeder so the initial scan is never missed
+	pt.eventChan = make(chan conversion.ProcessEvent, 1000)
+	pt.procfsFeeder.Subscribe(pt.eventChan)
+
+	// Start event processing goroutine before starting the feeder so consumer is actively draining
+	pt.consumerWg.Add(1)
+	go func() {
+		defer pt.consumerWg.Done()
+		pt.processEvents(consumerCtx, pt.eventChan)
+	}()
+
 	// Start the procfs feeder
 	if err := pt.procfsFeeder.Start(ctx); err != nil {
+		// Clean up consumer and subscription on startup failure
+		pt.cancel()
+		pt.consumerWg.Wait()
+		pt.cancel = nil
+		pt.procfsFeeder.Unsubscribe(pt.eventChan)
+		pt.eventChan = nil
 		return fmt.Errorf("starting procfs feeder: %w", err)
 	}
-
-	// Subscribe to procfs events
-	eventChan := make(chan conversion.ProcessEvent, 1000)
-	pt.procfsFeeder.Subscribe(eventChan)
-
-	// Start event processing goroutine
-	go pt.processEvents(ctx, eventChan)
 
 	pt.started = true
 	logger.L().Info("ProcfsTracer started successfully")
@@ -86,7 +103,17 @@ func (pt *ProcfsTracer) Stop() error {
 		return nil
 	}
 
+	if pt.cancel != nil {
+		pt.cancel()
+		pt.consumerWg.Wait()
+		pt.cancel = nil
+	}
+
 	if pt.procfsFeeder != nil {
+		if pt.eventChan != nil {
+			pt.procfsFeeder.Unsubscribe(pt.eventChan)
+			pt.eventChan = nil
+		}
 		if err := pt.procfsFeeder.Stop(); err != nil {
 			logger.L().Error("error stopping procfs feeder", helpers.Error(err))
 		}
@@ -109,7 +136,7 @@ func (pt *ProcfsTracer) GetEventType() utils.EventType {
 
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (pt *ProcfsTracer) IsEnabled(cfg config.Config) bool {
-	return cfg.EnableRuntimeDetection
+	return cfg.EnableRuntimeDetection || cfg.EnableApplicationProfile
 }
 
 // processEvents processes events from the procfs feeder
@@ -119,6 +146,9 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conv
 		case <-ctx.Done():
 			return
 		case event := <-eventChan:
+			if ctx.Err() != nil {
+				return
+			}
 			switch event.Type {
 			case conversion.ExitEvent:
 				pt.handleExitEvent(event)
@@ -156,6 +186,7 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 		Comm:           event.Comm,
 		Pcomm:          event.Pcomm,
 		Cmdline:        event.Cmdline,
+		Argv:           event.Argv,
 		Uid:            event.Uid,
 		Gid:            event.Gid,
 		Cwd:            event.Cwd,
@@ -178,6 +209,7 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 		if len(containersByNetns) > 0 {
 			// We don't care which container it is, we just need to find one
 			container = containersByNetns[0]
+			procfsEvent.AmbiguousContainer = true
 		}
 	}
 
