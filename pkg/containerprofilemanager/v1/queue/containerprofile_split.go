@@ -245,17 +245,29 @@ func countNeighborElements(neighbors []v1beta1.NetworkNeighbor) int {
 	return count
 }
 
-// Split peer lists first. Once a single peer remains, its ports can still be
-// partitioned while copying the identity into both chunks for storage to merge.
+// halveNeighbors partitions the ordered observations at half their total weight,
+// counting every port and each portless peer once. Only a peer crossing that boundary
+// is copied into both chunks, so large port lists consume the same split-depth budget
+// as other observations without duplicating every peer's identity.
 func halveNeighbors(neighbors []v1beta1.NetworkNeighbor) ([]v1beta1.NetworkNeighbor, []v1beta1.NetworkNeighbor) {
-	if len(neighbors) != 1 || len(neighbors[0].Ports) <= 1 {
-		return halve(neighbors)
+	remaining := (countNeighborElements(neighbors) + 1) / 2
+	for i := range neighbors {
+		if remaining == 0 {
+			return neighbors[:i], neighbors[i:]
+		}
+		weight := max(1, len(neighbors[i].Ports))
+		if remaining < weight {
+			left, right := neighbors[i].DeepCopy(), neighbors[i].DeepCopy()
+			left.Ports = left.Ports[:remaining]
+			right.Ports = right.Ports[remaining:]
+			a := append([]v1beta1.NetworkNeighbor(nil), neighbors[:i]...)
+			a = append(a, *left)
+			b := append([]v1beta1.NetworkNeighbor{*right}, neighbors[i+1:]...)
+			return a, b
+		}
+		remaining -= weight
 	}
-	a, b := neighbors[0].DeepCopy(), neighbors[0].DeepCopy()
-	mid := (len(a.Ports) + 1) / 2
-	a.Ports = a.Ports[:mid]
-	b.Ports = b.Ports[mid:]
-	return []v1beta1.NetworkNeighbor{*a}, []v1beta1.NetworkNeighbor{*b}
+	return neighbors, nil
 }
 
 // moveOneElement transfers a single element from the first non-empty partitionable field of

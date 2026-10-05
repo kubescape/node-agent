@@ -79,3 +79,86 @@ func TestQueueSplitsSingleNeighborPorts(t *testing.T) {
 		}
 	}
 }
+
+// skewedPortNeighbors places one port-heavy peer among peers with one or no ports.
+func skewedPortNeighbors(heavyIndex int) []v1beta1.NetworkNeighbor {
+	neighbors := make([]v1beta1.NetworkNeighbor, 16)
+	for i := range neighbors {
+		neighbors[i] = portSplitNeighbor()
+		neighbors[i].Identifier = fmt.Sprintf("peer-%d", i)
+		neighbors[i].Ports = neighbors[i].Ports[:i%2]
+	}
+	neighbors[heavyIndex] = portSplitNeighbor()
+	return neighbors
+}
+
+// TestSplitProfileBalancesSkewedNeighborPorts verifies weighted splitting preserves
+// observation order, zero-port peers, identities, and the unmodified input.
+func TestSplitProfileBalancesSkewedNeighborPorts(t *testing.T) {
+	for _, direction := range []string{"ingress", "egress"} {
+		for _, heavyIndex := range []int{0, 8, 15} {
+			t.Run(fmt.Sprintf("%s/heavy=%d", direction, heavyIndex), func(t *testing.T) {
+				profile := testProfile()
+				neighbors := skewedPortNeighbors(heavyIndex)
+				if direction == "ingress" {
+					profile.Spec.Ingress = neighbors
+				} else {
+					profile.Spec.Egress = neighbors
+				}
+				before := profile.DeepCopy()
+				a, b, ok := splitProfile(profile)
+				require.True(t, ok)
+				require.Equal(t, 12, countPartitionableElements(&a.Spec))
+				require.Equal(t, 11, countPartitionableElements(&b.Spec))
+				require.Equal(t, elementSignatures(&profile.Spec), append(elementSignatures(&a.Spec), elementSignatures(&b.Spec)...))
+				aPeers, bPeers := a.Spec.Ingress, b.Spec.Ingress
+				if direction == "egress" {
+					aPeers, bPeers = a.Spec.Egress, b.Spec.Egress
+				}
+				require.LessOrEqual(t, len(aPeers)+len(bPeers), len(neighbors)+1)
+				if aPeers[len(aPeers)-1].Identifier == bPeers[0].Identifier {
+					// Only a boundary peer is duplicated, with independent identity and ports.
+					aPeers[len(aPeers)-1].PodSelector.MatchLabels["app"] = "changed"
+					*aPeers[len(aPeers)-1].Ports[0].Port = 1
+					require.Equal(t, "api", bPeers[0].PodSelector.MatchLabels["app"])
+				}
+				require.Equal(t, before, profile)
+			})
+		}
+	}
+}
+
+// TestQueueSplitsSkewedNeighborPortsWithinDefaultDepth verifies a heavy peer is
+// split before peer isolation exhausts the HTTP 413 retry lineage's depth budget.
+func TestQueueSplitsSkewedNeighborPortsWithinDefaultDepth(t *testing.T) {
+	for _, direction := range []string{"ingress", "egress"} {
+		for _, heavyIndex := range []int{0, 8, 15} {
+			t.Run(fmt.Sprintf("%s/heavy=%d", direction, heavyIndex), func(t *testing.T) {
+				creator := &portLimitedCreator{}
+				q, err := NewQueueData(context.Background(), creator, QueueConfig{QueueDir: t.TempDir(), MaxQueueSize: 100})
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, q.Close()) })
+				profile := testProfile()
+				if direction == "ingress" {
+					profile.Spec.Ingress = skewedPortNeighbors(heavyIndex)
+				} else {
+					profile.Spec.Egress = skewedPortNeighbors(heavyIndex)
+				}
+				require.NoError(t, q.Enqueue(profile, "container"))
+				for range DefaultMaxSplitDepth + 2 {
+					q.processAllItems()
+				}
+				var observations []string
+				var rows []tsRow
+				for _, accepted := range creator.accepted {
+					observations = append(observations, elementSignatures(&accepted.Spec)...)
+					rows = append(rows, tsRow{PreviousReportTimestamp: accepted.Annotations[helpersv1.PreviousReportTimestampMetadataKey], ReportTimestamp: accepted.Annotations[helpersv1.ReportTimestampMetadataKey]})
+				}
+				require.ElementsMatch(t, elementSignatures(&profile.Spec), observations)
+				assertChainIsLinear(t, rows, profile.Annotations[helpersv1.PreviousReportTimestampMetadataKey], profile.Annotations[helpersv1.ReportTimestampMetadataKey])
+				require.Zero(t, q.chunksDropped.Load())
+				require.Zero(t, q.GetQueueSize())
+			})
+		}
+	}
+}
