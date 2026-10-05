@@ -535,3 +535,18 @@ func TestEmptyEvents_RetainsDeferredServicePortSnapshot(t *testing.T) {
 	cd.emptyEvents()
 	require.Nil(t, cd.servicePorts, "snapshots clear when their observations are emitted")
 }
+
+func BenchmarkNetworkNeighborsPortScan(b *testing.B) {
+	cd := &containerData{networks: mapset.NewSet[NetworkEvent]()}
+	for port := 1; port <= 4000; port++ {
+		cd.networks.Add(NetworkEvent{Port: uint16(port), Protocol: "tcp", PktType: utils.OutgoingPktType,
+			Destination: Destination{Kind: EndpointKindRaw, IPAddress: "93.184.216.34"}})
+	}
+	b.ResetTimer()
+	for b.Loop() {
+		neighbors := cd.getEgressNetworkNeighbors("", "default", nil, nil, nil, nil, false)
+		if len(neighbors) != 1 || len(neighbors[0].Ports) != 4000 {
+			b.Fatal("port-scan observations were lost")
+		}
+	}
+}

@@ -2,7 +2,6 @@ package containerprofilemanager
 
 import (
 	"net"
-	"slices"
 	"sort"
 
 	"github.com/DmitriyVTitov/size"
@@ -247,7 +246,7 @@ func (cd *containerData) getIngressNetworkNeighbors(
 		return ingress
 	}
 
-	seen := make(map[string]int)
+	seen := make(map[string]networkNeighborIndex)
 	for _, event := range cd.networks.ToSlice() {
 		if event.PktType == utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
@@ -276,7 +275,7 @@ func (cd *containerData) getEgressNetworkNeighbors(
 		return egress
 	}
 
-	seen := make(map[string]int)
+	seen := make(map[string]networkNeighborIndex)
 	for _, event := range cd.networks.ToSlice() {
 		if event.PktType != utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
@@ -290,19 +289,27 @@ func (cd *containerData) getEgressNetworkNeighbors(
 	return egress
 }
 
+type networkNeighborIndex struct {
+	index int
+	ports map[string]struct{}
+}
+
 // appendNetworkNeighbor merges all observed ports for neighbors with the same identity.
-func appendNetworkNeighbor(neighbors []v1beta1.NetworkNeighbor, seen map[string]int, neighbor v1beta1.NetworkNeighbor) []v1beta1.NetworkNeighbor {
-	if index, ok := seen[neighbor.Identifier]; ok {
+func appendNetworkNeighbor(neighbors []v1beta1.NetworkNeighbor, seen map[string]networkNeighborIndex, neighbor v1beta1.NetworkNeighbor) []v1beta1.NetworkNeighbor {
+	if entry, ok := seen[neighbor.Identifier]; ok {
 		for _, port := range neighbor.Ports {
-			if !slices.ContainsFunc(neighbors[index].Ports, func(existing v1beta1.NetworkPort) bool {
-				return existing.Name == port.Name
-			}) {
-				neighbors[index].Ports = append(neighbors[index].Ports, port)
+			if _, exists := entry.ports[port.Name]; !exists {
+				neighbors[entry.index].Ports = append(neighbors[entry.index].Ports, port)
+				entry.ports[port.Name] = struct{}{}
 			}
 		}
 		return neighbors
 	}
-	seen[neighbor.Identifier] = len(neighbors)
+	ports := make(map[string]struct{}, len(neighbor.Ports))
+	for _, port := range neighbor.Ports {
+		ports[port.Name] = struct{}{}
+	}
+	seen[neighbor.Identifier] = networkNeighborIndex{index: len(neighbors), ports: ports}
 	return append(neighbors, neighbor)
 }
 
