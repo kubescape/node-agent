@@ -563,10 +563,16 @@ processLoop:
 		if !queuedProfile.IsStitch && queuedProfile.MaxProfileSize > 0 &&
 			queuedProfile.SplitDepth < qd.maxSplitDepth &&
 			int64(size.Of(queuedProfile.Profile.Spec)) > queuedProfile.MaxProfileSize {
-			if a, b, ok := splitProfile(queuedProfile.Profile); ok && qd.requeueSplit(queuedProfile, a, b, false) {
-				qd.splits.Add(1)
-				qd.metrics.ReportContainerProfileSplit()
-				continue
+			if a, b, ok := splitProfile(queuedProfile.Profile); ok {
+				fallback := qd.requeueSplit(queuedProfile, a, b, false)
+				if fallback != queuedProfile {
+					qd.splits.Add(1)
+					qd.metrics.ReportContainerProfileSplit()
+				}
+				if fallback == nil {
+					continue
+				}
+				queuedProfile = fallback
 			}
 		}
 
@@ -669,14 +675,14 @@ func (qd *QueueData) requeueImmediate(queuedProfile *QueuedContainerProfile) {
 // Both halves inherit parent.Attempts, take SplitDepth = parent.SplitDepth+1, and are explicitly
 // IsStitch = false (the zero value - stated because a half must always remain splittable).
 //
-// With allowEviction false, shutdown or insufficient capacity leaves the queue untouched
-// and returns false so the caller can send the original profile. Admission is checked under
-// the same lock as both enqueues, preventing shutdown or concurrent producers from
-// invalidating the decision before either half is queued. A true
-// return means the split was attempted, including enqueue failures handled below.
+// With allowEviction false, shutdown, insufficient capacity, or first-half enqueue failure
+// returns parent for direct delivery. If only the second enqueue fails, it returns that half
+// with its split metadata for direct delivery, preserving the already queued first half.
+// Admission is checked under the same lock as both enqueues. A nil return means the split was
+// handled; allowEviction true retains the HTTP 413 drop/repair policy on enqueue failures.
 //
 // Callers must NOT hold qd.mu.
-func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.ContainerProfile, allowEviction bool) bool {
+func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.ContainerProfile, allowEviction bool) *QueuedContainerProfile {
 	half := func(profile *v1beta1.ContainerProfile) *QueuedContainerProfile {
 		return &QueuedContainerProfile{
 			Profile:        profile,
@@ -692,10 +698,15 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 	defer qd.mu.Unlock()
 
 	if !allowEviction && (!qd.running || qd.maxQueueSize-qd.queue.Size() < 2) {
-		return false
+		return parent
 	}
 
 	if err := qd.enqueueLocked(half(a)); err != nil {
+		if !allowEviction {
+			logger.L().Warning("failed to enqueue optional split, sending original container profile",
+				helpers.String("name", parent.Profile.Name), helpers.Error(err))
+			return parent
+		}
 		// The parent was already dequeued, so neither half reaches the queue: this is a
 		// total loss of the chunk, not just a fork, and must be at least as loud as the
 		// second-half case below. Unlike that case, nothing of the parent's data survives
@@ -721,7 +732,7 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 				helpers.String("containerID", parent.ContainerID))
 
 			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonStitchBacklogExhausted))
-			return true
+			return nil
 		}
 
 		stitch := qd.newStitchFor(parent, false)
@@ -734,10 +745,16 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 
 			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 		}
-		return true
+		return nil
 	}
 
-	if err := qd.enqueueLocked(half(b)); err != nil {
+	second := half(b)
+	if err := qd.enqueueLocked(second); err != nil {
+		if !allowEviction {
+			logger.L().Warning("failed to enqueue second optional split half, sending it directly",
+				helpers.String("name", b.Name), helpers.Error(err))
+			return second
+		}
 		// Exactly one half of a pair survived, which forks the container's report chain.
 		logger.L().Warning("failed to enqueue the second half of a split container profile, its report chain is now forked",
 			helpers.String("name", b.Name),
@@ -748,7 +765,7 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 		qd.chunksDropped.Add(1)
 		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 	}
-	return true
+	return nil
 }
 
 // dropChunk discards a queued chunk that cannot be delivered as-is: because it was rejected for

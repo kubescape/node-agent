@@ -3,7 +3,12 @@ package queue
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
+
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,17 +70,19 @@ func TestProactiveSplitChecksCapacityAtAdmission(t *testing.T) {
 	// the same locked path as Enqueue and consumes one of the two available slots.
 	qd.mu.Lock()
 	started := make(chan struct{})
-	admitted := make(chan bool, 1)
+	fallback := make(chan *QueuedContainerProfile, 1)
 	go func() {
 		close(started)
-		admitted <- qd.requeueSplit(&QueuedContainerProfile{Profile: parent}, a, b, false)
+		fallback <- qd.requeueSplit(&QueuedContainerProfile{Profile: parent}, a, b, false)
 	}()
 	<-started
 	incoming := testProfile()
 	err = qd.enqueueLocked(&QueuedContainerProfile{Profile: incoming, ContainerID: "incoming"})
 	qd.mu.Unlock()
 	require.NoError(t, err)
-	require.False(t, <-admitted)
+	unsent := <-fallback
+	require.NotNil(t, unsent)
+	require.Same(t, parent, unsent.Profile)
 	assert.Zero(t, qd.chunksDropped.Load())
 	require.Equal(t, 2, qd.GetQueueSize())
 	for _, id := range []string{"pending", "incoming"} {
@@ -133,6 +140,74 @@ func TestProactiveSplitSendsOriginalDuringShutdown(t *testing.T) {
 			require.Len(t, created, 1)
 			assert.Equal(t, parent, created[0])
 			assert.Zero(t, qd.splits.Load())
+			assert.Zero(t, qd.chunksDropped.Load())
+			assert.Zero(t, qd.GetQueueSize())
+		})
+	}
+}
+
+// recoveringDiskCreator restores segment creation when storage receives a profile,
+// allowing each regression to verify the complete delivery after an enqueue failure.
+type recoveringDiskCreator struct {
+	MockProfileCreator
+	blockedSegment string
+}
+
+// CreateContainerProfileDirect clears the injected disk failure and records delivery.
+func (c *recoveringDiskCreator) CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error {
+	if c.blockedSegment != "" {
+		if err := os.Remove(c.blockedSegment); err != nil {
+			return err
+		}
+		c.blockedSegment = ""
+	}
+	return c.MockProfileCreator.CreateContainerProfileDirect(profile)
+}
+
+// TestProactiveSplitPreservesDataOnDiskFailure verifies that optional splitting sends
+// the original on first-half failure and only the unqueued half on second-half failure.
+func TestProactiveSplitPreservesDataOnDiskFailure(t *testing.T) {
+	for _, itemsPerSegment := range []int{2, 3} {
+		t.Run(fmt.Sprint(itemsPerSegment), func(t *testing.T) {
+			dir := t.TempDir()
+			creator := &recoveringDiskCreator{}
+			qd, err := NewQueueData(context.Background(), creator, QueueConfig{QueueDir: dir, MaxQueueSize: 4, ItemsPerSegment: itemsPerSegment})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, qd.Close()) })
+			parent := testProfile()
+			parent.Spec.Capabilities = []string{"cap-a", "cap-b"}
+			require.NoError(t, qd.EnqueueWithSizeLimit(parent, "parent", 1))
+			pending := testProfile()
+			pending.Name = "pending"
+			require.NoError(t, qd.Enqueue(pending, "pending"))
+
+			// dque starts at segment 1. Keep a pending item there so dequeuing the
+			// parent does not rotate segments. Two slots force the first-half enqueue
+			// to create segment 2; three slots defer that failure to the second half.
+			blocked := filepath.Join(dir, DefaultQueueName, "0000000000002.dque")
+			require.NoError(t, os.Mkdir(blocked, 0700))
+			creator.blockedSegment = blocked
+			qd.processAllItems()
+			require.Empty(t, creator.blockedSegment, "fallback must reach storage before pending data is dequeued")
+			qd.processAllItems()
+
+			created := creator.CreatedProfiles()
+			if itemsPerSegment == 2 {
+				require.Len(t, created, 2)
+				assert.Equal(t, parent, created[0])
+				assert.Zero(t, qd.splits.Load())
+			} else {
+				require.Len(t, created, 3)
+				// The second half is sent immediately; the first remains queued until
+				// the next processing pass. Their payloads and chain still cover parent.
+				a, b := created[2], created[0]
+				assert.Equal(t, parent.Spec.Capabilities, append(a.Spec.Capabilities, b.Spec.Capabilities...))
+				assert.Equal(t, parent.Annotations[helpersv1.PreviousReportTimestampMetadataKey], a.Annotations[helpersv1.PreviousReportTimestampMetadataKey])
+				assert.Equal(t, a.Annotations[helpersv1.ReportTimestampMetadataKey], b.Annotations[helpersv1.PreviousReportTimestampMetadataKey])
+				assert.Equal(t, parent.Annotations[helpersv1.ReportTimestampMetadataKey], b.Annotations[helpersv1.ReportTimestampMetadataKey])
+				assert.Equal(t, int64(1), qd.splits.Load())
+			}
+			assert.Equal(t, pending, created[1])
 			assert.Zero(t, qd.chunksDropped.Load())
 			assert.Zero(t, qd.GetQueueSize())
 		})
