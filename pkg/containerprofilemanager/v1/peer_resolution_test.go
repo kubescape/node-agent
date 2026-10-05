@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -534,7 +533,7 @@ func TestCreateNetworkNeighbor_ServicePromotionPreservesRawFallback(t *testing.T
 	}
 }
 
-// TestEmptyEvents_RetainsDeferredServicePortSnapshot checks that deferred observations retain their port snapshot and size until emitted.
+// TestEmptyEvents_RetainsDeferredServicePortSnapshot checks that deferred observations retain their port snapshot without recharging the next batch.
 func TestEmptyEvents_RetainsDeferredServicePortSnapshot(t *testing.T) {
 	event := serviceNetworkEvent(80, "tcp")
 	event.Destination.IPAddress = "10.96.0.42"
@@ -544,7 +543,7 @@ func TestEmptyEvents_RetainsDeferredServicePortSnapshot(t *testing.T) {
 	require.Nil(t, cd.createNetworkNeighbor("", event, "default", client, nil, nil, nil, false))
 	cd.emptyEvents()
 	require.Equal(t, map[NetworkEvent][]uint16{event: {8080, 9090}}, cd.servicePorts)
-	require.Equal(t, int64(size.Of(event)+networkNeighborIncrement(cd, event)), cd.size.Load())
+	require.Zero(t, cd.size.Load(), "retained peers must not consume the next active batch budget")
 
 	// EndpointSlices change while the Service lookup recovers.
 	client.getErr = nil

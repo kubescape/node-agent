@@ -5,7 +5,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	"github.com/kubescape/go-logger"
@@ -29,7 +28,38 @@ func (cd *containerData) emptyEvents() {
 	cd.opens = nil
 	cd.rulePolicies = nil
 	cd.callStacks = nil
-	if cd.deferredNetworks != nil && cd.deferredNetworks.Cardinality() > 0 {
+	if cd.networkFlushForSize {
+		// Pressure flushes only consumed the active batch. Keep untouched pending
+		// peers in place rather than scanning or cloning their growing backlog.
+		if cd.activeNetworks != nil {
+			for _, event := range cd.activeNetworks.ToSlice() {
+				if cd.deferredNetworks != nil && cd.deferredNetworks.Contains(event) {
+					if cd.prevDeferredNetworks == nil {
+						cd.prevDeferredNetworks = mapset.NewSet[NetworkEvent]()
+					}
+					cd.prevDeferredNetworks.Add(event)
+					continue
+				}
+				cd.networks.Remove(event)
+				if cd.prevDeferredNetworks != nil {
+					cd.prevDeferredNetworks.Remove(event)
+				}
+				delete(cd.servicePorts, event)
+				delete(cd.networkDeferredUntil, event)
+			}
+		}
+		cd.deferredNetworks = nil
+		if cd.networks != nil && cd.networks.Cardinality() == 0 {
+			cd.networks = nil
+			cd.prevDeferredNetworks = nil
+		}
+		if len(cd.servicePorts) == 0 {
+			cd.servicePorts = nil
+		}
+		if len(cd.networkDeferredUntil) == 0 {
+			cd.networkDeferredUntil = nil
+		}
+	} else if cd.deferredNetworks != nil && cd.deferredNetworks.Cardinality() > 0 {
 		cd.networks = cd.deferredNetworks.Clone()
 		cd.prevDeferredNetworks = cd.deferredNetworks.Clone()
 		cd.deferredNetworks = nil
@@ -50,11 +80,6 @@ func (cd *containerData) emptyEvents() {
 		if len(cd.networkDeferredUntil) == 0 {
 			cd.networkDeferredUntil = nil
 		}
-		var retainedSize int64
-		for _, ev := range cd.networks.ToSlice() {
-			retainedSize += int64(size.Of(ev) + networkNeighborIncrement(cd, ev))
-		}
-		cd.size.Store(retainedSize)
 	} else {
 		cd.networks = nil
 		cd.prevDeferredNetworks = nil
@@ -62,6 +87,7 @@ func (cd *containerData) emptyEvents() {
 		cd.servicePorts = nil
 		cd.networkDeferredUntil = nil
 	}
+	cd.activeNetworks = nil
 	if cd.watchedContainerData != nil {
 		cd.lastReportedCompletion = string(cd.watchedContainerData.GetCompletionStatus())
 		cd.lastReportedStatus = string(cd.watchedContainerData.GetStatus())
@@ -70,6 +96,7 @@ func (cd *containerData) emptyEvents() {
 
 // isEmpty returns true if the container data is empty
 func (cd *containerData) isEmpty() bool {
+	networks := cd.networkEventsForFlush(false)
 	if cd.capabilites != nil ||
 		cd.syscalls != nil ||
 		cd.endpoints != nil ||
@@ -77,7 +104,7 @@ func (cd *containerData) isEmpty() bool {
 		cd.opens != nil ||
 		cd.rulePolicies != nil ||
 		cd.callStacks != nil ||
-		cd.networks != nil {
+		(networks != nil && networks.Cardinality() > 0) {
 		return false
 	}
 
@@ -245,6 +272,15 @@ func resolveEndpoint(
 	}
 }
 
+// networkEventsForFlush selects fresh observations for pressure saves and all retained
+// observations for interval or final saves, without copying either set.
+func (cd *containerData) networkEventsForFlush(forceSend bool) mapset.Set[NetworkEvent] {
+	if cd.networkFlushForSize && !forceSend {
+		return cd.activeNetworks
+	}
+	return cd.networks
+}
+
 // getIngressNetworkNeighbors returns ingress network neighbors for this container
 func (cd *containerData) getIngressNetworkNeighbors(
 	containerID string,
@@ -256,12 +292,13 @@ func (cd *containerData) getIngressNetworkNeighbors(
 	forceSend bool,
 ) []v1beta1.NetworkNeighbor {
 	var ingress []v1beta1.NetworkNeighbor
-	if cd.networks == nil {
+	networks := cd.networkEventsForFlush(forceSend)
+	if networks == nil {
 		return ingress
 	}
 
 	seen := make(map[string]networkNeighborIndex)
-	for _, event := range cd.networks.ToSlice() {
+	for _, event := range networks.ToSlice() {
 		if event.PktType == utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
 			if neighbor == nil {
@@ -285,12 +322,13 @@ func (cd *containerData) getEgressNetworkNeighbors(
 	forceSend bool,
 ) []v1beta1.NetworkNeighbor {
 	var egress []v1beta1.NetworkNeighbor
-	if cd.networks == nil {
+	networks := cd.networkEventsForFlush(forceSend)
+	if networks == nil {
 		return egress
 	}
 
 	seen := make(map[string]networkNeighborIndex)
-	for _, event := range cd.networks.ToSlice() {
+	for _, event := range networks.ToSlice() {
 		if event.PktType != utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
 			if neighbor == nil {

@@ -374,6 +374,10 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		}
 
 		data.networks.Add(networkEvent)
+		if data.activeNetworks == nil {
+			data.activeNetworks = mapset.NewSet[NetworkEvent]()
+		}
+		data.activeNetworks.Add(networkEvent)
 		return size.Of(networkEvent) + networkNeighborIncrement(data, networkEvent), nil
 	})
 

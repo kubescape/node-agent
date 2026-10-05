@@ -48,7 +48,8 @@ type containerData struct {
 	monitorDone          chan struct{}
 	monitorDoneOnce      sync.Once
 
-	// Apparent size
+	// Apparent size of observations collected since the last flush; deferred peers
+	// remain in networks without being charged to each new active batch.
 	size atomic.Int64
 
 	// Cleanup resources
@@ -62,7 +63,9 @@ type containerData struct {
 	opens                *maps.SafeMap[string, mapset.Set[string]]           // Map of opens, key is file path
 	rulePolicies         *maps.SafeMap[string, *v1beta1.RulePolicy]          // Map of rule policies, key is rule ID
 	callStacks           *maps.SafeMap[string, *v1beta1.IdentifiedCallStack] // Map of callstacks, key is SHA256 hash
-	networks             mapset.Set[NetworkEvent]
+	networks             mapset.Set[NetworkEvent]                            // Union used for deduplication and interval/final retries.
+	activeNetworks       mapset.Set[NetworkEvent]                            // Newly collected observations since the last flush.
+	networkFlushForSize  bool                                                // Size-triggered saves visit only activeNetworks.
 	deferredNetworks     mapset.Set[NetworkEvent]
 	prevDeferredNetworks mapset.Set[NetworkEvent]
 	droppedEvents        bool // Indicates if any events were dropped during monitoring

@@ -161,7 +161,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				return ContainerReachedMaxTime
 
 			case errors.Is(err, ProfileRequiresSplit):
-				if err := cpm.saveProfile(watchedContainer, container, false); err != nil {
+				if err := cpm.saveProfileForSize(watchedContainer, container); err != nil {
 					if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container, data); handledErr != nil {
 						return handledErr
 					}
@@ -233,6 +233,16 @@ func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedCon
 func (cpm *ContainerProfileManager) saveProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container, forceSend bool) error {
 	return cpm.withContainerNoSizeUpdate(watchedContainer.ContainerID, func(data *containerData) error {
 		return cpm.saveContainerProfile(watchedContainer, container, data, forceSend)
+	})
+}
+
+// saveProfileForSize flushes newly collected data while leaving pending network
+// retries for the interval or final flush. The entry lock guards the flush mode.
+func (cpm *ContainerProfileManager) saveProfileForSize(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container) error {
+	return cpm.withContainerNoSizeUpdate(watchedContainer.ContainerID, func(data *containerData) error {
+		data.networkFlushForSize = true
+		defer func() { data.networkFlushForSize = false }()
+		return cpm.saveContainerProfile(watchedContainer, container, data, false)
 	})
 }
 
@@ -309,7 +319,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	}
 
 	if !forceSend && !containerData.hasUnreportedStatusChange() &&
-		containerData.deferredNetworks != nil && containerData.deferredNetworks.Cardinality() > 0 &&
+		containerData.networks != nil && containerData.networks.Cardinality() > 0 &&
 		len(containerProfile.Spec.Capabilities) == 0 &&
 		len(containerProfile.Spec.Execs) == 0 &&
 		len(containerProfile.Spec.Opens) == 0 &&
