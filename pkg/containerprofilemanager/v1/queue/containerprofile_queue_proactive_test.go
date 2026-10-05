@@ -213,3 +213,71 @@ func TestProactiveSplitPreservesDataOnDiskFailure(t *testing.T) {
 		})
 	}
 }
+
+// finalDepthCreator records requests while applying a protobuf payload size limit.
+type finalDepthCreator struct {
+	byteLimitedCreator
+	attempted []*v1beta1.ContainerProfile
+}
+
+// CreateContainerProfileDirect records the attempted payload before applying storage's cap.
+func (c *finalDepthCreator) CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error {
+	c.attempted = append(c.attempted, profile.DeepCopy())
+	return c.byteLimitedCreator.CreateContainerProfileDirect(profile)
+}
+
+// TestProactiveSplitReservesFinalDepth verifies storage sees a still-acceptable parent
+// before a final optional split can grow its protobuf payload through timestamp metadata.
+func TestProactiveSplitReservesFinalDepth(t *testing.T) {
+	for _, maxDepth := range []int{1, DefaultMaxSplitDepth} {
+		for _, requiresSplit := range []bool{false, true} {
+			t.Run(fmt.Sprintf("depth=%d/requiresSplit=%t", maxDepth, requiresSplit), func(t *testing.T) {
+				parent := testProfile()
+				parent.Annotations[helpersv1.PreviousReportTimestampMetadataKey] = "2026-10-05 10:59:59.99975 +0000 UTC"
+				parent.Annotations[helpersv1.ReportTimestampMetadataKey] = "2026-10-05 11:00:00 +0000 UTC"
+				if requiresSplit {
+					parent.Spec.Ingress = []v1beta1.NetworkNeighbor{portSplitNeighbor()}
+				} else {
+					parent.Spec.Opens = []v1beta1.OpenCalls{{Path: "/a"}}
+					parent.Spec.Syscalls = []string{"poll"}
+				}
+				a, b, ok := splitProfile(parent)
+				require.True(t, ok)
+				creator := &finalDepthCreator{byteLimitedCreator: byteLimitedCreator{limit: parent.Size()}}
+				if requiresSplit {
+					creator.limit = max(a.Size(), b.Size())
+					require.Less(t, creator.limit, parent.Size())
+				} else {
+					require.Greater(t, max(a.Size(), b.Size()), parent.Size(), "JSON progress can still enlarge protobuf metadata")
+				}
+				q, err := NewQueueData(context.Background(), creator, QueueConfig{QueueDir: t.TempDir(), MaxSplitDepth: maxDepth})
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, q.Close()) })
+				q.mu.Lock()
+				err = q.enqueueLocked(&QueuedContainerProfile{Profile: parent, ContainerID: "container", SplitDepth: maxDepth - 1, MaxProfileSize: 1})
+				q.mu.Unlock()
+				require.NoError(t, err)
+				for range 3 {
+					q.processAllItems()
+				}
+				require.NotEmpty(t, creator.attempted)
+				require.Equal(t, parent, creator.attempted[0], "the final split level must first try storage")
+				var observations []string
+				var rows []tsRow
+				for _, accepted := range creator.accepted {
+					observations = append(observations, elementSignatures(&accepted.Spec)...)
+					rows = append(rows, tsRow{PreviousReportTimestamp: accepted.Annotations[helpersv1.PreviousReportTimestampMetadataKey], ReportTimestamp: accepted.Annotations[helpersv1.ReportTimestampMetadataKey]})
+				}
+				require.ElementsMatch(t, elementSignatures(&parent.Spec), observations)
+				assertChainIsLinear(t, rows, parent.Annotations[helpersv1.PreviousReportTimestampMetadataKey], parent.Annotations[helpersv1.ReportTimestampMetadataKey])
+				require.Zero(t, q.chunksDropped.Load())
+				require.Zero(t, q.GetQueueSize())
+				if requiresSplit {
+					require.Equal(t, int64(1), q.splits.Load(), "HTTP 413 retains the final split level")
+				} else {
+					require.Zero(t, q.splits.Load())
+				}
+			})
+		}
+	}
+}

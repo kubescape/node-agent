@@ -560,8 +560,10 @@ processLoop:
 			qd.releaseStitch()
 		}
 
+		// Reserve the final split level for a real storage rejection: optional splitting
+		// can grow protobuf timestamp metadata even when the JSON estimate shrinks.
 		if !queuedProfile.IsStitch && queuedProfile.MaxProfileSize > 0 &&
-			queuedProfile.SplitDepth < qd.maxSplitDepth &&
+			queuedProfile.SplitDepth+1 < qd.maxSplitDepth &&
 			int64(size.Of(queuedProfile.Profile.Spec)) > queuedProfile.MaxProfileSize {
 			if a, b, ok := splitProfile(queuedProfile.Profile); ok {
 				fallback := qd.requeueSplit(queuedProfile, a, b, false)

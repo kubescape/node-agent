@@ -20,7 +20,7 @@ func TestQueueSizeBudgetRetainsUnsplittableAndDepthLimitedData(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			creator := &MockProfileCreator{}
-			q, err := NewQueueData(context.Background(), creator, QueueConfig{QueueName: "budget", QueueDir: t.TempDir(), MaxQueueSize: 100, ItemsPerSegment: 10, MaxSplitDepth: 2})
+			q, err := NewQueueData(context.Background(), creator, QueueConfig{QueueName: "budget", QueueDir: t.TempDir(), MaxQueueSize: 100, ItemsPerSegment: 10, MaxSplitDepth: 3})
 			require.NoError(t, err)
 			defer q.Close()
 			original := &v1beta1.ContainerProfile{Name: "profile", Annotations: map[string]string{
@@ -32,7 +32,8 @@ func TestQueueSizeBudgetRetainsUnsplittableAndDepthLimitedData(t *testing.T) {
 			}
 			require.NoError(t, q.EnqueueWithSizeLimit(original, "container", 1))
 			// Process deterministically without the queue goroutine. The inherited budget
-			// must split again on the second pass, then send despite the remaining overage.
+			// must split again on the second pass, then reserve the final level for HTTP 413
+			// and send despite the remaining estimated overage.
 			for range 3 {
 				q.processAllItems()
 			}
