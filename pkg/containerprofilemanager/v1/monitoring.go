@@ -302,13 +302,27 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 			Endpoints:            containerData.getEndpoints(),
 			PolicyByRuleId:       containerData.getRulePolicies(),
 			IdentifiedCallStacks: containerData.getCallStacks(),
-			Egress:               containerData.getEgressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
-			Ingress:              containerData.getIngressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
+			Egress:               containerData.getEgressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient, cpm.k8sInventory, cpm.k8sObjectCache, forceSend),
+			Ingress:              containerData.getIngressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient, cpm.k8sInventory, cpm.k8sObjectCache, forceSend),
 			LabelSelector: metav1.LabelSelector{
 				MatchLabels:      watchedContainer.ParentWorkloadSelector.MatchLabels,
 				MatchExpressions: watchedContainer.ParentWorkloadSelector.MatchExpressions,
 			},
 		},
+	}
+
+	if !forceSend && containerData.deferredNetworks != nil && containerData.deferredNetworks.Cardinality() > 0 &&
+		len(containerProfile.Spec.Capabilities) == 0 &&
+		len(containerProfile.Spec.Execs) == 0 &&
+		len(containerProfile.Spec.Opens) == 0 &&
+		len(containerProfile.Spec.Syscalls) == 0 &&
+		len(containerProfile.Spec.Endpoints) == 0 &&
+		len(containerProfile.Spec.PolicyByRuleId) == 0 &&
+		len(containerProfile.Spec.IdentifiedCallStacks) == 0 &&
+		len(containerProfile.Spec.Egress) == 0 &&
+		len(containerProfile.Spec.Ingress) == 0 {
+		containerData.emptyEvents()
+		return nil
 	}
 
 	if err := cpm.enqueueContainerProfile(containerProfile, watchedContainer.ContainerID); err != nil {

@@ -13,6 +13,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -61,8 +62,10 @@ type containerData struct {
 	opens         *maps.SafeMap[string, mapset.Set[string]]           // Map of opens, key is file path
 	rulePolicies  *maps.SafeMap[string, *v1beta1.RulePolicy]          // Map of rule policies, key is rule ID
 	callStacks    *maps.SafeMap[string, *v1beta1.IdentifiedCallStack] // Map of callstacks, key is SHA256 hash
-	networks      mapset.Set[NetworkEvent]
-	droppedEvents bool // Indicates if any events were dropped during monitoring
+	networks             mapset.Set[NetworkEvent]
+	deferredNetworks     mapset.Set[NetworkEvent]
+	prevDeferredNetworks mapset.Set[NetworkEvent]
+	droppedEvents        bool // Indicates if any events were dropped during monitoring
 
 	// Service port snapshots keep report-time accounting and serialization consistent.
 	servicePorts map[NetworkEvent][]uint16
@@ -86,6 +89,7 @@ type ContainerProfileManager struct {
 	cfg               config.Config
 	k8sClient         k8sclient.K8sClientInterface
 	k8sObjectCache    objectcache.K8sObjectCache
+	k8sInventory      common.K8sInventoryCache
 	storageClient     storage.ProfileCreator
 	dnsResolverClient dnsmanager.DNSResolver
 	seccompManager    seccompmanager.SeccompManagerClient
@@ -120,6 +124,11 @@ type ContainerProfileManager struct {
 
 func (cpm *ContainerProfileManager) SetCompletionNotifier(n objectcache.CompletionNotifier) {
 	cpm.completionNotifier = n
+}
+
+// SetK8sInventory sets the k8s inventory cache (primarily used in tests)
+func (cpm *ContainerProfileManager) SetK8sInventory(k8sInventory common.K8sInventoryCache) {
+	cpm.k8sInventory = k8sInventory
 }
 
 // SetSyscallFlusher implements containerprofilemanager.ContainerProfileManagerClient.
@@ -160,6 +169,15 @@ func NewContainerProfileManager(
 		maxSniffTimeNotificationChan: make([]chan *containercollection.Container, 0),
 		cloudMetadata:                cloudMetadata,
 		lifecycleTracker:             otelsetup.NewProfileLifecycleTracker(),
+	}
+
+	if cfg.KubernetesMode {
+		if k8sInventory, err := common.GetK8sInventoryCache(); err == nil && k8sInventory != nil {
+			containerProfileManager.k8sInventory = k8sInventory
+			k8sInventory.Start()
+		} else if err != nil {
+			logger.L().Debug("failed to initialize k8s inventory cache in container profile manager", helpers.Error(err))
+		}
 	}
 
 	// Initialize queue
@@ -220,6 +238,10 @@ func (cpm *ContainerProfileManager) Close() {
 
 	if cpm.queueData != nil {
 		_ = cpm.queueData.Close()
+	}
+
+	if cpm.k8sInventory != nil {
+		cpm.k8sInventory.Stop()
 	}
 }
 

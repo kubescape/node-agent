@@ -270,7 +270,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 			}
 
 			cd := &containerData{}
-			neighbor := cd.createNetworkNeighbor("", tc.event, "default", client, nil)
+			neighbor := cd.createNetworkNeighbor("", tc.event, "default", client, nil, nil, nil, false)
 			require.NotNil(t, neighbor)
 			require.Equal(t, map[string]string{"app": "api"}, neighbor.PodSelector.MatchLabels)
 			require.Equal(t, tc.wantPorts, networkPortValues(neighbor.Ports))
@@ -298,7 +298,7 @@ func TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged(t *testing.T) {
 		},
 	}
 	podEvent.SetDestinationPodLabels(map[string]string{"app": "web"})
-	podNeighbor := cd.createNetworkNeighbor("", podEvent, "default", nil, nil)
+	podNeighbor := cd.createNetworkNeighbor("", podEvent, "default", nil, nil, nil, nil, false)
 	require.NotNil(t, podNeighbor)
 	require.Equal(t, []int32{8080}, networkPortValues(podNeighbor.Ports))
 
@@ -310,7 +310,7 @@ func TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged(t *testing.T) {
 			IPAddress: "93.184.216.34",
 		},
 	}
-	rawNeighbor := cd.createNetworkNeighbor("", rawEvent, "default", nil, nil)
+	rawNeighbor := cd.createNetworkNeighbor("", rawEvent, "default", nil, nil, nil, nil, false)
 	require.NotNil(t, rawNeighbor)
 	require.Equal(t, []int32{443}, networkPortValues(rawNeighbor.Ports))
 }
@@ -326,7 +326,7 @@ func TestGenerateNetworkPolicy_ServiceTargetPortRoundTrip(t *testing.T) {
 
 	cd := &containerData{}
 	event := serviceNetworkEvent(80, "tcp")
-	neighbor := cd.createNetworkNeighbor("", event, "default", client, nil)
+	neighbor := cd.createNetworkNeighbor("", event, "default", client, nil, nil, nil, false)
 	require.NotNil(t, neighbor)
 
 	egressPorts := make([]softwarecomposition.NetworkPort, 0, len(neighbor.Ports))

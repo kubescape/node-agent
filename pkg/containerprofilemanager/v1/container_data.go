@@ -1,20 +1,24 @@
 package containerprofilemanager
 
 import (
+	"net"
 	"sort"
 
+	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// emptyEvents clears all event data
+// emptyEvents clears all event data, but retains deferred network events for re-resolution
 func (cd *containerData) emptyEvents() {
 	cd.size.Store(0)
 	cd.capabilites = nil
@@ -24,7 +28,20 @@ func (cd *containerData) emptyEvents() {
 	cd.opens = nil
 	cd.rulePolicies = nil
 	cd.callStacks = nil
-	cd.networks = nil
+	if cd.deferredNetworks != nil && cd.deferredNetworks.Cardinality() > 0 {
+		cd.networks = cd.deferredNetworks.Clone()
+		cd.prevDeferredNetworks = cd.deferredNetworks.Clone()
+		cd.deferredNetworks = nil
+		var retainedSize int64
+		for _, ev := range cd.networks.ToSlice() {
+			retainedSize += int64(size.Of(ev) + networkNeighborIncrement(cd, ev))
+		}
+		cd.size.Store(retainedSize)
+	} else {
+		cd.networks = nil
+		cd.prevDeferredNetworks = nil
+		cd.deferredNetworks = nil
+	}
 	cd.servicePorts = nil
 	if cd.watchedContainerData != nil {
 		cd.lastReportedCompletion = string(cd.watchedContainerData.GetCompletionStatus())
@@ -159,19 +176,80 @@ func (cd *containerData) getCallStacks() []v1beta1.IdentifiedCallStack {
 	return callStacks
 }
 
+func isPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	return ip != nil && ip.IsPrivate()
+}
+
+func resolveEndpoint(
+	event *NetworkEvent,
+	k8sInventory common.K8sInventoryCache,
+	k8sObjectCache objectcache.K8sObjectCache,
+) {
+	if event.Destination.Kind == EndpointKindPod || event.Destination.Kind == EndpointKindService {
+		return
+	}
+	ip := event.Destination.IPAddress
+	if ip == "" || ip == "127.0.0.1" {
+		return
+	}
+
+	if k8sInventory != nil {
+		if pod := k8sInventory.GetPodByIp(ip); pod != nil && !pod.Spec.HostNetwork {
+			event.Destination.Kind = EndpointKindPod
+			event.Destination.Name = pod.Name
+			event.Destination.Namespace = pod.Namespace
+			event.SetDestinationPodLabels(pod.Labels)
+			return
+		}
+		if svc := k8sInventory.GetSvcByIp(ip); svc != nil {
+			event.Destination.Kind = EndpointKindService
+			event.Destination.Name = svc.Name
+			event.Destination.Namespace = svc.Namespace
+			event.SetDestinationPodLabels(svc.Labels)
+			return
+		}
+	}
+
+	if k8sObjectCache != nil {
+		for _, pod := range k8sObjectCache.GetPods() {
+			if pod != nil && !pod.Spec.HostNetwork && pod.Status.PodIP == ip {
+				event.Destination.Kind = EndpointKindPod
+				event.Destination.Name = pod.Name
+				event.Destination.Namespace = pod.Namespace
+				event.SetDestinationPodLabels(pod.Labels)
+				return
+			}
+		}
+	}
+}
+
 // getIngressNetworkNeighbors returns ingress network neighbors for this container
-func (cd *containerData) getIngressNetworkNeighbors(containerID string, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
+func (cd *containerData) getIngressNetworkNeighbors(
+	containerID string,
+	namespace string,
+	k8sClient k8sclient.K8sClientInterface,
+	dnsResolverClient dnsmanager.DNSResolver,
+	k8sInventory common.K8sInventoryCache,
+	k8sObjectCache objectcache.K8sObjectCache,
+	forceSend bool,
+) []v1beta1.NetworkNeighbor {
 	var ingress []v1beta1.NetworkNeighbor
 	if cd.networks == nil {
 		return ingress
 	}
 
+	seen := make(map[string]struct{})
 	for _, event := range cd.networks.ToSlice() {
 		if event.PktType == utils.HostPktType {
-			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient)
+			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
 			if neighbor == nil {
 				continue
 			}
+			if _, ok := seen[neighbor.Identifier]; ok {
+				continue
+			}
+			seen[neighbor.Identifier] = struct{}{}
 			ingress = append(ingress, *neighbor)
 		}
 	}
@@ -180,18 +258,31 @@ func (cd *containerData) getIngressNetworkNeighbors(containerID string, namespac
 }
 
 // getEgressNetworkNeighbors returns egress network neighbors for this container
-func (cd *containerData) getEgressNetworkNeighbors(containerID string, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
+func (cd *containerData) getEgressNetworkNeighbors(
+	containerID string,
+	namespace string,
+	k8sClient k8sclient.K8sClientInterface,
+	dnsResolverClient dnsmanager.DNSResolver,
+	k8sInventory common.K8sInventoryCache,
+	k8sObjectCache objectcache.K8sObjectCache,
+	forceSend bool,
+) []v1beta1.NetworkNeighbor {
 	var egress []v1beta1.NetworkNeighbor
 	if cd.networks == nil {
 		return egress
 	}
 
+	seen := make(map[string]struct{})
 	for _, event := range cd.networks.ToSlice() {
 		if event.PktType != utils.HostPktType {
-			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient)
+			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
 			if neighbor == nil {
 				continue
 			}
+			if _, ok := seen[neighbor.Identifier]; ok {
+				continue
+			}
+			seen[neighbor.Identifier] = struct{}{}
 			egress = append(egress, *neighbor)
 		}
 	}
@@ -200,7 +291,18 @@ func (cd *containerData) getEgressNetworkNeighbors(containerID string, namespace
 }
 
 // createNetworkNeighbor creates a network neighbor from a network event
-func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent NetworkEvent, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) *v1beta1.NetworkNeighbor {
+func (cd *containerData) createNetworkNeighbor(
+	containerID string,
+	networkEvent NetworkEvent,
+	namespace string,
+	k8sClient k8sclient.K8sClientInterface,
+	dnsResolverClient dnsmanager.DNSResolver,
+	k8sInventory common.K8sInventoryCache,
+	k8sObjectCache objectcache.K8sObjectCache,
+	forceSend bool,
+) *v1beta1.NetworkNeighbor {
+	resolveEndpoint(&networkEvent, k8sInventory, k8sObjectCache)
+
 	var neighborEntry v1beta1.NetworkNeighbor
 
 	enforcementPorts := []uint16{networkEvent.Port}
@@ -220,22 +322,24 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 
 	} else if networkEvent.Destination.Kind == EndpointKindService {
 		// For service, we need to retrieve it and use its selector
-		svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name) // TODO: use IG inventory as this can generate a lot of API calls.
-		if err != nil {
-			logger.L().Warning("failed to get service",
-				helpers.String("reason", err.Error()),
-				helpers.String("service name", networkEvent.Destination.Name))
-			return nil
-		}
-		serviceWorkload = svc
-
 		var selector map[string]string
-		if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
-			// The default service has no selectors, in addition, we want to save the default service address
-			selector = svc.GetLabels()
-			neighborEntry.IPAddress = networkEvent.Destination.IPAddress
-		} else {
-			selector = svc.GetServiceSelector()
+		if k8sClient != nil {
+			svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name) // TODO: use IG inventory as this can generate a lot of API calls.
+			if err != nil {
+				logger.L().Warning("failed to get service",
+					helpers.String("reason", err.Error()),
+					helpers.String("service name", networkEvent.Destination.Name))
+				return nil
+			}
+			serviceWorkload = svc
+
+			if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
+				// The default service has no selectors, in addition, we want to save the default service address
+				selector = svc.GetLabels()
+				neighborEntry.IPAddress = networkEvent.Destination.IPAddress
+			} else {
+				selector = svc.GetServiceSelector()
+			}
 		}
 
 		if len(selector) == 0 {
@@ -257,6 +361,19 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 			// No need to generate for localhost
 			return nil
 		}
+
+		// If the IP is inside the cluster pod CIDR / private IP and could not be resolved,
+		// defer by one flush before persisting as an external IP, unless forceSend is true
+		// or it has already been deferred once.
+		if isPrivateIP(networkEvent.Destination.IPAddress) && !forceSend && cd != nil &&
+			(cd.prevDeferredNetworks == nil || !cd.prevDeferredNetworks.Contains(networkEvent)) {
+			if cd.deferredNetworks == nil {
+				cd.deferredNetworks = mapset.NewSet[NetworkEvent]()
+			}
+			cd.deferredNetworks.Add(networkEvent)
+			return nil
+		}
+
 		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 
 		if dnsResolverClient != nil {
@@ -268,17 +385,22 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 		}
 	}
 
-	if ports, ok := cd.servicePorts[networkEvent]; ok {
-		enforcementPorts = ports
-	} else if networkEvent.Destination.Kind == EndpointKindService && serviceWorkload != nil && k8sClient != nil {
-		enforcementPorts = resolveServiceEnforcementPorts(
-			k8sClient,
-			networkEvent.Destination.Namespace,
-			networkEvent.Destination.Name,
-			serviceWorkload,
-			networkEvent.Port,
-			networkEvent.Protocol,
-		)
+	if cd != nil && cd.servicePorts != nil {
+		if ports, ok := cd.servicePorts[networkEvent]; ok {
+			enforcementPorts = ports
+		}
+	}
+	if len(enforcementPorts) == 1 && enforcementPorts[0] == networkEvent.Port {
+		if networkEvent.Destination.Kind == EndpointKindService && serviceWorkload != nil && k8sClient != nil {
+			enforcementPorts = resolveServiceEnforcementPorts(
+				k8sClient,
+				networkEvent.Destination.Namespace,
+				networkEvent.Destination.Name,
+				serviceWorkload,
+				networkEvent.Port,
+				networkEvent.Protocol,
+			)
+		}
 	}
 	neighborEntry.Ports = buildNetworkPorts(networkEvent.Protocol, enforcementPorts)
 

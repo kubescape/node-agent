@@ -117,7 +117,7 @@ func TestNetworkNeighborIncrementCoversMaxDNSName(t *testing.T) {
 	}
 
 	cd := &containerData{}
-	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, fakeDNSResolver{domain: maxDNSName})
+	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, fakeDNSResolver{domain: maxDNSName}, nil, nil, false)
 	if !assert.NotNil(t, neighbor) {
 		return
 	}
@@ -157,7 +157,7 @@ func TestNetworkNeighborIncrementCoversSelectorPayload(t *testing.T) {
 	// neighbor. watchedContainerData.Namespace is what networkNeighborIncrement reads to make
 	// the same "different namespace" call createNetworkNeighbor's own namespace arg does below.
 	cd := &containerData{watchedContainerData: &objectcache.WatchedContainerData{Namespace: "default"}}
-	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, nil)
+	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, nil, nil, nil, false)
 	if !assert.NotNil(t, neighbor) {
 		return
 	}
@@ -252,7 +252,7 @@ func TestCreateNetworkNeighbor_EmptyContainerIDWithWatchedContainerData(t *testi
 	}
 
 	resolver := &trackingDNSResolver{}
-	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, resolver)
+	neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, resolver, nil, nil, false)
 	assert.NotNil(t, neighbor)
 	assert.Equal(t, "", resolver.lastContainerID, "empty containerID must be preserved without falling back to watchedContainerData")
 	assert.Equal(t, "93.184.216.34", resolver.lastIPAddress)
@@ -279,7 +279,7 @@ func TestReportNetworkEventServicePortMultiplicity(t *testing.T) {
 		DstPort:     80, Proto: "tcp", PktType: utils.OutgoingPktType,
 	}
 	cpm.ReportNetworkEvent("container1", event)
-	neighbor := entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil)
+	neighbor := entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil, nil, nil, false)
 	require.NotNil(t, neighbor)
 	require.Equal(t, []int32{8080, 9090, 10000}, networkPortValues(neighbor.Ports))
 	// Isolate the port budget so unused selector headroom cannot hide an undercount.
@@ -305,13 +305,13 @@ func TestReportNetworkEventServicePortMultiplicity(t *testing.T) {
 
 	// Endpoint changes after reporting must not change the budgeted port list.
 	require.NoError(t, client.kubeClient.DiscoveryV1().EndpointSlices("default").Delete(context.Background(), "c", metav1.DeleteOptions{}))
-	neighbor = entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil)
+	neighbor = entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil, nil, nil, false)
 	require.Equal(t, []int32{8080, 9090, 10000}, networkPortValues(neighbor.Ports))
 
 	// A new profile batch resolves fresh ports instead of keeping the old snapshot.
 	entry.data.emptyEvents()
 	cpm.ReportNetworkEvent("container1", event)
-	neighbor = entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil)
+	neighbor = entry.data.createNetworkNeighbor("", serviceNetworkEvent(80, "tcp"), "default", client, nil, nil, nil, false)
 	require.Equal(t, []int32{8080, 9090}, networkPortValues(neighbor.Ports))
 	require.Less(t, entry.data.size.Load(), recordedSize)
 }
@@ -349,7 +349,7 @@ func TestCreateNetworkNeighbor_StatefulSetPeerStripsPodIdentityLabels(t *testing
 			})
 
 			cd := &containerData{}
-			neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, nil)
+			neighbor := cd.createNetworkNeighbor("", networkEvent, "default", nil, nil, nil, nil, false)
 			if !assert.NotNil(t, neighbor) {
 				return
 			}

@@ -353,6 +353,8 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		networkEvent.SetPodLabels(event.GetPodLabels())
 		networkEvent.SetDestinationPodLabels(dstEndpoint.PodLabels)
 
+		resolveEndpoint(&networkEvent, cpm.k8sInventory, cpm.k8sObjectCache)
+
 		// Skip if we already saved this event
 		if data.networks.Contains(networkEvent) {
 			return 0, nil
