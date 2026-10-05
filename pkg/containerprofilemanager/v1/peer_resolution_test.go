@@ -3,6 +3,11 @@ package containerprofilemanager
 import (
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	"k8s.io/utils/ptr"
+
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -402,4 +407,56 @@ func TestMonitoring_ReResolutionAtProfileFlush(t *testing.T) {
 	assert.Empty(t, ingress[0].IPAddress)
 	require.NotNil(t, ingress[0].PodSelector)
 	assert.Equal(t, map[string]string{"app": "wikijs"}, ingress[0].PodSelector.MatchLabels)
+}
+
+func TestNetworkNeighbors_MergeDistinctPortsAfterResolution(t *testing.T) {
+	for _, direction := range []string{utils.HostPktType, utils.OutgoingPktType} {
+		t.Run(direction, func(t *testing.T) {
+			inv := newMockK8sInventory()
+			inv.podsByIP["10.244.0.14"] = &common.SlimPod{SlimObjectMeta: common.SlimObjectMeta{
+				Name: "peer", Namespace: "default", Labels: map[string]string{"app": "peer"},
+			}}
+			cd := &containerData{networks: mapset.NewSet[NetworkEvent]()}
+			raw := NetworkEvent{Port: 80, Protocol: "tcp", PktType: direction,
+				Destination: Destination{Kind: EndpointKindRaw, IPAddress: "10.244.0.14"}}
+			cd.networks.Add(raw)
+			resolved := raw
+			resolveEndpoint(&resolved, inv, nil)
+			cd.networks.Add(resolved) // Same peer and port from a later, resolved observation.
+			resolved.Port = 443
+			cd.networks.Add(resolved)
+			resolved.Port = 80
+			resolved.Protocol = "udp"
+			cd.networks.Add(resolved)
+			var neighbors []v1beta1.NetworkNeighbor
+			if direction == utils.HostPktType {
+				neighbors = cd.getIngressNetworkNeighbors("", "default", nil, nil, inv, nil, false)
+			} else {
+				neighbors = cd.getEgressNetworkNeighbors("", "default", nil, nil, inv, nil, false)
+			}
+			require.Len(t, neighbors, 1)
+			names := make([]string, 0, len(neighbors[0].Ports))
+			for _, port := range neighbors[0].Ports {
+				names = append(names, port.Name)
+			}
+			require.ElementsMatch(t, []string{"tcp-80", "tcp-443", "udp-80"}, names)
+		})
+	}
+}
+
+func TestCreateNetworkNeighbor_PreservesSnapshotEqualToObservedPort(t *testing.T) {
+	event := serviceNetworkEvent(80, "tcp")
+	client := &servicePortTestClient{
+		service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
+			"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
+		}),
+		kubeClient: fake.NewClientset(newEndpointSlice("api-new", "api", discoveryv1.EndpointPort{
+			Name: ptr.To("web"), Port: ptr.To(int32(8080)), Protocol: ptr.To(corev1.ProtocolTCP),
+		})),
+	}
+	cd := &containerData{servicePorts: map[NetworkEvent][]uint16{event: {80}}}
+	neighbor := cd.createNetworkNeighbor("", event, "default", client, nil, nil, nil, false)
+	require.NotNil(t, neighbor)
+	require.Equal(t, []int32{80}, networkPortValues(neighbor.Ports))
+	require.Empty(t, client.kubeClient.Actions(), "cached snapshots must not query changed EndpointSlices")
 }

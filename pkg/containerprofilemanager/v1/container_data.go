@@ -2,6 +2,7 @@ package containerprofilemanager
 
 import (
 	"net"
+	"slices"
 	"sort"
 
 	"github.com/DmitriyVTitov/size"
@@ -239,18 +240,14 @@ func (cd *containerData) getIngressNetworkNeighbors(
 		return ingress
 	}
 
-	seen := make(map[string]struct{})
+	seen := make(map[string]int)
 	for _, event := range cd.networks.ToSlice() {
 		if event.PktType == utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
 			if neighbor == nil {
 				continue
 			}
-			if _, ok := seen[neighbor.Identifier]; ok {
-				continue
-			}
-			seen[neighbor.Identifier] = struct{}{}
-			ingress = append(ingress, *neighbor)
+			ingress = appendNetworkNeighbor(ingress, seen, *neighbor)
 		}
 	}
 
@@ -272,22 +269,34 @@ func (cd *containerData) getEgressNetworkNeighbors(
 		return egress
 	}
 
-	seen := make(map[string]struct{})
+	seen := make(map[string]int)
 	for _, event := range cd.networks.ToSlice() {
 		if event.PktType != utils.HostPktType {
 			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
 			if neighbor == nil {
 				continue
 			}
-			if _, ok := seen[neighbor.Identifier]; ok {
-				continue
-			}
-			seen[neighbor.Identifier] = struct{}{}
-			egress = append(egress, *neighbor)
+			egress = appendNetworkNeighbor(egress, seen, *neighbor)
 		}
 	}
 
 	return egress
+}
+
+// appendNetworkNeighbor merges all observed ports for neighbors with the same identity.
+func appendNetworkNeighbor(neighbors []v1beta1.NetworkNeighbor, seen map[string]int, neighbor v1beta1.NetworkNeighbor) []v1beta1.NetworkNeighbor {
+	if index, ok := seen[neighbor.Identifier]; ok {
+		for _, port := range neighbor.Ports {
+			if !slices.ContainsFunc(neighbors[index].Ports, func(existing v1beta1.NetworkPort) bool {
+				return existing.Name == port.Name
+			}) {
+				neighbors[index].Ports = append(neighbors[index].Ports, port)
+			}
+		}
+		return neighbors
+	}
+	seen[neighbor.Identifier] = len(neighbors)
+	return append(neighbors, neighbor)
 }
 
 // createNetworkNeighbor creates a network neighbor from a network event
@@ -385,12 +394,14 @@ func (cd *containerData) createNetworkNeighbor(
 		}
 	}
 
-	if cd != nil && cd.servicePorts != nil {
+	hasPortSnapshot := false
+	if cd != nil {
 		if ports, ok := cd.servicePorts[networkEvent]; ok {
+			hasPortSnapshot = true
 			enforcementPorts = ports
 		}
 	}
-	if len(enforcementPorts) == 1 && enforcementPorts[0] == networkEvent.Port {
+	if !hasPortSnapshot {
 		if networkEvent.Destination.Kind == EndpointKindService && serviceWorkload != nil && k8sClient != nil {
 			enforcementPorts = resolveServiceEnforcementPorts(
 				k8sClient,

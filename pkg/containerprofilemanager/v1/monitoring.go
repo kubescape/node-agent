@@ -268,23 +268,17 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		return nil
 	}
 
-	// Update timestamps before saving
-	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp
-	watchedContainer.CurrentReportTimestamp = time.Now()
-
 	containerProfile := &v1beta1.ContainerProfile{
 		Name:      slug,
 		Namespace: container.K8s.Namespace,
 		Annotations: map[string]string{
-			helpersv1.InstanceIDMetadataKey:              watchedContainer.InstanceID.GetStringFormatted(),
-			helpersv1.WlidMetadataKey:                    watchedContainer.Wlid,
-			helpersv1.CompletionMetadataKey:              string(watchedContainer.GetCompletionStatus()),
-			helpersv1.StatusMetadataKey:                  string(watchedContainer.GetStatus()),
-			helpersv1.ContainerTypeMetadataKey:           watchedContainer.ContainerType.String(),
-			helpersv1.ReportSeriesIdMetadataKey:          watchedContainer.SeriesID,
-			helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
-			helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
-			helpersv1.OtelSpanIDMetadataKey:              cpm.lifecycleTracker.LearningSpanID(watchedContainer.ContainerID),
+			helpersv1.InstanceIDMetadataKey:     watchedContainer.InstanceID.GetStringFormatted(),
+			helpersv1.WlidMetadataKey:           watchedContainer.Wlid,
+			helpersv1.CompletionMetadataKey:     string(watchedContainer.GetCompletionStatus()),
+			helpersv1.StatusMetadataKey:         string(watchedContainer.GetStatus()),
+			helpersv1.ContainerTypeMetadataKey:  watchedContainer.ContainerType.String(),
+			helpersv1.ReportSeriesIdMetadataKey: watchedContainer.SeriesID,
+			helpersv1.OtelSpanIDMetadataKey:     cpm.lifecycleTracker.LearningSpanID(watchedContainer.ContainerID),
 			// Full W3C traceparent so kubescape/storage can create a properly
 			// parented child span for the aggregation step.
 			helpersv1.OtelTraceparentMetadataKey: cpm.lifecycleTracker.LearningTraceparent(watchedContainer.ContainerID),
@@ -324,6 +318,13 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		containerData.emptyEvents()
 		return nil
 	}
+
+	// Advance the report chain only after deciding to emit this profile.
+	// Deferred-only flushes must not create a link to a report that was skipped.
+	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp
+	watchedContainer.CurrentReportTimestamp = time.Now()
+	containerProfile.Annotations[helpersv1.PreviousReportTimestampMetadataKey] = watchedContainer.PreviousReportTimestamp.String()
+	containerProfile.Annotations[helpersv1.ReportTimestampMetadataKey] = watchedContainer.CurrentReportTimestamp.String()
 
 	if err := cpm.enqueueContainerProfile(containerProfile, watchedContainer.ContainerID); err != nil {
 		// Empty the container data to prevent reporting the same data again
