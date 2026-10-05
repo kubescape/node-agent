@@ -96,3 +96,44 @@ func TestPodIPIndexConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestPodIPIndexRetainedReassignedIP(t *testing.T) {
+	for _, secondary := range []bool{false, true} {
+		t.Run(map[bool]string{false: "primary", true: "secondary"}[secondary], func(t *testing.T) {
+			k := &K8sObjectCacheImpl{}
+			ctx := context.Background()
+			ip := "10.0.0.1"
+			old := indexedPod("old", "first", ip)
+			if secondary {
+				ip = "fd00::1"
+				old.Status.PodIPs = []corev1.PodIP{{IP: old.Status.PodIP}, {IP: ip}}
+			}
+			replacement := indexedPod("new", "second", ip)
+			k.AddHandler(ctx, old)
+			k.AddHandler(ctx, replacement)
+			updated := old.DeepCopy()
+			updated.Labels = map[string]string{"updated": "true"}
+			k.ModifyHandler(ctx, updated)
+			assert.Same(t, replacement, k.GetPodByIP(ip))
+			k.DeleteHandler(ctx, updated)
+			assert.Same(t, replacement, k.GetPodByIP(ip))
+		})
+	}
+}
+
+func TestPodIPIndexNewAssignmentTakesOwnership(t *testing.T) {
+	k := &K8sObjectCacheImpl{}
+	ctx := context.Background()
+	old := indexedPod("old", "first", "10.0.0.1")
+	replacement := indexedPod("new", "second", "10.0.0.2")
+	k.AddHandler(ctx, old)
+	k.AddHandler(ctx, replacement)
+	updated := replacement.DeepCopy()
+	updated.Status.PodIP = old.Status.PodIP
+	k.ModifyHandler(ctx, updated)
+	assert.Same(t, updated, k.GetPodByIP(old.Status.PodIP))
+	assert.Nil(t, k.GetPodByIP(replacement.Status.PodIP))
+	recreated := indexedPod(replacement.Name, "third", old.Status.PodIP)
+	k.AddHandler(ctx, recreated)
+	assert.Same(t, recreated, k.GetPodByIP(old.Status.PodIP))
+}

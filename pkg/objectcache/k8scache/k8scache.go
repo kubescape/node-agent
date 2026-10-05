@@ -137,20 +137,35 @@ func (k *K8sObjectCacheImpl) storePod(pod *corev1.Pod) {
 	k.podMu.Lock()
 	defer k.podMu.Unlock()
 	key := podKey(pod.GetNamespace(), pod.GetName())
-	if previous, ok := k.pods.Load(key); ok {
+	previous, ok := k.pods.Load(key)
+	if ok {
 		k.removePodIPs(previous)
 	}
 	k.pods.Set(key, pod)
 	if k.podsByIP == nil {
 		k.podsByIP = make(map[string]*corev1.Pod)
 	}
-	if pod.Status.PodIP != "" {
-		k.podsByIP[pod.Status.PodIP] = pod
-	}
-	for _, ip := range pod.Status.PodIPs {
-		if ip.IP != "" {
-			k.podsByIP[ip.IP] = pod
+	indexIP := func(ip string) {
+		if ip == "" {
+			return
 		}
+		// A status update retaining an old IP must not reclaim it after reuse.
+		// New pods and newly assigned IPs can replace the previous owner.
+		if k.podsByIP[ip] != nil && previous != nil && previous.UID == pod.UID {
+			if previous.Status.PodIP == ip {
+				return
+			}
+			for _, oldIP := range previous.Status.PodIPs {
+				if oldIP.IP == ip {
+					return
+				}
+			}
+		}
+		k.podsByIP[ip] = pod
+	}
+	indexIP(pod.Status.PodIP)
+	for _, ip := range pod.Status.PodIPs {
+		indexIP(ip.IP)
 	}
 }
 

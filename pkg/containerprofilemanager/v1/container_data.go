@@ -33,6 +33,15 @@ func (cd *containerData) emptyEvents() {
 		cd.networks = cd.deferredNetworks.Clone()
 		cd.prevDeferredNetworks = cd.deferredNetworks.Clone()
 		cd.deferredNetworks = nil
+		// Retained observations must keep the ports captured at ingestion.
+		for event := range cd.servicePorts {
+			if !cd.networks.Contains(event) {
+				delete(cd.servicePorts, event)
+			}
+		}
+		if len(cd.servicePorts) == 0 {
+			cd.servicePorts = nil
+		}
 		var retainedSize int64
 		for _, ev := range cd.networks.ToSlice() {
 			retainedSize += int64(size.Of(ev) + networkNeighborIncrement(cd, ev))
@@ -42,8 +51,8 @@ func (cd *containerData) emptyEvents() {
 		cd.networks = nil
 		cd.prevDeferredNetworks = nil
 		cd.deferredNetworks = nil
+		cd.servicePorts = nil
 	}
-	cd.servicePorts = nil
 	if cd.watchedContainerData != nil {
 		cd.lastReportedCompletion = string(cd.watchedContainerData.GetCompletionStatus())
 		cd.lastReportedStatus = string(cd.watchedContainerData.GetStatus())

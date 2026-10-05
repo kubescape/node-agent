@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -506,4 +507,31 @@ func TestCreateNetworkNeighbor_ServicePromotionPreservesRawFallback(t *testing.T
 			}
 		})
 	}
+}
+
+func TestEmptyEvents_RetainsDeferredServicePortSnapshot(t *testing.T) {
+	event := serviceNetworkEvent(80, "tcp")
+	event.Destination.IPAddress = "10.96.0.42"
+	discarded := serviceNetworkEvent(443, "tcp")
+	cd := &containerData{servicePorts: map[NetworkEvent][]uint16{event: {8080, 9090}, discarded: {8443}}}
+	client := &servicePortTestClient{getErr: errors.New("transient lookup failure")}
+	require.Nil(t, cd.createNetworkNeighbor("", event, "default", client, nil, nil, nil, false))
+	cd.emptyEvents()
+	require.Equal(t, map[NetworkEvent][]uint16{event: {8080, 9090}}, cd.servicePorts)
+	require.Equal(t, int64(size.Of(event)+networkNeighborIncrement(cd, event)), cd.size.Load())
+
+	// EndpointSlices change while the Service lookup recovers.
+	client.getErr = nil
+	client.service = newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
+		"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
+	})
+	client.kubeClient = fake.NewClientset(newEndpointSlice("api-new", "api", discoveryv1.EndpointPort{
+		Name: ptr.To("web"), Port: ptr.To(int32(10000)), Protocol: ptr.To(corev1.ProtocolTCP),
+	}))
+	neighbor := cd.createNetworkNeighbor("", event, "default", client, nil, nil, nil, false)
+	require.NotNil(t, neighbor)
+	require.Equal(t, []int32{8080, 9090}, networkPortValues(neighbor.Ports))
+	require.Empty(t, client.kubeClient.Actions())
+	cd.emptyEvents()
+	require.Nil(t, cd.servicePorts, "snapshots clear when their observations are emitted")
 }
