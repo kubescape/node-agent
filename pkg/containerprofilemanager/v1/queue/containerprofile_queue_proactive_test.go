@@ -281,3 +281,37 @@ func TestProactiveSplitReservesFinalDepth(t *testing.T) {
 		}
 	}
 }
+
+// TestProactiveSplitPreservesWireSizeAtInitialDepth verifies optional splitting cannot
+// turn a storage-acceptable parent into an oversized, indivisible protobuf child.
+func TestProactiveSplitPreservesWireSizeAtInitialDepth(t *testing.T) {
+	parent := testProfile()
+	parent.Annotations[helpersv1.PreviousReportTimestampMetadataKey] = "2026-10-05 10:59:59.99975 +0000 UTC"
+	parent.Annotations[helpersv1.ReportTimestampMetadataKey] = "2026-10-05 11:00:00 +0000 UTC"
+	parent.Spec.Opens = []v1beta1.OpenCalls{{Path: "/a"}}
+	parent.Spec.Syscalls = []string{"poll"}
+	a, b, ok := splitProfile(parent)
+	require.True(t, ok)
+	require.Greater(t, max(a.Size(), b.Size()), parent.Size())
+
+	creator := &finalDepthCreator{byteLimitedCreator: byteLimitedCreator{limit: parent.Size()}}
+	q, err := NewQueueData(context.Background(), creator, QueueConfig{QueueDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, q.Close()) })
+	require.NoError(t, q.EnqueueWithSizeLimit(parent, "container", 1))
+	for range DefaultMaxSplitDepth + 2 {
+		q.processAllItems()
+	}
+
+	require.Zero(t, q.chunksDropped.Load(), "an optional split must not create a storage rejection")
+	require.Len(t, creator.attempted, 1)
+	require.Equal(t, parent, creator.attempted[0])
+	require.Len(t, creator.accepted, 1)
+	require.Equal(t, elementSignatures(&parent.Spec), elementSignatures(&creator.accepted[0].Spec))
+	assertChainIsLinear(t, []tsRow{{
+		PreviousReportTimestamp: creator.accepted[0].Annotations[helpersv1.PreviousReportTimestampMetadataKey],
+		ReportTimestamp:         creator.accepted[0].Annotations[helpersv1.ReportTimestampMetadataKey],
+	}}, parent.Annotations[helpersv1.PreviousReportTimestampMetadataKey], parent.Annotations[helpersv1.ReportTimestampMetadataKey])
+	require.Zero(t, q.splits.Load())
+	require.Zero(t, q.GetQueueSize())
+}
