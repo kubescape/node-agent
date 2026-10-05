@@ -5,8 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/internal/ttlcache"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
@@ -14,6 +16,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 // TestManager_GetProcessBootTimeNs exercises the accessor that the network-stream
@@ -85,4 +88,34 @@ func TestManager_GetContainerProcessTree_CarriesStartTime(t *testing.T) {
 
 	// The boot-relative identity for the same process, from the side map.
 	assert.Equal(t, uint64(2_220_000_000), mgr.GetProcessBootTimeNs(self))
+
+	impl := mgr.(*ProcessTreeManagerImpl)
+	key := treeCacheKey{containerID: containerID, pid: self}
+	impl.containerProcessTreeCache.Set(key, armotypes.Process{Comm: "cached"})
+	cached, err := mgr.GetContainerProcessTree(containerID, self, true)
+	require.NoError(t, err)
+	require.Equal(t, "cached", cached.Comm)
+	bypassed, err := mgr.GetContainerProcessTree(containerID, self, false)
+	require.NoError(t, err)
+	require.Equal(t, "nginx", bypassed.Comm)
+
+	impl.containerProcessTreeCache = ttlcache.New[treeCacheKey, armotypes.Process](10, time.Millisecond)
+	impl.containerProcessTreeCache.Set(key, armotypes.Process{Comm: "expired"})
+	time.Sleep(5 * time.Millisecond)
+	expired, err := mgr.GetContainerProcessTree(containerID, self, true)
+	require.NoError(t, err)
+	require.Equal(t, "nginx", expired.Comm)
+}
+
+func TestManagerCacheLifecycleDoesNotLeak(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	for range 10 {
+		tree := containerprocesstree.NewContainerProcessTree()
+		cfg := config.Config{}
+		cfg.ExitCleanup.CleanupInterval = time.Minute
+		creator := processtreecreator.NewProcessTreeCreator(tree, cfg)
+		mgr := NewProcessTreeManager(creator, tree, cfg)
+		mgr.Start()
+		mgr.Stop()
+	}
 }
