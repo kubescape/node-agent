@@ -55,13 +55,13 @@ type containerData struct {
 	timer *time.Timer // For max sniffing time
 
 	// Events reported for this container that need to be saved to the profile
-	capabilites   mapset.Set[string]
-	syscalls      mapset.Set[string]
-	endpoints     *maps.SafeMap[string, *v1beta1.HTTPEndpoint]
-	execs         *maps.SafeMap[string, []string]                     // Map of execs, key is SHA256 hash
-	opens         *maps.SafeMap[string, mapset.Set[string]]           // Map of opens, key is file path
-	rulePolicies  *maps.SafeMap[string, *v1beta1.RulePolicy]          // Map of rule policies, key is rule ID
-	callStacks    *maps.SafeMap[string, *v1beta1.IdentifiedCallStack] // Map of callstacks, key is SHA256 hash
+	capabilites          mapset.Set[string]
+	syscalls             mapset.Set[string]
+	endpoints            *maps.SafeMap[string, *v1beta1.HTTPEndpoint]
+	execs                *maps.SafeMap[string, []string]                     // Map of execs, key is SHA256 hash
+	opens                *maps.SafeMap[string, mapset.Set[string]]           // Map of opens, key is file path
+	rulePolicies         *maps.SafeMap[string, *v1beta1.RulePolicy]          // Map of rule policies, key is rule ID
+	callStacks           *maps.SafeMap[string, *v1beta1.IdentifiedCallStack] // Map of callstacks, key is SHA256 hash
 	networks             mapset.Set[NetworkEvent]
 	deferredNetworks     mapset.Set[NetworkEvent]
 	prevDeferredNetworks mapset.Set[NetworkEvent]
@@ -221,7 +221,7 @@ func NewContainerProfileManager(
 	return containerProfileManager, nil
 }
 
-// Stop stops the container profile manager
+// Close stops container timers, the persistent queue, and the Kubernetes inventory.
 func (cpm *ContainerProfileManager) Close() {
 	// Stop all container timers and clear container map
 	cpm.containersMu.Lock()

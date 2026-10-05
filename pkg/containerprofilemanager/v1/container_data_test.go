@@ -121,6 +121,7 @@ func serviceNetworkEvent(port uint16, protocol string) NetworkEvent {
 	}
 }
 
+// TestCreateNetworkNeighbor_ServiceTargetPortMatrix checks Service port remapping and observed-port fallbacks across protocols and endpoint sources.
 func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -284,6 +285,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 	}
 }
 
+// TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged checks that pod and raw-IP peers retain their observed ports.
 func TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged(t *testing.T) {
 	cd := &containerData{}
 
@@ -315,6 +317,7 @@ func TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged(t *testing.T) {
 	require.Equal(t, []int32{443}, networkPortValues(rawNeighbor.Ports))
 }
 
+// TestGenerateNetworkPolicy_ServiceTargetPortRoundTrip checks that generated policies use the backend target port instead of the Service port.
 func TestGenerateNetworkPolicy_ServiceTargetPortRoundTrip(t *testing.T) {
 	service := newServiceWorkload("api", map[string]any{"app.kubernetes.io/name": "api"}, map[string]any{
 		"port": 80, "targetPort": 8080, "protocol": "TCP",

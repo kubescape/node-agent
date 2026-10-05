@@ -174,6 +174,7 @@ func elementSignatures(spec *v1beta1.ContainerProfileSpec) []string {
 	return out
 }
 
+// TestSplitProfile_PartitionsWithoutLossOrDuplication checks that split halves contain every observation exactly once, including peer ports.
 func TestSplitProfile_PartitionsWithoutLossOrDuplication(t *testing.T) {
 	tests := []struct {
 		name   string

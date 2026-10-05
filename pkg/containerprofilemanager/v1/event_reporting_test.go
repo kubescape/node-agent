@@ -236,6 +236,7 @@ func (r *trackingDNSResolver) ResolveContainerProcessToCloudServices(string, uin
 	return nil
 }
 
+// TestCreateNetworkNeighbor_EmptyContainerIDWithWatchedContainerData checks that DNS lookup preserves an explicitly empty container ID.
 func TestCreateNetworkNeighbor_EmptyContainerIDWithWatchedContainerData(t *testing.T) {
 	cd := &containerData{
 		watchedContainerData: &objectcache.WatchedContainerData{
@@ -259,6 +260,7 @@ func TestCreateNetworkNeighbor_EmptyContainerIDWithWatchedContainerData(t *testi
 	assert.Equal(t, "resolved.domain", neighbor.DNS)
 }
 
+// TestReportNetworkEventServicePortMultiplicity checks that all backend ports count toward the size budget and stay fixed within a batch.
 func TestReportNetworkEventServicePortMultiplicity(t *testing.T) {
 	cpm, entry := newTestManager(t, "container1")
 	client := &servicePortTestClient{

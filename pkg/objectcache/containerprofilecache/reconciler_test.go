@@ -55,7 +55,9 @@ func (k *controllableK8sCache) GetPodSpec(_, _ string) *corev1.PodSpec     { ret
 func (k *controllableK8sCache) GetPodStatus(_, _ string) *corev1.PodStatus { return nil }
 func (k *controllableK8sCache) GetApiServerIpAddress() string              { return "" }
 func (k *controllableK8sCache) GetPods() []*corev1.Pod                     { return nil }
-func (k *controllableK8sCache) GetPodByIP(_ string) *corev1.Pod            { return nil }
+
+// GetPodByIP returns no peer because these cache tests do not model IP resolution.
+func (k *controllableK8sCache) GetPodByIP(_ string) *corev1.Pod { return nil }
 func (k *controllableK8sCache) SetSharedContainerData(_ string, _ *objectcache.WatchedContainerData) {
 }
 func (k *controllableK8sCache) GetSharedContainerData(_ string) *objectcache.WatchedContainerData {

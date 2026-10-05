@@ -545,6 +545,7 @@ func TestContainerProfileManagerCreation(t *testing.T) {
 	assert.NotNil(t, cpm.maxSniffTimeNotificationChan)
 }
 
+// TestContainerDataMethods checks that an empty container produces no profile events or network neighbors.
 func TestContainerDataMethods(t *testing.T) {
 	cd := &containerData{}
 

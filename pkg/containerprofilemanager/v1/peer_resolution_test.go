@@ -27,11 +27,13 @@ type stubK8sObjectCache struct {
 	getPodsCalls int
 }
 
+// GetPods records list calls so tests can detect fallback scans.
 func (s *stubK8sObjectCache) GetPods() []*corev1.Pod {
 	s.getPodsCalls++
 	return s.pods
 }
 
+// GetPodByIP finds a test pod by primary IP without calling GetPods.
 func (s *stubK8sObjectCache) GetPodByIP(ip string) *corev1.Pod {
 	for _, pod := range s.pods {
 		if pod != nil && pod.Status.PodIP == ip {
@@ -46,6 +48,7 @@ type mockK8sInventory struct {
 	svcsByIP map[string]*common.SlimService
 }
 
+// newMockK8sInventory creates mutable pod and Service indexes for simulating inventory updates.
 func newMockK8sInventory() *mockK8sInventory {
 	return &mockK8sInventory{
 		podsByIP: make(map[string]*common.SlimPod),
@@ -53,9 +56,13 @@ func newMockK8sInventory() *mockK8sInventory {
 	}
 }
 
+// Start is a no-op because tests populate the inventory directly.
 func (m *mockK8sInventory) Start() {}
-func (m *mockK8sInventory) Stop()  {}
 
+// Stop is a no-op because the test inventory has no background workers.
+func (m *mockK8sInventory) Stop() {}
+
+// GetPods returns the pods currently present in the test inventory.
 func (m *mockK8sInventory) GetPods() []*common.SlimPod {
 	var pods []*common.SlimPod
 	for _, p := range m.podsByIP {
@@ -64,6 +71,7 @@ func (m *mockK8sInventory) GetPods() []*common.SlimPod {
 	return pods
 }
 
+// GetPodByName finds a test pod by namespace and name, returning nil when absent.
 func (m *mockK8sInventory) GetPodByName(namespace string, name string) *common.SlimPod {
 	for _, p := range m.podsByIP {
 		if p.Namespace == namespace && p.Name == name {
@@ -73,6 +81,7 @@ func (m *mockK8sInventory) GetPodByName(namespace string, name string) *common.S
 	return nil
 }
 
+// GetPodByIp looks up a test pod by IP, returning nil when absent.
 func (m *mockK8sInventory) GetPodByIp(ip string) *common.SlimPod {
 	if m.podsByIP == nil {
 		return nil
@@ -80,6 +89,7 @@ func (m *mockK8sInventory) GetPodByIp(ip string) *common.SlimPod {
 	return m.podsByIP[ip]
 }
 
+// GetSvcs returns the Services currently present in the test inventory.
 func (m *mockK8sInventory) GetSvcs() []*common.SlimService {
 	var svcs []*common.SlimService
 	for _, s := range m.svcsByIP {
@@ -88,6 +98,7 @@ func (m *mockK8sInventory) GetSvcs() []*common.SlimService {
 	return svcs
 }
 
+// GetSvcByName finds a test Service by namespace and name, returning nil when absent.
 func (m *mockK8sInventory) GetSvcByName(namespace string, name string) *common.SlimService {
 	for _, s := range m.svcsByIP {
 		if s.Namespace == namespace && s.Name == name {
@@ -97,6 +108,7 @@ func (m *mockK8sInventory) GetSvcByName(namespace string, name string) *common.S
 	return nil
 }
 
+// GetSvcByIp looks up a test Service by IP, returning nil when absent.
 func (m *mockK8sInventory) GetSvcByIp(ip string) *common.SlimService {
 	if m.svcsByIP == nil {
 		return nil
@@ -104,6 +116,7 @@ func (m *mockK8sInventory) GetSvcByIp(ip string) *common.SlimService {
 	return m.svcsByIP[ip]
 }
 
+// TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sInventory checks that inventory resolution replaces a raw IP with stable workload labels.
 func TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sInventory(t *testing.T) {
 	inv := newMockK8sInventory()
 	inv.podsByIP["10.244.0.14"] = &common.SlimPod{
@@ -146,6 +159,7 @@ func TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sInventory(t *testing.T) {
 	assert.Equal(t, int32(3306), *neighbor.Ports[0].Port)
 }
 
+// TestCreateNetworkNeighbor_RawPodIP_CrossNamespace checks that resolved peers in another namespace receive a namespace selector.
 func TestCreateNetworkNeighbor_RawPodIP_CrossNamespace(t *testing.T) {
 	inv := newMockK8sInventory()
 	inv.podsByIP["10.244.0.14"] = &common.SlimPod{
@@ -184,6 +198,7 @@ func TestCreateNetworkNeighbor_RawPodIP_CrossNamespace(t *testing.T) {
 	assert.Equal(t, map[string]string{"kubernetes.io/metadata.name": "client-ns"}, neighbor.NamespaceSelector.MatchLabels)
 }
 
+// TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sObjectCache checks that fallback resolution uses the IP lookup without listing all pods.
 func TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sObjectCache(t *testing.T) {
 	mockCache := &stubK8sObjectCache{
 		pods: []*corev1.Pod{
@@ -222,6 +237,7 @@ func TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sObjectCache(t *testing.T) 
 	require.Zero(t, mockCache.getPodsCalls, "fallback lookup must use the IP index")
 }
 
+// TestCreateNetworkNeighbor_RawServiceIP_ResolvedViaK8sInventory checks that a raw Service IP resolves to its workload selector.
 func TestCreateNetworkNeighbor_RawServiceIP_ResolvedViaK8sInventory(t *testing.T) {
 	inv := newMockK8sInventory()
 	inv.svcsByIP["10.96.0.42"] = &common.SlimService{
@@ -260,6 +276,7 @@ func TestCreateNetworkNeighbor_RawServiceIP_ResolvedViaK8sInventory(t *testing.T
 	assert.Equal(t, map[string]string{"app": "api"}, neighbor.PodSelector.MatchLabels)
 }
 
+// TestCreateNetworkNeighbor_RawPrivateIP_DeferredOnIntermediateFlush checks that deferred private peers resolve after the inventory catches up.
 func TestCreateNetworkNeighbor_RawPrivateIP_DeferredOnIntermediateFlush(t *testing.T) {
 	cd := &containerData{}
 	rawEvent := NetworkEvent{
@@ -304,6 +321,7 @@ func TestCreateNetworkNeighbor_RawPrivateIP_DeferredOnIntermediateFlush(t *testi
 	assert.Equal(t, map[string]string{"app": "wikijs"}, neighbor.PodSelector.MatchLabels)
 }
 
+// TestCreateNetworkNeighbor_RawPrivateIP_EmittedExternalIfNeverResolves checks that unresolved private peers become external after one deferred flush.
 func TestCreateNetworkNeighbor_RawPrivateIP_EmittedExternalIfNeverResolves(t *testing.T) {
 	cd := &containerData{}
 	rawEvent := NetworkEvent{
@@ -330,6 +348,7 @@ func TestCreateNetworkNeighbor_RawPrivateIP_EmittedExternalIfNeverResolves(t *te
 	assert.Equal(t, "10.50.1.20", neighbor.IPAddress)
 }
 
+// TestCreateNetworkNeighbor_PublicIP_EmittedExternalImmediately checks that public IP peers bypass deferral.
 func TestCreateNetworkNeighbor_PublicIP_EmittedExternalImmediately(t *testing.T) {
 	cd := &containerData{}
 	rawEvent := NetworkEvent{
@@ -349,6 +368,7 @@ func TestCreateNetworkNeighbor_PublicIP_EmittedExternalImmediately(t *testing.T)
 	assert.Nil(t, cd.deferredNetworks)
 }
 
+// TestReportNetworkEvent_ImmediateResolutionWhenAvailableInInventory checks that ingestion stores pod identity when inventory already contains the peer.
 func TestReportNetworkEvent_ImmediateResolutionWhenAvailableInInventory(t *testing.T) {
 	cpm, entry := newTestManager(t, "container1")
 	inv := newMockK8sInventory()
@@ -382,6 +402,7 @@ func TestReportNetworkEvent_ImmediateResolutionWhenAvailableInInventory(t *testi
 	assert.Equal(t, map[string]string{"app": "wikijs"}, slice[0].GetDestinationPodLabels())
 }
 
+// TestMonitoring_ReResolutionAtProfileFlush checks that profile generation resolves raw peers added to inventory after ingestion.
 func TestMonitoring_ReResolutionAtProfileFlush(t *testing.T) {
 	cpm, entry := newTestManager(t, "container1")
 	inv := newMockK8sInventory()
@@ -423,6 +444,7 @@ func TestMonitoring_ReResolutionAtProfileFlush(t *testing.T) {
 	assert.Equal(t, map[string]string{"app": "wikijs"}, ingress[0].PodSelector.MatchLabels)
 }
 
+// TestNetworkNeighbors_MergeDistinctPortsAfterResolution checks that converging peer identities retain distinct ports and protocols without duplicates.
 func TestNetworkNeighbors_MergeDistinctPortsAfterResolution(t *testing.T) {
 	for _, direction := range []string{utils.HostPktType, utils.OutgoingPktType} {
 		t.Run(direction, func(t *testing.T) {
@@ -458,6 +480,7 @@ func TestNetworkNeighbors_MergeDistinctPortsAfterResolution(t *testing.T) {
 	}
 }
 
+// TestCreateNetworkNeighbor_PreservesSnapshotEqualToObservedPort checks that a cached port matching the observation bypasses changed EndpointSlices.
 func TestCreateNetworkNeighbor_PreservesSnapshotEqualToObservedPort(t *testing.T) {
 	event := serviceNetworkEvent(80, "tcp")
 	client := &servicePortTestClient{
@@ -475,6 +498,7 @@ func TestCreateNetworkNeighbor_PreservesSnapshotEqualToObservedPort(t *testing.T
 	require.Empty(t, client.kubeClient.Actions(), "cached snapshots must not query changed EndpointSlices")
 }
 
+// TestCreateNetworkNeighbor_ServicePromotionPreservesRawFallback checks that unusable Service selectors retain raw traffic with bounded deferral.
 func TestCreateNetworkNeighbor_ServicePromotionPreservesRawFallback(t *testing.T) {
 	for _, lookupFailure := range []bool{false, true} {
 		name := "selectorless service"
@@ -509,6 +533,7 @@ func TestCreateNetworkNeighbor_ServicePromotionPreservesRawFallback(t *testing.T
 	}
 }
 
+// TestEmptyEvents_RetainsDeferredServicePortSnapshot checks that deferred observations retain their port snapshot and size until emitted.
 func TestEmptyEvents_RetainsDeferredServicePortSnapshot(t *testing.T) {
 	event := serviceNetworkEvent(80, "tcp")
 	event.Destination.IPAddress = "10.96.0.42"
@@ -536,6 +561,7 @@ func TestEmptyEvents_RetainsDeferredServicePortSnapshot(t *testing.T) {
 	require.Nil(t, cd.servicePorts, "snapshots clear when their observations are emitted")
 }
 
+// BenchmarkNetworkNeighborsPortScan measures merging 4,000 ports for one peer and checks that no observations are lost.
 func BenchmarkNetworkNeighborsPortScan(b *testing.B) {
 	cd := &containerData{networks: mapset.NewSet[NetworkEvent]()}
 	for port := 1; port <= 4000; port++ {

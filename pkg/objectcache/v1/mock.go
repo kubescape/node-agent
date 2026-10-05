@@ -275,6 +275,7 @@ func (r *RuleObjectCacheMock) GetPods() []*corev1.Pod {
 	return []*corev1.Pod{{Spec: *r.podSpec, Status: *r.podStatus}}
 }
 
+// GetPodByIP resolves the configured mock pod by primary or secondary IP, or returns nil.
 func (r *RuleObjectCacheMock) GetPodByIP(ip string) *corev1.Pod {
 	if ip == "" || r.podStatus == nil {
 		return nil

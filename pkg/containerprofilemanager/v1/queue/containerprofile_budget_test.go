@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestQueueSizeBudgetRetainsUnsplittableAndDepthLimitedData verifies estimate-driven splits preserve data and timestamps through depth and size limits.
 func TestQueueSizeBudgetRetainsUnsplittableAndDepthLimitedData(t *testing.T) {
 	for _, count := range []int{1, 8} {
 		name := "unsplittable"

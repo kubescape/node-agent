@@ -185,11 +185,13 @@ func (cd *containerData) getCallStacks() []v1beta1.IdentifiedCallStack {
 	return callStacks
 }
 
+// isPrivateIP reports whether a valid address belongs to a private IPv4 or IPv6 range.
 func isPrivateIP(ipStr string) bool {
 	ip := net.ParseIP(ipStr)
 	return ip != nil && ip.IsPrivate()
 }
 
+// resolveEndpoint resolves unknown peers from inventory, then the pod cache, excluding host-network pods.
 func resolveEndpoint(
 	event *NetworkEvent,
 	k8sInventory common.K8sInventoryCache,

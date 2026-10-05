@@ -15,6 +15,7 @@ import (
 
 type portLimitedCreator struct{ accepted []*v1beta1.ContainerProfile }
 
+// CreateContainerProfileDirect rejects peers above the port limit and records independent copies of accepted profiles.
 func (c *portLimitedCreator) CreateContainerProfileDirect(p *v1beta1.ContainerProfile) error {
 	for _, n := range append(append([]v1beta1.NetworkNeighbor{}, p.Spec.Ingress...), p.Spec.Egress...) {
 		if len(n.Ports) > 2 {
@@ -25,6 +26,7 @@ func (c *portLimitedCreator) CreateContainerProfileDirect(p *v1beta1.ContainerPr
 	return nil
 }
 
+// portSplitNeighbor builds a single peer with enough ports to require successive queue splits.
 func portSplitNeighbor() v1beta1.NetworkNeighbor {
 	n := v1beta1.NetworkNeighbor{Identifier: "peer", Type: "internal", PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}}}
 	for i := range 8 {
@@ -33,6 +35,7 @@ func portSplitNeighbor() v1beta1.NetworkNeighbor {
 	return n
 }
 
+// TestQueueSplitsSingleNeighborPorts verifies HTTP 413 and proactive splits deliver every port with a continuous report chain.
 func TestQueueSplitsSingleNeighborPorts(t *testing.T) {
 	for _, direction := range []string{"ingress", "egress"} {
 		for _, proactive := range []bool{false, true} {

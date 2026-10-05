@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+// TestSaveContainerProfile_LateResolutionSizeBudget checks that resolved peers split within budget while preserving ports and report order.
 func TestSaveContainerProfile_LateResolutionSizeBudget(t *testing.T) {
 	for _, kind := range []EndpointKind{EndpointKindPod, EndpointKindService} {
 		t.Run(string(kind), func(t *testing.T) {

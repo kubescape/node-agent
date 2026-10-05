@@ -107,18 +107,21 @@ func (k *K8sObjectCacheImpl) DeleteSharedContainerData(containerID string) {
 	k.containerIDToSharedData.Delete(containerID)
 }
 
+// AddHandler adds pod objects to both name and IP indexes, ignoring other resource types.
 func (k *K8sObjectCacheImpl) AddHandler(_ context.Context, obj runtime.Object) {
 	if pod, ok := obj.(*corev1.Pod); ok {
 		k.storePod(pod)
 	}
 }
 
+// ModifyHandler updates both pod indexes and removes stale IP mappings.
 func (k *K8sObjectCacheImpl) ModifyHandler(_ context.Context, obj runtime.Object) {
 	if pod, ok := obj.(*corev1.Pod); ok {
 		k.storePod(pod)
 	}
 }
 
+// DeleteHandler removes the current pod and its IP mappings only when the deleted UID matches.
 func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj runtime.Object) {
 	if pod, ok := obj.(*corev1.Pod); ok {
 		k.podMu.Lock()
@@ -133,6 +136,7 @@ func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj runtime.Object
 	}
 }
 
+// storePod updates pod indexes under lock while preserving IPs reassigned to another pod.
 func (k *K8sObjectCacheImpl) storePod(pod *corev1.Pod) {
 	k.podMu.Lock()
 	defer k.podMu.Unlock()

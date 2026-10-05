@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSaveContainerProfile_DeferredOnlyPreservesReportTimestamps checks that a skipped flush leaves no timestamp link to an unqueued report.
 func TestSaveContainerProfile_DeferredOnlyPreservesReportTimestamps(t *testing.T) {
 	for _, priorReport := range []bool{false, true} {
 		name := "first report"

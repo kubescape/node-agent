@@ -563,10 +563,9 @@ processLoop:
 		if !queuedProfile.IsStitch && queuedProfile.MaxProfileSize > 0 &&
 			queuedProfile.SplitDepth < qd.maxSplitDepth &&
 			int64(size.Of(queuedProfile.Profile.Spec)) > queuedProfile.MaxProfileSize {
-			if a, b, ok := splitProfile(queuedProfile.Profile); ok {
+			if a, b, ok := splitProfile(queuedProfile.Profile); ok && qd.requeueSplit(queuedProfile, a, b, false) {
 				qd.splits.Add(1)
 				qd.metrics.ReportContainerProfileSplit()
-				qd.requeueSplit(queuedProfile, a, b)
 				continue
 			}
 		}
@@ -613,7 +612,7 @@ processLoop:
 
 					qd.splits.Add(1)
 					qd.metrics.ReportContainerProfileSplit()
-					qd.requeueSplit(queuedProfile, a, b)
+					qd.requeueSplit(queuedProfile, a, b, true)
 				}
 
 			case failureRetryable:
@@ -670,8 +669,13 @@ func (qd *QueueData) requeueImmediate(queuedProfile *QueuedContainerProfile) {
 // Both halves inherit parent.Attempts, take SplitDepth = parent.SplitDepth+1, and are explicitly
 // IsStitch = false (the zero value - stated because a half must always remain splittable).
 //
+// With allowEviction false, insufficient capacity leaves the queue untouched and returns
+// false so the caller can send the original profile. Capacity is checked under the same lock
+// as both enqueues, preventing concurrent producers from taking either reserved slot. A true
+// return means the split was attempted, including enqueue failures handled below.
+//
 // Callers must NOT hold qd.mu.
-func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.ContainerProfile) {
+func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.ContainerProfile, allowEviction bool) bool {
 	half := func(profile *v1beta1.ContainerProfile) *QueuedContainerProfile {
 		return &QueuedContainerProfile{
 			Profile:        profile,
@@ -685,6 +689,10 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 
 	qd.mu.Lock()
 	defer qd.mu.Unlock()
+
+	if !allowEviction && qd.maxQueueSize-qd.queue.Size() < 2 {
+		return false
+	}
 
 	if err := qd.enqueueLocked(half(a)); err != nil {
 		// The parent was already dequeued, so neither half reaches the queue: this is a
@@ -712,7 +720,7 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 				helpers.String("containerID", parent.ContainerID))
 
 			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonStitchBacklogExhausted))
-			return
+			return true
 		}
 
 		stitch := qd.newStitchFor(parent, false)
@@ -725,7 +733,7 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 
 			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 		}
-		return
+		return true
 	}
 
 	if err := qd.enqueueLocked(half(b)); err != nil {
@@ -739,6 +747,7 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 		qd.chunksDropped.Add(1)
 		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 	}
+	return true
 }
 
 // dropChunk discards a queued chunk that cannot be delivered as-is: because it was rejected for

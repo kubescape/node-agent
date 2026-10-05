@@ -35,6 +35,8 @@ func (k *K8sObjectCacheMock) GetPodStatus(_, _ string) *corev1.PodStatus {
 func (k *K8sObjectCacheMock) GetPod(_, _ string) *corev1.Pod {
 	return &corev1.Pod{Spec: k.PodSpec, Status: k.PodStatus}
 }
+
+// GetPodByIP returns the mock pod for a matching primary or secondary IP, or nil.
 func (k *K8sObjectCacheMock) GetPodByIP(ip string) *corev1.Pod {
 	if ip == "" {
 		return nil

@@ -11,10 +11,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// indexedPod builds a pod with explicit identity and primary IP for index lifecycle tests.
 func indexedPod(name, uid, ip string) *corev1.Pod {
 	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: name, UID: types.UID(uid)}, Status: corev1.PodStatus{PodIP: ip}}
 }
 
+// TestPodIPIndexLifecycle checks primary and secondary IP updates and deletion using an older status payload.
 func TestPodIPIndexLifecycle(t *testing.T) {
 	k := &K8sObjectCacheImpl{}
 	ctx := context.Background()
@@ -38,6 +40,7 @@ func TestPodIPIndexLifecycle(t *testing.T) {
 	assert.Nil(t, k.GetPod("default", "pod"))
 }
 
+// TestPodIPIndexReuse checks that deleting an old pod preserves the pod that reused its IP.
 func TestPodIPIndexReuse(t *testing.T) {
 	for _, sameName := range []bool{false, true} {
 		t.Run(map[bool]string{false: "different pods", true: "recreated pod"}[sameName], func(t *testing.T) {
@@ -59,6 +62,7 @@ func TestPodIPIndexReuse(t *testing.T) {
 	}
 }
 
+// TestPodIPIndexUpdatePreservesReusedIP checks that updating or deleting an old pod cannot remove a reassigned IP.
 func TestPodIPIndexUpdatePreservesReusedIP(t *testing.T) {
 	k := &K8sObjectCacheImpl{}
 	ctx := context.Background()
@@ -78,6 +82,7 @@ func TestPodIPIndexUpdatePreservesReusedIP(t *testing.T) {
 	assert.Nil(t, k.GetPodByIP("fd00::1"))
 }
 
+// TestPodIPIndexConcurrentAccess exercises concurrent informer mutations and IP lookups for race detection.
 func TestPodIPIndexConcurrentAccess(t *testing.T) {
 	k := &K8sObjectCacheImpl{}
 	var wg sync.WaitGroup
@@ -97,6 +102,7 @@ func TestPodIPIndexConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+// TestPodIPIndexRetainedReassignedIP checks that stale status updates cannot reclaim reused primary or secondary IPs.
 func TestPodIPIndexRetainedReassignedIP(t *testing.T) {
 	for _, secondary := range []bool{false, true} {
 		t.Run(map[bool]string{false: "primary", true: "secondary"}[secondary], func(t *testing.T) {
@@ -121,6 +127,7 @@ func TestPodIPIndexRetainedReassignedIP(t *testing.T) {
 	}
 }
 
+// TestPodIPIndexNewAssignmentTakesOwnership checks that newly assigned IPs and recreated pods take ownership of their index entries.
 func TestPodIPIndexNewAssignmentTakesOwnership(t *testing.T) {
 	k := &K8sObjectCacheImpl{}
 	ctx := context.Background()
