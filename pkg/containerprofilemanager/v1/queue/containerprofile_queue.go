@@ -669,9 +669,10 @@ func (qd *QueueData) requeueImmediate(queuedProfile *QueuedContainerProfile) {
 // Both halves inherit parent.Attempts, take SplitDepth = parent.SplitDepth+1, and are explicitly
 // IsStitch = false (the zero value - stated because a half must always remain splittable).
 //
-// With allowEviction false, insufficient capacity leaves the queue untouched and returns
-// false so the caller can send the original profile. Capacity is checked under the same lock
-// as both enqueues, preventing concurrent producers from taking either reserved slot. A true
+// With allowEviction false, shutdown or insufficient capacity leaves the queue untouched
+// and returns false so the caller can send the original profile. Admission is checked under
+// the same lock as both enqueues, preventing shutdown or concurrent producers from
+// invalidating the decision before either half is queued. A true
 // return means the split was attempted, including enqueue failures handled below.
 //
 // Callers must NOT hold qd.mu.
@@ -690,7 +691,7 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 	qd.mu.Lock()
 	defer qd.mu.Unlock()
 
-	if !allowEviction && qd.maxQueueSize-qd.queue.Size() < 2 {
+	if !allowEviction && (!qd.running || qd.maxQueueSize-qd.queue.Size() < 2) {
 		return false
 	}
 

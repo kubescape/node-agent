@@ -106,3 +106,35 @@ func TestProactiveSplitUsesAvailableCapacity(t *testing.T) {
 	assert.Zero(t, qd.chunksDropped.Load())
 	assert.Zero(t, qd.GetQueueSize())
 }
+
+// TestProactiveSplitSendsOriginalDuringShutdown verifies that stopping queue admission
+// while processing is in flight preserves the original payload for its direct send.
+func TestProactiveSplitSendsOriginalDuringShutdown(t *testing.T) {
+	for _, capacity := range []int{1, 2} {
+		t.Run(fmt.Sprint(capacity), func(t *testing.T) {
+			creator := &MockProfileCreator{}
+			qd, err := NewQueueData(context.Background(), creator, QueueConfig{QueueDir: t.TempDir(), MaxQueueSize: capacity})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, qd.Close()) })
+			parent := testProfile()
+			parent.Spec.Capabilities = []string{"cap-a", "cap-b"}
+			_, _, ok := splitProfile(parent)
+			require.True(t, ok)
+			require.NoError(t, qd.EnqueueWithSizeLimit(parent, "parent", 1))
+
+			// Close disables admission before waiting for the processor to finish.
+			// Reproduce that state without closing the disk queue underneath processing.
+			qd.mu.Lock()
+			qd.running = false
+			qd.mu.Unlock()
+			qd.processAllItems()
+
+			created := creator.CreatedProfiles()
+			require.Len(t, created, 1)
+			assert.Equal(t, parent, created[0])
+			assert.Zero(t, qd.splits.Load())
+			assert.Zero(t, qd.chunksDropped.Load())
+			assert.Zero(t, qd.GetQueueSize())
+		})
+	}
+}
