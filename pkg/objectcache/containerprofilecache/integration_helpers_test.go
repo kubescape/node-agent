@@ -99,6 +99,8 @@ func (k *stubK8sCache) GetPodStatus(_, _ string) *corev1.PodStatus { return nil 
 func (k *stubK8sCache) GetApiServerIpAddress() string              { return "" }
 func (k *stubK8sCache) GetPods() []*corev1.Pod                     { return nil }
 
+func (k *stubK8sCache) GetPodByIP(_ string) *corev1.Pod { return nil }
+
 func (k *stubK8sCache) SetSharedContainerData(id string, d *objectcache.WatchedContainerData) {
 	k.mu.Lock()
 	defer k.mu.Unlock()

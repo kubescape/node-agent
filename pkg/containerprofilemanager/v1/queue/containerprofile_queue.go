@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/DmitriyVTitov/size"
 	"github.com/joncrlsn/dque"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -65,7 +66,11 @@ type QueuedContainerProfile struct {
 	// retryable error. Items persisted before this field existed decode with Attempts
 	// at zero, so they simply get a full budget of retries.
 	Attempts int `json:"attempts"`
-	// SplitDepth counts how many times this item's lineage has been halved after an HTTP 413.
+	// MaxProfileSize is an optional in-memory size estimate for profiles whose
+	// network peers expanded after collection. Zero disables proactive splitting.
+	MaxProfileSize int64 `json:"maxProfileSize,omitempty"`
+	// SplitDepth counts how many times this item's lineage has been halved, either
+	// proactively for MaxProfileSize or after an HTTP 413.
 	// Items persisted before this field existed decode with SplitDepth at zero.
 	SplitDepth int `json:"splitDepth"`
 	// IsStitch marks a metadata-only chunk emitted in place of a chunk that was dropped or
@@ -283,12 +288,20 @@ func (qd *QueueData) Start() {
 
 // Enqueue adds a new container profile to the queue with LRU eviction
 func (qd *QueueData) Enqueue(profile *v1beta1.ContainerProfile, containerID string) error {
+	return qd.EnqueueWithSizeLimit(profile, containerID, 0)
+}
+
+// EnqueueWithSizeLimit applies an estimated size budget before sending to storage.
+// The existing splitter preserves the materialized data and report chain; profiles
+// that cannot be split within the depth limit are still offered to storage.
+func (qd *QueueData) EnqueueWithSizeLimit(profile *v1beta1.ContainerProfile, containerID string, maxProfileSize int64) error {
 	qd.mu.Lock()
 	defer qd.mu.Unlock()
 
 	if err := qd.enqueueLocked(&QueuedContainerProfile{
-		Profile:     profile,
-		ContainerID: containerID,
+		Profile:        profile,
+		ContainerID:    containerID,
+		MaxProfileSize: maxProfileSize,
 	}); err != nil {
 		return err
 	}
@@ -547,6 +560,17 @@ processLoop:
 			qd.releaseStitch()
 		}
 
+		if !queuedProfile.IsStitch && queuedProfile.MaxProfileSize > 0 &&
+			queuedProfile.SplitDepth < qd.maxSplitDepth &&
+			int64(size.Of(queuedProfile.Profile.Spec)) > queuedProfile.MaxProfileSize {
+			if a, b, ok := splitProfile(queuedProfile.Profile); ok {
+				qd.splits.Add(1)
+				qd.metrics.ReportContainerProfileSplit()
+				qd.requeueSplit(queuedProfile, a, b)
+				continue
+			}
+		}
+
 		// Attempt to create the profile
 		err = qd.creator.CreateContainerProfileDirect(queuedProfile.Profile)
 		if err != nil {
@@ -650,11 +674,12 @@ func (qd *QueueData) requeueImmediate(queuedProfile *QueuedContainerProfile) {
 func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.ContainerProfile) {
 	half := func(profile *v1beta1.ContainerProfile) *QueuedContainerProfile {
 		return &QueuedContainerProfile{
-			Profile:     profile,
-			ContainerID: parent.ContainerID,
-			Attempts:    parent.Attempts,
-			SplitDepth:  parent.SplitDepth + 1,
-			IsStitch:    false,
+			Profile:        profile,
+			ContainerID:    parent.ContainerID,
+			Attempts:       parent.Attempts,
+			SplitDepth:     parent.SplitDepth + 1,
+			MaxProfileSize: parent.MaxProfileSize,
+			IsStitch:       false,
 		}
 	}
 

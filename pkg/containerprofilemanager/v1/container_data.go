@@ -213,14 +213,12 @@ func resolveEndpoint(
 	}
 
 	if k8sObjectCache != nil {
-		for _, pod := range k8sObjectCache.GetPods() {
-			if pod != nil && !pod.Spec.HostNetwork && pod.Status.PodIP == ip {
-				event.Destination.Kind = EndpointKindPod
-				event.Destination.Name = pod.Name
-				event.Destination.Namespace = pod.Namespace
-				event.SetDestinationPodLabels(pod.Labels)
-				return
-			}
+		if pod := k8sObjectCache.GetPodByIP(ip); pod != nil && !pod.Spec.HostNetwork {
+			event.Destination.Kind = EndpointKindPod
+			event.Destination.Name = pod.Name
+			event.Destination.Namespace = pod.Namespace
+			event.SetDestinationPodLabels(pod.Labels)
+			return
 		}
 	}
 }
@@ -310,6 +308,7 @@ func (cd *containerData) createNetworkNeighbor(
 	k8sObjectCache objectcache.K8sObjectCache,
 	forceSend bool,
 ) *v1beta1.NetworkNeighbor {
+	originalEvent := networkEvent
 	resolveEndpoint(&networkEvent, k8sInventory, k8sObjectCache)
 
 	var neighborEntry v1beta1.NetworkNeighbor
@@ -338,22 +337,25 @@ func (cd *containerData) createNetworkNeighbor(
 				logger.L().Warning("failed to get service",
 					helpers.String("reason", err.Error()),
 					helpers.String("service name", networkEvent.Destination.Name))
-				return nil
-			}
-			serviceWorkload = svc
+			} else if svc != nil {
+				serviceWorkload = svc
 
-			if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
-				// The default service has no selectors, in addition, we want to save the default service address
-				selector = svc.GetLabels()
-				neighborEntry.IPAddress = networkEvent.Destination.IPAddress
-			} else {
-				selector = svc.GetServiceSelector()
+				if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
+					// The default service has no selectors, in addition, we want to save the default service address
+					selector = svc.GetLabels()
+					neighborEntry.IPAddress = networkEvent.Destination.IPAddress
+				} else {
+					selector = svc.GetServiceSelector()
+				}
 			}
 		}
 
 		if len(selector) == 0 {
-			// TODO: check if we need to handle services with no selectors
-			return nil
+			// Preserve observed IP traffic when promotion cannot provide a selector.
+			if networkEvent.Destination.IPAddress == "" {
+				return nil
+			}
+			networkEvent.Destination.Kind = EndpointKindRaw
 		} else {
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: selector,
@@ -365,7 +367,9 @@ func (cd *containerData) createNetworkNeighbor(
 			}
 		}
 
-	} else {
+	}
+
+	if networkEvent.Destination.Kind != EndpointKindPod && networkEvent.Destination.Kind != EndpointKindService {
 		if networkEvent.Destination.IPAddress == "127.0.0.1" {
 			// No need to generate for localhost
 			return nil
@@ -375,11 +379,11 @@ func (cd *containerData) createNetworkNeighbor(
 		// defer by one flush before persisting as an external IP, unless forceSend is true
 		// or it has already been deferred once.
 		if isPrivateIP(networkEvent.Destination.IPAddress) && !forceSend && cd != nil &&
-			(cd.prevDeferredNetworks == nil || !cd.prevDeferredNetworks.Contains(networkEvent)) {
+			(cd.prevDeferredNetworks == nil || !cd.prevDeferredNetworks.Contains(originalEvent)) {
 			if cd.deferredNetworks == nil {
 				cd.deferredNetworks = mapset.NewSet[NetworkEvent]()
 			}
-			cd.deferredNetworks.Add(networkEvent)
+			cd.deferredNetworks.Add(originalEvent)
 			return nil
 		}
 
@@ -395,7 +399,7 @@ func (cd *containerData) createNetworkNeighbor(
 	}
 
 	hasPortSnapshot := false
-	if cd != nil {
+	if cd != nil && networkEvent.Destination.Kind == EndpointKindService {
 		if ports, ok := cd.servicePorts[networkEvent]; ok {
 			hasPortSnapshot = true
 			enforcementPorts = ports

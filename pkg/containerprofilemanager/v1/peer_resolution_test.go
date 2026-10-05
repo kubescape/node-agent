@@ -1,6 +1,7 @@
 package containerprofilemanager
 
 import (
+	"errors"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -21,11 +22,22 @@ import (
 
 type stubK8sObjectCache struct {
 	objectcache.K8sObjectCacheMock
-	pods []*corev1.Pod
+	pods         []*corev1.Pod
+	getPodsCalls int
 }
 
 func (s *stubK8sObjectCache) GetPods() []*corev1.Pod {
+	s.getPodsCalls++
 	return s.pods
+}
+
+func (s *stubK8sObjectCache) GetPodByIP(ip string) *corev1.Pod {
+	for _, pod := range s.pods {
+		if pod != nil && pod.Status.PodIP == ip {
+			return pod
+		}
+	}
+	return nil
 }
 
 type mockK8sInventory struct {
@@ -206,6 +218,7 @@ func TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sObjectCache(t *testing.T) 
 	assert.Equal(t, InternalTrafficType, string(neighbor.Type))
 	require.NotNil(t, neighbor.PodSelector)
 	assert.Equal(t, map[string]string{"app": "wikijs"}, neighbor.PodSelector.MatchLabels)
+	require.Zero(t, mockCache.getPodsCalls, "fallback lookup must use the IP index")
 }
 
 func TestCreateNetworkNeighbor_RawServiceIP_ResolvedViaK8sInventory(t *testing.T) {
@@ -459,4 +472,38 @@ func TestCreateNetworkNeighbor_PreservesSnapshotEqualToObservedPort(t *testing.T
 	require.NotNil(t, neighbor)
 	require.Equal(t, []int32{80}, networkPortValues(neighbor.Ports))
 	require.Empty(t, client.kubeClient.Actions(), "cached snapshots must not query changed EndpointSlices")
+}
+
+func TestCreateNetworkNeighbor_ServicePromotionPreservesRawFallback(t *testing.T) {
+	for _, lookupFailure := range []bool{false, true} {
+		name := "selectorless service"
+		if lookupFailure {
+			name = "lookup failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			inv := newMockK8sInventory()
+			inv.svcsByIP["10.96.0.42"] = &common.SlimService{SlimObjectMeta: common.SlimObjectMeta{Name: "api", Namespace: "default"}}
+			client := &servicePortTestClient{service: newServiceWorkload("api", nil)}
+			if lookupFailure {
+				client.getErr = errors.New("transient lookup failure")
+			}
+			for _, kind := range []EndpointKind{EndpointKindRaw, EndpointKindService} {
+				event := NetworkEvent{Port: 80, Protocol: "tcp", PktType: utils.OutgoingPktType,
+					Destination: Destination{Kind: kind, IPAddress: "10.96.0.42", Namespace: "default", Name: "api"}}
+				cd := &containerData{}
+				require.Nil(t, cd.createNetworkNeighbor("", event, "default", client, nil, inv, nil, false))
+				require.NotNil(t, cd.deferredNetworks, "failed promotion must retain the observation")
+				require.True(t, cd.deferredNetworks.Contains(event))
+				cd.emptyEvents()
+				neighbor := cd.createNetworkNeighbor("", event, "default", client, nil, inv, nil, false)
+				require.NotNil(t, neighbor, "retry is bounded to one flush")
+				require.Equal(t, ExternalTrafficType, string(neighbor.Type))
+				require.Equal(t, "10.96.0.42", neighbor.IPAddress)
+				require.Equal(t, []int32{80}, networkPortValues(neighbor.Ports))
+				final := (&containerData{}).createNetworkNeighbor("", event, "default", client, nil, inv, nil, true)
+				require.NotNil(t, final, "forced final flush must preserve raw IP")
+				require.Equal(t, "10.96.0.42", final.IPAddress)
+			}
+		})
+	}
 }

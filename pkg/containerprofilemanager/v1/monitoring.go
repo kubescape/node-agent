@@ -326,10 +326,16 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	containerProfile.Annotations[helpersv1.PreviousReportTimestampMetadataKey] = watchedContainer.PreviousReportTimestamp.String()
 	containerProfile.Annotations[helpersv1.ReportTimestampMetadataKey] = watchedContainer.CurrentReportTimestamp.String()
 
-	if err := cpm.enqueueContainerProfile(containerProfile, watchedContainer.ContainerID); err != nil {
+	var enqueueErr error
+	if hasUnresolvedNetworkPeers(containerData) {
+		enqueueErr = cpm.queueData.EnqueueWithSizeLimit(containerProfile, watchedContainer.ContainerID, cpm.cfg.MaxTsProfileSize)
+	} else {
+		enqueueErr = cpm.enqueueContainerProfile(containerProfile, watchedContainer.ContainerID)
+	}
+	if enqueueErr != nil {
 		// Empty the container data to prevent reporting the same data again
 		containerData.emptyEvents()
-		return err
+		return enqueueErr
 	}
 
 	cpm.lifecycleTracker.OnEntrySaved(watchedContainer.ContainerID, containerData.droppedEvents)
