@@ -2,8 +2,10 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/DmitriyVTitov/size"
@@ -92,7 +94,7 @@ func skewedPortNeighbors(heavyIndex int) []v1beta1.NetworkNeighbor {
 	return neighbors
 }
 
-// TestSplitProfileBalancesSkewedNeighborPorts verifies weighted splitting preserves
+// TestSplitProfileBalancesSkewedNeighborPorts verifies byte-balanced splitting preserves
 // observation order, zero-port peers, identities, and the unmodified input.
 func TestSplitProfileBalancesSkewedNeighborPorts(t *testing.T) {
 	for _, direction := range []string{"ingress", "egress"} {
@@ -108,13 +110,19 @@ func TestSplitProfileBalancesSkewedNeighborPorts(t *testing.T) {
 				before := profile.DeepCopy()
 				a, b, ok := splitProfile(profile)
 				require.True(t, ok)
-				require.Equal(t, 12, countPartitionableElements(&a.Spec))
-				require.Equal(t, 11, countPartitionableElements(&b.Spec))
+				require.Equal(t, 23, countPartitionableElements(&a.Spec)+countPartitionableElements(&b.Spec))
 				require.Equal(t, elementSignatures(&profile.Spec), append(elementSignatures(&a.Spec), elementSignatures(&b.Spec)...))
 				aPeers, bPeers := a.Spec.Ingress, b.Spec.Ingress
 				if direction == "egress" {
 					aPeers, bPeers = a.Spec.Egress, b.Spec.Egress
 				}
+				encodedParent, err := json.Marshal(neighbors)
+				require.NoError(t, err)
+				encodedA, err := json.Marshal(aPeers)
+				require.NoError(t, err)
+				encodedB, err := json.Marshal(bPeers)
+				require.NoError(t, err)
+				require.LessOrEqual(t, max(len(encodedA), len(encodedB)), 2*len(encodedParent)/3)
 				require.LessOrEqual(t, len(aPeers)+len(bPeers), len(neighbors)+1)
 				if aPeers[len(aPeers)-1].Identifier == bPeers[0].Identifier {
 					// Only a boundary peer is duplicated, with independent identity and ports.
@@ -134,7 +142,7 @@ func TestQueueSplitsSkewedNeighborPortsWithinDefaultDepth(t *testing.T) {
 	for _, direction := range []string{"ingress", "egress"} {
 		for _, heavyIndex := range []int{0, 8, 15} {
 			t.Run(fmt.Sprintf("%s/heavy=%d", direction, heavyIndex), func(t *testing.T) {
-				creator := &portLimitedCreator{}
+				creator := &byteLimitedCreator{}
 				q, err := NewQueueData(context.Background(), creator, QueueConfig{QueueDir: t.TempDir(), MaxQueueSize: 100})
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, q.Close()) })
@@ -144,6 +152,15 @@ func TestQueueSplitsSkewedNeighborPortsWithinDefaultDepth(t *testing.T) {
 				} else {
 					profile.Spec.Egress = skewedPortNeighbors(heavyIndex)
 				}
+				limitProfile := testProfile()
+				limitedPeer := portSplitNeighbor()
+				limitedPeer.Ports = limitedPeer.Ports[:4]
+				if direction == "ingress" {
+					limitProfile.Spec.Ingress = []v1beta1.NetworkNeighbor{limitedPeer}
+				} else {
+					limitProfile.Spec.Egress = []v1beta1.NetworkNeighbor{limitedPeer}
+				}
+				creator.limit = limitProfile.Size()
 				require.NoError(t, q.Enqueue(profile, "container"))
 				for range DefaultMaxSplitDepth + 2 {
 					q.processAllItems()
@@ -161,4 +178,99 @@ func TestQueueSplitsSkewedNeighborPortsWithinDefaultDepth(t *testing.T) {
 			})
 		}
 	}
+}
+
+// byteLimitedCreator models storage's transport rejection using encoded protobuf size.
+type byteLimitedCreator struct {
+	limit    int
+	accepted []*v1beta1.ContainerProfile
+}
+
+// CreateContainerProfileDirect rejects oversized wire payloads and records accepted copies.
+func (c *byteLimitedCreator) CreateContainerProfileDirect(p *v1beta1.ContainerProfile) error {
+	if p.Size() > c.limit {
+		return genericStatusError(http.StatusRequestEntityTooLarge)
+	}
+	c.accepted = append(c.accepted, p.DeepCopy())
+	return nil
+}
+
+// TestQueueSplitsSelectorHeavyNeighbors verifies numerous large identities are balanced
+// even when another peer's large port count would dominate an observation-count cut.
+func TestQueueSplitsSelectorHeavyNeighbors(t *testing.T) {
+	for _, direction := range []string{"ingress", "egress"} {
+		t.Run(direction, func(t *testing.T) {
+			profile := testProfile()
+			heavyPorts := portSplitNeighbor()
+			heavyPorts.Ports = nil
+			for i := range 512 {
+				heavyPorts.Ports = append(heavyPorts.Ports, v1beta1.NetworkPort{Name: fmt.Sprintf("TCP-%d", 8000+i), Protocol: "TCP", Port: new(int32(8000 + i))})
+			}
+			neighbors := []v1beta1.NetworkNeighbor{heavyPorts}
+			for i := range 40 {
+				peer := portSplitNeighbor()
+				peer.Identifier = fmt.Sprintf("selector-peer-%d", i)
+				peer.Ports = peer.Ports[:1]
+				for j := range 1500 {
+					peer.PodSelector.MatchLabels[fmt.Sprintf("label-%04d", j)] = strings.Repeat("v", 63)
+				}
+				neighbors = append(neighbors, peer)
+			}
+			if direction == "ingress" {
+				profile.Spec.Ingress = neighbors
+			} else {
+				profile.Spec.Egress = neighbors
+			}
+			creator := &byteLimitedCreator{limit: 3 * 1024 * 1024}
+			require.Greater(t, profile.Size(), creator.limit)
+			q, err := NewQueueData(context.Background(), creator, QueueConfig{QueueDir: t.TempDir(), MaxQueueSize: 100})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, q.Close()) })
+			require.NoError(t, q.Enqueue(profile, "container"))
+			for range DefaultMaxSplitDepth + 2 {
+				q.processAllItems()
+			}
+			var observations []string
+			var rows []tsRow
+			for _, accepted := range creator.accepted {
+				peers := accepted.Spec.Ingress
+				if direction == "egress" {
+					peers = accepted.Spec.Egress
+				}
+				for _, peer := range peers {
+					var original *v1beta1.NetworkNeighbor
+					for i := range neighbors {
+						if neighbors[i].Identifier == peer.Identifier {
+							original = &neighbors[i]
+							break
+						}
+					}
+					require.NotNil(t, original)
+					require.Equal(t, *original, peer, "selectors and ports must stay intact")
+				}
+				observations = append(observations, elementSignatures(&accepted.Spec)...)
+				rows = append(rows, tsRow{PreviousReportTimestamp: accepted.Annotations[helpersv1.PreviousReportTimestampMetadataKey], ReportTimestamp: accepted.Annotations[helpersv1.ReportTimestampMetadataKey]})
+			}
+			require.ElementsMatch(t, elementSignatures(&profile.Spec), observations)
+			assertChainIsLinear(t, rows, profile.Annotations[helpersv1.PreviousReportTimestampMetadataKey], profile.Annotations[helpersv1.ReportTimestampMetadataKey])
+			require.Zero(t, q.chunksDropped.Load())
+			require.Zero(t, q.GetQueueSize())
+		})
+	}
+}
+
+// TestHalveNeighborsAvoidsDuplicatingLargeIdentity verifies that splitting a peer's
+// ports is rejected when copying its selector would make the larger half larger.
+func TestHalveNeighborsAvoidsDuplicatingLargeIdentity(t *testing.T) {
+	heavy := portSplitNeighbor()
+	heavy.Ports = heavy.Ports[:2]
+	for i := range 40 {
+		heavy.PodSelector.MatchLabels[fmt.Sprintf("label-%d", i)] = strings.Repeat("v", 63)
+	}
+	small := portSplitNeighbor()
+	small.Identifier = "small"
+	small.Ports = small.Ports[:1]
+	a, b := halveNeighbors([]v1beta1.NetworkNeighbor{heavy, small})
+	require.Equal(t, []v1beta1.NetworkNeighbor{heavy}, a)
+	require.Equal(t, []v1beta1.NetworkNeighbor{small}, b)
 }

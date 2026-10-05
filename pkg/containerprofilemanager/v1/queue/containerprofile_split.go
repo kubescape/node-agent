@@ -245,29 +245,68 @@ func countNeighborElements(neighbors []v1beta1.NetworkNeighbor) int {
 	return count
 }
 
-// halveNeighbors partitions the ordered observations at half their total weight,
-// counting every port and each portless peer once. Only a peer crossing that boundary
-// is copied into both chunks, so large port lists consume the same split-depth budget
-// as other observations without duplicating every peer's identity.
+// halveNeighbors chooses the ordered cut with the smallest larger half, estimating
+// bytes from JSON as splitProfile's progress guard does. Whole-peer cuts are preferred
+// on ties. Interior port cuts charge the duplicated peer identity to both halves, so
+// large selectors are balanced without needlessly copying them. Each neighbor and
+// port is encoded once; scoring all cuts is linear in the number of observations.
 func halveNeighbors(neighbors []v1beta1.NetworkNeighbor) ([]v1beta1.NetworkNeighbor, []v1beta1.NetworkNeighbor) {
-	remaining := (countNeighborElements(neighbors) + 1) / 2
-	for i := range neighbors {
-		if remaining == 0 {
-			return neighbors[:i], neighbors[i:]
-		}
-		weight := max(1, len(neighbors[i].Ports))
-		if remaining < weight {
-			left, right := neighbors[i].DeepCopy(), neighbors[i].DeepCopy()
-			left.Ports = left.Ports[:remaining]
-			right.Ports = right.Ports[remaining:]
-			a := append([]v1beta1.NetworkNeighbor(nil), neighbors[:i]...)
-			a = append(a, *left)
-			b := append([]v1beta1.NetworkNeighbor{*right}, neighbors[i+1:]...)
-			return a, b
-		}
-		remaining -= weight
+	if len(neighbors) == 0 {
+		return neighbors, nil
 	}
-	return neighbors, nil
+	sizes := make([]int, len(neighbors))
+	total := 0
+	for i := range neighbors {
+		encoded, _ := json.Marshal(neighbors[i])
+		// Include one separator byte per peer; the list brackets add the same
+		// constant to each candidate and therefore do not affect the choice.
+		sizes[i] = len(encoded) + 1
+		total += sizes[i]
+	}
+
+	bestSize, cutPeer, cutPort := total, len(neighbors), 0
+	prefix := 0
+	for i := 1; i < len(neighbors); i++ {
+		prefix += sizes[i-1]
+		if candidate := max(prefix, total-prefix); candidate < bestSize {
+			bestSize, cutPeer = candidate, i
+		}
+	}
+
+	prefix = 0
+	for i, neighbor := range neighbors {
+		if len(neighbor.Ports) > 1 {
+			portSizes := make([]int, len(neighbor.Ports))
+			portsTotal := 0
+			for j, port := range neighbor.Ports {
+				encoded, _ := json.Marshal(port)
+				portSizes[j] = len(encoded) + 1
+				portsTotal += portSizes[j]
+			}
+			portsPrefix := 0
+			for j := 1; j < len(neighbor.Ports); j++ {
+				portsPrefix += portSizes[j-1]
+				// Removing ports also removes one comma per port while each
+				// nonempty half retains the peer's full identity and ports wrapper.
+				left := prefix + sizes[i] - (portsTotal - portsPrefix)
+				right := total - prefix - portsPrefix
+				if candidate := max(left, right); candidate < bestSize {
+					bestSize, cutPeer, cutPort = candidate, i, j
+				}
+			}
+		}
+		prefix += sizes[i]
+	}
+	if cutPort == 0 {
+		return neighbors[:cutPeer], neighbors[cutPeer:]
+	}
+	left, right := neighbors[cutPeer].DeepCopy(), neighbors[cutPeer].DeepCopy()
+	left.Ports = left.Ports[:cutPort]
+	right.Ports = right.Ports[cutPort:]
+	a := append([]v1beta1.NetworkNeighbor(nil), neighbors[:cutPeer]...)
+	a = append(a, *left)
+	b := append([]v1beta1.NetworkNeighbor{*right}, neighbors[cutPeer+1:]...)
+	return a, b
 }
 
 // moveOneElement transfers a single element from the first non-empty partitionable field of
