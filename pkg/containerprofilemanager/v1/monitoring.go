@@ -267,6 +267,9 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	if containerData.isEmpty() && !forceSend { // TODO: Also check if the seccomp profile is new (currently not implemented)
 		return nil
 	}
+	// Size-triggered flushes must give unresolved peers the same minimum retry
+	// window as interval-triggered flushes.
+	containerData.networkDeferralDuration = cpm.cfg.UpdateDataPeriod
 
 	containerProfile := &v1beta1.ContainerProfile{
 		Name:      slug,
@@ -305,7 +308,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		},
 	}
 
-	if !forceSend && containerData.deferredNetworks != nil && containerData.deferredNetworks.Cardinality() > 0 &&
+	if !forceSend && !containerData.hasUnreportedStatusChange() &&
+		containerData.deferredNetworks != nil && containerData.deferredNetworks.Cardinality() > 0 &&
 		len(containerProfile.Spec.Capabilities) == 0 &&
 		len(containerProfile.Spec.Execs) == 0 &&
 		len(containerProfile.Spec.Opens) == 0 &&

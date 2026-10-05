@@ -67,6 +67,10 @@ type containerData struct {
 	prevDeferredNetworks mapset.Set[NetworkEvent]
 	droppedEvents        bool // Indicates if any events were dropped during monitoring
 
+	// Positive durations give unresolved peers an informer catch-up window across rapid saves.
+	networkDeferralDuration time.Duration
+	networkDeferredUntil    map[NetworkEvent]time.Time
+
 	// Service port snapshots keep report-time accounting and serialization consistent.
 	servicePorts map[NetworkEvent][]uint16
 

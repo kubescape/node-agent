@@ -3,6 +3,7 @@ package containerprofilemanager
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -616,5 +617,62 @@ func TestReportNetworkEventRetriesFailedServiceLookup(t *testing.T) {
 			}
 			require.Equal(t, []int32{want}, networkPortValues(neighbors[0].Ports))
 		})
+	}
+}
+
+// TestNetworkDeferralSurvivesRapidFlushes verifies split-triggered saves cannot consume
+// the inventory catch-up window, and expiry, resolution, or final flush releases the event.
+func TestNetworkDeferralSurvivesRapidFlushes(t *testing.T) {
+	for _, kind := range []EndpointKind{EndpointKindRaw, EndpointKindService} {
+		for _, finish := range []string{"expired", "resolved", "forced"} {
+			t.Run(string(kind)+"/"+finish, func(t *testing.T) {
+				event := serviceNetworkEvent(80, "tcp")
+				event.Destination.Kind = kind
+				event.Destination.IPAddress = "10.96.0.42"
+				discarded := serviceNetworkEvent(443, "tcp")
+				client := &servicePortTestClient{service: newServiceWorkload("api", nil)}
+				inv := newMockK8sInventory()
+				cd := &containerData{networks: mapset.NewSet(event), networkDeferralDuration: time.Minute,
+					networkDeferredUntil: map[NetworkEvent]time.Time{discarded: time.Now().Add(time.Minute)},
+					servicePorts:         map[NetworkEvent][]uint16{event: {8080}, discarded: {8443}}}
+				require.Empty(t, cd.getEgressNetworkNeighbors("", "default", client, nil, inv, nil, false))
+				cd.emptyEvents()
+				deadline := cd.networkDeferredUntil[event]
+				for range 3 {
+					require.Empty(t, cd.getEgressNetworkNeighbors("", "default", client, nil, inv, nil, false), "rapid saves must keep waiting for inventory")
+					cd.emptyEvents()
+					require.True(t, cd.networks.Contains(event))
+					require.Equal(t, map[NetworkEvent]time.Time{event: deadline}, cd.networkDeferredUntil, "retain only pending deadlines without extending them")
+					require.Equal(t, map[NetworkEvent][]uint16{event: {8080}}, cd.servicePorts)
+				}
+				require.False(t, deadline.IsZero())
+				forceSend := finish == "forced"
+				switch finish {
+				case "expired":
+					cd.networkDeferredUntil[event] = time.Now().Add(-time.Second)
+				case "resolved":
+					if kind == EndpointKindService {
+						client.service = newServiceWorkload("api", map[string]any{"app": "api"})
+					} else {
+						inv.podsByIP[event.Destination.IPAddress] = &common.SlimPod{SlimObjectMeta: common.SlimObjectMeta{Name: "api", Namespace: "default", Labels: map[string]string{"app": "api"}}, Status: common.SlimPodStatus{PodIP: event.Destination.IPAddress}}
+					}
+				}
+				neighbors := cd.getEgressNetworkNeighbors("", "default", client, nil, inv, nil, forceSend)
+				require.Len(t, neighbors, 1)
+				if finish == "resolved" {
+					require.NotNil(t, neighbors[0].PodSelector)
+					require.Equal(t, "api", neighbors[0].PodSelector.MatchLabels["app"])
+					if kind == EndpointKindService {
+						require.Equal(t, []int32{8080}, networkPortValues(neighbors[0].Ports))
+					}
+				} else {
+					require.Equal(t, event.Destination.IPAddress, neighbors[0].IPAddress)
+				}
+				cd.emptyEvents()
+				require.Nil(t, cd.networks)
+				require.Nil(t, cd.networkDeferredUntil)
+				require.Nil(t, cd.servicePorts)
+			})
+		}
 	}
 }

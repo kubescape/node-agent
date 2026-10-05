@@ -3,6 +3,7 @@ package containerprofilemanager
 import (
 	"net"
 	"sort"
+	"time"
 
 	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -41,6 +42,14 @@ func (cd *containerData) emptyEvents() {
 		if len(cd.servicePorts) == 0 {
 			cd.servicePorts = nil
 		}
+		for event := range cd.networkDeferredUntil {
+			if !cd.networks.Contains(event) {
+				delete(cd.networkDeferredUntil, event)
+			}
+		}
+		if len(cd.networkDeferredUntil) == 0 {
+			cd.networkDeferredUntil = nil
+		}
 		var retainedSize int64
 		for _, ev := range cd.networks.ToSlice() {
 			retainedSize += int64(size.Of(ev) + networkNeighborIncrement(cd, ev))
@@ -51,6 +60,7 @@ func (cd *containerData) emptyEvents() {
 		cd.prevDeferredNetworks = nil
 		cd.deferredNetworks = nil
 		cd.servicePorts = nil
+		cd.networkDeferredUntil = nil
 	}
 	if cd.watchedContainerData != nil {
 		cd.lastReportedCompletion = string(cd.watchedContainerData.GetCompletionStatus())
@@ -71,12 +81,14 @@ func (cd *containerData) isEmpty() bool {
 		return false
 	}
 
-	if cd.watchedContainerData == nil {
-		return true
-	}
+	return !cd.hasUnreportedStatusChange()
+}
 
-	return cd.lastReportedCompletion == string(cd.watchedContainerData.GetCompletionStatus()) &&
-		cd.lastReportedStatus == string(cd.watchedContainerData.GetStatus())
+// hasUnreportedStatusChange reports whether a metadata-only update still needs saving.
+func (cd *containerData) hasUnreportedStatusChange() bool {
+	return cd.watchedContainerData != nil &&
+		(cd.lastReportedCompletion != string(cd.watchedContainerData.GetCompletionStatus()) ||
+			cd.lastReportedStatus != string(cd.watchedContainerData.GetStatus()))
 }
 
 // getCapabilities returns a sorted slice of capabilities
@@ -315,6 +327,32 @@ func appendNetworkNeighbor(neighbors []v1beta1.NetworkNeighbor, seen map[string]
 	return append(neighbors, neighbor)
 }
 
+// deferNetworkEvent retains an unresolved observation until its first deadline.
+// Without a configured duration, retain the existing one-flush retry behavior.
+func (cd *containerData) deferNetworkEvent(event NetworkEvent) bool {
+	if cd.networkDeferralDuration > 0 {
+		now := time.Now()
+		deadline, exists := cd.networkDeferredUntil[event]
+		if !exists {
+			if cd.networkDeferredUntil == nil {
+				cd.networkDeferredUntil = make(map[NetworkEvent]time.Time)
+			}
+			deadline = now.Add(cd.networkDeferralDuration)
+			cd.networkDeferredUntil[event] = deadline
+		}
+		if !now.Before(deadline) {
+			return false
+		}
+	} else if cd.prevDeferredNetworks != nil && cd.prevDeferredNetworks.Contains(event) {
+		return false
+	}
+	if cd.deferredNetworks == nil {
+		cd.deferredNetworks = mapset.NewSet[NetworkEvent]()
+	}
+	cd.deferredNetworks.Add(event)
+	return true
+}
+
 // createNetworkNeighbor creates a network neighbor from a network event
 func (cd *containerData) createNetworkNeighbor(
 	containerID string,
@@ -393,15 +431,8 @@ func (cd *containerData) createNetworkNeighbor(
 			return nil
 		}
 
-		// If the IP is inside the cluster pod CIDR / private IP and could not be resolved,
-		// defer by one flush before persisting as an external IP, unless forceSend is true
-		// or it has already been deferred once.
-		if isPrivateIP(networkEvent.Destination.IPAddress) && !forceSend && cd != nil &&
-			(cd.prevDeferredNetworks == nil || !cd.prevDeferredNetworks.Contains(originalEvent)) {
-			if cd.deferredNetworks == nil {
-				cd.deferredNetworks = mapset.NewSet[NetworkEvent]()
-			}
-			cd.deferredNetworks.Add(originalEvent)
+		// Let inventory catch up before persisting unresolved private traffic as raw IP.
+		if isPrivateIP(networkEvent.Destination.IPAddress) && !forceSend && cd != nil && cd.deferNetworkEvent(originalEvent) {
 			return nil
 		}
 
