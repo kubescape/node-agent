@@ -153,10 +153,20 @@ func elementSignatures(spec *v1beta1.ContainerProfileSpec) []string {
 		out = append(out, "callstack:"+string(c.CallID))
 	}
 	for _, n := range spec.Ingress {
-		out = append(out, "ingress:"+n.Identifier)
+		if len(n.Ports) == 0 {
+			out = append(out, "ingress:"+n.Identifier)
+		}
+		for _, port := range n.Ports {
+			out = append(out, "ingress:"+n.Identifier+":"+port.Name)
+		}
 	}
 	for _, n := range spec.Egress {
-		out = append(out, "egress:"+n.Identifier)
+		if len(n.Ports) == 0 {
+			out = append(out, "egress:"+n.Identifier)
+		}
+		for _, port := range n.Ports {
+			out = append(out, "egress:"+n.Identifier+":"+port.Name)
+		}
 	}
 	for k := range spec.PolicyByRuleId {
 		out = append(out, "policy:"+k)
@@ -192,6 +202,18 @@ func TestSplitProfile_PartitionsWithoutLossOrDuplication(t *testing.T) {
 		}},
 		{"egress", func(p *v1beta1.ContainerProfile) {
 			p.Spec.Egress = []v1beta1.NetworkNeighbor{{Identifier: "a"}, {Identifier: "b"}, {Identifier: "c"}}
+		}},
+		{"merged neighbor ports", func(p *v1beta1.ContainerProfile) {
+			neighbor := portSplitNeighbor()
+			neighbor.Ports = neighbor.Ports[:7]
+			p.Spec.Ingress = []v1beta1.NetworkNeighbor{neighbor}
+			p.Spec.Egress = []v1beta1.NetworkNeighbor{neighbor}
+		}},
+		{"mixed peers and fields", func(p *v1beta1.ContainerProfile) {
+			neighbor := portSplitNeighbor()
+			p.Spec.Ingress = []v1beta1.NetworkNeighbor{neighbor}
+			p.Spec.Egress = []v1beta1.NetworkNeighbor{neighbor, {Identifier: "second"}}
+			p.Spec.Capabilities = []string{"CAP_SYS_ADMIN"}
 		}},
 		{"policyByRuleId", func(p *v1beta1.ContainerProfile) {
 			p.Spec.PolicyByRuleId = map[string]v1beta1.RulePolicy{

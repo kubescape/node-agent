@@ -77,13 +77,13 @@ func splitProfile(p *v1beta1.ContainerProfile) (*v1beta1.ContainerProfile, *v1be
 	a.Spec.Syscalls, b.Spec.Syscalls = halve(p.Spec.Syscalls)
 	a.Spec.Endpoints, b.Spec.Endpoints = halve(p.Spec.Endpoints)
 	a.Spec.IdentifiedCallStacks, b.Spec.IdentifiedCallStacks = halve(p.Spec.IdentifiedCallStacks)
-	a.Spec.Ingress, b.Spec.Ingress = halve(p.Spec.Ingress)
-	a.Spec.Egress, b.Spec.Egress = halve(p.Spec.Egress)
+	a.Spec.Ingress, b.Spec.Ingress = halveNeighbors(p.Spec.Ingress)
+	a.Spec.Egress, b.Spec.Egress = halveNeighbors(p.Spec.Egress)
 	a.Spec.PolicyByRuleId, b.Spec.PolicyByRuleId = halvePolicies(p.Spec.PolicyByRuleId)
 
-	// Every field with len <= 1 leaves its single element in a, so b can come out empty even
-	// though p had two or more elements. Move one element across, otherwise recursion on a
-	// would not strictly reduce and the split would make no progress.
+	// Fields with one indivisible element leave it in a, so b can come out empty
+	// even though p had two or more elements. Move one element across, otherwise
+	// recursion on a would not strictly reduce and the split would make no progress.
 	if countPartitionableElements(&b.Spec) == 0 {
 		moveOneElement(&a.Spec, &b.Spec)
 	}
@@ -223,7 +223,7 @@ func isZeroTimeString(s string) bool {
 }
 
 // countPartitionableElements returns the total number of elements across every list and
-// map field that splitProfile partitions.
+// map field that splitProfile partitions, counting each neighbor port separately.
 func countPartitionableElements(spec *v1beta1.ContainerProfileSpec) int {
 	return len(spec.Capabilities) +
 		len(spec.Execs) +
@@ -231,9 +231,31 @@ func countPartitionableElements(spec *v1beta1.ContainerProfileSpec) int {
 		len(spec.Syscalls) +
 		len(spec.Endpoints) +
 		len(spec.IdentifiedCallStacks) +
-		len(spec.Ingress) +
-		len(spec.Egress) +
+		countNeighborElements(spec.Ingress) +
+		countNeighborElements(spec.Egress) +
 		len(spec.PolicyByRuleId)
+}
+
+// A peer without ports still carries an identity that must be retained.
+func countNeighborElements(neighbors []v1beta1.NetworkNeighbor) int {
+	count := 0
+	for _, neighbor := range neighbors {
+		count += max(1, len(neighbor.Ports))
+	}
+	return count
+}
+
+// Split peer lists first. Once a single peer remains, its ports can still be
+// partitioned while copying the identity into both chunks for storage to merge.
+func halveNeighbors(neighbors []v1beta1.NetworkNeighbor) ([]v1beta1.NetworkNeighbor, []v1beta1.NetworkNeighbor) {
+	if len(neighbors) != 1 || len(neighbors[0].Ports) <= 1 {
+		return halve(neighbors)
+	}
+	a, b := neighbors[0].DeepCopy(), neighbors[0].DeepCopy()
+	mid := (len(a.Ports) + 1) / 2
+	a.Ports = a.Ports[:mid]
+	b.Ports = b.Ports[mid:]
+	return []v1beta1.NetworkNeighbor{*a}, []v1beta1.NetworkNeighbor{*b}
 }
 
 // moveOneElement transfers a single element from the first non-empty partitionable field of
