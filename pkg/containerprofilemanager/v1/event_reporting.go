@@ -360,19 +360,17 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 			return 0, nil
 		}
 
-		if networkEvent.Destination.Kind == EndpointKindService {
-			ports := []uint16{networkEvent.Port}
-			if cpm.k8sClient != nil {
-				svc, err := cpm.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
-				if err == nil {
-					ports = resolveServiceEnforcementPorts(cpm.k8sClient, networkEvent.Destination.Namespace,
-						networkEvent.Destination.Name, svc, networkEvent.Port, networkEvent.Protocol)
+		if networkEvent.Destination.Kind == EndpointKindService && cpm.k8sClient != nil {
+			svc, err := cpm.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
+			// Failed lookups leave no snapshot so flush-time resolution can retry.
+			if err == nil && svc != nil {
+				ports := resolveServiceEnforcementPorts(cpm.k8sClient, networkEvent.Destination.Namespace,
+					networkEvent.Destination.Name, svc, networkEvent.Port, networkEvent.Protocol)
+				if data.servicePorts == nil {
+					data.servicePorts = make(map[NetworkEvent][]uint16)
 				}
+				data.servicePorts[networkEvent] = ports
 			}
-			if data.servicePorts == nil {
-				data.servicePorts = make(map[NetworkEvent][]uint16)
-			}
-			data.servicePorts[networkEvent] = ports
 		}
 
 		data.networks.Add(networkEvent)

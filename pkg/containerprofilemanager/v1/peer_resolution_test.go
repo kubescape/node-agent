@@ -576,3 +576,45 @@ func BenchmarkNetworkNeighborsPortScan(b *testing.B) {
 		}
 	}
 }
+
+// TestReportNetworkEventRetriesFailedServiceLookup verifies transient lookup failures
+// leave ports unresolved, while a successful observed-port fallback stays authoritative.
+func TestReportNetworkEventRetriesFailedServiceLookup(t *testing.T) {
+	for _, scenario := range []string{"lookup error", "nil workload", "successful observed-port fallback"} {
+		t.Run(scenario, func(t *testing.T) {
+			cpm, entry := newTestManager(t, "container1")
+			inv := newMockK8sInventory()
+			inv.svcsByIP["10.96.0.42"] = &common.SlimService{SlimObjectMeta: common.SlimObjectMeta{Name: "api", Namespace: "default"}}
+			cpm.SetK8sInventory(inv)
+			client := &servicePortTestClient{service: newServiceWorkload("api", map[string]any{"app": "api"})}
+			switch scenario {
+			case "lookup error":
+				client.getErr = errors.New("transient Service lookup failure")
+			case "nil workload":
+				client.service = nil
+			}
+			cpm.k8sClient = client
+			cpm.ReportNetworkEvent("container1", &utils.StructEvent{
+				DstEndpoint: types.L3Endpoint{Addr: "10.96.0.42", Kind: types.EndpointKindRaw},
+				DstPort:     80, Proto: "tcp", PktType: utils.OutgoingPktType,
+			})
+			events := entry.data.networks.ToSlice()
+			require.Len(t, events, 1)
+			require.Equal(t, EndpointKindService, events[0].Destination.Kind)
+			_, snapshotted := entry.data.servicePorts[events[0]]
+			assert.Equal(t, scenario == "successful observed-port fallback", snapshotted)
+
+			client.getErr = nil
+			client.service = newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
+				"name": "web", "port": 80, "targetPort": 8080, "protocol": "TCP",
+			})
+			neighbors := entry.data.getEgressNetworkNeighbors("", "default", client, nil, inv, nil, false)
+			require.Len(t, neighbors, 1)
+			want := int32(8080)
+			if scenario == "successful observed-port fallback" {
+				want = 80
+			}
+			require.Equal(t, []int32{want}, networkPortValues(neighbors[0].Ports))
+		})
+	}
+}
