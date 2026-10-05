@@ -16,6 +16,32 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// TestRecursiveSplitPreservesSibling verifies recursive singleton redistribution
+// cannot overwrite an unsent sibling or the original profile through spare slice capacity.
+func TestRecursiveSplitPreservesSibling(t *testing.T) {
+	for _, kind := range []string{"lists", "neighbors"} {
+		t.Run(kind, func(t *testing.T) {
+			parent := testProfile()
+			if kind == "lists" {
+				parent.Spec.Capabilities = []string{strings.Repeat("A", 128), strings.Repeat("B", 128)}
+				parent.Spec.Syscalls = []string{strings.Repeat("read", 32), strings.Repeat("write", 32)}
+			} else {
+				parent.Spec.Ingress = []v1beta1.NetworkNeighbor{{Identifier: strings.Repeat("ingress-A", 32)}, {Identifier: strings.Repeat("ingress-B", 32)}}
+				parent.Spec.Egress = []v1beta1.NetworkNeighbor{{Identifier: strings.Repeat("egress-A", 32)}, {Identifier: strings.Repeat("egress-B", 32)}}
+			}
+			original := parent.DeepCopy()
+			a, b, ok := splitProfile(parent)
+			require.True(t, ok)
+			sibling := b.DeepCopy()
+			// This split redistributes one singleton into its empty second half.
+			// Even a rejected split must leave the queued sibling intact.
+			splitProfile(a)
+			require.Equal(t, sibling, b)
+			require.Equal(t, original, parent)
+		})
+	}
+}
+
 // tsRow is the reduced shape of storage's TimeSeriesContainers that
 // consolidateContinuousTimeSeries actually branches on.
 type tsRow struct {

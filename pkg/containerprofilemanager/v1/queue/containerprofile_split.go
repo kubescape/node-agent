@@ -298,7 +298,7 @@ func halveNeighbors(neighbors []v1beta1.NetworkNeighbor) ([]v1beta1.NetworkNeigh
 		prefix += sizes[i]
 	}
 	if cutPort == 0 {
-		return neighbors[:cutPeer], neighbors[cutPeer:]
+		return neighbors[:cutPeer:cutPeer], neighbors[cutPeer:len(neighbors):len(neighbors)]
 	}
 	left, right := neighbors[cutPeer].DeepCopy(), neighbors[cutPeer].DeepCopy()
 	left.Ports = left.Ports[:cutPort]
@@ -386,7 +386,8 @@ func freshOneTimeSlug(name string) string {
 	return base + suffix
 }
 
-// halve returns the first ceil(len(s)/2) elements of s and the rest.
+// halve returns the first ceil(len(s)/2) elements of s and the rest, limiting
+// capacity so singleton redistribution cannot append into a queued sibling's range.
 func halve[T any](s []T) ([]T, []T) {
 	if len(s) == 0 {
 		return nil, nil
@@ -394,7 +395,7 @@ func halve[T any](s []T) ([]T, []T) {
 
 	mid := (len(s) + 1) / 2
 
-	return s[:mid], s[mid:]
+	return s[:mid:mid], s[mid:len(s):len(s)]
 }
 
 // halvePolicies partitions m by sorted key, so the partition is deterministic across runs.
