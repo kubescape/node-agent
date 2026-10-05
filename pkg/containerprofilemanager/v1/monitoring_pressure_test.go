@@ -62,8 +62,9 @@ func TestPressureFlushDoesNotReprocessDeferredBacklog(t *testing.T) {
 		report(fmt.Sprintf("10.60.1.%d", i+1))
 	}
 	report("10.60.3.1")
-	cpm.cfg.MaxTsProfileSize = data.size.Load() / 4
-	require.Greater(t, data.size.Load(), cpm.cfg.MaxTsProfileSize)
+	// Keep the backlog below its independent admission limit; each flush must
+	// still leave its bytes out of the active budget and avoid retrying it.
+	cpm.cfg.MaxTsProfileSize = 2 * data.size.Load()
 	pressureSave := func() error { return cpm.saveProfileForSize(watched, container) }
 	require.NoError(t, pressureSave())
 	assert.Zero(t, data.size.Load(), "retained bytes must not trigger the next pressure flush")

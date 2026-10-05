@@ -280,6 +280,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	// Size-triggered flushes must give unresolved peers the same minimum retry
 	// window as interval-triggered flushes.
 	containerData.networkDeferralDuration = cpm.cfg.UpdateDataPeriod
+	containerData.networkDeferredSizeLimit = cpm.cfg.MaxTsProfileSize
 
 	containerProfile := &v1beta1.ContainerProfile{
 		Name:      slug,

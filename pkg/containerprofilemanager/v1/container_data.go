@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	"github.com/kubescape/go-logger"
@@ -46,6 +47,7 @@ func (cd *containerData) emptyEvents() {
 				}
 				delete(cd.servicePorts, event)
 				delete(cd.networkDeferredUntil, event)
+				cd.releaseDeferredNetworkSize(event)
 			}
 		}
 		cd.deferredNetworks = nil
@@ -80,12 +82,19 @@ func (cd *containerData) emptyEvents() {
 		if len(cd.networkDeferredUntil) == 0 {
 			cd.networkDeferredUntil = nil
 		}
+		for event := range cd.networkDeferredSizes {
+			if !cd.networks.Contains(event) {
+				cd.releaseDeferredNetworkSize(event)
+			}
+		}
 	} else {
 		cd.networks = nil
 		cd.prevDeferredNetworks = nil
 		cd.deferredNetworks = nil
 		cd.servicePorts = nil
 		cd.networkDeferredUntil = nil
+		cd.networkDeferredSizes = nil
+		cd.networkDeferredSize = 0
 	}
 	cd.activeNetworks = nil
 	if cd.watchedContainerData != nil {
@@ -365,24 +374,47 @@ func appendNetworkNeighbor(neighbors []v1beta1.NetworkNeighbor, seen map[string]
 	return append(neighbors, neighbor)
 }
 
-// deferNetworkEvent retains an unresolved observation until its first deadline.
-// Without a configured duration, retain the existing one-flush retry behavior.
-func (cd *containerData) deferNetworkEvent(event NetworkEvent) bool {
-	if cd.networkDeferralDuration > 0 {
-		now := time.Now()
-		deadline, exists := cd.networkDeferredUntil[event]
-		if !exists {
-			if cd.networkDeferredUntil == nil {
-				cd.networkDeferredUntil = make(map[NetworkEvent]time.Time)
-			}
-			deadline = now.Add(cd.networkDeferralDuration)
-			cd.networkDeferredUntil[event] = deadline
+// releaseDeferredNetworkSize removes one consumed observation from the independent
+// backlog budget. Pressure cleanup calls this only for events in its active batch.
+func (cd *containerData) releaseDeferredNetworkSize(event NetworkEvent) {
+	if estimate, exists := cd.networkDeferredSizes[event]; exists {
+		cd.networkDeferredSize -= estimate
+		delete(cd.networkDeferredSizes, event)
+		if len(cd.networkDeferredSizes) == 0 {
+			cd.networkDeferredSizes = nil
 		}
-		if !now.Before(deadline) {
+	}
+}
+
+// deferNetworkEvent retains an unresolved observation until its first deadline,
+// provided the independent backlog budget has room. Overflow falls through to raw
+// delivery. Nonpositive limits preserve the uncapped behavior of zero-config callers.
+func (cd *containerData) deferNetworkEvent(event NetworkEvent) bool {
+	now := time.Now()
+	deadline, hasDeadline := cd.networkDeferredUntil[event]
+	if cd.networkDeferralDuration > 0 {
+		if hasDeadline && !now.Before(deadline) {
 			return false
 		}
 	} else if cd.prevDeferredNetworks != nil && cd.prevDeferredNetworks.Contains(event) {
 		return false
+	}
+	if _, accounted := cd.networkDeferredSizes[event]; !accounted && cd.networkDeferredSizeLimit > 0 {
+		estimate := int64(size.Of(event) + networkNeighborIncrement(cd, event))
+		if estimate > cd.networkDeferredSizeLimit-cd.networkDeferredSize {
+			return false
+		}
+		if cd.networkDeferredSizes == nil {
+			cd.networkDeferredSizes = make(map[NetworkEvent]int64)
+		}
+		cd.networkDeferredSizes[event] = estimate
+		cd.networkDeferredSize += estimate
+	}
+	if cd.networkDeferralDuration > 0 && !hasDeadline {
+		if cd.networkDeferredUntil == nil {
+			cd.networkDeferredUntil = make(map[NetworkEvent]time.Time)
+		}
+		cd.networkDeferredUntil[event] = now.Add(cd.networkDeferralDuration)
 	}
 	if cd.deferredNetworks == nil {
 		cd.deferredNetworks = mapset.NewSet[NetworkEvent]()

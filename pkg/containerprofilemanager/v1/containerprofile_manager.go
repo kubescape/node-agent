@@ -73,6 +73,10 @@ type containerData struct {
 	// Positive durations give unresolved peers an informer catch-up window across rapid saves.
 	networkDeferralDuration time.Duration
 	networkDeferredUntil    map[NetworkEvent]time.Time
+	// Deferred admission is tracked independently from the active flush budget.
+	networkDeferredSizeLimit int64
+	networkDeferredSize      int64
+	networkDeferredSizes     map[NetworkEvent]int64
 
 	// Service port snapshots keep report-time accounting and serialization consistent.
 	servicePorts map[NetworkEvent][]uint16
