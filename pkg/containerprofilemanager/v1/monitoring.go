@@ -326,12 +326,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	containerProfile.Annotations[helpersv1.PreviousReportTimestampMetadataKey] = watchedContainer.PreviousReportTimestamp.String()
 	containerProfile.Annotations[helpersv1.ReportTimestampMetadataKey] = watchedContainer.CurrentReportTimestamp.String()
 
-	var enqueueErr error
-	if hasUnresolvedNetworkPeers(containerData) {
-		enqueueErr = cpm.queueData.EnqueueWithSizeLimit(containerProfile, watchedContainer.ContainerID, cpm.cfg.MaxTsProfileSize)
-	} else {
-		enqueueErr = cpm.enqueueContainerProfile(containerProfile, watchedContainer.ContainerID)
-	}
+	// Enforce the budget after selectors and Service ports have been materialized.
+	enqueueErr := cpm.queueData.EnqueueWithSizeLimit(containerProfile, watchedContainer.ContainerID, cpm.cfg.MaxTsProfileSize)
 	if enqueueErr != nil {
 		// Empty the container data to prevent reporting the same data again
 		containerData.emptyEvents()
