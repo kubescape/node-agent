@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/kubescape/node-agent/internal/ttlcache"
 	"github.com/kubescape/node-agent/pkg/config"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
@@ -23,7 +23,7 @@ type treeCacheKey struct {
 type ProcessTreeManagerImpl struct {
 	creator                   processtreecreator.ProcessTreeCreator
 	containerTree             containerprocesstree.ContainerProcessTree
-	containerProcessTreeCache *expirable.LRU[treeCacheKey, armotypes.Process] // (containerID, pid) -> cached result
+	containerProcessTreeCache *ttlcache.Cache[treeCacheKey, armotypes.Process] // (containerID, pid) -> cached result
 	mutex                     sync.RWMutex
 	config                    config.Config
 }
@@ -35,7 +35,7 @@ func NewProcessTreeManager(
 	config config.Config,
 ) ProcessTreeManager {
 
-	containerProcessTreeCache := expirable.NewLRU[treeCacheKey, armotypes.Process](10000, nil, 1*time.Minute)
+	containerProcessTreeCache := ttlcache.New[treeCacheKey, armotypes.Process](10000, 1*time.Minute)
 
 	ptm := &ProcessTreeManagerImpl{
 		creator:                   creator,
@@ -95,7 +95,7 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	}
 
 	// Cache the result
-	ptm.containerProcessTreeCache.Add(cacheKey, containerSubtree)
+	ptm.containerProcessTreeCache.Set(cacheKey, containerSubtree)
 
 	return containerSubtree, nil
 }
