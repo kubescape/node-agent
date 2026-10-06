@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -24,6 +25,8 @@ type K8sObjectCacheImpl struct {
 	nodeName                string
 	k8sClient               k8sclient.K8sClientInterface
 	pods                    maps.SafeMap[string, *corev1.Pod]
+	podMu                   sync.RWMutex
+	podsByIP                map[string]*corev1.Pod
 	apiServerIpAddress      string
 	containerIDToSharedData maps.SafeMap[string, *objectcache.WatchedContainerData]
 }
@@ -73,6 +76,13 @@ func (k *K8sObjectCacheImpl) GetPod(namespace, podName string) *corev1.Pod {
 	return nil
 }
 
+// GetPodByIP returns a cached pod by its primary or secondary IP in constant time.
+func (k *K8sObjectCacheImpl) GetPodByIP(ip string) *corev1.Pod {
+	k.podMu.RLock()
+	defer k.podMu.RUnlock()
+	return k.podsByIP[ip]
+}
+
 func (k *K8sObjectCacheImpl) GetApiServerIpAddress() string {
 	return k.apiServerIpAddress
 }
@@ -97,21 +107,81 @@ func (k *K8sObjectCacheImpl) DeleteSharedContainerData(containerID string) {
 	k.containerIDToSharedData.Delete(containerID)
 }
 
+// AddHandler adds pod objects to both name and IP indexes, ignoring other resource types.
 func (k *K8sObjectCacheImpl) AddHandler(_ context.Context, obj runtime.Object) {
 	if pod, ok := obj.(*corev1.Pod); ok {
-		k.pods.Set(podKey(pod.GetNamespace(), pod.GetName()), pod)
+		k.storePod(pod)
 	}
 }
 
+// ModifyHandler updates both pod indexes and removes stale IP mappings.
 func (k *K8sObjectCacheImpl) ModifyHandler(_ context.Context, obj runtime.Object) {
 	if pod, ok := obj.(*corev1.Pod); ok {
-		k.pods.Set(podKey(pod.GetNamespace(), pod.GetName()), pod)
+		k.storePod(pod)
 	}
 }
 
+// DeleteHandler removes the current pod and its IP mappings only when the deleted UID matches.
 func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj runtime.Object) {
 	if pod, ok := obj.(*corev1.Pod); ok {
-		k.pods.Delete(podKey(pod.GetNamespace(), pod.GetName()))
+		k.podMu.Lock()
+		defer k.podMu.Unlock()
+		key := podKey(pod.GetNamespace(), pod.GetName())
+		current, ok := k.pods.Load(key)
+		if !ok || current.UID != pod.UID {
+			return
+		}
+		k.removePodIPs(current)
+		k.pods.Delete(key)
+	}
+}
+
+// storePod updates pod indexes under lock while preserving IPs reassigned to another pod.
+func (k *K8sObjectCacheImpl) storePod(pod *corev1.Pod) {
+	k.podMu.Lock()
+	defer k.podMu.Unlock()
+	key := podKey(pod.GetNamespace(), pod.GetName())
+	previous, ok := k.pods.Load(key)
+	if ok {
+		k.removePodIPs(previous)
+	}
+	k.pods.Set(key, pod)
+	if k.podsByIP == nil {
+		k.podsByIP = make(map[string]*corev1.Pod)
+	}
+	indexIP := func(ip string) {
+		if ip == "" {
+			return
+		}
+		// A status update retaining an old IP must not reclaim it after reuse.
+		// New pods and newly assigned IPs can replace the previous owner.
+		if k.podsByIP[ip] != nil && previous != nil && previous.UID == pod.UID {
+			if previous.Status.PodIP == ip {
+				return
+			}
+			for _, oldIP := range previous.Status.PodIPs {
+				if oldIP.IP == ip {
+					return
+				}
+			}
+		}
+		k.podsByIP[ip] = pod
+	}
+	indexIP(pod.Status.PodIP)
+	for _, ip := range pod.Status.PodIPs {
+		indexIP(ip.IP)
+	}
+}
+
+// removePodIPs requires podMu and preserves IPs already assigned to another pod.
+func (k *K8sObjectCacheImpl) removePodIPs(pod *corev1.Pod) {
+	if k.podsByIP[pod.Status.PodIP] == pod {
+		delete(k.podsByIP, pod.Status.PodIP)
+	}
+	for _, ip := range pod.Status.PodIPs {
+		if k.podsByIP[ip.IP] == pod {
+			delete(k.podsByIP, ip.IP)
+		}
 	}
 }
 

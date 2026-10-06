@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/DmitriyVTitov/size"
 	"github.com/joncrlsn/dque"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -65,7 +66,11 @@ type QueuedContainerProfile struct {
 	// retryable error. Items persisted before this field existed decode with Attempts
 	// at zero, so they simply get a full budget of retries.
 	Attempts int `json:"attempts"`
-	// SplitDepth counts how many times this item's lineage has been halved after an HTTP 413.
+	// MaxProfileSize is an optional in-memory size estimate for profiles whose
+	// network peers expanded after collection. Zero disables proactive splitting.
+	MaxProfileSize int64 `json:"maxProfileSize,omitempty"`
+	// SplitDepth counts how many times this item's lineage has been halved, either
+	// proactively for MaxProfileSize or after an HTTP 413.
 	// Items persisted before this field existed decode with SplitDepth at zero.
 	SplitDepth int `json:"splitDepth"`
 	// IsStitch marks a metadata-only chunk emitted in place of a chunk that was dropped or
@@ -283,12 +288,20 @@ func (qd *QueueData) Start() {
 
 // Enqueue adds a new container profile to the queue with LRU eviction
 func (qd *QueueData) Enqueue(profile *v1beta1.ContainerProfile, containerID string) error {
+	return qd.EnqueueWithSizeLimit(profile, containerID, 0)
+}
+
+// EnqueueWithSizeLimit applies an estimated size budget before sending to storage.
+// The existing splitter preserves the materialized data and report chain; profiles
+// that cannot be split within the depth limit are still offered to storage.
+func (qd *QueueData) EnqueueWithSizeLimit(profile *v1beta1.ContainerProfile, containerID string, maxProfileSize int64) error {
 	qd.mu.Lock()
 	defer qd.mu.Unlock()
 
 	if err := qd.enqueueLocked(&QueuedContainerProfile{
-		Profile:     profile,
-		ContainerID: containerID,
+		Profile:        profile,
+		ContainerID:    containerID,
+		MaxProfileSize: maxProfileSize,
 	}); err != nil {
 		return err
 	}
@@ -547,6 +560,26 @@ processLoop:
 			qd.releaseStitch()
 		}
 
+		// Reserve the final split level for a real storage rejection.
+		if !queuedProfile.IsStitch && queuedProfile.MaxProfileSize > 0 &&
+			queuedProfile.SplitDepth+1 < qd.maxSplitDepth &&
+			int64(size.Of(queuedProfile.Profile.Spec)) > queuedProfile.MaxProfileSize {
+			// JSON progress can hide protobuf timestamp growth. Optional splitting
+			// must not turn an acceptable parent into a larger wire payload.
+			parentWireSize := queuedProfile.Profile.Size()
+			if a, b, ok := splitProfile(queuedProfile.Profile); ok && a.Size() <= parentWireSize && b.Size() <= parentWireSize {
+				fallback := qd.requeueSplit(queuedProfile, a, b, false)
+				if fallback != queuedProfile {
+					qd.splits.Add(1)
+					qd.metrics.ReportContainerProfileSplit()
+				}
+				if fallback == nil {
+					continue
+				}
+				queuedProfile = fallback
+			}
+		}
+
 		// Attempt to create the profile
 		err = qd.creator.CreateContainerProfileDirect(queuedProfile.Profile)
 		if err != nil {
@@ -589,7 +622,7 @@ processLoop:
 
 					qd.splits.Add(1)
 					qd.metrics.ReportContainerProfileSplit()
-					qd.requeueSplit(queuedProfile, a, b)
+					qd.requeueSplit(queuedProfile, a, b, true)
 				}
 
 			case failureRetryable:
@@ -646,22 +679,38 @@ func (qd *QueueData) requeueImmediate(queuedProfile *QueuedContainerProfile) {
 // Both halves inherit parent.Attempts, take SplitDepth = parent.SplitDepth+1, and are explicitly
 // IsStitch = false (the zero value - stated because a half must always remain splittable).
 //
+// With allowEviction false, shutdown, insufficient capacity, or first-half enqueue failure
+// returns parent for direct delivery. If only the second enqueue fails, it returns that half
+// with its split metadata for direct delivery, preserving the already queued first half.
+// Admission is checked under the same lock as both enqueues. A nil return means the split was
+// handled; allowEviction true retains the HTTP 413 drop/repair policy on enqueue failures.
+//
 // Callers must NOT hold qd.mu.
-func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.ContainerProfile) {
+func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.ContainerProfile, allowEviction bool) *QueuedContainerProfile {
 	half := func(profile *v1beta1.ContainerProfile) *QueuedContainerProfile {
 		return &QueuedContainerProfile{
-			Profile:     profile,
-			ContainerID: parent.ContainerID,
-			Attempts:    parent.Attempts,
-			SplitDepth:  parent.SplitDepth + 1,
-			IsStitch:    false,
+			Profile:        profile,
+			ContainerID:    parent.ContainerID,
+			Attempts:       parent.Attempts,
+			SplitDepth:     parent.SplitDepth + 1,
+			MaxProfileSize: parent.MaxProfileSize,
+			IsStitch:       false,
 		}
 	}
 
 	qd.mu.Lock()
 	defer qd.mu.Unlock()
 
+	if !allowEviction && (!qd.running || qd.maxQueueSize-qd.queue.Size() < 2) {
+		return parent
+	}
+
 	if err := qd.enqueueLocked(half(a)); err != nil {
+		if !allowEviction {
+			logger.L().Warning("failed to enqueue optional split, sending original container profile",
+				helpers.String("name", parent.Profile.Name), helpers.Error(err))
+			return parent
+		}
 		// The parent was already dequeued, so neither half reaches the queue: this is a
 		// total loss of the chunk, not just a fork, and must be at least as loud as the
 		// second-half case below. Unlike that case, nothing of the parent's data survives
@@ -687,7 +736,7 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 				helpers.String("containerID", parent.ContainerID))
 
 			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonStitchBacklogExhausted))
-			return
+			return nil
 		}
 
 		stitch := qd.newStitchFor(parent, false)
@@ -700,10 +749,16 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 
 			qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 		}
-		return
+		return nil
 	}
 
-	if err := qd.enqueueLocked(half(b)); err != nil {
+	second := half(b)
+	if err := qd.enqueueLocked(second); err != nil {
+		if !allowEviction {
+			logger.L().Warning("failed to enqueue second optional split half, sending it directly",
+				helpers.String("name", b.Name), helpers.Error(err))
+			return second
+		}
 		// Exactly one half of a pair survived, which forks the container's report chain.
 		logger.L().Warning("failed to enqueue the second half of a split container profile, its report chain is now forked",
 			helpers.String("name", b.Name),
@@ -714,6 +769,7 @@ func (qd *QueueData) requeueSplit(parent *QueuedContainerProfile, a, b *v1beta1.
 		qd.chunksDropped.Add(1)
 		qd.metrics.ReportContainerProfileChunkDropped(string(dropReasonEnqueueFailed))
 	}
+	return nil
 }
 
 // dropChunk discards a queued chunk that cannot be delivered as-is: because it was rejected for

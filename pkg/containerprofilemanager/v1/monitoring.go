@@ -161,7 +161,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				return ContainerReachedMaxTime
 
 			case errors.Is(err, ProfileRequiresSplit):
-				if err := cpm.saveProfile(watchedContainer, container, false); err != nil {
+				if err := cpm.saveProfileForSize(watchedContainer, container); err != nil {
 					if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container, data); handledErr != nil {
 						return handledErr
 					}
@@ -236,6 +236,16 @@ func (cpm *ContainerProfileManager) saveProfile(watchedContainer *objectcache.Wa
 	})
 }
 
+// saveProfileForSize flushes newly collected data while leaving pending network
+// retries for the interval or final flush. The entry lock guards the flush mode.
+func (cpm *ContainerProfileManager) saveProfileForSize(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container) error {
+	return cpm.withContainerNoSizeUpdate(watchedContainer.ContainerID, func(data *containerData) error {
+		data.networkFlushForSize = true
+		defer func() { data.networkFlushForSize = false }()
+		return cpm.saveContainerProfile(watchedContainer, container, data, false)
+	})
+}
+
 // saveContainerProfile saves the container profile to storage
 func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container, containerData *containerData, forceSend bool) error {
 	if watchedContainer == nil {
@@ -267,24 +277,22 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	if containerData.isEmpty() && !forceSend { // TODO: Also check if the seccomp profile is new (currently not implemented)
 		return nil
 	}
-
-	// Update timestamps before saving
-	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp
-	watchedContainer.CurrentReportTimestamp = time.Now()
+	// Size-triggered flushes must give unresolved peers the same minimum retry
+	// window as interval-triggered flushes.
+	containerData.networkDeferralDuration = cpm.cfg.UpdateDataPeriod
+	containerData.networkDeferredSizeLimit = cpm.cfg.MaxTsProfileSize
 
 	containerProfile := &v1beta1.ContainerProfile{
 		Name:      slug,
 		Namespace: container.K8s.Namespace,
 		Annotations: map[string]string{
-			helpersv1.InstanceIDMetadataKey:              watchedContainer.InstanceID.GetStringFormatted(),
-			helpersv1.WlidMetadataKey:                    watchedContainer.Wlid,
-			helpersv1.CompletionMetadataKey:              string(watchedContainer.GetCompletionStatus()),
-			helpersv1.StatusMetadataKey:                  string(watchedContainer.GetStatus()),
-			helpersv1.ContainerTypeMetadataKey:           watchedContainer.ContainerType.String(),
-			helpersv1.ReportSeriesIdMetadataKey:          watchedContainer.SeriesID,
-			helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
-			helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
-			helpersv1.OtelSpanIDMetadataKey:              cpm.lifecycleTracker.LearningSpanID(watchedContainer.ContainerID),
+			helpersv1.InstanceIDMetadataKey:     watchedContainer.InstanceID.GetStringFormatted(),
+			helpersv1.WlidMetadataKey:           watchedContainer.Wlid,
+			helpersv1.CompletionMetadataKey:     string(watchedContainer.GetCompletionStatus()),
+			helpersv1.StatusMetadataKey:         string(watchedContainer.GetStatus()),
+			helpersv1.ContainerTypeMetadataKey:  watchedContainer.ContainerType.String(),
+			helpersv1.ReportSeriesIdMetadataKey: watchedContainer.SeriesID,
+			helpersv1.OtelSpanIDMetadataKey:     cpm.lifecycleTracker.LearningSpanID(watchedContainer.ContainerID),
 			// Full W3C traceparent so kubescape/storage can create a properly
 			// parented child span for the aggregation step.
 			helpersv1.OtelTraceparentMetadataKey: cpm.lifecycleTracker.LearningTraceparent(watchedContainer.ContainerID),
@@ -302,8 +310,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 			Endpoints:            containerData.getEndpoints(),
 			PolicyByRuleId:       containerData.getRulePolicies(),
 			IdentifiedCallStacks: containerData.getCallStacks(),
-			Egress:               containerData.getEgressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
-			Ingress:              containerData.getIngressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
+			Egress:               containerData.getEgressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient, cpm.k8sInventory, cpm.k8sObjectCache, forceSend),
+			Ingress:              containerData.getIngressNetworkNeighbors(watchedContainer.ContainerID, container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient, cpm.k8sInventory, cpm.k8sObjectCache, forceSend),
 			LabelSelector: metav1.LabelSelector{
 				MatchLabels:      watchedContainer.ParentWorkloadSelector.MatchLabels,
 				MatchExpressions: watchedContainer.ParentWorkloadSelector.MatchExpressions,
@@ -311,10 +319,34 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		},
 	}
 
-	if err := cpm.enqueueContainerProfile(containerProfile, watchedContainer.ContainerID); err != nil {
+	if !forceSend && !containerData.hasUnreportedStatusChange() &&
+		containerData.networks != nil && containerData.networks.Cardinality() > 0 &&
+		len(containerProfile.Spec.Capabilities) == 0 &&
+		len(containerProfile.Spec.Execs) == 0 &&
+		len(containerProfile.Spec.Opens) == 0 &&
+		len(containerProfile.Spec.Syscalls) == 0 &&
+		len(containerProfile.Spec.Endpoints) == 0 &&
+		len(containerProfile.Spec.PolicyByRuleId) == 0 &&
+		len(containerProfile.Spec.IdentifiedCallStacks) == 0 &&
+		len(containerProfile.Spec.Egress) == 0 &&
+		len(containerProfile.Spec.Ingress) == 0 {
+		containerData.emptyEvents()
+		return nil
+	}
+
+	// Advance the report chain only after deciding to emit this profile.
+	// Deferred-only flushes must not create a link to a report that was skipped.
+	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp
+	watchedContainer.CurrentReportTimestamp = time.Now()
+	containerProfile.Annotations[helpersv1.PreviousReportTimestampMetadataKey] = watchedContainer.PreviousReportTimestamp.String()
+	containerProfile.Annotations[helpersv1.ReportTimestampMetadataKey] = watchedContainer.CurrentReportTimestamp.String()
+
+	// Enforce the budget after selectors and Service ports have been materialized.
+	enqueueErr := cpm.queueData.EnqueueWithSizeLimit(containerProfile, watchedContainer.ContainerID, cpm.cfg.MaxTsProfileSize)
+	if enqueueErr != nil {
 		// Empty the container data to prevent reporting the same data again
 		containerData.emptyEvents()
-		return err
+		return enqueueErr
 	}
 
 	cpm.lifecycleTracker.OnEntrySaved(watchedContainer.ContainerID, containerData.droppedEvents)

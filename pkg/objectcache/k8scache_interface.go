@@ -10,6 +10,7 @@ type K8sObjectCache interface {
 	GetPodStatus(namespace, podName string) *corev1.PodStatus
 	GetApiServerIpAddress() string
 	GetPods() []*corev1.Pod
+	GetPodByIP(ip string) *corev1.Pod
 	GetPod(namespace, podName string) *corev1.Pod
 	SetSharedContainerData(containerID string, data *WatchedContainerData)
 	GetSharedContainerData(containerID string) *WatchedContainerData
@@ -33,6 +34,22 @@ func (k *K8sObjectCacheMock) GetPodStatus(_, _ string) *corev1.PodStatus {
 }
 func (k *K8sObjectCacheMock) GetPod(_, _ string) *corev1.Pod {
 	return &corev1.Pod{Spec: k.PodSpec, Status: k.PodStatus}
+}
+
+// GetPodByIP returns the mock pod for a matching primary or secondary IP, or nil.
+func (k *K8sObjectCacheMock) GetPodByIP(ip string) *corev1.Pod {
+	if ip == "" {
+		return nil
+	}
+	if k.PodStatus.PodIP == ip {
+		return k.GetPod("", "")
+	}
+	for _, podIP := range k.PodStatus.PodIPs {
+		if podIP.IP == ip {
+			return k.GetPod("", "")
+		}
+	}
+	return nil
 }
 func (k *K8sObjectCacheMock) GetApiServerIpAddress() string {
 	return k.ApiServerIpAddress

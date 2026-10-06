@@ -545,6 +545,7 @@ func TestContainerProfileManagerCreation(t *testing.T) {
 	assert.NotNil(t, cpm.maxSniffTimeNotificationChan)
 }
 
+// TestContainerDataMethods checks that an empty container produces no profile events or network neighbors.
 func TestContainerDataMethods(t *testing.T) {
 	cd := &containerData{}
 
@@ -573,11 +574,11 @@ func TestContainerDataMethods(t *testing.T) {
 	assert.Empty(t, callStacks)
 
 	// Test getIngressNetworkNeighbors with nil networks
-	ingress := cd.getIngressNetworkNeighbors("", "default", nil, nil)
+	ingress := cd.getIngressNetworkNeighbors("", "default", nil, nil, nil, nil, false)
 	assert.Empty(t, ingress)
 
 	// Test getEgressNetworkNeighbors with nil networks
-	egress := cd.getEgressNetworkNeighbors("", "default", nil, nil)
+	egress := cd.getEgressNetworkNeighbors("", "default", nil, nil, nil, nil, false)
 	assert.Empty(t, egress)
 }
 

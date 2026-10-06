@@ -1,20 +1,25 @@
 package containerprofilemanager
 
 import (
+	"net"
 	"sort"
+	"time"
 
+	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// emptyEvents clears all event data
+// emptyEvents clears all event data, but retains deferred network events for re-resolution
 func (cd *containerData) emptyEvents() {
 	cd.size.Store(0)
 	cd.capabilites = nil
@@ -24,8 +29,74 @@ func (cd *containerData) emptyEvents() {
 	cd.opens = nil
 	cd.rulePolicies = nil
 	cd.callStacks = nil
-	cd.networks = nil
-	cd.servicePorts = nil
+	if cd.networkFlushForSize {
+		// Pressure flushes only consumed the active batch. Keep untouched pending
+		// peers in place rather than scanning or cloning their growing backlog.
+		if cd.activeNetworks != nil {
+			for _, event := range cd.activeNetworks.ToSlice() {
+				if cd.deferredNetworks != nil && cd.deferredNetworks.Contains(event) {
+					if cd.prevDeferredNetworks == nil {
+						cd.prevDeferredNetworks = mapset.NewSet[NetworkEvent]()
+					}
+					cd.prevDeferredNetworks.Add(event)
+					continue
+				}
+				cd.networks.Remove(event)
+				if cd.prevDeferredNetworks != nil {
+					cd.prevDeferredNetworks.Remove(event)
+				}
+				delete(cd.servicePorts, event)
+				delete(cd.networkDeferredUntil, event)
+				cd.releaseDeferredNetworkSize(event)
+			}
+		}
+		cd.deferredNetworks = nil
+		if cd.networks != nil && cd.networks.Cardinality() == 0 {
+			cd.networks = nil
+			cd.prevDeferredNetworks = nil
+		}
+		if len(cd.servicePorts) == 0 {
+			cd.servicePorts = nil
+		}
+		if len(cd.networkDeferredUntil) == 0 {
+			cd.networkDeferredUntil = nil
+		}
+	} else if cd.deferredNetworks != nil && cd.deferredNetworks.Cardinality() > 0 {
+		cd.networks = cd.deferredNetworks.Clone()
+		cd.prevDeferredNetworks = cd.deferredNetworks.Clone()
+		cd.deferredNetworks = nil
+		// Retained observations must keep the ports captured at ingestion.
+		for event := range cd.servicePorts {
+			if !cd.networks.Contains(event) {
+				delete(cd.servicePorts, event)
+			}
+		}
+		if len(cd.servicePorts) == 0 {
+			cd.servicePorts = nil
+		}
+		for event := range cd.networkDeferredUntil {
+			if !cd.networks.Contains(event) {
+				delete(cd.networkDeferredUntil, event)
+			}
+		}
+		if len(cd.networkDeferredUntil) == 0 {
+			cd.networkDeferredUntil = nil
+		}
+		for event := range cd.networkDeferredSizes {
+			if !cd.networks.Contains(event) {
+				cd.releaseDeferredNetworkSize(event)
+			}
+		}
+	} else {
+		cd.networks = nil
+		cd.prevDeferredNetworks = nil
+		cd.deferredNetworks = nil
+		cd.servicePorts = nil
+		cd.networkDeferredUntil = nil
+		cd.networkDeferredSizes = nil
+		cd.networkDeferredSize = 0
+	}
+	cd.activeNetworks = nil
 	if cd.watchedContainerData != nil {
 		cd.lastReportedCompletion = string(cd.watchedContainerData.GetCompletionStatus())
 		cd.lastReportedStatus = string(cd.watchedContainerData.GetStatus())
@@ -34,6 +105,7 @@ func (cd *containerData) emptyEvents() {
 
 // isEmpty returns true if the container data is empty
 func (cd *containerData) isEmpty() bool {
+	networks := cd.networkEventsForFlush(false)
 	if cd.capabilites != nil ||
 		cd.syscalls != nil ||
 		cd.endpoints != nil ||
@@ -41,16 +113,18 @@ func (cd *containerData) isEmpty() bool {
 		cd.opens != nil ||
 		cd.rulePolicies != nil ||
 		cd.callStacks != nil ||
-		cd.networks != nil {
+		(networks != nil && networks.Cardinality() > 0) {
 		return false
 	}
 
-	if cd.watchedContainerData == nil {
-		return true
-	}
+	return !cd.hasUnreportedStatusChange()
+}
 
-	return cd.lastReportedCompletion == string(cd.watchedContainerData.GetCompletionStatus()) &&
-		cd.lastReportedStatus == string(cd.watchedContainerData.GetStatus())
+// hasUnreportedStatusChange reports whether a metadata-only update still needs saving.
+func (cd *containerData) hasUnreportedStatusChange() bool {
+	return cd.watchedContainerData != nil &&
+		(cd.lastReportedCompletion != string(cd.watchedContainerData.GetCompletionStatus()) ||
+			cd.lastReportedStatus != string(cd.watchedContainerData.GetStatus()))
 }
 
 // getCapabilities returns a sorted slice of capabilities
@@ -159,20 +233,87 @@ func (cd *containerData) getCallStacks() []v1beta1.IdentifiedCallStack {
 	return callStacks
 }
 
+// isPrivateIP reports whether a valid address belongs to a private IPv4 or IPv6 range.
+func isPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	return ip != nil && ip.IsPrivate()
+}
+
+// resolveEndpoint resolves unknown peers from inventory, then the pod cache, excluding host-network pods.
+func resolveEndpoint(
+	event *NetworkEvent,
+	k8sInventory common.K8sInventoryCache,
+	k8sObjectCache objectcache.K8sObjectCache,
+) {
+	if event.Destination.Kind == EndpointKindPod || event.Destination.Kind == EndpointKindService {
+		return
+	}
+	ip := event.Destination.IPAddress
+	if ip == "" || ip == "127.0.0.1" {
+		return
+	}
+
+	if k8sInventory != nil {
+		if pod := k8sInventory.GetPodByIp(ip); pod != nil && !pod.Spec.HostNetwork {
+			event.Destination.Kind = EndpointKindPod
+			event.Destination.Name = pod.Name
+			event.Destination.Namespace = pod.Namespace
+			event.SetDestinationPodLabels(pod.Labels)
+			return
+		}
+		if svc := k8sInventory.GetSvcByIp(ip); svc != nil {
+			event.Destination.Kind = EndpointKindService
+			event.Destination.Name = svc.Name
+			event.Destination.Namespace = svc.Namespace
+			event.SetDestinationPodLabels(svc.Labels)
+			return
+		}
+	}
+
+	if k8sObjectCache != nil {
+		if pod := k8sObjectCache.GetPodByIP(ip); pod != nil && !pod.Spec.HostNetwork {
+			event.Destination.Kind = EndpointKindPod
+			event.Destination.Name = pod.Name
+			event.Destination.Namespace = pod.Namespace
+			event.SetDestinationPodLabels(pod.Labels)
+			return
+		}
+	}
+}
+
+// networkEventsForFlush selects fresh observations for pressure saves and all retained
+// observations for interval or final saves, without copying either set.
+func (cd *containerData) networkEventsForFlush(forceSend bool) mapset.Set[NetworkEvent] {
+	if cd.networkFlushForSize && !forceSend {
+		return cd.activeNetworks
+	}
+	return cd.networks
+}
+
 // getIngressNetworkNeighbors returns ingress network neighbors for this container
-func (cd *containerData) getIngressNetworkNeighbors(containerID string, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
+func (cd *containerData) getIngressNetworkNeighbors(
+	containerID string,
+	namespace string,
+	k8sClient k8sclient.K8sClientInterface,
+	dnsResolverClient dnsmanager.DNSResolver,
+	k8sInventory common.K8sInventoryCache,
+	k8sObjectCache objectcache.K8sObjectCache,
+	forceSend bool,
+) []v1beta1.NetworkNeighbor {
 	var ingress []v1beta1.NetworkNeighbor
-	if cd.networks == nil {
+	networks := cd.networkEventsForFlush(forceSend)
+	if networks == nil {
 		return ingress
 	}
 
-	for _, event := range cd.networks.ToSlice() {
+	seen := make(map[string]networkNeighborIndex)
+	for _, event := range networks.ToSlice() {
 		if event.PktType == utils.HostPktType {
-			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient)
+			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
 			if neighbor == nil {
 				continue
 			}
-			ingress = append(ingress, *neighbor)
+			ingress = appendNetworkNeighbor(ingress, seen, *neighbor)
 		}
 	}
 
@@ -180,27 +321,122 @@ func (cd *containerData) getIngressNetworkNeighbors(containerID string, namespac
 }
 
 // getEgressNetworkNeighbors returns egress network neighbors for this container
-func (cd *containerData) getEgressNetworkNeighbors(containerID string, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
+func (cd *containerData) getEgressNetworkNeighbors(
+	containerID string,
+	namespace string,
+	k8sClient k8sclient.K8sClientInterface,
+	dnsResolverClient dnsmanager.DNSResolver,
+	k8sInventory common.K8sInventoryCache,
+	k8sObjectCache objectcache.K8sObjectCache,
+	forceSend bool,
+) []v1beta1.NetworkNeighbor {
 	var egress []v1beta1.NetworkNeighbor
-	if cd.networks == nil {
+	networks := cd.networkEventsForFlush(forceSend)
+	if networks == nil {
 		return egress
 	}
 
-	for _, event := range cd.networks.ToSlice() {
+	seen := make(map[string]networkNeighborIndex)
+	for _, event := range networks.ToSlice() {
 		if event.PktType != utils.HostPktType {
-			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient)
+			neighbor := cd.createNetworkNeighbor(containerID, event, namespace, k8sClient, dnsResolverClient, k8sInventory, k8sObjectCache, forceSend)
 			if neighbor == nil {
 				continue
 			}
-			egress = append(egress, *neighbor)
+			egress = appendNetworkNeighbor(egress, seen, *neighbor)
 		}
 	}
 
 	return egress
 }
 
+type networkNeighborIndex struct {
+	index int
+	ports map[string]struct{}
+}
+
+// appendNetworkNeighbor merges all observed ports for neighbors with the same identity.
+func appendNetworkNeighbor(neighbors []v1beta1.NetworkNeighbor, seen map[string]networkNeighborIndex, neighbor v1beta1.NetworkNeighbor) []v1beta1.NetworkNeighbor {
+	if entry, ok := seen[neighbor.Identifier]; ok {
+		for _, port := range neighbor.Ports {
+			if _, exists := entry.ports[port.Name]; !exists {
+				neighbors[entry.index].Ports = append(neighbors[entry.index].Ports, port)
+				entry.ports[port.Name] = struct{}{}
+			}
+		}
+		return neighbors
+	}
+	ports := make(map[string]struct{}, len(neighbor.Ports))
+	for _, port := range neighbor.Ports {
+		ports[port.Name] = struct{}{}
+	}
+	seen[neighbor.Identifier] = networkNeighborIndex{index: len(neighbors), ports: ports}
+	return append(neighbors, neighbor)
+}
+
+// releaseDeferredNetworkSize removes one consumed observation from the independent
+// backlog budget. Pressure cleanup calls this only for events in its active batch.
+func (cd *containerData) releaseDeferredNetworkSize(event NetworkEvent) {
+	if estimate, exists := cd.networkDeferredSizes[event]; exists {
+		cd.networkDeferredSize -= estimate
+		delete(cd.networkDeferredSizes, event)
+		if len(cd.networkDeferredSizes) == 0 {
+			cd.networkDeferredSizes = nil
+		}
+	}
+}
+
+// deferNetworkEvent retains an unresolved observation until its first deadline,
+// provided the independent backlog budget has room. Overflow falls through to raw
+// delivery. Nonpositive limits preserve the uncapped behavior of zero-config callers.
+func (cd *containerData) deferNetworkEvent(event NetworkEvent) bool {
+	now := time.Now()
+	deadline, hasDeadline := cd.networkDeferredUntil[event]
+	if cd.networkDeferralDuration > 0 {
+		if hasDeadline && !now.Before(deadline) {
+			return false
+		}
+	} else if cd.prevDeferredNetworks != nil && cd.prevDeferredNetworks.Contains(event) {
+		return false
+	}
+	if _, accounted := cd.networkDeferredSizes[event]; !accounted && cd.networkDeferredSizeLimit > 0 {
+		estimate := int64(size.Of(event) + networkNeighborIncrement(cd, event))
+		if estimate > cd.networkDeferredSizeLimit-cd.networkDeferredSize {
+			return false
+		}
+		if cd.networkDeferredSizes == nil {
+			cd.networkDeferredSizes = make(map[NetworkEvent]int64)
+		}
+		cd.networkDeferredSizes[event] = estimate
+		cd.networkDeferredSize += estimate
+	}
+	if cd.networkDeferralDuration > 0 && !hasDeadline {
+		if cd.networkDeferredUntil == nil {
+			cd.networkDeferredUntil = make(map[NetworkEvent]time.Time)
+		}
+		cd.networkDeferredUntil[event] = now.Add(cd.networkDeferralDuration)
+	}
+	if cd.deferredNetworks == nil {
+		cd.deferredNetworks = mapset.NewSet[NetworkEvent]()
+	}
+	cd.deferredNetworks.Add(event)
+	return true
+}
+
 // createNetworkNeighbor creates a network neighbor from a network event
-func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent NetworkEvent, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) *v1beta1.NetworkNeighbor {
+func (cd *containerData) createNetworkNeighbor(
+	containerID string,
+	networkEvent NetworkEvent,
+	namespace string,
+	k8sClient k8sclient.K8sClientInterface,
+	dnsResolverClient dnsmanager.DNSResolver,
+	k8sInventory common.K8sInventoryCache,
+	k8sObjectCache objectcache.K8sObjectCache,
+	forceSend bool,
+) *v1beta1.NetworkNeighbor {
+	originalEvent := networkEvent
+	resolveEndpoint(&networkEvent, k8sInventory, k8sObjectCache)
+
 	var neighborEntry v1beta1.NetworkNeighbor
 
 	enforcementPorts := []uint16{networkEvent.Port}
@@ -220,27 +456,32 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 
 	} else if networkEvent.Destination.Kind == EndpointKindService {
 		// For service, we need to retrieve it and use its selector
-		svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name) // TODO: use IG inventory as this can generate a lot of API calls.
-		if err != nil {
-			logger.L().Warning("failed to get service",
-				helpers.String("reason", err.Error()),
-				helpers.String("service name", networkEvent.Destination.Name))
-			return nil
-		}
-		serviceWorkload = svc
-
 		var selector map[string]string
-		if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
-			// The default service has no selectors, in addition, we want to save the default service address
-			selector = svc.GetLabels()
-			neighborEntry.IPAddress = networkEvent.Destination.IPAddress
-		} else {
-			selector = svc.GetServiceSelector()
+		if k8sClient != nil {
+			svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name) // TODO: use IG inventory as this can generate a lot of API calls.
+			if err != nil {
+				logger.L().Warning("failed to get service",
+					helpers.String("reason", err.Error()),
+					helpers.String("service name", networkEvent.Destination.Name))
+			} else if svc != nil {
+				serviceWorkload = svc
+
+				if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
+					// The default service has no selectors, in addition, we want to save the default service address
+					selector = svc.GetLabels()
+					neighborEntry.IPAddress = networkEvent.Destination.IPAddress
+				} else {
+					selector = svc.GetServiceSelector()
+				}
+			}
 		}
 
 		if len(selector) == 0 {
-			// TODO: check if we need to handle services with no selectors
-			return nil
+			// Preserve observed IP traffic when promotion cannot provide a selector.
+			if networkEvent.Destination.IPAddress == "" {
+				return nil
+			}
+			networkEvent.Destination.Kind = EndpointKindRaw
 		} else {
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: selector,
@@ -252,11 +493,19 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 			}
 		}
 
-	} else {
+	}
+
+	if networkEvent.Destination.Kind != EndpointKindPod && networkEvent.Destination.Kind != EndpointKindService {
 		if networkEvent.Destination.IPAddress == "127.0.0.1" {
 			// No need to generate for localhost
 			return nil
 		}
+
+		// Let inventory catch up before persisting unresolved private traffic as raw IP.
+		if isPrivateIP(networkEvent.Destination.IPAddress) && !forceSend && cd != nil && cd.deferNetworkEvent(originalEvent) {
+			return nil
+		}
+
 		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 
 		if dnsResolverClient != nil {
@@ -268,17 +517,24 @@ func (cd *containerData) createNetworkNeighbor(containerID string, networkEvent 
 		}
 	}
 
-	if ports, ok := cd.servicePorts[networkEvent]; ok {
-		enforcementPorts = ports
-	} else if networkEvent.Destination.Kind == EndpointKindService && serviceWorkload != nil && k8sClient != nil {
-		enforcementPorts = resolveServiceEnforcementPorts(
-			k8sClient,
-			networkEvent.Destination.Namespace,
-			networkEvent.Destination.Name,
-			serviceWorkload,
-			networkEvent.Port,
-			networkEvent.Protocol,
-		)
+	hasPortSnapshot := false
+	if cd != nil && networkEvent.Destination.Kind == EndpointKindService {
+		if ports, ok := cd.servicePorts[networkEvent]; ok {
+			hasPortSnapshot = true
+			enforcementPorts = ports
+		}
+	}
+	if !hasPortSnapshot {
+		if networkEvent.Destination.Kind == EndpointKindService && serviceWorkload != nil && k8sClient != nil {
+			enforcementPorts = resolveServiceEnforcementPorts(
+				k8sClient,
+				networkEvent.Destination.Namespace,
+				networkEvent.Destination.Name,
+				serviceWorkload,
+				networkEvent.Port,
+				networkEvent.Protocol,
+			)
+		}
 	}
 	neighborEntry.Ports = buildNetworkPorts(networkEvent.Protocol, enforcementPorts)
 

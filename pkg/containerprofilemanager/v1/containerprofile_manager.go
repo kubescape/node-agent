@@ -13,6 +13,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -47,22 +48,35 @@ type containerData struct {
 	monitorDone          chan struct{}
 	monitorDoneOnce      sync.Once
 
-	// Apparent size
+	// Apparent size of observations collected since the last flush; deferred peers
+	// remain in networks without being charged to each new active batch.
 	size atomic.Int64
 
 	// Cleanup resources
 	timer *time.Timer // For max sniffing time
 
 	// Events reported for this container that need to be saved to the profile
-	capabilites   mapset.Set[string]
-	syscalls      mapset.Set[string]
-	endpoints     *maps.SafeMap[string, *v1beta1.HTTPEndpoint]
-	execs         *maps.SafeMap[string, []string]                     // Map of execs, key is SHA256 hash
-	opens         *maps.SafeMap[string, mapset.Set[string]]           // Map of opens, key is file path
-	rulePolicies  *maps.SafeMap[string, *v1beta1.RulePolicy]          // Map of rule policies, key is rule ID
-	callStacks    *maps.SafeMap[string, *v1beta1.IdentifiedCallStack] // Map of callstacks, key is SHA256 hash
-	networks      mapset.Set[NetworkEvent]
-	droppedEvents bool // Indicates if any events were dropped during monitoring
+	capabilites          mapset.Set[string]
+	syscalls             mapset.Set[string]
+	endpoints            *maps.SafeMap[string, *v1beta1.HTTPEndpoint]
+	execs                *maps.SafeMap[string, []string]                     // Map of execs, key is SHA256 hash
+	opens                *maps.SafeMap[string, mapset.Set[string]]           // Map of opens, key is file path
+	rulePolicies         *maps.SafeMap[string, *v1beta1.RulePolicy]          // Map of rule policies, key is rule ID
+	callStacks           *maps.SafeMap[string, *v1beta1.IdentifiedCallStack] // Map of callstacks, key is SHA256 hash
+	networks             mapset.Set[NetworkEvent]                            // Union used for deduplication and interval/final retries.
+	activeNetworks       mapset.Set[NetworkEvent]                            // Newly collected observations since the last flush.
+	networkFlushForSize  bool                                                // Size-triggered saves visit only activeNetworks.
+	deferredNetworks     mapset.Set[NetworkEvent]
+	prevDeferredNetworks mapset.Set[NetworkEvent]
+	droppedEvents        bool // Indicates if any events were dropped during monitoring
+
+	// Positive durations give unresolved peers an informer catch-up window across rapid saves.
+	networkDeferralDuration time.Duration
+	networkDeferredUntil    map[NetworkEvent]time.Time
+	// Deferred admission is tracked independently from the active flush budget.
+	networkDeferredSizeLimit int64
+	networkDeferredSize      int64
+	networkDeferredSizes     map[NetworkEvent]int64
 
 	// Service port snapshots keep report-time accounting and serialization consistent.
 	servicePorts map[NetworkEvent][]uint16
@@ -86,6 +100,7 @@ type ContainerProfileManager struct {
 	cfg               config.Config
 	k8sClient         k8sclient.K8sClientInterface
 	k8sObjectCache    objectcache.K8sObjectCache
+	k8sInventory      common.K8sInventoryCache
 	storageClient     storage.ProfileCreator
 	dnsResolverClient dnsmanager.DNSResolver
 	seccompManager    seccompmanager.SeccompManagerClient
@@ -120,6 +135,11 @@ type ContainerProfileManager struct {
 
 func (cpm *ContainerProfileManager) SetCompletionNotifier(n objectcache.CompletionNotifier) {
 	cpm.completionNotifier = n
+}
+
+// SetK8sInventory sets the k8s inventory cache (primarily used in tests)
+func (cpm *ContainerProfileManager) SetK8sInventory(k8sInventory common.K8sInventoryCache) {
+	cpm.k8sInventory = k8sInventory
 }
 
 // SetSyscallFlusher implements containerprofilemanager.ContainerProfileManagerClient.
@@ -160,6 +180,15 @@ func NewContainerProfileManager(
 		maxSniffTimeNotificationChan: make([]chan *containercollection.Container, 0),
 		cloudMetadata:                cloudMetadata,
 		lifecycleTracker:             otelsetup.NewProfileLifecycleTracker(),
+	}
+
+	if cfg.KubernetesMode {
+		if k8sInventory, err := common.GetK8sInventoryCache(); err == nil && k8sInventory != nil {
+			containerProfileManager.k8sInventory = k8sInventory
+			k8sInventory.Start()
+		} else if err != nil {
+			logger.L().Debug("failed to initialize k8s inventory cache in container profile manager", helpers.Error(err))
+		}
 	}
 
 	// Initialize queue
@@ -203,7 +232,7 @@ func NewContainerProfileManager(
 	return containerProfileManager, nil
 }
 
-// Stop stops the container profile manager
+// Close stops container timers, the persistent queue, and the Kubernetes inventory.
 func (cpm *ContainerProfileManager) Close() {
 	// Stop all container timers and clear container map
 	cpm.containersMu.Lock()
@@ -220,6 +249,10 @@ func (cpm *ContainerProfileManager) Close() {
 
 	if cpm.queueData != nil {
 		_ = cpm.queueData.Close()
+	}
+
+	if cpm.k8sInventory != nil {
+		cpm.k8sInventory.Stop()
 	}
 }
 
