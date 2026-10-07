@@ -67,6 +67,8 @@ func (l *processLibrary) getProcessEnv(pid ref.Val) ref.Val {
 
 // processEnvOrEmpty converts an exited process to an empty environment after
 // caching, so a missing process does not cache an empty map for a reused PID.
+// This avoids expected evaluation errors; it cannot recover the exited process's
+// environment, so environment-based rules may miss short-lived commands.
 func processEnvOrEmpty(result ref.Val) ref.Val {
 	if err, ok := result.(*types.Err); ok && errors.Is(err, errProcessExited) {
 		return types.NewStringStringMap(types.DefaultTypeAdapter, map[string]string{})
@@ -95,7 +97,9 @@ func (l *processLibrary) getLdHookVar(pid ref.Val) ref.Val {
 	return types.String(envVar)
 }
 
-// GetProcessEnv retrieves the environment variables for a given process ID
+// GetProcessEnv reads a process's live /proc/<pid>/environ at call time, not at
+// exec-event capture time. Short-lived processes can exit before the read;
+// their environment cannot be recovered from the exec event by this helper.
 func GetProcessEnv(pid int) (map[string]string, error) {
 	fs, err := procfs.NewFS("/proc")
 	if err != nil {
