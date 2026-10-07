@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/log/logtest"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -225,4 +227,47 @@ func TestProfileLifecycleTracker_CapEviction(t *testing.T) {
 	tracker.mu.Unlock()
 	assert.True(t, newExists)
 	assert.False(t, oldExists)
+}
+
+func TestEmitAlertLogRecord_PreservesContents(t *testing.T) {
+	for _, signature := range []string{"", "test-signature"} {
+		t.Run("signature="+signature, func(t *testing.T) {
+			recorder := logtest.NewRecorder()
+			previous := global.GetLoggerProvider()
+			global.SetLoggerProvider(recorder)
+			t.Cleanup(func() { global.SetLoggerProvider(previous) })
+			spanContext := trace.NewSpanContext(trace.SpanContextConfig{
+				TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2}, TraceFlags: trace.FlagsSampled,
+			})
+			ctx := trace.ContextWithSpanContext(t.Context(), spanContext)
+			before := time.Now()
+			EmitAlertLogRecord(ctx, AlertLogAttrs{
+				RuleID: "rule", AlertType: "malware", ContainerID: "cid", ContainerName: "container",
+				Namespace: "namespace", PodName: "pod", Image: "image", EventType: "exec",
+				MalwareSignature: signature,
+			})
+			var records []logtest.Record
+			for _, group := range recorder.Result() {
+				records = append(records, group...)
+			}
+			require.Len(t, records, 1)
+			r := records[0]
+			assert.Equal(t, "SecurityAlert", r.Body.AsString())
+			assert.Equal(t, otellog.SeverityWarn1, r.Severity)
+			assert.Equal(t, "WARN", r.SeverityText)
+			assert.False(t, r.Timestamp.Before(before))
+			assert.Equal(t, r.Timestamp, r.ObservedTimestamp)
+			assert.Equal(t, spanContext, trace.SpanContextFromContext(r.Context))
+			expected := []attribute.KeyValue{
+				attribute.String("rule_id", "rule"), attribute.String("alert_type", "malware"),
+				attribute.String("container.id", "cid"), attribute.String("container_name", "container"),
+				attribute.String("namespace", "namespace"), attribute.String("pod_name", "pod"),
+				attribute.String("image", "image"), attribute.String("event_type", "exec"),
+			}
+			if signature != "" {
+				expected = append(expected, attribute.String("malware.signature", signature))
+			}
+			assert.Equal(t, expected, r.Attributes)
+		})
+	}
 }
