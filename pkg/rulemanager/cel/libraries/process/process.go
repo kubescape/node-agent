@@ -1,12 +1,17 @@
 package process
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/prometheus/procfs"
 )
+
+var errProcessExited = errors.New("process exited before environment lookup")
 
 // LD_PRELOAD_ENV_VARS contains the environment variables that can be used for LD_PRELOAD
 var LD_PRELOAD_ENV_VARS = []string{
@@ -48,7 +53,7 @@ func (l *processLibrary) getProcessEnv(pid ref.Val) ref.Val {
 
 	envMap, err := GetProcessEnv(int(pidInt))
 	if err != nil {
-		return types.NewErr("failed to get process environment: %v", err)
+		return types.WrapErr(fmt.Errorf("failed to get process environment: %w", err))
 	}
 
 	// Convert map[string]string to map[string]interface{} for CEL
@@ -58,6 +63,15 @@ func (l *processLibrary) getProcessEnv(pid ref.Val) ref.Val {
 	}
 
 	return types.NewDynamicMap(types.DefaultTypeAdapter, result)
+}
+
+// processEnvOrEmpty converts an exited process to an empty environment after
+// caching, so a missing process does not cache an empty map for a reused PID.
+func processEnvOrEmpty(result ref.Val) ref.Val {
+	if err, ok := result.(*types.Err); ok && errors.Is(err, errProcessExited) {
+		return types.NewStringStringMap(types.DefaultTypeAdapter, map[string]string{})
+	}
+	return result
 }
 
 func (l *processLibrary) getLdHookVar(pid ref.Val) ref.Val {
@@ -90,11 +104,17 @@ func GetProcessEnv(pid int) (map[string]string, error) {
 
 	proc, err := fs.Proc(pid)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %w", errProcessExited, err)
+		}
 		return nil, err
 	}
 
 	env, err := proc.Environ()
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %w", errProcessExited, err)
+		}
 		return nil, err
 	}
 
