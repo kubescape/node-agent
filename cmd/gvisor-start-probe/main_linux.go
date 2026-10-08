@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -24,14 +23,19 @@ func main() {
 		fmt.Fprintln(os.Stderr, "container-id is required")
 		os.Exit(2)
 	}
-	encoder := json.NewEncoder(os.Stdout)
+	output, err := newJSONOutput(os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gvisor start probe output: %v\n", err)
+		os.Exit(1)
+	}
+	defer output.file.Close()
 	receiver := &gvisor.Receiver{
 		SocketPath: *socket,
 		Resolve: func(id string) bool {
 			return id == *containerID
 		},
-		OnStart: func(start gvisor.Start) {
-			_ = encoder.Encode(start)
+		OnStart: func(ctx context.Context, start gvisor.Start) {
+			_ = output.Encode(ctx, start)
 		},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -26,7 +26,7 @@ func TestReceiverVerifiesIdentityAndDropsSensitiveFields(t *testing.T) {
 	receiver := &Receiver{
 		SocketPath: path,
 		Resolve:    func(id string) bool { return id == "known-container" },
-		OnStart:    func(start Start) { starts <- start },
+		OnStart:    func(_ context.Context, start Start) { starts <- start },
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -84,7 +84,7 @@ func TestReceiverKeepsConcurrentConnectionsSeparate(t *testing.T) {
 	receiver := &Receiver{
 		SocketPath: path,
 		Resolve:    func(id string) bool { return id == "first" || id == "second" },
-		OnStart:    func(start Start) { starts <- start },
+		OnStart:    func(_ context.Context, start Start) { starts <- start },
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -130,6 +130,25 @@ func TestReceiverKeepsConcurrentConnectionsSeparate(t *testing.T) {
 		}
 	case <-time.After(4 * time.Second):
 		t.Fatal("receiver did not stop")
+	}
+}
+
+func TestReceiverDrainsClosedQueue(t *testing.T) {
+	starts := make(chan Start, 3)
+	for _, id := range []string{"first", "second", "third"} {
+		starts <- Start{ContainerID: id}
+	}
+	close(starts)
+	var delivered []string
+	receiver := &Receiver{OnStart: func(ctx context.Context, start Start) {
+		if ctx.Err() != nil {
+			t.Fatal("normal queue drain received a canceled context")
+		}
+		delivered = append(delivered, start.ContainerID)
+	}}
+	receiver.deliverStarts(context.Background(), starts)
+	if strings.Join(delivered, ",") != "first,second,third" {
+		t.Fatalf("queue did not drain in order: %v", delivered)
 	}
 }
 

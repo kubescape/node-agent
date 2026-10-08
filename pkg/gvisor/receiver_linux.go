@@ -73,9 +73,7 @@ func (r *Receiver) Run(ctx context.Context) error {
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
-		for start := range starts {
-			r.OnStart(start)
-		}
+		r.deliverStarts(ctx, starts)
 	}()
 
 	var clients sync.WaitGroup
@@ -118,6 +116,14 @@ func (r *Receiver) Run(ctx context.Context) error {
 		default:
 			unix.Close(client)
 		}
+	}
+}
+
+func (r *Receiver) deliverStarts(ctx context.Context, starts <-chan Start) {
+	for start := range starts {
+		// Use the caller's context: an internal listener error still drains
+		// queued events, while caller cancellation interrupts the handler.
+		r.OnStart(ctx, start)
 	}
 }
 

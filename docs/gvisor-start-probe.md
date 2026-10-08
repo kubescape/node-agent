@@ -77,6 +77,13 @@ discard, and a Linux socket exchange:
 go test ./pkg/gvisor -count=1
 ```
 
+Receiver callbacks receive the caller's cancellation context and must interrupt
+blocking work when it is canceled. The probe uses a write deadline to interrupt
+blocked pipe output on SIGINT or SIGTERM, allowing the receiver to finish and
+remove its socket even if the output consumer stops reading. Tests in
+`cmd/gvisor-start-probe` cover a full output pipe and ordinary JSON output;
+receiver tests also cover draining a closed event queue in order.
+
 This document records the procedure, not results. Live `runsc` and node-agent
 host eBPF observations must be added after the Linux trial; the existing
 [gVisor proof of concept](https://github.com/yellow-forrest/gvisor-visibility-poc)

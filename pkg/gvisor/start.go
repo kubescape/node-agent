@@ -5,6 +5,7 @@
 package gvisor
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -37,8 +38,9 @@ type Start struct {
 // The receiver never attributes an unverified claim to a Kubernetes workload.
 type Resolver func(containerID string) bool
 
-// StartHandler receives only runtime-verified start events.
-type StartHandler func(Start)
+// StartHandler receives only runtime-verified start events. It must honor ctx
+// cancellation, including interrupting any blocking I/O, so Run can finish.
+type StartHandler func(context.Context, Start)
 
 func handshakeVersion(frame []byte) (uint64, error) {
 	var version uint64
