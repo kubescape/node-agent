@@ -43,6 +43,6 @@ docker-push: docker-build
 
 gadgets:
 	$(foreach img,$(KUBESCAPE_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=$(img) TAG=latest;)
-	$(foreach img,$(BUILT_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=ghcr.io/inspektor-gadget/gadget/$(img) TAG=$(call gadget_version,$(img));)
+	set -e; $(foreach img,$(BUILT_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=ghcr.io/inspektor-gadget/gadget/$(img) TAG=$(call gadget_version,$(img));)
 	$(foreach img,$(GADGETS),sudo ig image pull ghcr.io/inspektor-gadget/gadget/$(img):$(VERSION);)
 	sudo ig image export $(foreach img,$(GADGETS) $(BUILT_GADGETS),ghcr.io/inspektor-gadget/gadget/$(img):$(call gadget_version,$(img))) $(foreach img,$(KUBESCAPE_GADGETS),$(img):latest) tracers.tar
