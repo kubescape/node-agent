@@ -214,6 +214,7 @@ func main() {
 	// Create clients
 	logger.L().Info("Kubernetes mode is true")
 	k8sClient := k8sinterface.NewKubernetesApi()
+	rulemanager.InitServicePeerLabelResolver(k8sClient)
 
 	// Fetch cluster UID from kube-system namespace
 	clusterUID := utils.GetClusterUID(k8sClient.GetKubernetesClient())
