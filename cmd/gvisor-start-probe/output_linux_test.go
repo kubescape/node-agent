@@ -48,7 +48,7 @@ func TestReceiverCancellationInterruptsFullOutputPipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer output.file.Close()
+	defer output.Close()
 
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0700); err != nil {
@@ -124,7 +124,7 @@ func TestJSONOutputWritesNormally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer output.file.Close()
+	defer output.Close()
 	for _, id := range []string{"first", "second", "third"} {
 		if err := output.Encode(context.Background(), gvisor.Start{ContainerID: id}); err != nil {
 			t.Fatal(err)

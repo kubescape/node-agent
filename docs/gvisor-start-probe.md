@@ -83,6 +83,8 @@ blocked pipe output on SIGINT or SIGTERM, allowing the receiver to finish and
 remove its socket even if the output consumer stops reading. Tests in
 `cmd/gvisor-start-probe` cover a full output pipe and ordinary JSON output;
 receiver tests also cover draining a closed event queue in order.
+The probe restores stdout's original file flags on both normal and error exits,
+so a parent process sharing the inherited pipe or terminal keeps its prior mode.
 
 This document records the procedure, not results. Live `runsc` and node-agent
 host eBPF observations must be added after the Linux trial; the existing

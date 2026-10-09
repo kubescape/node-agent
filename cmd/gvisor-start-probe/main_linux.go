@@ -16,19 +16,28 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() (exitCode int) {
 	socket := flag.String("socket", "/run/kubescape/gvisor-events.sock", "private Unix socket for the SecCheck remote sink")
 	containerID := flag.String("container-id", "", "exact container ID obtained independently from the local runtime before start")
 	flag.Parse()
 	if *containerID == "" {
 		fmt.Fprintln(os.Stderr, "container-id is required")
-		os.Exit(2)
+		return 2
 	}
 	output, err := newJSONOutput(os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gvisor start probe output: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
-	defer output.file.Close()
+	defer func() {
+		if err := output.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "gvisor start probe output cleanup: %v\n", err)
+			exitCode = 1
+		}
+	}()
 	receiver := &gvisor.Receiver{
 		SocketPath: *socket,
 		Resolve: func(id string) bool {
@@ -42,6 +51,7 @@ func main() {
 	defer stop()
 	if err := receiver.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "gvisor start probe: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
