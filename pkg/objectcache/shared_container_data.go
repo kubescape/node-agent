@@ -5,6 +5,7 @@ import (
 	"iter"
 	"maps"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -75,6 +76,15 @@ type WatchedContainerData struct {
 	ContainerInfos          map[ContainerType][]ContainerInfo
 	NsMntId                 uint64
 	InitialDelayExpired     bool
+	// statusMu guards status and completionStatus. Both are read and written
+	// from several goroutines at once — the monitoring loop sets them on every
+	// tick and at termination, while deleteContainer sets them from the
+	// container callback — and they are string-typed, so an unsynchronised
+	// write is not a single store. A torn read yields a status that matches
+	// nothing, and this is the field that decides whether a profile is stamped
+	// completed. Caught by the race detector, intermittently: two of eight
+	// runs.
+	statusMu                sync.RWMutex
 	status                  WatchedContainerStatus
 	completionStatus        WatchedContainerCompletionStatus
 	ParentWorkloadSelector  *metav1.LabelSelector
@@ -100,6 +110,25 @@ func formatDuration(d time.Duration) string {
 	s = strings.Replace(s, "m0s", "m", 1)
 	s = strings.Replace(s, "h0m", "h", 1)
 	return s
+}
+
+func CloudMetadataAnnotations(cloudMetadata *armotypes.CloudMetadata) map[string]string {
+	out := map[string]string{}
+	if cloudMetadata == nil {
+		return out
+	}
+	for k, v := range map[string]string{
+		helpersv1.HostTypeMetadataKey:               string(cloudMetadata.HostType),
+		helpersv1.HostIDMetadataKey:                 cloudMetadata.MachineID,
+		helpersv1.ClusterMetadataKey:                cloudMetadata.ClusterName,
+		helpersv1.CloudAccountIdentifierMetadataKey: cloudMetadata.AccountID,
+		helpersv1.RegionMetadataKey:                 cloudMetadata.Region,
+	} {
+		if v != "" {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *WatchedContainerData, stripContainer bool) map[string]string {
@@ -142,24 +171,62 @@ func GetLabels(cloudMetadata *armotypes.CloudMetadata, watchedContainer *Watched
 	return labels
 }
 
+// IsTerminal reports whether the status represents a terminal lifecycle state.
+func (s WatchedContainerStatus) IsTerminal() bool {
+	switch s {
+	case WatchedContainerStatusCompleted,
+		WatchedContainerStatusFailed,
+		WatchedContainerStatusMissingRuntime,
+		WatchedContainerStatusTooLarge,
+		WatchedContainerStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 func (watchedContainer *WatchedContainerData) GetStatus() WatchedContainerStatus {
+	watchedContainer.statusMu.RLock()
+	defer watchedContainer.statusMu.RUnlock()
 	return watchedContainer.status
 }
 
+// IsTerminal reports whether the container has reached a terminal status.
+func (watchedContainer *WatchedContainerData) IsTerminal() bool {
+	watchedContainer.statusMu.RLock()
+	defer watchedContainer.statusMu.RUnlock()
+	return watchedContainer.status.IsTerminal()
+}
+
 func (watchedContainer *WatchedContainerData) GetCompletionStatus() WatchedContainerCompletionStatus {
+	watchedContainer.statusMu.RLock()
+	defer watchedContainer.statusMu.RUnlock()
 	return watchedContainer.completionStatus
 }
 
 func (watchedContainer *WatchedContainerData) SetStatus(newStatus WatchedContainerStatus) {
-	if newStatus != watchedContainer.status {
-		watchedContainer.status = newStatus
+	watchedContainer.statusMu.Lock()
+	defer watchedContainer.statusMu.Unlock()
+	watchedContainer.status = newStatus
+}
+
+// SetReadyUnlessTerminal sets the container status to Ready unless it has already
+// reached a terminal state (Completed, Failed, MissingRuntime, TooLarge, Rejected).
+// It reports whether the status was updated to Ready.
+func (watchedContainer *WatchedContainerData) SetReadyUnlessTerminal() bool {
+	watchedContainer.statusMu.Lock()
+	defer watchedContainer.statusMu.Unlock()
+	if watchedContainer.status.IsTerminal() {
+		return false
 	}
+	watchedContainer.status = WatchedContainerStatusReady
+	return true
 }
 
 func (watchedContainer *WatchedContainerData) SetCompletionStatus(newStatus WatchedContainerCompletionStatus) {
-	if newStatus != watchedContainer.completionStatus {
-		watchedContainer.completionStatus = newStatus
-	}
+	watchedContainer.statusMu.Lock()
+	defer watchedContainer.statusMu.Unlock()
+	watchedContainer.completionStatus = newStatus
 }
 
 func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) error {

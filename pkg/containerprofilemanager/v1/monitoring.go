@@ -98,8 +98,12 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					// keep monitoring after reaching Completed).
 					cpm.notifyCompleted(watchedContainer.ContainerID)
 				}
-			} else {
-				watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
+			} else if !watchedContainer.SetReadyUnlessTerminal() {
+				// Container already reached a terminal state (e.g. Completed or Failed
+				// set by concurrent deleteContainerWithReason). Do not overwrite it
+				// with Ready or save an un-flushed partial profile; the upcoming signal
+				// on SyncChannel will handle final flush and save.
+				continue
 			}
 			if err := cpm.saveProfile(watchedContainer, container, false); err != nil {
 				if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container, data); handledErr != nil {
