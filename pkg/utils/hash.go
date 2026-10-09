@@ -13,7 +13,10 @@ import (
 
 func CalculateSHA256FileExecHash(path string, args []string) string {
 	hsh := sha256.New()
-	hsh.Write([]byte(fmt.Sprintf("%s;%v", path, args)))
+	fmt.Fprintf(hsh, "%d:%s;", len(path), path)
+	for _, arg := range args {
+		fmt.Fprintf(hsh, "%d:%s;", len(arg), arg)
+	}
 	hashInBytes := hsh.Sum(nil)
 	return hex.EncodeToString(hashInBytes)
 }

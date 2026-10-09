@@ -123,6 +123,20 @@ func NewEventHandlerFactory(
 			if execEvent, ok := event.(utils.ExecEvent); ok {
 				containerProfileManager.ReportFileExec(execEvent.GetContainerID(), execEvent)
 			}
+		case utils.ProcfsEventType:
+			// A process the agent found already running. Its exec happened
+			// before the tracer attached and cannot be replayed, but the
+			// process is still there and procfs carries what it ran
+			// (entlein/node-agent#22).
+			// Skip events where container attribution is ambiguous (such as
+			// network-namespace fallbacks in multi-container pods) to avoid
+			// poisoning container profiles with another container's processes.
+			if pe, ok := event.(*events.ProcfsEvent); ok {
+				if pe.AmbiguousContainer {
+					return
+				}
+				containerProfileManager.ReportProcfsExec(pe.ContainerID, pe.Path, pe.Argv)
+			}
 		case utils.OpenEventType:
 			if openEvent, ok := event.(utils.OpenEvent); ok {
 				containerProfileManager.ReportFileOpen(openEvent.GetContainerID(), openEvent)
@@ -396,6 +410,11 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// Exec events
 	ehf.handlers[utils.ExecveEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics, rulePolicy}
+
+	// Procfs events: the learning retry for a process whose exec the agent
+	// missed. The process tree consumes these on its own path; this entry is
+	// what carries them to learning.
+	ehf.handlers[utils.ProcfsEventType] = []Manager{containerProfileManager}
 
 	// Open events
 	ehf.handlers[utils.OpenEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics}
