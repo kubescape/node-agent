@@ -233,6 +233,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.createEventCallback(utils.NetworkEventType),
 		tf.thirdPartyEnricher,
 		tf.socketEnricher,
+		tf.cfg.KubernetesMode,
 	)
 	manager.RegisterTracer(networkTracer)
 
