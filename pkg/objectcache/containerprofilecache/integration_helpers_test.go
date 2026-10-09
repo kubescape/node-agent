@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -58,6 +59,10 @@ var _ storage.ProfileClient = (*stubStorage)(nil)
 
 func newFakeStorage(cp *v1beta1.ContainerProfile) *stubStorage {
 	return &stubStorage{cp: cp}
+}
+
+func (s *stubStorage) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
 }
 
 func (s *stubStorage) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
