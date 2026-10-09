@@ -222,6 +222,16 @@ static __always_inline long read_full_path_of_open_file_fd(int fd_num, char *buf
 #define AT_FDCWD -100
 #endif
 
+#ifndef S_IFMT
+#define S_IFMT  00170000
+#endif
+#ifndef S_IFDIR
+#define S_IFDIR 0040000
+#endif
+#ifndef S_ISDIR
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#endif
+
 // buf is always GADGET_PATH_MAX bytes: the verifier needs a compile-time bound
 // for the masked writes below, so the size is not a runtime parameter.
 static __always_inline long read_full_path_of_dfd_rel(int dfd, const char *user_fname,
@@ -237,6 +247,12 @@ static __always_inline long read_full_path_of_dfd_rel(int dfd, const char *user_
 	} else {
 		struct file *f = get_struct_file_for_fd(dfd);
 		if (!f)
+			return -1;
+		struct inode *inode = BPF_CORE_READ(f, f_inode);
+		if (!inode)
+			return -1;
+		umode_t mode = BPF_CORE_READ(inode, i_mode);
+		if (!S_ISDIR(mode))
 			return -1;
 		base = BPF_CORE_READ(f, f_path);
 	}

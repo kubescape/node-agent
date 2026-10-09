@@ -517,11 +517,48 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 }
 
 func (e *DatasourceEvent) GetFullPath() string {
-	path, _ := e.getFieldAccessor("fpath").String(e.Data)
-	if path == "" {
-		path, _ = e.getFieldAccessor("fname").String(e.Data)
+	fpath, _ := e.getFieldAccessor("fpath").String(e.Data)
+	// For successful opens (GetError() == 0), the gadget-resolved fpath is post-resolution
+	// (following symlinks to their canonical targets). Prefer it whenever it is a valid full path.
+	if IsResolvedFullPath(fpath) && e.GetError() == 0 {
+		return NormalizePath(fpath)
 	}
-	return NormalizePath(path)
+
+	raw, _ := e.getFieldAccessor("fname").String(e.Data)
+	if IsResolvedFullPath(raw) || e.EventType != OpenEventType {
+		return NormalizePath(raw)
+	}
+
+	// Relative/empty open the gadget could not walk (failed openat has no fd
+	// to resolve in-kernel): resolve in userspace via procfs so profile AND
+	// rule evaluation see the true absolute path. If procfs resolution fails,
+	// fall back to normalizing the raw argument as a best effort.
+	// Use the syscall thread ID (proc.tid) rather than thread-group PID since
+	// fd tables and cwd can be unshared per task and the leader may have exited.
+	tid := uint32(e.getTid())
+	if tid == 0 {
+		tid = e.GetPID()
+	}
+	fd, _ := e.getFieldAccessor("fd").Uint32(e.Data)
+	dirfd := AT_FDCWD
+	if acc := e.localFieldAccessor("dfd"); acc != nil {
+		if d, err := acc.Int32(e.Data); err == nil {
+			dirfd = d
+		}
+	} else if acc := e.localFieldAccessor("dirfd"); acc != nil {
+		if d, err := acc.Int32(e.Data); err == nil {
+			dirfd = d
+		}
+	}
+	if resolved := ResolveOpenPathProc(tid, fd, e.GetError() == 0, raw, dirfd); resolved != "" {
+		return NormalizePath(resolved)
+	}
+	// When dirfd is AT_FDCWD, cwd is guaranteed to be a directory; if procfs resolution
+	// was unavailable (e.g. short-lived process exited), a gadget-resolved absolute fpath is safe.
+	if dirfd == AT_FDCWD && IsResolvedFullPath(fpath) {
+		return NormalizePath(fpath)
+	}
+	return NormalizePath(raw)
 }
 
 func (e *DatasourceEvent) GetGid() *uint32 {
