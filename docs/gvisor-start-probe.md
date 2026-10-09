@@ -85,6 +85,10 @@ remove its socket even if the output consumer stops reading. Tests in
 receiver tests also cover draining a closed event queue in order.
 The probe restores stdout's original file flags on both normal and error exits,
 so a parent process sharing the inherited pipe or terminal keeps its prior mode.
+If output fails, the probe stops collection, reports the first write error on
+stderr, and exits with status 1. Signal cancellation of a blocked write remains
+a normal exit. Actual-process tests cover a closed output reader as well as
+flag restoration and signal cancellation.
 
 This document records the procedure, not results. Live `runsc` and node-agent
 host eBPF observations must be added after the Linux trial; the existing

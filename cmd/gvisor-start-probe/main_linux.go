@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -38,19 +39,39 @@ func run() (exitCode int) {
 			exitCode = 1
 		}
 	}()
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
+	outputErrors := make(chan error, 1)
 	receiver := &gvisor.Receiver{
 		SocketPath: *socket,
 		Resolve: func(id string) bool {
 			return id == *containerID
 		},
 		OnStart: func(ctx context.Context, start gvisor.Start) {
-			_ = output.Encode(ctx, start)
+			if err := output.Encode(ctx, start); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+					(ctx.Err() != nil && errors.Is(err, os.ErrDeadlineExceeded)) {
+					return
+				}
+				select {
+				case outputErrors <- err:
+				default:
+				}
+				cancel()
+			}
 		},
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := receiver.Run(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "gvisor start probe: %v\n", err)
+	runErr := receiver.Run(ctx)
+	select {
+	case err := <-outputErrors:
+		fmt.Fprintf(os.Stderr, "gvisor start probe output: %v\n", err)
+		return 1
+	default:
+	}
+	if runErr != nil {
+		fmt.Fprintf(os.Stderr, "gvisor start probe: %v\n", runErr)
 		return 1
 	}
 	return 0
