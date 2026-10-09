@@ -40,6 +40,7 @@ func TestAddRunningContainers(t *testing.T) {
 	}
 	type ignore struct {
 		namespace string
+		podName   string
 	}
 	tests := []struct {
 		notify                  *rulebindingmanager.RuleBindingNotify
@@ -87,6 +88,7 @@ func TestAddRunningContainers(t *testing.T) {
 			expectedRuleManagedPods: []string{},
 			ignore: ignore{
 				namespace: "namespace1",
+				podName:   "pod1",
 			},
 			notify: &rulebindingmanager.RuleBindingNotify{
 				Action: rulebindingmanager.Added,
@@ -100,7 +102,10 @@ func TestAddRunningContainers(t *testing.T) {
 			slices.Sort(tt.expectedRuleManagedPods)
 
 			ncw := ContainerWatcher{
-				cfg:                     config.Config{NamespaceName: tt.ignore.namespace},
+				cfg: config.Config{
+					NamespaceName: tt.ignore.namespace,
+					PodName:       tt.ignore.podName,
+				},
 				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
 				ruleBindingsInitialized: false,
 				containerCollection:     &containercollection.ContainerCollection{},
