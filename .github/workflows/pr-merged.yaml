@@ -10,6 +10,8 @@ on:
 
   workflow_dispatch:
 
+permissions: read-all
+
 jobs:
   reset-run-number:
     runs-on: ubuntu-latest
@@ -28,11 +30,10 @@ jobs:
     if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged
     needs: reset-run-number
     permissions:
-      actions: read
       id-token: write
-      packages: write
       contents: write
-      pull-requests: read
+      pull-requests: write  # Required by the nested benchmark workflow.
+      artifact-metadata: write  # Create the attested image storage record.
       attestations: write  # required by actions/attest-build-provenance in the shared workflow
     uses: ./.github/workflows/incluster-comp-pr-merged.yaml
     with:

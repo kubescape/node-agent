@@ -60,6 +60,8 @@ on:
         default: false
         type: boolean
 
+permissions: read-all
+
 jobs:
   docker-build:
     if: ${{ ((contains(github.event.pull_request.labels.*.name, 'release') || contains( github.event.pull_request.labels.*.name, 'trigger-integration-test')) && github.repository_owner == 'kubescape') || inputs.FORCE }}
@@ -69,9 +71,8 @@ jobs:
       TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}
     permissions:
       id-token: write
-      packages: write
       contents: read
-      pull-requests: read
+      artifact-metadata: write  # Create the attested image storage record.
       attestations: write  # required by actions/attest-build-provenance
 
     steps:
@@ -172,6 +173,7 @@ jobs:
           input: ${{ inputs.REQUIRED_TESTS }}
 
   run-tests:
+    permissions: {}  # Private-repository operations use the GitHub App token.
     needs: docker-build
     if: ${{ inputs.HELM_E2E_TEST == true }}
     runs-on: ubuntu-latest
@@ -370,6 +372,9 @@ jobs:
           retention-days: 7
 
   benchmark:
+    permissions:
+      contents: read
+      pull-requests: write  # Required by the reusable benchmark workflow.
     needs: docker-build
     if: ${{ contains(github.event.pull_request.labels.*.name, 'release') }}
     uses: ./.github/workflows/benchmark.yaml
