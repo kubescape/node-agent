@@ -15,7 +15,8 @@ import (
 
 func TestContainerCallbackAsync_StandaloneDoesNotAcquirePodData(t *testing.T) {
 	// Cancellation makes the synchronous metadata acquisition fail immediately;
-	// it must still report an error for a real (even partially enriched) Pod.
+	// it must still report an error for an addressable Pod, even before container
+	// name enrichment. Names, labels or sandbox IDs alone cannot address a Pod.
 	// Standalone registration must never enter that acquisition path.
 	cases := []struct {
 		name      string
@@ -23,12 +24,13 @@ func TestContainerCallbackAsync_StandaloneDoesNotAcquirePodData(t *testing.T) {
 		wantError bool
 	}{
 		{"standalone", func(*containercollection.Container) {}, false},
-		{"namespace", func(c *containercollection.Container) { c.K8s.Namespace = "test" }, true},
-		{"pod", func(c *containercollection.Container) { c.K8s.PodName = "test" }, true},
-		{"container name", func(c *containercollection.Container) { c.K8s.ContainerName = "test" }, true},
-		{"UID", func(c *containercollection.Container) { c.K8s.PodUID = "test-uid" }, true},
-		{"labels", func(c *containercollection.Container) { c.K8s.PodLabels = map[string]string{"app": "test"} }, true},
-		{"sandbox", func(c *containercollection.Container) { c.SandboxId = "test-sandbox" }, true},
+		{"namespace", func(c *containercollection.Container) { c.K8s.Namespace = "test" }, false},
+		{"pod", func(c *containercollection.Container) { c.K8s.PodName = "test" }, false},
+		{"container name", func(c *containercollection.Container) { c.K8s.ContainerName = "test" }, false},
+		{"UID", func(c *containercollection.Container) { c.K8s.PodUID = "test-uid" }, false},
+		{"labels", func(c *containercollection.Container) { c.K8s.PodLabels = map[string]string{"app": "test"} }, false},
+		{"sandbox", func(c *containercollection.Container) { c.SandboxId = "test-sandbox" }, false},
+		{"addressable Pod", func(c *containercollection.Container) { c.K8s.Namespace = "test"; c.K8s.PodName = "test" }, true},
 	}
 	log := logger.L()
 	level := log.GetLevel()

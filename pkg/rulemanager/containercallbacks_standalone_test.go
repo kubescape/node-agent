@@ -33,12 +33,13 @@ func TestStartRuleManager_StandaloneSkipsPodData(t *testing.T) {
 		wantReads int32
 	}{
 		{"standalone", func(*containercollection.Container) {}, 0},
-		{"namespace only", func(c *containercollection.Container) { c.K8s.Namespace = "test" }, 1},
-		{"pod only", func(c *containercollection.Container) { c.K8s.PodName = "test" }, 1},
-		{"container name only", func(c *containercollection.Container) { c.K8s.ContainerName = "test" }, 1},
-		{"pod UID only", func(c *containercollection.Container) { c.K8s.PodUID = "test-uid" }, 1},
-		{"pod labels only", func(c *containercollection.Container) { c.K8s.PodLabels = map[string]string{"app": "test"} }, 1},
-		{"sandbox only", func(c *containercollection.Container) { c.SandboxId = "test-sandbox" }, 1},
+		{"namespace only", func(c *containercollection.Container) { c.K8s.Namespace = "test" }, 0},
+		{"pod only", func(c *containercollection.Container) { c.K8s.PodName = "test" }, 0},
+		{"container name only", func(c *containercollection.Container) { c.K8s.ContainerName = "test" }, 0},
+		{"pod UID only", func(c *containercollection.Container) { c.K8s.PodUID = "test-uid" }, 0},
+		{"pod labels only", func(c *containercollection.Container) { c.K8s.PodLabels = map[string]string{"app": "test"} }, 0},
+		{"sandbox only", func(c *containercollection.Container) { c.SandboxId = "test-sandbox" }, 0},
+		{"addressable Pod without container name", func(c *containercollection.Container) { c.K8s.Namespace = "test"; c.K8s.PodName = "test" }, 1},
 		{"pod", func(c *containercollection.Container) {
 			c.K8s.Namespace = "test"
 			c.K8s.PodName = "test"
