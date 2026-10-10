@@ -218,12 +218,12 @@ func (rm *RuleManager) recompileProjectionSpec() {
 }
 
 func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string, done <-chan struct{}) {
-	if utils.IsHostContainer(container) {
-		logger.L().Debug("RuleManager - skipping shared data wait for host container",
+	if utils.IsHostContainer(container) || !utils.HasKubernetesMetadata(container) {
+		logger.L().Debug("RuleManager - skipping Pod data wait for non-Kubernetes container",
 			helpers.String("container ID", container.Runtime.ContainerID))
-		// Skip podToWlid and shim PID setup for host containers as they don't have K8s metadata
+		// Keep host and standalone monitoring without inventing a Pod binding.
 		if err := rm.monitorContainer(container, k8sContainerID, done); err != nil {
-			logger.L().Debug("RuleManager - stop monitor on host container",
+			logger.L().Debug("RuleManager - stop monitor on non-Kubernetes container",
 				helpers.String("reason", err.Error()),
 				helpers.String("container ID", container.Runtime.ContainerID),
 				helpers.String("k8s container id", k8sContainerID))

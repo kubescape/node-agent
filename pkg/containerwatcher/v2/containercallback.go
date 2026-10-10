@@ -112,6 +112,12 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 			return
 		}
 
+		if !utils.HasKubernetesMetadata(notif.Container) {
+			// Standalone runtime containers have no Pod to query. Other callback
+			// receivers still receive their lifecycle events and monitor them.
+			return
+		}
+
 		// Set shared watched container data
 		if cw.cfg.NamespaceFilterFile != "" {
 			// The per-receiver lifecycle queue orders this write before removal,

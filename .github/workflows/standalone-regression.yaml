@@ -21,3 +21,7 @@ jobs:
           go-version: '1.27.1'
       - name: Exercise standalone and partial Kubernetes registration
         run: go test -p 2 -count=1 -timeout=2m -run 'Test.*Standalone' ./pkg/rulemanager ./pkg/containerwatcher/v2
+      - name: Run affected package tests with the race detector
+        run: go test -p 2 -race -count=1 -timeout=10m ./pkg/utils ./pkg/rulemanager ./pkg/containerwatcher/v2
+      - name: Vet affected packages
+        run: go vet -p 2 ./pkg/utils ./pkg/rulemanager ./pkg/containerwatcher/v2

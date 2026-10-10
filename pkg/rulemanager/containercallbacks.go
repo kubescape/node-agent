@@ -55,6 +55,11 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 	}
 
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
+	if !utils.IsHostContainer(notif.Container) && !utils.HasKubernetesMetadata(notif.Container) {
+		// Empty Kubernetes identities must not merge independent runtime
+		// registrations or let one removal stop another container's monitor.
+		k8sContainerID = "standalone:" + notif.Container.Runtime.ContainerID
+	}
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:

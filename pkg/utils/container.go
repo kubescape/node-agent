@@ -17,6 +17,20 @@ func IsHostContainer(container *containercollection.Container) bool {
 	return container.Runtime.ContainerPID == 1 || container.Runtime.ContainerID == armotypes.HostContainerID
 }
 
+// HasKubernetesMetadata reports whether a container has any Kubernetes identity
+// information. Partial enrichment still needs Pod metadata acquisition; only a
+// runtime container with no Kubernetes evidence can bypass that path.
+func HasKubernetesMetadata(container *containercollection.Container) bool {
+	if container == nil {
+		return false
+	}
+	owner := container.K8sOwnerReference()
+	return container.K8s.Namespace != "" || container.K8s.PodName != "" ||
+		container.K8s.ContainerName != "" || container.K8s.PodUID != "" ||
+		len(container.K8s.PodLabels) != 0 || container.SandboxId != "" ||
+		(owner != nil && (owner.Kind != "" || owner.Name != ""))
+}
+
 // IsHost reports whether containerID identifies the virtual host
 // pseudo-container (armotypes.HostContainerID). This is the single choke
 // point for the "is this the host" check wherever only a containerID string
