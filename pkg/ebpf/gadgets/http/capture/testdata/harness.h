@@ -55,6 +55,11 @@ static int bpf_probe_read(void *dst, size_t n, const void *src) {
     memcpy(dst, src, n); return 0;
 }
 static int bpf_probe_read_user(void *dst, size_t n, const void *src) {
+    if (aggregate_buffer && (uintptr_t)dst >= (uintptr_t)aggregate_buffer &&
+        (uintptr_t)dst < (uintptr_t)aggregate_buffer + 32768) {
+        size_t offset = (uintptr_t)dst - (uintptr_t)aggregate_buffer;
+        assert(n <= 16384 && offset < 16384 && n <= 16384 - offset);
+    }
     if (((reserved && (uintptr_t)dst >= (uintptr_t)reserved && (uintptr_t)dst < (uintptr_t)reserved+20000) || (aggregate_buffer && (uintptr_t)dst >= (uintptr_t)aggregate_buffer && (uintptr_t)dst < (uintptr_t)aggregate_buffer+16384)) && ++copy_calls == fail_copy) return -1;
     memcpy(dst, src, n); return 0;
 }
