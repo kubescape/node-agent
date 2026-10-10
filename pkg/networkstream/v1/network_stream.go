@@ -144,7 +144,7 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 		// The container is announced now, so silence no longer means it is gone.
 		delete(ns.unannouncedEntities, containerID)
 		ns.eventsStorageMutex.Unlock()
-		if ns.k8sObjectCache != nil && !utils.IsHostContainer(notif.Container) {
+		if ns.k8sObjectCache != nil && !utils.IsHostContainer(notif.Container) && utils.HasKubernetesPodIdentity(notif.Container) {
 			go ns.enrichWorkloadDetails(notif.Container.Runtime.ContainerID)
 		}
 	case containercollection.EventTypeRemoveContainer:

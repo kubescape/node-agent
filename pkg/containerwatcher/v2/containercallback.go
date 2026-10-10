@@ -112,7 +112,7 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 			return
 		}
 
-		if !utils.HasKubernetesMetadata(notif.Container) {
+		if !utils.HasKubernetesPodIdentity(notif.Container) {
 			// Standalone runtime containers have no Pod to query. Other callback
 			// receivers still receive their lifecycle events and monitor them.
 			return

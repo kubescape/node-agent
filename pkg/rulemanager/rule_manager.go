@@ -218,7 +218,7 @@ func (rm *RuleManager) recompileProjectionSpec() {
 }
 
 func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string, done <-chan struct{}) {
-	if utils.IsHostContainer(container) || !utils.HasKubernetesMetadata(container) {
+	if utils.IsHostContainer(container) || !utils.HasKubernetesPodIdentity(container) {
 		logger.L().Debug("RuleManager - skipping Pod data wait for non-Kubernetes container",
 			helpers.String("container ID", container.Runtime.ContainerID))
 		// Keep host and standalone monitoring without inventing a Pod binding.
