@@ -46,29 +46,30 @@ import (
 )
 
 type RuleManager struct {
-	cfg                  config.Config
-	ruleBindingCache     bindingcache.RuleBindingCache
-	trackedContainers    mapset.Set[string]                  // key is k8sContainerID
-	trackedContainerDone maps.SafeMap[string, chan struct{}] // key is k8sContainerID; closed when that specific registration is removed
-	k8sClient            k8sclient.K8sClientInterface
-	ctx                  context.Context
-	objectCache          objectcache.ObjectCache
-	exporter             exporters.Exporter
-	metrics              metricsmanager.MetricsManager
-	podToWlid            maps.SafeMap[string, string] // key is namespace/podName
-	containerIdToShimPid maps.SafeMap[string, uint32]
-	containerIdToPid     maps.SafeMap[string, uint32]
-	enricher             types.Enricher
-	processManager       processtree.ProcessTreeManager
-	celEvaluator         cel.RuleEvaluator
-	ruleCooldown         *rulecooldown.RuleCooldown
-	adapterFactory       *ruleadapters.EventRuleAdapterFactory
-	ruleFailureCreator   ruleadapters.RuleFailureCreatorInterface
-	rulePolicyValidator  *RulePolicyValidator
-	mntnsRegistry        contextdetection.Registry
-	detectorManager      *detectors.DetectorManager
-	alertLogDedup        *expirable.LRU[string, struct{}]
-	alertLogDedupMu      sync.Mutex
+	cfg                   config.Config
+	ruleBindingCache      bindingcache.RuleBindingCache
+	trackedContainers     mapset.Set[string]                  // key is k8sContainerID
+	trackedContainerDone  maps.SafeMap[string, chan struct{}] // key is k8sContainerID; closed when that specific registration is removed
+	standaloneRuntimeKeys maps.SafeMap[string, string]        // preserves registration identity across later metadata enrichment
+	k8sClient             k8sclient.K8sClientInterface
+	ctx                   context.Context
+	objectCache           objectcache.ObjectCache
+	exporter              exporters.Exporter
+	metrics               metricsmanager.MetricsManager
+	podToWlid             maps.SafeMap[string, string] // key is namespace/podName
+	containerIdToShimPid  maps.SafeMap[string, uint32]
+	containerIdToPid      maps.SafeMap[string, uint32]
+	enricher              types.Enricher
+	processManager        processtree.ProcessTreeManager
+	celEvaluator          cel.RuleEvaluator
+	ruleCooldown          *rulecooldown.RuleCooldown
+	adapterFactory        *ruleadapters.EventRuleAdapterFactory
+	ruleFailureCreator    ruleadapters.RuleFailureCreatorInterface
+	rulePolicyValidator   *RulePolicyValidator
+	mntnsRegistry         contextdetection.Registry
+	detectorManager       *detectors.DetectorManager
+	alertLogDedup         *expirable.LRU[string, struct{}]
+	alertLogDedupMu       sync.Mutex
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
