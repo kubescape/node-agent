@@ -55,6 +55,14 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 	}
 
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
+	if !utils.IsHostContainer(notif.Container) && !utils.HasKubernetesPodIdentity(notif.Container) {
+		// Empty Kubernetes identities must not merge independent runtime
+		// registrations or let one removal stop another container's monitor.
+		k8sContainerID = "standalone:" + notif.Container.Runtime.ContainerID
+	}
+	if original, ok := rm.standaloneRuntimeKeys.Load(notif.Container.Runtime.ContainerID); ok {
+		k8sContainerID = original
+	}
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
@@ -90,6 +98,9 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		}
 
 		rm.trackedContainers.Add(k8sContainerID)
+		if !utils.IsHostContainer(notif.Container) && !utils.HasKubernetesPodIdentity(notif.Container) {
+			rm.standaloneRuntimeKeys.Set(notif.Container.Runtime.ContainerID, k8sContainerID)
+		}
 		done := make(chan struct{})
 		rm.trackedContainerDone.Set(k8sContainerID, done)
 		shim, err := utils.GetProcessStat(int(notif.Container.ContainerPid()))
@@ -110,6 +121,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		}
 
 		rm.trackedContainers.Remove(k8sContainerID)
+		rm.standaloneRuntimeKeys.Delete(notif.Container.Runtime.ContainerID)
 		if done, ok := rm.trackedContainerDone.Load(k8sContainerID); ok {
 			close(done)
 			rm.trackedContainerDone.Delete(k8sContainerID)
