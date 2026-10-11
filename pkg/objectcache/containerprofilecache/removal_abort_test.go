@@ -7,9 +7,11 @@ import (
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -81,4 +83,56 @@ func TestAddContainer_FailureClassification(t *testing.T) {
 		require.Error(t, c.addContainer(eventContainer("live"), ctx))
 		assert.False(t, utils.RemovedDuringAdd(ctx))
 	})
+}
+
+// delayedProfileClient holds the profile GET until released, honoring ctx like a real client.
+type delayedProfileClient struct {
+	*fakeProfileClient
+	once     sync.Once
+	inFlight chan struct{}
+	release  chan struct{}
+}
+
+func (b *delayedProfileClient) GetContainerProfile(ctx context.Context, ns, name string) (*v1beta1.ContainerProfile, error) {
+	b.once.Do(func() { close(b.inFlight) })
+	select {
+	case <-b.release:
+		return b.fakeProfileClient.GetContainerProfile(ctx, ns, name)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Removal after shared data exists must not abort the profile GET:
+// terminal events resolve the profile during the removal grace period.
+func TestContainerCallback_RemovalKeepsProfileFetch(t *testing.T) {
+	client := &delayedProfileClient{
+		fakeProfileClient: &fakeProfileClient{cp: &v1beta1.ContainerProfile{
+			Name:      "cp-init",
+			Namespace: "default",
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		}},
+		inFlight: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	c, k8s := newTestCache(t, client)
+	primeSharedData(t, k8s, "init", "wlid://cluster-a/namespace-default/deployment-nginx")
+	container := eventContainer("init")
+
+	c.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeAddContainer, Container: container})
+	select {
+	case <-client.inFlight:
+	case <-time.After(2 * time.Second):
+		t.Fatal("registration never issued the profile GET")
+	}
+
+	c.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeRemoveContainer, Container: container})
+	close(client.release)
+
+	require.Eventually(t, func() bool {
+		return c.GetProjectedContainerProfile("init") != nil
+	}, 2*time.Second, 5*time.Millisecond, "profile must be available during the removal grace period")
 }

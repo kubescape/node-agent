@@ -292,6 +292,9 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 func (c *ContainerProfileCacheImpl) addContainerWithTimeout(parent context.Context, container *containercollection.Container) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
 	defer cancel()
+	// Removal does not abort the profile fetch: wait for it, up to the deadline.
+	deadline, stop := withoutRemoval(ctx)
+	defer stop()
 
 	done := make(chan error, 1)
 	go func() {
@@ -303,7 +306,7 @@ func (c *ContainerProfileCacheImpl) addContainerWithTimeout(parent context.Conte
 		if err != nil {
 			utils.AddFailureLogger(ctx)("failed to add container to the container-profile cache", helpers.Error(err))
 		}
-	case <-ctx.Done():
+	case <-deadline.Done():
 		utils.AddFailureLogger(ctx)("timeout while adding container to the container-profile cache",
 			helpers.String("containerID", container.Runtime.ContainerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
@@ -329,6 +332,11 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 			return err
 		}
 
+		// Removal cancels only the wait above. The profile must still load:
+		// terminal events need it during the removal grace period.
+		fetchCtx, cancel := withoutRemoval(ctx)
+		defer cancel()
+
 		// Names we need:
 		//   cpName       = per-container stable slug, for the consolidated CP.
 		//                  Kept for forward-compat; current storage does not
@@ -353,7 +361,7 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 			return err
 		}
 
-		if populated := c.tryPopulateEntry(ctx, containerID, container, sharedData, cpName, workloadName); !populated {
+		if populated := c.tryPopulateEntry(fetchCtx, containerID, container, sharedData, cpName, workloadName); !populated {
 			// No profile data available yet (no consolidated CP in storage,
 			// and no authored CP resolved). Record a pending entry;
 			// the reconciler will retry each tick until data shows up or the
@@ -370,6 +378,15 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 		}
 		return nil
 	})
+}
+
+// withoutRemoval returns a context with ctx's deadline but none of its
+// cancellation, so a removal of the container no longer aborts it.
+func withoutRemoval(ctx context.Context) (context.Context, context.CancelFunc) {
+	if d, ok := ctx.Deadline(); ok {
+		return context.WithDeadline(context.WithoutCancel(ctx), d)
+	}
+	return context.WithCancel(context.WithoutCancel(ctx))
 }
 
 // tryPopulateEntry issues the CP GET (plus the authored CP when the pod
