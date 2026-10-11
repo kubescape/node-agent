@@ -124,3 +124,28 @@ func TestContainerCallback_StandaloneRegistrationsAreIndependent(t *testing.T) {
 	}
 	assert.Zero(t, rm.trackedContainers.Cardinality())
 }
+
+func TestContainerCallback_StandaloneRemovalRetainsRegistrationIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	rm := newTestRuleManager(ctx)
+	rm.cfg.NamespaceName = "kubescape"
+	rm.objectCache = &sharedDataProbe{}
+	rm.mntnsRegistry = contextdetection.NewMntnsRegistry()
+	c := &containercollection.Container{Mntns: 103}
+	c.Runtime.ContainerID = "runtime-late-enrichment"
+	c.Runtime.ContainerPID = uint32(os.Getpid())
+	rm.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeAddContainer, Container: c})
+	key := "standalone:" + c.Runtime.ContainerID
+	done, ok := rm.trackedContainerDone.Load(key)
+	require.True(t, ok)
+	// Runtime metadata may be enriched after the original registration.
+	c.K8s.Namespace, c.K8s.PodName, c.K8s.ContainerName = "test", "test-pod", "app"
+	rm.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeRemoveContainer, Container: c})
+	select {
+	case <-done:
+	default:
+		t.Fatal("late enrichment stranded the original runtime registration")
+	}
+	assert.Zero(t, rm.trackedContainers.Cardinality())
+}
