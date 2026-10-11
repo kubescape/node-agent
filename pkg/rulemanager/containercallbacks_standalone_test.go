@@ -140,12 +140,16 @@ func TestContainerCallback_StandaloneRemovalRetainsRegistrationIdentity(t *testi
 	done, ok := rm.trackedContainerDone.Load(key)
 	require.True(t, ok)
 	// Runtime metadata may be enriched after the original registration.
-	c.K8s.Namespace, c.K8s.PodName, c.K8s.ContainerName = "test", "test-pod", "app"
-	rm.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeRemoveContainer, Container: c})
+	removed := &containercollection.Container{Mntns: c.Mntns}
+	removed.Runtime = c.Runtime
+	removed.K8s.Namespace, removed.K8s.PodName, removed.K8s.ContainerName = "test", "test-pod", "app"
+	rm.ContainerCallback(containercollection.PubSubEvent{Type: containercollection.EventTypeRemoveContainer, Container: removed})
 	select {
 	case <-done:
 	default:
 		t.Fatal("late enrichment stranded the original runtime registration")
 	}
 	assert.Zero(t, rm.trackedContainers.Cardinality())
+	_, retained := rm.standaloneRuntimeKeys.Load(c.Runtime.ContainerID)
+	assert.False(t, retained, "removed runtime key must not leak")
 }
