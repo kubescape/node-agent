@@ -398,7 +398,7 @@ func (cpm *ContainerProfileManager) deleteContainerWithReason(container *contain
 	}
 
 	// Remove the container entry from the map
-	cpm.removeContainerEntry(containerID)
+	cpm.removeContainerEntryIfMatch(containerID, entry)
 
 	entry.mu.Lock()
 	if entry.data != nil {
