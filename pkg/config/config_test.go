@@ -970,3 +970,41 @@ func TestIgnoreContainer_SelfSBOB_TruthTable(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_DNSRuleForwardingDefaultsOff(t *testing.T) {
+	viper.Reset()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/config.json", []byte(`{}`), 0644))
+
+	config, err := LoadConfigOptional(dir, false)
+	require.NoError(t, err)
+
+	assert.False(t, config.DNSRuleForwarding.Enabled)
+	assert.Empty(t, config.DNSRuleForwarding.ExcludedSuffixes)
+}
+
+func TestLoadConfig_DNSRuleForwardingNormalizesSuffixes(t *testing.T) {
+	viper.Reset()
+	dir := t.TempDir()
+	cfg := `{"dnsRuleForwarding": {"enabled": true, "excludedSuffixes": ["EC2.internal", ".corp.example.com.", "", "...", "ec2.internal."]}}`
+	require.NoError(t, os.WriteFile(dir+"/config.json", []byte(cfg), 0644))
+
+	config, err := LoadConfigOptional(dir, false)
+	require.NoError(t, err)
+
+	assert.True(t, config.DNSRuleForwarding.Enabled)
+	assert.Equal(t, []string{".ec2.internal.", ".corp.example.com."}, config.DNSRuleForwarding.ExcludedSuffixes,
+		"suffixes are lowercased, dot-wrapped, deduplicated, and empty entries dropped")
+}
+
+func TestNormalizeDNSSuffix(t *testing.T) {
+	for in, want := range map[string]string{
+		"ec2.internal":      ".ec2.internal.",
+		".EC2.Internal.":    ".ec2.internal.",
+		"  cluster.local  ": ".cluster.local.",
+		"":                  "",
+		".":                 "",
+		"...":               "",
+	} {
+		assert.Equal(t, want, NormalizeDNSSuffix(in), "input %q", in)
+	}
+}

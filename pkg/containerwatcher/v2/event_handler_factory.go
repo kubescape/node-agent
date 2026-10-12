@@ -55,11 +55,20 @@ const (
 	dedupTTLHardlink     uint16 = 156 // 10s
 	dedupTTLPtrace       uint16 = 156 // 10s
 	dedupTTLSyscall      uint16 = 78  // 5s
+	// dedupTTLDNS applies to rule-only DNS events (forwarded queries and error
+	// responses) only. 5s covers resolver retransmits (musl ~1s, glibc 5s
+	// timeout plus retry) and parallel A/AAAA retries; exfil chunks carry
+	// unique names, so nothing of interest collapses.
+	dedupTTLDNS uint16 = 78 // 5s
 )
 
 // EventHandlerFactory manages the mapping of event types to their managers
 type EventHandlerFactory struct {
-	handlers                 map[utils.EventType][]Manager
+	handlers map[utils.EventType][]Manager
+	// ruleOnlyHandlers is the handler list for events marked RuleOnlyEvent
+	// (forwarded DNS queries). An event type with no entry here delivers a
+	// rule-only event to nobody.
+	ruleOnlyHandlers         map[utils.EventType][]Manager
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	thirdPartyEnricher       containerwatcher.TaskBasedEnricher
 	cfg                      config.Config
@@ -98,6 +107,7 @@ func NewEventHandlerFactory(
 
 	factory := &EventHandlerFactory{
 		handlers:                 make(map[utils.EventType][]Manager),
+		ruleOnlyHandlers:         make(map[utils.EventType][]Manager),
 		thirdPartyEventReceivers: thirdPartyEventReceivers,
 		thirdPartyEnricher:       thirdPartyEnricher,
 		cfg:                      cfg,
@@ -253,9 +263,16 @@ func computeEventDedupKey(enrichedEvent *events.EnrichedEvent) (key uint64, ttl 
 			dst := e.GetDstEndpoint()
 			return dedupcache.ComputeNetworkKey(mntns, pid, dst.Addr, e.GetDstPort(), e.GetProto()), dedupTTLNetwork, true
 		}
-	// DNS events are not deduplicated: the system resolver cache already
-	// limits DNS traffic at the network layer, so events reaching the eBPF
-	// tracer are almost always unique.
+	// Answered DNS responses are not deduplicated: the system resolver cache
+	// already limits DNS traffic at the network layer, so events reaching the
+	// eBPF tracer are almost always unique, and marking one Duplicate would
+	// hide it from the existing "dns" rules. Forwarded queries and error
+	// responses (rule-only) are deduplicated, since resolver retransmits and
+	// parallel A/AAAA retries repeat them within seconds.
+	case utils.DnsEventType:
+		if e, ok := event.(utils.DNSEvent); ok && utils.IsRuleOnlyEvent(event) {
+			return dedupcache.ComputeDNSKey(mntns, e.GetPID(), e.GetDNSName(), string(e.GetQr()), e.GetQtype()), dedupTTLDNS, true
+		}
 	case utils.CapabilitiesEventType:
 		if e, ok := event.(utils.CapabilitiesEvent); ok {
 			pid := uint32(0)
@@ -370,9 +387,22 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		}
 	}
 
-	// Get handlers for this event type
+	// Get handlers for this event type. A rule-only event (forwarded DNS
+	// query) uses the restricted list and never reaches third-party receivers;
+	// a duplicate one has no consumer at all, since the rule manager skips
+	// duplicates itself.
 	eventType := enrichedEvent.Event.GetEventType()
-	handlers, exists := ehf.handlers[eventType]
+	ruleOnly := utils.IsRuleOnlyEvent(enrichedEvent.Event)
+	var handlers []Manager
+	var exists bool
+	if ruleOnly {
+		if enrichedEvent.Duplicate {
+			return
+		}
+		handlers, exists = ehf.ruleOnlyHandlers[eventType]
+	} else {
+		handlers, exists = ehf.handlers[eventType]
+	}
 	if !exists {
 		return
 	}
@@ -392,7 +422,9 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	}
 
 	// Report to third-party event receivers
-	ehf.reportEventToThirdPartyTracers(enrichedEvent)
+	if !ruleOnly {
+		ehf.reportEventToThirdPartyTracers(enrichedEvent)
+	}
 }
 
 // registerHandlers registers all handlers for different event types
@@ -424,6 +456,10 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// DNS events
 	ehf.handlers[utils.DnsEventType] = []Manager{dnsManager, ruleManager, networkStreamClient, metrics}
+	// Forwarded DNS queries and error responses: rule manager only. The DNS
+	// manager would issue its own lookup for a name without addresses, and the
+	// network stream would record a query as an outbound connection.
+	ehf.ruleOnlyHandlers[utils.DnsEventType] = []Manager{ruleManager}
 
 	// RandomX events
 	ehf.handlers[utils.RandomXEventType] = []Manager{ruleManager, metrics}

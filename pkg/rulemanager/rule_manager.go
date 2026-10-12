@@ -303,7 +303,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
-	if !isSupportedEventType(rules, enrichedEvent) {
+	// Rule expressions are selected by the rule event type, which differs from
+	// the tracer event type only for forwarded DNS queries ("dnsQuery").
+	eventType := utils.RuleEventType(enrichedEvent.Event)
+
+	if !isSupportedEventType(rules, eventType) {
 		return
 	}
 
@@ -314,8 +318,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	if !rm.isMonitoringEnabledForContext(enrichedEvent.SourceContext) {
 		return
 	}
-
-	eventType := enrichedEvent.Event.GetEventType()
 
 	var eventFields prefilter.EventFields
 	var evalContext map[string]any
@@ -608,8 +610,7 @@ func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent
 	return message, uniqueID, err
 }
 
-func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEvent) bool {
-	eventType := enrichedEvent.Event.GetEventType()
+func isSupportedEventType(rules []typesv1.Rule, eventType utils.EventType) bool {
 	for _, rule := range rules {
 		for _, expression := range rule.Expressions.RuleExpression {
 			if string(expression.EventType) == string(eventType) {

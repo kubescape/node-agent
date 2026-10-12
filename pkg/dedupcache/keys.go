@@ -56,12 +56,17 @@ func ComputeNetworkKey(mntns uint64, pid uint32, dstAddr string, dstPort uint16,
 	return h.Sum64()
 }
 
-// ComputeDNSKey computes a dedup key for DNS events.
-// No qtype getter exists in the interface, so key is mntns + dnsName.
-func ComputeDNSKey(mntns uint64, dnsName string) uint64 {
+// ComputeDNSKey computes a dedup key for DNS events forwarded to rule
+// evaluation (queries and error responses). qr and qtype keep a query and its
+// response, and an A and an AAAA lookup of the same name, from colliding; pid
+// keeps alert attribution per process, as the open and network keys do.
+func ComputeDNSKey(mntns uint64, pid uint32, dnsName string, qr string, qtype string) uint64 {
 	h := xxhash.New()
 	writeUint64(h, mntns)
+	writeUint32(h, pid)
 	writeString(h, dnsName)
+	writeString(h, qr)
+	writeString(h, qtype)
 	return h.Sum64()
 }
 

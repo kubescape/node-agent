@@ -213,7 +213,10 @@ func (c *CEL) evaluateProgramWithContext(expression string, evalContext map[stri
 }
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
-	eventType := event.Event.GetEventType()
+	// Select expressions by the rule event type ("dnsQuery" for forwarded DNS
+	// queries), matching what RuleManager.ReportEnrichedEvent does. The eval
+	// context still carries the tracer event type.
+	eventType := utils.RuleEventType(event.Event)
 	evalContext := c.CreateEvalContext(event)
 	return c.EvaluateRuleWithContext(evalContext, eventType, expressions)
 }

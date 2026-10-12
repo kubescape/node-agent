@@ -58,6 +58,32 @@ type AlertDeduplicationConfig struct {
 	Bypass bool `mapstructure:"bypass"`
 }
 
+// DNSRuleForwardingConfig controls whether DNS queries and error responses
+// (NXDOMAIN, SERVFAIL, REFUSED), which the DNS tracer otherwise drops, are
+// forwarded to rule evaluation. Forwarded events reach the rule manager only
+// and match rule expressions written for eventType "dnsQuery"; existing "dns"
+// expressions keep seeing answered responses only. Off by default.
+// See docs/features/dns-query-rule-forwarding.md.
+type DNSRuleForwardingConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// ExcludedSuffixes lists name suffixes that are never forwarded, in
+	// addition to the built-in cluster-local and reverse-lookup zones. Each
+	// entry is normalized to lowercase with a leading and trailing dot.
+	ExcludedSuffixes []string `mapstructure:"excludedSuffixes"`
+}
+
+// NormalizeDNSSuffix lowercases s and ensures it carries a leading and a
+// trailing dot, so ".Example.COM" and "example.com." both become ".example.com.".
+// An empty or dots-only string returns "".
+func NormalizeDNSSuffix(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.Trim(s, ".")
+	if s == "" {
+		return ""
+	}
+	return "." + s + "."
+}
+
 type Config struct {
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
@@ -105,6 +131,7 @@ type Config struct {
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
 	AlertDeduplication             AlertDeduplicationConfig             `mapstructure:"alertDeduplication"`
+	DNSRuleForwarding              DNSRuleForwardingConfig              `mapstructure:"dnsRuleForwarding"`
 	EventDedup                     EventDedupConfig                     `mapstructure:"eventDedup"`
 	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
 	ExcludeLabels                  map[string][]string                  `mapstructure:"excludeLabels"`
@@ -237,6 +264,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("eventDedup::enabled", true)
 	viper.SetDefault("eventDedup::slotsExponent", 18)
 	viper.SetDefault("alertDeduplication::bypass", false)
+	viper.SetDefault("dnsRuleForwarding::enabled", false)
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
@@ -324,6 +352,18 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 		config.EventDedup.Enabled = false
 		config.RuleCoolDown.Disabled = true
 		config.FIM.DedupConfig.DedupEnabled = false
+	}
+
+	// Normalize user-supplied DNS suffix exclusions once, so the tracer can do
+	// plain suffix comparisons. Empty entries are dropped.
+	if len(config.DNSRuleForwarding.ExcludedSuffixes) > 0 {
+		normalized := make([]string, 0, len(config.DNSRuleForwarding.ExcludedSuffixes))
+		for _, s := range config.DNSRuleForwarding.ExcludedSuffixes {
+			if n := NormalizeDNSSuffix(s); n != "" && !slices.Contains(normalized, n) {
+				normalized = append(normalized, n)
+			}
+		}
+		config.DNSRuleForwarding.ExcludedSuffixes = normalized
 	}
 
 	// Validate eventDedup slotsExponent range
