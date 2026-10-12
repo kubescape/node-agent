@@ -351,7 +351,7 @@ func TestContainerCallback_ReplayDuringFailingRegistrationRetries(t *testing.T) 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		cpm.addContainerWithTimeout(newHostPseudoContainer())
+		cpm.addContainerWithTimeout(context.Background(), newHostPseudoContainer())
 	}()
 
 	// Give the replay goroutine time to observe the existing entry and start
