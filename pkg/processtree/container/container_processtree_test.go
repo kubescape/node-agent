@@ -1,6 +1,7 @@
 package containerprocesstree
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Helper function to create a SafeMap from regular map data
@@ -26,6 +28,59 @@ func TestNewContainerProcessTree(t *testing.T) {
 
 	// Test that it implements the interface
 	var _ ContainerProcessTree = cpt
+}
+
+func TestContainerProcessTreeImpl_GetPidBranch_Host(t *testing.T) {
+	for _, targetPID := range []uint32{1, 100, 101} {
+		t.Run(fmt.Sprint(targetPID), func(t *testing.T) {
+			cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+			cpt.containerIdToShimPid[armotypes.HostContainerID] = 0
+			fullTree := createSafeMapFromData(map[uint32]*armotypes.Process{
+				1:   {PID: 1, Comm: "systemd", Path: "/usr/lib/systemd/systemd"},
+				100: {PID: 100, PPID: 1, Comm: "sh", Path: "/usr/bin/sh"},
+				101: {PID: 101, PPID: 100, Comm: "ps", Path: "/usr/bin/ps", Cmdline: "ps aux"},
+				102: {PID: 102, PPID: 100, Comm: "sibling"},
+			})
+
+			branch, err := cpt.GetPidBranch(armotypes.HostContainerID, targetPID, fullTree)
+			require.NoError(t, err)
+			require.Equal(t, uint32(1), branch.PID)
+			current := &branch
+			for current.PID != targetPID {
+				require.Len(t, current.ChildrenMap, 1, "only target ancestry belongs in the branch")
+				for _, child := range current.ChildrenMap {
+					current = child
+				}
+			}
+			require.Empty(t, current.ChildrenMap)
+			cached, ok := fullTree.Load(targetPID)
+			require.True(t, ok)
+			assert.Equal(t, cached.Path, current.Path)
+			assert.Equal(t, cached.Cmdline, current.Cmdline)
+			current.Path = "changed-copy"
+			assert.NotEqual(t, current.Path, cached.Path, "branch must not mutate cached nodes")
+		})
+	}
+}
+
+func TestContainerProcessTreeImpl_GetPidBranch_HostMissingAncestry(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		nodes map[uint32]*armotypes.Process
+	}{
+		{"missing init", map[uint32]*armotypes.Process{100: {PID: 100, PPID: 1}}},
+		{"missing target", map[uint32]*armotypes.Process{1: {PID: 1}}},
+		{"missing parent", map[uint32]*armotypes.Process{1: {PID: 1}, 100: {PID: 100, PPID: 99}}},
+		{"outside init subtree", map[uint32]*armotypes.Process{1: {PID: 1}, 2: {PID: 2}, 100: {PID: 100, PPID: 2}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+			cpt.containerIdToShimPid[armotypes.HostContainerID] = 0
+			branch, err := cpt.GetPidBranch(armotypes.HostContainerID, 100, createSafeMapFromData(tc.nodes))
+			require.Error(t, err, "missing ancestry must remain eligible for caller fallback")
+			assert.Zero(t, branch.PID)
+		})
+	}
 }
 
 func TestContainerProcessTreeImpl_ContainerCallback_AddContainer(t *testing.T) {
