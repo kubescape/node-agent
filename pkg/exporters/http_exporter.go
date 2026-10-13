@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -206,15 +205,15 @@ func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
 	defer cancel()
 
-	payload := e.createAlertPayload([]armotypes.RuntimeAlert{e.createRuleAlert(failedRule)}, failedRule.GetRuntimeProcessDetails(), failedRule.GetCloudServices())
-	body, err := json.Marshal(payload)
+	body, err := e.marshalAlertPayload([]armotypes.RuntimeAlert{e.createRuleAlert(failedRule)}, failedRule.GetRuntimeProcessDetails(), failedRule.GetCloudServices())
 	if err == nil {
-		err = e.sendHTTPBody(ctx, body)
-		var rejection *httpRejection
-		if errors.As(err, &rejection) && rejection.retryable() {
-			e.enqueueRuleAlertRetry(body, rejection)
+		if e.ruleRetries != nil {
+			err = e.ruleRetries.send(ctx, body)
+		} else {
+			err = e.sendHTTPBody(ctx, body)
 		}
 	}
+
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("HTTPExporter.SendRuleAlert - failed to send rule alert", helpers.Error(err))
 	}
@@ -259,13 +258,6 @@ func (e *HTTPExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	if err := e.sendFimAlertsWithContext(ctx, fimEvents); err != nil {
 		logger.L().Ctx(ctx).Warning("HTTPExporter.SendFimAlerts - failed to send FIM alerts", helpers.Error(err))
 	}
-}
-
-// Internal methods with context support
-func (e *HTTPExporter) sendRuleAlertWithContext(ctx context.Context, failedRule types.RuleFailure) error {
-	// Note: rate limit check is now handled in SendRuleAlert() before calling this function
-	alert := e.createRuleAlert(failedRule)
-	return e.sendAlert(ctx, alert, failedRule.GetRuntimeProcessDetails(), failedRule.GetCloudServices())
 }
 
 func (e *HTTPExporter) sendMalwareAlertWithContext(ctx context.Context, result malwaremanager.MalwareResult) error {
@@ -386,8 +378,23 @@ func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) a
 }
 
 func (e *HTTPExporter) sendAlert(ctx context.Context, alert armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error {
-	payload := e.createAlertPayload([]armotypes.RuntimeAlert{alert}, processTree, cloudServices)
-	return e.sendHTTPRequest(ctx, payload)
+	body, err := e.marshalAlertPayload([]armotypes.RuntimeAlert{alert}, processTree, cloudServices)
+	if err != nil {
+		return err
+	}
+	return e.sendHTTPBody(ctx, body)
+}
+
+func marshalHTTPPayload(payload any) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal payload: %w", err)
+	}
+	return body, nil
+}
+
+func (e *HTTPExporter) marshalAlertPayload(alerts []armotypes.RuntimeAlert, tree armotypes.ProcessTree, services []string) ([]byte, error) {
+	return marshalHTTPPayload(e.createAlertPayload(alerts, tree, services))
 }
 
 func (e *HTTPExporter) createAlertPayload(alertList []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) HTTPAlertsList {
@@ -425,9 +432,9 @@ func (e *HTTPExporter) getCloudMetadata(cloudServices []string) armotypes.CloudM
 }
 
 func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload any) error {
-	body, err := json.Marshal(payload)
+	body, err := marshalHTTPPayload(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
+		return err
 	}
 
 	return e.sendHTTPBody(ctx, body)
@@ -484,6 +491,9 @@ func (e *HTTPExporter) sendHTTPBody(ctx context.Context, body []byte) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10)); err != nil {
+			logger.L().Debug("HTTPExporter - failed to drain rejection body", helpers.Error(err))
+		}
 		return &httpRejection{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
 	}
 

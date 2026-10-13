@@ -39,7 +39,7 @@ func retryTestResponse(status int, after string) *http.Response {
 }
 
 func TestRuleAlertRetryReconnect(t *testing.T) {
-	for _, status := range []int{429, 500, 503} {
+	for _, status := range []int{429, 503} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				start := time.Now()
@@ -48,7 +48,10 @@ func TestRuleAlertRetryReconnect(t *testing.T) {
 				successes := 0
 				e := retryTestExporter(t, func(r *http.Request) (*http.Response, error) {
 					body, err := io.ReadAll(r.Body)
-					require.NoError(t, err)
+					if err != nil {
+						t.Error(err)
+						return nil, err
+					}
 					mu.Lock()
 					defer mu.Unlock()
 					bodies = append(bodies, string(body))
@@ -103,13 +106,13 @@ func TestRuleAlertRetryBackoffAndExpiry(t *testing.T) {
 		require.Equal(t, 2*time.Second, attempts[2].Sub(attempts[1]))
 		require.Equal(t, ruleRetryMaxDelay, attempts[6].Sub(attempts[5]))
 		require.Less(t, attempts[len(attempts)-1].Sub(attempts[0]), ruleRetryRetention)
-		require.Empty(t, e.ruleRetries.items)
+		require.Zero(t, e.ruleRetries.items.Len())
 		require.Zero(t, e.ruleRetries.bytes)
 	})
 }
 
 func TestRuleAlertRetryPermanentAndAmbiguousFailures(t *testing.T) {
-	for _, status := range []int{200, 400, 401, 404, 408} {
+	for _, status := range []int{200, 400, 401, 404, 408, 500, 502, 504} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				var calls atomic.Int32
@@ -139,27 +142,27 @@ func TestRuleAlertRetryQueueBoundsAndClose(t *testing.T) {
 			e.SendRuleAlert(retryTestFailure())
 		}
 		synctest.Wait()
-		require.Len(t, e.ruleRetries.items, ruleRetryQueueSize)
+		require.Equal(t, ruleRetryQueueSize, e.ruleRetries.items.Len())
 		require.NoError(t, e.Close())
 		require.NoError(t, e.Close())
 		time.Sleep(61 * time.Second)
 		synctest.Wait()
-		require.EqualValues(t, ruleRetryQueueSize+1, calls.Load())
-		require.Empty(t, e.ruleRetries.items)
+		require.EqualValues(t, 1, calls.Load(), "new alerts must queue without hitting cooling endpoint")
+		require.Zero(t, e.ruleRetries.items.Len())
 		e.enqueueRuleAlertRetry([]byte("closed"), &httpRejection{status: 429})
-		require.Empty(t, e.ruleRetries.items)
+		require.Zero(t, e.ruleRetries.items.Len())
 	})
 	synctest.Test(t, func(t *testing.T) {
 		e := retryTestExporter(t, func(*http.Request) (*http.Response, error) { return retryTestResponse(429, "60"), nil })
 		e.enqueueRuleAlertRetry(make([]byte, ruleRetryQueueBytes), &httpRejection{status: 429})
 		e.enqueueRuleAlertRetry([]byte("overflow"), &httpRejection{status: 429})
 		synctest.Wait()
-		require.Len(t, e.ruleRetries.items, 1)
+		require.Equal(t, 1, e.ruleRetries.items.Len())
 		require.Equal(t, ruleRetryQueueBytes, e.ruleRetries.bytes)
 	})
 }
 
-func TestRuleAlertRetryIndependentSchedules(t *testing.T) {
+func TestRuleAlertRetrySharedSchedule(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int32
 		e := retryTestExporter(t, func(*http.Request) (*http.Response, error) { calls.Add(1); return retryTestResponse(200, ""), nil })
@@ -168,7 +171,7 @@ func TestRuleAlertRetryIndependentSchedules(t *testing.T) {
 		synctest.Wait()
 		time.Sleep(2 * time.Second)
 		synctest.Wait()
-		require.EqualValues(t, 1, calls.Load())
+		require.EqualValues(t, 0, calls.Load(), "shared endpoint cooldown gates every alert")
 		time.Sleep(60 * time.Second)
 		synctest.Wait()
 		require.EqualValues(t, 2, calls.Load())
@@ -184,7 +187,8 @@ func TestHTTPRejectionRetryAfter(t *testing.T) {
 		{"60", time.Minute}, {now.Add(time.Minute).Format(http.TimeFormat), time.Minute},
 		{"", time.Second}, {"bogus", time.Second}, {"-1", time.Second}, {"0", time.Second},
 		{now.Add(-time.Minute).Format(http.TimeFormat), time.Second},
-		{"9223372036854775807", ruleRetryRetention + time.Second},
+		{"600", 10 * time.Minute},
+		{"9223372036854775807", time.Duration(1<<63 - 1)},
 	} {
 		require.Equal(t, tt.want, (&httpRejection{retryAfter: tt.header}).delay(time.Second, now), tt.header)
 	}
@@ -203,7 +207,7 @@ func TestRuleAlertRetryCloseCancelsRequest(t *testing.T) {
 		<-started
 		require.NoError(t, e.Close())
 		synctest.Wait()
-		require.Empty(t, e.ruleRetries.items)
+		require.Zero(t, e.ruleRetries.items.Len())
 	})
 }
 
@@ -215,7 +219,7 @@ func TestRuleAlertRetryAfterBeyondRetention(t *testing.T) {
 		time.Sleep(ruleRetryRetention + time.Second)
 		synctest.Wait()
 		require.EqualValues(t, 1, calls.Load(), "must expire rather than retry before Retry-After")
-		require.Empty(t, e.ruleRetries.items)
+		require.Zero(t, e.ruleRetries.items.Len())
 	})
 }
 
@@ -226,17 +230,15 @@ func TestRuleAlertRetryReleasesPayload(t *testing.T) {
 		synctest.Wait()
 		q := e.ruleRetries
 		q.mu.Lock()
-		backing := q.items[:cap(q.items)]
+		retired := q.items.Front()
 		q.mu.Unlock()
 		time.Sleep(2 * time.Second)
 		synctest.Wait()
 		q.mu.Lock()
 		defer q.mu.Unlock()
-		require.Empty(t, q.items)
+		require.Zero(t, q.items.Len())
 		require.Zero(t, q.bytes)
-		for _, item := range backing {
-			require.Nil(t, item, "retired payload must be unreachable from queue")
-		}
+		require.Nil(t, retired.Value, "retired queue element must release its payload")
 	})
 }
 
@@ -271,4 +273,70 @@ func TestRuleAlertRetryHTTP(t *testing.T) {
 	}
 	require.NoError(t, e.Close())
 	require.EqualValues(t, 2, calls.Load())
+}
+
+func TestRuleAlertRetryEndpointCooldownAndPacing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var mu sync.Mutex
+		var attempts []time.Time
+		e := retryTestExporter(t, func(*http.Request) (*http.Response, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			attempts = append(attempts, time.Now())
+			if len(attempts) == 1 {
+				return retryTestResponse(429, "60"), nil
+			}
+			return retryTestResponse(200, ""), nil
+		})
+		e.config.MaxAlertsPerMinute = 100
+		e.SendRuleAlert(retryTestFailure())
+		for i := 0; i < 5; i++ {
+			e.SendRuleAlert(retryTestFailure())
+		}
+		synctest.Wait()
+		time.Sleep(59 * time.Second)
+		synctest.Wait()
+		mu.Lock()
+		count := len(attempts)
+		mu.Unlock()
+		require.Equal(t, 1, count, "new live alerts must respect endpoint cooldown")
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, attempts, 7)
+		for i := 2; i < len(attempts); i++ {
+			require.GreaterOrEqual(t, attempts[i].Sub(attempts[i-1]), time.Minute/100, "drain must be paced")
+		}
+	})
+}
+
+func TestRuleAlertRetryDrainStopsOnRejection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		e := retryTestExporter(t, func(*http.Request) (*http.Response, error) {
+			n := calls.Add(1)
+			if n == 1 {
+				return retryTestResponse(429, "1"), nil
+			}
+			if n == 3 {
+				return retryTestResponse(429, "60"), nil
+			}
+			return retryTestResponse(200, ""), nil
+		})
+		for i := 0; i < 5; i++ {
+			e.SendRuleAlert(retryTestFailure())
+		}
+		synctest.Wait()
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 3, calls.Load())
+		e.SendRuleAlert(retryTestFailure())
+		time.Sleep(58 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 3, calls.Load(), "429 during drain must pause queued and live alerts")
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 8, calls.Load())
+	})
 }

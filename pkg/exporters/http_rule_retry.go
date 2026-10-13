@@ -1,11 +1,11 @@
 package exporters
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -30,15 +30,15 @@ func (r *httpRejection) Error() string {
 	return fmt.Sprintf("received non-2xx status code: %d", r.status)
 }
 func (r *httpRejection) retryable() bool {
-	return r.status == http.StatusTooManyRequests || r.status >= 500 && r.status <= 599
+	return r.status == http.StatusTooManyRequests || r.status == http.StatusServiceUnavailable
 }
 
 // Retry-After is a lower bound, including when it exceeds our backoff cap.
 func (r *httpRejection) delay(backoff time.Duration, now time.Time) time.Duration {
 	if seconds, err := strconv.ParseUint(r.retryAfter, 10, 64); err == nil {
 		// Avoid overflowing time.Duration on an untrusted header.
-		if seconds > uint64(ruleRetryRetention/time.Second) {
-			return ruleRetryRetention + time.Second
+		if seconds > uint64(time.Duration(1<<63-1)/time.Second) {
+			return time.Duration(1<<63 - 1)
 		}
 		if delay := time.Duration(seconds) * time.Second; delay > backoff {
 			return delay
@@ -50,27 +50,28 @@ func (r *httpRejection) delay(backoff time.Duration, now time.Time) time.Duratio
 }
 
 type ruleAlertRetry struct {
-	body        []byte
-	nextAttempt time.Time
-	expires     time.Time
-	backoff     time.Duration
+	body    []byte
+	expires time.Time
+	backoff time.Duration
 }
 
-// The scheduler keeps one immutable serialized payload per alert. A single
-// worker selects the next due alert so one Retry-After cannot block other alerts.
-// Limits include the in-flight retry. Pending alerts are discarded on shutdown.
-// Only explicit HTTP rejections are retried: transport errors have ambiguous
-// delivery status. Alert uniqueID and timestamp are preserved on every attempt.
+// A FIFO queue shares an endpoint cooldown across pending and new rule alerts.
+// The send mutex serializes cooldown checks with requests; the queue mutex never
+// spans network I/O. Limits include the in-flight head. Payload bytes and alert
+// identity are unchanged across attempts; ambiguous failures are not retried.
 type ruleAlertRetryQueue struct {
-	mu       sync.Mutex
-	items    []*ruleAlertRetry
-	bytes    int
-	running  bool
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wake     chan struct{}
-	wg       sync.WaitGroup
-	exporter *HTTPExporter
+	mu        sync.Mutex
+	sendMu    sync.Mutex
+	items     list.List
+	bytes     int
+	notBefore time.Time
+	nextSend  time.Time
+	running   bool
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wake      chan struct{}
+	wg        sync.WaitGroup
+	exporter  *HTTPExporter
 }
 
 func newRuleAlertRetryQueue(e *HTTPExporter) *ruleAlertRetryQueue {
@@ -78,20 +79,65 @@ func newRuleAlertRetryQueue(e *HTTPExporter) *ruleAlertRetryQueue {
 	return &ruleAlertRetryQueue{ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), exporter: e}
 }
 
-func (e *HTTPExporter) enqueueRuleAlertRetry(body []byte, rejection *httpRejection) {
-	if e.ruleRetries == nil {
-		return
+// send preserves immediate healthy delivery. During cooldown, backlog, or an
+// in-flight send, admission is nonblocking and the worker delivers in FIFO order.
+func (q *ruleAlertRetryQueue) send(ctx context.Context, body []byte) error {
+	if !q.sendMu.TryLock() {
+		return q.enqueue(body, nil)
 	}
-	q := e.ruleRetries
+	defer q.sendMu.Unlock()
+	q.mu.Lock()
+	deferred := q.items.Len() > 0 || time.Now().Before(q.notBefore) || time.Now().Before(q.nextSend)
+	closed := q.ctx.Err() != nil
+	q.mu.Unlock()
+	if closed {
+		return fmt.Errorf("rule alert retry queue closed")
+	}
+	if deferred {
+		return q.enqueue(body, nil)
+	}
+	sendCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(q.ctx, cancel)
+	err := q.exporter.sendHTTPBody(sendCtx, body)
+	stop()
+	cancel()
+	var rejection *httpRejection
+	if errors.As(err, &rejection) && rejection.retryable() {
+		return q.enqueue(body, rejection)
+	}
+	return err
+}
+
+func (e *HTTPExporter) enqueueRuleAlertRetry(body []byte, rejection *httpRejection) error {
+	if e.ruleRetries == nil {
+		return fmt.Errorf("rule alert retry queue unavailable")
+	}
+	return e.ruleRetries.enqueue(body, rejection)
+}
+
+func (q *ruleAlertRetryQueue) enqueue(body []byte, rejection *httpRejection) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.ctx.Err() != nil || len(q.items) >= ruleRetryQueueSize || len(body) > ruleRetryQueueBytes-q.bytes {
-		logger.L().Warning("HTTPExporter - dropping rule alert, retry queue full or closed")
-		return
-	}
 	now := time.Now()
-	q.items = append(q.items, &ruleAlertRetry{body: body, nextAttempt: now.Add(rejection.delay(time.Second, now)), expires: now.Add(ruleRetryRetention), backoff: time.Second})
+	if rejection != nil {
+		q.notBefore = maxTime(q.notBefore, now.Add(rejection.delay(time.Second, now)))
+	}
+	reason := ""
+	switch {
+	case q.ctx.Err() != nil:
+		reason = "closed"
+	case q.items.Len() >= ruleRetryQueueSize:
+		reason = "count_limit"
+	case len(body) > ruleRetryQueueBytes-q.bytes:
+		reason = "byte_limit"
+	}
+	if reason != "" {
+		logger.L().Warning("HTTPExporter - dropping rule alert", helpers.String("reason", reason), helpers.Int("queuedAlerts", q.items.Len()), helpers.Int("queuedBytes", q.bytes))
+		return fmt.Errorf("rule alert retry queue admission failed: %s", reason)
+	}
+	q.items.PushBack(&ruleAlertRetry{body: body, expires: now.Add(ruleRetryRetention), backoff: time.Second})
 	q.bytes += len(body)
+	logger.L().Debug("HTTPExporter - queued rule alert for retry", helpers.Int("queuedAlerts", q.items.Len()), helpers.Int("queuedBytes", q.bytes))
 	if !q.running {
 		q.running = true
 		q.wg.Add(1)
@@ -101,6 +147,14 @@ func (e *HTTPExporter) enqueueRuleAlertRetry(body []byte, rejection *httpRejecti
 	case q.wake <- struct{}{}:
 	default:
 	}
+	return nil
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return b
+	}
+	return a
 }
 
 func (q *ruleAlertRetryQueue) close() {
@@ -109,34 +163,47 @@ func (q *ruleAlertRetryQueue) close() {
 	q.mu.Unlock()
 	q.wg.Wait()
 	q.mu.Lock()
-	q.items = nil
+	defer q.mu.Unlock()
+	if q.items.Len() > 0 {
+		logger.L().Warning("HTTPExporter - dropping pending rule alerts", helpers.String("reason", "shutdown"), helpers.Int("alertCount", q.items.Len()), helpers.Int("queuedBytes", q.bytes))
+	}
+	q.items.Init()
 	q.bytes = 0
-	q.mu.Unlock()
+}
+
+func (q *ruleAlertRetryQueue) removeHead(err error) {
+	head := q.items.Front()
+	q.bytes -= len(head.Value.(*ruleAlertRetry).body)
+	q.items.Remove(head)
+	head.Value = nil
+	if err != nil {
+		logger.L().Warning("HTTPExporter - dropping rule alert after retry", helpers.Error(err))
+	} else {
+		logger.L().Debug("HTTPExporter - delivered queued rule alert")
+	}
 }
 
 func (q *ruleAlertRetryQueue) run() {
 	defer q.wg.Done()
 	for {
 		q.mu.Lock()
-		if q.ctx.Err() != nil || len(q.items) == 0 {
+		if q.ctx.Err() != nil || q.items.Len() == 0 {
 			q.running = false
 			q.mu.Unlock()
 			return
 		}
-		index := 0
-		due := func(item *ruleAlertRetry) time.Time {
-			if item.expires.Before(item.nextAttempt) {
-				return item.expires
-			}
-			return item.nextAttempt
+		item := q.items.Front().Value.(*ruleAlertRetry)
+		now := time.Now()
+		if !now.Before(item.expires) {
+			q.removeHead(fmt.Errorf("rule alert retry retention expired"))
+			q.mu.Unlock()
+			continue
 		}
-		for i := 1; i < len(q.items); i++ {
-			if due(q.items[i]).Before(due(q.items[index])) {
-				index = i
-			}
+		due := maxTime(q.notBefore, q.nextSend)
+		if item.expires.Before(due) {
+			due = item.expires
 		}
-		item := q.items[index]
-		delay := time.Until(due(item))
+		delay := due.Sub(now)
 		q.mu.Unlock()
 		if delay > 0 {
 			timer := time.NewTimer(delay)
@@ -148,26 +215,38 @@ func (q *ruleAlertRetryQueue) run() {
 			timer.Stop()
 			continue
 		}
-		var err error
-		if time.Now().Before(item.expires) {
-			ctx, cancel := context.WithDeadline(q.ctx, item.expires)
-			err = q.exporter.sendHTTPBody(ctx, item.body)
-			cancel()
-		} else {
-			err = fmt.Errorf("rule alert retry retention expired")
-		}
+		q.sendMu.Lock()
 		q.mu.Lock()
-		var rejection *httpRejection
-		if errors.As(err, &rejection) && rejection.retryable() && time.Now().Before(item.expires) {
-			item.backoff = min(item.backoff*2, ruleRetryMaxDelay)
-			item.nextAttempt = time.Now().Add(rejection.delay(item.backoff, time.Now()))
-		} else {
-			q.bytes -= len(item.body)
-			q.items = slices.Delete(q.items, index, index+1)
-			if err != nil {
-				logger.L().Warning("HTTPExporter - dropping rule alert after retry", helpers.Error(err))
-			}
+		// A live send may have updated the cooldown while the worker took sendMu.
+		now = time.Now()
+		if q.ctx.Err() != nil || now.Before(q.notBefore) || now.Before(q.nextSend) || !now.Before(item.expires) {
+			q.mu.Unlock()
+			q.sendMu.Unlock()
+			continue
 		}
 		q.mu.Unlock()
+		ctx, cancel := context.WithDeadline(q.ctx, item.expires)
+		err := q.exporter.sendHTTPBody(ctx, item.body)
+		cancel()
+		q.mu.Lock()
+		now = time.Now()
+		rate := q.exporter.config.MaxAlertsPerMinute
+		if rate <= 0 {
+			rate = defaultMaxAlertsPerMin
+		}
+		q.nextSend = now.Add(max(time.Millisecond, time.Minute/time.Duration(rate)))
+		var rejection *httpRejection
+		if errors.As(err, &rejection) && rejection.retryable() {
+			item.backoff = min(item.backoff*2, ruleRetryMaxDelay)
+			q.notBefore = maxTime(q.notBefore, now.Add(rejection.delay(item.backoff, now)))
+			if !now.Before(item.expires) {
+				q.removeHead(fmt.Errorf("rule alert retry retention expired: %w", err))
+			}
+			logger.L().Debug("HTTPExporter - rule alert retry deferred", helpers.Error(err), helpers.String("retryAt", q.notBefore.Format(time.RFC3339)))
+		} else {
+			q.removeHead(err)
+		}
+		q.mu.Unlock()
+		q.sendMu.Unlock()
 	}
 }

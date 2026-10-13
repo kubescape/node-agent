@@ -2,6 +2,7 @@ package exporters
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
 	"time"
@@ -206,6 +207,8 @@ type AlertBulkManager struct {
 	retryBaseDelay  time.Duration
 	retryMaxDelay   time.Duration
 	sendWorkerCount int
+	// Owned by the single send worker; carries HTTP cooldown across bulks.
+	httpNotBefore time.Time
 
 	sendFunc func(containerID string, alerts []armotypes.RuntimeAlert, processTree armotypes.ProcessTree, cloudServices []string) error
 	stopChan chan struct{}
@@ -410,6 +413,16 @@ func (abm *AlertBulkManager) sendWorker() {
 // Retries are performed in-place to maintain FIFO ordering
 func (abm *AlertBulkManager) processSendQueueItem(item *bulkQueueItem) {
 	for {
+		if delay := time.Until(abm.httpNotBefore); delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-abm.stopChan:
+				timer.Stop()
+				logger.L().Warning("Dropping bulk during HTTP cooldown shutdown", helpers.String("containerID", item.containerID))
+				return
+			}
+		}
 		// Attempt send
 		err := abm.sendFunc(item.containerID, item.alerts, item.processTree, item.cloudServices)
 
@@ -422,6 +435,15 @@ func (abm *AlertBulkManager) processSendQueueItem(item *bulkQueueItem) {
 			return
 		}
 
+		var rejection *httpRejection
+		if errors.As(err, &rejection) && !rejection.retryable() {
+			logger.L().Warning("Bulk send rejected, not retrying", helpers.Error(err), helpers.String("containerID", item.containerID))
+			return
+		}
+
+		if rejection != nil {
+			abm.httpNotBefore = maxTime(abm.httpNotBefore, time.Now().Add(rejection.delay(abm.retryBaseDelay, time.Now())))
+		}
 		// Failed - check if should retry
 		if item.retryCount >= abm.maxRetries {
 			logger.L().Ctx(context.Background()).Error("Bulk send failed after max retries",
@@ -438,6 +460,10 @@ func (abm *AlertBulkManager) processSendQueueItem(item *bulkQueueItem) {
 
 		// Calculate delay: min(baseDelay * 2^(retryCount-1), maxDelay)
 		delay := min(time.Duration(float64(abm.retryBaseDelay)*math.Pow(2, float64(item.retryCount-1))), abm.retryMaxDelay)
+		if rejection != nil {
+			delay = rejection.delay(delay, time.Now())
+			abm.httpNotBefore = maxTime(abm.httpNotBefore, time.Now().Add(delay))
+		}
 
 		logger.L().Warning("Bulk send failed, will retry",
 			helpers.String("containerID", item.containerID),
@@ -453,7 +479,12 @@ func (abm *AlertBulkManager) processSendQueueItem(item *bulkQueueItem) {
 			// Retry time reached, loop will retry
 		case <-abm.stopChan:
 			timer.Stop()
-			// Shutdown requested, try one last time without delay
+			// An HTTP rejection must not bypass Retry-After during shutdown.
+			if rejection != nil {
+				logger.L().Warning("Dropping bulk during retry shutdown", helpers.Error(err), helpers.String("containerID", item.containerID))
+				return
+			}
+			// Preserve final-send behavior for generic send callbacks.
 			logger.L().Info("Shutdown requested during retry delay, attempting final send",
 				helpers.String("containerID", item.containerID))
 			// Loop will retry immediately
@@ -503,9 +534,18 @@ func (abm *AlertBulkManager) drainSendQueue() {
 	for {
 		select {
 		case item := <-abm.sendQueue:
-			// Try to send without retries during drain
+			// Shutdown never sends through a previously established HTTP cooldown.
+			if time.Now().Before(abm.httpNotBefore) {
+				logger.L().Warning("Dropping bulk during HTTP cooldown shutdown", helpers.String("containerID", item.containerID))
+				continue
+			}
+			// Try once, preserving any new cooldown for remaining drained bulks.
 			err := abm.sendFunc(item.containerID, item.alerts, item.processTree, item.cloudServices)
 			if err != nil {
+				var rejection *httpRejection
+				if errors.As(err, &rejection) && rejection.retryable() {
+					abm.httpNotBefore = maxTime(abm.httpNotBefore, time.Now().Add(rejection.delay(abm.retryBaseDelay, time.Now())))
+				}
 				logger.L().Warning("Failed to send bulk during drain",
 					helpers.String("containerID", item.containerID),
 					helpers.Error(err))
