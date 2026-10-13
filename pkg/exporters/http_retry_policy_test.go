@@ -268,3 +268,83 @@ func TestHTTPRejectionCooldownCap(t *testing.T) {
 		require.Equal(t, httpRetryMaxCooldown, (&httpRejection{retryAfter: header}).delay(time.Second, now))
 	}
 }
+
+func TestRuleAlertInitialRequestReservesCapacityAndOrder(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		var calls atomic.Int32
+		delivered := make(chan string, ruleRetryQueueSize)
+		e := retryTestExporter(t, func(r *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				return nil, err
+			}
+			if calls.Add(1) == 1 {
+				close(started)
+				select {
+				case <-release:
+				case <-r.Context().Done():
+					return nil, r.Context().Err()
+				}
+				return retryTestResponse(429, "60"), nil
+			}
+			delivered <- string(body)
+			return retryTestResponse(200, ""), nil
+		})
+		go func() { done <- e.ruleRetries.send(context.Background(), []byte("oldest")) }()
+		<-started
+		for i := 0; i < ruleRetryQueueSize-1; i++ {
+			require.NoError(t, e.ruleRetries.enqueue([]byte("newer"), nil))
+		}
+		require.Error(t, e.ruleRetries.enqueue([]byte("overflow"), nil), "initial request must reserve a queue slot")
+		close(release)
+		require.NoError(t, <-done, "the reserved oldest request must not be dropped on rejection")
+		time.Sleep(61 * time.Second)
+		synctest.Wait()
+		require.Equal(t, "oldest", <-delivered, "rejected initial request must precede newer arrivals")
+	})
+}
+
+func TestRuleAlertInitialRequestReservesByteCapacity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		e := retryTestExporter(t, func(r *http.Request) (*http.Response, error) {
+			close(started)
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+			return retryTestResponse(429, "60"), nil
+		})
+		go func() { done <- e.ruleRetries.send(context.Background(), make([]byte, ruleRetryQueueBytes)) }()
+		<-started
+		require.Error(t, e.ruleRetries.enqueue([]byte("overflow"), nil), "initial body must count against byte limit")
+		close(release)
+		require.NoError(t, <-done)
+		e.ruleRetries.mu.Lock()
+		retained := e.ruleRetries.bytes
+		e.ruleRetries.mu.Unlock()
+		require.Equal(t, ruleRetryQueueBytes, retained)
+	})
+}
+
+func TestRuleAlertInitialRequestReleasesReservation(t *testing.T) {
+	for _, status := range []int{200, 400, 502} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			e := retryTestExporter(t, func(*http.Request) (*http.Response, error) { return retryTestResponse(status, ""), nil })
+			err := e.ruleRetries.send(context.Background(), []byte("alert"))
+			if status == 200 {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			e.ruleRetries.mu.Lock()
+			defer e.ruleRetries.mu.Unlock()
+			require.Nil(t, e.ruleRetries.initial)
+			require.Zero(t, e.ruleRetries.bytes)
+			require.Zero(t, e.ruleRetries.items.Len())
+		})
+	}
+}

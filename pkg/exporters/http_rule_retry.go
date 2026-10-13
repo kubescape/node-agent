@@ -66,6 +66,7 @@ type ruleAlertRetryQueue struct {
 	mu        sync.Mutex
 	sendMu    sync.Mutex
 	items     list.List
+	initial   *ruleAlertRetry
 	bytes     int
 	notBefore time.Time
 	nextSend  time.Time
@@ -92,22 +93,41 @@ func (q *ruleAlertRetryQueue) send(ctx context.Context, body []byte) error {
 	q.mu.Lock()
 	deferred := q.items.Len() > 0 || time.Now().Before(q.notBefore) || time.Now().Before(q.nextSend)
 	closed := q.ctx.Err() != nil
-	q.mu.Unlock()
 	if closed {
+		q.mu.Unlock()
 		return fmt.Errorf("rule alert retry queue closed")
 	}
 	if deferred {
+		q.mu.Unlock()
 		return q.enqueue(body, nil)
 	}
+	if err := q.admitLocked(body); err != nil {
+		q.mu.Unlock()
+		return err
+	}
+	item := &ruleAlertRetry{body: body, expires: time.Now().Add(ruleRetryRetention), backoff: time.Second}
+	q.initial = item
+	q.bytes += len(body)
+	q.mu.Unlock()
 	sendCtx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(q.ctx, cancel)
 	err := q.exporter.sendHTTPBody(sendCtx, body)
 	stop()
 	cancel()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.initial = nil
 	var rejection *httpRejection
-	if errors.As(err, &rejection) && rejection.retryable() {
-		return q.enqueue(body, rejection)
+	if errors.As(err, &rejection) && rejection.retryable() && q.ctx.Err() == nil {
+		now := time.Now()
+		q.notBefore = maxTime(q.notBefore, now.Add(rejection.delay(time.Second, now)))
+		// Keep the reserved capacity and restore this older alert ahead of arrivals.
+		q.items.PushFront(item)
+		logger.L().Debug("HTTPExporter - queued initial rule alert for retry", helpers.Int("queuedAlerts", q.items.Len()), helpers.Int("queuedBytes", q.bytes))
+		q.startWorkerLocked()
+		return nil
 	}
+	q.bytes -= len(body)
 	return err
 }
 
@@ -125,22 +145,39 @@ func (q *ruleAlertRetryQueue) enqueue(body []byte, rejection *httpRejection) err
 	if rejection != nil {
 		q.notBefore = maxTime(q.notBefore, now.Add(rejection.delay(time.Second, now)))
 	}
+	if err := q.admitLocked(body); err != nil {
+		return err
+	}
+	q.items.PushBack(&ruleAlertRetry{body: body, expires: now.Add(ruleRetryRetention), backoff: time.Second})
+	q.bytes += len(body)
+	logger.L().Debug("HTTPExporter - queued rule alert for retry", helpers.Int("queuedAlerts", q.items.Len()), helpers.Int("queuedBytes", q.bytes))
+	q.startWorkerLocked()
+	return nil
+}
+
+// admitLocked includes the initial request's reserved slot and payload bytes.
+func (q *ruleAlertRetryQueue) admitLocked(body []byte) error {
+	initial := 0
+	if q.initial != nil {
+		initial = 1
+	}
 	reason := ""
 	switch {
 	case q.ctx.Err() != nil:
 		reason = "closed"
-	case q.items.Len() >= ruleRetryQueueSize:
+	case q.items.Len()+initial >= ruleRetryQueueSize:
 		reason = "count_limit"
 	case len(body) > ruleRetryQueueBytes-q.bytes:
 		reason = "byte_limit"
 	}
 	if reason != "" {
-		logger.L().Warning("HTTPExporter - dropping rule alert", helpers.String("reason", reason), helpers.Int("queuedAlerts", q.items.Len()), helpers.Int("queuedBytes", q.bytes))
+		logger.L().Warning("HTTPExporter - dropping rule alert", helpers.String("reason", reason), helpers.Int("queuedAlerts", q.items.Len()+initial), helpers.Int("queuedBytes", q.bytes))
 		return fmt.Errorf("rule alert retry queue admission failed: %s", reason)
 	}
-	q.items.PushBack(&ruleAlertRetry{body: body, expires: now.Add(ruleRetryRetention), backoff: time.Second})
-	q.bytes += len(body)
-	logger.L().Debug("HTTPExporter - queued rule alert for retry", helpers.Int("queuedAlerts", q.items.Len()), helpers.Int("queuedBytes", q.bytes))
+	return nil
+}
+
+func (q *ruleAlertRetryQueue) startWorkerLocked() {
 	if !q.running {
 		q.running = true
 		q.wg.Add(1)
@@ -150,7 +187,6 @@ func (q *ruleAlertRetryQueue) enqueue(body []byte, rejection *httpRejection) err
 	case q.wake <- struct{}{}:
 	default:
 	}
-	return nil
 }
 
 func maxTime(a, b time.Time) time.Time {
@@ -165,6 +201,9 @@ func (q *ruleAlertRetryQueue) close() {
 	q.cancel()
 	q.mu.Unlock()
 	q.wg.Wait()
+	// Join any initial request before clearing its reserved bytes.
+	q.sendMu.Lock()
+	defer q.sendMu.Unlock()
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.items.Len() > 0 {
@@ -220,7 +259,14 @@ func (q *ruleAlertRetryQueue) run() {
 		}
 		q.sendMu.Lock()
 		q.mu.Lock()
-		// A live send may have updated the cooldown while the worker took sendMu.
+		// A rejected initial request may have become the new head while we
+		// waited for sendMu. Always select the current head after taking it.
+		if q.items.Len() == 0 {
+			q.mu.Unlock()
+			q.sendMu.Unlock()
+			continue
+		}
+		item = q.items.Front().Value.(*ruleAlertRetry)
 		now = time.Now()
 		if q.ctx.Err() != nil || now.Before(q.notBefore) || now.Before(q.nextSend) || !now.Before(item.expires) {
 			q.mu.Unlock()
