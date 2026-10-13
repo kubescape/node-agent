@@ -68,6 +68,13 @@ func TestCEL_DNSFields_NonDNSEventIsEmpty(t *testing.T) {
 	exec := &utils.StructEvent{EventType: utils.ExecveEventType, Comm: "sh"}
 	require.True(t, evalDNS(t, exec, utils.ExecveEventType, `event.qtype == '' && event.qr == '' && event.numAnswers == 0`))
 	require.False(t, evalDNS(t, exec, utils.ExecveEventType, `has(event.rcode)`))
+
+	// The datasource-backed event is what runs in production; its DNS
+	// accessors must not read gadget fields that an exec datasource does not
+	// carry, and qr must not default to Q.
+	ds := newDatasourceExecEvent(t, utils.ExecveEventType, ttyDSFields{})
+	require.True(t, evalTTYEvent(t, ds, utils.ExecveEventType, `event.qtype == '' && event.qr == '' && event.rcode == '' && event.numAnswers == 0`))
+	require.False(t, evalTTYEvent(t, ds, utils.ExecveEventType, `has(event.rcode)`))
 }
 
 // TestCEL_DNSQueryAliasRouting pins the opt-in contract: a forwarded (rule-only)

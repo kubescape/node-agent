@@ -94,6 +94,10 @@ func newDNSDispatchFixture(t *testing.T, dedup *dedupcache.DedupCache) *dnsDispa
 }
 
 func dnsEnriched(containerID string, ruleOnly bool, qr utils.DNSPktType, name string, answers int, bucket uint16) *events.EnrichedEvent {
+	return dnsEnrichedRcode(containerID, ruleOnly, qr, name, answers, bucket, "")
+}
+
+func dnsEnrichedRcode(containerID string, ruleOnly bool, qr utils.DNSPktType, name string, answers int, bucket uint16, rcode string) *events.EnrichedEvent {
 	return &events.EnrichedEvent{
 		ContainerID:      containerID,
 		MountNamespaceID: 1001,
@@ -106,6 +110,7 @@ func dnsEnriched(containerID string, ruleOnly bool, qr utils.DNSPktType, name st
 			DNSName:     name,
 			NumAnswers:  answers,
 			Qtype:       "A",
+			Rcode:       rcode,
 			RuleOnly:    ruleOnly,
 		},
 	}
@@ -161,6 +166,26 @@ func TestEventHandlerFactory_DNSDedupAppliesToRuleOnlyEventsOnly(t *testing.T) {
 		assert.False(t, e.Duplicate, "answered response must never be marked duplicate")
 	}
 	assert.Equal(t, []string{"example.com.", "example.com."}, f.dns.names)
+}
+
+// A process whose resolv.conf lists two nameservers gets SERVFAIL from the
+// first and NXDOMAIN from the retry within the dedup TTL, for the same name and
+// type. The NXDOMAIN must still reach a rule gated on event.rcode, while a
+// retransmitted identical error response is still absorbed.
+func TestEventHandlerFactory_DNSDedupKeepsDistinctResponseCodes(t *testing.T) {
+	f := newDNSDispatchFixture(t, dedupcache.NewDedupCache(10))
+
+	f.factory.ProcessEvent(dnsEnrichedRcode(f.containerID, true, utils.DNSPktTypeResponse, "a.exfil.example.", 0, 1, "ServerFailure"))
+	f.factory.ProcessEvent(dnsEnrichedRcode(f.containerID, true, utils.DNSPktTypeResponse, "a.exfil.example.", 0, 2, "NameError"))
+	f.factory.ProcessEvent(dnsEnrichedRcode(f.containerID, true, utils.DNSPktTypeResponse, "a.exfil.example.", 0, 3, "NameError"))
+
+	require.Len(t, f.rules.received, 2, "SERVFAIL and NXDOMAIN are delivered, the repeated NXDOMAIN is not")
+	var rcodes []string
+	for _, e := range f.rules.received {
+		assert.False(t, e.Duplicate)
+		rcodes = append(rcodes, e.Event.(utils.DNSEvent).GetRcode())
+	}
+	assert.Equal(t, []string{"ServerFailure", "NameError"}, rcodes)
 }
 
 func TestComputeEventDedupKey_DNS(t *testing.T) {

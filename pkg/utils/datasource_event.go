@@ -785,7 +785,13 @@ func (e *DatasourceEvent) GetPupperLayer() bool {
 	return pupperLayer
 }
 
+// GetQr returns Q or R for a DNS event and "" for any other event type, so a
+// rule that reads event.qr on a non-DNS event gets the documented empty value
+// instead of a spurious Q.
 func (e *DatasourceEvent) GetQr() DNSPktType {
+	if e.EventType != DnsEventType {
+		return ""
+	}
 	isResponse, _ := e.getFieldAccessor("qr_raw").Bool(e.Data)
 	if isResponse {
 		return DNSPktTypeResponse

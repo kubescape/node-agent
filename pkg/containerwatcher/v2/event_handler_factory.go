@@ -271,7 +271,7 @@ func computeEventDedupKey(enrichedEvent *events.EnrichedEvent) (key uint64, ttl 
 	// parallel A/AAAA retries repeat them within seconds.
 	case utils.DnsEventType:
 		if e, ok := event.(utils.DNSEvent); ok && utils.IsRuleOnlyEvent(event) {
-			return dedupcache.ComputeDNSKey(mntns, e.GetPID(), e.GetDNSName(), string(e.GetQr()), e.GetQtype()), dedupTTLDNS, true
+			return dedupcache.ComputeDNSKey(mntns, e.GetPID(), e.GetDNSName(), string(e.GetQr()), e.GetQtype(), e.GetRcode()), dedupTTLDNS, true
 		}
 	case utils.CapabilitiesEventType:
 		if e, ok := event.(utils.CapabilitiesEvent); ok {

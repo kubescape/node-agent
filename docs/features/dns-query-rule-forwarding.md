@@ -82,9 +82,12 @@ in the alert arguments. Alerts on answered responses are unchanged.
 ## Deduplication
 
 Rule-only DNS events are deduplicated for 5 seconds on
-(mount namespace, pid, name, qr, qtype), which absorbs resolver retransmits and
-parallel A/AAAA retries without hiding exfiltration chunks, whose names are
-unique. Answered responses are never deduplicated, so existing `dns` rules see
+(mount namespace, pid, name, qr, qtype, rcode), which absorbs resolver
+retransmits and parallel A/AAAA retries without hiding exfiltration chunks,
+whose names are unique. rcode is part of the key so that a SERVFAIL from the
+first configured resolver and the NXDOMAIN from the retry to the next one are
+both delivered, and a rule gated on `event.rcode` sees the response it waits
+for. Answered responses are never deduplicated, so existing `dns` rules see
 every one of them. `eventDedup.enabled: false` or `alertDeduplication.bypass:
 true` disables this dedup with the rest.
 

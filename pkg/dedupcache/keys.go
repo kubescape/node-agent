@@ -58,15 +58,19 @@ func ComputeNetworkKey(mntns uint64, pid uint32, dstAddr string, dstPort uint16,
 
 // ComputeDNSKey computes a dedup key for DNS events forwarded to rule
 // evaluation (queries and error responses). qr and qtype keep a query and its
-// response, and an A and an AAAA lookup of the same name, from colliding; pid
-// keeps alert attribution per process, as the open and network keys do.
-func ComputeDNSKey(mntns uint64, pid uint32, dnsName string, qr string, qtype string) uint64 {
+// response, and an A and an AAAA lookup of the same name, from colliding; rcode
+// (empty on a query) keeps a SERVFAIL from the first resolver and the NXDOMAIN
+// from the retry distinct, so a rule gated on the response code sees the
+// response it waits for; pid keeps alert attribution per process, as the open
+// and network keys do.
+func ComputeDNSKey(mntns uint64, pid uint32, dnsName string, qr string, qtype string, rcode string) uint64 {
 	h := xxhash.New()
 	writeUint64(h, mntns)
 	writeUint32(h, pid)
 	writeString(h, dnsName)
 	writeString(h, qr)
 	writeString(h, qtype)
+	writeString(h, rcode)
 	return h.Sum64()
 }
 
