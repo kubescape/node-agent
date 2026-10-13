@@ -19,6 +19,8 @@ const (
 	ruleRetryQueueBytes = 16 << 20
 	ruleRetryRetention  = 5 * time.Minute
 	ruleRetryMaxDelay   = 30 * time.Second
+	// A malformed or excessive server hint must not silence the endpoint indefinitely.
+	httpRetryMaxCooldown = 5 * time.Minute
 )
 
 type httpRejection struct {
@@ -33,20 +35,21 @@ func (r *httpRejection) retryable() bool {
 	return r.status == http.StatusTooManyRequests || r.status == http.StatusServiceUnavailable
 }
 
-// Retry-After is a lower bound, including when it exceeds our backoff cap.
+// Honor Retry-After beyond the backoff cap, up to the endpoint cooldown limit.
+// Larger hints are deliberately capped so new alerts can resume delivery.
 func (r *httpRejection) delay(backoff time.Duration, now time.Time) time.Duration {
 	if seconds, err := strconv.ParseUint(r.retryAfter, 10, 64); err == nil {
-		// Avoid overflowing time.Duration on an untrusted header.
-		if seconds > uint64(time.Duration(1<<63-1)/time.Second) {
-			return time.Duration(1<<63 - 1)
+		// Bound the endpoint cooldown and avoid overflowing time.Duration.
+		if seconds > uint64(httpRetryMaxCooldown/time.Second) {
+			return httpRetryMaxCooldown
 		}
 		if delay := time.Duration(seconds) * time.Second; delay > backoff {
 			return delay
 		}
 	} else if date, err := http.ParseTime(r.retryAfter); err == nil && date.Sub(now) > backoff {
-		return date.Sub(now)
+		return min(date.Sub(now), httpRetryMaxCooldown)
 	}
-	return backoff
+	return min(backoff, httpRetryMaxCooldown)
 }
 
 type ruleAlertRetry struct {

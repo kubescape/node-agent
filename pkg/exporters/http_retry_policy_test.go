@@ -35,7 +35,7 @@ func TestBulkHTTPRetryPolicy(t *testing.T) {
 				time.Sleep(2 * time.Second)
 				<-done
 				want := 1
-				if status == 429 || status == 503 {
+				if status == 429 || status >= 500 {
 					want = 2
 				}
 				require.EqualValues(t, want, calls.Load())
@@ -151,12 +151,12 @@ func TestBulkDrainNewHTTPCooldown(t *testing.T) {
 	require.EqualValues(t, 1, calls.Load(), "a rejection during drain must pause subsequent bulks")
 }
 
-func TestRuleAlertRetryCooldownOutlivesExpiredAlert(t *testing.T) {
+func TestRuleAlertRetryResumesAfterCooldownCap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int32
 		e := retryTestExporter(t, func(*http.Request) (*http.Response, error) {
 			if calls.Add(1) == 1 {
-				return retryTestResponse(429, "600"), nil
+				return retryTestResponse(429, "86400"), nil
 			}
 			return retryTestResponse(200, ""), nil
 		})
@@ -165,10 +165,7 @@ func TestRuleAlertRetryCooldownOutlivesExpiredAlert(t *testing.T) {
 		synctest.Wait()
 		e.SendRuleAlert(retryTestFailure())
 		synctest.Wait()
-		require.EqualValues(t, 1, calls.Load())
-		time.Sleep(300 * time.Second)
-		synctest.Wait()
-		require.EqualValues(t, 2, calls.Load())
+		require.EqualValues(t, 2, calls.Load(), "new alerts must resume after the cooldown cap")
 	})
 }
 
@@ -237,11 +234,37 @@ func TestBulkHTTPRetryLongRetryAfter(t *testing.T) {
 		done := make(chan struct{})
 		go func() { manager.processSendQueueItem(&bulkQueueItem{}); close(done) }()
 		synctest.Wait()
-		time.Sleep(599 * time.Second)
+		time.Sleep(299 * time.Second)
 		synctest.Wait()
 		require.EqualValues(t, 1, calls.Load())
 		time.Sleep(2 * time.Second)
 		<-done
 		require.EqualValues(t, 2, calls.Load())
 	})
+}
+
+func TestBulkHTTP5xxPreservesExistingBackoff(t *testing.T) {
+	for _, status := range []int{500, 502, 504} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var attempts []time.Time
+				manager := NewAlertBulkManager(1, 10, 10, 3, 1000, 30000, func(string, []armotypes.RuntimeAlert, armotypes.ProcessTree, []string) error {
+					attempts = append(attempts, time.Now())
+					return &httpRejection{status: status}
+				})
+				manager.processSendQueueItem(&bulkQueueItem{})
+				require.Len(t, attempts, 4, "bulk 5xx must retain the existing retry budget")
+				for i, delay := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
+					require.Equal(t, delay, attempts[i+1].Sub(attempts[i]))
+				}
+			})
+		})
+	}
+}
+
+func TestHTTPRejectionCooldownCap(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, header := range []string{"86400", "9223372036854775807", now.Add(24 * time.Hour).Format(http.TimeFormat)} {
+		require.Equal(t, httpRetryMaxCooldown, (&httpRejection{retryAfter: header}).delay(time.Second, now))
+	}
 }

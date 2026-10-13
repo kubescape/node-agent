@@ -187,8 +187,8 @@ func TestHTTPRejectionRetryAfter(t *testing.T) {
 		{"60", time.Minute}, {now.Add(time.Minute).Format(http.TimeFormat), time.Minute},
 		{"", time.Second}, {"bogus", time.Second}, {"-1", time.Second}, {"0", time.Second},
 		{now.Add(-time.Minute).Format(http.TimeFormat), time.Second},
-		{"600", 10 * time.Minute},
-		{"9223372036854775807", time.Duration(1<<63 - 1)},
+		{"600", ruleRetryRetention},
+		{"9223372036854775807", ruleRetryRetention},
 	} {
 		require.Equal(t, tt.want, (&httpRejection{retryAfter: tt.header}).delay(time.Second, now), tt.header)
 	}

@@ -436,7 +436,7 @@ func (abm *AlertBulkManager) processSendQueueItem(item *bulkQueueItem) {
 		}
 
 		var rejection *httpRejection
-		if errors.As(err, &rejection) && !rejection.retryable() {
+		if errors.As(err, &rejection) && rejection.status >= 400 && rejection.status < 500 && !rejection.retryable() {
 			logger.L().Warning("Bulk send rejected, not retrying", helpers.Error(err), helpers.String("containerID", item.containerID))
 			return
 		}
@@ -460,7 +460,7 @@ func (abm *AlertBulkManager) processSendQueueItem(item *bulkQueueItem) {
 
 		// Calculate delay: min(baseDelay * 2^(retryCount-1), maxDelay)
 		delay := min(time.Duration(float64(abm.retryBaseDelay)*math.Pow(2, float64(item.retryCount-1))), abm.retryMaxDelay)
-		if rejection != nil {
+		if rejection != nil && rejection.retryable() {
 			delay = rejection.delay(delay, time.Now())
 			abm.httpNotBefore = maxTime(abm.httpNotBefore, time.Now().Add(delay))
 		}
@@ -543,7 +543,7 @@ func (abm *AlertBulkManager) drainSendQueue() {
 			err := abm.sendFunc(item.containerID, item.alerts, item.processTree, item.cloudServices)
 			if err != nil {
 				var rejection *httpRejection
-				if errors.As(err, &rejection) && rejection.retryable() {
+				if errors.As(err, &rejection) && (rejection.retryable() || rejection.status >= 500 && rejection.status <= 599) {
 					abm.httpNotBefore = maxTime(abm.httpNotBefore, time.Now().Add(rejection.delay(abm.retryBaseDelay, time.Now())))
 				}
 				logger.L().Warning("Failed to send bulk during drain",
