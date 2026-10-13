@@ -567,7 +567,14 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		helpers.Int("alerts", alerts),
 		helpers.String("since", since.Format(time.RFC3339)))
 
-	return e.sendAlert(ctx, alert, armotypes.ProcessTree{}, nil)
+	body, err := e.marshalAlertPayload([]armotypes.RuntimeAlert{alert}, armotypes.ProcessTree{}, nil)
+	if err != nil {
+		return err
+	}
+	if e.ruleRetries != nil {
+		return e.ruleRetries.send(ctx, body)
+	}
+	return e.sendHTTPBody(ctx, body)
 }
 
 // Close cancels pending rule retries and stops the bulk manager, flushing its bulks.

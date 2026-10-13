@@ -348,3 +348,34 @@ func TestRuleAlertInitialRequestReleasesReservation(t *testing.T) {
 		})
 	}
 }
+
+func TestRuleAlertLimitNotificationHonorsCooldown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		bodies := make(chan string, 3)
+		e := retryTestExporter(t, func(r *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				return nil, err
+			}
+			bodies <- string(body)
+			if calls.Add(1) == 1 {
+				return retryTestResponse(429, "60"), nil
+			}
+			return retryTestResponse(200, ""), nil
+		})
+		e.config.MaxAlertsPerMinute = 1
+		e.SendRuleAlert(retryTestFailure())
+		e.SendRuleAlert(retryTestFailure())
+		time.Sleep(59 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 1, calls.Load(), "limit notification must not bypass endpoint cooldown")
+		time.Sleep(62 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 3, calls.Load(), "original and limit notification must both be delivered")
+		<-bodies
+		require.Contains(t, <-bodies, "stable-alert-id")
+		require.Contains(t, <-bodies, "AlertLimitReached")
+	})
+}
