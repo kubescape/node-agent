@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -75,6 +76,7 @@ type HTTPExporter struct {
 	bulkManager         *AlertBulkManager
 	alertSourcePlatform armotypes.AlertSourcePlatform
 	metrics             metricsmanager.MetricsManager
+	ruleRetries         *ruleAlertRetryQueue
 }
 
 type alertMetrics struct {
@@ -142,6 +144,9 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 			helpers.Int("maxRetries", config.BulkMaxRetries))
 	}
 
+	if !config.EnableAlertBulking {
+		exporter.ruleRetries = newRuleAlertRetryQueue(exporter)
+	}
 	return exporter, nil
 }
 
@@ -197,11 +202,20 @@ func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 		return
 	}
 
-	// Otherwise, send immediately (legacy behavior)
+	// Send once immediately; retain explicit transient rejections for retry.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
 	defer cancel()
 
-	if err := e.sendRuleAlertWithContext(ctx, failedRule); err != nil {
+	payload := e.createAlertPayload([]armotypes.RuntimeAlert{e.createRuleAlert(failedRule)}, failedRule.GetRuntimeProcessDetails(), failedRule.GetCloudServices())
+	body, err := json.Marshal(payload)
+	if err == nil {
+		err = e.sendHTTPBody(ctx, body)
+		var rejection *httpRejection
+		if errors.As(err, &rejection) && rejection.retryable() {
+			e.enqueueRuleAlertRetry(body, rejection)
+		}
+	}
+	if err != nil {
 		logger.L().Ctx(ctx).Warning("HTTPExporter.SendRuleAlert - failed to send rule alert", helpers.Error(err))
 	}
 }
@@ -416,6 +430,10 @@ func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload any) error {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
+	return e.sendHTTPBody(ctx, body)
+}
+
+func (e *HTTPExporter) sendHTTPBody(ctx context.Context, body []byte) error {
 	var url string
 	if e.config.Path != nil {
 		url = fmt.Sprintf("%s%s", e.config.URL, *e.config.Path)
@@ -466,7 +484,7 @@ func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("received non-2xx status code: %d", resp.StatusCode)
+		return &httpRejection{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
 	}
 
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
@@ -542,8 +560,11 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 	return e.sendAlert(ctx, alert, armotypes.ProcessTree{}, nil)
 }
 
-// Close stops the bulk manager and flushes all pending bulks
+// Close cancels pending rule retries and stops the bulk manager, flushing its bulks.
 func (e *HTTPExporter) Close() error {
+	if e.ruleRetries != nil {
+		e.ruleRetries.close()
+	}
 	if e.bulkManager != nil {
 		e.bulkManager.Stop()
 	}
