@@ -262,9 +262,14 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate parent workload: %w", err)
 	}
-	parentWorkload, err := cw.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get parent workload: %w", err)
+	// An ownerless Pod is its own workload. Re-fetching it by name could mix
+	// the validated generation with a replacement Pod's workload metadata.
+	parentWorkload := wl
+	if kind != "Pod" || name != pod.GetName() {
+		parentWorkload, err = cw.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get parent workload: %w", err)
+		}
 	}
 	w := parentWorkload.(*workloadinterface.Workload)
 	watchedContainer.Wlid = w.GenerateWlid(cw.clusterName)

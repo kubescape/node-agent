@@ -8,9 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestSharedContainerDataPodUID(t *testing.T) {
@@ -89,4 +91,36 @@ func TestSharedContainerDataMissingRuntimeUIDRequiresOwnership(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSharedContainerDataOwnerlessPodUsesValidatedSnapshot(t *testing.T) {
+	original := &corev1.Pod{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"}, ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: "same-name", UID: "original", ResourceVersion: "10", Labels: map[string]string{"generation": "original"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "test:1"}}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+	replacement := original.DeepCopy()
+	replacement.UID = "replacement"
+	replacement.ResourceVersion = "20"
+	replacement.Labels = map[string]string{"generation": "replacement"}
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	client := dynamicfake.NewSimpleDynamicClient(scheme)
+	reads := 0
+	client.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		reads++
+		pod := original
+		if reads > 1 {
+			pod = replacement
+		}
+		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pod)
+		return true, &unstructured.Unstructured{Object: raw}, err
+	})
+	cw := &ContainerWatcher{clusterName: "test", k8sClient: &k8sinterface.KubernetesApi{Context: t.Context(), DynamicClient: client}}
+	container := &containercollection.Container{}
+	container.Runtime.ContainerID = "original-container"
+	container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName = "test", "same-name", "app"
+	container.K8s.PodUID = "original"
+	data, err := cw.getSharedWatchedContainerData(container)
+	require.NoError(t, err)
+	require.Equal(t, "original", data.PodUID)
+	require.Equal(t, "original", data.WorkloadUID)
+	require.Equal(t, "10", data.ParentResourceVersion)
+	require.Equal(t, 1, reads, "ownerless workload must reuse the identity-validated Pod snapshot")
 }
