@@ -3,6 +3,7 @@ package containerwatcher
 import (
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -218,6 +219,23 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 	podStatus, err := wl.GetPodStatus()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod status: %w", err)
+	}
+	if container.K8s.PodUID == "" {
+		ownsContainer := false
+		for _, statuses := range [][]corev1.ContainerStatus{podStatus.ContainerStatuses, podStatus.InitContainerStatuses, podStatus.EphemeralContainerStatuses} {
+			for _, status := range statuses {
+				id := status.ContainerID
+				if _, suffix, ok := strings.Cut(id, "://"); ok {
+					id = suffix
+				}
+				if container.Runtime.ContainerID != "" && id == container.Runtime.ContainerID {
+					ownsContainer = true
+				}
+			}
+		}
+		if !ownsContainer {
+			return nil, fmt.Errorf("fetched pod does not own container %s", container.Runtime.ContainerID)
+		}
 	}
 	if podStatus.Phase == "Pending" {
 		imageIDReady := false
