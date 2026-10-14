@@ -554,6 +554,11 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	pod := c.k8sObjectCache.GetPod(container.K8s.Namespace, container.K8s.PodName)
+	if pod != nil && sharedData.PodUID != "" && string(pod.UID) != sharedData.PodUID {
+		logger.L().Debug("pod cache generation differs from shared metadata; deferring profile population",
+			helpers.String("containerID", containerID))
+		return false
+	}
 	if pod == nil {
 		logger.L().Debug("pod not found in k8s cache; skipping pod-aware merge checks",
 			helpers.String("containerID", containerID),
@@ -638,10 +643,11 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 		CPName:        cp.Name,
 		RV:            cp.ResourceVersion,
 		Checksum:      checksumOfCP(cp),
+		PodUID:        sharedData.PodUID,
 	}
-	if pod != nil {
+	if entry.PodUID == "" && pod != nil {
 		entry.PodUID = string(pod.UID)
-	} else if container.K8s.PodUID != "" {
+	} else if entry.PodUID == "" && container.K8s.PodUID != "" {
 		// The pod is not yet in the k8s cache (busy-node watch lag) but the
 		// container runtime metadata already carries the pod UID. Without this
 		// backfill the entry starts with an empty PodUID, and the reconciler's
