@@ -59,23 +59,24 @@ func (c ContainerType) String() string {
 }
 
 type WatchedContainerData struct {
-	InstanceID              instanceidhandler.IInstanceID
-	UpdateDataTicker        *time.Ticker
-	SyncChannel             chan error
-	AckChan                 chan struct{}
-	ParentResourceVersion   string
-	ContainerID             string
-	PodName                 string
-	Namespace               string
-	ImageTag                string
-	ImageID                 string
-	Wlid                    string
-	WorkloadUID             string // UID of the top-level workload (from WLID)
-	ContainerType           ContainerType
-	ContainerIndex          int
-	ContainerInfos          map[ContainerType][]ContainerInfo
-	NsMntId                 uint64
-	InitialDelayExpired     bool
+	InstanceID            instanceidhandler.IInstanceID
+	UpdateDataTicker      *time.Ticker
+	SyncChannel           chan error
+	AckChan               chan struct{}
+	ParentResourceVersion string
+	ContainerID           string
+	PodName               string
+	PodUID                string // UID of the Pod fetched to derive this metadata.
+	Namespace             string
+	ImageTag              string
+	ImageID               string
+	Wlid                  string
+	WorkloadUID           string // UID of the top-level workload (from WLID)
+	ContainerType         ContainerType
+	ContainerIndex        int
+	ContainerInfos        map[ContainerType][]ContainerInfo
+	NsMntId               uint64
+	InitialDelayExpired   bool
 	// statusMu guards status and completionStatus. Both are read and written
 	// from several goroutines at once — the monitoring loop sets them on every
 	// tick and at termination, while deleteContainer sets them from the

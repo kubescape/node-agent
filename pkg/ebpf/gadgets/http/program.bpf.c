@@ -174,12 +174,12 @@ static __noinline int populate_http_metadata(struct http_metadata *event, __u32 
     struct sock *sk = BPF_CORE_READ(sock, sk);
     if (sk) {
         // Get raw values from the socket
-        // skc_num is local port (host endian usually, but we enforce ntohs to be safe)
+        // skc_num is the local port, already in host byte order.
         // skc_rcv_saddr is local IP
         // skc_dport is remote port (network endian)
         // skc_daddr is remote IP
         
-        __u16 local_port = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_num));
+        __u16 local_port = BPF_CORE_READ(sk, __sk_common.skc_num);
         __u32 local_addr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
         
         __u16 remote_port = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
