@@ -15,6 +15,10 @@ import (
 // socket ABI (skc_num host endian, skc_dport network endian). This verifies the
 // production source as well as the reported 8080/8000 examples, without loading BPF.
 func TestHTTPGadgetSocketPortByteOrder(t *testing.T) {
+	cc, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("native C compiler unavailable")
+	}
 	dir := t.TempDir()
 	source, err := os.ReadFile("../program.bpf.c")
 	require.NoError(t, err)
@@ -45,7 +49,7 @@ int main(void) {
 	cFile := filepath.Join(dir, "ports.c")
 	require.NoError(t, os.WriteFile(cFile, []byte(harness), 0o600))
 	binary := filepath.Join(dir, "ports")
-	out, err := exec.Command("cc", "-Wall", "-Werror", cFile, "-o", binary).CombinedOutput()
+	out, err := exec.Command(cc, "-Wall", "-Werror", cFile, "-o", binary).CombinedOutput()
 	require.NoError(t, err, "%s", out)
 	out, err = exec.Command(binary).CombinedOutput()
 	require.NoError(t, err, "%s", out)
