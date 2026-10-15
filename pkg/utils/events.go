@@ -204,6 +204,7 @@ type LinkEvent interface {
 
 type NetworkEvent interface {
 	EnrichEvent
+	GetExePath() string
 	GetDstEndpoint() types.L4Endpoint
 	GetDstPort() uint16
 	GetPktType() string

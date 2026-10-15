@@ -9,6 +9,9 @@ datasources:
       egress:
         annotations:
           description: "True if the packet is outgoing."
+      exepath:
+        annotations:
+          description: "Executable path of the process opening the socket, when available."
       endpoint:
         annotations:
           description: "L4 endpoint."

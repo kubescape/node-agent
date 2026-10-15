@@ -138,6 +138,17 @@ int ig_trace_net(struct __sk_buff *skb)
 
     gadget_process_populate_from_socket(skb_val, &event->proc);
 
+    // tmp_events is reused: do not retain another socket's path on lookup/read failure.
+    event->exepath[0] = '\0';
+    if (skb_val && bpf_core_field_exists(skb_val->exepath)) {
+        unsigned int exepath_len = bpf_core_field_size(skb_val->exepath);
+        if (exepath_len > sizeof(event->exepath))
+            exepath_len = sizeof(event->exepath);
+        if (bpf_probe_read_kernel_str(event->exepath, exepath_len,
+                                      skb_val->exepath) < 0)
+            event->exepath[0] = '\0';
+    }
+
 	event->netns_id = skb->cb[0]; // cb[0] initialized by dispatcher.bpf.c
     event->timestamp_raw = bpf_ktime_get_boot_ns();
 
