@@ -1,13 +1,16 @@
 package containerprofile
 
 import (
+	"testing"
+	"time"
+
 	"github.com/google/cel-go/cel"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
+	functioncache "github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestDNSBaselineMatching(t *testing.T) {
@@ -66,5 +69,38 @@ func TestDNSBaselineRequiresCompletedFullProfile(t *testing.T) {
 		require.NoError(t, err)
 		_, _, err = program.Eval(map[string]any{})
 		require.Error(t, err)
+	}
+}
+
+func TestDNSBaselineReadinessRefreshBypassesResultCache(t *testing.T) {
+	for _, expression := range []string{"!cp.was_dns_resolved('container','new.example.')", "!cp.was_dns_resolved_by_process('container','new.example.','/app')"} {
+		for _, invalid := range []string{"truncated", "unversioned", "partial"} {
+			t.Run(expression+"/"+invalid, func(t *testing.T) {
+				cache := &objectcachev1.RuleObjectCacheMock{}
+				cache.SetContainerProfileState(&objectcache.ProfileState{Status: "completed", Completion: "complete"})
+				profile := &v1beta1.ContainerProfile{Spec: v1beta1.ContainerProfileSpec{DNSBaselineVersion: "v1"}}
+				cache.SetContainerProfile(profile)
+				env, err := cel.NewEnv(CP(cache, config.Config{CelConfigCache: functioncache.FunctionCacheConfig{MaxSize: 100, TTL: time.Hour}}))
+				require.NoError(t, err)
+				ast, issues := env.Compile(expression)
+				require.NoError(t, issues.Err())
+				program, err := env.Program(ast)
+				require.NoError(t, err)
+				result, _, err := program.Eval(map[string]any{})
+				require.NoError(t, err)
+				require.Equal(t, true, result.Value())
+				switch invalid {
+				case "truncated":
+					profile.Spec.DNSBaselineTruncated = true
+				case "unversioned":
+					profile.Spec.DNSBaselineVersion = ""
+				case "partial":
+					cache.SetContainerProfileState(&objectcache.ProfileState{Status: "completed", Completion: "partial"})
+				}
+				cache.SetContainerProfile(profile)
+				_, _, err = program.Eval(map[string]any{})
+				require.Error(t, err, "refreshed unavailable baseline must not reuse cached false")
+			})
+		}
 	}
 }

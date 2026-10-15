@@ -286,6 +286,12 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	containerData.networkDeferralDuration = cpm.cfg.UpdateDataPeriod
 	containerData.networkDeferredSizeLimit = cpm.cfg.MaxTsProfileSize
 
+	// An empty baseline proves absence only when DNS collection was enabled.
+	// Match DNSTracer.IsEnabled and keep incomplete collection sticky across reports.
+	if cpm.cfg.DDns || (!cpm.cfg.EnableNetworkTracing && !cpm.cfg.EnableRuntimeDetection) {
+		containerData.dnsBaselineTruncated = true
+	}
+
 	containerProfile := &v1beta1.ContainerProfile{
 		Name:      slug,
 		Namespace: container.K8s.Namespace,

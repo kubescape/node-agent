@@ -182,3 +182,32 @@ func TestSaveDNSBaselineWithDeferredNetworkPeer(t *testing.T) {
 	require.Empty(t, data.dnsLookups)
 	require.Equal(t, 1, data.networks.Cardinality())
 }
+
+func TestSaveDNSBaselineDisabledCollectionIsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cfg       config.Config
+		truncated bool
+	}{
+		{"network tracing", config.Config{EnableNetworkTracing: true}, false},
+		{"runtime detection", config.Config{EnableRuntimeDetection: true}, false},
+		{"explicitly disabled", config.Config{DDns: true, EnableNetworkTracing: true, EnableRuntimeDetection: true}, true},
+		{"both consumers disabled", config.Config{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("QUEUE_DIR", t.TempDir())
+			sink := &storage.StorageHttpClientMock{}
+			manager, err := NewContainerProfileManager(context.Background(), tc.cfg, nil, nil, sink, nil, &seccompmanager.SeccompManagerMock{}, nil, nil, nil)
+			require.NoError(t, err)
+			t.Cleanup(manager.Close)
+			watched := hostidentity.BuildHostWatchedContainerData("node-1")
+			watched.SetStatus(objectcache.WatchedContainerStatusCompleted)
+			container := hostContainerWithIdentity(newHostPseudoContainer(), watched, "kubescape")
+			require.NoError(t, manager.saveContainerProfile(watched, container, &containerData{watchedContainerData: watched}, true))
+			require.Eventually(t, func() bool { return len(sink.ContainerProfilesSnapshot()) == 1 }, 8*time.Second, 10*time.Millisecond)
+			profile := sink.ContainerProfilesSnapshot()[0]
+			require.Equal(t, "v1", profile.Spec.DNSBaselineVersion)
+			require.Equal(t, tc.truncated, profile.Spec.DNSBaselineTruncated)
+		})
+	}
+}

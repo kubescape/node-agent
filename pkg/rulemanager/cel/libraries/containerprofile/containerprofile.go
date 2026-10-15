@@ -224,11 +224,13 @@ func (l *containerProfileLibrary) declarationsWithPrefix(namePrefix, overloadIDP
 					wrapperFunc := func(args ...ref.Val) ref.Val {
 						return spec.call(l, args)
 					}
+					if spec.preserveProfileError {
+						// DNS helpers must check current readiness on every call:
+						// authored/remote refreshes need not change the cache checksum.
+						return wrapperFunc(values...)
+					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, fullName, cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values...)
-					if spec.preserveProfileError {
-						return result
-					}
 					// Convert "profile not available" error to false after cache layer
 					// This ensures: 1) error is not cached, 2) rule evaluation continues normally
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
