@@ -105,7 +105,33 @@ func (c *listenerCache) listening(containerID string, pid uint32, port uint16) (
 	// read procfs outside the mutex, coalescing concurrent reads per container, PID, and generation.
 	flightKey := fmt.Sprintf("%s:%d:%d", containerID, pid, gen)
 	res, err, _ := c.sf.Do(flightKey, func() (any, error) {
-		return c.read(pid)
+		// A caller can miss the cache, then reach singleflight after another
+		// refresh finishes. Recheck before starting a second procfs read.
+		c.mu.Lock()
+		if !entry.forgotten && entry.generation == gen {
+			age := c.now().Sub(entry.at)
+			freshError := entry.err != nil && age <= errorSnapshotTTL
+			// The flight is shared across ports, so reuse must also be safe
+			// for callers whose port is absent from this snapshot.
+			freshPorts := entry.err == nil && age <= negativeSnapshotTTL
+			if freshError || freshPorts {
+				ports, err := entry.ports, entry.err
+				c.mu.Unlock()
+				return ports, err
+			}
+		}
+		c.mu.Unlock()
+
+		ports, err := c.read(pid)
+		// Publish before singleflight releases waiters or permits a new flight.
+		c.mu.Lock()
+		if !entry.forgotten && entry.generation == gen && entry.pid == pid {
+			entry.ports = ports
+			entry.err = err
+			entry.at = c.now()
+		}
+		c.mu.Unlock()
+		return ports, err
 	})
 
 	var ports map[uint16]struct{}
@@ -117,11 +143,6 @@ func (c *listenerCache) listening(containerID string, pid uint32, port uint16) (
 
 	c.mu.Lock()
 	entry.inFlight--
-	if !entry.forgotten && entry.generation == gen && entry.pid == pid {
-		entry.ports = ports
-		entry.err = err
-		entry.at = c.now()
-	}
 	if entry.forgotten && entry.inFlight == 0 {
 		if c.byContainer[containerID] == entry {
 			delete(c.byContainer, containerID)
