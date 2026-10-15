@@ -78,3 +78,5 @@ func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ utils.Networ
 func (a ContainerProfileManagerMock) OnQueueError(_ *v1beta1.ContainerProfile, _ string, _ error) {
 	// noop
 }
+
+func (a ContainerProfileManagerMock) ReportDNSEvent(_ string, _ utils.DNSEvent) {}

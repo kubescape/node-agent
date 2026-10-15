@@ -33,6 +33,22 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 		return pcp
 	}
 
+	pcp.DNSBaselineVersion = cp.Spec.DNSBaselineVersion
+	pcp.DNSBaselineTruncated = cp.Spec.DNSBaselineTruncated
+	pcp.DNSLookups = make(map[string]map[string]struct{}, len(cp.Spec.DNSLookups))
+	for _, lookup := range cp.Spec.DNSLookups {
+		name := strings.ToLower(strings.TrimSuffix(lookup.Name, ".")) + "."
+		paths := pcp.DNSLookups[name]
+		if paths == nil {
+			paths = make(map[string]struct{})
+			pcp.DNSLookups[name] = paths
+		}
+		for _, path := range lookup.ExePaths {
+			if path != "" {
+				paths[path] = struct{}{}
+			}
+		}
+	}
 	if cp.Annotations != nil {
 		pcp.SyncChecksum = cp.Annotations[helpersv1.SyncChecksumMetadataKey]
 	}

@@ -304,6 +304,9 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		Labels: objectcache.GetLabels(cpm.cloudMetadata, watchedContainer, false),
 		Spec: v1beta1.ContainerProfileSpec{
 			Architectures:        []string{runtime.GOARCH},
+			DNSLookups:           containerData.getDNSLookups(),
+			DNSBaselineVersion:   "v1",
+			DNSBaselineTruncated: containerData.dnsBaselineTruncated,
 			ImageID:              containerInfo.ImageID,
 			ImageTag:             containerInfo.ImageTag,
 			SeccompProfile:       seccompProfile,
@@ -325,6 +328,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 
 	if !forceSend && !containerData.hasUnreportedStatusChange() &&
 		containerData.networks != nil && containerData.networks.Cardinality() > 0 &&
+		len(containerProfile.Spec.DNSLookups) == 0 &&
 		len(containerProfile.Spec.Capabilities) == 0 &&
 		len(containerProfile.Spec.Execs) == 0 &&
 		len(containerProfile.Spec.Opens) == 0 &&

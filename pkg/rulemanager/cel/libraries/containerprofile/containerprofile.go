@@ -78,15 +78,18 @@ type containerProfileFuncSpec struct {
 	// name is the function's suffix, e.g. "was_executed" (used after the
 	// "cp."/"ap." namespace prefix, and after the "cp_"/"ap_" overload-id
 	// prefix).
-	name       string
-	argTypes   []*cel.Type
-	resultType *cel.Type
-	arity      int
+	name                 string
+	argTypes             []*cel.Type
+	resultType           *cel.Type
+	arity                int
+	preserveProfileError bool
 	// call invokes the shared implementation method on l.
 	call func(l *containerProfileLibrary, args []ref.Val) ref.Val
 }
 
 var containerProfileFuncSpecs = []containerProfileFuncSpec{
+	{name: "was_dns_resolved", preserveProfileError: true, argTypes: []*cel.Type{cel.StringType, cel.StringType}, resultType: cel.BoolType, arity: 2, call: func(l *containerProfileLibrary, a []ref.Val) ref.Val { return l.wasDNSResolved(a[0], a[1], nil) }},
+	{name: "was_dns_resolved_by_process", preserveProfileError: true, argTypes: []*cel.Type{cel.StringType, cel.StringType, cel.StringType}, resultType: cel.BoolType, arity: 3, call: func(l *containerProfileLibrary, a []ref.Val) ref.Val { return l.wasDNSResolved(a[0], a[1], a[2]) }},
 	{
 		name:       "was_executed",
 		argTypes:   []*cel.Type{cel.StringType, cel.StringType},
@@ -223,6 +226,9 @@ func (l *containerProfileLibrary) declarationsWithPrefix(namePrefix, overloadIDP
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, fullName, cache.HashForContainerProfile(l.objectCache))
 					result := cachedFunc(values...)
+					if spec.preserveProfileError {
+						return result
+					}
 					// Convert "profile not available" error to false after cache layer
 					// This ensures: 1) error is not cached, 2) rule evaluation continues normally
 					return cache.ConvertProfileNotAvailableErrToBool(result, false)
@@ -318,6 +324,8 @@ type containerProfileCostEstimator struct{}
 func (e *containerProfileCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
 	cost := int64(0)
 	switch function {
+	case "cp.was_dns_resolved", "cp.was_dns_resolved_by_process":
+		cost = 15
 	case "cp.was_executed":
 		// Cache lookup + O(n) linear search through execs list
 		cost = 15

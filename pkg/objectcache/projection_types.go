@@ -44,15 +44,18 @@ type FieldSpec struct {
 // ProjectedContainerProfile is the cache-resident compact form. Pure node-agent
 // internal type; never serialized. Replaces *v1beta1.ContainerProfile in the cache.
 type ProjectedContainerProfile struct {
-	Opens            ProjectedField
-	Execs            ProjectedField
-	Endpoints        ProjectedField
-	Capabilities     ProjectedField
-	Syscalls         ProjectedField
-	EgressDomains    ProjectedField
-	EgressAddresses  ProjectedField
-	IngressDomains   ProjectedField
-	IngressAddresses ProjectedField
+	DNSLookups           map[string]map[string]struct{}
+	DNSBaselineVersion   string
+	DNSBaselineTruncated bool
+	Opens                ProjectedField
+	Execs                ProjectedField
+	Endpoints            ProjectedField
+	Capabilities         ProjectedField
+	Syscalls             ProjectedField
+	EgressDomains        ProjectedField
+	EgressAddresses      ProjectedField
+	IngressDomains       ProjectedField
+	IngressAddresses     ProjectedField
 
 	// ExecsByPath carries the per-Path Args slices from cp.Spec.Execs so
 	// downstream consumers (e.g. dynamicpathdetector.CompareExecArgs used

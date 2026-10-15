@@ -14,6 +14,8 @@ import (
 func TestDeclarationsCompileEachOverload(t *testing.T) {
 	// One well-typed call site per declared function.
 	exprByFunc := map[string]string{
+		"cp.was_dns_resolved":                   `cp.was_dns_resolved(containerID, s)`,
+		"cp.was_dns_resolved_by_process":        `cp.was_dns_resolved_by_process(containerID, s, s)`,
 		"cp.was_executed":                       `cp.was_executed(containerID, s)`,
 		"cp.was_executed_with_args":             `cp.was_executed_with_args(containerID, s, strs)`,
 		"cp.was_path_opened":                    `cp.was_path_opened(containerID, s)`,
@@ -77,6 +79,10 @@ func TestDeclarationsCompileEachOverload(t *testing.T) {
 				t.Fatalf("program %q failed: %v", expr, err)
 			}
 			out, _, err := program.Eval(activation)
+			if name == "cp.was_dns_resolved" || name == "cp.was_dns_resolved_by_process" {
+				assert.Error(t, err, "DNS readiness failures must propagate rather than become false")
+				return
+			}
 			if err != nil {
 				t.Fatalf("eval %q failed: %v", expr, err)
 			}

@@ -163,6 +163,10 @@ func NewEventHandlerFactory(
 			if hardlinkEvent, ok := event.(utils.LinkEvent); ok {
 				containerProfileManager.ReportHardlinkEvent(hardlinkEvent.GetContainerID(), hardlinkEvent)
 			}
+		case utils.DnsEventType:
+			if dnsEvent, ok := event.(utils.DNSEvent); ok {
+				containerProfileManager.ReportDNSEvent(dnsEvent.GetContainerID(), dnsEvent)
+			}
 		case utils.NetworkEventType:
 			if networkEvent, ok := event.(utils.NetworkEvent); ok {
 				containerProfileManager.ReportNetworkEvent(networkEvent.GetContainerID(), networkEvent)
@@ -455,7 +459,7 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	ehf.handlers[utils.NetworkEventType] = []Manager{containerProfileManager, ruleManager, networkStreamClient, metrics}
 
 	// DNS events
-	ehf.handlers[utils.DnsEventType] = []Manager{dnsManager, ruleManager, networkStreamClient, metrics}
+	ehf.handlers[utils.DnsEventType] = []Manager{dnsManager, containerProfileManager, ruleManager, networkStreamClient, metrics}
 	// Forwarded DNS queries and error responses: rule manager only. The DNS
 	// manager would issue its own lookup for a name without addresses, and the
 	// network stream would record a query as an outbound connection.

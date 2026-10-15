@@ -42,6 +42,9 @@ type ContainerEntry struct {
 
 // containerData contains all the monitored data for a single container
 type containerData struct {
+	dnsLookups           map[string]v1beta1.DNSLookup
+	dnsNames             map[string]struct{} // retained across flushes to enforce a learning-window cap
+	dnsBaselineTruncated bool
 	// Core container information
 	watchedContainerData *objectcache.WatchedContainerData
 	queueErrors          chan error // One retained terminal verdict; accessed under the entry lock.
