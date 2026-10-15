@@ -52,3 +52,8 @@ already carrying `v1`. Storage marks detected mixed-version aggregates unusable;
 operators must still explicitly reset historical profiles instead of backfilling
 or assuming that a version marker proves a complete DNS-aware learning window. Older agents cannot
 compile the helpers, so rule rollout must be version-gated operationally.
+
+DNS collector availability is part of baseline completeness. Disabled collection,
+startup gaps, exhausted retries, and collector restarts invalidate overlapping
+learning windows. Recovery does not repair those windows: explicitly relearn
+with the DNS collector running throughout the new window.

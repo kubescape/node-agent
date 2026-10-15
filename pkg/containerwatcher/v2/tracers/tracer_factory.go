@@ -239,6 +239,9 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 
 	// Create DNS tracer
 	dnsTracerOpts := []DNSTracerOption{}
+	if reporter, ok := tf.containerProfileManager.(interface{ SetDNSCollectorAvailable(bool) }); ok {
+		dnsTracerOpts = append(dnsTracerOpts, WithDNSCollectorAvailability(reporter.SetDNSCollectorAvailable))
+	}
 	// Forwarded queries only ever reach the rule manager, so without runtime
 	// detection there is nobody to consume them.
 	if tf.cfg.EnableRuntimeDetection {

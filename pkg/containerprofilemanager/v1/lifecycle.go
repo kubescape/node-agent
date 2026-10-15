@@ -79,6 +79,7 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(parent context.Conte
 		data:  &containerData{monitorDone: make(chan struct{}), queueErrors: make(chan error, 1)},
 		ready: make(chan struct{}),
 	}
+	cpm.initializeDNSBaseline(entry.data)
 	for !cpm.addContainerEntryIfAbsent(containerID, entry) {
 		// Another goroutine is already registering (or has registered) this
 		// container. entry.ready closes on BOTH success and failure of that

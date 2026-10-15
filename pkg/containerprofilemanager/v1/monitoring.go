@@ -288,7 +288,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 
 	// An empty baseline proves absence only when DNS collection was enabled.
 	// Match DNSTracer.IsEnabled and keep incomplete collection sticky across reports.
-	if cpm.cfg.DDns || (!cpm.cfg.EnableNetworkTracing && !cpm.cfg.EnableRuntimeDetection) {
+	generation := cpm.dnsCollectorGeneration.Load()
+	if generation%2 == 0 || generation != containerData.dnsCollectorGeneration || cpm.cfg.DDns || (!cpm.cfg.EnableNetworkTracing && !cpm.cfg.EnableRuntimeDetection) {
 		containerData.dnsBaselineTruncated = true
 	}
 

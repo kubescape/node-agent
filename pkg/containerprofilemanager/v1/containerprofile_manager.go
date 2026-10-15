@@ -42,9 +42,10 @@ type ContainerEntry struct {
 
 // containerData contains all the monitored data for a single container
 type containerData struct {
-	dnsLookups           map[string]v1beta1.DNSLookup
-	dnsNames             map[string]struct{} // retained across flushes to enforce a learning-window cap
-	dnsBaselineTruncated bool
+	dnsLookups             map[string]v1beta1.DNSLookup
+	dnsNames               map[string]struct{} // retained across flushes to enforce a learning-window cap
+	dnsBaselineTruncated   bool
+	dnsCollectorGeneration uint64
 	// Core container information
 	watchedContainerData *objectcache.WatchedContainerData
 	queueErrors          chan error // One retained terminal verdict; accessed under the entry lock.
@@ -98,19 +99,21 @@ func (data *containerData) stopMonitoring() {
 
 // ContainerProfileManager manages container profiles and their lifecycle
 type ContainerProfileManager struct {
-	lifecycleQueue    utils.LifecycleQueue
-	pendingAdds       utils.PendingAdds
-	ctx               context.Context
-	cfg               config.Config
-	k8sClient         k8sclient.K8sClientInterface
-	k8sObjectCache    objectcache.K8sObjectCache
-	k8sInventory      common.K8sInventoryCache
-	storageClient     storage.ProfileCreator
-	dnsResolverClient dnsmanager.DNSResolver
-	seccompManager    seccompmanager.SeccompManagerClient
-	enricher          containerprofilemanager.Enricher
-	ruleBindingCache  rulebindingmanager.RuleBindingCache
-	queueData         *queue.QueueData
+	// Even generations are unavailable; odd generations are running.
+	dnsCollectorGeneration atomic.Uint64
+	lifecycleQueue         utils.LifecycleQueue
+	pendingAdds            utils.PendingAdds
+	ctx                    context.Context
+	cfg                    config.Config
+	k8sClient              k8sclient.K8sClientInterface
+	k8sObjectCache         objectcache.K8sObjectCache
+	k8sInventory           common.K8sInventoryCache
+	storageClient          storage.ProfileCreator
+	dnsResolverClient      dnsmanager.DNSResolver
+	seccompManager         seccompmanager.SeccompManagerClient
+	enricher               containerprofilemanager.Enricher
+	ruleBindingCache       rulebindingmanager.RuleBindingCache
+	queueData              *queue.QueueData
 
 	// Cloud metadata for annotation population
 	cloudMetadata *armotypes.CloudMetadata

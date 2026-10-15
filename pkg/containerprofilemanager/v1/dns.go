@@ -77,3 +77,22 @@ func (cd *containerData) getDNSLookups() []v1beta1.DNSLookup {
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
+
+// SetDNSCollectorAvailable records actual gadget lifecycle, independently of configuration.
+// Each transition changes the generation, invalidating every overlapping learning window.
+func (cpm *ContainerProfileManager) SetDNSCollectorAvailable(available bool) {
+	for {
+		generation := cpm.dnsCollectorGeneration.Load()
+		if (generation%2 == 1) == available {
+			return
+		}
+		if cpm.dnsCollectorGeneration.CompareAndSwap(generation, generation+1) {
+			return
+		}
+	}
+}
+
+func (cpm *ContainerProfileManager) initializeDNSBaseline(data *containerData) {
+	data.dnsCollectorGeneration = cpm.dnsCollectorGeneration.Load()
+	data.dnsBaselineTruncated = data.dnsCollectorGeneration%2 == 0
+}
