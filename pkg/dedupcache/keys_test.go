@@ -46,19 +46,40 @@ func TestComputeNetworkKey_DifferentInputs(t *testing.T) {
 }
 
 func TestComputeDNSKey_Deterministic(t *testing.T) {
-	k1 := ComputeDNSKey(100, "example.com")
-	k2 := ComputeDNSKey(100, "example.com")
+	k1 := ComputeDNSKey(100, 1, "example.com.", "Q", "A", "")
+	k2 := ComputeDNSKey(100, 1, "example.com.", "Q", "A", "")
 	if k1 != k2 {
 		t.Fatalf("non-deterministic: %x != %x", k1, k2)
 	}
 }
 
 func TestComputeDNSKey_DifferentInputs(t *testing.T) {
-	k1 := ComputeDNSKey(100, "example.com")
-	k2 := ComputeDNSKey(100, "other.com")
-	k3 := ComputeDNSKey(200, "example.com")
-	if k1 == k2 || k1 == k3 {
-		t.Fatal("unexpected collision")
+	base := ComputeDNSKey(100, 1, "example.com.", "Q", "A", "")
+	variants := map[string]uint64{
+		"name":  ComputeDNSKey(100, 1, "other.com.", "Q", "A", ""),
+		"mntns": ComputeDNSKey(200, 1, "example.com.", "Q", "A", ""),
+		"pid":   ComputeDNSKey(100, 2, "example.com.", "Q", "A", ""),
+		"qr":    ComputeDNSKey(100, 1, "example.com.", "R", "A", ""),
+		"qtype": ComputeDNSKey(100, 1, "example.com.", "Q", "AAAA", ""),
+		"rcode": ComputeDNSKey(100, 1, "example.com.", "Q", "A", "NameError"),
+	}
+	for what, k := range variants {
+		if k == base {
+			t.Fatalf("changing %s must change the key", what)
+		}
+	}
+}
+
+// A SERVFAIL from the first resolver and the NXDOMAIN from the retry are both
+// responses for the same name and type; only rcode tells them apart.
+func TestComputeDNSKey_ResponseCodesAreDistinct(t *testing.T) {
+	servfail := ComputeDNSKey(100, 1, "example.com.", "R", "A", "ServerFailure")
+	nxdomain := ComputeDNSKey(100, 1, "example.com.", "R", "A", "NameError")
+	if servfail == nxdomain {
+		t.Fatal("SERVFAIL and NXDOMAIN responses must not share a dedup key")
+	}
+	if nxdomain != ComputeDNSKey(100, 1, "example.com.", "R", "A", "NameError") {
+		t.Fatal("identical responses must share a dedup key")
 	}
 }
 
@@ -137,7 +158,7 @@ func BenchmarkComputeNetworkKey(b *testing.B) {
 func BenchmarkComputeDNSKey(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		ComputeDNSKey(100, "example.com")
+		ComputeDNSKey(100, 1, "example.com.", "Q", "A", "")
 	}
 }
 

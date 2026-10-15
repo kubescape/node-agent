@@ -548,6 +548,27 @@ See [ALERT_BULKING.md](ALERT_BULKING.md) for detailed documentation.
 | `celConfigCache::maxSize` | int | `100000` | Cache entry limit |
 | `celConfigCache::ttl` | duration | `1m` | Cache entry TTL |
 
+#### DNS Rule Forwarding
+
+Forwards DNS queries and error responses (NXDOMAIN, SERVFAIL, REFUSED) to rule
+evaluation, as rule-only events that match `eventType: "dnsQuery"` expressions.
+Off by default; see `docs/features/dns-query-rule-forwarding.md`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `dnsRuleForwarding::enabled` | bool | `false` | Forward queries and error responses to the rule manager (requires `runtimeDetectionEnabled`) |
+| `dnsRuleForwarding::excludedSuffixes` | list | `[]` | Extra name suffixes never forwarded, on top of `.cluster.local.`, `.in-addr.arpa.`, `.ip6.arpa.` |
+
+**Example:**
+```json
+{
+  "dnsRuleForwarding": {
+    "enabled": true,
+    "excludedSuffixes": ["ec2.internal"]
+  }
+}
+```
+
 #### Debug Flags
 
 These flags disable specific tracers (useful for debugging):

@@ -39,6 +39,20 @@ func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 	baseRuntimeAlert.Arguments["addresses"] = dnsEvent.GetAddresses()
 	baseRuntimeAlert.Arguments["protocol"] = proto
 	baseRuntimeAlert.Arguments["port"] = dnsEvent.GetDstPort()
+	if utils.IsRuleOnlyEvent(dnsEvent) {
+		// A forwarded query or error response carries no answer addresses, so
+		// give triage the packet facts instead. For a query the name server is
+		// the packet's destination; for a response it is the source.
+		baseRuntimeAlert.Arguments["qr"] = string(dnsEvent.GetQr())
+		baseRuntimeAlert.Arguments["qtype"] = dnsEvent.GetQtype()
+		baseRuntimeAlert.Arguments["numAnswers"] = dnsEvent.GetNumAnswers()
+		if dnsEvent.GetQr() == utils.DNSPktTypeResponse {
+			baseRuntimeAlert.Arguments["rcode"] = dnsEvent.GetRcode()
+			baseRuntimeAlert.Arguments["nameserver"] = dnsEvent.GetSrcIP()
+		} else {
+			baseRuntimeAlert.Arguments["nameserver"] = dnsEvent.GetDstIP()
+		}
+	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
 			Name: comm,

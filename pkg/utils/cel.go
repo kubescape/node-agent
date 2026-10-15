@@ -46,6 +46,18 @@ var isSet = ref.FieldTester(func(target any) bool {
 	return true
 })
 
+// dnsResponseIsSet is true only for a DNS response, so has(event.rcode) is
+// false on a query. It does not use presenceOf("rcode"): the gadget declares
+// the field on every packet, queries included, so presence says nothing about
+// whether a value was written.
+var dnsResponseIsSet = ref.FieldTester(func(target any) bool {
+	x := target.(*xcel.Object[CelEvent])
+	if x.Raw == nil {
+		return false
+	}
+	return x.Raw.GetEventType() == DnsEventType && x.Raw.GetQr() == DNSPktTypeResponse
+})
+
 var requestIsSet = ref.FieldTester(func(target any) bool {
 	x := target.(*xcel.Object[CelEvent])
 	if x.Raw == nil {
@@ -202,6 +214,53 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, errCelObjectNil
 			}
 			return celtypes.Int(x.Raw.GetDstPort()), nil
+		}),
+	},
+	// DNS packet fields. qtype, qr and numAnswers are set on every DNS event;
+	// rcode only on a response, so rules guard it with has(event.rcode).
+	// See docs/features/dns-query-rule-forwarding.md.
+	"qtype": {
+		Type:  celtypes.StringType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.String(x.Raw.GetQtype()), nil
+		}),
+	},
+	"qr": {
+		Type:  celtypes.StringType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.String(x.Raw.GetQr()), nil
+		}),
+	},
+	"numAnswers": {
+		Type:  celtypes.IntType,
+		IsSet: isSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.Int(x.Raw.GetNumAnswers()), nil
+		}),
+	},
+	"rcode": {
+		Type:  celtypes.StringType,
+		IsSet: dnsResponseIsSet,
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.String(x.Raw.GetRcode()), nil
 		}),
 	},
 	// dstNamespace / dstPodLabels carry the peer identity that IG's

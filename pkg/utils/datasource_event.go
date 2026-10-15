@@ -74,10 +74,14 @@ type DatasourceEvent struct {
 	EventType       EventType
 	FullPathTracing bool
 	Internal        bool
-	Request         *http.Request
-	Response        *http.Response
-	Syscall         string
-	extra           any
+	// RuleOnly marks an event that only the rule manager may consume; see
+	// RuleOnlyEvent. Set by the DNS tracer on forwarded queries and error
+	// responses.
+	RuleOnly bool
+	Request  *http.Request
+	Response *http.Response
+	Syscall  string
+	extra    any
 }
 
 var _ BpfEvent = (*DatasourceEvent)(nil)
@@ -781,12 +785,45 @@ func (e *DatasourceEvent) GetPupperLayer() bool {
 	return pupperLayer
 }
 
+// GetQr returns Q or R for a DNS event and "" for any other event type, so a
+// rule that reads event.qr on a non-DNS event gets the documented empty value
+// instead of a spurious Q.
 func (e *DatasourceEvent) GetQr() DNSPktType {
+	if e.EventType != DnsEventType {
+		return ""
+	}
 	isResponse, _ := e.getFieldAccessor("qr_raw").Bool(e.Data)
 	if isResponse {
 		return DNSPktTypeResponse
 	}
 	return DNSPktTypeQuery
+}
+
+// GetQtype returns the DNS question type name. Non-DNS events return "" without
+// touching the datasource, so a rule that reads event.qtype on another event
+// type does not log a missing-field warning.
+func (e *DatasourceEvent) GetQtype() string {
+	if e.EventType != DnsEventType {
+		return ""
+	}
+	qtype, _ := e.getFieldAccessor("qtype").String(e.Data)
+	return qtype
+}
+
+// GetRcode returns the DNS response code name for a response and "" for a
+// query. The gadget operator only writes rcode on responses, and packet buffers
+// are pooled, so the field must not be read on a query.
+func (e *DatasourceEvent) GetRcode() string {
+	if e.EventType != DnsEventType || e.GetQr() != DNSPktTypeResponse {
+		return ""
+	}
+	rcode, _ := e.getFieldAccessor("rcode").String(e.Data)
+	return rcode
+}
+
+// IsRuleOnly implements RuleOnlyEvent.
+func (e *DatasourceEvent) IsRuleOnly() bool {
+	return e.RuleOnly
 }
 
 func (e *DatasourceEvent) GetRequest() *http.Request {
