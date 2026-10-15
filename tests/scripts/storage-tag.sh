@@ -1,6 +1,14 @@
 #!/bin/bash
 set -eo pipefail
 
+# Pseudo-versions identify source commits, not published container tags. Component
+# CI builds that exact source in prepare-storage-image instead of calling here.
+FLOOR_TAG=$(go list -m -f '{{.Version}}' github.com/kubescape/storage 2>/dev/null || true)
+if [[ "$FLOOR_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+    echo "Storage ${FLOOR_TAG} requires a source-built image; it is not a release image tag." >&2
+    exit 1
+fi
+
 # 1. Latest release tag from kubescape/storage repository (using git ls-remote to avoid GitHub API rate limits)
 LATEST_TAG=$(git ls-remote --tags --refs https://github.com/kubescape/storage.git 2>/dev/null | awk -F/ '{print $3}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
 
@@ -17,7 +25,5 @@ fi
 # this repo's client library needs, component-tests would silently regress
 # (an older server drops CRD fields the newer client sets). Take the newest
 # available tag so CI runs against the latest server release.
-FLOOR_TAG=$(go list -m -f '{{.Version}}' github.com/kubescape/storage 2>/dev/null || true)
-
 printf '%s\n%s\n%s\n' "$LATEST_TAG" "$DYNAMIC_TAG" "$FLOOR_TAG" | grep -v '^$' | sort -V | tail -n1
 
