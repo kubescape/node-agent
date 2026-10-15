@@ -1,12 +1,12 @@
 package containerprofile
 
 import (
+	"strings"
+
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
-	"strings"
 )
 
 func (l *containerProfileLibrary) wasDNSResolved(containerID, domain, process ref.Val) ref.Val {
@@ -33,13 +33,12 @@ func (l *containerProfileLibrary) wasDNSResolved(containerID, domain, process re
 	if profileCache == nil {
 		return cache.NewProfileNotAvailableErr("no container profile cache available")
 	}
-	state := profileCache.GetContainerProfileState(id)
+	cp, state := profileCache.GetContainerProfileSnapshot(id)
 	if state == nil || state.Error != nil || state.Status != helpersv1.Completed || state.Completion != helpersv1.Full {
 		return cache.NewProfileNotAvailableErr("DNS baseline requires a completed full profile")
 	}
-	cp, _, err := profilehelper.GetProjectedContainerProfile(l.objectCache, id)
-	if err != nil {
-		return cache.NewProfileNotAvailableErr("%v", err)
+	if cp == nil {
+		return cache.NewProfileNotAvailableErr("no DNS profile available")
 	}
 	if cp.DNSBaselineVersion != "v1" || cp.DNSBaselineTruncated {
 		return cache.NewProfileNotAvailableErr("DNS baseline unavailable or truncated; relearning required")

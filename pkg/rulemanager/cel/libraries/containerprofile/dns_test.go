@@ -20,6 +20,7 @@ func TestDNSBaselineMatching(t *testing.T) {
 		want                        bool
 		wantErr                     bool
 	}{
+		{name: "DNS root", domain: ".", path: "/app", version: "v1", want: true},
 		{name: "same process", domain: "API.VENDOR.COM", path: "/app", version: "v1", want: true},
 		{name: "different process", domain: "api.vendor.com.", path: "/usr/bin/python3", version: "v1"},
 		{name: "new name", domain: "new.vendor.com.", path: "/app", version: "v1"},
@@ -31,7 +32,7 @@ func TestDNSBaselineMatching(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cache := &objectcachev1.RuleObjectCacheMock{}
 			cache.SetContainerProfileState(&objectcache.ProfileState{Status: "completed", Completion: "complete"})
-			cache.SetContainerProfile(&v1beta1.ContainerProfile{Spec: v1beta1.ContainerProfileSpec{DNSBaselineVersion: tc.version, DNSBaselineTruncated: tc.truncated, DNSLookups: []v1beta1.DNSLookup{{Name: "api.vendor.com.", ExePaths: []string{"/app"}}}, Egress: []v1beta1.NetworkNeighbor{{DNS: "network-only.example."}}}})
+			cache.SetContainerProfile(&v1beta1.ContainerProfile{Spec: v1beta1.ContainerProfileSpec{DNSBaselineVersion: tc.version, DNSBaselineTruncated: tc.truncated, DNSLookups: []v1beta1.DNSLookup{{Name: ".", ExePaths: []string{"/app"}}, {Name: "api.vendor.com.", ExePaths: []string{"/app"}}}, Egress: []v1beta1.NetworkNeighbor{{DNS: "network-only.example."}}}})
 			env, err := cel.NewEnv(CP(cache, config.Config{}))
 			require.NoError(t, err)
 			ast, issues := env.Compile("cp.was_dns_resolved_by_process('container', '" + tc.domain + "', '" + tc.path + "')")
@@ -103,4 +104,33 @@ func TestDNSBaselineReadinessRefreshBypassesResultCache(t *testing.T) {
 			})
 		}
 	}
+}
+
+// This cache models an authored-profile removal between the legacy reads.
+type refreshingDNSCache struct {
+	*objectcachev1.RuleObjectCacheMock
+}
+
+func (c *refreshingDNSCache) ContainerProfileCache() objectcache.ContainerProfileCache { return c }
+func (c *refreshingDNSCache) GetContainerProfileState(id string) *objectcache.ProfileState {
+	old := c.RuleObjectCacheMock.GetContainerProfileState(id)
+	c.SetContainerProfileState(&objectcache.ProfileState{Status: "completed", Completion: "partial"})
+	return old
+}
+func (c *refreshingDNSCache) GetContainerProfileSnapshot(id string) (*objectcache.ProjectedContainerProfile, *objectcache.ProfileState) {
+	// The replacement entry is partial; it cannot establish a DNS anomaly.
+	return c.GetProjectedContainerProfile(id), &objectcache.ProfileState{Status: "completed", Completion: "partial"}
+}
+func TestDNSBaselineUsesConsistentCacheSnapshot(t *testing.T) {
+	cache := &refreshingDNSCache{&objectcachev1.RuleObjectCacheMock{}}
+	cache.SetContainerProfile(&v1beta1.ContainerProfile{Spec: v1beta1.ContainerProfileSpec{DNSBaselineVersion: "v1"}})
+	cache.SetContainerProfileState(&objectcache.ProfileState{Status: "completed", Completion: "complete"})
+	env, err := cel.NewEnv(CP(cache, config.Config{}))
+	require.NoError(t, err)
+	ast, issues := env.Compile("!cp.was_dns_resolved('container','new.example.')")
+	require.NoError(t, issues.Err())
+	program, err := env.Program(ast)
+	require.NoError(t, err)
+	_, _, err = program.Eval(map[string]any{})
+	require.Error(t, err, "partial replacement must not use the authored profile's old readiness")
 }

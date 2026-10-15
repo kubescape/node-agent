@@ -14,6 +14,8 @@ import (
 // GetContainerProfile — callers receive the compact projected form instead of
 // the raw CRD pointer.
 type ContainerProfileCache interface {
+	// GetContainerProfileSnapshot returns projection and readiness from one immutable entry.
+	GetContainerProfileSnapshot(containerID string) (*ProjectedContainerProfile, *ProfileState)
 	GetProjectedContainerProfile(containerID string) *ProjectedContainerProfile
 	GetContainerProfileState(containerID string) *ProfileState
 	GetCallStackSearchTree(containerID string) *callstackcache.CallStackSearchTree
@@ -43,3 +45,7 @@ func (cp *ContainerProfileCacheMock) SetProjectionSpec(_ RuleProjectionSpec) {}
 func (cp *ContainerProfileCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {}
 
 func (cp *ContainerProfileCacheMock) Start(_ context.Context) {}
+
+func (cp *ContainerProfileCacheMock) GetContainerProfileSnapshot(id string) (*ProjectedContainerProfile, *ProfileState) {
+	return nil, cp.GetContainerProfileState(id)
+}

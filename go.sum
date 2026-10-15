@@ -930,6 +930,8 @@ github.com/kubescape/k8s-interface v0.0.214 h1:j7KP0/5VvYOoQdBGV2+gRM3qnR8PWLAGF
 github.com/kubescape/k8s-interface v0.0.214/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
 github.com/kubescape/storage v0.0.353-0.20261015150437-51188783e07c h1:wcCieKelc5NMt4t8nXWSgzYQlR2hGlXTRTO2JF+FHUg=
 github.com/kubescape/storage v0.0.353-0.20261015150437-51188783e07c/go.mod h1:ftzlaQMUuHjBE7rKZLywLYQHoF7KrwB2Ou217/+8CNI=
+github.com/kubescape/storage v0.0.353-0.20261015161907-5b4dacf1bc8a h1:oirRfPB8/oZBIRmtj4+rMDLcgPwNv7wBGOKsZrOjOTU=
+github.com/kubescape/storage v0.0.353-0.20261015161907-5b4dacf1bc8a/go.mod h1:ftzlaQMUuHjBE7rKZLywLYQHoF7KrwB2Ou217/+8CNI=
 github.com/kubescape/syft v1.32.0-ks.2 h1:xdUksUmKEyyVKsTfJDYW8Z5HawVJtelsUolPOsWtDx0=
 github.com/kubescape/syft v1.32.0-ks.2/go.mod h1:E6Kd4iBM2ljUOUQvSt7hVK6vBwaHkMXwcvBZmGMSY5o=
 github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf h1:hI0jVwrB6fT4GJWvuUjzObfci1CUknrZdRHfnRVtKM0=

@@ -361,3 +361,7 @@ func (r *RuleObjectCacheMock) DeleteHandler(_ context.Context, _ runtime.Object)
 func (r *RuleObjectCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {
 	return
 }
+
+func (r *RuleObjectCacheMock) GetContainerProfileSnapshot(id string) (*objectcache.ProjectedContainerProfile, *objectcache.ProfileState) {
+	return r.GetProjectedContainerProfile(id), r.GetContainerProfileState(id)
+}

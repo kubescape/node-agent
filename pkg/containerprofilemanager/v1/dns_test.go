@@ -2,11 +2,12 @@ package containerprofilemanager
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	storagefile "github.com/kubescape/storage/pkg/registry/file"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func dnsResponse(name, path string) *utils.StructEvent {
@@ -68,4 +69,11 @@ func TestDNSBaselineCapsPersistAcrossFlush(t *testing.T) {
 	manager.ReportDNSEvent("container", dnsResponse("overflow.example.", "/app"))
 	require.True(t, entry.data.dnsBaselineTruncated)
 	require.Empty(t, entry.data.getDNSLookups())
+}
+
+func TestDNSBaselineLearnsRootName(t *testing.T) {
+	manager, entry := newTestManager(t, "container")
+	manager.ReportDNSEvent("container", dnsResponse(".", "/app"))
+	require.Len(t, entry.data.getDNSLookups(), 1)
+	require.Equal(t, ".", entry.data.getDNSLookups()[0].Name)
 }

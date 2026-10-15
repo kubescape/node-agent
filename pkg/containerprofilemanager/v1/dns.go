@@ -1,14 +1,15 @@
 package containerprofilemanager
 
 import (
+	"net"
+	"sort"
+	"strings"
+
 	"github.com/DmitriyVTitov/size"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storagefile "github.com/kubescape/storage/pkg/registry/file"
-	"net"
-	"sort"
-	"strings"
 )
 
 // ReportDNSEvent learns successful answered responses during the existing learning window.
@@ -18,7 +19,7 @@ func (cpm *ContainerProfileManager) ReportDNSEvent(containerID string, event uti
 		return
 	}
 	name := strings.ToLower(strings.TrimSuffix(event.GetDNSName(), "."))
-	if name == "" || len(name) > 253 {
+	if event.GetDNSName() == "" || len(name) > 253 {
 		return
 	}
 	name += "."
