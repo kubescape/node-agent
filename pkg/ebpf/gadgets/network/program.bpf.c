@@ -138,17 +138,25 @@ int ig_trace_net(struct __sk_buff *skb)
 
     gadget_process_populate_from_socket(skb_val, &event->proc);
 
-    // tmp_events is reused: do not retain another socket's path on lookup/read failure.
+    // The socket metadata is a map value: copy directly without a kernel-read
+    // helper, which socket filters cannot use on some kernels/lockdown modes.
+    // tmp_events is reused, so missing attribution must clear the previous path.
     event->exepath[0] = '\0';
-    // Older supported kernels do not expose this helper to socket filters.
-    if (skb_val && bpf_core_field_exists(skb_val->exepath) &&
-        bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_probe_read_kernel_str)) {
+    if (skb_val && bpf_core_field_exists(skb_val->exepath)) {
         unsigned int exepath_len = bpf_core_field_size(skb_val->exepath);
-        if (exepath_len > sizeof(event->exepath))
-            exepath_len = sizeof(event->exepath);
-        if (bpf_probe_read_kernel_str(event->exepath, exepath_len,
-                                      skb_val->exepath) < 0)
-            event->exepath[0] = '\0';
+        const char *exepath = (const char *)skb_val +
+                             bpf_core_field_offset(skb_val->exepath);
+#pragma unroll
+        for (int i = 0; i < NETWORK_PATH_MAX; i++) {
+            if (i + 1 >= exepath_len || i == NETWORK_PATH_MAX - 1) {
+                event->exepath[i] = '\0';
+                break;
+            }
+            char c = exepath[i];
+            event->exepath[i] = c;
+            if (!c)
+                break;
+        }
     }
 
 	event->netns_id = skb->cb[0]; // cb[0] initialized by dispatcher.bpf.c

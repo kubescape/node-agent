@@ -8,6 +8,7 @@
 #include <linux/udp.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <stddef.h>
 #include <string.h>
 #include <arpa/inet.h>
 #define SEC(s)
@@ -16,7 +17,12 @@
 #define bpf_ntohs(x) ntohs(x)
 typedef __u64 gadget_timestamp, gadget_netns_id;
 struct gadget_process { int pid; };
-struct gadget_socket_value { int unused; };
+struct gadget_socket_value { char exepath[1024]; };
+static bool path_exists = true, socket_available = true;
+static unsigned path_size = sizeof(((struct gadget_socket_value *)0)->exepath);
+#define bpf_core_field_exists(field) path_exists
+#define bpf_core_field_size(field) path_size
+#define bpf_core_field_offset(field) offsetof(struct gadget_socket_value, exepath)
 struct gadget_l4endpoint_t {
  union { __u32 v4; __u8 v6[16]; } addr_raw;
  __u16 port;
@@ -35,7 +41,7 @@ static unsigned long long load_byte(const void *skb, unsigned long long off) {
  const struct __sk_buff *s = skb;
  return off < s->len ? packet[off] : 0;
 }
-static struct gadget_socket_value *gadget_socket_lookup(struct __sk_buff *skb) { return &socket_value; }
+static struct gadget_socket_value *gadget_socket_lookup(struct __sk_buff *skb) { return socket_available ? &socket_value : NULL; }
 static bool gadget_should_discard_data_by_skb(struct gadget_socket_value *s) { return discard; }
 static void gadget_process_populate_from_socket(struct gadget_socket_value *s, struct gadget_process *p) { p->pid = 42; }
 static __u64 bpf_ktime_get_boot_ns(void) { return 123; }

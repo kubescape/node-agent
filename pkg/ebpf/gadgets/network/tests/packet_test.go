@@ -28,7 +28,7 @@ func TestNetworkPackets(t *testing.T) {
 			text = strings.ReplaceAll(text, "unsigned long long load_byte(const void *skb,\n    unsigned long long off) asm(\"llvm.bpf.load.byte\");", "")
 		}
 		for line := range strings.SplitSeq(text, "\n") {
-			if (path == "../program.h" || path == "../program.bpf.c") && (strings.HasPrefix(line, "#include") || strings.HasPrefix(line, "#pragma once")) {
+			if (path == "../program.h" || path == "../program.bpf.c") && (strings.HasPrefix(line, "#include") || strings.HasPrefix(line, "#pragma once") || strings.HasPrefix(line, "#pragma unroll")) {
 				continue
 			}
 			source.WriteString(line)
