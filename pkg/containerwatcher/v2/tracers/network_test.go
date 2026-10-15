@@ -17,6 +17,7 @@ func TestNetworkFields(t *testing.T) {
 	expectedFields := map[string][]string{
 		"network": {
 			"egress",
+			"exepath",
 			"endpoint",
 			"endpoint.addr_raw",
 			"endpoint.addr_raw.v4",
