@@ -365,16 +365,23 @@ func (e *DatasourceEvent) GetDNSName() string {
 }
 
 func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
-	addr, _ := e.getFieldAccessor("endpoint.addr_raw.v4").Uint32(e.Data)
 	kind, _ := e.getFieldAccessor("endpoint.k8s.kind").String(e.Data)
 	name, _ := e.getFieldAccessor("endpoint.k8s.name").String(e.Data)
 	namespace, _ := e.getFieldAccessor("endpoint.k8s.namespace").String(e.Data)
 	podLabels, _ := e.getFieldAccessor("endpoint.k8s.labels").String(e.Data)
 	version, _ := e.getFieldAccessor("endpoint.version").Uint8(e.Data)
+	var addr string
+	if version == 6 {
+		raw, _ := e.getFieldAccessor("endpoint.addr_raw.v6").Bytes(e.Data)
+		addr = rawIPv6ToString(raw)
+	} else {
+		raw, _ := e.getFieldAccessor("endpoint.addr_raw.v4").Uint32(e.Data)
+		addr = rawIPv4ToString(raw)
+	}
 	port, _ := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
 	proto, _ := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
 	return types.L4Endpoint{
-		Addr:      rawIPv4ToString(addr),
+		Addr:      addr,
 		Version:   version,
 		Namespace: namespace,
 		Name:      name,
