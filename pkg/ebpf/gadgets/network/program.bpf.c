@@ -140,7 +140,9 @@ int ig_trace_net(struct __sk_buff *skb)
 
     // tmp_events is reused: do not retain another socket's path on lookup/read failure.
     event->exepath[0] = '\0';
-    if (skb_val && bpf_core_field_exists(skb_val->exepath)) {
+    // Older supported kernels do not expose this helper to socket filters.
+    if (skb_val && bpf_core_field_exists(skb_val->exepath) &&
+        bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_probe_read_kernel_str)) {
         unsigned int exepath_len = bpf_core_field_size(skb_val->exepath);
         if (exepath_len > sizeof(event->exepath))
             exepath_len = sizeof(event->exepath);
