@@ -78,7 +78,7 @@ func (e *netCostEstimator) EstimateCallCost(function, overloadID string, target 
 	cost := int64(0)
 	switch function {
 	case "net.is_private_ip":
-		// IP parsing O(1) + byte comparison across 6 IP ranges O(6) = O(1)
+		// IP parsing and fixed-size address classification are O(1).
 		cost = 8
 	}
 	return &checker.CallEstimate{Min: uint64(cost), Max: uint64(cost)}

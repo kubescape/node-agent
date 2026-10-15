@@ -166,7 +166,7 @@ func TestListenerCache_CoalescesConcurrentReads(t *testing.T) {
 				close(readStarted)
 			}
 			<-gate
-			return map[uint16]struct{}{8080: {}}, nil
+			return map[uint16]struct{}{8080: {}, 8081: {}}, nil
 		},
 	}
 
@@ -175,7 +175,7 @@ func TestListenerCache_CoalescesConcurrentReads(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			listening, known := c.listening("cont-shared", 10, 8080)
+			listening, known := c.listening("cont-shared", 10, uint16(8080+i%2))
 			require.True(t, known && listening)
 		}()
 	}

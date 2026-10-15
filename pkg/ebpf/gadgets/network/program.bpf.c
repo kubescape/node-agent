@@ -56,25 +56,42 @@ int ig_trace_net(struct __sk_buff *skb)
 	struct ethhdr ethh;
 	if (bpf_skb_load_bytes(skb, 0, &ethh, sizeof(ethh)))
 		return 0;
-	if (bpf_ntohs(ethh.h_proto) != ETH_P_IP)
-		return 0;
+	struct iphdr iph = {};
+	struct ipv6hdr ip6h;
+	__u8 version;
+	__u8 protocol;
+	int l4_off;
 
-	int ip_off = ETH_HLEN;
-	// Read the IP header.
-	struct iphdr iph;
-	if (bpf_skb_load_bytes(skb, ip_off, &iph, sizeof(iph)))
+	switch (bpf_ntohs(ethh.h_proto)) {
+	case ETH_P_IP: {
+		if (bpf_skb_load_bytes(skb, ETH_HLEN, &iph, sizeof(iph)))
+			return 0;
+		__u8 ihl_byte = load_byte(skb, ETH_HLEN);
+		__u8 ip_header_len = (ihl_byte & 0x0F) * 4;
+		if (iph.version != 4 || ip_header_len < sizeof(iph))
+			return 0;
+		l4_off = ETH_HLEN + ip_header_len;
+		protocol = iph.protocol;
+		version = 4;
+		break;
+	}
+	case ETH_P_IPV6:
+		if (bpf_skb_load_bytes(skb, ETH_HLEN, &ip6h, sizeof(ip6h)))
+			return 0;
+		if (ip6h.version != 6)
+			return 0;
+		l4_off = ETH_HLEN + sizeof(ip6h);
+		// As with the SSH gadget, extension headers are not traversed.
+		protocol = ip6h.nexthdr;
+		version = 6;
+		break;
+	default:
 		return 0;
+	}
 
-    // An IPv4 header doesn't have a fixed size. The IHL field of a packet
-    // represents the size of the IP header in 32-bit words, so we need to
-    // multiply this value by 4 to get the header size in bytes.
-    // Avoid taking the address of the bit-field; read the first byte from skb.
-    __u8 ihl_byte = load_byte(skb, ip_off);
-    __u8 ip_header_len = (ihl_byte & 0x0F) * 4;
-	int l4_off = ip_off + ip_header_len;
 	__u16 port;
 
-	if (iph.protocol == IPPROTO_TCP) {
+	if (protocol == IPPROTO_TCP) {
 		// Read the TCP header.
 		struct tcphdr tcph;
 		if (bpf_skb_load_bytes(skb, l4_off, &tcph, sizeof(tcph)))
@@ -85,7 +102,7 @@ int ig_trace_net(struct __sk_buff *skb)
 
         // Access direct field from the parsed header (network byte order kept)
         port = tcph.dest;
-	} else if (iph.protocol == IPPROTO_UDP) {
+	} else if (protocol == IPPROTO_UDP) {
 		// Read the UDP header.
 		struct udphdr udph;
 		if (bpf_skb_load_bytes(skb, l4_off, &udph, sizeof(udph)))
@@ -124,15 +141,17 @@ int ig_trace_net(struct __sk_buff *skb)
 	event->netns_id = skb->cb[0]; // cb[0] initialized by dispatcher.bpf.c
     event->timestamp_raw = bpf_ktime_get_boot_ns();
 
-    if (skb->pkt_type == PACKET_HOST) {
-        // Read from skb buffer to avoid taking addresses of bit-fields/stack
-        event->endpoint.addr_raw.v4 = iph.saddr;
-    } else {
-        event->endpoint.addr_raw.v4 = iph.daddr;
-    }
-    event->endpoint.proto_raw = iph.protocol;
+	if (version == 4) {
+		event->endpoint.addr_raw.v4 = skb->pkt_type == PACKET_HOST ? iph.saddr : iph.daddr;
+	} else {
+		// IPv6 source and destination addresses start at bytes 8 and 24.
+		int addr_off = ETH_HLEN + (skb->pkt_type == PACKET_HOST ? 8 : 24);
+		if (bpf_skb_load_bytes(skb, addr_off, &event->endpoint.addr_raw.v6[0], 16))
+			return 0;
+	}
+	event->endpoint.proto_raw = protocol;
 	event->endpoint.port = bpf_ntohs(port);
-	event->endpoint.version = 4;
+	event->endpoint.version = version;
 	event->egress = skb->pkt_type == PACKET_OUTGOING;
 
     bpf_perf_event_output(skb, &events, BPF_F_CURRENT_CPU, event, sizeof(*event));

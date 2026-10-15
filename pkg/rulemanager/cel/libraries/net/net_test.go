@@ -22,6 +22,22 @@ func TestNetLibrary(t *testing.T) {
 		expr     string
 		expected bool
 	}{
+		{name: "fc00::", expr: "net.is_private_ip('fc00::')", expected: true},
+		{name: "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", expr: "net.is_private_ip('fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff')", expected: true},
+		{name: "fbff:ffff::1", expr: "net.is_private_ip('fbff:ffff::1')", expected: false},
+		{name: "fe00::", expr: "net.is_private_ip('fe00::')", expected: false},
+		{name: "fe80::", expr: "net.is_private_ip('fe80::')", expected: true},
+		{name: "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff", expr: "net.is_private_ip('febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff')", expected: true},
+		{name: "fe7f:ffff::1", expr: "net.is_private_ip('fe7f:ffff::1')", expected: false},
+		{name: "fec0::", expr: "net.is_private_ip('fec0::')", expected: false},
+		{name: "2001:4860:4860::8888", expr: "net.is_private_ip('2001:4860:4860::8888')", expected: false},
+		{name: "::", expr: "net.is_private_ip('::')", expected: false},
+		{name: "100.64.0.0", expr: "net.is_private_ip('100.64.0.0')", expected: true},
+		{name: "100.127.255.255", expr: "net.is_private_ip('100.127.255.255')", expected: true},
+		{name: "100.63.255.255", expr: "net.is_private_ip('100.63.255.255')", expected: false},
+		{name: "100.128.0.0", expr: "net.is_private_ip('100.128.0.0')", expected: false},
+		{name: "::ffff:100.64.0.1", expr: "net.is_private_ip('::ffff:100.64.0.1')", expected: true},
+		{name: "::ffff:8.8.8.8", expr: "net.is_private_ip('::ffff:8.8.8.8')", expected: false},
 		{
 			name:     "localhost IPv4",
 			expr:     "net.is_private_ip('127.0.0.1')",

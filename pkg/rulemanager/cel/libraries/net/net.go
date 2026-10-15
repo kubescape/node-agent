@@ -1,7 +1,6 @@
 package net
 
 import (
-	"bytes"
 	"net"
 
 	"github.com/google/cel-go/common/types"
@@ -19,32 +18,16 @@ func (l *netLibrary) isPrivateIP(ip ref.Val) ref.Val {
 		return types.Bool(false)
 	}
 
-	// Check if IP is localhost
-	if parsedIP.IsLoopback() {
+	// Include loopback, RFC 1918, IPv6 unique-local and link-local addresses.
+	if parsedIP.IsLoopback() || parsedIP.IsPrivate() || parsedIP.IsLinkLocalUnicast() {
 		return types.Bool(true)
 	}
 
-	// Check if IP is in private IP ranges
-	privateIPRanges := []struct {
-		start net.IP
-		end   net.IP
-	}{
-		{net.ParseIP("10.0.0.0"), net.ParseIP("10.255.255.255")},
-		{net.ParseIP("172.16.0.0"), net.ParseIP("172.31.255.255")},
-		{net.ParseIP("192.168.0.0"), net.ParseIP("192.168.255.255")},
-		// Class D (Multicast)
-		{net.ParseIP("224.0.0.0"), net.ParseIP("239.255.255.255")},
-		// Class E (Experimental)
-		{net.ParseIP("240.0.0.0"), net.ParseIP("255.255.255.255")},
-		// APIPA (sometimes used for local dns)
-		{net.ParseIP("169.254.0.0"), net.ParseIP("169.254.255.255")},
+	// Preserve the helper's IPv4 multicast and experimental ranges, and
+	// include the shared address space used by carrier-grade NAT.
+	v4 := parsedIP.To4()
+	if v4 == nil {
+		return types.Bool(false)
 	}
-
-	for _, r := range privateIPRanges {
-		if bytes.Compare(parsedIP, r.start) >= 0 && bytes.Compare(parsedIP, r.end) <= 0 {
-			return types.Bool(true)
-		}
-	}
-
-	return types.Bool(false)
+	return types.Bool(v4[0] >= 224 || (v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127))
 }
