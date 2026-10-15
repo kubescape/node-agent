@@ -57,3 +57,8 @@ DNS collector availability is part of baseline completeness. Disabled collection
 startup gaps, exhausted retries, and collector restarts invalidate overlapping
 learning windows. Recovery does not repair those windows: explicitly relearn
 with the DNS collector running throughout the new window.
+
+DNS learning receives answered responses synchronously at the tracer capture
+callback, before asynchronous event batching and DNS-manager lookups. A queued
+response therefore cannot miss learning merely because its downstream delivery
+happens after completion; genuinely post-completion observations stay excluded.

@@ -459,7 +459,7 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	ehf.handlers[utils.NetworkEventType] = []Manager{containerProfileManager, ruleManager, networkStreamClient, metrics}
 
 	// DNS events
-	ehf.handlers[utils.DnsEventType] = []Manager{dnsManager, containerProfileManager, ruleManager, networkStreamClient, metrics}
+	ehf.handlers[utils.DnsEventType] = []Manager{containerProfileManager, dnsManager, ruleManager, networkStreamClient, metrics}
 	// Forwarded DNS queries and error responses: rule manager only. The DNS
 	// manager would issue its own lookup for a name without addresses, and the
 	// network stream would record a query as an outbound connection.

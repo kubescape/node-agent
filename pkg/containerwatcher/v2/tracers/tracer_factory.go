@@ -336,6 +336,14 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 // createEventCallback creates a simple callback that sends events directly to the ordered event queue
 func (tf *TracerFactory) createEventCallback(eventType utils.EventType) containerwatcher.ResultCallback {
 	return func(event utils.K8sEvent, containerID string, processID uint32) {
+		// Learning must precede the asynchronous batch/worker queues and DNS
+		// manager lookups. Otherwise a pre-completion response can arrive at
+		// profiling only after the final snapshot, when it must be rejected.
+		if eventType == utils.DnsEventType && tf.containerProfileManager != nil {
+			if dnsEvent, ok := event.(utils.DNSEvent); ok {
+				tf.containerProfileManager.ReportDNSEvent(containerID, dnsEvent)
+			}
+		}
 		tf.orderedEventQueue.AddEventDirect(eventType, event, containerID, processID)
 	}
 }
