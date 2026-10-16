@@ -1,0 +1,186 @@
+name: trace exec
+description: trace process executions
+homepageURL: https://inspektor-gadget.io/
+documentationURL: https://www.inspektor-gadget.io/docs/latest/gadgets/trace_exec
+sourceURL: https://github.com/inspektor-gadget/inspektor-gadget/tree/v0.48.1/gadgets/trace_exec
+datasources:
+  exec:
+    fields:
+      args:
+        annotations:
+          columns.width: "16"
+      args_count:
+        annotations:
+          columns.hidden: "true"
+          json.skip: "true"
+      args_size:
+        annotations:
+          columns.hidden: "true"
+          json.skip: "true"
+      cwd:
+        annotations:
+          columns.alignment: left
+          columns.hidden: "true"
+          columns.width: "64"
+          description: The current working directory of the process (require --paths
+            flag)
+      dev_major:
+        annotations:
+          columns.alignment: right
+          columns.hidden: "true"
+          columns.width: "5"
+          description: The major number of the device where the file is located. For
+            scripts, this refers to the script, not the interpreter (requires --paths
+            flag)
+      dev_minor:
+        annotations:
+          columns.alignment: right
+          columns.hidden: "true"
+          columns.width: "5"
+          description: The minor number of the device where the file is located. For
+            scripts, this refers to the script, not the interpreter (requires --paths
+            flag)
+      error:
+        annotations:
+          columns.alignment: right
+          columns.width: "5"
+      error_raw:
+        annotations:
+          description: 'TODO: Fill field description'
+      exepath:
+        annotations:
+          columns.alignment: left
+          columns.hidden: "true"
+          columns.width: "64"
+          description: The executable binary file of the process (require --paths
+            flag)
+      file:
+        annotations:
+          columns.alignment: left
+          columns.hidden: "true"
+          columns.width: "64"
+          description: The executable file of the process. It might be different to
+            exepath in case of a script (require --paths flag)
+      file_from_rootfs:
+        annotations:
+          columns.hidden: "true"
+          columns.width: "5"
+          description: Whether the executable file of the process (script in case
+            of script) is in the rootfs of the container. Initialized when the execution
+            succeeded or failed with the -ENOEXEC error ("Exec format error"). Notice
+            that to get failed executions, you need to set ignore_failed to false.
+      from_rootfs:
+        annotations:
+          columns.hidden: "true"
+          columns.width: "5"
+          description: Whether the executable file of the process (interpreter in
+            case of script) is in the rootfs of the container. Initialized when the
+            execution succeeded or failed with the -ENOEXEC error ("Exec format error").
+            Notice that to get failed executions, you need to set ignore_failed to
+            false.
+      fupper_layer:
+        annotations:
+          columns.hidden: "true"
+          columns.width: "5"
+          description: Whether the executable file of the process (script in case
+            of script) is in the upper layer of the overlay filesystem. Initialized
+            when the execution succeeded or failed with the -ENOEXEC error ("Exec
+            format error"). Notice that to get failed executions, you need to set
+            ignore_failed to false.
+      inode:
+        annotations:
+          columns.alignment: right
+          columns.hidden: "true"
+          columns.width: "5"
+          description: The inode number of the file. For scripts, this refers to the
+            script, not the interpreter (require --paths flag)
+      loginuid:
+        annotations:
+          columns.hidden: "true"
+          template: uid
+          uidgidresolver.target: loginuser
+      parent_exepath:
+        annotations:
+          columns.alignment: left
+          columns.hidden: "true"
+          columns.width: "64"
+          description: The executable binary file of the parent process (require --paths
+            flag)
+      proc:
+        annotations:
+          description: 'TODO: Fill field description'
+      pupper_layer:
+        annotations:
+          columns.hidden: "true"
+          columns.width: "5"
+          description: Whether the executable's parent in the process hierarchy (interpreter
+            in case of script) is in the upper layer of the overlay filesystem. Only
+            initialized when the execution succeeded.
+      sessionid:
+        annotations:
+          columns.hidden: "true"
+          template: uid
+      timestamp_raw:
+        annotations:
+          description: 'TODO: Fill field description'
+      tty:
+        annotations:
+          columns.hidden: "false"
+          columns.width: "5"
+          description: The index of the controlling terminal of the process within
+            its own driver. It does not identify a terminal on its own, as the index
+            is only unique per driver; use tty_major and tty_minor instead. 0 for
+            processes without a controlling terminal, which is indistinguishable from
+            the first terminal of any driver.
+      tty_major:
+        annotations:
+          columns.alignment: right
+          columns.hidden: "true"
+          columns.width: "5"
+          description: The major number of the device of the controlling terminal
+            of the process. 0 for processes without a controlling terminal.
+      tty_minor:
+        annotations:
+          columns.alignment: right
+          columns.hidden: "true"
+          columns.width: "5"
+          description: The minor number of the device of the controlling terminal
+            of the process. 0 for processes without a controlling terminal.
+      upper_layer:
+        annotations:
+          columns.hidden: "true"
+          columns.width: "5"
+          description: Whether the executable file of the process (interpreter in
+            case of script) is in the upper layer of the overlay filesystem. Only
+            initialized when the execution succeeded.
+params:
+  ebpf:
+    ignore_failed:
+      key: ignore-failed
+      defaultValue: "true"
+      description: Ignore failed events
+    paths:
+      key: paths
+      defaultValue: "false"
+      description: Show current working directory, file path and executable path.
+        The file path and executable path might be different in case of a script.
+    targ_comm:
+      key: targ_comm
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_gid:
+      key: targ_gid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_pid:
+      key: targ_pid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_tid:
+      key: targ_tid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
+    targ_uid:
+      key: targ_uid
+      defaultValue: ""
+      description: 'TODO: Fill parameter description'
