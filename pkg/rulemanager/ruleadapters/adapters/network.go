@@ -23,6 +23,7 @@ func (c *NetworkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 
 	pid := networkEvent.GetPID()
 	comm := networkEvent.GetComm()
+	exePath := networkEvent.GetExePath()
 	dstEndpoint := networkEvent.GetDstEndpoint()
 	port := networkEvent.GetDstPort()
 	proto := networkEvent.GetProto()
@@ -49,6 +50,7 @@ func (c *NetworkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 	runtimeProcessDetails := armotypes.ProcessTree{
 		ProcessTree: armotypes.Process{
 			Comm: comm,
+			Path: exePath,
 			Gid:  networkEvent.GetGid(),
 			PID:  pid,
 			Uid:  networkEvent.GetUid(),

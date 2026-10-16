@@ -48,6 +48,10 @@ static void check(int version, int direction, int proto, int port, int flags, in
   skb.len=n; emitted=0; ig_trace_net(&skb); assert(emitted == 0);
  }
 }
+static void check_path(const char *expected) {
+ check(4, PACKET_OUTGOING, IPPROTO_TCP, 10250, 1, 0, true);
+ assert(!strcmp(captured.exepath, expected));
+}
 int main(void) {
  for (int v=4; v<=6; v+=2) {
   for (int d=PACKET_HOST; d<=PACKET_OUTGOING; d+=4) {
@@ -62,5 +66,24 @@ int main(void) {
   discard=true; check(v,PACKET_OUTGOING,IPPROTO_TCP,10250,1,0,false); discard=false;
  }
  check(4,PACKET_OUTGOING,IPPROTO_TCP,10250,1,1,true);
+ strcpy(socket_value.exepath, "/usr/bin/curl");
+ check_path("/usr/bin/curl");
+ strcpy(socket_value.exepath, "/tmp/renamed-client");
+ check_path("/tmp/renamed-client");
+ socket_available = false; check_path(""); socket_available = true;
+ path_exists = false; check_path(""); path_exists = true;
+ socket_value.exepath[0] = 0; check_path("");
+ memset(socket_value.exepath, 'a', sizeof(socket_value.exepath));
+ check(4, PACKET_OUTGOING, IPPROTO_TCP, 10250, 1, 0, true);
+ assert(strlen(captured.exepath) == NETWORK_PATH_MAX - 1);
+ assert(captured.exepath[NETWORK_PATH_MAX - 1] == 0);
+ path_size = 16;
+ check(4, PACKET_OUTGOING, IPPROTO_TCP, 10250, 1, 0, true);
+ assert(strlen(captured.exepath) == path_size - 1);
+ path_size = 1; check_path("");
+ path_size = 0; check_path("");
+ path_size = sizeof(socket_value.exepath);
+ strcpy(socket_value.exepath, "/usr/bin/curl");
+ check_path("/usr/bin/curl");
  return 0;
 }

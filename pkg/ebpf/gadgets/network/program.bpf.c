@@ -138,6 +138,27 @@ int ig_trace_net(struct __sk_buff *skb)
 
     gadget_process_populate_from_socket(skb_val, &event->proc);
 
+    // The socket metadata is a map value: copy directly without a kernel-read
+    // helper, which socket filters cannot use on some kernels/lockdown modes.
+    // tmp_events is reused, so missing attribution must clear the previous path.
+    event->exepath[0] = '\0';
+    if (skb_val && bpf_core_field_exists(skb_val->exepath)) {
+        unsigned int exepath_len = bpf_core_field_size(skb_val->exepath);
+        const char *exepath = (const char *)skb_val +
+                             bpf_core_field_offset(skb_val->exepath);
+#pragma unroll
+        for (int i = 0; i < NETWORK_PATH_MAX; i++) {
+            if (i + 1 >= exepath_len || i == NETWORK_PATH_MAX - 1) {
+                event->exepath[i] = '\0';
+                break;
+            }
+            char c = exepath[i];
+            event->exepath[i] = c;
+            if (!c)
+                break;
+        }
+    }
+
 	event->netns_id = skb->cb[0]; // cb[0] initialized by dispatcher.bpf.c
     event->timestamp_raw = bpf_ktime_get_boot_ns();
 
