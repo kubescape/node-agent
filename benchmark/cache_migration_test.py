@@ -1,6 +1,9 @@
 import importlib.util
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location("cache_migration", Path(__file__).with_name("cache-migration.py"))
 module = importlib.util.module_from_spec(spec)
@@ -30,6 +33,29 @@ class LatencyGateTests(unittest.TestCase):
                                     "p95-ns": invalid if implementation == "hashicorp" else 1,
                                     "p99-ns": 1})
             self.assertEqual(module.gate(records, "parallel")["status"], "inconclusive")
+
+
+class ParallelSamplingTests(unittest.TestCase):
+    """Keep single-CPU runner validation at the documented sample threshold."""
+
+    def test_single_cpu_sample_threshold(self):
+        """Reject insufficient samples and accept the minimum and bounded buffer."""
+        args = SimpleNamespace(capacity=1000, trials=100, ttl_ms=100,
+                               pattern="hits", payload="int", scenario="parallel", cpus=1)
+        for samples in (8192, 9999, 10000, 16384):
+            with self.subTest(samples=samples), TemporaryDirectory() as directory:
+                child = SimpleNamespace(returncode=0, stderr="", stdout=(
+                    f"BenchmarkCacheParallel 1048576 100 ns/op 1 B/op 1 allocs/op "
+                    f"200 p95-ns 300 p99-ns {samples} samples\n"))
+                with mock.patch.object(module.subprocess, "run", return_value=child) as run:
+                    if samples < 10000:
+                        with self.assertRaisesRegex(RuntimeError, "insufficient latency samples"):
+                            module.run_child(Path("cache.test"), args, "adapter", 0, Path(directory))
+                    else:
+                        result = module.run_child(Path("cache.test"), args, "adapter", 0, Path(directory))
+                        self.assertEqual(result["samples"], samples)
+                    self.assertIn("-test.cpu=1", run.call_args.args[0])
+                    self.assertEqual(run.call_args.kwargs["env"]["GOMAXPROCS"], "1")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # TTL cache migration experiments
 
-The production prototype uses ttlcache v3.4.1 without `Start`, callbacks, or
+The evaluation adapter uses ttlcache v3.4.1 without `Start`, callbacks, or
 loaders. Reads promote LRU recency without renewing TTL. Writes call
 `DeleteExpired` before insertion, so expired recent entries do not displace live
 entries. `Has` rejects expired entries immediately and does not promote recency;
@@ -31,14 +31,13 @@ mutex/block profile attributed **99.76% of mutex contention delay** to
 `ttlcache.DeleteExpired` called by the adapter's `Set`. This identifies the
 synchronous purge of the entire expired batch as the cause of reader stalls.
 
-The adapter, process-tree prototype, regression tests, and experiment harness
-are retained as evaluation work. Other caches remain on Hashicorp.
-The system harness changes, remaining migration, complete benchmark matrix,
-repository-wide privileged checks, and system benchmark were not executed:
-they remain blocked by this failed prototype gate. Publication of the evaluation
-branch was explicitly authorized after the failed gate; this is not an accepted
-production migration or a resolution of #1014. No PR was created, and Docker
-was not started.
+The adapter, regression tests, and experiment harness are retained as evaluation
+work. Production process-tree caching has been restored to Hashicorp pending a
+passing migration gate. All other production caches also remain on Hashicorp.
+The original evaluation did not execute system harness changes, the remaining
+migration, the complete benchmark matrix, repository-wide privileged checks, or
+the system benchmark. These historical results do not establish an accepted
+production migration or a resolution of #1014.
 
 Passed: adapter/process-tree race and leak tests; ten repetitions of the core
 unit tests; process-tree subtree race tests; focused builds and vet; Python
@@ -101,7 +100,10 @@ Use `--scenario parallel` for sampled `RunParallel` p95/p99 latency, and
 Use `--pattern hits|misses|churn|expiration`, `--payload int|hash|process`, and
 capacities 1000/10000/50000 with CPU settings 1/4/16. Allocation diagnostics do
 not establish latency equivalence. The latency sample buffer is bounded per
-worker, samples every 64 operations, and retains the most recent samples.
+worker at 16,384 entries, samples every 64 operations, and retains the most
+recent samples. This exceeds the runner's unchanged 10,000-sample minimum even
+with one worker; shorter or slower runs can still be rejected for insufficient
+samples.
 
 `TestCacheRetainedMemory` is an opt-in isolated experiment enabled by
 `CACHE_BENCH_MEMORY=1` and `CACHE_BENCH_IMPL`. It inserts twenty capacity-sized
@@ -112,9 +114,52 @@ stable memory plateau.
 
 ## Scope of an unsuccessful prototype
 
-If the first-write gate fails, retain the prototype and its evidence for review.
-Do not migrate other subsystems, modify the system benchmark harness, start
-Docker, or create a PR. Publish the evaluation only on explicit authorization;
-do not describe it as a completed migration. The system benchmark safety/telemetry
-changes and repository-wide privileged validation remain gated on a successful
-prototype. Baseline package tests are not evidence of migration completion.
+If the first-write gate fails, retain the evaluation adapter and evidence for
+review while keeping Hashicorp in production. Further subsystem migration
+requires a passing gate. Local package, component, and system checks validate
+the evaluation PR; they cannot override the failed adapter latency gate or
+establish migration completion.
+
+## Review follow-up (2026-10-16)
+
+Production process-tree caching is restored to the upstream Hashicorp cache.
+The passive adapter remains available only for evaluation; its synchronous
+full-batch purge is unchanged and has not passed the migration gate. The
+production dependency graph contains neither ttlcache nor goleak.
+
+Parallel latency sampling now retains up to 16,384 samples per worker while
+keeping the runner's 10,000-sample minimum and sampling every 64 operations.
+A subprocess regression test runs 1,048,576 operations at one CPU and verifies
+that 16,384 samples are retained. Python tests cover rejection below the minimum
+and acceptance at the minimum and buffer capacity. A fresh one-CPU hits/int run
+completed 30 pairs with 15,625–16,384 samples per observation and produced a
+failed gate report. Other checks were active during that run, so it verifies
+sampling/report generation rather than replacing the controlled idle experiment.
+
+The component-test workflow downloads dependencies before executing tests and
+retries downloads at most three times, with 5- and 10-second waits. Test
+execution itself is not retried. Immediate success, transient failure recovery,
+and permanent failure were verified against the workflow's actual shell block.
+
+Local validation with Go 1.27:
+
+- Focused adapter/process-tree race tests and vet passed, as did all five Python
+  runner tests and workflow syntax validation.
+- The repository-wide privileged race run passed 73 packages; 27 had no tests.
+  Host FIM and malware-manager packages failed with races that also reproduce
+  on the unmodified upstream `493f1011` snapshot. Those files are unchanged.
+- `Test_02_AllAlertsFromMaliciousApp` passed in a disposable Kind cluster in
+  310.57 seconds, using the existing test chart and storage v0.0.352.
+- Independent upstream and candidate container builds produced the same image
+  digest, confirming that the evaluation changes do not alter that artifact.
+
+Current local logs, benchmark observations, source snapshots, and component-test
+CPU/memory plots are retained under
+`/home/linux/.cache/node-agent-pr1018-20261016/` (not committed).
+
+The system harness completed its baseline measurement, then hit a chart download
+timeout before the candidate measurement. The candidate run is being resumed
+with identical cached chart versions and the unchanged benchmark functions in
+a fresh disposable cluster. Final system comparison is pending. The harness's
+legacy event queries return no series; current OTEL counters are being collected
+separately for throughput verification.

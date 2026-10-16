@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -25,6 +27,40 @@ import (
 var benchmarkFixture any
 var benchmarkStop func()
 
+// One worker must retain enough samples for the runner's 10,000-sample gate.
+const parallelSamplesPerWorker = 16_384
+
+// TestParallelLatencySamplingSingleCPU exercises the actual benchmark in a
+// separate process so fixture reuse and Go benchmark calibration match the runner.
+func TestParallelLatencySamplingSingleCPU(t *testing.T) {
+	for name, value := range map[string]string{
+		"CACHE_BENCH_IMPL": "adapter", "CACHE_BENCH_PATTERN": "hits",
+		"CACHE_BENCH_PAYLOAD": "int", "CACHE_BENCH_LATENCY": "1",
+		"CACHE_BENCH_CAPACITY": "1000",
+	} {
+		t.Setenv(name, value)
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binary, "-test.run=^$", "-test.bench=^BenchmarkCacheParallel$",
+		"-test.cpu=1", "-test.benchtime=1048576x", "-test.count=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("single-CPU benchmark: %v\n%s", err, output)
+	}
+	match := regexp.MustCompile(`\s(\d+)\s+samples(?:\s|$)`).FindSubmatch(output)
+	if len(match) != 2 {
+		t.Fatalf("missing sample count in benchmark output:\n%s", output)
+	}
+	count, err := strconv.Atoi(string(match[1]))
+	if err != nil || count != parallelSamplesPerWorker || count < 10_000 {
+		t.Fatalf("single-CPU benchmark retained %s samples; want %d (at least 10000)", match[1], parallelSamplesPerWorker)
+	}
+}
+
+// TestMain stops and joins an active comparison cache before the process exits.
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if benchmarkStop != nil {
@@ -33,6 +69,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// TestActiveComparisonLifecycle verifies that repeated active sweeper shutdowns do not leak.
 func TestActiveComparisonLifecycle(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 	for range 10 {
@@ -49,6 +86,7 @@ type benchmarkCache[V any] struct {
 	stored func() int
 }
 
+// newBenchmarkCache gives each implementation the same capacity, TTL, and operations.
 func newBenchmarkCache[V any](implementation string, capacity int, ttl time.Duration) benchmarkCache[V] {
 	switch implementation {
 	case "hashicorp":
@@ -98,6 +136,7 @@ func newBenchmarkCache[V any](implementation string, capacity int, ttl time.Dura
 	}
 }
 
+// envInt reads a positive experiment dimension or uses its default.
 func envInt(name string, fallback int) int {
 	if s := os.Getenv(name); s != "" {
 		v, err := strconv.Atoi(s)
@@ -109,6 +148,7 @@ func envInt(name string, fallback int) int {
 	return fallback
 }
 
+// percentile sorts latency samples and returns the selected quantile in nanoseconds.
 func percentile(samples []time.Duration, quantile float64) float64 {
 	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 	return float64(samples[int(math.Ceil(quantile*float64(len(samples))))-1])
@@ -116,12 +156,14 @@ func percentile(samples []time.Duration, quantile float64) float64 {
 
 type benchmarkHashes struct{ SHA1Hash, MD5Hash string }
 
+// benchmarkProcess constructs a process payload representative of cached tree values.
 func benchmarkProcess(i int) armotypes.Process {
 	return armotypes.Process{PID: uint32(i + 1), Comm: "worker", Children: []armotypes.Process{
 		{PID: uint32(i + 2), Comm: "child"},
 	}}
 }
 
+// BenchmarkCacheParallel compares configured cache workloads with optional latency sampling.
 func BenchmarkCacheParallel(b *testing.B) {
 	if os.Getenv("CACHE_BENCH_IMPL") == "" {
 		b.Skip("use benchmark/cache-migration.py to run isolated comparisons")
@@ -140,6 +182,7 @@ func BenchmarkCacheParallel(b *testing.B) {
 	}
 }
 
+// runParallel reuses one fixture across calibration and bounds sampled latency storage.
 func runParallel[V any](b *testing.B, makeValue func(int) V) {
 	capacity := envInt("CACHE_BENCH_CAPACITY", 1000)
 	pattern := os.Getenv("CACHE_BENCH_PATTERN")
@@ -171,7 +214,7 @@ func runParallel[V any](b *testing.B, makeValue func(int) V) {
 		// Bounded per-worker samples, separate from allocation measurements.
 		var local []time.Duration
 		if latency {
-			local = make([]time.Duration, 0, 8192)
+			local = make([]time.Duration, 0, parallelSamplesPerWorker)
 		}
 		iteration := uint64(0)
 		for pb.Next() {

@@ -1,5 +1,6 @@
 // Package ttlcache provides passive, fixed-TTL LRU caches. It starts no
-// goroutines and registers no asynchronous callbacks.
+// goroutines and registers no asynchronous callbacks. This evaluation adapter
+// is not used by production caches: synchronous expiration failed the latency gate.
 //
 // Reads update LRU order without extending expiration. Expired entries are
 // immediately unreadable, but their references remain until a write, Len,
@@ -13,6 +14,7 @@ import (
 	jellycache "github.com/jellydator/ttlcache/v3"
 )
 
+// Cache is an experimental passive cache retained for migration benchmarks.
 type Cache[K comparable, V any] struct {
 	cache *jellycache.Cache[K, V]
 }
@@ -33,6 +35,7 @@ func New[K comparable, V any](capacity int, ttl time.Duration) *Cache[K, V] {
 	)}
 }
 
+// Get returns a live value and promotes its LRU position without renewing TTL.
 func (c *Cache[K, V]) Get(key K) (V, bool) {
 	if item := c.cache.Get(key); item != nil {
 		return item.Value(), true
@@ -42,6 +45,8 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 }
 
 // Set renews expiration and reclaims expired entries before capacity eviction.
+// Reclamation synchronously holds the cache lock for the full expired batch;
+// this failed the latency gate and must not be used on production hot paths.
 func (c *Cache[K, V]) Set(key K, value V) {
 	c.cache.DeleteExpired()
 	c.cache.Set(key, value, jellycache.DefaultTTL)
@@ -51,8 +56,10 @@ func (c *Cache[K, V]) Set(key K, value V) {
 // Unlike expirable.Contains, it does not recognize retained expired entries.
 func (c *Cache[K, V]) Has(key K) bool { return c.cache.Has(key) }
 
+// Delete removes a key, if present.
 func (c *Cache[K, V]) Delete(key K) { c.cache.Delete(key) }
 
+// DeleteAll removes all retained entries.
 func (c *Cache[K, V]) DeleteAll() { c.cache.DeleteAll() }
 
 // Len reclaims expired entries and reports live entries, rather than counting

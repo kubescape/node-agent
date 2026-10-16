@@ -45,6 +45,7 @@ def classify(deltas, comparisons=COMPARISONS, resamples=100_000):
 
 
 def gate(records, scenario):
+    """Compare paired latency percentiles without accepting incomplete evidence."""
     rows = {"hashicorp": {}, "adapter": {}}
     for row in records:
         if row["implementation"] in rows:
@@ -71,6 +72,7 @@ def gate(records, scenario):
 
 
 def run_child(binary, args, implementation, repetition, output):
+    """Run one isolated experiment and reject failed or insufficient observations."""
     env = dict(os.environ, CACHE_BENCH_IMPL=implementation,
                CACHE_BENCH_CAPACITY=str(args.capacity), CACHE_BENCH_TRIALS=str(args.trials),
                CACHE_BENCH_TTL_MS=str(args.ttl_ms), CACHE_BENCH_PATTERN=args.pattern,
@@ -108,6 +110,7 @@ def run_child(binary, args, implementation, repetition, output):
 
 
 def main():
+    """Capture reproducible paired experiments and return the migration gate status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--scenario", choices=("idle", "parallel", "allocations"), default="idle")
