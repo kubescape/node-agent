@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"regexp"
@@ -182,6 +183,58 @@ func BenchmarkCacheParallel(b *testing.B) {
 	}
 }
 
+// nextParallelAccess selects a read/write operation and its key.
+func nextParallelAccess(rng *rand.Rand, capacity int) (key int, read bool) {
+	// Separate draws prevent capacities divisible by ten from partitioning
+	// the keyspace into read-only and write-only keys.
+	read = rng.IntN(10) < 9
+	return rng.IntN(capacity), read
+}
+
+// TestParallelExpirationRenewal exercises the benchmark's access selector after
+// the initialized population expires. Every capacity must allow renewed keys
+// to be read, rather than partitioning keys by operation.
+func TestParallelExpirationRenewal(t *testing.T) {
+	for _, capacity := range []int{1000, 10000, 50000} {
+		t.Run(strconv.Itoa(capacity), func(t *testing.T) {
+			c := New[int, int](capacity, time.Hour)
+			for key := range capacity {
+				c.cache.Set(key, -1, time.Nanosecond)
+			}
+			waitUntilExpired(time.Now())
+			for key := range capacity {
+				if _, found := c.Get(key); found {
+					t.Fatalf("initial key %d has not expired", key)
+				}
+			}
+			rng := rand.New(rand.NewPCG(1, 1014))
+			renewedReads := make(map[int]bool)
+			reads := 0
+			for range 50 * capacity {
+				key, read := nextParallelAccess(rng, capacity)
+				if read {
+					reads++
+					if value, found := c.Get(key); found {
+						if value != key {
+							t.Fatalf("key %d returned stale value %d", key, value)
+						}
+						renewedReads[key] = true
+					}
+				} else {
+					c.Set(key, key)
+				}
+			}
+			if len(renewedReads) < capacity/2 {
+				t.Fatalf("only %d/%d expired keys were renewed and subsequently read", len(renewedReads), capacity)
+			}
+			fraction := float64(reads) / float64(50*capacity)
+			if fraction < .89 || fraction > .91 {
+				t.Fatalf("read fraction %f; want approximately 0.9", fraction)
+			}
+		})
+	}
+}
+
 // runParallel reuses one fixture across calibration and bounds sampled latency storage.
 func runParallel[V any](b *testing.B, makeValue func(int) V) {
 	capacity := envInt("CACHE_BENCH_CAPACITY", 1000)
@@ -210,7 +263,7 @@ func runParallel[V any](b *testing.B, makeValue func(int) V) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		seed := worker.Add(1)
+		rng := rand.New(rand.NewPCG(worker.Add(1), 1014))
 		// Bounded per-worker samples, separate from allocation measurements.
 		var local []time.Duration
 		if latency {
@@ -218,10 +271,7 @@ func runParallel[V any](b *testing.B, makeValue func(int) V) {
 		}
 		iteration := uint64(0)
 		for pb.Next() {
-			seed ^= seed << 13
-			seed ^= seed >> 7
-			seed ^= seed << 17
-			key := int(seed % uint64(capacity))
+			key, read := nextParallelAccess(rng, capacity)
 			measure := latency && iteration%64 == 0
 			var start time.Time
 			if measure {
@@ -229,19 +279,19 @@ func runParallel[V any](b *testing.B, makeValue func(int) V) {
 			}
 			switch pattern {
 			case "hits", "expiration":
-				if seed%10 < 9 {
+				if read {
 					_, _ = c.get(key)
 				} else {
 					c.set(key, values[key])
 				}
 			case "misses":
-				if seed%10 < 9 {
+				if read {
 					_, _ = c.get(key + capacity)
 				} else {
 					c.set(key, values[key])
 				}
 			case "churn":
-				c.set(int(seed), values[key])
+				c.set(int(rng.Uint64()), values[key])
 			}
 			if measure {
 				d := time.Since(start)

@@ -181,3 +181,33 @@ resource comparison has 21 samples. Heap, allocation, and CPU profiles, plots,
 raw counters, and the failed gate output are retained with the local evidence.
 The complete cache matrix and heap-plateau acceptance remain unrun; neither
 system results nor package tests override the failed cache latency gate.
+
+## Parallel workload correction (2026-10-16)
+
+Parallel workers now draw the operation and key separately from a deterministic
+per-worker PCG generator. The previous shared draw selected reads with
+`seed % 10 < 9` and keys with `seed % capacity`. At capacities 1,000, 10,000,
+and 50,000 this split reads and writes into disjoint key sets. Expiration reads
+therefore missed every initialized key after its TTL, without reading keys
+renewed by writes. Earlier parallel observations do not validate the intended
+mixed workload and must be rerun; the separate idle experiment above is
+unaffected by this selector correction and its failed gate remains in force.
+
+`TestParallelExpirationRenewal` checks all three capacities with a fixed seed.
+It expires the initial population, executes the same selector as the benchmark,
+and verifies that writes renew keys that subsequent reads find, while reads
+remain approximately 90% of operations. Renewals use a long TTL in this test
+so correctness does not depend on machine speed; measured expiration benchmarks
+retain their 1 ms TTL. With the old correlated selector the test finds zero
+renewed/read keys at every capacity.
+
+Focused adapter/process-tree race tests, vet, the single-CPU subprocess
+regression, all five Python runner tests, formatting and whitespace checks
+passed after the correction. The corrected expiration runner completed ten
+Hashicorp/adapter pairs at capacity 1,000, one CPU and integer payloads, with
+all observations meeting the 10,000-sample minimum. Report generation completed
+and the unchanged 0% gate failed (median p95 change +113.3%, p99 +403.2%).
+This smoke run overlapped local checks and is not controlled performance
+acceptance; the full matrix and heap plateau remain unrun. Raw observations,
+source snapshots and report are retained locally in
+`/home/linux/.cache/node-agent-pr1018-expiration-independent-20261016/`.
