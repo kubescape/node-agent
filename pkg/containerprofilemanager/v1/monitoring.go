@@ -286,6 +286,13 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	containerData.networkDeferralDuration = cpm.cfg.UpdateDataPeriod
 	containerData.networkDeferredSizeLimit = cpm.cfg.MaxTsProfileSize
 
+	// An empty baseline proves absence only when DNS collection was enabled.
+	// Match DNSTracer.IsEnabled and keep incomplete collection sticky across reports.
+	generation := cpm.dnsCollectorGeneration.Load()
+	if generation%2 == 0 || generation != containerData.dnsCollectorGeneration || cpm.cfg.DDns || (!cpm.cfg.EnableNetworkTracing && !cpm.cfg.EnableRuntimeDetection) {
+		containerData.dnsBaselineTruncated = true
+	}
+
 	containerProfile := &v1beta1.ContainerProfile{
 		Name:      slug,
 		Namespace: container.K8s.Namespace,
@@ -304,6 +311,9 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		Labels: objectcache.GetLabels(cpm.cloudMetadata, watchedContainer, false),
 		Spec: v1beta1.ContainerProfileSpec{
 			Architectures:        []string{runtime.GOARCH},
+			DNSLookups:           containerData.getDNSLookups(),
+			DNSBaselineVersion:   "v1",
+			DNSBaselineTruncated: containerData.dnsBaselineTruncated,
 			ImageID:              containerInfo.ImageID,
 			ImageTag:             containerInfo.ImageTag,
 			SeccompProfile:       seccompProfile,
@@ -325,6 +335,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 
 	if !forceSend && !containerData.hasUnreportedStatusChange() &&
 		containerData.networks != nil && containerData.networks.Cardinality() > 0 &&
+		len(containerProfile.Spec.DNSLookups) == 0 &&
 		len(containerProfile.Spec.Capabilities) == 0 &&
 		len(containerProfile.Spec.Execs) == 0 &&
 		len(containerProfile.Spec.Opens) == 0 &&

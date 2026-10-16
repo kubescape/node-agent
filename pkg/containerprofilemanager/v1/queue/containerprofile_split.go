@@ -71,6 +71,7 @@ func splitProfile(p *v1beta1.ContainerProfile) (*v1beta1.ContainerProfile, *v1be
 
 	// Per-field (rather than global-index) halving guarantees that whichever field dominates
 	// the byte size is itself halved on the very first round.
+	a.Spec.DNSLookups, b.Spec.DNSLookups = halve(p.Spec.DNSLookups)
 	a.Spec.Capabilities, b.Spec.Capabilities = halve(p.Spec.Capabilities)
 	a.Spec.Execs, b.Spec.Execs = halve(p.Spec.Execs)
 	a.Spec.Opens, b.Spec.Opens = halve(p.Spec.Opens)
@@ -225,7 +226,7 @@ func isZeroTimeString(s string) bool {
 // countPartitionableElements returns the total number of elements across every list and
 // map field that splitProfile partitions, counting each neighbor port separately.
 func countPartitionableElements(spec *v1beta1.ContainerProfileSpec) int {
-	return len(spec.Capabilities) +
+	return len(spec.DNSLookups) + len(spec.Capabilities) +
 		len(spec.Execs) +
 		len(spec.Opens) +
 		len(spec.Syscalls) +
@@ -313,6 +314,7 @@ func halveNeighbors(neighbors []v1beta1.NetworkNeighbor) ([]v1beta1.NetworkNeigh
 // from into to, so that a split of a spec with at least two elements never yields an empty half.
 func moveOneElement(from, to *v1beta1.ContainerProfileSpec) {
 	switch {
+	case moveLast(&from.DNSLookups, &to.DNSLookups):
 	case moveLast(&from.Capabilities, &to.Capabilities):
 	case moveLast(&from.Execs, &to.Execs):
 	case moveLast(&from.Opens, &to.Opens):
@@ -445,9 +447,11 @@ func stitchChunk(dropped *v1beta1.ContainerProfile) *v1beta1.ContainerProfile {
 	stitch := dropped.DeepCopy()
 	stitch.Name = freshOneTimeSlug(dropped.Name)
 	stitch.Spec = v1beta1.ContainerProfileSpec{
-		SeccompProfile: stitch.Spec.SeccompProfile,
-		ImageID:        stitch.Spec.ImageID,
-		ImageTag:       stitch.Spec.ImageTag,
+		DNSBaselineVersion:   stitch.Spec.DNSBaselineVersion,
+		DNSBaselineTruncated: stitch.Spec.DNSBaselineTruncated || len(stitch.Spec.DNSLookups) > 0,
+		SeccompProfile:       stitch.Spec.SeccompProfile,
+		ImageID:              stitch.Spec.ImageID,
+		ImageTag:             stitch.Spec.ImageTag,
 	}
 
 	return stitch
