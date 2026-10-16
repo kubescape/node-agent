@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -132,4 +133,14 @@ func TestManager_GetContainerProcessTree_CarriesStartTime(t *testing.T) {
 
 	// The boot-relative identity for the same process, from the side map.
 	assert.Equal(t, uint64(2_220_000_000), mgr.GetProcessBootTimeNs(self))
+
+	impl := mgr.(*ProcessTreeManagerImpl)
+	key := treeCacheKey{containerID: containerID, pid: self}
+	impl.containerProcessTreeCache.Add(key, armotypes.Process{Comm: "cached"})
+	cached, err := mgr.GetContainerProcessTree(containerID, self, true)
+	require.NoError(t, err)
+	require.Equal(t, "cached", cached.Comm)
+	bypassed, err := mgr.GetContainerProcessTree(containerID, self, false)
+	require.NoError(t, err)
+	require.Equal(t, "nginx", bypassed.Comm)
 }
