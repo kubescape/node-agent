@@ -35,6 +35,32 @@ func (r *RuleCreatorMock) CreateRuleByName(name string) typesv1.Rule {
 	}
 }
 
+func (r *RuleCreatorMock) CreateRulesByID(id string) []typesv1.Rule {
+	var rules []typesv1.Rule
+	for _, rule := range r.Rules {
+		if rule.ID == id {
+			rules = append(rules, rule)
+		}
+	}
+	if len(rules) > 0 {
+		return rules
+	}
+	return []typesv1.Rule{r.CreateRuleByID(id)}
+}
+
+func (r *RuleCreatorMock) CreateRulesByName(name string) []typesv1.Rule {
+	var rules []typesv1.Rule
+	for _, rule := range r.Rules {
+		if rule.Name == name {
+			rules = append(rules, rule)
+		}
+	}
+	if len(rules) > 0 {
+		return rules
+	}
+	return []typesv1.Rule{r.CreateRuleByName(name)}
+}
+
 func (r *RuleCreatorMock) RegisterRule(rule typesv1.Rule) {
 }
 
@@ -61,9 +87,13 @@ func (r *RuleCreatorMock) CreateRulesForContext(ctx contextdetection.EventSource
 }
 
 func (r *RuleCreatorMock) GetAllRuleIDs() []string {
+	seen := make(map[string]struct{}, len(r.Rules))
 	var ids []string
 	for _, rule := range r.Rules {
-		ids = append(ids, rule.ID)
+		if _, ok := seen[rule.ID]; !ok {
+			seen[rule.ID] = struct{}{}
+			ids = append(ids, rule.ID)
+		}
 	}
 	return ids
 }
