@@ -60,7 +60,9 @@ on:
         default: false
         type: boolean
 
-permissions: read-all
+# Keep reusable defaults within the caller's permission ceiling.
+permissions:
+  contents: read
 
 jobs:
   docker-build:

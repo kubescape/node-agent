@@ -36,7 +36,9 @@ on:
       GITGUARDIAN_API_KEY:
         required: false
 
-permissions: read-all
+# Keep reusable defaults within the caller's permission ceiling.
+permissions:
+  contents: read
 
 jobs:
   Check-secret:
