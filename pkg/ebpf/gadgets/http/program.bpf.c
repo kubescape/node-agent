@@ -608,12 +608,19 @@ static __noinline int emit_iov_step(struct syscall_trace_exit *ctx, struct paylo
         capture_failed(msg->fd, args->is_rx, HTTP_LOSS_LIMIT);
         return -1;
     }
-    __u32 buffered = args->buffered;
+    __u64 buffered = args->buffered;
     if (buffered >= MAX_DATAEVENT_BUFFER)
         return -1;
-    __u32 size = min_size(args->actual_len - args->offset, MAX_DATAEVENT_BUFFER - buffered);
+    __u64 capacity = MAX_DATAEVENT_BUFFER - buffered;
+    __u64 size = min_size(args->actual_len - args->offset, capacity);
     size = min_size(size, HTTP_MAX_CHUNKS * MAX_DATAEVENT_BUFFER - captured);
-    if (size > MAX_DATAEVENT_BUFFER || buffered + size > MAX_DATAEVENT_BUFFER)
+    // LLVM can otherwise fold away the explicit bounds below because min_size
+    // already implies them in C. The verifier needs those checks after both
+    // minima; this register barrier emits no instructions.
+    asm volatile("" : "+r"(size), "+r"(capacity));
+    // Check the helper's size itself in 64 bits. Checking a narrowed sum does
+    // not bound this scalar on older verifiers (notably COS 121 / Linux 6.6).
+    if (size > MAX_DATAEVENT_BUFFER || size > capacity)
         return -1;
     __u32 zero = 0;
     struct http_aggregate *aggregate = bpf_map_lookup_elem(&aggregate_scratch, &zero);
