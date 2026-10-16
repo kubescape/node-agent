@@ -82,5 +82,8 @@ int main(void) {
  assert(strlen(captured.exepath) == path_size - 1);
  path_size = 1; check_path("");
  path_size = 0; check_path("");
+ path_size = sizeof(socket_value.exepath);
+ strcpy(socket_value.exepath, "/usr/bin/curl");
+ check_path("/usr/bin/curl");
  return 0;
 }

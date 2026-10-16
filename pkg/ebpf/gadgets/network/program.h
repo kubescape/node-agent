@@ -1,6 +1,6 @@
 #pragma once
 
-#define NETWORK_PATH_MAX 512
+#define NETWORK_PATH_MAX 256
 
 #define PACKET_HOST 0
 #define PACKET_OUTGOING 4
