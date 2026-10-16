@@ -11,8 +11,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: read-all
+
 jobs:
   pr-created:
+    permissions:
+      contents: read
+      actions: read
+      security-events: write  # Pass CodeQL permissions through nested workflows.
     uses: ./.github/workflows/incluster-comp-pr-created.yaml
     with:
       GO_VERSION: "1.27"
