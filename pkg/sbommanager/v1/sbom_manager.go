@@ -274,20 +274,38 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 		// filesystem on the host regardless of the underlying snapshotter.
 		return []string{filepath.Join(s.procDir, pid, "root")}, nil
 	}
+	var lowerdir, snapshotRoot string
 	for option := range strings.SplitSeq(mounts[0].VFSOptions, ",") {
-		if strings.HasPrefix(option, "lowerdir=") {
-			var volumes []string
-			for volume := range strings.SplitSeq(option[9:], ":") {
-				// FIXME this is a workaround
-				if !strings.HasPrefix(volume, "/") {
-					volume = "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/" + volume
+		key, value, _ := strings.Cut(option, "=")
+		switch key {
+		case "lowerdir":
+			lowerdir = value
+		case "upperdir", "workdir":
+			// Containerd shortens lowerdirs relative to its snapshots directory
+			// when mount options exceed a page. The upper/work directory stays
+			// absolute at <root>/snapshots/<id>/{fs,work}, including on k3s/RKE2.
+			if filepath.IsAbs(value) {
+				root := filepath.Dir(filepath.Dir(value))
+				if filepath.Base(root) == "snapshots" {
+					snapshotRoot = root
 				}
-				volumes = append(volumes, filepath.Join(s.hostRoot, volume))
 			}
-			return volumes, nil
 		}
 	}
-	return nil, fmt.Errorf("failed to find lowerdir in %s", mounts[0].VFSOptions)
+	if lowerdir == "" {
+		return nil, fmt.Errorf("failed to find lowerdir in %s", mounts[0].VFSOptions)
+	}
+	var volumes []string
+	for volume := range strings.SplitSeq(lowerdir, ":") {
+		if !filepath.IsAbs(volume) {
+			if snapshotRoot == "" {
+				return nil, fmt.Errorf("failed to resolve relative lowerdir %q: no absolute snapshot upperdir or workdir in %s", volume, mounts[0].VFSOptions)
+			}
+			volume = filepath.Join(snapshotRoot, volume)
+		}
+		volumes = append(volumes, filepath.Join(s.hostRoot, volume))
+	}
+	return volumes, nil
 }
 
 // ContainerCallback handles add/remove container-collection events. Host

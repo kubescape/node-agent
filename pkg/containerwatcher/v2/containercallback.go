@@ -3,6 +3,7 @@ package containerwatcher
 import (
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -112,6 +113,12 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 			return
 		}
 
+		if !utils.HasKubernetesPodIdentity(notif.Container) {
+			// Standalone runtime containers have no Pod to query. Other callback
+			// receivers still receive their lifecycle events and monitor them.
+			return
+		}
+
 		// Set shared watched container data
 		if cw.cfg.NamespaceFilterFile != "" {
 			// The per-receiver lifecycle queue orders this write before removal,
@@ -187,6 +194,20 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workload: %w", err)
 	}
+	// Namespace/name may now identify a replacement Pod while this container's
+	// metadata acquisition is retrying. Record the fetched generation, and refuse
+	// to bind it to a container with a different known Pod UID.
+	podUID := wl.GetUID()
+	if podUID == "" {
+		return nil, fmt.Errorf("fetched pod has no UID")
+	}
+	// Static Pods have a runtime UID distinct from their API mirror Pod UID.
+	// The mirror annotation identifies the corresponding static Pod generation.
+	mirrorUID, _ := wl.GetAnnotation("kubernetes.io/config.mirror")
+	if expected := container.K8s.PodUID; expected != "" && expected != podUID && expected != mirrorUID {
+		return nil, fmt.Errorf("pod UID changed: expected %s, fetched %s", expected, podUID)
+	}
+	watchedContainer.PodUID = podUID
 	// The pod phase must not gate init containers: a pod executing its init
 	// containers is Pending BY DEFINITION, so waiting for phase != Pending
 	// means shared data (and with it profile adoption and rule enforcement)
@@ -198,6 +219,23 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 	podStatus, err := wl.GetPodStatus()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod status: %w", err)
+	}
+	if container.K8s.PodUID == "" {
+		ownsContainer := false
+		for _, statuses := range [][]corev1.ContainerStatus{podStatus.ContainerStatuses, podStatus.InitContainerStatuses, podStatus.EphemeralContainerStatuses} {
+			for _, status := range statuses {
+				id := status.ContainerID
+				if _, suffix, ok := strings.Cut(id, "://"); ok {
+					id = suffix
+				}
+				if container.Runtime.ContainerID != "" && id == container.Runtime.ContainerID {
+					ownsContainer = true
+				}
+			}
+		}
+		if !ownsContainer {
+			return nil, fmt.Errorf("fetched pod does not own container %s", container.Runtime.ContainerID)
+		}
 	}
 	if podStatus.Phase == "Pending" {
 		imageIDReady := false
@@ -224,9 +262,14 @@ func (cw *ContainerWatcher) getSharedWatchedContainerData(container *containerco
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate parent workload: %w", err)
 	}
-	parentWorkload, err := cw.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get parent workload: %w", err)
+	// An ownerless Pod is its own workload. Re-fetching it by name could mix
+	// the validated generation with a replacement Pod's workload metadata.
+	parentWorkload := wl
+	if kind != "Pod" || name != pod.GetName() {
+		parentWorkload, err = cw.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get parent workload: %w", err)
+		}
 	}
 	w := parentWorkload.(*workloadinterface.Workload)
 	watchedContainer.Wlid = w.GenerateWlid(cw.clusterName)

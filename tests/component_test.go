@@ -854,14 +854,16 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 	completedAt := time.Now()
 	t.Logf("merged ContainerProfile %q reached %q %s after restart-ready", mergedName, helpersv1.Completed, completedAt.Sub(restartReadyAt).Round(time.Second))
 
-	// A completed/enforcing profile now exists; run a process that is NOT in it.
-	t.Logf("exec 'ls -l' now — %s after profile completion", time.Since(completedAt).Round(time.Second))
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
-	require.NoError(t, err)
-
-	// Poll for the alert (replaces the fixed time.Sleep(30s)+single GetAlerts).
+	// Storage completion precedes the agent's asynchronous cache update. Retry
+	// the probe while polling so an exec before enforcement starts does not
+	// leave us waiting for an alert that can never arrive.
 	var alerts []testutils.Alert
 	require.Eventually(t, func() bool {
+		_, _, err := wl.ExecIntoPod([]string{"ls", "-l"}, "")
+		if err != nil {
+			t.Logf("exec probe failed: %v", err)
+			return false
+		}
 		alerts, _ = testutils.GetAlerts(wl.Namespace)
 		for _, a := range alerts {
 			if a.Labels["rule_name"] == "Unexpected process launched" &&

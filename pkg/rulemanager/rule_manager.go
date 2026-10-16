@@ -46,29 +46,30 @@ import (
 )
 
 type RuleManager struct {
-	cfg                  config.Config
-	ruleBindingCache     bindingcache.RuleBindingCache
-	trackedContainers    mapset.Set[string]                  // key is k8sContainerID
-	trackedContainerDone maps.SafeMap[string, chan struct{}] // key is k8sContainerID; closed when that specific registration is removed
-	k8sClient            k8sclient.K8sClientInterface
-	ctx                  context.Context
-	objectCache          objectcache.ObjectCache
-	exporter             exporters.Exporter
-	metrics              metricsmanager.MetricsManager
-	podToWlid            maps.SafeMap[string, string] // key is namespace/podName
-	containerIdToShimPid maps.SafeMap[string, uint32]
-	containerIdToPid     maps.SafeMap[string, uint32]
-	enricher             types.Enricher
-	processManager       processtree.ProcessTreeManager
-	celEvaluator         cel.RuleEvaluator
-	ruleCooldown         *rulecooldown.RuleCooldown
-	adapterFactory       *ruleadapters.EventRuleAdapterFactory
-	ruleFailureCreator   ruleadapters.RuleFailureCreatorInterface
-	rulePolicyValidator  *RulePolicyValidator
-	mntnsRegistry        contextdetection.Registry
-	detectorManager      *detectors.DetectorManager
-	alertLogDedup        *expirable.LRU[string, struct{}]
-	alertLogDedupMu      sync.Mutex
+	cfg                   config.Config
+	ruleBindingCache      bindingcache.RuleBindingCache
+	trackedContainers     mapset.Set[string]                  // key is k8sContainerID
+	trackedContainerDone  maps.SafeMap[string, chan struct{}] // key is k8sContainerID; closed when that specific registration is removed
+	standaloneRuntimeKeys maps.SafeMap[string, string]        // preserves registration identity across later metadata enrichment
+	k8sClient             k8sclient.K8sClientInterface
+	ctx                   context.Context
+	objectCache           objectcache.ObjectCache
+	exporter              exporters.Exporter
+	metrics               metricsmanager.MetricsManager
+	podToWlid             maps.SafeMap[string, string] // key is namespace/podName
+	containerIdToShimPid  maps.SafeMap[string, uint32]
+	containerIdToPid      maps.SafeMap[string, uint32]
+	enricher              types.Enricher
+	processManager        processtree.ProcessTreeManager
+	celEvaluator          cel.RuleEvaluator
+	ruleCooldown          *rulecooldown.RuleCooldown
+	adapterFactory        *ruleadapters.EventRuleAdapterFactory
+	ruleFailureCreator    ruleadapters.RuleFailureCreatorInterface
+	rulePolicyValidator   *RulePolicyValidator
+	mntnsRegistry         contextdetection.Registry
+	detectorManager       *detectors.DetectorManager
+	alertLogDedup         *expirable.LRU[string, struct{}]
+	alertLogDedupMu       sync.Mutex
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -218,12 +219,12 @@ func (rm *RuleManager) recompileProjectionSpec() {
 }
 
 func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string, done <-chan struct{}) {
-	if utils.IsHostContainer(container) {
-		logger.L().Debug("RuleManager - skipping shared data wait for host container",
+	if utils.IsHostContainer(container) || !utils.HasKubernetesPodIdentity(container) {
+		logger.L().Debug("RuleManager - skipping Pod data wait for non-Kubernetes container",
 			helpers.String("container ID", container.Runtime.ContainerID))
-		// Skip podToWlid and shim PID setup for host containers as they don't have K8s metadata
+		// Keep host and standalone monitoring without inventing a Pod binding.
 		if err := rm.monitorContainer(container, k8sContainerID, done); err != nil {
-			logger.L().Debug("RuleManager - stop monitor on host container",
+			logger.L().Debug("RuleManager - stop monitor on non-Kubernetes container",
 				helpers.String("reason", err.Error()),
 				helpers.String("container ID", container.Runtime.ContainerID),
 				helpers.String("k8s container id", k8sContainerID))
@@ -302,7 +303,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
-	if !isSupportedEventType(rules, enrichedEvent) {
+	// Rule expressions are selected by the rule event type, which differs from
+	// the tracer event type only for forwarded DNS queries ("dnsQuery").
+	eventType := utils.RuleEventType(enrichedEvent.Event)
+
+	if !isSupportedEventType(rules, eventType) {
 		return
 	}
 
@@ -313,8 +318,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	if !rm.isMonitoringEnabledForContext(enrichedEvent.SourceContext) {
 		return
 	}
-
-	eventType := enrichedEvent.Event.GetEventType()
 
 	var eventFields prefilter.EventFields
 	var evalContext map[string]any
@@ -327,9 +330,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		if !RuleAppliesToContext(&rule, enrichedEvent.SourceContext) {
 			continue
 		}
-		// Skip profile dependency checks for non-K8s contexts (profiles are K8s-specific)
-		// Only K8s contexts should enforce profile dependencies
-		if isK8sContext && !profileExists && rule.ProfileDependency == armotypes.Required {
+		if !profileExists && rule.ProfileDependency == armotypes.Required {
 			rm.metrics.ReportAlertSuppressed(rule.ID, "profile_incomplete")
 			continue
 		}
@@ -607,8 +608,7 @@ func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent
 	return message, uniqueID, err
 }
 
-func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEvent) bool {
-	eventType := enrichedEvent.Event.GetEventType()
+func isSupportedEventType(rules []typesv1.Rule, eventType utils.EventType) bool {
 	for _, rule := range rules {
 		for _, expression := range rule.Expressions.RuleExpression {
 			if string(expression.EventType) == string(eventType) {

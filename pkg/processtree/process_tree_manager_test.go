@@ -1,6 +1,7 @@
 package processtree
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -9,12 +10,58 @@ import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	treeconfig "github.com/kubescape/node-agent/pkg/processtree/config"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestManager_GetContainerProcessTree_HostRetainsExitedProcess(t *testing.T) {
+	cfg := config.Config{ExitCleanup: treeconfig.ExitCleanupConfig{
+		MaxPendingExits: 100, CleanupInterval: time.Hour, CleanupDelay: 5 * time.Minute,
+	}}
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := processtreecreator.NewProcessTreeCreator(containerTree, cfg)
+	mgr := NewProcessTreeManager(creator, containerTree, cfg)
+	containerTree.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeAddContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{ContainerID: "host", ContainerPID: 1},
+			},
+		},
+	})
+	require.NoError(t, mgr.ReportEvent(utils.ProcfsEventType, &events.ProcfsEvent{
+		PID: 1, Comm: "systemd", Path: "/usr/lib/systemd/systemd", ContainerID: "host",
+	}))
+
+	// A synthetic PID above Linux's PID limit ensures procfs cannot supply the
+	// executable or arguments. Feed exec then exit through the real manager.
+	const pid uint32 = 1 << 30
+	require.NoError(t, mgr.ReportEvent(utils.ExecveEventType, &utils.StructEvent{
+		ContainerID: "host", Pid: pid, Ppid: 1, Comm: "ps",
+		ExePath: "/usr/bin/ps", Args: []string{"ps", "aux"}, Timestamp: time.Now().UnixNano(),
+	}))
+	require.NoError(t, mgr.ReportEvent(utils.ExitEventType, &utils.StructEvent{
+		ContainerID: "host", Pid: pid, Ppid: 1, Timestamp: time.Now().UnixNano(),
+	}))
+	_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
+	require.True(t, os.IsNotExist(err))
+
+	for _, useCache := range []bool{false, true} {
+		branch, err := mgr.GetContainerProcessTree("host", pid, useCache)
+		require.NoError(t, err)
+		require.Equal(t, uint32(1), branch.PID)
+		require.Len(t, branch.ChildrenMap, 1)
+		for _, child := range branch.ChildrenMap {
+			assert.Equal(t, pid, child.PID)
+			assert.Equal(t, "/usr/bin/ps", child.Path)
+			assert.Equal(t, "ps aux", child.Cmdline)
+		}
+	}
+}
 
 // TestManager_GetProcessBootTimeNs exercises the accessor that the network-stream
 // attribution work calls to build a per-connection process reference: a procfs

@@ -55,11 +55,20 @@ const (
 	dedupTTLHardlink     uint16 = 156 // 10s
 	dedupTTLPtrace       uint16 = 156 // 10s
 	dedupTTLSyscall      uint16 = 78  // 5s
+	// dedupTTLDNS applies to rule-only DNS events (forwarded queries and error
+	// responses) only. 5s covers resolver retransmits (musl ~1s, glibc 5s
+	// timeout plus retry) and parallel A/AAAA retries; exfil chunks carry
+	// unique names, so nothing of interest collapses.
+	dedupTTLDNS uint16 = 78 // 5s
 )
 
 // EventHandlerFactory manages the mapping of event types to their managers
 type EventHandlerFactory struct {
-	handlers                 map[utils.EventType][]Manager
+	handlers map[utils.EventType][]Manager
+	// ruleOnlyHandlers is the handler list for events marked RuleOnlyEvent
+	// (forwarded DNS queries). An event type with no entry here delivers a
+	// rule-only event to nobody.
+	ruleOnlyHandlers         map[utils.EventType][]Manager
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	thirdPartyEnricher       containerwatcher.TaskBasedEnricher
 	cfg                      config.Config
@@ -70,6 +79,7 @@ type EventHandlerFactory struct {
 	metrics                  metricsmanager.MetricsManager
 	dedupSkipSet             map[Manager]struct{} // Managers to skip when event is duplicate
 	ebpfDropCounter          metric.Int64Counter
+	listeners                *listenerCache
 	// removalGracePeriod overrides removedContainerGracePeriod when > 0.
 	// Settable in tests; production uses the default.
 	removalGracePeriod time.Duration
@@ -97,6 +107,7 @@ func NewEventHandlerFactory(
 
 	factory := &EventHandlerFactory{
 		handlers:                 make(map[utils.EventType][]Manager),
+		ruleOnlyHandlers:         make(map[utils.EventType][]Manager),
 		thirdPartyEventReceivers: thirdPartyEventReceivers,
 		thirdPartyEnricher:       thirdPartyEnricher,
 		cfg:                      cfg,
@@ -104,6 +115,7 @@ func NewEventHandlerFactory(
 		containerCache:           &maps.SafeMap[string, *containercollection.Container]{},
 		containerProfileManager:  containerProfileManager,
 		dedupCache:               dedupCache,
+		listeners:                newListenerCache(),
 		metrics:                  metrics,
 		dedupSkipSet:             make(map[Manager]struct{}),
 		ebpfDropCounter:          ebpfDropCounter,
@@ -120,6 +132,20 @@ func NewEventHandlerFactory(
 		case utils.ExecveEventType:
 			if execEvent, ok := event.(utils.ExecEvent); ok {
 				containerProfileManager.ReportFileExec(execEvent.GetContainerID(), execEvent)
+			}
+		case utils.ProcfsEventType:
+			// A process the agent found already running. Its exec happened
+			// before the tracer attached and cannot be replayed, but the
+			// process is still there and procfs carries what it ran
+			// (entlein/node-agent#22).
+			// Skip events where container attribution is ambiguous (such as
+			// network-namespace fallbacks in multi-container pods) to avoid
+			// poisoning container profiles with another container's processes.
+			if pe, ok := event.(*events.ProcfsEvent); ok {
+				if pe.AmbiguousContainer {
+					return
+				}
+				containerProfileManager.ReportProcfsExec(pe.ContainerID, pe.Path, pe.Argv)
 			}
 		case utils.OpenEventType:
 			if openEvent, ok := event.(utils.OpenEvent); ok {
@@ -237,9 +263,16 @@ func computeEventDedupKey(enrichedEvent *events.EnrichedEvent) (key uint64, ttl 
 			dst := e.GetDstEndpoint()
 			return dedupcache.ComputeNetworkKey(mntns, pid, dst.Addr, e.GetDstPort(), e.GetProto()), dedupTTLNetwork, true
 		}
-	// DNS events are not deduplicated: the system resolver cache already
-	// limits DNS traffic at the network layer, so events reaching the eBPF
-	// tracer are almost always unique.
+	// Answered DNS responses are not deduplicated: the system resolver cache
+	// already limits DNS traffic at the network layer, so events reaching the
+	// eBPF tracer are almost always unique, and marking one Duplicate would
+	// hide it from the existing "dns" rules. Forwarded queries and error
+	// responses (rule-only) are deduplicated, since resolver retransmits and
+	// parallel A/AAAA retries repeat them within seconds.
+	case utils.DnsEventType:
+		if e, ok := event.(utils.DNSEvent); ok && utils.IsRuleOnlyEvent(event) {
+			return dedupcache.ComputeDNSKey(mntns, e.GetPID(), e.GetDNSName(), string(e.GetQr()), e.GetQtype(), e.GetRcode()), dedupTTLDNS, true
+		}
 	case utils.CapabilitiesEventType:
 		if e, ok := event.(utils.CapabilitiesEvent); ok {
 			pid := uint32(0)
@@ -326,6 +359,22 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		return
 	}
 
+	// Always report dropped events regardless of dedup status or unsolicited ingress filtering
+	if enrichedEvent.Event.HasDroppedEvents() {
+		ehf.containerProfileManager.ReportDroppedEvent(enrichedEvent.Event.GetContainerID())
+		ehf.ebpfDropCounter.Add(context.Background(),
+			1,
+			metric.WithAttributes(
+				attribute.String("event_type", string(enrichedEvent.Event.GetEventType())),
+				attribute.String("reason", "profile_drop"),
+			),
+		)
+	}
+
+	if ehf.unsolicitedIngress(enrichedEvent, container) {
+		return
+	}
+
 	// Dedup check: compute key and check cache before dispatching to handlers
 	if ehf.dedupCache != nil {
 		key, ttl, shouldDedup := computeEventDedupKey(enrichedEvent)
@@ -338,21 +387,22 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 		}
 	}
 
-	// Always report dropped events regardless of dedup status
-	if enrichedEvent.Event.HasDroppedEvents() {
-		ehf.containerProfileManager.ReportDroppedEvent(enrichedEvent.Event.GetContainerID())
-		ehf.ebpfDropCounter.Add(context.Background(),
-			1,
-			metric.WithAttributes(
-				attribute.String("event_type", string(enrichedEvent.Event.GetEventType())),
-				attribute.String("reason", "profile_drop"),
-			),
-		)
-	}
-
-	// Get handlers for this event type
+	// Get handlers for this event type. A rule-only event (forwarded DNS
+	// query) uses the restricted list and never reaches third-party receivers;
+	// a duplicate one has no consumer at all, since the rule manager skips
+	// duplicates itself.
 	eventType := enrichedEvent.Event.GetEventType()
-	handlers, exists := ehf.handlers[eventType]
+	ruleOnly := utils.IsRuleOnlyEvent(enrichedEvent.Event)
+	var handlers []Manager
+	var exists bool
+	if ruleOnly {
+		if enrichedEvent.Duplicate {
+			return
+		}
+		handlers, exists = ehf.ruleOnlyHandlers[eventType]
+	} else {
+		handlers, exists = ehf.handlers[eventType]
+	}
 	if !exists {
 		return
 	}
@@ -372,7 +422,9 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	}
 
 	// Report to third-party event receivers
-	ehf.reportEventToThirdPartyTracers(enrichedEvent)
+	if !ruleOnly {
+		ehf.reportEventToThirdPartyTracers(enrichedEvent)
+	}
 }
 
 // registerHandlers registers all handlers for different event types
@@ -391,6 +443,11 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	// Exec events
 	ehf.handlers[utils.ExecveEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics, rulePolicy}
 
+	// Procfs events: the learning retry for a process whose exec the agent
+	// missed. The process tree consumes these on its own path; this entry is
+	// what carries them to learning.
+	ehf.handlers[utils.ProcfsEventType] = []Manager{containerProfileManager}
+
 	// Open events
 	ehf.handlers[utils.OpenEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics}
 
@@ -399,6 +456,10 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// DNS events
 	ehf.handlers[utils.DnsEventType] = []Manager{dnsManager, ruleManager, networkStreamClient, metrics}
+	// Forwarded DNS queries and error responses: rule manager only. The DNS
+	// manager would issue its own lookup for a name without addresses, and the
+	// network stream would record a query as an outbound connection.
+	ehf.ruleOnlyHandlers[utils.DnsEventType] = []Manager{ruleManager}
 
 	// RandomX events
 	ehf.handlers[utils.RandomXEventType] = []Manager{ruleManager, metrics}
@@ -475,6 +536,9 @@ func (ehf *EventHandlerFactory) ContainerCallback(notif containercollection.PubS
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		ehf.containerCache.Set(containerID, notif.Container)
+		if ehf.listeners != nil && containerID != "" {
+			ehf.listeners.forget(containerID)
+		}
 	case containercollection.EventTypeRemoveContainer:
 		// Keep the entry resolvable for the grace window, then evict. This
 		// also fixes the previous behavior of never evicting lazily-cached
@@ -486,6 +550,9 @@ func (ehf *EventHandlerFactory) ContainerCallback(notif containercollection.PubS
 		}
 		time.AfterFunc(grace, func() {
 			ehf.containerCache.Delete(containerID)
+			if ehf.listeners != nil && containerID != "" {
+				ehf.listeners.forget(containerID)
+			}
 		})
 	}
 }

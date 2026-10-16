@@ -60,9 +60,13 @@ func TestProcfsFeeder_Stop(t *testing.T) {
 
 	err = feeder.Stop()
 	assert.NoError(t, err)
-	// After stopping, cancel should be nil to allow a restart.
-	// The context itself is intentionally not nilled out to prevent a race condition.
 	assert.Nil(t, feeder.cancel, "Cancel func should be nil after stop")
+
+	// Test rapid restart after stop joins old loop cleanly
+	err = feeder.Start(ctx)
+	require.NoError(t, err)
+	err = feeder.Stop()
+	assert.NoError(t, err)
 }
 
 func TestProcfsFeeder_Subscribe(t *testing.T) {
@@ -81,6 +85,28 @@ func TestProcfsFeeder_Subscribe(t *testing.T) {
 	feeder.Subscribe(ch2)
 	require.Len(t, feeder.subscribers, 2)
 	assert.Equal(t, (chan<- conversion.ProcessEvent)(ch2), feeder.subscribers[1])
+}
+
+func TestProcfsFeeder_Unsubscribe(t *testing.T) {
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
+	ch1 := make(chan conversion.ProcessEvent, 1)
+	ch2 := make(chan conversion.ProcessEvent, 1)
+
+	feeder.Subscribe(ch1)
+	feeder.Subscribe(ch2)
+	require.Len(t, feeder.subscribers, 2)
+
+	feeder.Unsubscribe(ch1)
+	require.Len(t, feeder.subscribers, 1)
+	assert.Equal(t, (chan<- conversion.ProcessEvent)(ch2), feeder.subscribers[0])
+
+	// Unsubscribing non-existent channel is a no-op
+	feeder.Unsubscribe(ch1)
+	require.Len(t, feeder.subscribers, 1)
+
+	feeder.Unsubscribe(ch2)
+	require.Empty(t, feeder.subscribers)
 }
 
 func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
@@ -267,4 +293,69 @@ func TestProcfsFeeder_ProcessSpecificPID(t *testing.T) {
 	// Test processing a non-existent PID
 	err = feeder.ProcessSpecificPID(999999)
 	assert.Error(t, err)
+}
+
+func TestProcfsFeeder_BroadcastEventWithBackpressure_Lossless(t *testing.T) {
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(10*time.Second, 10*time.Second, mockManager)
+
+	// Channel buffer of 1 - will block if not drained
+	ch := make(chan conversion.ProcessEvent, 1)
+	feeder.Subscribe(ch)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	const totalEvents = 10
+	var received []conversion.ProcessEvent
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case ev := <-ch:
+				received = append(received, ev)
+				if len(received) == totalEvents {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	for i := uint32(1); i <= totalEvents; i++ {
+		feeder.broadcastEventWithBackpressure(ctx, conversion.ProcessEvent{PID: i})
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for events")
+	}
+
+	assert.Len(t, received, totalEvents)
+	for i, ev := range received {
+		assert.Equal(t, uint32(i+1), ev.PID)
+	}
+
+	// Also verify context cancellation unblocks broadcastEventWithBackpressure when buffer is full
+	cancelingCtx, cancelBroadcast := context.WithCancel(t.Context())
+	// Fill buffer of size 1
+	feeder.broadcastEventWithBackpressure(ctx, conversion.ProcessEvent{PID: 100})
+	unblocked := make(chan struct{})
+	go func() {
+		feeder.broadcastEventWithBackpressure(cancelingCtx, conversion.ProcessEvent{PID: 101})
+		close(unblocked)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancelBroadcast()
+
+	select {
+	case <-unblocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("broadcastEventWithBackpressure did not unblock on context cancellation")
+	}
 }

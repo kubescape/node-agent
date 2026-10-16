@@ -17,6 +17,16 @@ func IsHostContainer(container *containercollection.Container) bool {
 	return container.Runtime.ContainerPID == 1 || container.Runtime.ContainerID == armotypes.HostContainerID
 }
 
+// HasKubernetesPodIdentity reports whether a container identifies an addressable
+// Kubernetes Pod. Other runtime metadata cannot be used for a Pod lookup.
+// Container-name enrichment is not required to acquire the Pod's shared data.
+func HasKubernetesPodIdentity(container *containercollection.Container) bool {
+	if container == nil {
+		return false
+	}
+	return container.K8s.Namespace != "" && container.K8s.PodName != ""
+}
+
 // IsHost reports whether containerID identifies the virtual host
 // pseudo-container (armotypes.HostContainerID). This is the single choke
 // point for the "is this the host" check wherever only a containerID string

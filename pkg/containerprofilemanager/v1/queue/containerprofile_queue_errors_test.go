@@ -906,7 +906,7 @@ func TestRequeueSplit_QueueNotRunningDropsBothHalvesAndAttemptsStitch(t *testing
 	qd.running = false
 	qd.mu.Unlock()
 
-	qd.requeueSplit(queuedParent, a, b)
+	qd.requeueSplit(queuedParent, a, b, true)
 
 	assert.Equal(t, 0, qd.GetQueueSize(), "neither half nor the stitch can land while the queue isn't running")
 	assert.Equal(t, int64(1), qd.chunksDropped.Load(),

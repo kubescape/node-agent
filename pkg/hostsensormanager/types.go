@@ -263,8 +263,9 @@ type CNIInfoSpec struct {
 
 // Config holds the configuration for the host sensor manager
 type Config struct {
-	Namespace string
-	Enabled   bool
-	Interval  time.Duration
-	NodeName  string
+	Namespace       string
+	ExcludedSensors []string
+	Enabled         bool
+	Interval        time.Duration
+	NodeName        string
 }

@@ -1,0 +1,381 @@
+package exporters
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBulkHTTPRetryPolicy(t *testing.T) {
+	for _, status := range []int{400, 500, 502, 504, 429, 503} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var calls atomic.Int32
+				manager := NewAlertBulkManager(1, 10, 10, 3, 1000, 30000, func(string, []armotypes.RuntimeAlert, armotypes.ProcessTree, []string) error {
+					if calls.Add(1) == 1 {
+						return &httpRejection{status: status, retryAfter: "60"}
+					}
+					return nil
+				})
+				done := make(chan struct{})
+				go func() { manager.processSendQueueItem(&bulkQueueItem{}); close(done) }()
+				synctest.Wait()
+				time.Sleep(59 * time.Second)
+				synctest.Wait()
+				require.EqualValues(t, 1, calls.Load())
+				time.Sleep(2 * time.Second)
+				<-done
+				want := 1
+				if status == 429 || status >= 500 {
+					want = 2
+				}
+				require.EqualValues(t, want, calls.Load())
+			})
+		})
+	}
+}
+
+func TestBulkHTTPRetryCooldownAfterExhaustion(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		manager := NewAlertBulkManager(1, 10, 10, 1, 1000, 30000, func(string, []armotypes.RuntimeAlert, armotypes.ProcessTree, []string) error {
+			return &httpRejection{status: 429, retryAfter: "60"}
+		})
+		manager.maxRetries = 0
+		manager.processSendQueueItem(&bulkQueueItem{})
+		var calls atomic.Int32
+		manager.sendFunc = func(string, []armotypes.RuntimeAlert, armotypes.ProcessTree, []string) error {
+			calls.Add(1)
+			return nil
+		}
+		done := make(chan struct{})
+		go func() { manager.processSendQueueItem(&bulkQueueItem{}); close(done) }()
+		synctest.Wait()
+		time.Sleep(59 * time.Second)
+		synctest.Wait()
+		require.Zero(t, calls.Load())
+		time.Sleep(2 * time.Second)
+		<-done
+		require.EqualValues(t, 1, calls.Load())
+	})
+}
+
+func TestBulkHTTPRetryCloseRespectsCooldown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		manager := NewAlertBulkManager(1, 10, 10, 3, 1000, 30000, func(string, []armotypes.RuntimeAlert, armotypes.ProcessTree, []string) error {
+			calls.Add(1)
+			return &httpRejection{status: 429, retryAfter: "60"}
+		})
+		done := make(chan struct{})
+		go func() { manager.processSendQueueItem(&bulkQueueItem{}); close(done) }()
+		synctest.Wait()
+		close(manager.stopChan)
+		<-done
+		require.EqualValues(t, 1, calls.Load(), "shutdown must not resend before Retry-After")
+	})
+}
+
+func TestHTTPRejectionBodyDrain(t *testing.T) {
+	reader := bytes.NewReader(bytes.Repeat([]byte("x"), 128<<10))
+	e := retryTestExporter(t, func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 429, Header: make(http.Header), Body: io.NopCloser(reader)}, nil
+	})
+	err := e.sendHTTPBody(context.Background(), []byte("alert"))
+	require.Error(t, err)
+	require.Equal(t, 64<<10, reader.Len(), "rejection drainage must be bounded")
+}
+
+func TestHTTPRejectionConnectionReuse(t *testing.T) {
+	addresses := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		addresses <- r.RemoteAddr
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(429)
+		_, _ = io.WriteString(w, "temporarily unavailable")
+	}))
+	defer server.Close()
+	e, err := NewHTTPExporter(HTTPExporterConfig{URL: server.URL}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
+	require.NoError(t, err)
+	defer e.Close()
+	for i := 0; i < 2; i++ {
+		require.Error(t, e.sendHTTPBody(context.Background(), []byte("alert")))
+	}
+	first, second := <-addresses, <-addresses
+	require.Equal(t, first, second)
+}
+
+func TestMarshalHTTPPayloadError(t *testing.T) {
+	_, err := marshalHTTPPayload(make(chan int))
+	require.ErrorContains(t, err, "failed to marshal payload")
+	body, err := marshalHTTPPayload(map[string]string{"alert": "same"})
+	require.NoError(t, err)
+	require.Contains(t, string(body), "same")
+}
+
+func TestBulkStopRespectsHTTPCooldownForQueuedBulks(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		manager := NewAlertBulkManager(1, 10, 10, 3, 1000, 30000, func(string, []armotypes.RuntimeAlert, armotypes.ProcessTree, []string) error {
+			calls.Add(1)
+			return &httpRejection{status: 429, retryAfter: "60"}
+		})
+		for i := 0; i < 3; i++ {
+			manager.sendQueue <- &bulkQueueItem{}
+		}
+		manager.Start()
+		synctest.Wait()
+		manager.Stop()
+		require.EqualValues(t, 1, calls.Load(), "Stop must not bypass cooldown for queued bulks")
+	})
+}
+
+func TestBulkDrainNewHTTPCooldown(t *testing.T) {
+	var calls atomic.Int32
+	manager := NewAlertBulkManager(1, 10, 10, 3, 1000, 30000, func(string, []armotypes.RuntimeAlert, armotypes.ProcessTree, []string) error {
+		calls.Add(1)
+		return &httpRejection{status: 429, retryAfter: "60"}
+	})
+	for i := 0; i < 3; i++ {
+		manager.sendQueue <- &bulkQueueItem{}
+	}
+	manager.drainSendQueue()
+	require.EqualValues(t, 1, calls.Load(), "a rejection during drain must pause subsequent bulks")
+}
+
+func TestRuleAlertRetryResumesAfterCooldownCap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		e := retryTestExporter(t, func(*http.Request) (*http.Response, error) {
+			if calls.Add(1) == 1 {
+				return retryTestResponse(429, "86400"), nil
+			}
+			return retryTestResponse(200, ""), nil
+		})
+		e.SendRuleAlert(retryTestFailure())
+		time.Sleep(301 * time.Second)
+		synctest.Wait()
+		e.SendRuleAlert(retryTestFailure())
+		synctest.Wait()
+		require.EqualValues(t, 2, calls.Load(), "new alerts must resume after the cooldown cap")
+	})
+}
+
+func TestRuleAlertCloseCancelsInitialSendWithQueuedFollower(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, done := make(chan struct{}), make(chan struct{})
+		e := retryTestExporter(t, func(r *http.Request) (*http.Response, error) {
+			close(started)
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		})
+		go func() { e.SendRuleAlert(retryTestFailure()); close(done) }()
+		<-started
+		e.SendRuleAlert(retryTestFailure())
+		before := time.Now()
+		require.NoError(t, e.Close())
+		<-done
+		require.Equal(t, before, time.Now(), "Close must cancel the initial request rather than wait for its timeout")
+	})
+}
+
+type retryTestReader func([]byte) (int, error)
+
+func (f retryTestReader) Read(p []byte) (int, error) { return f(p) }
+
+func TestRuleAlertRetryExpiredRejectionStillPausesEndpoint(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		e := retryTestExporter(t, func(*http.Request) (*http.Response, error) {
+			switch calls.Add(1) {
+			case 1:
+				return retryTestResponse(429, "299"), nil
+			case 2:
+				resp := retryTestResponse(429, "60")
+				resp.Body = io.NopCloser(retryTestReader(func([]byte) (int, error) { time.Sleep(2 * time.Second); return 0, io.EOF }))
+				return resp, nil
+			default:
+				return retryTestResponse(200, ""), nil
+			}
+		})
+		e.SendRuleAlert(retryTestFailure())
+		time.Sleep(299 * time.Second)
+		synctest.Wait()
+		e.SendRuleAlert(retryTestFailure())
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 2, calls.Load())
+		time.Sleep(58 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 2, calls.Load(), "expired rejection must still set endpoint cooldown")
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 3, calls.Load())
+	})
+}
+
+func TestBulkHTTPRetryLongRetryAfter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		manager := NewAlertBulkManager(1, 10, 10, 3, 1000, 30000, func(string, []armotypes.RuntimeAlert, armotypes.ProcessTree, []string) error {
+			if calls.Add(1) == 1 {
+				return &httpRejection{status: 503, retryAfter: "600"}
+			}
+			return nil
+		})
+		done := make(chan struct{})
+		go func() { manager.processSendQueueItem(&bulkQueueItem{}); close(done) }()
+		synctest.Wait()
+		time.Sleep(299 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 1, calls.Load())
+		time.Sleep(2 * time.Second)
+		<-done
+		require.EqualValues(t, 2, calls.Load())
+	})
+}
+
+func TestBulkHTTP5xxPreservesExistingBackoff(t *testing.T) {
+	for _, status := range []int{500, 502, 504} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var attempts []time.Time
+				manager := NewAlertBulkManager(1, 10, 10, 3, 1000, 30000, func(string, []armotypes.RuntimeAlert, armotypes.ProcessTree, []string) error {
+					attempts = append(attempts, time.Now())
+					return &httpRejection{status: status}
+				})
+				manager.processSendQueueItem(&bulkQueueItem{})
+				require.Len(t, attempts, 4, "bulk 5xx must retain the existing retry budget")
+				for i, delay := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
+					require.Equal(t, delay, attempts[i+1].Sub(attempts[i]))
+				}
+			})
+		})
+	}
+}
+
+func TestHTTPRejectionCooldownCap(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, header := range []string{"86400", "9223372036854775807", now.Add(24 * time.Hour).Format(http.TimeFormat)} {
+		require.Equal(t, httpRetryMaxCooldown, (&httpRejection{retryAfter: header}).delay(time.Second, now))
+	}
+}
+
+func TestRuleAlertInitialRequestReservesCapacityAndOrder(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		var calls atomic.Int32
+		delivered := make(chan string, ruleRetryQueueSize)
+		e := retryTestExporter(t, func(r *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				return nil, err
+			}
+			if calls.Add(1) == 1 {
+				close(started)
+				select {
+				case <-release:
+				case <-r.Context().Done():
+					return nil, r.Context().Err()
+				}
+				return retryTestResponse(429, "60"), nil
+			}
+			delivered <- string(body)
+			return retryTestResponse(200, ""), nil
+		})
+		go func() { done <- e.ruleRetries.send(context.Background(), []byte("oldest")) }()
+		<-started
+		for i := 0; i < ruleRetryQueueSize-1; i++ {
+			require.NoError(t, e.ruleRetries.enqueue([]byte("newer"), nil))
+		}
+		require.Error(t, e.ruleRetries.enqueue([]byte("overflow"), nil), "initial request must reserve a queue slot")
+		close(release)
+		require.NoError(t, <-done, "the reserved oldest request must not be dropped on rejection")
+		time.Sleep(61 * time.Second)
+		synctest.Wait()
+		require.Equal(t, "oldest", <-delivered, "rejected initial request must precede newer arrivals")
+	})
+}
+
+func TestRuleAlertInitialRequestReservesByteCapacity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		e := retryTestExporter(t, func(r *http.Request) (*http.Response, error) {
+			close(started)
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+			return retryTestResponse(429, "60"), nil
+		})
+		go func() { done <- e.ruleRetries.send(context.Background(), make([]byte, ruleRetryQueueBytes)) }()
+		<-started
+		require.Error(t, e.ruleRetries.enqueue([]byte("overflow"), nil), "initial body must count against byte limit")
+		close(release)
+		require.NoError(t, <-done)
+		e.ruleRetries.mu.Lock()
+		retained := e.ruleRetries.bytes
+		e.ruleRetries.mu.Unlock()
+		require.Equal(t, ruleRetryQueueBytes, retained)
+	})
+}
+
+func TestRuleAlertInitialRequestReleasesReservation(t *testing.T) {
+	for _, status := range []int{200, 400, 502} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			e := retryTestExporter(t, func(*http.Request) (*http.Response, error) { return retryTestResponse(status, ""), nil })
+			err := e.ruleRetries.send(context.Background(), []byte("alert"))
+			if status == 200 {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			e.ruleRetries.mu.Lock()
+			defer e.ruleRetries.mu.Unlock()
+			require.Nil(t, e.ruleRetries.initial)
+			require.Zero(t, e.ruleRetries.bytes)
+			require.Zero(t, e.ruleRetries.items.Len())
+		})
+	}
+}
+
+func TestRuleAlertLimitNotificationHonorsCooldown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		bodies := make(chan string, 3)
+		e := retryTestExporter(t, func(r *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				return nil, err
+			}
+			bodies <- string(body)
+			if calls.Add(1) == 1 {
+				return retryTestResponse(429, "60"), nil
+			}
+			return retryTestResponse(200, ""), nil
+		})
+		e.config.MaxAlertsPerMinute = 1
+		e.SendRuleAlert(retryTestFailure())
+		e.SendRuleAlert(retryTestFailure())
+		time.Sleep(59 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 1, calls.Load(), "limit notification must not bypass endpoint cooldown")
+		time.Sleep(62 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 3, calls.Load(), "original and limit notification must both be delivered")
+		<-bodies
+		require.Contains(t, <-bodies, "stable-alert-id")
+		require.Contains(t, <-bodies, "AlertLimitReached")
+	})
+}

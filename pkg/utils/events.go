@@ -88,8 +88,45 @@ type DNSEvent interface {
 	GetNumAnswers() int
 	GetProto() string
 	GetQr() DNSPktType
+	// GetQtype returns the question type as the gadget names it ("A", "AAAA",
+	// "TXT", ...), or the decimal type number for types without a name.
+	GetQtype() string
+	// GetRcode returns the response code name ("Success", "NameError",
+	// "ServerFailure", "Refused", ...) for a response, and "" for a query.
+	GetRcode() string
 	GetSrcIP() string
 	GetSrcPort() uint16
+}
+
+// RuleOnlyEvent is implemented by events that must reach the rule manager
+// only, bypassing every other consumer of their event type (profile learning,
+// DNS cache, network stream, metrics, third-party receivers). The DNS tracer
+// marks forwarded queries and error responses this way: they carry no answer
+// addresses and would otherwise trigger agent-side lookups in the DNS manager
+// and be recorded as outbound connections by the network stream.
+type RuleOnlyEvent interface {
+	IsRuleOnly() bool
+}
+
+// IsRuleOnlyEvent reports whether e is marked rule-only.
+func IsRuleOnlyEvent(e K8sEvent) bool {
+	if ro, ok := e.(RuleOnlyEvent); ok {
+		return ro.IsRuleOnly()
+	}
+	return false
+}
+
+// RuleEventType returns the event type the rule manager uses to select rule
+// expressions for e. For a rule-only DNS event this is DnsQueryRuleEventType,
+// so that rules opt in with `eventType: "dnsQuery"` and existing "dns"
+// expressions keep matching answered responses only. For every other event it
+// is the event's own type.
+func RuleEventType(e K8sEvent) EventType {
+	t := e.GetEventType()
+	if t == DnsEventType && IsRuleOnlyEvent(e) {
+		return DnsQueryRuleEventType
+	}
+	return t
 }
 
 type ExecEvent interface {
@@ -215,6 +252,11 @@ const (
 	BpfEventType          EventType = "bpf"
 	CapabilitiesEventType EventType = "capabilities"
 	DnsEventType          EventType = "dns"
+	// DnsQueryRuleEventType is not a tracer event type. It is the rule-selection
+	// alias for DNS queries and error responses forwarded to the rule manager
+	// (see RuleEventType); such events still report DnsEventType from
+	// GetEventType so every DNS accessor and adapter applies to them.
+	DnsQueryRuleEventType EventType = "dnsQuery"
 	ExecveEventType       EventType = "exec"
 	ExitEventType         EventType = "exit"
 	ForkEventType         EventType = "fork"

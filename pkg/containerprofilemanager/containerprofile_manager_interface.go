@@ -10,6 +10,7 @@ type ContainerProfileManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 	ReportCapability(containerID, capability string)
 	ReportFileExec(containerID string, event utils.ExecEvent)
+	ReportProcfsExec(containerID string, path string, argv []string)
 	ReportFileOpen(containerID string, event utils.OpenEvent)
 	ReportHTTPEvent(containerID string, event utils.HttpEvent)
 	ReportRulePolicy(containerID, ruleId, allowedProcess string, allowedContainer bool)

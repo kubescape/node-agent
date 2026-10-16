@@ -48,7 +48,7 @@ func (l *processLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return l.getProcessEnv(args[0])
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "process.get_process_env")
-					return cachedFunc(values[0])
+					return processEnvOrEmpty(cachedFunc(values[0]))
 				}),
 			),
 		},

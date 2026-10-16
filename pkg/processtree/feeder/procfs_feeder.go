@@ -38,7 +38,9 @@ type ProcfsFeeder struct {
 	// bootTime is /proc/stat's btime, read once at Start. Used only to derive the
 	// display-only wall-clock start time; it has whole-second resolution, which is
 	// why boot-relative nanoseconds remain the sole process-identity source.
-	bootTime time.Time
+	bootTime           time.Time
+	running            bool
+	wg                 sync.WaitGroup
 }
 
 // procInfo is a helper struct to pass results from worker goroutines.
@@ -62,8 +64,8 @@ func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 	pf.mutex.Lock()
 	defer pf.mutex.Unlock()
 
-	// Use pf.cancel as the guard to check if the feeder is running.
-	if pf.cancel != nil {
+	// Use pf.running as the guard to check if the feeder is running.
+	if pf.running {
 		return fmt.Errorf("procfs feeder already started")
 	}
 
@@ -83,8 +85,10 @@ func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 
 	// Create a cancellable context for graceful shutdown
 	pf.ctx, pf.cancel = context.WithCancel(ctx)
+	pf.running = true
 
-	go pf.feedLoop()
+	pf.wg.Add(1)
+	go pf.feedLoop(pf.ctx)
 
 	return nil
 }
@@ -92,15 +96,22 @@ func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 // Stop stops the procfs feeder.
 func (pf *ProcfsFeeder) Stop() error {
 	pf.mutex.Lock()
-	defer pf.mutex.Unlock()
-
-	if pf.cancel != nil {
-		pf.cancel()
-		// Setting cancel to nil indicates the feeder is stopped and can be started again.
-		pf.cancel = nil
-		// DO NOT set pf.ctx to nil here. The feedLoop goroutine needs it
-		// to gracefully shut down when it reads from ctx.Done().
+	if !pf.running {
+		pf.mutex.Unlock()
+		return nil
 	}
+	cancel := pf.cancel
+	pf.mutex.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	pf.wg.Wait()
+
+	pf.mutex.Lock()
+	pf.running = false
+	pf.cancel = nil
+	pf.mutex.Unlock()
 
 	return nil
 }
@@ -113,19 +124,30 @@ func (pf *ProcfsFeeder) Subscribe(ch chan<- conversion.ProcessEvent) {
 	pf.subscribers = append(pf.subscribers, ch)
 }
 
+// Unsubscribe removes a channel from the subscribers list.
+func (pf *ProcfsFeeder) Unsubscribe(ch chan<- conversion.ProcessEvent) {
+	pf.mutex.Lock()
+	defer pf.mutex.Unlock()
+
+	for i, sub := range pf.subscribers {
+		if sub == ch {
+			pf.subscribers = append(pf.subscribers[:i], pf.subscribers[i+1:]...)
+			break
+		}
+	}
+}
+
 // feedLoop is the main loop that reads procfs and feeds events.
-func (pf *ProcfsFeeder) feedLoop() {
-	// Capture context locally. This is safe now because pf.ctx is never set to nil
-	// during the feeder's lifecycle.
-	ctx := pf.ctx
+func (pf *ProcfsFeeder) feedLoop(ctx context.Context) {
+	defer pf.wg.Done()
 
 	ticker := time.NewTicker(pf.interval)
 	exitTicker := time.NewTicker(pf.pidScanInterval)
 	defer ticker.Stop()
 	defer exitTicker.Stop()
 
-	// Initial scan
-	pf.scanProcfs()
+	// Initial scan with backpressure to guarantee lossless delivery to subscribers
+	pf.scanProcfsWithBackpressure(ctx)
 
 	for {
 		select {
@@ -135,12 +157,24 @@ func (pf *ProcfsFeeder) feedLoop() {
 			pf.scanProcfs()
 		case <-exitTicker.C:
 			pids := pf.getPids()
-			go pf.sendExitEvents(pids)
+			pf.wg.Add(1)
+			go func(p []uint32) {
+				defer pf.wg.Done()
+				pf.sendExitEvents(p)
+			}(pids)
 		}
 	}
 }
 
 func (pf *ProcfsFeeder) scanProcfs() {
+	pf.scanProcfsInternal(nil)
+}
+
+func (pf *ProcfsFeeder) scanProcfsWithBackpressure(ctx context.Context) {
+	pf.scanProcfsInternal(ctx)
+}
+
+func (pf *ProcfsFeeder) scanProcfsInternal(blockingCtx context.Context) {
 	pids := pf.getPids()
 	if len(pids) == 0 {
 		return
@@ -181,9 +215,9 @@ func (pf *ProcfsFeeder) scanProcfs() {
 		if parentProc, ok := procMap[event.PPID]; ok {
 			eventWithPcomm := event
 			eventWithPcomm.Pcomm = parentProc.Comm
-			pf.broadcastEvent(eventWithPcomm)
+			pf.broadcastEventWithBackpressure(blockingCtx, eventWithPcomm)
 		} else {
-			pf.broadcastEvent(event)
+			pf.broadcastEventWithBackpressure(blockingCtx, event)
 		}
 	}
 }
@@ -271,6 +305,7 @@ func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (conversion.ProcessEvent, er
 			event.Cmdline = stat.Comm
 		} else {
 			event.Cmdline = strings.Join(cmdline, " ")
+			event.Argv = append([]string(nil), cmdline...)
 		}
 	}
 
@@ -300,15 +335,34 @@ func (pf *ProcfsFeeder) getProcessComm(pid uint32) (string, error) {
 	return proc.Comm()
 }
 
-// broadcastEvent sends an event to all subscribers.
+// broadcastEvent sends an event to all subscribers using non-blocking send.
 func (pf *ProcfsFeeder) broadcastEvent(event conversion.ProcessEvent) {
-	pf.mutex.RLock()
-	defer pf.mutex.RUnlock()
+	pf.broadcastEventWithBackpressure(nil, event)
+}
 
-	for _, ch := range pf.subscribers {
-		select {
-		case ch <- event:
-		default:
+// broadcastEventWithBackpressure sends an event to all subscribers, waiting on
+// channel capacity when blockingCtx is non-nil to provide lossless delivery.
+func (pf *ProcfsFeeder) broadcastEventWithBackpressure(blockingCtx context.Context, event conversion.ProcessEvent) {
+	pf.mutex.RLock()
+	if len(pf.subscribers) == 0 {
+		pf.mutex.RUnlock()
+		return
+	}
+	subscribers := append([]chan<- conversion.ProcessEvent(nil), pf.subscribers...)
+	pf.mutex.RUnlock()
+
+	for _, ch := range subscribers {
+		if blockingCtx != nil {
+			select {
+			case ch <- event:
+			case <-blockingCtx.Done():
+				return
+			}
+		} else {
+			select {
+			case ch <- event:
+			default:
+			}
 		}
 	}
 }

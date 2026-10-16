@@ -243,6 +243,11 @@ NodeAgent is configured through a JSON configuration file and environment variab
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete configuration reference.
 
+For kube-proxy-free clusters, set `hostSensorExcludedSensors: ["KubeProxyInfo"]`
+to retain other host sensors without recurring kube-proxy warnings. See
+[host sensor configuration](docs/CONFIGURATION.md#host-sensors) for JSON,
+environment-variable, and Helm examples.
+
 **Example minimal config:**
 ```json
 {

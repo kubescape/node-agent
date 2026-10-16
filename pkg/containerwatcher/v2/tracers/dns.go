@@ -2,6 +2,7 @@ package tracers
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,7 +18,10 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/otelsetup"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
@@ -51,6 +55,26 @@ type DNSTracer struct {
 	runtime            runtime.Runtime
 	socketEnricherOp   *socketenricher.SocketEnricher
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher
+
+	// forwarding is nil unless WithDNSRuleForwarding enabled it. With it nil
+	// the tracer behaves exactly as before: only answered responses enter the
+	// pipeline.
+	forwarding *dnsForwarding
+}
+
+// DNSTracerOption configures optional DNSTracer behaviour.
+type DNSTracerOption func(*DNSTracer)
+
+// WithDNSRuleForwarding forwards DNS queries and error responses to the rule
+// manager, as rule-only events, according to cfg. With cfg.Enabled false it is
+// a no-op. See docs/features/dns-query-rule-forwarding.md.
+func WithDNSRuleForwarding(cfg config.DNSRuleForwardingConfig) DNSTracerOption {
+	return func(dt *DNSTracer) {
+		if !cfg.Enabled {
+			return
+		}
+		dt.forwarding = newDNSForwarding(cfg.ExcludedSuffixes)
+	}
 }
 
 // NewDNSTracer creates a new tracer
@@ -61,8 +85,9 @@ func NewDNSTracer(
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	socketEnricherOp *socketenricher.SocketEnricher,
+	opts ...DNSTracerOption,
 ) *DNSTracer {
-	return &DNSTracer{
+	dt := &DNSTracer{
 		eventCallback:      eventCallback,
 		kubeManager:        kubeManager,
 		ociStore:           ociStore,
@@ -70,6 +95,95 @@ func NewDNSTracer(
 		thirdPartyEnricher: thirdPartyEnricher,
 		socketEnricherOp:   socketEnricherOp,
 	}
+	for _, opt := range opts {
+		opt(dt)
+	}
+	return dt
+}
+
+// builtinExcludedDNSSuffixes are never forwarded as rule-only events: they are
+// the bulk of unique names in a cluster (ndots search-suffix expansion of
+// external names, reverse lookups) and can never carry exfiltrated data to an
+// external server.
+var builtinExcludedDNSSuffixes = []string{".cluster.local.", ".in-addr.arpa.", ".ip6.arpa."}
+
+// dnsForwarding holds the forwarding policy and its counter.
+type dnsForwarding struct {
+	excludedSuffixes []string
+	counter          metric.Int64Counter
+}
+
+func newDNSForwarding(extraSuffixes []string) *dnsForwarding {
+	suffixes := make([]string, 0, len(builtinExcludedDNSSuffixes)+len(extraSuffixes))
+	suffixes = append(suffixes, builtinExcludedDNSSuffixes...)
+	for _, s := range extraSuffixes {
+		if s = config.NormalizeDNSSuffix(s); s != "" {
+			suffixes = append(suffixes, s)
+		}
+	}
+	counter, _ := otelsetup.Meter().Int64Counter(
+		"node_agent.dns.rule_forwarding.total",
+		metric.WithDescription("DNS packets classified by the rule-forwarding filter, by outcome"),
+	)
+	return &dnsForwarding{excludedSuffixes: suffixes, counter: counter}
+}
+
+func (f *dnsForwarding) excluded(name string) bool {
+	name = strings.ToLower(name)
+	for _, s := range f.excludedSuffixes {
+		if strings.HasSuffix(name, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *dnsForwarding) count(outcome dnsOutcome) {
+	if f == nil || f.counter == nil {
+		return
+	}
+	f.counter.Add(context.Background(), 1, metric.WithAttributes(attribute.String("outcome", string(outcome))))
+}
+
+// dnsOutcome is the counter label for one classified packet.
+type dnsOutcome string
+
+const (
+	dnsOutcomeAnswered      dnsOutcome = "answered"       // response with answers: the pre-existing path
+	dnsOutcomeQuery         dnsOutcome = "query"          // forwarded, rule-only
+	dnsOutcomeErrorResponse dnsOutcome = "error_response" // NXDOMAIN/SERVFAIL/REFUSED...: forwarded, rule-only
+	dnsOutcomeSkippedSuffix dnsOutcome = "skipped_suffix" // excluded name
+	dnsOutcomeSkippedNodata dnsOutcome = "skipped_nodata" // NOERROR with no answers: repeats the query, dropped
+	dnsOutcomeDropped       dnsOutcome = "dropped"        // forwarding off, or empty name
+)
+
+// classifyDNS decides whether a parsed DNS packet enters the pipeline and
+// whether it is rule-only. fwd nil means forwarding is off, which reproduces
+// the historical filter exactly: only responses with answers pass.
+func classifyDNS(e utils.DNSEvent, fwd *dnsForwarding) (forward bool, ruleOnly bool, outcome dnsOutcome) {
+	isResponse := e.GetQr() == utils.DNSPktTypeResponse
+	if isResponse && e.GetNumAnswers() > 0 {
+		return true, false, dnsOutcomeAnswered
+	}
+	if fwd == nil {
+		return false, false, dnsOutcomeDropped
+	}
+	name := e.GetDNSName()
+	if name == "" {
+		return false, false, dnsOutcomeDropped
+	}
+	if fwd.excluded(name) {
+		return false, false, dnsOutcomeSkippedSuffix
+	}
+	if !isResponse {
+		return true, true, dnsOutcomeQuery
+	}
+	// A NOERROR response without answers (NODATA, typically AAAA for an
+	// IPv4-only name) only repeats the question the query already carried.
+	if e.GetRcode() == RCodeSuccess.String() {
+		return false, false, dnsOutcomeSkippedNodata
+	}
+	return true, true, dnsOutcomeErrorResponse
 }
 
 // newGadgetContext builds a fresh GadgetContext for a single run attempt and
@@ -184,7 +298,17 @@ func (dt *DNSTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					dt.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.DnsEventType})
+					// Classify on the packet in place and copy only what is
+					// forwarded. Reads inside the subscribe callback are valid
+					// without a copy, and most packets are dropped, so this
+					// removes a DeepCopy per dropped packet.
+					view := &utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.DnsEventType}
+					forward, ruleOnly, outcome := classifyDNS(view, dt.forwarding)
+					dt.forwarding.count(outcome)
+					if !forward {
+						return nil
+					}
+					dt.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.DnsEventType, RuleOnly: ruleOnly})
 					return nil
 				}, opPriority)
 				if err != nil {
@@ -196,16 +320,8 @@ func (dt *DNSTracer) eventOperator() operators.DataOperator {
 	)
 }
 
-// callback handles events from the tracer
+// callback hands an event that classifyDNS accepted to the pipeline.
 func (dt *DNSTracer) callback(event utils.DNSEvent) {
-	if event.GetQr() != utils.DNSPktTypeResponse {
-		return
-	}
-
-	if event.GetNumAnswers() == 0 {
-		return
-	}
-
 	if dt.eventCallback != nil {
 		// Extract container ID and process ID from the DNS event
 		containerID := event.GetContainerID()

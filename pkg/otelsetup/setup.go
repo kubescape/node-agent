@@ -21,6 +21,7 @@ import (
 	gotelsetup "github.com/kubescape/go-logger/otelsetup"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
 	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/global"
@@ -174,21 +175,21 @@ func EmitAlertLogRecord(ctx context.Context, attrs AlertLogAttrs) {
 	now := time.Now()
 	r.SetTimestamp(now)
 	r.SetObservedTimestamp(now)
-	r.SetBody(otellog.StringValue("SecurityAlert"))
+	r.SetBody(attribute.StringValue("SecurityAlert"))
 	r.SetSeverity(otellog.SeverityWarn1)
 	r.SetSeverityText("WARN")
 	r.AddAttributes(
-		otellog.String("rule_id", attrs.RuleID),
-		otellog.String("alert_type", attrs.AlertType),
-		otellog.String("container.id", attrs.ContainerID),
-		otellog.String("container_name", attrs.ContainerName),
-		otellog.String("namespace", attrs.Namespace),
-		otellog.String("pod_name", attrs.PodName),
-		otellog.String("image", attrs.Image),
-		otellog.String("event_type", attrs.EventType),
+		attribute.String("rule_id", attrs.RuleID),
+		attribute.String("alert_type", attrs.AlertType),
+		attribute.String("container.id", attrs.ContainerID),
+		attribute.String("container_name", attrs.ContainerName),
+		attribute.String("namespace", attrs.Namespace),
+		attribute.String("pod_name", attrs.PodName),
+		attribute.String("image", attrs.Image),
+		attribute.String("event_type", attrs.EventType),
 	)
 	if attrs.MalwareSignature != "" {
-		r.AddAttributes(otellog.String("malware.signature", attrs.MalwareSignature))
+		r.AddAttributes(attribute.String("malware.signature", attrs.MalwareSignature))
 	}
 	Logger().Emit(ctx, r)
 }

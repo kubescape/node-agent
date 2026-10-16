@@ -233,10 +233,17 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.createEventCallback(utils.NetworkEventType),
 		tf.thirdPartyEnricher,
 		tf.socketEnricher,
+		tf.cfg.KubernetesMode,
 	)
 	manager.RegisterTracer(networkTracer)
 
 	// Create DNS tracer
+	dnsTracerOpts := []DNSTracerOption{}
+	// Forwarded queries only ever reach the rule manager, so without runtime
+	// detection there is nobody to consume them.
+	if tf.cfg.EnableRuntimeDetection {
+		dnsTracerOpts = append(dnsTracerOpts, WithDNSRuleForwarding(tf.cfg.DNSRuleForwarding))
+	}
 	dnsTracer := NewDNSTracer(
 		tf.kubeManager,
 		tf.runtime,
@@ -244,6 +251,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.createEventCallback(utils.DnsEventType),
 		tf.thirdPartyEnricher,
 		tf.socketEnricher,
+		dnsTracerOpts...,
 	)
 	manager.RegisterTracer(dnsTracer)
 

@@ -16,6 +16,32 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// TestRecursiveSplitPreservesSibling verifies recursive singleton redistribution
+// cannot overwrite an unsent sibling or the original profile through spare slice capacity.
+func TestRecursiveSplitPreservesSibling(t *testing.T) {
+	for _, kind := range []string{"lists", "neighbors"} {
+		t.Run(kind, func(t *testing.T) {
+			parent := testProfile()
+			if kind == "lists" {
+				parent.Spec.Capabilities = []string{strings.Repeat("A", 128), strings.Repeat("B", 128)}
+				parent.Spec.Syscalls = []string{strings.Repeat("read", 32), strings.Repeat("write", 32)}
+			} else {
+				parent.Spec.Ingress = []v1beta1.NetworkNeighbor{{Identifier: strings.Repeat("ingress-A", 32)}, {Identifier: strings.Repeat("ingress-B", 32)}}
+				parent.Spec.Egress = []v1beta1.NetworkNeighbor{{Identifier: strings.Repeat("egress-A", 32)}, {Identifier: strings.Repeat("egress-B", 32)}}
+			}
+			original := parent.DeepCopy()
+			a, b, ok := splitProfile(parent)
+			require.True(t, ok)
+			sibling := b.DeepCopy()
+			// This split redistributes one singleton into its empty second half.
+			// Even a rejected split must leave the queued sibling intact.
+			splitProfile(a)
+			require.Equal(t, sibling, b)
+			require.Equal(t, original, parent)
+		})
+	}
+}
+
 // tsRow is the reduced shape of storage's TimeSeriesContainers that
 // consolidateContinuousTimeSeries actually branches on.
 type tsRow struct {
@@ -153,10 +179,20 @@ func elementSignatures(spec *v1beta1.ContainerProfileSpec) []string {
 		out = append(out, "callstack:"+string(c.CallID))
 	}
 	for _, n := range spec.Ingress {
-		out = append(out, "ingress:"+n.Identifier)
+		if len(n.Ports) == 0 {
+			out = append(out, "ingress:"+n.Identifier)
+		}
+		for _, port := range n.Ports {
+			out = append(out, "ingress:"+n.Identifier+":"+port.Name)
+		}
 	}
 	for _, n := range spec.Egress {
-		out = append(out, "egress:"+n.Identifier)
+		if len(n.Ports) == 0 {
+			out = append(out, "egress:"+n.Identifier)
+		}
+		for _, port := range n.Ports {
+			out = append(out, "egress:"+n.Identifier+":"+port.Name)
+		}
 	}
 	for k := range spec.PolicyByRuleId {
 		out = append(out, "policy:"+k)
@@ -164,6 +200,7 @@ func elementSignatures(spec *v1beta1.ContainerProfileSpec) []string {
 	return out
 }
 
+// TestSplitProfile_PartitionsWithoutLossOrDuplication checks that split halves contain every observation exactly once, including peer ports.
 func TestSplitProfile_PartitionsWithoutLossOrDuplication(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -192,6 +229,18 @@ func TestSplitProfile_PartitionsWithoutLossOrDuplication(t *testing.T) {
 		}},
 		{"egress", func(p *v1beta1.ContainerProfile) {
 			p.Spec.Egress = []v1beta1.NetworkNeighbor{{Identifier: "a"}, {Identifier: "b"}, {Identifier: "c"}}
+		}},
+		{"merged neighbor ports", func(p *v1beta1.ContainerProfile) {
+			neighbor := portSplitNeighbor()
+			neighbor.Ports = neighbor.Ports[:7]
+			p.Spec.Ingress = []v1beta1.NetworkNeighbor{neighbor}
+			p.Spec.Egress = []v1beta1.NetworkNeighbor{neighbor}
+		}},
+		{"mixed peers and fields", func(p *v1beta1.ContainerProfile) {
+			neighbor := portSplitNeighbor()
+			p.Spec.Ingress = []v1beta1.NetworkNeighbor{neighbor}
+			p.Spec.Egress = []v1beta1.NetworkNeighbor{neighbor, {Identifier: "second"}}
+			p.Spec.Capabilities = []string{"CAP_SYS_ADMIN"}
 		}},
 		{"policyByRuleId", func(p *v1beta1.ContainerProfile) {
 			p.Spec.PolicyByRuleId = map[string]v1beta1.RulePolicy{

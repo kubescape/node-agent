@@ -1,0 +1,677 @@
+package containerprofilemanager
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	"k8s.io/utils/ptr"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+)
+
+type stubK8sObjectCache struct {
+	objectcache.K8sObjectCacheMock
+	pods         []*corev1.Pod
+	getPodsCalls int
+}
+
+// GetPods records list calls so tests can detect fallback scans.
+func (s *stubK8sObjectCache) GetPods() []*corev1.Pod {
+	s.getPodsCalls++
+	return s.pods
+}
+
+// GetPodByIP finds a test pod by primary IP without calling GetPods.
+func (s *stubK8sObjectCache) GetPodByIP(ip string) *corev1.Pod {
+	for _, pod := range s.pods {
+		if pod != nil && pod.Status.PodIP == ip {
+			return pod
+		}
+	}
+	return nil
+}
+
+type mockK8sInventory struct {
+	podsByIP map[string]*common.SlimPod
+	svcsByIP map[string]*common.SlimService
+}
+
+// newMockK8sInventory creates mutable pod and Service indexes for simulating inventory updates.
+func newMockK8sInventory() *mockK8sInventory {
+	return &mockK8sInventory{
+		podsByIP: make(map[string]*common.SlimPod),
+		svcsByIP: make(map[string]*common.SlimService),
+	}
+}
+
+// Start is a no-op because tests populate the inventory directly.
+func (m *mockK8sInventory) Start() {}
+
+// Stop is a no-op because the test inventory has no background workers.
+func (m *mockK8sInventory) Stop() {}
+
+// GetPods returns the pods currently present in the test inventory.
+func (m *mockK8sInventory) GetPods() []*common.SlimPod {
+	var pods []*common.SlimPod
+	for _, p := range m.podsByIP {
+		pods = append(pods, p)
+	}
+	return pods
+}
+
+// GetPodByName finds a test pod by namespace and name, returning nil when absent.
+func (m *mockK8sInventory) GetPodByName(namespace string, name string) *common.SlimPod {
+	for _, p := range m.podsByIP {
+		if p.Namespace == namespace && p.Name == name {
+			return p
+		}
+	}
+	return nil
+}
+
+// GetPodByIp looks up a test pod by IP, returning nil when absent.
+func (m *mockK8sInventory) GetPodByIp(ip string) *common.SlimPod {
+	if m.podsByIP == nil {
+		return nil
+	}
+	return m.podsByIP[ip]
+}
+
+// GetSvcs returns the Services currently present in the test inventory.
+func (m *mockK8sInventory) GetSvcs() []*common.SlimService {
+	var svcs []*common.SlimService
+	for _, s := range m.svcsByIP {
+		svcs = append(svcs, s)
+	}
+	return svcs
+}
+
+// GetSvcByName finds a test Service by namespace and name, returning nil when absent.
+func (m *mockK8sInventory) GetSvcByName(namespace string, name string) *common.SlimService {
+	for _, s := range m.svcsByIP {
+		if s.Namespace == namespace && s.Name == name {
+			return s
+		}
+	}
+	return nil
+}
+
+// GetSvcByIp looks up a test Service by IP, returning nil when absent.
+func (m *mockK8sInventory) GetSvcByIp(ip string) *common.SlimService {
+	if m.svcsByIP == nil {
+		return nil
+	}
+	return m.svcsByIP[ip]
+}
+
+// TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sInventory checks that inventory resolution replaces a raw IP with stable workload labels.
+func TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sInventory(t *testing.T) {
+	inv := newMockK8sInventory()
+	inv.podsByIP["10.244.0.14"] = &common.SlimPod{
+		SlimObjectMeta: common.SlimObjectMeta{
+			Name:      "wikijs-5b7c844697-x9k2v",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app":               "wikijs",
+				"pod-template-hash": "5b7c844697",
+			},
+		},
+		Spec: common.SlimPodSpec{
+			HostNetwork: false,
+		},
+		Status: common.SlimPodStatus{
+			PodIP: "10.244.0.14",
+		},
+	}
+
+	cd := &containerData{}
+	rawEvent := NetworkEvent{
+		Port:     3306,
+		Protocol: "tcp",
+		PktType:  utils.HostPktType, // ingress to mariadb
+		Destination: Destination{
+			Kind:      EndpointKindRaw,
+			IPAddress: "10.244.0.14",
+		},
+	}
+
+	neighbor := cd.createNetworkNeighbor("", rawEvent, "default", nil, nil, inv, nil, false)
+	require.NotNil(t, neighbor)
+	assert.Equal(t, InternalTrafficType, string(neighbor.Type))
+	assert.Empty(t, neighbor.IPAddress, "pod neighbor must not have raw ipAddress set")
+	require.NotNil(t, neighbor.PodSelector)
+	assert.Equal(t, map[string]string{"app": "wikijs"}, neighbor.PodSelector.MatchLabels)
+	assert.NotContains(t, neighbor.PodSelector.MatchLabels, "pod-template-hash")
+	assert.Nil(t, neighbor.NamespaceSelector, "same namespace should have nil namespaceSelector")
+	require.Len(t, neighbor.Ports, 1)
+	assert.Equal(t, int32(3306), *neighbor.Ports[0].Port)
+}
+
+// TestCreateNetworkNeighbor_RawPodIP_CrossNamespace checks that resolved peers in another namespace receive a namespace selector.
+func TestCreateNetworkNeighbor_RawPodIP_CrossNamespace(t *testing.T) {
+	inv := newMockK8sInventory()
+	inv.podsByIP["10.244.0.14"] = &common.SlimPod{
+		SlimObjectMeta: common.SlimObjectMeta{
+			Name:      "wikijs-abcde",
+			Namespace: "client-ns",
+			Labels: map[string]string{
+				"app": "wikijs",
+			},
+		},
+		Spec: common.SlimPodSpec{
+			HostNetwork: false,
+		},
+		Status: common.SlimPodStatus{
+			PodIP: "10.244.0.14",
+		},
+	}
+
+	cd := &containerData{}
+	rawEvent := NetworkEvent{
+		Port:     3306,
+		Protocol: "tcp",
+		PktType:  utils.HostPktType,
+		Destination: Destination{
+			Kind:      EndpointKindRaw,
+			IPAddress: "10.244.0.14",
+		},
+	}
+
+	neighbor := cd.createNetworkNeighbor("", rawEvent, "server-ns", nil, nil, inv, nil, false)
+	require.NotNil(t, neighbor)
+	assert.Equal(t, InternalTrafficType, string(neighbor.Type))
+	require.NotNil(t, neighbor.PodSelector)
+	assert.Equal(t, map[string]string{"app": "wikijs"}, neighbor.PodSelector.MatchLabels)
+	require.NotNil(t, neighbor.NamespaceSelector)
+	assert.Equal(t, map[string]string{"kubernetes.io/metadata.name": "client-ns"}, neighbor.NamespaceSelector.MatchLabels)
+}
+
+// TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sObjectCache checks that fallback resolution uses the IP lookup without listing all pods.
+func TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sObjectCache(t *testing.T) {
+	mockCache := &stubK8sObjectCache{
+		pods: []*corev1.Pod{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "wikijs-pod",
+					Namespace: "default",
+					Labels:    map[string]string{"app": "wikijs"},
+				},
+				Spec: corev1.PodSpec{
+					HostNetwork: false,
+				},
+				Status: corev1.PodStatus{
+					PodIP: "10.244.0.14",
+				},
+			},
+		},
+	}
+
+	cd := &containerData{}
+	rawEvent := NetworkEvent{
+		Port:     3306,
+		Protocol: "tcp",
+		PktType:  utils.HostPktType,
+		Destination: Destination{
+			Kind:      EndpointKindRaw,
+			IPAddress: "10.244.0.14",
+		},
+	}
+
+	neighbor := cd.createNetworkNeighbor("", rawEvent, "default", nil, nil, nil, mockCache, false)
+	require.NotNil(t, neighbor)
+	assert.Equal(t, InternalTrafficType, string(neighbor.Type))
+	require.NotNil(t, neighbor.PodSelector)
+	assert.Equal(t, map[string]string{"app": "wikijs"}, neighbor.PodSelector.MatchLabels)
+	require.Zero(t, mockCache.getPodsCalls, "fallback lookup must use the IP index")
+}
+
+// TestCreateNetworkNeighbor_RawServiceIP_ResolvedViaK8sInventory checks that a raw Service IP resolves to its workload selector.
+func TestCreateNetworkNeighbor_RawServiceIP_ResolvedViaK8sInventory(t *testing.T) {
+	inv := newMockK8sInventory()
+	inv.svcsByIP["10.96.0.42"] = &common.SlimService{
+		SlimObjectMeta: common.SlimObjectMeta{
+			Name:      "api-svc",
+			Namespace: "default",
+		},
+		Spec: common.SlimServiceSpec{
+			ClusterIP: "10.96.0.42",
+		},
+	}
+
+	service := newServiceWorkload("api-svc", map[string]any{"app": "api"}, map[string]any{
+		"port": 80, "targetPort": 8080, "protocol": "TCP",
+	})
+	client := &servicePortTestClient{
+		service:    service,
+		kubeClient: fake.NewClientset(),
+	}
+
+	cd := &containerData{}
+	rawEvent := NetworkEvent{
+		Port:     80,
+		Protocol: "tcp",
+		PktType:  utils.OutgoingPktType,
+		Destination: Destination{
+			Kind:      EndpointKindRaw,
+			IPAddress: "10.96.0.42",
+		},
+	}
+
+	neighbor := cd.createNetworkNeighbor("", rawEvent, "default", client, nil, inv, nil, false)
+	require.NotNil(t, neighbor)
+	assert.Equal(t, InternalTrafficType, string(neighbor.Type))
+	require.NotNil(t, neighbor.PodSelector)
+	assert.Equal(t, map[string]string{"app": "api"}, neighbor.PodSelector.MatchLabels)
+}
+
+// TestCreateNetworkNeighbor_RawPrivateIP_DeferredOnIntermediateFlush checks that deferred private peers resolve after the inventory catches up.
+func TestCreateNetworkNeighbor_RawPrivateIP_DeferredOnIntermediateFlush(t *testing.T) {
+	cd := &containerData{}
+	rawEvent := NetworkEvent{
+		Port:     3306,
+		Protocol: "tcp",
+		PktType:  utils.HostPktType,
+		Destination: Destination{
+			Kind:      EndpointKindRaw,
+			IPAddress: "10.244.0.14",
+		},
+	}
+
+	// 1. First flush: IP is private (10.244.0.14) and inventory does not have it yet.
+	// Intermediate flush (forceSend = false).
+	neighbor := cd.createNetworkNeighbor("", rawEvent, "default", nil, nil, nil, nil, false)
+	assert.Nil(t, neighbor, "raw private IP should be deferred on first intermediate flush")
+	require.NotNil(t, cd.deferredNetworks)
+	assert.True(t, cd.deferredNetworks.Contains(rawEvent))
+
+	// 2. emptyEvents preserves deferred networks for next flush
+	cd.emptyEvents()
+	assert.Nil(t, cd.deferredNetworks)
+	require.NotNil(t, cd.networks)
+	assert.True(t, cd.networks.Contains(rawEvent))
+	require.NotNil(t, cd.prevDeferredNetworks)
+	assert.True(t, cd.prevDeferredNetworks.Contains(rawEvent))
+
+	// 3. Second flush: inventory now has the pod!
+	inv := newMockK8sInventory()
+	inv.podsByIP["10.244.0.14"] = &common.SlimPod{
+		SlimObjectMeta: common.SlimObjectMeta{
+			Name:      "wikijs",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "wikijs"},
+		},
+		Status: common.SlimPodStatus{PodIP: "10.244.0.14"},
+	}
+
+	neighbor = cd.createNetworkNeighbor("", rawEvent, "default", nil, nil, inv, nil, false)
+	require.NotNil(t, neighbor, "re-resolved to pod on second flush")
+	assert.Equal(t, InternalTrafficType, string(neighbor.Type))
+	assert.Equal(t, map[string]string{"app": "wikijs"}, neighbor.PodSelector.MatchLabels)
+}
+
+// TestCreateNetworkNeighbor_RawPrivateIP_EmittedExternalIfNeverResolves checks that unresolved private peers become external after one deferred flush.
+func TestCreateNetworkNeighbor_RawPrivateIP_EmittedExternalIfNeverResolves(t *testing.T) {
+	cd := &containerData{}
+	rawEvent := NetworkEvent{
+		Port:     3306,
+		Protocol: "tcp",
+		PktType:  utils.OutgoingPktType,
+		Destination: Destination{
+			Kind:      EndpointKindRaw,
+			IPAddress: "10.50.1.20", // off-cluster private IP
+		},
+	}
+
+	// Flush 1: deferred
+	neighbor := cd.createNetworkNeighbor("", rawEvent, "default", nil, nil, nil, nil, false)
+	assert.Nil(t, neighbor)
+
+	// emptyEvents moves it to prevDeferredNetworks
+	cd.emptyEvents()
+
+	// Flush 2: already deferred once, now emitted as external
+	neighbor = cd.createNetworkNeighbor("", rawEvent, "default", nil, nil, nil, nil, false)
+	require.NotNil(t, neighbor)
+	assert.Equal(t, ExternalTrafficType, string(neighbor.Type))
+	assert.Equal(t, "10.50.1.20", neighbor.IPAddress)
+}
+
+// TestCreateNetworkNeighbor_PublicIP_EmittedExternalImmediately checks that public IP peers bypass deferral.
+func TestCreateNetworkNeighbor_PublicIP_EmittedExternalImmediately(t *testing.T) {
+	cd := &containerData{}
+	rawEvent := NetworkEvent{
+		Port:     443,
+		Protocol: "tcp",
+		PktType:  utils.OutgoingPktType,
+		Destination: Destination{
+			Kind:      EndpointKindRaw,
+			IPAddress: "93.184.216.34", // public IP
+		},
+	}
+
+	neighbor := cd.createNetworkNeighbor("", rawEvent, "default", nil, nil, nil, nil, false)
+	require.NotNil(t, neighbor)
+	assert.Equal(t, ExternalTrafficType, string(neighbor.Type))
+	assert.Equal(t, "93.184.216.34", neighbor.IPAddress)
+	assert.Nil(t, cd.deferredNetworks)
+}
+
+// TestReportNetworkEvent_ImmediateResolutionWhenAvailableInInventory checks that ingestion stores pod identity when inventory already contains the peer.
+func TestReportNetworkEvent_ImmediateResolutionWhenAvailableInInventory(t *testing.T) {
+	cpm, entry := newTestManager(t, "container1")
+	inv := newMockK8sInventory()
+	inv.podsByIP["10.244.0.14"] = &common.SlimPod{
+		SlimObjectMeta: common.SlimObjectMeta{
+			Name:      "wikijs",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "wikijs"},
+		},
+		Status: common.SlimPodStatus{PodIP: "10.244.0.14"},
+	}
+	cpm.SetK8sInventory(inv)
+
+	event := &utils.StructEvent{
+		DstEndpoint: types.L3Endpoint{
+			Addr: "10.244.0.14",
+			Kind: types.EndpointKindRaw, // inspector gadget emitted raw
+		},
+		DstPort: 3306,
+		Proto:   "tcp",
+		PktType: utils.HostPktType,
+	}
+
+	cpm.ReportNetworkEvent("container1", event)
+
+	// Verify that networks stored the event directly resolved to EndpointKindPod
+	slice := entry.data.networks.ToSlice()
+	require.Len(t, slice, 1)
+	assert.Equal(t, EndpointKindPod, slice[0].Destination.Kind)
+	assert.Equal(t, "wikijs", slice[0].Destination.Name)
+	assert.Equal(t, map[string]string{"app": "wikijs"}, slice[0].GetDestinationPodLabels())
+}
+
+// TestMonitoring_ReResolutionAtProfileFlush checks that profile generation resolves raw peers added to inventory after ingestion.
+func TestMonitoring_ReResolutionAtProfileFlush(t *testing.T) {
+	cpm, entry := newTestManager(t, "container1")
+	inv := newMockK8sInventory()
+	cpm.SetK8sInventory(inv)
+
+	// Step 1: Network event arrived when pod was NOT yet in inventory
+	event := &utils.StructEvent{
+		DstEndpoint: types.L3Endpoint{
+			Addr: "10.244.0.14",
+			Kind: types.EndpointKindRaw,
+		},
+		DstPort: 3306,
+		Proto:   "tcp",
+		PktType: utils.HostPktType,
+	}
+	cpm.ReportNetworkEvent("container1", event)
+
+	// Event is stored as raw
+	slice := entry.data.networks.ToSlice()
+	require.Len(t, slice, 1)
+	assert.Equal(t, EndpointKindRaw, slice[0].Destination.Kind)
+
+	// Step 2: Informer catches up before saveProfile flush!
+	inv.podsByIP["10.244.0.14"] = &common.SlimPod{
+		SlimObjectMeta: common.SlimObjectMeta{
+			Name:      "wikijs-789",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "wikijs"},
+		},
+		Status: common.SlimPodStatus{PodIP: "10.244.0.14"},
+	}
+
+	// Step 3: Profile generation resolves raw peer via k8sInventory
+	ingress := entry.data.getIngressNetworkNeighbors("mariadb", "default", nil, nil, cpm.k8sInventory, cpm.k8sObjectCache, false)
+	require.Len(t, ingress, 1)
+	assert.Equal(t, InternalTrafficType, string(ingress[0].Type))
+	assert.Empty(t, ingress[0].IPAddress)
+	require.NotNil(t, ingress[0].PodSelector)
+	assert.Equal(t, map[string]string{"app": "wikijs"}, ingress[0].PodSelector.MatchLabels)
+}
+
+// TestNetworkNeighbors_MergeDistinctPortsAfterResolution checks that converging peer identities retain distinct ports and protocols without duplicates.
+func TestNetworkNeighbors_MergeDistinctPortsAfterResolution(t *testing.T) {
+	for _, direction := range []string{utils.HostPktType, utils.OutgoingPktType} {
+		t.Run(direction, func(t *testing.T) {
+			inv := newMockK8sInventory()
+			inv.podsByIP["10.244.0.14"] = &common.SlimPod{SlimObjectMeta: common.SlimObjectMeta{
+				Name: "peer", Namespace: "default", Labels: map[string]string{"app": "peer"},
+			}}
+			cd := &containerData{networks: mapset.NewSet[NetworkEvent]()}
+			raw := NetworkEvent{Port: 80, Protocol: "tcp", PktType: direction,
+				Destination: Destination{Kind: EndpointKindRaw, IPAddress: "10.244.0.14"}}
+			cd.networks.Add(raw)
+			resolved := raw
+			resolveEndpoint(&resolved, inv, nil)
+			cd.networks.Add(resolved) // Same peer and port from a later, resolved observation.
+			resolved.Port = 443
+			cd.networks.Add(resolved)
+			resolved.Port = 80
+			resolved.Protocol = "udp"
+			cd.networks.Add(resolved)
+			var neighbors []v1beta1.NetworkNeighbor
+			if direction == utils.HostPktType {
+				neighbors = cd.getIngressNetworkNeighbors("", "default", nil, nil, inv, nil, false)
+			} else {
+				neighbors = cd.getEgressNetworkNeighbors("", "default", nil, nil, inv, nil, false)
+			}
+			require.Len(t, neighbors, 1)
+			names := make([]string, 0, len(neighbors[0].Ports))
+			for _, port := range neighbors[0].Ports {
+				names = append(names, port.Name)
+			}
+			require.ElementsMatch(t, []string{"tcp-80", "tcp-443", "udp-80"}, names)
+		})
+	}
+}
+
+// TestCreateNetworkNeighbor_PreservesSnapshotEqualToObservedPort checks that a cached port matching the observation bypasses changed EndpointSlices.
+func TestCreateNetworkNeighbor_PreservesSnapshotEqualToObservedPort(t *testing.T) {
+	event := serviceNetworkEvent(80, "tcp")
+	client := &servicePortTestClient{
+		service: newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
+			"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
+		}),
+		kubeClient: fake.NewClientset(newEndpointSlice("api-new", "api", discoveryv1.EndpointPort{
+			Name: ptr.To("web"), Port: ptr.To(int32(8080)), Protocol: ptr.To(corev1.ProtocolTCP),
+		})),
+	}
+	cd := &containerData{servicePorts: map[NetworkEvent][]uint16{event: {80}}}
+	neighbor := cd.createNetworkNeighbor("", event, "default", client, nil, nil, nil, false)
+	require.NotNil(t, neighbor)
+	require.Equal(t, []int32{80}, networkPortValues(neighbor.Ports))
+	require.Empty(t, client.kubeClient.Actions(), "cached snapshots must not query changed EndpointSlices")
+}
+
+// TestCreateNetworkNeighbor_ServicePromotionPreservesRawFallback checks that unusable Service selectors retain raw traffic with bounded deferral.
+func TestCreateNetworkNeighbor_ServicePromotionPreservesRawFallback(t *testing.T) {
+	for _, lookupFailure := range []bool{false, true} {
+		name := "selectorless service"
+		if lookupFailure {
+			name = "lookup failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			inv := newMockK8sInventory()
+			inv.svcsByIP["10.96.0.42"] = &common.SlimService{SlimObjectMeta: common.SlimObjectMeta{Name: "api", Namespace: "default"}}
+			client := &servicePortTestClient{service: newServiceWorkload("api", nil)}
+			if lookupFailure {
+				client.getErr = errors.New("transient lookup failure")
+			}
+			for _, kind := range []EndpointKind{EndpointKindRaw, EndpointKindService} {
+				event := NetworkEvent{Port: 80, Protocol: "tcp", PktType: utils.OutgoingPktType,
+					Destination: Destination{Kind: kind, IPAddress: "10.96.0.42", Namespace: "default", Name: "api"}}
+				cd := &containerData{}
+				require.Nil(t, cd.createNetworkNeighbor("", event, "default", client, nil, inv, nil, false))
+				require.NotNil(t, cd.deferredNetworks, "failed promotion must retain the observation")
+				require.True(t, cd.deferredNetworks.Contains(event))
+				cd.emptyEvents()
+				neighbor := cd.createNetworkNeighbor("", event, "default", client, nil, inv, nil, false)
+				require.NotNil(t, neighbor, "retry is bounded to one flush")
+				require.Equal(t, ExternalTrafficType, string(neighbor.Type))
+				require.Equal(t, "10.96.0.42", neighbor.IPAddress)
+				require.Equal(t, []int32{80}, networkPortValues(neighbor.Ports))
+				final := (&containerData{}).createNetworkNeighbor("", event, "default", client, nil, inv, nil, true)
+				require.NotNil(t, final, "forced final flush must preserve raw IP")
+				require.Equal(t, "10.96.0.42", final.IPAddress)
+			}
+		})
+	}
+}
+
+// TestEmptyEvents_RetainsDeferredServicePortSnapshot checks that deferred observations retain their port snapshot without recharging the next batch.
+func TestEmptyEvents_RetainsDeferredServicePortSnapshot(t *testing.T) {
+	event := serviceNetworkEvent(80, "tcp")
+	event.Destination.IPAddress = "10.96.0.42"
+	discarded := serviceNetworkEvent(443, "tcp")
+	cd := &containerData{servicePorts: map[NetworkEvent][]uint16{event: {8080, 9090}, discarded: {8443}}}
+	client := &servicePortTestClient{getErr: errors.New("transient lookup failure")}
+	require.Nil(t, cd.createNetworkNeighbor("", event, "default", client, nil, nil, nil, false))
+	cd.emptyEvents()
+	require.Equal(t, map[NetworkEvent][]uint16{event: {8080, 9090}}, cd.servicePorts)
+	require.Zero(t, cd.size.Load(), "retained peers must not consume the next active batch budget")
+
+	// EndpointSlices change while the Service lookup recovers.
+	client.getErr = nil
+	client.service = newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
+		"name": "web", "port": 80, "targetPort": "http", "protocol": "TCP",
+	})
+	client.kubeClient = fake.NewClientset(newEndpointSlice("api-new", "api", discoveryv1.EndpointPort{
+		Name: ptr.To("web"), Port: ptr.To(int32(10000)), Protocol: ptr.To(corev1.ProtocolTCP),
+	}))
+	neighbor := cd.createNetworkNeighbor("", event, "default", client, nil, nil, nil, false)
+	require.NotNil(t, neighbor)
+	require.Equal(t, []int32{8080, 9090}, networkPortValues(neighbor.Ports))
+	require.Empty(t, client.kubeClient.Actions())
+	cd.emptyEvents()
+	require.Nil(t, cd.servicePorts, "snapshots clear when their observations are emitted")
+}
+
+// BenchmarkNetworkNeighborsPortScan measures merging 4,000 ports for one peer and checks that no observations are lost.
+func BenchmarkNetworkNeighborsPortScan(b *testing.B) {
+	cd := &containerData{networks: mapset.NewSet[NetworkEvent]()}
+	for port := 1; port <= 4000; port++ {
+		cd.networks.Add(NetworkEvent{Port: uint16(port), Protocol: "tcp", PktType: utils.OutgoingPktType,
+			Destination: Destination{Kind: EndpointKindRaw, IPAddress: "93.184.216.34"}})
+	}
+	b.ResetTimer()
+	for b.Loop() {
+		neighbors := cd.getEgressNetworkNeighbors("", "default", nil, nil, nil, nil, false)
+		if len(neighbors) != 1 || len(neighbors[0].Ports) != 4000 {
+			b.Fatal("port-scan observations were lost")
+		}
+	}
+}
+
+// TestReportNetworkEventRetriesFailedServiceLookup verifies transient lookup failures
+// leave ports unresolved, while a successful observed-port fallback stays authoritative.
+func TestReportNetworkEventRetriesFailedServiceLookup(t *testing.T) {
+	for _, scenario := range []string{"lookup error", "nil workload", "successful observed-port fallback"} {
+		t.Run(scenario, func(t *testing.T) {
+			cpm, entry := newTestManager(t, "container1")
+			inv := newMockK8sInventory()
+			inv.svcsByIP["10.96.0.42"] = &common.SlimService{SlimObjectMeta: common.SlimObjectMeta{Name: "api", Namespace: "default"}}
+			cpm.SetK8sInventory(inv)
+			client := &servicePortTestClient{service: newServiceWorkload("api", map[string]any{"app": "api"})}
+			switch scenario {
+			case "lookup error":
+				client.getErr = errors.New("transient Service lookup failure")
+			case "nil workload":
+				client.service = nil
+			}
+			cpm.k8sClient = client
+			cpm.ReportNetworkEvent("container1", &utils.StructEvent{
+				DstEndpoint: types.L3Endpoint{Addr: "10.96.0.42", Kind: types.EndpointKindRaw},
+				DstPort:     80, Proto: "tcp", PktType: utils.OutgoingPktType,
+			})
+			events := entry.data.networks.ToSlice()
+			require.Len(t, events, 1)
+			require.Equal(t, EndpointKindService, events[0].Destination.Kind)
+			_, snapshotted := entry.data.servicePorts[events[0]]
+			assert.Equal(t, scenario == "successful observed-port fallback", snapshotted)
+
+			client.getErr = nil
+			client.service = newServiceWorkload("api", map[string]any{"app": "api"}, map[string]any{
+				"name": "web", "port": 80, "targetPort": 8080, "protocol": "TCP",
+			})
+			neighbors := entry.data.getEgressNetworkNeighbors("", "default", client, nil, inv, nil, false)
+			require.Len(t, neighbors, 1)
+			want := int32(8080)
+			if scenario == "successful observed-port fallback" {
+				want = 80
+			}
+			require.Equal(t, []int32{want}, networkPortValues(neighbors[0].Ports))
+		})
+	}
+}
+
+// TestNetworkDeferralSurvivesRapidFlushes verifies split-triggered saves cannot consume
+// the inventory catch-up window, and expiry, resolution, or final flush releases the event.
+func TestNetworkDeferralSurvivesRapidFlushes(t *testing.T) {
+	for _, kind := range []EndpointKind{EndpointKindRaw, EndpointKindService} {
+		for _, finish := range []string{"expired", "resolved", "forced"} {
+			t.Run(string(kind)+"/"+finish, func(t *testing.T) {
+				event := serviceNetworkEvent(80, "tcp")
+				event.Destination.Kind = kind
+				event.Destination.IPAddress = "10.96.0.42"
+				discarded := serviceNetworkEvent(443, "tcp")
+				client := &servicePortTestClient{service: newServiceWorkload("api", nil)}
+				inv := newMockK8sInventory()
+				cd := &containerData{networks: mapset.NewSet(event), networkDeferralDuration: time.Minute,
+					networkDeferredUntil: map[NetworkEvent]time.Time{discarded: time.Now().Add(time.Minute)},
+					servicePorts:         map[NetworkEvent][]uint16{event: {8080}, discarded: {8443}}}
+				require.Empty(t, cd.getEgressNetworkNeighbors("", "default", client, nil, inv, nil, false))
+				cd.emptyEvents()
+				deadline := cd.networkDeferredUntil[event]
+				for range 3 {
+					require.Empty(t, cd.getEgressNetworkNeighbors("", "default", client, nil, inv, nil, false), "rapid saves must keep waiting for inventory")
+					cd.emptyEvents()
+					require.True(t, cd.networks.Contains(event))
+					require.Equal(t, map[NetworkEvent]time.Time{event: deadline}, cd.networkDeferredUntil, "retain only pending deadlines without extending them")
+					require.Equal(t, map[NetworkEvent][]uint16{event: {8080}}, cd.servicePorts)
+				}
+				require.False(t, deadline.IsZero())
+				forceSend := finish == "forced"
+				switch finish {
+				case "expired":
+					cd.networkDeferredUntil[event] = time.Now().Add(-time.Second)
+				case "resolved":
+					if kind == EndpointKindService {
+						client.service = newServiceWorkload("api", map[string]any{"app": "api"})
+					} else {
+						inv.podsByIP[event.Destination.IPAddress] = &common.SlimPod{SlimObjectMeta: common.SlimObjectMeta{Name: "api", Namespace: "default", Labels: map[string]string{"app": "api"}}, Status: common.SlimPodStatus{PodIP: event.Destination.IPAddress}}
+					}
+				}
+				neighbors := cd.getEgressNetworkNeighbors("", "default", client, nil, inv, nil, forceSend)
+				require.Len(t, neighbors, 1)
+				if finish == "resolved" {
+					require.NotNil(t, neighbors[0].PodSelector)
+					require.Equal(t, "api", neighbors[0].PodSelector.MatchLabels["app"])
+					if kind == EndpointKindService {
+						require.Equal(t, []int32{8080}, networkPortValues(neighbors[0].Ports))
+					}
+				} else {
+					require.Equal(t, event.Destination.IPAddress, neighbors[0].IPAddress)
+				}
+				cd.emptyEvents()
+				require.Nil(t, cd.networks)
+				require.Nil(t, cd.networkDeferredUntil)
+				require.Nil(t, cd.servicePorts)
+			})
+		}
+	}
+}

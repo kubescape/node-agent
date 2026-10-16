@@ -11,6 +11,12 @@ func (sc *Storage) GetContainerProfile(ctx context.Context, namespace, name stri
 	return sc.storageClient.ContainerProfiles(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
+// ListContainerProfiles lists ContainerProfiles in a namespace with the given
+// options (typically a LabelSelector) — used to gather signed bundle fragments.
+func (sc *Storage) ListContainerProfiles(ctx context.Context, namespace string, opts metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return sc.storageClient.ContainerProfiles(namespace).List(ctx, opts)
+}
+
 // CreateContainerProfileDirect directly creates the profile without queuing.
 // This implements the ProfileCreator interface.
 func (sc *Storage) CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error {

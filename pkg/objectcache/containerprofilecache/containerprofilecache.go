@@ -124,6 +124,7 @@ type ContainerProfileCacheImpl struct {
 	entries        maps.SafeMap[string, *CachedContainerProfile]
 	pending        maps.SafeMap[string, *pendingContainer]
 	containerLocks *resourcelocks.ResourceLocks
+	pendingAdds    utils.PendingAdds
 	storageClient  storage.ProfileClient
 	k8sObjectCache objectcache.K8sObjectCache
 	metricsManager metricsmanager.MetricsManager
@@ -242,8 +243,13 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 			containerCopy.K8s.Namespace = namespace
 			container = &containerCopy
 		}
-		go c.addContainerWithTimeout(container)
+		parent, release := c.pendingAdds.Track(container.Runtime.ContainerID)
+		go func() {
+			defer release()
+			c.addContainerWithTimeout(parent, container)
+		}()
 	case containercollection.EventTypeRemoveContainer:
+		c.pendingAdds.Cancel(notif.Container.Runtime.ContainerID)
 		// Skip the ignore check on Remove: a container added before its pod
 		// labels matched the ignore filter would otherwise leak in the cache.
 		// The reconciler eviction path is the safety net, but a Remove event
@@ -282,9 +288,13 @@ func (c *ContainerProfileCacheImpl) ContainerCallback(notif containercollection.
 
 // addContainerWithTimeout runs addContainer with a 10-minute cap to prevent
 // a stuck storage client from wedging the callback goroutine.
-func (c *ContainerProfileCacheImpl) addContainerWithTimeout(container *containercollection.Container) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+// parent is canceled if the container is removed meanwhile.
+func (c *ContainerProfileCacheImpl) addContainerWithTimeout(parent context.Context, container *containercollection.Container) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
 	defer cancel()
+	// Removal does not abort the profile fetch: wait for it, up to the deadline.
+	deadline, stop := withoutRemoval(ctx)
+	defer stop()
 
 	done := make(chan error, 1)
 	go func() {
@@ -294,10 +304,10 @@ func (c *ContainerProfileCacheImpl) addContainerWithTimeout(container *container
 	select {
 	case err := <-done:
 		if err != nil {
-			logger.L().Error("failed to add container to the container-profile cache", helpers.Error(err))
+			utils.AddFailureLogger(ctx)("failed to add container to the container-profile cache", helpers.Error(err))
 		}
-	case <-ctx.Done():
-		logger.L().Error("timeout while adding container to the container-profile cache",
+	case <-deadline.Done():
+		utils.AddFailureLogger(ctx)("timeout while adding container to the container-profile cache",
 			helpers.String("containerID", container.Runtime.ContainerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
@@ -315,11 +325,17 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 	return c.containerLocks.WithLockAndError(containerID, func() error {
 		sharedData, err := c.waitForSharedContainerData(containerID, ctx)
 		if err != nil {
-			logger.L().Error("failed to get shared data for container",
+			// Debug only when the container was removed first (#848).
+			utils.AddFailureLogger(ctx)("failed to get shared data for container",
 				helpers.String("containerID", containerID),
 				helpers.Error(err))
 			return err
 		}
+
+		// Removal cancels only the wait above. The profile must still load:
+		// terminal events need it during the removal grace period.
+		fetchCtx, cancel := withoutRemoval(ctx)
+		defer cancel()
 
 		// Names we need:
 		//   cpName       = per-container stable slug, for the consolidated CP.
@@ -345,7 +361,7 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 			return err
 		}
 
-		if populated := c.tryPopulateEntry(ctx, containerID, container, sharedData, cpName, workloadName); !populated {
+		if populated := c.tryPopulateEntry(fetchCtx, containerID, container, sharedData, cpName, workloadName); !populated {
 			// No profile data available yet (no consolidated CP in storage,
 			// and no authored CP resolved). Record a pending entry;
 			// the reconciler will retry each tick until data shows up or the
@@ -362,6 +378,15 @@ func (c *ContainerProfileCacheImpl) addContainer(container *containercollection.
 		}
 		return nil
 	})
+}
+
+// withoutRemoval returns a context with ctx's deadline but none of its
+// cancellation, so a removal of the container no longer aborts it.
+func withoutRemoval(ctx context.Context) (context.Context, context.CancelFunc) {
+	if d, ok := ctx.Deadline(); ok {
+		return context.WithDeadline(context.WithoutCancel(ctx), d)
+	}
+	return context.WithCancel(context.WithoutCancel(ctx))
 }
 
 // tryPopulateEntry issues the CP GET (plus the authored CP when the pod
@@ -529,6 +554,11 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	pod := c.k8sObjectCache.GetPod(container.K8s.Namespace, container.K8s.PodName)
+	if pod != nil && sharedData.PodUID != "" && string(pod.UID) != sharedData.PodUID {
+		logger.L().Debug("pod cache generation differs from shared metadata; deferring profile population",
+			helpers.String("containerID", containerID))
+		return false
+	}
 	if pod == nil {
 		logger.L().Debug("pod not found in k8s cache; skipping pod-aware merge checks",
 			helpers.String("containerID", containerID),
@@ -613,10 +643,11 @@ func (c *ContainerProfileCacheImpl) buildEntry(
 		CPName:        cp.Name,
 		RV:            cp.ResourceVersion,
 		Checksum:      checksumOfCP(cp),
+		PodUID:        sharedData.PodUID,
 	}
-	if pod != nil {
+	if entry.PodUID == "" && pod != nil {
 		entry.PodUID = string(pod.UID)
-	} else if container.K8s.PodUID != "" {
+	} else if entry.PodUID == "" && container.K8s.PodUID != "" {
 		// The pod is not yet in the k8s cache (busy-node watch lag) but the
 		// container runtime metadata already carries the pod UID. Without this
 		// backfill the entry starts with an empty PodUID, and the reconciler's

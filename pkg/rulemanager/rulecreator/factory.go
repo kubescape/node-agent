@@ -95,12 +95,15 @@ func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	var rules []typesv1.Rule
+	if len(r.Rules) == 0 {
+		return nil
+	}
+	rules := make([]typesv1.Rule, len(r.Rules))
 	for i := range r.Rules {
 		if r.Rules[i].Prefilter == nil {
 			r.Rules[i].Prefilter = prefilter.ParseWithDefaults(r.Rules[i].State, nil)
 		}
-		rules = append(rules, r.Rules[i])
+		rules[i] = r.Rules[i]
 	}
 	return rules
 }

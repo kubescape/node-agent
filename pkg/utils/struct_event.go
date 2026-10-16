@@ -66,25 +66,30 @@ type StructEvent struct {
 	PtraceRequest        int                     `json:"ptraceRequest,omitempty" yaml:"ptraceRequest,omitempty"`
 	PupperLayer          bool                    `json:"pupperLayer,omitempty" yaml:"pupperLayer,omitempty"`
 	Qr                   DNSPktType              `json:"qr,omitempty" yaml:"qr,omitempty"`
+	Qtype                string                  `json:"qtype,omitempty" yaml:"qtype,omitempty"`
+	Rcode                string                  `json:"rcode,omitempty" yaml:"rcode,omitempty"`
 	Request              *http.Request           `json:"request,omitempty" yaml:"request,omitempty"`
-	Response             *http.Response          `json:"response,omitempty" yaml:"response,omitempty"`
-	Signal               uint32                  `json:"signal,omitempty" yaml:"signal,omitempty"`
-	SockFd               uint32                  `json:"sockFd,omitempty" yaml:"sockFd,omitempty"`
-	SocketInode          uint64                  `json:"socketInode,omitempty" yaml:"socketInode,omitempty"`
-	SrcIP                string                  `json:"srcIP,omitempty" yaml:"srcIP,omitempty"`
-	SrcPort              uint16                  `json:"srcPort,omitempty" yaml:"srcPort,omitempty"`
-	StatusCode           int                     `json:"statusCode,omitempty" yaml:"statusCode,omitempty"`
-	Syscall              string                  `json:"syscall,omitempty" yaml:"syscall,omitempty"`
-	Syscalls             []byte                  `json:"syscalls,omitempty" yaml:"syscalls,omitempty"`
-	Tid                  uint64                  `json:"tid,omitempty" yaml:"tid,omitempty"`
-	Timestamp            int64                   `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
-	TTY                  *int32                  `json:"tty,omitempty" yaml:"tty,omitempty"`
-	TTYMajor             *uint32                 `json:"ttyMajor,omitempty" yaml:"ttyMajor,omitempty"`
-	TTYMinor             *uint32                 `json:"ttyMinor,omitempty" yaml:"ttyMinor,omitempty"`
-	Type                 HTTPDataType            `json:"type,omitempty" yaml:"type,omitempty"`
-	Uid                  uint32                  `json:"uid,omitempty" yaml:"uid,omitempty"`
-	UpperLayer           bool                    `json:"upperLayer,omitempty" yaml:"upperLayer,omitempty"`
-	UserData             int                     `json:"userData,omitempty" yaml:"userData,omitempty"`
+	// RuleOnly mirrors DatasourceEvent.RuleOnly for synthetic events (rule
+	// library tests build dnsQuery events with it). Not serialized.
+	RuleOnly    bool           `json:"-" yaml:"-"`
+	Response    *http.Response `json:"response,omitempty" yaml:"response,omitempty"`
+	Signal      uint32         `json:"signal,omitempty" yaml:"signal,omitempty"`
+	SockFd      uint32         `json:"sockFd,omitempty" yaml:"sockFd,omitempty"`
+	SocketInode uint64         `json:"socketInode,omitempty" yaml:"socketInode,omitempty"`
+	SrcIP       string         `json:"srcIP,omitempty" yaml:"srcIP,omitempty"`
+	SrcPort     uint16         `json:"srcPort,omitempty" yaml:"srcPort,omitempty"`
+	StatusCode  int            `json:"statusCode,omitempty" yaml:"statusCode,omitempty"`
+	Syscall     string         `json:"syscall,omitempty" yaml:"syscall,omitempty"`
+	Syscalls    []byte         `json:"syscalls,omitempty" yaml:"syscalls,omitempty"`
+	Tid         uint64         `json:"tid,omitempty" yaml:"tid,omitempty"`
+	Timestamp   int64          `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
+	TTY         *int32         `json:"tty,omitempty" yaml:"tty,omitempty"`
+	TTYMajor    *uint32        `json:"ttyMajor,omitempty" yaml:"ttyMajor,omitempty"`
+	TTYMinor    *uint32        `json:"ttyMinor,omitempty" yaml:"ttyMinor,omitempty"`
+	Type        HTTPDataType   `json:"type,omitempty" yaml:"type,omitempty"`
+	Uid         uint32         `json:"uid,omitempty" yaml:"uid,omitempty"`
+	UpperLayer  bool           `json:"upperLayer,omitempty" yaml:"upperLayer,omitempty"`
+	UserData    int            `json:"userData,omitempty" yaml:"userData,omitempty"`
 }
 
 var _ BpfEvent = (*StructEvent)(nil)
@@ -404,6 +409,23 @@ func (e *StructEvent) GetPupperLayer() bool {
 
 func (e *StructEvent) GetQr() DNSPktType {
 	return e.Qr
+}
+
+func (e *StructEvent) GetQtype() string {
+	return e.Qtype
+}
+
+// GetRcode mirrors DatasourceEvent: a query never carries a response code.
+func (e *StructEvent) GetRcode() string {
+	if e.Qr != DNSPktTypeResponse {
+		return ""
+	}
+	return e.Rcode
+}
+
+// IsRuleOnly implements RuleOnlyEvent.
+func (e *StructEvent) IsRuleOnly() bool {
+	return e.RuleOnly
 }
 
 func (e *StructEvent) GetRequest() *http.Request {

@@ -153,11 +153,46 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event uti
 		}
 
 		exec := append([]string{path}, args...)
+		delta := size.Of(exec)
+		if data.execs.Has(execIdentifier) {
+			delta = 0
+		}
 		data.execs.Set(execIdentifier, exec)
-		return size.Of(exec), nil
+		return delta, nil
 	})
 
 	cpm.logEventError(err, "file exec", containerID)
+}
+
+// ReportProcfsExec records a process the agent found already running, from the
+// procfs scan rather than from an exec event (entlein/node-agent#22).
+//
+// An exec that happened before the tracer attached cannot be replayed, but the
+// process it started is usually still there, and procfs carries the same two
+// facts an exec event would have: the resolved binary and the argv. So the
+// learning is retried against the live process rather than reconstructed from
+// the pod spec, which would state what was asked for instead of what ran.
+//
+// Same identifier as an observed exec, so a process seen both ways is recorded
+// once and neither source shadows the other.
+func (cpm *ContainerProfileManager) ReportProcfsExec(containerID string, path string, argv []string) {
+	if path == "" {
+		return
+	}
+	args := append([]string(nil), argv...)
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+		if data.execs == nil {
+			data.execs = &maps.SafeMap[string, []string]{}
+		}
+		execIdentifier := utils.CalculateSHA256FileExecHash(path, args)
+		if data.execs.Has(execIdentifier) {
+			return 0, nil
+		}
+		exec := append([]string{path}, args...)
+		data.execs.Set(execIdentifier, exec)
+		return size.Of(exec), nil
+	})
+	cpm.logEventError(err, "procfs exec", containerID)
 }
 
 // ReportFileOpen reports a file open event for a container
@@ -353,27 +388,31 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		networkEvent.SetPodLabels(event.GetPodLabels())
 		networkEvent.SetDestinationPodLabels(dstEndpoint.PodLabels)
 
+		resolveEndpoint(&networkEvent, cpm.k8sInventory, cpm.k8sObjectCache)
+
 		// Skip if we already saved this event
 		if data.networks.Contains(networkEvent) {
 			return 0, nil
 		}
 
-		if networkEvent.Destination.Kind == EndpointKindService {
-			ports := []uint16{networkEvent.Port}
-			if cpm.k8sClient != nil {
-				svc, err := cpm.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
-				if err == nil {
-					ports = resolveServiceEnforcementPorts(cpm.k8sClient, networkEvent.Destination.Namespace,
-						networkEvent.Destination.Name, svc, networkEvent.Port, networkEvent.Protocol)
+		if networkEvent.Destination.Kind == EndpointKindService && cpm.k8sClient != nil {
+			svc, err := cpm.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
+			// Failed lookups leave no snapshot so flush-time resolution can retry.
+			if err == nil && svc != nil {
+				ports := resolveServiceEnforcementPorts(cpm.k8sClient, networkEvent.Destination.Namespace,
+					networkEvent.Destination.Name, svc, networkEvent.Port, networkEvent.Protocol)
+				if data.servicePorts == nil {
+					data.servicePorts = make(map[NetworkEvent][]uint16)
 				}
+				data.servicePorts[networkEvent] = ports
 			}
-			if data.servicePorts == nil {
-				data.servicePorts = make(map[NetworkEvent][]uint16)
-			}
-			data.servicePorts[networkEvent] = ports
 		}
 
 		data.networks.Add(networkEvent)
+		if data.activeNetworks == nil {
+			data.activeNetworks = mapset.NewSet[NetworkEvent]()
+		}
+		data.activeNetworks.Add(networkEvent)
 		return size.Of(networkEvent) + networkNeighborIncrement(data, networkEvent), nil
 	})
 

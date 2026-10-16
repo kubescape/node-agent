@@ -38,6 +38,7 @@ type NetworkTracer struct {
 	runtime            runtime.Runtime
 	socketEnricherOp   *socketenricher.SocketEnricher
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher
+	peers              *peerRepair
 }
 
 // NewNetworkTracer creates a new tracer
@@ -50,7 +51,12 @@ func NewNetworkTracer(
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	socketEnricherOp *socketenricher.SocketEnricher,
+	kubernetesMode bool,
 ) *NetworkTracer {
+	var peers *peerRepair
+	if kubernetesMode {
+		peers = newPeerRepair()
+	}
 	return &NetworkTracer{
 		eventCallback:      eventCallback,
 		kubeIPResolver:     kubeIPResolver,
@@ -60,6 +66,7 @@ func NewNetworkTracer(
 		runtime:            runtime,
 		thirdPartyEnricher: thirdPartyEnricher,
 		socketEnricherOp:   socketEnricherOp,
+		peers:              peers,
 	}
 }
 
@@ -98,6 +105,9 @@ func (nt *NetworkTracer) Stop() error {
 	if nt.gadgetCtx != nil {
 		nt.gadgetCtx.Cancel()
 	}
+	if nt.peers != nil {
+		nt.peers.stop()
+	}
 	return nil
 }
 
@@ -124,7 +134,12 @@ func (nt *NetworkTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					nt.callback(&utils.DatasourceEvent{Datasource: d, Data: source.DeepCopy(data), EventType: utils.NetworkEventType})
+					copied := source.DeepCopy(data)
+					ev := &utils.DatasourceEvent{Datasource: d, Data: copied, EventType: utils.NetworkEventType}
+					if nt.peers != nil && nt.peers.repair(d, copied, ev) {
+						ev = &utils.DatasourceEvent{Datasource: d, Data: copied, EventType: utils.NetworkEventType}
+					}
+					nt.callback(ev)
 					return nil
 				}, opPriority)
 				if err != nil {

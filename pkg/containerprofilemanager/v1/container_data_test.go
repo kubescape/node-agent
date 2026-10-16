@@ -121,6 +121,7 @@ func serviceNetworkEvent(port uint16, protocol string) NetworkEvent {
 	}
 }
 
+// TestCreateNetworkNeighbor_ServiceTargetPortMatrix checks Service port remapping and observed-port fallbacks across protocols and endpoint sources.
 func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -270,7 +271,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 			}
 
 			cd := &containerData{}
-			neighbor := cd.createNetworkNeighbor("", tc.event, "default", client, nil)
+			neighbor := cd.createNetworkNeighbor("", tc.event, "default", client, nil, nil, nil, false)
 			require.NotNil(t, neighbor)
 			require.Equal(t, map[string]string{"app": "api"}, neighbor.PodSelector.MatchLabels)
 			require.Equal(t, tc.wantPorts, networkPortValues(neighbor.Ports))
@@ -284,6 +285,7 @@ func TestCreateNetworkNeighbor_ServiceTargetPortMatrix(t *testing.T) {
 	}
 }
 
+// TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged checks that pod and raw-IP peers retain their observed ports.
 func TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged(t *testing.T) {
 	cd := &containerData{}
 
@@ -298,7 +300,7 @@ func TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged(t *testing.T) {
 		},
 	}
 	podEvent.SetDestinationPodLabels(map[string]string{"app": "web"})
-	podNeighbor := cd.createNetworkNeighbor("", podEvent, "default", nil, nil)
+	podNeighbor := cd.createNetworkNeighbor("", podEvent, "default", nil, nil, nil, nil, false)
 	require.NotNil(t, podNeighbor)
 	require.Equal(t, []int32{8080}, networkPortValues(podNeighbor.Ports))
 
@@ -310,11 +312,12 @@ func TestCreateNetworkNeighbor_NonServiceDestinationsUnchanged(t *testing.T) {
 			IPAddress: "93.184.216.34",
 		},
 	}
-	rawNeighbor := cd.createNetworkNeighbor("", rawEvent, "default", nil, nil)
+	rawNeighbor := cd.createNetworkNeighbor("", rawEvent, "default", nil, nil, nil, nil, false)
 	require.NotNil(t, rawNeighbor)
 	require.Equal(t, []int32{443}, networkPortValues(rawNeighbor.Ports))
 }
 
+// TestGenerateNetworkPolicy_ServiceTargetPortRoundTrip checks that generated policies use the backend target port instead of the Service port.
 func TestGenerateNetworkPolicy_ServiceTargetPortRoundTrip(t *testing.T) {
 	service := newServiceWorkload("api", map[string]any{"app.kubernetes.io/name": "api"}, map[string]any{
 		"port": 80, "targetPort": 8080, "protocol": "TCP",
@@ -326,7 +329,7 @@ func TestGenerateNetworkPolicy_ServiceTargetPortRoundTrip(t *testing.T) {
 
 	cd := &containerData{}
 	event := serviceNetworkEvent(80, "tcp")
-	neighbor := cd.createNetworkNeighbor("", event, "default", client, nil)
+	neighbor := cd.createNetworkNeighbor("", event, "default", client, nil, nil, nil, false)
 	require.NotNil(t, neighbor)
 
 	egressPorts := make([]softwarecomposition.NetworkPort, 0, len(neighbor.Ports))

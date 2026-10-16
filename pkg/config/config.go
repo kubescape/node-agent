@@ -58,6 +58,32 @@ type AlertDeduplicationConfig struct {
 	Bypass bool `mapstructure:"bypass"`
 }
 
+// DNSRuleForwardingConfig controls whether DNS queries and error responses
+// (NXDOMAIN, SERVFAIL, REFUSED), which the DNS tracer otherwise drops, are
+// forwarded to rule evaluation. Forwarded events reach the rule manager only
+// and match rule expressions written for eventType "dnsQuery"; existing "dns"
+// expressions keep seeing answered responses only. Off by default.
+// See docs/features/dns-query-rule-forwarding.md.
+type DNSRuleForwardingConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// ExcludedSuffixes lists name suffixes that are never forwarded, in
+	// addition to the built-in cluster-local and reverse-lookup zones. Each
+	// entry is normalized to lowercase with a leading and trailing dot.
+	ExcludedSuffixes []string `mapstructure:"excludedSuffixes"`
+}
+
+// NormalizeDNSSuffix lowercases s and ensures it carries a leading and a
+// trailing dot, so ".Example.COM" and "example.com." both become ".example.com.".
+// An empty or dots-only string returns "".
+func NormalizeDNSSuffix(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.Trim(s, ".")
+	if s == "" {
+		return ""
+	}
+	return "." + s + "."
+}
+
 type Config struct {
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
@@ -105,6 +131,7 @@ type Config struct {
 	SeccompProfileBackend          string                               `mapstructure:"seccompProfileBackend"`
 	EventBatchSize                 int                                  `mapstructure:"eventBatchSize"`
 	AlertDeduplication             AlertDeduplicationConfig             `mapstructure:"alertDeduplication"`
+	DNSRuleForwarding              DNSRuleForwardingConfig              `mapstructure:"dnsRuleForwarding"`
 	EventDedup                     EventDedupConfig                     `mapstructure:"eventDedup"`
 	ExcludeJsonPaths               []string                             `mapstructure:"excludeJsonPaths"`
 	ExcludeLabels                  map[string][]string                  `mapstructure:"excludeLabels"`
@@ -140,8 +167,9 @@ type Config struct {
 	WorkerChannelSize              int                                  `mapstructure:"workerChannelSize"`
 	WorkerPoolSize                 int                                  `mapstructure:"workerPoolSize"`
 	// Host sensor configuration
-	EnableHostSensor   bool          `mapstructure:"hostSensorEnabled"`
-	HostSensorInterval time.Duration `mapstructure:"hostSensorInterval"`
+	EnableHostSensor          bool          `mapstructure:"hostSensorEnabled"`
+	HostSensorInterval        time.Duration `mapstructure:"hostSensorInterval"`
+	HostSensorExcludedSensors []string      `mapstructure:"hostSensorExcludedSensors"`
 
 	// namespaceFilter is shared by Config copies; published snapshots are immutable.
 	namespaceFilter *atomic.Pointer[NamespaceFilter]
@@ -236,6 +264,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("eventDedup::enabled", true)
 	viper.SetDefault("eventDedup::slotsExponent", 18)
 	viper.SetDefault("alertDeduplication::bypass", false)
+	viper.SetDefault("dnsRuleForwarding::enabled", false)
 	viper.SetDefault("dnsCacheSize", 50000)
 	viper.SetDefault("seccompProfileBackend", "storage") // "storage" or "crd"
 	viper.SetDefault("containerEolNotificationBuffer", 100)
@@ -291,6 +320,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	// Host sensor defaults
 	viper.SetDefault("hostSensorEnabled", false)
 	viper.SetDefault("hostSensorInterval", 5*time.Minute)
+	viper.SetDefault("hostSensorExcludedSensors", []string{})
 
 	viper.AutomaticEnv()
 
@@ -324,6 +354,18 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 		config.FIM.DedupConfig.DedupEnabled = false
 	}
 
+	// Normalize user-supplied DNS suffix exclusions once, so the tracer can do
+	// plain suffix comparisons. Empty entries are dropped.
+	if len(config.DNSRuleForwarding.ExcludedSuffixes) > 0 {
+		normalized := make([]string, 0, len(config.DNSRuleForwarding.ExcludedSuffixes))
+		for _, s := range config.DNSRuleForwarding.ExcludedSuffixes {
+			if n := NormalizeDNSSuffix(s); n != "" && !slices.Contains(normalized, n) {
+				normalized = append(normalized, n)
+			}
+		}
+		config.DNSRuleForwarding.ExcludedSuffixes = normalized
+	}
+
 	// Validate eventDedup slotsExponent range
 	if config.EventDedup.Enabled && (config.EventDedup.SlotsExponent < 10 || config.EventDedup.SlotsExponent > 30) {
 		return Config{}, fmt.Errorf("invalid eventDedup.slotsExponent value: %d (must be between 10 and 30)",
@@ -337,11 +379,18 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 }
 
 func (c *Config) IgnoreContainer(ns, podName string, labels map[string]string) bool {
-	// do not trace any of our pods
-	if ns == c.NamespaceName {
+	// E1: never trace the node-agent's OWN DaemonSet pods — a tracer processing
+	// its own syscalls is a feedback loop. Narrowed from "the whole agent
+	// namespace" to node-agent pods only, so stack peers (storage, operator)
+	// and honey workloads co-located in the agent namespace ARE traced: the
+	// stack is governed by its self-SBOB, and honey must learn + be detected.
+	// Matches the local pod (exact PodName) and — for the cluster-wide
+	// untraced sweep, which sees every node's node-agent pod — siblings
+	// sharing this agent's DaemonSet name prefix.
+	if c.IsOwnAgentPod(ns, podName) {
 		return true
 	}
-	// do not trace the node-agent pods if MULTIPLY is set
+	// E2: MULTIPLY test mode ignores node-agent pods in ANY namespace.
 	if m := os.Getenv("MULTIPLY"); m == "true" {
 		if strings.HasPrefix(podName, "node-agent") {
 			return true
@@ -362,6 +411,43 @@ func (c *Config) IgnoreContainer(ns, podName string, labels map[string]string) b
 		}
 	}
 	return false
+}
+
+// IsOwnAgentPod reports whether podName is one of the node-agent DaemonSet's
+// own pods, which must never be traced (E1). It matches the local agent exactly
+// by PodName (any namespace, so a mis-set namespace cannot expose the agent to
+// self-tracing) and, within the agent namespace, any pod sharing the
+// DaemonSet's name prefix (the sibling node-agent pods the cluster-wide untraced
+// sweep surfaces). A pod deliberately named with the node-agent prefix inside
+// the agent namespace is a documented spoof residual — evading it requires
+// pod-create rights in the agent namespace, which is already privileged.
+func (c *Config) IsOwnAgentPod(ns, podName string) bool {
+	if podName == "" {
+		return false
+	}
+	if c.PodName != "" && podName == c.PodName {
+		return true
+	}
+	return ns == c.NamespaceName && workloadNamePrefix(podName) == c.agentWorkloadPrefix()
+}
+
+// agentWorkloadPrefix is the node-agent DaemonSet name derived from this pod's
+// own name; when PodName is unset it falls back to the conventional
+// "node-agent" so the self-guard still holds.
+func (c *Config) agentWorkloadPrefix() string {
+	if c.PodName == "" {
+		return "node-agent"
+	}
+	return workloadNamePrefix(c.PodName)
+}
+
+// workloadNamePrefix strips the trailing "-<hash>" instance suffix a controller
+// appends to a pod name (DaemonSet: one segment), yielding the workload name.
+func workloadNamePrefix(podName string) string {
+	if i := strings.LastIndex(podName, "-"); i > 0 {
+		return podName[:i]
+	}
+	return podName
 }
 
 func (c *Config) SkipNamespace(ns string) bool {

@@ -74,10 +74,14 @@ type DatasourceEvent struct {
 	EventType       EventType
 	FullPathTracing bool
 	Internal        bool
-	Request         *http.Request
-	Response        *http.Response
-	Syscall         string
-	extra           any
+	// RuleOnly marks an event that only the rule manager may consume; see
+	// RuleOnlyEvent. Set by the DNS tracer on forwarded queries and error
+	// responses.
+	RuleOnly bool
+	Request  *http.Request
+	Response *http.Response
+	Syscall  string
+	extra    any
 }
 
 var _ BpfEvent = (*DatasourceEvent)(nil)
@@ -361,16 +365,23 @@ func (e *DatasourceEvent) GetDNSName() string {
 }
 
 func (e *DatasourceEvent) GetDstEndpoint() types.L4Endpoint {
-	addr, _ := e.getFieldAccessor("endpoint.addr_raw.v4").Uint32(e.Data)
 	kind, _ := e.getFieldAccessor("endpoint.k8s.kind").String(e.Data)
 	name, _ := e.getFieldAccessor("endpoint.k8s.name").String(e.Data)
 	namespace, _ := e.getFieldAccessor("endpoint.k8s.namespace").String(e.Data)
 	podLabels, _ := e.getFieldAccessor("endpoint.k8s.labels").String(e.Data)
 	version, _ := e.getFieldAccessor("endpoint.version").Uint8(e.Data)
+	var addr string
+	if version == 6 {
+		raw, _ := e.getFieldAccessor("endpoint.addr_raw.v6").Bytes(e.Data)
+		addr = rawIPv6ToString(raw)
+	} else {
+		raw, _ := e.getFieldAccessor("endpoint.addr_raw.v4").Uint32(e.Data)
+		addr = rawIPv4ToString(raw)
+	}
 	port, _ := e.getFieldAccessor("endpoint.port").Uint16(e.Data)
 	proto, _ := e.getFieldAccessor("endpoint.proto_raw").Uint16(e.Data)
 	return types.L4Endpoint{
-		Addr:      rawIPv4ToString(addr),
+		Addr:      addr,
 		Version:   version,
 		Namespace: namespace,
 		Name:      name,
@@ -517,11 +528,48 @@ func (e *DatasourceEvent) GetFlagsRaw() uint32 {
 }
 
 func (e *DatasourceEvent) GetFullPath() string {
-	path, _ := e.getFieldAccessor("fpath").String(e.Data)
-	if path == "" {
-		path, _ = e.getFieldAccessor("fname").String(e.Data)
+	fpath, _ := e.getFieldAccessor("fpath").String(e.Data)
+	// For successful opens (GetError() == 0), the gadget-resolved fpath is post-resolution
+	// (following symlinks to their canonical targets). Prefer it whenever it is a valid full path.
+	if IsResolvedFullPath(fpath) && e.GetError() == 0 {
+		return NormalizePath(fpath)
 	}
-	return NormalizePath(path)
+
+	raw, _ := e.getFieldAccessor("fname").String(e.Data)
+	if IsResolvedFullPath(raw) || e.EventType != OpenEventType {
+		return NormalizePath(raw)
+	}
+
+	// Relative/empty open the gadget could not walk (failed openat has no fd
+	// to resolve in-kernel): resolve in userspace via procfs so profile AND
+	// rule evaluation see the true absolute path. If procfs resolution fails,
+	// fall back to normalizing the raw argument as a best effort.
+	// Use the syscall thread ID (proc.tid) rather than thread-group PID since
+	// fd tables and cwd can be unshared per task and the leader may have exited.
+	tid := uint32(e.getTid())
+	if tid == 0 {
+		tid = e.GetPID()
+	}
+	fd, _ := e.getFieldAccessor("fd").Uint32(e.Data)
+	dirfd := AT_FDCWD
+	if acc := e.localFieldAccessor("dfd"); acc != nil {
+		if d, err := acc.Int32(e.Data); err == nil {
+			dirfd = d
+		}
+	} else if acc := e.localFieldAccessor("dirfd"); acc != nil {
+		if d, err := acc.Int32(e.Data); err == nil {
+			dirfd = d
+		}
+	}
+	if resolved := ResolveOpenPathProc(tid, fd, e.GetError() == 0, raw, dirfd); resolved != "" {
+		return NormalizePath(resolved)
+	}
+	// When dirfd is AT_FDCWD, cwd is guaranteed to be a directory; if procfs resolution
+	// was unavailable (e.g. short-lived process exited), a gadget-resolved absolute fpath is safe.
+	if dirfd == AT_FDCWD && IsResolvedFullPath(fpath) {
+		return NormalizePath(fpath)
+	}
+	return NormalizePath(raw)
 }
 
 func (e *DatasourceEvent) GetGid() *uint32 {
@@ -744,12 +792,45 @@ func (e *DatasourceEvent) GetPupperLayer() bool {
 	return pupperLayer
 }
 
+// GetQr returns Q or R for a DNS event and "" for any other event type, so a
+// rule that reads event.qr on a non-DNS event gets the documented empty value
+// instead of a spurious Q.
 func (e *DatasourceEvent) GetQr() DNSPktType {
+	if e.EventType != DnsEventType {
+		return ""
+	}
 	isResponse, _ := e.getFieldAccessor("qr_raw").Bool(e.Data)
 	if isResponse {
 		return DNSPktTypeResponse
 	}
 	return DNSPktTypeQuery
+}
+
+// GetQtype returns the DNS question type name. Non-DNS events return "" without
+// touching the datasource, so a rule that reads event.qtype on another event
+// type does not log a missing-field warning.
+func (e *DatasourceEvent) GetQtype() string {
+	if e.EventType != DnsEventType {
+		return ""
+	}
+	qtype, _ := e.getFieldAccessor("qtype").String(e.Data)
+	return qtype
+}
+
+// GetRcode returns the DNS response code name for a response and "" for a
+// query. The gadget operator only writes rcode on responses, and packet buffers
+// are pooled, so the field must not be read on a query.
+func (e *DatasourceEvent) GetRcode() string {
+	if e.EventType != DnsEventType || e.GetQr() != DNSPktTypeResponse {
+		return ""
+	}
+	rcode, _ := e.getFieldAccessor("rcode").String(e.Data)
+	return rcode
+}
+
+// IsRuleOnly implements RuleOnlyEvent.
+func (e *DatasourceEvent) IsRuleOnly() bool {
+	return e.RuleOnly
 }
 
 func (e *DatasourceEvent) GetRequest() *http.Request {

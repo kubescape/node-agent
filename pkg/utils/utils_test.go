@@ -18,25 +18,25 @@ func TestCalculateSHA256FileExecHash(t *testing.T) {
 			name: "Test with path only",
 			path: "/usr/local/bin/python",
 			args: []string{},
-			want: "c3c3590ac3929a993cce758788838263ce47309429f486d8ebb8ee59fba42650",
+			want: "3608506635c019b279ef561e999dace6b75735ab89611ce9f5c977bb5b9424a5",
 		},
 		{
 			name: "Test with path and one argument",
 			path: "/usr/local/bin/python",
 			args: []string{"-v"},
-			want: "5b4db099511640892a59a841aa0d13914610f60e8ca3922b0adaada599002a15",
+			want: "17c24802e9bd6668cc207b91bbf5584f25c42b4209e18a07f5e6102ffbaff0a6",
 		},
 		{
 			name: "Test with path and multiple arguments",
 			path: "/usr/local/bin/python",
 			args: []string{"-v", "-m", "pip"},
-			want: "4fa7e242cfbe5b2d5ec4440821cae0b9830672c01dfb3959834aad5b46a6cec5",
+			want: "f005865e9bbb5fb613475d4539067f681f8a1d9579e0cb21cc502a02953e4d6a",
 		},
 		{
 			name: "Test with path and multiple arguments different order",
 			path: "/usr/local/bin/python",
 			args: []string{"-v", "pip", "-m"},
-			want: "0fbe286986472240a59623fa225c96c02a2976bb248083a06f220c00f8863490",
+			want: "b9245e8ce8c8f844ae150e4ac9bbc1ab813e7b66215a0ac34da3f894592a686c",
 		},
 	}
 
@@ -46,6 +46,16 @@ func TestCalculateSHA256FileExecHash(t *testing.T) {
 				t.Errorf("CalculateSHA256FileExecHash() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCalculateSHA256FileExecHash_ArgvBoundaryCollision(t *testing.T) {
+	path := "/bin/sh"
+	hash1 := CalculateSHA256FileExecHash(path, []string{"/bin/sh", "a b"})
+	hash2 := CalculateSHA256FileExecHash(path, []string{"/bin/sh", "a", "b"})
+
+	if hash1 == hash2 {
+		t.Errorf("CalculateSHA256FileExecHash() collision detected for distinct argv boundaries: %v == %v", hash1, hash2)
 	}
 }
 

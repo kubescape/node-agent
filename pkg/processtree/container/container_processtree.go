@@ -9,6 +9,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/prometheus/procfs"
 )
 
@@ -67,10 +68,17 @@ func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID ui
 		return armotypes.Process{}, fmt.Errorf("container %s not found", containerID)
 	}
 
-	// Find the process node for the shim PID
-	shimNode, ok := fullTree.Load(shimPID)
+	// The host pseudo-container has no shim: PID 1's parent is PID 0,
+	// which is not a process-tree node. Validate ancestry against PID 1,
+	// but keep PID 0 as the exclusive boundary so the branch includes init.
+	rootPID, rootKind := shimPID, "shim"
+	if utils.IsHost(containerID) {
+		rootPID, rootKind = 1, "host init"
+		shimPID = 0
+	}
+	rootNode, ok := fullTree.Load(rootPID)
 	if !ok {
-		return armotypes.Process{}, fmt.Errorf("shim process %d not found in process tree", shimPID)
+		return armotypes.Process{}, fmt.Errorf("%s process %d not found in process tree", rootKind, rootPID)
 	}
 
 	// Find the target process node
@@ -79,8 +87,8 @@ func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID ui
 		return armotypes.Process{}, fmt.Errorf("target process %d not found in process tree", targetPID)
 	}
 
-	// Check if the target PID is within the shim's subtree
-	if !c.isProcessInSubtree(targetNode, shimNode, fullTree) {
+	// Check if the target PID is within the container or host root's subtree.
+	if !c.isProcessInSubtree(targetNode, rootNode, fullTree) {
 		return armotypes.Process{}, fmt.Errorf("target process %d is not within container %s subtree", targetPID, containerID)
 	}
 
@@ -199,6 +207,7 @@ func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *armo
 
 // buildBranchToShim builds a process tree branch from targetNode up to (but not including) shimPID
 // This creates a new process tree containing only the nodes along the path from target to shim
+// A zero shimPID includes the host init node, whose PPID is zero.
 func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *armotypes.Process, shimPID uint32, fullTree *maps.SafeMap[uint32, *armotypes.Process]) *armotypes.Process {
 	if targetNode == nil {
 		return nil
@@ -206,8 +215,11 @@ func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *armotypes.Proce
 
 	pathNodes := make([]*armotypes.Process, 0, 8)
 	current := targetNode
-	for current.PPID != 0 {
+	for {
 		pathNodes = append(pathNodes, current)
+		if current.PPID == 0 {
+			break
+		}
 
 		parent, ok := fullTree.Load(current.PPID)
 		if !ok {

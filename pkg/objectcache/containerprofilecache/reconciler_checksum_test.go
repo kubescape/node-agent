@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -53,6 +54,10 @@ type checksumRecordingClient struct {
 }
 
 var _ storage.ProfileClient = (*checksumRecordingClient)(nil)
+
+func (c *checksumRecordingClient) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
+}
 
 func (c *checksumRecordingClient) GetContainerProfile(ctx context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
 	c.mu.Lock()
@@ -387,6 +392,10 @@ type blockingSpecProfileClient struct {
 
 var _ storage.ProfileClient = (*blockingSpecProfileClient)(nil)
 
+func (c *blockingSpecProfileClient) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
+}
+
 func (c *blockingSpecProfileClient) GetContainerProfile(ctx context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	select {
 	case c.entered <- struct{}{}:
@@ -508,6 +517,10 @@ type conditionalChecksumClient struct {
 }
 
 var _ storage.ProfileClient = (*conditionalChecksumClient)(nil)
+
+func (c *conditionalChecksumClient) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
+}
 
 func (c *conditionalChecksumClient) GetContainerProfile(ctx context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	c.mu.Lock()
@@ -965,6 +978,10 @@ type blockingFetchClient struct {
 }
 
 var _ storage.ProfileClient = (*blockingFetchClient)(nil)
+
+func (c *blockingFetchClient) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
+}
 
 func (c *blockingFetchClient) GetContainerProfile(ctx context.Context, _, name string) (*v1beta1.ContainerProfile, error) {
 	active := c.active.Add(1)

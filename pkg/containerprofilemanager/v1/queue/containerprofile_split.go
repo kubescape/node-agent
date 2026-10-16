@@ -77,13 +77,13 @@ func splitProfile(p *v1beta1.ContainerProfile) (*v1beta1.ContainerProfile, *v1be
 	a.Spec.Syscalls, b.Spec.Syscalls = halve(p.Spec.Syscalls)
 	a.Spec.Endpoints, b.Spec.Endpoints = halve(p.Spec.Endpoints)
 	a.Spec.IdentifiedCallStacks, b.Spec.IdentifiedCallStacks = halve(p.Spec.IdentifiedCallStacks)
-	a.Spec.Ingress, b.Spec.Ingress = halve(p.Spec.Ingress)
-	a.Spec.Egress, b.Spec.Egress = halve(p.Spec.Egress)
+	a.Spec.Ingress, b.Spec.Ingress = halveNeighbors(p.Spec.Ingress)
+	a.Spec.Egress, b.Spec.Egress = halveNeighbors(p.Spec.Egress)
 	a.Spec.PolicyByRuleId, b.Spec.PolicyByRuleId = halvePolicies(p.Spec.PolicyByRuleId)
 
-	// Every field with len <= 1 leaves its single element in a, so b can come out empty even
-	// though p had two or more elements. Move one element across, otherwise recursion on a
-	// would not strictly reduce and the split would make no progress.
+	// Fields with one indivisible element leave it in a, so b can come out empty
+	// even though p had two or more elements. Move one element across, otherwise
+	// recursion on a would not strictly reduce and the split would make no progress.
 	if countPartitionableElements(&b.Spec) == 0 {
 		moveOneElement(&a.Spec, &b.Spec)
 	}
@@ -223,7 +223,7 @@ func isZeroTimeString(s string) bool {
 }
 
 // countPartitionableElements returns the total number of elements across every list and
-// map field that splitProfile partitions.
+// map field that splitProfile partitions, counting each neighbor port separately.
 func countPartitionableElements(spec *v1beta1.ContainerProfileSpec) int {
 	return len(spec.Capabilities) +
 		len(spec.Execs) +
@@ -231,9 +231,82 @@ func countPartitionableElements(spec *v1beta1.ContainerProfileSpec) int {
 		len(spec.Syscalls) +
 		len(spec.Endpoints) +
 		len(spec.IdentifiedCallStacks) +
-		len(spec.Ingress) +
-		len(spec.Egress) +
+		countNeighborElements(spec.Ingress) +
+		countNeighborElements(spec.Egress) +
 		len(spec.PolicyByRuleId)
+}
+
+// A peer without ports still carries an identity that must be retained.
+func countNeighborElements(neighbors []v1beta1.NetworkNeighbor) int {
+	count := 0
+	for _, neighbor := range neighbors {
+		count += max(1, len(neighbor.Ports))
+	}
+	return count
+}
+
+// halveNeighbors chooses the ordered cut with the smallest larger half, estimating
+// bytes from JSON as splitProfile's progress guard does. Whole-peer cuts are preferred
+// on ties. Interior port cuts charge the duplicated peer identity to both halves, so
+// large selectors are balanced without needlessly copying them. Each neighbor and
+// port is encoded once; scoring all cuts is linear in the number of observations.
+func halveNeighbors(neighbors []v1beta1.NetworkNeighbor) ([]v1beta1.NetworkNeighbor, []v1beta1.NetworkNeighbor) {
+	if len(neighbors) == 0 {
+		return neighbors, nil
+	}
+	sizes := make([]int, len(neighbors))
+	total := 0
+	for i := range neighbors {
+		encoded, _ := json.Marshal(neighbors[i])
+		// Include one separator byte per peer; the list brackets add the same
+		// constant to each candidate and therefore do not affect the choice.
+		sizes[i] = len(encoded) + 1
+		total += sizes[i]
+	}
+
+	bestSize, cutPeer, cutPort := total, len(neighbors), 0
+	prefix := 0
+	for i := 1; i < len(neighbors); i++ {
+		prefix += sizes[i-1]
+		if candidate := max(prefix, total-prefix); candidate < bestSize {
+			bestSize, cutPeer = candidate, i
+		}
+	}
+
+	prefix = 0
+	for i, neighbor := range neighbors {
+		if len(neighbor.Ports) > 1 {
+			portSizes := make([]int, len(neighbor.Ports))
+			portsTotal := 0
+			for j, port := range neighbor.Ports {
+				encoded, _ := json.Marshal(port)
+				portSizes[j] = len(encoded) + 1
+				portsTotal += portSizes[j]
+			}
+			portsPrefix := 0
+			for j := 1; j < len(neighbor.Ports); j++ {
+				portsPrefix += portSizes[j-1]
+				// Removing ports also removes one comma per port while each
+				// nonempty half retains the peer's full identity and ports wrapper.
+				left := prefix + sizes[i] - (portsTotal - portsPrefix)
+				right := total - prefix - portsPrefix
+				if candidate := max(left, right); candidate < bestSize {
+					bestSize, cutPeer, cutPort = candidate, i, j
+				}
+			}
+		}
+		prefix += sizes[i]
+	}
+	if cutPort == 0 {
+		return neighbors[:cutPeer:cutPeer], neighbors[cutPeer:len(neighbors):len(neighbors)]
+	}
+	left, right := neighbors[cutPeer].DeepCopy(), neighbors[cutPeer].DeepCopy()
+	left.Ports = left.Ports[:cutPort]
+	right.Ports = right.Ports[cutPort:]
+	a := append([]v1beta1.NetworkNeighbor(nil), neighbors[:cutPeer]...)
+	a = append(a, *left)
+	b := append([]v1beta1.NetworkNeighbor{*right}, neighbors[cutPeer+1:]...)
+	return a, b
 }
 
 // moveOneElement transfers a single element from the first non-empty partitionable field of
@@ -313,7 +386,8 @@ func freshOneTimeSlug(name string) string {
 	return base + suffix
 }
 
-// halve returns the first ceil(len(s)/2) elements of s and the rest.
+// halve returns the first ceil(len(s)/2) elements of s and the rest, limiting
+// capacity so singleton redistribution cannot append into a queued sibling's range.
 func halve[T any](s []T) ([]T, []T) {
 	if len(s) == 0 {
 		return nil, nil
@@ -321,7 +395,7 @@ func halve[T any](s []T) ([]T, []T) {
 
 	mid := (len(s) + 1) / 2
 
-	return s[:mid], s[mid:]
+	return s[:mid:mid], s[mid:len(s):len(s)]
 }
 
 // halvePolicies partitions m by sorted key, so the partition is deterministic across runs.

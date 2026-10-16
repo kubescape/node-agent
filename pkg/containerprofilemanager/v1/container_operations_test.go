@@ -88,7 +88,7 @@ func TestAddContainerWithTimeout_StaleFailureCleanupDoesNotDeleteNewerEntry(t *t
 	// already removes failingEntry from the map before addContainer returns.
 	expiredCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err = cpm.addContainer(container, expiredCtx)
+	err = cpm.addContainer(container, failingEntry, expiredCtx)
 	require.Error(t, err, "addContainer must fail against an already-cancelled context")
 
 	_, stillTracked := cpm.getContainerEntry(containerID)

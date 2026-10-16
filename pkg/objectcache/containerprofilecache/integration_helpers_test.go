@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -60,6 +61,10 @@ func newFakeStorage(cp *v1beta1.ContainerProfile) *stubStorage {
 	return &stubStorage{cp: cp}
 }
 
+func (s *stubStorage) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
+}
+
 func (s *stubStorage) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -98,6 +103,9 @@ func (k *stubK8sCache) GetPodSpec(_, _ string) *corev1.PodSpec     { return nil 
 func (k *stubK8sCache) GetPodStatus(_, _ string) *corev1.PodStatus { return nil }
 func (k *stubK8sCache) GetApiServerIpAddress() string              { return "" }
 func (k *stubK8sCache) GetPods() []*corev1.Pod                     { return nil }
+
+// GetPodByIP returns no peer because these cache tests do not model IP resolution.
+func (k *stubK8sCache) GetPodByIP(_ string) *corev1.Pod { return nil }
 
 func (k *stubK8sCache) SetSharedContainerData(id string, d *objectcache.WatchedContainerData) {
 	k.mu.Lock()

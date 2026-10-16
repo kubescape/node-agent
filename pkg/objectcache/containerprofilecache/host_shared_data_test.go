@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // hostEventContainer builds the host pseudo-container event
@@ -130,6 +131,10 @@ type signallingProfileClient struct {
 }
 
 var _ storage.ProfileClient = (*signallingProfileClient)(nil)
+
+func (c *signallingProfileClient) ListContainerProfiles(_ context.Context, _ string, _ metav1.ListOptions) (*v1beta1.ContainerProfileList, error) {
+	return &v1beta1.ContainerProfileList{}, nil
+}
 
 func (c *signallingProfileClient) GetContainerProfile(_ context.Context, _, _ string) (*v1beta1.ContainerProfile, error) {
 	c.once.Do(func() { close(c.reached) })

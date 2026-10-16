@@ -156,6 +156,11 @@ func ParseWithDefaults(ruleState map[string]any, bindingParams map[string]any) *
 		logger.L().Warning("prefilter: failed to marshal params", helpers.Error(err))
 		return nil
 	}
+	// Unknown state still needs JSON validation, but cannot produce a filter.
+	// Avoid decoding it on every rule refresh without caching mutable state.
+	if !hasPrefilterKey(merged) && json.Valid(buf) {
+		return nil
+	}
 	var raw rawParams
 	if err := json.Unmarshal(buf, &raw); err != nil {
 		logger.L().Warning("prefilter: failed to unmarshal params", helpers.Error(err))
@@ -210,6 +215,21 @@ func ParseWithDefaults(ruleState map[string]any, bindingParams map[string]any) *
 		return nil
 	}
 	return p
+}
+
+func hasPrefilterKey(params map[string]any) bool {
+	for key := range params {
+		for _, known := range [...]string{
+			"ignorePrefixes", "includePrefixes", "ports", "direction", "methods",
+			"excludeProcesses", "excludeParentProcesses",
+		} {
+			// Match encoding/json's case-insensitive field lookup, including Unicode.
+			if strings.EqualFold(key, known) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // buildProcessMap converts a list of (name, path) entries to a lookup map.
