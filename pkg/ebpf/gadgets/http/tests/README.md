@@ -71,3 +71,24 @@ The same per-CPU layout applies to `capture_loss`; its three reason keys are
 unchanged. Neither map changes the payload/event ABI, but readers of the old
 shared ARRAY layout must adapt to per-CPU values. The native capture harness
 checks the production map types and isolates increments on two simulated CPUs.
+
+## Local COS 121 VM evidence
+
+`local_cos121.py` extracts and verifies Google's published `18867.624.2`
+full update payload and boots its original kernel and root filesystem under
+KVM/QEMU. It requires Linux x86_64, KVM access, QEMU, `mkfs.ext4`, and the
+validation fixture disk/initramfs supplied with the evidence bundle. Run
+`python3 pkg/ebpf/gadgets/http/tests/local_cos121.py --help` for arguments.
+
+The guest uses a test initramfs and a writable overlay over the verified vendor
+root partition. It starts Docker manually with the vfs storage driver and runs
+Python/IG in a privileged container sharing the guest PID and network namespaces.
+This isolates the affected kernel from the workstation kernel. It does not
+reproduce GCE firmware, normal COS systemd startup, or a deployed host-agent.
+Keep the payload/partition hashes, guest kernel configuration and command line,
+boot log, OCI identities, baseline verifier rejection, both patched capture runs,
+and exit statuses together when reporting results.
+
+See [the COS 121 validation report](validation-cos121.md) for the measured
+baseline rejection, patched capture/reattachment results, artifact identities,
+boot differences, and replay command.
