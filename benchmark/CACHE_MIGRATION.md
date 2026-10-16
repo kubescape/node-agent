@@ -158,8 +158,26 @@ CPU/memory plots are retained under
 `/home/linux/.cache/node-agent-pr1018-20261016/` (not committed).
 
 The system harness completed its baseline measurement, then hit a chart download
-timeout before the candidate measurement. The candidate run is being resumed
-with identical cached chart versions and the unchanged benchmark functions in
-a fresh disposable cluster. Final system comparison is pending. The harness's
-legacy event queries return no series; current OTEL counters are being collected
-separately for throughput verification.
+timeout before the candidate measurement. The candidate was measured in a fresh
+disposable cluster with identical cached chart versions, unchanged benchmark
+functions, a 120-second warmup, and a 600-second load window. This was a resumed
+comparison, not an uninterrupted successful harness run.
+
+| System metric | Upstream | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| Mean CPU (cores) | 0.1458 | 0.2013 | +38.0% |
+| CPU p95 (cores) | 0.1582 | 0.2100 | +32.7% |
+| Mean memory (MiB) | 314.34 | 314.00 | -0.11% |
+| Peak memory (MiB) | 317.76 | 318.81 | +0.33% |
+| Current-counter event rate (events/s) | 1635.01 | 1633.56 | -0.09% |
+
+The existing 10% resource gate **failed** on mean and p95 CPU. The independently
+built images have identical digests, so this run cannot attribute the observed
+CPU difference to the evaluation changes or establish a passing comparison.
+The legacy harness event queries returned no series; event rates above use
+separate current OTEL counter queries over the same ten-minute windows. There
+were no rule-counter series, so rule-evaluation throughput is unverified. Each
+resource comparison has 21 samples. Heap, allocation, and CPU profiles, plots,
+raw counters, and the failed gate output are retained with the local evidence.
+The complete cache matrix and heap-plateau acceptance remain unrun; neither
+system results nor package tests override the failed cache latency gate.
