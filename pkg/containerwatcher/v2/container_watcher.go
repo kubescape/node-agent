@@ -73,6 +73,7 @@ type ContainerWatcher struct {
 	// New components
 	orderedEventQueue   *OrderedEventQueue
 	batchBuf            []EventEntry
+	droppedBuf          []DroppedEvents
 	eventHandlerFactory *EventHandlerFactory
 	processTreeManager  processtree.ProcessTreeManager
 	eventEnricher       *EventEnricher
@@ -505,7 +506,36 @@ func (cw *ContainerWatcher) workerPoolLoop() {
 	}
 }
 
+// accountQueueDrops applies the drops recorded by the ordered queue's
+// producer-side overflow path: it updates the dropped-events metric and marks
+// each affected container's profile as partial.
+func (cw *ContainerWatcher) accountQueueDrops() {
+	cw.droppedBuf = cw.orderedEventQueue.DrainDropped(cw.droppedBuf)
+	if len(cw.droppedBuf) == 0 {
+		return
+	}
+	reported := make(map[string]struct{}, len(cw.droppedBuf))
+	for _, d := range cw.droppedBuf {
+		cw.ebpfDropCounter.Add(context.Background(),
+			d.Count,
+			metric.WithAttributes(
+				attribute.String("event_type", string(d.EventType)),
+				attribute.String("reason", "ordered_queue_full"),
+			),
+		)
+		if d.ContainerID == "" {
+			continue
+		}
+		if _, done := reported[d.ContainerID]; !done {
+			reported[d.ContainerID] = struct{}{}
+			cw.containerProfileManager.ReportDroppedEvent(d.ContainerID)
+		}
+	}
+	clear(cw.droppedBuf)
+}
+
 func (cw *ContainerWatcher) processQueueBatch() {
+	cw.accountQueueDrops()
 	batchSize := cw.cfg.EventBatchSize
 	cw.batchBuf = cw.orderedEventQueue.PopBatch(batchSize, cw.batchBuf)
 	for i := range cw.batchBuf {
