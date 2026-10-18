@@ -419,13 +419,27 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 	cpm.logEventError(err, "network", containerID)
 }
 
-// ReportDroppedEvent reports a dropped event (currently just logs)
+// ReportDroppedEvent marks the container's profile as having lost events. If the
+// container is not registered yet, the drop is kept as a pending marker and applied
+// by addContainerEntryIfAbsent when the container is registered.
 func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
-	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+	apply := func(data *containerData) error {
 		data.droppedEvents = true
 		return nil
-	})
-	if err != nil && !errors.Is(err, ErrContainerNotFound) {
+	}
+	err := cpm.withContainerNoSizeUpdate(containerID, apply)
+	if errors.Is(err, ErrContainerNotFound) {
+		if cpm.recordDropForUnregisteredContainer(containerID) {
+			logger.L().Debug("dropped event kept pending until container registration", helpers.String("containerID", containerID))
+			return
+		}
+		// Registered between the lookup and the pending check.
+		err = cpm.withContainerNoSizeUpdate(containerID, apply)
+		if errors.Is(err, ErrContainerNotFound) {
+			return // registered and already removed again
+		}
+	}
+	if err != nil {
 		logger.L().Error("failed to report dropped event",
 			helpers.String("containerID", containerID),
 			helpers.Error(err))

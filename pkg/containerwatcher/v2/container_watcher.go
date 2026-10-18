@@ -54,6 +54,10 @@ type ContainerWatcher struct {
 	clusterName         string
 	agentStartTime      time.Time
 
+	// processingDone is closed when eventProcessingLoop returns. droppedBuf is
+	// owned by that loop, so Stop waits on this before the final drop drain.
+	processingDone chan struct{}
+
 	// Clients
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
 	igK8sClient             *containercollection.K8sClient
@@ -340,7 +344,8 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	// Start ordered event queue BEFORE tracers
 
 	// Start event processing loop
-	go cw.eventProcessingLoop()
+	cw.processingDone = make(chan struct{})
+	go cw.eventProcessingLoop(cw.processingDone)
 
 	// Start worker pool goroutine
 	go cw.workerPoolLoop()
@@ -420,6 +425,10 @@ func (cw *ContainerWatcher) Stop() {
 		cw.tracerManagerV2.StopAllTracers()
 	}
 
+	// No tracer can enqueue (or drop) events any more and the processing loop
+	// has been cancelled: apply whatever drops are still pending.
+	cw.finishQueueAccounting()
+
 	cw.gadgetRuntime.Close()
 
 	// workerChan is intentionally not closed: the consumer (workerPoolLoop) and
@@ -478,7 +487,21 @@ func (cw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatche
 	cw.thirdPartyContainerReceivers.Remove(receiver)
 }
 
-func (cw *ContainerWatcher) eventProcessingLoop() {
+// finishQueueAccounting performs the final drop accounting at shutdown. It must be
+// called after cw.ctx is cancelled and the tracers (the only producers of queue
+// drops) are stopped. It waits for eventProcessingLoop to exit, which also makes
+// this goroutine the sole user of droppedBuf, then drains once more. Drops
+// already accounted by the loop were removed from the queue by DrainDropped, so
+// nothing is counted twice.
+func (cw *ContainerWatcher) finishQueueAccounting() {
+	if cw.processingDone != nil {
+		<-cw.processingDone
+	}
+	cw.accountQueueDrops()
+}
+
+func (cw *ContainerWatcher) eventProcessingLoop(done chan<- struct{}) {
+	defer close(done)
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
