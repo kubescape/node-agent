@@ -423,6 +423,11 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 // container is not registered yet, the drop is kept as a pending marker and applied
 // by addContainerEntryIfAbsent when the container is registered.
 func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
+	if containerID == "" {
+		// Events that could not be attributed to a container (e.g. host processes) have no
+		// profile to mark; the callers still account for them in the dropped-events metric.
+		return
+	}
 	apply := func(data *containerData) error {
 		data.droppedEvents = true
 		return nil

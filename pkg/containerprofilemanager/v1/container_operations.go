@@ -197,7 +197,21 @@ func (cpm *ContainerProfileManager) removeContainerEntryIfMatch(containerID stri
 // abandonEntry untracks a failed or skipped registration, then closes ready.
 // Removing first lets a waiting replayed add see the entry gone and retry.
 func (cpm *ContainerProfileManager) abandonEntry(containerID string, entry *ContainerEntry) {
-	cpm.removeContainerEntryIfMatch(containerID, entry)
+	if cpm.removeContainerEntryIfMatch(containerID, entry) {
+		// A drop recorded on the discarded entry (directly, or from a pending marker applied
+		// at insertion) must not vanish with it: a replayed registration would otherwise
+		// start from a clean entry and its profile could be saved as Complete. Clearing data
+		// under the entry lock makes any report that still holds this entry fall through to
+		// the not-found path; ReportDroppedEvent then re-records the drop on the replacement
+		// entry, or as a pending marker if there is none yet.
+		entry.mu.Lock()
+		dropped := entry.data != nil && entry.data.droppedEvents
+		entry.data = nil
+		entry.mu.Unlock()
+		if dropped {
+			cpm.ReportDroppedEvent(containerID)
+		}
+	}
 	entry.readyOnce.Do(func() {
 		close(entry.ready)
 	})

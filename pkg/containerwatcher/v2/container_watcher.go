@@ -425,8 +425,9 @@ func (cw *ContainerWatcher) Stop() {
 		cw.tracerManagerV2.StopAllTracers()
 	}
 
-	// No tracer can enqueue (or drop) events any more and the processing loop
-	// has been cancelled: apply whatever drops are still pending.
+	// The processing loop has been cancelled and the tracers were asked to stop: apply
+	// whatever drops are pending. Tracer.Stop only cancels the gadget context and does not
+	// wait for in-flight callbacks, so a drop recorded after this drain is not accounted.
 	cw.finishQueueAccounting()
 
 	cw.gadgetRuntime.Close()
@@ -489,7 +490,8 @@ func (cw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatche
 
 // finishQueueAccounting performs the final drop accounting at shutdown. It must be
 // called after cw.ctx is cancelled and the tracers (the only producers of queue
-// drops) are stopped. It waits for eventProcessingLoop to exit, which also makes
+// drops) have been asked to stop; their in-flight callbacks are not awaited, so drops
+// recorded after the final drain are not accounted. It waits for eventProcessingLoop to exit, which also makes
 // this goroutine the sole user of droppedBuf, then drains once more. Drops
 // already accounted by the loop were removed from the queue by DrainDropped, so
 // nothing is counted twice.
