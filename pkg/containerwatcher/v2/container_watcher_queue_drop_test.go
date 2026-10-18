@@ -85,3 +85,67 @@ func TestAccountQueueDrops_NoOverflowIsNoop(t *testing.T) {
 	assert.Empty(t, spy.dropped)
 	assert.Equal(t, 1, cw.orderedEventQueue.Size())
 }
+
+// startLoop runs eventProcessingLoop the way Start does and returns a cancel func plus its done channel.
+func startLoop(cw *ContainerWatcher) (cancel context.CancelFunc) {
+	cw.ctx, cancel = context.WithCancel(context.Background())
+	cw.cfg.EventBatchSize = 10
+	cw.processingDone = make(chan struct{})
+	go cw.eventProcessingLoop(cw.processingDone)
+	return cancel
+}
+
+func TestFinishQueueAccounting_DrainsDropsPendingAtShutdown(t *testing.T) {
+	cw, spy, reader := newDropAccountingWatcher(t, 1)
+	cancel := startLoop(cw)
+	cancel()
+	<-cw.processingDone // the loop has exited without seeing this drop
+
+	cw.orderedEventQueue.AddEventDirect(utils.ExecveEventType, &utils.StructEvent{Timestamp: 1}, "kept", 1)
+	cw.orderedEventQueue.AddEventDirect(utils.OpenEventType, &utils.StructEvent{Timestamp: 2}, "c1", 1)
+	require.Empty(t, droppedByReason(t, reader))
+
+	cw.finishQueueAccounting()
+
+	assert.Equal(t, map[string]int64{string(utils.OpenEventType) + "/ordered_queue_full": 1}, droppedByReason(t, reader))
+	assert.Equal(t, []string{"c1"}, spy.dropped)
+}
+
+func TestFinishQueueAccounting_NoDoubleCount(t *testing.T) {
+	cw, spy, reader := newDropAccountingWatcher(t, 1)
+	cw.orderedEventQueue.AddEventDirect(utils.ExecveEventType, &utils.StructEvent{Timestamp: 1}, "kept", 1)
+	cw.orderedEventQueue.AddEventDirect(utils.OpenEventType, &utils.StructEvent{Timestamp: 2}, "c1", 1)
+	cw.accountQueueDrops() // normal processing already accounted for it
+
+	cw.processingDone = make(chan struct{})
+	close(cw.processingDone)
+	cw.finishQueueAccounting()
+	cw.finishQueueAccounting() // repeated shutdown is safe
+
+	assert.Equal(t, map[string]int64{string(utils.OpenEventType) + "/ordered_queue_full": 1}, droppedByReason(t, reader))
+	assert.Equal(t, []string{"c1"}, spy.dropped)
+}
+
+// The final drain must not run while the processing loop (the owner of droppedBuf) is alive.
+func TestFinishQueueAccounting_WaitsForProcessingLoop(t *testing.T) {
+	cw, spy, _ := newDropAccountingWatcher(t, 1)
+	cw.orderedEventQueue.AddEventDirect(utils.ExecveEventType, &utils.StructEvent{Timestamp: 1}, "kept", 1)
+	cw.orderedEventQueue.AddEventDirect(utils.OpenEventType, &utils.StructEvent{Timestamp: 2}, "c1", 1)
+	cw.processingDone = make(chan struct{})
+
+	finished := make(chan struct{})
+	go func() { cw.finishQueueAccounting(); close(finished) }()
+
+	select {
+	case <-finished:
+		t.Fatal("final drain completed while the processing loop was still running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(cw.processingDone)
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("final drain did not run after the processing loop exited")
+	}
+	assert.Equal(t, []string{"c1"}, spy.dropped)
+}

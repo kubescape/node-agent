@@ -1,9 +1,14 @@
 package containerprofilemanager
 
 import (
+	"time"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
+
+// maxPendingDrops bounds the dropped-event markers kept for unregistered containers.
+const maxPendingDrops = 1024
 
 // withContainer executes a function with write access to container data
 // This is the core method that handles all locking and error management
@@ -110,6 +115,48 @@ func (cpm *ContainerProfileManager) addContainerEntryIfAbsent(containerID string
 		return false
 	}
 	cpm.containers[containerID] = entry
+	// Apply a drop recorded before this container was registered. The entry is
+	// not visible to anyone else until containersMu is released.
+	if _, pending := cpm.pendingDrops[containerID]; pending {
+		delete(cpm.pendingDrops, containerID)
+		if entry.data != nil {
+			entry.data.droppedEvents = true
+		}
+	}
+	return true
+}
+
+// recordDropForUnregisteredContainer remembers that events were dropped for a
+// container that is not (yet) tracked, so the drop is applied when the
+// container is registered. It re-checks the map under the write lock, so a
+// registration that completed since the caller's lookup is not missed; it
+// returns false in that case and the caller must apply the drop to the entry.
+// The set is bounded: entries older than MaxWaitForSharedContainerData can no
+// longer be consumed by a registration attempt and are pruned first.
+func (cpm *ContainerProfileManager) recordDropForUnregisteredContainer(containerID string) bool {
+	cpm.containersMu.Lock()
+	defer cpm.containersMu.Unlock()
+
+	if _, exists := cpm.containers[containerID]; exists {
+		return false
+	}
+	if cpm.pendingDrops == nil {
+		cpm.pendingDrops = make(map[string]time.Time)
+	}
+	now := time.Now()
+	if _, known := cpm.pendingDrops[containerID]; !known && len(cpm.pendingDrops) >= maxPendingDrops {
+		for id, at := range cpm.pendingDrops {
+			if now.Sub(at) > MaxWaitForSharedContainerData {
+				delete(cpm.pendingDrops, id)
+			}
+		}
+		if len(cpm.pendingDrops) >= maxPendingDrops {
+			logger.L().Warning("too many pending dropped-event markers, discarding",
+				helpers.String("containerID", containerID))
+			return true
+		}
+	}
+	cpm.pendingDrops[containerID] = now
 	return true
 }
 

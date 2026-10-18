@@ -115,6 +115,11 @@ type ContainerProfileManager struct {
 	// Container storage with embedded locking
 	containers   map[string]*ContainerEntry
 	containersMu sync.RWMutex
+	// pendingDrops holds drops reported for a container that has no entry yet
+	// (the watcher can start dropping before the asynchronous registration has
+	// inserted it). Guarded by containersMu so that "entry missing -> record"
+	// and "insert entry -> consume" are atomic with respect to each other.
+	pendingDrops map[string]time.Time
 
 	// Notification channels for container end of life
 	maxSniffTimeNotificationChan []chan *containercollection.Container
