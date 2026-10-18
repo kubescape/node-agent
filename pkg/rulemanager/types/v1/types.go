@@ -21,28 +21,28 @@ type RulesSpec struct {
 // Rule is node-agent's view of a rule from the Rules CRD.
 //
 // It embeds armotypes.RuntimeRule so the CRD contract -- including StateWrites --
-// has exactly one definition, shared with the operator. Two fields are
-// deliberately SHADOWED because their types differ from the shared root:
+// has exactly one definition, shared with the operator. One field is
+// deliberately SHADOWED because its type differs from the shared root:
 //
 //   - Expressions: node-agent's RuleExpression uses utils.EventType, which covers
 //     all node-agent event streams and is the type the rule loop compares
 //     against. The embedded RuntimeRule.Expressions is unused.
-//   - ProfileDataRequired: node-agent's FieldRequirement carries a Declared flag
-//     distinguishing "absent" from "present but empty", and rejects unknown keys
-//     at unmarshal. armotypes.ProfileDataField has neither.
 //
-// The two decoders that reach this struct treat the shadows differently.
-// encoding/json resolves same-tag conflicts by depth, so only these depth-0
-// fields are populated. apimachinery's converter -- the production CRD path --
-// has no depth rule and visits every field independently, so it populates the
-// embedded copies as well. Either way the depth-0 fields are what all
-// node-agent code reads; never read the embedded copies. rule_embedding_test.go
+// ProfileDataRequired is NOT shadowed: node-agent's type is an alias of
+// armotypes.ProfileDataRequired (see profiledata.go), so the promoted field is
+// read directly.
+//
+// The two decoders that reach this struct treat the shadow differently.
+// encoding/json resolves same-tag conflicts by depth, so only the depth-0 field
+// is populated. apimachinery's converter -- the production CRD path -- has no
+// depth rule and visits every field independently, so it populates the
+// embedded copy as well. Either way the depth-0 field is what all node-agent
+// code reads; never read the embedded copy. rule_embedding_test.go
 // pins the behaviour of both decoders.
 type Rule struct {
 	armotypes.RuntimeRule `json:",inline" yaml:",inline"`
 
-	Expressions         RuleExpressions      `json:"expressions" yaml:"expressions"`
-	ProfileDataRequired *ProfileDataRequired `json:"profileDataRequired,omitempty" yaml:"profileDataRequired,omitempty"`
+	Expressions RuleExpressions `json:"expressions" yaml:"expressions"`
 
 	Prefilter *prefilter.Params `json:"-" yaml:"-"`
 }
