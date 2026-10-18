@@ -1,6 +1,7 @@
 package containerprofilemanager
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -215,4 +216,53 @@ func (cpm *ContainerProfileManager) mustRemove(t *testing.T, containerID string)
 	t.Helper()
 	_, ok := cpm.removeContainerEntry(containerID)
 	require.True(t, ok)
+}
+
+// When the pending set is full the marker for a new container cannot be stored. A container
+// registering afterwards must still not come out complete, the set must stay bounded, and
+// containers registered long after the overflow are unaffected.
+func TestReportDroppedEvent_OverflowMarksLaterRegistrationPartial(t *testing.T) {
+	cpm := newPendingDropManager()
+	for i := range maxPendingDrops {
+		cpm.ReportDroppedEvent(fmt.Sprintf("fill-%d", i))
+	}
+	require.Len(t, cpm.pendingDrops, maxPendingDrops)
+
+	cpm.ReportDroppedEvent("overflowed")
+	assert.Len(t, cpm.pendingDrops, maxPendingDrops, "the bound holds")
+	assert.NotContains(t, cpm.pendingDrops, "overflowed")
+
+	overflowed := newPendingEntry()
+	require.True(t, cpm.addContainerEntryIfAbsent("overflowed", overflowed))
+	assert.True(t, dropped(overflowed), "a lost marker must not yield a Complete profile")
+
+	// Normal markers are still consumed per container.
+	stored := newPendingEntry()
+	require.True(t, cpm.addContainerEntryIfAbsent("fill-0", stored))
+	assert.True(t, dropped(stored))
+	assert.Len(t, cpm.pendingDrops, maxPendingDrops-1)
+
+	// Already registered containers keep being marked directly.
+	registered := newPendingEntry()
+	require.True(t, cpm.addContainerEntryIfAbsent("registered", registered))
+	cpm.ReportDroppedEvent("registered")
+	assert.True(t, dropped(registered))
+
+	// Once the registration window of the overflow has passed, the fallback no longer applies.
+	cpm.containersMu.Lock()
+	cpm.pendingDropsOverflowAt = time.Now().Add(-2 * MaxWaitForSharedContainerData)
+	cpm.containersMu.Unlock()
+	late := newPendingEntry()
+	require.True(t, cpm.addContainerEntryIfAbsent("late", late))
+	assert.False(t, dropped(late), "unrelated profiles are not marked partial after the window")
+}
+
+func TestReportDroppedEvent_NoOverflowLeavesRegistrationComplete(t *testing.T) {
+	cpm := newPendingDropManager()
+	for i := range maxPendingDrops - 1 {
+		cpm.ReportDroppedEvent(fmt.Sprintf("fill-%d", i))
+	}
+	entry := newPendingEntry()
+	require.True(t, cpm.addContainerEntryIfAbsent("clean", entry))
+	assert.False(t, dropped(entry), "below capacity, unrelated registrations are not marked")
 }

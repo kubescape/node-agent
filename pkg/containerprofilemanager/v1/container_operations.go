@@ -117,11 +117,13 @@ func (cpm *ContainerProfileManager) addContainerEntryIfAbsent(containerID string
 	cpm.containers[containerID] = entry
 	// Apply a drop recorded before this container was registered. The entry is
 	// not visible to anyone else until containersMu is released.
-	if _, pending := cpm.pendingDrops[containerID]; pending {
-		delete(cpm.pendingDrops, containerID)
-		if entry.data != nil {
-			entry.data.droppedEvents = true
-		}
+	_, pending := cpm.pendingDrops[containerID]
+	delete(cpm.pendingDrops, containerID)
+	// A marker that did not fit in pendingDrops may belong to any container that is still
+	// within its registration window, so stay conservative while that window is open.
+	overflowed := !cpm.pendingDropsOverflowAt.IsZero() && time.Since(cpm.pendingDropsOverflowAt) <= MaxWaitForSharedContainerData
+	if (pending || overflowed) && entry.data != nil {
+		entry.data.droppedEvents = true
 	}
 	return true
 }
@@ -132,7 +134,8 @@ func (cpm *ContainerProfileManager) addContainerEntryIfAbsent(containerID string
 // registration that completed since the caller's lookup is not missed; it
 // returns false in that case and the caller must apply the drop to the entry.
 // The set is bounded: entries older than MaxWaitForSharedContainerData can no
-// longer be consumed by a registration attempt and are pruned first.
+// longer be consumed by a registration attempt and are pruned first. When it is
+// still full, pendingDropsOverflowAt is set instead (see addContainerEntryIfAbsent).
 func (cpm *ContainerProfileManager) recordDropForUnregisteredContainer(containerID string) bool {
 	cpm.containersMu.Lock()
 	defer cpm.containersMu.Unlock()
@@ -151,7 +154,13 @@ func (cpm *ContainerProfileManager) recordDropForUnregisteredContainer(container
 			}
 		}
 		if len(cpm.pendingDrops) >= maxPendingDrops {
-			logger.L().Warning("too many pending dropped-event markers, discarding",
+			// The marker cannot be kept per container without breaking the bound. Remember
+			// that one was lost: a container registered within MaxWaitForSharedContainerData
+			// of this moment (the longest an unregistered container can still register) is
+			// marked partial, which may include containers that never lost events. Partial
+			// is the safe error; a false Complete is not.
+			cpm.pendingDropsOverflowAt = now
+			logger.L().Warning("too many pending dropped-event markers, marking containers registered shortly after as partial",
 				helpers.String("containerID", containerID))
 			return true
 		}

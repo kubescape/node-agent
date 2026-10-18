@@ -120,6 +120,9 @@ type ContainerProfileManager struct {
 	// inserted it). Guarded by containersMu so that "entry missing -> record"
 	// and "insert entry -> consume" are atomic with respect to each other.
 	pendingDrops map[string]time.Time
+	// pendingDropsOverflowAt is when a marker last had to be discarded because pendingDrops
+	// was full; guarded by containersMu.
+	pendingDropsOverflowAt time.Time
 
 	// Notification channels for container end of life
 	maxSniffTimeNotificationChan []chan *containercollection.Container
