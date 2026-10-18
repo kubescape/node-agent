@@ -27,7 +27,7 @@ func TestCreateNetworkRuleFailurePathPrecedence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			creator := NewRuleFailureCreator(nil, dnsmanager.CreateDNSManagerMock(), NewEventRuleAdapterFactory(), 0, "test", new(maps.SafeMap[string, uint32]))
 			event := &utils.StructEvent{EventType: utils.NetworkEventType, ExePath: tc.eventPath, Pid: 42}
-			failure := creator.CreateRuleFailure(typesv1.Rule{ProfileDependency: armotypes.NotRequired}, &events.EnrichedEvent{Event: event, ProcessTree: tc.tree}, nil, "test", "id", "", nil)
+			failure := creator.CreateRuleFailure(typesv1.Rule{RuntimeRule: armotypes.RuntimeRule{ProfileDependency: armotypes.NotRequired}}, &events.EnrichedEvent{Event: event, ProcessTree: tc.tree}, nil, "test", "id", "", nil, nil)
 			require.NotNil(t, failure)
 			require.Equal(t, tc.want, failure.GetRuntimeProcessDetails().ProcessTree.Path)
 			require.Equal(t, uint32(42), failure.GetRuntimeProcessDetails().ProcessTree.PID)
