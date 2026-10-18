@@ -14,8 +14,7 @@ import (
 // makeRule is a helper that builds a Rule with a ProfileDataRequired.
 func makeRule(pdr *typesv1.ProfileDataRequired) typesv1.Rule {
 	return typesv1.Rule{
-		RuntimeRule:         armotypes.RuntimeRule{ID: "test-rule"},
-		ProfileDataRequired: pdr,
+		RuntimeRule: armotypes.RuntimeRule{ID: "test-rule", ProfileDataRequired: pdr},
 	}
 }
 
@@ -66,8 +65,8 @@ func TestCompileSpec_Empty(t *testing.T) {
 // ProfileDataRequired do not contribute to the spec.
 func TestCompileSpec_NilProfileDataRequiredSkipped(t *testing.T) {
 	rules := []typesv1.Rule{
-		{RuntimeRule: armotypes.RuntimeRule{ID: "no-pdr"}, ProfileDataRequired: nil},
-		{RuntimeRule: armotypes.RuntimeRule{ID: "also-no-pdr"}, ProfileDataRequired: nil},
+		{RuntimeRule: armotypes.RuntimeRule{ID: "no-pdr", ProfileDataRequired: nil}},
+		{RuntimeRule: armotypes.RuntimeRule{ID: "also-no-pdr", ProfileDataRequired: nil}},
 	}
 	spec := CompileSpec(rules)
 
@@ -93,7 +92,7 @@ func TestCompileSpec_DeterministicHash(t *testing.T) {
 	pdr2 := &typesv1.ProfileDataRequired{
 		Execs: fieldReqAll(),
 	}
-	rule2 := typesv1.Rule{RuntimeRule: armotypes.RuntimeRule{ID: "r2"}, ProfileDataRequired: pdr2}
+	rule2 := typesv1.Rule{RuntimeRule: armotypes.RuntimeRule{ID: "r2", ProfileDataRequired: pdr2}}
 
 	specAB := CompileSpec([]typesv1.Rule{rule, rule2})
 	specBA := CompileSpec([]typesv1.Rule{rule2, rule})
