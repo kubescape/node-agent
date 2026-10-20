@@ -65,44 +65,11 @@ func (s *LinuxKernelVariablesSensor) walkVarsDir(dirPath string, procDir *os.Fil
 	var err error
 	for varsNames, err = procDir.Readdirnames(100); err == nil; varsNames, err = procDir.Readdirnames(100) {
 		for _, varName := range varsNames {
-			hVarFileName := hostPath(path.Join(dirPath, varName))
-			varFile, errOpen := os.Open(hVarFileName)
-			if errOpen != nil {
-				if strings.Contains(errOpen.Error(), "permission denied") {
-					logger.L().Debug("failed to open kernel variable file", helpers.String("path", hVarFileName), helpers.Error(errOpen))
-					continue
-				}
-				return nil, fmt.Errorf("failed to open file (%s): %w", hVarFileName, errOpen)
+			entryVars, errEntry := s.readVarsEntry(dirPath, varName)
+			if errEntry != nil {
+				return nil, errEntry
 			}
-			defer varFile.Close()
-
-			fileInfo, errStat := varFile.Stat()
-			if errStat != nil {
-				return nil, fmt.Errorf("failed to stat file (%s): %w", hVarFileName, errStat)
-			}
-
-			if fileInfo.IsDir() {
-				// Recursive call
-				innerVars, errW := s.walkVarsDir(path.Join(dirPath, varName), varFile)
-				if errW != nil {
-					return nil, fmt.Errorf("failed to walkVarsDir file (%s): %w", hVarFileName, errW)
-				}
-				varsList = append(varsList, innerVars...)
-			} else if fileInfo.Mode().IsRegular() {
-				strBld := strings.Builder{}
-				if _, errCopy := io.Copy(&strBld, varFile); errCopy != nil {
-					if strings.Contains(errCopy.Error(), "operation not permitted") {
-						logger.L().Debug("failed to read kernel variable file", helpers.String("path", hVarFileName), helpers.Error(errCopy))
-						continue
-					}
-					return nil, fmt.Errorf("failed to copy file (%s): %w", hVarFileName, errCopy)
-				}
-				varsList = append(varsList, KernelVariable{
-					Key:    varName,
-					Value:  strBld.String(),
-					Source: path.Join(dirPath, varName),
-				})
-			}
+			varsList = append(varsList, entryVars...)
 		}
 	}
 
@@ -111,4 +78,55 @@ func (s *LinuxKernelVariablesSensor) walkVarsDir(dirPath string, procDir *os.Fil
 	}
 
 	return varsList, nil
+}
+
+// readVarsEntry reads a single entry (file or sub-directory) of a kernel
+// variables directory. It is a separate function so that the entry's file
+// handle is closed as soon as the entry is processed. Deferring the close in
+// walkVarsDir's loop kept every opened /proc/sys file open until the whole
+// directory had been walked, which can exhaust the process's file descriptors
+// on hosts with many variables.
+func (s *LinuxKernelVariablesSensor) readVarsEntry(dirPath, varName string) ([]KernelVariable, error) {
+	hVarFileName := hostPath(path.Join(dirPath, varName))
+	varFile, errOpen := os.Open(hVarFileName)
+	if errOpen != nil {
+		if strings.Contains(errOpen.Error(), "permission denied") {
+			logger.L().Debug("failed to open kernel variable file", helpers.String("path", hVarFileName), helpers.Error(errOpen))
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to open file (%s): %w", hVarFileName, errOpen)
+	}
+	defer varFile.Close()
+
+	fileInfo, errStat := varFile.Stat()
+	if errStat != nil {
+		return nil, fmt.Errorf("failed to stat file (%s): %w", hVarFileName, errStat)
+	}
+
+	if fileInfo.IsDir() {
+		// Recursive call
+		innerVars, errW := s.walkVarsDir(path.Join(dirPath, varName), varFile)
+		if errW != nil {
+			return nil, fmt.Errorf("failed to walkVarsDir file (%s): %w", hVarFileName, errW)
+		}
+		return innerVars, nil
+	}
+
+	if fileInfo.Mode().IsRegular() {
+		strBld := strings.Builder{}
+		if _, errCopy := io.Copy(&strBld, varFile); errCopy != nil {
+			if strings.Contains(errCopy.Error(), "operation not permitted") {
+				logger.L().Debug("failed to read kernel variable file", helpers.String("path", hVarFileName), helpers.Error(errCopy))
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to copy file (%s): %w", hVarFileName, errCopy)
+		}
+		return []KernelVariable{{
+			Key:    varName,
+			Value:  strBld.String(),
+			Source: path.Join(dirPath, varName),
+		}}, nil
+	}
+
+	return nil, nil
 }
