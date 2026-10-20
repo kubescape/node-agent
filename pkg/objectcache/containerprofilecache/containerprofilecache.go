@@ -710,6 +710,17 @@ func (c *ContainerProfileCacheImpl) GetProjectedContainerProfile(containerID str
 	return nil
 }
 
+// GetContainerProfileSnapshot reads one immutable cache entry so refresh cannot
+// pair readiness from an old authored profile with a new learned projection.
+func (c *ContainerProfileCacheImpl) GetContainerProfileSnapshot(containerID string) (*objectcache.ProjectedContainerProfile, *objectcache.ProfileState) {
+	if entry, ok := c.entries.Load(containerID); ok && entry != nil {
+		c.metricsManager.ReportContainerProfileCacheHit(entry.Projected != nil)
+		return entry.Projected, entry.State
+	}
+	c.metricsManager.ReportContainerProfileCacheHit(false)
+	return nil, &objectcache.ProfileState{Error: fmt.Errorf("container %s not found in container-profile cache", containerID)}
+}
+
 // SetProjectionSpec installs a new compiled spec. Idempotent: no-op when the
 // spec hash matches the currently-installed one. On change: stores the spec,
 // bumps specGeneration, and sends a non-blocking nudge to the reconciler.

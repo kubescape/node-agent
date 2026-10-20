@@ -59,7 +59,8 @@ type DNSTracer struct {
 	// forwarding is nil unless WithDNSRuleForwarding enabled it. With it nil
 	// the tracer behaves exactly as before: only answered responses enter the
 	// pipeline.
-	forwarding *dnsForwarding
+	forwarding   *dnsForwarding
+	availability func(bool)
 }
 
 // DNSTracerOption configures optional DNSTracer behaviour.
@@ -75,6 +76,26 @@ func WithDNSRuleForwarding(cfg config.DNSRuleForwardingConfig) DNSTracerOption {
 		}
 		dt.forwarding = newDNSForwarding(cfg.ExcludedSuffixes)
 	}
+}
+
+// WithDNSCollectorAvailability reports actual collector lifecycle to profiling.
+func WithDNSCollectorAvailability(callback func(bool)) DNSTracerOption {
+	return func(dt *DNSTracer) { dt.availability = callback }
+}
+
+func (dt *DNSTracer) reportAvailability(available bool) {
+	if dt.availability != nil {
+		dt.availability(available)
+	}
+}
+
+func (dt *DNSTracer) availabilityOperator() operators.DataOperator {
+	return simple.New("dns-availability",
+		// Run last, after the eBPF collector and subscribers have started.
+		simple.WithPriority(int(^uint(0)>>1)),
+		simple.OnStart(func(operators.GadgetContext) error { dt.reportAvailability(true); return nil }),
+		simple.OnStop(func(operators.GadgetContext) error { dt.reportAvailability(false); return nil }),
+	)
 }
 
 // NewDNSTracer creates a new tracer
@@ -201,6 +222,7 @@ func (dt *DNSTracer) newGadgetContext(ctx context.Context) *gadgetcontext.Gadget
 			dt.socketEnricherOp,
 			NewDnsOperator(),
 			dt.eventOperator(),
+			dt.availabilityOperator(),
 		),
 		gadgetcontext.WithName(dnsTraceName),
 		gadgetcontext.WithOrasReadonlyTarget(dt.ociStore),
@@ -215,6 +237,7 @@ func (dt *DNSTracer) newGadgetContext(ctx context.Context) *gadgetcontext.Gadget
 
 // Start initializes and starts the tracer
 func (dt *DNSTracer) Start(ctx context.Context) error {
+	dt.reportAvailability(false)
 	// The retry loop gets its own cancelable context, independent of
 	// whichever GadgetContext is currently in flight, so Stop can halt
 	// retries even between attempts (see Stop).
@@ -236,7 +259,9 @@ func (dt *DNSTracer) Start(ctx context.Context) error {
 			// the previous one terminated, and it also becomes the current
 			// one Stop() will cancel.
 			gadgetCtx := dt.newGadgetContext(ctx)
-			return dt.runtime.RunGadget(gadgetCtx, nil, params)
+			err := dt.runtime.RunGadget(gadgetCtx, nil, params)
+			dt.reportAvailability(false)
+			return err
 		}, bo, func(err error, next time.Duration) {
 			logger.L().Warning("Error running gadget, retrying",
 				helpers.String("gadget", dnsTraceName),
@@ -252,6 +277,7 @@ func (dt *DNSTracer) Start(ctx context.Context) error {
 
 // Stop gracefully stops the tracer
 func (dt *DNSTracer) Stop() error {
+	dt.reportAvailability(false)
 	if dt.socketEnricherOp != nil {
 		dt.socketEnricherOp.Close()
 	}

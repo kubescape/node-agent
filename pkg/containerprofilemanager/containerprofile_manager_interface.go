@@ -17,6 +17,7 @@ type ContainerProfileManagerClient interface {
 	ReportIdentifiedCallStack(containerID string, callStack *v1beta1.IdentifiedCallStack)
 	ReportSymlinkEvent(containerID string, event utils.LinkEvent)
 	ReportHardlinkEvent(containerID string, event utils.LinkEvent)
+	ReportDNSEvent(containerID string, event utils.DNSEvent)
 	ReportNetworkEvent(containerID string, event utils.NetworkEvent)
 	// ReportSyscalls reports a batch of syscalls for a container in a single operation. The
 	// syscall tracer bypasses the generic per-event pipeline entirely for this method (see

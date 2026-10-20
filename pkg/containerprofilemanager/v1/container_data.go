@@ -22,6 +22,7 @@ import (
 // emptyEvents clears all event data, but retains deferred network events for re-resolution
 func (cd *containerData) emptyEvents() {
 	cd.size.Store(0)
+	cd.dnsLookups = nil
 	cd.capabilites = nil
 	cd.syscalls = nil
 	cd.endpoints = nil
@@ -106,7 +107,8 @@ func (cd *containerData) emptyEvents() {
 // isEmpty returns true if the container data is empty
 func (cd *containerData) isEmpty() bool {
 	networks := cd.networkEventsForFlush(false)
-	if cd.capabilites != nil ||
+	if cd.dnsLookups != nil ||
+		cd.capabilites != nil ||
 		cd.syscalls != nil ||
 		cd.endpoints != nil ||
 		cd.execs != nil ||

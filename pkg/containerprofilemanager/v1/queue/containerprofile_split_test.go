@@ -702,3 +702,30 @@ func TestStitchChunk_PreservesAssignmentMergedScalars(t *testing.T) {
 	stitchBase, _ := file.SplitProfileName(stitch.Name)
 	assert.Equal(t, base, stitchBase)
 }
+
+func TestSplitDNSBaseline(t *testing.T) {
+	profile := testProfile()
+	profile.Spec = v1beta1.ContainerProfileSpec{DNSBaselineVersion: "v1", DNSBaselineTruncated: true, DNSLookups: []v1beta1.DNSLookup{{Name: strings.Repeat("a", 128) + ".example."}, {Name: strings.Repeat("b", 128) + ".example."}, {Name: strings.Repeat("c", 128) + ".example."}}}
+	a, b, ok := splitProfile(profile)
+	require.True(t, ok)
+	require.Equal(t, "v1", a.Spec.DNSBaselineVersion)
+	require.Equal(t, "v1", b.Spec.DNSBaselineVersion)
+	require.True(t, a.Spec.DNSBaselineTruncated)
+	require.True(t, b.Spec.DNSBaselineTruncated)
+	require.Len(t, append(a.Spec.DNSLookups, b.Spec.DNSLookups...), 3)
+}
+
+func TestDroppedDNSChunkMarksBaselineIncomplete(t *testing.T) {
+	for _, tc := range []struct{ hasDNS, truncated, want bool }{{true, false, true}, {false, true, true}, {false, false, false}} {
+		profile := testProfile()
+		profile.Spec.DNSBaselineVersion = "v1"
+		profile.Spec.DNSBaselineTruncated = tc.truncated
+		if tc.hasDNS {
+			profile.Spec.DNSLookups = []v1beta1.DNSLookup{{Name: "lost.example."}}
+		}
+		stitch := stitchChunk(profile)
+		require.Equal(t, "v1", stitch.Spec.DNSBaselineVersion)
+		require.Equal(t, tc.want, stitch.Spec.DNSBaselineTruncated)
+		require.Empty(t, stitch.Spec.DNSLookups)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -158,6 +159,100 @@ func TestSaveContainerProfile_DeferredOnlyReportsStatusChanges(t *testing.T) {
 			last := sink.ContainerProfilesSnapshot()[1]
 			require.Len(t, last.Spec.Egress, 1)
 			require.Equal(t, first.Annotations[helpersv1.ReportTimestampMetadataKey], last.Annotations[helpersv1.PreviousReportTimestampMetadataKey])
+		})
+	}
+}
+
+func TestSaveDNSBaselineWithDeferredNetworkPeer(t *testing.T) {
+	t.Setenv("QUEUE_DIR", t.TempDir())
+	sink := &storage.StorageHttpClientMock{}
+	manager, err := NewContainerProfileManager(t.Context(), config.Config{}, nil, nil, sink, nil, &seccompmanager.SeccompManagerMock{}, nil, nil, nil)
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	watched := hostidentity.BuildHostWatchedContainerData("node-1")
+	container := hostContainerWithIdentity(newHostPseudoContainer(), watched, "kubescape")
+	data := &containerData{watchedContainerData: watched, lastReportedCompletion: string(watched.GetCompletionStatus()), lastReportedStatus: string(watched.GetStatus()), networks: mapset.NewSet(NetworkEvent{Port: 443, Protocol: "tcp", PktType: utils.OutgoingPktType, Destination: Destination{Kind: EndpointKindRaw, IPAddress: "10.50.1.20"}}), dnsLookups: map[string]v1beta1.DNSLookup{"api.example.": {Name: "api.example.", ExePaths: []string{"/app"}}}}
+	require.NoError(t, manager.saveContainerProfile(watched, container, data, false))
+	require.Eventually(t, func() bool { return len(sink.ContainerProfilesSnapshot()) == 1 }, 8*time.Second, 10*time.Millisecond)
+	profile := sink.ContainerProfilesSnapshot()[0]
+	require.Equal(t, "v1", profile.Spec.DNSBaselineVersion)
+	require.Len(t, profile.Spec.DNSLookups, 1)
+	require.Equal(t, "api.example.", profile.Spec.DNSLookups[0].Name)
+	require.Empty(t, profile.Spec.Egress)
+	require.Empty(t, data.dnsLookups)
+	require.Equal(t, 1, data.networks.Cardinality())
+}
+
+func TestSaveDNSBaselineDisabledCollectionIsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cfg       config.Config
+		truncated bool
+	}{
+		{"network tracing", config.Config{EnableNetworkTracing: true}, false},
+		{"runtime detection", config.Config{EnableRuntimeDetection: true}, false},
+		{"explicitly disabled", config.Config{DDns: true, EnableNetworkTracing: true, EnableRuntimeDetection: true}, true},
+		{"both consumers disabled", config.Config{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("QUEUE_DIR", t.TempDir())
+			sink := &storage.StorageHttpClientMock{}
+			manager, err := NewContainerProfileManager(context.Background(), tc.cfg, nil, nil, sink, nil, &seccompmanager.SeccompManagerMock{}, nil, nil, nil)
+			require.NoError(t, err)
+			t.Cleanup(manager.Close)
+			watched := hostidentity.BuildHostWatchedContainerData("node-1")
+			watched.SetStatus(objectcache.WatchedContainerStatusCompleted)
+			container := hostContainerWithIdentity(newHostPseudoContainer(), watched, "kubescape")
+			manager.SetDNSCollectorAvailable(true)
+			data := &containerData{watchedContainerData: watched}
+			manager.initializeDNSBaseline(data)
+			require.NoError(t, manager.saveContainerProfile(watched, container, data, true))
+			require.Eventually(t, func() bool { return len(sink.ContainerProfilesSnapshot()) == 1 }, 8*time.Second, 10*time.Millisecond)
+			profile := sink.ContainerProfilesSnapshot()[0]
+			require.Equal(t, "v1", profile.Spec.DNSBaselineVersion)
+			require.Equal(t, tc.truncated, profile.Spec.DNSBaselineTruncated)
+		})
+	}
+}
+
+func TestDNSCollectorFailureAndRecoveryKeepsLearningWindowUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		readyInitially bool
+		recover        bool
+		wantTruncated  bool
+	}{
+		{"startup failed", false, false, true},
+		{"startup recovered", false, true, true},
+		{"running collector failed and recovered", true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("QUEUE_DIR", t.TempDir())
+			sink := &storage.StorageHttpClientMock{}
+			manager, err := NewContainerProfileManager(t.Context(), config.Config{EnableNetworkTracing: true}, nil, nil, sink, nil, &seccompmanager.SeccompManagerMock{}, nil, nil, nil)
+			require.NoError(t, err)
+			t.Cleanup(manager.Close)
+			manager.SetDNSCollectorAvailable(tc.readyInitially)
+			watched := hostidentity.BuildHostWatchedContainerData("node-1")
+			watched.SetStatus(objectcache.WatchedContainerStatusCompleted)
+			data := &containerData{watchedContainerData: watched}
+			manager.initializeDNSBaseline(data)
+			manager.SetDNSCollectorAvailable(false)
+			if tc.recover {
+				manager.SetDNSCollectorAvailable(true)
+			}
+			container := hostContainerWithIdentity(newHostPseudoContainer(), watched, "kubescape")
+			require.NoError(t, manager.saveContainerProfile(watched, container, data, true))
+			require.Eventually(t, func() bool { return len(sink.ContainerProfilesSnapshot()) == 1 }, 8*time.Second, 10*time.Millisecond)
+			require.Equal(t, tc.wantTruncated, sink.ContainerProfilesSnapshot()[0].Spec.DNSBaselineTruncated)
+			// A report after recovery cannot clear the window's sticky loss.
+			manager.SetDNSCollectorAvailable(true)
+			require.NoError(t, manager.saveContainerProfile(watched, container, data, true))
+			require.True(t, data.dnsBaselineTruncated)
+			// Only a newly learned window can start with the recovered collector.
+			fresh := &containerData{}
+			manager.initializeDNSBaseline(fresh)
+			require.False(t, fresh.dnsBaselineTruncated)
 		})
 	}
 }

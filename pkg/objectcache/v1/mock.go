@@ -82,6 +82,20 @@ func (r *RuleObjectCacheMock) GetProjectedContainerProfile(containerID string) *
 		SpecHash:       spec.Hash,
 	}
 
+	pcp.DNSBaselineVersion = cp.Spec.DNSBaselineVersion
+	pcp.DNSBaselineTruncated = cp.Spec.DNSBaselineTruncated
+	pcp.DNSLookups = make(map[string]map[string]struct{}, len(cp.Spec.DNSLookups))
+	for _, lookup := range cp.Spec.DNSLookups {
+		paths := pcp.DNSLookups[lookup.Name]
+		if paths == nil {
+			paths = make(map[string]struct{})
+			pcp.DNSLookups[lookup.Name] = paths
+		}
+		for _, path := range lookup.ExePaths {
+			paths[path] = struct{}{}
+		}
+	}
+
 	if (!specInstalled || spec.Capabilities.InUse) && len(cp.Spec.Capabilities) > 0 {
 		pcp.Capabilities.All = true
 		pcp.Capabilities.Values = make(map[string]struct{}, len(cp.Spec.Capabilities))
@@ -346,4 +360,8 @@ func (r *RuleObjectCacheMock) DeleteHandler(_ context.Context, _ runtime.Object)
 
 func (r *RuleObjectCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {
 	return
+}
+
+func (r *RuleObjectCacheMock) GetContainerProfileSnapshot(id string) (*objectcache.ProjectedContainerProfile, *objectcache.ProfileState) {
+	return r.GetProjectedContainerProfile(id), r.GetContainerProfileState(id)
 }

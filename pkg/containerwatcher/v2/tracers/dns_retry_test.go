@@ -56,13 +56,17 @@ func TestDNSTracerStartRetriesOnTransientFailure(t *testing.T) {
 
 func TestDNSTracerStartGivesUpAfterMaxRetries(t *testing.T) {
 	fr := &fakeRuntime{failCount: dnsStartMaxRetries + 10} // always fail
-	dt := NewDNSTracer(nil, fr, nil, nil, nil, nil)
+	var available atomic.Bool
+	available.Store(true)
+	dt := NewDNSTracer(nil, fr, nil, nil, nil, nil, WithDNSCollectorAvailability(available.Store))
 
 	require.NoError(t, dt.Start(context.Background()))
 
 	require.Eventually(t, func() bool {
 		return fr.calls.Load() == int32(dnsStartMaxRetries)
 	}, 15*time.Second, 20*time.Millisecond, "expected the tracer to stop after dnsStartMaxRetries attempts")
+
+	require.False(t, available.Load(), "failed startup must not report collection available")
 
 	// Give any (incorrect) further retry a chance to happen, then confirm
 	// the bound was actually respected.
@@ -115,4 +119,20 @@ func TestDNSTracerStartStopsRetryingWhenContextCanceled(t *testing.T) {
 		"expected retries to stop shortly after the context is canceled")
 
 	require.NoError(t, dt.Stop())
+}
+
+func TestDNSTracerAvailabilityTracksOperatorRecoveryAndStop(t *testing.T) {
+	var available atomic.Bool
+	dt := NewDNSTracer(nil, nil, nil, nil, nil, nil, WithDNSCollectorAvailability(available.Store))
+	require.False(t, available.Load())
+	instance, err := dt.availabilityOperator().InstantiateDataOperator(nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, instance.Start(nil))
+	require.True(t, available.Load(), "only the final started operator marks collection available")
+	require.NoError(t, instance.Stop(nil))
+	require.False(t, available.Load())
+	require.NoError(t, instance.Start(nil))
+	require.True(t, available.Load(), "a subsequent successful attempt reports recovery")
+	require.NoError(t, dt.Stop())
+	require.False(t, available.Load())
 }

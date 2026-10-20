@@ -87,6 +87,9 @@ func resolveAuthoredContainerSection(cp *v1beta1.ContainerProfile, containerName
 				IdentifiedCallStacks: section.IdentifiedCallStacks,
 				Ingress:              section.Ingress,
 				Egress:               section.Egress,
+				DNSLookups:           section.DNSLookups,
+				DNSBaselineVersion:   section.DNSBaselineVersion,
+				DNSBaselineTruncated: section.DNSBaselineTruncated,
 			}
 			return flat
 		}

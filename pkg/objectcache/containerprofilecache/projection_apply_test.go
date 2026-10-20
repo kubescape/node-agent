@@ -461,3 +461,15 @@ func TestApply_ExecsByPath_NilWhenSpecEmpty(t *testing.T) {
 	require.NotNil(t, pcp)
 	assert.Nil(t, pcp.ExecsByPath, "empty Spec.Execs must project to nil ExecsByPath")
 }
+
+func TestApplyDNSBaseline(t *testing.T) {
+	cp := &v1beta1.ContainerProfile{Spec: v1beta1.ContainerProfileSpec{DNSBaselineVersion: "v1", DNSLookups: []v1beta1.DNSLookup{{Name: "API.EXAMPLE.COM", ExePaths: []string{"/app"}, Addresses: []string{"192.0.2.1"}}, {Name: "api.example.com.", ExePaths: []string{"/usr/bin/python3"}}}, Egress: []v1beta1.NetworkNeighbor{{DNS: "connection.example."}}}}
+	projected := Apply(&objectcache.RuleProjectionSpec{Hash: "dns-test"}, cp, nil)
+	require.Equal(t, "v1", projected.DNSBaselineVersion)
+	require.Contains(t, projected.DNSLookups["api.example.com."], "/app")
+	require.Contains(t, projected.DNSLookups["api.example.com."], "/usr/bin/python3")
+	require.NotContains(t, projected.DNSLookups, "connection.example.")
+	cp.Spec.DNSLookups[0].ExePaths[0] = "changed"
+	require.Contains(t, projected.DNSLookups["api.example.com."], "/app")
+	require.Contains(t, projected.EgressDomains.Values, "connection.example.")
+}
