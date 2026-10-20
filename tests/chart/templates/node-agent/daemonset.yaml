@@ -62,6 +62,12 @@ spec:
         - name: {{ .Values.nodeAgent.name }}
           image: "{{ .Values.nodeAgent.image.repository }}:{{ .Values.nodeAgent.image.tag }}"
           imagePullPolicy: {{ .Values.nodeAgent.image.pullPolicy }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 7888
+            periodSeconds: 5
+            timeoutSeconds: 2
           resources:
 {{ toYaml .Values.nodeAgent.resources | indent 12 }}
           env:

@@ -213,9 +213,11 @@ jobs:
             collect logs -n "$namespace" "$pod" --all-containers=true --timestamps=true --limit-bytes=10485760 > "diagnostics/${namespace}-${pod}.log" 2>&1 || true
             collect logs -n "$namespace" "$pod" --all-containers=true --timestamps=true --limit-bytes=10485760 --previous > "diagnostics/${namespace}-${pod}-previous.log" 2>&1 || true
           done < diagnostics/core-pods.txt
+          collect get --raw /api/v1/namespaces/kubescape/services/node-agent:prometheus/proxy/metrics > diagnostics/node-agent-metrics.txt 2>&1 || true
           collect get events -A --sort-by=.metadata.creationTimestamp > diagnostics/events.txt 2>&1 || true
+          # Storage's default LIST contains metadata only; request real payloads.
+          collect get --raw '/apis/spdx.softwarecomposition.kubescape.io/v1beta1/containerprofiles?resourceVersion=fullSpec' > diagnostics/containerprofiles.spdx.softwarecomposition.kubescape.io.yaml 2>&1 || true
           for resource in \
-            containerprofiles.spdx.softwarecomposition.kubescape.io \
             rules.kubescape.io \
             runtimerulealertbindings.kubescape.io; do
             collect get "$resource" -A -o yaml > "diagnostics/${resource}.yaml" 2>&1 || true

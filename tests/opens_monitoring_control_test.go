@@ -13,10 +13,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-// waitForOpensMonitoring proves the container and its profile are active before
-// a file-access assertion can interpret silence as success. The callers exclude
-// uname from their exec baseline and filter file-access alerts to comm=cat.
-func waitForOpensMonitoring(t *testing.T, wl *testutils.TestWorkload, container string) {
+// waitForProfileMonitoring proves the container and its profile are active before
+// an assertion can interpret silence or count alerts. Callers exclude uname
+// from their exec baseline and count only the command under test.
+func waitForProfileMonitoring(t *testing.T, wl *testutils.TestWorkload, container string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -43,6 +43,6 @@ func waitForOpensMonitoring(t *testing.T, wl *testutils.TestWorkload, container 
 		return false, nil
 	})
 	require.NoError(t, err,
-		"monitoring control must produce a profile-backed R0001 uname alert for %s/%s before file-access assertions (last alert fetch error: %v)",
+		"monitoring control must produce a profile-backed R0001 uname alert for %s/%s before profile assertions (last alert fetch error: %v)",
 		wl.Namespace, container, lastFetchErr)
 }
