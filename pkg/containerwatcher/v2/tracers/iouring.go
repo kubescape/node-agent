@@ -52,6 +52,13 @@ func NewIoUringTracer(
 	}
 }
 
+// hasIouringSubmitReq reports whether a kernel is SupportedMajor.SupportedMinor
+// or newer, so the iouring_new gadget applies. The minor version alone says
+// nothing when the major is higher: 7.0 is newer than 6.4.
+func hasIouringSubmitReq(major, minor uint) bool {
+	return major > SupportedMajor || (major == SupportedMajor && minor >= SupportedMinor)
+}
+
 // Start initializes and starts the tracer
 func (it *IoUringTracer) Start(ctx context.Context) error {
 	kernelVersion, _ := kernel.GetKernelVersion()
@@ -60,7 +67,7 @@ func (it *IoUringTracer) Start(ctx context.Context) error {
 		return fmt.Errorf("parsing kernel version: %w", err)
 	}
 	var imageName string
-	if major >= SupportedMajor && minor >= SupportedMinor {
+	if hasIouringSubmitReq(major, minor) {
 		imageName = iouringImageName
 	} else {
 		imageName = "ghcr.io/inspektor-gadget/gadget/iouring_old:latest"
