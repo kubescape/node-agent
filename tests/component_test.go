@@ -3322,8 +3322,16 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		return count(alerts, "R9902", "c-none") > 0 &&
-			count(alerts, "R9902", "c-pts0") > 0 &&
+		if count(alerts, "R9902", "c-none") == 0 {
+			// Repeating a non-TTY probe cannot change the terminal under test.
+			// Keep the pristine pts/0 and concurrent-TTY probes single-shot.
+			stdout, stderr, probeErr := wl.ExecIntoPodNoTTY(probe, "c-none")
+			if probeErr != nil {
+				t.Logf("no-TTY control probe: %v; stdout=%q stderr=%q", probeErr, stdout, stderr)
+			}
+			return false
+		}
+		return count(alerts, "R9902", "c-pts0") > 0 &&
 			count(alerts, "R9902", "c-conc") > 0
 	}, 180*time.Second, 5*time.Second,
 		"control rule R9902 must fire for all three probe execs -- if it does not, the trigger or the rule pipeline is broken, not the TTY field")
