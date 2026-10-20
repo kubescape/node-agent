@@ -109,7 +109,8 @@ func (cw *ContainerWatcher) removeExcludedNamespaceContainers() {
 
 // reconcileNamespaceFilter admits containers independently of filter polling.
 // Only namespaces that changed from excluded to included are replayed, so an
-// unrelated update does not restart completed profiling sessions.
+// unrelated update does not restart completed profiling sessions. A nil previous
+// filter recovers never-observed containers missed by the runtime hook.
 func (cw *ContainerWatcher) reconcileNamespaceFilter(ctx context.Context, previous *config.NamespaceFilter, running func(context.Context, *config.NamespaceFilter) ([]containercollection.Container, error)) error {
 	containers, err := running(ctx, previous)
 	// Partial results are useful: retry will skip containers already present.
@@ -118,20 +119,48 @@ func (cw *ContainerWatcher) reconcileNamespaceFilter(ctx context.Context, previo
 			return ctx.Err()
 		}
 		container := &containers[i]
-		if utils.IsHostContainer(container) || !previous.SkipNamespace(container.K8s.Namespace) || cw.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels) {
+		if utils.IsHostContainer(container) || (previous != nil && !previous.SkipNamespace(container.K8s.Namespace)) || cw.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels) {
 			continue
 		}
 		if cw.containerCollection.GetContainer(container.Runtime.ContainerID) != nil {
 			continue
 		}
+		if previous == nil {
+			if _, observed := cw.observedContainers.Load(container.Runtime.ContainerID); observed {
+				continue
+			}
+		}
 		cw.lateAdmissions.Store(container, struct{}{})
 		cw.containerCollection.AddContainer(container)
 		if cw.containerCollection.GetContainer(container.Runtime.ContainerID) != container {
 			cw.lateAdmissions.Delete(container)
+		} else if previous == nil {
+			logger.L().Warning("Recovered running container absent from runtime discovery; startup events may be incomplete",
+				helpers.String("containerID", container.Runtime.ContainerID),
+				helpers.String("namespace", container.K8s.Namespace),
+				helpers.String("podName", container.K8s.PodName),
+				helpers.String("containerName", container.K8s.ContainerName))
 		}
 		if cw.containerCollection.GetContainer(container.Runtime.ContainerID) == nil {
 			err = fmt.Errorf("container %s could not be admitted; retrying discovery", container.Runtime.ContainerID)
 		}
 	}
 	return err
+}
+
+// watchContainerRecovery stops its cancellable discovery before collection teardown.
+func (cw *ContainerWatcher) watchContainerRecovery(ctx context.Context, ticks <-chan time.Time) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			if ctx.Err() != nil {
+				return
+			}
+			if err := cw.reconcileNamespaceFilter(ctx, nil, cw.runningContainersForNamespace); err != nil && ctx.Err() == nil {
+				logger.L().Warning("Container discovery recovery failed; will retry", helpers.Error(err))
+			}
+		}
+	}
 }

@@ -31,6 +31,9 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 	// Start the container collection
 	containerEventFuncs := []containercollection.FuncNotify{
 		func(event containercollection.PubSubEvent) {
+			if cw.cfg.KubernetesMode && event.Type == containercollection.EventTypeAddContainer && event.Container != nil {
+				cw.observedContainers.Store(event.Container.Runtime.ContainerID, struct{}{})
+			}
 			logger.L().TimedWrapper("synchronous containerCallback", 5*time.Second, func() {
 				cw.containerCallback(event)
 			})
