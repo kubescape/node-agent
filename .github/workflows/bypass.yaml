@@ -2,6 +2,8 @@ name: build
 on:
   workflow_dispatch:
 
+permissions: read-all
+
 jobs:
   reset-run-number:
     runs-on: ubuntu-latest
@@ -17,6 +19,12 @@ jobs:
           run-id: ${{ github.run_number }}
 
   pr-merged:
+    permissions:
+      contents: write  # Create the release.
+      id-token: write  # Sign images and attest provenance.
+      pull-requests: write  # Required by the nested benchmark workflow.
+      artifact-metadata: write  # Create the attested image storage record.
+      attestations: write
     needs: reset-run-number
     uses: ./.github/workflows/incluster-comp-pr-merged.yaml
     with:

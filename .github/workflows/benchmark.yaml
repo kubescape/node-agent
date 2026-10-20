@@ -28,8 +28,15 @@ concurrency:
   group: benchmark-${{ github.ref }}
   cancel-in-progress: true
 
+# Keep reusable defaults within the caller's permission ceiling.
+permissions:
+  contents: read
+
 jobs:
   benchmark:
+    permissions:
+      contents: read
+      pull-requests: write  # Post the benchmark report on the PR.
     runs-on: ubuntu-large
     steps:
       - name: Checkout
