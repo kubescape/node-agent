@@ -143,7 +143,7 @@ jobs:
             timeout --kill-after=1s 10s ./kind version || true
             timeout --kill-after=1s 10s docker version || true
             timeout --kill-after=1s 10s docker inspect kind-control-plane \
-              --format 'node image={{.Config.Image}} image ID={{.Image}} container ID={{.Id}}' || true
+              --format 'node image={{.Config.Image}} image ID={{.Image}} container ID={{.Id}} PID mode={{.HostConfig.PidMode}}' || true
             for runtime_command in 'uname -a' 'containerd --version' 'runc --version'; do
               echo "Kind node: ${runtime_command}"
               timeout --kill-after=1s 10s docker exec kind-control-plane sh -c "${runtime_command}" || true
@@ -218,6 +218,39 @@ jobs:
           collect() {
             timeout --kill-after=1s 10s kubectl --request-timeout=8s "$@"
           }
+          collect_goroutines() (
+            namespace=$1
+            pod=$2
+            prefix="diagnostics/${namespace}-${pod}-goroutines"
+            timeout --kill-after=1s 8s kubectl --request-timeout=5s \
+              -n "$namespace" port-forward --address=127.0.0.1 "pod/$pod" :6060 \
+              > "${prefix}-port-forward.log" 2>&1 &
+            forward_pid=$!
+            trap 'kill "$forward_pid" 2>/dev/null || true; wait "$forward_pid" 2>/dev/null || true' EXIT
+            trap 'exit 0' INT TERM
+            port=""
+            for attempt in 1 2 3 4 5 6; do
+              port=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\) -> 6060$/\1/p' "${prefix}-port-forward.log")
+              [ -z "$port" ] || break
+              kill -0 "$forward_pid" 2>/dev/null || break
+              sleep 0.5
+            done
+            if [ -n "$port" ]; then
+              curl --noproxy '*' --fail --silent --show-error --connect-timeout 1 --max-time 4 \
+                "http://127.0.0.1:${port}/debug/pprof/goroutine?debug=2" \
+                > "${prefix}.txt" 2> "${prefix}-error.txt" || true
+            else
+              echo "Profiler port-forward did not become ready" > "${prefix}-error.txt"
+            fi
+          )
+          # Correlate kernel PID numbers with Kind's nested procfs PID numbers.
+          {
+            ps -e -o pid=,comm= | awk '$2 ~ /^containerd-shim/ { print $1 }' | head -64 | while read -r shim_pid; do
+              echo "Host shim: ${shim_pid}"
+              awk '/^(Name|Pid|PPid|NSpid):/' "/proc/${shim_pid}/status" || true
+            done
+            timeout --kill-after=1s 10s docker exec kind-control-plane ps -e -o pid,ppid,comm || true
+          } > diagnostics/shim-pid-namespaces.txt 2>&1
           collect get pods -A -o json > diagnostics/pods.json 2> diagnostics/pods-error.txt || true
           # Preserve agent/storage logs before querying optional aggregated APIs.
           jq -r '[.items[] | select(.metadata.namespace == "kubescape") |
@@ -227,6 +260,9 @@ jobs:
             [ -n "$pod" ] || continue
             collect logs -n "$namespace" "$pod" --all-containers=true --timestamps=true --limit-bytes=10485760 > "diagnostics/${namespace}-${pod}.log" 2>&1 || true
             collect logs -n "$namespace" "$pod" --all-containers=true --timestamps=true --limit-bytes=10485760 --previous > "diagnostics/${namespace}-${pod}-previous.log" 2>&1 || true
+            if [[ "$pod" == node-agent-* ]]; then
+              collect_goroutines "$namespace" "$pod"
+            fi
           done < diagnostics/core-pods.txt
           collect get --raw /api/v1/namespaces/kubescape/services/node-agent:prometheus/proxy/metrics > diagnostics/node-agent-metrics.txt 2>&1 || true
           collect get events -A --sort-by=.metadata.creationTimestamp > diagnostics/events.txt 2>&1 || true

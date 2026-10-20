@@ -679,14 +679,8 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
-		// Diagnose whether exec joins a different mount namespace from PID 1.
-		// Preserve the original argv and run each filesystem operation once.
-		wrappedCommand := append([]string{"/bin/sh", "-c",
-			`printf 'exec mount namespace: '; readlink /proc/self/ns/mnt || printf 'unavailable\n'; printf 'PID 1 mount namespace: '; readlink /proc/1/ns/mnt || printf 'unavailable\n'; exec "$@"`,
-			"filesystem-probe"}, command...)
-		stdout, stderr, err := endpointTraffic.ExecIntoPodNoTTYWithContext(ctx, wrappedCommand, "endpoint-traffic")
+		stdout, stderr, err := endpointTraffic.ExecIntoPodNoTTYWithContext(ctx, command, "endpoint-traffic")
 		require.NoError(t, err, "filesystem probe %q; stdout=%q stderr=%q", command, stdout, stderr)
-		t.Logf("filesystem probe %q; stdout=%q stderr=%q", command, stdout, stderr)
 	}
 
 	// Add to rule policy symlink.
