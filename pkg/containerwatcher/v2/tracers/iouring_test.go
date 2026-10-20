@@ -67,3 +67,21 @@ func TestIoUringFields(t *testing.T) {
 		}
 	}
 }
+
+func TestHasIouringSubmitReq(t *testing.T) {
+	for _, tc := range []struct {
+		major, minor uint
+		want         bool
+	}{
+		{5, 15, false},
+		{6, 3, false},
+		{6, 4, true},
+		{6, 17, true},
+		{7, 0, true}, // was false: the old check compared the minor alone
+		{7, 3, true},
+		{7, 4, true},
+		{8, 0, true},
+	} {
+		assert.Equal(t, tc.want, hasIouringSubmitReq(tc.major, tc.minor), "%d.%d", tc.major, tc.minor)
+	}
+}
