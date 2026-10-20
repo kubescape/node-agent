@@ -71,6 +71,8 @@ spec:
           resources:
 {{ toYaml .Values.nodeAgent.resources | indent 12 }}
           env:
+            - name: OTEL_METRICS_EXPORTER
+              value: "prometheus"
             - name: GOMEMLIMIT
               value: "600MiB"
             - name: HOST_ROOT
