@@ -672,22 +672,24 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	require.NoError(t, endpointTraffic.WaitForReady(80), "Error waiting for workload to be ready")
 
 	// Wait for application profile to be ready
-	assert.NoError(t, endpointTraffic.WaitForContainerProfile(80, "ready"))
-	time.Sleep(10 * time.Second)
+	require.NoError(t, endpointTraffic.WaitForContainerProfile(80, "ready"))
+	// The first profile save occurs late in the learning window. Trigger
+	// immediately and avoid allocating terminals for these filesystem probes.
+	probe := func(command ...string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		stdout, stderr, err := endpointTraffic.ExecIntoPodNoTTYWithContext(ctx, command, "endpoint-traffic")
+		require.NoError(t, err, "filesystem probe %q; stdout=%q stderr=%q", command, stdout, stderr)
+	}
 
-	// Add to rule policy symlink
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
-	assert.NoError(t, err)
+	// Add to rule policy symlink.
+	probe("ln", "-s", "/etc/shadow", "/tmp/a")
+	probe("rm", "/tmp/a")
 
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	assert.NoError(t, err)
-
-	// Not add to rule policy
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/bin/sh", "/tmp/a"}, "")
-	assert.NoError(t, err)
-
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	assert.NoError(t, err)
+	// This hardlink does not match a sensitive target and must not be learned.
+	probe("ln", "/bin/sh", "/tmp/a")
+	probe("rm", "/tmp/a")
 
 	require.NoError(t, endpointTraffic.WaitForContainerProfileCompletion(80),
 		"Error waiting for container profile to be completed")
@@ -706,15 +708,13 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	// wait for cache
 	time.Sleep(40 * time.Second)
 
-	// generate hardlink alert
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/etc/shadow", "/tmp/a"}, "")
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	assert.NoError(t, err)
+	// Generate the unlearned hardlink alert.
+	probe("ln", "/etc/shadow", "/tmp/a")
+	probe("rm", "/tmp/a")
 
-	// not generate alert
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	assert.NoError(t, err)
+	// The learned symlink policy must suppress this alert.
+	probe("ln", "-s", "/etc/shadow", "/tmp/a")
+	probe("rm", "/tmp/a")
 
 	// Wait for the alert to be signaled
 	time.Sleep(30 * time.Second)
