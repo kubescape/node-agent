@@ -1,5 +1,34 @@
 # Plain HTTP response continuation regression tests
 
+## Kernel verifier and live iovec capture
+
+On a disposable Linux host with root access, Docker, Python 3 and IG `v0.48.1`:
+
+```sh
+sudo python3 pkg/ebpf/gadgets/http/tests/verifier_capture.py \
+  --output-dir /var/tmp/http-verifier-regression
+```
+
+The runner builds current HTTP source under a unique local tag, loads and
+attaches it with registry pulling disabled, and requires an actual HTTP event
+before checking capture. It verifies byte-for-byte payloads and the 16 KiB
+event / 256 KiB syscall limits through real TCP `sendmsg`, `recvmsg`, `writev`
+and `readv` calls, including empty/split vectors and short receive buffers.
+It retains environment information, JSON events, generated ELF files and
+verbose load logs. Any load, capture or fixture failure exits nonzero; missing
+privileges are not treated as a pass. It traces only the runner's PID.
+
+To compare an already imported release artifact, add `--image IMAGE:TAG` and
+use a separate output directory. Run both versions on COS 121 build
+`18867.624.2`, kernel `6.6.157+`, and confirm the baseline ELF digest is
+`d278a0cf36ffcd8e95dad1b97da80422ba2e9c7d92342da4b9ff1857baa1151d`.
+The baseline must reject loading and the patched image must pass. A pass on
+another kernel does not establish COS compatibility. Repeat the patched run
+to check detach and reattachment. The runner does not deploy node-agent or
+establish backend/profile integration.
+
+## Native continuation tests
+
 Run `go test ./pkg/ebpf/gadgets/http/tests` from the repository root. A native C
 compiler (`cc`) is required; the test explicitly skips when it is unavailable.
 The harness compiles the production HTTP classifier and syscall entry/exit
@@ -42,3 +71,24 @@ The same per-CPU layout applies to `capture_loss`; its three reason keys are
 unchanged. Neither map changes the payload/event ABI, but readers of the old
 shared ARRAY layout must adapt to per-CPU values. The native capture harness
 checks the production map types and isolates increments on two simulated CPUs.
+
+## Local COS 121 VM evidence
+
+`local_cos121.py` extracts and verifies Google's published `18867.624.2`
+full update payload and boots its original kernel and root filesystem under
+KVM/QEMU. It requires Linux x86_64, KVM access, QEMU, `mkfs.ext4`, and the
+validation fixture disk/initramfs supplied with the evidence bundle. Run
+`python3 pkg/ebpf/gadgets/http/tests/local_cos121.py --help` for arguments.
+
+The guest uses a test initramfs and a writable overlay over the verified vendor
+root partition. It starts Docker manually with the vfs storage driver and runs
+Python/IG in a privileged container sharing the guest PID and network namespaces.
+This isolates the affected kernel from the workstation kernel. It does not
+reproduce GCE firmware, normal COS systemd startup, or a deployed host-agent.
+Keep the payload/partition hashes, guest kernel configuration and command line,
+boot log, OCI identities, baseline verifier rejection, both patched capture runs,
+and exit statuses together when reporting results.
+
+See [the COS 121 validation report](validation-cos121.md) for the measured
+baseline rejection, patched capture/reattachment results, artifact identities,
+boot differences, and replay command.

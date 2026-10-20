@@ -44,7 +44,7 @@ func harness(t *testing.T) string {
 func TestSyscallPayloadChunks(t *testing.T) {
 	bin := harness(t)
 	for _, mode := range []string{"w", "r", "wv", "rv"} {
-		for _, size := range []int{10240, 16384, 16385, 20992, 40960} {
+		for _, size := range []int{10240, 16383, 16384, 16385, 20992, 40960} {
 			for _, split := range []int{0, 8192} {
 				t.Run(fmt.Sprintf("%s/%d/split%d", mode, size, split), func(t *testing.T) {
 					payload := []byte("POST / HTTP/1.1\r\nContent-Length: 500000\r\n\r\n" + strings.Repeat("b", size))[:size]
