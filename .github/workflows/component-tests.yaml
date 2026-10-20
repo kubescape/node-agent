@@ -11,7 +11,7 @@ permissions: read-all
 
 jobs:
   build-and-push-image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -27,7 +27,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq curl
           IG_ARCH=amd64
-          IG_VERSION=$(curl -s https://api.github.com/repos/inspektor-gadget/inspektor-gadget/releases/latest | jq -r .tag_name)
+          IG_VERSION=v0.57.0
           echo "Installing IG version: ${IG_VERSION}"
           curl -sL https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-${IG_ARCH}-${IG_VERSION}.tar.gz | sudo tar -C /usr/local/bin -xzf - ig
           sudo chmod +x /usr/local/bin/ig
@@ -69,7 +69,7 @@ jobs:
       image_repo: ${{ steps.build-and-push-image.outputs.image_repo }}
 
   component-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-and-push-image
     timeout-minutes: 45
     strategy:
@@ -145,18 +145,19 @@ jobs:
         run: |
           curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
           chmod 700 get_helm.sh
-          sudo ./get_helm.sh
+          sudo ./get_helm.sh --version v3.22.1
 
       - name: Install Prometheus and Node Exporter
         run: |
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
-          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --set grafana.enabled=false --namespace monitoring --create-namespace --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false,prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false --set prometheus.prometheusSpec.maximumStartupDurationSeconds=300 --wait --timeout 5m
+          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --version 92.11.0 --set grafana.enabled=false --namespace monitoring --create-namespace --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false,prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false --set prometheus.prometheusSpec.maximumStartupDurationSeconds=300 --wait --timeout 5m
           # Check that the prometheus pod is running
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s
       - name: Install Node Agent Chart
+        env:
+          STORAGE_TAG: v0.0.354
         run: |
-          STORAGE_TAG=$(./tests/scripts/storage-tag.sh)
           echo "Storage tag that will be used: ${STORAGE_TAG}"
           helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${{ needs.build-and-push-image.outputs.image_tag }} --set nodeAgent.image.repository=${{ needs.build-and-push-image.outputs.image_repo }} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 10m --debug
           # Check that the node-agent pod is running
@@ -170,7 +171,7 @@ jobs:
           CGO_ENABLED: 0
         uses: actions/setup-go@7b8cf10d4e4a01d4992d18a89f4d7dc5a3e6d6f4 # v4
         with:
-          go-version: "1.27"
+          go-version: "1.27.2"
       - name: Download test dependencies
         working-directory: tests
         run: |
@@ -189,7 +190,11 @@ jobs:
           sudo sh -c "ulimit -l unlimited"
       - name: Run test
         run: |
-          cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
+          repetitions=1
+          if [ "${{ matrix.test }}" = "Test_01_BasicAlertTest" ]; then
+            repetitions=3
+          fi
+          cd tests && go test -v ./... -run '^${{ matrix.test }}$' -count="$repetitions" --timeout=20m --tags=component
       - name: Collect component test diagnostics
         if: always()
         timeout-minutes: 5
