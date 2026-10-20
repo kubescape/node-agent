@@ -198,12 +198,20 @@ func (cpm *ContainerProfileManager) ReportProcfsExec(containerID string, path st
 // ReportFileOpen reports a file open event for a container
 func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event utils.OpenEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+		path := event.GetPath()
+		if path == "" {
+			// No file identity can be learned. A successful open with a
+			// missing path is capture loss; a failed empty-name open is not.
+			if event.GetError() == 0 {
+				data.droppedEvents = true
+			}
+			return 0, nil
+		}
 		if data.opens == nil {
 			data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
 		}
 
 		// Deduplicate /proc/1234/* into /proc/.../*
-		path := event.GetPath()
 		if strings.HasPrefix(path, "/proc/") {
 			path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
 		}
