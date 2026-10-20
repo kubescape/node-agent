@@ -123,6 +123,8 @@ type ContainerProfileManager struct {
 	// pendingDropsOverflowAt is when a marker last had to be discarded because pendingDrops
 	// was full; guarded by containersMu.
 	pendingDropsOverflowAt time.Time
+	// dropReportHook is a test seam called between the steps of ReportDroppedEvent; nil in production.
+	dropReportHook func(step string)
 
 	// Notification channels for container end of life
 	maxSniffTimeNotificationChan []chan *containercollection.Container

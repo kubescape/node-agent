@@ -1,11 +1,17 @@
 package containerprofilemanager
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/hostidentity"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/seccompmanager"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -265,4 +271,50 @@ func TestReportDroppedEvent_NoOverflowLeavesRegistrationComplete(t *testing.T) {
 	entry := newPendingEntry()
 	require.True(t, cpm.addContainerEntryIfAbsent("clean", entry))
 	assert.False(t, dropped(entry), "below capacity, unrelated registrations are not marked")
+}
+
+// A registration that is inserted and then abandoned between ReportDroppedEvent's lookup and
+// its pending-marker check must not swallow the drop: the marker is retained and applied to the
+// next registration, whose profile is then saved as Partial.
+func TestReportDroppedEvent_EntryInsertedThenAbandonedBetweenLookups(t *testing.T) {
+	t.Setenv("QUEUE_DIR", t.TempDir())
+	cpm, err := NewContainerProfileManager(context.Background(), config.Config{}, nil, nil,
+		&storage.StorageHttpClientMock{}, nil, &seccompmanager.SeccompManagerMock{}, nil, nil, nil)
+	require.NoError(t, err)
+	t.Cleanup(cpm.Close)
+
+	newEntry := func() (*ContainerEntry, *objectcache.WatchedContainerData) {
+		watched := hostidentity.BuildHostWatchedContainerData("node-1")
+		watched.ContainerID = "c1"
+		watched.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusFull)
+		return &ContainerEntry{data: &containerData{watchedContainerData: watched}, ready: make(chan struct{})}, watched
+	}
+	entryA, _ := newEntry()
+
+	var steps []string
+	cpm.dropReportHook = func(step string) {
+		steps = append(steps, step)
+		switch len(steps) {
+		case 1: // initial lookup missed: registration inserts A before the marker check
+			require.True(t, cpm.addContainerEntryIfAbsent("c1", entryA))
+		case 2: // the marker check saw A and declined: A's registration fails before the retry lookup
+			cpm.abandonEntry("c1", entryA)
+		}
+	}
+
+	cpm.ReportDroppedEvent("c1")
+
+	require.Equal(t, []string{"lookup-miss", "record-declined", "lookup-miss"}, steps)
+	require.False(t, dropped(entryA), "the drop was never applied to the abandoned entry")
+	require.Contains(t, cpm.pendingDrops, "c1", "the drop is retained for the next registration")
+
+	// Registration is retried and creates entry B.
+	entryB, watchedB := newEntry()
+	require.True(t, cpm.addContainerEntryIfAbsent("c1", entryB))
+	assert.True(t, dropped(entryB))
+	assert.Empty(t, cpm.pendingDrops, "the marker is consumed exactly once")
+
+	container := hostContainerWithIdentity(newHostPseudoContainer(), watchedB, "kubescape")
+	require.NoError(t, cpm.saveProfile(watchedB, container, true))
+	assert.Equal(t, objectcache.WatchedContainerCompletionStatusPartial, watchedB.GetCompletionStatus())
 }
