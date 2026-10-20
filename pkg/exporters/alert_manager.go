@@ -79,6 +79,13 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 		logger.L().Warning("AlertManagerExporter.SendRuleAlert - failed to get process from process tree", helpers.String("trace", trace), helpers.Int("pid", int(failedRule.GetBaseRuntimeAlert().InfectedPID)))
 		return
 	}
+	var uid, gid uint32
+	if process.Uid != nil {
+		uid = *process.Uid
+	}
+	if process.Gid != nil {
+		gid = *process.Gid
+	}
 	sourceUrl := fmt.Sprintf("https://armosec.github.io/kubecop/alertviewer/?AlertMessage=%s&AlertRuleName=%s&AlertRuleID=%s&AlertFix=%s&AlertNamespace=%s&AlertPod=%s&AlertContainer=%s&AlertProcess=%s",
 		failedRule.GetRuleAlert().RuleDescription,
 		failedRule.GetBaseRuntimeAlert().AlertName,
@@ -118,8 +125,8 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 			"ppid":              fmt.Sprintf("%d", process.PPID),
 			"pcomm":             process.Pcomm,
 			"comm":              process.Comm,
-			"uid":               fmt.Sprintf("%d", process.Uid),
-			"gid":               fmt.Sprintf("%d", process.Gid),
+			"uid":               strconv.FormatUint(uint64(uid), 10),
+			"gid":               strconv.FormatUint(uint64(gid), 10),
 			"trace":             trace,
 			"fail_on_profile":   fmt.Sprintf("%t", failOnProfile),
 			"profile_status":    completedStatus,
