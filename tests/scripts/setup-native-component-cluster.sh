@@ -11,8 +11,8 @@ if [[ "${GITHUB_ACTIONS:-}" != true || "${RUNNER_ENVIRONMENT:-}" != github-hoste
 fi
 # shellcheck source=/dev/null
 source /etc/os-release
-if [[ "$ID" != ubuntu || "$VERSION_ID" != 24.04 || "$(uname -m)" != x86_64 ]]; then
-  echo "Native cluster setup requires Ubuntu 24.04 amd64." >&2
+if [[ "$ID" != ubuntu || "$VERSION_ID" != 22.04 || "$(uname -m)" != x86_64 ]]; then
+  echo "Native cluster setup requires Ubuntu 22.04 amd64." >&2
   exit 1
 fi
 : "${RUNNER_TEMP:?}" "${GITHUB_ENV:?}"

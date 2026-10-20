@@ -69,7 +69,9 @@ jobs:
       image_repo: ${{ steps.build-and-push-image.outputs.image_repo }}
 
   component-tests:
-    runs-on: ubuntu-24.04
+    # Ubuntu 24.04 kernel 7.0.0-1017-azure loses syscall BPF events on all but one CPU.
+    # Follow IG CI until https://github.com/actions/runner-images/issues/15003 is fixed.
+    runs-on: ubuntu-22.04
     needs: build-and-push-image
     timeout-minutes: 45
     strategy:

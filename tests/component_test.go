@@ -1388,11 +1388,13 @@ func Test_23_RuleCooldownTest(t *testing.T) {
 	alertCount := 0
 	err = wait.PollUntilContextCancel(ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
 		fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Second)
-		alerts, lastFetchErr = testutils.GetAlertsWithContext(fetchCtx, wl.Namespace)
+		fetchedAlerts, fetchErr := testutils.GetAlertsWithContext(fetchCtx, wl.Namespace)
 		cancelFetch()
+		lastFetchErr = fetchErr
 		if lastFetchErr != nil {
 			return false, nil
 		}
+		alerts = fetchedAlerts
 		alertCount = 0
 		for _, alert := range alerts {
 			if alert.Labels["rule_id"] == "R0001" && alert.Labels["comm"] == "ls" &&
@@ -3885,8 +3887,13 @@ func Test_25_RuleCooldownExactThreshold(t *testing.T) {
 	pollCtx, pollCancel := context.WithTimeout(ctx, 90*time.Second)
 	defer pollCancel()
 	err = wait.PollUntilContextCancel(pollCtx, 2*time.Second, true, func(ctx context.Context) (bool, error) {
-		observed, fetchErr = countID(ctx)
-		return fetchErr == nil && observed >= 10, nil
+		count, err := countID(ctx)
+		fetchErr = err
+		if fetchErr != nil {
+			return false, nil
+		}
+		observed = count
+		return observed >= 10, nil
 	})
 	require.NoError(t, err, "20 successful id probes must reach the cooldown threshold (observed=%d, last fetch error=%v)", observed, fetchErr)
 	require.Equal(t, 10, observed,
