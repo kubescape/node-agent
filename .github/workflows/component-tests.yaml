@@ -71,9 +71,9 @@ jobs:
   component-tests:
     runs-on: ubuntu-latest
     needs: build-and-push-image
-    continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
+      fail-fast: false
       matrix:
         test: [
           Test_01_BasicAlertTest,
@@ -190,11 +190,33 @@ jobs:
       - name: Run test
         run: |
           cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
-      - name: Print node agent & storage logs
+      - name: Collect component test diagnostics
         if: always()
+        timeout-minutes: 3
         run: |
-          echo "Node agent logs"
-          kubectl logs $(kubectl get pods -n kubescape -o name | grep node-agent) -n kubescape -c node-agent
-          echo "-----------------------------------------"
-          echo "Storage logs"
-          kubectl logs $(kubectl get pods -n kubescape -o name | grep storage) -n kubescape
+          mkdir -p diagnostics
+          kubectl --request-timeout=15s get pods -A -o yaml > diagnostics/pods.yaml 2>&1 || true
+          kubectl --request-timeout=15s get events -A --sort-by=.metadata.creationTimestamp > diagnostics/events.txt 2>&1 || true
+          for resource in \
+            containerprofiles.spdx.softwarecomposition.kubescape.io \
+            applicationprofiles.spdx.softwarecomposition.kubescape.io \
+            networkneighborhoods.spdx.softwarecomposition.kubescape.io \
+            rules.kubescape.io \
+            runtimerulealertbindings.kubescape.io; do
+            kubectl --request-timeout=15s get "$resource" -A -o yaml > "diagnostics/${resource}.yaml" 2>&1 || true
+          done
+          kubectl --request-timeout=15s get pods -n kubescape -o name > diagnostics/kubescape-pods.txt 2> diagnostics/kubescape-pods-error.txt || true
+          while read -r pod; do
+            [ -n "$pod" ] || continue
+            name="${pod#pod/}"
+            kubectl --request-timeout=15s logs -n kubescape "$pod" --all-containers=true --timestamps=true > "diagnostics/${name}.log" 2>&1 || true
+            kubectl --request-timeout=15s logs -n kubescape "$pod" --all-containers=true --timestamps=true --previous > "diagnostics/${name}-previous.log" 2>&1 || true
+          done < diagnostics/kubescape-pods.txt
+
+      - name: Upload component test diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: component-diagnostics-${{ matrix.test }}-${{ github.run_attempt }}
+          path: diagnostics/
+          retention-days: 7
