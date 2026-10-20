@@ -1428,34 +1428,40 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	err = endpointTraffic.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
-	// wait for cache
-	time.Sleep(30 * time.Second)
+	waitForProfileMonitoring(t, endpointTraffic, "process-tree")
 
-	// Add to rule policy symlink
-	buf, _, err := endpointTraffic.ExecIntoPod([]string{"/bin/sh", "-c", "python3 /root/python_spawner.py 10"}, "")
-	require.NoError(t, err)
-
+	// Execute the tree once; polling below only waits for alert delivery.
+	execCtx, cancelExec := context.WithTimeout(t.Context(), 30*time.Second)
+	buf, stderr, err := endpointTraffic.ExecIntoPodNoTTYWithContext(execCtx, []string{"/bin/sh", "-c", "python3 /root/python_spawner.py 10"}, "process-tree")
+	cancelExec()
+	require.NoError(t, err, "process tree execution: stdout=%q stderr=%q", buf, stderr)
 	t.Logf("Output: %s", buf)
 
-	t.Logf("Waiting for the alert to be signaled")
-
-	// Wait for the alert to be signaled
-	time.Sleep(2 * time.Minute)
-
-	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
-	require.NoError(t, err, "Error getting alerts")
-
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	var alerts []testutils.Alert
+	var lastFetchErr error
 	found := false
-
-	for _, alert := range alerts {
-		if alert.Labels["rule_name"] == "Unexpected process launched" {
-			if alert.Labels["processtree_depth"] == "10" {
+	err = wait.PollUntilContextCancel(ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Second)
+		alerts, lastFetchErr = testutils.GetAlertsWithContext(fetchCtx, endpointTraffic.Namespace)
+		cancelFetch()
+		if lastFetchErr != nil {
+			return false, nil
+		}
+		for _, alert := range alerts {
+			if alert.Labels["rule_name"] == "Unexpected process launched" &&
+				alert.Labels["comm"] == "python3" &&
+				alert.Labels["container_name"] == "process-tree" &&
+				alert.Labels["processtree_depth"] == "10" {
 				found = true
-				break
+				return true, nil
 			}
 		}
-	}
+		return false, nil
+	})
 
+	assert.NoError(t, err, "waiting for process tree alert (last fetch error: %v)", lastFetchErr)
 	assert.Truef(t, found, "Expected to find an alert for the process tree depth")
 
 	t.Logf("Found alerts for the process tree depth: %v", alerts)
@@ -1565,10 +1571,10 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	// up to 60s to avoid race conditions with alert propagation.
 	triggerAndGetAlerts := func(t *testing.T, wl *testutils.TestWorkload, filePath string) []testutils.Alert {
 		t.Helper()
-		stdout, stderr, err := wl.ExecIntoPod([]string{"cat", filePath}, "nginx")
-		if err != nil {
-			t.Errorf("exec 'cat %s' in container nginx failed: %v (stdout=%q stderr=%q)", filePath, err, stdout, stderr)
-		}
+		probeCtx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		stdout, stderr, err := wl.ExecIntoPodNoTTYWithContext(probeCtx, []string{"cat", filePath}, "nginx")
+		cancel()
+		require.NoError(t, err, "cat %s in nginx must run (stdout=%q stderr=%q)", filePath, stdout, stderr)
 		// Poll for alerts — they may take time to propagate through
 		// eBPF → node-agent → alertmanager.
 		var alerts []testutils.Alert
@@ -1683,7 +1689,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		}, 8*time.Minute, 5*time.Second, "rendered redis statefulset pod must become Ready")
 		var bprofiles []v1beta1.ContainerProfile
 		require.Eventually(t, func() bool {
-			cps, lerr := storageClient.ContainerProfiles(bns.Name).List(context.TODO(), metav1.ListOptions{})
+			cps, lerr := storageClient.ContainerProfiles(bns.Name).List(context.TODO(), metav1.ListOptions{ResourceVersion: "fullSpec"})
 			if lerr != nil || len(cps.Items) == 0 {
 				return false
 			}
@@ -1699,17 +1705,23 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			checkOpens(bprofiles[i].Namespace+"/"+bprofiles[i].Name, bprofiles[i].Labels["kubescape.io/workload-container-name"], bprofiles[i].Spec.Opens)
 		}
 
-		// Deterministic gadget positive control, race-free: the profile is
-		// completed (frozen), so a procfs read now must surface as an R0002
-		// alert carrying the exactly-rooted path. A silent gadget produces no
-		// alert; a scrambling gadget produces "/1/cmdline".
+		// R0002 does not monitor /proc/1/cmdline. Use the unlearned cat exec
+		// as the positive control while retaining the procfs read and the
+		// learned absolute-path checks above.
+		for _, profile := range bprofiles {
+			for _, recordedExec := range profile.Spec.Execs {
+				require.NotEqual(t, "cat", path.Base(recordedExec.Path), "Redis positive-control cat must not be in the learned exec baseline")
+			}
+		}
 		pods, perr := dyn.KubernetesClient.CoreV1().Pods(bns.Name).List(context.Background(),
 			metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=redis"})
 		require.NoError(t, perr)
 		require.NotEmpty(t, pods.Items)
 		// completed profile needs a reconciler tick to reach the enforcement cache
 		time.Sleep(45 * time.Second)
-		stdout, stderr, eerr := testutils.ExecIntoPod(pods.Items[0].Name, bns.Name, []string{"cat", "/proc/1/cmdline"}, "redis")
+		probeCtx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		stdout, stderr, eerr := testutils.ExecIntoPodNoTTYWithContext(probeCtx, pods.Items[0].Name, bns.Name, []string{"cat", "/proc/1/cmdline"}, "redis")
+		cancel()
 		require.NoError(t, eerr, "probe exec must run (stdout=%q stderr=%q)", stdout, stderr)
 		require.Eventually(t, func() bool {
 			alerts, aerr := testutils.GetAlerts(bns.Name)
@@ -1717,18 +1729,18 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 				return false
 			}
 			for _, a := range alerts {
-				if a.Labels["comm"] == "cat" && (a.Labels["rule_id"] == "R0001" || a.Labels["rule_id"] == "R0002") {
+				if a.Labels["comm"] == "cat" && a.Labels["container_name"] == "redis" && a.Labels["rule_id"] == "R0001" && a.Labels["fail_on_profile"] == "true" {
 					return true
 				}
 			}
 			return false
-		}, 3*time.Minute, 5*time.Second, "the probe exec/open must alert - gadget positive control (silent pipeline)")
+		}, 3*time.Minute, 5*time.Second, "the unlearned Redis cat exec must produce R0001 - gadget positive control")
 
 		// Distro-wide scan: the scrambled paths originally surfaced in real distro
 		// workloads (redis/valkey mounted-etc, health-check scripts, service-account
 		// tokens), so scan EVERY learned ContainerProfile across all namespaces, not
 		// only this test's workload. Best-effort: a failed cluster-wide list is not fatal.
-		if allCPs, listErr := storageClient.ContainerProfiles(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{}); listErr != nil {
+		if allCPs, listErr := storageClient.ContainerProfiles(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{ResourceVersion: "fullSpec"}); listErr != nil {
 			t.Logf("distro-wide scrambled-path scan skipped (cluster-wide list failed): %v", listErr)
 		} else {
 			for i := range allCPs.Items {
@@ -1919,10 +1931,10 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			"/etc/ssl/openssl.cnf", // exact match
 		}
 		for _, f := range allowedFiles {
-			stdout, stderr, err := wl.ExecIntoPod([]string{"cat", f}, "curl")
-			if err != nil {
-				t.Logf("exec 'cat %s' failed: %v (stdout=%q stderr=%q)", f, err, stdout, stderr)
-			}
+			probeCtx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			stdout, stderr, err := wl.ExecIntoPodNoTTYWithContext(probeCtx, []string{"cat", f}, "curl")
+			cancel()
+			require.NoError(t, err, "cat %s in curl must run (stdout=%q stderr=%q)", f, stdout, stderr)
 		}
 
 		// Poll for alerts to propagate.

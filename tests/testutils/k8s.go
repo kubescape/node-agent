@@ -147,7 +147,12 @@ func NewTestWorkloadFromK8sIdentifiers(namespace, kind, name string) (*TestWorkl
 //
 // Use this when a test needs a process with genuinely no controlling terminal.
 func ExecIntoPodNoTTY(podName, podNamespace string, command []string, container string) (string, string, error) {
-	return execIntoPod(podName, podNamespace, command, container, false)
+	return ExecIntoPodNoTTYWithContext(context.Background(), podName, podNamespace, command, container)
+}
+
+// ExecIntoPodNoTTYWithContext bounds the non-interactive exec stream by ctx.
+func ExecIntoPodNoTTYWithContext(ctx context.Context, podName, podNamespace string, command []string, container string) (string, string, error) {
+	return execIntoPodWithContext(ctx, podName, podNamespace, command, container, false)
 }
 
 func ExecIntoPod(podName, podNamespace string, command []string, container string) (string, string, error) {
