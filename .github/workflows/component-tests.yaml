@@ -135,6 +135,21 @@ jobs:
           chmod +x ./kubectl
           sudo mv ./kubectl /usr/local/bin/kubectl
 
+      - name: Capture Kind runtime diagnostics
+        timeout-minutes: 2
+        run: |
+          mkdir -p diagnostics
+          {
+            timeout --kill-after=1s 10s ./kind version || true
+            timeout --kill-after=1s 10s docker version || true
+            timeout --kill-after=1s 10s docker inspect kind-control-plane \
+              --format 'node image={{.Config.Image}} image ID={{.Image}} container ID={{.Id}}' || true
+            for runtime_command in 'uname -a' 'containerd --version' 'runc --version'; do
+              echo "Kind node: ${runtime_command}"
+              timeout --kill-after=1s 10s docker exec kind-control-plane sh -c "${runtime_command}" || true
+            done
+          } 2>&1 | tee diagnostics/kind-runtime.txt
+
       - name: Load fork PR image into Kind
         if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         run: |

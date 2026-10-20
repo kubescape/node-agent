@@ -15,7 +15,9 @@ import (
 
 // waitForProfileMonitoring proves the container and its profile are active before
 // an assertion can interpret silence or count alerts. Callers exclude uname
-// from their exec baseline and count only the command under test.
+// from their exec arguments and count only the command under test. BusyBox
+// applets may share an allowed executable, so either an unexpected executable
+// or unexpected arguments must demonstrate live profile enforcement.
 func waitForProfileMonitoring(t *testing.T, wl *testutils.TestWorkload, container string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -33,7 +35,7 @@ func waitForProfileMonitoring(t *testing.T, wl *testutils.TestWorkload, containe
 			return false, nil
 		}
 		for _, alert := range alerts {
-			if alert.Labels["rule_id"] == "R0001" &&
+			if (alert.Labels["rule_id"] == "R0001" || alert.Labels["rule_id"] == "R0040") &&
 				alert.Labels["comm"] == "uname" &&
 				alert.Labels["container_name"] == container &&
 				alert.Labels["fail_on_profile"] == "true" {
@@ -43,6 +45,6 @@ func waitForProfileMonitoring(t *testing.T, wl *testutils.TestWorkload, containe
 		return false, nil
 	})
 	require.NoError(t, err,
-		"monitoring control must produce a profile-backed R0001 uname alert for %s/%s before profile assertions (last alert fetch error: %v)",
+		"monitoring control must produce a profile-backed exec or argument uname alert (R0001/R0040) for %s/%s before profile assertions (last alert fetch error: %v)",
 		wl.Namespace, container, lastFetchErr)
 }
