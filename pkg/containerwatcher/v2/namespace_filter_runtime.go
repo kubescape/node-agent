@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -38,27 +37,6 @@ func (cw *ContainerWatcher) runningContainersForNamespace(ctx context.Context, p
 	if err != nil {
 		return nil, err
 	}
-	if previous == nil {
-		// Retain completed-session IDs while Kubernetes still references them.
-		// Do not discard a hook addition whose pod status has not caught up yet.
-		present := make(map[string]struct{})
-		for i := range pods.Items {
-			status := &pods.Items[i].Status
-			for _, statuses := range [][]corev1.ContainerStatus{status.InitContainerStatuses, status.ContainerStatuses, status.EphemeralContainerStatuses} {
-				for _, container := range statuses {
-					_, id, _ := strings.Cut(container.ContainerID, "://")
-					present[id] = struct{}{}
-				}
-			}
-		}
-		cw.observedContainers.Range(func(key, _ any) bool {
-			id := key.(string)
-			if _, exists := present[id]; !exists && cw.containerCollection.GetContainer(id) == nil {
-				cw.observedContainers.Delete(id)
-			}
-			return true
-		})
-	}
 	var client runtimeclient.ContainerRuntimeClient
 	var containers []containercollection.Container
 	var discoveryErrors []error
@@ -67,38 +45,7 @@ func (cw *ContainerWatcher) runningContainersForNamespace(ctx context.Context, p
 			return containers, ctx.Err()
 		}
 		pod := &pods.Items[i]
-		if (previous != nil && !previous.SkipNamespace(pod.Namespace)) || cw.cfg.IgnoreContainer(pod.Namespace, pod.Name, pod.Labels) {
-			continue
-		}
-		// Filter before CRI access: ordinary polls must not inspect every running
-		// container or replay sessions intentionally stopped after learning.
-		pod = pod.DeepCopy()
-		missing := func(statuses []corev1.ContainerStatus) []corev1.ContainerStatus {
-			out := statuses[:0]
-			for _, status := range statuses {
-				if status.ContainerID == "" || status.State.Running == nil {
-					continue
-				}
-				id := status.ContainerID
-				if _, value, ok := strings.Cut(id, "://"); ok {
-					id = value
-				}
-				if cw.containerCollection.GetContainer(id) != nil {
-					continue
-				}
-				if previous == nil {
-					if _, observed := cw.observedContainers.Load(id); observed {
-						continue
-					}
-				}
-				out = append(out, status)
-			}
-			return out
-		}
-		pod.Status.InitContainerStatuses = missing(pod.Status.InitContainerStatuses)
-		pod.Status.ContainerStatuses = missing(pod.Status.ContainerStatuses)
-		pod.Status.EphemeralContainerStatuses = missing(pod.Status.EphemeralContainerStatuses)
-		if len(pod.Status.InitContainerStatuses)+len(pod.Status.ContainerStatuses)+len(pod.Status.EphemeralContainerStatuses) == 0 {
+		if !previous.SkipNamespace(pod.Namespace) || cw.cfg.IgnoreContainer(pod.Namespace, pod.Name, pod.Labels) {
 			continue
 		}
 		if client == nil {

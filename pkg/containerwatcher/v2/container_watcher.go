@@ -45,16 +45,14 @@ import (
 type ContainerWatcher struct {
 	running bool
 	// Configuration
-	cfg                   config.Config
-	containerSelector     containercollection.ContainerSelector
-	ctx                   context.Context
-	cancel                context.CancelFunc
-	namespaceFilterDone   chan struct{}
-	containerRecoveryDone chan struct{}
-	observedContainers    sync.Map // runtime IDs already discovered, including intentionally unregistered containers
-	lateAdmissions        sync.Map // keyed by container pointer to distinguish readmissions
-	clusterName           string
-	agentStartTime        time.Time
+	cfg                 config.Config
+	containerSelector   containercollection.ContainerSelector
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	namespaceFilterDone chan struct{}
+	lateAdmissions      sync.Map // keyed by container pointer to distinguish readmissions
+	clusterName         string
+	agentStartTime      time.Time
 
 	// Clients
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
@@ -384,15 +382,6 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 			cw.watchNamespaceFilter(cw.ctx, ticker.C)
 		}()
 	}
-	if cw.cfg.KubernetesMode {
-		cw.containerRecoveryDone = make(chan struct{})
-		go func() {
-			defer close(cw.containerRecoveryDone)
-			ticker := time.NewTicker(namespaceFilterPollInterval)
-			defer ticker.Stop()
-			cw.watchContainerRecovery(cw.ctx, ticker.C)
-		}()
-	}
 	logger.L().Info("ContainerWatcher started successfully")
 	return nil
 }
@@ -420,10 +409,6 @@ func (cw *ContainerWatcher) Stop() {
 	// Finish reload/reconciliation before closing the container collection.
 	if cw.namespaceFilterDone != nil {
 		<-cw.namespaceFilterDone
-	}
-
-	if cw.containerRecoveryDone != nil {
-		<-cw.containerRecoveryDone
 	}
 
 	// Stop container manager
