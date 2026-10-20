@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -47,10 +48,14 @@ func installBasicAlertDNSFixture(t *testing.T, namespace string) {
 	httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
 	defer transport.CloseIdleConnections()
 
+	network := os.Getenv("COMPONENT_DOCKER_NETWORK")
+	if network == "" {
+		network = "kind"
+	}
 	var hosts string
 	seenIPs := make(map[string]bool)
 	for _, name := range []string{"nginx", "server"} {
-		id, err := runDocker(ctx, "create", "--network", "kind", "--label", "component-test="+namespace, "nginx:1.25.5")
+		id, err := runDocker(ctx, "create", "--network", network, "--label", "component-test="+namespace, "nginx:1.25.5")
 		require.NoError(t, err, "create %s DNS fixture endpoint", name)
 		require.Regexp(t, `^[a-f0-9]{64}$`, id, "Docker must return an exact container ID")
 		t.Cleanup(func() {
@@ -67,7 +72,7 @@ func installBasicAlertDNSFixture(t *testing.T, namespace string) {
 		})
 		_, err = runDocker(ctx, "start", id)
 		require.NoError(t, err, "start %s DNS fixture endpoint", name)
-		ip, err := runDocker(ctx, "inspect", "--format", `{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}`, id)
+		ip, err := runDocker(ctx, "inspect", "--format", fmt.Sprintf(`{{with index .NetworkSettings.Networks %q}}{{.IPAddress}}{{end}}`, network), id)
 		require.NoError(t, err, "inspect %s DNS fixture endpoint", name)
 		require.NotNil(t, net.ParseIP(ip).To4(), "fixture requires a routable IPv4 address: %q", ip)
 		require.False(t, seenIPs[ip], "DNS fixture endpoints must have distinct IPs")

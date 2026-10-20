@@ -121,40 +121,27 @@ jobs:
         with:
           name: node-agent-image
 
-      - name: Load fork PR image
-        if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-        run: |
-          docker load -i node-agent-image.tar
+      - name: Set up native Kubernetes node
+        timeout-minutes: 22
+        run: ./tests/scripts/setup-native-component-cluster.sh
 
-      - name: Set up Kind
-        run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
-          chmod +x ./kind
-          ./kind create cluster
-          curl -LO "https://dl.k8s.io/release/v1.35.0/bin/linux/amd64/kubectl"
-          chmod +x ./kubectl
-          sudo mv ./kubectl /usr/local/bin/kubectl
-
-      - name: Capture Kind runtime diagnostics
+      - name: Capture native runtime diagnostics
         timeout-minutes: 2
         run: |
           mkdir -p diagnostics
           {
-            timeout --kill-after=1s 10s ./kind version || true
+            timeout --kill-after=1s 10s minikube version || true
             timeout --kill-after=1s 10s docker version || true
-            timeout --kill-after=1s 10s docker inspect kind-control-plane \
-              --format 'node image={{.Config.Image}} image ID={{.Image}} container ID={{.Id}} PID mode={{.HostConfig.PidMode}}' || true
-            for runtime_command in 'uname -a' 'containerd --version' 'runc --version'; do
-              echo "Kind node: ${runtime_command}"
-              timeout --kill-after=1s 10s docker exec kind-control-plane sh -c "${runtime_command}" || true
-            done
-          } 2>&1 | tee diagnostics/kind-runtime.txt
+            timeout --kill-after=1s 10s containerd --version || true
+            timeout --kill-after=1s 10s runc --version || true
+            uname -a
+            readlink /proc/1/ns/pid
+          } 2>&1 | tee diagnostics/cluster-runtime.txt
 
-      - name: Load fork PR image into Kind
+      - name: Load fork PR image into native runtime
         if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-        run: |
-          ./kind load docker-image \
-            ${{ needs.build-and-push-image.outputs.image_repo }}:${{ needs.build-and-push-image.outputs.image_tag }}
+        timeout-minutes: 3
+        run: sudo minikube image load "${PWD}/node-agent-image.tar"
 
       - name: Install Helm and Kubectl
         run: |
@@ -243,13 +230,13 @@ jobs:
               echo "Profiler port-forward did not become ready" > "${prefix}-error.txt"
             fi
           )
-          # Correlate kernel PID numbers with Kind's nested procfs PID numbers.
+          # Retain runtime PID identity to diagnose process-tree attribution.
           {
             ps -e -o pid=,comm= | awk '$2 ~ /^containerd-shim/ { print $1 }' | head -64 | while read -r shim_pid; do
               echo "Host shim: ${shim_pid}"
               awk '/^(Name|Pid|PPid|NSpid):/' "/proc/${shim_pid}/status" || true
             done
-            timeout --kill-after=1s 10s docker exec kind-control-plane ps -e -o pid,ppid,comm || true
+            readlink /proc/1/ns/pid || true
           } > diagnostics/shim-pid-namespaces.txt 2>&1
           collect get pods -A -o json > diagnostics/pods.json 2> diagnostics/pods-error.txt || true
           # Preserve agent/storage logs before querying optional aggregated APIs.
