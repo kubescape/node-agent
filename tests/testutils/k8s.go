@@ -97,13 +97,17 @@ func (w *TestWorkload) ExecIntoPod(command []string, container string) (string, 
 
 // ExecIntoPodNoTTY execs without a controlling terminal. See ExecIntoPodNoTTY.
 func (w *TestWorkload) ExecIntoPodNoTTY(command []string, container string) (string, string, error) {
-	pods, err := w.GetPods()
+	return w.ExecIntoPodNoTTYWithContext(context.Background(), command, container)
+}
+
+func (w *TestWorkload) ExecIntoPodNoTTYWithContext(ctx context.Context, command []string, container string) (string, string, error) {
+	pods, err := w.GetPodsWithContext(ctx)
 	if err != nil {
 		return "", "", err
 	}
 	pod := pods[0]
 
-	return ExecIntoPodNoTTY(pod.Name, w.Namespace, command, container)
+	return execIntoPodWithContext(ctx, pod.Name, w.Namespace, command, container, false)
 }
 func NewTestWorkloadFromK8sIdentifiers(namespace, kind, name string) (*TestWorkload, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
@@ -151,6 +155,10 @@ func ExecIntoPod(podName, podNamespace string, command []string, container strin
 }
 
 func execIntoPod(podName, podNamespace string, command []string, container string, tty bool) (string, string, error) {
+	return execIntoPodWithContext(context.Background(), podName, podNamespace, command, container, tty)
+}
+
+func execIntoPodWithContext(ctx context.Context, podName, podNamespace string, command []string, container string, tty bool) (string, string, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 
 	buf := &bytes.Buffer{}
@@ -179,7 +187,7 @@ func execIntoPod(podName, podNamespace string, command []string, container strin
 	if err != nil {
 		return "", "", err
 	}
-	err = exec.StreamWithContext(context.TODO(), remotecommand.StreamOptions{
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdout: buf,
 		Stderr: errBuf,
 	})
@@ -191,6 +199,10 @@ func execIntoPod(podName, podNamespace string, command []string, container strin
 }
 
 func (w *TestWorkload) GetPods() ([]v1.Pod, error) {
+	return w.GetPodsWithContext(context.Background())
+}
+
+func (w *TestWorkload) GetPodsWithContext(ctx context.Context) ([]v1.Pod, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 
 	appLabel, _ := w.WorkloadObj.GetLabel("app")
@@ -201,7 +213,7 @@ func (w *TestWorkload) GetPods() ([]v1.Pod, error) {
 		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
 	}
 
-	pods, err := k8sClient.KubernetesClient.CoreV1().Pods(namespace).List(context.TODO(), listOptions)
+	pods, err := k8sClient.KubernetesClient.CoreV1().Pods(namespace).List(ctx, listOptions)
 	if err != nil {
 		return nil, err
 	}

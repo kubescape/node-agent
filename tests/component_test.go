@@ -1505,8 +1505,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		require.NoError(t, err, "create workload in ns %s", ns.Name)
 		require.NoError(t, wl.WaitForReady(80), "workload not ready in ns %s", ns.Name)
 
-		// Wait for node-agent to load the user-defined profile into cache.
-		time.Sleep(10 * time.Second)
+		waitForOpensMonitoring(t, wl, "nginx")
 		return wl
 	}
 
@@ -1558,6 +1557,12 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 
 		profiles, err := wl.GetContainerProfiles()
 		require.NoError(t, err, "get container profiles")
+		for _, profile := range profiles {
+			for _, recordedExec := range profile.Spec.Execs {
+				require.NotEqual(t, "uname", path.Base(recordedExec.Path), "monitoring control must not be in the learned exec baseline")
+			}
+		}
+		waitForOpensMonitoring(t, wl, "nginx")
 
 		passed := true
 		// A fully resolved open path never begins with a numeric first segment;
@@ -1853,8 +1858,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		require.NoError(t, err, "create curl workload in ns %s", ns.Name)
 		require.NoError(t, wl.WaitForReady(80), "curl workload not ready in ns %s", ns.Name)
 
-		// Wait for node-agent to load the user-defined profile into cache.
-		time.Sleep(10 * time.Second)
+		waitForOpensMonitoring(t, wl, "curl")
 
 		// Cat files that are covered by the wildcard opens.
 		allowedFiles := []string{
@@ -1989,8 +1993,7 @@ func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 		// pushing the total test runtime into a different regime.
 		require.NoError(t, wl.WaitForReady(180), "workload not ready in ns %s", ns.Name)
 
-		// Wait for node-agent to load the user-defined profile into cache.
-		time.Sleep(10 * time.Second)
+		waitForOpensMonitoring(t, wl, "nginx")
 		return wl
 	}
 
