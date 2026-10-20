@@ -184,7 +184,7 @@ func execIntoPod(podName, podNamespace string, command []string, container strin
 		Stderr: errBuf,
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("%w Failed executing command %s on %v/%v", err, command, podNamespace, podName)
+		return buf.String(), errBuf.String(), fmt.Errorf("%w Failed executing command %s on %v/%v", err, command, podNamespace, podName)
 	}
 
 	return buf.String(), errBuf.String(), nil

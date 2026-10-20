@@ -60,20 +60,24 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	ns := testutils.NewRandomNamespace()
+	installBasicAlertDNSFixture(t, ns.Name)
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
 	require.NoError(t, err, "Error creating workload")
 	require.NoError(t, wl.WaitForReady(80))
 
 	time.Sleep(10 * time.Second)
 
-	// process launched from nginx container
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
+	execProbe := func(container string, command ...string) {
+		t.Helper()
+		stdout, stderr, err := wl.ExecIntoPod(command, container)
+		require.NoError(t, err, "probe in %s: %v; stdout=%q stderr=%q", container, command, stdout, stderr)
+	}
 
-	// network activity from server container
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
-
-	// network activity from nginx container
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
+	// Learn different DNS destinations for each container. The fixture names
+	// deliberately avoid .svc.cluster.local, which R0005 excludes.
+	execProbe("nginx", "ls", "-l")
+	execProbe("server", "wget", "-O", "/dev/null", "-T", "10", "-t", "1", "http://server.component.test.")
+	execProbe("nginx", "curl", "--fail", "--noproxy", "*", "--max-time", "10", "http://nginx.component.test.")
 
 	err = wl.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
@@ -82,15 +86,17 @@ func Test_01_BasicAlertTest(t *testing.T) {
 
 	time.Sleep(30 * time.Second)
 
-	profiles, _ := wl.GetContainerProfiles()
-	profilesJson, _ := json.Marshal(profiles)
+	profiles, err := wl.GetContainerProfiles()
+	require.NoError(t, err, "get learned container profiles")
+	profilesJson, err := json.Marshal(profiles)
+	require.NoError(t, err, "marshal learned container profiles")
 
 	t.Logf("container profiles: %v", string(profilesJson))
 
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")                               // no alert expected
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server")                              // alert expected
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // no alert expected
-	_, _, err = wl.ExecIntoPod([]string{"curl", "ebpf.io", "-m", "2"}, "nginx")             // alert expected
+	execProbe("nginx", "ls", "-l")                                                                              // no alert expected
+	execProbe("server", "ls", "-l")                                                                             // alert expected
+	execProbe("server", "wget", "-O", "/dev/null", "-T", "10", "-t", "1", "http://server.component.test.")      // no alert expected
+	execProbe("nginx", "curl", "--fail", "--noproxy", "*", "--max-time", "10", "http://server.component.test.") // alert expected
 
 	// Wait for the alert to be signaled
 	time.Sleep(30 * time.Second)
@@ -113,11 +119,11 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	serverCP, err := wl.GetContainerProfile("server")
 	require.NoError(t, err, "Error getting server container profile")
 
-	testutils.AssertContainerProfileContains(t, nginxCP, []string{"kubernetes.io."}, []string{})
-	testutils.AssertContainerProfileNotContains(t, serverCP, []string{"kubernetes.io."}, []string{})
+	testutils.AssertContainerProfileContains(t, nginxCP, []string{"nginx.component.test."}, []string{})
+	testutils.AssertContainerProfileNotContains(t, serverCP, []string{"nginx.component.test."}, []string{})
 
-	testutils.AssertContainerProfileContains(t, serverCP, []string{"ebpf.io."}, []string{})
-	testutils.AssertContainerProfileNotContains(t, nginxCP, []string{"ebpf.io."}, []string{})
+	testutils.AssertContainerProfileContains(t, serverCP, []string{"server.component.test."}, []string{})
+	testutils.AssertContainerProfileNotContains(t, nginxCP, []string{"server.component.test."}, []string{})
 }
 
 // enableR0002ForTest applies an override Rules CRD that enables R0002 ("Files
@@ -154,8 +160,9 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	err = wl.WaitForReady(80)
 	require.NoError(t, err, "Error waiting for workload to be ready")
 
-	// Wait for the application profile to be created and completed
-	err = wl.WaitForContainerProfileCompletion(150)
+	// Leave time for readiness, alert collection, and diagnostics within the
+	// 20-minute test deadline; 150 retries alone would take 25 minutes.
+	err = wl.WaitForContainerProfileCompletion(50)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	// Wait for the alerts to be generated
