@@ -3857,10 +3857,10 @@ func Test_25_RuleCooldownExactThreshold(t *testing.T) {
 	// Use a different command/cooldown key to prove monitoring is active
 	// before issuing the fixed set of counted id probes.
 	waitForProfileMonitoring(t, wl, "app")
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
-	defer cancel()
 	execID := func() {
 		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		defer cancel()
 		stdout, stderr, err := wl.ExecIntoPodNoTTYWithContext(ctx, []string{"/usr/bin/id"}, "app")
 		require.NoError(t, err, "counted id probe; stdout=%q stderr=%q", stdout, stderr)
 	}
@@ -3884,7 +3884,7 @@ func Test_25_RuleCooldownExactThreshold(t *testing.T) {
 	}
 	var observed int
 	var fetchErr error
-	pollCtx, pollCancel := context.WithTimeout(ctx, 90*time.Second)
+	pollCtx, pollCancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer pollCancel()
 	err = wait.PollUntilContextCancel(pollCtx, 2*time.Second, true, func(ctx context.Context) (bool, error) {
 		count, err := countID(ctx)
@@ -3904,7 +3904,9 @@ func Test_25_RuleCooldownExactThreshold(t *testing.T) {
 		time.Sleep(1 * time.Second)
 	}
 	time.Sleep(30 * time.Second)
-	observed, err = countID(ctx)
+	finalCtx, finalCancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer finalCancel()
+	observed, err = countID(finalCtx)
 	require.NoError(t, err, "fetch alerts after suppression probes")
 	require.Equal(t, 10, observed,
 		"once cooled down, further identical execs add no alerts (suppression holds for ruleCooldownDuration)")
