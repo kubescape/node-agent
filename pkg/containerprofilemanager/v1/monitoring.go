@@ -118,8 +118,11 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			switch {
 			case errors.Is(err, ContainerHasTerminatedError):
 				// Recover any syscalls not yet surfaced by the tracer's periodic poll before
-				// we snapshot and discard this container's data (see flushAndSettle).
-				cpm.flushAndSettle()
+				// we snapshot and discard this container's data (see flushSyscalls).
+				if err := cpm.flushSyscalls(); err != nil {
+					cpm.ReportDroppedEvent(watchedContainer.ContainerID)
+					logger.L().Warning("final syscall flush failed; profile is partial", helpers.Error(err), helpers.String("containerID", watchedContainer.ContainerID))
+				}
 				if pendingErr := handlePendingQueueError(); pendingErr != nil {
 					return pendingErr
 				}
@@ -144,7 +147,10 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			case errors.Is(err, ContainerReachedMaxTime):
 				watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 				// See the ContainerHasTerminatedError case above.
-				cpm.flushAndSettle()
+				if err := cpm.flushSyscalls(); err != nil {
+					cpm.ReportDroppedEvent(watchedContainer.ContainerID)
+					logger.L().Warning("final syscall flush failed; profile is partial", helpers.Error(err), helpers.String("containerID", watchedContainer.ContainerID))
+				}
 				if pendingErr := handlePendingQueueError(); pendingErr != nil {
 					return pendingErr
 				}

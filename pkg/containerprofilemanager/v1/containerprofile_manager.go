@@ -128,10 +128,10 @@ type ContainerProfileManager struct {
 	// save to request an immediate out-of-band fetch of its not-yet-polled syscalls. See
 	// SetSyscallFlusher and kubescape/node-agent#922. Stored via atomic.Pointer: it's written
 	// once during startup wiring (TracerFactory.CreateAllTracers, after StartContainerCollection
-	// has already begun enumerating containers), and flushAndSettle reads it from whatever
+	// has already begun enumerating containers), and flushSyscalls reads it from whatever
 	// per-container monitorContainer goroutine happens to be running at that time - a plain
 	// field would be an unsynchronized data race between that write and those concurrent reads.
-	syscallFlusher atomic.Pointer[func()]
+	syscallFlusher atomic.Pointer[func(context.Context) error]
 }
 
 func (cpm *ContainerProfileManager) SetCompletionNotifier(n objectcache.CompletionNotifier) {
@@ -143,8 +143,21 @@ func (cpm *ContainerProfileManager) SetK8sInventory(k8sInventory common.K8sInven
 	cpm.k8sInventory = k8sInventory
 }
 
-// SetSyscallFlusher implements containerprofilemanager.ContainerProfileManagerClient.
+// SetSyscallFlusher preserves the legacy request-only callback API. Returning
+// from that callback cannot prove delivery, so finalization remains partial.
 func (cpm *ContainerProfileManager) SetSyscallFlusher(flush func()) {
+	if flush == nil {
+		cpm.SetSyscallFlusherWithContext(nil)
+		return
+	}
+	cpm.SetSyscallFlusherWithContext(func(context.Context) error {
+		flush()
+		return fmt.Errorf("legacy syscall flusher does not acknowledge delivery")
+	})
+}
+
+// SetSyscallFlusherWithContext registers an acknowledged, cancellable flush.
+func (cpm *ContainerProfileManager) SetSyscallFlusherWithContext(flush func(context.Context) error) {
 	cpm.syscallFlusher.Store(&flush)
 }
 
@@ -258,4 +271,5 @@ func (cpm *ContainerProfileManager) Close() {
 }
 
 var _ containerprofilemanager.ContainerProfileManagerClient = (*ContainerProfileManager)(nil)
+var _ containerprofilemanager.SyscallFlushRegistrar = (*ContainerProfileManager)(nil)
 var _ queue.ErrorCallback = (*ContainerProfileManager)(nil)
