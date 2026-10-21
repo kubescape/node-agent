@@ -1,6 +1,7 @@
 package containerprofilemanager
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -56,7 +57,7 @@ func TestPermanentRejectionStopsMonitoringWithoutCompletion(t *testing.T) {
 				// Reject during the final syscall flush, after the monitor has
 				// already checked the queue and accepted the lifecycle signal.
 				watched.SetStatus(objectcache.WatchedContainerStatusCompleted)
-				cpm.SetSyscallFlusher(func() { cpm.OnQueueError(nil, id, rejection) })
+				cpm.SetSyscallFlusherWithContext(func(context.Context) error { cpm.OnQueueError(nil, id, rejection); return nil })
 				watched.SyncChannel <- tc.finalize
 			} else {
 				// Fill the control channel and deliver multiple already queued report

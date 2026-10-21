@@ -55,19 +55,30 @@ and *all* fetching — periodic or not — goes through one explicit call:
   regardless of how many containers are being traced (the old design ran one 5s ticker *per
   container*), since one `TriggerManualMapFetch` call drains and dispatches every currently
   tracked container's pending syscalls in a single batch.
-- **`ContainerProfileManager.SetSyscallFlusher`** lets `TracerFactory` additionally wire
-  `Peek` to be called once more, out of that schedule, right before a container's final forced
-  profile save (`flushAndSettle` in pkg/containerprofilemanager/v1/helpers.go, called from both
-  termination paths in monitoring.go) — closing even the up-to-`syscallPollInterval` gap the
-  periodic schedule alone would still leave at exactly the moment a container disappears.
-  `flushAndSettle` waits a fixed `postSyscallFlushSettleDelay` (`500ms`) afterward for the
-  resulting data to land before the profile is snapshotted and cleared. `ContainerProfileManager`
-  no longer goes through the generic event queue/worker pool for syscalls at all (see
-  [Batching](#batching-bypassing-the-generic-pipeline-for-containerprofilemanager) below); the
-  wait covers `SyscallTracer.callback`'s own dispatch goroutine and any per-container
-  `SyncChannel` backpressure in `ContainerProfileManager.ReportSyscalls`, not queue latency. This
-  wiring only happens when the syscall tracer is actually enabled (`SyscallTracer.IsEnabled`), so
-  a disabled tracer costs nothing.
+- **`ContainerProfileManager.SetSyscallFlusherWithContext`** wires `SyscallTracer.Flush`
+  before the final forced profile save on termination or learning expiry. Unlike `Peek`,
+  `Flush` confirms that a fresh map fetch and its profile deliveries have completed. The
+  manager gives the native, context-aware callback a five-second deadline. If confirmation fails, the final profile
+  retains collected data but is marked partial. No flusher is registered when the tracer is
+  disabled.
+
+### Confirming the final fetch
+
+The pinned gadget emits one array for each map fetch, including an empty fetch. The tracer
+subscribes to whole arrays, recording a sequence at the beginning of each array callback.
+`Flush` requires two array starts after its request: the first could belong to a fetch already
+in flight, while the second must have begun after the request. It requests another fetch as
+arrays arrive and retries requests to cover gadget startup, when the manual trigger can be a
+no-op. Concurrent callers can share fetches.
+
+Each array also has a delivery-completion channel. While the tracer is running, it closes only
+after all of that array's asynchronous `ReportSyscalls` calls and all earlier arrays' deliveries
+have finished. Shutdown closes pending channels for cleanup; `Flush` returns an error in that
+case. Waiting
+for the target array therefore also covers older outstanding reports, even when the fresh
+fetch is empty. The map-fetch goroutine remains free to process other containers while a
+profile report waits for a container lock. Cancellation, tracer shutdown, or deadline expiry
+returns an error instead of acknowledging delivery.
 
 ## Why this isn't a regression risk for alerting
 
@@ -89,7 +100,7 @@ why `ContainerProfileManager` is no longer one of that fan-out's targets).
 generic pipeline models one event per occurrence, so turning that batch into individual
 `SyscallEventType` events (one `AddEventDirect`, dedup-key computation, and 2-handler dispatch
 loop each) is pure per-item overhead for a data source that was never actually a discrete event
-stream — it's a periodic snapshot of a persistent per-mntns bitmap. That overhead scales with how
+stream — it's a periodically drained per-mntns bitmap. That overhead scales with how
 many *distinct* syscalls a container has executed since its last fetch, which is worst right
 after a container starts.
 
@@ -117,28 +128,33 @@ Two things this direct call requires that the generic pipeline used to provide f
   goroutines, so a slow or blocked container only ever tied up one interchangeable worker.
   `callback` is invoked synchronously, once per currently-traced container, by the single
   goroutine that processes each fetch — and `ContainerProfileManager.ReportSyscalls` can itself
-  block (`withContainer` sends on a container's `SyncChannel`, which is bounded, while holding
-  that container's lock, when a profile crosses `MaxTsProfileSize`). `callback` therefore
+  wait for a container lock held by profile serialization. `callback` therefore
   dispatches `ReportSyscalls` on its own goroutine rather than calling it inline, so one
   container's backpressure can never stall the processing of every other container's syscalls
   for that tick, or the next `Peek`-triggered fetch.
 
-## Concurrency
+## Concurrency and compatibility
 
-`ContainerProfileManager.syscallFlusher` (the callback `SetSyscallFlusher` registers) is stored
-via `atomic.Pointer[func()]`, not a plain field. `SetSyscallFlusher` is called once during
-startup wiring (`TracerFactory.CreateAllTracers`), but by that point `StartContainerCollection`
-has already begun enumerating existing containers and starting their `monitorContainer`
-goroutines — a container that starts and terminates in that window would call `flushAndSettle`
-(reading `syscallFlusher`) concurrently with that write. A plain field would be an unsynchronized
-data race there, silently able to reintroduce #922's exact bug at exactly the highest-churn
-moment there is: node-agent startup or restart.
+The manager stores its flusher callback atomically: tracer wiring can run concurrently with
+per-container monitors during startup. The tracer protects array sequences and delivery
+channels with a mutex; report completion is asynchronous and ordered by the delivery chain.
+
+The existing `ContainerProfileManagerClient.SetSyscallFlusher(func())` method remains available
+for downstream integrations. A separate optional `SyscallFlushRegistrar` interface supplies
+`SetSyscallFlusherWithContext(func(context.Context) error)` without changing the existing client
+interface. Native wiring uses this acknowledged method. A legacy callback cannot confirm
+completion, so the native manager treats its result as unacknowledged and marks the final
+profile partial rather than claiming full capture. Legacy callbacks retain their inline
+calling semantics and must return promptly; they cannot be canceled through a context.
 
 ## Known limitations
 
-`TriggerManualMapFetch` is fire-and-forget and `flushAndSettle`'s settle delay is a bounded wait
-for the event pipeline, not an absolute guarantee tied to the fetch itself. Under severe
-scheduler contention or a saturated event queue, the flushed events could in principle still
-arrive after the delay elapses; termination would then fall back to whatever the tracer already
-had from the last periodic `Peek` (at most `syscallPollInterval` old) — the same kind of race as
-before, just far less likely and far smaller in scope than the original 30-second window.
+The map iterator still uses `BPF_MAP_LOOKUP_AND_DELETE_BATCH`: reads consume observations,
+not cumulative snapshots. The barrier fixes the reproduced finalization race; it does not
+provide replay after unrelated drops, repair unresolved container attribution, or certify
+that the learning workload exercised every syscall it will ever need.
+
+The pinned dependency can also emit an array after a map-read error. An array acknowledgment
+proves dispatch ordering and profile delivery, not error-free kernel collection. These limits
+mean that this fix alone does not establish that every historical loss reported in #918 is
+resolved.

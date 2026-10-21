@@ -1,6 +1,8 @@
 package containerprofilemanager
 
 import (
+	"context"
+
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -26,13 +28,16 @@ type ContainerProfileManagerClient interface {
 	ReportDroppedEvent(containerID string)
 	RegisterForContainerEndOfLife(notificationChannel chan *containercollection.Container)
 	OnQueueError(profile *v1beta1.ContainerProfile, containerID string, err error)
-	// SetSyscallFlusher registers a callback invoked right before a container's final
-	// forced profile save (on termination or max-sniffing-time), requesting an immediate
-	// out-of-band fetch of any not-yet-polled syscalls for that container so they aren't
-	// silently discarded (see SyscallTracer.Peek, kubescape/node-agent#922).
+	// SetSyscallFlusher registers the legacy best-effort flush request.
 	SetSyscallFlusher(flush func())
 }
 
 type Enricher interface {
 	EnrichEvent(containerID string, event utils.EnrichEvent, callID string)
+}
+
+// SyscallFlushRegistrar optionally supports acknowledged final syscall delivery.
+// A callback must honor cancellation and return nil only after ReportSyscalls.
+type SyscallFlushRegistrar interface {
+	SetSyscallFlusherWithContext(flush func(context.Context) error)
 }

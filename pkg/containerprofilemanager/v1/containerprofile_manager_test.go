@@ -652,50 +652,91 @@ func TestSetSyscallFlusher(t *testing.T) {
 	assert.Nil(t, cpm.syscallFlusher.Load())
 
 	called := false
-	cpm.SetSyscallFlusher(func() { called = true })
+	cpm.SetSyscallFlusherWithContext(func(context.Context) error { called = true; return nil })
 	flush := cpm.syscallFlusher.Load()
 	require.NotNil(t, flush)
 
-	(*flush)()
+	require.NoError(t, (*flush)(context.Background()))
 	assert.True(t, called)
 }
 
-// TestSetSyscallFlusherConcurrentWithFlushAndSettle exercises the exact race the review on
+// TestSetSyscallFlusherConcurrentWithFlushSyscalls exercises the exact race the review on
 // PR #924 flagged: SetSyscallFlusher (a startup-time write, from TracerFactory) racing with
-// flushAndSettle reads from an already-running per-container monitorContainer goroutine. Run
+// flushSyscalls reads from an already-running per-container monitorContainer goroutine. Run
 // with -race; a plain (non-atomic) field would be flagged here.
-func TestSetSyscallFlusherConcurrentWithFlushAndSettle(t *testing.T) {
+func TestSetSyscallFlusherConcurrentWithFlushSyscalls(t *testing.T) {
 	cpm := &ContainerProfileManager{}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		cpm.SetSyscallFlusher(func() {})
+		cpm.SetSyscallFlusherWithContext(func(context.Context) error { return nil })
 	}()
 	go func() {
 		defer wg.Done()
-		cpm.flushAndSettle()
+		cpm.flushSyscalls()
 	}()
 	wg.Wait()
 }
 
-func TestFlushAndSettleNoFlusherIsNoopAndFast(t *testing.T) {
+func TestFlushSyscallsNoFlusher(t *testing.T) {
 	cpm := &ContainerProfileManager{}
-	start := time.Now()
-	cpm.flushAndSettle()
-	assert.Less(t, time.Since(start), postSyscallFlushSettleDelay)
+	require.NoError(t, cpm.flushSyscalls())
 }
 
-func TestFlushAndSettleCallsFlusherAndWaits(t *testing.T) {
-	called := false
+func TestFlushSyscallsPropagatesFailure(t *testing.T) {
 	cpm := &ContainerProfileManager{}
+	cpm.SetSyscallFlusherWithContext(func(context.Context) error { return context.DeadlineExceeded })
+	require.ErrorIs(t, cpm.flushSyscalls(), context.DeadlineExceeded)
+}
+
+func TestFlushSyscallsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cpm := &ContainerProfileManager{ctx: ctx}
+	started := make(chan struct{})
+	cpm.SetSyscallFlusherWithContext(func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	done := make(chan error, 1)
+	go func() { done <- cpm.flushSyscalls() }()
+	<-started
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("flush ignored cancellation")
+	}
+}
+
+func TestLegacySyscallFlusherCannotAcknowledgeDelivery(t *testing.T) {
+	cpm := &ContainerProfileManager{}
+	called := false
 	cpm.SetSyscallFlusher(func() { called = true })
+	require.ErrorContains(t, cpm.flushSyscalls(), "does not acknowledge delivery")
+	require.True(t, called)
+	cpm.SetSyscallFlusherWithContext(func(context.Context) error { return nil })
+	require.NoError(t, cpm.flushSyscalls())
+	cpm.SetSyscallFlusher(func() {})
+	require.Error(t, cpm.flushSyscalls())
+	cpm.SetSyscallFlusher(nil)
+	require.NoError(t, cpm.flushSyscalls())
+}
 
-	start := time.Now()
-	cpm.flushAndSettle()
-	elapsed := time.Since(start)
-
-	assert.True(t, called)
-	assert.GreaterOrEqual(t, elapsed, postSyscallFlushSettleDelay)
+func TestFlushSyscallsDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	cpm := &ContainerProfileManager{ctx: ctx}
+	cpm.SetSyscallFlusherWithContext(func(ctx context.Context) error {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		require.LessOrEqual(t, time.Until(deadline), syscallFlushTimeout)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	require.ErrorIs(t, cpm.flushSyscalls(), context.DeadlineExceeded)
 }

@@ -114,16 +114,20 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.containerProfileManager.ReportSyscalls,
 		// false: node-agent's own EventHandlerFactory.ProcessEvent already drops
 		// containerID=="" events, so emitting them here would only pay the steady-state
-		// decode/dispatch/enrich cost for every host process and stale map entry on every
-		// poll for no benefit (see NewSyscallTracer's doc comment).
+		// decode/dispatch/enrich cost for unattributed entries drained on a fetch
+		// for no benefit (see NewSyscallTracer's doc comment).
 		false,
 	)
 	manager.RegisterTracer(syscallTracer)
 	if syscallTracer.IsEnabled(tf.cfg) {
 		// Only wire the flusher when this tracer will actually run; otherwise
-		// ContainerProfileManager would pay flushAndSettle's settle delay on every
+		// ContainerProfileManager would wait until its flush deadline on every
 		// container termination for a fetch that can never surface anything.
-		tf.containerProfileManager.SetSyscallFlusher(syscallTracer.Peek)
+		if registrar, ok := tf.containerProfileManager.(containerprofilemanager.SyscallFlushRegistrar); ok {
+			registrar.SetSyscallFlusherWithContext(syscallTracer.Flush)
+		} else {
+			tf.containerProfileManager.SetSyscallFlusher(syscallTracer.Peek)
+		}
 	}
 
 	// Create exec tracer

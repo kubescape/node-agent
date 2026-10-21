@@ -1,6 +1,7 @@
 package containerprofilemanager
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -25,32 +26,27 @@ const (
 	MaxWaitForSharedContainerData = 10 * time.Minute
 	MaxWaitForAck                 = 30 * time.Second
 
-	// postSyscallFlushSettleDelay bounds how long flushAndSettle waits, after requesting an
-	// immediate out-of-band syscall fetch (see SetSyscallFlusher), for the resulting events
-	// to travel through the event queue and worker pool into this container's data before its
-	// profile is snapshotted and its data is cleared. It only needs to cover that pipeline's
-	// latency (normally low milliseconds), not any polling interval, since the fetch itself
-	// was already requested rather than waited on.
-	postSyscallFlushSettleDelay = 500 * time.Millisecond
+	// Keep final syscall delivery inside the lifecycle acknowledgment budget.
+	syscallFlushTimeout = 5 * time.Second
 )
 
-// flushAndSettle requests an immediate, out-of-band fetch of any not-yet-polled syscalls (via
-// the flusher registered with SetSyscallFlusher) and briefly waits for the result to land in
-// this container's data. It is a no-op with no wait if no flusher is registered (e.g. the
-// syscall tracer is disabled).
-//
-// Call this right before a container's final forced profile save on termination or
-// max-sniffing-time: the eBPF syscall tracer only ever surfaces syscalls it has decoded from
-// its last periodic map fetch (see pkg/containerwatcher/v2/tracers/syscall.go), so without this
-// a container terminating between two polls would silently lose whatever it executed since the
-// last one once this manager removes its data (kubescape/node-agent#922).
-func (cpm *ContainerProfileManager) flushAndSettle() {
+// flushSyscalls waits for acknowledged delivery before the final profile save.
+// The callback must honor its context; no flusher means tracing is disabled.
+func (cpm *ContainerProfileManager) flushSyscalls() error {
 	flush := cpm.syscallFlusher.Load()
-	if flush == nil {
-		return
+	if flush == nil || *flush == nil {
+		return nil
 	}
-	(*flush)()
-	time.Sleep(postSyscallFlushSettleDelay)
+	ctx := cpm.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, syscallFlushTimeout)
+	defer cancel()
+	if err := (*flush)(ctx); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 // createUUID generates a new UUID string
