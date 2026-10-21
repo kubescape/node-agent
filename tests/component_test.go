@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/yaml"
 )
@@ -60,20 +61,24 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	ns := testutils.NewRandomNamespace()
+	installBasicAlertDNSFixture(t, ns.Name)
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
 	require.NoError(t, err, "Error creating workload")
 	require.NoError(t, wl.WaitForReady(80))
 
 	time.Sleep(10 * time.Second)
 
-	// process launched from nginx container
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
+	execProbe := func(container string, command ...string) {
+		t.Helper()
+		stdout, stderr, err := wl.ExecIntoPod(command, container)
+		require.NoError(t, err, "probe in %s: %v; stdout=%q stderr=%q", container, command, stdout, stderr)
+	}
 
-	// network activity from server container
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
-
-	// network activity from nginx container
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
+	// Learn different DNS destinations for each container. The fixture names
+	// deliberately avoid .svc.cluster.local, which R0005 excludes.
+	execProbe("nginx", "ls", "-l")
+	execProbe("server", "wget", "-O", "/dev/null", "-T", "10", "-t", "1", "http://server.component.test.")
+	execProbe("nginx", "curl", "--fail", "--noproxy", "*", "--max-time", "10", "http://nginx.component.test.")
 
 	err = wl.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
@@ -82,15 +87,17 @@ func Test_01_BasicAlertTest(t *testing.T) {
 
 	time.Sleep(30 * time.Second)
 
-	profiles, _ := wl.GetContainerProfiles()
-	profilesJson, _ := json.Marshal(profiles)
+	profiles, err := wl.GetContainerProfiles()
+	require.NoError(t, err, "get learned container profiles")
+	profilesJson, err := json.Marshal(profiles)
+	require.NoError(t, err, "marshal learned container profiles")
 
 	t.Logf("container profiles: %v", string(profilesJson))
 
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")                               // no alert expected
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server")                              // alert expected
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // no alert expected
-	_, _, err = wl.ExecIntoPod([]string{"curl", "ebpf.io", "-m", "2"}, "nginx")             // alert expected
+	execProbe("nginx", "ls", "-l")                                                                              // no alert expected
+	execProbe("server", "ls", "-l")                                                                             // alert expected
+	execProbe("server", "wget", "-O", "/dev/null", "-T", "10", "-t", "1", "http://server.component.test.")      // no alert expected
+	execProbe("nginx", "curl", "--fail", "--noproxy", "*", "--max-time", "10", "http://server.component.test.") // alert expected
 
 	// Wait for the alert to be signaled
 	time.Sleep(30 * time.Second)
@@ -113,11 +120,11 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	serverCP, err := wl.GetContainerProfile("server")
 	require.NoError(t, err, "Error getting server container profile")
 
-	testutils.AssertContainerProfileContains(t, nginxCP, []string{"kubernetes.io."}, []string{})
-	testutils.AssertContainerProfileNotContains(t, serverCP, []string{"kubernetes.io."}, []string{})
+	testutils.AssertContainerProfileContains(t, nginxCP, []string{"nginx.component.test."}, []string{})
+	testutils.AssertContainerProfileNotContains(t, serverCP, []string{"nginx.component.test."}, []string{})
 
-	testutils.AssertContainerProfileContains(t, serverCP, []string{"ebpf.io."}, []string{})
-	testutils.AssertContainerProfileNotContains(t, nginxCP, []string{"ebpf.io."}, []string{})
+	testutils.AssertContainerProfileContains(t, serverCP, []string{"server.component.test."}, []string{})
+	testutils.AssertContainerProfileNotContains(t, nginxCP, []string{"server.component.test."}, []string{})
 }
 
 // enableR0002ForTest applies an override Rules CRD that enables R0002 ("Files
@@ -154,8 +161,9 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	err = wl.WaitForReady(80)
 	require.NoError(t, err, "Error waiting for workload to be ready")
 
-	// Wait for the application profile to be created and completed
-	err = wl.WaitForContainerProfileCompletion(150)
+	// Leave time for readiness, alert collection, and diagnostics within the
+	// 20-minute test deadline; 150 retries alone would take 25 minutes.
+	err = wl.WaitForContainerProfileCompletion(50)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	// Wait for the alerts to be generated
@@ -664,22 +672,24 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	require.NoError(t, endpointTraffic.WaitForReady(80), "Error waiting for workload to be ready")
 
 	// Wait for application profile to be ready
-	assert.NoError(t, endpointTraffic.WaitForContainerProfile(80, "ready"))
-	time.Sleep(10 * time.Second)
+	require.NoError(t, endpointTraffic.WaitForContainerProfile(80, "ready"))
+	// The first profile save occurs late in the learning window. Trigger
+	// immediately and avoid allocating terminals for these filesystem probes.
+	probe := func(command ...string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		stdout, stderr, err := endpointTraffic.ExecIntoPodNoTTYWithContext(ctx, command, "endpoint-traffic")
+		require.NoError(t, err, "filesystem probe %q; stdout=%q stderr=%q", command, stdout, stderr)
+	}
 
-	// Add to rule policy symlink
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
-	assert.NoError(t, err)
+	// Add to rule policy symlink.
+	probe("ln", "-s", "/etc/shadow", "/tmp/a")
+	probe("rm", "/tmp/a")
 
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	assert.NoError(t, err)
-
-	// Not add to rule policy
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/bin/sh", "/tmp/a"}, "")
-	assert.NoError(t, err)
-
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	assert.NoError(t, err)
+	// This hardlink does not match a sensitive target and must not be learned.
+	probe("ln", "/bin/sh", "/tmp/a")
+	probe("rm", "/tmp/a")
 
 	require.NoError(t, endpointTraffic.WaitForContainerProfileCompletion(80),
 		"Error waiting for container profile to be completed")
@@ -698,15 +708,13 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	// wait for cache
 	time.Sleep(40 * time.Second)
 
-	// generate hardlink alert
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/etc/shadow", "/tmp/a"}, "")
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	assert.NoError(t, err)
+	// Generate the unlearned hardlink alert.
+	probe("ln", "/etc/shadow", "/tmp/a")
+	probe("rm", "/tmp/a")
 
-	// not generate alert
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	assert.NoError(t, err)
+	// The learned symlink policy must suppress this alert.
+	probe("ln", "-s", "/etc/shadow", "/tmp/a")
+	probe("rm", "/tmp/a")
 
 	// Wait for the alert to be signaled
 	time.Sleep(30 * time.Second)
@@ -878,6 +886,9 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 }
 
 func Test_17_ApCompletedToPartialUpdateTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
 	ns := testutils.NewRandomNamespace()
 
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
@@ -890,19 +901,36 @@ func Test_17_ApCompletedToPartialUpdateTest(t *testing.T) {
 	err = testutils.RestartDaemonSet("kubescape", "node-agent")
 	require.NoError(t, err, "Error restarting daemonset")
 
-	require.NoError(t, wl.WaitForContainerProfileCompletion(160))
-	require.NoError(t, wl.WaitForContainerProfileCompletion(160))
+	require.NoError(t, wl.WaitForContainerProfileCompletion(60))
 
-	time.Sleep(30 * time.Second)
-
-	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "cat /run/secrets/kubernetes.io/serviceaccount/token >/dev/null"}, "")
-	require.NoError(t, err)
-
-	time.Sleep(30 * time.Second)
-
-	alerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Error getting alerts")
-
+	waitForProfileMonitoring(t, wl, "nginx")
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	var alerts []testutils.Alert
+	var lastFetchErr error
+	err = wait.PollUntilContextCancel(ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		probeCtx, cancelProbe := context.WithTimeout(ctx, 10*time.Second)
+		stdout, stderr, execErr := wl.ExecIntoPodNoTTYWithContext(probeCtx, []string{"sh", "-c", "cat /run/secrets/kubernetes.io/serviceaccount/token >/dev/null"}, "nginx")
+		cancelProbe()
+		if execErr != nil {
+			return false, fmt.Errorf("cat probe: %w; stdout=%q stderr=%q", execErr, stdout, stderr)
+		}
+		fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Second)
+		alerts, lastFetchErr = testutils.GetAlertsWithContext(fetchCtx, wl.Namespace)
+		cancelFetch()
+		if lastFetchErr != nil {
+			return false, nil
+		}
+		for _, alert := range alerts {
+			if alert.Labels["rule_name"] == "Unexpected service account token access" &&
+				alert.Labels["comm"] == "cat" && alert.Labels["container_name"] == "nginx" &&
+				alert.Labels["fail_on_profile"] == "true" {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	require.NoError(t, err, "expected profile-backed cat alert (last fetch error: %v)", lastFetchErr)
 	testutils.AssertContains(t, alerts, "Unexpected service account token access", "cat", "nginx", []bool{true})
 }
 
@@ -937,7 +965,7 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 	require.NoError(t, err, "Error restarting daemonset")
 
 	// Wait for the application profile to be completed
-	err = wl.WaitForContainerProfileCompletion(160)
+	err = wl.WaitForContainerProfileCompletion(60)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
 	profile, err := wl.GetContainerProfile("nginx")
@@ -945,16 +973,34 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 
 	require.Equal(t, helpersv1.Partial, profile.Annotations[helpersv1.CompletionMetadataKey])
 
-	// Wait for cache to be updated
-	time.Sleep(15 * time.Second)
-
-	// Generate an alert by executing a command
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
-	require.NoError(t, err, "Error executing command in pod")
-	// Wait for the alert to be generated
-	time.Sleep(15 * time.Second)
-	alerts, err := testutils.GetAlerts(ns.Name)
-	require.NoError(t, err, "Error getting alerts")
+	waitForProfileMonitoring(t, wl, "nginx")
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	var alerts []testutils.Alert
+	var lastFetchErr error
+	err = wait.PollUntilContextCancel(ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		probeCtx, cancelProbe := context.WithTimeout(ctx, 10*time.Second)
+		stdout, stderr, execErr := wl.ExecIntoPodNoTTYWithContext(probeCtx, []string{"ls", "-l"}, "nginx")
+		cancelProbe()
+		if execErr != nil {
+			return false, fmt.Errorf("ls probe: %w; stdout=%q stderr=%q", execErr, stdout, stderr)
+		}
+		fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Second)
+		alerts, lastFetchErr = testutils.GetAlertsWithContext(fetchCtx, wl.Namespace)
+		cancelFetch()
+		if lastFetchErr != nil {
+			return false, nil
+		}
+		for _, alert := range alerts {
+			if alert.Labels["rule_name"] == "Unexpected process launched" &&
+				alert.Labels["comm"] == "ls" && alert.Labels["container_name"] == "nginx" &&
+				alert.Labels["fail_on_profile"] == "true" {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	require.NoError(t, err, "expected profile-backed ls alert (last fetch error: %v)", lastFetchErr)
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 }
 
@@ -1322,30 +1368,45 @@ func Test_23_RuleCooldownTest(t *testing.T) {
 
 	require.NoError(t, wl.WaitForContainerProfileCompletion(80))
 
-	// Wait for cache
-	time.Sleep(30 * time.Second)
+	waitForProfileMonitoring(t, wl, "nginx")
 
-	// Run the same process 20 times
+	// The uname control has a separate cooldown key. Send exactly 20 ls probes;
+	// polling below only reads alerts and never consumes another cooldown slot.
 	for i := 0; i < 20; i++ {
-		_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
-		require.NoError(t, err)
-		time.Sleep(1 * time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		stdout, stderr, execErr := wl.ExecIntoPodNoTTYWithContext(ctx, []string{"ls", "-l"}, "nginx")
+		cancel()
+		require.NoError(t, execErr, "ls probe %d: stdout=%q stderr=%q", i+1, stdout, stderr)
+		time.Sleep(time.Second)
 	}
 
-	// Wait for alerts to be processed
-	time.Sleep(30 * time.Second)
-
-	// Get all alerts
-	alerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Error getting alerts")
-
-	// Count alerts for "Unexpected process launched" rule
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	probesDone := time.Now()
+	var alerts []testutils.Alert
+	var lastFetchErr error
 	alertCount := 0
-	for _, alert := range alerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
-			alertCount++
+	err = wait.PollUntilContextCancel(ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Second)
+		fetchedAlerts, fetchErr := testutils.GetAlertsWithContext(fetchCtx, wl.Namespace)
+		cancelFetch()
+		lastFetchErr = fetchErr
+		if lastFetchErr != nil {
+			return false, nil
 		}
-	}
+		alerts = fetchedAlerts
+		alertCount = 0
+		for _, alert := range alerts {
+			if alert.Labels["rule_id"] == "R0001" && alert.Labels["comm"] == "ls" &&
+				alert.Labels["container_name"] == "nginx" && alert.Labels["fail_on_profile"] == "true" {
+				alertCount++
+			}
+		}
+		// Preserve the original 30-second delivery window so a transient count
+		// of ten cannot hide additional alerts still in flight.
+		return alertCount > 10 || (alertCount >= 10 && time.Since(probesDone) >= 30*time.Second), nil
+	})
+	require.NoError(t, err, "waiting for cooldown alerts: got %d (last fetch error: %v)", alertCount, lastFetchErr)
 
 	// We should get exactly 10 alerts (cooldown threshold) even though we ran the process 20 times
 	assert.Equal(t, 10, alertCount, "Expected exactly 10 alerts due to cooldown threshold, got %d", alertCount)
@@ -1369,34 +1430,40 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	err = endpointTraffic.WaitForContainerProfileCompletion(80)
 	require.NoError(t, err, "Error waiting for application profile to be completed")
 
-	// wait for cache
-	time.Sleep(30 * time.Second)
+	waitForProfileMonitoring(t, endpointTraffic, "process-tree")
 
-	// Add to rule policy symlink
-	buf, _, err := endpointTraffic.ExecIntoPod([]string{"/bin/sh", "-c", "python3 /root/python_spawner.py 10"}, "")
-	require.NoError(t, err)
-
+	// Execute the tree once; polling below only waits for alert delivery.
+	execCtx, cancelExec := context.WithTimeout(t.Context(), 30*time.Second)
+	buf, stderr, err := endpointTraffic.ExecIntoPodNoTTYWithContext(execCtx, []string{"/bin/sh", "-c", "python3 /root/python_spawner.py 10"}, "process-tree")
+	cancelExec()
+	require.NoError(t, err, "process tree execution: stdout=%q stderr=%q", buf, stderr)
 	t.Logf("Output: %s", buf)
 
-	t.Logf("Waiting for the alert to be signaled")
-
-	// Wait for the alert to be signaled
-	time.Sleep(2 * time.Minute)
-
-	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
-	require.NoError(t, err, "Error getting alerts")
-
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	var alerts []testutils.Alert
+	var lastFetchErr error
 	found := false
-
-	for _, alert := range alerts {
-		if alert.Labels["rule_name"] == "Unexpected process launched" {
-			if alert.Labels["processtree_depth"] == "10" {
+	err = wait.PollUntilContextCancel(ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Second)
+		alerts, lastFetchErr = testutils.GetAlertsWithContext(fetchCtx, endpointTraffic.Namespace)
+		cancelFetch()
+		if lastFetchErr != nil {
+			return false, nil
+		}
+		for _, alert := range alerts {
+			if alert.Labels["rule_name"] == "Unexpected process launched" &&
+				alert.Labels["comm"] == "python3" &&
+				alert.Labels["container_name"] == "process-tree" &&
+				alert.Labels["processtree_depth"] == "10" {
 				found = true
-				break
+				return true, nil
 			}
 		}
-	}
+		return false, nil
+	})
 
+	assert.NoError(t, err, "waiting for process tree alert (last fetch error: %v)", lastFetchErr)
 	assert.Truef(t, found, "Expected to find an alert for the process tree depth")
 
 	t.Logf("Found alerts for the process tree depth: %v", alerts)
@@ -1498,8 +1565,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		require.NoError(t, err, "create workload in ns %s", ns.Name)
 		require.NoError(t, wl.WaitForReady(80), "workload not ready in ns %s", ns.Name)
 
-		// Wait for node-agent to load the user-defined profile into cache.
-		time.Sleep(10 * time.Second)
+		waitForProfileMonitoring(t, wl, "nginx")
 		return wl
 	}
 
@@ -1507,10 +1573,10 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 	// up to 60s to avoid race conditions with alert propagation.
 	triggerAndGetAlerts := func(t *testing.T, wl *testutils.TestWorkload, filePath string) []testutils.Alert {
 		t.Helper()
-		stdout, stderr, err := wl.ExecIntoPod([]string{"cat", filePath}, "nginx")
-		if err != nil {
-			t.Errorf("exec 'cat %s' in container nginx failed: %v (stdout=%q stderr=%q)", filePath, err, stdout, stderr)
-		}
+		probeCtx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		stdout, stderr, err := wl.ExecIntoPodNoTTYWithContext(probeCtx, []string{"cat", filePath}, "nginx")
+		cancel()
+		require.NoError(t, err, "cat %s in nginx must run (stdout=%q stderr=%q)", filePath, stdout, stderr)
 		// Poll for alerts — they may take time to propagate through
 		// eBPF → node-agent → alertmanager.
 		var alerts []testutils.Alert
@@ -1551,6 +1617,12 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 
 		profiles, err := wl.GetContainerProfiles()
 		require.NoError(t, err, "get container profiles")
+		for _, profile := range profiles {
+			for _, recordedExec := range profile.Spec.Execs {
+				require.NotEqual(t, "uname", path.Base(recordedExec.Path), "monitoring control must not be in the learned exec baseline")
+			}
+		}
+		waitForProfileMonitoring(t, wl, "nginx")
 
 		passed := true
 		// A fully resolved open path never begins with a numeric first segment;
@@ -1619,7 +1691,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		}, 8*time.Minute, 5*time.Second, "rendered redis statefulset pod must become Ready")
 		var bprofiles []v1beta1.ContainerProfile
 		require.Eventually(t, func() bool {
-			cps, lerr := storageClient.ContainerProfiles(bns.Name).List(context.TODO(), metav1.ListOptions{})
+			cps, lerr := storageClient.ContainerProfiles(bns.Name).List(context.TODO(), metav1.ListOptions{ResourceVersion: "fullSpec"})
 			if lerr != nil || len(cps.Items) == 0 {
 				return false
 			}
@@ -1635,17 +1707,23 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			checkOpens(bprofiles[i].Namespace+"/"+bprofiles[i].Name, bprofiles[i].Labels["kubescape.io/workload-container-name"], bprofiles[i].Spec.Opens)
 		}
 
-		// Deterministic gadget positive control, race-free: the profile is
-		// completed (frozen), so a procfs read now must surface as an R0002
-		// alert carrying the exactly-rooted path. A silent gadget produces no
-		// alert; a scrambling gadget produces "/1/cmdline".
+		// R0002 does not monitor /proc/1/cmdline. Use the unlearned cat exec
+		// as the positive control while retaining the procfs read and the
+		// learned absolute-path checks above.
+		for _, profile := range bprofiles {
+			for _, recordedExec := range profile.Spec.Execs {
+				require.NotEqual(t, "cat", path.Base(recordedExec.Path), "Redis positive-control cat must not be in the learned exec baseline")
+			}
+		}
 		pods, perr := dyn.KubernetesClient.CoreV1().Pods(bns.Name).List(context.Background(),
 			metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=redis"})
 		require.NoError(t, perr)
 		require.NotEmpty(t, pods.Items)
 		// completed profile needs a reconciler tick to reach the enforcement cache
 		time.Sleep(45 * time.Second)
-		stdout, stderr, eerr := testutils.ExecIntoPod(pods.Items[0].Name, bns.Name, []string{"cat", "/proc/1/cmdline"}, "redis")
+		probeCtx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		stdout, stderr, eerr := testutils.ExecIntoPodNoTTYWithContext(probeCtx, pods.Items[0].Name, bns.Name, []string{"cat", "/proc/1/cmdline"}, "redis")
+		cancel()
 		require.NoError(t, eerr, "probe exec must run (stdout=%q stderr=%q)", stdout, stderr)
 		require.Eventually(t, func() bool {
 			alerts, aerr := testutils.GetAlerts(bns.Name)
@@ -1653,18 +1731,18 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 				return false
 			}
 			for _, a := range alerts {
-				if a.Labels["comm"] == "cat" && (a.Labels["rule_id"] == "R0001" || a.Labels["rule_id"] == "R0002") {
+				if a.Labels["comm"] == "cat" && a.Labels["container_name"] == "redis" && a.Labels["rule_id"] == "R0001" && a.Labels["fail_on_profile"] == "true" {
 					return true
 				}
 			}
 			return false
-		}, 3*time.Minute, 5*time.Second, "the probe exec/open must alert - gadget positive control (silent pipeline)")
+		}, 3*time.Minute, 5*time.Second, "the unlearned Redis cat exec must produce R0001 - gadget positive control")
 
 		// Distro-wide scan: the scrambled paths originally surfaced in real distro
 		// workloads (redis/valkey mounted-etc, health-check scripts, service-account
 		// tokens), so scan EVERY learned ContainerProfile across all namespaces, not
 		// only this test's workload. Best-effort: a failed cluster-wide list is not fatal.
-		if allCPs, listErr := storageClient.ContainerProfiles(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{}); listErr != nil {
+		if allCPs, listErr := storageClient.ContainerProfiles(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{ResourceVersion: "fullSpec"}); listErr != nil {
 			t.Logf("distro-wide scrambled-path scan skipped (cluster-wide list failed): %v", listErr)
 		} else {
 			for i := range allCPs.Items {
@@ -1846,8 +1924,7 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 		require.NoError(t, err, "create curl workload in ns %s", ns.Name)
 		require.NoError(t, wl.WaitForReady(80), "curl workload not ready in ns %s", ns.Name)
 
-		// Wait for node-agent to load the user-defined profile into cache.
-		time.Sleep(10 * time.Second)
+		waitForProfileMonitoring(t, wl, "curl")
 
 		// Cat files that are covered by the wildcard opens.
 		allowedFiles := []string{
@@ -1856,10 +1933,10 @@ func Test_27_ApplicationProfileOpens(t *testing.T) {
 			"/etc/ssl/openssl.cnf", // exact match
 		}
 		for _, f := range allowedFiles {
-			stdout, stderr, err := wl.ExecIntoPod([]string{"cat", f}, "curl")
-			if err != nil {
-				t.Logf("exec 'cat %s' failed: %v (stdout=%q stderr=%q)", f, err, stdout, stderr)
-			}
+			probeCtx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			stdout, stderr, err := wl.ExecIntoPodNoTTYWithContext(probeCtx, []string{"cat", f}, "curl")
+			cancel()
+			require.NoError(t, err, "cat %s in curl must run (stdout=%q stderr=%q)", f, stdout, stderr)
 		}
 
 		// Poll for alerts to propagate.
@@ -1982,8 +2059,7 @@ func Test_33_AnalyzeOpensWildcardAnchoring(t *testing.T) {
 		// pushing the total test runtime into a different regime.
 		require.NoError(t, wl.WaitForReady(180), "workload not ready in ns %s", ns.Name)
 
-		// Wait for node-agent to load the user-defined profile into cache.
-		time.Sleep(10 * time.Second)
+		waitForProfileMonitoring(t, wl, "nginx")
 		return wl
 	}
 
@@ -3315,8 +3391,16 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		return count(alerts, "R9902", "c-none") > 0 &&
-			count(alerts, "R9902", "c-pts0") > 0 &&
+		if count(alerts, "R9902", "c-none") == 0 {
+			// Repeating a non-TTY probe cannot change the terminal under test.
+			// Keep the pristine pts/0 and concurrent-TTY probes single-shot.
+			stdout, stderr, probeErr := wl.ExecIntoPodNoTTY(probe, "c-none")
+			if probeErr != nil {
+				t.Logf("no-TTY control probe: %v; stdout=%q stderr=%q", probeErr, stdout, stderr)
+			}
+			return false
+		}
+		return count(alerts, "R9902", "c-pts0") > 0 &&
 			count(alerts, "R9902", "c-conc") > 0
 	}, 180*time.Second, 5*time.Second,
 		"control rule R9902 must fire for all three probe execs -- if it does not, the trigger or the rule pipeline is broken, not the TTY field")
@@ -3366,34 +3450,25 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 		path.Join(utils.CurrentDir(), "resources/percontainer-deployment.yaml"))
 	require.NoError(t, err)
 	require.NoError(t, wl.WaitForReady(80))
-	// Cache-load latency on the ContainerProfileCache is bursty; 30s covers the
-	// observed worst case on a loaded runner (matches Test_28).
-	time.Sleep(30 * time.Second)
+	waitForProfileMonitoring(t, wl, "app")
+	waitForProfileMonitoring(t, wl, "sidecar")
 
-	// Exercise each container with BOTH binaries. Expected R0001 (unexpected
-	// process) per the inverse allow-lists:
-	//   app     : whoami -> R0001 (not allowed) ; id -> allowed (no alert)
-	//   sidecar : id     -> R0001 (not allowed) ; whoami -> allowed (no alert)
-	wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "app")
-	wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
-	wl.ExecIntoPod([]string{"/usr/bin/id"}, "sidecar")
-	wl.ExecIntoPod([]string{"/usr/bin/whoami"}, "sidecar")
-
-	var alerts []testutils.Alert
-	require.Eventually(t, func() bool {
-		var e error
-		alerts, e = testutils.GetAlerts(wl.Namespace)
-		return e == nil
-	}, 60*time.Second, 5*time.Second, "must be able to fetch alerts")
-	// Extra settle time for remaining alerts.
-	time.Sleep(10 * time.Second)
-	alerts, _ = testutils.GetAlerts(wl.Namespace)
-
-	for i, a := range alerts {
-		t.Logf("  [%d] %s(%s) comm=%s container=%s", i,
-			a.Labels["rule_name"], a.Labels["rule_id"], a.Labels["comm"], a.Labels["container_name"])
+	probe := func(t *testing.T, ctx context.Context, container, binary string) {
+		t.Helper()
+		commandCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		stdout, stderr, err := wl.ExecIntoPodNoTTYWithContext(commandCtx, []string{binary}, container)
+		require.NoError(t, err, "exec %s in %s: stdout=%q stderr=%q", binary, container, stdout, stderr)
 	}
-
+	fetchAlerts := func(t *testing.T, ctx context.Context) []testutils.Alert {
+		t.Helper()
+		requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		alerts, err := testutils.GetAlertsWithContext(requestCtx, wl.Namespace)
+		require.NoError(t, err, "fetch per-container alerts")
+		return alerts
+	}
+	var alerts []testutils.Alert
 	countR0001 := func(container, comm string) int {
 		n := 0
 		for _, a := range alerts {
@@ -3404,6 +3479,33 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 			}
 		}
 		return n
+	}
+
+	// Both profiles must enforce their inverse allow-lists. Re-triggering is
+	// safe here because assertions concern presence, not exact alert counts.
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+	for ctx.Err() == nil {
+		// Send the allowed probe before its forbidden control in each container.
+		probe(t, ctx, "app", "/usr/bin/id")
+		probe(t, ctx, "app", "/usr/bin/whoami")
+		probe(t, ctx, "sidecar", "/usr/bin/whoami")
+		probe(t, ctx, "sidecar", "/usr/bin/id")
+		alerts = fetchAlerts(t, ctx)
+		if countR0001("app", "whoami") > 0 && countR0001("sidecar", "id") > 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+		}
+	}
+	// Retain the existing delivery window before checking allowed commands.
+	time.Sleep(10 * time.Second)
+	alerts = fetchAlerts(t, t.Context())
+	for i, a := range alerts {
+		t.Logf("  [%d] %s(%s) comm=%s container=%s", i,
+			a.Labels["rule_name"], a.Labels["rule_id"], a.Labels["comm"], a.Labels["container_name"])
 	}
 
 	// The forbidden process in each container MUST alert.
@@ -3435,21 +3537,20 @@ func Test_36_MultiContainerPerContainerBinding(t *testing.T) {
 		_, err = storageClient.ContainerProfiles(ns.Name).Update(context.Background(), cp, v1.UpdateOptions{})
 		require.NoError(t, err, "update percontainer-app to forbid id")
 
-		time.Sleep(45 * time.Second)
-		wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
-
-		require.Eventually(t, func() bool {
-			a2, e := testutils.GetAlerts(wl.Namespace)
-			if e != nil {
-				return false
+		ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+		defer cancel()
+		for ctx.Err() == nil {
+			probe(t, ctx, "app", "/usr/bin/id")
+			alerts = fetchAlerts(t, ctx)
+			if countR0001("app", "id") > 0 {
+				break
 			}
-			for _, a := range a2 {
-				if a.Labels["rule_id"] == "R0001" && a.Labels["container_name"] == "app" && a.Labels["comm"] == "id" {
-					return true
-				}
+			select {
+			case <-ctx.Done():
+			case <-time.After(5 * time.Second):
 			}
-			return false
-		}, 90*time.Second, 5*time.Second,
+		}
+		require.Greater(t, countR0001("app", "id"), 0,
 			"after percontainer-app is updated to forbid id, the reconciler refresh must re-fetch and re-project it so id now fires R0001 in app")
 	})
 }
@@ -3753,22 +3854,61 @@ func Test_25_RuleCooldownExactThreshold(t *testing.T) {
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/static-authored-deployment.yaml"))
 	require.NoError(t, err, "create static workload")
 	require.NoError(t, wl.WaitForReady(80), "workload ready")
-	time.Sleep(40 * time.Second)
+	// Use a different command/cooldown key to prove monitoring is active
+	// before issuing the fixed set of counted id probes.
+	waitForProfileMonitoring(t, wl, "app")
+	execID := func() {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+		defer cancel()
+		stdout, stderr, err := wl.ExecIntoPodNoTTYWithContext(ctx, []string{"/usr/bin/id"}, "app")
+		require.NoError(t, err, "counted id probe; stdout=%q stderr=%q", stdout, stderr)
+	}
 
 	for i := 0; i < 20; i++ {
-		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		execID()
 		time.Sleep(1 * time.Second)
 	}
-	time.Sleep(30 * time.Second)
-	require.Equal(t, 10, countRuleAlerts(t, ns.Name, "R0001", "app", "id"),
+	countID := func(ctx context.Context) (int, error) {
+		alerts, err := testutils.GetAlertsWithContext(ctx, ns.Name)
+		if err != nil {
+			return 0, err
+		}
+		count := 0
+		for _, alert := range alerts {
+			if alert.Labels["rule_id"] == "R0001" && alert.Labels["container_name"] == "app" && alert.Labels["comm"] == "id" {
+				count++
+			}
+		}
+		return count, nil
+	}
+	var observed int
+	var fetchErr error
+	pollCtx, pollCancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer pollCancel()
+	err = wait.PollUntilContextCancel(pollCtx, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+		count, err := countID(ctx)
+		fetchErr = err
+		if fetchErr != nil {
+			return false, nil
+		}
+		observed = count
+		return observed >= 10, nil
+	})
+	require.NoError(t, err, "20 successful id probes must reach the cooldown threshold (observed=%d, last fetch error=%v)", observed, fetchErr)
+	require.Equal(t, 10, observed,
 		"cooldown must cap identical alerts at ruleCooldownAfterCount (10) despite 20 execs")
 
 	for i := 0; i < 10; i++ {
-		_, _, _ = wl.ExecIntoPod([]string{"/usr/bin/id"}, "app")
+		execID()
 		time.Sleep(1 * time.Second)
 	}
 	time.Sleep(30 * time.Second)
-	require.Equal(t, 10, countRuleAlerts(t, ns.Name, "R0001", "app", "id"),
+	finalCtx, finalCancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer finalCancel()
+	observed, err = countID(finalCtx)
+	require.NoError(t, err, "fetch alerts after suppression probes")
+	require.Equal(t, 10, observed,
 		"once cooled down, further identical execs add no alerts (suppression holds for ruleCooldownDuration)")
 }
 

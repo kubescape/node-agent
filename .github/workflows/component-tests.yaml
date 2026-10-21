@@ -11,7 +11,7 @@ permissions: read-all
 
 jobs:
   build-and-push-image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -27,7 +27,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq curl
           IG_ARCH=amd64
-          IG_VERSION=$(curl -s https://api.github.com/repos/inspektor-gadget/inspektor-gadget/releases/latest | jq -r .tag_name)
+          IG_VERSION=v0.57.0
           echo "Installing IG version: ${IG_VERSION}"
           curl -sL https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-${IG_ARCH}-${IG_VERSION}.tar.gz | sudo tar -C /usr/local/bin -xzf - ig
           sudo chmod +x /usr/local/bin/ig
@@ -69,11 +69,13 @@ jobs:
       image_repo: ${{ steps.build-and-push-image.outputs.image_repo }}
 
   component-tests:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 kernel 7.0.0-1017-azure loses syscall BPF events on all but one CPU.
+    # Follow IG CI until https://github.com/actions/runner-images/issues/15003 is fixed.
+    runs-on: ubuntu-22.04
     needs: build-and-push-image
-    continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
+      fail-fast: false
       matrix:
         test: [
           Test_01_BasicAlertTest,
@@ -121,42 +123,45 @@ jobs:
         with:
           name: node-agent-image
 
-      - name: Load fork PR image
-        if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-        run: |
-          docker load -i node-agent-image.tar
+      - name: Set up native Kubernetes node
+        timeout-minutes: 22
+        run: ./tests/scripts/setup-native-component-cluster.sh
 
-      - name: Set up Kind
+      - name: Capture native runtime diagnostics
+        timeout-minutes: 2
         run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
-          chmod +x ./kind
-          ./kind create cluster
-          curl -LO "https://dl.k8s.io/release/v1.35.0/bin/linux/amd64/kubectl"
-          chmod +x ./kubectl
-          sudo mv ./kubectl /usr/local/bin/kubectl
+          mkdir -p diagnostics
+          {
+            timeout --kill-after=1s 10s minikube version || true
+            timeout --kill-after=1s 10s docker version || true
+            timeout --kill-after=1s 10s containerd --version || true
+            timeout --kill-after=1s 10s runc --version || true
+            uname -a
+            readlink /proc/1/ns/pid
+          } 2>&1 | tee diagnostics/cluster-runtime.txt
 
-      - name: Load fork PR image into Kind
+      - name: Load fork PR image into native runtime
         if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-        run: |
-          ./kind load docker-image \
-            ${{ needs.build-and-push-image.outputs.image_repo }}:${{ needs.build-and-push-image.outputs.image_tag }}
+        timeout-minutes: 3
+        run: sudo minikube image load "${PWD}/node-agent-image.tar"
 
       - name: Install Helm and Kubectl
         run: |
           curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
           chmod 700 get_helm.sh
-          sudo ./get_helm.sh
+          sudo ./get_helm.sh --version v3.22.1
 
       - name: Install Prometheus and Node Exporter
         run: |
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
-          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --set grafana.enabled=false --namespace monitoring --create-namespace --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false,prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false --set prometheus.prometheusSpec.maximumStartupDurationSeconds=300 --wait --timeout 5m
+          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --version 92.11.0 --set grafana.enabled=false --namespace monitoring --create-namespace --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false,prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false --set prometheus.prometheusSpec.maximumStartupDurationSeconds=300 --wait --timeout 5m
           # Check that the prometheus pod is running
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s
       - name: Install Node Agent Chart
+        env:
+          STORAGE_TAG: v0.0.354
         run: |
-          STORAGE_TAG=$(./tests/scripts/storage-tag.sh)
           echo "Storage tag that will be used: ${STORAGE_TAG}"
           helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${{ needs.build-and-push-image.outputs.image_tag }} --set nodeAgent.image.repository=${{ needs.build-and-push-image.outputs.image_repo }} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 10m --debug
           # Check that the node-agent pod is running
@@ -170,7 +175,7 @@ jobs:
           CGO_ENABLED: 0
         uses: actions/setup-go@7b8cf10d4e4a01d4992d18a89f4d7dc5a3e6d6f4 # v4
         with:
-          go-version: "1.27"
+          go-version: "1.27.2"
       - name: Download test dependencies
         working-directory: tests
         run: |
@@ -189,12 +194,95 @@ jobs:
           sudo sh -c "ulimit -l unlimited"
       - name: Run test
         run: |
-          cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
-      - name: Print node agent & storage logs
+          repetitions=1
+          if [ "${{ matrix.test }}" = "Test_01_BasicAlertTest" ]; then
+            repetitions=3
+          fi
+          cd tests && go test -v ./... -run '^${{ matrix.test }}$' -count="$repetitions" --timeout=20m --tags=component
+      - name: Collect component test diagnostics
         if: always()
+        timeout-minutes: 5
         run: |
-          echo "Node agent logs"
-          kubectl logs $(kubectl get pods -n kubescape -o name | grep node-agent) -n kubescape -c node-agent
-          echo "-----------------------------------------"
-          echo "Storage logs"
-          kubectl logs $(kubectl get pods -n kubescape -o name | grep storage) -n kubescape
+          mkdir -p diagnostics
+          collect() {
+            timeout --kill-after=1s 10s kubectl --request-timeout=8s "$@"
+          }
+          collect_goroutines() (
+            namespace=$1
+            pod=$2
+            prefix="diagnostics/${namespace}-${pod}-goroutines"
+            timeout --kill-after=1s 8s kubectl --request-timeout=5s \
+              -n "$namespace" port-forward --address=127.0.0.1 "pod/$pod" :6060 \
+              > "${prefix}-port-forward.log" 2>&1 &
+            forward_pid=$!
+            trap 'kill "$forward_pid" 2>/dev/null || true; wait "$forward_pid" 2>/dev/null || true' EXIT
+            trap 'exit 0' INT TERM
+            port=""
+            for attempt in 1 2 3 4 5 6; do
+              port=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\) -> 6060$/\1/p' "${prefix}-port-forward.log")
+              [ -z "$port" ] || break
+              kill -0 "$forward_pid" 2>/dev/null || break
+              sleep 0.5
+            done
+            if [ -n "$port" ]; then
+              curl --noproxy '*' --fail --silent --show-error --connect-timeout 1 --max-time 4 \
+                "http://127.0.0.1:${port}/debug/pprof/goroutine?debug=2" \
+                > "${prefix}.txt" 2> "${prefix}-error.txt" || true
+            else
+              echo "Profiler port-forward did not become ready" > "${prefix}-error.txt"
+            fi
+          )
+          # Retain runtime PID identity to diagnose process-tree attribution.
+          {
+            ps -e -o pid=,comm= | awk '$2 ~ /^containerd-shim/ { print $1 }' | head -64 | while read -r shim_pid; do
+              echo "Host shim: ${shim_pid}"
+              awk '/^(Name|Pid|PPid|NSpid):/' "/proc/${shim_pid}/status" || true
+            done
+            readlink /proc/1/ns/pid || true
+          } > diagnostics/shim-pid-namespaces.txt 2>&1
+          collect get pods -A -o json > diagnostics/pods.json 2> diagnostics/pods-error.txt || true
+          # Preserve agent/storage logs before querying optional aggregated APIs.
+          jq -r '[.items[] | select(.metadata.namespace == "kubescape") |
+            select(.metadata.name | test("^(node-agent|storage)-"))] | .[:4][] |
+            [.metadata.namespace, .metadata.name] | @tsv' diagnostics/pods.json > diagnostics/core-pods.txt || true
+          while read -r namespace pod; do
+            [ -n "$pod" ] || continue
+            collect logs -n "$namespace" "$pod" --all-containers=true --timestamps=true --limit-bytes=10485760 > "diagnostics/${namespace}-${pod}.log" 2>&1 || true
+            collect logs -n "$namespace" "$pod" --all-containers=true --timestamps=true --limit-bytes=10485760 --previous > "diagnostics/${namespace}-${pod}-previous.log" 2>&1 || true
+            if [[ "$pod" == node-agent-* ]]; then
+              collect_goroutines "$namespace" "$pod"
+            fi
+          done < diagnostics/core-pods.txt
+          collect get --raw /api/v1/namespaces/kubescape/services/node-agent:prometheus/proxy/metrics > diagnostics/node-agent-metrics.txt 2>&1 || true
+          collect get events -A --sort-by=.metadata.creationTimestamp > diagnostics/events.txt 2>&1 || true
+          # Storage's default LIST contains metadata only; request real payloads.
+          collect get --raw '/apis/spdx.softwarecomposition.kubescape.io/v1beta1/containerprofiles?resourceVersion=fullSpec' > diagnostics/containerprofiles.spdx.softwarecomposition.kubescape.io.yaml 2>&1 || true
+          for resource in \
+            rules.kubescape.io \
+            runtimerulealertbindings.kubescape.io; do
+            collect get "$resource" -A -o yaml > "diagnostics/${resource}.yaml" 2>&1 || true
+          done
+          # Cap workload logs and prioritize failed or terminated test containers.
+          jq -r '[.items[] | select(.metadata.namespace | startswith("node-agent-test-"))] |
+            sort_by(if .status.phase == "Failed" then 0
+              elif any(.status.containerStatuses[]?; .state.terminated != null) then 1
+              else 2 end) | .[:4][] |
+            [.metadata.namespace, .metadata.name] | @tsv' diagnostics/pods.json > diagnostics/test-pods.txt || true
+          while read -r namespace pod; do
+            [ -n "$pod" ] || continue
+            collect logs -n "$namespace" "$pod" --all-containers=true --timestamps=true --limit-bytes=1048576 > "diagnostics/${namespace}-${pod}.log" 2>&1 || true
+            collect logs -n "$namespace" "$pod" --all-containers=true --timestamps=true --limit-bytes=1048576 --previous > "diagnostics/${namespace}-${pod}-previous.log" 2>&1 || true
+          done < diagnostics/test-pods.txt
+          for resource in \
+            applicationprofiles.spdx.softwarecomposition.kubescape.io \
+            networkneighborhoods.spdx.softwarecomposition.kubescape.io; do
+            collect get "$resource" -A -o yaml > "diagnostics/${resource}.yaml" 2>&1 || true
+          done
+
+      - name: Upload component test diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: component-diagnostics-${{ matrix.test }}-${{ github.run_attempt }}
+          path: diagnostics/
+          retention-days: 7

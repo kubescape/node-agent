@@ -194,7 +194,7 @@ func CreateContainerWatcher(
 
 	ebpfDropCounter, _ := otelsetup.Meter().Int64Counter(
 		"node_agent.ebpf.events_dropped.total",
-		metric.WithDescription("Total eBPF events dropped due to backpressure or profile drops"),
+		metric.WithDescription("Total eBPF events dropped due to backpressure, profile drops, or missing container attribution"),
 	)
 
 	return &ContainerWatcher{

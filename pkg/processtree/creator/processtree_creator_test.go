@@ -164,7 +164,6 @@ func TestHandleExecEvent(t *testing.T) {
 
 	// Mock container tree methods
 	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.Anything).Return(false)
-	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(999), nil)
 
 	// First create a process with fork event
 	forkEvent := conversion.ProcessEvent{
@@ -195,7 +194,7 @@ func TestHandleExecEvent(t *testing.T) {
 	proc := impl.processMap.Get(1234)
 	assert.NotNil(t, proc)
 	assert.Equal(t, uint32(1234), proc.PID)
-	assert.Equal(t, uint32(999), proc.PPID)   // Should be updated to shim PID
+	assert.Equal(t, uint32(1000), proc.PPID)  // Preserve the unresolved parent
 	assert.Equal(t, "new-process", proc.Comm) // Should be updated
 	assert.Equal(t, "new-process --arg", proc.Cmdline)
 	assert.Equal(t, uint32(1000), *proc.Uid)
@@ -214,6 +213,9 @@ func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
 	// Mock container tree methods - GetPidByContainerID returns an error
 	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.Anything).Return(false)
 	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(0), fmt.Errorf("container not found"))
+
+	// The parent is positively outside the container, so exec attempts fallback.
+	impl.processMap.Set(1000, &armotypes.Process{PID: 1000, PPID: 1})
 
 	// First create a process with fork event
 	forkEvent := conversion.ProcessEvent{

@@ -14,7 +14,59 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestSendRuleAlertIdentityLabels(t *testing.T) {
+	uid, gid := uint32(1000), uint32(4294967295)
+	zero := uint32(0)
+	for _, tc := range []struct {
+		name     string
+		uid, gid *uint32
+		wantUID  string
+		wantGID  string
+	}{
+		{name: "values", uid: &uid, gid: &gid, wantUID: "1000", wantGID: "4294967295"},
+		{name: "root", uid: &zero, gid: &zero, wantUID: "0", wantGID: "0"},
+		{name: "missing", wantUID: "0", wantGID: "0"},
+		{name: "missing uid", gid: &gid, wantUID: "0", wantGID: "4294967295"},
+		{name: "missing gid", uid: &uid, wantUID: "1000", wantGID: "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			received := make(chan []byte, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				received <- body
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+			exporter := InitAlertManagerExporter(strings.TrimPrefix(server.URL, "http://"))
+			require.NotNil(t, exporter)
+			exporter.SendRuleAlert(&types.GenericRuleFailure{
+				RuntimeProcessDetails: armotypes.ProcessTree{
+					ProcessTree: armotypes.Process{Uid: tc.uid, Gid: tc.gid},
+				},
+			})
+			var body []byte
+			select {
+			case body = <-received:
+			default:
+				t.Fatal("alert was not sent")
+			}
+			var alerts []struct {
+				Labels map[string]string `json:"labels"`
+			}
+			require.NoError(t, json.Unmarshal(body, &alerts))
+			require.Len(t, alerts, 1)
+			assert.Equal(t, tc.wantUID, alerts[0].Labels["uid"])
+			assert.Equal(t, tc.wantGID, alerts[0].Labels["gid"])
+		})
+	}
+}
 
 func TestSendAlert(t *testing.T) {
 	// Set up a mock Alertmanager server

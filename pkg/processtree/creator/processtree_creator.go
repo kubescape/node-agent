@@ -176,6 +176,15 @@ func (pt *processTreeCreatorImpl) UpdatePPID(proc *armotypes.Process, event conv
 			return
 		}
 
+		// Container membership walks assume acyclic ancestry. Do not introduce
+		// an edge into a corrupt chain or walk one already present.
+		if _, cyclic := pt.ancestryRoot(event.PPID); cyclic {
+			return
+		}
+		if _, cyclic := pt.ancestryRoot(proc.PID); cyclic {
+			return
+		}
+
 		// First check if new PPID is under any container subtree
 		IsNewPPIDUnderContainer := pt.containerTree.IsProcessUnderContainer(event.PPID, event.ContainerID, &pt.processMap)
 		if IsNewPPIDUnderContainer {
@@ -187,6 +196,23 @@ func (pt *processTreeCreatorImpl) UpdatePPID(proc *armotypes.Process, event conv
 			}
 		}
 	}
+}
+
+// ancestryRoot distinguishes a known host boundary from incomplete ancestry.
+// A missing node or a zero-parent placeholder is unknown. The node-count bound
+// also detects cycles without allocating or reading procfs under the tree lock.
+func (pt *processTreeCreatorImpl) ancestryRoot(pid uint32) (root uint32, cyclic bool) {
+	for remaining := pt.processMap.Len() + 1; remaining > 0; remaining-- {
+		if pid == 1 {
+			return 1, false
+		}
+		proc, ok := pt.processMap.Load(pid)
+		if !ok || proc.PPID == 0 {
+			return 0, false
+		}
+		pid = proc.PPID
+	}
+	return 0, true
 }
 
 // ensureStartTime gives a fork/exec-created node its process identity without
@@ -415,11 +441,17 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 	pt.UpdatePPID(proc, event)
 
 	if pt.config.KubernetesMode {
-		isCurrentUnderContainer := pt.containerTree.IsProcessUnderContainer(proc.PID, event.ContainerID, &pt.processMap)
-		if !isCurrentUnderContainer {
-			shimPid, err := pt.containerTree.GetPidByContainerID(event.ContainerID)
-			if err == nil {
-				pt.updateProcessPPID(proc, shimPid)
+		root, cyclic := pt.ancestryRoot(proc.PID)
+		// Unknown parents can arrive after this exec. Preserve the raw parent
+		// instead of permanently cutting that chain at the shim. Retain fallback
+		// for proven host ancestry and the legacy fresh, parentless exec case.
+		if !cyclic && (root == 1 || (proc.PPID == 0 && event.PPID == 0)) {
+			isCurrentUnderContainer := pt.containerTree.IsProcessUnderContainer(proc.PID, event.ContainerID, &pt.processMap)
+			if !isCurrentUnderContainer {
+				shimPid, err := pt.containerTree.GetPidByContainerID(event.ContainerID)
+				if err == nil {
+					pt.updateProcessPPID(proc, shimPid)
+				}
 			}
 		}
 	}
@@ -547,7 +579,11 @@ func (pt *processTreeCreatorImpl) isDescendant(parentPID, targetPID uint32) bool
 	}
 
 	current := target
-	for current != nil && current.PPID != 0 {
+	for remaining := pt.processMap.Len() + 1; current != nil && current.PPID != 0; remaining-- {
+		if remaining == 0 {
+			// A corrupt candidate chain cannot safely become a new parent.
+			return true
+		}
 		if current.PPID == parentPID {
 			return true
 		}

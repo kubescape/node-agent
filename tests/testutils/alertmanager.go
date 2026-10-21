@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,14 +25,18 @@ type Alert struct {
 
 // GetAlerts retrieves and filters alerts from Alertmanager
 func GetAlerts(namespace string) ([]Alert, error) {
+	return GetAlertsWithContext(context.Background(), namespace)
+}
+
+func GetAlertsWithContext(ctx context.Context, namespace string) ([]Alert, error) {
 	url := alertManagerURL
 	if envURL, exists := os.LookupEnv("ALERTMANAGER_URL"); exists {
 		url = envURL
 	}
 
-	alerts, err := getActiveAlerts(url)
+	alerts, err := getActiveAlerts(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("could not get alerts: %v", err)
+		return nil, fmt.Errorf("could not get alerts: %w", err)
 	}
 
 	alerts = filterAlertsByLabel(alerts, "alertname", "KubescapeRuleViolated")
@@ -40,11 +45,15 @@ func GetAlerts(namespace string) ([]Alert, error) {
 	return alerts, nil
 }
 
-func getActiveAlerts(alertManagerURL string) ([]Alert, error) {
+func getActiveAlerts(ctx context.Context, alertManagerURL string) ([]Alert, error) {
 	endpoint := fmt.Sprintf("%s/api/v2/alerts?active=true", alertManagerURL)
-	response, err := http.Get(endpoint)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error connecting: %v", err)
+		return nil, fmt.Errorf("create alert request: %w", err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("error connecting: %w", err)
 	}
 	defer response.Body.Close()
 

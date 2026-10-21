@@ -7,6 +7,8 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -102,7 +104,7 @@ func NewEventHandlerFactory(
 ) *EventHandlerFactory {
 	ebpfDropCounter, _ := otelsetup.Meter().Int64Counter(
 		"node_agent.ebpf.events_dropped.total",
-		metric.WithDescription("Total eBPF events dropped due to backpressure or profile drops"),
+		metric.WithDescription("Total eBPF events dropped due to backpressure, profile drops, or missing container attribution"),
 	)
 
 	factory := &EventHandlerFactory{
@@ -337,12 +339,14 @@ func computeEventDedupKey(enrichedEvent *events.EnrichedEvent) (key uint64, ttl 
 // ProcessEvent processes an event through all registered handlers
 func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent) {
 	if enrichedEvent.ContainerID == "" {
+		ehf.reportAttributionDrop(enrichedEvent, "missing_container_id")
 		return
 	}
 
 	// Get container information to check if it should be ignored
 	container, err := ehf.getContainerInfo(enrichedEvent.ContainerID)
 	if err != nil || container == nil {
+		ehf.reportAttributionDrop(enrichedEvent, "container_not_found")
 		return
 	}
 
@@ -425,6 +429,24 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	if !ruleOnly {
 		ehf.reportEventToThirdPartyTracers(enrichedEvent)
 	}
+}
+
+func (ehf *EventHandlerFactory) reportAttributionDrop(event *events.EnrichedEvent, reason string) {
+	eventType := string(event.Event.GetEventType())
+	ehf.ebpfDropCounter.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("event_type", eventType), attribute.String("reason", reason)))
+
+	// Keep process/container identity in logs only, not metric dimensions.
+	var mntns any
+	if raw, ok := event.Event.(interface{ GetMountNsID() uint64 }); ok {
+		mntns = raw.GetMountNsID()
+	}
+	logger.L().Debug("EventHandlerFactory - dropping event without container attribution",
+		helpers.String("reason", reason),
+		helpers.String("eventType", eventType),
+		helpers.Interface("pid", event.PID),
+		helpers.Interface("mntns", mntns),
+		helpers.String("containerID", event.ContainerID))
 }
 
 // registerHandlers registers all handlers for different event types
