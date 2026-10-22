@@ -108,11 +108,9 @@ func (c *ContainerProfileCacheImpl) verifyUserContainerProfileVerdict(profile *v
 		}
 		return verifyOK
 	}
-	// Classify the error: only ErrSignatureMismatch indicates an actual tamper
-	// event. Hash-computation, verifier-construction, and malformed-annotation
-	// errors are operational and MUST NOT raise R1016 — that would cause false
-	// alerts and, when signing is enforced, drop a valid overlay
-	// because of a transient operational failure.
+	// Invalid signatures, including malformed signature annotations, raise R1016.
+	// Hash-computation and verifier-construction failures are operational errors
+	// and do not indicate tampering.
 	if !errors.Is(err, signature.ErrSignatureMismatch) {
 		logger.L().Warning("user-defined ContainerProfile signature verification operational error (NOT tamper)",
 			helpers.String("profile", profile.Name),

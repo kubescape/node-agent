@@ -26,10 +26,8 @@ const (
 
 var ErrObjectNotSigned = errors.New("object is not signed (missing signature annotation)")
 
-// ErrSignatureMismatch wraps the underlying cosign verifier failure when a
-// signature is present but does not verify against the object's content +
-// certificate. Callers (e.g. ContainerProfileCache's tamper-alert path)
-// MUST distinguish this from operational errors (hash computation failure,
-// verifier construction failure, malformed signature annotations) — only
-// ErrSignatureMismatch indicates an actual tamper event.
+// ErrSignatureMismatch reports invalid signature material, including malformed
+// annotations, or a signature that does not verify against the object's content
+// and certificate. Callers distinguish this from verification machinery errors
+// such as hash computation or verifier construction failures.
 var ErrSignatureMismatch = errors.New("signature verification failed")

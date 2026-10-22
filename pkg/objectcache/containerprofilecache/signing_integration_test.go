@@ -4,6 +4,7 @@ package containerprofilecache
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/signature"
@@ -104,4 +105,30 @@ func TestSigningPolicyReloadRejectsUnsignedCacheOnBundleError(t *testing.T) {
 	require.Empty(t, refused.UserCPRV)
 	require.Equal(t, admitted.UserCPRef, refused.UserCPRef)
 	require.NotEqual(t, admitted.Projected, refused.Projected)
+}
+
+func TestMalformedSignatureAnnotationsEmitTamperAlert(t *testing.T) {
+	for _, annotation := range []string{signature.AnnotationSignature, signature.AnnotationCertificate, signature.AnnotationTimestamp} {
+		for _, enforce := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/enforce=%t", annotation, enforce), func(t *testing.T) {
+				cp := authoredCP("authored", "/bin/signed", "1")
+				require.NoError(t, signature.SignObjectDisableKeyless(profiles.NewContainerProfileAdapter(cp)))
+				cp.Spec.Execs = []v1beta1.ExecCalls{{Path: "/bin/edited"}}
+				cp.Annotations[annotation] = "!malformed!"
+				c := &ContainerProfileCacheImpl{}
+				mode := bundle.ModeAlert
+				if enforce {
+					mode = bundle.ModeEnforce
+				}
+				c.SetBundleConfig(&bundle.TrustPolicy{Mode: mode})
+				exp := &captureExporter{}
+				c.SetTamperAlertExporter(exp)
+				_, refused, provenance := c.admitSignedProfile(cp, "wlid://cluster-a/namespace-default/deployment-test")
+				require.Equal(t, enforce, refused)
+				require.False(t, provenance.verifiedFlat)
+				require.Len(t, exp.ruleAlerts(), 1, "malformed annotations on signed content must produce R1016 even in alert mode")
+				require.Equal(t, "R1016", exp.ruleAlerts()[0].GetRuleId())
+			})
+		}
+	}
 }

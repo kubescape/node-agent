@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/signature"
 	"github.com/kubescape/node-agent/pkg/signature/bundle"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -153,17 +154,7 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 		return err
 	}
 
-	fragments := make([]*typesv1.Rules, 0, len(unstructuredList.Items))
-	for _, item := range unstructuredList.Items {
-		rules, err := unstructuredToRules(&item)
-		if err != nil {
-			logger.L().Warning("RulesWatcher - failed to convert rule during sync", helpers.Error(err))
-			continue
-		}
-		fragments = append(fragments, rules)
-	}
-
-	enabledRules, tally, signingEnabled, err := w.admitAndSyncRules(ctx, fragments, w.reportRulesDivergence)
+	enabledRules, tally, signingEnabled, err := w.admitAndSyncRules(ctx, unstructuredList.Items, w.reportRulesDivergence)
 	if err != nil {
 		return err
 	}
@@ -196,12 +187,21 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 // being checked. Holding policyMutex through SyncRules makes the generation
 // check and publication atomic with respect to SetTrustPolicy. Neither network
 // requests nor the watcher callback run under this lock.
-func (w *RulesWatcherImpl) admitAndSyncRules(ctx context.Context, fragments []*typesv1.Rules, onAdmitted func(*typesv1.Rules)) ([]typesv1.Rule, admissionTally, bool, error) {
+func (w *RulesWatcherImpl) admitAndSyncRules(ctx context.Context, items []unstructured.Unstructured, onAdmitted func(*typesv1.Rules)) ([]typesv1.Rule, admissionTally, bool, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, admissionTally{}, false, err
 		}
 		policy, signingEnabled, generation := w.trustPolicySnapshot()
+		fragments := make([]*typesv1.Rules, 0, len(items))
+		for i := range items {
+			rules, err := rulesForAdmission(&items[i], signingEnabled)
+			if err != nil {
+				logger.L().Warning("RulesWatcher - failed to convert rule during sync", helpers.Error(err))
+				continue
+			}
+			fragments = append(fragments, rules)
+		}
 		enabledRules, tally := admitFragments(fragments, policy, signingEnabled, onAdmitted)
 		w.policyMutex.RLock()
 		if generation != w.policyGeneration {
@@ -216,6 +216,26 @@ func (w *RulesWatcherImpl) admitAndSyncRules(ctx context.Context, fragments []*t
 
 func (w *RulesWatcherImpl) InitialSync(ctx context.Context) error {
 	return w.syncAllRulesFromCluster(ctx)
+}
+
+// Embedded signatures authenticate their own spec. Decode only the carrier's
+// identity before admission so malformed display-only spec cannot remove rules.
+func rulesForAdmission(obj *unstructured.Unstructured, signingEnabled bool) (*typesv1.Rules, error) {
+	if _, embedded := obj.GetAnnotations()[signature.AnnotationContent]; !signingEnabled || !embedded {
+		return unstructuredToRules(obj)
+	}
+	carrier := obj.DeepCopy()
+	delete(carrier.Object, "spec")
+	rules := &typesv1.Rules{}
+	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(carrier.Object, rules); err != nil {
+		return nil, err
+	}
+	// Preserve a decodable stored spec only for divergence diagnostics.
+	stored := &typesv1.Rules{}
+	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, stored); err == nil {
+		rules.Spec = stored.Spec
+	}
+	return rules, nil
 }
 
 func unstructuredToRules(obj *unstructured.Unstructured) (*typesv1.Rules, error) {

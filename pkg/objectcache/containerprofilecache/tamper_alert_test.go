@@ -84,7 +84,6 @@ func TestVerifyClassification_OperationalErrorDistinguishable(t *testing.T) {
 	}{
 		{"hash computation failure", fmt.Errorf("failed to compute content hash: %w", errors.New("io error"))},
 		{"verifier construction failure", fmt.Errorf("failed to create verifier: %w", errors.New("missing root certs"))},
-		{"decode signature failure", fmt.Errorf("failed to decode signature from annotations: %w", errors.New("base64 invalid"))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if errors.Is(tc.err, signature.ErrSignatureMismatch) {

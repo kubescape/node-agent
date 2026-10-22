@@ -40,7 +40,9 @@ func VerifyObject(obj SignableObject, opts ...VerifyOption) error {
 
 	sig, err := adapter.DecodeSignatureFromAnnotations(annotations)
 	if err != nil {
-		return fmt.Errorf("failed to decode signature from annotations: %w", err)
+		// Annotation bytes are supplied by the object, so decoding failures
+		// are invalid signature material, not verification machinery failures.
+		return fmt.Errorf("%w: failed to decode signature from annotations: %w", ErrSignatureMismatch, err)
 	}
 
 	// When the canonical signed content is embedded (vendor-shipped artifacts),

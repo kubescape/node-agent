@@ -124,3 +124,20 @@ func TestEmbedContent_MalformedIsTamper(t *testing.T) {
 		t.Fatalf("malformed embedded content on a signed object must classify as tamper; got %v", err)
 	}
 }
+
+func TestMalformedSignatureAnnotationsAreSignatureMismatch(t *testing.T) {
+	for _, annotation := range []string{AnnotationSignature, AnnotationCertificate, AnnotationTimestamp} {
+		t.Run(annotation, func(t *testing.T) {
+			obj := embedContentFixture(t)
+			if err := SignObjectDisableKeyless(obj); err != nil {
+				t.Fatal(err)
+			}
+			annotations := obj.GetAnnotations()
+			annotations[annotation] = "!malformed!"
+			obj.SetAnnotations(annotations)
+			if err := VerifyObjectAllowUntrusted(obj); !errors.Is(err, ErrSignatureMismatch) {
+				t.Fatalf("malformed signature material must report ErrSignatureMismatch, got %v", err)
+			}
+		})
+	}
+}

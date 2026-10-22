@@ -4,6 +4,8 @@ package ruleswatcher
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sync"
 	"testing"
 	"time"
@@ -30,9 +32,13 @@ func TestPolicyReloadCannotBeOverwrittenByInFlightAdmission(t *testing.T) {
 	admitted, resume := make(chan struct{}), make(chan struct{})
 	var release sync.Once
 	defer release.Do(func() { close(resume) })
+	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
 	go func() {
-		_, _, _, err := w.admitAndSyncRules(context.Background(), []*typesv1.Rules{fragment}, func(*typesv1.Rules) {
+		_, _, _, err := w.admitAndSyncRules(context.Background(), []unstructured.Unstructured{{Object: raw}}, func(*typesv1.Rules) {
 			close(admitted)
 			<-resume
 		})

@@ -3,12 +3,17 @@
 package ruleswatcher
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/signature"
 	"github.com/kubescape/node-agent/pkg/signature/bundle"
+	"github.com/kubescape/node-agent/pkg/signature/profiles"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // admissionTally counts what one sync pass did, for the log line and the
@@ -65,6 +70,9 @@ func admitFragments(fragments []*typesv1.Rules, policy *bundle.TrustPolicy, sign
 
 		if signingEnabled {
 			verified, admitErr := bundle.AdmitRulesFragment(rules, *policy)
+			if admitErr == nil {
+				admitErr = validateAdmittedRules(rules, verified.Rules)
+			}
 			if admitErr != nil {
 				// A3: drop this fragment whole and move on. Nothing already
 				// collected is revisited.
@@ -103,4 +111,29 @@ func admitFragments(fragments []*typesv1.Rules, policy *bundle.TrustPolicy, sign
 	}
 
 	return enabledRules, tally
+}
+
+// Validate the authenticated view, including raw fields that typed decoding can
+// discard, before admitting any rules from the fragment.
+func validateAdmittedRules(carrier *typesv1.Rules, rules []typesv1.Rule) error {
+	if content, present, err := signature.EmbeddedContent(profiles.NewRulesAdapter(carrier)); present {
+		if err != nil {
+			return err
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(content, &raw); err != nil {
+			return err
+		}
+		if err := validateRawProfileDataInUnstructured(&unstructured.Unstructured{Object: raw}); err != nil {
+			return err
+		}
+	}
+	for _, rule := range rules {
+		if rule.ProfileDataRequired != nil {
+			if err := rule.ProfileDataRequired.Validate(); err != nil {
+				return fmt.Errorf("rule %q invalid profileDataRequired: %w", rule.ID, err)
+			}
+		}
+	}
+	return nil
 }
