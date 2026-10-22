@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/DmitriyVTitov/size"
+	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
@@ -372,7 +373,7 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 
 // ReportNetworkEvent reports a network event for a container
 func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event utils.NetworkEvent) {
-	if !cpm.isValidNetworkEvent(event) {
+	if !cpm.isValidNetworkEvent(containerID, event) {
 		return
 	}
 
@@ -468,7 +469,7 @@ func (cpm *ContainerProfileManager) ReportSyscalls(containerID string, syscalls 
 }
 
 // isValidNetworkEvent checks if the network event is valid for processing
-func (cpm *ContainerProfileManager) isValidNetworkEvent(event utils.NetworkEvent) bool {
+func (cpm *ContainerProfileManager) isValidNetworkEvent(containerID string, event utils.NetworkEvent) bool {
 	pktType := event.GetPktType()
 	// Unknown type, shouldn't happen
 	if pktType != utils.HostPktType && pktType != utils.OutgoingPktType {
@@ -481,8 +482,8 @@ func (cpm *ContainerProfileManager) isValidNetworkEvent(event utils.NetworkEvent
 		return false
 	}
 
-	// Ignore host netns
-	if event.GetHostNetwork() {
+	// Learn host traffic only in the host profile, not in profiles for hostNetwork pods.
+	if event.GetHostNetwork() && containerID != armotypes.HostContainerID {
 		return false
 	}
 

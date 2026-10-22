@@ -97,14 +97,33 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	r.setContextSpecificFields(ruleFailure, enrichedEvent)
 	r.enrichRuleFailure(ruleFailure)
 
-	if enrichedEvent.ProcessTree.PID != 0 {
+	eventProcess := ruleFailure.GetRuntimeProcessDetails().ProcessTree
+	eventComm := eventProcess.Comm
+	if enrichedEvent.Event.GetEventType() == utils.SyscallEventType {
+		// Syscall events can carry a container name instead of a process comm.
+		eventComm = ""
+	}
+	if tree, ok := eventProcessTree(enrichedEvent.ProcessTree, eventProcess, eventComm); ok {
 		ruleFailure.SetRuntimeProcessDetails(armotypes.ProcessTree{
-			ProcessTree: enrichedEvent.ProcessTree,
+			ProcessTree: tree,
 			ContainerID: enrichedEvent.ContainerID,
 		})
 	}
 
 	return ruleFailure
+}
+
+// eventProcessTree accepts enrichment only when it contains the event process.
+// A mismatched comm can indicate PID reuse or a stale tree after exec.
+func eventProcessTree(branch armotypes.Process, eventProcess armotypes.Process, eventComm string) (armotypes.Process, bool) {
+	if branch.PID == 0 || eventProcess.PID == 0 {
+		return armotypes.Process{}, false
+	}
+	process := utils.GetProcessFromProcessTree(&branch, eventProcess.PID)
+	if process == nil || (eventComm != "" && process.Comm != eventComm) {
+		return armotypes.Process{}, false
+	}
+	return branch, true
 }
 
 func (r *RuleFailureCreator) enrichRuleFailure(ruleFailure *types.GenericRuleFailure) {
