@@ -84,17 +84,14 @@ func EmbeddedContent(obj SignableObject) ([]byte, bool, error) {
 // bind the signed content to the carrier object it is stapled onto.
 type embeddedIdentity struct {
 	Metadata struct {
-		Name string `json:"name"`
+		Name      string  `json:"name"`
+		Namespace *string `json:"namespace"`
 	} `json:"metadata"`
 }
 
-// checkEmbeddedBinding verifies the embedded content commits to the same NAME
-// as the carrier object. Namespace is deliberately NOT bound: it is not part of
-// the signed content, so the same vendor artifact installs into any namespace
-// (bundle membership, not placement, scopes a fragment). Without the name check
-// a validly-signed blob could be stapled onto a differently-named object whose
-// live spec is then used, decoupling "what was signed" from "what is loaded".
-// Returns nil when the binding holds; a non-nil error is treated as tamper.
+// checkEmbeddedBinding binds the signed name and, when present, namespace to
+// the carrier. Adapters omitting namespace keep their portable-artifact behavior.
+// A mismatch is treated as tampering.
 func checkEmbeddedBinding(obj SignableObject, embedded []byte) error {
 	var id embeddedIdentity
 	if err := json.Unmarshal(embedded, &id); err != nil {
@@ -102,6 +99,9 @@ func checkEmbeddedBinding(obj SignableObject, embedded []byte) error {
 	}
 	if id.Metadata.Name != obj.GetName() {
 		return fmt.Errorf("embedded content name %q does not match object %q", id.Metadata.Name, obj.GetName())
+	}
+	if id.Metadata.Namespace != nil && *id.Metadata.Namespace != obj.GetNamespace() {
+		return fmt.Errorf("embedded content namespace %q does not match object %q", *id.Metadata.Namespace, obj.GetNamespace())
 	}
 	return nil
 }

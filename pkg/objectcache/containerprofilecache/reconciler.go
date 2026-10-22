@@ -495,10 +495,11 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	if e.UserCPRef != nil {
 		bundleName = e.UserCPRef.Name
 	}
-	bundleCP, bundleHandled, bundleErr := c.loadSignedBundle(ctx, ns, bundleName, e.WorkloadID)
+	bundleCP, bundleHandled, provenance, bundleErr := c.loadSignedBundle(ctx, ns, bundleName, e.WorkloadID)
 	if bundleErr != nil {
+		c.handleBundleError(id, e)
 		return
-	} // Preserve the last verified composite on assembly errors.
+	}
 	if bundleHandled {
 		userDefinedCP = bundleCP
 	}
@@ -568,10 +569,11 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		checksumOfCP(cp) == e.Checksum &&
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
 		e.SpecHash == postFetchSpecHash {
+		e.signingProvenance = provenance
 		return
 	}
 
-	c.rebuildEntryFromSources(id, e, cp, userDefinedCP)
+	c.rebuildEntryFromSources(id, e, cp, userDefinedCP, provenance)
 }
 
 // rvsMatchCP returns true when either (a) the object is absent and the stored RV
@@ -595,6 +597,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	prev *CachedContainerProfile,
 	cp *v1beta1.ContainerProfile,
 	userDefinedCP *v1beta1.ContainerProfile,
+	provenance signingProvenance,
 ) {
 	// Authored-validation (mirror of the add path): a label-referenced CP that
 	// carries lifecycle annotations is a LEARNED profile, not an authored one.
@@ -644,6 +647,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	newEntry := &CachedContainerProfile{
+		signingProvenance:    provenance,
 		Projected:            projectedCP,
 		SpecHash:             projectedCP.SpecHash,
 		State:                &objectcache.ProfileState{Completion: effectiveCP.Annotations[helpersv1.CompletionMetadataKey], Status: effectiveCP.Annotations[helpersv1.StatusMetadataKey], Name: effectiveCP.Name},

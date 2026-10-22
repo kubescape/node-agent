@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/signature"
 	"github.com/kubescape/node-agent/pkg/signature/bundle"
 	"github.com/kubescape/node-agent/pkg/signature/profiles"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/require"
 )
@@ -76,4 +77,31 @@ func TestSigningEmbeddedContentDoesNotMutateStorageObject(t *testing.T) {
 	require.False(t, refused)
 	require.Len(t, admitted.Spec.Execs, 1)
 	require.Len(t, cp.Spec.Execs, 2)
+}
+
+func TestSigningPolicyReloadRejectsUnsignedCacheOnBundleError(t *testing.T) {
+	cp := authoredCP("authored", "/bin/unsigned", "1")
+	client := &storage.StorageHttpClientMock{ContainerProfiles: []*v1beta1.ContainerProfile{cp}}
+	c := newReconcilerCache(t, client, newControllableK8sCache(), nil)
+	c.SetBundleConfig(&bundle.TrustPolicy{Mode: bundle.ModeAlert})
+	entry := newEntry(cp, "app", "pod", cp.Namespace, "uid")
+	entry.CPName = "learned"
+	entry.UserCPRef = &namespacedName{Namespace: cp.Namespace, Name: cp.Name}
+	c.entries.Set("id", entry)
+	c.refreshOneEntry(context.Background(), "id", entry)
+	admitted, _ := c.entries.Load("id")
+	require.Equal(t, "1", admitted.UserCPRV)
+	fragment := cp.DeepCopy()
+	fragment.Name = "invalid-base"
+	fragment.Labels = map[string]string{bundle.LabelBundle: cp.Name, bundle.LabelFragmentClass: "base"}
+	client.ContainerProfiles = append(client.ContainerProfiles, fragment)
+	c.SetBundleConfig(&bundle.TrustPolicy{Mode: bundle.ModeEnforce})
+	_, err := c.assembleUserBundle(context.Background(), cp.Namespace, cp.Name, "")
+	require.Error(t, err)
+	c.refreshOneEntry(context.Background(), "id", admitted)
+	refused, ok := c.entries.Load("id")
+	require.True(t, ok)
+	require.Empty(t, refused.UserCPRV)
+	require.Equal(t, admitted.UserCPRef, refused.UserCPRef)
+	require.NotEqual(t, admitted.Projected, refused.Projected)
 }

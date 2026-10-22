@@ -537,6 +537,15 @@ func TestBundleTamperAfterLoad_KeepsLastVerifiedProfile(t *testing.T) {
 		require.True(t, ok, "%s must be enforced before the tamper", p)
 	}
 
+	// Successful revalidation updates provenance even if the source RVs match
+	// and refresh can keep the existing projection.
+	revalidatedPolicy := *policy
+	c.SetBundleConfig(&revalidatedPolicy)
+	c.refreshAllEntries(context.Background())
+	revalidated, ok := c.entries.Load(id)
+	require.True(t, ok)
+	require.Same(t, &revalidatedPolicy, revalidated.verifiedBundlePolicy)
+
 	overlay.Spec.Execs = append(overlay.Spec.Execs, v1beta1.ExecCalls{Path: "/bin/backdoor"})
 
 	c.refreshAllEntries(context.Background())
@@ -553,6 +562,28 @@ func TestBundleTamperAfterLoad_KeepsLastVerifiedProfile(t *testing.T) {
 	state := c.GetContainerProfileState(id)
 	require.NotNil(t, state)
 	require.Equal(t, helpersv1.Completed, state.Status, "the retained profile must stay enforceable")
+
+	// A replacement policy invalidates the provenance until the sources can be
+	// verified again, even when the fragment resource versions do not change.
+	replacement := *policy
+	replacement.Mode = bundle.ModeEnforce
+	c.SetBundleConfig(&replacement)
+	c.refreshAllEntries(context.Background())
+	refused, ok := c.entries.Load(id)
+	require.True(t, ok)
+	require.Empty(t, refused.UserCPRV)
+	require.NotNil(t, refused.UserCPRef)
+	require.NotEqual(t, helpersv1.Completed, refused.State.Status)
+
+	overlay.Spec.Execs = overlay.Spec.Execs[:len(overlay.Spec.Execs)-1]
+	c.refreshAllEntries(context.Background())
+	recovered, ok := c.entries.Load(id)
+	require.True(t, ok)
+	require.Same(t, &replacement, recovered.verifiedBundlePolicy)
+	require.Equal(t, helpersv1.Completed, recovered.State.Status)
+	overlay.Spec.Execs = append(overlay.Spec.Execs, v1beta1.ExecCalls{Path: "/bin/backdoor"})
+	c.refreshAllEntries(context.Background())
+	require.Same(t, recovered.Projected, c.GetProjectedContainerProfile(id))
 }
 
 // TestAssembleUserBundle_NonMemberInjection_Skipped pins the F1 fix: an object a

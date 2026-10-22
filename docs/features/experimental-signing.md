@@ -49,7 +49,9 @@ Stored-spec divergence is logged as a diagnostic; it does not emit R1017. Signed
 embedded content governs instead of the mutable stored spec. A verified embedded
 spec that cannot be decoded is refused in both modes. Signing refusal
 clears the previously admitted flat profile and retains its reference for
-recovery. Failed bundle reassembly retains the last verified composite.
+recovery. Failed bundle reassembly retains a composite only while the policy that verified
+it remains in force. Unverified cached content is cleared on assembly failure;
+a policy replacement requires fresh verification.
 
 This feature does not require RogueArtifact CRDs or the RogueArtifact writer
 from PR #121. R1017 remains owned by that separate work; signing does not register

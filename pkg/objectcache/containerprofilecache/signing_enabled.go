@@ -26,9 +26,26 @@ type signingState struct {
 	specDivergence      sync.Map
 }
 
-func (c *ContainerProfileCacheImpl) loadSignedBundle(ctx context.Context, ns, name, wlid string) (*v1beta1.ContainerProfile, bool, error) {
-	cp, err := c.assembleUserBundle(ctx, ns, name, wlid)
-	return cp, cp != nil || err != nil, err
+// signingProvenance records the immutable policy used to verify a composite.
+// A replacement policy requires fresh verification before retaining it on error.
+type signingProvenance struct {
+	verifiedBundlePolicy *bundle.TrustPolicy
+}
+
+func (c *ContainerProfileCacheImpl) loadSignedBundle(ctx context.Context, ns, name, wlid string) (*v1beta1.ContainerProfile, bool, signingProvenance, error) {
+	policy := c.bundleTrustPolicy.Load()
+	cp, err := c.assembleUserBundleWithPolicy(ctx, ns, name, wlid, policy)
+	provenance := signingProvenance{}
+	if cp != nil && err == nil {
+		provenance.verifiedBundlePolicy = policy
+	}
+	return cp, cp != nil || err != nil, provenance, err
+}
+
+func (c *ContainerProfileCacheImpl) handleBundleError(id string, entry *CachedContainerProfile) {
+	if entry.verifiedBundlePolicy == nil || entry.verifiedBundlePolicy != c.bundleTrustPolicy.Load() {
+		c.refuseSignedProfile(id, entry)
+	}
 }
 
 func (c *ContainerProfileCacheImpl) requiresSignedProfile() bool { return c.signingEnforced() }
@@ -57,5 +74,5 @@ func (c *ContainerProfileCacheImpl) refuseSignedProfile(id string, entry *Cached
 		name = entry.UserCPRef.Name
 	}
 	empty := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: entry.Namespace}}
-	c.rebuildEntryFromSources(id, entry, empty, nil)
+	c.rebuildEntryFromSources(id, entry, empty, nil, signingProvenance{})
 }

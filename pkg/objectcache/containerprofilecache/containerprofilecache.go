@@ -53,6 +53,7 @@ type namespacedName struct {
 // ContainerProfile is not retained after projection — only the compact form is
 // stored so the raw pointer can be GC'd.
 type CachedContainerProfile struct {
+	signingProvenance
 	Projected     *objectcache.ProjectedContainerProfile
 	SpecHash      string // mirrors Projected.SpecHash; used for staleness checks
 	State         *objectcache.ProfileState
@@ -442,7 +443,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// single-container convention and the safest retry target when the
 	// per-container fetch does not cleanly succeed.
 	resolvedOverlayName := overlayName
-	bundleCP, bundleHandled, bundleErr := c.loadSignedBundle(ctx, ns, overlayName, sharedData.Wlid)
+	bundleCP, bundleHandled, provenance, bundleErr := c.loadSignedBundle(ctx, ns, overlayName, sharedData.Wlid)
 	if bundleErr != nil {
 		logger.L().Warning("signed bundle failed verification: NO fallback to a ContainerProfile of the same name", helpers.String("bundle", overlayName), helpers.Error(bundleErr))
 		return false
@@ -587,6 +588,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	entry := c.buildEntry(cp, pod, container, sharedData)
+	entry.signingProvenance = provenance
 	// Override CPName with the real consolidated-CP slug. buildEntry sets
 	// CPName from cp.Name, but when cp was synthesized above (no consolidated
 	// CP in storage yet), cp.Name is the workloadName/overlayName — NOT the

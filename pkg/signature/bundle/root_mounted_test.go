@@ -95,3 +95,26 @@ func TestResolveRootFingerprint_UnreadableMountFails(t *testing.T) {
 		t.Fatal("an unreadable mounted key path must fail closed")
 	}
 }
+
+func TestTrustedRootDoesNotFallbackOnStatFailure(t *testing.T) {
+	// Descending through a regular file fails with ENOTDIR even as root.
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if fp, _, err := resolveTrustedRootFingerprintAt(filepath.Join(blocker, "root.pub")); err == nil || fp != "" {
+		t.Fatalf("stat errors must not select compiled root: fp=%q err=%v", fp, err)
+	}
+}
+
+func TestTrustedRootFallbackOnlyWhenMissing(t *testing.T) {
+	fp, mounted, err := resolveTrustedRootFingerprintAt(filepath.Join(t.TempDir(), "absent.pub"))
+	if err != nil || mounted || fp != DemoRootFingerprint {
+		t.Fatalf("missing mount must use compiled root: fp=%q mounted=%v err=%v", fp, mounted, err)
+	}
+	keyPath := writePubKeyPEM(t, t.TempDir(), genKey(t))
+	fp, mounted, err = resolveTrustedRootFingerprintAt(keyPath)
+	if err != nil || !mounted || fp == DemoRootFingerprint {
+		t.Fatalf("existing mount must override compiled root: fp=%q mounted=%v err=%v", fp, mounted, err)
+	}
+}

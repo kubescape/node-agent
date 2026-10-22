@@ -56,7 +56,10 @@ func (c *ContainerProfileCacheImpl) signingEnforced() bool {
 //   - (nil, err)        when fragments exist but fail verification/assembly. A
 //     tampered fragment additionally raises R1016 (deduped).
 func (c *ContainerProfileCacheImpl) assembleUserBundle(ctx context.Context, ns, bundleName, wlid string) (*v1beta1.ContainerProfile, error) {
-	policy := c.bundleTrustPolicy.Load()
+	return c.assembleUserBundleWithPolicy(ctx, ns, bundleName, wlid, c.bundleTrustPolicy.Load())
+}
+
+func (c *ContainerProfileCacheImpl) assembleUserBundleWithPolicy(ctx context.Context, ns, bundleName, wlid string, policy *bundle.TrustPolicy) (*v1beta1.ContainerProfile, error) {
 	if policy == nil || bundleName == "" {
 		return nil, nil
 	}

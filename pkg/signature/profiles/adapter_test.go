@@ -3,6 +3,7 @@
 package profiles
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/signature"
@@ -252,5 +253,32 @@ func TestContainerProfileAdapter_SignFromNilAnnotations(t *testing.T) {
 	}
 	if !signature.IsSigned(adapter) {
 		t.Fatal("object should report as signed after SignObject")
+	}
+}
+
+func TestEmbeddedSeccompProfileBindsNamespace(t *testing.T) {
+	profile := &v1beta1.SeccompProfile{ObjectMeta: metav1.ObjectMeta{Name: "sandbox", Namespace: "source"}}
+	adapter := NewSeccompProfileAdapter(profile)
+	if err := signature.SignObject(adapter, signature.WithKeyless(false), signature.WithEmbedContent(true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := signature.VerifyObjectAllowUntrusted(adapter); err != nil {
+		t.Fatal(err)
+	}
+	profile.Namespace = "target"
+	if err := signature.VerifyObjectAllowUntrusted(adapter); !errors.Is(err, signature.ErrSignatureMismatch) {
+		t.Fatalf("relocating namespace-bound seccomp content must fail: %v", err)
+	}
+}
+
+func TestEmbeddedContainerProfileRemainsNamespacePortable(t *testing.T) {
+	profile := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: "portable", Namespace: "source"}}
+	adapter := NewContainerProfileAdapter(profile)
+	if err := signature.SignObject(adapter, signature.WithKeyless(false), signature.WithEmbedContent(true)); err != nil {
+		t.Fatal(err)
+	}
+	profile.Namespace = "target"
+	if err := signature.VerifyObjectAllowUntrusted(adapter); err != nil {
+		t.Fatalf("an adapter omitting namespace must stay portable: %v", err)
 	}
 }

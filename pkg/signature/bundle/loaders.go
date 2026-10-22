@@ -4,6 +4,7 @@ package bundle
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -35,9 +36,15 @@ func LoadSignedTrustPolicy(policyPath, rootKeyPath string) (*TrustPolicy, error)
 // (FixedRootKeyPath) or the compiled-in default ONLY. Unlike a config-supplied
 // path, this anchor cannot be redirected by editing a mutable ConfigMap.
 func ResolveTrustedRootFingerprint() (fingerprint string, mounted bool, err error) {
+	return resolveTrustedRootFingerprintAt(FixedRootKeyPath)
+}
+
+func resolveTrustedRootFingerprintAt(path string) (fingerprint string, mounted bool, err error) {
 	mountedKeyPath := ""
-	if _, statErr := os.Stat(FixedRootKeyPath); statErr == nil {
-		mountedKeyPath = FixedRootKeyPath
+	if _, statErr := os.Stat(path); statErr == nil {
+		mountedKeyPath = path
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return "", false, fmt.Errorf("probe trusted root %q: %w", path, statErr)
 	}
 	return ResolveRootFingerprint(mountedKeyPath)
 }
