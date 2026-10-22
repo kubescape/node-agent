@@ -97,14 +97,18 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	r.setContextSpecificFields(ruleFailure, enrichedEvent)
 	r.enrichRuleFailure(ruleFailure)
 
-	eventProcess := ruleFailure.GetRuntimeProcessDetails().ProcessTree
-	// Syscall events can carry a container name instead of a process comm.
-	isSyscallEvent := enrichedEvent.Event.GetEventType() == utils.SyscallEventType
-	if tree, ok := eventProcessTree(enrichedEvent.ProcessTree, eventProcess, isSyscallEvent); ok {
-		ruleFailure.SetRuntimeProcessDetails(armotypes.ProcessTree{
-			ProcessTree: tree,
-			ContainerID: enrichedEvent.ContainerID,
-		})
+	// Validate against the source event: adapters may omit process fields
+	// from alert metadata (for example, HTTP alerts omit Comm).
+	if event, ok := enrichedEvent.Event.(utils.EnrichEvent); ok {
+		eventProcess := armotypes.Process{PID: event.GetPID(), Comm: event.GetComm()}
+		// Syscall events can carry a container name instead of a process comm.
+		isSyscallEvent := event.GetEventType() == utils.SyscallEventType
+		if tree, ok := eventProcessTree(enrichedEvent.ProcessTree, eventProcess, isSyscallEvent); ok {
+			ruleFailure.SetRuntimeProcessDetails(armotypes.ProcessTree{
+				ProcessTree: tree,
+				ContainerID: enrichedEvent.ContainerID,
+			})
+		}
 	}
 
 	return ruleFailure
