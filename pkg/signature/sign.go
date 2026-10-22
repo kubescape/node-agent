@@ -5,9 +5,11 @@ package signature
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	apivalidation "k8s.io/apimachinery/pkg/api/validation"
 )
 
 func SignObject(obj SignableObject, opts ...SignOption) error {
@@ -73,25 +75,17 @@ func SignObject(obj SignableObject, opts ...SignOption) error {
 		return fmt.Errorf("failed to encode signature to annotations: %w", err)
 	}
 
-	existingAnnotations := obj.GetAnnotations()
-	if existingAnnotations == nil {
-		existingAnnotations = make(map[string]string)
-	}
-
-	for k, v := range annotations {
-		existingAnnotations[k] = v
-	}
 	if options.EmbedContent {
 		enc, err := encodeEmbeddedContent(contentBytes)
 		if err != nil {
 			return fmt.Errorf("failed to encode embedded content: %w", err)
 		}
-		existingAnnotations[AnnotationContent] = enc
-	} else {
-		delete(existingAnnotations, AnnotationContent)
+		annotations[AnnotationContent] = enc
 	}
 
-	obj.SetAnnotations(existingAnnotations)
+	if err := publishSignedAnnotations(obj, annotations); err != nil {
+		return err
+	}
 
 	logger.L().Info("Successfully signed object",
 		helpers.String("namespace", obj.GetNamespace()),
@@ -99,6 +93,24 @@ func SignObject(obj SignableObject, opts ...SignOption) error {
 		helpers.String("identity", sig.Identity),
 		helpers.String("issuer", sig.Issuer))
 
+	return nil
+}
+
+// Publish only after the complete annotation set passes resource size limits.
+func publishSignedAnnotations(obj SignableObject, signed map[string]string) error {
+	annotations := maps.Clone(obj.GetAnnotations())
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	// Re-signing without embedding must remove a previously embedded payload.
+	delete(annotations, AnnotationContent)
+	maps.Copy(annotations, signed)
+	if _, resource := obj.(ResourceSignableObject); resource {
+		if err := apivalidation.ValidateAnnotationsSize(annotations); err != nil {
+			return fmt.Errorf("signed object exceeds Kubernetes annotation limit: %w; reduce embedded content or existing annotations", err)
+		}
+	}
+	obj.SetAnnotations(annotations)
 	return nil
 }
 
