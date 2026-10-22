@@ -27,7 +27,9 @@ func (p BindingClassPolicy) allowsSigner(id string) bool {
 	return false
 }
 
+// VerifiedBinding carries the authenticated selectors and rules for enforcement.
 type VerifiedBinding struct {
+	Spec   rulebindingtypesv1.RuntimeAlertRuleBindingSpec
 	Class  FragmentClass
 	Signer string
 }
@@ -57,6 +59,7 @@ func AdmitBinding(b *rulebindingtypesv1.RuntimeAlertRuleBinding, policy TrustPol
 
 	name := b.Name
 	labels := b.Labels
+	spec := b.Spec
 	if embedded, present, embErr := signature.EmbeddedContent(adapter); present {
 		if embErr != nil {
 			return VerifiedBinding{}, fmt.Errorf("embedded content of %q: %w", b.Name, embErr)
@@ -67,6 +70,7 @@ func AdmitBinding(b *rulebindingtypesv1.RuntimeAlertRuleBinding, policy TrustPol
 		}
 		name = view.Metadata.Name
 		labels = view.Metadata.Labels
+		spec = view.Spec
 	}
 
 	class := FragmentClass(labels[LabelFragmentClass])
@@ -90,7 +94,7 @@ func AdmitBinding(b *rulebindingtypesv1.RuntimeAlertRuleBinding, policy TrustPol
 		return VerifiedBinding{}, fmt.Errorf("%w: signer %q, class %q (rule binding %q)", ErrSignerNotTrusted, signer, class, name)
 	}
 
-	return VerifiedBinding{Class: class, Signer: signer}, nil
+	return VerifiedBinding{Class: class, Signer: signer, Spec: spec}, nil
 }
 
 func BindingSignerID(b *rulebindingtypesv1.RuntimeAlertRuleBinding) (string, error) {

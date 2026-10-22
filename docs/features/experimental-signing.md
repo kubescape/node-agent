@@ -40,6 +40,11 @@ certificates and detects content changes; it does not authorize the signer
 against bundle fragment classes. Use signed bundles with a real trust root when
 signer authorization is required. This remains experimental.
 
+Bundle fragments currently support flat profile specs only. Fragments with
+nonempty `containers`, `initContainers`, or `ephemeralContainers` are rejected
+before assembly, including when these fields occur in embedded signed content.
+Standalone signed grouped profiles remain supported by legacy verification.
+
 Stored-spec divergence is logged as a diagnostic; it does not emit R1017. Signed
 embedded content governs instead of the mutable stored spec. A verified embedded
 spec that cannot be decoded is refused in both modes. Signing refusal

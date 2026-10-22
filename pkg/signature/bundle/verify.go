@@ -25,6 +25,7 @@ var (
 	ErrSignerNotTrusted = errors.New("signer not permitted for this fragment class")
 	ErrPathNotAllowed   = errors.New("fragment sets a spec path not permitted for its class")
 	ErrEmptyBundle      = errors.New("bundle has no fragments")
+	ErrGroupedFragment  = errors.New("grouped container profiles are not supported as bundle fragments")
 	// ErrFragmentRollback is a replay of an older, still-validly-signed fragment:
 	// its version is below the highest already accepted for its slot. It is NOT a
 	// tamper (the signature verifies), so it does not raise R1016; it is refused
@@ -146,6 +147,13 @@ func admitFragment(cp *v1beta1.ContainerProfile, bundleName string, policy Trust
 	}
 	if !cpol.allowsSigner(signer) {
 		return verifiedFragment{}, fmt.Errorf("%w: signer %q, class %q (fragment %q)", ErrSignerNotTrusted, signer, class, name)
+	}
+
+	// Assembly and class-path restrictions currently support flat specs only.
+	// Reject grouped grants from the verified view rather than silently dropping
+	// them while producing a seemingly valid composite and manifest.
+	if len(spec.Containers) > 0 || len(spec.InitContainers) > 0 || len(spec.EphemeralContainers) > 0 {
+		return verifiedFragment{}, fmt.Errorf("%w: %q", ErrGroupedFragment, name)
 	}
 
 	for _, p := range setSpecPaths(&spec) {

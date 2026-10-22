@@ -435,13 +435,19 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) [
 	logger.L().Info("RBCache - ruleBinding added/modified", helpers.String("name", rbName))
 
 	if policy, signingEnabled := c.trustPolicySnapshot(); signingEnabled {
-		if _, admitErr := bundle.AdmitBinding(ruleBinding, *policy); admitErr != nil {
+		verified, admitErr := bundle.AdmitBinding(ruleBinding, *policy)
+		if admitErr != nil {
 			logger.L().Warning("rule binding rejected",
 				helpers.String("name", ruleBinding.GetName()),
 				helpers.String("namespace", ruleBinding.GetNamespace()),
 				helpers.Error(admitErr))
 			return rbs
 		}
+		// Keep the watch object's identity, but enforce only authenticated
+		// selectors and rules. Never mutate an informer-owned object.
+		admitted := *ruleBinding
+		admitted.Spec = verified.Spec
+		ruleBinding = &admitted
 	}
 
 	// convert selectors to string

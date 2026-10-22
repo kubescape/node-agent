@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -275,5 +276,58 @@ func TestRBCache_SigningDisabledAddsBindingUnchanged(t *testing.T) {
 	c.addRuleBinding(signed)
 	if !c.rbNameToRB.Has(rbName) {
 		t.Error("with binding signing disabled a signed binding must be cached exactly like any other")
+	}
+}
+
+func TestRBCache_EmbeddedBindingUsesAuthenticatedSpec(t *testing.T) {
+	for _, field := range []string{"rules", "pod selector", "namespace selector"} {
+		t.Run(field, func(t *testing.T) {
+			b := bindingFor("rb-embedded", string(bundle.ClassOverlay))
+			b.Spec.PodSelector = metav1.LabelSelector{MatchLabels: map[string]string{"app": "nginx"}}
+			b.Spec.NamespaceSelector = metav1.LabelSelector{MatchLabels: map[string]string{"app": "default"}}
+			want := b.Spec
+			if err := signature.SignObject(profiles.NewRuleBindingAdapter(b), signature.WithPrivateKey(bindingTestKey(t)), signature.WithEmbedContent(true)); err != nil {
+				t.Fatal(err)
+			}
+			policy := policyTrusting(t, b)
+			switch field {
+			case "rules":
+				b.Spec.Rules = nil
+			case "pod selector":
+				b.Spec.PodSelector = metav1.LabelSelector{MatchLabels: map[string]string{"app": "attacker"}}
+			case "namespace selector":
+				b.Spec.NamespaceSelector = metav1.LabelSelector{MatchLabels: map[string]string{"app": "attacker"}}
+			}
+			stored := b.Spec
+			c := bindingTestCache(t)
+			c.SetTrustPolicy(policy)
+			c.addRuleBinding(b)
+			if got := c.rbNameToRB.Get(uniqueName(b)).Spec; !reflect.DeepEqual(got, want) {
+				t.Errorf("cached spec = %+v, want authenticated %+v", got, want)
+			}
+			if !reflect.DeepEqual(b.Spec, stored) {
+				t.Error("admission mutated the informer object")
+			}
+			assertRules := func() {
+				t.Helper()
+				if got := c.ListRulesForPod("default", "nginx-77b4fdf86c-hp4x5"); len(got) != 1 || got[0].ID != "R0001" {
+					t.Fatalf("rules = %+v, want authenticated R0001", got)
+				}
+			}
+			assertRules()
+			c.RefreshRuleBindingsRules()
+			assertRules()
+			c.deletePod(signedBindingPodID)
+			pod, err := c.k8sClient.GetKubernetesClient().CoreV1().Pods("default").Get(context.Background(), "nginx-77b4fdf86c-hp4x5", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.addPod(context.Background(), pod)
+			if !c.podToRBNames.Has(signedBindingPodID) {
+				t.Fatal("later pod admission must use authenticated selectors")
+			}
+			c.rulesForPod.Purge()
+			assertRules()
+		})
 	}
 }

@@ -82,6 +82,8 @@ func SignObject(obj SignableObject, opts ...SignOption) error {
 			return fmt.Errorf("failed to encode embedded content: %w", err)
 		}
 		existingAnnotations[AnnotationContent] = enc
+	} else {
+		delete(existingAnnotations, AnnotationContent)
 	}
 
 	obj.SetAnnotations(existingAnnotations)

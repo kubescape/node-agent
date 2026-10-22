@@ -44,3 +44,16 @@ func TestPolicyStatus_LifecycleAndCounters(t *testing.T) {
 	require.Equal(t, "d2", PolicyStatusSnapshot().InForceDigest, "snapshot must be a copy")
 	resetPolicyStatusForTest()
 }
+
+func TestPolicyStatus_RefusalBeforeFirstAppliedPolicy(t *testing.T) {
+	resetPolicyStatusForTest()
+	t.Cleanup(resetPolicyStatusForTest)
+	RecordPolicyRefusal("invalid-boot-policy")
+	require.Nil(t, PolicyStatusSnapshot(), "a refused policy must not fabricate in-force identity")
+	SetInForcePolicy(demoPolicy(), "verified-policy", "key:root", true)
+	status := PolicyStatusSnapshot()
+	require.NotNil(t, status)
+	require.Equal(t, "verified-policy", status.InForceDigest)
+	require.Equal(t, "invalid-boot-policy", status.LastRefusedDigest)
+	require.False(t, status.LastRefusedAt.IsZero(), "keep refusal history for the first real policy")
+}

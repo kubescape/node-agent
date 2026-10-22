@@ -89,7 +89,7 @@ func RecordRuleAdmission(admitted, rejected, effective int) {
 func PolicyStatusSnapshot() *PolicyStatus {
 	policyStatusMu.Lock()
 	defer policyStatusMu.Unlock()
-	if policyStatus == nil {
+	if policyStatus == nil || policyStatus.AppliedAt.IsZero() {
 		return nil
 	}
 	s := *policyStatus

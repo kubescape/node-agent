@@ -231,3 +231,27 @@ func TestGetObjectSignature(t *testing.T) {
 		})
 	}
 }
+
+func TestResignWithoutEmbeddingClearsPreviousContent(t *testing.T) {
+	content := map[string]interface{}{
+		"metadata": map[string]interface{}{"name": "resigned"},
+		"spec":     map[string]interface{}{"version": 1},
+	}
+	obj := NewMockSignableObject("uid", "", "resigned", content)
+	if err := SignObject(obj, WithKeyless(false), WithEmbedContent(true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyObjectAllowUntrusted(obj); err != nil {
+		t.Fatal(err)
+	}
+	content["spec"] = map[string]interface{}{"version": 2}
+	if err := SignObject(obj, WithKeyless(false), WithEmbedContent(false)); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := obj.annotations[AnnotationContent]; present {
+		t.Error("re-signing without embedding must remove stale content")
+	}
+	if err := VerifyObjectAllowUntrusted(obj); err != nil {
+		t.Fatalf("new signature must verify against edited content: %v", err)
+	}
+}

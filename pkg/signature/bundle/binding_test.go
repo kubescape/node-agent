@@ -5,6 +5,8 @@ package bundle
 import (
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 
 	rulebindingtypesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
@@ -233,5 +235,28 @@ func TestBindingClassPolicy_AllowsSigner(t *testing.T) {
 	w := BindingClassPolicy{Signers: []string{"*"}}
 	if !w.allowsSigner("*") || w.allowsSigner("key:a") {
 		t.Error("signers must be matched literally, no wildcard")
+	}
+}
+
+func TestAdmitBinding_ReturnsAuthenticatedSpec(t *testing.T) {
+	for _, embedded := range []bool{false, true} {
+		t.Run(fmt.Sprint(embedded), func(t *testing.T) {
+			b := bindingObject("redis-binding", "redis", string(ClassOverlay), []string{"R0001"})
+			want := b.Spec
+			if err := signature.SignObject(profiles.NewRuleBindingAdapter(b), signature.WithPrivateKey(genKey(t)), signature.WithEmbedContent(embedded)); err != nil {
+				t.Fatal(err)
+			}
+			policy := bindingPolicy(ClassOverlay, bindingSignerIDOf(t, b))
+			if embedded {
+				b.Spec = rulebindingtypesv1.RuntimeAlertRuleBindingSpec{}
+			}
+			got, err := AdmitBinding(b, policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.Spec, want) {
+				t.Fatalf("spec = %+v, want authenticated %+v", got.Spec, want)
+			}
+		})
 	}
 }
