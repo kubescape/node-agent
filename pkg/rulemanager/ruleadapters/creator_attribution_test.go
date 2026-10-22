@@ -58,22 +58,43 @@ func TestCreateRuleFailureProcessAttribution(t *testing.T) {
 
 func TestEventProcessTreeRequiresPID(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		branch armotypes.Process
-		event  armotypes.Process
-		comm   string
-		want   bool
+		name      string
+		branch    armotypes.Process
+		event     armotypes.Process
+		isSyscall bool
+		want      bool
 	}{
 		{name: "zero event PID", branch: armotypes.Process{PID: 1}},
 		{name: "zero tree PID", event: armotypes.Process{PID: 42}},
 		{name: "empty comm still requires matching PID", branch: armotypes.Process{PID: 1}, event: armotypes.Process{PID: 42}},
-		{name: "empty comm allows matching PID", branch: armotypes.Process{PID: 42, Comm: "curl"}, event: armotypes.Process{PID: 42}, want: true},
+		{name: "empty comm rejects matching PID", branch: armotypes.Process{PID: 42, Comm: "curl"}, event: armotypes.Process{PID: 42}},
+		{name: "syscall empty comm allows matching PID", branch: armotypes.Process{PID: 42, Comm: "curl"}, event: armotypes.Process{PID: 42}, isSyscall: true, want: true},
+		{name: "syscall still requires matching PID", branch: armotypes.Process{PID: 1}, event: armotypes.Process{PID: 42}, isSyscall: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tree, ok := eventProcessTree(tc.branch, tc.event, tc.comm)
+			tree, ok := eventProcessTree(tc.branch, tc.event, tc.isSyscall)
 			require.Equal(t, tc.want, ok)
 			if ok {
 				require.Equal(t, tc.branch, tree)
+			}
+		})
+	}
+}
+
+func TestCreateRuleFailureEmptyCommAttribution(t *testing.T) {
+	for _, eventType := range []utils.EventType{utils.ExecveEventType, utils.NetworkEventType, utils.SyscallEventType} {
+		t.Run(string(eventType), func(t *testing.T) {
+			creator := NewRuleFailureCreator(nil, dnsmanager.CreateDNSManagerMock(), NewEventRuleAdapterFactory(), 0, "test", new(maps.SafeMap[string, uint32]))
+			event := &utils.StructEvent{EventType: eventType, ContainerID: armotypes.HostContainerID, Pid: 42, ExePath: "/event/curl"}
+			tree := armotypes.Process{PID: 42, Comm: "unverified", Path: "/unverified/process"}
+			failure := creator.CreateRuleFailure(typesv1.Rule{ProfileDependency: armotypes.NotRequired}, &events.EnrichedEvent{Event: event, ContainerID: armotypes.HostContainerID, ProcessTree: tree}, nil, "test", "id", "", nil)
+			require.NotNil(t, failure)
+			require.Equal(t, uint32(42), failure.GetBaseRuntimeAlert().InfectedPID)
+			if eventType == utils.SyscallEventType {
+				require.Equal(t, tree, failure.GetRuntimeProcessDetails().ProcessTree)
+			} else {
+				require.Empty(t, failure.GetRuntimeProcessDetails().ProcessTree.Comm)
+				require.Equal(t, "/event/curl", failure.GetRuntimeProcessDetails().ProcessTree.Path)
 			}
 		})
 	}
