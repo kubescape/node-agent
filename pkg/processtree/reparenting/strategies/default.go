@@ -9,7 +9,7 @@ import (
 type DefaultStrategy struct{}
 
 func (defs *DefaultStrategy) Name() string {
-	return "fallback"
+	return "default"
 }
 
 func (defs *DefaultStrategy) IsApplicable(exitingPID uint32, containerTree containerprocesstree.ContainerProcessTree, processMap *maps.SafeMap[uint32, *armotypes.Process]) bool {
