@@ -457,6 +457,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			logger.L().Warning("refreshOneEntry: source returned unchanged without an offered checksum; keeping cached entry as a transient failure",
 				helpers.String("containerID", id),
 				helpers.String("cpName", e.CPName))
+			c.handleProfileFetchError(id, e)
 			return
 		}
 		c.metricsManager.ReportContainerProfileConditionalFetchResponse(conditionalFetchOutcomeUnchanged)
@@ -478,6 +479,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName),
 			helpers.Error(cpErr))
+		c.handleProfileFetchError(id, e)
 		return
 	}
 	// Re-fetch the user-defined ContainerProfile (migrated "new way") FIRST, when
@@ -491,10 +493,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	// fetched. Otherwise a learned CP stuck in a non-terminal status ("ready")
 	// would freeze authored-CP edits out of the cache forever.
 	var userDefinedCP *v1beta1.ContainerProfile
-	bundleName := ""
-	if e.UserCPRef != nil {
-		bundleName = e.UserCPRef.Name
-	}
+	bundleName := c.signingBundleName(e)
 	bundleCP, bundleHandled, provenance, bundleErr := c.loadSignedBundle(ctx, ns, bundleName, e.WorkloadID)
 	if bundleErr != nil {
 		c.handleBundleError(id, e)
@@ -514,6 +513,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 				helpers.String("containerID", id),
 				helpers.String("name", e.UserCPRef.Name),
 				helpers.Error(userCPErr))
+			c.handleProfileFetchError(id, e)
 			return
 		}
 		if userCPErr != nil {
@@ -522,7 +522,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	}
 	if !bundleHandled {
 		var refused bool
-		userDefinedCP, refused = c.admitSignedProfile(userDefinedCP, e.WorkloadID)
+		userDefinedCP, refused, provenance = c.admitSignedProfile(userDefinedCP, e.WorkloadID)
 		if refused {
 			c.refuseSignedProfile(id, e)
 			return
@@ -533,6 +533,9 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		userCPName = e.UserCPRef.Name
 	}
 	userDefinedCP = resolveAuthoredSection(userDefinedCP, e.ContainerName, userCPName, id, ns)
+	if userDefinedCP == nil {
+		provenance = signingProvenance{}
+	}
 
 	if c.requiresSignedProfile() && userDefinedCP == nil {
 		c.refuseSignedProfile(id, e)
@@ -570,6 +573,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
 		e.SpecHash == postFetchSpecHash {
 		e.signingProvenance = provenance
+		c.noteAdoptedProfile(provenance, userDefinedCP, e.WorkloadID)
 		return
 	}
 
@@ -647,6 +651,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 	}
 
 	newEntry := &CachedContainerProfile{
+		signingBinding:       prev.signingBinding,
 		signingProvenance:    provenance,
 		Projected:            projectedCP,
 		SpecHash:             projectedCP.SpecHash,
@@ -681,7 +686,9 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		newEntry.UserCPRef = prev.UserCPRef
 	}
 
+	c.preserveSignedBundleReference(newEntry, prev)
 	c.entries.Set(id, newEntry)
+	c.noteAdoptedProfile(provenance, userDefinedCP, prev.WorkloadID)
 }
 
 // rvOfCP returns the object's ResourceVersion or "" when nil. Using a typed

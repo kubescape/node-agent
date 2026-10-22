@@ -49,7 +49,7 @@ func TestAdmissionRejectsInvalidVerifiedEmbeddedSpec(t *testing.T) {
 					cache.cfg.EnableSignatureVerification = enforce
 					exporter := &captureExporter{}
 					cache.SetTamperAlertExporter(exporter)
-					admitted, refused := cache.admitSignedProfile(cp, "")
+					admitted, refused, _ := cache.admitSignedProfile(cp, "")
 					require.True(t, refused, "invalid signed content must never fall back to the mutable stored spec")
 					require.Nil(t, admitted)
 					require.False(t, cache.verifyUserContainerProfile(cp.DeepCopy(), ""), "the boolean verification helper must refuse invalid embedded content too")

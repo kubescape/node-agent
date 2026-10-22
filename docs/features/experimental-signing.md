@@ -51,7 +51,11 @@ spec that cannot be decoded is refused in both modes. Signing refusal
 clears the previously admitted flat profile and retains its reference for
 recovery. Failed bundle reassembly retains a composite only while the policy that verified
 it remains in force. Unverified cached content is cleared on assembly failure;
-a policy replacement requires fresh verification.
+a policy replacement requires fresh verification. While enforcing, source-fetch
+errors retain only previously verified profiles or eligible verified composites.
+Refresh uses the original pod label to discover bundles and retains the resolved
+flat-profile reference for recovery. R1018 is emitted only after a profile is
+actually adopted.
 
 This feature does not require RogueArtifact CRDs or the RogueArtifact writer
 from PR #121. R1017 remains owned by that separate work; signing does not register

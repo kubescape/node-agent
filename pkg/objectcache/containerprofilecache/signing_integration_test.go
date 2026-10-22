@@ -73,7 +73,7 @@ func TestSigningEmbeddedContentDoesNotMutateStorageObject(t *testing.T) {
 	cp := signedEmbeddedCP(t)
 	cp.Spec.Execs = append(cp.Spec.Execs, v1beta1.ExecCalls{Path: "/bin/stored-edit"})
 	c := &ContainerProfileCacheImpl{}
-	admitted, refused := c.admitSignedProfile(cp, "")
+	admitted, refused, _ := c.admitSignedProfile(cp, "")
 	require.False(t, refused)
 	require.Len(t, admitted.Spec.Execs, 1)
 	require.Len(t, cp.Spec.Execs, 2)

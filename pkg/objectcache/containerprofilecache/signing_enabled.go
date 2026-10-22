@@ -26,10 +26,43 @@ type signingState struct {
 	specDivergence      sync.Map
 }
 
-// signingProvenance records the immutable policy used to verify a composite.
-// A replacement policy requires fresh verification before retaining it on error.
+// signingProvenance records admission of the adopted profile. Bundles require
+// fresh verification under a replacement policy before retention on errors;
+// flat profiles use policy-independent signature verification.
 type signingProvenance struct {
 	verifiedBundlePolicy *bundle.TrustPolicy
+	verifiedFlat         bool
+	unsigned             bool
+}
+
+// signingBinding preserves the pod label separately from the resolved flat CP.
+type signingBinding struct{ bundleName string }
+
+func (*ContainerProfileCacheImpl) setSigningBinding(entry *CachedContainerProfile, name string) {
+	entry.bundleName = name
+}
+func (*ContainerProfileCacheImpl) signingBundleName(entry *CachedContainerProfile) string {
+	if entry.bundleName != "" {
+		return entry.bundleName
+	}
+	if entry.UserCPRef != nil {
+		return entry.UserCPRef.Name
+	}
+	return ""
+}
+
+// Flat signatures use cryptographic verification independently of bundle policy.
+func (c *ContainerProfileCacheImpl) handleProfileFetchError(id string, entry *CachedContainerProfile) {
+	if c.requiresSignedProfile() && !entry.verifiedFlat &&
+		(entry.verifiedBundlePolicy == nil || entry.verifiedBundlePolicy != c.bundleTrustPolicy.Load()) {
+		c.refuseSignedProfile(id, entry)
+	}
+}
+
+func (c *ContainerProfileCacheImpl) noteAdoptedProfile(provenance signingProvenance, cp *v1beta1.ContainerProfile, wlid string) {
+	if provenance.unsigned {
+		c.noteUnsignedGoverns(verifyUnsigned, cp, wlid)
+	}
 }
 
 func (c *ContainerProfileCacheImpl) loadSignedBundle(ctx context.Context, ns, name, wlid string) (*v1beta1.ContainerProfile, bool, signingProvenance, error) {
@@ -52,17 +85,16 @@ func (c *ContainerProfileCacheImpl) requiresSignedProfile() bool { return c.sign
 
 // Verify the fetched document before flattening grouped sections. Verification
 // can restore its embedded signed spec, so never mutate the storage client's copy.
-func (c *ContainerProfileCacheImpl) admitSignedProfile(cp *v1beta1.ContainerProfile, wlid string) (*v1beta1.ContainerProfile, bool) {
+func (c *ContainerProfileCacheImpl) admitSignedProfile(cp *v1beta1.ContainerProfile, wlid string) (*v1beta1.ContainerProfile, bool, signingProvenance) {
 	if cp == nil {
-		return nil, false
+		return nil, false, signingProvenance{}
 	}
 	cp = cp.DeepCopy()
 	verdict := c.verifyUserContainerProfileVerdict(cp, wlid)
-	c.noteUnsignedGoverns(verdict, cp, wlid)
 	if verdict == verifyInvalidEmbedded || (c.signingEnforced() && verdict != verifyOK) {
-		return nil, true
+		return nil, true, signingProvenance{}
 	}
-	return cp, false
+	return cp, false, signingProvenance{verifiedFlat: verdict == verifyOK, unsigned: verdict == verifyUnsigned}
 }
 
 // Refusal removes the previously admitted content from enforcement immediately
@@ -75,4 +107,10 @@ func (c *ContainerProfileCacheImpl) refuseSignedProfile(id string, entry *Cached
 	}
 	empty := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: entry.Namespace}}
 	c.rebuildEntryFromSources(id, entry, empty, nil, signingProvenance{})
+}
+
+func (*ContainerProfileCacheImpl) preserveSignedBundleReference(entry, prev *CachedContainerProfile) {
+	if entry.verifiedBundlePolicy != nil && prev.UserCPRef != nil {
+		entry.UserCPRef = prev.UserCPRef
+	}
 }

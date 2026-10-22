@@ -53,6 +53,7 @@ type namespacedName struct {
 // ContainerProfile is not retained after projection — only the compact form is
 // stored so the raw pointer can be GC'd.
 type CachedContainerProfile struct {
+	signingBinding
 	signingProvenance
 	Projected     *objectcache.ProjectedContainerProfile
 	SpecHash      string // mirrors Projected.SpecHash; used for staleness checks
@@ -498,12 +499,15 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 
 	if !bundleHandled {
 		var refused bool
-		userDefinedCP, refused = c.admitSignedProfile(userDefinedCP, sharedData.Wlid)
+		userDefinedCP, refused, provenance = c.admitSignedProfile(userDefinedCP, sharedData.Wlid)
 		if refused {
 			return false
 		}
 	}
 	userDefinedCP = resolveAuthoredSection(userDefinedCP, container.Runtime.ContainerName, resolvedOverlayName, containerID, ns)
+	if userDefinedCP == nil {
+		provenance = signingProvenance{}
+	}
 
 	if c.requiresSignedProfile() && userDefinedCP == nil {
 		return false
@@ -589,6 +593,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 
 	entry := c.buildEntry(cp, pod, container, sharedData)
 	entry.signingProvenance = provenance
+	c.setSigningBinding(entry, overlayName)
 	// Override CPName with the real consolidated-CP slug. buildEntry sets
 	// CPName from cp.Name, but when cp was synthesized above (no consolidated
 	// CP in storage yet), cp.Name is the workloadName/overlayName — NOT the
@@ -635,6 +640,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	c.entries.Set(containerID, entry)
+	c.noteAdoptedProfile(provenance, userDefinedCP, sharedData.Wlid)
 	c.pending.Delete(containerID)
 	c.metricsManager.SetContainerProfileCacheEntries("container", float64(c.entries.Len()))
 	c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))
