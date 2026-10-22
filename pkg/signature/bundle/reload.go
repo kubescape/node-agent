@@ -143,6 +143,14 @@ func removedSigners(inForce, candidate *TrustPolicy) []string {
 			}
 		}
 	}
+	for class, cp := range inForce.BindingClasses {
+		next := candidate.BindingClasses[class]
+		for _, s := range cp.Signers {
+			if !next.allowsSigner(s) {
+				removed = append(removed, "binding/"+string(class)+":"+s)
+			}
+		}
+	}
 	return removed
 }
 

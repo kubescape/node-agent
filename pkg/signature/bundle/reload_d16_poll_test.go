@@ -103,3 +103,42 @@ func TestPolicyReloader_BootPolicyIsTheFirstInForce(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, signedOne, 0o600))
 	require.ErrorIs(t, r.Poll().Err, ErrSignerRemoved)
 }
+
+func TestPolicyReloader_BindingSignersAreAppendOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		classes map[FragmentClass]BindingClassPolicy
+		refused bool
+	}{
+		{"remove signer", map[FragmentClass]BindingClassPolicy{"base": {Signers: []string{"key:aaa"}}}, true},
+		{"remove class", nil, true},
+		{"add signer", map[FragmentClass]BindingClassPolicy{"base": {Signers: []string{"key:aaa", "key:bbb", "key:ccc"}}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := genKey(t)
+			boot := enforcePolicyV(t, 2, "key:profile")
+			boot.BindingClasses = map[FragmentClass]BindingClassPolicy{"base": {Signers: []string{"key:aaa", "key:bbb"}}}
+			signed, fp := signPolicyWithFingerprint(t, boot, key)
+			path := writePolicyFile(t, t.TempDir(), signed)
+			r := newTestReloader(t, path, fp, nil)
+			require.NotNil(t, r.Poll().Applied)
+
+			candidate := enforcePolicyV(t, 3, "key:profile")
+			candidate.BindingClasses = tc.classes
+			updated, _ := signPolicyWithFingerprint(t, candidate, key)
+			require.NoError(t, os.WriteFile(path, updated, 0o600))
+			ev := r.Poll()
+			if tc.refused {
+				require.ErrorIs(t, ev.Err, ErrSignerRemoved)
+				require.Contains(t, ev.Err.Error(), "binding/base:key:bbb")
+				require.Nil(t, ev.Applied)
+				require.True(t, r.inForce.BindingSigningEnabled())
+				require.Equal(t, int64(2), r.inForceVersion)
+			} else {
+				require.NoError(t, ev.Err)
+				require.NotNil(t, ev.Applied)
+				require.True(t, ev.Applied.BindingClasses["base"].allowsSigner("key:ccc"))
+			}
+		})
+	}
+}

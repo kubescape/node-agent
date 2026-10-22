@@ -118,25 +118,18 @@ func configureSigning(ctx context.Context, cfg config.Config, cpc *containerprof
 		// crash-looping instead would hand ConfigMap writers a fleet-wide
 		// kill switch. An invalid boot policy leaves signing DISABLED
 		// (scream-and-poll) until a verifiable artifact is mounted.
-		var initial []byte
-		var bootVersion int64
-		var bootPolicy *bundle.TrustPolicy
-		if policy, rootFp, mounted, perr := bundle.LoadSignedTrustPolicyTrusted(cfg.BundleTrustPolicyPath); perr != nil {
+		// Startup uses the same single-read verification path as later reloads.
+		// The in-force policy and digest therefore describe the same artifact,
+		// even if kubelet swaps the ConfigMap while startup is running.
+		reloader := bundle.NewPolicyReloader(cfg.BundleTrustPolicyPath, nil, 0)
+		boot := reloader.Poll()
+		if boot.Err != nil {
 			logger.L().Warning("trust policy invalid at startup: signed bundle overlays DISABLED until a valid policy is mounted; re-checking every reload interval",
-				helpers.String("path", cfg.BundleTrustPolicyPath), helpers.Error(perr))
-		} else {
-			if raw, rerr := os.ReadFile(cfg.BundleTrustPolicyPath); rerr == nil {
-				initial = raw
-			}
-			bootVersion = policy.PolicyVersion
-			bootPolicy = policy
-			applyTrustPolicy(policy, rootFp, mounted, false)
-			bundle.SetInForcePolicy(policy, bundle.HashArtifact(initial), rootFp, mounted)
-			logger.L().Info("trust policy in force", helpers.String("inForceDigest", bundle.HashArtifact(initial)), helpers.String("mode", string(policy.EffectiveMode())))
-		}
-		reloader := bundle.NewPolicyReloader(cfg.BundleTrustPolicyPath, initial, bootVersion)
-		if bootPolicy != nil {
-			reloader.NoteInForce(bootPolicy)
+				helpers.String("path", cfg.BundleTrustPolicyPath), helpers.Error(boot.Err))
+		} else if boot.Applied != nil {
+			applyTrustPolicy(boot.Applied, boot.RootFP, boot.Mounted, false)
+			bundle.SetInForcePolicy(boot.Applied, boot.ArtifactDigest, boot.RootFP, boot.Mounted)
+			logger.L().Info("trust policy in force", helpers.String("inForceDigest", boot.ArtifactDigest), helpers.String("mode", string(boot.Applied.EffectiveMode())))
 		}
 		go reloader.Watch(ctx, bundle.DefaultPolicyReloadInterval, func(ev bundle.PolicyReloadEvent) {
 			if ev.Err != nil {
