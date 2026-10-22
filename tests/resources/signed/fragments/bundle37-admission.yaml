@@ -1,0 +1,21 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: bundle37-admission
+  labels:
+    signature.kubescape.io/bundle: bundle37
+    signature.kubescape.io/fragment-class: admission
+spec:
+  ingress:
+    - identifier: allowed-client
+      type: internal
+      podSelector:
+        matchLabels:
+          app: redis-client
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: bundle37
+      ports:
+        - name: TCP-6379
+          port: 6379
+          protocol: TCP

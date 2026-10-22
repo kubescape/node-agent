@@ -1,5 +1,7 @@
 DOCKERFILE_PATH=./build/Dockerfile
 BINARY_NAME=node-agent
+# Opt in with BUILD_TAGS=experimental_signing. Empty by default.
+BUILD_TAGS?=
 
 IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 # GADGETS are pulled unmodified from upstream IG. trace_open is intentionally NOT
@@ -15,7 +17,7 @@ TAG?=test
 # TAG?=v0.0.1
 
 binary:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) ./cmd/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags "$(BUILD_TAGS)" -o $(BINARY_NAME) ./cmd
 
 .PHONY: check-legacy-packages
 check-legacy-packages:
@@ -28,10 +30,10 @@ check-ig-pin:
 	./scripts/check-inspektor-gadget-pin.sh go.mod
 
 docker-build-only:
-	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
+	docker buildx build --build-arg BUILD_TAGS="$(BUILD_TAGS)" --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
 
 docker-build: gadgets
-	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
+	docker buildx build --build-arg BUILD_TAGS="$(BUILD_TAGS)" --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
 
 docker-push: docker-build
 	docker push $(IMAGE):$(TAG)

@@ -1,0 +1,85 @@
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJYVENDQVFLZ0F3SUJBZ0lSQU8yeTliYUFZRHFWOXdyYXo5TDZDcnN3Q2dZSUtvWkl6ajBFQXdJd0ZERVMKTUJBR0ExVUVBeE1KYkc5allXd3RhMlY1TUI0WERUSTJNRGt5TURFNE5EWXpPRm9YRFRJM01Ea3lNREU0TkRZegpPRm93RkRFU01CQUdBMVVFQXhNSmJHOWpZV3d0YTJWNU1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEClFnQUUzR0lRd0tCK1I0RmJTU0liQXYwMUdKcHJNekxwa1RSUVRhellEYWc0YWlFcDQ3bDhmQ2FqUkIwTTUzWE0KRkpkK0xIdzE1WHpjTG5Sc1dDckd1Rlh4WEtNMU1ETXdEZ1lEVlIwUEFRSC9CQVFEQWdlQU1CTUdBMVVkSlFRTQpNQW9HQ0NzR0FRVUZCd01ETUF3R0ExVWRFd0VCL3dRQ01BQXdDZ1lJS29aSXpqMEVBd0lEU1FBd1JnSWhBTDJsCnJxdlhPdjVwdEJmRHVOaHkxdm9QTFIxdHMyajdhcVgrRjk5aFVDbUhBaUVBd3BCMkhrcEZPUVdkeW5KUWFlTGoKenF6bWtlMmt2RlZudEhZcWtCRXN6WlE9Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    signature.kubescape.io/content: H4sIAAAAAAAA/8yUb2sjNxDGv8p03qTHKe66fzi6cC8MTlND71KCry2UI4yl8VpEK+mk2cQmGPoh+gn7SYrWu3GTJi2FK9wrr0ezo2eemd/eIUX7E6dsg8car7sVZ02RJzZ8cTNFhdfWG6zxsnOcUWHLQoaEsL5DRyt2uTxl23iSLvHkQYFV541jrPHw8NUrVM+lrhM1LXs51Y5yxhrDDSdHO9wr9NSWIlpOxzqnrd2yOU29qL3CHFkXHYdA/esdsqeVY4O1pI4V2r6HqqpKS0O9d563kbWwgZiC5pzBUef1hg0qNJx1slEOvsycC7dsYENuDWENBL0CGGXDH7/9Dm2XBTzfcAIyrRVYsaYuM8iGIduVs76BIhEWc7AZQifZmsPx0C707QOV65zNggp5GxPnMp/e6pZzpqboP3mz+OVsDt9dzs7fnL1dQt9eDSfwEviGvUx0aFtU2Hn7oeNFceAYh5dwcnVM5S1Hkg2q3sKz+ysPXpaU5S6WS3nL+oEorPEzHSe3lK/KWSdsPh+v8ULWc1oYBZFS5knD0mddlcuGNEpNVn9RrB5KevEC9+/3CmMKa+t4zpG9Ya93WFfHKAld8ofOpjLyOwyRi1u+c071kstGkXOoUFOklXVWLN9n5F3W5NzxDW9isF6OgaZ0Ow8tWf8oODOm/ByLWf9U8hB9lF1Wt+yLlR3WrxTmLsaQ5MfgbGlwTS6zQqGmLDUWQ3krdQEneZYeyDF47zYqJB9acjvs/SmLjWocHMXorKay1oN3+F4hNexl+AoMPpatxhpRoc3LZJuG08xxkpGo1kriJWmxGmtczqqq+hLHMOtNv3TlZFp98y3u1bNITp9G8uAueJbbkK5BEq3XVv8NzLnNNLA5ElZQ7OsWxnwQsP6fEFOQQ3/+8/cXP5wdie5pXjEkXne5/yT8FxKnD0g0Wcrkn4LxePQv5A1OPIbvUCVe92nw+jWcXLxbnl8s3p6ffCRwDn/+R24GMj8pcEa3PxYc0+oZOL6eljHt/wwAAP//uo+OkYgHAAA=
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEQCIBZMmz5NKlHFBXZw4EPvyfmMUVbK/5pM7t90beomJ09PAiB+oqTwF/iMofWfd6Ctak4sN/FRAcr9dzkH/8LyNJKKwA==
+    signature.kubescape.io/timestamp: "1789929998"
+  labels:
+    signature.kubescape.io/bundle: bundle37
+    signature.kubescape.io/fragment-class: overlay
+  name: ct-bundle37-mixed-rules
+spec:
+  rules:
+  - agentVersionRequirement: ""
+    description: Allowed half of a mixed fragment — must never admit because the sibling
+      rule ID is outside the overlay class allowlist
+    enabled: true
+    expressions:
+      message: '''MIXED FRAGMENT R0001: '' + event.comm'
+      ruleExpression:
+      - eventType: exec
+        expression: '!cp.was_executed(event.containerId, parse.get_exec_path(event.args,
+          event.comm, event.exepath))'
+      uniqueId: event.comm + '_' + event.exepath
+    id: R0001
+    isTriggerAlert: true
+    mitreTactic: TA0002
+    mitreTechnique: T1059
+    name: Unexpected process launched
+    profileDataRequired:
+      capabilities: null
+      egressAddresses: null
+      egressDomains: null
+      endpoints: null
+      execs: all
+      ingressAddresses: null
+      ingressDomains: null
+      opens: null
+      syscalls: null
+    profileDependency: 0
+    severity: 7
+    supportPolicy: false
+    tags:
+    - context:kubernetes
+    - context:container
+    - anomaly
+    - process
+    - exec
+    - applicationprofile
+  - agentVersionRequirement: ""
+    description: Disallowed sibling — R0011 is not in the overlay class allowlist,
+      so the WHOLE fragment must be refused
+    enabled: true
+    expressions:
+      message: '''MIXED FRAGMENT R0011: '' + event.dstAddr'
+      ruleExpression:
+      - eventType: network
+        expression: event.pktType == 'OUTGOING'
+      uniqueId: event.dstAddr
+    id: R0011
+    isTriggerAlert: true
+    mitreTactic: TA0010
+    mitreTechnique: T1041
+    name: Unexpected egress network traffic
+    profileDataRequired:
+      capabilities: null
+      egressAddresses: all
+      egressDomains: null
+      endpoints: null
+      execs: null
+      ingressAddresses: null
+      ingressDomains: null
+      opens: null
+      syscalls: null
+    profileDependency: 0
+    severity: 7
+    supportPolicy: false
+    tags:
+    - context:kubernetes
+    - context:container
+    - anomaly
+    - network

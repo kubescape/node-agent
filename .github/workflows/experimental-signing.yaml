@@ -1,0 +1,42 @@
+name: Experimental signing build isolation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  signing:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tags: ["", experimental_signing]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test signing integration and baseline
+        env:
+          BUILD_TAGS: ${{ matrix.tags }}
+        run: |
+          go test -tags "$BUILD_TAGS" ./pkg/config ./pkg/healthmanager ./pkg/objectcache/containerprofilecache ./pkg/rulebindingmanager/cache ./pkg/rulemanager/rulecreator ./pkg/rulemanager/ruleswatcher ./pkg/rulemanager/types/v1 ./pkg/storage/...
+          if [ -n "$BUILD_TAGS" ]; then
+            go test -tags "$BUILD_TAGS" ./pkg/signature/... ./pkg/compactyaml ./cmd/...
+            go build -tags "$BUILD_TAGS" -o /tmp/sign-object ./cmd/sign-object
+          fi
+      - name: Build agent and prove default isolation
+        env:
+          BUILD_TAGS: ${{ matrix.tags }}
+        run: |
+          go build -tags "$BUILD_TAGS" -o /tmp/node-agent ./cmd
+          if [ -z "$BUILD_TAGS" ]; then
+            go list -deps ./cmd > /tmp/default-deps
+            if grep -E 'github.com/kubescape/node-agent/pkg/signature|github.com/sigstore/(cosign|fulcio)' /tmp/default-deps; then
+              echo 'Experimental signing dependencies leaked into the default build'
+              exit 1
+            fi
+          fi

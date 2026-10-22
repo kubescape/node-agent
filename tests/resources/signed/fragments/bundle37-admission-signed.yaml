@@ -1,0 +1,46 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJXekNDQVFHZ0F3SUJBZ0lRQ0FWMTF1ZGNya1Y0RHJaQklXRGlHakFLQmdncWhrak9QUVFEQWpBVU1SSXcKRUFZRFZRUURFd2xzYjJOaGJDMXJaWGt3SGhjTk1qWXdPREV4TVRjek9UQXpXaGNOTWpjd09ERXhNVGN6T1RBegpXakFVTVJJd0VBWURWUVFERXdsc2IyTmhiQzFyWlhrd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DCkFBVGNZaERBb0g1SGdWdEpJaHNDL1RVWW1tc3pNdW1STkZCTnJOZ05xRGhxSVNuanVYeDhKcU5FSFF6bmRjd1UKbDM0c2ZEWGxmTnd1ZEd4WUtzYTRWZkZjb3pVd016QU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3dwpDZ1lJS3dZQkJRVUhBd013REFZRFZSMFRBUUgvQkFJd0FEQUtCZ2dxaGtqT1BRUURBZ05JQURCRkFpRUFxL08zCndZditaZGh2RTZIQnRyREtrck9HZUQ2ZU12WkJJdkM2bEVsRkdZQUNJRU4yV3hCY00ra2xZU3hIUDhuV2FIYVQKVi91ODJlVHArajhtZEZJcFZiQUIKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    signature.kubescape.io/content: H4sIAAAAAAAA/3ySQYvcMAyF/4vOninLQpfmtkwvhVIGduml9KDYSlaMIhtb6e4y5L8XTzJJp9De/Cz5RfryzoCJv1MuHBUaKCm87Uvs7BUz+TikWNg46v40tlQ8Jtpz/PDrriXDO3BwYg3QwCGqISvlY44dC4GDgQwDGkJzBsGWpNRT4V7Rxky3hu2oQQgamA/3D+D+1dpl7AdS23nBUqABDAOXy/iTA8XhT5vdTbEk8nUIzP6FjXw1L9DoKOLAY8KWhY23O3ojv4qYSFdR3otHkU2Tr7Su69dNl48F6nAUe/Q2E4ZpckAaUmS19T0P2NOXz7W+iGfsZ5VHoWMU9pfBzpMDDqTGHVM4oMiToT9tRtpnqlx+nLe+XDGJxFcKOy9MauDA3lNFxWqUFQUchLofzIdvOGwcUsw2Wy58nw/H3cf7h0/gIOVo0UeZb2FuhqZWp59VhScS8hZzpTGg+ZevaxwwJWggU+ByHWxa/mJJ6Ok/T2sospJRqam4pm3/VwAudpweQ5ipANShaGFUt5um3wEAAP//5UhAygMDAAA=
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEUCIGFKoKENiRhBmp37z/M/47Xxsosl08FVkSStpvBsd9QwAiEAvDb22KI3SW+IW0CfVxf0d7TKvMHpXTnhbtRaIJzBeLI=
+    signature.kubescape.io/timestamp: "1786469943"
+  labels:
+    signature.kubescape.io/bundle: bundle37
+    signature.kubescape.io/fragment-class: admission
+  name: bundle37-admission
+spec:
+  architectures: null
+  capabilities: null
+  egress: null
+  endpoints: null
+  execs: null
+  identifiedCallStacks: null
+  imageID: ""
+  imageTag: ""
+  ingress:
+  - dns: ""
+    dnsNames: null
+    identifier: allowed-client
+    ipAddress: ""
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: bundle37
+    podSelector:
+      matchLabels:
+        app: redis-client
+    ports:
+    - name: TCP-6379
+      port: 6379
+      protocol: TCP
+    type: internal
+  opens: null
+  rulePolicies: null
+  seccompProfile:
+    spec:
+      defaultAction: ""
+  syscalls: null
+status: {}

@@ -1,0 +1,24 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: bundle37-base
+  labels:
+    signature.kubescape.io/bundle: bundle37
+    signature.kubescape.io/fragment-class: base
+spec:
+  architectures:
+    - amd64
+  execs:
+    - path: /bin/busybox
+      args:
+        - /bin/sleep
+    - path: /usr/bin/curl
+  syscalls:
+    - close
+    - connect
+    - openat
+    - read
+    - socket
+    - write
+  matchLabels:
+    app: bundle37

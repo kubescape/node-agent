@@ -1,0 +1,14 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: bundle56-base
+  labels:
+    signature.kubescape.io/bundle: bundle56
+    signature.kubescape.io/fragment-class: base
+    signature.kubescape.io/version: "1"
+spec:
+  architectures: [amd64]
+  execs:
+    - path: /usr/bin/sleep
+  matchLabels:
+    app: bundle56

@@ -408,7 +408,9 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	//
 	// Attached per call, never to the shared ctx: the authored-CP fetch below
 	// derives from the same ctx and must never carry the learned CP's checksum.
-	validatorEligible := e.UserCPRef == nil && e.UserCPRV == "" && e.SpecHash == preFetchSpecHash &&
+	// Signing enforcement must re-evaluate learned-only entries after a policy
+	// reload; a checksum match must not bypass that admission decision.
+	validatorEligible := !c.requiresSignedProfile() && e.UserCPRef == nil && e.UserCPRV == "" && e.SpecHash == preFetchSpecHash &&
 		e.State != nil && e.State.Status == helpersv1.Completed && e.State.Completion == helpersv1.Full
 	validatorOffered := false
 	requestMode := conditionalFetchModeMissing
@@ -489,7 +491,18 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	// fetched. Otherwise a learned CP stuck in a non-terminal status ("ready")
 	// would freeze authored-CP edits out of the cache forever.
 	var userDefinedCP *v1beta1.ContainerProfile
+	bundleName := ""
 	if e.UserCPRef != nil {
+		bundleName = e.UserCPRef.Name
+	}
+	bundleCP, bundleHandled, bundleErr := c.loadSignedBundle(ctx, ns, bundleName, e.WorkloadID)
+	if bundleErr != nil {
+		return
+	} // Preserve the last verified composite on assembly errors.
+	if bundleHandled {
+		userDefinedCP = bundleCP
+	}
+	if !bundleHandled && e.UserCPRef != nil {
 		var userCPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
 			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, e.UserCPRef.Namespace, e.UserCPRef.Name)
@@ -506,11 +519,24 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 			userDefinedCP = nil
 		}
 	}
+	if !bundleHandled {
+		var refused bool
+		userDefinedCP, refused = c.admitSignedProfile(userDefinedCP, e.WorkloadID)
+		if refused {
+			c.refuseSignedProfile(id, e)
+			return
+		}
+	}
 	userCPName := ""
 	if e.UserCPRef != nil {
 		userCPName = e.UserCPRef.Name
 	}
 	userDefinedCP = resolveAuthoredSection(userDefinedCP, e.ContainerName, userCPName, id, ns)
+
+	if c.requiresSignedProfile() && userDefinedCP == nil {
+		c.refuseSignedProfile(id, e)
+		return
+	}
 	if cp == nil && userDefinedCP == nil {
 		logger.L().Debug("refreshOneEntry: no CP available after refresh; evicting entry",
 			helpers.String("containerID", id),

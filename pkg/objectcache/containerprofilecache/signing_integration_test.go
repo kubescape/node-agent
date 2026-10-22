@@ -1,0 +1,79 @@
+//go:build experimental_signing
+
+package containerprofilecache
+
+import (
+	"context"
+	"testing"
+
+	"github.com/kubescape/node-agent/pkg/signature"
+	"github.com/kubescape/node-agent/pkg/signature/bundle"
+	"github.com/kubescape/node-agent/pkg/signature/profiles"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/stretchr/testify/require"
+)
+
+func TestSigningPolicyReloadDisablesLearnedChecksumSkip(t *testing.T) {
+	cp := learnedCPWithChecksum("learned", "1", "checksum")
+	client := &checksumRecordingClient{learned: cp}
+	c := newReconcilerCache(t, client, newControllableK8sCache(), nil)
+	entry := seedChecksumEntry(c, "id", cp, "checksum", "")
+	c.SetBundleConfig(&bundle.TrustPolicy{Mode: bundle.ModeAlert})
+	c.refreshOneEntry(context.Background(), "id", entry)
+	require.Equal(t, []string{"checksum"}, client.checksumsFor(cp.Name))
+
+	c.SetBundleConfig(&bundle.TrustPolicy{Mode: bundle.ModeEnforce})
+	c.refreshOneEntry(context.Background(), "id", entry)
+	require.Equal(t, []string{"checksum", ""}, client.checksumsFor(cp.Name))
+	refused, ok := c.entries.Load("id")
+	require.True(t, ok)
+	require.NotEqual(t, entry.Projected, refused.Projected,
+		"enforcement must remove the unsigned learned projection despite an unchanged checksum")
+}
+
+func TestSigningRefreshRefusesAndRecoversWithoutRogueArtifacts(t *testing.T) {
+	raw := signedGroupedCP(t)
+	client := &scriptedProfileClient{byName: map[string]*v1beta1.ContainerProfile{raw.Name: raw}}
+	c := newReconcilerCache(t, client, newControllableK8sCache(), nil)
+	c.cfg.EnableSignatureVerification = true
+	exp := &captureExporter{}
+	c.SetTamperAlertExporter(exp)
+	flat := resolveAuthoredContainerSection(raw, "app")
+	entry := newEntry(flat, "app", "pod", raw.Namespace, "uid")
+	entry.CPName = "learned"
+	entry.UserCPRef = &namespacedName{Namespace: raw.Namespace, Name: raw.Name}
+	entry.UserCPRV = ""
+	c.entries.Set("id", entry)
+	c.refreshOneEntry(context.Background(), "id", entry)
+	verified, _ := c.entries.Load("id")
+	require.Equal(t, "7", verified.UserCPRV)
+
+	// Even without an RV change verification must precede the cache fast-skip.
+	raw.Spec.Containers[0].Execs = append(raw.Spec.Containers[0].Execs, v1beta1.ExecCalls{Path: "/bin/evil"})
+	c.refreshOneEntry(context.Background(), "id", verified)
+	refused, _ := c.entries.Load("id")
+	require.Empty(t, refused.UserCPRV)
+	require.NotEqual(t, verified.Projected, refused.Projected)
+	require.NotNil(t, refused.UserCPRef, "reconciliation must retain the recovery target")
+	require.Len(t, exp.ruleAlerts(), 1)
+	require.Equal(t, "R1016", exp.ruleAlerts()[0].GetRuleId())
+
+	require.NoError(t, signature.SignObjectDisableKeyless(profiles.NewContainerProfileAdapter(raw)))
+	raw.ResourceVersion = "8"
+	c.refreshOneEntry(context.Background(), "id", refused)
+	healed, _ := c.entries.Load("id")
+	require.Equal(t, "8", healed.UserCPRV)
+	for _, alert := range exp.ruleAlerts() {
+		require.NotEqual(t, "R1017", alert.GetRuleId())
+	}
+}
+
+func TestSigningEmbeddedContentDoesNotMutateStorageObject(t *testing.T) {
+	cp := signedEmbeddedCP(t)
+	cp.Spec.Execs = append(cp.Spec.Execs, v1beta1.ExecCalls{Path: "/bin/stored-edit"})
+	c := &ContainerProfileCacheImpl{}
+	admitted, refused := c.admitSignedProfile(cp, "")
+	require.False(t, refused)
+	require.Len(t, admitted.Spec.Execs, 1)
+	require.Len(t, cp.Spec.Execs, 2)
+}

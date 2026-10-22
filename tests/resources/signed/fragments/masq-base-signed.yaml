@@ -1,0 +1,46 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJYRENDQVFLZ0F3SUJBZ0lSQUxHTEdBVG4yNU93RVZ2bUJGRUNxdjh3Q2dZSUtvWkl6ajBFQXdJd0ZERVMKTUJBR0ExVUVBeE1KYkc5allXd3RhMlY1TUI0WERUSTJNRGd5TnpFNE1UWXdNMW9YRFRJM01EZ3lOekU0TVRZdwpNMW93RkRFU01CQUdBMVVFQXhNSmJHOWpZV3d0YTJWNU1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEClFnQUV6cUxHMWptZXQyK2pFMmQvY1dOeklkVzJNbHlPS0RySm84Z3loMWlrc3BJNW9lM3hqQkg3d200OGdhQXUKU2JKd3NWTHhvM0NCMFpNYlluMGRsV3FHbGFNMU1ETXdEZ1lEVlIwUEFRSC9CQVFEQWdlQU1CTUdBMVVkSlFRTQpNQW9HQ0NzR0FRVUZCd01ETUF3R0ExVWRFd0VCL3dRQ01BQXdDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWhBS0pIClV4SVdvRDhvbEVHZEtRWGhOY2dwd1JUWjRnQzVONlY1bFFkYmt6VElBaUEydytsNXZIR0thYjEzNmpIcW9jTTEKZ2FtT3VaZmFxWEJSRU1hdWc4aFNIUT09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    signature.kubescape.io/content: H4sIAAAAAAAA/3RSPW/bQAz9L5zPNgIEHbQV6VKgQ4AWXYoMFEXJhCne9UglDgz99+LijzRDNj3y6ZF8706ARX5zdckGHXgZjlvPY7xgZcpzyS4h2baHpWcnLLyVvHu+6znwDhIcxAbo4CFboBjXx5pHUYYEMwcOGAjdCRR7Vm9fLpNhLJU/CvaLDcrQwYz+9wLSZ+Sx4jSzxYYU3aGDHp1hTWA4XzU215oXpjYYK+0lmJqcQ/cHcB6+3MNTAsKCvaiEtIYtqgn4yNRYJygYe+hg14vtXJkLrOm9OmQ6cN2wRX0tWSy2vv9AWLzuvP1rk9gR1qcEubDdBvmrE6qeNyLiEveQoG+uJiDN3nygbMYUkEDFgw3OItgqlbFRvS3S8EuV4HaWM7X8roE07y9WDDziovGV4pw5rGsCtuHtgNtmMuPE37+1/gX8wumM6qL8mFXozbHTmkAGtpBReHhA1Z+BdLgJzRi0/3F7AVjKNSPn+sy1pSQ2VfZ3+/9D6/ovAAD//7EADRmjAgAA
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEUCIFSFU7AT7P885kxUEGM74DL7IdG9eUZ2QC1VI8sZdrV6AiEA1ThD763G6ifisV1NrfcNLMiP8jhVzf0TYhErMxgACu8=
+    signature.kubescape.io/timestamp: "1787854563"
+  labels:
+    signature.kubescape.io/bundle: masqbundle
+    signature.kubescape.io/fragment-class: base
+  name: masq-base
+spec:
+  architectures:
+  - amd64
+  capabilities: null
+  egress: null
+  endpoints: null
+  execs:
+  - path: /bin/sleep
+  - path: /docker-entrypoint.sh
+  - path: /usr/sbin/nginx
+  identifiedCallStacks: null
+  imageID: ""
+  imageTag: ""
+  ingress: null
+  matchLabels:
+    app: masq-server
+  opens: null
+  rulePolicies: null
+  seccompProfile:
+    spec:
+      defaultAction: ""
+  syscalls:
+  - accept4
+  - bind
+  - close
+  - connect
+  - listen
+  - openat
+  - read
+  - socket
+  - write
+status: {}

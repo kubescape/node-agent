@@ -115,7 +115,12 @@ func main() {
 		}
 	}
 
-	clusterData, err := utilsmetadata.LoadConfig("/etc/config/clusterData.json")
+	clusterDataPath, cleanupClusterData, err := verifiedClusterDataPath()
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("verify clusterData error", helpers.Error(err))
+	}
+	defer cleanupClusterData()
+	clusterData, err := utilsmetadata.LoadConfig(clusterDataPath)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}
@@ -209,6 +214,7 @@ func main() {
 
 	// Start the health manager
 	healthManager := healthmanager.NewHealthManager()
+	configureSigningHealth(healthManager)
 	healthManager.Start(ctx)
 
 	// Create clients
@@ -283,10 +289,11 @@ func main() {
 	}
 
 	var ruleBindingCache *rulebindingcachev1.RBCache
+	var rulesWatcher *ruleswatcher.RulesWatcherImpl
 	if cfg.EnableRuntimeDetection {
 		ruleCreator := rulecreator.NewRuleCreator()
 		ruleBindingCache = rulebindingcachev1.NewCache(cfg, k8sClient, ruleCreator)
-		rulesWatcher := ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
+		rulesWatcher = ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
 			ruleBindingCache.RefreshRuleBindingsRules()
 		})
 		dWatcher.AddAdaptor(rulesWatcher)
@@ -357,6 +364,7 @@ func main() {
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
 		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, metricsProvider)
+		configureSigning(ctx, cfg, cpc, rulesWatcher, ruleBindingCache, exporter)
 		cpc.Start(ctx)
 		if cpm, ok := containerProfileManager.(*containerprofilemanagerv1.ContainerProfileManager); ok {
 			cpm.SetCompletionNotifier(cpc)

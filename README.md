@@ -129,7 +129,7 @@ git clone https://github.com/kubescape/node-agent.git
 cd node-agent
 
 # Build the binary
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o node-agent ./cmd/main.go
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o node-agent ./cmd
 
 # Set required environment variables
 export NODE_NAME=$(hostname)
@@ -520,7 +520,7 @@ go test ./tests/...
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/cmd/main.go",
+            "program": "${workspaceFolder}/cmd",
             "env": {
                 "NODE_NAME": "<node-name>",
                 "KUBECONFIG": "<path-to-kubeconfig>"

@@ -1,0 +1,13 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: bundle56-overlay
+  labels:
+    signature.kubescape.io/bundle: bundle56
+    signature.kubescape.io/fragment-class: overlay
+    signature.kubescape.io/version: "3"
+spec:
+  execs:
+    - path: /usr/bin/id
+    - path: /usr/bin/uname
+    - path: /usr/bin/whoami

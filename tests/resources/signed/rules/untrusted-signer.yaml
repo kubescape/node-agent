@@ -1,0 +1,33 @@
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  labels:
+    signature.kubescape.io/fragment-class: base
+  name: ct-rogue-rules
+spec:
+  rules:
+  - description: Rogue retune of R0001 signed by an untrusted key; must never be admitted
+    enabled: true
+    expressions:
+      message: '''ROGUE R0001: unexpected process '' + event.comm + '' with PID '' + string(event.pid)'
+      ruleExpression:
+      - eventType: exec
+        expression: '!cp.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath))'
+      uniqueId: event.comm + '_' + event.exepath
+    id: R0001
+    isTriggerAlert: true
+    mitreTactic: TA0002
+    mitreTechnique: T1059
+    name: Unexpected process launched
+    profileDataRequired:
+      execs: all
+    profileDependency: 0
+    severity: 7
+    supportPolicy: false
+    tags:
+    - context:kubernetes
+    - context:container
+    - anomaly
+    - process
+    - exec
+    - applicationprofile

@@ -120,6 +120,7 @@ type pendingContainer struct {
 
 // ContainerProfileCacheImpl is the unified container-keyed cache for ContainerProfile objects.
 type ContainerProfileCacheImpl struct {
+	signingState
 	cfg            config.Config
 	entries        maps.SafeMap[string, *CachedContainerProfile]
 	pending        maps.SafeMap[string, *pendingContainer]
@@ -441,7 +442,15 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// single-container convention and the safest retry target when the
 	// per-container fetch does not cleanly succeed.
 	resolvedOverlayName := overlayName
-	if hasOverlay && overlayName != "" {
+	bundleCP, bundleHandled, bundleErr := c.loadSignedBundle(ctx, ns, overlayName, sharedData.Wlid)
+	if bundleErr != nil {
+		logger.L().Warning("signed bundle failed verification: NO fallback to a ContainerProfile of the same name", helpers.String("bundle", overlayName), helpers.Error(bundleErr))
+		return false
+	}
+	if bundleHandled {
+		userDefinedCP = bundleCP
+	}
+	if !bundleHandled && hasOverlay && overlayName != "" {
 		// Per-container binding (review finding on node-agent#864): a
 		// multi-container pod shares one label value but each container is
 		// profiled independently, so its authored ContainerProfile is published
@@ -486,7 +495,18 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
+	if !bundleHandled {
+		var refused bool
+		userDefinedCP, refused = c.admitSignedProfile(userDefinedCP, sharedData.Wlid)
+		if refused {
+			return false
+		}
+	}
 	userDefinedCP = resolveAuthoredSection(userDefinedCP, container.Runtime.ContainerName, resolvedOverlayName, containerID, ns)
+
+	if c.requiresSignedProfile() && userDefinedCP == nil {
+		return false
+	}
 
 	// Only cache profiles whose status is terminal (Completed or TooLarge).
 	// Learning/ready profiles are still being written; caching them would let

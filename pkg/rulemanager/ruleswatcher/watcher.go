@@ -1,3 +1,5 @@
+//go:build !experimental_signing
+
 package ruleswatcher
 
 import (
