@@ -83,19 +83,27 @@ func EmbeddedContent(obj SignableObject) ([]byte, bool, error) {
 // embeddedIdentity is the metadata the embedded content commits to; used to
 // bind the signed content to the carrier object it is stapled onto.
 type embeddedIdentity struct {
-	Metadata struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Metadata   struct {
 		Name      string  `json:"name"`
 		Namespace *string `json:"namespace"`
 	} `json:"metadata"`
 }
 
-// checkEmbeddedBinding binds the signed name and, when present, namespace to
+// checkEmbeddedBinding binds the signed resource type, name and optional namespace to
 // the carrier. Adapters omitting namespace keep their portable-artifact behavior.
 // A mismatch is treated as tampering.
 func checkEmbeddedBinding(obj SignableObject, embedded []byte) error {
 	var id embeddedIdentity
 	if err := json.Unmarshal(embedded, &id); err != nil {
 		return fmt.Errorf("parse embedded metadata: %w", err)
+	}
+	if resource, ok := obj.(ResourceSignableObject); ok {
+		apiVersion, kind := resource.ExpectedResourceType()
+		if id.APIVersion != apiVersion || id.Kind != kind {
+			return fmt.Errorf("embedded content type %q/%q does not match expected %q/%q", id.APIVersion, id.Kind, apiVersion, kind)
+		}
 	}
 	if id.Metadata.Name != obj.GetName() {
 		return fmt.Errorf("embedded content name %q does not match object %q", id.Metadata.Name, obj.GetName())

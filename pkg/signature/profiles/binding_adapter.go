@@ -59,3 +59,8 @@ func (r *RuleBindingAdapter) GetContent() interface{} {
 func (r *RuleBindingAdapter) GetUpdatedObject() interface{} {
 	return r.binding
 }
+
+// ExpectedResourceType identifies the resource handled by this adapter, independently of live TypeMeta.
+func (*RuleBindingAdapter) ExpectedResourceType() (apiVersion, kind string) {
+	return "kubescape.io/v1", "RuntimeRuleAlertBinding"
+}

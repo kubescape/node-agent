@@ -52,7 +52,16 @@ func newFakeK8sClient(t *testing.T, objs ...*typesv1.Rules) *fakeK8sClient {
 		items = append(items, &unstructured.Unstructured{Object: u})
 	}
 	listKinds := map[schema.GroupVersionResource]string{typesv1.RuleGvr: "RuleList"}
-	return &fakeK8sClient{dyn: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, items...)}
+	// Seed the explicit GVR: the fake client's pluralizer maps Kind Rules to
+	// "ruleses", whereas the CRD resource is "rules".
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+	for _, item := range items {
+		obj := item.(*unstructured.Unstructured)
+		if err := dyn.Tracker().Create(typesv1.RuleGvr, obj, obj.GetNamespace()); err != nil {
+			t.Fatalf("seed rules: %v", err)
+		}
+	}
+	return &fakeK8sClient{dyn: dyn}
 }
 
 func testKey(t *testing.T) *ecdsa.PrivateKey {
@@ -79,7 +88,7 @@ func rulesObj(name, namespace, bundleName, class string, ruleIDs ...string) *typ
 		labels[bundle.LabelBundle] = bundleName
 	}
 	return &typesv1.Rules{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "kubescape.io/v1", Kind: "Rule"},
+		TypeMeta:   metav1.TypeMeta{APIVersion: "kubescape.io/v1", Kind: "Rules"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
 		Spec:       typesv1.RulesSpec{Rules: rules},
 	}

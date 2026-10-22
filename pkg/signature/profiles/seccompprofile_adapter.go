@@ -62,3 +62,8 @@ func (s *SeccompProfileAdapter) GetContent() interface{} {
 func (s *SeccompProfileAdapter) GetUpdatedObject() interface{} {
 	return s.profile
 }
+
+// ExpectedResourceType identifies the resource handled by this adapter, independently of live TypeMeta.
+func (*SeccompProfileAdapter) ExpectedResourceType() (apiVersion, kind string) {
+	return "spdx.softwarecomposition.kubescape.io/v1beta1", "SeccompProfile"
+}

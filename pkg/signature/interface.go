@@ -24,6 +24,15 @@ type SignableObject interface {
 	GetUpdatedObject() interface{}
 }
 
+// ResourceSignableObject binds embedded Kubernetes content to the resource type
+// the adapter handles. ExpectedResourceType must return constants independent
+// of the carrier's mutable TypeMeta. Non-resource config and policy adapters do
+// not implement this interface.
+type ResourceSignableObject interface {
+	SignableObject
+	ExpectedResourceType() (apiVersion, kind string)
+}
+
 type Signature struct {
 	Signature   []byte
 	Certificate []byte

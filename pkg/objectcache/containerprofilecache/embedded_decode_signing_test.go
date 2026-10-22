@@ -19,8 +19,10 @@ type invalidEmbeddedProfile struct {
 
 func (p invalidEmbeddedProfile) GetContent() interface{} {
 	return map[string]interface{}{
-		"metadata": map[string]interface{}{"name": p.GetName()},
-		"spec":     p.spec,
+		"apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
+		"kind":       "ContainerProfile",
+		"metadata":   map[string]interface{}{"name": p.GetName()},
+		"spec":       p.spec,
 	}
 }
 

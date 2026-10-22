@@ -62,3 +62,8 @@ func (r *RulesAdapter) GetContent() interface{} {
 func (r *RulesAdapter) GetUpdatedObject() interface{} {
 	return r.rules
 }
+
+// ExpectedResourceType identifies the resource handled by this adapter, independently of live TypeMeta.
+func (*RulesAdapter) ExpectedResourceType() (apiVersion, kind string) {
+	return "kubescape.io/v1", "Rules"
+}

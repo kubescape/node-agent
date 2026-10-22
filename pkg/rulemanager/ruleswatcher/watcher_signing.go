@@ -31,12 +31,11 @@ type RulesWatcherImpl struct {
 	watchResources []watcher.WatchResource
 	specDivergence sync.Map
 
-	// trustPolicy governs signed Rules fragments. It is written once during
-	// startup wiring but read from watch-event goroutines, so it is guarded by
-	// policyMutex (the write also happens before dWatcher.Start, but the lock
-	// keeps the field safe if that ordering ever changes).
-	policyMutex sync.RWMutex
-	trustPolicy *bundle.TrustPolicy
+	// policyMutex coordinates policy replacement with publication of admitted rules.
+	// Admission and cluster requests run outside the lock.
+	policyMutex      sync.RWMutex
+	trustPolicy      *bundle.TrustPolicy
+	policyGeneration uint64
 }
 
 func NewRulesWatcher(k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator, callback RulesWatcherCallback) *RulesWatcherImpl {
@@ -60,22 +59,23 @@ func (w *RulesWatcherImpl) SetTrustPolicy(p *bundle.TrustPolicy) {
 	w.policyMutex.Lock()
 	defer w.policyMutex.Unlock()
 	w.trustPolicy = p
+	w.policyGeneration++
 }
 
-// trustPolicySnapshot returns the currently configured policy and whether rule
-// signing is enabled with it.
-func (w *RulesWatcherImpl) trustPolicySnapshot() (*bundle.TrustPolicy, bool) {
+// trustPolicySnapshot returns the policy, whether rule signing is enabled,
+// and the generation used to guard publication against concurrent reloads.
+func (w *RulesWatcherImpl) trustPolicySnapshot() (*bundle.TrustPolicy, bool, uint64) {
 	w.policyMutex.RLock()
 	defer w.policyMutex.RUnlock()
 	if w.trustPolicy == nil || !w.trustPolicy.RuleSigningEnabled() {
-		return nil, false
+		return nil, false, w.policyGeneration
 	}
-	return w.trustPolicy, true
+	return w.trustPolicy, true, w.policyGeneration
 }
 
 // ruleSigningEnabled reports whether a trust policy with rule classes is set.
 func (w *RulesWatcherImpl) ruleSigningEnabled() bool {
-	_, ok := w.trustPolicySnapshot()
+	_, ok, _ := w.trustPolicySnapshot()
 	return ok
 }
 
@@ -153,8 +153,6 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 		return err
 	}
 
-	policy, signingEnabled := w.trustPolicySnapshot()
-
 	fragments := make([]*typesv1.Rules, 0, len(unstructuredList.Items))
 	for _, item := range unstructuredList.Items {
 		rules, err := unstructuredToRules(&item)
@@ -165,9 +163,10 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 		fragments = append(fragments, rules)
 	}
 
-	enabledRules, tally := admitFragments(fragments, policy, signingEnabled, w.reportRulesDivergence)
-
-	w.ruleCreator.SyncRules(enabledRules)
+	enabledRules, tally, signingEnabled, err := w.admitAndSyncRules(ctx, fragments, w.reportRulesDivergence)
+	if err != nil {
+		return err
+	}
 
 	logger.L().Info("RulesWatcher - synced rules from cluster",
 		helpers.Int("enabledRules", len(enabledRules)),
@@ -191,6 +190,28 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// admitAndSyncRules retries admission if the policy changes while signatures are
+// being checked. Holding policyMutex through SyncRules makes the generation
+// check and publication atomic with respect to SetTrustPolicy. Neither network
+// requests nor the watcher callback run under this lock.
+func (w *RulesWatcherImpl) admitAndSyncRules(ctx context.Context, fragments []*typesv1.Rules, onAdmitted func(*typesv1.Rules)) ([]typesv1.Rule, admissionTally, bool, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, admissionTally{}, false, err
+		}
+		policy, signingEnabled, generation := w.trustPolicySnapshot()
+		enabledRules, tally := admitFragments(fragments, policy, signingEnabled, onAdmitted)
+		w.policyMutex.RLock()
+		if generation != w.policyGeneration {
+			w.policyMutex.RUnlock()
+			continue
+		}
+		w.ruleCreator.SyncRules(enabledRules)
+		w.policyMutex.RUnlock()
+		return enabledRules, tally, signingEnabled, nil
+	}
 }
 
 func (w *RulesWatcherImpl) InitialSync(ctx context.Context) error {

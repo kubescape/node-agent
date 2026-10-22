@@ -86,3 +86,8 @@ func (a *ContainerProfileAdapter) GetContent() interface{} {
 func (a *ContainerProfileAdapter) GetUpdatedObject() interface{} {
 	return a.profile
 }
+
+// ExpectedResourceType identifies the resource handled by this adapter, independently of live TypeMeta.
+func (*ContainerProfileAdapter) ExpectedResourceType() (apiVersion, kind string) {
+	return "spdx.softwarecomposition.kubescape.io/v1beta1", "ContainerProfile"
+}

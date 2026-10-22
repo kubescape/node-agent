@@ -27,7 +27,16 @@ func mutableRulesClient(t *testing.T, objs ...*typesv1.Rules) *fakeK8sClient {
 		items = append(items, &unstructured.Unstructured{Object: u})
 	}
 	listKinds := map[schema.GroupVersionResource]string{typesv1.RuleGvr: "RuleList"}
-	return &fakeK8sClient{dyn: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, items...)}
+	// Seed the explicit GVR: the fake client's pluralizer maps Kind Rules to
+	// "ruleses", whereas the CRD resource is "rules".
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+	for _, item := range items {
+		obj := item.(*unstructured.Unstructured)
+		if err := dyn.Tracker().Create(typesv1.RuleGvr, obj, obj.GetNamespace()); err != nil {
+			t.Fatalf("seed rules: %v", err)
+		}
+	}
+	return &fakeK8sClient{dyn: dyn}
 }
 
 func applyRules(t *testing.T, c *fakeK8sClient, r *typesv1.Rules) {
