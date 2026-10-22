@@ -33,6 +33,7 @@ type signingProvenance struct {
 	verifiedBundlePolicy *bundle.TrustPolicy
 	verifiedFlat         bool
 	unsigned             bool
+	refused              bool
 }
 
 // signingBinding preserves the pod label separately from the resolved flat CP.
@@ -106,11 +107,17 @@ func (c *ContainerProfileCacheImpl) refuseSignedProfile(id string, entry *Cached
 		name = entry.UserCPRef.Name
 	}
 	empty := &v1beta1.ContainerProfile{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: entry.Namespace}}
-	c.rebuildEntryFromSources(id, entry, empty, nil, signingProvenance{})
+	c.rebuildEntryFromSources(id, entry, empty, nil, signingProvenance{refused: true})
 }
 
 func (*ContainerProfileCacheImpl) preserveSignedBundleReference(entry, prev *CachedContainerProfile) {
 	if entry.verifiedBundlePolicy != nil && prev.UserCPRef != nil {
 		entry.UserCPRef = prev.UserCPRef
 	}
+}
+
+// A refused entry contains an empty projection, not the fetched source content.
+// Even matching empty resource versions must rebuild it after admission succeeds.
+func (*ContainerProfileCacheImpl) canSkipSignedRefresh(entry *CachedContainerProfile) bool {
+	return !entry.refused
 }

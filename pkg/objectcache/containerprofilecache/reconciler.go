@@ -568,7 +568,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	if spec := c.snapshotSpec(); spec != nil {
 		postFetchSpecHash = spec.Hash
 	}
-	if rvsMatchCP(cp, e.RV) &&
+	if c.canSkipSignedRefresh(e) && rvsMatchCP(cp, e.RV) &&
 		checksumOfCP(cp) == e.Checksum &&
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
 		e.SpecHash == postFetchSpecHash {

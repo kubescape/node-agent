@@ -30,3 +30,5 @@ func (*ContainerProfileCacheImpl) noteAdoptedProfile(signingProvenance, *v1beta1
 
 func (*ContainerProfileCacheImpl) preserveSignedBundleReference(*CachedContainerProfile, *CachedContainerProfile) {
 }
+
+func (*ContainerProfileCacheImpl) canSkipSignedRefresh(*CachedContainerProfile) bool { return true }

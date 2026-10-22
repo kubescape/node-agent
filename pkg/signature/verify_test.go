@@ -337,9 +337,10 @@ func TestTamperedNNLogsWarning(t *testing.T) {
 	}
 }
 
-// TestSuccessfulVerifyLogsInfo verifies that a valid signature produces the
-// "Successfully verified object signature" info log with identity and issuer.
-func TestSuccessfulVerifyLogsInfo(t *testing.T) {
+// TestSuccessfulVerifyLogsDebug preserves diagnostic details without per-fragment Info noise.
+func TestSuccessfulVerifyLogsDebug(t *testing.T) {
+	t.Cleanup(func() { logger.InitLogger("pretty") })
+	t.Setenv(logger.EnvLoggerLevel, "debug")
 	cp := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "valid-ap",
@@ -363,7 +364,7 @@ func TestSuccessfulVerifyLogsInfo(t *testing.T) {
 	})
 
 	if !strings.Contains(logOutput, "Successfully verified object signature") {
-		t.Errorf("expected info message in log output, got:\n%s", logOutput)
+		t.Errorf("expected debug message in log output, got:\n%s", logOutput)
 	}
 	if !strings.Contains(logOutput, "valid-ns") {
 		t.Errorf("expected namespace 'valid-ns' in log output, got:\n%s", logOutput)

@@ -101,7 +101,7 @@ func VerifyObject(obj SignableObject, opts ...VerifyOption) error {
 		return fmt.Errorf("%w: %w", ErrSignatureMismatch, verifyErr)
 	}
 
-	logger.L().Info("Successfully verified object signature",
+	logger.L().Debug("Successfully verified object signature",
 		helpers.String("namespace", obj.GetNamespace()),
 		helpers.String("name", obj.GetName()),
 		helpers.String("identity", sig.Identity),

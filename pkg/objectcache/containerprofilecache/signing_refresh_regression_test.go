@@ -167,3 +167,31 @@ func TestUnsignedAlertOnlyAfterRefreshAdoption(t *testing.T) {
 		})
 	}
 }
+
+func TestSigningRefusalRecoversWithEmptyResourceVersion(t *testing.T) {
+	cp := classicalCP("authored-nginx", "default", "/bin/recovered")
+	client := &storage.StorageHttpClientMock{ContainerProfiles: []*v1beta1.ContainerProfile{cp}}
+	c, k8s := newTestCache(t, client)
+	primeSharedData(t, k8s, "id", "wlid://cluster-a/namespace-default/deployment-test")
+	bindToProfile(t, c, "id", "authored")
+	require.True(t, execEnforced(c, "id", "/bin/recovered"))
+	c.SetBundleConfig(&bundle.TrustPolicy{Mode: bundle.ModeEnforce})
+	c.refreshAllEntries(context.Background())
+	require.False(t, execEnforced(c, "id", "/bin/recovered"))
+	refused, ok := c.entries.Load("id")
+	require.True(t, ok)
+	require.Empty(t, refused.RV)
+	require.Empty(t, refused.UserCPRV)
+	require.Empty(t, refused.Checksum)
+	require.NoError(t, signature.SignObjectDisableKeyless(profiles.NewContainerProfileAdapter(cp)))
+	require.Empty(t, cp.ResourceVersion)
+	c.refreshAllEntries(context.Background())
+	require.True(t, execEnforced(c, "id", "/bin/recovered"), "successful re-signing must install the recovered grants despite unchanged empty RVs")
+	recovered, ok := c.entries.Load("id")
+	require.True(t, ok)
+	require.Equal(t, helpersv1.Completed, recovered.State.Status)
+	require.Equal(t, refused.UserCPRef, recovered.UserCPRef)
+	// The restored projection stays usable on subsequent unchanged-source ticks.
+	c.refreshAllEntries(context.Background())
+	require.True(t, execEnforced(c, "id", "/bin/recovered"))
+}
