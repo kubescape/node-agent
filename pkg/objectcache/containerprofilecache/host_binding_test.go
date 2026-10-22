@@ -28,11 +28,15 @@ func hostBindingCache(t *testing.T, label *string, sourceErr *error) (*Container
 		return map[string]string{helpersv1.UserDefinedProfileMetadataKey: *label}, *sourceErr
 	})
 	container := hostEventContainer()
+	// Match GetHostAsContainer: the runtime does not supply a host name.
+	container.Runtime.ContainerName = ""
 	container.K8s.Namespace = "kubescape"
 	data := hostidentity.BuildHostWatchedContainerData("node-1")
 	k8s.SetSharedContainerData(armotypes.HostContainerID, data)
 	populate := func() bool {
-		return c.tryPopulateEntry(context.Background(), armotypes.HostContainerID, container, data, "learned", "host-node-1")
+		populated := c.tryPopulateEntry(context.Background(), armotypes.HostContainerID, container, data, "learned", "host-node-1")
+		require.Empty(t, container.Runtime.ContainerName, "cache must not mutate collection metadata")
+		return populated
 	}
 	return c, client, populate
 }
@@ -152,6 +156,42 @@ func TestHostNodeBindingUnresolvedProfileFallsBackAndRetries(t *testing.T) {
 			client.userCP = &v1beta1.ContainerProfile{Name: label, Namespace: "kubescape", ResourceVersion: "2", Spec: v1beta1.ContainerProfileSpec{Capabilities: []string{"SYS_ADMIN"}}}
 			c.refreshOneEntry(context.Background(), armotypes.HostContainerID, entry)
 			require.Equal(t, map[string]struct{}{"SYS_ADMIN": {}}, hostBindingEntry(t, c).Projected.Capabilities.Values)
+		})
+	}
+}
+
+func TestHostNodeGroupedProfileBindingWithEmptyRuntimeName(t *testing.T) {
+	for _, initiallyBound := range []bool{true, false} {
+		t.Run(map[bool]string{true: "initial-binding", false: "later-binding"}[initiallyBound], func(t *testing.T) {
+			label := ""
+			if initiallyBound {
+				label = "authored"
+			}
+			var sourceErr error
+			c, client, populate := hostBindingCache(t, &label, &sourceErr)
+			client.userCP.Spec = v1beta1.ContainerProfileSpec{
+				Containers: []v1beta1.ContainerProfileContainer{
+					{Name: "other", Capabilities: []string{"SYS_ADMIN"}},
+					{Name: "host", Capabilities: []string{"SYS_PTRACE"}},
+				},
+			}
+			require.True(t, populate())
+			require.Equal(t, "host", hostBindingEntry(t, c).ContainerName)
+			if !initiallyBound {
+				require.Equal(t, map[string]struct{}{"NET_ADMIN": {}}, hostBindingEntry(t, c).Projected.Capabilities.Values)
+				label = "authored"
+				c.refreshOneEntry(context.Background(), armotypes.HostContainerID, hostBindingEntry(t, c))
+			}
+			entry := hostBindingEntry(t, c)
+			require.Equal(t, &namespacedName{Namespace: "kubescape", Name: "authored"}, entry.UserCPRef)
+			require.Equal(t, "authored", entry.State.Name)
+			require.Equal(t, map[string]struct{}{"SYS_PTRACE": {}}, entry.Projected.Capabilities.Values)
+
+			// Refresh must retain the normalized name when reselecting the section.
+			client.userCP.ResourceVersion = "2"
+			client.userCP.Spec.Containers[1].Capabilities = []string{"NET_RAW"}
+			c.refreshOneEntry(context.Background(), armotypes.HostContainerID, entry)
+			require.Equal(t, map[string]struct{}{"NET_RAW": {}}, hostBindingEntry(t, c).Projected.Capabilities.Values)
 		})
 	}
 }

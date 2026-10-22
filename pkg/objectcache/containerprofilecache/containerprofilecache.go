@@ -423,6 +423,13 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	sharedData *objectcache.WatchedContainerData,
 	cpName, workloadName string,
 ) bool {
+	if utils.IsHostContainer(container) && container.Runtime.ContainerName == "" {
+		// GetHostAsContainer has no runtime name. Authored sections and later
+		// refreshes use the synthetic host name without mutating collection data.
+		containerCopy := *container
+		containerCopy.Runtime.ContainerName = "host"
+		container = &containerCopy
+	}
 	ns := container.K8s.Namespace
 
 	// Fetch consolidated ContainerProfile. The storage server aggregates the
