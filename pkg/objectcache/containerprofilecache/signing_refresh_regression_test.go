@@ -195,3 +195,44 @@ func TestSigningRefusalRecoversWithEmptyResourceVersion(t *testing.T) {
 	c.refreshAllEntries(context.Background())
 	require.True(t, execEnforced(c, "id", "/bin/recovered"))
 }
+
+func TestSignedRefreshRebuildsChangedContentWithUnchangedResourceVersion(t *testing.T) {
+	for _, rv := range []string{"", "unchanged"} {
+		for _, initiallySigned := range []bool{false, true} {
+			for _, failedSource := range []string{"learned", "authored"} {
+				t.Run(fmt.Sprintf("rv=%s/signed=%t/failure=%s", rv, initiallySigned, failedSource), func(t *testing.T) {
+					cp := classicalCP("authored-nginx", "default", "/bin/old")
+					cp.ResourceVersion = rv
+					if initiallySigned {
+						require.NoError(t, signature.SignObjectDisableKeyless(profiles.NewContainerProfileAdapter(cp)))
+					}
+					client := &signingFailureClient{StorageHttpClientMock: &storage.StorageHttpClientMock{ContainerProfiles: []*v1beta1.ContainerProfile{cp}}}
+					c, k8s := newTestCache(t, client)
+					c.SetBundleConfig(&bundle.TrustPolicy{Mode: bundle.ModeAlert})
+					primeSharedData(t, k8s, "id", "wlid://cluster-a/namespace-default/deployment-test")
+					bindToProfile(t, c, "id", "authored")
+					require.True(t, execEnforced(c, "id", "/bin/old"))
+
+					replacement := classicalCP("authored-nginx", "default", "/bin/signed")
+					replacement.ResourceVersion = rv
+					require.NoError(t, signature.SignObjectDisableKeyless(profiles.NewContainerProfileAdapter(replacement)))
+					client.ContainerProfiles = []*v1beta1.ContainerProfile{replacement}
+					c.refreshAllEntries(context.Background())
+					require.False(t, execEnforced(c, "id", "/bin/old"), "newly verified content must replace the previous projection despite matching RVs")
+					require.True(t, execEnforced(c, "id", "/bin/signed"))
+
+					entry, ok := c.entries.Load("id")
+					require.True(t, ok)
+					client.failName = entry.CPName
+					if failedSource == "authored" {
+						client.failName = entry.UserCPRef.Name
+					}
+					c.SetBundleConfig(&bundle.TrustPolicy{Mode: bundle.ModeEnforce})
+					c.refreshAllEntries(context.Background())
+					require.False(t, execEnforced(c, "id", "/bin/old"))
+					require.True(t, execEnforced(c, "id", "/bin/signed"), "fetch failure may retain only the projection built from authenticated content")
+				})
+			}
+		}
+	}
+}

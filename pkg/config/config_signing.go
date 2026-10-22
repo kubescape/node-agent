@@ -33,6 +33,7 @@ func readSignedConfig(dir string) ([]byte, bool, error) {
 
 func readConfig(path string, errNotFound bool) error {
 	viper.SetDefault("enableSignatureVerification", false)
+	viper.SetDefault("bundleTrustPolicyPath", "")
 	verified, signed, err := readSignedConfig(path)
 	if err != nil {
 		return err

@@ -4,6 +4,8 @@ package containerprofilecache
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 
@@ -34,6 +36,8 @@ type signingProvenance struct {
 	verifiedFlat         bool
 	unsigned             bool
 	refused              bool
+	// sourceSpecHash binds admission provenance to the content used for projection.
+	sourceSpecHash [sha256.Size]byte
 }
 
 // signingBinding preserves the pod label separately from the resolved flat CP.
@@ -71,6 +75,10 @@ func (c *ContainerProfileCacheImpl) loadSignedBundle(ctx context.Context, ns, na
 	cp, err := c.assembleUserBundleWithPolicy(ctx, ns, name, wlid, policy)
 	provenance := signingProvenance{}
 	if cp != nil && err == nil {
+		provenance.sourceSpecHash, err = profileSpecHash(cp)
+		if err != nil {
+			return nil, true, signingProvenance{}, err
+		}
 		provenance.verifiedBundlePolicy = policy
 	}
 	return cp, cp != nil || err != nil, provenance, err
@@ -95,7 +103,11 @@ func (c *ContainerProfileCacheImpl) admitSignedProfile(cp *v1beta1.ContainerProf
 	if verdict == verifyInvalidEmbedded || (c.signingEnforced() && verdict != verifyOK) {
 		return nil, true, signingProvenance{}
 	}
-	return cp, false, signingProvenance{verifiedFlat: verdict == verifyOK, unsigned: verdict == verifyUnsigned}
+	specHash, err := profileSpecHash(cp)
+	if err != nil {
+		return nil, true, signingProvenance{}
+	}
+	return cp, false, signingProvenance{verifiedFlat: verdict == verifyOK, unsigned: verdict == verifyUnsigned, sourceSpecHash: specHash}
 }
 
 // Refusal removes the previously admitted content from enforcement immediately
@@ -116,8 +128,17 @@ func (*ContainerProfileCacheImpl) preserveSignedBundleReference(entry, prev *Cac
 	}
 }
 
-// A refused entry contains an empty projection, not the fetched source content.
-// Even matching empty resource versions must rebuild it after admission succeeds.
-func (*ContainerProfileCacheImpl) canSkipSignedRefresh(entry *CachedContainerProfile) bool {
-	return !entry.refused
+// Hash the admitted spec, after embedded signed content has been restored.
+// Grouped documents may cause a conservative rebuild for another section's edit,
+// but unchanged resource versions can never attach new trust to old grants.
+func profileSpecHash(cp *v1beta1.ContainerProfile) ([sha256.Size]byte, error) {
+	content, err := json.Marshal(cp.Spec)
+	if err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	return sha256.Sum256(content), nil
+}
+
+func (*ContainerProfileCacheImpl) canSkipSignedRefresh(entry *CachedContainerProfile, provenance signingProvenance) bool {
+	return !entry.refused && entry.sourceSpecHash == provenance.sourceSpecHash
 }

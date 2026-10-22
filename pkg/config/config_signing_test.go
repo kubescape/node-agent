@@ -20,3 +20,13 @@ func TestSignedConfigRejectsInvalidArtifactBeforeUnsignedFallback(t *testing.T) 
 	_, err := LoadConfig(dir)
 	require.ErrorContains(t, err, "refused signed config")
 }
+
+func TestBundleTrustPolicyPathFromEnvironmentOnly(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	path := filepath.Join(t.TempDir(), "policy.signed.json")
+	t.Setenv("BUNDLETRUSTPOLICYPATH", path)
+	cfg, err := LoadConfigOptional(t.TempDir(), false)
+	require.NoError(t, err)
+	require.Equal(t, path, cfg.BundleTrustPolicyPath)
+}
