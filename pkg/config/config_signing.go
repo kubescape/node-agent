@@ -18,7 +18,7 @@ const SignedConfigFileName = "config.signed.json"
 
 func readSignedConfig(dir string) ([]byte, bool, error) {
 	signedPath := filepath.Join(dir, SignedConfigFileName)
-	verified, present, err := bundle.LoadSignedConfigIfPresent(signedPath)
+	verified, present, err := bundle.LoadSignedConfigIfPresent(signedPath, bundle.NodeAgentConfigPurpose)
 	if err != nil {
 		logger.L().Warning("refusing tampered or wrongly-signed node-agent config",
 			helpers.String("path", signedPath),

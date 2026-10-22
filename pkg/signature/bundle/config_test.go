@@ -34,9 +34,9 @@ const clusterDataJSON = `{
   "eventReceiverRestURL": "https://report.example.invalid"
 }`
 
-func signConfigWithFingerprint(t *testing.T, raw string, key *ecdsa.PrivateKey) (signed []byte, fingerprint string) {
+func signConfigWithFingerprint(t *testing.T, raw string, purpose ConfigPurpose, key *ecdsa.PrivateKey) (signed []byte, fingerprint string) {
 	t.Helper()
-	signed, err := SignConfig([]byte(raw), key)
+	signed, err := SignConfig([]byte(raw), purpose, key)
 	if err != nil {
 		t.Fatalf("SignConfig: %v", err)
 	}
@@ -44,7 +44,7 @@ func signConfigWithFingerprint(t *testing.T, raw string, key *ecdsa.PrivateKey) 
 	if err := json.Unmarshal(signed, &artifact); err != nil {
 		t.Fatalf("unmarshal artifact: %v", err)
 	}
-	it, err := newConfigSignable(artifact.Config, artifact.Annotations)
+	it, err := newConfigSignable(artifact.Config, artifact.Purpose, artifact.Annotations)
 	if err != nil {
 		t.Fatalf("newConfigSignable: %v", err)
 	}
@@ -69,9 +69,9 @@ func decodeJSON(t *testing.T, b []byte) map[string]interface{} {
 }
 
 func TestSignedConfig_RoundTripNodeAgentConfig(t *testing.T) {
-	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, genKey(t))
+	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, genKey(t))
 
-	got, err := verifyAndPinConfig(signed, fp)
+	got, err := verifyAndPinConfig(signed, fp, NodeAgentConfigPurpose)
 	if err != nil {
 		t.Fatalf("verifyAndPinConfig: %v", err)
 	}
@@ -81,9 +81,9 @@ func TestSignedConfig_RoundTripNodeAgentConfig(t *testing.T) {
 }
 
 func TestSignedConfig_RoundTripClusterData(t *testing.T) {
-	signed, fp := signConfigWithFingerprint(t, clusterDataJSON, genKey(t))
+	signed, fp := signConfigWithFingerprint(t, clusterDataJSON, ClusterDataPurpose, genKey(t))
 
-	got, err := verifyAndPinConfig(signed, fp)
+	got, err := verifyAndPinConfig(signed, fp, ClusterDataPurpose)
 	if err != nil {
 		t.Fatalf("verifyAndPinConfig: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestSignedConfig_RoundTripClusterData(t *testing.T) {
 
 func TestSignedConfig_WhitespaceAndKeyOrderInsensitive(t *testing.T) {
 	key := genKey(t)
-	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, key)
+	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, key)
 
 	var artifact signedConfigArtifact
 	if err := json.Unmarshal(signed, &artifact); err != nil {
@@ -116,7 +116,7 @@ func TestSignedConfig_WhitespaceAndKeyOrderInsensitive(t *testing.T) {
 		t.Fatalf("marshal artifact: %v", err)
 	}
 
-	got, err := verifyAndPinConfig(reserialised, fp)
+	got, err := verifyAndPinConfig(reserialised, fp, NodeAgentConfigPurpose)
 	if err != nil {
 		t.Fatalf("re-serialised config must still verify: %v", err)
 	}
@@ -126,10 +126,10 @@ func TestSignedConfig_WhitespaceAndKeyOrderInsensitive(t *testing.T) {
 }
 
 func TestSignedConfig_WrongSignerRejected(t *testing.T) {
-	signed, _ := signConfigWithFingerprint(t, nodeAgentConfigJSON, genKey(t))
-	_, otherFp := signConfigWithFingerprint(t, nodeAgentConfigJSON, genKey(t))
+	signed, _ := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, genKey(t))
+	_, otherFp := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, genKey(t))
 
-	_, err := verifyAndPinConfig(signed, otherFp)
+	_, err := verifyAndPinConfig(signed, otherFp, NodeAgentConfigPurpose)
 	if err == nil {
 		t.Fatal("config signed by a foreign key must be rejected")
 	}
@@ -139,7 +139,7 @@ func TestSignedConfig_WrongSignerRejected(t *testing.T) {
 }
 
 func TestSignedConfig_TamperedPayloadRejected(t *testing.T) {
-	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, genKey(t))
+	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, genKey(t))
 
 	var artifact signedConfigArtifact
 	if err := json.Unmarshal(signed, &artifact); err != nil {
@@ -157,7 +157,7 @@ func TestSignedConfig_TamperedPayloadRejected(t *testing.T) {
 		t.Fatalf("marshal artifact: %v", err)
 	}
 
-	_, err = verifyAndPinConfig(tamperedArtifact, fp)
+	_, err = verifyAndPinConfig(tamperedArtifact, fp, NodeAgentConfigPurpose)
 	if err == nil {
 		t.Fatal("tampered config payload must be rejected")
 	}
@@ -167,20 +167,20 @@ func TestSignedConfig_TamperedPayloadRejected(t *testing.T) {
 }
 
 func TestSignedConfig_TamperedTrustPolicyPathRejected(t *testing.T) {
-	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, genKey(t))
+	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, genKey(t))
 	redirected := strings.Replace(string(signed), "/etc/bundle/trust-policy.signed.json", "/tmp/attacker-policy.json", 1)
 	if redirected == string(signed) {
 		t.Fatal("test setup failed: trust policy path not present in artifact")
 	}
 
-	_, err := verifyAndPinConfig([]byte(redirected), fp)
+	_, err := verifyAndPinConfig([]byte(redirected), fp, NodeAgentConfigPurpose)
 	if err == nil {
 		t.Fatal("redirecting bundleTrustPolicyPath must be rejected")
 	}
 }
 
 func TestSignedConfig_MissingAnnotationsRejected(t *testing.T) {
-	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, genKey(t))
+	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, genKey(t))
 
 	var artifact signedConfigArtifact
 	if err := json.Unmarshal(signed, &artifact); err != nil {
@@ -192,7 +192,7 @@ func TestSignedConfig_MissingAnnotationsRejected(t *testing.T) {
 		t.Fatalf("marshal artifact: %v", err)
 	}
 
-	_, err = verifyAndPinConfig(stripped, fp)
+	_, err = verifyAndPinConfig(stripped, fp, NodeAgentConfigPurpose)
 	if err == nil {
 		t.Fatal("config without signature annotations must be rejected")
 	}
@@ -202,7 +202,7 @@ func TestSignedConfig_MissingAnnotationsRejected(t *testing.T) {
 }
 
 func TestSignedConfig_MissingPayloadRejected(t *testing.T) {
-	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, genKey(t))
+	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, genKey(t))
 
 	var artifact signedConfigArtifact
 	if err := json.Unmarshal(signed, &artifact); err != nil {
@@ -214,7 +214,7 @@ func TestSignedConfig_MissingPayloadRejected(t *testing.T) {
 		t.Fatalf("marshal artifact: %v", err)
 	}
 
-	_, err = verifyAndPinConfig(stripped, fp)
+	_, err = verifyAndPinConfig(stripped, fp, NodeAgentConfigPurpose)
 	if err == nil {
 		t.Fatal("config artifact without a payload must be rejected")
 	}
@@ -224,7 +224,7 @@ func TestSignedConfig_MissingPayloadRejected(t *testing.T) {
 }
 
 func TestSignedConfig_EmbeddedContentAnnotationRejected(t *testing.T) {
-	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, genKey(t))
+	signed, fp := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, genKey(t))
 
 	var artifact signedConfigArtifact
 	if err := json.Unmarshal(signed, &artifact); err != nil {
@@ -236,7 +236,7 @@ func TestSignedConfig_EmbeddedContentAnnotationRejected(t *testing.T) {
 		t.Fatalf("marshal artifact: %v", err)
 	}
 
-	_, err = verifyAndPinConfig(stapled, fp)
+	_, err = verifyAndPinConfig(stapled, fp, NodeAgentConfigPurpose)
 	if err == nil {
 		t.Fatal("config artifact carrying embedded content must be rejected")
 	}
@@ -247,19 +247,19 @@ func TestSignedConfig_EmbeddedContentAnnotationRejected(t *testing.T) {
 
 func TestSignedConfig_NonObjectPayloadRejected(t *testing.T) {
 	key := genKey(t)
-	if _, err := SignConfig([]byte(`["not", "an", "object"]`), key); err == nil {
+	if _, err := SignConfig([]byte(`["not", "an", "object"]`), NodeAgentConfigPurpose, key); err == nil {
 		t.Fatal("a non-object config payload must not be signable")
 	}
-	if _, err := SignConfig([]byte(`{"a":1} {"b":2}`), key); err == nil {
+	if _, err := SignConfig([]byte(`{"a":1} {"b":2}`), NodeAgentConfigPurpose, key); err == nil {
 		t.Fatal("trailing data after the config object must not be signable")
 	}
-	if _, err := SignConfig([]byte(``), key); err == nil {
+	if _, err := SignConfig([]byte(``), NodeAgentConfigPurpose, key); err == nil {
 		t.Fatal("an empty config payload must not be signable")
 	}
 }
 
 func TestSignedConfig_LoadIfPresentAbsent(t *testing.T) {
-	got, present, err := LoadSignedConfigIfPresent(t.TempDir() + "/config.signed.json")
+	got, present, err := LoadSignedConfigIfPresent(t.TempDir()+"/config.signed.json", NodeAgentConfigPurpose)
 	if err != nil {
 		t.Fatalf("absent signed config must not error: %v", err)
 	}
@@ -272,13 +272,13 @@ func TestSignedConfig_LoadIfPresentAbsent(t *testing.T) {
 }
 
 func TestSignedConfig_LoadIfPresentRefusesForeignKey(t *testing.T) {
-	signed, _ := signConfigWithFingerprint(t, nodeAgentConfigJSON, genKey(t))
+	signed, _ := signConfigWithFingerprint(t, nodeAgentConfigJSON, NodeAgentConfigPurpose, genKey(t))
 	path := t.TempDir() + "/config.signed.json"
 	if err := os.WriteFile(path, signed, 0644); err != nil {
 		t.Fatalf("write signed config: %v", err)
 	}
 
-	_, present, err := LoadSignedConfigIfPresent(path)
+	_, present, err := LoadSignedConfigIfPresent(path, NodeAgentConfigPurpose)
 	if !present {
 		t.Fatal("an existing signed config must report present=true")
 	}
@@ -291,13 +291,13 @@ func TestSignedConfig_LoadIfPresentRefusesForeignKey(t *testing.T) {
 }
 
 func TestSignedConfig_RoundTripFile(t *testing.T) {
-	signed, fp := signConfigWithFingerprint(t, clusterDataJSON, genKey(t))
+	signed, fp := signConfigWithFingerprint(t, clusterDataJSON, ClusterDataPurpose, genKey(t))
 	path := t.TempDir() + "/clusterData.signed.json"
 	if err := os.WriteFile(path, signed, 0644); err != nil {
 		t.Fatalf("write signed config: %v", err)
 	}
 
-	got, err := loadSignedConfigWithRoot(path, fp)
+	got, err := loadSignedConfigWithRoot(path, fp, ClusterDataPurpose)
 	if err != nil {
 		t.Fatalf("loadSignedConfigWithRoot: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestSignedConfig_RoundTripFile(t *testing.T) {
 }
 
 func TestSignedConfig_FileTamperRejectedWithPath(t *testing.T) {
-	signed, fp := signConfigWithFingerprint(t, clusterDataJSON, genKey(t))
+	signed, fp := signConfigWithFingerprint(t, clusterDataJSON, ClusterDataPurpose, genKey(t))
 	tampered := strings.Replace(string(signed), "demo-cluster", "attacker-cluster", 1)
 	if tampered == string(signed) {
 		t.Fatal("test setup failed: cluster name not present in artifact")
@@ -317,7 +317,7 @@ func TestSignedConfig_FileTamperRejectedWithPath(t *testing.T) {
 		t.Fatalf("write signed config: %v", err)
 	}
 
-	_, err := loadSignedConfigWithRoot(path, fp)
+	_, err := loadSignedConfigWithRoot(path, fp, ClusterDataPurpose)
 	if err == nil {
 		t.Fatal("a tampered clusterData file must be refused")
 	}

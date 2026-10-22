@@ -28,6 +28,14 @@ The agent loads `config.signed.json` from the configuration directory and
 is rejected instead of falling back to unsigned content. With no signed files,
 the existing unsigned configuration paths remain available.
 
+Signed configuration binds its purpose to its signature. Use
+`sign-object sign-config --purpose node-agent-config --file config.json --key root.pem --output config.signed.json`
+for agent settings and
+`sign-object sign-config --purpose cluster-data --file clusterData.json --key root.pem --output clusterData.signed.json`
+for cluster metadata. Each consumer rejects the other purpose even when signed
+by the same root. Existing signed configuration artifacts without a purpose must
+be re-signed; missing or modified purposes are rejected.
+
 Trust-policy reload runs periodically. An invalid policy at startup leaves
 signing disabled until a valid policy is mounted. A rejected reload preserves
 the policy already in force. Rules are resynchronized after policy reload;

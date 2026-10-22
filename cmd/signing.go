@@ -35,7 +35,7 @@ func materialiseVerifiedClusterData(verified []byte) (string, error) {
 }
 
 func verifiedClusterDataPath() (string, func(), error) {
-	verified, signed, err := bundle.LoadSignedConfigIfPresent(signedClusterDataPath)
+	verified, signed, err := bundle.LoadSignedConfigIfPresent(signedClusterDataPath, bundle.ClusterDataPurpose)
 	if err != nil {
 		return "", func() {}, err
 	}

@@ -22,19 +22,6 @@ func SignObject(obj SignableObject, opts ...SignOption) error {
 		opt(options)
 	}
 
-	var adapter *CosignAdapter
-	var err error
-
-	if options.PrivateKey != nil {
-		adapter, err = NewCosignAdapterWithPrivateKey(false, options.PrivateKey)
-	} else {
-		adapter, err = NewCosignAdapter(options.UseKeyless)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to create cosign adapter: %w", err)
-	}
-
 	content := obj.GetContent()
 
 	// With EmbedContent the exact signed bytes ride along in an annotation, so
@@ -46,6 +33,24 @@ func SignObject(obj SignableObject, opts ...SignOption) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal content for embedding: %w", err)
 		}
+		// Match the verifier's decompressed limit before constructing a signer
+		// or changing annotations, so signing cannot produce an unusable artifact.
+		if len(contentBytes) > maxEmbeddedContentBytes {
+			return fmt.Errorf("embedded content exceeds %d bytes", maxEmbeddedContentBytes)
+		}
+	}
+
+	var adapter *CosignAdapter
+	var err error
+
+	if options.PrivateKey != nil {
+		adapter, err = NewCosignAdapterWithPrivateKey(false, options.PrivateKey)
+	} else {
+		adapter, err = NewCosignAdapter(options.UseKeyless)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to create cosign adapter: %w", err)
 	}
 
 	hash, err := adapter.GetContentHash(content)

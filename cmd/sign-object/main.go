@@ -25,18 +25,19 @@ import (
 )
 
 var (
-	inputFile    string
-	outputFile   string
-	keyFile      string
-	objectType   string
-	useKeyless   bool
-	embedContent bool
-	verbose      bool
-	strict       bool
-	jsonOutput   bool
-	publicOnly   bool
-	policyFile   string
-	command      string
+	configPurpose string
+	inputFile     string
+	outputFile    string
+	keyFile       string
+	objectType    string
+	useKeyless    bool
+	embedContent  bool
+	verbose       bool
+	strict        bool
+	jsonOutput    bool
+	publicOnly    bool
+	policyFile    string
+	command       string
 )
 
 func main() {
@@ -266,6 +267,7 @@ func runSignPolicy() error {
 
 func parseSignConfigFlags() {
 	fs := flag.NewFlagSet("sign-object sign-config", flag.ExitOnError)
+	fs.StringVar(&configPurpose, "purpose", "", "Signed artifact purpose: node-agent-config or cluster-data (required)")
 	fs.StringVar(&inputFile, "file", "", "Input plain config JSON file, e.g. config.json or clusterData.json (required)")
 	fs.StringVar(&keyFile, "key", "", "Path to ROOT EC private key PEM (required)")
 	fs.StringVar(&outputFile, "output", "", "Output file for the signed config artifact (required)")
@@ -304,7 +306,7 @@ func runSignConfig() error {
 		return err
 	}
 
-	signed, err := bundle.SignConfig(configData, rootKey)
+	signed, err := bundle.SignConfig(configData, bundle.ConfigPurpose(configPurpose), rootKey)
 	if err != nil {
 		return fmt.Errorf("failed to sign config: %w", err)
 	}
@@ -688,6 +690,7 @@ SIGN-POLICY FLAGS:
 
 SIGN-CONFIG FLAGS:
     --file <path>           Input plain config JSON file, e.g. config.json or clusterData.json (required)
+    --purpose <purpose>     node-agent-config or cluster-data (required)
     --key <path>            Path to ROOT EC private key PEM (required)
     --output <path>         Output file for the signed config artifact (required)
 
@@ -714,7 +717,7 @@ EXAMPLES:
     sign-object sign-policy --policy trust-policy.json --key root.pem --output trust-policy.signed.json
 
     # Sign a node-agent config file with the root key
-    sign-object sign-config --file config.json --key root.pem --output config.signed.json
+    sign-object sign-config --purpose node-agent-config --file config.json --key root.pem --output config.signed.json
 
 For more information, see: docs/signing/README.md`)
 }
