@@ -94,3 +94,80 @@ This document records the procedure, not results. Live `runsc` and node-agent
 host eBPF observations must be added after the Linux trial; the existing
 [gVisor proof of concept](https://github.com/yellow-forrest/gvisor-visibility-poc)
 is useful prior work but is not validation of this receiver.
+
+## Repeated and concurrent starts
+
+The probe accepts repeated `--container-id` flags. Each value is matched in
+full, never as a prefix. The original single-ID invocation still works.
+Obtain all IDs from the local runtime before starting the selected containers:
+
+```sh
+./gvisor-start-probe \
+  --socket "$TRIAL_DIR/events.sock" \
+  --container-id "$CONTAINER_A" \
+  --container-id "$CONTAINER_B" \
+  > "$TRIAL_DIR/starts.jsonl" 2> "$TRIAL_DIR/probe.stderr"
+```
+
+Create `TRIAL_DIR` with mode `0700` and use `umask 077` before redirecting
+output. Wait until the socket exists before starting either container; do not
+use a fixed sleep as evidence that the receiver is ready. Check that the probe
+is still running. Stop it with SIGTERM after the workload and wait for a zero
+exit status before checking artifacts. A nonzero exit invalidates that run.
+
+For twenty repeated starts, either collect each independently created ID in
+advance and repeat the flag for every ID, or run separate probe invocations
+and combine only the sanitized start JSONL files. Keep a runtime-derived
+expected-count manifest for exactly those invocations. For the concurrent
+case use one receiver with two IDs, overlapping sandbox lifetimes, and runtime
+records that demonstrate the overlap. Two sequential starts are not evidence
+of concurrency. The ID flag remains a manual trial allowlist; it does not
+implement the production runtime inventory join.
+
+## Check retained evidence
+
+Use Python 3.9 or newer. Create `expected.json` from independently recorded
+runtime starts, not from the probe output. Its keys must be exact runtime IDs
+and its values the expected number of starts. For example, replace these
+placeholders with the two real IDs:
+
+```json
+{"exact-runtime-id-a": 1, "exact-runtime-id-b": 1}
+```
+
+Use a harmless ASCII marker of at least 16 characters, such as
+`GVS_TRIAL_CANARY_2026`, in the root and child container argv and cwd fixtures.
+Do not use real credentials. After the probe has stopped, check each run:
+
+```sh
+python3 scripts/check-gvisor-start-trial.py \
+  --expected "$TRIAL_DIR/expected.json" \
+  --events "$TRIAL_DIR/starts.jsonl" \
+  --canary GVS_TRIAL_CANARY_2026 \
+  --artifact "$TRIAL_DIR/probe.stderr"
+```
+
+Repeat `--artifact` for additional retained logs or exports. The checker
+rejects missing, duplicate or unknown starts, unexpected event fields, invalid
+source/timestamps, nonzero sender-reported drop counts, and the canary in the
+specified artifacts. Each input file is limited to 16 MiB. It prints neither
+input records nor parser error payloads. It does not inspect unspecified
+files, prove that the canary was actually used, verify the manifest's origin,
+measure local queue drops, or prove runtime identity from a JSON file. JSON
+record counts cannot prove timing, concurrency, or per-connection isolation.
+A passing check is an artifact consistency check, not a lifecycle integration
+gate or proof that application code executed.
+
+Fill in [the trial record](gvisor-start-trial-record.md) with version details,
+runtime ground truth, privacy checks, host eBPF observations, and limitations.
+Keep the synthetic fixture separate from sanitized evidence. Debug/strace
+output can itself include argv or cwd; inspect it privately and sanitize it
+before retaining or sharing. The checker can detect a known marker, not every
+possible secret or encoding. A failed privacy check means the artifacts must
+not be published.
+
+The checker can be tested without `runsc`:
+
+```sh
+python3 -m unittest discover -s scripts -p test_check_gvisor_start_trial.py
+```
