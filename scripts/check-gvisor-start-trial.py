@@ -44,8 +44,8 @@ def read_artifact(path, canary):
 
 
 def check(expected_path, events_path, canary, artifacts=()):
-    if not canary or not canary.isascii() or len(canary) < 16:
-        raise InvalidEvidence("use an ASCII synthetic canary of at least 16 characters")
+    if re.fullmatch(r"[A-Za-z0-9_-]{16,}", canary) is None:
+        raise InvalidEvidence("use a synthetic canary of at least 16 ASCII letters, digits, underscores or hyphens")
     expected = load_json(read_artifact(expected_path, canary))
     if not isinstance(expected, dict) or not expected:
         raise InvalidEvidence("expected starts must be a nonempty ID-to-count object")
@@ -57,7 +57,7 @@ def check(expected_path, events_path, canary, artifacts=()):
     observed = Counter()
     for line in read_artifact(events_path, canary).splitlines():
         if not line.strip():
-            continue
+            raise InvalidEvidence("blank JSONL record")
         event = load_json(line)
         if not isinstance(event, dict) or set(event) != FIELDS:
             raise InvalidEvidence("start record has missing or unexpected fields")
@@ -71,7 +71,7 @@ def check(expected_path, events_path, canary, artifacts=()):
             raise InvalidEvidence("start record reports invalid or nonzero sender drops")
         if not isinstance(event["ObservedAt"], str):
             raise InvalidEvidence("invalid observation timestamp")
-        match = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})", event["ObservedAt"])
+        match = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d{1,9})?(Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])", event["ObservedAt"])
         if match is None:
             raise InvalidEvidence("observation timestamp must be RFC3339 with a timezone")
         # Python 3.9 accepts microseconds; Go emits up to nine fractional digits.
@@ -89,7 +89,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected", required=True, help="runtime-derived JSON ID-to-count manifest")
     parser.add_argument("--events", required=True, help="probe JSONL stdout")
-    parser.add_argument("--canary", required=True, help="harmless ASCII test marker, never a real secret")
+    parser.add_argument("--canary", required=True, help="synthetic marker matching [A-Za-z0-9_-]{16,}, never a real secret")
     parser.add_argument("--artifact", action="append", default=[], help="additional retained file to scan for the canary; repeatable")
     args = parser.parse_args(argv)
     try:

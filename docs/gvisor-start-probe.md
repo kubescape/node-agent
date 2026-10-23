@@ -110,10 +110,37 @@ Obtain all IDs from the local runtime before starting the selected containers:
 ```
 
 Create `TRIAL_DIR` with mode `0700` and use `umask 077` before redirecting
-output. Wait until the socket exists before starting either container; do not
-use a fixed sleep as evidence that the receiver is ready. Check that the probe
-is still running. Stop it with SIGTERM after the workload and wait for a zero
-exit status before checking artifacts. A nonzero exit invalidates that run.
+output. Socket existence alone is not readiness: the receiver binds the path
+before calling `listen`. Before starting either container, require a successful
+connection and version-1 handshake with a bounded retry, for example:
+
+```sh
+python3 - "$TRIAL_DIR/events.sock" <<'PYREADY'
+import socket
+import sys
+import time
+
+deadline = time.monotonic() + 5
+while time.monotonic() < deadline:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as connection:
+        connection.settimeout(0.2)
+        try:
+            connection.connect(sys.argv[1])
+            connection.sendall(b"\x08\x01")  # Version-1 protobuf handshake.
+            if connection.recv(32) == b"\x08\x01":
+                break
+        except OSError:
+            pass
+    time.sleep(0.05)
+else:
+    raise SystemExit("receiver readiness handshake timed out")
+PYREADY
+```
+
+The check closes its connection without sending a start and produces no trial
+event. Abort the trial if the check fails. It only establishes that the receiver
+answered; keep checking that the probe is running while the workload starts.
+Stop it with SIGTERM after the workload and wait for a zero exit status before checking artifacts. A nonzero exit invalidates that run.
 
 For twenty repeated starts, either collect each independently created ID in
 advance and repeat the flag for every ID, or run separate probe invocations
@@ -135,9 +162,12 @@ placeholders with the two real IDs:
 {"exact-runtime-id-a": 1, "exact-runtime-id-b": 1}
 ```
 
-Use a harmless ASCII marker of at least 16 characters, such as
+Use a harmless marker matching `[A-Za-z0-9_-]{16,}`, such as
 `GVS_TRIAL_CANARY_2026`, in the root and child container argv and cwd fixtures.
-Do not use real credentials. After the probe has stopped, check each run:
+Only ASCII letters, digits, underscores and hyphens are accepted, so ordinary
+JSON string encoding leaves the marker literal. Quotes, backslashes, whitespace
+and non-ASCII markers are rejected before reading evidence. Do not use real
+credentials. After the probe has stopped, check each run:
 
 ```sh
 python3 scripts/check-gvisor-start-trial.py \
@@ -149,8 +179,8 @@ python3 scripts/check-gvisor-start-trial.py \
 
 Repeat `--artifact` for additional retained logs or exports. The checker
 rejects missing, duplicate or unknown starts, unexpected event fields, invalid
-source/timestamps, nonzero sender-reported drop counts, and the canary in the
-specified artifacts. Each input file is limited to 16 MiB. It prints neither
+source/timestamps, blank JSONL records, nonzero sender-reported drop counts,
+and the canary in the specified artifacts. Each input file is limited to 16 MiB. It prints neither
 input records nor parser error payloads. It does not inspect unspecified
 files, prove that the canary was actually used, verify the manifest's origin,
 measure local queue drops, or prove runtime identity from a JSON file. JSON
