@@ -99,23 +99,33 @@ is useful prior work but is not validation of this receiver.
 
 The probe accepts repeated `--container-id` flags. Each value is matched in
 full, never as a prefix. The original single-ID invocation still works.
-Obtain all IDs from the local runtime before starting the selected containers:
+Obtain all IDs from the local runtime before starting the selected containers.
+Reuse the receiver-owned `/run/kubescape` directory (mode `0700`) and the
+trace configuration from the controlled trial above. The sink endpoint, probe
+and readiness check all use `/run/kubescape/gvisor-events.sock`; `TRIAL_DIR`
+stores evidence only. If you choose a different socket, replace that literal
+with the same absolute path in all three places. JSON does not expand shell
+variables, so the trace configuration must contain the actual pathname.
+
+Create a private evidence directory before redirecting output:
 
 ```sh
+umask 077
+TRIAL_DIR="$(mktemp -d)"
 ./gvisor-start-probe \
-  --socket "$TRIAL_DIR/events.sock" \
+  --socket /run/kubescape/gvisor-events.sock \
   --container-id "$CONTAINER_A" \
   --container-id "$CONTAINER_B" \
   > "$TRIAL_DIR/starts.jsonl" 2> "$TRIAL_DIR/probe.stderr"
 ```
 
-Create `TRIAL_DIR` with mode `0700` and use `umask 077` before redirecting
-output. Socket existence alone is not readiness: the receiver binds the path
+Run the following readiness check in a second terminal while the probe runs.
+Socket existence alone is not readiness: the receiver binds the path
 before calling `listen`. Before starting either container, require a successful
 connection and version-1 handshake with a bounded retry, for example:
 
 ```sh
-python3 - "$TRIAL_DIR/events.sock" <<'PYREADY'
+python3 - /run/kubescape/gvisor-events.sock <<'PYREADY'
 import socket
 import sys
 import time
@@ -140,7 +150,8 @@ PYREADY
 The check closes its connection without sending a start and produces no trial
 event. Abort the trial if the check fails. It only establishes that the receiver
 answered; keep checking that the probe is running while the workload starts.
-Stop it with SIGTERM after the workload and wait for a zero exit status before checking artifacts. A nonzero exit invalidates that run.
+Stop it with SIGTERM after the workload and wait for a zero exit status before
+checking artifacts. A nonzero exit invalidates that run.
 
 For twenty repeated starts, either collect each independently created ID in
 advance and repeat the flag for every ID, or run separate probe invocations
@@ -178,13 +189,18 @@ python3 scripts/check-gvisor-start-trial.py \
 ```
 
 Repeat `--artifact` for additional retained logs or exports. The checker
-rejects missing, duplicate or unknown starts, unexpected event fields, invalid
+rejects missing or excess start counts, unknown identities, unexpected event
+fields, invalid
 source/timestamps, blank JSONL records, nonzero sender-reported drop counts,
-and the canary in the specified artifacts. Each input file is limited to 16 MiB. It prints neither
+and the canary in the specified artifacts. Each input file is limited to
+16 MiB. It prints neither
 input records nor parser error payloads. It does not inspect unspecified
 files, prove that the canary was actually used, verify the manifest's origin,
 measure local queue drops, or prove runtime identity from a JSON file. JSON
 record counts cannot prove timing, concurrency, or per-connection isolation.
+If a manifest expects two starts for one ID, two identical records satisfy that
+count; the checker does not authenticate events or distinguish replayed copies
+from distinct starts. Independent runtime evidence is still required.
 A passing check is an artifact consistency check, not a lifecycle integration
 gate or proof that application code executed.
 
