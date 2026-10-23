@@ -19,6 +19,8 @@ type ProcessTreeCreator interface {
 	// since boot (CLOCK_BOOTTIME), sourced exclusively from /proc/<pid>/stat
 	// field 22. Returns 0 when unknown (process not yet seen, or already exited).
 	GetProcessBootTimeNs(pid uint32) uint64
+	// GetPidBranch returns the container branch for a pid under the creator's lock
+	GetPidBranch(containerTree any, containerID string, targetPID uint32) (armotypes.Process, error)
 	// Start the process tree creator and begin background tasks
 	Start()
 	// Stop the process tree creator and cleanup resources
