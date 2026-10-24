@@ -148,7 +148,8 @@ func (pt *processTreeCreatorImpl) GetProcessBootTimeNs(pid uint32) uint64 {
 	return pt.pidStartTimeNs[pid]
 }
 
-// GetPidBranch performs container branch operation (no longer needs to be atomic)
+// GetPidBranch walks the container branch under the creator's lock, so exit
+// cleanup cannot reparent nodes mid-walk.
 func (pt *processTreeCreatorImpl) GetPidBranch(containerTree any, containerID string, targetPID uint32) (armotypes.Process, error) {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()

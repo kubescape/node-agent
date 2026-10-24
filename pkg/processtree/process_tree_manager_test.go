@@ -3,6 +3,7 @@ package processtree
 import (
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,4 +144,47 @@ func TestManager_GetContainerProcessTree_CarriesStartTime(t *testing.T) {
 	bypassed, err := mgr.GetContainerProcessTree(containerID, self, false)
 	require.NoError(t, err)
 	require.Equal(t, "nginx", bypassed.Comm)
+}
+
+func TestManager_GetContainerProcessTree_ConcurrentExitCleanup(t *testing.T) {
+	cfg := config.Config{ExitCleanup: treeconfig.ExitCleanupConfig{
+		MaxPendingExits: 100, CleanupInterval: time.Millisecond, CleanupDelay: 0,
+	}}
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := processtreecreator.NewProcessTreeCreator(containerTree, cfg)
+	mgr := NewProcessTreeManager(creator, containerTree, cfg)
+	containerTree.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeAddContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{ContainerID: "host", ContainerPID: 1},
+			},
+		},
+	})
+	require.NoError(t, mgr.ReportEvent(utils.ProcfsEventType, &events.ProcfsEvent{PID: 1, Comm: "systemd", ContainerID: "host"}))
+	mgr.Start()
+	defer mgr.Stop()
+
+	const parent, child uint32 = 1 << 30, 1<<30 + 1
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = mgr.GetContainerProcessTree("host", child, false)
+			}
+		}
+	})
+	for range 200 {
+		now := time.Now().UnixNano()
+		require.NoError(t, mgr.ReportEvent(utils.ExecveEventType, &utils.StructEvent{ContainerID: "host", Pid: parent, Ppid: 1, Comm: "sh", Timestamp: now}))
+		require.NoError(t, mgr.ReportEvent(utils.ExecveEventType, &utils.StructEvent{ContainerID: "host", Pid: child, Ppid: parent, Comm: "sleep", Timestamp: now}))
+		require.NoError(t, mgr.ReportEvent(utils.ExitEventType, &utils.StructEvent{ContainerID: "host", Pid: parent, Ppid: 1, Timestamp: now}))
+		time.Sleep(2 * time.Millisecond)
+	}
+	close(stop)
+	wg.Wait()
 }
