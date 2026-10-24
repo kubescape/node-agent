@@ -20,8 +20,19 @@ type ProfileRequirement struct {
 // RuleCreator is an interface for creating rules by tags, IDs, and names
 type RuleCreator interface {
 	CreateRulesByTags(tags []string) []typesv1.Rule
+	// CreateRuleByID / CreateRuleByName return a SINGLE rule and prefer the
+	// cluster-wide variant when a signed bundle overlay carries the same ID or
+	// name. They are kept for callers that genuinely want one rule.
 	CreateRuleByID(id string) typesv1.Rule
 	CreateRuleByName(name string) typesv1.Rule
+
+	// CreateRulesByID / CreateRulesByName return EVERY variant carrying that ID
+	// or name — the cluster-wide rule plus each bundle overlay.
+	// Intended for callers that resolve rules per pod (planned in the rule-binding
+	// cache), allowing bundle overlays to be selected over cluster-wide defaults
+	// based on the workload's bundle scope. Order follows registration order.
+	CreateRulesByID(id string) []typesv1.Rule
+	CreateRulesByName(name string) []typesv1.Rule
 	RegisterRule(rule typesv1.Rule)
 	CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule
 	CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule
