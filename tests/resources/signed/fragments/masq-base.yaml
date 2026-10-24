@@ -1,0 +1,26 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: masq-base
+  labels:
+    signature.kubescape.io/bundle: masqbundle
+    signature.kubescape.io/fragment-class: base
+spec:
+  architectures:
+    - amd64
+  execs:
+    - path: /bin/sleep
+    - path: /docker-entrypoint.sh
+    - path: /usr/sbin/nginx
+  syscalls:
+    - accept4
+    - bind
+    - close
+    - connect
+    - listen
+    - openat
+    - read
+    - socket
+    - write
+  matchLabels:
+    app: masq-server

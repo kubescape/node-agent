@@ -1,0 +1,44 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJYRENDQVFHZ0F3SUJBZ0lRUFJTcWloUW1URytsMVlXMFozSjJQakFLQmdncWhrak9QUVFEQWpBVU1SSXcKRUFZRFZRUURFd2xzYjJOaGJDMXJaWGt3SGhjTk1qWXdPVEl3TVRjeU5qQXpXaGNOTWpjd09USXdNVGN5TmpBegpXakFVTVJJd0VBWURWUVFERXdsc2IyTmhiQzFyWlhrd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DCkFBVE9vc2JXT1o2M2I2TVRaMzl4WTNNaDFiWXlYSTRvT3NtanlES0hXS1N5a2ptaDdmR01FZnZDYmp5Qm9DNUoKc25DeFV2R2pjSUhSa3h0aWZSMlZhb2FWb3pVd016QU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3dwpDZ1lJS3dZQkJRVUhBd013REFZRFZSMFRBUUgvQkFJd0FEQUtCZ2dxaGtqT1BRUURBZ05KQURCR0FpRUE0d3QrCkE5WGhCZnlDUXVUSk9tWjEwTjZKVHFKWGdpczJSN05aM2w1QUVaWUNJUUNWNDV0NXorQzVXbTVScWd4WXg5MEgKdlJRb3RKRjVsK29jOVpRTUNTanVndz09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    signature.kubescape.io/content: H4sIAAAAAAAA/3RRwWocMQz9F52dLKGlhbmV9FLoIdDSS9mDRtbMivXIxpKbDcv8e/FsstkeetOTnp7s986ARX5xNckKA1iJp3vLkz9jZcpLySYuWe+PbWQjLHwveffnYWTHBwhwFI0wwGNWR1GuTzVPkhgCLOwY0RGGMyQcOVmvTGZFb5X/FRybxsQwwKX48BnC/6hTxXlh9TtKaNZX0BjWAIrLrcLdW98KUz+NlQ7iTF3SYPgNuMRPH2EfgLDgKElc+kBbSgH4xNRZZyjoBxhgN4ruxmYvYz5BAKzzJrK1LTEX2K/hnd2sbiNqNcG6D5AL61XdXowwpU2BUrZuGGVVJocLFXtRGWN3ItORO36u4txfbEw9nDe3u7Gvv4w8YUv+hfwSKKxrANZYsqhf78uCM3/72uev4CfOF1Rb4qechDYzzmsAiawuk3B8xJR+ONLxKrSg0+H7NV4s5TbEvqxzZXu39Qat698AAAD//24n/dd9AgAA
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEUCIFTjlXxwq5fHNeUksMDpj72n+J7EZZqA5iiN8eveVZHmAiEA6AZHgZXmh9N62HqOaHJv5g7SAyx7OSZoWa8t/ZgDAms=
+    signature.kubescape.io/timestamp: "1789925163"
+  labels:
+    signature.kubescape.io/bundle: bundle37
+    signature.kubescape.io/fragment-class: base
+  name: bundle37-base
+spec:
+  architectures:
+  - amd64
+  capabilities: null
+  egress: null
+  endpoints: null
+  execs:
+  - args:
+    - /bin/sleep
+    path: /bin/busybox
+  - path: /usr/bin/curl
+  identifiedCallStacks: null
+  imageID: ""
+  imageTag: ""
+  ingress: null
+  matchLabels:
+    app: bundle37
+  opens: null
+  rulePolicies: null
+  seccompProfile:
+    spec:
+      defaultAction: ""
+  syscalls:
+  - close
+  - connect
+  - openat
+  - read
+  - socket
+  - write
+status: {}

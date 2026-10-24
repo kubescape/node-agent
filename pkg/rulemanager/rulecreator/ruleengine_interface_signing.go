@@ -1,0 +1,54 @@
+//go:build experimental_signing
+
+package rulecreator
+
+import (
+	"github.com/kubescape/node-agent/pkg/contextdetection"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	"github.com/armosec/armoapi-go/armotypes"
+)
+
+// ProfileRequirement indicates how a rule uses profiles
+type ProfileRequirement struct {
+	// ProfileDependency indicates if the rule requires a profile
+	ProfileDependency armotypes.ProfileDependency
+
+	// ProfileType indicates what type of profile is needed (Application, Network, etc)
+	ProfileType armotypes.ProfileType
+}
+
+// RuleCreator is an interface for creating rules by tags, IDs, and names
+type RuleCreator interface {
+	CreateRulesByTags(tags []string) []typesv1.Rule
+
+	// CreateRuleByID / CreateRuleByName return a SINGLE rule and prefer the
+	// cluster-wide variant when a signed bundle overlay carries the same ID or
+	// name. They are kept for callers that genuinely want one rule.
+	CreateRuleByID(id string) typesv1.Rule
+	CreateRuleByName(name string) typesv1.Rule
+
+	// CreateRulesByID / CreateRulesByName return EVERY variant carrying that ID
+	// or name — the cluster-wide rule plus each bundle overlay.
+	// Callers that resolve rules per pod (the rule-binding cache) must use these,
+	// otherwise a bundle overlay can never override the cluster-wide rule it is
+	// meant to replace: the override is decided later, per bundle, by
+	// scopeRulesToBundle, which can only choose between variants it was
+	// given. Order is the creator's registration order, hence deterministic.
+	CreateRulesByID(id string) []typesv1.Rule
+	CreateRulesByName(name string) []typesv1.Rule
+
+	RegisterRule(rule typesv1.Rule)
+	CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule
+	CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule
+	CreateAllRules() []typesv1.Rule
+	CreateRulesForContext(ctx contextdetection.EventSourceContext) []typesv1.Rule
+	GetAllRuleIDs() []string
+
+	// Dynamic rule management methods for CRD sync
+	SyncRules(newRules []typesv1.Rule)
+	RemoveRuleByID(id string) bool
+	UpdateRule(rule typesv1.Rule) bool
+	HasRule(id string) bool
+}

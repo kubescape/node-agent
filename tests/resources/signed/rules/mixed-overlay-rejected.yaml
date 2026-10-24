@@ -1,0 +1,47 @@
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  labels:
+    signature.kubescape.io/bundle: bundle37
+    signature.kubescape.io/fragment-class: overlay
+  name: ct-bundle37-mixed-rules
+spec:
+  rules:
+  - description: Allowed half of a mixed fragment — must never admit because the sibling rule ID is outside the overlay class allowlist
+    enabled: true
+    expressions:
+      message: '''MIXED FRAGMENT R0001: '' + event.comm'
+      ruleExpression:
+      - eventType: exec
+        expression: '!cp.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath))'
+      uniqueId: event.comm + '_' + event.exepath
+    id: R0001
+    isTriggerAlert: true
+    mitreTactic: TA0002
+    mitreTechnique: T1059
+    name: Unexpected process launched
+    profileDataRequired:
+      execs: all
+    profileDependency: 0
+    severity: 7
+    supportPolicy: false
+    tags: ["context:kubernetes", "context:container", "anomaly", "process", "exec", "applicationprofile"]
+  - description: Disallowed sibling — R0011 is not in the overlay class allowlist, so the WHOLE fragment must be refused
+    enabled: true
+    expressions:
+      message: '''MIXED FRAGMENT R0011: '' + event.dstAddr'
+      ruleExpression:
+      - eventType: network
+        expression: 'event.pktType == ''OUTGOING'''
+      uniqueId: event.dstAddr
+    id: R0011
+    isTriggerAlert: true
+    mitreTactic: TA0010
+    mitreTechnique: T1041
+    name: Unexpected egress network traffic
+    profileDataRequired:
+      egressAddresses: all
+    profileDependency: 0
+    severity: 7
+    supportPolicy: false
+    tags: ["context:kubernetes", "context:container", "anomaly", "network"]

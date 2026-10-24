@@ -1,0 +1,44 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJXekNDQVFHZ0F3SUJBZ0lRTlBxd1FKbXlXSnY1UFcyWkFSS3ZlekFLQmdncWhrak9QUVFEQWpBVU1SSXcKRUFZRFZRUURFd2xzYjJOaGJDMXJaWGt3SGhjTk1qWXdPREkzTVRneE5qQTRXaGNOTWpjd09ESTNNVGd4TmpBNApXakFVTVJJd0VBWURWUVFERXdsc2IyTmhiQzFyWlhrd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DCkFBUVdkU1hvdTJyamFrTW4xUGpNQ05aUzYvSDA0aXhVcDBHcHpnSEt0V2lZRllFdWFjQmZOL2tvQ1Z2UUs4eEQKVDZQM0J2TXE3aWo2Y1IzU2thU3JnMzJab3pVd016QU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3dwpDZ1lJS3dZQkJRVUhBd013REFZRFZSMFRBUUgvQkFJd0FEQUtCZ2dxaGtqT1BRUURBZ05JQURCRkFpRUE1OHQyCk16Y1pNZXhrWlBFckpIRWxla3FBdDNRY256ZHdYVVpuc0xZT3NzOENJQ25GYXNJbWJIZnNnUFRjeGtGYk1za3UKSkMzbzVEV21FUCtGNExaYVltb2YKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    signature.kubescape.io/content: H4sIAAAAAAAA/3SSQW/bMAyF/wvPStbeCt+K7DJgGAK02GXYgaFolwhNaRK9tQj83wfVTowO2I1PpJ75PusCmOU7lyrJoIOa4+u+pt7/YGFKY05VXJLtz9OJK2HmvaRPv+9P7HgPAc5iETo4JHMU43IsqRdlCDCyY0RH6C6geGKtraoyGPpU+KPhabKoDB2MWH+tIvxvuC84jGy+I8VaoQOMo9T3AHMAw/FqtPvQqJmprYCFXsSZmnGFzibVAIQZT6Lisp3xK9NNpMx2E/WtEqpumqmxuoZvOdePRe5xUn8kX/jCPAdgizmJ+e2+jDjwl8+tv4pnHBZVJuVjUqH3xS5zAIlsLr1wPKDqkyOdNyMbCjcmPy7bXLniIBU2hwD+lhsjMediqBAgtnCwFN9w3CDkVHzxW8E+H467hzsIkEvyREmXM1hGoXu4m3+2Oj6xMnkqDcOITi9fb68Ac/5np3n9czUj8XZzTZUfY1xyATR3XlO29jz/DQAA///iVFxywwIAAA==
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEUCIQDIK9P4GincXr3Cy2sQEOstVTAtRUyC5i4YhPwbF0yWRAIgXSlv6MJxKCtYXA5oRqrjsh5kaZLCbuilesmWjmHsWsI=
+    signature.kubescape.io/timestamp: "1787854568"
+  labels:
+    signature.kubescape.io/bundle: masqbundle
+    signature.kubescape.io/fragment-class: admission
+  name: masq-admission
+spec:
+  architectures: null
+  capabilities: null
+  egress: null
+  endpoints: null
+  execs: null
+  identifiedCallStacks: null
+  imageID: ""
+  imageTag: ""
+  ingress:
+  - dns: ""
+    dnsNames: null
+    identifier: masq-client
+    ipAddress: ""
+    namespaceSelector: null
+    podSelector:
+      matchLabels:
+        app: masq-client
+    ports:
+    - name: TCP-80
+      port: 80
+      protocol: TCP
+    type: internal
+  opens: null
+  rulePolicies: null
+  seccompProfile:
+    spec:
+      defaultAction: ""
+  syscalls: null
+status: {}

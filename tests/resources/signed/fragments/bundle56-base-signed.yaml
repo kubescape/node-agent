@@ -1,0 +1,36 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJXekNDQVFLZ0F3SUJBZ0lSQUs5T0dObHY4YXhidjZBTVpwVy9kRFF3Q2dZSUtvWkl6ajBFQXdJd0ZERVMKTUJBR0ExVUVBeE1KYkc5allXd3RhMlY1TUI0WERUSTJNRGt5TURFNE5EWXpPRm9YRFRJM01Ea3lNREU0TkRZegpPRm93RkRFU01CQUdBMVVFQXhNSmJHOWpZV3d0YTJWNU1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEClFnQUV6cUxHMWptZXQyK2pFMmQvY1dOeklkVzJNbHlPS0RySm84Z3loMWlrc3BJNW9lM3hqQkg3d200OGdhQXUKU2JKd3NWTHhvM0NCMFpNYlluMGRsV3FHbGFNMU1ETXdEZ1lEVlIwUEFRSC9CQVFEQWdlQU1CTUdBMVVkSlFRTQpNQW9HQ0NzR0FRVUZCd01ETUF3R0ExVWRFd0VCL3dRQ01BQXdDZ1lJS29aSXpqMEVBd0lEUndBd1JBSWdYN29CCjJRc1dNcWpKbWpRbDVyNWZ5WUliR3ZPd3YzYVlFZVk3ZHdya3Z2c0NJSEVyQ0txZDdXMmpZdFowdE9TbnhkMDMKamMrN3pKejlWdWU0SGdDSmhnQ28KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    signature.kubescape.io/content: H4sIAAAAAAAA/3RRsW4bMQz9F86KDQNthtuKdCnQIUCLLkUGnsQ7E+ZRgshLUxj690JxenEGb3rge0+Pj2fAwr+oGmeFAaykl53lyf9gpZiXko2ds+5O60gWsdCO8/75MJLjAQKcWBMM8JDVkZXqY80TC0GAhRwTOsJwBsGRxPrLeFb0tdJHw3HVJAQDXB6f7yHcok4V54XU76KgWZeg0W3687baAVoAxeX6m7tXcQtghWLPhzUe2Sl2I4PhN+CS7j/BU4CIBUcWdu4DXUUC0AvFzjpDQT/CAPvV6n5k3ZsQFWhPAXIh3QT21yKKvGOKveT/rfWC3oIkmnAV/xL9kh5aC0CaSmb1Tc8LzvTta5+/gZ84X1BdhR6zcHzNe24BOJE6T0zpAUV+OMbTZrSgx+P37UxYyvUxuljnSva++RVq7V8AAAD//5o05apFAgAA
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEUCIQCh3WerTMOE37FYj+FKHV9z+0wLXqygxbYwKFISLVIxowIgb7OlRsJWHCCT/UBE3Yj/klo7QUzdgslcPpqdWm8MRig=
+    signature.kubescape.io/timestamp: "1789929998"
+  labels:
+    signature.kubescape.io/bundle: bundle56
+    signature.kubescape.io/fragment-class: base
+    signature.kubescape.io/version: "1"
+  name: bundle56-base
+spec:
+  architectures:
+  - amd64
+  capabilities: null
+  egress: null
+  endpoints: null
+  execs:
+  - path: /usr/bin/sleep
+  identifiedCallStacks: null
+  imageID: ""
+  imageTag: ""
+  ingress: null
+  matchLabels:
+    app: bundle56
+  opens: null
+  rulePolicies: null
+  seccompProfile:
+    spec:
+      defaultAction: ""
+  syscalls: null
+status: {}

@@ -1,0 +1,12 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: bundle37-overlay
+  labels:
+    signature.kubescape.io/bundle: bundle37
+    signature.kubescape.io/fragment-class: overlay
+spec:
+  execs:
+    - path: /bin/busybox
+      args:
+        - /usr/bin/id

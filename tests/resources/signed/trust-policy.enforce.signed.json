@@ -1,0 +1,52 @@
+{
+  "policy": {
+    "mode": "enforce",
+    "classes": {
+      "admission": {
+        "signers": [
+          "key:58fd31c363a8fac06d6eb596c2e8c63d5913b4dc4b971ee62579ec41fff78826"
+        ],
+        "allowedSpecPaths": [
+          "ingress",
+          "egress"
+        ]
+      },
+      "base": {
+        "signers": [
+          "key:162a08d59135652ee095ad2e0d927104c9e4eefe94f4ae844e7387ba1a7352d2"
+        ],
+        "allowedSpecPaths": [
+          "architectures",
+          "capabilities",
+          "execs",
+          "opens",
+          "syscalls",
+          "seccompProfile",
+          "endpoints",
+          "imageID",
+          "imageTag",
+          "rulePolicies",
+          "identifiedCallStacks",
+          "labelSelector"
+        ]
+      },
+      "overlay": {
+        "signers": [
+          "key:58fd31c363a8fac06d6eb596c2e8c63d5913b4dc4b971ee62579ec41fff78826"
+        ],
+        "allowedSpecPaths": [
+          "execs",
+          "opens"
+        ]
+      }
+    },
+    "policyVersion": 2
+  },
+  "annotations": {
+    "signature.kubescape.io/certificate": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJYRENDQVFHZ0F3SUJBZ0lRZnJxRC96V0p1UjIwWkxQRWdDYUxlakFLQmdncWhrak9QUVFEQWpBVU1SSXcKRUFZRFZRUURFd2xzYjJOaGJDMXJaWGt3SGhjTk1qWXdPREkyTVRjek1qUXhXaGNOTWpjd09ESTJNVGN6TWpReApXakFVTVJJd0VBWURWUVFERXdsc2IyTmhiQzFyWlhrd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DCkFBUXc3a1NsNUFOdEh2VHFnV0gzaFB3cjdJMHJTbUlrUlNtd3BRUGUzYThQZ3dTMWxsMnVtMVRWUTQwV21KYkgKTGFmQVlMT1dsbVloZTFHdGNNRU5WbzE5b3pVd016QU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3dwpDZ1lJS3dZQkJRVUhBd013REFZRFZSMFRBUUgvQkFJd0FEQUtCZ2dxaGtqT1BRUURBZ05KQURCR0FpRUF4SmRuCmV1alJDTnIrZlhqZzFVOTBZWTRLK05zYm1ERG80RUVvMGpGcCtoZ0NJUUQ4OHlpMlNSM1NKZklaOW5wOEdmRE4KcHcvTlFYVU9weUxESUFmdXluTGlDUT09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K",
+    "signature.kubescape.io/identity": "local-key",
+    "signature.kubescape.io/issuer": "local",
+    "signature.kubescape.io/signature": "MEUCIQC3uV8iTk0cH0/feUJiMBvb47EOkrWzZY0sR+ldC/MB9wIgQK9fkzBNqIH6VYSKVsoMR/7CN8hUsNRp15oZFxoZe74=",
+    "signature.kubescape.io/timestamp": "1787765561"
+  }
+}

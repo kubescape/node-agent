@@ -53,6 +53,8 @@ type namespacedName struct {
 // ContainerProfile is not retained after projection — only the compact form is
 // stored so the raw pointer can be GC'd.
 type CachedContainerProfile struct {
+	signingBinding
+	signingProvenance
 	Projected     *objectcache.ProjectedContainerProfile
 	SpecHash      string // mirrors Projected.SpecHash; used for staleness checks
 	State         *objectcache.ProfileState
@@ -120,6 +122,7 @@ type pendingContainer struct {
 
 // ContainerProfileCacheImpl is the unified container-keyed cache for ContainerProfile objects.
 type ContainerProfileCacheImpl struct {
+	signingState
 	cfg            config.Config
 	entries        maps.SafeMap[string, *CachedContainerProfile]
 	pending        maps.SafeMap[string, *pendingContainer]
@@ -441,7 +444,15 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// single-container convention and the safest retry target when the
 	// per-container fetch does not cleanly succeed.
 	resolvedOverlayName := overlayName
-	if hasOverlay && overlayName != "" {
+	bundleCP, bundleHandled, provenance, bundleErr := c.loadSignedBundle(ctx, ns, overlayName, sharedData.Wlid)
+	if bundleErr != nil {
+		logger.L().Warning("signed bundle failed verification: NO fallback to a ContainerProfile of the same name", helpers.String("bundle", overlayName), helpers.Error(bundleErr))
+		return false
+	}
+	if bundleHandled {
+		userDefinedCP = bundleCP
+	}
+	if !bundleHandled && hasOverlay && overlayName != "" {
 		// Per-container binding (review finding on node-agent#864): a
 		// multi-container pod shares one label value but each container is
 		// profiled independently, so its authored ContainerProfile is published
@@ -486,7 +497,21 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		}
 	}
 
+	if !bundleHandled {
+		var refused bool
+		userDefinedCP, refused, provenance = c.admitSignedProfile(userDefinedCP, sharedData.Wlid)
+		if refused {
+			return false
+		}
+	}
 	userDefinedCP = resolveAuthoredSection(userDefinedCP, container.Runtime.ContainerName, resolvedOverlayName, containerID, ns)
+	if userDefinedCP == nil {
+		provenance = signingProvenance{}
+	}
+
+	if c.requiresSignedProfile() && userDefinedCP == nil {
+		return false
+	}
 
 	// Only cache profiles whose status is terminal (Completed or TooLarge).
 	// Learning/ready profiles are still being written; caching them would let
@@ -567,6 +592,8 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	entry := c.buildEntry(cp, pod, container, sharedData)
+	entry.signingProvenance = provenance
+	c.setSigningBinding(entry, overlayName)
 	// Override CPName with the real consolidated-CP slug. buildEntry sets
 	// CPName from cp.Name, but when cp was synthesized above (no consolidated
 	// CP in storage yet), cp.Name is the workloadName/overlayName — NOT the
@@ -613,6 +640,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	}
 
 	c.entries.Set(containerID, entry)
+	c.noteAdoptedProfile(provenance, userDefinedCP, sharedData.Wlid)
 	c.pending.Delete(containerID)
 	c.metricsManager.SetContainerProfileCacheEntries("container", float64(c.entries.Len()))
 	c.metricsManager.SetContainerProfileCacheEntries("pending", float64(c.pending.Len()))

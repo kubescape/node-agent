@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -85,6 +84,9 @@ func NormalizeDNSSuffix(s string) string {
 }
 
 type Config struct {
+	// Signing options are effective only in experimental_signing builds.
+	EnableSignatureVerification    bool                                 `mapstructure:"enableSignatureVerification"`
+	BundleTrustPolicyPath          string                               `mapstructure:"bundleTrustPolicyPath"`
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
 	ContainerEolNotificationBuffer int                                  `mapstructure:"containerEolNotificationBuffer"`
@@ -324,11 +326,8 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 
 	viper.AutomaticEnv()
 
-	if err := viper.ReadInConfig(); err != nil {
-		var notFound viper.ConfigFileNotFoundError
-		if !errors.As(err, &notFound) || errNotFound {
-			return Config{}, err
-		}
+	if err := readConfig(path, errNotFound); err != nil {
+		return Config{}, err
 	}
 
 	var config Config

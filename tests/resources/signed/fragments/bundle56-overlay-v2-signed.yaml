@@ -1,0 +1,33 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJXakNDQVFHZ0F3SUJBZ0lRU2ViMmNJTnU3ZVd3UkZvalRyVHdHekFLQmdncWhrak9QUVFEQWpBVU1SSXcKRUFZRFZRUURFd2xzYjJOaGJDMXJaWGt3SGhjTk1qWXdPVEEwTVRBMU1EVTBXaGNOTWpjd09UQTBNVEExTURVMApXakFVTVJJd0VBWURWUVFERXdsc2IyTmhiQzFyWlhrd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DCkFBVGNZaERBb0g1SGdWdEpJaHNDL1RVWW1tc3pNdW1STkZCTnJOZ05xRGhxSVNuanVYeDhKcU5FSFF6bmRjd1UKbDM0c2ZEWGxmTnd1ZEd4WUtzYTRWZkZjb3pVd016QU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3dwpDZ1lJS3dZQkJRVUhBd013REFZRFZSMFRBUUgvQkFJd0FEQUtCZ2dxaGtqT1BRUURBZ05IQURCRUFpQmpVTzFZCitCZmVkd2VRd1RHSnVEQ21jdTJscU5JeDVqYUJSSlA5TkJNV29nSWdXM3dteVp2RlFwNDdSeExaOGpDZTNNODYKNEUvbHVYYlZobWdSVFljck8xbz0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    signature.kubescape.io/content: H4sIAAAAAAAA/3RQsW5bMQz8F86KjRRoB21FunQL0KJL0YFP4nshzEcJIuUmMPTvxYsTOx288STe8e5OgJV/UTMuChGs5uedldn/YqNU1lqMnYvuDn0iS1hpx2V/vJ/I8R4CHFgzRHgo6shK7bGVmYUgwEqOGR0hnkBwIrFtMl4UvTf6X3DqmoUgwnn4/AXCrdW54bKS+l0SNIMI5UhN8OU243hJ9wlGAMX146W7d/4IYJXS5hJbemKntGkZRO0iARJWnFjY+fpGz5QM4u8TVPQniLDv1vYT676/nhl/ApRKeiHYiyUUuWJKW8vvtW0NvXnINGMX/5r87B3GCECaa2H1C59XXOj7t+3/DfzE5YxaF3oswunV72kE4EzqPDPlBxT54ZgOVyFdGtk12Ac0xr8AAAD//8VdXhklAgAA
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEUCIGWmgI9MOkKxOt3I+/7B1tj9y112130cGrgY6fmnwrRSAiEArS/BI0klnX/u6egNco1uiOXlzwpg1i+2nFGl69EvbJk=
+    signature.kubescape.io/timestamp: "1788519054"
+  labels:
+    signature.kubescape.io/bundle: bundle56
+    signature.kubescape.io/fragment-class: overlay
+    signature.kubescape.io/version: "2"
+  name: bundle56-overlay
+spec:
+  architectures: null
+  capabilities: null
+  egress: null
+  endpoints: null
+  execs:
+  - path: /usr/bin/uname
+  identifiedCallStacks: null
+  imageID: ""
+  imageTag: ""
+  ingress: null
+  opens: null
+  rulePolicies: null
+  seccompProfile:
+    spec:
+      defaultAction: ""
+  syscalls: null
+status: {}

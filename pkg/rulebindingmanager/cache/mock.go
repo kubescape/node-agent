@@ -1,3 +1,5 @@
+//go:build !experimental_signing
+
 package cache
 
 import (

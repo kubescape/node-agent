@@ -13,6 +13,7 @@ import (
 )
 
 type HealthManager struct {
+	policyHealth
 	containerWatcher containerwatcher.ContainerWatcher
 	port             int
 }
@@ -31,6 +32,7 @@ func (h *HealthManager) Start(ctx context.Context) {
 	go func() {
 		http.HandleFunc("/livez", h.livenessProbe)
 		http.HandleFunc("/readyz", h.readinessProbe)
+		h.registerPolicyHandler()
 		srv := &http.Server{
 			Addr:         fmt.Sprintf(":%d", h.port),
 			WriteTimeout: 15 * time.Second,

@@ -3,11 +3,12 @@ FROM --platform=$BUILDPLATFORM golang:1.27-trixie AS builder
 ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /work
 ARG TARGETOS TARGETARCH
+ARG BUILD_TAGS=""
 
 RUN --mount=target=. \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
-    GOOS=$TARGETOS GOARCH=$TARGETARCH GOEXPERIMENT=greenteagc go build -o /out/node-agent -ldflags="-s -w" ./cmd/main.go
+    GOOS=$TARGETOS GOARCH=$TARGETARCH GOEXPERIMENT=greenteagc go build -tags "$BUILD_TAGS" -o /out/node-agent -ldflags="-s -w" ./cmd
 
 RUN --mount=target=. \
     --mount=type=cache,target=/root/.cache/go-build \

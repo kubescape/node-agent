@@ -1,0 +1,44 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJXekNDQVFLZ0F3SUJBZ0lSQU93UFcwd3BGNmRybkR4LzRuZklBQVF3Q2dZSUtvWkl6ajBFQXdJd0ZERVMKTUJBR0ExVUVBeE1KYkc5allXd3RhMlY1TUI0WERUSTJNRGd5TnpFNE1UWXdOMW9YRFRJM01EZ3lOekU0TVRZdwpOMW93RkRFU01CQUdBMVVFQXhNSmJHOWpZV3d0YTJWNU1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEClFnQUUzR0lRd0tCK1I0RmJTU0liQXYwMUdKcHJNekxwa1RSUVRhellEYWc0YWlFcDQ3bDhmQ2FqUkIwTTUzWE0KRkpkK0xIdzE1WHpjTG5Sc1dDckd1Rlh4WEtNMU1ETXdEZ1lEVlIwUEFRSC9CQVFEQWdlQU1CTUdBMVVkSlFRTQpNQW9HQ0NzR0FRVUZCd01ETUF3R0ExVWRFd0VCL3dRQ01BQXdDZ1lJS29aSXpqMEVBd0lEUndBd1JBSWdYLzBDCnFLWC9sZkVyT3BFcE44L0RicTV2Z1R6emMyZFZtby84TlgraGFMZ0NJRWpLenhGTzJWZWhkYXU0UzYzaTk0MEYKZ2I1ZG1DY2kyZ09PemE0WE4zZG4KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    signature.kubescape.io/content: H4sIAAAAAAAA/3SRMW/cMAyF/wtn3TXZAm/BdSlQFAck6FJ0oCXaIY6iVIluExj+74Vix0aHbnw09czvcQbM/J1K5aTQQc3h9VzTYH+wkE8xp8rGSc+3qafqMdOZ06ff9z0Z3oODG2uADi5JDVmpXEsaWAgcRDIMaAjdDII9SW1V5VHRpkL/GvaTBiHoIGL9tQn3v+Gh4BhJ7eQFa4UOMESu7wCLA8X4YXTqsZKwUuvXTL5tgMW/sJFvvhU6nUQceMzYs7Dx0aNX8rtImXQX9a16FDk0+RbVB3vD3H4WaMBJ7NHbGi8siwPSkBOr7e854khfPrfvm3jGcVVlEromYf++2Lw44EBqPDCFC4o8GfrbYaRjoRbJj/mYK9BBT8qjggN7yy0dVqOiKOAgNC5Yi28YD/6ciq1WW6TPl+vp4Q4c5JIs+SRrD9ZR6B7ulp+tDk8k5C2VlkBE8y9f9/tjzvtx1p2W7WY1o6fj5QaUH0NYkQCaO22A7fOy/A0AAP//QM8QBr0CAAA=
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEYCIQC2nq/MP3Mw23aOy47A0CRhyQ+gaHsAIVthgtglBwugbAIhAIo9WZi6sFWneO+6UR5Rc25t9w4vEURz1FBwTIu84nf5
+    signature.kubescape.io/timestamp: "1787854567"
+  labels:
+    signature.kubescape.io/bundle: masqbundle
+    signature.kubescape.io/fragment-class: admission
+  name: masq-baseline
+spec:
+  architectures: null
+  capabilities: null
+  egress: null
+  endpoints: null
+  execs: null
+  identifiedCallStacks: null
+  imageID: ""
+  imageTag: ""
+  ingress:
+  - dns: ""
+    dnsNames: null
+    identifier: benign
+    ipAddress: ""
+    namespaceSelector: null
+    podSelector:
+      matchLabels:
+        app: masq-benign
+    ports:
+    - name: TCP-80
+      port: 80
+      protocol: TCP
+    type: internal
+  opens: null
+  rulePolicies: null
+  seccompProfile:
+    spec:
+      defaultAction: ""
+  syscalls: null
+status: {}

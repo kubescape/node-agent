@@ -1,0 +1,35 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJXekNDQVFHZ0F3SUJBZ0lRS2pHbGlnendqaW5UemhMVGUybUlDVEFLQmdncWhrak9QUVFEQWpBVU1SSXcKRUFZRFZRUURFd2xzYjJOaGJDMXJaWGt3SGhjTk1qWXdPVEEwTVRBMU1EVTBXaGNOTWpjd09UQTBNVEExTURVMApXakFVTVJJd0VBWURWUVFERXdsc2IyTmhiQzFyWlhrd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DCkFBVGNZaERBb0g1SGdWdEpJaHNDL1RVWW1tc3pNdW1STkZCTnJOZ05xRGhxSVNuanVYeDhKcU5FSFF6bmRjd1UKbDM0c2ZEWGxmTnd1ZEd4WUtzYTRWZkZjb3pVd016QU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3dwpDZ1lJS3dZQkJRVUhBd013REFZRFZSMFRBUUgvQkFJd0FEQUtCZ2dxaGtqT1BRUURBZ05JQURCRkFpRUE3TmtUCkFSQ1RLYkU5VDBuZzh5andETVdGRUdkbHJ0b1p6dWFkMEJjWjBlMENJQVB1V1dkaTdaeWk5NlZaMW1xdTdQVmgKNEF4Ny9pSkpuaWE1NGNYR3N1emUKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    signature.kubescape.io/content: H4sIAAAAAAAA/3RRsW4bMQz9F86KjaBoh9uKdOkWoEWXogNP4p0J8yhBpJwEhv69uDjxpWiy8ZHie3xPZ8DCv6gaZ4UBrKTHneXJH7BSzEvJxs5Zd8c2kkUstOO8P92O5HgLAY6sCQa4y+rISvW+5omFIMBCjgkdYTiD4Ehia2U8K3qr9C/h2DQJwQCX4vMXCB89nSrOC6nfREEzGCCfqAo+fbxxurr7BD2A4vJW6eZ1vwewQnG9Ems8sFNcuQwGbSIBIhYcWdh569EjRYPh9xkK+gEG2Der+5F1zwl6+L/dntXfmzwcMi4M/U+AXEivEvZkEUU2THH9l9eg10xfrk40YRP/Gv3iFnoPQJpKZvXrPi840/dv6/wF/MT5gmoTus/C8dnhuQfgROo8MaU7FPnhGI8bkc6VbIviDer9bwAAAP//yjeXAFcCAAA=
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEYCIQCK0weIhssIQI3IS5nMAU1rLaN4dgdklD690jyPVorMXwIhAO7C4QU0kIvroi4l8LVN/WS9OoElkcVgo7crK4KGdbAB
+    signature.kubescape.io/timestamp: "1788519054"
+  labels:
+    signature.kubescape.io/bundle: bundle56
+    signature.kubescape.io/fragment-class: overlay
+    signature.kubescape.io/version: "3"
+  name: bundle56-overlay
+spec:
+  architectures: null
+  capabilities: null
+  egress: null
+  endpoints: null
+  execs:
+  - path: /usr/bin/id
+  - path: /usr/bin/uname
+  - path: /usr/bin/whoami
+  identifiedCallStacks: null
+  imageID: ""
+  imageTag: ""
+  ingress: null
+  opens: null
+  rulePolicies: null
+  seccompProfile:
+    spec:
+      defaultAction: ""
+  syscalls: null
+status: {}

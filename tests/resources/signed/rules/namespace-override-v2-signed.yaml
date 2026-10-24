@@ -1,0 +1,53 @@
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  annotations:
+    signature.kubescape.io/certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJXakNDQVFHZ0F3SUJBZ0lRVmcvbHJ2QWQxU2UwM2s3NjF1M1d2REFLQmdncWhrak9QUVFEQWpBVU1SSXcKRUFZRFZRUURFd2xzYjJOaGJDMXJaWGt3SGhjTk1qWXdPVEl3TVRnME5qTTRXaGNOTWpjd09USXdNVGcwTmpNNApXakFVTVJJd0VBWURWUVFERXdsc2IyTmhiQzFyWlhrd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DCkFBVGNZaERBb0g1SGdWdEpJaHNDL1RVWW1tc3pNdW1STkZCTnJOZ05xRGhxSVNuanVYeDhKcU5FSFF6bmRjd1UKbDM0c2ZEWGxmTnd1ZEd4WUtzYTRWZkZjb3pVd016QU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3dwpDZ1lJS3dZQkJRVUhBd013REFZRFZSMFRBUUgvQkFJd0FEQUtCZ2dxaGtqT1BRUURBZ05IQURCRUFpQldRZnVDCmI3R1RRaFEwT0hYeURzNzRVRGQ3TE4rY3ovVTlGaDlBZDNRaU5nSWdXWk95RzZDbXJsUFFSa0k1WG53NXRJK3gKRkJEZ0t5RVJoYnEwSWJpekRsaz0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    signature.kubescape.io/content: H4sIAAAAAAAA/3RU0U4rNxD9FXdeAOGkC1XVdt+CwgMSahEKSFWF0MSebEZ4bWPPhkRR/r3yZkNuuPc+rTVzPHPm+MxuASM/U8ocPNTw1s0pG4w05vDr6go0vLG3UMNj5yiDhpYELQpCvQWHc3K5nDI3HqVLND4pMO+8dQQ17A+//QH6Z9BFwqYlLyPjMGeoIawoOdzAToPHthQxMjrUGQ3ZUepp7TTkSKYw2Qfq/7ZAHueOLNSSOtLA/RRVVZWhhopPntaRjJBVMQVDOSuHnTdLsqDBUjaJo+yVuelbj7IJkawa+quwUH1NrTKZ4K1KtOKipVaLkJQsSWVB88a+USa0MXjyooSygAZax0S5oHsRW8oZm8Lr7Obp7+n9rfrn+fbxfvKver7ed6lV9z3jM3WpaEVexia0rbpUZ+qDZake7qZ9Lkti35zvIZHtBWjoPL93dFckOb36eqxGa4ooS9C9prefXPfiFshsEwtbWpM5mQZq+MXE8Qfm15LrhOz5oY0XZE/pzmoVMWUaNyQ96rU0G2CYmqy/GUqfUrq4gN3LTkNMYcGOphTJW/JmA3V1jKLgI713nIoHthAiFZl955zuKReToXOgwWDEOTsWpk9E3mSDzh1veBsDezkGmjLtNLTI/ktwYm35HIux/xF4iH5BFy/TihLLBuo/NeQuxpDkITguAy7QZdIg2BSXQxGU1lKXXUqepN/RQ/BTbdCAPrToNtDrU3wD+vBwGKNjg8Xng3bwogEb8jL8GAYdy35CDaCB8yxx01CaOEpyWLGWJdEMjbCBGmaTqqqu4RAms+xNVzJX1e9/lSfc/R8AAP//sgLHdX4EAAA=
+    signature.kubescape.io/identity: local-key
+    signature.kubescape.io/issuer: local
+    signature.kubescape.io/signature: MEQCIHWRBt1rfDCCVxxp/O7E7HpC28zLApJu7S5ViUMaka3FAiBFiuruI/abZiFo6UM83CXHPtFVbMVxTEtuzaC7UQWGsQ==
+    signature.kubescape.io/timestamp: "1789929998"
+  labels:
+    signature.kubescape.io/bundle: bundle37
+    signature.kubescape.io/fragment-class: overlay
+  name: ct-bundle37-overlay-rules
+spec:
+  rules:
+  - agentVersionRequirement: ""
+    description: Bundle-scoped overlay of R0001, second revision, for the stacking
+      component test
+    enabled: true
+    expressions:
+      message: '''BUNDLE OVERLAY V2 R0001: unexpected process '' + event.comm + ''
+        with PID '' + string(event.pid)'
+      ruleExpression:
+      - eventType: exec
+        expression: '!cp.was_executed(event.containerId, parse.get_exec_path(event.args,
+          event.comm, event.exepath))'
+      uniqueId: event.comm + '_' + event.exepath
+    id: R0001
+    isTriggerAlert: true
+    mitreTactic: TA0002
+    mitreTechnique: T1059
+    name: Unexpected process launched
+    profileDataRequired:
+      capabilities: null
+      egressAddresses: null
+      egressDomains: null
+      endpoints: null
+      execs: all
+      ingressAddresses: null
+      ingressDomains: null
+      opens: null
+      syscalls: null
+    profileDependency: 0
+    severity: 8
+    supportPolicy: false
+    tags:
+    - context:kubernetes
+    - context:container
+    - anomaly
+    - process
+    - exec
+    - applicationprofile

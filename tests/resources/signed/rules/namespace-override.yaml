@@ -1,0 +1,34 @@
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  labels:
+    signature.kubescape.io/bundle: bundle37
+    signature.kubescape.io/fragment-class: overlay
+  name: ct-bundle37-overlay-rules
+spec:
+  rules:
+  - description: Bundle-scoped overlay of R0001 for the signed-rules component test
+    enabled: true
+    expressions:
+      message: '''BUNDLE OVERLAY R0001: unexpected process '' + event.comm + '' with PID '' + string(event.pid)'
+      ruleExpression:
+      - eventType: exec
+        expression: '!cp.was_executed(event.containerId, parse.get_exec_path(event.args, event.comm, event.exepath))'
+      uniqueId: event.comm + '_' + event.exepath
+    id: R0001
+    isTriggerAlert: true
+    mitreTactic: TA0002
+    mitreTechnique: T1059
+    name: Unexpected process launched
+    profileDataRequired:
+      execs: all
+    profileDependency: 0
+    severity: 9
+    supportPolicy: false
+    tags:
+    - context:kubernetes
+    - context:container
+    - anomaly
+    - process
+    - exec
+    - applicationprofile

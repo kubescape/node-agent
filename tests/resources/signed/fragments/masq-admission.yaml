@@ -1,0 +1,18 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ContainerProfile
+metadata:
+  name: masq-admission
+  labels:
+    signature.kubescape.io/bundle: masqbundle
+    signature.kubescape.io/fragment-class: admission
+spec:
+  ingress:
+    - identifier: masq-client
+      type: internal
+      podSelector:
+        matchLabels:
+          app: masq-client
+      ports:
+        - name: TCP-80
+          port: 80
+          protocol: TCP
