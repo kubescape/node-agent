@@ -4,6 +4,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -12,12 +13,14 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
+var projectionGeneration atomic.Uint64
+
 // Apply transforms a raw ContainerProfile into a ProjectedContainerProfile
-// under the given spec. Pure function: no I/O, no mutation of inputs.
+// under the given spec, assigning a process-local cache generation.
+// It performs no I/O and does not mutate its inputs.
 // If spec is nil, a zero-spec is used — InUse=false on every field triggers
 // pass-through, retaining all raw data.
-// callStackTree is built by the caller and passed in so Apply stays a pure
-// data transform.
+// callStackTree is built by the caller and passed in.
 func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, callStackTree *callstackcache.CallStackSearchTree) *objectcache.ProjectedContainerProfile {
 	var s objectcache.RuleProjectionSpec
 	if spec != nil {
@@ -25,8 +28,9 @@ func Apply(spec *objectcache.RuleProjectionSpec, cp *v1beta1.ContainerProfile, c
 	}
 
 	pcp := &objectcache.ProjectedContainerProfile{
-		SpecHash:      s.Hash,
-		CallStackTree: callStackTree,
+		CacheGeneration: projectionGeneration.Add(1),
+		SpecHash:        s.Hash,
+		CallStackTree:   callStackTree,
 	}
 
 	if cp == nil {

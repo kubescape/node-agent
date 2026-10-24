@@ -71,6 +71,9 @@ type CachedContainerProfile struct {
 	// reconciler to re-fetch on refresh.
 	UserCPRef *namespacedName
 
+	// Retain host metadata for retry when an unbound host has no learned CP yet.
+	hostRetry *pendingContainer
+
 	// CPName is the storage name of the ContainerProfile. Populated at
 	// addContainer time so the reconciler can re-fetch without re-querying
 	// shared data (which may have been evicted from K8sObjectCache by then).
@@ -128,6 +131,9 @@ type ContainerProfileCacheImpl struct {
 	storageClient  storage.ProfileClient
 	k8sObjectCache objectcache.K8sObjectCache
 	metricsManager metricsmanager.MetricsManager
+
+	// Installed before Start; nil for sources without Kubernetes Nodes.
+	hostLabelSource func(context.Context) (map[string]string, error)
 
 	reconcileEvery time.Duration
 	rpcBudget      time.Duration
@@ -196,6 +202,23 @@ func NewContainerProfileCache(cfg config.Config, storageClient storage.ProfileCl
 	c.removalPending.Set("", time.Time{})
 	c.removalPending.Delete("")
 	return c
+}
+
+// SetHostLabelSource installs the Kubernetes Node label reader before Start or
+// ContainerCallback. Errors preserve the current binding; an empty label map
+// removes it. Authored host profiles live in the agent's namespace.
+func (c *ContainerProfileCacheImpl) SetHostLabelSource(fn func(context.Context) (map[string]string, error)) {
+	c.hostLabelSource = fn
+}
+
+func (c *ContainerProfileCacheImpl) hostProfileLabel(ctx context.Context) (string, error) {
+	var labels map[string]string
+	err := c.refreshRPC(ctx, func(ctx context.Context) error {
+		var err error
+		labels, err = c.hostLabelSource(ctx)
+		return err
+	})
+	return labels[helpersv1.UserDefinedProfileMetadataKey], err
 }
 
 // refreshRPC calls fn with a context bounded by c.rpcBudget, enforcing a
@@ -400,6 +423,13 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	sharedData *objectcache.WatchedContainerData,
 	cpName, workloadName string,
 ) bool {
+	if utils.IsHostContainer(container) && container.Runtime.ContainerName == "" {
+		// GetHostAsContainer has no runtime name. Authored sections and later
+		// refreshes use the synthetic host name without mutating collection data.
+		containerCopy := *container
+		containerCopy.Runtime.ContainerName = "host"
+		container = &containerCopy
+	}
 	ns := container.K8s.Namespace
 
 	// Fetch consolidated ContainerProfile. The storage server aggregates the
@@ -435,6 +465,15 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// drives the reconciler to retry the CP on every tick until it materialises.
 	var userDefinedCP *v1beta1.ContainerProfile
 	overlayName, hasOverlay := container.K8s.PodLabels[helpersv1.UserDefinedProfileMetadataKey]
+	if utils.IsHostContainer(container) && c.hostLabelSource != nil {
+		var err error
+		overlayName, err = c.hostProfileLabel(ctx)
+		if err != nil {
+			logger.L().Debug("host Node labels unavailable; deferring profile population", helpers.Error(err))
+			return false
+		}
+		hasOverlay = overlayName != ""
+	}
 	// resolvedOverlayName is the ContainerProfile name the label ultimately
 	// resolves to; it is recorded in entry.UserCPRef so refreshOneEntry re-fetches
 	// the SAME object every tick. It defaults to the bare label value — the
@@ -450,6 +489,10 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		// pods). A transient error is NOT a fallback trigger — the CP is left nil
 		// for this tick and the bare name stays the retry target.
 		perContainerName := overlayName + "-" + container.Runtime.ContainerName
+		if utils.IsHostContainer(container) {
+			// A Node has one host profile; its label names that object directly.
+			perContainerName = overlayName
+		}
 		var userCPErr error
 		_ = c.refreshRPC(ctx, func(rctx context.Context) error {
 			userDefinedCP, userCPErr = c.storageClient.GetContainerProfile(rctx, ns, perContainerName)
@@ -458,7 +501,7 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 		switch {
 		case userCPErr == nil && userDefinedCP != nil:
 			resolvedOverlayName = perContainerName
-		case apierrors.IsNotFound(userCPErr):
+		case apierrors.IsNotFound(userCPErr) && perContainerName != overlayName:
 			// Fall back to the bare overlay name (single-container convention).
 			userDefinedCP = nil
 			var bareErr error
@@ -586,6 +629,9 @@ func (c *ContainerProfileCacheImpl) tryPopulateEntry(
 	// WorkloadName is the synthesize-name source refreshOneEntry uses when it
 	// rebuilds an entry whose consolidated CP is not yet in storage.
 	entry.WorkloadName = workloadName
+	if utils.IsHostContainer(container) {
+		entry.hostRetry = &pendingContainer{container: container, sharedData: sharedData, cpName: cpName, workloadName: workloadName}
+	}
 
 	// When the overlay label is set, ALWAYS record UserCPRef so the reconciler
 	// keeps probing for the user-authored ContainerProfile on every tick — even

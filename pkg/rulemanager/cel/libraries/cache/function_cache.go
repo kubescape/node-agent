@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,9 +80,9 @@ func NewFunctionCache(config FunctionCacheConfig) *FunctionCache {
 
 type CelFunction func(...ref.Val) ref.Val
 
-// HashForContainerProfile returns a function that extracts the SpecHash of the
-// projected profile for the containerID in values[0]. Passing this to WithCache
-// ensures cached results are invalidated whenever the projection spec changes.
+// HashForContainerProfile returns a cache token for the projected profile for
+// the containerID in values[0]. Each projection rebuild changes its generation,
+// including authored profile updates that have no SyncChecksum annotation.
 func HashForContainerProfile(oc objectcache.ObjectCache) func([]ref.Val) string {
 	return func(values []ref.Val) string {
 		if len(values) == 0 || oc == nil {
@@ -99,7 +100,11 @@ func HashForContainerProfile(oc objectcache.ObjectCache) func([]ref.Val) string 
 		if pcp == nil {
 			return ""
 		}
-		// Include SyncChecksum so the key changes when profile content is updated
+		if pcp.CacheGeneration != 0 {
+			return "generation:" + strconv.FormatUint(pcp.CacheGeneration, 10)
+		}
+		// For manually constructed projections without a generation,
+		// include SyncChecksum so the key changes when profile content is updated
 		// under the same projection spec, preventing stale cached results after
 		// the profile learns new paths/execs/etc.
 		return pcp.SpecHash + "|" + pcp.SyncChecksum
