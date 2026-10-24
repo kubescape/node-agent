@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -229,4 +230,63 @@ func TestOrderedEventQueue_LargeNumberOfEvents(t *testing.T) {
 	}
 
 	assert.True(t, queue.Empty())
+}
+
+func TestOrderedEventQueue_DrainDropped(t *testing.T) {
+	queue := NewOrderedEventQueue(10*time.Millisecond, 1)
+	queue.AddEventDirect(utils.ExecveEventType, &utils.StructEvent{Timestamp: 1}, "kept", 1)
+
+	// Nothing dropped yet: normal operation records no drops.
+	assert.Empty(t, queue.DrainDropped(nil))
+
+	for range 3 {
+		queue.AddEventDirect(utils.ExecveEventType, &utils.StructEvent{Timestamp: 2}, "c1", 1)
+	}
+	queue.AddEventDirect(utils.OpenEventType, &utils.StructEvent{Timestamp: 3}, "c1", 1)
+	queue.AddEventDirect(utils.ExecveEventType, &utils.StructEvent{Timestamp: 4}, "", 1)
+
+	got := queue.DrainDropped(nil)
+	assert.ElementsMatch(t, []DroppedEvents{
+		{EventType: utils.ExecveEventType, ContainerID: "c1", Count: 3},
+		{EventType: utils.OpenEventType, ContainerID: "c1", Count: 1},
+		{EventType: utils.ExecveEventType, ContainerID: "", Count: 1},
+	}, got)
+
+	// Drain resets the counters, so drops are never reported twice.
+	assert.Empty(t, queue.DrainDropped(got))
+	assert.Equal(t, 1, queue.Size())
+}
+
+func TestOrderedEventQueue_ConcurrentOverflowAccounting(t *testing.T) {
+	const maxSize, workers, perWorker = 10, 8, 500
+	queue := NewOrderedEventQueue(10*time.Millisecond, maxSize)
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		dropped int64
+	)
+	collect := func() {
+		for _, d := range queue.DrainDropped(nil) {
+			mu.Lock()
+			dropped += d.Count
+			mu.Unlock()
+		}
+	}
+	for w := range workers {
+		wg.Go(func() {
+			for i := range perWorker {
+				queue.AddEventDirect(utils.ExecveEventType, &utils.StructEvent{Timestamp: int64(i)}, fmt.Sprintf("c%d", w%2), 1)
+				if i%50 == 0 {
+					collect()
+				}
+			}
+		})
+	}
+	wg.Wait()
+	collect()
+
+	// No queue consumer ran, so every event is either queued or accounted as dropped, exactly once.
+	assert.Equal(t, maxSize, queue.Size())
+	assert.Equal(t, int64(workers*perWorker-maxSize), dropped)
 }

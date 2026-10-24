@@ -1,9 +1,14 @@
 package containerprofilemanager
 
 import (
+	"time"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
+
+// maxPendingDrops bounds the dropped-event markers kept for unregistered containers.
+const maxPendingDrops = 1024
 
 // withContainer executes a function with write access to container data
 // This is the core method that handles all locking and error management
@@ -110,6 +115,57 @@ func (cpm *ContainerProfileManager) addContainerEntryIfAbsent(containerID string
 		return false
 	}
 	cpm.containers[containerID] = entry
+	// Apply a drop recorded before this container was registered. The entry is
+	// not visible to anyone else until containersMu is released.
+	_, pending := cpm.pendingDrops[containerID]
+	delete(cpm.pendingDrops, containerID)
+	// A marker that did not fit in pendingDrops may belong to any container that is still
+	// within its registration window, so stay conservative while that window is open.
+	overflowed := !cpm.pendingDropsOverflowAt.IsZero() && time.Since(cpm.pendingDropsOverflowAt) <= MaxWaitForSharedContainerData
+	if (pending || overflowed) && entry.data != nil {
+		entry.data.droppedEvents = true
+	}
+	return true
+}
+
+// recordDropForUnregisteredContainer remembers that events were dropped for a
+// container that is not (yet) tracked, so the drop is applied when the
+// container is registered. It re-checks the map under the write lock, so a
+// registration that completed since the caller's lookup is not missed; it
+// returns false in that case and the caller must apply the drop to the entry.
+// The set is bounded: entries older than MaxWaitForSharedContainerData can no
+// longer be consumed by a registration attempt and are pruned first. When it is
+// still full, pendingDropsOverflowAt is set instead (see addContainerEntryIfAbsent).
+func (cpm *ContainerProfileManager) recordDropForUnregisteredContainer(containerID string) bool {
+	cpm.containersMu.Lock()
+	defer cpm.containersMu.Unlock()
+
+	if _, exists := cpm.containers[containerID]; exists {
+		return false
+	}
+	if cpm.pendingDrops == nil {
+		cpm.pendingDrops = make(map[string]time.Time)
+	}
+	now := time.Now()
+	if _, known := cpm.pendingDrops[containerID]; !known && len(cpm.pendingDrops) >= maxPendingDrops {
+		for id, at := range cpm.pendingDrops {
+			if now.Sub(at) > MaxWaitForSharedContainerData {
+				delete(cpm.pendingDrops, id)
+			}
+		}
+		if len(cpm.pendingDrops) >= maxPendingDrops {
+			// The marker cannot be kept per container without breaking the bound. Remember
+			// that one was lost: a container registered within MaxWaitForSharedContainerData
+			// of this moment (the longest an unregistered container can still register) is
+			// marked partial, which may include containers that never lost events. Partial
+			// is the safe error; a false Complete is not.
+			cpm.pendingDropsOverflowAt = now
+			logger.L().Warning("too many pending dropped-event markers, marking containers registered shortly after as partial",
+				helpers.String("containerID", containerID))
+			return true
+		}
+	}
+	cpm.pendingDrops[containerID] = now
 	return true
 }
 
@@ -150,7 +206,21 @@ func (cpm *ContainerProfileManager) removeContainerEntryIfMatch(containerID stri
 // abandonEntry untracks a failed or skipped registration, then closes ready.
 // Removing first lets a waiting replayed add see the entry gone and retry.
 func (cpm *ContainerProfileManager) abandonEntry(containerID string, entry *ContainerEntry) {
-	cpm.removeContainerEntryIfMatch(containerID, entry)
+	if cpm.removeContainerEntryIfMatch(containerID, entry) {
+		// A drop recorded on the discarded entry (directly, or from a pending marker applied
+		// at insertion) must not vanish with it: a replayed registration would otherwise
+		// start from a clean entry and its profile could be saved as Complete. Clearing data
+		// under the entry lock makes any report that still holds this entry fall through to
+		// the not-found path; ReportDroppedEvent then re-records the drop on the replacement
+		// entry, or as a pending marker if there is none yet.
+		entry.mu.Lock()
+		dropped := entry.data != nil && entry.data.droppedEvents
+		entry.data = nil
+		entry.mu.Unlock()
+		if dropped {
+			cpm.ReportDroppedEvent(containerID)
+		}
+	}
 	entry.readyOnce.Do(func() {
 		close(entry.ready)
 	})

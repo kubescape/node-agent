@@ -17,11 +17,28 @@ type EventEntry struct {
 	ProcessID   uint32
 }
 
+// DroppedEvents is the number of events of one type dropped for one container
+// because the queue was full. ContainerID may be empty for events that cannot
+// be attributed to a container.
+type DroppedEvents struct {
+	EventType   utils.EventType
+	ContainerID string
+	Count       int64
+}
+
+type droppedKey struct {
+	eventType   utils.EventType
+	containerID string
+}
+
 type OrderedEventQueue struct {
 	maxBufferSize  int
 	eventQueue     []EventEntry
 	mutex          sync.Mutex
 	fullQueueAlert chan struct{}
+	// dropped is guarded by mutex. It is bounded by the number of distinct
+	// (event type, container) pairs seen between two DrainDropped calls.
+	dropped map[droppedKey]int64
 }
 
 func NewOrderedEventQueue(collectionInterval time.Duration, maxBufferSize int) *OrderedEventQueue {
@@ -40,6 +57,13 @@ func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event ut
 	oeq.mutex.Lock()
 	if len(oeq.eventQueue) >= oeq.maxBufferSize {
 		queueSize := len(oeq.eventQueue)
+		// Only record the drop here; metrics and profile updates are applied
+		// from the processing loop via DrainDropped so this callback never
+		// waits on per-container locks.
+		if oeq.dropped == nil {
+			oeq.dropped = make(map[droppedKey]int64)
+		}
+		oeq.dropped[droppedKey{eventType: eventType, containerID: containerID}]++
 		oeq.mutex.Unlock()
 
 		logger.L().Warning("Ordered event queue - Event queue full, dropping event to prevent OOM",
@@ -69,6 +93,20 @@ func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event ut
 
 	oeq.pushHeap(eventEntry)
 	oeq.mutex.Unlock()
+}
+
+// DrainDropped appends the drops recorded since the previous call to dst[:0]
+// and resets the counters.
+func (oeq *OrderedEventQueue) DrainDropped(dst []DroppedEvents) []DroppedEvents {
+	oeq.mutex.Lock()
+	defer oeq.mutex.Unlock()
+
+	dst = dst[:0]
+	for key, count := range oeq.dropped {
+		dst = append(dst, DroppedEvents{EventType: key.eventType, ContainerID: key.containerID, Count: count})
+		delete(oeq.dropped, key)
+	}
+	return dst
 }
 
 func (oeq *OrderedEventQueue) PopEvent() (EventEntry, bool) {
