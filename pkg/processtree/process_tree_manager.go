@@ -91,6 +91,7 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	}()
 
 	if subtreeErr != nil {
+		ptm.containerProcessTreeCache.Remove(cacheKey)
 		return armotypes.Process{}, &GetContainerSubtreeError{Err: subtreeErr}
 	}
 
