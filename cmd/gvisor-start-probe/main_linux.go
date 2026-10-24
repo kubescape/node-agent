@@ -22,9 +22,10 @@ func main() {
 
 func run() (exitCode int) {
 	socket := flag.String("socket", "/run/kubescape/gvisor-events.sock", "private Unix socket for the SecCheck remote sink")
-	containerID := flag.String("container-id", "", "exact container ID obtained independently from the local runtime before start")
+	var ids containerIDs
+	flag.Var(&ids, "container-id", "exact container ID obtained independently from the local runtime before start; repeat for multiple containers")
 	flag.Parse()
-	if *containerID == "" {
+	if len(ids) == 0 {
 		fmt.Fprintln(os.Stderr, "container-id is required")
 		return 2
 	}
@@ -46,9 +47,7 @@ func run() (exitCode int) {
 	outputErrors := make(chan error, 1)
 	receiver := &gvisor.Receiver{
 		SocketPath: *socket,
-		Resolve: func(id string) bool {
-			return id == *containerID
-		},
+		Resolve:    ids.resolves,
 		OnStart: func(ctx context.Context, start gvisor.Start) {
 			if err := output.Encode(ctx, start); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
