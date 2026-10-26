@@ -21,6 +21,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -365,6 +366,31 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		return
 	}
 
+	// Read Node labels on every refresh so adding, replacing, or removing the
+	// binding takes effect without restarting the agent. Work on a copy so a
+	// failed profile fetch cannot publish half of a binding transition.
+	bindingChanged := false
+	if id == armotypes.HostContainerID && c.hostLabelSource != nil {
+		label, err := c.hostProfileLabel(ctx)
+		if err != nil {
+			logger.L().Debug("host Node labels unavailable; keeping cached profile", helpers.Error(err))
+			return
+		}
+		previousLabel := ""
+		if e.UserCPRef != nil {
+			previousLabel = e.UserCPRef.Name
+		}
+		if label != previousLabel {
+			bindingChanged = true
+			copy := *e
+			e = &copy
+			e.UserCPRef = nil
+			if label != "" {
+				e.UserCPRef = &namespacedName{Namespace: e.Namespace, Name: label}
+			}
+		}
+	}
+
 	ns := e.Namespace
 
 	// Snapshot the projection spec before the fetch only to decide whether it is
@@ -408,7 +434,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	//
 	// Attached per call, never to the shared ctx: the authored-CP fetch below
 	// derives from the same ctx and must never carry the learned CP's checksum.
-	validatorEligible := e.UserCPRef == nil && e.UserCPRV == "" && e.SpecHash == preFetchSpecHash &&
+	validatorEligible := !bindingChanged && e.UserCPRef == nil && e.UserCPRV == "" && e.SpecHash == preFetchSpecHash &&
 		e.State != nil && e.State.Status == helpersv1.Completed && e.State.Completion == helpersv1.Full
 	validatorOffered := false
 	requestMode := conditionalFetchModeMissing
@@ -515,6 +541,9 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 		logger.L().Debug("refreshOneEntry: no CP available after refresh; evicting entry",
 			helpers.String("containerID", id),
 			helpers.String("cpName", e.CPName))
+		if e.hostRetry != nil {
+			c.pending.Set(id, e.hostRetry)
+		}
 		c.entries.Delete(id)
 		c.metricsManager.ReportContainerProfileReconcilerEviction("profile_deleted")
 		return
@@ -538,7 +567,7 @@ func (c *ContainerProfileCacheImpl) refreshOneEntry(ctx context.Context, id stri
 	if spec := c.snapshotSpec(); spec != nil {
 		postFetchSpecHash = spec.Hash
 	}
-	if rvsMatchCP(cp, e.RV) &&
+	if !bindingChanged && rvsMatchCP(cp, e.RV) &&
 		checksumOfCP(cp) == e.Checksum &&
 		rvsMatchCP(userDefinedCP, e.UserCPRV) &&
 		e.SpecHash == postFetchSpecHash {
@@ -629,6 +658,7 @@ func (c *ContainerProfileCacheImpl) rebuildEntryFromSources(
 		WorkloadID:           prev.WorkloadID,
 		CPName:               prev.CPName,
 		WorkloadName:         prev.WorkloadName,
+		hostRetry:            prev.hostRetry,
 		RV:                   rvOfCP(cp),
 		UserCPRV:             rvOfCP(userDefinedCP),
 		Checksum:             checksumOfCP(cp),

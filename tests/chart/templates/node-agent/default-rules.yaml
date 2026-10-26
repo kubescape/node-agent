@@ -30,6 +30,7 @@ spec:
         tags:
           - "context:kubernetes"
           - "context:container"
+          - "context:host"
           - "anomaly"
           - "process"
           - "exec"
@@ -85,6 +86,7 @@ spec:
         tags:
           - "context:kubernetes"
           - "context:container"
+          - "context:host"
           - "anomaly"
           - "file"
           - "open"
@@ -110,6 +112,7 @@ spec:
         tags:
           - "context:kubernetes"
           - "context:container"
+          - "context:host"
           - "anomaly"
           - "syscall"
           - "applicationprofile"
@@ -134,6 +137,7 @@ spec:
         tags:
           - "context:kubernetes"
           - "context:container"
+          - "context:host"
           - "anomaly"
           - "capabilities"
           - "applicationprofile"
@@ -350,6 +354,7 @@ spec:
         tags:
           - "context:kubernetes"
           - "context:container"
+          - "context:host"
           - "anomaly"
           - "process"
           - "exec"

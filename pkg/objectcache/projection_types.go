@@ -67,6 +67,10 @@ type ProjectedContainerProfile struct {
 	// constraint" (back-compat for pre-projection profiles).
 	ExecsByPath map[string][][]string
 
+	// CacheGeneration uniquely identifies each projection build within this process.
+	// It invalidates CEL results even when authored profiles have no sync checksum.
+	CacheGeneration uint64 `json:"-"`
+
 	SpecHash       string
 	SyncChecksum   string
 	PolicyByRuleId map[string]v1beta1.RulePolicy

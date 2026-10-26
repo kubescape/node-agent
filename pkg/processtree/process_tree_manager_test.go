@@ -146,6 +146,57 @@ func TestManager_GetContainerProcessTree_CarriesStartTime(t *testing.T) {
 	require.Equal(t, "nginx", bypassed.Comm)
 }
 
+func TestManager_GetContainerProcessTree_FailedRefreshDropsCachedBranch(t *testing.T) {
+	cfg := config.Config{KubernetesMode: true, ExitCleanup: treeconfig.ExitCleanupConfig{
+		MaxPendingExits: 100, CleanupInterval: time.Hour, CleanupDelay: 5 * time.Minute,
+	}}
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := processtreecreator.NewProcessTreeCreator(containerTree, cfg)
+	mgr := NewProcessTreeManager(creator, containerTree, cfg)
+
+	self := uint32(os.Getpid())
+	shim := uint32(os.Getppid())
+	require.NotEqual(t, self, shim, "test must run under a distinct parent pid")
+
+	const containerID = "failed-refresh-container"
+	containerTree.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeAddContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{ContainerID: containerID, ContainerPID: self},
+			},
+		},
+	})
+	require.NoError(t, mgr.ReportEvent(utils.ProcfsEventType, &events.ProcfsEvent{PID: shim, PPID: 1, Comm: "containerd-shim", ContainerID: containerID}))
+	require.NoError(t, mgr.ReportEvent(utils.ProcfsEventType, &events.ProcfsEvent{PID: self, PPID: shim, Comm: "init", ContainerID: containerID}))
+
+	const pid uint32 = 1 << 30
+	require.NoError(t, mgr.ReportEvent(utils.ForkEventType, &utils.StructEvent{
+		ContainerID: containerID, Pid: pid, Ppid: self, Comm: "python3", Timestamp: time.Now().UnixNano(),
+	}))
+	require.NoError(t, mgr.ReportEvent(utils.ExecveEventType, &utils.StructEvent{
+		ContainerID: containerID, Pid: pid, Ppid: self, Comm: "python3",
+		ExePath: "/usr/bin/python3", Args: []string{"python3", "worker.py", "--job", "1"}, Timestamp: time.Now().UnixNano(),
+	}))
+	branch, err := mgr.GetContainerProcessTree(containerID, pid, false)
+	require.NoError(t, err)
+	require.Equal(t, self, branch.PID)
+
+	require.NoError(t, mgr.ReportEvent(utils.ExitEventType, &utils.StructEvent{
+		ContainerID: containerID, Pid: pid, Ppid: self, Timestamp: time.Now().UnixNano(),
+	}))
+	require.NoError(t, mgr.ReportEvent(utils.ExecveEventType, &utils.StructEvent{
+		ContainerID: containerID, Pid: pid, Ppid: pid + 7, Comm: "python3",
+		ExePath: "/usr/bin/python3", Args: []string{"python3", "worker.py", "--job", "2"}, Timestamp: time.Now().UnixNano(),
+	}))
+	_, err = mgr.GetContainerProcessTree(containerID, pid, false)
+	require.Error(t, err, "refresh must fail while the new parent is unknown")
+
+	cached, err := mgr.GetContainerProcessTree(containerID, pid, true)
+	require.Error(t, err, "cached read must not serve the previous process's branch")
+	require.Zero(t, cached.PID)
+}
+
 func TestManager_GetContainerProcessTree_ConcurrentExitCleanup(t *testing.T) {
 	cfg := config.Config{ExitCleanup: treeconfig.ExitCleanupConfig{
 		MaxPendingExits: 100, CleanupInterval: time.Millisecond, CleanupDelay: 0,

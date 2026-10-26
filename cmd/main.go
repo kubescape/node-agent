@@ -357,6 +357,15 @@ func main() {
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
 		cpc := containerprofilecache.NewContainerProfileCache(cfg, storageClient, k8sObjectCache, metricsProvider)
+		if cfg.HostMonitoringEnabled {
+			cpc.SetHostLabelSource(func(ctx context.Context) (map[string]string, error) {
+				node, err := k8sClient.GetKubernetesClient().CoreV1().Nodes().Get(ctx, cfg.NodeName, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return node.Labels, nil
+			})
+		}
 		cpc.Start(ctx)
 		if cpm, ok := containerProfileManager.(*containerprofilemanagerv1.ContainerProfileManager); ok {
 			cpm.SetCompletionNotifier(cpc)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/hostidentity"
@@ -30,7 +31,7 @@ import (
 // TestContainerCallback_HostReachesStorage's (pkg/objectcache/
 // containerprofilecache/host_shared_data_test.go): that test only exercises
 // the READ/overlay cache path (GetContainerProfile being called at all). This
-// test drives real events (exec/open/syscall/capability) through this
+// test drives real events (exec/open/syscall/capability/network) through this
 // package's WRITE path -- ContainerProfileManager, the component that
 // actually assembles and submits the CR -- for the host pseudo-container, and
 // asserts on the resulting CR's Spec content.
@@ -131,6 +132,13 @@ func TestHostContainerProfile_ContentPopulated(t *testing.T) {
 	})
 	cpm.ReportSyscalls(armotypes.HostContainerID, []string{"execve", "openat"})
 	cpm.ReportCapability(armotypes.HostContainerID, "CAP_SYS_ADMIN")
+	cpm.ReportNetworkEvent(armotypes.HostContainerID, &utils.StructEvent{
+		DstEndpoint: types.L3Endpoint{Addr: "203.0.113.10"},
+		DstPort:     443,
+		Proto:       "tcp",
+		PktType:     utils.OutgoingPktType,
+		HostNetwork: true,
+	})
 
 	// Force an immediate save (mirrors the termination/max-time forced-save
 	// callers already in monitoring.go) rather than waiting on the real
@@ -163,4 +171,10 @@ func TestHostContainerProfile_ContentPopulated(t *testing.T) {
 	assert.NotEmpty(t, cr.Spec.Opens, "host CR must carry real open data, not an empty shell")
 	assert.NotEmpty(t, cr.Spec.Syscalls, "host CR must carry real syscall data, not an empty shell")
 	assert.NotEmpty(t, cr.Spec.Capabilities, "host CR must carry real capability data, not an empty shell")
+	require.Len(t, cr.Spec.Egress, 1, "host network observations must reach the stored profile")
+	assert.Equal(t, "203.0.113.10", cr.Spec.Egress[0].IPAddress)
+	require.Len(t, cr.Spec.Egress[0].Ports, 1)
+	require.NotNil(t, cr.Spec.Egress[0].Ports[0].Port)
+	assert.Equal(t, int32(443), *cr.Spec.Egress[0].Ports[0].Port)
+	assert.Equal(t, "tcp", string(cr.Spec.Egress[0].Ports[0].Protocol))
 }
