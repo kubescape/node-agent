@@ -76,6 +76,13 @@ func (s *ControlPlaneInfoSensor) Sense() (any, error) {
 		}
 	}
 
+	// etcd data directory, from the --data-dir argument of the local etcd process
+	if proc, err := LocateProcessByExecSuffix(etcdExe); err == nil {
+		if dataDir, ok := proc.GetArg(etcdDataDirArg); ok && dataDir != "" {
+			ret.EtcdDataDir = makeContaineredFileInfoVerbose(ctx, proc, dataDir, false)
+		}
+	}
+
 	// Other configs
 	ret.EtcdConfigFile = makeHostFileInfoVerbose(ctx, etcdConfigPath, false)
 	ret.AdminConfigFile = makeHostFileInfoVerbose(ctx, adminConfigPath, false)
