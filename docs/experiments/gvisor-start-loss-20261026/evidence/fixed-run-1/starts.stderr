@@ -1,0 +1,1 @@
+{"accepted_connections":21,"rejected_connections":0,"closed_connections":21,"handshakes":21,"handshake_errors":0,"received_frames":20,"read_errors":0,"interrupted_reads":0,"invalid_frames":0,"unresolved_starts":0,"ignored_frames":0,"verified_starts":20,"callbacks_completed":20,"sender_drop_frames":0,"queue_drops":0}

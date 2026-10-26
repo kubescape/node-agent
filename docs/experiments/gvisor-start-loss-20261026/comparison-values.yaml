@@ -1,0 +1,37 @@
+clusterName: gvisor-local-comparison
+includeNamespaces: gvisor-comparison
+capabilities:
+  operator: disable
+  configurationScan: disable
+  continuousScan: disable
+  nodeScan: disable
+  nodeSbomGeneration: disable
+  vulnerabilityScan: disable
+  relevancy: disable
+  runtimeObservability: enable
+  runtimeDetection: disable
+  networkPolicyService: disable
+  networkEventsStreaming: disable
+  nodeProfileService: disable
+  httpDetection: disable
+  seccompProfileService: disable
+  admissionController: disable
+configurations:
+  persistence: disable
+nodeAgent:
+  image:
+    tag: v0.3.293
+  privileged: true
+  config:
+    learningPeriod: 10m
+    updatePeriod: 5s
+    extra:
+      fimEnabled: false
+      hostMonitoringEnabled: false
+  env:
+    - name: NodeName
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+    - name: OTEL_METRICS_EXPORTER
+      value: prometheus

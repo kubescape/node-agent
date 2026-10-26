@@ -219,3 +219,23 @@ The checker can be tested without `runsc`:
 ```sh
 python3 -m unittest discover -s scripts -p test_check_gvisor_start_trial.py
 ```
+
+## Receiver diagnostics
+
+For a loss investigation, add `--diagnostics` and redirect stderr to a regular
+file. On shutdown the probe writes one payload-free JSON counter snapshot.
+Errors can also appear on stderr, so the stream is not a general JSONL API.
+The flag is disabled by default and does not change event stdout.
+
+`received_frames` excludes the handshake; `verified_starts` counts resolved
+starts before local queuing. `queue_drops` counts local queue rejections.
+`sender_drop_frames` counts frames reporting a nonzero sender drop field,
+not the total number of lost events. `unresolved_starts` is also included in
+`ignored_frames`. `callbacks_completed` means the callback returned, not that
+its output succeeded. Counts are process-local and read independently while
+collection is active; they are stable after receiver workers finish.
+
+A closed connection is not evidence of a container stop. Zero drop counters
+cannot prove completeness or account for an event that never reached the
+receiver. See the [loss investigation](experiments/gvisor-start-loss-20261026/README.md)
+for a reproduced interrupted-read failure and its limits.

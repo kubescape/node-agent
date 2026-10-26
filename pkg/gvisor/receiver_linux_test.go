@@ -176,3 +176,89 @@ func sendPacket(t *testing.T, fd int, packet []byte) {
 		t.Fatal(err)
 	}
 }
+
+func TestReceiverCountsInvalidFrameWithoutRetainingPayload(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	receiver := &Receiver{SocketPath: filepath.Join(dir, "events.sock"), Resolve: func(string) bool { return true }, OnStart: func(context.Context, Start) { t.Error("malformed frame delivered") }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- receiver.Run(ctx) }()
+	fd := connectReceiver(t, receiver.SocketPath)
+	sendPacket(t, fd, []byte{8, 1})
+	if _, err := unix.Read(fd, make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	const canary = "DIAGNOSTICS_MUST_NOT_RETAIN_THIS"
+	sendPacket(t, fd, []byte(canary))
+	unix.Close(fd)
+	deadline := time.Now().Add(time.Second)
+	for receiver.Stats().InvalidFrames == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	stats := receiver.Stats()
+	if stats.AcceptedConnections != 1 || stats.ClosedConnections != 1 || stats.Handshakes != 1 || stats.ReceivedFrames != 1 || stats.InvalidFrames != 1 || stats.VerifiedStarts != 0 || stats.CallbacksCompleted != 0 {
+		t.Fatalf("unexpected counters: %+v", stats)
+	}
+	encoded, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), canary) {
+		t.Fatal("diagnostics retained frame contents")
+	}
+}
+
+func TestReceiverReportsQueueLoss(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{}, 1)
+	receiver := &Receiver{SocketPath: filepath.Join(dir, "events.sock"), Resolve: func(string) bool { return true },
+		OnStart: func(ctx context.Context, _ Start) {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+		}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- receiver.Run(ctx) }()
+	fd := connectReceiver(t, receiver.SocketPath)
+	defer unix.Close(fd)
+	sendPacket(t, fd, []byte{8, 1})
+	if _, err := unix.Read(fd, make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	sendPacket(t, fd, startFrame("known", "known", "private"))
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("callback not entered")
+	}
+	for range queueSize + 2 {
+		sendPacket(t, fd, startFrame("known", "known", "private"))
+	}
+	deadline := time.Now().Add(time.Second)
+	for receiver.Stats().QueueDrops < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	stats := receiver.Stats()
+	if stats.QueueDrops != 2 || stats.VerifiedStarts != queueSize+3 || stats.CallbacksCompleted != queueSize+1 {
+		t.Fatalf("queue loss not accounted for: %+v", stats)
+	}
+}

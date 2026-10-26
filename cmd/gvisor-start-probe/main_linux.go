@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,6 +23,7 @@ func main() {
 
 func run() (exitCode int) {
 	socket := flag.String("socket", "/run/kubescape/gvisor-events.sock", "private Unix socket for the SecCheck remote sink")
+	diagnostics := flag.Bool("diagnostics", false, "write payload-free final receiver counters to stderr; use a regular file for trial diagnostics")
 	var ids containerIDs
 	flag.Var(&ids, "container-id", "exact container ID obtained independently from the local runtime before start; repeat for multiple containers")
 	flag.Parse()
@@ -63,6 +65,12 @@ func run() (exitCode int) {
 		},
 	}
 	runErr := receiver.Run(ctx)
+	if *diagnostics {
+		if err := json.NewEncoder(os.Stderr).Encode(receiver.Stats()); err != nil {
+			fmt.Fprintln(os.Stderr, "gvisor start probe: cannot write diagnostics")
+			return 1
+		}
+	}
 	select {
 	case err := <-outputErrors:
 		fmt.Fprintf(os.Stderr, "gvisor start probe output: %v\n", err)
