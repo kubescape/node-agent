@@ -1,6 +1,11 @@
 # gVisor start trial record
 
-**Status: NOT RUN.** This is a template for the live experiment from
+**Status: reusable template.** For measured results, see the
+[26 October local ARM64 trial](experiments/gvisor-start-20261026/README.md).
+That trial found an unexplained missed start and does not pass the integration
+gates. The pending entries below are placeholders for another trial record.
+
+This is a template for the live experiment from
 [design #23](https://github.com/kubescape/designs-and-proposals/pull/23).
 Neither the merged receiver nor the offline checker establishes live coverage.
 Copy this record for a real trial and replace pending entries with measured

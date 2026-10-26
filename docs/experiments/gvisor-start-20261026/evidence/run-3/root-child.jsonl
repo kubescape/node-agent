@@ -1,0 +1,2 @@
+{"Source":"gvisor_trace","ContainerID":"gvisor-root","ObservedAt":"2026-10-26T19:31:16.811025156+05:30","Dropped":0}
+{"Source":"gvisor_trace","ContainerID":"gvisor-child","ObservedAt":"2026-10-26T19:31:16.842835535+05:30","Dropped":0}

@@ -90,8 +90,10 @@ stderr, and exits with status 1. Signal cancellation of a blocked write remains
 a normal exit. Actual-process tests cover a closed output reader as well as
 flag restoration and signal cancellation.
 
-This document records the procedure, not results. Live `runsc` and node-agent
-host eBPF observations must be added after the Linux trial; the existing
+This document records the procedure. See the
+[local ARM64 trial results and limits](experiments/gvisor-start-20261026/README.md)
+for live containerd/runsc evidence. A comparison using node-agent itself remains
+outstanding; the existing
 [gVisor proof of concept](https://github.com/yellow-forrest/gvisor-visibility-poc)
 is useful prior work but is not validation of this receiver.
 

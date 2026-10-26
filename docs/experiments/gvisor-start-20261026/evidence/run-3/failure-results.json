@@ -1,0 +1,72 @@
+[
+  {
+    "scenario": "receiver_absent",
+    "inventory": [
+      {
+        "id": "gvisor-no-receiver-check",
+        "runtime": "io.containerd.runsc.v1",
+        "inventory_checked_at": "2026-10-26T14:03:04.734868+00:00"
+      }
+    ],
+    "start": {
+      "id": "gvisor-no-receiver-check",
+      "start_requested_at": "2026-10-26T14:03:04.734891+00:00",
+      "start_returned_at": "2026-10-26T14:03:04.772401+00:00",
+      "start_latency_ms": 37.523,
+      "exit": 1,
+      "error": "ctr: failed to create shim task: OCI runtime create failed: creating container: cannot create sandbox: cannot init config: connect(\"/run/kubescape/gvisor-events.sock\"): no such file or directory\n"
+    }
+  },
+  {
+    "scenario": "receiver_restart",
+    "inventory": [
+      {
+        "id": "gvisor-restart-existing",
+        "runtime": "io.containerd.runsc.v1",
+        "inventory_checked_at": "2026-10-26T14:03:04.812217+00:00"
+      },
+      {
+        "id": "gvisor-restart-new",
+        "runtime": "io.containerd.runsc.v1",
+        "inventory_checked_at": "2026-10-26T14:03:04.827084+00:00"
+      }
+    ],
+    "first_start": {
+      "id": "gvisor-restart-existing",
+      "start_requested_at": "2026-10-26T14:03:04.949412+00:00",
+      "start_returned_at": "2026-10-26T14:03:10.152875+00:00",
+      "start_latency_ms": 5203.475,
+      "exit": 0,
+      "error": ""
+    },
+    "after_disconnect": {
+      "observed_at": "2026-10-26T14:03:12.331002+00:00",
+      "tasks": "TASK                       PID      STATUS    \ngvisor-restart-existing    25859    RUNNING\n"
+    },
+    "before": {
+      "counts_match": true,
+      "received": 1,
+      "expected": 1,
+      "missing": [],
+      "sender_dropped": 0,
+      "canary_absent": true
+    },
+    "replayed_records_before_new_start": 0,
+    "second_start": {
+      "id": "gvisor-restart-new",
+      "start_requested_at": "2026-10-26T14:03:13.503787+00:00",
+      "start_returned_at": "2026-10-26T14:03:18.658362+00:00",
+      "start_latency_ms": 5154.59,
+      "exit": 0,
+      "error": ""
+    },
+    "after": {
+      "counts_match": true,
+      "received": 1,
+      "expected": 1,
+      "missing": [],
+      "sender_dropped": 0,
+      "canary_absent": true
+    }
+  }
+]
