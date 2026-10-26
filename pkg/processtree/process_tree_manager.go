@@ -87,7 +87,7 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	func() {
 		ptm.mutex.RLock()
 		defer ptm.mutex.RUnlock()
-		containerSubtree, subtreeErr = ptm.containerTree.GetPidBranch(containerID, pid, ptm.creator.GetProcessMap())
+		containerSubtree, subtreeErr = ptm.creator.GetPidBranch(ptm.containerTree, containerID, pid)
 	}()
 
 	if subtreeErr != nil {
