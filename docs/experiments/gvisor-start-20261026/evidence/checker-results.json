@@ -1,0 +1,42 @@
+[
+  {
+    "case": "run-1/concurrent",
+    "status": "PASS",
+    "records": 2
+  },
+  {
+    "case": "run-1/repeated",
+    "status": "PASS",
+    "records": 20
+  },
+  {
+    "case": "run-2-missed-start/repeated",
+    "status": "FAIL",
+    "reason": "observed start counts do not match runtime manifest"
+  },
+  {
+    "case": "run-3/concurrent",
+    "status": "PASS",
+    "records": 2
+  },
+  {
+    "case": "run-3/repeated",
+    "status": "PASS",
+    "records": 20
+  },
+  {
+    "case": "run-3/restart-after",
+    "status": "PASS",
+    "records": 1
+  },
+  {
+    "case": "run-3/restart-before",
+    "status": "PASS",
+    "records": 1
+  },
+  {
+    "case": "run-3/root-child",
+    "status": "PASS",
+    "records": 2
+  }
+]

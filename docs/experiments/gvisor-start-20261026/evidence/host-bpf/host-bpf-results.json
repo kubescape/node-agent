@@ -1,0 +1,26 @@
+[
+  {
+    "scenario": "ordinary",
+    "runtime": "io.containerd.runc.v2",
+    "id": "bpf-baseline-ordinary",
+    "expected_guest_exec_calls": 3,
+    "start_requested_at": "2026-10-26T13:52:40.980284+00:00",
+    "start_exit": 0,
+    "start_error": "",
+    "runtime_state": "TASK                     PID      STATUS    \nbpf-baseline-ordinary    14428    STOPPED\n",
+    "tracer_exit": 0,
+    "observed_host_exec_calls": 3
+  },
+  {
+    "scenario": "gvisor",
+    "runtime": "io.containerd.runsc.v1",
+    "id": "bpf-baseline-gvisor",
+    "expected_guest_exec_calls": 3,
+    "start_requested_at": "2026-10-26T13:52:44.613361+00:00",
+    "start_exit": 0,
+    "start_error": "",
+    "runtime_state": "TASK                   PID      STATUS    \nbpf-baseline-gvisor    14546    STOPPED\n",
+    "tracer_exit": 0,
+    "observed_host_exec_calls": 0
+  }
+]
