@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -119,6 +120,11 @@ type Config struct {
 	EnableNodeProfile              bool                                 `mapstructure:"nodeProfileServiceEnabled"`
 	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
+	EnableSandboxPolicy            bool                                 `mapstructure:"sandboxPolicyEnabled"`
+	SandboxPolicyImage             string                               `mapstructure:"sandboxPolicyImage"`
+	SandboxPolicyContainerdSocket  string                               `mapstructure:"sandboxPolicyContainerdSocket"`
+	SandboxPolicyControlRoot       string                               `mapstructure:"sandboxPolicyControlRoot"`
+	SandboxPolicyMaxOwners         uint64                               `mapstructure:"sandboxPolicyMaxOwners"`
 	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
 	EnableSbomFailureReporting     bool                                 `mapstructure:"sbomFailureReportingEnabled"`
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
@@ -218,6 +224,9 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetConfigType("json")
 	viper.SetOptions(viper.KeyDelimiter("::"))
 
+	viper.SetDefault("sandboxPolicyEnabled", false)
+	viper.SetDefault("sandboxPolicyImage", "")
+	viper.SetDefault("sandboxPolicyMaxOwners", 4)
 	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)
 	viper.SetDefault("nodeProfileInterval", 10*time.Minute)
@@ -334,6 +343,23 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	var config Config
 	if err := viper.Unmarshal(&config); err != nil {
 		return Config{}, err
+	}
+
+	if config.EnableSandboxPolicy {
+		if !config.KubernetesMode {
+			return Config{}, fmt.Errorf("sandboxPolicyEnabled requires kubernetesMode")
+		}
+		if config.SandboxPolicyImage == "" || strings.TrimSpace(config.SandboxPolicyImage) != config.SandboxPolicyImage {
+			return Config{}, fmt.Errorf("sandboxPolicyEnabled requires an explicit sandboxPolicyImage")
+		}
+		for name, value := range map[string]string{"sandboxPolicyContainerdSocket": config.SandboxPolicyContainerdSocket, "sandboxPolicyControlRoot": config.SandboxPolicyControlRoot} {
+			if !filepath.IsAbs(value) || filepath.Clean(value) != value || value == "/" {
+				return Config{}, fmt.Errorf("sandboxPolicyEnabled requires an explicit canonical non-root %s", name)
+			}
+		}
+		if config.SandboxPolicyMaxOwners == 0 || config.SandboxPolicyMaxOwners > 1024 {
+			return Config{}, fmt.Errorf("sandboxPolicyMaxOwners must be between 1 and 1024")
+		}
 	}
 
 	// Validate seccompProfileBackend value

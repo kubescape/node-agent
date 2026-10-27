@@ -62,6 +62,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
+	sandboxintegration "github.com/kubescape/node-agent/pkg/sandboxpolicy/integration"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
@@ -567,6 +568,34 @@ func main() {
 	// Only defer Stop() if Start succeeded or we're in FIM-only mode
 	if err == nil || cfg.EnableFIM {
 		defer mainHandler.Stop()
+	}
+
+	if cfg.EnableSandboxPolicy {
+		// Enforcement is independent of observer/runtime-detection switches. The
+		// service rejects unavailable predicates/bindings rather than weakening them.
+		sandboxService, sandboxErr := sandboxintegration.NewService(ctx, sandboxintegration.ServiceOptions{
+			Kubernetes: k8sClient.GetKubernetesClient(), Dynamic: k8sClient.GetDynamicClient(),
+			Containers: mainHandler.GetContainerCollection(), Tracers: mainHandler.GetTracerCollection(),
+			NodeName: cfg.NodeName, AgentNamespace: cfg.NamespaceName, ImageName: cfg.SandboxPolicyImage, ImageArchive: "tracers.tar",
+			ContainerdSocket: cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
+			Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
+			Receivers: thirdPartyTracers.ThirdPartyEventReceivers,
+			OnError:   func(err error) { logger.L().Ctx(ctx).Error("sandbox policy NotReady", helpers.Error(err)) },
+		})
+		if sandboxErr != nil {
+			logger.L().Ctx(ctx).Fatal("creating sandbox policy service", helpers.Error(sandboxErr))
+		}
+		dWatcher.AddAdaptor(sandboxService)
+		if sandboxErr = sandboxService.Start(ctx); sandboxErr != nil {
+			logger.L().Ctx(ctx).Fatal("starting sandbox policy service", helpers.Error(sandboxErr))
+		}
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := sandboxService.Close(cleanupCtx); err != nil {
+				logger.L().Error("sandbox policy cleanup incomplete", helpers.Error(err))
+			}
+		}()
 	}
 
 	// start watching

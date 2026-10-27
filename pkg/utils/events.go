@@ -276,6 +276,9 @@ const (
 	UnshareEventType      EventType = "unshare"
 )
 
+// SandboxExecVerdictEventType identifies authorization attempts, not process creation.
+const SandboxExecVerdictEventType EventType = "sandboxExecVerdict"
+
 // Get the path of the file on the node.
 func GetHostFilePathFromEvent(event EnrichEvent, containerPid uint32) (string, error) {
 	switch event.GetEventType() {

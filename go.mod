@@ -14,6 +14,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cilium/ebpf v0.22.0
+	github.com/containerd/containerd v1.7.36
 	github.com/crewjam/rfc5424 v0.1.0
 	github.com/cyphar/filepath-securejoin v0.6.1
 	github.com/deckarep/golang-set/v2 v2.8.0
@@ -35,12 +36,13 @@ require (
 	github.com/kubescape/backend v0.0.39
 	github.com/kubescape/go-logger v0.0.35
 	github.com/kubescape/k8s-interface v0.0.214
-	github.com/kubescape/storage v0.0.303
+	github.com/kubescape/storage v0.0.352-0.20261013133511-eb6406e01cb9
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opcoder0/fanotify v0.4.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
+	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/picatz/xcel v0.0.0-20260226001349-6958ffac5706
 	github.com/prometheus/alertmanager v0.27.0
@@ -184,7 +186,6 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
 	github.com/containerd/cgroups/v3 v3.1.2 // indirect
-	github.com/containerd/containerd v1.7.36 // indirect
 	github.com/containerd/containerd/api v1.10.0 // indirect
 	github.com/containerd/continuity v0.4.5 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
@@ -352,7 +353,6 @@ require (
 	github.com/olekukonko/tablewriter v1.0.9 // indirect
 	github.com/olvrng/ujson v1.1.0 // indirect
 	github.com/opcoder0/capabilities v0.0.0-20221222060822-17fd73bffd2a // indirect
-	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/selinux v1.13.1 // indirect
 	github.com/packetcap/go-pcap v0.0.0-20250723190045-d00b185f30b7 // indirect
 	github.com/pborman/indent v1.2.1 // indirect
@@ -480,7 +480,7 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20260826074832-06b0d12baca0
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261027103046-6b8b24afaf6f
 
 replace github.com/anchore/syft => github.com/kubescape/syft v1.32.0-ks.2
 
