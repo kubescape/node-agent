@@ -47,9 +47,10 @@ kubelet/API server or establish generic runtime/kernel compatibility. The exact 
 narrow. Private OTel implementation is outside this public change.
 
 The expanded IG revision is published and pinned at
-`v0.0.0-20261027120845-c2aa29f9ca0d`; standalone node-agent targeted tests, race
-checks, vet and binary builds pass without a development workspace. The pin is
-still on PR #15 rather than main, so the repository merge guard correctly blocks
+`v0.0.0-20261027123410-90147104198e`; standalone node-agent targeted tests, race
+checks, vet and binary builds pass without a development workspace. This revision
+also includes IG main through #16, preserving the ordinary-symbol streaming fix.
+The pin is still on PR #15 rather than main, so the repository merge guard correctly blocks
 consumer merging until the upstream change is merged and re-pinned.
 No chart version has changed. No image is implicitly downloaded or trusted: the
 local OCI archive is privileged administrator-supplied code, and IG skips its
