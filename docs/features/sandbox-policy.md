@@ -174,8 +174,12 @@ The expanded IG revision is published as signed-off commit
 `90147104198e91083298a132854d9de77d98091c` also incorporates IG main through #16,
 preserving its ordinary-symbol streaming fix. Follow-up review fixes through
 `f9467312a221885cf144aa3289df3b0260af25e9` reject noncanonical exec prefixes
-and make attachment initialization cancellable. Node-agent pins that exact
-public pseudo-version and passes targeted tests, race checks, vet and binary
+and make attachment initialization cancellable. The reviewed revision
+`87a796fe97803ec6788e985e6570efea46124fba` additionally admits only the exact
+Kubernetes-capable kernel BTF proved by the full predicate, persistent OCI and
+authenticated CRI matrix, while retaining the original artifact. Private
+Kubernetes/OTLP integration remains separate and pending. Node-agent pins that
+exact public pseudo-version and passes targeted tests, race checks, vet and binary
 compilation with `GOWORK=off`. The repository's merge guard intentionally blocks
 this stacked dependency until IG #15 merges; re-pin to its merged main revision
 before merging the consumer change. Do not bypass that guard.

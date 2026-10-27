@@ -47,9 +47,12 @@ kubelet/API server or establish generic runtime/kernel compatibility. The exact 
 narrow. Private OTel implementation is outside this public change.
 
 The expanded IG revision is published and pinned at
-`v0.0.0-20261027125008-f9467312a221`; standalone node-agent targeted tests, race
+`v0.0.0-20261027133411-87a796fe9780`; standalone node-agent targeted tests, race
 checks, vet and binary builds pass without a development workspace. This revision
-also includes IG main through #16, preserving the ordinary-symbol streaming fix.
+also includes IG main through #16, preserving the ordinary-symbol streaming fix,
+and the individually proved Kubernetes-capable exact BTF artifact. Its isolated
+upstream predicate/persistent OCI/CRI proof does not replace the still-pending
+private Kubernetes/OTLP integration proof.
 The pin is still on PR #15 rather than main, so the repository merge guard correctly blocks
 consumer merging until the upstream change is merged and re-pinned.
 No chart version has changed. No image is implicitly downloaded or trusted: the
