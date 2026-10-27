@@ -150,7 +150,7 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 		if container.K8s.Namespace != binding.Namespace || container.K8s.PodName != binding.PodName || container.K8s.PodUID != string(binding.PodUID) || container.K8s.ContainerName != binding.ContainerName {
 			return nil, fmt.Errorf("runtime/Kubernetes metadata mismatch for %s", key)
 		}
-		if container.CgroupID == 0 || container.Runtime.ContainerPID == 0 || container.Mntns == 0 || container.CgroupPath == "" || !path.IsAbs(container.CgroupPath) || path.Clean(container.CgroupPath) != container.CgroupPath || container.CgroupPath == "/" {
+		if container.CgroupID == 0 || container.Runtime.ContainerPID == 0 || container.Mntns == 0 || container.CgroupV2 == "" || !path.IsAbs(container.CgroupV2) || path.Clean(container.CgroupV2) != container.CgroupV2 || container.CgroupV2 == "/" {
 			return nil, fmt.Errorf("live Kubernetes container %s lacks a strict cgroup/PID/mount identity", key)
 		}
 		if previous, duplicate := cgroups[container.CgroupID]; duplicate {
@@ -158,7 +158,9 @@ func snapshotBindings(ctx context.Context, client kubernetes.Interface, containe
 		}
 		cgroups[container.CgroupID] = key
 		binding.CgroupID = container.CgroupID
-		binding.CgroupPath = container.CgroupPath
+		// IG CgroupPath includes the mountpoint; strict owners need the cgroup-v2
+		// membership path from /proc/<pid>/cgroup, relative to their cgroup root.
+		binding.CgroupPath = container.CgroupV2
 		binding.PID = container.Runtime.ContainerPID
 		binding.MountNamespace = container.Mntns
 		result = append(result, binding)

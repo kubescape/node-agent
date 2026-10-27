@@ -468,3 +468,51 @@ func TestChangedRuntimeIdentityDoesNotHideLostPriorOwner(t *testing.T) {
 		t.Fatalf("identity conflict hid lost prior protection: %+v %v", result, err)
 	}
 }
+
+func TestWithdrawalFailureChecksRetainedProtection(t *testing.T) {
+	for _, stage := range []string{"cleanup", "unbind"} {
+		for _, health := range []string{"healthy", "not-ready", "lease-lost"} {
+			t.Run(stage+"/"+health, func(t *testing.T) {
+				b, e, v, binding, plan := fixture(t)
+				ctx := context.Background()
+				if _, err := b.Replace(ctx, binding, plan); err != nil {
+					t.Fatal(err)
+				}
+				active, lease := e.instances[0], v.leases[0]
+				operationErr := errors.New("withdrawal failed")
+				healthErr := errors.New("retained protection lost")
+				if stage == "cleanup" {
+					retired := &fakeInstance{stopErr: operationErr, readyErr: healthErr}
+					b.records[key(binding)].retiring = []*owned{{instance: retired, lease: &fakeLease{}}}
+				} else {
+					active.unbindErr = operationErr
+				}
+				if health == "not-ready" {
+					active.readyErr = healthErr
+				}
+				if health == "lease-lost" {
+					lease.checkErr = healthErr
+				}
+				result, err := b.Withdraw(ctx, binding)
+				if result.Committed || result.ProtectionUnconfirmed != (health != "healthy") || !errors.Is(err, operationErr) {
+					t.Fatalf("wrong withdrawal result: %+v %v", result, err)
+				}
+				if health != "healthy" && !errors.Is(err, healthErr) {
+					t.Fatalf("health failure missing: %v", err)
+				}
+				if b.records[key(binding)].active == nil || lease.closed != 0 {
+					t.Fatal("failed withdrawal lost retained owner")
+				}
+			})
+		}
+	}
+}
+
+func TestWithdrawalRetiringOnlyDoesNotClaimProtection(t *testing.T) {
+	b, _, _, binding, _ := fixture(t)
+	b.records[key(binding)] = &record{retiring: []*owned{{instance: &fakeInstance{stopErr: failure}, lease: &fakeLease{}}}}
+	result, err := b.Withdraw(context.Background(), binding)
+	if result.Committed || !result.ProtectionUnconfirmed || !errors.Is(err, failure) {
+		t.Fatalf("retiring ownership reported as confirmed protection: %+v %v", result, err)
+	}
+}

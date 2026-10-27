@@ -211,7 +211,7 @@ func (b *Backend) Replace(ctx context.Context, binding sandboxpolicy.Binding, pl
 	return result, cleanup(ctx, r)
 }
 
-func (b *Backend) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (sandboxpolicy.WithdrawResult, error) {
+func (b *Backend) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (result sandboxpolicy.WithdrawResult, resultErr error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	k := key(binding)
@@ -219,6 +219,22 @@ func (b *Backend) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (
 	if r == nil {
 		return sandboxpolicy.WithdrawResult{Committed: true}, nil
 	}
+	// An incomplete withdrawal retains ownership, not necessarily protection.
+	// Re-attest after either cleanup or unbind fails, as either operation may
+	// race native failure. A retiring-only record has no confirmed active owner.
+	defer func() {
+		if result.Committed {
+			return
+		}
+		health := fmt.Errorf("no active enforcement owner")
+		if r.active != nil {
+			health = errors.Join(r.active.lease.Check(), r.active.instance.Ready())
+		}
+		result.ProtectionUnconfirmed = health != nil
+		if health != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("existing enforcement protection cannot be confirmed: %w", health))
+		}
+	}()
 	// Retired instances may still enforce during failed cleanup. Do not report
 	// withdrawal committed while any of those old links may protect the binding.
 	if err := cleanup(ctx, r); err != nil {
@@ -231,7 +247,7 @@ func (b *Backend) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (
 		r.retiring = append(r.retiring, r.active)
 		r.active = nil
 	}
-	result := sandboxpolicy.WithdrawResult{Committed: true}
+	result = sandboxpolicy.WithdrawResult{Committed: true}
 	if err := cleanup(ctx, r); err != nil {
 		return result, err
 	}

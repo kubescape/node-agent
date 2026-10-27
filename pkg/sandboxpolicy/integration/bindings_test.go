@@ -31,7 +31,7 @@ func bindingFixtures() (*corev1.Pod, *corev1.Namespace, []*containercollection.C
 		case 2:
 			pod.Status.EphemeralContainerStatuses = []corev1.ContainerStatus{status}
 		}
-		c := &containercollection.Container{CgroupID: uint64(100 + i), CgroupPath: "/kubepods/" + id, Mntns: uint64(1000 + i)}
+		c := &containercollection.Container{CgroupID: uint64(100 + i), CgroupPath: "/sys/fs/cgroup/kubepods/" + id, CgroupV2: "/kubepods/" + id, Mntns: uint64(1000 + i)}
 		c.Runtime.RuntimeName = gadgettypes.RuntimeNameContainerd
 		c.Runtime.ContainerID = id
 		c.Runtime.ContainerPID = uint32(10000 + i)
@@ -55,7 +55,7 @@ func TestSnapshotBindingsCorrelatesExactRunningIdentities(t *testing.T) {
 		t.Fatalf("want three container kinds, got %d", len(bindings))
 	}
 	for i, b := range bindings {
-		if b.Kind != []string{"regular", "init", "ephemeral"}[i] || b.PodUID != "pod-uid" || b.Runtime != "containerd" || b.ContainerID != containers[i].Runtime.ContainerID || b.CgroupID != containers[i].CgroupID || b.CgroupPath != containers[i].CgroupPath || b.PID != containers[i].Runtime.ContainerPID || b.MountNamespace != containers[i].Mntns || b.PodLabels["app"] != "current" || b.NamespaceLabels["team"] != "red" {
+		if b.Kind != []string{"regular", "init", "ephemeral"}[i] || b.PodUID != "pod-uid" || b.Runtime != "containerd" || b.ContainerID != containers[i].Runtime.ContainerID || b.CgroupID != containers[i].CgroupID || b.CgroupPath != containers[i].CgroupV2 || b.PID != containers[i].Runtime.ContainerPID || b.MountNamespace != containers[i].Mntns || b.PodLabels["app"] != "current" || b.NamespaceLabels["team"] != "red" {
 			t.Fatalf("incorrect binding: %+v", b)
 		}
 	}
@@ -78,7 +78,7 @@ func TestSnapshotRejectsDiscoveryGapsWithoutPartialBindings(t *testing.T) {
 			return c
 		},
 		"root cgroup": func(_ *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
-			c[1].CgroupPath = "/"
+			c[1].CgroupV2 = "/"
 			return c
 		},
 		"missing PID": func(_ *corev1.Pod, _ *corev1.Namespace, c []*containercollection.Container) []*containercollection.Container {
@@ -242,5 +242,18 @@ func TestSelectedSnapshotSelectsBeforeRequiringRuntimeIdentity(t *testing.T) {
 	got, err = SnapshotSelectedBindings(context.Background(), fake.NewSimpleClientset(p, ns), collection, "node", func(sandboxpolicy.Binding) bool { return false })
 	if err != nil || len(got) != 0 {
 		t.Fatalf("no selected policies requires no binding: %v", err)
+	}
+}
+
+func TestSnapshotRejectsInvalidMembershipDespiteMountedPath(t *testing.T) {
+	for _, membership := range []string{"", "relative", "/", "/kubepods/../other", "/kubepods//target"} {
+		t.Run(membership, func(t *testing.T) {
+			p, ns, containers := bindingFixtures()
+			containers[0].CgroupV2 = membership
+			got, err := SnapshotBindingsFromContainers(context.Background(), fake.NewSimpleClientset(p, ns), containers, "node")
+			if err == nil || got != nil {
+				t.Fatalf("invalid membership accepted: %+v %v", got, err)
+			}
+		})
 	}
 }
