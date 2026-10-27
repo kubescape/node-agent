@@ -117,12 +117,18 @@ the CRD exec vocabulary and are refused rather than broadened.
 ## Public event hooks
 
 Register receivers in `ThirdPartyTracers.ThirdPartyEventReceivers` under
-`utils.SandboxExecVerdictEventType`. The public `VerdictExporter` accepts
+`utils.ExecAuthorizationEventType`. The public `VerdictExporter` accepts
 `EnrichedEventReceiver`, `EventReceiver`, or `sandboxpolicy.VerdictReceiver`.
 Optional process-tree enrichment uses the existing `TaskBasedEnricher` interface.
 Private OTel export is intentionally not implemented here.
 
-`VerdictEvent` implements `EnrichEvent`, **not** `ExecEvent`: an LSM denial is not
+`ExecAuthorizationEventType` (`execAuthorization`) is an internal receiver-dispatch
+key, not an OTEL event name. Construct snapshots with `NewExecVerdictEvent`.
+An exporter may reuse the ordinary exec wire family with an explicit authorization
+phase, but that mapping must not route authorization through ordinary exec
+observation processing or imply syscall success.
+
+`ExecVerdictEvent` implements `EnrichEvent`, **not** `ExecEvent`: an LSM denial is not
 process creation. The payload preserves policy/revision, verdict, effective mode,
 `WouldDeny`, and available rule/origin metadata. Unknown argv, UID, image origin
 and actor path remain absent for legacy events. Legacy time is receipt time.
@@ -134,6 +140,35 @@ receiver-error and enrichment-error counters, exposed by `Service.ExporterStats(
 kernel decisions. Void third-party receiver calls must return promptly; cancellation
 cannot forcibly interrupt arbitrary user callbacks. Events are independent of
 trace_exec's successful-exec filters and do not mutate the process tree as an exec.
+
+### Adding a second enforcement gadget
+
+`ExecVerdictEvent` and the current `Verdict` payload are exec-specific; their
+existing names do not define a generic contract for open, connect or syscall
+authorization. When adding the second gadget:
+
+1. Define a distinct operation-specific event and authorization dispatch key.
+   Keep exec target/argv, open path/flags, connect destination and syscall facts
+   in their own typed payloads, rather than adding unrelated optional fields to
+   `ExecVerdictEvent` or making authorization implement observation interfaces.
+2. Compare the two concrete payloads and extract only genuinely shared decision,
+   mode, policy/revision/match, completeness and captured-binding metadata.
+   Preserve absence, immutable snapshots and identity validation. Do not assume
+   exec's binding requirements or provenance fields apply unchanged to another
+   hook; validate that contract before sharing it. No shared abstraction is added
+   preemptively by this exec-only implementation.
+3. Preserve separate authorization dispatch through the public receiver hooks.
+   At the exporter boundary, extend the corresponding existing operation's wire
+   family with explicit authorization versus observation semantics and policy
+   metadata. Update its backend contract/tests; do not carry exec-specific
+   attribute names into another operation or silently imply operation success.
+4. Reuse bounded telemetry/loss handling only where semantics match. Reporting
+   failures must not alter enforcement decisions. Test each operation's unknown
+   fields, deny/audit/allow cases and receiver isolation, plus mixed-operation
+   dispatch and snapshot ownership for any shared metadata extracted.
+5. Treat cross-producer occurrence correlation as a separate contract. A common
+   metadata struct or wire family does not make two records the same attempt;
+   do not suppress observations using PID/path/time heuristics.
 
 ## Verification boundary
 

@@ -60,7 +60,7 @@ func (f *fakeVerdictEnricher) SubmitEnrichmentTask(event utils.EnrichEvent, sysc
 
 func receiverMap(receivers ...containerwatcher.GenericEventReceiver) *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]] {
 	result := &maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]{}
-	result.Set(utils.SandboxExecVerdictEventType, mapset.NewSet[containerwatcher.GenericEventReceiver](receivers...))
+	result.Set(utils.ExecAuthorizationEventType, mapset.NewSet[containerwatcher.GenericEventReceiver](receivers...))
 	return result
 }
 func sampleVerdict() Verdict {
@@ -68,12 +68,12 @@ func sampleVerdict() Verdict {
 	image := false
 	return Verdict{Time: time.Unix(1710000000, 1234), Policy: PolicyIdentity{Kind: "SandboxPolicy", Namespace: "ns", Name: "policy", UID: "policy-uid", Generation: 3}, Revision: "revision", Rule: "rule", Origin: "authored", Mode: api.RuleEnforce, Verdict: api.ActionDeny, Reason: "matched deny", ContainerID: "container", CgroupID: 12, PID: 41, ParentPID: 40, UID: &uid, ActorPath: "/bin/actor", TargetPath: "/bin/target", Argv: []string{"target", "--flag"}, FromImage: &image}
 }
-func TestVerdictEventRetainsKnownMetadataWithoutInventingExec(t *testing.T) {
+func TestExecVerdictEventRetainsKnownMetadataWithoutInventingExec(t *testing.T) {
 	v := sampleVerdict()
 	b := binding()
 	b.MountNamespace = 123
-	event := NewVerdictEvent(v, b)
-	if event.GetEventType() != utils.SandboxExecVerdictEventType || event.GetEventType() == utils.ExecveEventType {
+	event := NewExecVerdictEvent(v, b)
+	if event.GetEventType() != utils.ExecAuthorizationEventType || event.GetEventType() == utils.ExecveEventType {
 		t.Fatal("verdict classified as successful exec observation")
 	}
 	if _, ok := any(event).(utils.ExecEvent); ok {
@@ -95,6 +95,34 @@ func TestVerdictEventRetainsKnownMetadataWithoutInventingExec(t *testing.T) {
 	if event.Verdict.Argv[0] != "target" || *event.GetUid() != 1000 || *event.Verdict.FromImage || event.GetPodLabels()["app"] != "test" {
 		t.Fatal("event aliases producer memory")
 	}
+}
+
+// An authorization-only receiver must not depend on observation dispatch keys
+// or on a serializer's choice to reuse an existing exec wire format.
+func TestExecAuthorizationDispatchKey(t *testing.T) {
+	if utils.ExecAuthorizationEventType != "execAuthorization" || utils.ExecAuthorizationEventType == utils.ExecveEventType {
+		t.Fatal("exec authorization must retain its own internal dispatch key")
+	}
+	receiver := &dispatchKeyReceiver{received: make(chan utils.EventType, 1)}
+	exporter, err := NewVerdictExporter(ExporterOptions{Capacity: 1, Receivers: receiverMap(receiver)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exporter.dispatch(context.Background(), NewExecVerdictEvent(sampleVerdict(), binding()))
+	select {
+	case got := <-receiver.received:
+		if got != utils.ExecAuthorizationEventType {
+			t.Fatalf("raw receiver dispatched under %q", got)
+		}
+	default:
+		t.Fatal("authorization receiver was not called")
+	}
+}
+
+type dispatchKeyReceiver struct{ received chan utils.EventType }
+
+func (r *dispatchKeyReceiver) ReportEvent(eventType utils.EventType, _ utils.K8sEvent) {
+	r.received <- eventType
 }
 
 func TestDeniedAuditAndAllowedEventsReachPublicReceivers(t *testing.T) {
@@ -125,7 +153,7 @@ func TestDeniedAuditAndAllowedEventsReachPublicReceivers(t *testing.T) {
 		}
 		select {
 		case event := <-raw.received:
-			if !reflect.DeepEqual(event.(*VerdictEvent).Verdict, v) {
+			if !reflect.DeepEqual(event.(*ExecVerdictEvent).Verdict, v) {
 				t.Fatal("raw verdict lost")
 			}
 		case <-time.After(3 * time.Second):
@@ -133,7 +161,7 @@ func TestDeniedAuditAndAllowedEventsReachPublicReceivers(t *testing.T) {
 		}
 		select {
 		case event := <-enriched.received:
-			if !reflect.DeepEqual(event.Event.(*VerdictEvent).Verdict, v) || event.PID != v.PID || event.ContainerID != v.ContainerID || event.ProcessTree.PID != 0 {
+			if !reflect.DeepEqual(event.Event.(*ExecVerdictEvent).Verdict, v) || event.PID != v.PID || event.ContainerID != v.ContainerID || event.ProcessTree.PID != 0 {
 				t.Fatal("enrichment lost verdict or fabricated process tree")
 			}
 		case <-time.After(3 * time.Second):
@@ -155,11 +183,11 @@ func TestReceiverFailuresCannotChangeVerdictsOrBlockOtherSubscribers(t *testing.
 		t.Fatal(err)
 	}
 	original := sampleVerdict()
-	exporter.dispatch(context.Background(), NewVerdictEvent(original, binding()))
+	exporter.dispatch(context.Background(), NewExecVerdictEvent(original, binding()))
 	if failing.calls.Load() != 1 || exporter.Stats().ReceiverErrors != 2 || exporter.Stats().Delivered != 1 {
 		t.Fatalf("errors not isolated/reported: %+v", exporter.Stats())
 	}
-	if got := (<-raw.received).(*VerdictEvent); !reflect.DeepEqual(got.Verdict, original) {
+	if got := (<-raw.received).(*ExecVerdictEvent); !reflect.DeepEqual(got.Verdict, original) {
 		t.Fatal("receiver failures changed enforcement verdict")
 	}
 }
@@ -172,9 +200,9 @@ func TestOptionalEnrichmentDoesNotFabricateForkOrReplaceVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := sampleVerdict()
-	exporter.deliver(context.Background(), NewVerdictEvent(v, binding()))
+	exporter.deliver(context.Background(), NewExecVerdictEvent(v, binding()))
 	got := <-receiver.received
-	if enricher.calls != 1 || len(enricher.syscalls) != 0 || got.PID != v.PID || got.ContainerID != v.ContainerID || !reflect.DeepEqual(got.Event.(*VerdictEvent).Verdict, v) || got.Event.(utils.EnrichEvent).GetExtra() != "stack-context" {
+	if enricher.calls != 1 || len(enricher.syscalls) != 0 || got.PID != v.PID || got.ContainerID != v.ContainerID || !reflect.DeepEqual(got.Event.(*ExecVerdictEvent).Verdict, v) || got.Event.(utils.EnrichEvent).GetExtra() != "stack-context" {
 		t.Fatal("enricher invented fork or replaced authoritative attempt metadata")
 	}
 }
@@ -232,7 +260,7 @@ func TestCancelledPendingEnrichmentCountsLossOnce(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	exporter.deliver(ctx, NewVerdictEvent(sampleVerdict(), binding()))
+	exporter.deliver(ctx, NewExecVerdictEvent(sampleVerdict(), binding()))
 	enricher.callback(enricher.event, "container", 41)
 	if exporter.Stats().Dropped != 1 || exporter.Stats().Delivered != 0 {
 		t.Fatalf("late callback double-counted or delivered after cancellation: %+v", exporter.Stats())
@@ -256,8 +284,8 @@ func TestFullVerdictProvenanceCloneBoundaries(t *testing.T) {
 	v.Matches[0].Name = "producer mutation"
 	queued := <-exporter.queue
 	exporter.dispatch(context.Background(), queued)
-	first := (<-a.received).(*VerdictEvent)
-	second := (<-b.received).(*VerdictEvent)
+	first := (<-a.received).(*ExecVerdictEvent)
+	second := (<-b.received).(*ExecVerdictEvent)
 	first.Verdict.PolicySet[0].Revision = "receiver mutation"
 	first.Verdict.Matches[0].Name = "receiver mutation"
 	if second.Verdict.PolicySet[0].Revision != "revision" || second.Verdict.Matches[0].Name != "original" || queued.Verdict.Matches[0].Name != "original" || !second.Verdict.MatchesComplete {

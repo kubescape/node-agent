@@ -15,21 +15,24 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-// VerdictEvent is an exec authorization attempt, NOT an observed process creation.
+// ExecVerdictEvent is an exec authorization attempt, NOT an observed process creation.
 // It deliberately does not implement utils.ExecEvent. The raw Verdict retains
 // policy/rule provenance and audit/deny semantics even after optional enrichment.
 // Unknown enrichment fields are absent (FieldPresent=false), not fabricated from
 // the target executable. In particular GetError's zero means unavailable, not a
 // successful exec syscall: this event describes an LSM decision, not syscall exit.
-type VerdictEvent struct {
+// Keep this event exec-specific. When a second enforce gadget is added, give its
+// operation facts a distinct event and dispatch key; extract only metadata proven
+// common to both. See docs/features/sandbox-policy.md#adding-a-second-enforcement-gadget.
+type ExecVerdictEvent struct {
 	Verdict Verdict
 	Binding Binding
 	extra   any
 }
 
-var _ utils.EnrichEvent = (*VerdictEvent)(nil)
+var _ utils.EnrichEvent = (*ExecVerdictEvent)(nil)
 
-func NewVerdictEvent(verdict Verdict, binding Binding) *VerdictEvent {
+func NewExecVerdictEvent(verdict Verdict, binding Binding) *ExecVerdictEvent {
 	verdict.PolicySet = append([]PolicyRevision(nil), verdict.PolicySet...)
 	verdict.Matches = append([]RuleMatch(nil), verdict.Matches...)
 	verdict.Argv = append([]string(nil), verdict.Argv...)
@@ -43,54 +46,54 @@ func NewVerdictEvent(verdict Verdict, binding Binding) *VerdictEvent {
 	}
 	binding.PodLabels = cloneLabels(binding.PodLabels)
 	binding.NamespaceLabels = cloneLabels(binding.NamespaceLabels)
-	return &VerdictEvent{Verdict: verdict, Binding: binding}
+	return &ExecVerdictEvent{Verdict: verdict, Binding: binding}
 }
-func (e *VerdictEvent) GetContainerID() string      { return e.Verdict.ContainerID }
-func (*VerdictEvent) GetEventType() utils.EventType { return utils.SandboxExecVerdictEventType }
-func (e *VerdictEvent) GetNamespace() string        { return e.Binding.Namespace }
-func (e *VerdictEvent) GetPod() string              { return e.Binding.PodName }
-func (e *VerdictEvent) GetTimestamp() gadgettypes.Time {
+func (e *ExecVerdictEvent) GetContainerID() string      { return e.Verdict.ContainerID }
+func (*ExecVerdictEvent) GetEventType() utils.EventType { return utils.ExecAuthorizationEventType }
+func (e *ExecVerdictEvent) GetNamespace() string        { return e.Binding.Namespace }
+func (e *ExecVerdictEvent) GetPod() string              { return e.Binding.PodName }
+func (e *ExecVerdictEvent) GetTimestamp() gadgettypes.Time {
 	if e.Verdict.Time.IsZero() {
 		return 0
 	}
 	return gadgettypes.Time(e.Verdict.Time.UnixNano())
 }
-func (*VerdictEvent) HasDroppedEvents() bool            { return false } // loss is exposed by ExporterStats, never invented per record
-func (*VerdictEvent) Release()                          {}
-func (*VerdictEvent) GetComm() string                   { return "" }
-func (e *VerdictEvent) GetContainer() string            { return e.Binding.ContainerName }
-func (*VerdictEvent) GetContainerImage() string         { return "" }
-func (*VerdictEvent) GetContainerImageDigest() string   { return "" }
-func (*VerdictEvent) GetError() int64                   { return 0 }
-func (e *VerdictEvent) GetExtra() any                   { return e.extra }
-func (e *VerdictEvent) SetExtra(extra any)              { e.extra = extra }
-func (*VerdictEvent) GetGid() *uint32                   { return nil }
-func (*VerdictEvent) GetHostNetwork() bool              { return false }
-func (e *VerdictEvent) GetMountNsID() uint64            { return e.Binding.MountNamespace }
-func (*VerdictEvent) GetPcomm() string                  { return "" }
-func (e *VerdictEvent) GetPID() uint32                  { return e.Verdict.PID }
-func (e *VerdictEvent) GetPID64() uint64                { return uint64(e.Verdict.PID) }
-func (e *VerdictEvent) GetPodLabels() map[string]string { return cloneLabels(e.Binding.PodLabels) }
-func (e *VerdictEvent) GetPpid() uint32                 { return e.Verdict.ParentPID }
-func (e *VerdictEvent) GetUid() *uint32 {
+func (*ExecVerdictEvent) HasDroppedEvents() bool            { return false } // loss is exposed by ExporterStats, never invented per record
+func (*ExecVerdictEvent) Release()                          {}
+func (*ExecVerdictEvent) GetComm() string                   { return "" }
+func (e *ExecVerdictEvent) GetContainer() string            { return e.Binding.ContainerName }
+func (*ExecVerdictEvent) GetContainerImage() string         { return "" }
+func (*ExecVerdictEvent) GetContainerImageDigest() string   { return "" }
+func (*ExecVerdictEvent) GetError() int64                   { return 0 }
+func (e *ExecVerdictEvent) GetExtra() any                   { return e.extra }
+func (e *ExecVerdictEvent) SetExtra(extra any)              { e.extra = extra }
+func (*ExecVerdictEvent) GetGid() *uint32                   { return nil }
+func (*ExecVerdictEvent) GetHostNetwork() bool              { return false }
+func (e *ExecVerdictEvent) GetMountNsID() uint64            { return e.Binding.MountNamespace }
+func (*ExecVerdictEvent) GetPcomm() string                  { return "" }
+func (e *ExecVerdictEvent) GetPID() uint32                  { return e.Verdict.PID }
+func (e *ExecVerdictEvent) GetPID64() uint64                { return uint64(e.Verdict.PID) }
+func (e *ExecVerdictEvent) GetPodLabels() map[string]string { return cloneLabels(e.Binding.PodLabels) }
+func (e *ExecVerdictEvent) GetPpid() uint32                 { return e.Verdict.ParentPID }
+func (e *ExecVerdictEvent) GetUid() *uint32 {
 	if e.Verdict.UID == nil {
 		return nil
 	}
 	value := *e.Verdict.UID
 	return &value
 }
-func (*VerdictEvent) GetEcsClusterName() string       { return "" }
-func (*VerdictEvent) GetEcsClusterARN() string        { return "" }
-func (*VerdictEvent) GetEcsTaskARN() string           { return "" }
-func (*VerdictEvent) GetEcsTaskFamily() string        { return "" }
-func (*VerdictEvent) GetEcsTaskDefinitionARN() string { return "" }
-func (*VerdictEvent) GetEcsServiceName() string       { return "" }
-func (*VerdictEvent) GetEcsContainerName() string     { return "" }
-func (*VerdictEvent) GetEcsContainerARN() string      { return "" }
-func (*VerdictEvent) GetEcsContainerInstance() string { return "" }
-func (*VerdictEvent) GetEcsAvailabilityZone() string  { return "" }
-func (*VerdictEvent) GetEcsLaunchType() string        { return "" }
-func (e *VerdictEvent) FieldPresent(name string) bool {
+func (*ExecVerdictEvent) GetEcsClusterName() string       { return "" }
+func (*ExecVerdictEvent) GetEcsClusterARN() string        { return "" }
+func (*ExecVerdictEvent) GetEcsTaskARN() string           { return "" }
+func (*ExecVerdictEvent) GetEcsTaskFamily() string        { return "" }
+func (*ExecVerdictEvent) GetEcsTaskDefinitionARN() string { return "" }
+func (*ExecVerdictEvent) GetEcsServiceName() string       { return "" }
+func (*ExecVerdictEvent) GetEcsContainerName() string     { return "" }
+func (*ExecVerdictEvent) GetEcsContainerARN() string      { return "" }
+func (*ExecVerdictEvent) GetEcsContainerInstance() string { return "" }
+func (*ExecVerdictEvent) GetEcsAvailabilityZone() string  { return "" }
+func (*ExecVerdictEvent) GetEcsLaunchType() string        { return "" }
+func (e *ExecVerdictEvent) FieldPresent(name string) bool {
 	switch name {
 	case "timestamp":
 		return !e.Verdict.Time.IsZero()
@@ -138,7 +141,7 @@ type ExporterStats struct {
 // queue and drops telemetry rather than blocking the enforcement producer.
 type VerdictExporter struct {
 	options          ExporterOptions
-	queue            chan *VerdictEvent
+	queue            chan *ExecVerdictEvent
 	mu               sync.Mutex
 	stopped          bool
 	started          atomic.Bool
@@ -155,7 +158,7 @@ func NewVerdictExporter(options ExporterOptions) (*VerdictExporter, error) {
 	if options.Capacity <= 0 || options.Capacity > MaxVerdictQueueCapacity {
 		return nil, fmt.Errorf("verdict queue capacity must be between 1 and %d", MaxVerdictQueueCapacity)
 	}
-	return &VerdictExporter{options: options, queue: make(chan *VerdictEvent, options.Capacity)}, nil
+	return &VerdictExporter{options: options, queue: make(chan *ExecVerdictEvent, options.Capacity)}, nil
 }
 func (e *VerdictExporter) ReportVerdict(ctx context.Context, verdict Verdict) error {
 	binding := Binding{}
@@ -165,7 +168,7 @@ func (e *VerdictExporter) ReportVerdict(ctx context.Context, verdict Verdict) er
 			binding = resolved
 		}
 	}
-	event := NewVerdictEvent(verdict, binding)
+	event := NewExecVerdictEvent(verdict, binding)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.stopped {
@@ -218,7 +221,7 @@ func (e *VerdictExporter) Run(ctx context.Context) error {
 		}
 	}
 }
-func (e *VerdictExporter) deliver(ctx context.Context, event *VerdictEvent) {
+func (e *VerdictExporter) deliver(ctx context.Context, event *ExecVerdictEvent) {
 	if e.options.Enricher == nil {
 		e.dispatch(ctx, event)
 		return
@@ -250,18 +253,18 @@ func (e *VerdictExporter) deliver(ctx context.Context, event *VerdictEvent) {
 		once.Do(func() { e.dropped.Add(1); close(done) })
 	}
 }
-func (e *VerdictExporter) dispatch(ctx context.Context, event *VerdictEvent) {
+func (e *VerdictExporter) dispatch(ctx context.Context, event *ExecVerdictEvent) {
 	if e.options.Receivers == nil {
 		e.dropped.Add(1)
 		return
 	}
-	receivers, ok := e.options.Receivers.Load(utils.SandboxExecVerdictEventType)
+	receivers, ok := e.options.Receivers.Load(utils.ExecAuthorizationEventType)
 	if !ok || receivers.Cardinality() == 0 {
 		e.dropped.Add(1)
 		return
 	}
 	for _, receiver := range receivers.ToSlice() {
-		copy := NewVerdictEvent(event.Verdict, event.Binding)
+		copy := NewExecVerdictEvent(event.Verdict, event.Binding)
 		copy.extra = event.extra
 		err := guardReceiver(func() error {
 			if enriched, ok := receiver.(containerwatcher.EnrichedEventReceiver); ok {
@@ -270,7 +273,7 @@ func (e *VerdictExporter) dispatch(ctx context.Context, event *VerdictEvent) {
 				return nil
 			}
 			if raw, ok := receiver.(containerwatcher.EventReceiver); ok {
-				raw.ReportEvent(utils.SandboxExecVerdictEventType, copy)
+				raw.ReportEvent(utils.ExecAuthorizationEventType, copy)
 				return nil
 			}
 			if verdict, ok := receiver.(VerdictReceiver); ok {
