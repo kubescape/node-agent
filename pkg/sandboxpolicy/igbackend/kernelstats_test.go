@@ -137,3 +137,41 @@ func TestNativeKernelStatsPartialStartupThroughJoinedStop(t *testing.T) {
 		t.Fatal("missing stats interface reported zero loss")
 	}
 }
+
+func TestKernelStatsCancellationWhileBackendBusy(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		t.Run(map[bool]string{false: "cancel", true: "deadline"}[deadline], func(t *testing.T) {
+			instance := &counterTestInstance{fullTestInstance: &fullTestInstance{}}
+			backend := &FullBackend{records: map[identity]*fullRecord{{}: {instance: instance}}}
+			backend.mu.Lock()
+			defer backend.mu.Unlock()
+			ctx, cancel := context.WithCancel(context.Background())
+			if deadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+			}
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { _, err := backend.KernelEventStats(ctx); result <- err }()
+			if !deadline {
+				time.Sleep(20 * time.Millisecond)
+				cancel()
+			}
+			want := context.Canceled
+			if deadline {
+				want = context.DeadlineExceeded
+			}
+			select {
+			case err := <-result:
+				if !errors.Is(err, want) {
+					t.Fatalf("got %v, want %v", err, want)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("stats did not cancel while backend mutex remained locked")
+			}
+			if instance.reads != 0 {
+				t.Fatal("canceled waiter read instance counters")
+			}
+		})
+	}
+}

@@ -364,7 +364,23 @@ func (b *FullBackend) KernelEventStats(ctx context.Context) (KernelEventStats, e
 	if err := ctx.Err(); err != nil {
 		return KernelEventStats{}, err
 	}
-	b.mu.Lock()
+	// Mutating backend operations may hold this mutex during native work.
+	// Poll only this read-only API so cancellation never leaves a lock waiter
+	// goroutine behind or delays sampler shutdown until enforcement completes.
+	if !b.mu.TryLock() {
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return KernelEventStats{}, ctx.Err()
+			case <-ticker.C:
+			}
+			if b.mu.TryLock() {
+				break
+			}
+		}
+	}
 	defer b.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return KernelEventStats{}, err
