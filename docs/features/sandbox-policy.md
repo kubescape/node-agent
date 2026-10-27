@@ -172,7 +172,9 @@ The expanded IG revision is published as signed-off commit
 `6b8b24afaf6f2fd9eeb1bcaa9f7a52f4f11e9ea1`, and review fixes through
 `c2aa29f9ca0d4dfa9300ffb9a7461a464b60f998`, in IG PR #15. The signed-off merge
 `90147104198e91083298a132854d9de77d98091c` also incorporates IG main through #16,
-preserving its ordinary-symbol streaming fix. Node-agent pins that exact
+preserving its ordinary-symbol streaming fix. Follow-up review fixes through
+`f9467312a221885cf144aa3289df3b0260af25e9` reject noncanonical exec prefixes
+and make attachment initialization cancellable. Node-agent pins that exact
 public pseudo-version and passes targeted tests, race checks, vet and binary
 compilation with `GOWORK=off`. The repository's merge guard intentionally blocks
 this stacked dependency until IG #15 merges; re-pin to its merged main revision
