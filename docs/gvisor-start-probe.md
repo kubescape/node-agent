@@ -92,8 +92,10 @@ flag restoration and signal cancellation.
 
 This document records the procedure. See the
 [local ARM64 trial results and limits](experiments/gvisor-start-20261026/README.md)
-for live containerd/runsc evidence. A comparison using node-agent itself remains
-outstanding; the existing
+for live containerd/runsc evidence. The
+[individual-GET node-agent comparison](experiments/gvisor-profile-comparison-20261027/README.md)
+records a narrow ordinary/gVisor profile comparison and its attribution limits;
+the existing
 [gVisor proof of concept](https://github.com/yellow-forrest/gvisor-visibility-poc)
 is useful prior work but is not validation of this receiver.
 

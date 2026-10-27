@@ -1,0 +1,72 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "gvisor-comparison"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "ordinary-20261027-second",
+        "namespace": "gvisor-comparison"
+      },
+      "spec": {
+        "restartPolicy": "Never",
+        "containers": [
+          {
+            "name": "workload",
+            "image": "docker.io/library/busybox:1.36.1",
+            "imagePullPolicy": "IfNotPresent",
+            "command": [
+              "/bin/sh",
+              "-c",
+              "set -eu; sleep 20; /bin/busybox true; /bin/busybox true; /bin/busybox true; printf '{\"completed\":true}\\n'; sleep 30"
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "500m",
+                "memory": "256Mi"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "gvisor-20261027-second",
+        "namespace": "gvisor-comparison"
+      },
+      "spec": {
+        "restartPolicy": "Never",
+        "containers": [
+          {
+            "name": "workload",
+            "image": "docker.io/library/busybox:1.36.1",
+            "imagePullPolicy": "IfNotPresent",
+            "command": [
+              "/bin/sh",
+              "-c",
+              "set -eu; sleep 20; /bin/busybox true; /bin/busybox true; /bin/busybox true; printf '{\"completed\":true}\\n'; sleep 30"
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "500m",
+                "memory": "256Mi"
+              }
+            }
+          }
+        ],
+        "runtimeClassName": "gvisor"
+      }
+    }
+  ]
+}
