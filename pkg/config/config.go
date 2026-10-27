@@ -226,6 +226,8 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 
 	viper.SetDefault("sandboxPolicyEnabled", false)
 	viper.SetDefault("sandboxPolicyImage", "")
+	viper.SetDefault("sandboxPolicyContainerdSocket", "")
+	viper.SetDefault("sandboxPolicyControlRoot", "")
 	viper.SetDefault("sandboxPolicyMaxOwners", 4)
 	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)

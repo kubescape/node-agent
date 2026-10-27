@@ -170,7 +170,7 @@ not sufficient completion evidence.
 The expanded IG revision is published as signed-off commit
 `fe1de461890489288685634d12821f976b16d0a6`, followed by the lint-only commit
 `6b8b24afaf6f2fd9eeb1bcaa9f7a52f4f11e9ea1`, and review fixes through
-`d715b98cb9415bf4ab5a014cfaeffa83563b0824`, in IG PR #15. Node-agent pins that exact
+`c2aa29f9ca0d4dfa9300ffb9a7461a464b60f998`, in IG PR #15. Node-agent pins that exact
 public pseudo-version and passes targeted tests, race checks, vet and binary
 compilation with `GOWORK=off`. The repository's merge guard intentionally blocks
 this stacked dependency until IG #15 merges; re-pin to its merged main revision

@@ -1043,3 +1043,24 @@ func TestSandboxPolicyOptIn(t *testing.T) {
 		})
 	}
 }
+
+func TestSandboxPolicyEnvironmentOnlyConfig(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	for name, value := range map[string]string{
+		"SANDBOXPOLICYENABLED":          "true",
+		"SANDBOXPOLICYIMAGE":            "enforce_exec:test",
+		"SANDBOXPOLICYCONTAINERDSOCKET": "/run/containerd/containerd.sock",
+		"SANDBOXPOLICYCONTROLROOT":      "/sys/fs/cgroup",
+		"SANDBOXPOLICYMAXOWNERS":        "7",
+	} {
+		t.Setenv(name, value)
+	}
+	cfg, err := LoadConfigOptional(t.TempDir(), false)
+	require.NoError(t, err)
+	assert.True(t, cfg.EnableSandboxPolicy)
+	assert.Equal(t, "enforce_exec:test", cfg.SandboxPolicyImage)
+	assert.Equal(t, "/run/containerd/containerd.sock", cfg.SandboxPolicyContainerdSocket)
+	assert.Equal(t, "/sys/fs/cgroup", cfg.SandboxPolicyControlRoot)
+	assert.Equal(t, uint64(7), cfg.SandboxPolicyMaxOwners)
+}
