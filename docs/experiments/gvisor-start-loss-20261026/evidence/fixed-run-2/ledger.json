@@ -1,0 +1,292 @@
+{
+  "case": "fixed-run-2",
+  "inventory": [
+    {
+      "id": "loss-check-01",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:20.943569+00:00"
+    },
+    {
+      "id": "loss-check-02",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:20.958188+00:00"
+    },
+    {
+      "id": "loss-check-03",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:20.975579+00:00"
+    },
+    {
+      "id": "loss-check-04",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:20.988306+00:00"
+    },
+    {
+      "id": "loss-check-05",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.001510+00:00"
+    },
+    {
+      "id": "loss-check-06",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.014183+00:00"
+    },
+    {
+      "id": "loss-check-07",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.028255+00:00"
+    },
+    {
+      "id": "loss-check-08",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.041290+00:00"
+    },
+    {
+      "id": "loss-check-09",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.053183+00:00"
+    },
+    {
+      "id": "loss-check-10",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.065563+00:00"
+    },
+    {
+      "id": "loss-check-11",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.078439+00:00"
+    },
+    {
+      "id": "loss-check-12",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.090164+00:00"
+    },
+    {
+      "id": "loss-check-13",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.103902+00:00"
+    },
+    {
+      "id": "loss-check-14",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.115716+00:00"
+    },
+    {
+      "id": "loss-check-15",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.127329+00:00"
+    },
+    {
+      "id": "loss-check-16",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.140945+00:00"
+    },
+    {
+      "id": "loss-check-17",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.155320+00:00"
+    },
+    {
+      "id": "loss-check-18",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.168310+00:00"
+    },
+    {
+      "id": "loss-check-19",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.181323+00:00"
+    },
+    {
+      "id": "loss-check-20",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:53:21.193673+00:00"
+    }
+  ],
+  "starts": [
+    {
+      "id": "loss-check-01",
+      "start_requested_at": "2026-10-26T17:53:21.315444+00:00",
+      "start_returned_at": "2026-10-26T17:53:26.498565+00:00",
+      "start_latency_ms": 5183.138,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-02",
+      "start_requested_at": "2026-10-26T17:53:27.656136+00:00",
+      "start_returned_at": "2026-10-26T17:53:32.757240+00:00",
+      "start_latency_ms": 5101.175,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-03",
+      "start_requested_at": "2026-10-26T17:53:33.833891+00:00",
+      "start_returned_at": "2026-10-26T17:53:38.996411+00:00",
+      "start_latency_ms": 5162.531,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-04",
+      "start_requested_at": "2026-10-26T17:53:40.172590+00:00",
+      "start_returned_at": "2026-10-26T17:53:45.276356+00:00",
+      "start_latency_ms": 5103.778,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-05",
+      "start_requested_at": "2026-10-26T17:53:46.355568+00:00",
+      "start_returned_at": "2026-10-26T17:53:51.471495+00:00",
+      "start_latency_ms": 5115.968,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-06",
+      "start_requested_at": "2026-10-26T17:53:52.584301+00:00",
+      "start_returned_at": "2026-10-26T17:53:57.746290+00:00",
+      "start_latency_ms": 5162.035,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-07",
+      "start_requested_at": "2026-10-26T17:53:58.821132+00:00",
+      "start_returned_at": "2026-10-26T17:54:03.910217+00:00",
+      "start_latency_ms": 5089.115,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-08",
+      "start_requested_at": "2026-10-26T17:54:04.959934+00:00",
+      "start_returned_at": "2026-10-26T17:54:10.079323+00:00",
+      "start_latency_ms": 5119.401,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-09",
+      "start_requested_at": "2026-10-26T17:54:11.140016+00:00",
+      "start_returned_at": "2026-10-26T17:54:16.216534+00:00",
+      "start_latency_ms": 5076.529,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-10",
+      "start_requested_at": "2026-10-26T17:54:17.308802+00:00",
+      "start_returned_at": "2026-10-26T17:54:22.430876+00:00",
+      "start_latency_ms": 5122.119,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-11",
+      "start_requested_at": "2026-10-26T17:54:23.485182+00:00",
+      "start_returned_at": "2026-10-26T17:54:28.647792+00:00",
+      "start_latency_ms": 5162.626,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-12",
+      "start_requested_at": "2026-10-26T17:54:29.744589+00:00",
+      "start_returned_at": "2026-10-26T17:54:34.815566+00:00",
+      "start_latency_ms": 5070.991,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-13",
+      "start_requested_at": "2026-10-26T17:54:35.891438+00:00",
+      "start_returned_at": "2026-10-26T17:54:41.015811+00:00",
+      "start_latency_ms": 5124.391,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-14",
+      "start_requested_at": "2026-10-26T17:54:42.059739+00:00",
+      "start_returned_at": "2026-10-26T17:54:47.171439+00:00",
+      "start_latency_ms": 5111.714,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-15",
+      "start_requested_at": "2026-10-26T17:54:48.236617+00:00",
+      "start_returned_at": "2026-10-26T17:54:53.390212+00:00",
+      "start_latency_ms": 5153.624,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-16",
+      "start_requested_at": "2026-10-26T17:54:54.428139+00:00",
+      "start_returned_at": "2026-10-26T17:54:59.515113+00:00",
+      "start_latency_ms": 5086.998,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-17",
+      "start_requested_at": "2026-10-26T17:55:00.616033+00:00",
+      "start_returned_at": "2026-10-26T17:55:05.720901+00:00",
+      "start_latency_ms": 5104.88,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-18",
+      "start_requested_at": "2026-10-26T17:55:06.768541+00:00",
+      "start_returned_at": "2026-10-26T17:55:11.879680+00:00",
+      "start_latency_ms": 5111.15,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-19",
+      "start_requested_at": "2026-10-26T17:55:12.979313+00:00",
+      "start_returned_at": "2026-10-26T17:55:18.089705+00:00",
+      "start_latency_ms": 5110.404,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-20",
+      "start_requested_at": "2026-10-26T17:55:19.203165+00:00",
+      "start_returned_at": "2026-10-26T17:55:24.357323+00:00",
+      "start_latency_ms": 5154.169,
+      "exit": 0,
+      "error": ""
+    }
+  ],
+  "evidence": {
+    "counts_match": true,
+    "received": 20,
+    "expected": 20,
+    "missing": [],
+    "sender_dropped": 0,
+    "canary_absent": true
+  },
+  "health": {
+    "accepted_connections": 21,
+    "rejected_connections": 0,
+    "closed_connections": 21,
+    "handshakes": 21,
+    "handshake_errors": 0,
+    "received_frames": 20,
+    "read_errors": 0,
+    "interrupted_reads": 0,
+    "invalid_frames": 0,
+    "unresolved_starts": 0,
+    "ignored_frames": 0,
+    "verified_starts": 20,
+    "callbacks_completed": 20,
+    "sender_drop_frames": 0,
+    "queue_drops": 0
+  }
+}

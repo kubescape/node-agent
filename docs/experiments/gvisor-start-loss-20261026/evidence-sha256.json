@@ -1,0 +1,16 @@
+{
+  "evidence/checker-results.json": "4bf34236e90edf32597686518b718cec03c600a62cb504b45ac9e16f7c007f3c",
+  "evidence/fixed-run-1/ledger.json": "a0eda1a956ea3b02bb41db06ca51cfe21f778264fafd41844c5909b153c79da4",
+  "evidence/fixed-run-1/starts-expected.json": "c85e5d3507752af93df184206c8fadd96a757e05364ba32d48f9686de19469fd",
+  "evidence/fixed-run-1/starts.jsonl": "db425f574e8324a0521a1a640cb47124d455d722f72e00010b4a709241ffd742",
+  "evidence/fixed-run-1/starts.stderr": "f2c4d92a301173755d7b54e2c17e60a313435a25a631194fbd2fece271697f3a",
+  "evidence/fixed-run-2/ledger.json": "658ae5e3a1260537461236cd7237df80d10d66f15658b22c7ec5fd175d02eed9",
+  "evidence/fixed-run-2/starts-expected.json": "c85e5d3507752af93df184206c8fadd96a757e05364ba32d48f9686de19469fd",
+  "evidence/fixed-run-2/starts.jsonl": "d0d11be9cd59c9fb90123cb6e22cffa0c274aaad3ccfda01ea678a7734613089",
+  "evidence/fixed-run-2/starts.stderr": "f2c4d92a301173755d7b54e2c17e60a313435a25a631194fbd2fece271697f3a",
+  "evidence/node-agent-comparison.json": "b448fc216740abe5ab6fdcb15bd455af0e8ceed63d89e82c9ae04b9439db791e",
+  "evidence/signal-after/health.jsonl": "86d9453d8535cb3f3a897cced4abd22a637ef651b29e5bc02c2351563e520777",
+  "evidence/signal-after/starts.jsonl": "78a2cacde848fae20924332329e6538b84fb9510f7c2bbb9300b7d98eb3826f6",
+  "evidence/signal-before/health.jsonl": "d05c75adc45551057c63b0b1352e916cc6020af097b9b08976351fb56146b480",
+  "evidence/signal-before/starts.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

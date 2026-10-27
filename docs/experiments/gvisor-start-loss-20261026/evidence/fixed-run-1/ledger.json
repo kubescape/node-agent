@@ -1,0 +1,292 @@
+{
+  "case": "fixed-run-1",
+  "inventory": [
+    {
+      "id": "loss-check-01",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.369939+00:00"
+    },
+    {
+      "id": "loss-check-02",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.381809+00:00"
+    },
+    {
+      "id": "loss-check-03",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.393695+00:00"
+    },
+    {
+      "id": "loss-check-04",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.405200+00:00"
+    },
+    {
+      "id": "loss-check-05",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.417713+00:00"
+    },
+    {
+      "id": "loss-check-06",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.431336+00:00"
+    },
+    {
+      "id": "loss-check-07",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.443768+00:00"
+    },
+    {
+      "id": "loss-check-08",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.458418+00:00"
+    },
+    {
+      "id": "loss-check-09",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.471607+00:00"
+    },
+    {
+      "id": "loss-check-10",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.485437+00:00"
+    },
+    {
+      "id": "loss-check-11",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.499670+00:00"
+    },
+    {
+      "id": "loss-check-12",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.512879+00:00"
+    },
+    {
+      "id": "loss-check-13",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.526130+00:00"
+    },
+    {
+      "id": "loss-check-14",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.538577+00:00"
+    },
+    {
+      "id": "loss-check-15",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.552691+00:00"
+    },
+    {
+      "id": "loss-check-16",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.565555+00:00"
+    },
+    {
+      "id": "loss-check-17",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.578121+00:00"
+    },
+    {
+      "id": "loss-check-18",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.591242+00:00"
+    },
+    {
+      "id": "loss-check-19",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.604951+00:00"
+    },
+    {
+      "id": "loss-check-20",
+      "runtime": "io.containerd.runsc.v1",
+      "inventory_checked_at": "2026-10-26T17:38:58.618209+00:00"
+    }
+  ],
+  "starts": [
+    {
+      "id": "loss-check-01",
+      "start_requested_at": "2026-10-26T17:38:58.795382+00:00",
+      "start_returned_at": "2026-10-26T17:39:04.140638+00:00",
+      "start_latency_ms": 5345.299,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-02",
+      "start_requested_at": "2026-10-26T17:39:05.250651+00:00",
+      "start_returned_at": "2026-10-26T17:39:10.462944+00:00",
+      "start_latency_ms": 5212.303,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-03",
+      "start_requested_at": "2026-10-26T17:39:11.566594+00:00",
+      "start_returned_at": "2026-10-26T17:39:16.795613+00:00",
+      "start_latency_ms": 5229.031,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-04",
+      "start_requested_at": "2026-10-26T17:39:17.887547+00:00",
+      "start_returned_at": "2026-10-26T17:39:23.168242+00:00",
+      "start_latency_ms": 5280.705,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-05",
+      "start_requested_at": "2026-10-26T17:39:24.266156+00:00",
+      "start_returned_at": "2026-10-26T17:39:29.593264+00:00",
+      "start_latency_ms": 5327.12,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-06",
+      "start_requested_at": "2026-10-26T17:39:30.731613+00:00",
+      "start_returned_at": "2026-10-26T17:39:35.877922+00:00",
+      "start_latency_ms": 5146.32,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-07",
+      "start_requested_at": "2026-10-26T17:39:37.003100+00:00",
+      "start_returned_at": "2026-10-26T17:39:42.223539+00:00",
+      "start_latency_ms": 5220.454,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-08",
+      "start_requested_at": "2026-10-26T17:39:43.338571+00:00",
+      "start_returned_at": "2026-10-26T17:39:48.699348+00:00",
+      "start_latency_ms": 5360.789,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-09",
+      "start_requested_at": "2026-10-26T17:39:49.840772+00:00",
+      "start_returned_at": "2026-10-26T17:39:55.111490+00:00",
+      "start_latency_ms": 5270.728,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-10",
+      "start_requested_at": "2026-10-26T17:39:56.226502+00:00",
+      "start_returned_at": "2026-10-26T17:40:01.424903+00:00",
+      "start_latency_ms": 5198.415,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-11",
+      "start_requested_at": "2026-10-26T17:40:02.506830+00:00",
+      "start_returned_at": "2026-10-26T17:40:07.673790+00:00",
+      "start_latency_ms": 5166.972,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-12",
+      "start_requested_at": "2026-10-26T17:40:08.750295+00:00",
+      "start_returned_at": "2026-10-26T17:40:13.911426+00:00",
+      "start_latency_ms": 5161.143,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-13",
+      "start_requested_at": "2026-10-26T17:40:15.064315+00:00",
+      "start_returned_at": "2026-10-26T17:40:20.233151+00:00",
+      "start_latency_ms": 5168.848,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-14",
+      "start_requested_at": "2026-10-26T17:40:21.265362+00:00",
+      "start_returned_at": "2026-10-26T17:40:26.433912+00:00",
+      "start_latency_ms": 5168.561,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-15",
+      "start_requested_at": "2026-10-26T17:40:27.571519+00:00",
+      "start_returned_at": "2026-10-26T17:40:32.791647+00:00",
+      "start_latency_ms": 5220.144,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-16",
+      "start_requested_at": "2026-10-26T17:40:33.895738+00:00",
+      "start_returned_at": "2026-10-26T17:40:39.138608+00:00",
+      "start_latency_ms": 5242.884,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-17",
+      "start_requested_at": "2026-10-26T17:40:40.259546+00:00",
+      "start_returned_at": "2026-10-26T17:40:45.505626+00:00",
+      "start_latency_ms": 5246.09,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-18",
+      "start_requested_at": "2026-10-26T17:40:46.607663+00:00",
+      "start_returned_at": "2026-10-26T17:40:51.947616+00:00",
+      "start_latency_ms": 5339.964,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-19",
+      "start_requested_at": "2026-10-26T17:40:53.059905+00:00",
+      "start_returned_at": "2026-10-26T17:40:58.230041+00:00",
+      "start_latency_ms": 5170.151,
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "id": "loss-check-20",
+      "start_requested_at": "2026-10-26T17:40:59.292134+00:00",
+      "start_returned_at": "2026-10-26T17:41:04.517880+00:00",
+      "start_latency_ms": 5225.756,
+      "exit": 0,
+      "error": ""
+    }
+  ],
+  "evidence": {
+    "counts_match": true,
+    "received": 20,
+    "expected": 20,
+    "missing": [],
+    "sender_dropped": 0,
+    "canary_absent": true
+  },
+  "health": {
+    "accepted_connections": 21,
+    "rejected_connections": 0,
+    "closed_connections": 21,
+    "handshakes": 21,
+    "handshake_errors": 0,
+    "received_frames": 20,
+    "read_errors": 0,
+    "interrupted_reads": 0,
+    "invalid_frames": 0,
+    "unresolved_starts": 0,
+    "ignored_frames": 0,
+    "verified_starts": 20,
+    "callbacks_completed": 20,
+    "sender_drop_frames": 0,
+    "queue_drops": 0
+  }
+}

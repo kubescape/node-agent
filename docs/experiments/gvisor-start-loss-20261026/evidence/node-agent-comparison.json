@@ -1,0 +1,73 @@
+{
+  "recorded_at": "2026-10-26T18:52:40.750718+00:00",
+  "result": "inconclusive: ordinary positive control has no retained exec records",
+  "node_agent_image": "quay.io/kubescape/node-agent:v0.3.293",
+  "chart": "kubescape-operator 1.40.5",
+  "k3s": "v1.37.1+k3s1",
+  "pods": [
+    {
+      "name": "gvisor",
+      "container_id": "e85119856d50c1243248a9b2e579dab81a6646a0bcaee2011ac406aea2dfa99b",
+      "runtime": "io.containerd.runsc.v1",
+      "image_id": "sha256:b7c873bd97bdc9046fc894e0b216c8aef31e0db4c5b761fb53022e40577ab6c0",
+      "state": {
+        "terminated": {
+          "containerID": "containerd://e85119856d50c1243248a9b2e579dab81a6646a0bcaee2011ac406aea2dfa99b",
+          "exitCode": 0,
+          "finishedAt": "2026-10-26T18:52:06Z",
+          "reason": "Completed",
+          "startedAt": "2026-10-26T18:50:15Z"
+        }
+      }
+    },
+    {
+      "name": "ordinary",
+      "container_id": "6795c2a5645f4450118a5ec98641ddd48bf6c3cc4566b27625a24c1fda5ecdd1",
+      "runtime": "io.containerd.runc.v2",
+      "image_id": "sha256:b7c873bd97bdc9046fc894e0b216c8aef31e0db4c5b761fb53022e40577ab6c0",
+      "state": {
+        "terminated": {
+          "containerID": "containerd://6795c2a5645f4450118a5ec98641ddd48bf6c3cc4566b27625a24c1fda5ecdd1",
+          "exitCode": 0,
+          "finishedAt": "2026-10-26T18:52:05Z",
+          "reason": "Completed",
+          "startedAt": "2026-10-26T18:50:15Z"
+        }
+      }
+    }
+  ],
+  "profiles": [
+    {
+      "name": "pod-ordinary-workload-3d6a-6d29",
+      "status": "completed",
+      "completion": "complete",
+      "exec_record_count": 0
+    }
+  ],
+  "collector_startup": [
+    {
+      "ts": "2026-10-26T18:48:25Z",
+      "msg": "Started tracer",
+      "tracer": "trace_exec"
+    },
+    {
+      "ts": "2026-10-26T18:48:27Z",
+      "msg": "Started tracer",
+      "tracer": "trace_open"
+    },
+    {
+      "ts": "2026-10-26T18:48:29Z",
+      "msg": "Started tracer",
+      "tracer": "trace_fork"
+    },
+    {
+      "ts": "2026-10-26T18:48:31Z",
+      "msg": "Started tracer",
+      "tracer": "trace_exit"
+    },
+    {
+      "ts": "2026-10-26T18:48:33Z",
+      "msg": "ContainerWatcher started successfully"
+    }
+  ]
+}

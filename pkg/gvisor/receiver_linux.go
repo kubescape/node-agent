@@ -4,6 +4,7 @@ package gvisor
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -30,6 +31,7 @@ type Receiver struct {
 	OnStart    StartHandler
 
 	queueDrops atomic.Uint64
+	counters   receiverCounters
 }
 
 // QueueDrops counts locally discarded events when the consumer cannot keep up.
@@ -104,16 +106,20 @@ func (r *Receiver) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("accepting gvisor connection: %w", acceptErr)
 		}
+		r.counters.AcceptedConnections.Add(1)
 		select {
 		case slots <- struct{}{}:
 			clients.Add(1)
 			go func() {
 				defer clients.Done()
+				defer r.counters.ClosedConnections.Add(1)
 				defer func() { <-slots }()
 				defer unix.Close(client)
 				r.receive(runCtx, client, starts)
 			}()
 		default:
+			r.counters.RejectedConnections.Add(1)
+			r.counters.ClosedConnections.Add(1)
 			unix.Close(client)
 		}
 	}
@@ -124,6 +130,7 @@ func (r *Receiver) deliverStarts(ctx context.Context, starts <-chan Start) {
 		// Use the caller's context: an internal listener error still drains
 		// queued events, while caller cancellation interrupts the handler.
 		r.OnStart(ctx, start)
+		r.counters.CallbacksCompleted.Add(1)
 	}
 }
 
@@ -144,37 +151,74 @@ func (r *Receiver) receive(ctx context.Context, fd int, starts chan<- Start) {
 	buffer := make([]byte, maxFrameSize+1)
 	defer clear(buffer)
 	timeout := unix.NsecToTimeval((2 * time.Second).Nanoseconds())
-	if unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &timeout) != nil {
-		return
-	}
 	if unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_SNDTIMEO, &timeout) != nil {
+		r.counters.HandshakeErrors.Add(1)
 		return
 	}
-	n, _, flags, _, err := unix.Recvmsg(fd, buffer, nil, 0)
+	handshakeCtx, cancelHandshake := context.WithTimeout(ctx, 2*time.Second)
+	defer cancelHandshake()
+	n, flags, err := r.readPacket(handshakeCtx, fd, buffer)
 	if err != nil || n == 0 || flags&unix.MSG_TRUNC != 0 || n > maxFrameSize {
+		r.counters.HandshakeErrors.Add(1)
 		return
 	}
 	if _, err = handshakeVersion(buffer[:n]); err != nil {
+		r.counters.HandshakeErrors.Add(1)
 		return
 	}
 	response := protowire.AppendTag(nil, 1, protowire.VarintType)
 	response = protowire.AppendVarint(response, protocolVersion)
-	if _, err = unix.SendmsgN(fd, response, nil, nil, 0); err != nil {
-		return
+	for {
+		if handshakeCtx.Err() != nil {
+			r.counters.HandshakeErrors.Add(1)
+			return
+		}
+		_, err = unix.SendmsgN(fd, response, nil, nil, 0)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			r.counters.HandshakeErrors.Add(1)
+			return
+		}
+		break
 	}
+	r.counters.Handshakes.Add(1)
+	cancelHandshake()
 	for ctx.Err() == nil {
-		n, _, flags, _, err = unix.Recvmsg(fd, buffer, nil, 0)
+		n, flags, err = r.readPacket(ctx, fd, buffer)
 		if err == unix.EAGAIN || err == unix.EWOULDBLOCK {
 			continue
 		}
 		if err != nil || n == 0 {
+			if err != nil && ctx.Err() == nil {
+				r.counters.ReadErrors.Add(1)
+			}
 			return
 		}
+		r.counters.ReceivedFrames.Add(1)
 		if flags&unix.MSG_TRUNC != 0 || n > maxFrameSize {
+			r.counters.InvalidFrames.Add(1)
 			return
 		}
-		start, ok, err := decodeStartFrame(buffer[:n], time.Now(), r.Resolve)
+		if n >= headerSize && int(binary.LittleEndian.Uint16(buffer[:2])) >= headerSize &&
+			int(binary.LittleEndian.Uint16(buffer[:2])) <= n && binary.LittleEndian.Uint32(buffer[4:8]) != 0 {
+			r.counters.SenderDropFrames.Add(1)
+		}
+		start, ok, err := decodeStartFrame(buffer[:n], time.Now(), func(id string) bool {
+			known := r.Resolve(id)
+			if !known {
+				r.counters.UnresolvedStarts.Add(1)
+			}
+			return known
+		})
+		if err != nil {
+			r.counters.InvalidFrames.Add(1)
+		} else if !ok {
+			r.counters.IgnoredFrames.Add(1)
+		}
 		if err == nil && ok {
+			r.counters.VerifiedStarts.Add(1)
 			select {
 			case starts <- start:
 			default:
@@ -183,5 +227,37 @@ func (r *Receiver) receive(ctx context.Context, fd int, starts chan<- Start) {
 		}
 		// Raw bytes may include argv, cwd, and env. Never retain them across reads.
 		clear(buffer[:n])
+	}
+}
+
+// readPacket retries signal interruptions instead of discarding a healthy
+// connection. SO_RCVTIMEO makes socket reads interruptible even with SA_RESTART.
+// The context bounds retries; a handshake's absolute deadline is not reset by
+// repeated signals. Idle reads retain the receiver's two-second polling bound.
+func (r *Receiver) readPacket(ctx context.Context, fd int, buffer []byte) (int, int, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return 0, 0, err
+		}
+		wait := 2 * time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return 0, 0, context.DeadlineExceeded
+			}
+			if remaining < wait {
+				wait = remaining
+			}
+		}
+		timeout := unix.NsecToTimeval(wait.Nanoseconds())
+		if err := unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &timeout); err != nil {
+			return 0, 0, err
+		}
+		n, _, flags, _, err := unix.Recvmsg(fd, buffer, nil, 0)
+		if err == unix.EINTR {
+			r.counters.InterruptedReads.Add(1)
+			continue
+		}
+		return n, flags, err
 	}
 }
