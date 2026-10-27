@@ -55,6 +55,7 @@ func native(b sandboxpolicy.Binding) execruntime.ContainerIdentity {
 }
 
 type record struct {
+	binding  sandboxpolicy.Binding
 	revision string
 	active   *owned
 	retiring []*owned
@@ -118,6 +119,9 @@ func (b *Backend) Replace(ctx context.Context, binding sandboxpolicy.Binding, pl
 		}
 	}()
 	r := b.records[k]
+	if r != nil && !sameFullBindingMetadata(r.binding, binding) {
+		return result, fmt.Errorf("binding metadata changed for legacy identity")
+	}
 	if r != nil {
 		// Finish previous cleanup before a new plan can be installed. Never restart
 		// an already committed same-revision instance just to retry cleanup.
@@ -193,14 +197,14 @@ func (b *Backend) Replace(ctx context.Context, binding sandboxpolicy.Binding, pl
 	next := &owned{instance: candidate, lease: lease}
 	if err := errors.Join(lease.Check(), candidate.Ready()); err != nil {
 		if r == nil {
-			r = &record{}
+			r = &record{binding: binding}
 			b.records[k] = r
 		}
 		r.retiring = append(r.retiring, next)
 		return result, errors.Join(err, cleanup(ctx, r))
 	}
 	if r == nil {
-		r = &record{}
+		r = &record{binding: binding}
 		b.records[k] = r
 	}
 	if r.active != nil {
@@ -216,7 +220,7 @@ func (b *Backend) Withdraw(ctx context.Context, binding sandboxpolicy.Binding) (
 	defer b.mu.Unlock()
 	k := key(binding)
 	r := b.records[k]
-	if r == nil {
+	if r == nil || !sameFullBindingMetadata(r.binding, binding) {
 		return sandboxpolicy.WithdrawResult{Committed: true}, nil
 	}
 	// An incomplete withdrawal retains ownership, not necessarily protection.
@@ -309,14 +313,14 @@ func Compile(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, generation 
 func (b *Backend) Close(ctx context.Context) error {
 	b.mu.Lock()
 	b.closed = true
-	keys := make([]identity, 0, len(b.records))
-	for k := range b.records {
-		keys = append(keys, k)
+	bindings := make([]sandboxpolicy.Binding, 0, len(b.records))
+	for _, r := range b.records {
+		bindings = append(bindings, r.binding)
 	}
 	b.mu.Unlock()
 	var errs []error
-	for _, k := range keys {
-		_, err := b.Withdraw(ctx, sandboxpolicy.Binding{Runtime: k.runtime, ContainerID: k.container, CgroupPath: k.path, CgroupID: k.cgroup, MountNamespace: k.mountns, PID: k.pid})
+	for _, binding := range bindings {
+		_, err := b.Withdraw(ctx, binding)
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)

@@ -276,7 +276,7 @@ func TestOwnedIdentityCapacityIncludesRetiringRecords(t *testing.T) {
 	for i := 0; i < execpolicy.KernelMaxBindings; i++ {
 		instance := &fakeInstance{}
 		owner := &owned{instance: instance, lease: &fakeLease{}}
-		state := &record{revision: "old"}
+		state := &record{binding: bindingAt(i), revision: "old"}
 		if i%2 == 0 {
 			state.retiring = []*owned{owner}
 			instance.stopErr = failure
@@ -510,9 +510,67 @@ func TestWithdrawalFailureChecksRetainedProtection(t *testing.T) {
 
 func TestWithdrawalRetiringOnlyDoesNotClaimProtection(t *testing.T) {
 	b, _, _, binding, _ := fixture(t)
-	b.records[key(binding)] = &record{retiring: []*owned{{instance: &fakeInstance{stopErr: failure}, lease: &fakeLease{}}}}
+	b.records[key(binding)] = &record{binding: binding, retiring: []*owned{{instance: &fakeInstance{stopErr: failure}, lease: &fakeLease{}}}}
 	result, err := b.Withdraw(context.Background(), binding)
 	if result.Committed || !result.ProtectionUnconfirmed || !errors.Is(err, failure) {
 		t.Fatalf("retiring ownership reported as confirmed protection: %+v %v", result, err)
+	}
+}
+
+func TestLegacyBindingMetadataCannotReuseOrWithdrawOwner(t *testing.T) {
+	for name, mutate := range map[string]func(*sandboxpolicy.Binding){
+		"pod UID":        func(b *sandboxpolicy.Binding) { b.PodUID = "stale-uid" },
+		"namespace":      func(b *sandboxpolicy.Binding) { b.Namespace = "other-ns" },
+		"pod name":       func(b *sandboxpolicy.Binding) { b.PodName = "other-pod" },
+		"container name": func(b *sandboxpolicy.Binding) { b.ContainerName = "other-container" },
+		"kind":           func(b *sandboxpolicy.Binding) { b.Kind = "init" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			b, e, v, binding, plan := fixture(t)
+			binding.PodUID, binding.Namespace, binding.PodName, binding.ContainerName, binding.Kind = "current-uid", "ns", "pod", "app", "regular"
+			ctx := context.Background()
+			if _, err := b.Replace(ctx, binding, plan); err != nil {
+				t.Fatal(err)
+			}
+			retired := &fakeInstance{}
+			b.records[key(binding)].retiring = []*owned{{instance: retired, lease: &fakeLease{}}}
+			stale := binding
+			mutate(&stale)
+			for _, revision := range []string{plan.Revision, "next"} {
+				candidate := plan
+				candidate.Revision = revision
+				result, err := b.Replace(ctx, stale, candidate)
+				if err == nil || result.Committed {
+					t.Fatalf("contradictory metadata reused owner: %+v %v", result, err)
+				}
+			}
+			result, err := b.Withdraw(ctx, stale)
+			if err != nil || !result.Committed {
+				t.Fatalf("stale withdrawal not ignored: %+v %v", result, err)
+			}
+			if len(e.instances) != 1 || e.instances[0].stops != 0 || e.instances[0].unbound != 0 || v.leases[0].closed != 0 || retired.stops != 0 {
+				t.Fatal("stale metadata mutated the current owner")
+			}
+			if err := b.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if e.instances[0].unbound != 1 || e.instances[0].stops != 1 || v.leases[0].closed != 1 || len(b.records) != 0 {
+				t.Fatal("Close lost authoritative binding metadata")
+			}
+		})
+	}
+}
+
+func TestLegacyStalePodWithdrawalPreservesOwner(t *testing.T) {
+	b, e, v, binding, plan := fixture(t)
+	binding.PodUID = "current"
+	if _, err := b.Replace(context.Background(), binding, plan); err != nil {
+		t.Fatal(err)
+	}
+	stale := binding
+	stale.PodUID = "old"
+	result, err := b.Withdraw(context.Background(), stale)
+	if err != nil || !result.Committed || e.instances[0].unbound != 0 || e.instances[0].stops != 0 || v.leases[0].closed != 0 || len(b.records) != 1 {
+		t.Fatalf("stale pod withdrew live protection: %+v %v", result, err)
 	}
 }
