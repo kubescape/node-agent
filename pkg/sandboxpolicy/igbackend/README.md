@@ -47,7 +47,7 @@ kubelet/API server or establish generic runtime/kernel compatibility. The exact 
 narrow. Private OTel implementation is outside this public change.
 
 The expanded IG revision is published and pinned at
-`v0.0.0-20261027103046-6b8b24afaf6f`; standalone node-agent targeted tests, race
+`v0.0.0-20261027114358-d715b98cb941`; standalone node-agent targeted tests, race
 checks, vet and binary builds pass without a development workspace. The pin is
 still on PR #15 rather than main, so the repository merge guard correctly blocks
 consumer merging until the upstream change is merged and re-pinned.
