@@ -580,7 +580,7 @@ func main() {
 			ContainerdSocket: cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
 			Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
 			Receivers: thirdPartyTracers.ThirdPartyEventReceivers,
-			OnError:   func(err error) { logger.L().Ctx(ctx).Error("sandbox policy NotReady", helpers.Error(err)) },
+			OnError:   func(err error) { logger.L().Ctx(ctx).Error("sandbox policy service diagnostic", helpers.Error(err)) },
 		})
 		if sandboxErr != nil {
 			logger.L().Ctx(ctx).Fatal("creating sandbox policy service", helpers.Error(sandboxErr))
