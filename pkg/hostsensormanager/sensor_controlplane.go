@@ -3,6 +3,8 @@ package hostsensormanager
 import (
 	"context"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/hostsensor"
 )
 
@@ -11,7 +13,6 @@ const (
 	controllerManagerExe = "/kube-controller-manager"
 	schedulerExe         = "/kube-scheduler"
 	etcdExe              = "/etcd"
-	etcdDataDirArg       = "--data-dir"
 	auditPolicyFileArg   = "--audit-policy-file"
 
 	apiServerSpecsPath         = "/etc/kubernetes/manifests/kube-apiserver.yaml"
@@ -73,6 +74,15 @@ func (s *ControlPlaneInfoSensor) Sense() (any, error) {
 		ret.SchedulerInfo = &ProcessInfo{
 			CmdLine:   proc.RawCmd(),
 			SpecsFile: makeHostFileInfoVerbose(ctx, schedulerSpecsPath, false),
+		}
+	}
+
+	// etcd data directory, as the local etcd process resolves it
+	if proc, err := LocateProcessByExecSuffix(etcdExe); err == nil {
+		if dataDir, err := etcdDataDir(proc); err == nil {
+			ret.EtcdDataDir = makeContaineredFileInfoVerbose(ctx, proc, dataDir, false)
+		} else {
+			logger.L().Ctx(ctx).Debug("failed to resolve the etcd data directory", helpers.Error(err))
 		}
 	}
 
