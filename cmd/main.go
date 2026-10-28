@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
-	_ "net/http/pprof"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -180,7 +180,7 @@ func main() {
 	if _, present := os.LookupEnv("ENABLE_PROFILER"); present {
 		logger.L().Info("starting profiler on port 6060")
 		go func() {
-			_ = http.ListenAndServe("localhost:6060", nil)
+			_ = newPprofServer("localhost:6060").ListenAndServe()
 		}()
 	}
 
@@ -626,4 +626,23 @@ func resolveOwnContainerID(ctx context.Context, k8sClient *k8sinterface.Kubernet
 	logger.L().Warning("resolveOwnContainerID - no ContainerStatuses entry named \"node-agent\" yet, cgroup memory gauges will report 0",
 		helpers.String("pod", podName), helpers.String("namespace", namespace))
 	return "", ""
+}
+
+// newPprofServer builds the profiler's debug server on its own mux, not the
+// nil/DefaultServeMux that net/http/pprof populates on import, so it exposes
+// only the pprof endpoints. ReadHeaderTimeout keeps a stalled client from
+// holding a connection open indefinitely.
+func newPprofServer(addr string) *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	return &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 }
