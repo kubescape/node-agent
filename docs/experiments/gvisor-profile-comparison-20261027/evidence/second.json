@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-27T09:10:28.965094+00:00",
+  "namespace": "gvisor-comparison",
+  "pods": [
+    {
+      "name": "ordinary-20261027-second",
+      "uid": "f84c4d05-496b-44b8-a98c-8a5cc15bb00e",
+      "container_id": "c36e95ed05df260909aa6e06707bffa41f4db21a8092e58367ac9be7991324cd",
+      "runtime": "io.containerd.runc.v2",
+      "image_id": "sha256:b7c873bd97bdc9046fc894e0b216c8aef31e0db4c5b761fb53022e40577ab6c0",
+      "exit_code": 0,
+      "completion_marker": true,
+      "started_at": "2026-10-27T09:08:32Z",
+      "finished_at": "2026-10-27T09:09:22Z"
+    },
+    {
+      "name": "gvisor-20261027-second",
+      "uid": "eb3a8927-bd4b-4c5d-be53-08ebcab72652",
+      "container_id": "f6cd0565d6ace1e57648ab4f312c8510aad51dffc338afb51ffe5459f7bcf74a",
+      "runtime": "io.containerd.runsc.v1",
+      "image_id": "sha256:b7c873bd97bdc9046fc894e0b216c8aef31e0db4c5b761fb53022e40577ab6c0",
+      "exit_code": 0,
+      "completion_marker": true,
+      "started_at": "2026-10-27T09:08:32Z",
+      "finished_at": "2026-10-27T09:09:22Z"
+    }
+  ],
+  "profiles": [
+    {
+      "name": "pod-ordinary-20261027-second-workload-b8da-d154",
+      "uid": "af76c84d-3bff-45c9-b348-1a3c3f845b6a",
+      "pod": "ordinary-20261027-second",
+      "query": "individual GET",
+      "exec_entry_count": 2,
+      "target_exec_present": true,
+      "list_exec_entry_count": 0
+    }
+  ],
+  "ordinary_positive_control": true,
+  "gvisor_target_exec_observed": false,
+  "result": "ordinary target observed; gVisor target not observed in profile path"
+}
