@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	_ "net/http/pprof"
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -96,4 +97,25 @@ func TestSetContainerWatcher(t *testing.T) {
 	w := httptest.NewRecorder()
 	hm.readinessProbe(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestNewServer_ServesOnlyProbes(t *testing.T) {
+	hm := NewHealthManager()
+	hm.SetContainerWatcher(&containerwatcher.ContainerWatcherMock{})
+	srv := hm.newServer()
+
+	assert.NotNil(t, srv.Handler)
+	assert.NotSame(t, http.DefaultServeMux, srv.Handler, "handler must not be http.DefaultServeMux")
+
+	for path, want := range map[string]int{
+		"/livez":               http.StatusOK,
+		"/readyz":              http.StatusOK,
+		"/debug/pprof/":        http.StatusNotFound,
+		"/debug/pprof/profile": http.StatusNotFound,
+	} {
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(w, req)
+		assert.Equal(t, want, w.Code, path)
+	}
 }
