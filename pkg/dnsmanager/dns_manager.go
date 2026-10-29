@@ -153,6 +153,13 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		if !dm.containerToCloudServices.Has(containerID) {
 			dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, *processCloudServices]())
 		}
+		// A container re-added with the same ID must not inherit the retained
+		// services of processes that exited before it was removed.
+		for key := range dm.exitedCloudServices {
+			if key.containerID == containerID {
+				delete(dm.exitedCloudServices, key)
+			}
+		}
 		dm.cacheMu.Unlock()
 	case containercollection.EventTypeRemoveContainer:
 		containerID := notif.Container.Runtime.ContainerID

@@ -31,11 +31,15 @@ func newExitTestManager(t *testing.T, containerID string) (*DNSManager, *exitTim
 	timers := &exitTimers{}
 	dm := CreateDNSManager(100)
 	dm.afterFunc = timers.afterFunc
-	dm.ContainerCallback(containercollection.PubSubEvent{
-		Type:      containercollection.EventTypeAddContainer,
-		Container: &containercollection.Container{Runtime: containercollection.RuntimeMetadata{BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{ContainerID: containerID}}},
-	})
+	dm.ContainerCallback(containerEvent(containercollection.EventTypeAddContainer, containerID))
 	return dm, timers
+}
+
+func containerEvent(eventType containercollection.EventType, containerID string) containercollection.PubSubEvent {
+	return containercollection.PubSubEvent{
+		Type:      eventType,
+		Container: &containercollection.Container{Runtime: containercollection.RuntimeMetadata{BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{ContainerID: containerID}}},
+	}
 }
 
 func cloudDNSEvent(containerID string, pid uint32, name string, ts int64) *utils.StructEvent {
@@ -117,6 +121,18 @@ func TestReportExitEvent_LookupDuringExitFindsCloudServices(t *testing.T) {
 			require.NotNil(t, dm.ResolveContainerProcessToCloudServices("worker", pid), "a lookup during an exit must still find the cloud services")
 		}
 	}
+}
+
+func TestReportExitEvent_ReaddedContainerDropsRetainedCloudServices(t *testing.T) {
+	dm, _ := newExitTestManager(t, "worker")
+	dm.ReportEvent(cloudDNSEvent("worker", 4242, "s3.eu-west-1.amazonaws.com.", 100))
+	dm.ReportExitEvent(exitEvent("worker", 4242, 4242, 200))
+
+	dm.ContainerCallback(containerEvent(containercollection.EventTypeRemoveContainer, "worker"))
+	require.NotNil(t, dm.ResolveContainerProcessToCloudServices("worker", 4242), "alerts for a removed container must still get retained cloud services")
+	dm.ContainerCallback(containerEvent(containercollection.EventTypeAddContainer, "worker"))
+
+	require.Nil(t, dm.ResolveContainerProcessToCloudServices("worker", 4242), "a re-added container must not inherit retained cloud services")
 }
 
 func TestReportExitEvent_ExitWithoutTimestampKeepsCloudServices(t *testing.T) {
