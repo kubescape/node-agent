@@ -32,6 +32,7 @@ type Rule struct {
 	State                   map[string]any              `json:"state,omitempty" yaml:"state,omitempty"`
 	AgentVersionRequirement string                      `json:"agentVersionRequirement" yaml:"agentVersionRequirement"`
 	IsTriggerAlert          bool                        `json:"isTriggerAlert" yaml:"isTriggerAlert"`
+	MitreMappings           []armotypes.MitreMapping    `json:"mitreMappings,omitempty" yaml:"mitreMappings,omitempty"`
 	MitreTactic             string                      `json:"mitreTactic" yaml:"mitreTactic"`
 	MitreTechnique          string                      `json:"mitreTechnique" yaml:"mitreTechnique"`
 	Prefilter               *prefilter.Params           `json:"-" yaml:"-"`
@@ -46,4 +47,9 @@ type RuleExpressions struct {
 type RuleExpression struct {
 	EventType  utils.EventType `json:"eventType" yaml:"eventType"`
 	Expression string          `json:"expression" yaml:"expression"`
+}
+
+// GetMitreMappings reads the paired metadata with legacy scalar fallback.
+func (r Rule) GetMitreMappings() []armotypes.MitreMapping {
+	return armotypes.EffectiveMitreMappings(r.MitreMappings, r.MitreTactic, r.MitreTechnique)
 }
