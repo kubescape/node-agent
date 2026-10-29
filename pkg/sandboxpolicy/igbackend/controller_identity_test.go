@@ -294,3 +294,41 @@ func TestControllerBindingFailureNeverResumesUncommittedCandidate(t *testing.T) 
 		t.Fatal("healthy read-only attestation changed owner or failed to confirm retained revision")
 	}
 }
+
+func TestControllerFullBackendReenableAfterFailedWithdrawal(t *testing.T) {
+	c, b, e, s, w, client, binding := controllerIdentityFixture(t)
+	ctx := context.Background()
+	old := b.records[key(binding)]
+	owner := e.instances[0]
+	policy, err := client.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Get(ctx, "policy", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateMode := func(mode string) {
+		t.Helper()
+		policy.SetGeneration(policy.GetGeneration() + 1)
+		if err := unstructured.SetNestedField(policy.Object, mode, "spec", "mode"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Update(ctx, policy, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		c.ModifyHandler(ctx, policy)
+	}
+	owner.failStop = true
+	updateMode("off")
+	if c.LastError() == nil || len(e.instances) != 1 || s.leases[0].closed != 0 || w.report.Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatal("failed withdrawal did not retain unconfirmed ownership", c.LastError())
+	}
+	owner.failStop = false
+	updateMode("enforce")
+	if c.LastError() != nil {
+		t.Fatal("same-UID re-enable failed to recover retirement", c.LastError())
+	}
+	if len(e.instances) != 2 || len(s.leases) != 2 || s.leases[0].closed != 1 || s.leases[1].closed != 0 || b.records[key(binding)] == old || w.report.Status.Conditions[0].Status != metav1.ConditionTrue {
+		t.Fatal("re-enabled policy did not acquire fresh, confirmed ownership")
+	}
+	if err := c.Reconcile(ctx); err != nil || len(e.instances) != 2 {
+		t.Fatal("recovered owner failed stable reconciliation", err)
+	}
+}
