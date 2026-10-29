@@ -48,4 +48,11 @@ func TestAddJitter_NoOverflow(t *testing.T) {
 		}
 	}
 	assert.Equal(t, time.Duration(0), AddJitter(0, 5))
+
+	// d*p overflows int64 here, but d*p/100 does not: the bound must stay at p%.
+	long := 87600 * time.Hour
+	for range 1000 {
+		got := AddJitter(long, 50)
+		assert.LessOrEqual(t, got, long+long/2)
+	}
 }
