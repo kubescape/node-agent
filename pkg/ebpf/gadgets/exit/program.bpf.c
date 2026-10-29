@@ -75,6 +75,10 @@ int tracepoint__sched_exit(struct bpf_raw_tracepoint_args *ctx)
     event->exit_pid = BPF_CORE_READ(task, tgid);
     event->exit_tid = BPF_CORE_READ(task, pid);
     event->exit_ppid = BPF_CORE_READ(task, real_parent, tgid);
+    // do_exit decrements signal->live before this tracepoint, so zero means
+    // no thread of the group is still live. Threads exiting together can all
+    // see zero, so more than one exit of a group may report it.
+    event->exit_group_dead = BPF_CORE_READ(task, signal, live.counter) == 0;
     event->upper_layer = has_upper_layer();
 
     /* emit event */

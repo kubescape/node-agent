@@ -25,9 +25,12 @@ import (
 type dnsManagerSpy struct {
 	dnsmanager.DNSManagerMock
 	names []string
+	exits []uint32
 }
 
 func (s *dnsManagerSpy) ReportEvent(e utils.DNSEvent) { s.names = append(s.names, e.GetDNSName()) }
+
+func (s *dnsManagerSpy) ReportExitEvent(e utils.ExitEvent) { s.exits = append(s.exits, e.GetPID()) }
 
 type networkStreamSpy struct {
 	networkstream.NetworkStreamMock
@@ -139,6 +142,32 @@ func TestEventHandlerFactory_DNSAnsweredReachesEveryHandler(t *testing.T) {
 	assert.Equal(t, 1, f.stream.count)
 	assert.Equal(t, 1, f.thirdParty.count)
 	assert.Equal(t, 1, f.metrics.EventCounter.Get(utils.DnsEventType))
+}
+
+func TestEventHandlerFactory_ExitReachesDNSManagerOnly(t *testing.T) {
+	f := newDNSDispatchFixture(t, nil)
+
+	f.factory.ProcessEvent(&events.EnrichedEvent{
+		ContainerID:      f.containerID,
+		MountNamespaceID: 1001,
+		Event:            &utils.StructEvent{EventType: utils.ExitEventType, ContainerID: f.containerID, Pid: 4242},
+	})
+
+	require.Equal(t, []uint32{4242}, f.dns.exits, "exit must reach the DNS manager")
+	require.Empty(t, f.rules.received, "exit must not reach the rule manager")
+	require.Zero(t, f.stream.count, "exit must not reach the network stream")
+	require.Zero(t, f.thirdParty.count, "exit must not reach DNS third-party receivers")
+	require.Zero(t, f.metrics.EventCounter.Get(utils.ExitEventType), "exit must not change event metrics")
+}
+
+func TestEventHandlerFactory_ProcfsExitWithoutContainerIDIsDropped(t *testing.T) {
+	f := newDNSDispatchFixture(t, nil)
+
+	f.factory.ProcessEvent(&events.EnrichedEvent{
+		Event: &utils.StructEvent{EventType: utils.ExitEventType, Pid: 4242, Comm: "exit"},
+	})
+
+	require.Empty(t, f.dns.exits, "a procfs exit without a container id must not reach the DNS manager")
 }
 
 func TestEventHandlerFactory_DNSDedupAppliesToRuleOnlyEventsOnly(t *testing.T) {

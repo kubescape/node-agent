@@ -9,6 +9,10 @@ datasources:
       exit_code:
         annotations:
           description: Process exit code.
+      exit_group_dead:
+        annotations:
+          description: True if no thread of the exiting thread's group is still
+            live, i.e. the whole process has exited.
       exit_signal:
         annotations:
           description: Signal that caused the exit (if any).

@@ -24,9 +24,23 @@ type DNSManager struct {
 	hostAddressToDomain        *lru.Cache[string, string]
 	containerToAddressToDomain *lru.Cache[string, *lru.Cache[string, string]]
 	removedContainers          *lru.Cache[string, struct{}]
-	lookupCache                cache.ExpiringCache                                             // Cache for DNS lookups
-	failureCache               cache.ExpiringCache                                             // Cache for failed lookups
-	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerID, value: map of pid to cloud services
+	lookupCache                cache.ExpiringCache                                                // Cache for DNS lookups
+	failureCache               cache.ExpiringCache                                                // Cache for failed lookups
+	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, *processCloudServices]] // key: containerID, value: map of pid to cloud services
+	exitedCloudServices        map[exitedProcess]*processCloudServices                            // cloud services of exited processes, kept for the grace period; guarded by cacheMu
+	afterFunc                  func(time.Duration, func()) *time.Timer
+}
+
+// processCloudServices holds the cloud services a pid resolved and the
+// timestamp of its latest cloud DNS event. Guarded by cacheMu.
+type processCloudServices struct {
+	names      mapset.Set[string]
+	lastSeenNs int64
+}
+
+type exitedProcess struct {
+	containerID string
+	pid         uint32
 }
 
 type cacheEntry struct {
@@ -42,6 +56,7 @@ const (
 	minTrackedContainers         = 10               // Minimum number of concurrent containers with DNS caches
 	maxRemovedContainersEntries  = 10000            // Maximum number of removed containers to track to prevent resurrection
 	defaultRemovalGracePeriod    = 10 * time.Second // Grace period before evicting resolution cache to allow terminal profile save
+	defaultExitGracePeriod       = 10 * time.Second // Grace period before dropping an exited process's cloud services, so in-flight alerts still get them
 )
 
 var _ DNSManagerClient = (*DNSManager)(nil)
@@ -88,6 +103,8 @@ func CreateDNSManager(size int) *DNSManager {
 		removedContainers:          removedCache,
 		lookupCache:                cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
 		failureCache:               cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
+		exitedCloudServices:        make(map[exitedProcess]*processCloudServices),
+		afterFunc:                  time.AfterFunc,
 	}
 }
 
@@ -134,7 +151,14 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 			dm.removedContainers.Remove(containerID)
 		}
 		if !dm.containerToCloudServices.Has(containerID) {
-			dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
+			dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, *processCloudServices]())
+		}
+		// A container re-added with the same ID must not inherit the retained
+		// services of processes that exited before it was removed.
+		for key := range dm.exitedCloudServices {
+			if key.containerID == containerID {
+				delete(dm.exitedCloudServices, key)
+			}
 		}
 		dm.cacheMu.Unlock()
 	case containercollection.EventTypeRemoveContainer:
@@ -160,19 +184,20 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	dnsName := dnsEvent.GetDNSName()
 	containerID := dnsEvent.GetContainerID()
 	if isCloudService(dnsName) {
+		dm.cacheMu.Lock()
 		if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
-			// Guard against cache size getting too large by checking the cardinality per container and pid
-			if services, found := pidToServices.Load(dnsEvent.GetPID()); found {
-				if services.Cardinality() < maxServiceCacheSize {
-					services.Add(dnsName)
-				}
-			} else {
-				// Create a new set for this pid
-				servicesSet := mapset.NewSet[string]()
-				servicesSet.Add(dnsName)
-				pidToServices.Set(dnsEvent.GetPID(), servicesSet)
+			services, found := pidToServices.Load(dnsEvent.GetPID())
+			if !found {
+				services = &processCloudServices{names: mapset.NewSet[string]()}
+				pidToServices.Set(dnsEvent.GetPID(), services)
 			}
+			// Guard against cache size getting too large by checking the cardinality per container and pid
+			if services.names.Cardinality() < maxServiceCacheSize {
+				services.names.Add(dnsName)
+			}
+			services.lastSeenNs = max(services.lastSeenNs, int64(dnsEvent.GetTimestamp()))
 		}
+		dm.cacheMu.Unlock()
 	}
 
 	containerCache := dm.getContainerCache(containerID)
@@ -238,6 +263,44 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	})
 }
 
+// ReportExitEvent moves the exited process's cloud services out of the live
+// map, so a recycled pid starts with an empty set, and keeps them for a grace
+// period so alerts raised just before the exit still get them. The exit tracer
+// fires for every thread with the thread group id as the pid, and the leader
+// can exit while other threads keep running, so only the exit of the group's
+// last live thread counts.
+func (dm *DNSManager) ReportExitEvent(exitEvent utils.ExitEvent) {
+	if !exitEvent.GetGroupDead() {
+		return
+	}
+	pid := exitEvent.GetPID()
+	containerID := exitEvent.GetContainerID()
+	exitNs := int64(exitEvent.GetTimestamp())
+
+	dm.cacheMu.Lock()
+	defer dm.cacheMu.Unlock()
+	pidToServices, found := dm.containerToCloudServices.Load(containerID)
+	if !found {
+		return
+	}
+	services, found := pidToServices.Load(pid)
+	// An exit without a timestamp cannot be ordered, and a late exit must not
+	// retire services that a process reusing the pid reported after it.
+	if !found || exitNs == 0 || services.lastSeenNs > exitNs {
+		return
+	}
+	key := exitedProcess{containerID: containerID, pid: pid}
+	dm.exitedCloudServices[key] = services
+	pidToServices.Delete(pid)
+	dm.afterFunc(defaultExitGracePeriod, func() {
+		dm.cacheMu.Lock()
+		defer dm.cacheMu.Unlock()
+		if dm.exitedCloudServices[key] == services {
+			delete(dm.exitedCloudServices, key)
+		}
+	})
+}
+
 func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (string, bool) {
 	if utils.IsHost(containerID) {
 		if dm.hostAddressToDomain != nil {
@@ -256,10 +319,19 @@ func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (strin
 }
 
 func (dm *DNSManager) ResolveContainerProcessToCloudServices(containerID string, pid uint32) mapset.Set[string] {
+	dm.cacheMu.Lock()
+	defer dm.cacheMu.Unlock()
 	if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
 		if services, found := pidToServices.Load(pid); found {
-			return services
+			return services.names
 		}
+	}
+	// Within the grace period the live entry wins, so once a process reusing
+	// the pid resolves a cloud service, a late lookup for the exited process
+	// gets the replacement's services, and a second exit replaces the retained
+	// entry. Telling them apart needs a start-time identity (phase 2).
+	if exited, found := dm.exitedCloudServices[exitedProcess{containerID: containerID, pid: pid}]; found {
+		return exited.names
 	}
 	return nil
 }

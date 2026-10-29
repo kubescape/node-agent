@@ -40,6 +40,7 @@ type StructEvent struct {
 	FullPath             string                  `json:"fullPath,omitempty" yaml:"fullPath,omitempty"`
 	FullPathTracing      bool                    `json:"fullPathTracing,omitempty" yaml:"fullPathTracing,omitempty"`
 	Gid                  uint32                  `json:"gid,omitempty" yaml:"gid,omitempty"`
+	GroupDead            bool                    `json:"groupDead,omitempty" yaml:"groupDead,omitempty"`
 	HostNetwork          bool                    `json:"hostNetwork,omitempty" yaml:"hostNetwork,omitempty"`
 	ID                   string                  `json:"id,omitempty" yaml:"id,omitempty"`
 	Identifier           string                  `json:"identifier,omitempty" yaml:"identifier,omitempty"`
@@ -288,6 +289,10 @@ func (e *StructEvent) GetFullPath() string {
 
 func (e *StructEvent) GetGid() *uint32 {
 	return &e.Gid
+}
+
+func (e *StructEvent) GetGroupDead() bool {
+	return e.GroupDead
 }
 
 // GetHasTTY reports whether the process has a controlling terminal, preferring
