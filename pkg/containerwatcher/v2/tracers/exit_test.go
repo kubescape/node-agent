@@ -17,6 +17,7 @@ func TestExitFields(t *testing.T) {
 	expectedFields := map[string][]string{
 		"exit": {
 			"exit_code",
+			"exit_group_dead",
 			"exit_pid",
 			"exit_ppid",
 			"exit_signal",
