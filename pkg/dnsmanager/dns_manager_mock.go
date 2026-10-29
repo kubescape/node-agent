@@ -19,6 +19,9 @@ func CreateDNSManagerMock() *DNSManagerMock {
 func (n *DNSManagerMock) ReportEvent(_ utils.DNSEvent) {
 }
 
+func (n *DNSManagerMock) ReportExitEvent(_ utils.ExitEvent) {
+}
+
 func (n *DNSManagerMock) ContainerCallback(_ containercollection.PubSubEvent) {
 }
 

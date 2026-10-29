@@ -210,6 +210,10 @@ func NewEventHandlerFactory(
 			if dnsEvent, ok := event.(utils.DNSEvent); ok {
 				dnsManager.ReportEvent(dnsEvent)
 			}
+		case utils.ExitEventType:
+			if exitEvent, ok := event.(utils.ExitEvent); ok {
+				dnsManager.ReportExitEvent(exitEvent)
+			}
 		}
 	})
 
@@ -482,6 +486,9 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	// manager would issue its own lookup for a name without addresses, and the
 	// network stream would record a query as an outbound connection.
 	ehf.ruleOnlyHandlers[utils.DnsEventType] = []Manager{ruleManager}
+
+	// Exit events: the DNS manager drops the exited process's cloud services.
+	ehf.handlers[utils.ExitEventType] = []Manager{dnsManager}
 
 	// RandomX events
 	ehf.handlers[utils.RandomXEventType] = []Manager{ruleManager, metrics}

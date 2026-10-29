@@ -27,6 +27,7 @@ type DNSManager struct {
 	lookupCache                cache.ExpiringCache                                             // Cache for DNS lookups
 	failureCache               cache.ExpiringCache                                             // Cache for failed lookups
 	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerID, value: map of pid to cloud services
+	exitGracePeriod            time.Duration
 }
 
 type cacheEntry struct {
@@ -42,6 +43,7 @@ const (
 	minTrackedContainers         = 10               // Minimum number of concurrent containers with DNS caches
 	maxRemovedContainersEntries  = 10000            // Maximum number of removed containers to track to prevent resurrection
 	defaultRemovalGracePeriod    = 10 * time.Second // Grace period before evicting resolution cache to allow terminal profile save
+	defaultExitGracePeriod       = 10 * time.Second // Grace period before dropping an exited process's cloud services, so in-flight alerts still get them
 )
 
 var _ DNSManagerClient = (*DNSManager)(nil)
@@ -88,6 +90,7 @@ func CreateDNSManager(size int) *DNSManager {
 		removedContainers:          removedCache,
 		lookupCache:                cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
 		failureCache:               cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
+		exitGracePeriod:            defaultExitGracePeriod,
 	}
 }
 
@@ -235,6 +238,24 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	// Cache the successful lookup
 	dm.lookupCache.Set(dnsName, cacheEntry{
 		addresses: addrStrings,
+	})
+}
+
+// ReportExitEvent drops the exited process's cloud services after a grace
+// period, so a recycled pid does not inherit them. The exit tracer fires for
+// every thread with the thread group id as the pid, so only the group leader's
+// exit counts (a procfs exit has no tid and always counts).
+func (dm *DNSManager) ReportExitEvent(exitEvent utils.ExitEvent) {
+	pid := exitEvent.GetPID()
+	if tid := uint32(exitEvent.GetPID64()); tid != 0 && tid != pid {
+		return
+	}
+	pidToServices, found := dm.containerToCloudServices.Load(exitEvent.GetContainerID())
+	if !found || !pidToServices.Has(pid) {
+		return
+	}
+	time.AfterFunc(dm.exitGracePeriod, func() {
+		pidToServices.Delete(pid)
 	})
 }
 
