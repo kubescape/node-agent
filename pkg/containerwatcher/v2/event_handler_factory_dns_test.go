@@ -160,6 +160,16 @@ func TestEventHandlerFactory_ExitReachesDNSManagerOnly(t *testing.T) {
 	require.Zero(t, f.metrics.EventCounter.Get(utils.ExitEventType), "exit must not change event metrics")
 }
 
+func TestEventHandlerFactory_ProcfsExitWithoutContainerIDIsDropped(t *testing.T) {
+	f := newDNSDispatchFixture(t, nil)
+
+	f.factory.ProcessEvent(&events.EnrichedEvent{
+		Event: &utils.StructEvent{EventType: utils.ExitEventType, Pid: 4242, Comm: "exit"},
+	})
+
+	require.Empty(t, f.dns.exits, "a procfs exit without a container id must not reach the DNS manager")
+}
+
 func TestEventHandlerFactory_DNSDedupAppliesToRuleOnlyEventsOnly(t *testing.T) {
 	f := newDNSDispatchFixture(t, dedupcache.NewDedupCache(10))
 

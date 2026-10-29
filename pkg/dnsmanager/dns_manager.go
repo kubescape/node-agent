@@ -24,11 +24,18 @@ type DNSManager struct {
 	hostAddressToDomain        *lru.Cache[string, string]
 	containerToAddressToDomain *lru.Cache[string, *lru.Cache[string, string]]
 	removedContainers          *lru.Cache[string, struct{}]
-	lookupCache                cache.ExpiringCache                                             // Cache for DNS lookups
-	failureCache               cache.ExpiringCache                                             // Cache for failed lookups
-	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerID, value: map of pid to cloud services
-	exitedCloudServices        map[exitedProcess]mapset.Set[string]                            // cloud services of exited processes, kept for the grace period; guarded by cacheMu
+	lookupCache                cache.ExpiringCache                                                // Cache for DNS lookups
+	failureCache               cache.ExpiringCache                                                // Cache for failed lookups
+	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, *processCloudServices]] // key: containerID, value: map of pid to cloud services
+	exitedCloudServices        map[exitedProcess]*processCloudServices                            // cloud services of exited processes, kept for the grace period; guarded by cacheMu
 	afterFunc                  func(time.Duration, func()) *time.Timer
+}
+
+// processCloudServices holds the cloud services a pid resolved and the
+// timestamp of its latest cloud DNS event. Guarded by cacheMu.
+type processCloudServices struct {
+	names      mapset.Set[string]
+	lastSeenNs int64
 }
 
 type exitedProcess struct {
@@ -96,7 +103,7 @@ func CreateDNSManager(size int) *DNSManager {
 		removedContainers:          removedCache,
 		lookupCache:                cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
 		failureCache:               cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
-		exitedCloudServices:        make(map[exitedProcess]mapset.Set[string]),
+		exitedCloudServices:        make(map[exitedProcess]*processCloudServices),
 		afterFunc:                  time.AfterFunc,
 	}
 }
@@ -144,7 +151,7 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 			dm.removedContainers.Remove(containerID)
 		}
 		if !dm.containerToCloudServices.Has(containerID) {
-			dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
+			dm.containerToCloudServices.Set(containerID, maps.NewSafeMap[uint32, *processCloudServices]())
 		}
 		dm.cacheMu.Unlock()
 	case containercollection.EventTypeRemoveContainer:
@@ -170,19 +177,20 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	dnsName := dnsEvent.GetDNSName()
 	containerID := dnsEvent.GetContainerID()
 	if isCloudService(dnsName) {
+		dm.cacheMu.Lock()
 		if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
-			// Guard against cache size getting too large by checking the cardinality per container and pid
-			if services, found := pidToServices.Load(dnsEvent.GetPID()); found {
-				if services.Cardinality() < maxServiceCacheSize {
-					services.Add(dnsName)
-				}
-			} else {
-				// Create a new set for this pid
-				servicesSet := mapset.NewSet[string]()
-				servicesSet.Add(dnsName)
-				pidToServices.Set(dnsEvent.GetPID(), servicesSet)
+			services, found := pidToServices.Load(dnsEvent.GetPID())
+			if !found {
+				services = &processCloudServices{names: mapset.NewSet[string]()}
+				pidToServices.Set(dnsEvent.GetPID(), services)
 			}
+			// Guard against cache size getting too large by checking the cardinality per container and pid
+			if services.names.Cardinality() < maxServiceCacheSize {
+				services.names.Add(dnsName)
+			}
+			services.lastSeenNs = max(services.lastSeenNs, int64(dnsEvent.GetTimestamp()))
 		}
+		dm.cacheMu.Unlock()
 	}
 
 	containerCache := dm.getContainerCache(containerID)
@@ -259,20 +267,23 @@ func (dm *DNSManager) ReportExitEvent(exitEvent utils.ExitEvent) {
 		return
 	}
 	containerID := exitEvent.GetContainerID()
+	exitNs := int64(exitEvent.GetTimestamp())
+
+	dm.cacheMu.Lock()
+	defer dm.cacheMu.Unlock()
 	pidToServices, found := dm.containerToCloudServices.Load(containerID)
 	if !found {
 		return
 	}
 	services, found := pidToServices.Load(pid)
-	if !found {
+	// An exit without a timestamp cannot be ordered, and a late exit must not
+	// retire services that a process reusing the pid reported after it.
+	if !found || exitNs == 0 || services.lastSeenNs > exitNs {
 		return
 	}
-	pidToServices.Delete(pid)
-
 	key := exitedProcess{containerID: containerID, pid: pid}
-	dm.cacheMu.Lock()
 	dm.exitedCloudServices[key] = services
-	dm.cacheMu.Unlock()
+	pidToServices.Delete(pid)
 	dm.afterFunc(defaultExitGracePeriod, func() {
 		dm.cacheMu.Lock()
 		defer dm.cacheMu.Unlock()
@@ -300,14 +311,21 @@ func (dm *DNSManager) ResolveIPAddress(containerID string, ipAddr string) (strin
 }
 
 func (dm *DNSManager) ResolveContainerProcessToCloudServices(containerID string, pid uint32) mapset.Set[string] {
-	if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
-		if services, found := pidToServices.Load(pid); found {
-			return services
-		}
-	}
 	dm.cacheMu.Lock()
 	defer dm.cacheMu.Unlock()
-	return dm.exitedCloudServices[exitedProcess{containerID: containerID, pid: pid}]
+	if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
+		if services, found := pidToServices.Load(pid); found {
+			return services.names
+		}
+	}
+	// Within the grace period the live entry wins, so once a process reusing
+	// the pid resolves a cloud service, a late lookup for the exited process
+	// gets the replacement's services, and a second exit replaces the retained
+	// entry. Telling them apart needs a start-time identity (phase 2).
+	if exited, found := dm.exitedCloudServices[exitedProcess{containerID: containerID, pid: pid}]; found {
+		return exited.names
+	}
+	return nil
 }
 
 func isCloudService(domain string) bool {

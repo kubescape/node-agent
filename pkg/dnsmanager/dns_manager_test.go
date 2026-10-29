@@ -518,8 +518,7 @@ func TestContainerCloudServices(t *testing.T) {
 		}
 
 		// Create new set for the PID
-		services := mapset.NewSet[string]()
-		pidToServices.Set(testPid, services)
+		pidToServices.Set(testPid, &processCloudServices{names: mapset.NewSet[string]()})
 
 		// Process cloud service DNS events
 		cloudEvents := []*utils.StructEvent{
@@ -592,8 +591,7 @@ func TestContainerCloudServices(t *testing.T) {
 
 		// Initialize the services set for the PID
 		if pidToServices, found := dm.containerToCloudServices.Load(containerID); found {
-			services := mapset.NewSet[string]()
-			pidToServices.Set(testPid, services)
+			pidToServices.Set(testPid, &processCloudServices{names: mapset.NewSet[string]()})
 		}
 
 		// Add more services than the cache size
