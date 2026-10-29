@@ -12,8 +12,10 @@ func AddJitter(duration time.Duration, maxJitterPercentage int) time.Duration {
 	if maxJitterPercentage == 0 {
 		return duration
 	}
-	jitter := 1 + rand.Intn(maxJitterPercentage)/100
-	return duration * time.Duration(jitter)
+	// Integer arithmetic on the percentage truncated the jitter to zero for
+	// any value under 100, so compute it on the duration itself.
+	maxJitter := int64(duration) * int64(maxJitterPercentage) / 100
+	return duration + time.Duration(rand.Int63n(maxJitter+1))
 }
 
 // Jitter returns a random duration
