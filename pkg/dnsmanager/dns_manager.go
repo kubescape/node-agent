@@ -27,7 +27,13 @@ type DNSManager struct {
 	lookupCache                cache.ExpiringCache                                             // Cache for DNS lookups
 	failureCache               cache.ExpiringCache                                             // Cache for failed lookups
 	containerToCloudServices   maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerID, value: map of pid to cloud services
-	exitGracePeriod            time.Duration
+	exitedCloudServices        map[exitedProcess]mapset.Set[string]                            // cloud services of exited processes, kept for the grace period; guarded by cacheMu
+	afterFunc                  func(time.Duration, func()) *time.Timer
+}
+
+type exitedProcess struct {
+	containerID string
+	pid         uint32
 }
 
 type cacheEntry struct {
@@ -90,7 +96,8 @@ func CreateDNSManager(size int) *DNSManager {
 		removedContainers:          removedCache,
 		lookupCache:                cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
 		failureCache:               cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
-		exitGracePeriod:            defaultExitGracePeriod,
+		exitedCloudServices:        make(map[exitedProcess]mapset.Set[string]),
+		afterFunc:                  time.AfterFunc,
 	}
 }
 
@@ -241,21 +248,37 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 	})
 }
 
-// ReportExitEvent drops the exited process's cloud services after a grace
-// period, so a recycled pid does not inherit them. The exit tracer fires for
-// every thread with the thread group id as the pid, so only the group leader's
-// exit counts (a procfs exit has no tid and always counts).
+// ReportExitEvent moves the exited process's cloud services out of the live
+// map, so a recycled pid starts with an empty set, and keeps them for a grace
+// period so alerts raised just before the exit still get them. The exit tracer
+// fires for every thread with the thread group id as the pid, so only the group
+// leader's exit counts (a procfs exit has no tid and always counts).
 func (dm *DNSManager) ReportExitEvent(exitEvent utils.ExitEvent) {
 	pid := exitEvent.GetPID()
 	if tid := uint32(exitEvent.GetPID64()); tid != 0 && tid != pid {
 		return
 	}
-	pidToServices, found := dm.containerToCloudServices.Load(exitEvent.GetContainerID())
-	if !found || !pidToServices.Has(pid) {
+	containerID := exitEvent.GetContainerID()
+	pidToServices, found := dm.containerToCloudServices.Load(containerID)
+	if !found {
 		return
 	}
-	time.AfterFunc(dm.exitGracePeriod, func() {
-		pidToServices.Delete(pid)
+	services, found := pidToServices.Load(pid)
+	if !found {
+		return
+	}
+	pidToServices.Delete(pid)
+
+	key := exitedProcess{containerID: containerID, pid: pid}
+	dm.cacheMu.Lock()
+	dm.exitedCloudServices[key] = services
+	dm.cacheMu.Unlock()
+	dm.afterFunc(defaultExitGracePeriod, func() {
+		dm.cacheMu.Lock()
+		defer dm.cacheMu.Unlock()
+		if dm.exitedCloudServices[key] == services {
+			delete(dm.exitedCloudServices, key)
+		}
 	})
 }
 
@@ -282,7 +305,9 @@ func (dm *DNSManager) ResolveContainerProcessToCloudServices(containerID string,
 			return services
 		}
 	}
-	return nil
+	dm.cacheMu.Lock()
+	defer dm.cacheMu.Unlock()
+	return dm.exitedCloudServices[exitedProcess{containerID: containerID, pid: pid}]
 }
 
 func isCloudService(domain string) bool {

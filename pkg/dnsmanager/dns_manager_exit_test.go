@@ -10,15 +10,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newExitTestManager(t *testing.T, containerID string) *DNSManager {
+type exitTimers struct {
+	pending []func()
+}
+
+func (e *exitTimers) afterFunc(_ time.Duration, f func()) *time.Timer {
+	e.pending = append(e.pending, f)
+	return nil
+}
+
+func (e *exitTimers) fire() {
+	for _, f := range e.pending {
+		f()
+	}
+	e.pending = nil
+}
+
+func newExitTestManager(t *testing.T, containerID string) (*DNSManager, *exitTimers) {
 	t.Helper()
+	timers := &exitTimers{}
 	dm := CreateDNSManager(100)
-	dm.exitGracePeriod = 50 * time.Millisecond
+	dm.afterFunc = timers.afterFunc
 	dm.ContainerCallback(containercollection.PubSubEvent{
 		Type:      containercollection.EventTypeAddContainer,
 		Container: &containercollection.Container{Runtime: containercollection.RuntimeMetadata{BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{ContainerID: containerID}}},
 	})
-	return dm
+	return dm, timers
+}
+
+func cloudDNSEvent(containerID string, pid uint32, name string) *utils.StructEvent {
+	return &utils.StructEvent{ContainerID: containerID, Pid: pid, DNSName: name, Addresses: []string{"52.218.0.1"}}
 }
 
 func exitEvent(containerID string, pid, tid uint32) *utils.StructEvent {
@@ -26,37 +47,49 @@ func exitEvent(containerID string, pid, tid uint32) *utils.StructEvent {
 }
 
 func TestReportExitEvent_RecycledPidDoesNotInheritCloudServices(t *testing.T) {
-	dm := newExitTestManager(t, "worker")
-	dm.ReportEvent(&utils.StructEvent{ContainerID: "worker", Pid: 4242, DNSName: "s3.eu-west-1.amazonaws.com.", Addresses: []string{"52.218.0.1"}})
+	dm, timers := newExitTestManager(t, "worker")
+	dm.ReportEvent(cloudDNSEvent("worker", 4242, "s3.eu-west-1.amazonaws.com."))
 
 	dm.ReportExitEvent(exitEvent("worker", 4242, 4242))
-
 	require.NotNil(t, dm.ResolveContainerProcessToCloudServices("worker", 4242), "alerts raised just before the exit must still get the cloud services")
-	require.Eventually(t, func() bool {
-		return dm.ResolveContainerProcessToCloudServices("worker", 4242) == nil
-	}, time.Second, 10*time.Millisecond, "a recycled pid must not inherit cloud services")
+
+	timers.fire()
+	require.Nil(t, dm.ResolveContainerProcessToCloudServices("worker", 4242), "a recycled pid must not inherit cloud services")
+}
+
+func TestReportExitEvent_ReplacementKeepsItsCloudServices(t *testing.T) {
+	dm, timers := newExitTestManager(t, "worker")
+	dm.ReportEvent(cloudDNSEvent("worker", 4242, "s3.eu-west-1.amazonaws.com."))
+	dm.ReportExitEvent(exitEvent("worker", 4242, 4242))
+
+	dm.ReportEvent(cloudDNSEvent("worker", 4242, "sts.amazonaws.com."))
+	timers.fire()
+
+	got := dm.ResolveContainerProcessToCloudServices("worker", 4242)
+	require.NotNil(t, got, "the replacement must keep its cloud services")
+	require.ElementsMatch(t, []string{"sts.amazonaws.com."}, got.ToSlice(), "the replacement must not inherit the exited process's cloud services")
 }
 
 func TestReportExitEvent_ThreadExitKeepsCloudServices(t *testing.T) {
-	dm := newExitTestManager(t, "worker")
-	dm.ReportEvent(&utils.StructEvent{ContainerID: "worker", Pid: 4242, DNSName: "s3.eu-west-1.amazonaws.com.", Addresses: []string{"52.218.0.1"}})
+	dm, timers := newExitTestManager(t, "worker")
+	dm.ReportEvent(cloudDNSEvent("worker", 4242, "s3.eu-west-1.amazonaws.com."))
 
 	dm.ReportExitEvent(exitEvent("worker", 4242, 4243))
 
-	require.Never(t, func() bool {
-		return dm.ResolveContainerProcessToCloudServices("worker", 4242) == nil
-	}, 200*time.Millisecond, 10*time.Millisecond, "a thread exit must not drop the process's cloud services")
+	require.Empty(t, timers.pending, "a thread exit must not schedule a cleanup")
+	require.NotNil(t, dm.ResolveContainerProcessToCloudServices("worker", 4242), "a thread exit must not drop the process's cloud services")
 }
 
 func TestReportExitEvent_ExitedPidsAreDropped(t *testing.T) {
-	dm := newExitTestManager(t, "cron-runner")
+	dm, timers := newExitTestManager(t, "cron-runner")
 	for pid := uint32(1000); pid < 6000; pid++ {
-		dm.ReportEvent(&utils.StructEvent{ContainerID: "cron-runner", Pid: pid, DNSName: "sts.amazonaws.com.", Addresses: []string{"52.94.0.1"}})
+		dm.ReportEvent(cloudDNSEvent("cron-runner", pid, "sts.amazonaws.com."))
 		dm.ReportExitEvent(exitEvent("cron-runner", pid, pid))
 	}
+	timers.fire()
+
 	pidToServices, found := dm.containerToCloudServices.Load("cron-runner")
 	require.True(t, found, "container must be tracked")
-	require.Eventually(t, func() bool {
-		return pidToServices.Len() == 0
-	}, 2*time.Second, 10*time.Millisecond, "exited pids must not stay in the map")
+	require.Zero(t, pidToServices.Len(), "exited pids must not stay in the map")
+	require.Empty(t, dm.exitedCloudServices, "exited pids must be dropped after the grace period")
 }
