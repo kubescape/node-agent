@@ -22,9 +22,20 @@ type FullStartConfig struct {
 // FullEngine prepares one persistent owner without activating its first policy.
 // Install event provenance BEFORE Start and Activate. A non-nil instance returned
 // with an error still owns resources: retain it and retry Stop until successful.
+// Start may run concurrently for distinct bindings. Instance operations are
+// serialized per binding; Close runs only after all Start/instance work joins.
 // Event callbacks must not reenter lifecycle methods or block on their locks.
 type FullEngine interface {
 	Start(context.Context, string, FullStartConfig, func(RawFullVerdict)) (FullInstance, error)
+}
+
+// FullEngineCloser optionally owns node-wide resources shared by instances.
+// The backend calls Close only after every instance and untransferred lease has
+// drained. An error retains ownership for retry; success is called only once.
+// Close must not release the borrowed runtime or binding source: their caller
+// closes those only after backend Close succeeds. Legacy engines need no Close.
+type FullEngineCloser interface {
+	Close(context.Context) error
 }
 
 // FullInstance reloads the same kernel owner; it never replaces the gadget.
