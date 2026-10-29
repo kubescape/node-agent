@@ -266,13 +266,14 @@ func (dm *DNSManager) ReportEvent(dnsEvent utils.DNSEvent) {
 // ReportExitEvent moves the exited process's cloud services out of the live
 // map, so a recycled pid starts with an empty set, and keeps them for a grace
 // period so alerts raised just before the exit still get them. The exit tracer
-// fires for every thread with the thread group id as the pid, so only the group
-// leader's exit counts (a procfs exit has no tid and always counts).
+// fires for every thread with the thread group id as the pid, and the leader
+// can exit while other threads keep running, so only the exit of the group's
+// last live thread counts.
 func (dm *DNSManager) ReportExitEvent(exitEvent utils.ExitEvent) {
-	pid := exitEvent.GetPID()
-	if tid := uint32(exitEvent.GetPID64()); tid != 0 && tid != pid {
+	if !exitEvent.GetGroupDead() {
 		return
 	}
+	pid := exitEvent.GetPID()
 	containerID := exitEvent.GetContainerID()
 	exitNs := int64(exitEvent.GetTimestamp())
 

@@ -11,4 +11,5 @@ struct event {
     __u32 exit_pid;
     __u32 exit_tid;
     __u32 exit_ppid;
+    bool exit_group_dead;
 };

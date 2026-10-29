@@ -146,6 +146,10 @@ type ExecEvent interface {
 type ExitEvent interface {
 	EnrichEvent
 	GetExitCode() uint32
+	// GetGroupDead reports whether no thread of the exiting thread's group is
+	// still live, i.e. the whole process has exited. It may be true for more
+	// than one exit of the same group.
+	GetGroupDead() bool
 	GetSignal() uint32
 }
 

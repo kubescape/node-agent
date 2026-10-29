@@ -46,7 +46,15 @@ func cloudDNSEvent(containerID string, pid uint32, name string, ts int64) *utils
 	return &utils.StructEvent{ContainerID: containerID, Pid: pid, DNSName: name, Addresses: []string{"52.218.0.1"}, Timestamp: ts}
 }
 
+// exitEvent is the exit of the group's last live thread, i.e. the whole process.
 func exitEvent(containerID string, pid, tid uint32, ts int64) *utils.StructEvent {
+	event := threadExitEvent(containerID, pid, tid, ts)
+	event.GroupDead = true
+	return event
+}
+
+// threadExitEvent is the exit of one thread while others in the group still run.
+func threadExitEvent(containerID string, pid, tid uint32, ts int64) *utils.StructEvent {
 	return &utils.StructEvent{EventType: utils.ExitEventType, ContainerID: containerID, Pid: pid, PID64: uint64(pid)<<32 | uint64(tid), Timestamp: ts}
 }
 
@@ -159,10 +167,26 @@ func TestReportExitEvent_ThreadExitKeepsCloudServices(t *testing.T) {
 	dm, timers := newExitTestManager(t, "worker")
 	dm.ReportEvent(cloudDNSEvent("worker", 4242, "s3.eu-west-1.amazonaws.com.", 100))
 
-	dm.ReportExitEvent(exitEvent("worker", 4242, 4243, 200))
+	dm.ReportExitEvent(threadExitEvent("worker", 4242, 4243, 200))
 
 	require.Empty(t, timers.pending, "a thread exit must not schedule a cleanup")
 	require.NotNil(t, dm.ResolveContainerProcessToCloudServices("worker", 4242), "a thread exit must not drop the process's cloud services")
+}
+
+func TestReportExitEvent_LeaderExitWithSurvivingWorkerKeepsCloudServices(t *testing.T) {
+	dm, timers := newExitTestManager(t, "worker")
+	dm.ReportEvent(cloudDNSEvent("worker", 4242, "s3.eu-west-1.amazonaws.com.", 100))
+
+	// The main thread calls pthread_exit while worker 4243 keeps running.
+	dm.ReportExitEvent(threadExitEvent("worker", 4242, 4242, 200))
+	timers.fire()
+	require.Equal(t, []string{"s3.eu-west-1.amazonaws.com."}, resolvedNames(dm, "worker", 4242), "a leader exit with a surviving worker must keep the process's cloud services")
+
+	// The last worker exits, so the whole process is gone.
+	dm.ReportExitEvent(exitEvent("worker", 4242, 4243, 300))
+	require.NotNil(t, dm.ResolveContainerProcessToCloudServices("worker", 4242), "alerts raised just before the last thread exits must still get the cloud services")
+	timers.fire()
+	require.Nil(t, dm.ResolveContainerProcessToCloudServices("worker", 4242), "the last thread's exit must drop the process's cloud services")
 }
 
 func TestReportExitEvent_ExitedPidsAreDropped(t *testing.T) {

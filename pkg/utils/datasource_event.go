@@ -583,6 +583,18 @@ func (e *DatasourceEvent) GetGid() *uint32 {
 	}
 }
 
+// GetGroupDead reports whether the exit gadget saw the last live thread of the
+// group exit. A gadget without the field reports false, so callers keep the
+// process's state rather than retiring it while other threads may still run.
+func (e *DatasourceEvent) GetGroupDead() bool {
+	accessor := e.localFieldAccessor("exit_group_dead")
+	if accessor == nil {
+		return false
+	}
+	groupDead, _ := accessor.Bool(e.Data)
+	return groupDead
+}
+
 // GetHasTTY reports whether the process has a controlling terminal.
 //
 // It prefers the device number, which is unambiguous, and falls back to the

@@ -167,6 +167,8 @@ func (pt *ProcfsTracer) handleExitEvent(event conversion.ProcessEvent) {
 		Pid:       event.PID,
 		Ppid:      event.PPID,
 		Comm:      "exit",
+		// The pid is gone from procfs, so the whole thread group has exited.
+		GroupDead: true,
 	}
 
 	exitEvent.Timestamp = event.Timestamp.UnixNano()
