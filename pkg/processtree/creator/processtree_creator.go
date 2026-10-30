@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -67,12 +68,13 @@ type processTreeCreatorImpl struct {
 	// whose parent has no known ancestry. Injectable for tests.
 	readParent func(pid uint32) (ppid uint32, startTimeNs uint64, ok bool)
 
-	// bootToWallNs is wall-clock ns minus CLOCK_BOOTTIME ns, sampled once at
-	// construction: the same fixed offset inspektor-gadget adds to an exec
-	// event's bpf_ktime_get_boot_ns timestamp. Subtracting it maps the exec
-	// instant back to the boot clock, so rereadUnknownParent can tell whether a
-	// /proc reading describes a process created after the exec, i.e. a recycled
-	// pid. Zero means unknown. Injectable for tests.
+	// bootToWallNs is the fixed wall-minus-boot offset that
+	// gadgets.WallTimeFromBootTime adds to an exec event's bpf_ktime_get_boot_ns
+	// timestamp. It is read back from that function rather than resampled, so
+	// it is exactly the offset IG sampled at package init. Subtracting it maps
+	// the exec instant back to the boot clock, so rereadUnknownParent can tell
+	// whether a /proc reading describes a process created after the exec, i.e.
+	// a recycled pid. Zero means unknown. Injectable for tests.
 	bootToWallNs int64
 }
 
@@ -93,10 +95,9 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		readStartTime:         newProcfsStartTimeReader(),
 		nowBootNs:             readBootTimeNs,
 		readParent:            newProcfsParentReader(),
-		config:                config,
-	}
-	if boot := readBootTimeNs(); boot != 0 {
-		creator.bootToWallNs = time.Now().UnixNano() - int64(boot)
+		// WallTimeFromBootTime(ts) is ts plus IG's offset for any non-zero ts.
+		bootToWallNs: int64(gadgets.WallTimeFromBootTime(1)) - 1,
+		config:       config,
 	}
 
 	return creator
@@ -285,20 +286,20 @@ func (pt *processTreeCreatorImpl) rereadUnknownParent(proc *armotypes.Process, e
 	}
 
 	// Pid-reuse guard: the /proc reading must describe the same incarnation the
-	// node does. A recorded start time must match. For proc, the event's exec
-	// instant, mapped to the boot clock, must also not precede the /proc
-	// creation time, even when a start time is recorded: an exec handled after
-	// its pid was recycled reads a replacement created after that instant, and
-	// an earlier delayed exec may already have recorded that replacement's time.
-	// Without a recorded start time, an ancestor cannot be identified.
+	// node does. A recorded start time must match. The event's exec instant,
+	// mapped to the boot clock, must also not precede the /proc creation time,
+	// even when a start time is recorded: proc and every ancestor of it existed
+	// before this exec. An exec handled after a pid was recycled reads a
+	// replacement created after that instant, and an earlier delayed exec may
+	// already have recorded that replacement's time. Without a recorded start
+	// time, an ancestor cannot be identified.
 	if known := pt.pidStartTimeNs[anchor.PID]; known != 0 && known != startNs {
 		return
 	}
-	if anchor == proc {
-		if !pt.createdBeforeExec(startNs, event.StartTimeNs) {
-			return
-		}
-	} else if pt.pidStartTimeNs[anchor.PID] == 0 {
+	if anchor != proc && pt.pidStartTimeNs[anchor.PID] == 0 {
+		return
+	}
+	if !pt.createdBeforeExec(startNs, event.StartTimeNs) {
 		return
 	}
 

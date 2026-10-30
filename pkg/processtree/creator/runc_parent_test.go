@@ -87,7 +87,7 @@ func TestExecRereadsAncestorWhenChildExecsFirst(t *testing.T) {
 	// runc exits; the child's exec repairs its parent's chain.
 	c.pidStartTimeNs[execPID] = execStartNs
 	table[execPID] = [2]uint64{uint64(shim), execStartNs}
-	c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: execChildPID, PPID: execPID, Comm: "sleep", Pcomm: "sh", ContainerID: ancestryContainerID})
+	c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: execChildPID, PPID: execPID, Comm: "sleep", Pcomm: "sh", ContainerID: ancestryContainerID, StartTimeNs: uint64(testWallOffsetNs) + execBootNs})
 	require.Equal(t, shim, c.processMap.Get(execPID).PPID)
 	require.Equal(t, shimComm, c.processMap.Get(execPID).Pcomm, "the repaired ancestor must name its adopted parent")
 	require.Equal(t, "sh", c.processMap.Get(execChildPID).Pcomm, "the child's own parent is unchanged")
@@ -159,6 +159,24 @@ func TestExecRereadRejectsRecycledExecTarget(t *testing.T) {
 		require.Equal(t, runcPID, c.processMap.Get(execPID).PPID, "the second delayed exec must not adopt the replacement's parent")
 		require.Equal(t, "runc", c.processMap.Get(execPID).Pcomm)
 	})
+}
+
+// A delayed parent exec caches its recycled pid's replacement start time. A
+// queued child exec stamped before the replacement existed must not trust that
+// cached value and attach the old ancestry to the replacement's parent.
+func TestExecRereadRejectsAncestorCreatedAfterChildExec(t *testing.T) {
+	c, _, shim := newRuncTestCreator(t)
+	calls := 0
+	c.readParent = stubParentReader(map[uint32][2]uint64{execPID: {uint64(shim), recycledStartNs}, shim: {1, shimStartNs}}, &calls)
+	c.readStartTime = func(uint32) (uint64, time.Time) { return recycledStartNs, time.Time{} }
+	execUnderRunc(c, execPID, runcPID, "sh")
+	require.Equal(t, runcPID, c.processMap.Get(execPID).PPID)
+	require.Equal(t, recycledStartNs, c.pidStartTimeNs[execPID], "the parent exec caches the replacement's start time")
+
+	childExecBootNs := recycledStartNs - 1_000_000_000
+	c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: execChildPID, PPID: execPID, Comm: "sleep", Pcomm: "sh", ContainerID: ancestryContainerID, StartTimeNs: uint64(testWallOffsetNs) + childExecBootNs})
+	require.Equal(t, runcPID, c.processMap.Get(execPID).PPID, "an ancestor created after the child's exec must not be repaired")
+	require.Equal(t, "runc", c.processMap.Get(execPID).Pcomm)
 }
 
 // Two queued execs for the same pid both report runc. The first repairs the
