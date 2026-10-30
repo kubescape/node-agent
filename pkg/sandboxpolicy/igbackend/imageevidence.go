@@ -102,7 +102,7 @@ func (s *containerdImageSource) Evidence(ctx context.Context, id string) (contai
 	if err != nil {
 		return result, err
 	}
-	spec, err := container.Spec(ctx)
+	spec, err := boundedContainerSpec(ctx, container)
 	if err != nil {
 		return result, err
 	}
@@ -110,7 +110,7 @@ func (s *containerdImageSource) Evidence(ctx context.Context, id string) (contai
 	if err != nil {
 		return result, err
 	}
-	diffs, err := image.RootFS(ctx)
+	diffs, err := boundedImageRootFS(ctx, image)
 	if err != nil {
 		return result, err
 	}
@@ -155,7 +155,7 @@ func (s *containerdImageSource) Evidence(ctx context.Context, id string) (contai
 		if e != nil {
 			return containerdImageEvidence{}, e
 		}
-		sandboxSpec, e := sandbox.Spec(ctx)
+		sandboxSpec, e := boundedContainerSpec(ctx, sandbox)
 		if e != nil {
 			return containerdImageEvidence{}, e
 		}
