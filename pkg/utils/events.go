@@ -276,6 +276,10 @@ const (
 	UnshareEventType      EventType = "unshare"
 )
 
+// ExecAuthorizationEventType is an internal dispatch key for exec authorization,
+// not process observation or an exporter wire-format name.
+const ExecAuthorizationEventType EventType = "execAuthorization"
+
 // Get the path of the file on the node.
 func GetHostFilePathFromEvent(event EnrichEvent, containerPid uint32) (string, error) {
 	switch event.GetEventType() {

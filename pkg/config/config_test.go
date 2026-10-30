@@ -43,6 +43,7 @@ func TestLoadConfig(t *testing.T) {
 				KubernetesMode:                 true,
 				NetworkStreamingInterval:       2 * time.Minute,
 				InitialDelay:                   2 * time.Minute,
+				SandboxPolicyMaxOwners:         4,
 				HostSBOMRescanInterval:         24 * time.Hour,
 				HostSbomOffloadEnabled:         true,
 				MaxSniffingTime:                24 * time.Hour,
@@ -1007,4 +1008,59 @@ func TestNormalizeDNSSuffix(t *testing.T) {
 	} {
 		assert.Equal(t, want, NormalizeDNSSuffix(in), "input %q", in)
 	}
+}
+
+func TestSandboxPolicyOptIn(t *testing.T) {
+	cases := []struct {
+		name, json           string
+		wantEnabled, wantErr bool
+	}{
+		{"default", `{}`, false, false},
+		{"explicit", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","runtimeDetectionEnabled":false,"applicationProfileServiceEnabled":false}`, true, false},
+		{"missing-runtime", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test"}`, false, true},
+		{"invalid-owner-budget", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","sandboxPolicyContainerdSocket":"/run/containerd/containerd.sock","sandboxPolicyControlRoot":"/sys/fs/cgroup","sandboxPolicyMaxOwners":0}`, false, true},
+		{"missing-image", `{"sandboxPolicyEnabled":true}`, false, true},
+		{"whitespace-image", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":" "}`, false, true},
+		{"host-mode", `{"sandboxPolicyEnabled":true,"sandboxPolicyImage":"enforce_exec:test","kubernetesMode":false}`, false, true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			t.Cleanup(viper.Reset)
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(dir+"/config.json", []byte(tt.json), 0600))
+			cfg, err := LoadConfigOptional(dir, false)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantEnabled, cfg.EnableSandboxPolicy)
+			if tt.wantEnabled {
+				assert.False(t, cfg.EnableRuntimeDetection)
+				assert.False(t, cfg.EnableApplicationProfile)
+			}
+		})
+	}
+}
+
+func TestSandboxPolicyEnvironmentOnlyConfig(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	for name, value := range map[string]string{
+		"SANDBOXPOLICYENABLED":          "true",
+		"SANDBOXPOLICYIMAGE":            "enforce_exec:test",
+		"SANDBOXPOLICYCONTAINERDSOCKET": "/run/containerd/containerd.sock",
+		"SANDBOXPOLICYCONTROLROOT":      "/sys/fs/cgroup",
+		"SANDBOXPOLICYMAXOWNERS":        "7",
+	} {
+		t.Setenv(name, value)
+	}
+	cfg, err := LoadConfigOptional(t.TempDir(), false)
+	require.NoError(t, err)
+	assert.True(t, cfg.EnableSandboxPolicy)
+	assert.Equal(t, "enforce_exec:test", cfg.SandboxPolicyImage)
+	assert.Equal(t, "/run/containerd/containerd.sock", cfg.SandboxPolicyContainerdSocket)
+	assert.Equal(t, "/sys/fs/cgroup", cfg.SandboxPolicyControlRoot)
+	assert.Equal(t, uint64(7), cfg.SandboxPolicyMaxOwners)
 }
