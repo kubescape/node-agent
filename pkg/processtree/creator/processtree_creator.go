@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -61,6 +62,20 @@ type processTreeCreatorImpl struct {
 	// recorded creation time. Injectable for tests; read through pt.bootTimeNs(),
 	// which tolerates a nil hook by returning 0 ("unknown").
 	nowBootNs func() uint64
+
+	// readParent fetches a pid's CURRENT parent and boot-relative start time
+	// from /proc/<pid>/stat. Used only by rereadUnknownParent, on the exec path
+	// whose parent has no known ancestry. Injectable for tests.
+	readParent func(pid uint32) (ppid uint32, startTimeNs uint64, ok bool)
+
+	// bootToWallNs is the fixed wall-minus-boot offset that
+	// gadgets.WallTimeFromBootTime adds to an exec event's bpf_ktime_get_boot_ns
+	// timestamp. It is read back from that function rather than resampled, so
+	// it is exactly the offset IG sampled at package init. Subtracting it maps
+	// the exec instant back to the boot clock, so rereadUnknownParent can tell
+	// whether a /proc reading describes a process created after the exec, i.e.
+	// a recycled pid. Zero means unknown. Injectable for tests.
+	bootToWallNs int64
 }
 
 func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree, config config.Config) ProcessTreeCreator {
@@ -79,7 +94,10 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		pidStartTimeNs:        make(map[uint32]uint64),
 		readStartTime:         newProcfsStartTimeReader(),
 		nowBootNs:             readBootTimeNs,
-		config:                config,
+		readParent:            newProcfsParentReader(),
+		// WallTimeFromBootTime(ts) is ts plus IG's offset for any non-zero ts.
+		bootToWallNs: int64(gadgets.WallTimeFromBootTime(1)) - 1,
+		config:       config,
 	}
 
 	return creator
@@ -214,6 +232,113 @@ func (pt *processTreeCreatorImpl) ancestryRoot(pid uint32) (root uint32, cyclic 
 		pid = proc.PPID
 	}
 	return 0, true
+}
+
+// rereadUnknownParent repairs the `runc exec` race. A `kubectl exec`'d process
+// is reported with whichever parent it had when its exec event was captured:
+// the containerd-shim if `runc exec` has already exited, or the runc process if
+// it is still alive. runc is a host process, so the tree only holds a
+// parentless placeholder for it and the branch cannot reach the shim. By the
+// time the event is handled runc has usually exited and the kernel has
+// reparented the process to the shim, so the current parent is re-read from
+// /proc and adopted when it is already a tree node.
+//
+// The re-read targets the topmost node below the unknown ancestor, not
+// necessarily proc: a child of the exec'd process may exec before its parent's
+// chain was repaired, and it is the parent that hangs off runc.
+//
+// Only reached when the chain does not reach the container's shim or a known
+// host root, so the /proc read under the tree lock stays off the common path,
+// the same trade-off ensureStartTime makes for exec.
+//
+// Must be called with pt.mutex held.
+func (pt *processTreeCreatorImpl) rereadUnknownParent(proc *armotypes.Process, event conversion.ProcessEvent) {
+	containerID := event.ContainerID
+	if proc.PPID == 0 || pt.readParent == nil || containerID == "" || utils.IsHost(containerID) {
+		return
+	}
+	if root, cyclic := pt.ancestryRoot(proc.PID); cyclic || root == 1 {
+		return
+	}
+	if pt.containerTree.IsProcessUnderContainer(proc.PID, containerID, &pt.processMap) {
+		return
+	}
+
+	// Walk up to the last node whose parent is missing or a placeholder.
+	// ancestryRoot proved the chain acyclic, so this terminates.
+	anchor := proc
+	for {
+		parent, ok := pt.processMap.Load(anchor.PPID)
+		if !ok || parent.PPID == 0 {
+			break
+		}
+		anchor = parent
+	}
+
+	// A node awaiting deletion may have had its pid recycled already.
+	if _, exited := pt.pendingExits[anchor.PID]; exited {
+		return
+	}
+
+	ppid, startNs, ok := pt.readParent(anchor.PID)
+	if !ok || ppid == anchor.PPID || ppid == 0 || startNs == 0 {
+		return
+	}
+
+	// Pid-reuse guard: the /proc reading must describe the same incarnation the
+	// node does. A recorded start time must match. The event's exec instant,
+	// mapped to the boot clock, must also not precede the /proc creation time,
+	// even when a start time is recorded: proc and every ancestor of it existed
+	// before this exec. An exec handled after a pid was recycled reads a
+	// replacement created after that instant, and an earlier delayed exec may
+	// already have recorded that replacement's time. Without a recorded start
+	// time, an ancestor cannot be identified.
+	if known := pt.pidStartTimeNs[anchor.PID]; known != 0 && known != startNs {
+		return
+	}
+	if anchor != proc && pt.pidStartTimeNs[anchor.PID] == 0 {
+		return
+	}
+	if !pt.createdBeforeExec(startNs, event.StartTimeNs) {
+		return
+	}
+
+	// Only adopt a parent the tree already knows, and only the incarnation the
+	// node describes: no pending exit, a matching recorded start time, and never
+	// younger than the child. Host shims have no recorded start time in
+	// Kubernetes mode, because host procfs events never reach the side map.
+	parent, ok := pt.processMap.Load(ppid)
+	if !ok {
+		return
+	}
+	if _, exited := pt.pendingExits[ppid]; exited {
+		return
+	}
+	_, parentNs, ok := pt.readParent(ppid)
+	if !ok || parentNs == 0 || parentNs > startNs {
+		return
+	}
+	if known := pt.pidStartTimeNs[ppid]; known != 0 && known != parentNs {
+		return
+	}
+
+	pt.UpdatePPID(anchor, conversion.ProcessEvent{PID: anchor.PID, PPID: ppid, ContainerID: containerID})
+	if anchor.PPID != ppid {
+		return
+	}
+	anchor.Pcomm = parent.Comm
+}
+
+// createdBeforeExec reports whether a process created at startNs (boot clock,
+// /proc field 22) can be the one that performed an exec stamped execWallNs
+// (inspektor-gadget wall time). /proc truncates to clock ticks, so the same
+// process always reads at or before its exec. Unknown values prove nothing and
+// report false.
+func (pt *processTreeCreatorImpl) createdBeforeExec(startNs, execWallNs uint64) bool {
+	if pt.bootToWallNs == 0 || execWallNs == 0 || int64(execWallNs) <= pt.bootToWallNs {
+		return false
+	}
+	return startNs <= uint64(int64(execWallNs)-pt.bootToWallNs)
 }
 
 // ensureStartTime gives a fork/exec-created node its process identity without
@@ -442,6 +567,8 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 	pt.UpdatePPID(proc, event)
 
 	if pt.config.KubernetesMode {
+		pt.rereadUnknownParent(proc, event)
+
 		root, cyclic := pt.ancestryRoot(proc.PID)
 		// Unknown parents can arrive after this exec. Preserve the raw parent
 		// instead of permanently cutting that chain at the shim. Retain fallback
@@ -460,7 +587,10 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 	if event.Comm != "" {
 		proc.Comm = event.Comm
 	}
-	if event.Pcomm != "" {
+	// The event's Pcomm names the parent it reported. Apply it only when that
+	// parent was kept: a re-read adoption, or an earlier exec's adoption that a
+	// delayed exec could not undo, must not be relabelled with a stale comm.
+	if event.Pcomm != "" && (event.PPID == 0 || event.PPID == proc.PPID) {
 		proc.Pcomm = event.Pcomm
 	}
 	if event.Cmdline != "" {
