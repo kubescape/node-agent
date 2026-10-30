@@ -29,30 +29,9 @@ func NewExecOperator() operators.DataOperator {
 					return fmt.Errorf("failed to get args: %s", err)
 				}
 
-				if len(payload) == 0 {
-					return fmt.Errorf("empty args")
-				}
-
 				argsSize, _ := argsSize.Uint32(data)
-				if argsSize > uint32(len(payload)) {
-					argsSize = uint32(len(payload))
-				}
 				argsCount, _ := argsCount.Int32(data)
-
-				args := []string{}
-				count := 0
-				buf := []byte{}
-
-				for i := 0; i < int(argsSize) && count < int(argsCount); i++ {
-					c := payload[i]
-					if c == 0 {
-						args = append(args, string(buf))
-						count = 0
-						buf = []byte{}
-					} else {
-						buf = append(buf, c)
-					}
-				}
+				args := decodeExecArgs(payload, argsSize, argsCount)
 
 				// TODO: The datasource doesn't support arrays yet, hence we have to
 				// join the args in a single string. We are using a non-breaking space
@@ -65,4 +44,31 @@ func NewExecOperator() operators.DataOperator {
 		}),
 		simple.WithPriority(1),
 	)
+}
+
+// decodeExecArgs splits the NUL-separated argv payload sent by the gadget. A
+// trailing argument without a NUL (cut by the capture limit) is dropped. An
+// empty payload (argv could not be read) yields no arguments rather than an
+// error: the event is kept, the args field becomes "", GetArgs() returns nil,
+// and consumers treat argv as unknown.
+func decodeExecArgs(payload []byte, argsSize uint32, argsCount int32) []string {
+	if argsSize > uint32(len(payload)) {
+		argsSize = uint32(len(payload))
+	}
+
+	args := []string{}
+	count := 0
+	buf := []byte{}
+
+	for i := 0; i < int(argsSize) && count < int(argsCount); i++ {
+		c := payload[i]
+		if c == 0 {
+			args = append(args, string(buf))
+			count = 0
+			buf = []byte{}
+		} else {
+			buf = append(buf, c)
+		}
+	}
+	return args
 }
