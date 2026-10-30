@@ -114,6 +114,58 @@ coverage, an unambiguous selected container and literal paths. Exact argv-length
 argument-wildcard and environment constraints cannot be represented faithfully by
 the CRD exec vocabulary and are refused rather than broadened.
 
+## Role-entry authoring
+
+Treat `setRole` on an allow rule as an **authorization grant**, not just an event
+label. An omitted or empty actor, or a wildcard-only actor constraint, can grant
+the role broadly to matching successful execs. The current compiler accepts
+such broad grants; an empty actor object is not a mitigation or a validation
+workaround.
+
+Constrain entry using a meaningful trusted actor, the intended target and the
+policy-local authorization boundary. Review how the launcher's trusted role
+history was established; missing history is not authority, and an executable
+path or image origin alone does not establish trust in its inputs. A constrained
+native Go IR example and its assumptions are documented in IG's
+[role-entry authoring and isolation guidance](https://github.com/kubescape/inspektor-gadget/blob/8224dd6e694ad43b83ca1dc85de8d2b954d5f98e/gadgets/enforce_exec/fullruntime/README.md#role-entry-authoring-and-isolation).
+That example is not CRD YAML or a complete deployment policy.
+
+Roles are **not hostile-code isolation boundaries**. Untrusted code may invoke a
+trusted launcher as a confused deputy or delegate work through IPC, shared files
+or services. Review that reachable authority, including pod-shared resources,
+rather than assuming a role label prevents delegation.
+
+## Runtime evidence input limits
+
+The containerd evidence path refuses oversized metadata before its relevant
+content read or JSON decode. These are supported-input limits, not a total heap,
+process-memory or IG `CompileBytes` bound:
+
+- Raw container and sandbox OCI specs: **1 MiB each** before JSON decoding;
+  existing encoded-spec size checks still apply. CRI extensions retain their
+  existing **1 MiB each** predecode limit.
+- Image indexes, manifests and configs: **16 MiB per blob and 16 MiB aggregate**
+  per evidence observation. The actual content-store reader size is checked,
+  not merely the descriptor's claimed size. Repeated reads and inspected inline
+  descriptor data count again; an invalid inline attempt followed by a store
+  read charges both. Admitted failed reads are not refunded.
+- Descriptor traversal retains containerd's **10,000 references**, including
+  duplicates. Existing limits of **128 image diff IDs** and **128 snapshot
+  ancestors** remain in force.
+
+The raw-spec and streamed/aggregate metadata ceilings are stricter input-domain
+restrictions: whitespace-heavy specs or large multi-platform metadata may now be
+refused even if their eventual selected representation was previously accepted.
+Nested inline data is allocated while decoding its size-admitted parent; its
+later byte check does not claim to prevent that earlier allocation. Decoder
+copies, RPC buffers and provider-owned asynchronous state are not covered by a
+16 MiB heap claim.
+
+Excess is unsupported evidence and fails closed. On re-attestation it follows the
+existing sticky evidence-failure path, not the retryable transport-unavailable
+exception. This does not remove or weaken any image, mount, identity or native
+readiness check, and does not expand the supported runtime/kernel matrix.
+
 ## Public event hooks
 
 Register receivers in `ThirdPartyTracers.ThirdPartyEventReceivers` under
