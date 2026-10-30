@@ -250,20 +250,17 @@ func (pt *processTreeCreatorImpl) ancestryRoot(pid uint32) (root uint32, cyclic 
 // host root, so the /proc read under the tree lock stays off the common path,
 // the same trade-off ensureStartTime makes for exec.
 //
-// Returns true when proc itself was given a new parent, so the caller must not
-// overwrite the adopted parent's comm with the event's stale Pcomm.
-//
 // Must be called with pt.mutex held.
-func (pt *processTreeCreatorImpl) rereadUnknownParent(proc *armotypes.Process, event conversion.ProcessEvent) bool {
+func (pt *processTreeCreatorImpl) rereadUnknownParent(proc *armotypes.Process, event conversion.ProcessEvent) {
 	containerID := event.ContainerID
 	if proc.PPID == 0 || pt.readParent == nil || containerID == "" || utils.IsHost(containerID) {
-		return false
+		return
 	}
 	if root, cyclic := pt.ancestryRoot(proc.PID); cyclic || root == 1 {
-		return false
+		return
 	}
 	if pt.containerTree.IsProcessUnderContainer(proc.PID, containerID, &pt.processMap) {
-		return false
+		return
 	}
 
 	// Walk up to the last node whose parent is missing or a placeholder.
@@ -279,25 +276,30 @@ func (pt *processTreeCreatorImpl) rereadUnknownParent(proc *armotypes.Process, e
 
 	// A node awaiting deletion may have had its pid recycled already.
 	if _, exited := pt.pendingExits[anchor.PID]; exited {
-		return false
+		return
 	}
 
 	ppid, startNs, ok := pt.readParent(anchor.PID)
 	if !ok || ppid == anchor.PPID || ppid == 0 || startNs == 0 {
-		return false
+		return
 	}
 
 	// Pid-reuse guard: the /proc reading must describe the same incarnation the
-	// node does. A recorded start time must match. Without one, only proc can be
-	// identified: the event's exec instant, mapped to the boot clock, must not
-	// precede the /proc creation time. An exec handled after its pid was
-	// recycled reads a replacement created after that instant.
-	if known := pt.pidStartTimeNs[anchor.PID]; known != 0 {
-		if known != startNs {
-			return false
+	// node does. A recorded start time must match. For proc, the event's exec
+	// instant, mapped to the boot clock, must also not precede the /proc
+	// creation time, even when a start time is recorded: an exec handled after
+	// its pid was recycled reads a replacement created after that instant, and
+	// an earlier delayed exec may already have recorded that replacement's time.
+	// Without a recorded start time, an ancestor cannot be identified.
+	if known := pt.pidStartTimeNs[anchor.PID]; known != 0 && known != startNs {
+		return
+	}
+	if anchor == proc {
+		if !pt.createdBeforeExec(startNs, event.StartTimeNs) {
+			return
 		}
-	} else if anchor != proc || !pt.createdBeforeExec(startNs, event.StartTimeNs) {
-		return false
+	} else if pt.pidStartTimeNs[anchor.PID] == 0 {
+		return
 	}
 
 	// Only adopt a parent the tree already knows, and only the incarnation the
@@ -306,25 +308,24 @@ func (pt *processTreeCreatorImpl) rereadUnknownParent(proc *armotypes.Process, e
 	// Kubernetes mode, because host procfs events never reach the side map.
 	parent, ok := pt.processMap.Load(ppid)
 	if !ok {
-		return false
+		return
 	}
 	if _, exited := pt.pendingExits[ppid]; exited {
-		return false
+		return
 	}
 	_, parentNs, ok := pt.readParent(ppid)
 	if !ok || parentNs == 0 || parentNs > startNs {
-		return false
+		return
 	}
 	if known := pt.pidStartTimeNs[ppid]; known != 0 && known != parentNs {
-		return false
+		return
 	}
 
 	pt.UpdatePPID(anchor, conversion.ProcessEvent{PID: anchor.PID, PPID: ppid, ContainerID: containerID})
 	if anchor.PPID != ppid {
-		return false
+		return
 	}
 	anchor.Pcomm = parent.Comm
-	return anchor == proc
 }
 
 // createdBeforeExec reports whether a process created at startNs (boot clock,
@@ -564,9 +565,8 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 
 	pt.UpdatePPID(proc, event)
 
-	adopted := false
 	if pt.config.KubernetesMode {
-		adopted = pt.rereadUnknownParent(proc, event)
+		pt.rereadUnknownParent(proc, event)
 
 		root, cyclic := pt.ancestryRoot(proc.PID)
 		// Unknown parents can arrive after this exec. Preserve the raw parent
@@ -586,8 +586,10 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 	if event.Comm != "" {
 		proc.Comm = event.Comm
 	}
-	// The event's Pcomm names the parent it reported, not one adopted above.
-	if event.Pcomm != "" && !adopted {
+	// The event's Pcomm names the parent it reported. Apply it only when that
+	// parent was kept: a re-read adoption, or an earlier exec's adoption that a
+	// delayed exec could not undo, must not be relabelled with a stale comm.
+	if event.Pcomm != "" && (event.PPID == 0 || event.PPID == proc.PPID) {
 		proc.Pcomm = event.Pcomm
 	}
 	if event.Cmdline != "" {

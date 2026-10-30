@@ -3,6 +3,7 @@ package processtreecreator
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
@@ -143,6 +144,36 @@ func TestExecRereadRejectsRecycledExecTarget(t *testing.T) {
 			require.Equal(t, "runc", c.processMap.Get(execPID).Pcomm)
 		})
 	}
+
+	// Successive delayed execs: the first one records the replacement's start
+	// time through ensureStartTime, so the second sees a matching recorded time
+	// and must still be rejected by its exec timestamp.
+	t.Run("successive delayed execs", func(t *testing.T) {
+		c, _, shim := newRuncTestCreator(t)
+		calls := 0
+		c.readParent = stubParentReader(map[uint32][2]uint64{execPID: {uint64(shim), recycledStartNs}, shim: {1, shimStartNs}}, &calls)
+		c.readStartTime = func(uint32) (uint64, time.Time) { return recycledStartNs, time.Time{} }
+		execUnderRunc(c, execPID, runcPID, "sh")
+		require.Equal(t, recycledStartNs, c.pidStartTimeNs[execPID], "the first exec caches the replacement's start time")
+		execUnderRunc(c, execPID, runcPID, "sh")
+		require.Equal(t, runcPID, c.processMap.Get(execPID).PPID, "the second delayed exec must not adopt the replacement's parent")
+		require.Equal(t, "runc", c.processMap.Get(execPID).Pcomm)
+	})
+}
+
+// Two queued execs for the same pid both report runc. The first repairs the
+// parent; the second keeps it and must not relabel Pcomm back to runc.
+func TestExecRereadKeepsRepairedPcommOnSuccessiveExecs(t *testing.T) {
+	c, _, shim := newRuncTestCreator(t)
+	calls := 0
+	c.readParent = stubParentReader(map[uint32][2]uint64{execPID: {uint64(shim), execStartNs}, shim: {1, shimStartNs}}, &calls)
+	c.readStartTime = func(uint32) (uint64, time.Time) { return execStartNs, time.Time{} }
+	execUnderRunc(c, execPID, runcPID, "sh")
+	require.Equal(t, shim, c.processMap.Get(execPID).PPID)
+	require.Equal(t, shimComm, c.processMap.Get(execPID).Pcomm)
+	execUnderRunc(c, execPID, runcPID, "sh")
+	require.Equal(t, shim, c.processMap.Get(execPID).PPID)
+	require.Equal(t, shimComm, c.processMap.Get(execPID).Pcomm, "a stale runc pcomm must not overwrite the repaired parent's comm")
 }
 
 // The tree's node for the new ppid may be a stale, exited process whose pid was
