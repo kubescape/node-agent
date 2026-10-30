@@ -25,19 +25,26 @@ shim.
 |---|---|
 | Gate | Kubernetes mode only, a non-host container id, a non-zero parent, an acyclic chain that reaches neither pid 1 nor the container's shim. Every other exec skips the read. |
 | Target | The topmost node below the unknown ancestor. This is usually the exec'd process. It is the process's parent when a child execs before the parent's chain was repaired. |
-| Pid reuse | Skip when the target has a pending exit. Skip when the `/proc` start time (field 22) differs from the recorded `pidStartTimeNs`. Skip when an ancestor target has no recorded start time. The exec being handled proves that its own pid is live. |
-| Adoption | Only a parent that is already a tree node, and never one recorded as younger than the target. Adoption goes through `UpdatePPID`, so the container-subtree rules still apply. |
+| Pid reuse (target) | Skip when the target has a pending exit. With a recorded `pidStartTimeNs`, skip unless the `/proc` start time (field 22) matches it. Without one, only the exec'd process itself can be identified: its `/proc` start time must not be later than the event's exec timestamp mapped back to the boot clock. A later start time means the exec was handled after its pid was recycled. If the timestamp is unknown, or the target is an ancestor with no recorded start time, skip. |
+| Pid reuse (parent) | The new parent must already be a tree node with no pending exit. Its `/proc` start time is read too. It must match the node's recorded start time when there is one, and must not be later than the target's. Host shims have no recorded start time in Kubernetes mode, because host procfs events never reach the side map. |
+| Adoption | Adoption goes through `UpdatePPID`, so the container-subtree rules still apply. The repaired node's `Pcomm` becomes the adopted parent's `Comm`. For the exec'd process itself, the event's `Pcomm` (which names runc) is then not applied. |
 | No change | The pid is gone, the stat fails to parse, the parent is unchanged, or the new parent is unknown. The tree keeps today's behaviour. |
 
 ## Cost and locking
 
-The read is one `/proc/<pid>/stat` open-read-parse, about 7.5 µs. It runs under
+Each read is one `/proc/<pid>/stat` open-read-parse, about 7.5 µs. An adoption
+takes two reads: the target and the new parent. It runs under
 the tree's write lock, the same trade-off `ensureStartTime` makes on the exec
 path. It is acceptable because the gate keeps it off the common path: an exec
 whose parent chain is already known never reads `/proc`.
 
 The reader is the `readParent` field on the creator (`parent_reader.go`). Tests
-inject a stub in its place.
+inject a stub in its place. If `/proc` cannot be opened, the reader retries on
+the next call instead of staying disabled.
+
+The exec timestamp is inspektor-gadget's `bpf_ktime_get_boot_ns` value plus a
+fixed wall-clock offset. The creator samples the same offset once at
+construction (`bootToWallNs`) and subtracts it.
 
 ## Limits
 

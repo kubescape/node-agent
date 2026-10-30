@@ -5,11 +5,23 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/stretchr/testify/require"
 )
 
 const runcPID, execPID, execChildPID = uint32(4000000500), uint32(4000000600), uint32(4000000700)
+
+// Boot-relative times used by the runc tests. The exec happens after the
+// process was created; a recycled pid reads a later creation time.
+const (
+	testWallOffsetNs = int64(1_700_000_000_000_000_000)
+	shimStartNs      = uint64(1_000_000_000)
+	execStartNs      = uint64(5_000_000_000)
+	execBootNs       = uint64(5_500_000_000)
+	recycledStartNs  = uint64(7_000_000_000)
+	shimComm         = "containerd-shim"
+)
 
 // stubParentReader answers readParent from a fixed table and counts calls.
 func stubParentReader(table map[uint32][2]uint64, calls *int) func(uint32) (uint32, uint64, bool) {
@@ -23,23 +35,34 @@ func stubParentReader(table map[uint32][2]uint64, calls *int) func(uint32) (uint
 	}
 }
 
+// newRuncTestCreator names the shim node and fixes the wall/boot offset so an
+// exec stamped execBootNs maps back to the boot clock.
+func newRuncTestCreator(t *testing.T) (*processTreeCreatorImpl, containerprocesstree.ContainerProcessTree, uint32) {
+	t.Helper()
+	c, tree, shim := newAncestryTestCreator(t)
+	c.bootToWallNs = testWallOffsetNs
+	c.processMap.Get(shim).Comm = shimComm
+	return c, tree, shim
+}
+
 func execUnderRunc(c *processTreeCreatorImpl, pid, ppid uint32, comm string) {
-	c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: pid, PPID: ppid, Comm: comm, Pcomm: "runc", ContainerID: ancestryContainerID})
+	c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: pid, PPID: ppid, Comm: comm, Pcomm: "runc", ContainerID: ancestryContainerID, StartTimeNs: uint64(testWallOffsetNs) + execBootNs})
 }
 
 func TestExecRereadsRuncParentToShim(t *testing.T) {
-	c, tree, shim := newAncestryTestCreator(t)
+	c, tree, shim := newRuncTestCreator(t)
 	calls := 0
-	c.readParent = stubParentReader(map[uint32][2]uint64{execPID: {uint64(shim), 0}}, &calls)
+	c.readParent = stubParentReader(map[uint32][2]uint64{execPID: {uint64(shim), execStartNs}, shim: {1, shimStartNs}}, &calls)
 
 	execUnderRunc(c, execPID, runcPID, "sh")
-	require.Equal(t, 1, calls)
+	require.Equal(t, 2, calls)
 	require.Equal(t, shim, c.processMap.Get(execPID).PPID, "the exec must be reparented to the shim")
+	require.Equal(t, shimComm, c.processMap.Get(execPID).Pcomm, "the event's runc pcomm must not survive adoption")
 	require.NotContains(t, c.processMap.Get(runcPID).ChildrenMap, armotypes.CommPID{PID: execPID}, "runc placeholder must drop the child")
 
 	// A child of the repaired process resolves through the shim with full depth.
 	c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: execChildPID, PPID: execPID, Comm: "sleep", ContainerID: ancestryContainerID})
-	require.Equal(t, 1, calls, "a known parent chain must not re-read /proc")
+	require.Equal(t, 2, calls, "a known parent chain must not re-read /proc")
 	branch, err := tree.GetPidBranch(ancestryContainerID, execChildPID, &c.processMap)
 	require.NoError(t, err)
 	require.Equal(t, execPID, branch.PID)
@@ -50,20 +73,23 @@ func TestExecRereadsRuncParentToShim(t *testing.T) {
 }
 
 func TestExecRereadsAncestorWhenChildExecsFirst(t *testing.T) {
-	c, tree, shim := newAncestryTestCreator(t)
+	c, tree, shim := newRuncTestCreator(t)
 	calls := 0
-	table := map[uint32][2]uint64{execPID: {uint64(runcPID), 0}}
+	table := map[uint32][2]uint64{execPID: {uint64(runcPID), execStartNs}, shim: {1, shimStartNs}}
 	c.readParent = stubParentReader(table, &calls)
 
 	// runc still alive when the exec is handled: the parent stays runc.
 	execUnderRunc(c, execPID, runcPID, "sh")
 	require.Equal(t, runcPID, c.processMap.Get(execPID).PPID)
+	require.Equal(t, "runc", c.processMap.Get(execPID).Pcomm)
 
 	// runc exits; the child's exec repairs its parent's chain.
-	c.pidStartTimeNs[execPID] = 5_000_000_000
-	table[execPID] = [2]uint64{uint64(shim), 5_000_000_000}
-	c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: execChildPID, PPID: execPID, Comm: "sleep", ContainerID: ancestryContainerID})
+	c.pidStartTimeNs[execPID] = execStartNs
+	table[execPID] = [2]uint64{uint64(shim), execStartNs}
+	c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: execChildPID, PPID: execPID, Comm: "sleep", Pcomm: "sh", ContainerID: ancestryContainerID})
 	require.Equal(t, shim, c.processMap.Get(execPID).PPID)
+	require.Equal(t, shimComm, c.processMap.Get(execPID).Pcomm, "the repaired ancestor must name its adopted parent")
+	require.Equal(t, "sh", c.processMap.Get(execChildPID).Pcomm, "the child's own parent is unchanged")
 	_, err := tree.GetPidBranch(ancestryContainerID, execChildPID, &c.processMap)
 	require.NoError(t, err)
 }
@@ -74,13 +100,13 @@ func TestExecRereadRejectsRecycledAncestor(t *testing.T) {
 		recorded  uint64
 		readStart uint64
 	}{
-		{name: "start time differs", recorded: 5_000_000_000, readStart: 6_000_000_000},
-		{name: "ancestor identity unknown", recorded: 0, readStart: 6_000_000_000},
+		{name: "start time differs", recorded: execStartNs, readStart: recycledStartNs},
+		{name: "ancestor identity unknown", recorded: 0, readStart: recycledStartNs},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, _, shim := newAncestryTestCreator(t)
+			c, _, shim := newRuncTestCreator(t)
 			calls := 0
-			table := map[uint32][2]uint64{execPID: {uint64(runcPID), 0}}
+			table := map[uint32][2]uint64{execPID: {uint64(runcPID), execStartNs}, shim: {1, shimStartNs}}
 			c.readParent = stubParentReader(table, &calls)
 			execUnderRunc(c, execPID, runcPID, "sh")
 			if tc.recorded != 0 {
@@ -93,13 +119,60 @@ func TestExecRereadRejectsRecycledAncestor(t *testing.T) {
 	}
 }
 
+// An exec handled after its pid was recycled: /proc describes the replacement,
+// created after the exec instant, and its parent must not be adopted.
+func TestExecRereadRejectsRecycledExecTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		execWall uint64
+	}{
+		{name: "replacement created after the exec", execWall: uint64(testWallOffsetNs) + execBootNs},
+		{name: "exec timestamp unknown", execWall: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _, shim := newRuncTestCreator(t)
+			calls := 0
+			start := recycledStartNs
+			if tc.execWall == 0 {
+				start = execStartNs
+			}
+			c.readParent = stubParentReader(map[uint32][2]uint64{execPID: {uint64(shim), start}, shim: {1, shimStartNs}}, &calls)
+			c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: execPID, PPID: runcPID, Comm: "sh", Pcomm: "runc", ContainerID: ancestryContainerID, StartTimeNs: tc.execWall})
+			require.Equal(t, 1, calls)
+			require.Equal(t, runcPID, c.processMap.Get(execPID).PPID, "the event's parent must be kept")
+			require.Equal(t, "runc", c.processMap.Get(execPID).Pcomm)
+		})
+	}
+}
+
+// The tree's node for the new ppid may be a stale, exited process whose pid was
+// recycled; it must not be adopted.
+func TestExecRereadRejectsStaleParentNode(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(c *processTreeCreatorImpl, shim uint32)
+	}{
+		{name: "recorded start time differs", setup: func(c *processTreeCreatorImpl, shim uint32) { c.pidStartTimeNs[shim] = shimStartNs + 1 }},
+		{name: "pending exit", setup: func(c *processTreeCreatorImpl, shim uint32) { c.pendingExits[shim] = &pendingExit{} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _, shim := newRuncTestCreator(t)
+			calls := 0
+			c.readParent = stubParentReader(map[uint32][2]uint64{execPID: {uint64(shim), execStartNs}, shim: {1, shimStartNs}}, &calls)
+			tc.setup(c, shim)
+			execUnderRunc(c, execPID, runcPID, "sh")
+			require.Equal(t, runcPID, c.processMap.Get(execPID).PPID)
+			require.Equal(t, "runc", c.processMap.Get(execPID).Pcomm)
+		})
+	}
+}
+
 func TestExecRereadRejectsYoungerParent(t *testing.T) {
-	c, _, shim := newAncestryTestCreator(t)
+	c, _, shim := newRuncTestCreator(t)
 	calls := 0
-	c.readParent = stubParentReader(map[uint32][2]uint64{execPID: {uint64(shim), 5_000_000_000}}, &calls)
-	c.pidStartTimeNs[shim] = 9_000_000_000
+	c.readParent = stubParentReader(map[uint32][2]uint64{execPID: {uint64(shim), execStartNs}, shim: {1, execStartNs + 1}}, &calls)
 	execUnderRunc(c, execPID, runcPID, "sh")
-	require.Equal(t, 1, calls)
+	require.Equal(t, 2, calls)
 	require.Equal(t, runcPID, c.processMap.Get(execPID).PPID)
 }
 
@@ -109,11 +182,11 @@ func TestExecRereadKeepsParentWhenUnresolved(t *testing.T) {
 		table map[uint32][2]uint64
 	}{
 		{name: "pid vanished", table: map[uint32][2]uint64{}},
-		{name: "ppid unchanged", table: map[uint32][2]uint64{execPID: {uint64(runcPID), 0}}},
-		{name: "ppid not in tree", table: map[uint32][2]uint64{execPID: {4000000999, 0}}},
+		{name: "ppid unchanged", table: map[uint32][2]uint64{execPID: {uint64(runcPID), execStartNs}}},
+		{name: "ppid not in tree", table: map[uint32][2]uint64{execPID: {4000000999, execStartNs}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, tree, _ := newAncestryTestCreator(t)
+			c, tree, _ := newRuncTestCreator(t)
 			calls := 0
 			c.readParent = stubParentReader(tc.table, &calls)
 			execUnderRunc(c, execPID, runcPID, "sh")
