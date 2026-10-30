@@ -114,7 +114,9 @@ func TestExecRereadRejectsRecycledAncestor(t *testing.T) {
 				c.pidStartTimeNs[execPID] = tc.recorded
 			}
 			table[execPID] = [2]uint64{uint64(shim), tc.readStart}
-			c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: execChildPID, PPID: execPID, ContainerID: ancestryContainerID})
+			// The child execs after the ancestor's /proc start time, so only the
+			// identity guard under test can reject the repair.
+			c.FeedEvent(conversion.ProcessEvent{Type: conversion.ExecEvent, PID: execChildPID, PPID: execPID, ContainerID: ancestryContainerID, StartTimeNs: uint64(testWallOffsetNs) + tc.readStart + 1_000_000_000})
 			require.Equal(t, runcPID, c.processMap.Get(execPID).PPID)
 		})
 	}
