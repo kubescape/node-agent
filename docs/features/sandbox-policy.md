@@ -282,6 +282,21 @@ receiver copies isolate the added slices from producer/receiver mutation.
 
 ## Pinned CRI kernel validation
 
+The live kernel fixture is excluded from ordinary test builds. On an approved,
+isolated Linux qualification host, its explicit invocation is:
+
+```sh
+IG_FULL_BACKEND_KERNEL_TEST=1 go test -count=1 -tags=sandboxpolicy_kernel \
+  ./pkg/sandboxpolicy/igbackend -run '^TestFullBackendContainerdKernel$'
+```
+
+**The build tag itself admits kernel-related dependency initialization, including
+BPF map creation attempts, even when the opt-in environment variable is unset.**
+Do not use the tag for ordinary unit tests or run the tagged binary outside the
+approved kernel-qualification procedure. Setting the environment variable without
+the tag fails explicitly rather than silently passing with no matching test.
+The pure `TestFullBackendKernelFixturePlan` remains in ordinary Linux test builds.
+
 The isolated combined fixture uses real containerd 1.7.30 / runc 1.3.4 CRI
 RunPodSandbox/CreateContainer/StartContainer, not forged ctr metadata. It retains
 the generated hosts, hostname, resolv.conf, sandbox shared-memory bind and
