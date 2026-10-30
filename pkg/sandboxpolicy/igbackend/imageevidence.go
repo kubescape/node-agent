@@ -79,6 +79,8 @@ func newContainerdImageSource(socket string) (*containerdImageSource, error) {
 }
 func (s *containerdImageSource) Close() error { return s.client.Close() }
 func (s *containerdImageSource) Evidence(ctx context.Context, id string) (containerdImageEvidence, error) {
+	ctx, finish := newEvidenceContext(ctx)
+	defer finish()
 	var result containerdImageEvidence
 	if !fullContainerID(id) {
 		return result, fmt.Errorf("exact 64-character containerd container ID required")
