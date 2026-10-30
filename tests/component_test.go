@@ -3414,20 +3414,18 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 		"R9901 must fire for the exec that held a nonzero pts index -- this is the actual TTY-field proof")
 	assert.Equal(t, 0, count(alerts, "R9901", "c-none"),
 		"R9901 must not fire for an exec with no controlling terminal")
-	// Deliberate: phase 1 reads the ambiguous per-driver index, where 0 means
-	// both /dev/pts/0 and "no terminal". A single exec into a fresh container is
-	// pts/0 and so is invisible to hasTty. This is a known, documented
-	// limitation, not a bug -- do not "fix" this expectation. It flips when
-	// phase 2 lands (gadget emits tty_major/tty_minor).
-	assert.Equal(t, 0, count(alerts, "R9901", "c-pts0"),
-		"phase 1: an exec on pts/0 is indistinguishable from no terminal, so R9901 must stay silent here")
+	// Phase 2: trace_exec v0.57.0 emits tty_major/tty_minor, so hasTty reads the
+	// device major and /dev/pts/0 is no longer confused with "no terminal". A
+	// single exec into a fresh container lands on pts/0 and must now fire.
+	assert.Greater(t, count(alerts, "R9901", "c-pts0"), 0,
+		"phase 2: an exec on pts/0 has ttyMajor 136, so R9901 must fire here")
 
 	// has() presence testing is honest, and ttyMajor is registered rather than
 	// silently unresolvable. Exactly one of these two must fire.
-	assert.Equal(t, 0, total(alerts, "R9903"),
-		"R9903 must not fire: the pinned gadget does not emit tty_major, so has(event.ttyMajor) is false")
-	assert.Greater(t, total(alerts, "R9904"), 0,
-		"R9904 must fire: !has(event.ttyMajor) proves ttyMajor is a registered field that is honestly absent, not a compile failure")
+	assert.Greater(t, total(alerts, "R9903"), 0,
+		"R9903 must fire: the pinned gadget emits tty_major, so has(event.ttyMajor) is true")
+	assert.Equal(t, 0, total(alerts, "R9904"),
+		"R9904 must not fire: the pinned gadget emits tty_major, so !has(event.ttyMajor) is false")
 }
 
 // Test_36_MultiContainerPerContainerBinding shows per-container binding: a
