@@ -19,10 +19,13 @@ Disabled by default:
 
 Enabling requires an explicit, trusted mutator image reference in `tracers.tar`,
 compiled from the **same IG revision as the Go runtime owner**. Do not substitute a
-trace gadget or reuse an older policy-map layout. The public dependency currently
-pins the prototype revision; publishing/re-pinning the expanded backend remains
-outstanding. No mutator image is implicitly downloaded, trusted or published by
-this change. IG treats an explicit local OCI target as pretrusted and skips its signature
+trace gadget or reuse an older policy-map layout. The public dependency already
+pins the published per-binding persistent-owner backend at
+`87a796fe97803ec6788e985e6570efea46124fba`, as detailed below. The newer shared Go
+preparation foundation at `dabee7d08345752cada90c326e25cd7b6855d62d` is not the
+consumer pin and remains unqualified and unintegrated as a shared runtime; it
+does not establish shared enforcement or Ready. No mutator image is implicitly
+downloaded, trusted or published by this change. IG treats an explicit local OCI target as pretrusted and skips its signature
 verification. The archive must therefore be authenticated by the administrator
 as part of the agent-image supply chain; the verification flag alone does not
 authenticate it. Policy authors cannot choose the image/archive.
