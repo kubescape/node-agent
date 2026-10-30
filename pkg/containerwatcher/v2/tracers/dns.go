@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	dnsImageName = "ghcr.io/inspektor-gadget/gadget/trace_dns:v0.48.1"
+	dnsImageName = "ghcr.io/inspektor-gadget/gadget/trace_dns:v0.57.0"
 	dnsTraceName = "trace_dns"
 
 	// dnsStartMaxRetries bounds retries of a failed gadget start. Startup

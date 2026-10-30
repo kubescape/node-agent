@@ -41,6 +41,18 @@ func TestDecodeExecArgs(t *testing.T) {
 		p = p[:limit]
 		assert.Equal(t, []string{"echo", first}, decodeExecArgs(p, limit, 3))
 	})
+
+	// IG v0.57 re-reads mm->arg_start..arg_end after a successful exec and sets
+	// args_count to the byte count (an upper bound), not the argument count.
+	// Argv may exceed the legacy 20-argument / 255-byte-per-argument caps.
+	t.Run("v0.57 post-exec block with args_count == args_size", func(t *testing.T) {
+		want := []string{"/bin/sh", "/tmp/script.sh", strings.Repeat("x", 300)}
+		for i := 0; i < 30; i++ {
+			want = append(want, "-v")
+		}
+		p := join(want...)
+		assert.Equal(t, want, decodeExecArgs(p, uint32(len(p)), int32(len(p))))
+	})
 }
 
 // TestExecCallbackFiltersFailedExecs checks that failed execs (non-zero error)

@@ -63,8 +63,9 @@ has(event.ttyMajor) && event.ttyMajor == uint(136)
 
 `tests/component_test.go:Test_35_ExecTTYFieldTest` proves the fields work
 end-to-end against real eBPF, using four test-only rules in
-`tests/resources/exec-tty-rules.yaml`. Measured on kind with
-`trace_exec:v0.48.1`:
+`tests/resources/exec-tty-rules.yaml`. Measured on kind with the fork's
+`trace_exec:v0.48.1` build (node-agent now uses upstream `trace_exec:v0.57.0`,
+which carries the same TTY fields):
 
 ```
 R9901 (hasTty)   c-none=0  c-pts0=0  c-conc=1

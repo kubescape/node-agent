@@ -7,8 +7,8 @@ upstream.
 
 ## Current fork
 
-The fork is **`github.com/kubescape/inspektor-gadget`**, pinned to a specific commit
-via a pseudo-version:
+The long-term fork is **`github.com/kubescape/inspektor-gadget`**, pinned to a specific
+commit via a pseudo-version:
 
 ```
 replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-<timestamp>-<short-sha>
@@ -20,17 +20,43 @@ with its own history. Previously this pointed at a personal fork
 (`matthyx/inspektor-gadget`); that was migrated to the org fork so the dependency
 isn't tied to one contributor's personal account.
 
-## Updating the pin
+### Temporary pin: IG v0.57.0 merge (fork PR #17)
 
-1. Push (or force-push) the desired commit to `kubescape/inspektor-gadget:main`.
-2. Update the `replace` line in `go.mod` with the new commit's pseudo-version:
-   ```
-   go get github.com/inspektor-gadget/inspektor-gadget@<commit-sha>
-   ```
-3. Run `go mod tidy` and `go build ./...` to confirm `go.sum` and the build are consistent.
+The IG v0.57.0 merge (fork PR #17, commit `ddcb1a5766427456dac3a2b9bd7bcac7cc5f0868`)
+is not on `kubescape/inspektor-gadget:main` yet, so the commit does not resolve
+under the `kubescape` module path. Until #17 merges, `go.mod` pins the
+contributor's fork, which carries the same commit:
 
-The pin is a point-in-time snapshot, not a tracking reference — moving
-`kubescape/inspektor-gadget:main` further does not update `go.mod` automatically.
+```
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/ANAMASGARD/inspektor-gadget v0.0.0-20261027113509-ddcb1a576642
+```
+
+After #17 merges, re-pin to the merged commit on `kubescape/inspektor-gadget`
+(see "Updating the pin"). The `NOTE:` comment above the replace line makes
+`make check-ig-pin` fail until then; the guard's ancestor check only covers the
+`kubescape` path, so the marker is what blocks a merge. Remove it when re-pinning.
+
+### Carried replaces
+
+`replace` directives in a dependency's `go.mod` do not apply to consumers, so
+node-agent copies the ones the fork needs from the fork's `go.mod`:
+
+```
+replace github.com/notaryproject/notation-go => github.com/inspektor-gadget/notation-go v1.3.3
+replace go.opentelemetry.io/ebpf-profiler => github.com/inspektor-gadget/opentelemetry-ebpf-profiler v0.0.202611-0.20260715114040-ef6cf29492c8
+```
+
+Keep them in sync with the fork's `go.mod` whenever the pin moves. The v0.57.0
+fork also requires the k8s.io v0.37 modules (`k8s.io/kubectl` v0.37.1).
+
+### Gadget images
+
+The upstream gadgets (`trace_exec`, `trace_capabilities`, `trace_dns`,
+`advise_seccomp`) are pulled unmodified at `v0.57.0` (`Makefile` `VERSION`).
+The `trace_capabilities` 10240 change that used to need the fork is upstream in
+v0.57.0. `trace_open` is vendored under `pkg/ebpf/gadgets/trace_open` (upstream
+v0.57.0 plus the local dirfd path-resolution patch) and built with the v0.57.0
+gadget builder.
 
 ## Exec event semantics (IG v0.57)
 
