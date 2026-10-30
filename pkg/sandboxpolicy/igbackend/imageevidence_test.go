@@ -618,3 +618,52 @@ func TestImageEvidenceSemanticSourceFailuresRemainSticky(t *testing.T) {
 		})
 	}
 }
+
+func TestOverlayEvidenceLowerdirBoundaryAndErrorOrder(t *testing.T) {
+	paths := make([]string, 129)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("/lower/%03d", i)
+	}
+	for _, count := range []int{1, 127, 128} {
+		t.Run(fmt.Sprintf("accepted-%d", count), func(t *testing.T) {
+			got, err := parseOverlayEvidence([]string{"lowerdir=" + strings.Join(paths[:count], ":"), "upperdir=/upper", "workdir=/work"})
+			require.NoError(t, err)
+			require.Equal(t, paths[:count], got.Lower)
+		})
+	}
+	oversized := "lowerdir=" + strings.Join(paths, ":")
+	tests := []struct {
+		name    string
+		options []string
+		want    string
+	}{
+		{"129", []string{oversized}, "lowerdir budget exceeded"},
+		{"empty", []string{"lowerdir="}, "unsupported encoded/relative/data-only lowerdir"},
+		{"missing-value", []string{"lowerdir"}, "missing lowerdir"},
+		{"malformed-128", []string{"lowerdir=relative:" + strings.Join(paths[:127], ":")}, "unsupported encoded/relative/data-only lowerdir"},
+		{"malformed-129", []string{"lowerdir=relative:" + strings.Join(paths[:128], ":")}, "lowerdir budget exceeded"},
+		{"empty-components-128", []string{"lowerdir=" + strings.Repeat(":", 127)}, "unsupported encoded/relative/data-only lowerdir"},
+		{"empty-components-129", []string{"lowerdir=" + strings.Repeat(":", 128)}, "lowerdir budget exceeded"},
+		{"duplicate-first", []string{"lowerdir=/valid", oversized}, "duplicate overlay option \"lowerdir\""},
+		{"budget-first", []string{oversized, "lowerdir=/valid"}, "lowerdir budget exceeded"},
+		{"earlier-upper", []string{"upperdir=relative", oversized}, "invalid upperdir"},
+		{"earlier-unknown", []string{"unknown", oversized}, "unsupported overlay option \"unknown\""},
+		{"overlap-128", []string{"lowerdir=" + strings.TrimSuffix(strings.Repeat("/lower:", 128), ":"), "upperdir=/upper", "workdir=/work"}, "overlapping overlay directories"},
+		{"option-budget-first", append([]string{oversized}, make([]string, 32)...), "overlay option budget exceeded"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseOverlayEvidence(tt.options)
+			require.EqualError(t, err, tt.want)
+		})
+	}
+}
+
+func TestOverlayEvidenceOversizedLowerdirNotMaterialized(t *testing.T) {
+	for _, separators := range []int{128, 65536} {
+		got, err := parseOverlayEvidence([]string{"upperdir=/upper", "lowerdir=" + strings.Repeat(":", separators)})
+		require.EqualError(t, err, "lowerdir budget exceeded")
+		require.Equal(t, "/upper", got.Upper)
+		require.Nil(t, got.Lower, "rejected lowerdir must not be split into a slice")
+	}
+}

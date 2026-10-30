@@ -597,10 +597,11 @@ func parseOverlayEvidence(options []string) (overlayEvidence, error) {
 			if !hasValue {
 				return result, fmt.Errorf("missing lowerdir")
 			}
-			result.Lower = strings.Split(value, ":")
-			if len(result.Lower) == 0 || len(result.Lower) > 128 {
+			// Bound the component slice before Split allocates it.
+			if strings.Count(value, ":") >= 128 {
 				return result, fmt.Errorf("lowerdir budget exceeded")
 			}
+			result.Lower = strings.Split(value, ":")
 			for _, p := range result.Lower {
 				if !simpleEvidencePath(p) {
 					return result, fmt.Errorf("unsupported encoded/relative/data-only lowerdir")
