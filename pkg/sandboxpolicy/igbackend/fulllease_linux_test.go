@@ -193,3 +193,111 @@ func TestFullLeaseIndexCheckPreservesCallerDeadline(t *testing.T) {
 	index := &lowerIndexLease{}
 	require.ErrorIs(t, index.CheckContext(ctx), context.Canceled)
 }
+
+// Built-in types let the IG consumer select this additive contract without a pin
+// update merely to expose the provider method.
+var _ interface{ SharedContainerName() (string, error) } = (*containerdFullLease)(nil)
+
+type sharedNameNoRPCSource struct{}
+
+func (sharedNameNoRPCSource) Evidence(context.Context, string) (containerdImageEvidence, error) {
+	panic("SharedContainerName must not observe the runtime")
+}
+
+func sharedNameLease(binding sandboxpolicy.Binding) *containerdFullLease {
+	return &containerdFullLease{
+		process: &linuxLease{identity: binding},
+		image:   &trustedImageLease{source: sharedNameNoRPCSource{}},
+		host:    &hostNamespacePins{},
+	}
+}
+
+func TestFullLeaseSharedContainerNameDomain(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		valid       bool
+	}{
+		{"ordinary", "application", true},
+		{"exact-255", strings.Repeat("a", 255), true},
+		{"over-256", strings.Repeat("a", 256), false},
+		{"utf8-exact", strings.Repeat("é", 127) + "a", true},
+		{"utf8-over", strings.Repeat("é", 128), false},
+		{"empty", "", false},
+		{"nul", "app\x00name", false},
+		{"invalid-utf8", "app\xff", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lease := sharedNameLease(sandboxpolicy.Binding{ContainerName: tc.value})
+			got, err := lease.SharedContainerName()
+			if tc.valid {
+				require.NoError(t, err)
+				require.Equal(t, tc.value, got)
+			} else {
+				require.Error(t, err)
+				require.Empty(t, got)
+			}
+		})
+	}
+}
+
+func TestFullLeaseSharedContainerNameAvailability(t *testing.T) {
+	for _, kind := range []string{"closing", "closed", "process", "image", "host"} {
+		t.Run(kind, func(t *testing.T) {
+			lease := sharedNameLease(sandboxpolicy.Binding{ContainerName: "application"})
+			switch kind {
+			case "closing":
+				lease.closing = true
+			case "closed":
+				lease.closed = true
+			case "process":
+				lease.process = nil
+			case "image":
+				lease.image = nil
+			case "host":
+				lease.host = nil
+			}
+			got, err := lease.SharedContainerName()
+			require.ErrorContains(t, err, "unavailable")
+			require.Empty(t, got)
+		})
+	}
+}
+
+func TestFullLeaseSharedContainerNameRetainsOriginalBinding(t *testing.T) {
+	binding := sandboxpolicy.Binding{ContainerName: "original"}
+	lease := sharedNameLease(binding)
+	binding.ContainerName = "replacement"
+	got, err := lease.SharedContainerName()
+	require.NoError(t, err)
+	require.Equal(t, "original", got)
+	require.NoError(t, lease.Close())
+	require.Equal(t, "original", got, "borrowed immutable string survives caller retention")
+	got, err = lease.SharedContainerName()
+	require.ErrorContains(t, err, "unavailable")
+	require.Empty(t, got)
+}
+
+func TestFullLeaseSharedContainerNameJoinsClose(t *testing.T) {
+	lease := sharedNameLease(sandboxpolicy.Binding{ContainerName: "original"})
+	var wg sync.WaitGroup
+	var inconsistent atomic.Bool
+	start := make(chan struct{})
+	for range 8 {
+		wg.Go(func() {
+			<-start
+			for range 100 {
+				got, err := lease.SharedContainerName()
+				if (err == nil && got != "original") || (err != nil && got != "") {
+					inconsistent.Store(true)
+				}
+			}
+		})
+	}
+	close(start)
+	require.NoError(t, lease.Close())
+	wg.Wait()
+	require.False(t, inconsistent.Load())
+	got, err := lease.SharedContainerName()
+	require.Error(t, err)
+	require.Empty(t, got)
+}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	execruntime "github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
@@ -171,6 +172,27 @@ func (l *containerdFullLease) Check(ctx context.Context) error {
 	}
 	return nil
 }
+
+// SharedContainerName returns the immutable name retained from the validated
+// runtime/Kubernetes binding. The caller must first successfully Check the lease;
+// this getter is not attestation and makes no runtime or filesystem observations.
+// Its built-in signature permits the shared IG consumer to select this optional
+// contract without changing the provider's dependency pin.
+func (l *containerdFullLease) SharedContainerName() (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closing || l.closed || l.process == nil || l.image == nil || l.host == nil {
+		return "", fmt.Errorf("full binding lease unavailable")
+	}
+	name := l.process.identity.ContainerName
+	// Match the shared compiler's 255-byte string domain, not a caller override
+	// or a separately decoded, potentially inconsistent CRI metadata name.
+	if name == "" || len(name) > 255 || !utf8.ValidString(name) || strings.IndexByte(name, 0) >= 0 {
+		return "", fmt.Errorf("bounded valid shared container name required")
+	}
+	return name, nil
+}
+
 func (l *containerdFullLease) InitProc() *os.File {
 	l.mu.Lock()
 	defer l.mu.Unlock()
