@@ -884,20 +884,49 @@ func (e *DatasourceEvent) GetSyscall() string {
 		return gadgets.FromCString(syscall)
 	case SyscallEventType:
 		return e.Syscall
-	case KmodEventType, AuditSeccompEventType:
+	case KmodEventType:
 		syscall, _ := e.getFieldAccessor("syscall").String(e.Data)
 		return syscall
+	case AuditSeccompEventType:
+		// node-agent runs no formatter operator, so read the raw number
+		accessor := e.getFieldAccessor("syscall_raw")
+		if nr, err := accessor.Uint64(e.Data); err == nil {
+			return syscalls.SyscallGetName(uint16(nr))
+		}
+		if nr, err := accessor.Uint32(e.Data); err == nil {
+			return syscalls.SyscallGetName(uint16(nr))
+		}
+		return ""
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
 }
 
+// seccompActions names the SECCOMP_RET_* actions audit_seccomp can report.
+var seccompActions = map[uint32]string{
+	0x80000000: "SECCOMP_RET_KILL_PROCESS",
+	0x00030000: "SECCOMP_RET_TRAP",
+	0x00050000: "SECCOMP_RET_ERRNO",
+	0x7fc00000: "SECCOMP_RET_USER_NOTIF",
+	0x7ff00000: "SECCOMP_RET_TRACE",
+	0x7ffc0000: "SECCOMP_RET_LOG",
+	0x7fff0000: "SECCOMP_RET_ALLOW",
+}
+
 // GetSeccompCode returns the seccomp action of an audit_seccomp event, such as
-// SECCOMP_RET_ERRNO or SECCOMP_RET_LOG.
+// SECCOMP_RET_ERRNO or SECCOMP_RET_LOG, or "" when it cannot be read.
 func (e *DatasourceEvent) GetSeccompCode() string {
-	code, _ := e.getFieldAccessor("code").String(e.Data)
-	return code
+	accessor := e.getFieldAccessor("code_raw")
+	var code uint32
+	if v, err := accessor.Uint32(e.Data); err == nil {
+		code = v
+	} else if v, err := accessor.Int32(e.Data); err == nil {
+		code = uint32(v)
+	} else {
+		return ""
+	}
+	return seccompActions[code&0xffff0000]
 }
 
 func (e *DatasourceEvent) GetSyscalls() []byte {

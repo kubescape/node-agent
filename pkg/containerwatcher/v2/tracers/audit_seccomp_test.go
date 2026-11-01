@@ -15,7 +15,8 @@ import (
 // TestAuditSeccompFields checks only the fields the SandboxPolicy seccomp layer
 // reads; the upstream gadget owns the rest of its schema.
 func TestAuditSeccompFields(t *testing.T) {
-	required := []string{"syscall", "code", "proc.pid", "proc.comm", "proc.mntns_id"}
+	// raw fields: node-agent runs no formatter operator
+	required := []string{"syscall_raw", "code_raw", "proc.pid", "proc.comm", "proc.mntns_id"}
 	ociStore, err := orasoci.NewFromTar(context.Background(), "../../../../tracers.tar")
 	require.NoError(t, err)
 	gadgetCtx := gadgetcontext.New(
