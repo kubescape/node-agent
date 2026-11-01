@@ -6,6 +6,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	stdruntime "runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/goradd/maps"
 	"github.com/grafana/pyroscope-go"
 
+	contribseccomp "github.com/containerd/containerd/contrib/seccomp"
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	iglogger "github.com/inspektor-gadget/inspektor-gadget/pkg/logger"
@@ -62,7 +64,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	sandboxintegration "github.com/kubescape/node-agent/pkg/sandboxpolicy/integration"
+	sandboxseccomp "github.com/kubescape/node-agent/pkg/sandboxpolicy/seccomp"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
 	sbomscanner "github.com/kubescape/node-agent/pkg/sbomscanner/v1"
@@ -73,6 +77,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/validator"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	goruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -570,6 +575,7 @@ func main() {
 		defer mainHandler.Stop()
 	}
 
+	var sandboxController *sandboxpolicy.Controller
 	if cfg.EnableSandboxPolicy {
 		// Enforcement is independent of observer/runtime-detection switches. The
 		// service rejects unavailable predicates/bindings rather than weakening them.
@@ -586,6 +592,7 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("creating sandbox policy service", helpers.Error(sandboxErr))
 		}
 		dWatcher.AddAdaptor(sandboxService)
+		sandboxController = sandboxService.Controller
 		if sandboxErr = sandboxService.Start(ctx); sandboxErr != nil {
 			logger.L().Ctx(ctx).Fatal("starting sandbox policy service", helpers.Error(sandboxErr))
 		}
@@ -596,6 +603,14 @@ func main() {
 				logger.L().Error("sandbox policy cleanup incomplete", helpers.Error(err))
 			}
 		}()
+	}
+
+	if cfg.EnableSandboxSeccomp {
+		// The seccomp layer needs no BPF LSM. A failure here disables only this
+		// layer; the rest of node-agent keeps running.
+		if err := startSandboxSeccomp(ctx, cfg, k8sClient, k8sObjectCache, sandboxController, dWatcher, thirdPartyTracers.ThirdPartyEventReceivers); err != nil {
+			logger.L().Ctx(ctx).Error("sandbox seccomp layer disabled", helpers.Error(err))
+		}
 	}
 
 	// start watching
@@ -655,4 +670,39 @@ func resolveOwnContainerID(ctx context.Context, k8sClient *k8sinterface.Kubernet
 	logger.L().Warning("resolveOwnContainerID - no ContainerStatuses entry named \"node-agent\" yet, cgroup memory gauges will report 0",
 		helpers.String("pod", podName), helpers.String("namespace", namespace))
 	return "", ""
+}
+
+func startSandboxSeccomp(ctx context.Context, cfg config.Config, k8sClient *k8sinterface.KubernetesApi, pods *k8scache.K8sObjectCacheImpl, controller *sandboxpolicy.Controller, dWatcher *dynamicwatcher.WatchHandler, receivers sandboxseccomp.Receivers) error {
+	profilesDir, err := seccompmanagerv1.ProfilesDir()
+	if err != nil {
+		return err
+	}
+	layer, err := sandboxseccomp.NewService(sandboxseccomp.Options{
+		Dynamic: k8sClient.GetDynamicClient(), Kubernetes: k8sClient.GetKubernetesClient(), Pods: pods.GetPod,
+		NodeName: cfg.NodeName, AgentNamespace: cfg.NamespaceName, NRISocket: cfg.SandboxSeccompNRISocket,
+		ProfilesDir: profilesDir, Arch: stdruntime.GOARCH,
+		RuntimeDefault: func(capabilities []string) *specs.LinuxSeccomp {
+			return contribseccomp.DefaultProfile(&specs.Spec{Process: &specs.Process{Capabilities: &specs.LinuxCapabilities{Bounding: capabilities}}})
+		},
+		ExecEnforcement: controller != nil,
+		Contributes:     controller != nil,
+		Writer:          &sandboxpolicy.DynamicStatusWriter{Client: k8sClient.GetDynamicClient()},
+		Receivers:       receivers,
+		OnError:         func(err error) { logger.L().Ctx(ctx).Warning("sandbox seccomp layer", helpers.Error(err)) },
+	})
+	if err != nil {
+		return err
+	}
+	// audit_seccomp events feed the layer, which forwards attributed verdicts
+	set, ok := receivers.Load(utils.AuditSeccompEventType)
+	if !ok {
+		set = mapset.NewSet[containerwatcher.GenericEventReceiver]()
+		receivers.Set(utils.AuditSeccompEventType, set)
+	}
+	set.Add(layer)
+	if controller != nil {
+		controller.AddStatusContributor(layer)
+	}
+	dWatcher.AddAdaptor(layer)
+	return layer.Start(ctx)
 }

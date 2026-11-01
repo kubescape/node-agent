@@ -515,6 +515,10 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	// Unshare events
 	ehf.handlers[utils.UnshareEventType] = []Manager{ruleManager, metrics}
 
+	// Seccomp audit events only feed third-party receivers, such as the
+	// SandboxPolicy seccomp layer
+	ehf.handlers[utils.AuditSeccompEventType] = []Manager{}
+
 	// Bpf events
 	ehf.handlers[utils.BpfEventType] = []Manager{ruleManager, metrics}
 }

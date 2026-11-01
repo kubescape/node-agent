@@ -884,13 +884,20 @@ func (e *DatasourceEvent) GetSyscall() string {
 		return gadgets.FromCString(syscall)
 	case SyscallEventType:
 		return e.Syscall
-	case KmodEventType:
+	case KmodEventType, AuditSeccompEventType:
 		syscall, _ := e.getFieldAccessor("syscall").String(e.Data)
 		return syscall
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""
 	}
+}
+
+// GetSeccompCode returns the seccomp action of an audit_seccomp event, such as
+// SECCOMP_RET_ERRNO or SECCOMP_RET_LOG.
+func (e *DatasourceEvent) GetSeccompCode() string {
+	code, _ := e.getFieldAccessor("code").String(e.Data)
+	return code
 }
 
 func (e *DatasourceEvent) GetSyscalls() []byte {

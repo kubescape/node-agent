@@ -51,6 +51,7 @@ type Controller struct {
 	lastError    error
 	bindingError error
 	configError  error
+	contributors []StatusContributor
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -63,6 +64,14 @@ func NewController(client dynamic.Interface, backend Backend, resolver SourceRes
 		return nil, fmt.Errorf("node name/UID and agent namespace are required")
 	}
 	return &Controller{client: client, backend: backend, resolver: resolver, writer: writer, options: options, objects: make(map[string]*unstructured.Unstructured), bindings: make(map[string]Binding), active: make(map[string]installed), withdrawals: make(map[string]installed)}, nil
+}
+
+// AddStatusContributor adds another enforcement layer's state to every report.
+// Call it before the first reconcile.
+func (c *Controller) AddStatusContributor(contributor StatusContributor) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.contributors = append(c.contributors, contributor)
 }
 
 func (*Controller) WatchResources() []watcher.WatchResource {
@@ -240,6 +249,12 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	return p
 }
 
+// execRelevant is false for policies with only other sections, such as a
+// privilege-only policy, so they never install an empty exec plan.
+func (p desiredPolicy) execRelevant() bool {
+	return p.spec.Exec != nil || len(p.spec.Sources) > 0
+}
+
 func (p desiredPolicy) matches(b Binding) bool {
 	if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != b.Namespace {
 		return false
@@ -334,7 +349,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	for key, binding := range c.bindings {
 		if c.bindingRetiring(key, binding) {
 			for _, p := range policies {
-				if p.err == nil && p.spec.Mode != api.ModeOff && p.matches(binding) {
+				if p.err == nil && p.spec.Mode != api.ModeOff && p.execRelevant() && p.matches(binding) {
 					policyErrors[string(p.identity.UID)] = errors.Join(policyErrors[string(p.identity.UID)], &withdrawalCleanupError{fmt.Errorf("previous binding ownership must retire before installing policy")})
 				}
 			}
@@ -353,7 +368,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 				selected = append(selected, p)
 				continue
 			}
-			if p.spec.Mode != api.ModeOff && p.matches(binding) {
+			if p.spec.Mode != api.ModeOff && p.execRelevant() && p.matches(binding) {
 				selected = append(selected, p)
 				keep[string(p.identity.UID)] = true
 			}
@@ -628,7 +643,7 @@ func selectorFor(objects map[string]*unstructured.Unstructured) func(Binding) bo
 			if policy.err != nil {
 				return true
 			}
-			if policy.spec.Mode != api.ModeOff && policy.matches(binding) {
+			if policy.spec.Mode != api.ModeOff && policy.execRelevant() && policy.matches(binding) {
 				return true
 			}
 		}

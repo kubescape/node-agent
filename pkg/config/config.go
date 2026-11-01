@@ -125,6 +125,8 @@ type Config struct {
 	SandboxPolicyContainerdSocket  string                               `mapstructure:"sandboxPolicyContainerdSocket"`
 	SandboxPolicyControlRoot       string                               `mapstructure:"sandboxPolicyControlRoot"`
 	SandboxPolicyMaxOwners         uint64                               `mapstructure:"sandboxPolicyMaxOwners"`
+	EnableSandboxSeccomp           bool                                 `mapstructure:"sandboxSeccompEnabled"`
+	SandboxSeccompNRISocket        string                               `mapstructure:"sandboxSeccompNRISocket"`
 	EnableRuntimeDetection         bool                                 `mapstructure:"runtimeDetectionEnabled"`
 	EnableSbomFailureReporting     bool                                 `mapstructure:"sbomFailureReportingEnabled"`
 	EnableSbomGeneration           bool                                 `mapstructure:"sbomGenerationEnabled"`
@@ -229,6 +231,8 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetDefault("sandboxPolicyContainerdSocket", "")
 	viper.SetDefault("sandboxPolicyControlRoot", "")
 	viper.SetDefault("sandboxPolicyMaxOwners", 4)
+	viper.SetDefault("sandboxSeccompEnabled", false)
+	viper.SetDefault("sandboxSeccompNRISocket", "/var/run/nri/nri.sock")
 	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)
 	viper.SetDefault("nodeProfileInterval", 10*time.Minute)
@@ -361,6 +365,16 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 		}
 		if config.SandboxPolicyMaxOwners == 0 || config.SandboxPolicyMaxOwners > 1024 {
 			return Config{}, fmt.Errorf("sandboxPolicyMaxOwners must be between 1 and 1024")
+		}
+	}
+
+	if config.EnableSandboxSeccomp {
+		if !config.KubernetesMode {
+			return Config{}, fmt.Errorf("sandboxSeccompEnabled requires kubernetesMode")
+		}
+		socket := config.SandboxSeccompNRISocket
+		if !filepath.IsAbs(socket) || filepath.Clean(socket) != socket {
+			return Config{}, fmt.Errorf("sandboxSeccompNRISocket must be an absolute canonical path")
 		}
 	}
 

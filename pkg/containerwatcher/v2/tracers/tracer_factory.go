@@ -178,6 +178,16 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	)
 	manager.RegisterTracer(capabilitiesTracer)
 
+	// Create audit_seccomp tracer (SandboxPolicy seccomp verdicts)
+	auditSeccompTracer := NewAuditSeccompTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.AuditSeccompEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(auditSeccompTracer)
+
 	// Create symlink tracer
 	symlinkTracer := NewSymlinkTracer(
 		tf.kubeManager,

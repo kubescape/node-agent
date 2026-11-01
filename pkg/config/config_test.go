@@ -44,6 +44,7 @@ func TestLoadConfig(t *testing.T) {
 				NetworkStreamingInterval:       2 * time.Minute,
 				InitialDelay:                   2 * time.Minute,
 				SandboxPolicyMaxOwners:         4,
+				SandboxSeccompNRISocket:        "/var/run/nri/nri.sock",
 				HostSBOMRescanInterval:         24 * time.Hour,
 				HostSbomOffloadEnabled:         true,
 				MaxSniffingTime:                24 * time.Hour,

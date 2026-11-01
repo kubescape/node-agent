@@ -125,3 +125,6 @@ func getProfilesDir() (string, error) {
 	}
 	return seccompProfilesDir, nil
 }
+
+// ProfilesDir is the kubelet seccomp directory as seen from node-agent.
+func ProfilesDir() (string, error) { return getProfilesDir() }

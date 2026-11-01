@@ -5,7 +5,7 @@ IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 # GADGETS are pulled unmodified from upstream IG. trace_open is intentionally NOT
 # here: it is vendored and built from source (see BUILT_GADGETS) so the fpath
 # resolver can resolve relative opens against their dirfd/cwd.
-GADGETS=advise_seccomp trace_capabilities trace_dns trace_exec
+GADGETS=advise_seccomp audit_seccomp trace_capabilities trace_dns trace_exec
 VERSION=v0.48.1
 KUBESCAPE_GADGETS=bpf exit fork hardlink http iouring_new iouring_old kmod network ptrace randomx ssh symlink unshare
 # BUILT_GADGETS are vendored under pkg/ebpf/gadgets and built under their full

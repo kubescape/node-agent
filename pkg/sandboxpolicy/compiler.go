@@ -30,9 +30,10 @@ func Compile(ctx context.Context, identity PolicyIdentity, spec api.PolicySpec, 
 	if spec.Mode != api.ModeAudit && spec.Mode != api.ModeEnforce {
 		return result, fmt.Errorf("policy is not active: %q", spec.Mode)
 	}
-	if spec.File != nil || spec.Network != nil || spec.Privilege != nil || spec.Identity != nil {
+	if spec.File != nil || spec.Network != nil || spec.Identity != nil {
 		return result, fmt.Errorf("non-exec sections are unsupported")
 	}
+	// The privilege section is compiled by the seccomp layer, not into the plan.
 	// JSON cloning preserves all pointers and slice fields of the API vocabulary.
 	data, err := json.Marshal(spec)
 	if err != nil {
@@ -166,7 +167,7 @@ func validateShape(spec api.PolicySpec) error {
 	if spec.Mode == api.ModeOff {
 		return nil
 	}
-	if spec.File != nil || spec.Network != nil || spec.Privilege != nil || spec.Identity != nil {
+	if spec.File != nil || spec.Network != nil || spec.Identity != nil {
 		return fmt.Errorf("non-exec sections are unsupported")
 	}
 	if spec.Exec != nil {
