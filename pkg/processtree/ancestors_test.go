@@ -23,6 +23,12 @@ func (s *stubCreator) Stop()                             {}
 
 func (s *stubCreator) GetRootTree() ([]armotypes.Process, error) { return nil, nil }
 
+// Ancestor walking never asks for a container branch; the stub only has to
+// satisfy the interface.
+func (s *stubCreator) GetPidBranch(_ any, _ string, _ uint32) (armotypes.Process, error) {
+	return armotypes.Process{}, nil
+}
+
 // Ancestor walking does not consult process start times, so the stub reports
 // "unknown" for every pid rather than inventing values.
 func (s *stubCreator) GetProcessBootTimeNs(_ uint32) uint64 { return 0 }

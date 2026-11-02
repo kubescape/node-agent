@@ -31,7 +31,7 @@ func TestCreateRuleFailureProcessAttribution(t *testing.T) {
 					creator := NewRuleFailureCreator(nil, dnsmanager.CreateDNSManagerMock(), NewEventRuleAdapterFactory(), 0, "test", new(maps.SafeMap[string, uint32]))
 					event := &utils.StructEvent{EventType: eventType, ContainerID: armotypes.HostContainerID, Pid: 42, Comm: "curl", ExePath: "/event/curl", Args: []string{"curl", "example.com"}, Uid: 1000, Gid: 1000}
 					enriched := &events.EnrichedEvent{Event: event, ContainerID: armotypes.HostContainerID, ProcessTree: tc.tree}
-					failure := creator.CreateRuleFailure(typesv1.Rule{ProfileDependency: armotypes.NotRequired}, enriched, nil, "test", "id", "", nil)
+					failure := creator.CreateRuleFailure(typesv1.Rule{RuntimeRule: armotypes.RuntimeRule{ProfileDependency: armotypes.NotRequired}}, enriched, nil, "test", "id", "", nil, nil)
 					require.NotNil(t, failure)
 					require.Equal(t, uint32(42), failure.GetBaseRuntimeAlert().InfectedPID, "infected PID must remain the event PID, including when enrichment starts at an ancestor")
 					require.Equal(t, "curl", failure.GetBaseRuntimeAlert().Identifiers.Process.Name)
@@ -88,7 +88,7 @@ func TestCreateRuleFailureEmptyCommAttribution(t *testing.T) {
 			creator := NewRuleFailureCreator(nil, dnsmanager.CreateDNSManagerMock(), NewEventRuleAdapterFactory(), 0, "test", new(maps.SafeMap[string, uint32]))
 			event := &utils.StructEvent{EventType: eventType, ContainerID: armotypes.HostContainerID, Pid: 42, ExePath: "/event/curl"}
 			tree := armotypes.Process{PID: 42, Comm: "unverified", Path: "/unverified/process"}
-			failure := creator.CreateRuleFailure(typesv1.Rule{ProfileDependency: armotypes.NotRequired}, &events.EnrichedEvent{Event: event, ContainerID: armotypes.HostContainerID, ProcessTree: tree}, nil, "test", "id", "", nil)
+			failure := creator.CreateRuleFailure(typesv1.Rule{RuntimeRule: armotypes.RuntimeRule{ProfileDependency: armotypes.NotRequired}}, &events.EnrichedEvent{Event: event, ContainerID: armotypes.HostContainerID, ProcessTree: tree}, nil, "test", "id", "", nil, nil)
 			require.NotNil(t, failure)
 			require.Equal(t, uint32(42), failure.GetBaseRuntimeAlert().InfectedPID)
 			if eventType == utils.SyscallEventType {
@@ -123,7 +123,7 @@ func TestCreateRuleFailureHTTPProcessAttribution(t *testing.T) {
 			require.NoError(t, err)
 			event := &utils.StructEvent{EventType: utils.HTTPEventType, ContainerID: armotypes.HostContainerID, Pid: tc.pid, Comm: tc.comm, Request: request}
 			creator := NewRuleFailureCreator(nil, dnsmanager.CreateDNSManagerMock(), NewEventRuleAdapterFactory(), 0, "test", new(maps.SafeMap[string, uint32]))
-			failure := creator.CreateRuleFailure(typesv1.Rule{ProfileDependency: armotypes.NotRequired}, &events.EnrichedEvent{Event: event, ContainerID: armotypes.HostContainerID, ProcessTree: tc.tree}, nil, "test", "id", "", nil)
+			failure := creator.CreateRuleFailure(typesv1.Rule{RuntimeRule: armotypes.RuntimeRule{ProfileDependency: armotypes.NotRequired}}, &events.EnrichedEvent{Event: event, ContainerID: armotypes.HostContainerID, ProcessTree: tc.tree}, nil, "test", "id", "", nil, nil)
 			require.NotNil(t, failure)
 			require.Equal(t, tc.pid, failure.GetBaseRuntimeAlert().InfectedPID)
 			details := failure.GetRuntimeProcessDetails()
