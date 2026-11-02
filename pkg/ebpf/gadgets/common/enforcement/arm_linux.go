@@ -51,7 +51,10 @@ func ArmExisting(armed Map, cgroupPath string) error {
 					}
 					return fmt.Errorf("listing container tasks: %w", err)
 				}
-				return nil // a child cgroup removed during the walk
+				if errors.Is(err, fs.ErrNotExist) {
+					return nil // a child cgroup removed during the walk
+				}
+				return fmt.Errorf("listing container tasks: %w", err)
 			}
 			if !d.IsDir() {
 				return nil
@@ -75,8 +78,11 @@ const maxArmingPasses = 8
 
 func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) error {
 	f, err := os.Open(threads)
-	if err != nil {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil // the cgroup was removed
+	}
+	if err != nil {
+		return fmt.Errorf("listing container tasks: %w", err)
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
