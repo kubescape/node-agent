@@ -330,7 +330,11 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 		return err
 	}
 	if err = candidate.Ready(); err != nil {
-		return errors.Join(err, candidate.Stop(ctx))
+		if stopErr := candidate.Stop(ctx); stopErr != nil {
+			b.retiring = append(b.retiring, candidate) // retried by retire
+			return errors.Join(err, stopErr)
+		}
+		return err
 	}
 	if b.instance != nil {
 		b.retiring = append(b.retiring, b.instance)

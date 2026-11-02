@@ -73,7 +73,14 @@ type Service struct {
 	wake          chan struct{}
 	inputEpoch    atomic.Uint64
 	snapshotEpoch atomic.Uint64
+	// podsScheduled is set by a Pending-pod event; lastPrepare bounds how
+	// often privilege slot preparation lists the node's pods.
+	podsScheduled atomic.Bool
+	lastPrepare   time.Time
 }
+
+// prepareInterval is the longest time between two slot preparations.
+const prepareInterval = 30 * time.Second
 
 // NewService prepares the public watcher/exporter/native runtime bridge. It does
 // not authorize any cgroup or start enforcement until Start is called.
@@ -176,6 +183,7 @@ func (s *Service) configurationHint(obj runtime.Object) {
 	}
 	if pod, ok := obj.(*corev1.Pod); ok {
 		if s.options.PrivilegeImageName != "" && pod.Spec.NodeName == s.options.NodeName && pod.Status.Phase == corev1.PodPending {
+			s.podsScheduled.Store(true)
 			s.ContainerCallback(containercollection.PubSubEvent{})
 		}
 		return
@@ -243,7 +251,11 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
-	if s.options.PrivilegeImageName != "" && s.options.Kubernetes != nil && s.Controller.HasPrivilegePolicies() {
+	// Prepare after a Pending-pod event, else at most every prepareInterval,
+	// so the extra pod and namespace listing does not run on every refresh.
+	if s.options.PrivilegeImageName != "" && s.options.Kubernetes != nil && s.Controller.HasPrivilegePolicies() &&
+		(s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
+		s.lastPrepare = time.Now()
 		scheduled, err := ScheduledContainers(ctx, s.options.Kubernetes, s.options.NodeName)
 		if err == nil {
 			err = s.Controller.PrepareScheduled(ctx, scheduled)

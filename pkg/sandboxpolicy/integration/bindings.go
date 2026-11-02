@@ -62,7 +62,7 @@ func SnapshotSelectedBindingsFromContainers(ctx context.Context, client kubernet
 }
 
 // ScheduledContainers returns API metadata (no runtime identity) for every
-// declared regular and init container of the pods scheduled to this node that
+// declared regular, init and ephemeral container of the pods scheduled to this node that
 // are not finished. It feeds privilege slot preparation, not binding.
 func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeName string) ([]sandboxpolicy.Binding, error) {
 	if client == nil || nodeName == "" {
@@ -96,6 +96,9 @@ func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeN
 			for _, c := range group.containers {
 				result = append(result, sandboxpolicy.Binding{PodUID: pod.UID, Namespace: pod.Namespace, PodName: pod.Name, ContainerName: c.Name, Kind: group.kind, PodLabels: copyLabels(pod.Labels), NamespaceLabels: copyLabels(labels)})
 			}
+		}
+		for _, c := range pod.Spec.EphemeralContainers {
+			result = append(result, sandboxpolicy.Binding{PodUID: pod.UID, Namespace: pod.Namespace, PodName: pod.Name, ContainerName: c.Name, Kind: "ephemeral", PodLabels: copyLabels(pod.Labels), NamespaceLabels: copyLabels(labels)})
 		}
 	}
 	return result, nil

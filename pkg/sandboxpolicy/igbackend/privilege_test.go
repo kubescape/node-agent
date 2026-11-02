@@ -214,3 +214,26 @@ func TestPrivilegeOversizedPrepareDoesNotBlockContainers(t *testing.T) {
 		t.Fatalf("a real container must still bind: %+v %v", r, err)
 	}
 }
+
+func TestPrivilegeUnreadyCandidateThatFailsToStopIsRetried(t *testing.T) {
+	e := &readyFailEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	if r, err := b.Replace(ctx, privBinding(1), privPlan("r1", privPolicy("p1", api.ActionAllow))); err == nil || r.Committed {
+		t.Fatalf("an unready candidate must fail: %+v", r)
+	}
+	if len(b.retiring) != 1 {
+		t.Fatal("a candidate that failed to stop must be kept for retry")
+	}
+	e.instance.stopErr = nil
+	if err := b.Close(ctx); err != nil || e.instance.stops != 2 {
+		t.Fatalf("close must retry the stop: %v stops=%d", err, e.instance.stops)
+	}
+}
+
+type readyFailEngine struct{ instance *fakePrivilegeInstance }
+
+func (e *readyFailEngine) Start(context.Context, string, privruntime.Config) (PrivilegeInstance, error) {
+	e.instance = &fakePrivilegeInstance{readyErr: errors.New("not ready"), stopErr: errors.New("busy"), bound: map[uint64]uint32{}}
+	return e.instance, nil
+}
