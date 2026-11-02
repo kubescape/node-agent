@@ -197,3 +197,20 @@ func TestBuildRejects(t *testing.T) {
 		t.Fatal("a default-allow base is not a runtime default")
 	}
 }
+
+func TestBuildLogsAuditedCallsUnderTheBaseArgumentFilter(t *testing.T) {
+	base := runtimeDefaultFixture(false)
+	filtered := []specs.LinuxSeccompArg{{Index: 0, Value: 0x10, Op: specs.OpEqualTo}}
+	base.Syscalls = append(base.Syscalls, specs.LinuxSyscall{Names: []string{"personality", "bpf"}, Action: specs.ActAllow, Args: filtered})
+	profile, _, err := Build(Input{Base: BaseRuntimeDefault, Arch: "amd64", Default: base}, []Rule{{Name: "watch-bpf", Mode: api.RuleAudit, Syscalls: []string{"bpf"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := entriesFor(profile, "bpf")
+	if len(got) != 1 || got[0].Action != specs.ActLog || !reflect.DeepEqual(got[0].Args, filtered) {
+		t.Fatalf("bpf must stay allowed under the same filter and be logged: %+v", got)
+	}
+	if got := entriesFor(profile, "personality"); len(got) != 1 || got[0].Action != specs.ActAllow {
+		t.Fatalf("the rest of the entry is unchanged: %+v", got)
+	}
+}

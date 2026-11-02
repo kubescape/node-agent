@@ -179,16 +179,32 @@ func CompilePolicy(identity sandboxpolicy.PolicyIdentity, spec api.PolicySpec) (
 	}
 	if section.Default == api.ActionDeny {
 		mode := effectiveMode(spec.Mode, "")
+		// Families overlap (mount contains open_tree and move_mount), so an allow
+		// covers every member of its family, whichever key names it.
+		covered := make(map[string]bool)
+		for name := range allowed {
+			for _, member := range syscallFamilies[name] {
+				covered[member] = true
+			}
+		}
+		for name := range scopedAllow {
+			for _, member := range syscallFamilies[name] {
+				covered[member] = true
+			}
+		}
 		var plain []string
 		for name, family := range syscallFamilies {
-			if allowed[name] || scopedAllow[name] {
-				continue
-			}
 			if flaggable[name] {
-				result.Rules = append(result.Rules, Rule{Policy: identity, Name: DefaultRuleName, Mode: mode, Syscalls: []string{name}, Flags: allNamespaces})
+				if !covered[name] {
+					result.Rules = append(result.Rules, Rule{Policy: identity, Name: DefaultRuleName, Mode: mode, Syscalls: []string{name}, Flags: allNamespaces})
+				}
 				continue
 			}
-			plain = append(plain, family...)
+			for _, member := range family {
+				if !covered[member] {
+					plain = append(plain, member)
+				}
+			}
 		}
 		if len(plain) > 0 {
 			result.Rules = append(result.Rules, Rule{Policy: identity, Name: DefaultRuleName, Mode: mode, Syscalls: sortedUnique(plain)})

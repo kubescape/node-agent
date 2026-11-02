@@ -118,6 +118,7 @@ type Service struct {
 	mu          sync.Mutex
 	containers  map[string]*tracked
 	pending     []pending
+	notes       map[types.UID][]string
 	unsupport   map[types.UID][]Unsupported
 	namespaces  map[string]namespaceEntry
 	listed      time.Time
@@ -522,13 +523,14 @@ func (s *Service) refresh(ctx context.Context) {
 		}
 	}
 	var next []pending
+	notes := map[types.UID][]string{}
 	if s.nriActive.Load() {
-		next = s.pendingFromNRI(ctx)
+		next = s.pendingFromNRI(ctx, notes)
 	} else {
-		next = s.pendingFromPods(ctx)
+		next = s.pendingFromPods(ctx, notes)
 	}
 	s.mu.Lock()
-	s.pending = next
+	s.pending, s.notes = next, notes
 	s.mu.Unlock()
 	if !s.options.Contributes && s.options.Writer != nil && listed {
 		s.writeReports(ctx, *s.policies.Load())
@@ -588,7 +590,17 @@ func classify(id string, want *desired, err error, applied string, optedIn func(
 	return &pending{container: id, reason: "policy changed after the container started", rules: want.rules}
 }
 
-func (s *Service) pendingFromNRI(ctx context.Context) []pending {
+// addNotes records Build's limitation notes for every policy in the profile.
+func addNotes(notes map[types.UID][]string, want *desired) {
+	if want == nil {
+		return
+	}
+	for uid := range want.rules {
+		notes[uid] = append(notes[uid], want.notes...)
+	}
+}
+
+func (s *Service) pendingFromNRI(ctx context.Context, notes map[types.UID][]string) []pending {
 	s.mu.Lock()
 	containers := make(map[string]tracked, len(s.containers))
 	for id, c := range s.containers {
@@ -602,6 +614,7 @@ func (s *Service) pendingFromNRI(ctx context.Context) []pending {
 			continue
 		}
 		want, err := s.desiredFor(ctx, pod, c.container, c.info, true, lookupLimit)
+		addNotes(notes, want)
 		if err == nil && want != nil && want.revision == c.applied && c.index == nil {
 			// recovered after a restart: attribute events with the applied rules
 			s.mu.Lock()
@@ -621,7 +634,7 @@ func (s *Service) pendingFromNRI(ctx context.Context) []pending {
 // pendingFromPods handles nodes where NRI is unavailable: every selected
 // container is pending unless it references its fallback file, which is
 // written here. Pods are listed every podListPeriod, not every tick.
-func (s *Service) pendingFromPods(ctx context.Context) []pending {
+func (s *Service) pendingFromPods(ctx context.Context, notes map[types.UID][]string) []pending {
 	s.mu.Lock()
 	due := time.Since(s.podsListed) >= podListPeriod
 	pods := s.nodePods
@@ -647,7 +660,10 @@ func (s *Service) pendingFromPods(ctx context.Context) []pending {
 		if pod.Status.Phase != corev1.PodRunning && pod.Status.Phase != corev1.PodPending {
 			continue
 		}
-		names := make([]string, 0, len(pod.Spec.Containers)+len(pod.Spec.EphemeralContainers))
+		names := make([]string, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers)+len(pod.Spec.EphemeralContainers))
+		for _, c := range pod.Spec.InitContainers {
+			names = append(names, c.Name)
+		}
 		for _, c := range pod.Spec.Containers {
 			names = append(names, c.Name)
 		}
@@ -659,6 +675,7 @@ func (s *Service) pendingFromPods(ctx context.Context) []pending {
 				keep[file] = true
 			}
 			want, err := s.desiredFor(ctx, pod, name, RuntimeInfo{}, false, lookupLimit)
+			addNotes(notes, want)
 			id := pod.Namespace + "/" + pod.Name + "/" + name
 			if err == nil && want != nil {
 				file := FallbackFile(want.base, want.revision)
@@ -777,11 +794,12 @@ func (s *Service) Contribute(policy types.UID) ([]string, []metav1.Condition) {
 		sort.Strings(ordered)
 		conditions = append(conditions, metav1.Condition{Type: ConditionAppliesOnRestart, Status: metav1.ConditionTrue, Reason: "ContainersNeedRestart", Message: bounded(strings.Join(ordered, "; "))})
 	}
-	if unsupported := s.unsupport[policy]; len(unsupported) > 0 {
-		parts := make([]string, 0, len(unsupported))
+	if unsupported, notes := s.unsupport[policy], sortedUnique(s.notes[policy]); len(unsupported)+len(notes) > 0 {
+		parts := make([]string, 0, len(unsupported)+len(notes))
 		for _, u := range unsupported {
 			parts = append(parts, u.Rule+": "+u.Reason)
 		}
+		parts = append(parts, notes...)
 		conditions = append(conditions, metav1.Condition{Type: ConditionUnsupported, Status: metav1.ConditionTrue, Reason: "NotExpressibleInSeccomp", Message: bounded(strings.Join(parts, "; "))})
 	}
 	return sortedUnique(names), conditions
@@ -818,11 +836,8 @@ func (s *Service) writeReports(ctx context.Context, views []sandboxpolicy.Policy
 		}
 		status := &api.NodeStatus{Tier: "seccomp-only", ObservedGeneration: view.Identity.Generation, LastReported: now}
 		pending, conditions := s.Contribute(view.Identity.UID)
-		ready, reason := metav1.ConditionTrue, "Reconciled"
-		if len(pending) > 0 {
-			ready, reason = metav1.ConditionFalse, "AppliesOnRestart"
-		}
-		status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: "seccomp layer", ObservedGeneration: view.Identity.Generation, LastTransitionTime: now}}
+		// ContributeStatus turns Ready False when anything is pending or not enforced
+		status.Conditions = []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue, Reason: "Reconciled", Message: "seccomp layer", ObservedGeneration: view.Identity.Generation, LastTransitionTime: now}}
 		static := staticContributor{pending: pending, conditions: conditions}
 		sandboxpolicy.ContributeStatus(status, view.Identity.UID, view.Identity.Generation, now, static)
 		namespace := view.Identity.Namespace

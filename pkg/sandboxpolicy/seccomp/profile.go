@@ -308,11 +308,8 @@ func onRuntimeDefault(base *specs.LinuxSeccomp, decisions map[string]*decision) 
 				own.Args, _ = narrow(own.Args, audited)
 			}
 			if d.all == api.RuleAudit {
-				if len(own.Args) == 0 {
-					own.Action = specs.ActLog
-				} else {
-					notes = append(notes, fmt.Sprintf("%s: audit applies only where the runtime default allows it unconditionally", name))
-				}
+				// still allowed under the same argument filter, now logged
+				own.Action = specs.ActLog
 			}
 			kept = append(kept, own)
 			for _, bit := range sortedBits(d.flags) {

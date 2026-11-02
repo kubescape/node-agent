@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestStatusIdentityBoundsAndUnprotected(t *testing.T) {
@@ -72,5 +73,43 @@ func TestDynamicStatusWriterCreateHeartbeatAndIdentity(t *testing.T) {
 		if action.GetVerb() == "update" && action.GetSubresource() != "status" {
 			t.Fatal("updated spec/parent instead of status")
 		}
+	}
+}
+
+type pendingContributor struct{}
+
+func (pendingContributor) Contribute(types.UID) ([]string, []metav1.Condition) {
+	return []string{"no-mount"}, []metav1.Condition{{Type: "SeccompAppliesOnRestart", Status: metav1.ConditionTrue, Reason: "ContainersNeedRestart", Message: "1 container(s)"}}
+}
+
+func TestPrivilegeWithoutSeccompLayerIsNotReady(t *testing.T) {
+	c, _, _, _ := setup(t)
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = &api.PrivilegeSection{Default: api.ActionAllow}
+	r := c.report(parseTypedPolicy(t, pol), nil)
+	if r.Status.Conditions[0].Status != metav1.ConditionFalse || r.Status.Conditions[0].Reason != "NotFullyEnforced" {
+		t.Fatalf("Ready: %+v", r.Status.Conditions[0])
+	}
+	found := false
+	for _, cond := range r.Status.Conditions {
+		found = found || cond.Type == ConditionPrivilegeNotEnforced
+	}
+	if !found {
+		t.Fatalf("missing %s: %+v", ConditionPrivilegeNotEnforced, r.Status.Conditions)
+	}
+	// an exec-only policy is unaffected
+	if r := c.report(parseTypedPolicy(t, policy("exec", "ns")), nil); r.Status.Conditions[0].Status != metav1.ConditionTrue {
+		t.Fatalf("exec-only Ready: %+v", r.Status.Conditions[0])
+	}
+}
+
+func TestContributedPendingRulesMakeReadyFalse(t *testing.T) {
+	c, _, _, _ := setup(t)
+	c.AddStatusContributor(pendingContributor{})
+	pol := policy("policy", "ns")
+	pol.Spec.Privilege = &api.PrivilegeSection{Default: api.ActionAllow}
+	r := c.report(parseTypedPolicy(t, pol), nil)
+	if r.Status.Conditions[0].Reason != "AppliesOnRestart" || r.Status.Counts.AppliesOnRestart != 1 || len(r.Status.AppliesOnRestart) != 1 {
+		t.Fatalf("status: %+v", r.Status)
 	}
 }

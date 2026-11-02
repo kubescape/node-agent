@@ -890,13 +890,19 @@ func (e *DatasourceEvent) GetSyscall() string {
 	case AuditSeccompEventType:
 		// node-agent runs no formatter operator, so read the raw number
 		accessor := e.getFieldAccessor("syscall_raw")
-		if nr, err := accessor.Uint64(e.Data); err == nil {
-			return syscalls.SyscallGetName(uint16(nr))
+		var nr uint64
+		if v, err := accessor.Uint64(e.Data); err == nil {
+			nr = v
+		} else if v, err := accessor.Uint32(e.Data); err == nil {
+			nr = uint64(v)
+		} else {
+			return ""
 		}
-		if nr, err := accessor.Uint32(e.Data); err == nil {
-			return syscalls.SyscallGetName(uint16(nr))
+		// x32 numbers carry bit 30; truncating them would name a native syscall
+		if nr > 0xffff {
+			return ""
 		}
-		return ""
+		return syscalls.SyscallGetName(uint16(nr))
 	default:
 		logger.L().Warning("GetSyscall not implemented for event type", helpers.String("eventType", string(e.EventType)))
 		return ""

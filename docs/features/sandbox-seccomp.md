@@ -95,7 +95,9 @@ report under `status.appliesOnRestart`, with the reasons in the
 after the container started". Rules seccomp cannot express are listed in the
 `SeccompRulesNotEnforced` condition. With exec enforcement enabled, these are
 added to the exec controller's report; otherwise the layer writes the report
-itself with tier `seccomp-only`. A restart button in the UI is a possible
+itself with tier `seccomp-only`. Either way, Ready is False while any rule waits
+for a restart or is not enforced. With the layer disabled, a policy with a `privilege`
+section reports `PrivilegeNotEnforced` and is not Ready. A restart button in the UI is a possible
 follow-up; the operator's `operatorAction` framework could carry it.
 
 ## Events
