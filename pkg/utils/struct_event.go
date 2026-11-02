@@ -125,6 +125,8 @@ func (e *StructEvent) FieldPresent(name string) bool {
 		return e.TTYMajor != nil
 	case "tty_minor":
 		return e.TTYMinor != nil
+	case "file":
+		return e.File != ""
 	default:
 		return false
 	}

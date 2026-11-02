@@ -93,7 +93,8 @@ func presenceOf(dsField string) ref.FieldTester {
 //
 // A field whose IsSet tester is presenceOf(...) can be absent at runtime when
 // the running gadget does not emit it; rules should guard those with has().
-// See docs/features/exec-tty-field.md for the tty fields specifically.
+// See docs/features/exec-tty-field.md for the tty fields and
+// docs/features/exec-file-cel-field.md for file.
 var CelFields = map[string]*celtypes.FieldType{
 	"args": {
 		Type:  celtypes.ListType,
@@ -307,6 +308,17 @@ var CelFields = map[string]*celtypes.FieldType{
 				return nil, errCelObjectNil
 			}
 			return celtypes.String(x.Raw.GetExePath()), nil
+		}),
+	},
+	"file": {
+		Type:  celtypes.StringType,
+		IsSet: presenceOf("file"),
+		GetFrom: ref.FieldGetter(func(target any) (any, error) {
+			x := target.(*xcel.Object[CelEvent])
+			if x.Raw == nil {
+				return nil, errCelObjectNil
+			}
+			return celtypes.String(x.Raw.GetFile()), nil
 		}),
 	},
 	"flags": {
