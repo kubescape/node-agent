@@ -210,6 +210,27 @@ func TestScopeIDs_HostAndNodeDoNotCollide(t *testing.T) {
 	assert.False(t, IsHostScopeID(ContainerScopeID("abc")))
 }
 
+// Production host events do not carry "": containerwatcher registers the host
+// pseudo-container under armotypes.HostContainerID and stamps it on every host
+// event. If that ID were mapped literally, host state would live in "c:host"
+// with the per-container cap and be counted as container occupancy -- a busy
+// host would be refused writes at 256 while the config promised 4096.
+func TestContainerScopeID_ProductionHostIDIsTheHostBucket(t *testing.T) {
+	assert.Equal(t, HostScopeID(), ContainerScopeID(armotypes.HostContainerID))
+	assert.Equal(t, ContainerScopeID(""), ContainerScopeID(armotypes.HostContainerID),
+		"both spellings of a host process must share one bucket")
+	assert.Equal(t, ScopeKindHost, ScopeKind(ContainerScopeID(armotypes.HostContainerID)))
+
+	s := NewStore(testConfig(), NoopMetrics{}) // host cap 8, container cap 4
+	now := time.Now()
+	scope := ContainerScopeID(armotypes.HostContainerID)
+	for i := 0; i < 8; i++ {
+		require.NoError(t, s.Set(entry("R1089", scope, "n", fmt.Sprint(i), now, time.Minute)),
+			"the host bucket must get MaxEntriesForHost, not the per-container cap")
+	}
+	assert.ErrorIs(t, s.Set(entry("R1089", scope, "n", "8", now, time.Minute)), ErrScopeCapReached)
+}
+
 func TestStore_PurgeScopeDropsOnlyThatScope(t *testing.T) {
 	s := NewStore(testConfig(), NoopMetrics{})
 	now := time.Now()

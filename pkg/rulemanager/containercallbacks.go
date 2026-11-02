@@ -138,8 +138,14 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		// with no "//" separator, and ContainerScopeID("") is the HOST bucket, so
 		// trimming here would purge every host process marker on each container
 		// exit.
+		//
+		// The host pseudo-container is registered in the collection under
+		// armotypes.HostContainerID, so its removal arrives here too. Its bucket
+		// is node-wide and reclaimed by TTL only, never by purge.
 		if rm.stateStore != nil {
-			rm.stateStore.PurgeScope(rulestate.ContainerScopeID(notif.Container.Runtime.ContainerID))
+			if scope := rulestate.ContainerScopeID(notif.Container.Runtime.ContainerID); !rulestate.IsHostScopeID(scope) {
+				rm.stateStore.PurgeScope(scope)
+			}
 		}
 
 		namespace := notif.Container.K8s.Namespace

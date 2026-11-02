@@ -129,7 +129,11 @@ write at a full store would walk all 16 shards under their locks, stalling the
 whole rule loop at the busiest possible moment. A write arriving between sweeps is
 treated as though the sweep freed nothing, which is what it would have found. Host processes share one `c:__host__` bucket with its own larger cap,
 since it holds the whole node's process space and gets no removal purge; node scope
-takes that same larger cap for the same reason.
+takes that same larger cap for the same reason. A host process is recognised by
+either spelling of its container ID — the production `host` pseudo-container ID
+(`armotypes.HostContainerID`) or an empty ID — and both land in that one bucket;
+the mapping is made in a single place, so reads, writes, purge and the
+`node_agent_state_entries{scope="host"}` gauge cannot disagree about it.
 
 ## Reading state
 

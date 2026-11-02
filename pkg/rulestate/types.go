@@ -87,11 +87,22 @@ func (NoopMetrics) ReportStateEntries(string, int)          {}
 
 const hostScopeSuffix = "__host__"
 
-// ContainerScopeID maps a container ID to its bucket. The empty container ID is
-// a host / cgroup-0 process, which gets an explicit pseudo-container bucket --
-// without the type prefix it would collide with node scope, whose ID is also "".
+// ContainerScopeID maps a container ID to its bucket. It is the ONE place a
+// container ID becomes a scope ID: reads, writes, purge and metrics all go
+// through it, so the host canonicalisation below holds everywhere at once.
+//
+// A host process reaches here under two spellings. Production stamps
+// armotypes.HostContainerID ("host") on every event of the host
+// pseudo-container (containerwatcher registers it under that ID, and the procfs
+// tracer assigns it to any untracked mntns); an event with no container at all
+// carries "". Both are the same bucket. Mapping "host" literally to "c:host"
+// would give the whole node's process space the per-container cap and report it
+// as container occupancy, which is exactly what happened before this check.
+//
+// The explicit pseudo-container bucket also keeps "" from colliding with node
+// scope, whose ID is "" too.
 func ContainerScopeID(containerID string) string {
-	if containerID == "" {
+	if containerID == "" || containerID == armotypes.HostContainerID {
 		return "c:" + hostScopeSuffix
 	}
 	return "c:" + containerID
