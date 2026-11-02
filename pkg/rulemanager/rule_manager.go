@@ -398,10 +398,16 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			evalContext = rm.celEvaluator.CreateEvalContext(enrichedEvent)
 		}
 
+		// The tracker is one object per event, shared by every rule, and its hits
+		// become the alert's correlation evidence. It is reset before EVERY rule,
+		// stateful or not: a stateless rule cannot read state, but it still
+		// alerts, and the alert is handed whatever the tracker holds. Resetting
+		// only when the next rule declares state left rule N-1's hits in place
+		// for a stateless rule N to cite as its own.
+		stateTracker.Reset()
+
 		// Rebuild the state receiver per rule: it carries the rule ID and the
 		// rule's own declared-name scopes, so it cannot be shared between rules.
-		// Resetting the tracker here is what stops rule N citing rule N-1's
-		// entries as its own evidence.
 		//
 		// Only rules that actually declare state pay for this. seedStateContext
 		// allocates a ScopeIDs map and an Accessor, and it ran for every rule on
@@ -414,7 +420,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		// read another rule's state through it -- the one thing the receiver design
 		// exists to make inexpressible.
 		if len(stateScopes) > 0 {
-			stateTracker.Reset()
 			rm.seedStateContext(evalContext, &rule, enrichedEvent, stateScopes, stateTracker)
 		} else {
 			delete(evalContext, state.AccessorContextKey)

@@ -231,9 +231,12 @@ func (c *CEL) EvaluateBoolExpressionWithContext(evalContext map[string]any, expr
 	if err != nil {
 		return false, err
 	}
-	// A nil program means compilation failed and was cached as such.
+	// A nil program means compilation failed and was cached as such. Only the
+	// FIRST call sees the compile error; every later call gets the cached nil.
+	// That must stay an error here: a state-write guard that silently reads as
+	// false would drop every write and nothing would count it.
 	if out == nil {
-		return false, nil
+		return false, errCachedCompileFailure(expression)
 	}
 	boolVal, ok := out.Value().(bool)
 	if !ok {
@@ -252,14 +255,24 @@ func (c *CEL) EvaluateStringExpressionWithContext(evalContext map[string]any, ex
 	if err != nil {
 		return "", err
 	}
+	// As above, and with a sharper consequence: a cached failure returned as
+	// ("", nil) is accepted by the state-write executor as the KEY, so a
+	// malformed key: would store a scope-wide marker from the second event on.
 	if out == nil {
-		return "", nil
+		return "", errCachedCompileFailure(expression)
 	}
 	strVal, ok := out.Value().(string)
 	if !ok {
 		return "", fmt.Errorf("expression returned %T, expected string", out.Value())
 	}
 	return strVal, nil
+}
+
+// errCachedCompileFailure is what the typed entry points return when the program
+// cache holds a nil for the expression. The compile diagnostics were logged once
+// by registerExpression; repeating them per event would be noise.
+func errCachedCompileFailure(expression string) error {
+	return fmt.Errorf("expression disabled: failed to compile earlier: %q", expression)
 }
 
 func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error) {
