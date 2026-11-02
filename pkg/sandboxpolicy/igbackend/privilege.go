@@ -10,6 +10,8 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
@@ -124,6 +126,13 @@ func Combination(plan sandboxpolicy.Plan) (string, []sandboxpolicy.CompiledPolic
 	return hex.EncodeToString(sum[:]), policies
 }
 
+// logBind records whether a new container found its slot ready ("prepared")
+// or needed a node instance replacement ("replaced").
+func logBind(b sandboxpolicy.Binding, slot string) {
+	logger.L().Info("sandbox privilege bind", helpers.String("slot", slot),
+		helpers.String("namespace", b.Namespace), helpers.String("pod", b.PodName), helpers.String("container", b.ContainerName))
+}
+
 func (b *PrivilegeBackend) Stats() PrivilegeStats {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -186,6 +195,7 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 		}
 		if current == nil {
 			b.stats.Prepared++
+			logBind(binding, "prepared")
 		}
 		b.bindings[k] = next
 		return commit()
@@ -201,6 +211,7 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 	}
 	if current == nil {
 		b.stats.Replaced++
+		logBind(binding, "replaced")
 	}
 	return commit()
 }
