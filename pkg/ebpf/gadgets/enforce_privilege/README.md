@@ -100,10 +100,11 @@ spec:
   pressure), the task stays unarmed and is not judged until its next exec. The
   failure is counted in `counters` slot 4. A later check cannot tell such a
   task apart from the runtime's own setup, so it is not retried.
-- **No-audit capability checks** (`CAP_OPT_NOAUDIT`) are not judged. They are
-  kernel probes (for example the overcommit check); judging them would deny
-  normal work in every bound container. One of them grants write access to
-  `/proc/sys/kernel/ns_last_pid`, which the privilege section does not cover.
+- **No-audit capability checks** (`CAP_OPT_NOAUDIT`) are excluded from
+  capability enforcement. Most are kernel probes (for example the overcommit
+  check), and judging them would deny normal work in every bound container. Some
+  also grant access (in current kernels, writing the pid namespace's `pid_max`),
+  so `capability` rules do not cover every `CAP_SYS_ADMIN` use.
 
 ## Maps and events
 
