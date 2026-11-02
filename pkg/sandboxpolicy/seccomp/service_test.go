@@ -448,3 +448,31 @@ func TestBoundedKeepsRunes(t *testing.T) {
 		t.Fatalf("len %d valid %v", len(got), utf8.ValidString(got))
 	}
 }
+
+func TestStaleCachedPodFallsBackToTheAPI(t *testing.T) {
+	pod := agentPod("agent", map[string]string{"app": "agent"}, nil)
+	h := newHarness(t, "", []*corev1.Pod{pod}, privilegePolicy("p", noUserns()))
+	// the cache still holds a deleted pod of the same name
+	stale := pod.DeepCopy()
+	stale.UID = "old-uid"
+	h.service.options.Pods = func(string, string) *corev1.Pod { return stale }
+	adjust, _, err := h.service.CreateContainer(context.Background(), nriPod(pod), unconfinedCtr("c1", "sandbox-agent"))
+	if err != nil || adjust == nil {
+		t.Fatalf("adjust=%v err=%v errs=%v", adjust, err, h.errs)
+	}
+}
+
+func TestPendingPolicyChangeIsLoadedBeforeInjection(t *testing.T) {
+	pod := agentPod("agent", map[string]string{"app": "agent"}, nil)
+	h := newHarness(t, "", []*corev1.Pod{pod})
+	// the policy arrives, the watch marks it, the refresh has not run yet
+	raw, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(privilegePolicy("p", noUserns()))
+	if _, err := h.dynamic.Resource(sandboxpolicy.PolicyGVR).Namespace("agents").Create(context.Background(), &unstructured.Unstructured{Object: raw}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	h.service.AddHandler(context.Background(), nil)
+	adjust, _, err := h.service.CreateContainer(context.Background(), nriPod(pod), unconfinedCtr("c1", "sandbox-agent"))
+	if err != nil || adjust == nil {
+		t.Fatalf("adjust=%v err=%v errs=%v", adjust, err, h.errs)
+	}
+}

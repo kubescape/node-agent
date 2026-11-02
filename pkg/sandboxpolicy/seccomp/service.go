@@ -303,8 +303,12 @@ func (s *Service) CreateContainer(ctx context.Context, pod *nriapi.PodSandbox, c
 	}()
 	ctx, cancel := context.WithTimeout(ctx, 2*hotPathLimit)
 	defer cancel()
-	k8sPod := s.lookupPod(ctx, pod.GetNamespace(), pod.GetName(), hotPathLimit)
-	if k8sPod == nil || string(k8sPod.UID) != pod.GetUid() {
+	if s.policyDirty.Load() {
+		// a policy changed and the refresh has not run yet: decide on the new set
+		s.reloadPolicies(ctx)
+	}
+	k8sPod := s.lookupPod(ctx, pod.GetNamespace(), pod.GetName(), pod.GetUid(), hotPathLimit)
+	if k8sPod == nil {
 		s.options.OnError(fmt.Errorf("seccomp layer: pod %s/%s not found at container creation", pod.GetNamespace(), pod.GetName()))
 		return nil, nil, nil
 	}
@@ -386,14 +390,16 @@ func toOCI(p *nriapi.LinuxSeccomp) *specs.LinuxSeccomp {
 	return out
 }
 
-func (s *Service) lookupPod(ctx context.Context, namespace, name string, limit time.Duration) *corev1.Pod {
-	if pod := s.options.Pods(namespace, name); pod != nil {
+// lookupPod returns the pod with this UID. The cache can still hold a deleted
+// pod of the same name, so a UID mismatch falls back to the API server.
+func (s *Service) lookupPod(ctx context.Context, namespace, name, uid string, limit time.Duration) *corev1.Pod {
+	if pod := s.options.Pods(namespace, name); pod != nil && string(pod.UID) == uid {
 		return pod
 	}
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	pod, err := s.options.Kubernetes.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
+	if err != nil || string(pod.UID) != uid {
 		return nil
 	}
 	return pod
@@ -507,20 +513,8 @@ func (s *Service) refresh(ctx context.Context) {
 	s.mu.Lock()
 	due := time.Since(s.listed) >= policyListPeriod
 	s.mu.Unlock()
-	if s.policyDirty.Swap(false) || due {
-		views, unsupported, err := s.loadPolicies(ctx)
-		if err != nil {
-			// keep the last coherent policy set; never treat a failed list as empty
-			s.policyDirty.Store(true)
-			listed = false
-			s.options.OnError(fmt.Errorf("seccomp layer policy list: %w", err))
-		} else {
-			s.policies.Store(&views)
-			s.mu.Lock()
-			s.unsupport, s.listed = unsupported, time.Now()
-			s.pruneNamespaces()
-			s.mu.Unlock()
-		}
+	if s.policyDirty.Load() || due {
+		listed = s.reloadPolicies(ctx)
 	}
 	var next []pending
 	notes := map[types.UID][]string{}
@@ -535,6 +529,24 @@ func (s *Service) refresh(ctx context.Context) {
 	if !s.options.Contributes && s.options.Writer != nil && listed {
 		s.writeReports(ctx, *s.policies.Load())
 	}
+}
+
+// reloadPolicies lists the policies. A failed list keeps the last coherent set
+// and the dirty mark; it is never treated as an empty set.
+func (s *Service) reloadPolicies(ctx context.Context) bool {
+	s.policyDirty.Store(false)
+	views, unsupported, err := s.loadPolicies(ctx)
+	if err != nil {
+		s.policyDirty.Store(true)
+		s.options.OnError(fmt.Errorf("seccomp layer policy list: %w", err))
+		return false
+	}
+	s.policies.Store(&views)
+	s.mu.Lock()
+	s.unsupport, s.listed = unsupported, time.Now()
+	s.pruneNamespaces()
+	s.mu.Unlock()
+	return true
 }
 
 func (s *Service) pruneNamespaces() {
@@ -609,8 +621,8 @@ func (s *Service) pendingFromNRI(ctx context.Context, notes map[types.UID][]stri
 	s.mu.Unlock()
 	var out []pending
 	for id, c := range containers {
-		pod := s.lookupPod(ctx, c.namespace, c.pod, lookupLimit)
-		if pod == nil || string(pod.UID) != c.podUID {
+		pod := s.lookupPod(ctx, c.namespace, c.pod, c.podUID, lookupLimit)
+		if pod == nil {
 			continue
 		}
 		want, err := s.desiredFor(ctx, pod, c.container, c.info, true, lookupLimit)
