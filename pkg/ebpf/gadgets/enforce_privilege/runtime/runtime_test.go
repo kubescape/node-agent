@@ -62,4 +62,8 @@ func TestValidateConfig(t *testing.T) {
 	if err := validateConfig(Config{Policy: c}); err == nil {
 		t.Fatal("a slot without its generation entry must fail")
 	}
+	c.Entries = append(c.Entries, c.Entries[0]) // a second slot-0 entry, no slot 1
+	if err := validateConfig(Config{Policy: c}); err == nil {
+		t.Fatal("duplicate generation entries must fail")
+	}
 }

@@ -37,7 +37,7 @@ docker-push: docker-build
 	docker push $(IMAGE):$(TAG)
 
 gadgets:
-	$(foreach img,$(KUBESCAPE_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=$(img) TAG=latest;)
+	$(foreach img,$(KUBESCAPE_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=$(img) TAG=latest || exit 1;)
 	$(foreach img,$(BUILT_GADGETS),$(MAKE) -C ./pkg/ebpf/gadgets/$(img) build IMAGE=ghcr.io/inspektor-gadget/gadget/$(img) TAG=$(VERSION);)
 	$(foreach img,$(GADGETS),sudo ig image pull ghcr.io/inspektor-gadget/gadget/$(img):$(VERSION);)
 	sudo ig image export $(foreach img,$(GADGETS) $(BUILT_GADGETS),ghcr.io/inspektor-gadget/gadget/$(img):$(VERSION)) $(foreach img,$(KUBESCAPE_GADGETS),$(img):latest) tracers.tar

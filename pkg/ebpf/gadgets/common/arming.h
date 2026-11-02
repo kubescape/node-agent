@@ -53,12 +53,16 @@ static __always_inline bool arming_task_armed(struct task_struct *task)
 	return a && *a;
 }
 
-static __always_inline void arming_mark(struct task_struct *task)
+// arming_mark returns false when the task storage could not be allocated (memory
+// pressure): the task then stays unarmed, and the caller counts the failure.
+static __always_inline bool arming_mark(struct task_struct *task)
 {
 	__u32 *a = bpf_task_storage_get(&armed_tasks, task, 0,
 					BPF_LOCAL_STORAGE_GET_F_CREATE);
-	if (a)
-		*a = 1;
+	if (!a)
+		return false;
+	*a = 1;
+	return true;
 }
 
 #define ARMING_MAX_ANCESTORS 64
@@ -90,28 +94,31 @@ static __always_inline __u64 arming_host_mntns(struct task_struct *task)
 		}
 		t = parent;
 	}
-	// Tree deeper than the walk: do not cache a value that may be wrong.
-	return BPF_CORE_READ(t, nsproxy, mnt_ns, ns.inum);
+	// Tree deeper than the walk: no namespace inode is 0, so the task is
+	// treated as outside the runtime namespace (armed), and nothing is cached.
+	return 0;
 }
 
 // arming_on_exec runs after a successful exec (bprm_committed_creds).
-static __always_inline void arming_on_exec(void)
+// arming_on_exec returns false when a needed mark failed.
+static __always_inline bool arming_on_exec(void)
 {
 	struct task_struct *task = bpf_get_current_task_btf();
 	__u64 mntns = BPF_CORE_READ(task, nsproxy, mnt_ns, ns.inum);
 
 	if (arming_task_armed(task))
-		return;
+		return true;
 	if (mntns == arming_host_mntns(task))
-		return;
-	arming_mark(task);
+		return true;
+	return arming_mark(task);
 }
 
 // arming_on_fork runs in task_alloc: the child inherits the parent's mark.
-static __always_inline void arming_on_fork(struct task_struct *child)
+static __always_inline bool arming_on_fork(struct task_struct *child)
 {
 	if (arming_task_armed(bpf_get_current_task_btf()))
-		arming_mark(child);
+		return arming_mark(child);
+	return true;
 }
 
 #endif /* __ENFORCEMENT_ARMING_H */

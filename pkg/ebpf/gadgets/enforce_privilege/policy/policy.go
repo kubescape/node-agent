@@ -124,8 +124,8 @@ func (t Target) validate() error {
 		}
 	}
 	for _, fs := range t.MountFSType {
-		if fs == "" || len(fs) >= KernelNameLen {
-			return fmt.Errorf("filesystem type %q must be 1-%d bytes", fs, KernelNameLen-1)
+		if fs == "" || len(fs) >= KernelNameLen || strings.ContainsRune(fs, 0) {
+			return fmt.Errorf("filesystem type %q must be 1-%d bytes without NUL", fs, KernelNameLen-1)
 		}
 	}
 	return nil

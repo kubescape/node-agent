@@ -131,6 +131,7 @@ func TestValidationErrors(t *testing.T) {
 		"cap prefix":     "      - {name: r, target: {capability: [CAP_SYS_ADMIN]}, action: deny}\n",
 		"bad action":     "      - {name: r, target: {syscall: [mount]}, action: block}\n",
 		"long fstype":    "      - {name: r, target: {mountFsType: [abcdefghijklmnop]}, action: deny}\n",
+		"NUL fstype":     "      - {name: r, target: {mountFsType: [\"pro\\0c\"]}, action: deny}\n",
 		"duplicate name": "      - {name: r, target: {syscall: [mount]}, action: deny}\n      - {name: r, target: {syscall: [bpf]}, action: deny}\n",
 		"unknown field":  "      - {name: r, target: {path: [/x]}, action: deny}\n",
 	} {
