@@ -1,0 +1,24 @@
+name: enforce_privilege
+behavior: mutator
+description: "Enforce SandboxPolicy privilege rules (capabilities, namespaces, mounts, ptrace, modules) for a live set of containers (BPF LSM)"
+annotations:
+  enable-containers-datasource: "true"
+  enforce-privilege: "true"
+datasources:
+  verdict:
+    fields:
+      hook_raw:
+        annotations:
+          columns.hidden: true
+      syscall_raw:
+        annotations:
+          columns.hidden: true
+  containers:
+    annotations:
+      cli.default-output-mode: none
+params:
+  ebpf:
+    host_mntns_id:
+      key: host-mntns-id
+      defaultValue: "0"
+      description: mount namespace inode of the container runtime; 0 uses the global init task's
