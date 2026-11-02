@@ -283,8 +283,12 @@ const (
 // nodeAgentEventTypes is every event stream node-agent can actually deliver.
 // AllEventType is deliberately absent: it is a rule-binding wildcard, not a
 // stream, so anything that must name a concrete stream has to reject it.
+//
+// DnsQueryRuleEventType is included although no tracer emits it: it is the
+// rule-facing name of a rule-only DNS event (see RuleEventType), and a state
+// write naming it is driven by exactly those events.
 var nodeAgentEventTypes = map[EventType]struct{}{
-	BpfEventType: {}, CapabilitiesEventType: {}, DnsEventType: {},
+	BpfEventType: {}, CapabilitiesEventType: {}, DnsEventType: {}, DnsQueryRuleEventType: {},
 	ExecveEventType: {}, ExitEventType: {}, ForkEventType: {},
 	HTTPEventType: {}, HardlinkEventType: {}, IoUringEventType: {},
 	KmodEventType: {}, NetworkEventType: {}, OpenEventType: {},

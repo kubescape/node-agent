@@ -86,6 +86,18 @@ answer. Where the parameters are genuinely meant for one leg only, the fix is to
 express them in that leg's `expression` instead of as rule-level pre-filter
 parameters.
 
+### DNS writes follow the rule-facing event type
+
+The DNS tracer emits a single `dns` stream, but the rule loop selects
+expressions by the rule-facing type: an answered response is `dns`, while a
+forwarded query or an error response is `dnsQuery` (see
+`dns-query-rule-forwarding.md`). A write uses the same renaming, so
+`eventType: dnsQuery` on a write is driven by exactly the events a `dnsQuery`
+expression sees, and `eventType: dns` on a write never fires on a bare query. The
+entry's `_eventType` provenance carries the rule-facing name too, so a remembered
+query and a remembered answer are distinguishable. Both names are accepted by
+validation; `dnsQuery` requires armoapi-go v0.0.771 or later.
+
 ### Validation
 
 An unknown event type, `eventType: all` (a binding wildcard, not a stream),

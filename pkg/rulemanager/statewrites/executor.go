@@ -88,7 +88,11 @@ func (e *Executor) Apply(
 	if enriched == nil || enriched.Event == nil {
 		return
 	}
-	eventType := enriched.Event.GetEventType()
+	// RuleEventType, not GetEventType: a forwarded DNS query is emitted by the
+	// tracer as "dns" but is selected by rules as "dnsQuery". Comparing the raw
+	// tracer type here would route it to "dns" writes, which is the opposite of
+	// what the rule's own expressions see.
+	eventType := utils.RuleEventType(enriched.Event)
 	scopeIDs := ScopeIDs(enriched)
 
 	for _, w := range compiled {
