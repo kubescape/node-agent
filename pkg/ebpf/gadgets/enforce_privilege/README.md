@@ -94,6 +94,17 @@ spec:
   candidate syscall rule applies.
 - **Deny** returns `-EPERM` from the LSM hook, before the side effect.
 
+## Known limits
+
+- **Failed arming mark.** If the kernel cannot allocate task storage (memory
+  pressure), the task stays unarmed and is not judged until its next exec. The
+  failure is counted in `counters` slot 4. A later check cannot tell such a
+  task apart from the runtime's own setup, so it is not retried.
+- **No-audit capability checks** (`CAP_OPT_NOAUDIT`) are not judged. They are
+  kernel probes (for example the overcommit check); judging them would deny
+  normal work in every bound container. One of them grants write access to
+  `/proc/sys/kernel/ns_last_pid`, which the privilege section does not cover.
+
 ## Maps and events
 
 | Map | Content |
