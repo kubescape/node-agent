@@ -116,6 +116,11 @@ func (m *mockK8sInventory) GetSvcByIp(ip string) *common.SlimService {
 	return m.svcsByIP[ip]
 }
 
+// GetNodeByIp returns nil: the tests define no nodes.
+func (m *mockK8sInventory) GetNodeByIp(ip string) *common.SlimNode {
+	return nil
+}
+
 // TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sInventory checks that inventory resolution replaces a raw IP with stable workload labels.
 func TestCreateNetworkNeighbor_RawPodIP_ResolvedViaK8sInventory(t *testing.T) {
 	inv := newMockK8sInventory()

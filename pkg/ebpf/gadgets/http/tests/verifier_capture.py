@@ -85,8 +85,8 @@ def main():
         parser.error("run as root to load and attach BPF")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     version = subprocess.check_output(["ig", "version"], text=True).strip()
-    if version != "v0.48.1":
-        parser.error(f"requires IG v0.48.1, found {version}")
+    if version != "v0.57.0":
+        parser.error(f"requires IG v0.57.0, found {version}")
     image = args.image or f"http:verifier-{os.getpid()}"
     (args.output_dir / "environment.json").write_text(json.dumps({
         "kernel": os.uname().release, "ig": version, "image": image,

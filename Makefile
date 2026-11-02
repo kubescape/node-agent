@@ -6,7 +6,7 @@ IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 # here: it is vendored and built from source (see BUILT_GADGETS) so the fpath
 # resolver can resolve relative opens against their dirfd/cwd.
 GADGETS=advise_seccomp trace_capabilities trace_dns trace_exec
-VERSION=v0.48.1
+VERSION=v0.57.0
 KUBESCAPE_GADGETS=bpf exit fork hardlink http iouring_new iouring_old kmod network ptrace randomx ssh symlink unshare
 # BUILT_GADGETS are vendored under pkg/ebpf/gadgets and built under their full
 # upstream image name+tag so node-agent's pinned openImageName keeps resolving.

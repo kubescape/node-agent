@@ -1,7 +1,9 @@
 package containerprofile
 
 import (
+	"path"
 	"slices"
+	"strings"
 
 	"github.com/google/cel-go/common/types"
 
@@ -76,9 +78,8 @@ func (l *containerProfileLibrary) wasExecutedWithArgs(containerID, path, args re
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	// Parse the runtime args list from CEL. Empty list is valid ("exec'd
-	// with no args") and matches a profile entry whose Args is also empty
-	// or absent (empty profile Args = "no argv constraint").
+	// Parse the runtime args list from CEL. An empty list is valid: it means
+	// argv was not captured, and matchExecArgv treats it as unknown (match).
 	runtimeArgs, err := celparse.ParseList[string](args)
 	if err != nil {
 		return types.NewErr("failed to parse args: %v", err)
@@ -96,39 +97,31 @@ func (l *containerProfileLibrary) wasExecutedWithArgs(containerID, path, args re
 		return cache.NewProfileNotAvailableErr("%v", perr)
 	}
 
-	// Exact path match: walk the profile's Args for that path via
-	// CompareExecArgs (handles ⋯ single-arg and * zero-or-more tokens).
+	// Exact path match: match the runtime argv against every argv vector
+	// recorded for that path with matchExecArgv (B1′, see its doc comment).
 	//
-	// ExecsByPath absent-vs-empty asymmetry — CodeRabbit upstream PR
-	// #807 finding #8. Three states to distinguish:
+	// Three profile states:
 	//
-	//   1. Path absent from cp.Execs.Values:
-	//        Profile doesn't allow this exec at all → fall through to
-	//        the pattern-match loop, then to false.
+	//   1. Path absent from cp.Execs.Values: the profile does not allow this
+	//      exec → fall through to the pattern loop, then to false.
 	//
-	//   2. Path in Values, ABSENT from ExecsByPath (map lookup ok=false):
-	//        Legacy / pre-args-projection profiles. Treated as
-	//        "no argv constraint" — back-compat MATCH any args.
-	//        This is the intentional fallback for profiles compiled
-	//        against older storage versions that didn't populate the
-	//        composite ExecsByPath surface.
+	//   2. Path in Values, absent from ExecsByPath: a legacy or
+	//      pre-args-projection profile → no argv constraint, match.
 	//
-	//   3. Path in Values, PRESENT in ExecsByPath with an EMPTY arg
-	//      list ([]):
-	//        Profile explicitly captured "this path ran with no args".
-	//        CompareExecArgs matches only when runtimeArgs is also
-	//        empty. NOT a back-compat fallback — a deliberately tight
-	//        constraint authored by the profile producer.
+	//   3. Path in Values with recorded vectors: each vector is matched by
+	//      matchExecArgv. An EMPTY vector ([]) means "no argv constraint" and
+	//      matches any runtime argv (storage CompareExecArgs,
+	//      compare_exec_args.go). It is not "must have no args": the stored
+	//      Args is omitempty, so [] and nil cannot be told apart.
 	//
-	// The distinction matters for rule-author intuition: producing a
-	// signed profile that lists `{Path: /usr/bin/foo, Args: []}` is a
-	// CONSTRAINT, not a wildcard. Authors who want "any args" must
-	// omit the ExecsByPath entry (rare) or use an explicit `*`
-	// wildcard token in Args.
+	// Exec-arg wildcards are "⋯" (exactly one arg, or one path segment inside
+	// an arg) and "⋯⋯" (zero or more whole args). "*" is never a wildcard: it
+	// is matched literally, because a process is routinely invoked with an
+	// unexpanded shell glob.
 	if _, ok := cp.Execs.Values[pathStr]; ok {
 		if vectors, ok := cp.ExecsByPath[pathStr]; ok {
 			for _, profileArgs := range vectors {
-				if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+				if matchExecArgv(profileArgs, runtimeArgs) {
 					return types.Bool(true)
 				}
 			}
@@ -144,7 +137,7 @@ func (l *containerProfileLibrary) wasExecutedWithArgs(containerID, path, args re
 		if dynamicpathdetector.CompareDynamic(execPath, pathStr) {
 			if vectors, ok := cp.ExecsByPath[execPath]; ok {
 				for _, profileArgs := range vectors {
-					if dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs) {
+					if matchExecArgv(profileArgs, runtimeArgs) {
 						return types.Bool(true)
 					}
 				}
@@ -159,6 +152,42 @@ func (l *containerProfileLibrary) wasExecutedWithArgs(containerID, path, args re
 	}
 
 	return types.Bool(false)
+}
+
+// matchExecArgv reports whether a runtime argv (argv[0] included) satisfies
+// a recorded profile argv vector (B1′).
+//
+//   - An empty profile vector is "no constraint" and matches anything.
+//   - An empty or nil runtime argv is an unknown capture (the tracer could not
+//     read argv), not "ran with no arguments", so it matches and R0040 does not
+//     fire. R0001 still covers the path.
+//   - If profile[0] contains "⋯", the full vectors are compared with the
+//     storage matcher.
+//   - Otherwise argv[0] is compared by basename, ignoring one leading "-"
+//     (login shells), so a profile learned with "/bin/sh" matches the real
+//     argv[0] "sh" while busybox applets ("ls" vs "cat") stay distinct. The
+//     rest of the vectors is compared with the storage matcher. A one-element
+//     profile requires a one-element runtime argv, because the storage matcher
+//     would treat the empty remainder as "no constraint".
+func matchExecArgv(profileArgs, runtimeArgs []string) bool {
+	if len(profileArgs) == 0 || len(runtimeArgs) == 0 {
+		return true
+	}
+	if strings.Contains(profileArgs[0], dynamicpathdetector.DynamicIdentifier) {
+		return dynamicpathdetector.CompareExecArgs(profileArgs, runtimeArgs)
+	}
+	if argv0Name(profileArgs[0]) != argv0Name(runtimeArgs[0]) {
+		return false
+	}
+	if len(profileArgs) == 1 {
+		return len(runtimeArgs) == 1
+	}
+	return dynamicpathdetector.CompareExecArgs(profileArgs[1:], runtimeArgs[1:])
+}
+
+// argv0Name returns the basename of argv[0] without a leading "-".
+func argv0Name(arg0 string) string {
+	return path.Base(strings.TrimPrefix(arg0, "-"))
 }
 
 func (l *containerProfileLibrary) isExecInPodSpec(containerID, path ref.Val) ref.Val {

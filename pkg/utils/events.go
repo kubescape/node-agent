@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
@@ -134,6 +137,7 @@ type ExecEvent interface {
 	GetArgs() []string
 	GetCwd() string
 	GetExePath() string
+	GetFile() string
 	GetHasTTY() bool
 	GetParentExePath() string
 	GetPupperLayer() bool
@@ -276,26 +280,89 @@ const (
 	UnshareEventType      EventType = "unshare"
 )
 
-// Get the path of the file on the node.
+// GetHostFilePathFromEvent returns the primary host path of the file behind
+// the event. For an exec event this is the first path from
+// GetHostFilePathsFromEvent. Use GetHostFilePathsFromEvent to also get the
+// interpreter path of a script or a binfmt_misc binary.
 func GetHostFilePathFromEvent(event EnrichEvent, containerPid uint32) (string, error) {
+	paths, err := GetHostFilePathsFromEvent(event, containerPid)
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", fmt.Errorf("no scannable path for event")
+	}
+	return paths[0], nil
+}
+
+// GetHostFilePathsFromEvent returns the host paths of the files behind the
+// event.
+//
+// An open event yields its full path under the container root.
+//
+// An exec event yields the executed file (`file`) under the container root. If
+// `file` is empty, a memfd ("/memfd:...") or a deleted file ("... (deleted)"),
+// the kernel no longer has a reachable path, so /proc/<pid>/exe is used, or the
+// path is skipped when the pid is unknown. If `exepath` differs from `file`
+// (a shebang script or a binfmt_misc binary), the interpreter is returned too.
+func GetHostFilePathsFromEvent(event EnrichEvent, containerPid uint32) ([]string, error) {
 	switch event.GetEventType() {
 	case ExecveEventType:
-		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, GetExecPathFromEvent(event.(ExecEvent))))
-		return realPath, nil
+		return getExecHostFilePaths(event.(ExecEvent), containerPid), nil
 	case OpenEventType:
-		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, event.(OpenEvent).GetFullPath()))
-		return realPath, nil
+		return []string{containerRootPath(containerPid, event.(OpenEvent).GetFullPath())}, nil
 	default:
-		return "", fmt.Errorf("event is not of type exec or open")
+		return nil, fmt.Errorf("event is not of type exec or open")
 	}
 }
 
-// Get the path of the executable from the given event.
-func GetExecPathFromEvent(event ExecEvent) string {
-	if args := event.GetArgs(); len(args) > 0 {
-		if args[0] != "" {
-			return args[0]
+func getExecHostFilePaths(event ExecEvent, containerPid uint32) []string {
+	var paths []string
+	add := func(p string) {
+		if p != "" && !slices.Contains(paths, p) {
+			paths = append(paths, p)
 		}
+	}
+	resolve := func(p string) string {
+		if !isUnreachableExecPath(p) {
+			return containerRootPath(containerPid, p)
+		}
+		if pid := event.GetPID(); pid != 0 {
+			return filepath.Join("/proc", fmt.Sprintf("%d", pid), "exe")
+		}
+		logger.L().Debug("GetHostFilePathsFromEvent - skipping exec path, pid unknown",
+			helpers.String("path", p), helpers.String("containerID", event.GetContainerID()))
+		return ""
+	}
+
+	file := event.GetFile()
+	add(resolve(file))
+	if exepath := event.GetExePath(); file != "" && exepath != "" && exepath != file {
+		add(resolve(exepath))
+	}
+	return paths
+}
+
+// isUnreachableExecPath reports whether an exec path cannot be opened under
+// the container root: it is empty, a memfd, or a deleted file.
+func isUnreachableExecPath(p string) bool {
+	return p == "" || strings.HasPrefix(p, "/memfd:") || strings.HasSuffix(p, " (deleted)")
+}
+
+func containerRootPath(containerPid uint32, p string) string {
+	return filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, p))
+}
+
+// GetExecPathFromEvent returns the path of the executable: the resolved file
+// (`file`), then the kernel exe path (`exepath`), then comm. argv[0] is never
+// used: it is caller-controlled and, since IG v0.57, it is the real argv[0]
+// ("sh"), not the requested pathname.
+func GetExecPathFromEvent(event ExecEvent) string {
+	if file := event.GetFile(); file != "" {
+		return file
+	}
+	if exepath := event.GetExePath(); exepath != "" {
+		return exepath
 	}
 	return event.GetComm()
 }

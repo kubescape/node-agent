@@ -230,15 +230,14 @@ func TestExecWithArgsInProfile(t *testing.T) {
 			expectedResult: true,
 		},
 		{
-			// /bin/ls in the profile has Args: ["-la", "/tmp"]. An empty
-			// runtime args list cannot satisfy a 2-arg anchored profile.
-			// (Empty profile Args = "no argv constraint" still matches via
-			// the back-compat branch; that's a separate case.)
+			// An empty runtime args list means argv was not captured. It is
+			// treated as unknown and matches (B1′, no R0040 on a failed
+			// capture); R0001 still covers the path.
 			name:           "Empty args list",
 			containerID:    "test-container-id",
 			path:           "/bin/ls",
 			args:           []string{},
-			expectedResult: false,
+			expectedResult: true,
 		},
 	}
 

@@ -488,6 +488,13 @@ func (e *DatasourceEvent) GetExePath() string {
 	return NormalizePath(exepath)
 }
 
+// GetFile returns the file the kernel executed (d_path of bprm->file): the
+// symlink-resolved path of the binary or, for a shebang script, the script.
+func (e *DatasourceEvent) GetFile() string {
+	file, _ := e.getFieldAccessor("file").String(e.Data)
+	return NormalizePath(file)
+}
+
 func (e *DatasourceEvent) GetParentExePath() string {
 	exepath, _ := e.getFieldAccessor("parent_exepath").String(e.Data)
 	return NormalizePath(exepath)
