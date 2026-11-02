@@ -42,6 +42,17 @@ func TestDecodeExecArgs(t *testing.T) {
 		assert.Equal(t, []string{"echo", first}, decodeExecArgs(p, limit, 3))
 	})
 
+	// A caller can set an argv[0] longer than the capture limit (exec -a). If it
+	// were dropped like any other partial argument, argv would look unknown and
+	// R0040 would match any arguments, so the truncated argv[0] is kept.
+	t.Run("argv[0] longer than the 5120-byte limit is kept truncated", func(t *testing.T) {
+		const limit = 5120
+		p := append([]byte(strings.Repeat("a", 6000)), 0)
+		p = append(p, join("--evil")...)
+		p = p[:limit]
+		assert.Equal(t, []string{strings.Repeat("a", limit)}, decodeExecArgs(p, limit, limit))
+	})
+
 	// IG v0.57 re-reads mm->arg_start..arg_end after a successful exec and sets
 	// args_count to the byte count (an upper bound), not the argument count.
 	// Argv may exceed the legacy 20-argument / 255-byte-per-argument caps.

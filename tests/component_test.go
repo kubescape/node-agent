@@ -3412,7 +3412,12 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 	// The feature: hasTty discriminates.
 	assert.Greater(t, count(alerts, "R9901", "c-conc"), 0,
 		"R9901 must fire for the exec that held a nonzero pts index -- this is the actual TTY-field proof")
-	assert.Equal(t, 0, count(alerts, "R9901", "c-none"),
+	// R9901 and R9904 for an exec can post after the snapshot above, so the
+	// negative assertions read the alerts again after a settle interval.
+	time.Sleep(10 * time.Second)
+	settled, err := testutils.GetAlerts(ns.Name)
+	require.NoError(t, err, "alerts must be readable after the settle interval")
+	assert.Equal(t, 0, count(settled, "R9901", "c-none"),
 		"R9901 must not fire for an exec with no controlling terminal")
 	// Phase 2: trace_exec v0.57.0 emits tty_major/tty_minor, so hasTty reads the
 	// device major and /dev/pts/0 is no longer confused with "no terminal". A
@@ -3424,7 +3429,7 @@ func Test_35_ExecTTYFieldTest(t *testing.T) {
 	// silently unresolvable. Exactly one of these two must fire.
 	assert.Greater(t, total(alerts, "R9903"), 0,
 		"R9903 must fire: the pinned gadget emits tty_major, so has(event.ttyMajor) is true")
-	assert.Equal(t, 0, total(alerts, "R9904"),
+	assert.Equal(t, 0, total(settled, "R9904"),
 		"R9904 must not fire: the pinned gadget emits tty_major, so !has(event.ttyMajor) is false")
 }
 

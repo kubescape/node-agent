@@ -88,6 +88,9 @@ profile recorded for the path:
 - An empty profile vector means "no constraint" and matches anything.
 - An empty or `nil` runtime argv is an unknown capture, not "ran with no
   arguments". It matches, so R0040 does not fire. R0001 still covers the path.
+  An `argv[0]` longer than the 5,120-byte capture limit is not unknown: the
+  decoder keeps it truncated as the only argument, so R0040 compares it and
+  fires instead of being bypassed by an oversized `exec -a` name.
 - If profile `argv[0]` contains `⋯`, the full vectors are compared.
 - Otherwise `argv[0]` is compared by basename, ignoring one leading `-`. A
   profile `["/bin/sh","-c","x"]` matches `["sh","-c","x"]`, and `-bash` matches

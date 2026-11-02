@@ -47,10 +47,12 @@ func NewExecOperator() operators.DataOperator {
 }
 
 // decodeExecArgs splits the NUL-separated argv payload sent by the gadget. A
-// trailing argument without a NUL (cut by the capture limit) is dropped. An
-// empty payload (argv could not be read) yields no arguments rather than an
-// error: the event is kept, the args field becomes "", GetArgs() returns nil,
-// and consumers treat argv as unknown.
+// trailing argument without a NUL (cut by the capture limit) is dropped, unless
+// it is argv[0]: an argv[0] longer than the capture limit is kept truncated, so
+// the event still carries an argv that R0040 can mismatch instead of looking
+// like an unknown capture. An empty payload (argv could not be read) yields no
+// arguments rather than an error: the event is kept, the args field becomes "",
+// GetArgs() returns nil, and consumers treat argv as unknown.
 func decodeExecArgs(payload []byte, argsSize uint32, argsCount int32) []string {
 	if argsSize > uint32(len(payload)) {
 		argsSize = uint32(len(payload))
@@ -69,6 +71,9 @@ func decodeExecArgs(payload []byte, argsSize uint32, argsCount int32) []string {
 		} else {
 			buf = append(buf, c)
 		}
+	}
+	if len(args) == 0 && len(buf) > 0 {
+		args = append(args, string(buf))
 	}
 	return args
 }
