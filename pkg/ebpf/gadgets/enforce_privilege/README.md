@@ -13,10 +13,11 @@ One instance runs per node:
   combination share it. Limits per node: 1024 containers, 64 slots, 512 policy
   map entries per slot, 16384 in total.
 - Binding or unbinding a container is a live write to the `bindings` map.
-- A combination the running instance does not have (a new or edited policy)
-  replaces the node instance: the candidate starts with every slot in use, is
-  ready with every container bound, and then the old instance stops. Both
-  enforce during the overlap. Unused slots are dropped at the next replacement.
+- The policy map is frozen per instance. A combination the running instance
+  does not have (a new or edited policy) needs a new instance: the owner starts
+  one with every slot in use and every container bound, and then stops the old
+  one, so both enforce during the overlap (the sandbox policy controller does
+  this).
 - An owner can create a slot before a container starts (for example when its
   pod is scheduled to the node), so the container binds with a live write.
 - Several policies on one container merge as the SandboxPolicy design says: the

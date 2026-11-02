@@ -85,23 +85,35 @@ func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) 
 		if err != nil || seen[tid] {
 			continue
 		}
-		seen[tid] = true
-		if mntns, err := mntnsOf(scanner.Text()); err != nil || mntns == hostMntns {
+		// A task is seen once it is armed or needs no arming; any other
+		// failure is returned, so the caller does not report it protected.
+		mntns, err := mntnsOf(scanner.Text())
+		if errors.Is(err, fs.ErrNotExist) || (err == nil && mntns == hostMntns) {
+			seen[tid] = true // exited, or a runtime helper
 			continue
+		}
+		if err != nil {
+			return fmt.Errorf("reading mount namespace of task %d: %w", tid, err)
 		}
 		fd, err := unix.PidfdOpen(tid, pidfdThread)
 		if errors.Is(err, unix.EINVAL) {
 			fd, err = unix.PidfdOpen(tid, 0)
 		}
-		if err != nil {
-			// The task exited, or it is a non-leader thread on an older kernel.
+		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EINVAL) {
+			// Exited, or a non-leader thread on a kernel without
+			// PIDFD_THREAD: the BPF rule judges it through its leader.
+			seen[tid] = true
 			continue
+		}
+		if err != nil {
+			return fmt.Errorf("opening task %d: %w", tid, err)
 		}
 		err = armed.Put(uint32(fd), uint32(1))
 		unix.Close(fd)
 		if err != nil && !errors.Is(err, unix.ESRCH) {
 			return fmt.Errorf("arming task %d: %w", tid, err)
 		}
+		seen[tid] = true
 	}
 	return scanner.Err()
 }

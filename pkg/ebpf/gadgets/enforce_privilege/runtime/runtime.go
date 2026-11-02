@@ -57,7 +57,7 @@ func validateConfig(config Config) error {
 	if p.Generation == 0 || p.Slots > privpolicy.KernelMaxSlots || len(p.Entries) > privpolicy.KernelMaxEntries {
 		return fmt.Errorf("invalid compiled privilege policy")
 	}
-	metas := uint32(0)
+	metas := map[uint32]bool{}
 	for _, e := range p.Entries {
 		if e.Key.Slot >= p.Slots {
 			return fmt.Errorf("policy entry for slot %d out of range", e.Key.Slot)
@@ -66,10 +66,13 @@ func validateConfig(config Config) error {
 			if e.Value.Generation != p.Generation {
 				return fmt.Errorf("slot %d carries another generation", e.Key.Slot)
 			}
-			metas++
+			if metas[e.Key.Slot] {
+				return fmt.Errorf("slot %d has two generation entries", e.Key.Slot)
+			}
+			metas[e.Key.Slot] = true
 		}
 	}
-	if metas != p.Slots {
+	if uint32(len(metas)) != p.Slots {
 		return fmt.Errorf("every slot needs one generation entry")
 	}
 	return nil

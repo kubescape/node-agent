@@ -289,25 +289,72 @@ static __always_inline void consider_syscall(__u32 slot, enum priv_syscall sc,
 	priv_consider(&key, m);
 }
 
-// resolve_syscall resolves the syscall kind: rules on the syscall with any
-// flag, rules on each CLONE_NEW* flag in flags, then the syscall default.
+struct resolve_flags_ctx {
+	__u32 slot;
+	enum priv_syscall sc;
+	__u64 flags;
+	struct policy_match base;
+	struct policy_match out;
+};
+
+static __always_inline __u64 ns_flag_at(__u32 i)
+{
+	switch (i) {
+	case 0:
+		return CLONE_NEWNS;
+	case 1:
+		return CLONE_NEWCGROUP;
+	case 2:
+		return CLONE_NEWUTS;
+	case 3:
+		return CLONE_NEWIPC;
+	case 4:
+		return CLONE_NEWUSER;
+	case 5:
+		return CLONE_NEWPID;
+	case 6:
+		return CLONE_NEWNET;
+	case 7:
+		return CLONE_NEWTIME;
+	}
+	return 0;
+}
+
+// resolve_flag is a bpf_loop callback: one namespace flag of the call.
+static long resolve_flag(__u32 i, void *data)
+{
+	struct resolve_flags_ctx *c = data;
+	__u64 flag = ns_flag_at(i);
+	struct policy_match m;
+
+	if (!flag)
+		return 1;
+	if (!(c->flags & flag))
+		return 0;
+	m = c->base;
+	consider_syscall(c->slot, c->sc, flag, &m);
+	priv_finish_kind(c->slot, PRIV_KIND_SYSCALL, &m);
+	policy_merge(&c->out, &m);
+	return 0;
+}
+
+// resolve_syscall resolves the syscall kind. Each namespace flag of a call
+// resolves on its own (rules on the flag or on the syscall with any flag, else
+// the default), so an allow for one flag never lets another flag of the same
+// call pass. The per-flag work runs in bpf_loop to keep verification small.
 static __always_inline void resolve_syscall(__u32 slot, enum priv_syscall sc,
 					    __u64 flags, struct policy_match *out)
 {
-	static const __u64 ns_flags[] = {
-		CLONE_NEWNS,  CLONE_NEWCGROUP, CLONE_NEWUTS, CLONE_NEWIPC,
-		CLONE_NEWUSER, CLONE_NEWPID,   CLONE_NEWNET, CLONE_NEWTIME,
-	};
-	struct policy_match m = {};
+	struct resolve_flags_ctx c = { .slot = slot, .sc = sc, .flags = flags };
 
-	consider_syscall(slot, sc, 0, &m);
-#pragma unroll
-	for (int i = 0; i < sizeof(ns_flags) / sizeof(ns_flags[0]); i++) {
-		if (flags & ns_flags[i])
-			consider_syscall(slot, sc, ns_flags[i], &m);
+	consider_syscall(slot, sc, 0, &c.base);
+	if (!(flags & CLONE_NS_MASK)) {
+		priv_finish_kind(slot, PRIV_KIND_SYSCALL, &c.base);
+		policy_merge(out, &c.base);
+		return;
 	}
-	priv_finish_kind(slot, PRIV_KIND_SYSCALL, &m);
-	policy_merge(out, &m);
+	bpf_loop(8, resolve_flag, &c, 0);
+	policy_merge(out, &c.out);
 }
 
 static __always_inline void resolve_capability(__u32 slot, int cap,
@@ -416,7 +463,8 @@ static __always_inline int check_syscall(void *ctx, enum priv_hook hook,
 SEC("lsm/bprm_committed_creds")
 int BPF_PROG(ig_priv_exec)
 {
-	arming_on_exec();
+	if (!arming_on_exec())
+		verdict_count(VERDICT_COUNT_SECTION_ERROR);
 	return 0;
 }
 
@@ -462,7 +510,8 @@ static __always_inline int do_task_alloc(void *ctx, struct task_struct *task,
 	enum priv_syscall sc;
 	__u64 flags;
 
-	arming_on_fork(task);
+	if (!arming_on_fork(task))
+		verdict_count(VERDICT_COUNT_SECTION_ERROR);
 
 	// userns_create judges CLONE_NEWUSER.
 	flags = clone_flags & CLONE_NS_MASK & ~CLONE_NEWUSER;
@@ -696,6 +745,9 @@ static __always_inline int do_ptrace_access_check(void *ctx, unsigned int mode)
 	__u32 slot = 0;
 
 	if (current_is_compat()) {
+		// Read-mode /proc access (ps, top) is never ptrace.
+		if (!(mode & PTRACE_MODE_ATTACH))
+			return 0;
 		// Unknown syscall: apply all three ptrace-family syscalls.
 		header = priv_scope(&cgid, &slot);
 		if (!header)

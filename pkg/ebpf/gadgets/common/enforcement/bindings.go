@@ -218,7 +218,10 @@ func (b *Bindings) bind(c Binding) error {
 			// A container that is gone needs no protection; a startup
 			// replay skips it (see start).
 			if derr := b.members.Delete(id.CgroupID); derr != nil {
-				err = errors.Join(err, derr)
+				// The kernel entry stays: keep it tracked so Unbind can
+				// remove it later.
+				b.active[id.CgroupID] = c
+				return errors.Join(err, derr)
 			}
 			return err
 		}
