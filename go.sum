@@ -83,8 +83,6 @@ git.sr.ht/~sbinet/cmpimg v0.1.0 h1:E0zPRk2muWuCqSKSVZIWsgtU9pjsw3eKHi8VmQeScxo=
 git.sr.ht/~sbinet/cmpimg v0.1.0/go.mod h1:FU12psLbF4TfNXkKH2ZZQ29crIqoiqTZmeQ7dkp/pxE=
 git.sr.ht/~sbinet/gg v0.5.0 h1:6V43j30HM623V329xA9Ntq+WJrMjDxRjuAB1LFWF5m8=
 git.sr.ht/~sbinet/gg v0.5.0/go.mod h1:G2C0eRESqlKhS7ErsNey6HHrqU1PwsnCQlekFi9Q2Oo=
-github.com/ANAMASGARD/inspektor-gadget v0.0.0-20261027113509-ddcb1a576642 h1:MA8pFnLDB8EOLbPN17OdzBV1hYXQsv+EJKoYPIYINvQ=
-github.com/ANAMASGARD/inspektor-gadget v0.0.0-20261027113509-ddcb1a576642/go.mod h1:PMBks/BMUEnanU636fZaAOU173YUlhusBJqGEd+q6jo=
 github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 h1:He8afgbRMd7mFxO99hRNu+6tazq8nFF9lIwo9JFroBk=
 github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6/go.mod h1:8o94RPi1/7XTJvwPpRSzSUedZrtlirdB3r9Z20bi2f8=
 github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20250520111509-a70c2aa677fa h1:x6kFzdPgBoLbyoNkA/jny0ENpoEz4wqY8lPTQL2DPkg=
@@ -924,6 +922,8 @@ github.com/kubescape/backend v0.0.39 h1:B1QRfKCSFlzuE+jWOnk/l7EpH71/Q3n14KKq0QSn
 github.com/kubescape/backend v0.0.39/go.mod h1:cMEGP8cXUZgY89YU4GRBGIla9HZW7grZsUtlCwvZgAE=
 github.com/kubescape/go-logger v0.0.35 h1:o4zVrmRjP74ytfM0iNHhmJHnmCHjmyChwgP+aUmu2dw=
 github.com/kubescape/go-logger v0.0.35/go.mod h1:tNhDWN8Yn8Tf6h+eIIjT5s//Aqxx2kAJ/HO18souZ18=
+github.com/kubescape/inspektor-gadget v0.0.0-20261102092255-9864428b73f8 h1:8aLwjXc0QnkINEyB0emwG3ezXFY3bGSYg6aUTL3whd8=
+github.com/kubescape/inspektor-gadget v0.0.0-20261102092255-9864428b73f8/go.mod h1:PMBks/BMUEnanU636fZaAOU173YUlhusBJqGEd+q6jo=
 github.com/kubescape/k8s-interface v0.0.214 h1:j7KP0/5VvYOoQdBGV2+gRM3qnR8PWLAGF8RM/k/DmJ0=
 github.com/kubescape/k8s-interface v0.0.214/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
 github.com/kubescape/storage v0.0.303 h1:0nXI6E07lbWsg7iEH04vR4kwiekj//uCQl/La+8j4aM=

@@ -480,9 +480,7 @@ require (
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
 
-// NOTE: temporary pin to the contributor fork for kubescape/inspektor-gadget#17
-// (IG v0.57.0 merge); re-pin to the merged kubescape/inspektor-gadget commit.
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/ANAMASGARD/inspektor-gadget v0.0.0-20261027113509-ddcb1a576642
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/kubescape/inspektor-gadget v0.0.0-20261102092255-9864428b73f8
 
 // Carried over from the inspektor-gadget fork go.mod; keep in sync with it.
 replace github.com/notaryproject/notation-go => github.com/inspektor-gadget/notation-go v1.3.3

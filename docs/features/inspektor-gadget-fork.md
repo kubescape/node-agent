@@ -20,21 +20,14 @@ with its own history. Previously this pointed at a personal fork
 (`matthyx/inspektor-gadget`); that was migrated to the org fork so the dependency
 isn't tied to one contributor's personal account.
 
-### Temporary pin: IG v0.57.0 merge (fork PR #17)
+### IG v0.57.0 merge (fork PR #17)
 
-The IG v0.57.0 merge (fork PR #17, commit `ddcb1a5766427456dac3a2b9bd7bcac7cc5f0868`)
-is not on `kubescape/inspektor-gadget:main` yet, so the commit does not resolve
-under the `kubescape` module path. Until #17 merges, `go.mod` pins the
-contributor's fork, which carries the same commit:
-
-```
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/ANAMASGARD/inspektor-gadget v0.0.0-20261027113509-ddcb1a576642
-```
-
-After #17 merges, re-pin to the merged commit on `kubescape/inspektor-gadget`
-(see "Updating the pin"). The `NOTE:` comment above the replace line makes
-`make check-ig-pin` fail until then; the guard's ancestor check only covers the
-`kubescape` path, so the marker is what blocks a merge. Remove it when re-pinning.
+The pin is the merge of fork PR #17 on `kubescape/inspektor-gadget:main`
+(`9864428b73f8a5731cc6c524fb8b0fdd516a5c82`): upstream IG v0.57.0 plus the fork's
+patches. The fork-only commit that disabled kubelet `/configz` runtime socket
+discovery unless a kubelet CA bundle was configured was reverted before the merge,
+so socket discovery behaves as upstream v0.57.0 (needed on k3s, where the
+containerd socket is `/run/k3s/containerd/containerd.sock`).
 
 ### Carried replaces
 
