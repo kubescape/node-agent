@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -21,8 +22,13 @@ import (
 type LinuxValidator struct{ ProcRoot, CgroupRoot string }
 type linuxLease struct {
 	proc, cgroup, namespace *os.File
-	identity                sandboxpolicy.Binding
-	start                   string
+	// hostCgroupNS is the cgroup namespace of PID 1 of procRoot when it is not
+	// ours. /proc/<pid>/cgroup is relative to the reader's cgroup namespace,
+	// and the binding's path is relative to PID 1's (as the container
+	// collection reads it), so Check reads it there.
+	hostCgroupNS *os.File
+	identity     sandboxpolicy.Binding
+	start        string
 }
 
 func (v LinuxValidator) Acquire(ctx context.Context, b sandboxpolicy.Binding) (Lease, error) {
@@ -86,6 +92,9 @@ func (v LinuxValidator) Acquire(ctx context.Context, b sandboxpolicy.Binding) (L
 	if stat.Ino != b.MountNamespace {
 		return fail(fmt.Errorf("mount namespace changed"))
 	}
+	if lease.hostCgroupNS, err = foreignCgroupNamespace(procRoot); err != nil {
+		return fail(err)
+	}
 	lease.start, err = lease.readStart()
 	if err != nil {
 		return fail(err)
@@ -136,7 +145,7 @@ func (l *linuxLease) Check() error {
 	if start != l.start {
 		return fmt.Errorf("process identity changed")
 	}
-	data, err := l.read("cgroup")
+	data, err := l.readCgroup()
 	if err != nil {
 		return err
 	}
@@ -168,11 +177,59 @@ func (l *linuxLease) Check() error {
 }
 func (l *linuxLease) Close() error {
 	var errs []error
-	for _, f := range []*os.File{l.namespace, l.cgroup, l.proc} {
+	for _, f := range []*os.File{l.hostCgroupNS, l.namespace, l.cgroup, l.proc} {
 		if f != nil {
 			errs = append(errs, f.Close())
 		}
 	}
-	l.namespace, l.cgroup, l.proc = nil, nil, nil
+	l.hostCgroupNS, l.namespace, l.cgroup, l.proc = nil, nil, nil, nil
 	return errors.Join(errs...)
+}
+
+// foreignCgroupNamespace opens the cgroup namespace of PID 1 of procRoot. It
+// returns nil when this process is already in it. node-agent normally runs in
+// its own (private) cgroup namespace, where /proc/<pid>/cgroup of a workload
+// shows a "/../.." path instead of the path the container collection recorded.
+func foreignCgroupNamespace(procRoot string) (*os.File, error) {
+	host, err := os.Open(filepath.Join(procRoot, "1", "ns", "cgroup"))
+	if err != nil {
+		return nil, fmt.Errorf("host cgroup namespace: %w", err)
+	}
+	var hostStat, selfStat unix.Stat_t
+	if err := unix.Fstat(int(host.Fd()), &hostStat); err != nil {
+		return nil, errors.Join(err, host.Close())
+	}
+	if err := unix.Stat("/proc/thread-self/ns/cgroup", &selfStat); err != nil {
+		return nil, errors.Join(err, host.Close())
+	}
+	if hostStat.Dev == selfStat.Dev && hostStat.Ino == selfStat.Ino {
+		return nil, host.Close()
+	}
+	return host, nil
+}
+
+// readCgroup reads /proc/<pid>/cgroup in the host cgroup namespace.
+func (l *linuxLease) readCgroup() ([]byte, error) {
+	if l.hostCgroupNS == nil {
+		return l.read("cgroup")
+	}
+	runtime.LockOSThread()
+	own, err := os.Open("/proc/thread-self/ns/cgroup")
+	if err != nil {
+		runtime.UnlockOSThread()
+		return nil, err
+	}
+	defer own.Close()
+	if err := unix.Setns(int(l.hostCgroupNS.Fd()), unix.CLONE_NEWCGROUP); err != nil {
+		runtime.UnlockOSThread()
+		return nil, fmt.Errorf("enter host cgroup namespace: %w", err)
+	}
+	data, readErr := l.read("cgroup")
+	if err := unix.Setns(int(own.Fd()), unix.CLONE_NEWCGROUP); err != nil {
+		// Keep the thread locked: Go ends it when this goroutine exits, so no
+		// other goroutine runs in the wrong cgroup namespace.
+		return nil, fmt.Errorf("restore cgroup namespace: %w", err)
+	}
+	runtime.UnlockOSThread()
+	return data, readErr
 }
