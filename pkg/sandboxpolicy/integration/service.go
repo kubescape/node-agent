@@ -22,8 +22,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	orasoci "oras.land/oras-go/v2/content/oci"
@@ -43,6 +45,8 @@ type ServiceOptions struct {
 	Receivers                                         *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	Enricher                                          containerwatcher.TaskBasedEnricher
 	OnError                                           func(error)
+	// PrivilegeImageName enables the privilege section. Empty rejects it.
+	PrivilegeImageName string
 }
 
 type serviceBackend interface {
@@ -118,8 +122,26 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		_ = s.closeRuntime()
 		return nil, err
 	}
-	s.backend, err = igbackend.NewFull(engine, source, s.exporter, s.report)
+	full, err := igbackend.NewFull(engine, source, s.exporter, s.report)
 	if err != nil {
+		_ = s.closeRuntime()
+		return nil, err
+	}
+	var privilege sandboxpolicy.Backend
+	if options.PrivilegeImageName != "" {
+		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
+		if err == nil {
+			privilege, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
+		}
+		if err != nil {
+			_ = full.Close(ctx)
+			_ = s.closeRuntime()
+			return nil, err
+		}
+	}
+	s.backend, err = sandboxpolicy.NewSectionBackend(full, privilege)
+	if err != nil {
+		_ = full.Close(ctx)
 		_ = s.closeRuntime()
 		return nil, err
 	}
@@ -135,12 +157,27 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 // Watch events are hints only. Generic watcher queues may deliver old updates
 // after a relist/deletion; applying their payload could resurrect removed policy.
 // Refresh always reads authoritative configuration and cannot revive queued UIDs.
-func (s *Service) WatchResources() []watcher.WatchResource             { return s.Controller.WatchResources() }
+// WatchResources adds this node's pods, so a scheduled pod can get its privilege
+// slot before its containers start.
+func (s *Service) WatchResources() []watcher.WatchResource {
+	resources := s.Controller.WatchResources()
+	if s.options.PrivilegeImageName == "" {
+		return resources
+	}
+	pods := watcher.NewWatchResource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}, metav1.ListOptions{FieldSelector: "spec.nodeName=" + s.options.NodeName})
+	return append(resources, pods)
+}
 func (s *Service) AddHandler(_ context.Context, obj runtime.Object)    { s.configurationHint(obj) }
 func (s *Service) ModifyHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj) }
 func (s *Service) DeleteHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj) }
 func (s *Service) configurationHint(obj runtime.Object) {
 	if obj == nil {
+		return
+	}
+	if pod, ok := obj.(*corev1.Pod); ok {
+		if s.options.PrivilegeImageName != "" && pod.Spec.NodeName == s.options.NodeName && pod.Status.Phase == corev1.PodPending {
+			s.ContainerCallback(containercollection.PubSubEvent{})
+		}
 		return
 	}
 	switch obj.GetObjectKind().GroupVersionKind().Kind {
@@ -206,6 +243,15 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
+	if s.options.PrivilegeImageName != "" && s.options.Kubernetes != nil && s.Controller.HasPrivilegePolicies() {
+		scheduled, err := ScheduledContainers(ctx, s.options.Kubernetes, s.options.NodeName)
+		if err == nil {
+			err = s.Controller.PrepareScheduled(ctx, scheduled)
+		}
+		if err != nil {
+			s.report(fmt.Errorf("privilege slot preparation: %w", err))
+		}
+	}
 	// Configuration and selected-runtime discovery share one commit barrier. A
 	// candidate cannot report Ready between its relist and a failed binding list.
 	err := s.Controller.Refresh(ctx, func(ctx context.Context, selected func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
@@ -303,7 +349,11 @@ func (s *Service) Close(ctx context.Context) error {
 // from ExporterStats. Unavailable counts/errors mean totals are incomplete;
 // these evaluator counters do not cover early native-owner exec refusals.
 func (s *Service) KernelEventStats(ctx context.Context) (igbackend.KernelEventStats, error) {
-	source, ok := s.backend.(interface {
+	var backend any = s.backend
+	if sections, isSections := s.backend.(*sandboxpolicy.SectionBackend); isSections {
+		backend = sections.Exec()
+	}
+	source, ok := backend.(interface {
 		KernelEventStats(context.Context) (igbackend.KernelEventStats, error)
 	})
 	if !ok {

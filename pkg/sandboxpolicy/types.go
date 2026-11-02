@@ -45,6 +45,8 @@ type CompiledPolicy struct {
 	Mode     api.PolicyMode  `json:"mode"`
 	RootRole string          `json:"rootRole"`
 	Exec     api.ExecSection `json:"exec"`
+	// Privilege is nil when the policy has no privilege section.
+	Privilege *api.PrivilegeSection `json:"privilege,omitempty"`
 }
 
 type Plan struct {
@@ -99,6 +101,13 @@ type Backend interface {
 // uncertainty; only an authoritative snapshot may authorize reconciliation again.
 type ProtectionAttester interface {
 	Attest(context.Context, Binding, string) error
+}
+
+// SlotPreparer optionally prepares enforcement for pods scheduled to this node
+// before their containers start. Each plan is what a container of such a pod
+// will get. It is a hint: a later Replace must still work without it.
+type SlotPreparer interface {
+	Prepare(context.Context, []Plan) error
 }
 
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.

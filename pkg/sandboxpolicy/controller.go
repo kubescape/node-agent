@@ -168,6 +168,56 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	c.lastError = c.reconcile(ctx)
 	return c.lastError
 }
+
+// PrepareScheduled passes, for every container of the given pods (scheduled to
+// this node and not finished), the privilege policies it will get to
+// a backend that can prepare them. It is a hint and changes no binding state.
+func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding) error {
+	c.mu.Lock()
+	preparer, ok := c.backend.(SlotPreparer)
+	if !ok || c.configError != nil {
+		c.mu.Unlock()
+		return nil
+	}
+	policies := c.privilegePolicies()
+	c.mu.Unlock()
+	var plans []Plan
+	for _, b := range containers {
+		var plan Plan
+		for _, p := range policies {
+			if p.matches(b) {
+				plan.Policies = append(plan.Policies, CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy()})
+			}
+		}
+		if len(plan.Policies) > 0 {
+			plans = append(plans, plan)
+		}
+	}
+	// Outside c.mu: a preparation may start a gadget instance.
+	return preparer.Prepare(ctx, plans)
+}
+
+// HasPrivilegePolicies reports whether any active policy has a privilege section.
+func (c *Controller) HasPrivilegePolicies() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.privilegePolicies()) > 0
+}
+
+// privilegePolicies is called with c.mu held.
+func (c *Controller) privilegePolicies() []desiredPolicy {
+	var policies []desiredPolicy
+	for _, obj := range c.objects {
+		if obj.GetKind() == "SandboxPolicyClasses" {
+			continue
+		}
+		if p := parsePolicy(obj); p.err == nil && p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
+			policies = append(policies, p)
+		}
+	}
+	return policies
+}
+
 func (c *Controller) LastError() error { c.mu.Lock(); defer c.mu.Unlock(); return c.lastError }
 
 func bindingKey(b Binding) string {

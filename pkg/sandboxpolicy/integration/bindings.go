@@ -61,6 +61,46 @@ func SnapshotSelectedBindingsFromContainers(ctx context.Context, client kubernet
 	return snapshotBindings(ctx, client, containers, nodeName, selector)
 }
 
+// ScheduledContainers returns API metadata (no runtime identity) for every
+// declared regular and init container of the pods scheduled to this node that
+// are not finished. It feeds privilege slot preparation, not binding.
+func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeName string) ([]sandboxpolicy.Binding, error) {
+	if client == nil || nodeName == "" {
+		return nil, fmt.Errorf("Kubernetes client and node name are required")
+	}
+	pods, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String()})
+	if err != nil {
+		return nil, fmt.Errorf("list node pods: %w", err)
+	}
+	namespaces, err := client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list namespaces: %w", err)
+	}
+	namespaceLabels := make(map[string]map[string]string, len(namespaces.Items))
+	for _, ns := range namespaces.Items {
+		namespaceLabels[ns.Name] = ns.Labels
+	}
+	var result []sandboxpolicy.Binding
+	for _, pod := range pods.Items {
+		if pod.Spec.NodeName != nodeName || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		labels, ok := namespaceLabels[pod.Namespace]
+		if !ok {
+			continue
+		}
+		for _, group := range []struct {
+			kind       string
+			containers []corev1.Container
+		}{{"regular", pod.Spec.Containers}, {"init", pod.Spec.InitContainers}} {
+			for _, c := range group.containers {
+				result = append(result, sandboxpolicy.Binding{PodUID: pod.UID, Namespace: pod.Namespace, PodName: pod.Name, ContainerName: c.Name, Kind: group.kind, PodLabels: copyLabels(pod.Labels), NamespaceLabels: copyLabels(labels)})
+			}
+		}
+	}
+	return result, nil
+}
+
 func snapshotBindings(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
 
 	if client == nil || nodeName == "" {

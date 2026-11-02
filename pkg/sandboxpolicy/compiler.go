@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 
+	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 )
 
@@ -30,8 +31,8 @@ func Compile(ctx context.Context, identity PolicyIdentity, spec api.PolicySpec, 
 	if spec.Mode != api.ModeAudit && spec.Mode != api.ModeEnforce {
 		return result, fmt.Errorf("policy is not active: %q", spec.Mode)
 	}
-	if spec.File != nil || spec.Network != nil || spec.Privilege != nil || spec.Identity != nil {
-		return result, fmt.Errorf("non-exec sections are unsupported")
+	if spec.File != nil || spec.Network != nil || spec.Identity != nil {
+		return result, fmt.Errorf("file, network and identity sections are unsupported")
 	}
 	// JSON cloning preserves all pointers and slice fields of the API vocabulary.
 	data, err := json.Marshal(spec)
@@ -49,6 +50,7 @@ func Compile(ctx context.Context, identity PolicyIdentity, spec api.PolicySpec, 
 	if copy.Exec != nil {
 		result.Exec = *copy.Exec
 	}
+	result.Privilege = copy.Privilege
 	names := make(map[string]bool)
 	for _, r := range result.Exec.Rules {
 		names[r.Name] = true
@@ -120,7 +122,7 @@ func Compile(ctx context.Context, identity PolicyIdentity, spec api.PolicySpec, 
 		}
 	}
 	// Validate imported rules as well as authored rules after class expansion.
-	validated := api.PolicySpec{Containers: copy.Containers, Mode: copy.Mode, RootRole: result.RootRole, Exec: &result.Exec}
+	validated := api.PolicySpec{Containers: copy.Containers, Mode: copy.Mode, RootRole: result.RootRole, Exec: &result.Exec, Privilege: result.Privilege}
 	if err := api.ValidatePolicySpec(validated); err != nil {
 		return result, err
 	}
@@ -166,8 +168,13 @@ func validateShape(spec api.PolicySpec) error {
 	if spec.Mode == api.ModeOff {
 		return nil
 	}
-	if spec.File != nil || spec.Network != nil || spec.Privilege != nil || spec.Identity != nil {
-		return fmt.Errorf("non-exec sections are unsupported")
+	if spec.File != nil || spec.Network != nil || spec.Identity != nil {
+		return fmt.Errorf("file, network and identity sections are unsupported")
+	}
+	if spec.Privilege != nil {
+		if _, err := privpolicy.FromAPI("", spec.Mode, *spec.Privilege); err != nil {
+			return fmt.Errorf("privilege: %w", err)
+		}
 	}
 	if spec.Exec != nil {
 		if spec.Exec.Default != api.ActionAllow && spec.Exec.Default != api.ActionDeny {
