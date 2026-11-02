@@ -128,7 +128,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		return nil, fmt.Errorf("runtime mount namespace: %w", err)
 	}
 	desired := &api.GadgetInstance{Id: id, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: e.image,
-		ParamValues: map[string]string{"operator.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)}}}
+		ParamValues: map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)}}}
 	err = e.manager.StartGadget(ctx, desired,
 		gadgetcontext.WithOrasReadonlyTarget(e.store),
 		gadgetcontext.WithAdditionalDataOperators(handler, e.kube, privruntime.New(), events),
