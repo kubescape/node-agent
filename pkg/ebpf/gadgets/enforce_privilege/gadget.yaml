@@ -1,6 +1,6 @@
 name: enforce_privilege
 behavior: mutator
-description: "Enforce SandboxPolicy privilege rules (capabilities, namespaces, mounts, ptrace, modules) for a live set of containers (BPF LSM)"
+description: "Enforce privilege rules (capabilities, namespaces, mounts, ptrace, modules) for a live set of containers (BPF LSM)"
 annotations:
   enable-containers-datasource: "true"
   enforce-privilege: "true"

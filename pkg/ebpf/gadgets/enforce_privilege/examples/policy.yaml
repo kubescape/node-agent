@@ -1,0 +1,28 @@
+# enforce_privilege policy document. One document per policy; the compiler can
+# merge several documents into one slot (most limiting wins).
+version: 1
+name: example
+policy:
+  mode: enforce              # audit | enforce | off
+  privilege:
+    default: allow           # default for syscall and mountFsType targets
+    rules:
+      - name: no-new-namespaces
+        target:
+          syscall: [unshare, clone, clone3, setns]
+          flags: [CLONE_NEWUSER, CLONE_NEWNS]
+        action: deny
+        origin: example/namespaces
+      - name: no-proc-mount
+        target:
+          mountFsType: [proc, sysfs]
+        action: deny
+      - name: no-kernel-modules
+        target:
+          syscall: [init_module, finit_module]
+        action: deny
+      - name: watch-sys-admin
+        target:
+          capability: [SYS_ADMIN]
+        action: deny
+        mode: audit

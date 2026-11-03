@@ -1,16 +1,24 @@
 // Copyright 2026 The Kubescape Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package privpolicy parses and compiles the privilege section of a sandbox
-// policy into the enforce_privilege map entries.
+// Package privpolicy defines the enforce_privilege policy document (YAML or
+// JSON, see ../examples/policy.yaml), parses it, and compiles one or more
+// documents into the gadget's map entries.
 package privpolicy
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-const MaxRules = 128
+const (
+	MaxBytes = 64 * 1024
+	MaxRules = 128
+)
 
 type Document struct {
 	// Name qualifies rule names in events when several policies merge.
@@ -43,6 +51,28 @@ type Target struct {
 	Flags       []string `yaml:"flags,omitempty" json:"flags,omitempty"`
 	Capability  []string `yaml:"capability,omitempty" json:"capability,omitempty"`
 	MountFSType []string `yaml:"mountFsType,omitempty" json:"mountFsType,omitempty"`
+}
+
+// Parse reads one policy document (YAML or JSON) with unknown fields rejected.
+func Parse(r io.Reader) (Document, error) {
+	var doc Document
+	data, err := io.ReadAll(io.LimitReader(r, MaxBytes+1))
+	if err != nil {
+		return doc, err
+	}
+	if len(data) > MaxBytes {
+		return doc, fmt.Errorf("policy exceeds %d bytes", MaxBytes)
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&doc); err != nil {
+		return doc, fmt.Errorf("parsing policy: %w", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return doc, fmt.Errorf("parsing policy: one document per file")
+	}
+	return doc, doc.Validate()
 }
 
 func validMode(m string, allowEmpty bool) bool {
