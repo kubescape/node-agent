@@ -8,6 +8,9 @@ import "sync/atomic"
 // read independently. After Run returns all receiver workers have finished.
 // It contains no message payload, container identity or command arguments.
 type Stats struct {
+	ActiveConnections   int64  `json:"active_connections"`
+	Listening           bool   `json:"listening"`
+	CanceledStarts      uint64 `json:"canceled_starts"`
 	AcceptedConnections uint64 `json:"accepted_connections"`
 	RejectedConnections uint64 `json:"rejected_connections"`
 	ClosedConnections   uint64 `json:"closed_connections"`
@@ -26,6 +29,8 @@ type Stats struct {
 }
 
 type receiverCounters struct {
+	ActiveConnections   atomic.Int64
+	CanceledStarts      atomic.Uint64
 	AcceptedConnections atomic.Uint64
 	RejectedConnections atomic.Uint64
 	ClosedConnections   atomic.Uint64
@@ -46,6 +51,9 @@ type receiverCounters struct {
 // callback is not proof of successful output; callers must check their own I/O.
 func (r *Receiver) Stats() Stats {
 	return Stats{
+		ActiveConnections:   r.counters.ActiveConnections.Load(),
+		Listening:           r.listening.Load(),
+		CanceledStarts:      r.counters.CanceledStarts.Load(),
 		AcceptedConnections: r.counters.AcceptedConnections.Load(),
 		RejectedConnections: r.counters.RejectedConnections.Load(),
 		ClosedConnections:   r.counters.ClosedConnections.Load(),
