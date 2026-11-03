@@ -40,15 +40,24 @@ var forbiddenWords = regexp.MustCompile(`(?i)sandbox[ _-]?polic|kubescape\.io|\b
 
 // A quoted BPF include must stay inside the gadget folders: "x.h" or
 // "../common/x.h" (checked by includeOutside).
-var quotedInclude = regexp.MustCompile(`#include\s+"([^"]*)"`)
+var quotedInclude = regexp.MustCompile(`#\s*include\s*"([^"]*)"`)
 
 func includeOutside(line string) bool {
 	m := quotedInclude.FindStringSubmatch(line)
-	if m == nil || !strings.HasPrefix(m[1], "../") {
+	if m == nil {
 		return false
 	}
+	if strings.HasPrefix(m[1], "/") {
+		return true // absolute
+	}
 	rest, ok := strings.CutPrefix(m[1], "../common/")
-	return !ok || strings.Contains(rest, "..")
+	if !ok {
+		rest = m[1]
+		if strings.HasPrefix(rest, "../") {
+			return true
+		}
+	}
+	return strings.Contains(rest, "..")
 }
 
 func walkGadgetFiles(t *testing.T, fn func(path string, data []byte)) {
@@ -133,6 +142,9 @@ func TestIncludeOutside(t *testing.T) {
 		`#include "../config/x.h"`:           true,
 		`#include "../../pkg/x.h"`:           true,
 		`#include "../common/../../pkg/x.h"`: true,
+		`# include "../../pkg/x.h"`:          true,
+		`#include "/usr/include/x.h"`:        true,
+		`#include "sub/../../x.h"`:           true,
 	} {
 		if got := includeOutside(line); got != want {
 			t.Errorf("%s: got %v, want %v", line, got, want)
