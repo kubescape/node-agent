@@ -399,6 +399,7 @@ change does not configure other Kubescape components or modify the Helm chart.
 | `exporters::httpExporterConfig::headers` | map | `{}` | HTTP headers |
 | `exporters::httpExporterConfig::timeoutSeconds` | int | `5` | Request timeout |
 | `exporters::httpExporterConfig::method` | string | `POST` | HTTP method |
+| `exporters::httpExporterConfig::tokenFile` | string | - | Path to a projected service-account token. When set, it is sent as `Authorization: Bearer <token>` to the `url` host on every synchronizer-bound post: runtime alerts, node profiles and network streams. The file is re-read when its mtime changes. While it is set, redirects from `https` to `http` are refused |
 
 #### AlertManager Exporter
 

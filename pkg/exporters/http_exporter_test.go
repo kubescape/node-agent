@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSendRuleAlert(t *testing.T) {
@@ -254,4 +257,64 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 		Method: "DELETE",
 	}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
 	assert.Error(t, err)
+}
+
+func TestHTTPExporter_SendsBearerFromTokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(tokenFile, []byte("tok"), 0o600))
+
+	tests := []struct {
+		name      string
+		tokenFile string
+		want      string
+	}{
+		{name: "token file set", tokenFile: tokenFile, want: "Bearer tok"},
+		{name: "token file empty", tokenFile: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authChan := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authChan <- r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			exporter, err := NewHTTPExporter(HTTPExporterConfig{
+				URL:       server.URL,
+				TokenFile: tt.tokenFile,
+			}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
+			require.NoError(t, err)
+
+			exporter.SendRuleAlert(&types.GenericRuleFailure{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{AlertName: "testrule"},
+			})
+
+			waitAuth := func() string {
+				select {
+				case got := <-authChan:
+					return got
+				case <-time.After(2 * time.Second):
+					t.Fatal("timed out waiting for request")
+					return ""
+				}
+			}
+			assert.Equal(t, tt.want, waitAuth())
+
+			if tt.tokenFile == "" {
+				return
+			}
+			// Rotation: the kubelet rewrites the projected token; the next
+			// request must carry the new one. The mtime is moved forward so the
+			// change is seen even on filesystems with coarse timestamps.
+			require.NoError(t, os.WriteFile(tt.tokenFile, []byte("rotated"), 0o600))
+			future := time.Now().Add(time.Second)
+			require.NoError(t, os.Chtimes(tt.tokenFile, future, future))
+
+			exporter.SendRuleAlert(&types.GenericRuleFailure{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{AlertName: "testrule2"},
+			})
+			assert.Equal(t, "Bearer rotated", waitAuth())
+		})
+	}
 }
