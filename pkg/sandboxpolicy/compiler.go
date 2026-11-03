@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sort"
 
-	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 )
 
@@ -172,7 +171,7 @@ func validateShape(spec api.PolicySpec) error {
 		return fmt.Errorf("file, network and identity sections are unsupported")
 	}
 	if spec.Privilege != nil {
-		if _, err := privpolicy.FromAPI("", spec.Mode, *spec.Privilege); err != nil {
+		if _, err := PrivilegeDocument("", spec.Mode, *spec.Privilege); err != nil {
 			return fmt.Errorf("privilege: %w", err)
 		}
 	}

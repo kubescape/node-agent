@@ -309,7 +309,7 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 	for i, c := range keys {
 		slots[c] = uint32(i)
 		for _, p := range wanted[c] {
-			doc, err := privpolicy.FromAPI(p.Identity.Namespace+"/"+p.Identity.Name, p.Mode, *p.Privilege)
+			doc, err := sandboxpolicy.PrivilegeDocument(p.Identity.Namespace+"/"+p.Identity.Name, p.Mode, *p.Privilege)
 			if err != nil {
 				return err
 			}
