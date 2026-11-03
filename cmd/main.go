@@ -142,6 +142,7 @@ func main() {
 	if err != nil {
 		logger.L().Warning("OTEL init failed, running without telemetry", helpers.Error(err))
 	}
+	otelLogsReady := err == nil && (os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") != "")
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -570,6 +571,13 @@ func main() {
 	}
 
 	// start watching
+	stopGVisor, gvisorErr := startGVisorCollection(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, k8sClient.GetKubernetesClient().CoreV1(), otelLogsReady)
+	if gvisorErr != nil {
+		logger.L().Warning("gVisor start source unavailable; runtime visibility is degraded", helpers.Error(gvisorErr))
+	} else {
+		defer stopGVisor()
+	}
+
 	dWatcher.Start(ctx)
 	defer dWatcher.Stop(ctx)
 

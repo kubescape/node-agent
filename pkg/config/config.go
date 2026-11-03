@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/backend/pkg/servicediscovery/schema"
 	servicediscoveryv3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
 	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/gvisor"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
@@ -85,6 +86,7 @@ func NormalizeDNSSuffix(s string) string {
 }
 
 type Config struct {
+	GVisorStart                    gvisor.IntegrationConfig             `mapstructure:"gVisorStart"`
 	BlockEvents                    bool                                 `mapstructure:"blockEvents"`
 	CelConfigCache                 cache.FunctionCacheConfig            `mapstructure:"celConfigCache"`
 	ContainerEolNotificationBuffer int                                  `mapstructure:"containerEolNotificationBuffer"`
