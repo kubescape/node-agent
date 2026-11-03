@@ -5,22 +5,12 @@ package privpolicy
 
 import (
 	"encoding/binary"
+	"os"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
-// parse decodes a test policy with unknown fields rejected, then validates it.
-func parse(y string) (Document, error) {
-	var d Document
-	dec := yaml.NewDecoder(strings.NewReader(y))
-	dec.KnownFields(true)
-	if err := dec.Decode(&d); err != nil {
-		return d, err
-	}
-	return d, d.Validate()
-}
+func parse(y string) (Document, error) { return Parse(strings.NewReader(y)) }
 
 func mustParse(t *testing.T, y string) Document {
 	t.Helper()
@@ -246,5 +236,29 @@ func TestAuditDenyRaiseRespectsFlagKeys(t *testing.T) {
 	// B's default deny still applies to flags B does not allow.
 	if r := rankOf(c, "CLONE_NEWNET"); r != RankDenyEnforce {
 		t.Fatalf("unshare --net: rank %d, want enforce from B's default", r)
+	}
+}
+
+func TestParse(t *testing.T) {
+	f, err := os.Open("../examples/policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	d, err := Parse(f)
+	if err != nil {
+		t.Fatalf("example: %v", err)
+	}
+	if _, err := CompileKernel(d, 1); err != nil {
+		t.Fatalf("example compile: %v", err)
+	}
+	for name, in := range map[string]string{
+		"unknown field": "version: 1\npolicy: {mode: enforce, privilege: {default: allow}}\nbinding: {}\n",
+		"two documents": "version: 1\npolicy: {mode: enforce, privilege: {default: allow}}\n---\nversion: 1\n",
+		"too large":     "version: 1\n#" + strings.Repeat("x", MaxBytes) + "\n",
+	} {
+		if _, err := parse(in); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
 	}
 }

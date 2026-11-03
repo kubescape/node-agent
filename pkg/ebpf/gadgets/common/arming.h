@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright 2026 The Kubescape Authors
 
-// Arming rule shared by the SandboxPolicy prevention gadgets.
+// Arming rule shared by the BPF LSM enforcement gadgets.
 //
 // A cgroup-scoped enforcer also sees the container runtime's own setup inside
 // the container cgroup (runc init creates namespaces, mounts, pivots root and,

@@ -1,35 +1,27 @@
 # enforce_privilege
 
-Container privilege enforcement with BPF LSM, no seccomp. It enforces the
-`privilege` section of a sandbox policy: namespace creation and joining, mounts,
-`pivot_root`/`chroot`, capabilities, ptrace, kernel modules, `bpf`,
-`perf_event_open`, keys, `io_uring_setup`, `userfaultfd`, `mknod`,
-`setuid`/`setgid` and `capset`.
+Container privilege enforcement with BPF LSM, no seccomp. It enforces a
+privilege policy: namespace creation and joining, mounts, `pivot_root`/`chroot`,
+capabilities, ptrace, kernel modules, `bpf`, `perf_event_open`, keys,
+`io_uring_setup`, `userfaultfd`, `mknod`, `setuid`/`setgid` and `capset`.
 
 The gadget is built on the [common enforcement library](../common/README.md).
-One instance runs per node:
+It depends only on Inspektor Gadget and that library. One instance runs per
+node:
 
-- A **slot** is one combination of privilege policies; containers with the same
+- A **slot** is one combination of policy documents; containers with the same
   combination share it. Limits per node: 1024 containers, 64 slots, 512 policy
   map entries per slot, 16384 in total.
 - Binding or unbinding a container is a live write to the `bindings` map.
 - The policy map is frozen per instance. A combination the running instance
   does not have (a new or edited policy) needs a new instance: the owner starts
   one with every slot in use and every container bound, and then stops the old
-  one, so both enforce during the overlap (the sandbox policy controller does
-  this).
-- An owner can create a slot before a container starts (for example when its
-  pod is scheduled to the node), so the container binds with a live write.
-- Several policies on one container merge as the SandboxPolicy design says: the
-  union of rules (explicit deny > allow > default, each rule with its own name,
-  origin and mode); a default is deny if any policy denies, with the strictest
-  mode among the policies that agree. One addition to the design: a monitoring
-  (audit) deny rule never weakens another policy's enforce deny, including its
-  enforce default deny. An explicit allow still beats another policy's default
-  deny.
+  one, so both enforce during the overlap.
+- An owner can create a slot before a container starts, so the container binds
+  with a live write.
 
-`policy/` compiles the `privilege` section of one or more policies;
-`runtime/` is the native owner a controller drives.
+`policy/` parses and compiles policy documents; `runtime/` is the native
+operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
 
 Requires cgroup v2, kernel BTF and BPF LSM enabled (`bpf` in
 `/sys/kernel/security/lsm`). Linux 6.1 or later (the `userns_create` hook;
@@ -39,38 +31,46 @@ README).
 
 ## Policy
 
-The `privilege` section of a SandboxPolicy, for example:
+A policy document (YAML or JSON), parsed with `policy.Parse`. Full example:
+[examples/policy.yaml](examples/policy.yaml).
 
 ```yaml
-spec:
+version: 1
+name: example                # qualifies rule names in events
+policy:
   mode: enforce              # audit | enforce | off
   privilege:
-    default: allow           # applies to syscall and mountFsType targets
+    default: allow           # default for syscall and mountFsType targets
     rules:
       - name: no-new-namespaces
         target: {syscall: [unshare, clone, clone3, setns], flags: [CLONE_NEWUSER, CLONE_NEWNS]}
         action: deny
-        origin: catalog/G1
       - name: no-proc-mount
         target: {mountFsType: [proc, sysfs]}
         action: deny
-      - name: audit-sys-admin
+      - name: watch-sys-admin
         target: {capability: [SYS_ADMIN]}
         action: deny
-        mode: audit
+        mode: audit          # a rule may override the document mode
 ```
 
 - A rule targets exactly one kind: `syscall` (optionally with `flags` for
   `unshare`, `setns`, `clone`, `clone3`), `capability` (short names such as
   `SYS_ADMIN`) or `mountFsType`.
 - Resolution: an explicit deny beats an allow, an allow beats the default,
-  independent of rule order. Each rule has its own mode.
+  independent of rule order. Each rule has its own mode. Each namespace flag of
+  a call resolves on its own.
 - Capability checks have no default; only explicit capability rules apply.
 - A `default: deny` also denies `setuid`/`setgid` (package managers drop
   privileges), implicit kernel module loads (judged as `init_module`, for
   example an `iptables` match module) and new superblocks of any filesystem
   type. Allow what the workload needs.
-- `actor`, `except` and `pathClass` are not supported yet.
+- **Several documents in one slot** combine so that the most limiting result
+  wins: the union of rules (explicit deny > allow > default, each rule with its
+  own name, origin and mode); a default is deny if any document denies, with the
+  strictest mode among the documents that agree; a monitoring (audit) deny rule
+  never weakens another document's enforce deny, including its enforce default
+  deny; an explicit allow still beats another document's default deny.
 
 ## How it decides
 
@@ -106,6 +106,19 @@ spec:
   also grant access (in current kernels, writing the pid namespace's `pid_max`),
   so `capability` rules do not cover every `CAP_SYS_ADMIN` use.
 
+## Using it outside this repository
+
+- The gadget and `../common` depend only on Inspektor Gadget, the libraries it
+  uses, and the `enforce_exec` types of the Inspektor Gadget fork. A guard test
+  (`common/enforcement/portability_test.go`) keeps it that way.
+- A Go program drives it: `runtime.WithConfig` with a compiled policy, then
+  `runtime.GetBindings` to bind containers (see `runtime/runtime_kernel_test.go`).
+  There is no `ig` command for it yet; `ig run` alone fails because the policy
+  comes from the owner, not from gadget parameters.
+- To move it into Inspektor Gadget: rewrite the import paths, drop the
+  per-gadget `Makefile` (its `REPO_ROOT` is this repository's depth) and add the
+  gadget to the central gadget list, which already sets `IG_SOURCE_PATH`.
+
 ## Maps and events
 
 | Map | Content |
@@ -115,7 +128,9 @@ spec:
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny`, `mode` and
 `host_pid` with enforce_exec and adds `rule_id`, `origin_id`, `is_default`,
-`comm`, `hook`, `syscall`, `flags`, `capability`, `fstype` and `slot`. Rule and origin
+`comm`, `hook`, `syscall`, `flags`, `capability`, `fstype` and `slot`. When a
+document's default deny strengthens another document's audit rule on the same
+key, the event names the rule `default` with `is_default` false. Rule and origin
 names are in the owner's compiled policy (`RuleNames`, `Origins`). Reporting is
 limited to 100 events per CPU per second; enforcement is never throttled.
 

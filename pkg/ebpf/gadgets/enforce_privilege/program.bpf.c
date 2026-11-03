@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright 2026 The Kubescape Authors
 
-// enforce_privilege: enforce the privilege section of a SandboxPolicy with BPF
+// enforce_privilege: enforce a privilege policy (namespaces, mounts,
+// capabilities, ptrace, modules and more) for a set of containers with BPF
 // LSM. The program is fixed; the policy is map data (privilege_policy.h),
 // frozen per instance; a rule change starts a replacement instance. Audit and
 // enforce share one code path: the rank of the deciding entry carries the mode.

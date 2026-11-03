@@ -119,12 +119,14 @@ func CompileKernel(d Document, generation uint64) (Compiled, error) {
 }
 
 // CompileSlots compiles one node instance. Each slot holds one combination of
-// policies, merged as the CRD design says for several policies matching one pod:
+// documents, combined so that the most limiting result wins:
 //   - rules are the union, each with its own name, origin and mode; the compiler
 //     folds every rule on one key into the most limiting rank, so an explicit
 //     deny beats an allow and an allow beats a default;
-//   - a default is deny if any policy's default is deny, else allow; its mode is
-//     the strictest among the policies whose default equals the merged one.
+//   - a default is deny if any document's default is deny, else allow; its mode
+//     is the strictest among the documents whose default equals the merged one;
+//   - an audit deny rule never weakens another document's enforce default deny
+//     (see the raise below), while an explicit allow still beats it.
 //
 // The default covers the syscall and mountFsType kinds only. Capability checks
 // have no default: only explicit capability rules apply, because capable() runs
