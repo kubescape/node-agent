@@ -10,7 +10,7 @@ package igbackend
 //	IG_PRIVILEGE_IMAGE_ARCHIVE  OCI archive from `ig image export`
 //	IG_PRIVILEGE_IMAGE          image name in the archive
 //	IG_PRIVILEGE_CONTAINER_ID   full Docker container ID
-//	IG_PRIVILEGE_CGROUP_PATH    its cgroup v2 path (relative to /sys/fs/cgroup)
+//	IG_PRIVILEGE_CGROUP_PATH    its cgroup v2 path under /sys/fs/cgroup, with a leading "/" (as in /proc/<pid>/cgroup)
 //	IG_PRIVILEGE_CONTAINER_ID2, IG_PRIVILEGE_CGROUP_PATH2  a second container
 //
 // With two containers it also checks the node-wide instance: the second
