@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSendRuleAlert(t *testing.T) {
@@ -254,4 +257,45 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 		Method: "DELETE",
 	}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
 	assert.Error(t, err)
+}
+
+func TestHTTPExporter_SendsBearerFromTokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(tokenFile, []byte("tok"), 0o600))
+
+	tests := []struct {
+		name      string
+		tokenFile string
+		want      string
+	}{
+		{name: "token file set", tokenFile: tokenFile, want: "Bearer tok"},
+		{name: "token file empty", tokenFile: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authChan := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authChan <- r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			exporter, err := NewHTTPExporter(HTTPExporterConfig{
+				URL:       server.URL,
+				TokenFile: tt.tokenFile,
+			}, "", "", nil, "", armotypes.AlertSourcePlatformK8sAgent)
+			require.NoError(t, err)
+
+			exporter.SendRuleAlert(&types.GenericRuleFailure{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{AlertName: "testrule"},
+			})
+
+			select {
+			case got := <-authChan:
+				assert.Equal(t, tt.want, got)
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for request")
+			}
+		})
+	}
 }
