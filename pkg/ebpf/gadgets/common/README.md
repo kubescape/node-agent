@@ -1,6 +1,7 @@
 # Common enforcement library
 
-Shared pieces of the BPF LSM enforcement gadgets (`enforce_privilege` today).
+Shared pieces of the BPF LSM enforcement gadgets (`enforce_privilege` and
+`root_barrier` today).
 They are taken from the enforce_exec gadget of the pinned Inspektor Gadget fork
 and keep the first verdict fields, the mode encoding, the `counters` slots, the
 identity type and the `bindings` key and value size. To move enforce_exec onto
@@ -17,8 +18,10 @@ and keeps its path rules in an array that `policy.h` does not describe.
 | `bindings.h` | `bindings` map: cgroup id → the container's policy slot; optional parent-cgroup depth |
 | `policy.h` | policy modes (0 off, 1 audit, 2 enforce), rank resolution (explicit deny > allow > default, one mode per rule), shared policy value |
 | `verdict.h` | first verdict fields (`generation`, `cgroup`, `deny`, `mode`), per-CPU `counters` (denied, submitted, dropped, allowed, section error, rate limited), 100 reports per CPU per second |
+| `root_barrier.h` | root barrier: always deny chroot, pivot_root, new user namespaces, new or joined mount namespaces and mount-tree changes for the tasks a gadget-defined predicate covers |
 | `arming.h` | arming rule: judge only tasks that executed outside the runtime mount namespace, and their children; `arming_faults`, tracking faults per slot |
 | `merge/` | the merge contract for several policies on one container, and its shared test vectors |
+| `rootbarrier/` | Go: attestation (each barrier program has a live LSM link, BPF LSM is active) and a self-test, for the Ready step of a gadget that includes `root_barrier.h` |
 | `enforcement/` | Go: the binding controller of one node-wide instance (policy written and frozen before any binding, live `Bind`/`Unbind` of a container to a slot, readiness, arming of tasks already running, `SlotFaults`) |
 
 Section-specific parts (the policy key layout, hooks, compiler) stay in each

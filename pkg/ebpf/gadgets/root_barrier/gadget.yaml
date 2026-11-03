@@ -1,0 +1,11 @@
+name: root_barrier
+behavior: mutator
+description: "Stop tasks of a live set of cgroups from changing their root, mount namespace or mount tree (BPF LSM)"
+annotations:
+  root-barrier: "true"
+datasources:
+  denial:
+    fields:
+      op_raw:
+        annotations:
+          columns.hidden: true
