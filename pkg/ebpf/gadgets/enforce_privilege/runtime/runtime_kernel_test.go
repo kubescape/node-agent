@@ -14,7 +14,7 @@ package runtime
 //	PRIVILEGE_IMAGE_ARCHIVE  OCI archive from `ig image export`
 //	PRIVILEGE_IMAGE          image name in the archive
 //	PRIVILEGE_CONTAINER_ID   full Docker container ID
-//	PRIVILEGE_CGROUP_PATH    its cgroup v2 path (relative to /sys/fs/cgroup)
+//	PRIVILEGE_CGROUP_PATH    its cgroup v2 path under /sys/fs/cgroup, with a leading "/" (as in /proc/<pid>/cgroup)
 
 import (
 	"context"
