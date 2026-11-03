@@ -290,12 +290,31 @@ func TestHTTPExporter_SendsBearerFromTokenFile(t *testing.T) {
 				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{AlertName: "testrule"},
 			})
 
-			select {
-			case got := <-authChan:
-				assert.Equal(t, tt.want, got)
-			case <-time.After(2 * time.Second):
-				t.Fatal("timed out waiting for request")
+			waitAuth := func() string {
+				select {
+				case got := <-authChan:
+					return got
+				case <-time.After(2 * time.Second):
+					t.Fatal("timed out waiting for request")
+					return ""
+				}
 			}
+			assert.Equal(t, tt.want, waitAuth())
+
+			if tt.tokenFile == "" {
+				return
+			}
+			// Rotation: the kubelet rewrites the projected token; the next
+			// request must carry the new one. The mtime is moved forward so the
+			// change is seen even on filesystems with coarse timestamps.
+			require.NoError(t, os.WriteFile(tt.tokenFile, []byte("rotated"), 0o600))
+			future := time.Now().Add(time.Second)
+			require.NoError(t, os.Chtimes(tt.tokenFile, future, future))
+
+			exporter.SendRuleAlert(&types.GenericRuleFailure{
+				BaseRuntimeAlert: armotypes.BaseRuntimeAlert{AlertName: "testrule2"},
+			})
+			assert.Equal(t, "Bearer rotated", waitAuth())
 		})
 	}
 }

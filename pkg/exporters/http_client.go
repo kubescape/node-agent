@@ -1,6 +1,7 @@
 package exporters
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,12 +10,16 @@ import (
 	"github.com/kubescape/storage/pkg/apiauth"
 )
 
+// maxRedirects matches the limit of Go's default redirect policy.
+const maxRedirects = 10
+
 // NewHTTPClient returns the client for every post to the exporter URL: runtime
 // alerts, node profiles and network streams. The timeout is cfg.TimeoutSeconds,
 // or fallbackTimeout when that is unset. A nil cfg gives a plain client.
 //
 // When cfg.TokenFile is set, requests to the exporter URL host carry the token
-// read from that file as a bearer token.
+// read from that file as a bearer token, and redirects from https to any other
+// scheme are refused so the token cannot leave over plaintext.
 func NewHTTPClient(cfg *HTTPExporterConfig, fallbackTimeout time.Duration) (*http.Client, error) {
 	return newHTTPClient(cfg, fallbackTimeout, nil)
 }
@@ -43,5 +48,19 @@ func newHTTPClient(cfg *HTTPExporterConfig, fallbackTimeout time.Duration, base 
 		return nil, fmt.Errorf("url %q has no host to send the bearer token to", cfg.URL)
 	}
 	client.Transport = apiauth.NewTransport(base, apiauth.NewFileTokenSource(cfg.TokenFile), parsedURL.Host)
+	client.CheckRedirect = refuseHTTPSDowngrade
 	return client, nil
+}
+
+// refuseHTTPSDowngrade keeps Go's default 10-redirect limit and refuses a
+// redirect that leaves https, since the bearer transport matches on host:port
+// regardless of scheme.
+func refuseHTTPSDowngrade(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return errors.New("refusing redirect from https to " + req.URL.Scheme + " while a bearer token is configured")
+	}
+	return nil
 }
