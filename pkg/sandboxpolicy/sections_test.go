@@ -258,7 +258,7 @@ func TestPrivilegeUnavailableIsReportedAndRefused(t *testing.T) {
 	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, lsm)
 	c.backend = sections
 	if err := c.InitialSync(ctx); err != nil && !errors.Is(err, lsm) {
-		t.Logf("initial sync: %v", err)
+		t.Fatalf("initial sync: %v", err)
 	}
 	report := w.reports[string(p.UID)]
 	if report == nil || len(report.Status.Conditions) == 0 {
