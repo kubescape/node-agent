@@ -224,10 +224,11 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 		return commit()
 	}
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
-	err := b.replaceInstance(ctx, b.prepared, extra, k, next)
-	if err != nil && len(b.prepared) > 0 {
-		// The prepared set may not fit; never let it block a real container.
-		err = b.replaceInstance(ctx, nil, extra, k, next)
+	err := b.replaceInstance(ctx, b.prepared, extra, k, next, true)
+	if err != nil && (len(b.prepared) > 0 || len(b.pods) > 0) {
+		// The prepared set and the pod bindings may not fit; never let them
+		// block a real container. BindPods binds the pods again later.
+		err = b.replaceInstance(ctx, nil, extra, k, next, false)
 	}
 	if err != nil {
 		return fail(err)
@@ -307,14 +308,15 @@ func (b *PrivilegeBackend) Prepare(ctx context.Context, plans []sandboxpolicy.Pl
 		return b.retire(ctx)
 	}
 	// The prepared set is kept only when the instance with it is running.
-	return errors.Join(b.replaceInstance(ctx, prepared, nil, identity{}, nil), b.retire(ctx))
+	return errors.Join(b.replaceInstance(ctx, prepared, nil, identity{}, nil, true), b.retire(ctx))
 }
 
 // BindPods binds the given pod cgroups to the slot of their plan and unbinds
 // the pod cgroups that are not given. A pod whose slot does not exist yet is
 // skipped: Prepare creates the slot, and the next call binds the pod. A pod
-// whose plan changes keeps its old slot until the new slot exists, then moves
-// in one map write.
+// whose plan changes moves to the new slot in one map write; when the new slot
+// does not exist yet, the pod is unbound, so a removed or edited policy never
+// stays active at pod level.
 func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -330,7 +332,10 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 	for uid, current := range b.pods {
 		next, ok := wanted[uid]
 		if ok && next.CgroupID == current.pod.CgroupID && next.CgroupPath == current.pod.CgroupPath {
-			continue
+			combination, _ := Combination(next.Plan)
+			if _, slot := b.slots[combination]; slot || combination == current.combination {
+				continue
+			}
 		}
 		// Not wanted, or a new cgroup for the pod: remove the old identity.
 		// An instance that is not ready protects nothing.
@@ -363,9 +368,15 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 }
 
 // replaceInstance starts a candidate with every combination in use or prepared
-// (plus extra), binds every container (plus next, under nextKey), and only then
-// stops the old instance. On failure the old instance and state stay.
-func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra map[string][]sandboxpolicy.CompiledPolicy, nextKey identity, next *privilegeBinding) error {
+// (plus extra), binds every container (plus next, under nextKey) and, with
+// withPods, every pod cgroup, and only then stops the old instance. Without
+// withPods, the pod bindings are dropped. On failure the old instance and
+// state stay.
+func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra map[string][]sandboxpolicy.CompiledPolicy, nextKey identity, next *privilegeBinding, withPods bool) error {
+	pods := b.pods
+	if !withPods {
+		pods = map[types.UID]*podBinding{}
+	}
 	bindings := map[identity]*privilegeBinding{}
 	for k, v := range b.bindings {
 		bindings[k] = v
@@ -385,7 +396,7 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 			wanted[v.combination] = b.combinations[v.combination]
 		}
 	}
-	for _, p := range b.pods {
+	for _, p := range pods {
 		if _, ok := wanted[p.combination]; !ok {
 			wanted[p.combination] = b.combinations[p.combination]
 		}
@@ -415,7 +426,7 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 	for _, v := range bindings {
 		config.InitialBindings = append(config.InitialBindings, enforcement.Binding{Container: native(v.binding), Slot: slots[v.combination]})
 	}
-	for _, p := range b.pods {
+	for _, p := range pods {
 		config.InitialBindings = append(config.InitialBindings, nativePod(p.pod, slots[p.combination]))
 	}
 	b.generation++
@@ -433,7 +444,7 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 	if b.instance != nil {
 		b.retiring = append(b.retiring, b.instance)
 	}
-	b.instance, b.slots, b.combinations, b.bindings, b.prepared = candidate, slots, wanted, bindings, prepared
+	b.instance, b.slots, b.combinations, b.bindings, b.prepared, b.pods = candidate, slots, wanted, bindings, prepared, pods
 	b.stats.Replacements++
 	return nil
 }

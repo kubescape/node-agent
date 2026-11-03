@@ -332,3 +332,33 @@ func TestPrivilegePodBindings(t *testing.T) {
 		t.Fatal("the container binding must stay")
 	}
 }
+
+func TestPrivilegePodUnboundWhenNewSlotIsMissing(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	// An edited policy without a slot yet: the old policy must not stay.
+	edited := privPlan("r2", privPolicy("p1", api.ActionDeny))
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, edited)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[0].bound[100]; ok {
+		t.Fatal("a pod whose new slot is missing must be unbound")
+	}
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{edited}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, edited)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[len(e.instances)-1].bound[100]; !ok {
+		t.Fatal("the pod must be bound once the new slot exists")
+	}
+}
