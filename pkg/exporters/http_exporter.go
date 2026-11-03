@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/storage/pkg/apiauth"
 
 	"github.com/armosec/armoapi-go/armotypes"
 )
@@ -51,7 +49,9 @@ type HTTPExporterConfig struct {
 	Path        *string         `json:"path,omitempty"`
 	QueryParams []HTTPKeyValues `json:"queryParams,omitempty"`
 	Headers     []HTTPKeyValues `json:"headers"`
-	// TokenFile is a projected service-account token; when set it is sent as a bearer token to the exporter URL host.
+	// TokenFile is a projected service-account token. When set, it is sent as a
+	// bearer token to the exporter URL host on every synchronizer-bound post:
+	// runtime alerts, node profiles and network streams.
 	TokenFile          string `json:"tokenFile"`
 	TimeoutSeconds     int    `json:"timeoutSeconds"`
 	Method             string `json:"method"`
@@ -113,15 +113,9 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		metrics = metricsOpt[0]
 	}
 
-	httpClient := &http.Client{
-		Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
-	}
-	if config.TokenFile != "" {
-		parsedURL, err := url.Parse(config.URL)
-		if err != nil {
-			return nil, fmt.Errorf("invalid config: failed to parse url: %w", err)
-		}
-		httpClient.Transport = apiauth.NewTransport(nil, apiauth.NewFileTokenSource(config.TokenFile), parsedURL.Host)
+	httpClient, err := NewHTTPClient(&config, defaultTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	exporter := &HTTPExporter{

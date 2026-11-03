@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -69,25 +70,21 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		k8sInventory.Start() // We do not stop it here, as we need it to be running for the whole lifetime of the NetworkStream.
 	}
 
-	var timeoutSeconds int
-	if cfg.Exporters.HTTPExporterConfig != nil && cfg.Exporters.HTTPExporterConfig.TimeoutSeconds > 0 {
-		timeoutSeconds = cfg.Exporters.HTTPExporterConfig.TimeoutSeconds
-	} else {
-		timeoutSeconds = timeoutDefaultSeconds
+	httpClient, err := exporters.NewHTTPClient(cfg.Exporters.HTTPExporterConfig, timeoutDefaultSeconds*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("creating http client: %w", err)
 	}
 
 	ns := NetworkStream{
 		networkEventsStorage: armotypes.NetworkStream{
 			Entities: make(map[string]armotypes.NetworkStreamEntity),
 		},
-		cfg:            cfg,
-		ctx:            ctx,
-		k8sObjectCache: k8sObjectCache,
-		dnsResolver:    dnsResolver,
-		k8sInventory:   k8sInventory,
-		httpClient: &http.Client{
-			Timeout: time.Duration(timeoutSeconds) * time.Second,
-		},
+		cfg:                       cfg,
+		ctx:                       ctx,
+		k8sObjectCache:            k8sObjectCache,
+		dnsResolver:               dnsResolver,
+		k8sInventory:              k8sInventory,
+		httpClient:                httpClient,
 		nodeName:                  nodeName,
 		eventsNotificationChannel: eventsNotificationChannel,
 		dnsSupport:                dnsSupport,
