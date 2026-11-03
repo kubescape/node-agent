@@ -320,13 +320,13 @@ func TestControllerPodPlans(t *testing.T) {
 	}
 	elsewhere := container("other-ns", "web", "regular")
 	elsewhere.Namespace = "elsewhere"
-	plans := c.PodPlans([]Binding{
+	plans, ok := c.PodPlans([]Binding{
 		container("uniform", "web", "regular"), container("uniform", "db", "regular"),
 		container("init", "web", "regular"), container("init", "setup", "init"),
 		container("mixed", "web", "regular"), container("mixed", "app", "regular"),
 		elsewhere,
 	})
-	if len(plans) != 1 || len(plans["uniform"].Policies) != 1 || plans["uniform"].Policies[0].Identity.Name != "all" {
+	if !ok || len(plans) != 1 || len(plans["uniform"].Policies) != 1 || plans["uniform"].Policies[0].Identity.Name != "all" {
 		t.Fatalf("only the pod whose containers all get the same policies has a pod plan: %+v", plans)
 	}
 }

@@ -197,11 +197,12 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 // Such a pod can be bound at its pod cgroup before its containers start. A pod
 // whose containers get different policies, or none, has no pod plan: a pod
 // binding would also judge the containers that the policies do not select.
-func (c *Controller) PodPlans(containers []Binding) map[types.UID]Plan {
+// It returns false when the policies are not known (a configuration error).
+func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 	c.mu.Lock()
 	if c.configError != nil {
 		c.mu.Unlock()
-		return nil
+		return nil, false
 	}
 	plans := privilegePlans(c.privilegePolicies(), containers)
 	c.mu.Unlock()
@@ -225,7 +226,7 @@ func (c *Controller) PodPlans(containers []Binding) map[types.UID]Plan {
 		}
 		pods[b.PodUID] = plan
 	}
-	return pods
+	return pods, true
 }
 
 // privilegePlans returns the plan of each container, in order (possibly empty).

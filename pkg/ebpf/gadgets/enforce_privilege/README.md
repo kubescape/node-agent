@@ -108,6 +108,11 @@ policy:
   zero and arms the running tasks again. Audit-only faults do not count there.
 - **Scope.** A bound cgroup also covers up to 31 levels of child cgroups. This is
   by design and differs from enforce_exec, which binds the exact cgroup only.
+  The nearest bound cgroup decides. So an owner can bind a parent cgroup (for
+  example the cgroup of a group of containers) before they start, with
+  `SkipArming`, and a container is judged from its first exec. The tasks
+  already in the parent are not armed, also not at a slot move or in a new
+  instance, because a runtime helper can be there during its setup.
 - **Capabilities.** A `capable()` call is judged only when the task uses its own
   credentials (overlayfs copy-up uses the mounter's) and the call is not a
   no-audit probe.

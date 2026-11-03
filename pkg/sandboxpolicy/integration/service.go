@@ -24,11 +24,13 @@ import (
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
@@ -88,7 +90,8 @@ type Service struct {
 	podPolling   bool
 	podPollUntil time.Time
 	// podCgroupID returns the cgroup ID of a pod cgroup path (replaced in tests).
-	podCgroupID func(string) (uint64, error)
+	podCgroupID  func(string) (uint64, error)
+	podInformers informers.SharedInformerFactory
 }
 
 // prepareInterval is the longest time between two slot preparations.
@@ -188,15 +191,8 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 // Watch events are hints only. Generic watcher queues may deliver old updates
 // after a relist/deletion; applying their payload could resurrect removed policy.
 // Refresh always reads authoritative configuration and cannot revive queued UIDs.
-// WatchResources adds this node's pods, so a scheduled pod can get its privilege
-// slot before its containers start.
 func (s *Service) WatchResources() []watcher.WatchResource {
-	resources := s.Controller.WatchResources()
-	if s.options.PrivilegeImageName == "" {
-		return resources
-	}
-	pods := watcher.NewWatchResource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}, metav1.ListOptions{FieldSelector: "spec.nodeName=" + s.options.NodeName})
-	return append(resources, pods)
+	return s.Controller.WatchResources()
 }
 func (s *Service) AddHandler(_ context.Context, obj runtime.Object)    { s.configurationHint(obj) }
 func (s *Service) ModifyHandler(_ context.Context, obj runtime.Object) { s.configurationHint(obj) }
@@ -205,17 +201,31 @@ func (s *Service) configurationHint(obj runtime.Object) {
 	if obj == nil {
 		return
 	}
-	if pod, ok := obj.(*corev1.Pod); ok {
-		if s.options.PrivilegeImageName != "" && pod.Spec.NodeName == s.options.NodeName && pod.Status.Phase == corev1.PodPending {
-			s.podsScheduled.Store(true)
-			s.ContainerCallback(containercollection.PubSubEvent{})
-		}
-		return
-	}
 	switch obj.GetObjectKind().GroupVersionKind().Kind {
 	case "SandboxPolicy", "ClusterSandboxPolicy", "SandboxPolicyClasses":
 		s.ContainerCallback(containercollection.PubSubEvent{})
 	}
+}
+
+// watchPods hints a slot preparation for each pod scheduled to this node while
+// it is Pending. It has its own informer: the generic watcher delivers an
+// event only after the object has had no update for 5 s, which is later than
+// the start of the pod's containers.
+func (s *Service) watchPods(ctx context.Context) {
+	if s.options.PrivilegeImageName == "" || s.options.Kubernetes == nil {
+		return
+	}
+	s.podInformers = informers.NewSharedInformerFactoryWithOptions(s.options.Kubernetes, 0, informers.WithTweakListOptions(func(o *metav1.ListOptions) {
+		o.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", s.options.NodeName).String()
+	}))
+	hint := func(obj any) {
+		if pod, ok := obj.(*corev1.Pod); ok && pod.Spec.NodeName == s.options.NodeName && pod.Status.Phase == corev1.PodPending {
+			s.podsScheduled.Store(true)
+			s.ContainerCallback(containercollection.PubSubEvent{})
+		}
+	}
+	_, _ = s.podInformers.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{AddFunc: hint, UpdateFunc: func(_, obj any) { hint(obj) }})
+	s.podInformers.Start(ctx.Done())
 }
 
 // Start is called after container discovery is running and before the generic
@@ -238,6 +248,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 	go s.exporter.Run(runCtx)
+	s.watchPods(runCtx)
 	// Drain observed startup churn into the readiness barrier before handing
 	// work to the background loop. Persistent churn stays explicitly NotReady.
 drain:
@@ -337,7 +348,10 @@ func (s *Service) bindPods(ctx context.Context) {
 	if !ok || s.Controller == nil {
 		return
 	}
-	plans := s.Controller.PodPlans(s.scheduled)
+	plans, ok := s.Controller.PodPlans(s.scheduled)
+	if !ok {
+		return // the policies are not known: keep the pod bindings
+	}
 	var pods []sandboxpolicy.PodBinding
 	missing := false
 	if len(plans) > 0 {
@@ -426,6 +440,9 @@ func (s *Service) Close(ctx context.Context) error {
 		case <-s.done:
 		case <-ctx.Done():
 			return ctx.Err()
+		}
+		if s.podInformers != nil {
+			s.podInformers.Shutdown()
 		}
 	}
 	if !s.backendClosed {
