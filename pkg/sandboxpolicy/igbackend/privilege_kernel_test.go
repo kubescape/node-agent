@@ -40,6 +40,9 @@ func TestPrivilegeBackendKernel(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	if err := CheckBPFLSM("/"); err != nil {
+		t.Fatalf("this test needs an active BPF LSM: %v", err)
+	}
 	bindingOf := func(id, cgroupPath string) sandboxpolicy.Binding {
 		var st unix.Stat_t
 		if err := unix.Stat(filepath.Join("/sys/fs/cgroup", cgroupPath), &st); err != nil {

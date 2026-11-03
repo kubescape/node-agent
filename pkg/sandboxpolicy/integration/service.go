@@ -135,7 +135,11 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	var privilege sandboxpolicy.Backend
+	var privilegeUnavailable error
 	if options.PrivilegeImageName != "" {
+		privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
+	}
+	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
 		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
 		if err == nil {
 			privilege, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
@@ -146,7 +150,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			return nil, err
 		}
 	}
-	s.backend, err = sandboxpolicy.NewSectionBackend(full, privilege)
+	s.backend, err = sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
 		_ = s.closeRuntime()

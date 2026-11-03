@@ -24,8 +24,10 @@ import (
 type SectionBackend struct {
 	mu        sync.Mutex
 	exec      Backend
-	privilege Backend // nil: privilege sections are rejected
-	active    map[string]sectionPlans
+	privilege Backend // nil: privilege sections are rejected with unavailable
+	// unavailable says why privilege sections are rejected (privilege == nil).
+	unavailable error
+	active      map[string]sectionPlans
 }
 
 type sectionPlans struct {
@@ -41,12 +43,23 @@ var (
 	_ ProtectionAttester = (*SectionBackend)(nil)
 )
 
-func NewSectionBackend(exec, privilege Backend) (*SectionBackend, error) {
+// NewSectionBackend combines the section backends. When privilege is nil,
+// unavailable says why (nil means no privilege image is configured).
+func NewSectionBackend(exec, privilege Backend, unavailable error) (*SectionBackend, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("exec backend is required")
 	}
-	return &SectionBackend{exec: exec, privilege: privilege, active: map[string]sectionPlans{}}, nil
+	if privilege == nil && unavailable == nil {
+		unavailable = &EnforcementUnavailableError{Section: "privilege", Reason: "PrivilegeNotConfigured", Detail: "no privilege gadget image is configured"}
+	}
+	if privilege != nil {
+		unavailable = nil
+	}
+	return &SectionBackend{exec: exec, privilege: privilege, unavailable: unavailable, active: map[string]sectionPlans{}}, nil
 }
+
+// PrivilegeUnavailable returns why privilege sections cannot be enforced.
+func (s *SectionBackend) PrivilegeUnavailable() error { return s.unavailable }
 
 // execOnly reports whether the plans need only the exec backend.
 func (p sectionPlans) execOnly() bool { return p.privilege.Revision == "" && !p.privilegeCleanup }
@@ -158,7 +171,7 @@ func (s *SectionBackend) Replace(ctx context.Context, binding Binding, plan Plan
 		return r, err
 	}
 	if s.privilege == nil {
-		return ReplaceResult{}, fmt.Errorf("privilege sections are unsupported: no privilege image configured")
+		return ReplaceResult{}, s.unavailable
 	}
 
 	e := apply(ctx, s.exec, binding, old.exec, want.exec)

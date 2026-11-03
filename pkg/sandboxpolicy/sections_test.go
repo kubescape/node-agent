@@ -2,9 +2,11 @@ package sandboxpolicy
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func privilegeSection(def api.Action) *api.PrivilegeSection {
@@ -17,7 +19,7 @@ func sectionPlan(revision string, policies ...CompiledPolicy) Plan {
 
 func TestSectionBackendExecOnlyPlanIsUnchanged(t *testing.T) {
 	exec, privilege := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
-	s, err := NewSectionBackend(exec, privilege)
+	s, err := NewSectionBackend(exec, privilege, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +41,7 @@ func TestSectionBackendExecOnlyPlanIsUnchanged(t *testing.T) {
 
 func TestSectionBackendSplitsAndKeepsUnchangedSection(t *testing.T) {
 	exec, privilege := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
-	s, _ := NewSectionBackend(exec, privilege)
+	s, _ := NewSectionBackend(exec, privilege, nil)
 	b := Binding{ContainerID: "c"}
 	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
 	privPolicy := CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
@@ -72,7 +74,7 @@ func TestSectionBackendSplitsAndKeepsUnchangedSection(t *testing.T) {
 
 func TestSectionBackendPrivilegeFailureRestoresExec(t *testing.T) {
 	exec, privilege := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}, fail: true}
-	s, _ := NewSectionBackend(exec, privilege)
+	s, _ := NewSectionBackend(exec, privilege, nil)
 	b := Binding{ContainerID: "c"}
 	execPolicy := CompiledPolicy{Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
 	r, err := s.Replace(context.Background(), b, sectionPlan("r1", execPolicy, CompiledPolicy{Revision: "p", Privilege: privilegeSection(api.ActionAllow)}))
@@ -85,7 +87,7 @@ func TestSectionBackendPrivilegeFailureRestoresExec(t *testing.T) {
 }
 
 func TestSectionBackendRejectsPrivilegeWithoutImage(t *testing.T) {
-	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil)
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
 	if _, err := s.Replace(context.Background(), Binding{}, sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})); err == nil {
 		t.Fatal("privilege must be rejected without a privilege backend")
 	}
@@ -107,7 +109,7 @@ func TestCompileKeepsPrivilegeSection(t *testing.T) {
 func TestSectionBackendKeepsCommittedCleanupErrors(t *testing.T) {
 	// Exec-only: the exec backend result passes through unchanged.
 	exec := &fakeBackend{plans: map[string]Plan{}, postCommit: true}
-	s, _ := NewSectionBackend(exec, &fakeBackend{plans: map[string]Plan{}})
+	s, _ := NewSectionBackend(exec, &fakeBackend{plans: map[string]Plan{}}, nil)
 	b := Binding{ContainerID: "c"}
 	r, err := s.Replace(context.Background(), b, sectionPlan("r1", CompiledPolicy{Exec: api.ExecSection{Default: api.ActionDeny}}))
 	if err == nil || !r.Committed || r.ActiveRevision != "r1" {
@@ -115,7 +117,7 @@ func TestSectionBackendKeepsCommittedCleanupErrors(t *testing.T) {
 	}
 	// With privilege: a committed section with a cleanup error does not roll back.
 	privilege := &fakeBackend{plans: map[string]Plan{}, postCommit: true}
-	s, _ = NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege)
+	s, _ = NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
 	r, err = s.Replace(context.Background(), b, sectionPlan("r2", CompiledPolicy{Privilege: privilegeSection(api.ActionAllow)}))
 	if err == nil || !r.Committed || r.ActiveRevision != "r2" {
 		t.Fatalf("privilege cleanup error must stay committed: %+v %v", r, err)
@@ -124,7 +126,7 @@ func TestSectionBackendKeepsCommittedCleanupErrors(t *testing.T) {
 
 func TestSectionBackendPrivilegeChangeKeepsExecRevision(t *testing.T) {
 	exec, privilege := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
-	s, _ := NewSectionBackend(exec, privilege)
+	s, _ := NewSectionBackend(exec, privilege, nil)
 	b := Binding{ContainerID: "c"}
 	p := CompiledPolicy{Revision: "v1", Exec: api.ExecSection{Default: api.ActionDeny}, Privilege: privilegeSection(api.ActionAllow)}
 	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err != nil {
@@ -142,7 +144,7 @@ func TestSectionBackendPrivilegeChangeKeepsExecRevision(t *testing.T) {
 
 func TestSectionBackendSendsAllPrivilegePolicies(t *testing.T) {
 	privilege := &fakeBackend{plans: map[string]Plan{}}
-	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege)
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
 	b := Binding{ContainerID: "c"}
 	p1 := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Privilege: privilegeSection(api.ActionAllow)}
 	p2 := CompiledPolicy{Identity: PolicyIdentity{UID: "2"}, Privilege: privilegeSection(api.ActionDeny)}
@@ -166,7 +168,7 @@ func (p *preparingBackend) Prepare(_ context.Context, plans []Plan) error {
 
 func TestSectionBackendPassesPrepare(t *testing.T) {
 	privilege := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
-	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege)
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
 	if err := s.Prepare(context.Background(), []Plan{sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})}); err != nil || len(privilege.prepared) != 1 {
 		t.Fatalf("prepare: %v %v", err, privilege.prepared)
 	}
@@ -174,7 +176,7 @@ func TestSectionBackendPassesPrepare(t *testing.T) {
 
 func TestSectionBackendModeChangeReachesPrivilege(t *testing.T) {
 	privilege := &fakeBackend{plans: map[string]Plan{}}
-	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege)
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
 	b := Binding{ContainerID: "c"}
 	p := CompiledPolicy{Mode: api.ModeAudit, Privilege: privilegeSection(api.ActionAllow)}
 	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err != nil {
@@ -191,7 +193,7 @@ func TestSectionBackendModeChangeReachesPrivilege(t *testing.T) {
 
 func TestSectionBackendRetriesPrivilegeCleanup(t *testing.T) {
 	privilege := &fakeBackend{plans: map[string]Plan{}}
-	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege)
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
 	b := Binding{ContainerID: "c"}
 	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", CompiledPolicy{Privilege: privilegeSection(api.ActionAllow)})); err != nil {
 		t.Fatal(err)
@@ -212,7 +214,7 @@ func TestSectionBackendRetriesPrivilegeCleanup(t *testing.T) {
 
 func TestSectionBackendPartialWithdrawIsUnconfirmed(t *testing.T) {
 	privilege := &fakeBackend{plans: map[string]Plan{}}
-	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege)
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
 	b := Binding{ContainerID: "c"}
 	p := CompiledPolicy{Exec: api.ExecSection{Default: api.ActionDeny}, Privilege: privilegeSection(api.ActionAllow)}
 	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err != nil {
@@ -244,5 +246,29 @@ func TestControllerPrepareScheduled(t *testing.T) {
 	}
 	if len(preparer.prepared) != 1 || len(preparer.prepared[0].Policies) != 1 || preparer.prepared[0].Policies[0].Identity.Name != "with-privilege" {
 		t.Fatalf("prepared %+v", preparer.prepared)
+	}
+}
+
+func TestPrivilegeUnavailableIsReportedAndRefused(t *testing.T) {
+	ctx := context.Background()
+	p := policy("with-privilege", "ns")
+	p.Spec.Privilege = privilegeSection(api.ActionDeny)
+	c, _, w, _ := setup(t, p)
+	lsm := &EnforcementUnavailableError{Section: "privilege", Reason: "BPFLSMInactive", Detail: "BPF LSM is not active"}
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, lsm)
+	c.backend = sections
+	if err := c.InitialSync(ctx); err != nil && !errors.Is(err, lsm) {
+		t.Logf("initial sync: %v", err)
+	}
+	report := w.reports[string(p.UID)]
+	if report == nil || len(report.Status.Conditions) == 0 {
+		t.Fatal("no status report")
+	}
+	ready := report.Status.Conditions[0]
+	if ready.Status != metav1.ConditionFalse || ready.Reason != "BPFLSMInactive" {
+		t.Fatalf("ready condition %+v", ready)
+	}
+	if _, err := sections.Replace(ctx, Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})); !errors.Is(err, lsm) {
+		t.Fatalf("privilege binding must be refused: %v", err)
 	}
 }
