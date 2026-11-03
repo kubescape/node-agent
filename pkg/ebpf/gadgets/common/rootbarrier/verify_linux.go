@@ -25,7 +25,7 @@ func Verify(gc operators.GadgetContext) error {
 	if err := Attest(counters); err != nil {
 		return err
 	}
-	return SelfTest(counters, probe)
+	return SelfTest(probe)
 }
 
 func instanceMap(gc operators.GadgetContext, name string) (*ebpf.Map, error) {

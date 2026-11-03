@@ -101,6 +101,14 @@ if libc.syscall(429, fd, b"", -100, b"/mnt", 4) != 0:
     raise SystemExit("move_mount: " + os.strerror(ctypes.get_errno()))
 `
 
+// pyOpenTreeClone clones the /dev/mqueue mount (OPEN_TREE_CLONE).
+const pyOpenTreeClone = `
+import ctypes, os
+libc = ctypes.CDLL(None, use_errno=True)
+if libc.syscall(428, -100, b"/dev/mqueue", 1) < 0:
+    raise SystemExit("open_tree: " + os.strerror(ctypes.get_errno()))
+`
+
 type fixture struct {
 	t       *testing.T
 	ctx     context.Context
@@ -284,6 +292,8 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 		f.denied(a, rootbarrier.OpUnshareNS, "unshare", "-m", "true")
 		f.denied(a, rootbarrier.OpUserns, "unshare", "-U", "true")
 		f.denied(a, rootbarrier.OpSetns, "nsenter", "-t", "1", "-m", "true")
+		f.denied(a, rootbarrier.OpSetns, "python3", "-c", "import os\nos.setns(os.open('/proc/1/ns/mnt', os.O_RDONLY), 0)")
+		f.denied(a, rootbarrier.OpNewMount, "python3", "-c", pyOpenTreeClone)
 		f.denied(a, rootbarrier.OpCloneNS, "python3", "-c", clone3NS)
 		f.denied(a, rootbarrier.OpMount, "python3", "-c", pyMount)
 		f.denied(a, rootbarrier.OpMoveMount, "python3", "-c", pyMoveMount)
@@ -308,6 +318,24 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 	t.Run("already running task is covered", func(t *testing.T) {
 		if res := f.trigger(); res != "thread=ok chroot=Operation not permitted unshare=Operation not permitted" {
 			t.Fatalf("agent started before the gadget: %s", res)
+		}
+	})
+
+	t.Run("a task in a child cgroup stays covered", func(t *testing.T) {
+		sub := filepath.Join("/sys/fs/cgroup", cgroupPath, "rb-sub")
+		if err := os.Mkdir(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(sub)
+		move := func(dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(pid), 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		move(sub)
+		defer move(filepath.Join("/sys/fs/cgroup", cgroupPath))
+		if res := f.trigger(); res != "thread=ok chroot=Operation not permitted unshare=Operation not permitted" {
+			t.Fatalf("agent in a child cgroup: %s", res)
 		}
 	})
 

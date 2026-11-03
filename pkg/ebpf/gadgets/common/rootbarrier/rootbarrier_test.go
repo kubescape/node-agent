@@ -44,7 +44,11 @@ func TestHooksMatchHeader(t *testing.T) {
 			t.Errorf("program name %s is longer than the kernel keeps", m[2])
 		}
 	}
-	ops := regexp.MustCompile(`ROOT_BARRIER_(\w+) = (\d+),`).FindAllStringSubmatch(header, -1)
+	opEnum := regexp.MustCompile(`(?s)enum root_barrier_op : __u32 \{(.*?)\};`).FindStringSubmatch(header)
+	if opEnum == nil {
+		t.Fatal("enum root_barrier_op not found")
+	}
+	ops := regexp.MustCompile(`ROOT_BARRIER_(\w+) = (\d+),`).FindAllStringSubmatch(opEnum[1], -1)
 	if len(ops) != int(opMax)+1 {
 		t.Fatalf("header has %d op values, want %d", len(ops), opMax+1)
 	}

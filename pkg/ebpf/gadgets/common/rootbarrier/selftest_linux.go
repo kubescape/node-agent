@@ -56,12 +56,21 @@ func forkExecMissing(flags uintptr) error {
 
 var selfTestMu sync.Mutex
 
+// probeEntry matches struct root_barrier_probe in ../root_barrier.h.
+type probeEntry struct {
+	Tid      uint32
+	Denied   uint32
+	PidnsDev uint64
+	PidnsIno uint64
+}
+
 // SelfTest covers one thread of this process through the probe map and runs
-// each probe on it. Each probe must fail with EPERM and add one to the
-// matching counter, so a denial by another layer does not count. The process
-// needs CAP_SYS_ADMIN and CAP_SYS_CHROOT, else the kernel denies a probe
-// before the barrier sees it.
-func SelfTest(counters, probeMap *ebpf.Map) error {
+// each probe on it. Each probe must fail with EPERM and the barrier must mark
+// the probe's operation in the probe entry, so a denial by another layer, or a
+// barrier denial of another task, does not count. The process needs
+// CAP_SYS_ADMIN and CAP_SYS_CHROOT, else the kernel denies a probe before the
+// barrier sees it.
+func SelfTest(probeMap *ebpf.Map) error {
 	if err := needCapabilities(); err != nil {
 		return err
 	}
@@ -72,39 +81,63 @@ func SelfTest(counters, probeMap *ebpf.Map) error {
 		// The thread is never unlocked, so it exits with this goroutine:
 		// no other goroutine runs on a thread that ran a probe.
 		runtime.LockOSThread()
-		result <- selfTestOnThread(counters, probeMap)
+		result <- selfTestOnThread(probeMap)
 	}()
 	return <-result
 }
 
-func selfTestOnThread(counters, probeMap *ebpf.Map) error {
-	if err := probeMap.Put(uint32(0), uint32(unix.Gettid())); err != nil {
-		return fmt.Errorf("root barrier: writing probe map: %w", err)
+func selfTestOnThread(probeMap *ebpf.Map) error {
+	// The BPF side matches the thread id in this thread's PID namespace, so
+	// the test also works outside the host PID namespace.
+	var st unix.Stat_t
+	if err := unix.Stat("/proc/thread-self/ns/pid", &st); err != nil {
+		return fmt.Errorf("root barrier: reading the PID namespace: %w", err)
+	}
+	entry := probeEntry{
+		Tid: uint32(unix.Gettid()),
+		// The kernel's dev_t encoding (MINORBITS 20), not the stat encoding.
+		PidnsDev: uint64(unix.Major(st.Dev))<<20 | uint64(unix.Minor(st.Dev)),
+		PidnsIno: st.Ino,
 	}
 	var errs []error
 	for _, p := range probes {
-		errs = append(errs, runProbe(counters, p))
+		errs = append(errs, runProbe(probeMap, entry, p))
 	}
-	if err := probeMap.Put(uint32(0), uint32(0)); err != nil {
-		errs = append(errs, fmt.Errorf("root barrier: clearing probe map: %w", err))
+	if err := clearProbe(probeMap); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-func runProbe(counters *ebpf.Map, p probe) error {
-	before, err := denials(counters, p.op)
-	if err != nil {
-		return err
+// clearProbe retries, because a stale thread id could cover a later task with
+// the same id. When it still fails, the error refuses activation and the
+// instance, with its probe map, is removed.
+func clearProbe(probeMap *ebpf.Map) error {
+	var err error
+	for i := 0; i < 3; i++ {
+		if err = probeMap.Put(uint32(0), probeEntry{}); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("root barrier: clearing probe map: %w", err)
+}
+
+func runProbe(probeMap *ebpf.Map, entry probeEntry, p probe) error {
+	if err := probeMap.Put(uint32(0), entry); err != nil {
+		return fmt.Errorf("root barrier: writing probe map: %w", err)
 	}
 	runErr := p.run()
-	after, err := denials(counters, p.op)
-	if err != nil {
-		return err
+	var after probeEntry
+	if err := probeMap.Lookup(uint32(0), &after); err != nil {
+		return fmt.Errorf("root barrier: reading probe map: %w", err)
 	}
-	if !errors.Is(runErr, unix.EPERM) || after == before {
-		return fmt.Errorf("root barrier: %s not denied by the barrier (result %v, %d new denials)", p.op, runErr, after-before)
+	if errors.Is(runErr, unix.EPERM) && after.Denied&(1<<p.op) != 0 {
+		return nil
 	}
-	return nil
+	if p.op == OpUserns && errors.Is(runErr, unix.ENOSPC) {
+		return fmt.Errorf("root barrier: user namespaces are disabled on this node (user.max_user_namespaces), so the userns probe cannot reach the barrier")
+	}
+	return fmt.Errorf("root barrier: %s not denied by the barrier (result %v)", p.op, runErr)
 }
 
 func needCapabilities() error {
