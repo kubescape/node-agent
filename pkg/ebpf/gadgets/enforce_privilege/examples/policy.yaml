@@ -13,8 +13,8 @@ policy:
           flags: [CLONE_NEWUSER, CLONE_NEWNS]
         action: deny
         origin: example/namespaces
-      - name: no-proc-mount
-        target:
+      - name: no-proc-mount          # new proc/sysfs mounts only; bind mounts
+        target:                      # are judged by the `mount` syscall rule
           mountFsType: [proc, sysfs]
         action: deny
       - name: no-kernel-modules

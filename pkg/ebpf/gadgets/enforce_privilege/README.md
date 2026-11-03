@@ -61,6 +61,9 @@ policy:
   independent of rule order. Each rule has its own mode. Each namespace flag of
   a call resolves on its own.
 - Capability checks have no default; only explicit capability rules apply.
+- `mountFsType` judges the creation of a new filesystem instance (a new
+  superblock, from `mount(2)` or the new mount API). Bind mounts and remounts
+  of an existing one are judged only by the `mount` syscall rule.
 - A `default: deny` also denies `setuid`/`setgid` (package managers drop
   privileges), implicit kernel module loads (judged as `init_module`, for
   example an `iptables` match module) and new superblocks of any filesystem
