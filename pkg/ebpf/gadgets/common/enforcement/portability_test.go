@@ -38,8 +38,18 @@ var allowedImports = []string{
 // Names of the host product and its policy API, which the gadgets must not use.
 var forbiddenWords = regexp.MustCompile(`(?i)sandbox[ _-]?polic|kubescape\.io|\barmo(sec)?\b|node-agent|kubescape/storage|\bkubernetes\b|\bpods?\b`)
 
-// A BPF include must stay inside the gadget folders: "x.h" or "../common/x.h".
-var badInclude = regexp.MustCompile(`#include\s+"(\.\./){2,}|#include\s+"\.\./[^c]`)
+// A quoted BPF include must stay inside the gadget folders: "x.h" or
+// "../common/x.h" (checked by includeOutside).
+var quotedInclude = regexp.MustCompile(`#include\s+"([^"]*)"`)
+
+func includeOutside(line string) bool {
+	m := quotedInclude.FindStringSubmatch(line)
+	if m == nil || !strings.HasPrefix(m[1], "../") {
+		return false
+	}
+	rest, ok := strings.CutPrefix(m[1], "../common/")
+	return !ok || strings.Contains(rest, "..")
+}
 
 func walkGadgetFiles(t *testing.T, fn func(path string, data []byte)) {
 	t.Helper()
@@ -105,7 +115,7 @@ func TestGadgetFilesUseNeutralNames(t *testing.T) {
 				strings.HasPrefix(trimmed, "// Copyright") || strings.HasPrefix(trimmed, "# Copyright") {
 				continue // import paths are rewritten on a move; license headers stay
 			}
-			if badInclude.MatchString(line) {
+			if (strings.HasSuffix(path, ".c") || strings.HasSuffix(path, ".h")) && includeOutside(line) {
 				t.Errorf("%s:%d includes a header outside the gadget folders", path, i+1)
 			}
 			if m := forbiddenWords.FindString(line); m != "" {
@@ -113,4 +123,19 @@ func TestGadgetFilesUseNeutralNames(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestIncludeOutside(t *testing.T) {
+	for line, want := range map[string]bool{
+		`#include "privilege_policy.h"`:      false,
+		`#include "../common/bindings.h"`:    false,
+		`#include <vmlinux.h>`:               false,
+		`#include "../config/x.h"`:           true,
+		`#include "../../pkg/x.h"`:           true,
+		`#include "../common/../../pkg/x.h"`: true,
+	} {
+		if got := includeOutside(line); got != want {
+			t.Errorf("%s: got %v, want %v", line, got, want)
+		}
+	}
 }
