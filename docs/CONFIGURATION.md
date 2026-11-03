@@ -734,3 +734,10 @@ For more information, see:
 - [Main README](../README.md)
 - [Alert Bulking](ALERT_BULKING.md)
 - [Kubescape Documentation](https://kubescape.io/docs/)
+
+## Experimental gVisor start source
+
+`gVisorStart.enabled` is disabled by default. See the [source configuration and
+identity/export contract](features/gvisor-start-source.md) before enabling it on
+a self-managed Kubernetes test node. It requires a local CRI socket, a configured
+runsc trace sink and an initialized OTLP log exporter.
