@@ -16,6 +16,7 @@ import (
 	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 	privruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // PrivilegeEngine starts one node-wide enforce_privilege instance. Start returns
@@ -68,6 +69,23 @@ func (p *privilegeBinding) close() error {
 	return p.lease.Close()
 }
 
+// podBinding is a bound pod cgroup (see sandboxpolicy.PodBinding).
+type podBinding struct {
+	pod         sandboxpolicy.PodBinding
+	combination string
+}
+
+// podRuntime is the runtime name of a pod cgroup identity in the bindings
+// controller. No container runtime has this name.
+const podRuntime = "kubernetes-pod"
+
+// nativePod returns the bindings controller identity of a pod cgroup. Tasks
+// already in it are not armed: runc init of a container being created can be
+// there.
+func nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
+	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot, SkipArming: true}
+}
+
 // PrivilegeBackend owns ONE enforce_privilege instance per node.
 //
 // A slot is one combination of privilege policies; containers with the same
@@ -87,6 +105,7 @@ type PrivilegeBackend struct {
 	slots        map[string]uint32 // combination -> slot in instance
 	combinations map[string][]sandboxpolicy.CompiledPolicy
 	bindings     map[identity]*privilegeBinding
+	pods         map[types.UID]*podBinding
 	prepared     map[string][]sandboxpolicy.CompiledPolicy
 	retiring     []PrivilegeInstance
 	stats        PrivilegeStats
@@ -96,6 +115,7 @@ type PrivilegeBackend struct {
 var (
 	_ sandboxpolicy.Backend            = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.ProtectionAttester = (*PrivilegeBackend)(nil)
+	_ sandboxpolicy.PodBinder          = (*PrivilegeBackend)(nil)
 )
 
 // NewPrivilege creates the node backend. validator verifies the live container
@@ -104,7 +124,7 @@ func NewPrivilege(engine PrivilegeEngine, validator Validator, prefix string) (*
 	if engine == nil {
 		return nil, fmt.Errorf("privilege engine is required")
 	}
-	return &PrivilegeBackend{engine: engine, validator: validator, prefix: prefix, slots: map[string]uint32{}, combinations: map[string][]sandboxpolicy.CompiledPolicy{}, bindings: map[identity]*privilegeBinding{}, prepared: map[string][]sandboxpolicy.CompiledPolicy{}}, nil
+	return &PrivilegeBackend{engine: engine, validator: validator, prefix: prefix, slots: map[string]uint32{}, combinations: map[string][]sandboxpolicy.CompiledPolicy{}, bindings: map[identity]*privilegeBinding{}, pods: map[types.UID]*podBinding{}, prepared: map[string][]sandboxpolicy.CompiledPolicy{}}, nil
 }
 
 // Combination returns the privilege policies of a plan, sorted, and their key.
@@ -290,6 +310,58 @@ func (b *PrivilegeBackend) Prepare(ctx context.Context, plans []sandboxpolicy.Pl
 	return errors.Join(b.replaceInstance(ctx, prepared, nil, identity{}, nil), b.retire(ctx))
 }
 
+// BindPods binds the given pod cgroups to the slot of their plan and unbinds
+// the pod cgroups that are not given. A pod whose slot does not exist yet is
+// skipped: Prepare creates the slot, and the next call binds the pod. A pod
+// whose plan changes keeps its old slot until the new slot exists, then moves
+// in one map write.
+func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return fmt.Errorf("privilege backend is closed")
+	}
+	ready := b.instance != nil && b.instance.Ready() == nil
+	wanted := make(map[types.UID]sandboxpolicy.PodBinding, len(pods))
+	for _, p := range pods {
+		wanted[p.PodUID] = p
+	}
+	var errs []error
+	for uid, current := range b.pods {
+		next, ok := wanted[uid]
+		if ok && next.CgroupID == current.pod.CgroupID && next.CgroupPath == current.pod.CgroupPath {
+			continue
+		}
+		// Not wanted, or a new cgroup for the pod: remove the old identity.
+		// An instance that is not ready protects nothing.
+		if ready {
+			if err := b.instance.Unbind(nativePod(current.pod, 0).Container); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		delete(b.pods, uid)
+	}
+	for uid, p := range wanted {
+		combination, policies := Combination(p.Plan)
+		current := b.pods[uid]
+		if len(policies) == 0 || current != nil && current.combination == combination {
+			continue
+		}
+		slot, ok := b.slots[combination]
+		if !ok || !ready {
+			continue
+		}
+		if err := b.instance.Bind(nativePod(p, slot)); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		b.pods[uid] = &podBinding{pod: p, combination: combination}
+		logger.L().Info("sandbox privilege pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
+	}
+	return errors.Join(append(errs, b.retire(ctx))...)
+}
+
 // replaceInstance starts a candidate with every combination in use or prepared
 // (plus extra), binds every container (plus next, under nextKey), and only then
 // stops the old instance. On failure the old instance and state stay.
@@ -311,6 +383,11 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 	for _, v := range bindings {
 		if _, ok := wanted[v.combination]; !ok {
 			wanted[v.combination] = b.combinations[v.combination]
+		}
+	}
+	for _, p := range b.pods {
+		if _, ok := wanted[p.combination]; !ok {
+			wanted[p.combination] = b.combinations[p.combination]
 		}
 	}
 	keys := make([]string, 0, len(wanted))
@@ -337,6 +414,9 @@ func (b *PrivilegeBackend) replaceInstance(ctx context.Context, prepared, extra 
 	config := privruntime.Config{Policy: compiled}
 	for _, v := range bindings {
 		config.InitialBindings = append(config.InitialBindings, enforcement.Binding{Container: native(v.binding), Slot: slots[v.combination]})
+	}
+	for _, p := range b.pods {
+		config.InitialBindings = append(config.InitialBindings, nativePod(p.pod, slots[p.combination]))
 	}
 	b.generation++
 	candidate, err := b.engine.Start(ctx, fmt.Sprintf("%s-privilege-%d", b.prefix, b.generation), config)
@@ -385,5 +465,6 @@ func (b *PrivilegeBackend) Close(ctx context.Context) error {
 		errs = append(errs, v.close())
 	}
 	b.bindings = map[identity]*privilegeBinding{}
+	b.pods = map[types.UID]*podBinding{}
 	return errors.Join(append(errs, b.retire(ctx))...)
 }

@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -63,24 +64,26 @@ func SnapshotSelectedBindingsFromContainers(ctx context.Context, client kubernet
 
 // ScheduledContainers returns API metadata (no runtime identity) for every
 // declared regular, init and ephemeral container of the pods scheduled to this node that
-// are not finished. It feeds privilege slot preparation, not binding.
-func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeName string) ([]sandboxpolicy.Binding, error) {
+// are not finished, and the QoS class of each such pod. It feeds privilege slot
+// preparation and pod cgroup binding, not container binding.
+func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeName string) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass, error) {
 	if client == nil || nodeName == "" {
-		return nil, fmt.Errorf("Kubernetes client and node name are required")
+		return nil, nil, fmt.Errorf("Kubernetes client and node name are required")
 	}
 	pods, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String()})
 	if err != nil {
-		return nil, fmt.Errorf("list node pods: %w", err)
+		return nil, nil, fmt.Errorf("list node pods: %w", err)
 	}
 	namespaces, err := client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list namespaces: %w", err)
+		return nil, nil, fmt.Errorf("list namespaces: %w", err)
 	}
 	namespaceLabels := make(map[string]map[string]string, len(namespaces.Items))
 	for _, ns := range namespaces.Items {
 		namespaceLabels[ns.Name] = ns.Labels
 	}
 	var result []sandboxpolicy.Binding
+	qos := map[types.UID]corev1.PodQOSClass{}
 	for _, pod := range pods.Items {
 		if pod.Spec.NodeName != nodeName || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
@@ -89,6 +92,7 @@ func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeN
 		if !ok {
 			continue
 		}
+		qos[pod.UID] = pod.Status.QOSClass
 		for _, group := range []struct {
 			kind       string
 			containers []corev1.Container
@@ -101,7 +105,7 @@ func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeN
 			result = append(result, sandboxpolicy.Binding{PodUID: pod.UID, Namespace: pod.Namespace, PodName: pod.Name, ContainerName: c.Name, Kind: "ephemeral", PodLabels: copyLabels(pod.Labels), NamespaceLabels: copyLabels(labels)})
 		}
 	}
-	return result, nil
+	return result, qos, nil
 }
 
 func snapshotBindings(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {

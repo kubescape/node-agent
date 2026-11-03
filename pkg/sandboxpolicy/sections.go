@@ -79,6 +79,16 @@ func (s *SectionBackend) Prepare(ctx context.Context, plans []Plan) error {
 	return preparer.Prepare(ctx, plans)
 }
 
+// BindPods passes the pod bindings to a privilege backend that can bind pod
+// cgroups. Pod bindings exist only for the privilege section.
+func (s *SectionBackend) BindPods(ctx context.Context, pods []PodBinding) error {
+	binder, ok := s.privilege.(PodBinder)
+	if !ok {
+		return nil
+	}
+	return binder.BindPods(ctx, pods)
+}
+
 // Exec returns the exec section backend.
 func (s *SectionBackend) Exec() Backend { return s.exec }
 

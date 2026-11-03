@@ -33,6 +33,11 @@ type ContainerIdentity = execruntime.ContainerIdentity
 type Binding struct {
 	Container ContainerIdentity
 	Slot      uint32
+	// SkipArming binds without arming the tasks already in the cgroup. Use it
+	// for a parent cgroup bound before its containers start: a container
+	// runtime helper can be there between its namespace setup and its exec,
+	// and must not be judged. Tasks are still armed at their own exec.
+	SkipArming bool
 }
 
 // bindingValue matches struct binding_value in ../bindings.h.
@@ -231,8 +236,8 @@ func (b *Bindings) bind(c Binding) error {
 	}
 	// A slot move arms again too: a task that the old slot left unarmed (an
 	// audit slot allows a fork whose child mark failed) must not escape the
-	// new slot.
-	if b.armed != nil {
+	// new slot. A SkipArming binding never arms.
+	if b.armed != nil && !c.SkipArming {
 		if err := b.armExisting(b.armed, id.CgroupPath); err != nil {
 			if bound && !errors.Is(err, ErrContainerGone) {
 				// Undo the move, so a retry moves and arms again.

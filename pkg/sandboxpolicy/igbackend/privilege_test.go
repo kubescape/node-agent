@@ -265,3 +265,70 @@ func TestPrivilegeTrackingFaultUnconfirmsAndHeals(t *testing.T) {
 		t.Fatalf("the new instance has no fault: %v", err)
 	}
 }
+
+func testPodBinding(uid string, cgroup uint64, plan sandboxpolicy.Plan) sandboxpolicy.PodBinding {
+	return sandboxpolicy.PodBinding{PodUID: types.UID(uid), Namespace: "ns", PodName: uid, CgroupID: cgroup, CgroupPath: "/kubepods/pod" + uid, Plan: plan}
+}
+
+func TestPrivilegePodBindings(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	p1 := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	p2 := privPlan("r2", privPolicy("p2", api.ActionDeny))
+	// No slot yet: the pod waits for Prepare.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil || len(e.instances) != 0 {
+		t.Fatalf("no slot: %v instances %d", err, len(e.instances))
+	}
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p1)}); err != nil {
+		t.Fatal(err)
+	}
+	slot1, ok := e.instances[0].bound[100]
+	if !ok {
+		t.Fatal("the pod cgroup must be bound once its slot exists")
+	}
+	// A container of the pod binds to the same slot; the pod binding stays.
+	if _, err := b.Replace(ctx, privBinding(1), p1); err != nil || e.instances[0].bound[1] != slot1 || len(e.instances) != 1 {
+		t.Fatalf("container bind: %v %+v", err, e.instances[0].bound)
+	}
+	// A new combination replaces the instance; the pod binding is carried.
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{p1, p2}); err != nil || len(e.instances) != 2 {
+		t.Fatalf("prepare p2: %v", err)
+	}
+	carried := false
+	for _, initial := range e.configs[1].InitialBindings {
+		if initial.Container.CgroupID == 100 {
+			carried = initial.SkipArming && initial.Container.Runtime == podRuntime && initial.Container.ID == "a"
+		}
+	}
+	if !carried {
+		t.Fatalf("pod binding not carried without arming: %+v", e.configs[1].InitialBindings)
+	}
+	// A changed plan moves the pod to the new slot in place.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 100, p2)}); err != nil || e.instances[1].bound[100] == e.instances[1].bound[1] {
+		t.Fatalf("plan change: %v %+v", err, e.instances[1].bound)
+	}
+	// A recreated pod cgroup is a new identity: the old one is removed.
+	if err := b.BindPods(ctx, []sandboxpolicy.PodBinding{testPodBinding("a", 101, p2)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, old := e.instances[1].bound[100]; old {
+		t.Fatal("the old pod cgroup must be unbound")
+	}
+	if _, ok := e.instances[1].bound[101]; !ok {
+		t.Fatal("the new pod cgroup must be bound")
+	}
+	// A pod that is not given any more is unbound; containers stay.
+	if err := b.BindPods(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.instances[1].bound[101]; ok {
+		t.Fatal("pod binding must be removed")
+	}
+	if _, ok := e.instances[1].bound[1]; !ok {
+		t.Fatal("the container binding must stay")
+	}
+}

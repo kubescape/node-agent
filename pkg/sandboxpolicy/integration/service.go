@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	orasoci "oras.land/oras-go/v2/content/oci"
@@ -77,10 +78,27 @@ type Service struct {
 	// often privilege slot preparation lists the node's pods.
 	podsScheduled atomic.Bool
 	lastPrepare   time.Time
+	// scheduled and qos are the containers and QoS classes of the pods
+	// scheduled to this node, from the last slot preparation. Only the refresh
+	// loop uses them.
+	scheduled []sandboxpolicy.Binding
+	qos       map[types.UID]corev1.PodQOSClass
+	// podPolling is set while a pod with a pod plan has no pod cgroup yet,
+	// up to podPollUntil (see bindPods).
+	podPolling   bool
+	podPollUntil time.Time
+	// podCgroupID returns the cgroup ID of a pod cgroup path (replaced in tests).
+	podCgroupID func(string) (uint64, error)
 }
 
 // prepareInterval is the longest time between two slot preparations.
 const prepareInterval = 30 * time.Second
+
+// podPollInterval is how often a scheduled pod is checked for its pod cgroup,
+// for up to prepareInterval after it is scheduled. The kubelet creates the pod
+// cgroup before the pod sandbox, so the pod cgroup is bound before the first
+// container starts.
+const podPollInterval = 50 * time.Millisecond
 
 // NewService prepares the public watcher/exporter/native runtime bridge. It does
 // not authorize any cgroup or start enforcement until Start is called.
@@ -101,6 +119,8 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, fmt.Errorf("sandbox native runtime: %w", err)
 	}
 	s := &Service{options: options, bindings: map[string]sandboxpolicy.Binding{}, closeRuntime: r.Close, done: make(chan struct{}), wake: make(chan struct{}, 1)}
+	cgroupRoot := filepath.Join(host.HostRoot, "sys/fs/cgroup")
+	s.podCgroupID = func(path string) (uint64, error) { return cgroupID(cgroupRoot, path) }
 	s.exporter, err = sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 1024, Receivers: options.Receivers, Enricher: options.Enricher, ResolveBinding: s.resolveBinding})
 	if err != nil {
 		_ = r.Close()
@@ -241,6 +261,10 @@ drain:
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
+			var poll <-chan time.Time
+			if s.podPolling {
+				poll = time.After(podPollInterval)
+			}
 			select {
 			case <-runCtx.Done():
 				return
@@ -248,6 +272,8 @@ drain:
 				s.refresh(runCtx)
 			case <-s.wake:
 				s.refresh(runCtx)
+			case <-poll:
+				s.bindPods(runCtx)
 			}
 		}
 	}()
@@ -260,14 +286,17 @@ func (s *Service) refresh(ctx context.Context) {
 	if s.options.PrivilegeImageName != "" && s.options.Kubernetes != nil && s.Controller.HasPrivilegePolicies() &&
 		(s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
 		s.lastPrepare = time.Now()
-		scheduled, err := ScheduledContainers(ctx, s.options.Kubernetes, s.options.NodeName)
+		scheduled, qos, err := ScheduledContainers(ctx, s.options.Kubernetes, s.options.NodeName)
 		if err == nil {
+			s.scheduled, s.qos, s.podPollUntil = scheduled, qos, s.lastPrepare.Add(prepareInterval)
 			err = s.Controller.PrepareScheduled(ctx, scheduled)
 		}
 		if err != nil {
 			s.report(fmt.Errorf("privilege slot preparation: %w", err))
 		}
 	}
+	// Every refresh, so a policy change also reaches the pod bindings.
+	s.bindPods(ctx)
 	// Configuration and selected-runtime discovery share one commit barrier. A
 	// candidate cannot report Ready between its relist and a failed binding list.
 	err := s.Controller.Refresh(ctx, func(ctx context.Context, selected func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
@@ -297,6 +326,59 @@ func (s *Service) refresh(ctx context.Context) {
 	if err != nil {
 		s.report(err)
 	}
+}
+
+// bindPods binds the pod cgroup of every scheduled pod that has a pod plan
+// (see Controller.PodPlans) and unbinds the others. It uses the pods of the
+// last slot preparation and makes no API call. A pod whose cgroup does not
+// exist yet sets podPolling, so it is checked again soon.
+func (s *Service) bindPods(ctx context.Context) {
+	binder, ok := s.backend.(sandboxpolicy.PodBinder)
+	if !ok || s.Controller == nil {
+		return
+	}
+	plans := s.Controller.PodPlans(s.scheduled)
+	var pods []sandboxpolicy.PodBinding
+	missing := false
+	if len(plans) > 0 {
+		layout, known := s.podCgroupLayout()
+		for _, c := range s.scheduled {
+			plan, ok := plans[c.PodUID]
+			if !ok {
+				continue
+			}
+			delete(plans, c.PodUID)
+			path := layout.path(c.PodUID, s.qos[c.PodUID])
+			if !known || path == "" || s.podCgroupID == nil {
+				continue
+			}
+			id, err := s.podCgroupID(path)
+			if err != nil || id == 0 {
+				missing = true
+				continue
+			}
+			pods = append(pods, sandboxpolicy.PodBinding{PodUID: c.PodUID, Namespace: c.Namespace, PodName: c.PodName, CgroupID: id, CgroupPath: path, Plan: plan})
+		}
+	}
+	s.podPolling = missing && time.Now().Before(s.podPollUntil)
+	if err := binder.BindPods(ctx, pods); err != nil {
+		s.report(fmt.Errorf("privilege pod binding: %w", err))
+	}
+}
+
+// podCgroupLayout reads the pod cgroup layout from a running pod container.
+func (s *Service) podCgroupLayout() (podCgroupLayout, bool) {
+	var layout podCgroupLayout
+	found := false
+	if s.options.Containers == nil {
+		return layout, false
+	}
+	s.options.Containers.ContainerRange(func(c *containercollection.Container) {
+		if !found && c != nil {
+			layout, found = learnPodCgroupLayout(c.CgroupV2, types.UID(c.K8s.PodUID))
+		}
+	})
+	return layout, found
 }
 
 // ContainerCallback is deliberately nonblocking: event delivery must never hold

@@ -7,6 +7,7 @@ import (
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func privilegeSection(def api.Action) *api.PrivilegeSection {
@@ -298,5 +299,34 @@ func TestSectionBackendSeparatePrivilegePolicyKeepsExecRevision(t *testing.T) {
 	}
 	if privilege.replacements != 2 || privilege.withdrawals != 1 {
 		t.Fatalf("privilege %d replacements %d withdrawals", privilege.replacements, privilege.withdrawals)
+	}
+}
+
+func TestControllerPodPlans(t *testing.T) {
+	ctx := context.Background()
+	all := policy("all", "ns")
+	all.Spec.Privilege = privilegeSection(api.ActionDeny)
+	app := policy("app-only", "ns")
+	app.Spec.Containers = []string{"app"}
+	app.Spec.Privilege = privilegeSection(api.ActionAllow)
+	c, _, _, _ := setup(t, all, app)
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	container := func(pod types.UID, name, kind string) Binding {
+		b := binding()
+		b.ContainerID, b.CgroupID, b.PodUID, b.ContainerName, b.Kind = "", 0, pod, name, kind
+		return b
+	}
+	elsewhere := container("other-ns", "web", "regular")
+	elsewhere.Namespace = "elsewhere"
+	plans := c.PodPlans([]Binding{
+		container("uniform", "web", "regular"), container("uniform", "db", "regular"),
+		container("init", "web", "regular"), container("init", "setup", "init"),
+		container("mixed", "web", "regular"), container("mixed", "app", "regular"),
+		elsewhere,
+	})
+	if len(plans) != 1 || len(plans["uniform"].Policies) != 1 || plans["uniform"].Policies[0].Identity.Name != "all" {
+		t.Fatalf("only the pod whose containers all get the same policies has a pod plan: %+v", plans)
 	}
 }

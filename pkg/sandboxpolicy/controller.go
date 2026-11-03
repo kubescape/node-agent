@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -179,22 +180,83 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 		c.mu.Unlock()
 		return nil
 	}
-	policies := c.privilegePolicies()
+	plans := privilegePlans(c.privilegePolicies(), containers)
 	c.mu.Unlock()
-	var plans []Plan
-	for _, b := range containers {
-		var plan Plan
-		for _, p := range policies {
-			if p.matches(b) {
-				plan.Policies = append(plan.Policies, CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy()})
-			}
-		}
+	var nonEmpty []Plan
+	for _, plan := range plans {
 		if len(plan.Policies) > 0 {
-			plans = append(plans, plan)
+			nonEmpty = append(nonEmpty, plan)
 		}
 	}
 	// Outside c.mu: a preparation may start a gadget instance.
-	return preparer.Prepare(ctx, plans)
+	return preparer.Prepare(ctx, nonEmpty)
+}
+
+// PodPlans returns the privilege plan of each pod whose declared containers
+// (all of them must be given) get the same nonempty set of privilege policies.
+// Such a pod can be bound at its pod cgroup before its containers start. A pod
+// whose containers get different policies, or none, has no pod plan: a pod
+// binding would also judge the containers that the policies do not select.
+func (c *Controller) PodPlans(containers []Binding) map[types.UID]Plan {
+	c.mu.Lock()
+	if c.configError != nil {
+		c.mu.Unlock()
+		return nil
+	}
+	plans := privilegePlans(c.privilegePolicies(), containers)
+	c.mu.Unlock()
+	pods := map[types.UID]Plan{}
+	mixed := map[types.UID]bool{}
+	for i, b := range containers {
+		plan := plans[i]
+		if mixed[b.PodUID] {
+			continue
+		}
+		if len(plan.Policies) == 0 {
+			mixed[b.PodUID] = true
+			delete(pods, b.PodUID)
+			continue
+		}
+		previous, seen := pods[b.PodUID]
+		if seen && !samePolicies(previous, plan) {
+			mixed[b.PodUID] = true
+			delete(pods, b.PodUID)
+			continue
+		}
+		pods[b.PodUID] = plan
+	}
+	return pods
+}
+
+// privilegePlans returns the plan of each container, in order (possibly empty).
+func privilegePlans(policies []desiredPolicy, containers []Binding) []Plan {
+	plans := make([]Plan, len(containers))
+	for i, b := range containers {
+		for _, p := range policies {
+			if p.matches(b) {
+				plans[i].Policies = append(plans[i].Policies, CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy()})
+			}
+		}
+	}
+	return plans
+}
+
+// samePolicies compares the policy objects and generations of two plans.
+func samePolicies(a, b Plan) bool {
+	if len(a.Policies) != len(b.Policies) {
+		return false
+	}
+	ids := map[PolicyIdentity]int{}
+	for _, p := range a.Policies {
+		ids[p.Identity]++
+	}
+	for _, p := range b.Policies {
+		if ids[p.Identity] == 0 {
+			return false
+		}
+		ids[p.Identity]--
+	}
+	return true
 }
 
 // HasPrivilegePolicies reports whether any active policy has a privilege section.
