@@ -42,10 +42,6 @@ on:
         default: false
         type: boolean
         description: "run cosign on released image"
-      TRIGGER_HELM_CICD:
-        required: false
-        default: true
-        type: boolean
       HELM_E2E_TEST:
         required: false
         default: false
@@ -427,13 +423,3 @@ jobs:
           draft: false
           prerelease: false
           body: ${{ github.event.pull_request.body }}
-
-      - name: Trigger helm chart workflow
-        if: ${{ inputs.TRIGGER_HELM_CICD == true }}
-        uses: benc-uk/workflow-dispatch@d004979be141727c7a17c28f603e2facc40d0855 # v1
-        with:
-          workflow: 00-cicd.yaml
-          repo: kubescape/helm-charts
-          ref: ${{ inputs.HELM_BRANCH }}
-          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          inputs: '{"IMAGE_TAG":"${{ inputs.IMAGE_TAG }}","COMPONENT_NAME":"${{ inputs.COMPONENT_NAME }}","HELM_E2E_TEST":"${{ inputs.HELM_E2E_TEST }}","CHANGE_TAG":"true"}'
