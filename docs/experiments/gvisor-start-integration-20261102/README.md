@@ -109,7 +109,9 @@ specifications into a PR.
 6. Run `parallel-trial.py`, then `verify.py` before deleting Pods. Verification
    checks every export against retained Pod and CRI identities, exact counts,
    concurrent execution overlap, the pre-filter privacy flags and local agent
-   log scan. An error is a failed experiment, not evidence of no starts.
+   log scan. Checks remain active under `python -O` and `PYTHONOPTIMIZE`;
+   overlap and privacy verdicts are derived from the checked inputs. An error
+   is a failed experiment, not evidence of no starts.
 7. Export only the sanitized observation/verification files. Restore the
    original ConfigMap, DaemonSet and runsc settings, remove only the experiment
    workloads, allow the OTEL shutdown flush, then stop the collector and VM.
