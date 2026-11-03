@@ -121,9 +121,11 @@ not stop the other rules in the CRD from evaluating.
 The clause's CEL expressions — `when:`, `key:` and each `value:` entry — are a
 separate case, because they are compiled lazily on first evaluation rather than
 by the validator. A compile failure is logged once and cached, and **every later
-evaluation of that expression keeps failing**: the write is skipped and counted
-under `guard_error`, `key_error` or logged as a value failure, on every event. It
-does not degrade into an empty guard or an empty key. The distinction matters for
+evaluation of that expression keeps failing**, on every event. What a failure
+costs depends on the expression: a failing `when:` or `key:` skips the write and
+is counted under `guard_error` or `key_error`, while a failing `value:` entry is
+logged and that one field is omitted from the entry, which is still stored. A
+failure never degrades into an empty guard or an empty key. The distinction matters for
 `key:` in particular — an empty key names the scope-wide entry, so a key that
 silently evaluated to `""` would turn a per-process marker into a container-wide
 one. The same rule applies to `message` and `uniqueId`: a `uniqueId` that does
