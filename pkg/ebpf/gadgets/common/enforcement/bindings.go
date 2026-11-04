@@ -97,10 +97,13 @@ type Status struct {
 
 // Bindings serializes all writes. Map handles are borrowed from the eBPF operator.
 type Bindings struct {
-	mu              sync.Mutex
-	config          Config
-	desired         map[execpolicy.Container]Binding
-	active          map[uint64]Binding
+	mu      sync.Mutex
+	config  Config
+	desired map[execpolicy.Container]Binding
+	active  map[uint64]Binding
+	// unarmed marks bound cgroups whose running tasks the last bind did
+	// not arm, so a retry with the same slot arms them.
+	unarmed         map[uint64]bool
 	members, armed  Map
 	faults          FaultMap
 	ready, stopped  bool
@@ -118,7 +121,7 @@ func New(config Config) (*Bindings, error) {
 	if len(config.InitialBindings) > MaxBindings {
 		return nil, fmt.Errorf("too many initial bindings")
 	}
-	b := &Bindings{config: config, desired: map[execpolicy.Container]Binding{}, active: map[uint64]Binding{}, armExisting: ArmExisting}
+	b := &Bindings{config: config, desired: map[execpolicy.Container]Binding{}, active: map[uint64]Binding{}, unarmed: map[uint64]bool{}, armExisting: ArmExisting}
 	for _, c := range config.InitialBindings {
 		if err := b.validate(c); err != nil {
 			return nil, err
@@ -210,7 +213,7 @@ func (b *Bindings) bind(c Binding) error {
 	if bound && previous.Container != id {
 		return fmt.Errorf("cgroup identity conflicts with active binding")
 	}
-	if bound && previous.Slot == c.Slot {
+	if bound && previous.Slot == c.Slot && !b.unarmed[id.CgroupID] {
 		return nil
 	}
 	if !bound {
@@ -235,6 +238,7 @@ func (b *Bindings) bind(c Binding) error {
 				// Undo the move, so a retry moves and arms again.
 				if perr := b.members.Put(id.CgroupID, bindingValue{Slot: previous.Slot}); perr != nil {
 					b.active[id.CgroupID] = c
+					b.unarmed[id.CgroupID] = true
 					return errors.Join(err, perr)
 				}
 				return err
@@ -245,12 +249,15 @@ func (b *Bindings) bind(c Binding) error {
 				// The kernel entry stays: keep it tracked so Unbind can
 				// remove it later.
 				b.active[id.CgroupID] = c
+				b.unarmed[id.CgroupID] = true
 				return errors.Join(err, derr)
 			}
 			delete(b.active, id.CgroupID)
+			delete(b.unarmed, id.CgroupID)
 			return err
 		}
 	}
+	delete(b.unarmed, id.CgroupID)
 	b.active[id.CgroupID] = c
 	return nil
 }
@@ -266,6 +273,7 @@ func (b *Bindings) unbind(c ContainerIdentity) error {
 		return fmt.Errorf("removing container binding: %w", err)
 	}
 	delete(b.active, c.CgroupID)
+	delete(b.unarmed, c.CgroupID)
 	return nil
 }
 

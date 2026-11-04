@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cilium/ebpf"
+	execpolicy "github.com/inspektor-gadget/inspektor-gadget/gadgets/enforce_exec/policy"
 	"golang.org/x/sys/unix"
 )
 
@@ -19,6 +20,7 @@ type fakeMap struct {
 	frozen                bool
 	log                   *[]string
 	name                  string
+	deleteErr             error
 }
 
 func (m *fakeMap) Put(k, v interface{}) error {
@@ -31,6 +33,9 @@ func (m *fakeMap) Put(k, v interface{}) error {
 }
 
 func (m *fakeMap) Delete(k interface{}) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
 	if _, ok := m.data[k]; !ok {
 		return ebpf.ErrKeyNotExist
 	}
@@ -121,6 +126,31 @@ func TestFailedArmingRemovesBinding(t *testing.T) {
 	}
 	if len(members.data) != 0 {
 		t.Fatalf("binding must be removed: %v", members.data)
+	}
+}
+
+// When arming fails and the kernel entry cannot be removed, the binding stays
+// tracked. A retry with the same slot must arm again, not return early.
+func TestSameSlotRetryArmsAfterFailedArming(t *testing.T) {
+	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
+	b.config.InitialBindings, b.desired = nil, map[execpolicy.Container]Binding{}
+	arms := 0
+	b.armExisting = func(Map, string) error { arms++; return nil }
+	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil); err != nil {
+		t.Fatal(err)
+	}
+	b.armExisting = func(Map, string) error { arms++; return errors.New("walk failed") }
+	members.deleteErr = errors.New("busy")
+	if err := b.Bind(Binding{Container: identity}); err == nil {
+		t.Fatal("a failed arming must fail the bind")
+	}
+	b.armExisting = func(Map, string) error { arms++; return nil }
+	members.deleteErr = nil
+	if err := b.Bind(Binding{Container: identity}); err != nil || arms != 2 {
+		t.Fatalf("retry must arm: %v arms=%d", err, arms)
+	}
+	if err := b.Bind(Binding{Container: identity}); err != nil || arms != 2 {
+		t.Fatalf("an armed binding needs no new arming: %v arms=%d", err, arms)
 	}
 }
 
