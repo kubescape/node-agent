@@ -83,20 +83,19 @@ type Service struct {
 	podsScheduled atomic.Bool
 	lastPrepare   time.Time
 	// The fields below are used only by the refresh loop.
-	// namespaceLabels are from the last slot preparation. scheduled and qos
-	// are the containers and QoS classes of the node's pods from the last
-	// preparation, used when there is no pod informer.
-	namespaceLabels map[string]map[string]string
-	scheduled       []sandboxpolicy.Binding
-	qos             map[types.UID]corev1.PodQOSClass
+	// scheduled and qos are the containers and QoS classes of the node's pods
+	// from the last slot preparation, used when there are no informers.
+	scheduled []sandboxpolicy.Binding
+	qos       map[types.UID]corev1.PodQOSClass
 	// podFirstSeen is when a pod with a pod plan was first seen. podPolling is
 	// set while such a pod has no pod cgroup yet, for up to prepareInterval.
 	podFirstSeen map[types.UID]time.Time
 	podPolling   bool
 	// podCgroupID returns the cgroup ID of a pod cgroup path (replaced in tests).
 	podCgroupID func(string) (uint64, error)
-	// pods is the node's pod informer (nil without a privilege image).
-	pods informers.SharedInformerFactory
+	// pods and namespaces are the informers of the node's pods and of all
+	// namespaces (nil without a privilege image).
+	pods, namespaces informers.SharedInformerFactory
 }
 
 // prepareInterval is the longest time between two slot preparations.
@@ -133,6 +132,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		s.pods = informers.NewSharedInformerFactoryWithOptions(options.Kubernetes, 0, informers.WithTweakListOptions(func(o *metav1.ListOptions) {
 			o.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", options.NodeName).String()
 		}))
+		s.namespaces = informers.NewSharedInformerFactory(options.Kubernetes, 0)
 		s.watchPods()
 	}
 	s.exporter, err = sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 1024, Receivers: options.Receivers, Enricher: options.Enricher, ResolveBinding: s.resolveBinding})
@@ -242,6 +242,15 @@ func (s *Service) watchPods() {
 			s.ContainerCallback(containercollection.PubSubEvent{})
 		}
 	}
+	_, _ = s.namespaces.Core().V1().Namespaces().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, obj any) {
+			before, ok1 := old.(*corev1.Namespace)
+			after, ok2 := obj.(*corev1.Namespace)
+			if !ok1 || !ok2 || !stdmaps.Equal(before.Labels, after.Labels) {
+				s.ContainerCallback(containercollection.PubSubEvent{})
+			}
+		},
+	})
 	_, _ = s.pods.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj any) { hint(nil, obj) },
 		UpdateFunc: hint,
@@ -271,6 +280,12 @@ func (s *Service) Start(ctx context.Context) error {
 	go s.exporter.Run(runCtx)
 	if s.pods != nil {
 		s.pods.Start(runCtx.Done())
+		s.namespaces.Start(runCtx.Done())
+		// Bounded: the caches only add hints, refresh works without them.
+		syncCtx, cancelSync := context.WithTimeout(runCtx, 10*time.Second)
+		s.pods.WaitForCacheSync(syncCtx.Done())
+		s.namespaces.WaitForCacheSync(syncCtx.Done())
+		cancelSync()
 	}
 	// Drain observed startup churn into the readiness barrier before handing
 	// work to the background loop. Persistent churn stays explicitly NotReady.
@@ -315,14 +330,14 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
-	// Prepare after a Pending-pod event, else at most every prepareInterval,
-	// so the extra pod and namespace listing does not run on every refresh.
+	// Prepare after a Pending-pod or policy event, else at most every
+	// prepareInterval.
 	if s.options.PrivilegeImageName != "" && s.options.Kubernetes != nil && s.Controller.HasPrivilegePolicies() &&
 		(s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
 		s.lastPrepare = time.Now()
-		scheduled, qos, namespaceLabels, err := ScheduledContainers(ctx, s.options.Kubernetes, s.options.NodeName)
+		scheduled, qos, err := s.scheduledPods(ctx)
 		if err == nil {
-			s.scheduled, s.qos, s.namespaceLabels = scheduled, qos, namespaceLabels
+			s.scheduled, s.qos = scheduled, qos
 			err = s.Controller.PrepareScheduled(ctx, scheduled)
 		}
 		if err != nil {
@@ -374,14 +389,14 @@ func (s *Service) bindPods(ctx context.Context) {
 	if !ok || s.Controller == nil {
 		return
 	}
+	s.podPolling = false // set again below when a pod cgroup is missing
 	scheduled, qos := s.scheduled, s.qos
 	if s.pods != nil {
-		pods, err := s.pods.Core().V1().Pods().Lister().List(labels.Everything())
-		if err != nil {
+		var err error
+		if scheduled, qos, err = s.scheduledPods(ctx); err != nil {
 			s.report(fmt.Errorf("privilege pod binding: %w", err))
 			return
 		}
-		scheduled, qos = scheduledContainers(pods, s.namespaceLabels, s.options.NodeName)
 	}
 	plans, ok := s.Controller.PodPlans(scheduled)
 	if !ok {
@@ -425,6 +440,29 @@ func (s *Service) bindPods(ctx context.Context) {
 	if err := binder.BindPods(ctx, pods); err != nil {
 		s.report(fmt.Errorf("privilege pod binding: %w", err))
 	}
+}
+
+// scheduledPods returns the containers and QoS classes of the node's pods (see
+// ScheduledContainers), from the informer caches when there are informers.
+func (s *Service) scheduledPods(ctx context.Context) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass, error) {
+	if s.pods == nil {
+		scheduled, qos, err := ScheduledContainers(ctx, s.options.Kubernetes, s.options.NodeName)
+		return scheduled, qos, err
+	}
+	pods, err := s.pods.Core().V1().Pods().Lister().List(labels.Everything())
+	if err != nil {
+		return nil, nil, err
+	}
+	namespaces, err := s.namespaces.Core().V1().Namespaces().Lister().List(labels.Everything())
+	if err != nil {
+		return nil, nil, err
+	}
+	namespaceLabels := make(map[string]map[string]string, len(namespaces))
+	for _, ns := range namespaces {
+		namespaceLabels[ns.Name] = ns.Labels
+	}
+	scheduled, qos := scheduledContainers(pods, namespaceLabels, s.options.NodeName)
+	return scheduled, qos, nil
 }
 
 // podCgroupLayout reads the pod cgroup layout from a running pod container,
@@ -496,6 +534,7 @@ func (s *Service) Close(ctx context.Context) error {
 		}
 		if s.pods != nil {
 			s.pods.Shutdown()
+			s.namespaces.Shutdown()
 		}
 	}
 	if !s.backendClosed {

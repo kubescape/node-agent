@@ -52,6 +52,9 @@ type Controller struct {
 	lastError    error
 	bindingError error
 	configError  error
+	// classes and classErr are from the last reconcile (see PodPlans).
+	classes  api.PolicyClasses
+	classErr error
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -197,23 +200,32 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 // Such a pod can be bound at its pod cgroup before its containers start. A pod
 // whose containers get different policies, or none, has no pod plan: a pod
 // binding would also judge the containers that the policies do not select.
-// It returns false when the policies are not known (a configuration error).
+// A container must also pass the checks that its own binding needs (see
+// podContainerPlan), so a pod binding never applies a policy that the
+// container binding refuses. It returns false when the policies are not known
+// (a configuration error).
 func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 	c.mu.Lock()
 	if c.configError != nil {
 		c.mu.Unlock()
 		return nil, false
 	}
-	plans := privilegePlans(c.privilegePolicies(), containers)
+	var policies []desiredPolicy
+	for _, obj := range c.objects {
+		if obj.GetKind() != "SandboxPolicyClasses" {
+			policies = append(policies, parsePolicy(obj))
+		}
+	}
+	classes, classErr := c.classes, c.classErr
 	c.mu.Unlock()
 	pods := map[types.UID]Plan{}
 	mixed := map[types.UID]bool{}
-	for i, b := range containers {
-		plan := plans[i]
+	for _, b := range containers {
 		if mixed[b.PodUID] {
 			continue
 		}
-		if len(plan.Policies) == 0 {
+		plan, ok := podContainerPlan(policies, classes, classErr, b)
+		if !ok {
 			mixed[b.PodUID] = true
 			delete(pods, b.PodUID)
 			continue
@@ -227,6 +239,41 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 		pods[b.PodUID] = plan
 	}
 	return pods, true
+}
+
+// podContainerPlan returns the privilege plan of a container for a pod
+// binding. It is false when the container's own binding would fail, as in
+// reconcile: an invalid policy that may select it, a class error, too many
+// policies, or a policy that does not compile without a ContainerProfile
+// resolver (a policy with sources depends on the profile, so it is refused).
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErr error, b Binding) (Plan, bool) {
+	var plan Plan
+	selected := 0
+	for _, p := range policies {
+		if p.err != nil {
+			if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != b.Namespace {
+				continue
+			}
+			return Plan{}, false
+		}
+		if p.spec.Mode == api.ModeOff || !p.matches(b) {
+			continue
+		}
+		selected++
+		if classErr != nil {
+			return Plan{}, false
+		}
+		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
+			return Plan{}, false
+		}
+		if p.spec.Privilege != nil {
+			plan.Policies = append(plan.Policies, CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy()})
+		}
+	}
+	if selected > MaxPoliciesPerBinding || len(plan.Policies) == 0 {
+		return Plan{}, false
+	}
+	return plan, true
 }
 
 // privilegePlans returns the plan of each container, in order (possibly empty).
@@ -414,6 +461,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			classes.PathClasses[name] = paths
 		}
 	}
+	c.classes, c.classErr = classes, classErr
 	policyErrors := make(map[string]error)
 	for _, p := range policies {
 		if p.err != nil {

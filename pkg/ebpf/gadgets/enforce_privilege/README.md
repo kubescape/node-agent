@@ -125,6 +125,13 @@ policy:
 
 ## Known limits
 
+- **Parent bindings.** A bound parent cgroup also judges the armed tasks of
+  its child cgroups that have no binding of their own: OCI `createContainer`
+  and `startContainer` hooks (runc runs them in the container mount
+  namespace before the workload), and an infrastructure (pause) process. A
+  new instance does not arm the tasks that run only under a parent binding;
+  they are judged again when their own cgroup is bound or at their next exec.
+
 - **Lost mark at exec.** The exec hook cannot fail the exec, so a task whose
   mark fails there stays unarmed until its next exec. In an enforcing slot this
   is a tracking fault (see above). A later check cannot tell such a task apart

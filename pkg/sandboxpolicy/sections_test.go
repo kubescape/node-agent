@@ -3,6 +3,7 @@ package sandboxpolicy
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
@@ -328,5 +329,29 @@ func TestControllerPodPlans(t *testing.T) {
 	})
 	if !ok || len(plans) != 1 || len(plans["uniform"].Policies) != 1 || plans["uniform"].Policies[0].Identity.Name != "all" {
 		t.Fatalf("only the pod whose containers all get the same policies has a pod plan: %+v", plans)
+	}
+}
+
+func TestControllerPodPlansNeedContainerEligibility(t *testing.T) {
+	ctx := context.Background()
+	priv := policy("priv", "ns")
+	priv.Spec.Privilege = privilegeSection(api.ActionDeny)
+	// A second policy that selects the same container but depends on a
+	// ContainerProfile: the container binding can fail, so no pod binding.
+	sourced := policy("sourced", "ns")
+	sourced.Spec.Selector.PodSelector = metav1.LabelSelector{MatchLabels: map[string]string{"profile": "yes"}}
+	sourced.Spec.Sources = []api.PolicySource{{ContainerProfile: api.ContainerProfileReference{Name: "profile"}, Include: []string{"execs"}}}
+	c, _, _, _ := setup(t, priv, sourced)
+	if err := c.InitialSync(ctx); err != nil && !strings.Contains(err.Error(), "ContainerProfile") {
+		t.Fatal(err)
+	}
+	plain := binding()
+	plain.ContainerID, plain.CgroupID, plain.PodUID = "", 0, "plain"
+	profiled := plain
+	profiled.PodUID = "profiled"
+	profiled.PodLabels = map[string]string{"app": "test", "profile": "yes"}
+	plans, ok := c.PodPlans([]Binding{plain, profiled})
+	if !ok || len(plans) != 1 || len(plans["plain"].Policies) != 1 {
+		t.Fatalf("only the pod without a sourced policy has a pod plan: %+v", plans)
 	}
 }

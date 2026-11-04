@@ -64,20 +64,20 @@ func SnapshotSelectedBindingsFromContainers(ctx context.Context, client kubernet
 
 // ScheduledContainers returns API metadata (no runtime identity) for every
 // declared regular, init and ephemeral container of the pods scheduled to this
-// node that are not finished, the QoS class of each such pod (see
-// scheduledContainers) and the namespace labels. It feeds privilege slot
+// node that are not finished, and the QoS class of each such pod (see
+// scheduledContainers). It feeds privilege slot
 // preparation and pod cgroup binding, not container binding.
-func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeName string) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass, map[string]map[string]string, error) {
+func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeName string) ([]sandboxpolicy.Binding, map[types.UID]corev1.PodQOSClass, error) {
 	if client == nil || nodeName == "" {
-		return nil, nil, nil, fmt.Errorf("Kubernetes client and node name are required")
+		return nil, nil, fmt.Errorf("Kubernetes client and node name are required")
 	}
 	pods, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String()})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("list node pods: %w", err)
+		return nil, nil, fmt.Errorf("list node pods: %w", err)
 	}
 	namespaces, err := client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("list namespaces: %w", err)
+		return nil, nil, fmt.Errorf("list namespaces: %w", err)
 	}
 	namespaceLabels := make(map[string]map[string]string, len(namespaces.Items))
 	for _, ns := range namespaces.Items {
@@ -88,7 +88,7 @@ func ScheduledContainers(ctx context.Context, client kubernetes.Interface, nodeN
 		list[i] = &pods.Items[i]
 	}
 	result, qos := scheduledContainers(list, namespaceLabels, nodeName)
-	return result, qos, namespaceLabels, nil
+	return result, qos, nil
 }
 
 // scheduledContainers is ScheduledContainers for a given pod list. A pod of a

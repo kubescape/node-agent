@@ -380,3 +380,20 @@ func TestPrivilegePrepareStartsInstanceWithoutPlans(t *testing.T) {
 		t.Fatalf("first container: %v instances=%d", err, len(e.instances))
 	}
 }
+
+func TestPrivilegeEmptyInstanceRetryWaits(t *testing.T) {
+	e := &fakePrivilegeEngine{startErr: errors.New("load failed")}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	if err := b.Prepare(ctx, nil); err == nil {
+		t.Fatal("the failed start must be reported")
+	}
+	e.startErr = nil
+	if err := b.Prepare(ctx, nil); err != nil || len(e.instances) != 0 {
+		t.Fatalf("an empty start must not be retried at once: %v instances=%d", err, len(e.instances))
+	}
+	// A real plan is not delayed.
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))}); err != nil || len(e.instances) != 1 {
+		t.Fatalf("prepare with a plan: %v instances=%d", err, len(e.instances))
+	}
+}

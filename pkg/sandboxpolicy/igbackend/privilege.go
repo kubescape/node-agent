@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -110,7 +111,13 @@ type PrivilegeBackend struct {
 	retiring     []PrivilegeInstance
 	stats        PrivilegeStats
 	closed       bool
+	// emptyFailed is when starting an instance with no slot last failed.
+	emptyFailed time.Time
 }
+
+// emptyRetry is the shortest time between two starts of an instance with no
+// slot: each start is a slow gadget load on the refresh loop.
+const emptyRetry = 30 * time.Second
 
 var (
 	_ sandboxpolicy.Backend            = (*PrivilegeBackend)(nil)
@@ -225,7 +232,7 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 	}
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 	err := b.replaceInstance(ctx, b.prepared, extra, k, next, true)
-	if err != nil && (len(b.prepared) > 0 || len(b.pods) > 0) {
+	if err != nil && (len(b.prepared) > 0 || b.podsAddSlots(extra)) {
 		// The prepared set and the pod bindings may not fit; never let them
 		// block a real container. BindPods binds the pods again later.
 		err = b.replaceInstance(ctx, nil, extra, k, next, false)
@@ -295,7 +302,7 @@ func (b *PrivilegeBackend) Prepare(ctx context.Context, plans []sandboxpolicy.Pl
 	// Without an instance, start one even with no plans: the first gadget load
 	// is slow, so the first container of a privilege policy would find no
 	// instance ready (for example the first pod after a node-agent restart).
-	missing := b.instance == nil
+	missing := b.instance == nil && time.Since(b.emptyFailed) >= emptyRetry
 	for _, plan := range plans {
 		combination, policies := Combination(plan)
 		if len(policies) == 0 {
@@ -311,7 +318,11 @@ func (b *PrivilegeBackend) Prepare(ctx context.Context, plans []sandboxpolicy.Pl
 		return b.retire(ctx)
 	}
 	// The prepared set is kept only when the instance with it is running.
-	return errors.Join(b.replaceInstance(ctx, prepared, nil, identity{}, nil, true), b.retire(ctx))
+	err := b.replaceInstance(ctx, prepared, nil, identity{}, nil, true)
+	if err != nil && len(prepared) == 0 {
+		b.emptyFailed = time.Now()
+	}
+	return errors.Join(err, b.retire(ctx))
 }
 
 // BindPods binds the given pod cgroups to the slot of their plan and unbinds
@@ -368,6 +379,24 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		logger.L().Info("sandbox privilege pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
 	}
 	return errors.Join(append(errs, b.retire(ctx))...)
+}
+
+// podsAddSlots reports whether a pod binding needs a combination that no
+// container binding, and not extra, needs.
+func (b *PrivilegeBackend) podsAddSlots(extra map[string][]sandboxpolicy.CompiledPolicy) bool {
+	used := map[string]bool{}
+	for c := range extra {
+		used[c] = true
+	}
+	for _, v := range b.bindings {
+		used[v.combination] = true
+	}
+	for _, p := range b.pods {
+		if !used[p.combination] {
+			return true
+		}
+	}
+	return false
 }
 
 // replaceInstance starts a candidate with every combination in use or prepared
