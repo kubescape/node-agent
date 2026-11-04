@@ -332,3 +332,60 @@ func TestSectionBackendRejectsNetworkWithoutImage(t *testing.T) {
 		t.Fatalf("network must be rejected without a network backend: %v", err)
 	}
 }
+
+// The controller gives a plan the digest of its policies as revision. Adding a
+// privilege policy to an exec-only binding, and removing it again, must keep
+// the exec revision, so exec does not restart.
+func TestSectionBackendSeparatePrivilegePolicyKeepsExecRevision(t *testing.T) {
+	exec, privilege := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Identity: PolicyIdentity{UID: "e", Generation: 3}, Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	privPolicy := CompiledPolicy{Identity: PolicyIdentity{UID: "p", Generation: 1}, Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
+	plan := func(policies ...CompiledPolicy) Plan { return Plan{Revision: digest(policies), Policies: policies} }
+	steps := []Plan{plan(execPolicy), plan(execPolicy, privPolicy), plan(execPolicy)}
+	privPolicy.Identity.Generation = 2 // an edit of the privilege policy object
+	privPolicy.Privilege = privilegeSection(api.ActionDeny)
+	steps = append(steps[:2], plan(execPolicy, privPolicy), steps[2])
+	for i, p := range steps {
+		r, err := s.Replace(context.Background(), b, p)
+		if err != nil || !r.Committed || r.ActiveRevision != p.Revision {
+			t.Fatalf("step %d: %+v %v", i, r, err)
+		}
+	}
+	if exec.replacements != 1 {
+		t.Fatalf("exec restarted: %d replacements", exec.replacements)
+	}
+	if privilege.replacements != 2 || privilege.withdrawals != 1 {
+		t.Fatalf("privilege %d replacements %d withdrawals", privilege.replacements, privilege.withdrawals)
+	}
+}
+
+// Adding a separate network policy to an exec-only binding, editing it and
+// removing it again must keep the exec revision, so exec does not restart.
+func TestSectionBackendSeparateNetworkPolicyKeepsExecRevision(t *testing.T) {
+	exec, privilege, network := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	s.WithNetwork(network, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Identity: PolicyIdentity{UID: "e", Generation: 3}, Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	netPolicy := CompiledPolicy{Identity: PolicyIdentity{UID: "n", Generation: 1}, Revision: "n", Network: networkPlan()}
+	plan := func(policies ...CompiledPolicy) Plan { return Plan{Revision: digest(policies), Policies: policies} }
+	steps := []Plan{plan(execPolicy), plan(execPolicy, netPolicy)}
+	netPolicy.Identity.Generation = 2 // an edit of the network policy object
+	netPolicy.Network = networkPlan()
+	netPolicy.Network.Egress.Policy.Egress.Default = "deny"
+	steps = append(steps, plan(execPolicy, netPolicy), plan(execPolicy))
+	for i, p := range steps {
+		r, err := s.Replace(context.Background(), b, p)
+		if err != nil || !r.Committed || r.ActiveRevision != p.Revision {
+			t.Fatalf("step %d: %+v %v", i, r, err)
+		}
+	}
+	if exec.replacements != 1 {
+		t.Fatalf("exec restarted: %d replacements", exec.replacements)
+	}
+	if network.replacements != 2 || network.withdrawals != 1 || privilege.replacements != 0 {
+		t.Fatalf("network %d replacements %d withdrawals, privilege %d", network.replacements, network.withdrawals, privilege.replacements)
+	}
+}

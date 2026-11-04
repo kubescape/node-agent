@@ -21,9 +21,13 @@ const (
 // A binding whose old and new plans have only exec sections goes straight to
 // the exec backend, unchanged. Otherwise the plan is split into an exec plan
 // and one plan per other section (privilege, network), each with its own
-// revision. A policy's generation is part of the exec revision, so an edit
-// restarts exec only when exec and another section share one policy object;
-// sections in separate policies stay independent.
+// revision. When no policy object holds exec and another section, the exec
+// plan and its revision are what the controller gives the exec policies alone,
+// so adding, editing or removing a privilege or network policy does not restart
+// exec. When one object holds both, its generation is part of the exec revision
+// (as in the exec-only path): an edit of only its other section restarts exec
+// once. This is a known limit; the generation must stay in the plan for status
+// staleness.
 //
 // Commit follows the Backend contract of each section: a section that returns
 // Committed=true is committed, even with a cleanup error. If a later section
@@ -183,6 +187,28 @@ func (s *SectionBackend) split(plan Plan) sectionPlans {
 		out.exec = plan
 		return out
 	}
+	shared := false
+	for _, p := range plan.Policies {
+		if p.Exec.Default != "" && s.hasOtherSection(p) {
+			shared = true
+		}
+	}
+	if !shared {
+		// No policy object carries exec and another section: the exec plan is
+		// the plan of the policies without another section, with the revision
+		// the controller gives that plan alone. Adding or removing a privilege
+		// or network policy then keeps the exec revision, so exec does not
+		// restart.
+		for _, p := range plan.Policies {
+			if !s.hasOtherSection(p) {
+				out.exec.Policies = append(out.exec.Policies, p)
+			}
+		}
+		if len(out.exec.Policies) > 0 {
+			out.exec.Revision = digest(out.exec.Policies)
+		}
+		return out
+	}
 	type execPart struct {
 		Identity PolicyIdentity
 		Mode     api.PolicyMode
@@ -205,6 +231,16 @@ func (s *SectionBackend) split(plan Plan) sectionPlans {
 		out.exec.Revision = digest(execParts)
 	}
 	return out
+}
+
+// hasOtherSection reports whether a policy has a section other than exec.
+func (s *SectionBackend) hasOtherSection(p CompiledPolicy) bool {
+	for _, sec := range s.sections {
+		if sec.part(p) != nil {
+			return true
+		}
+	}
+	return false
 }
 
 type sectionResult struct {
