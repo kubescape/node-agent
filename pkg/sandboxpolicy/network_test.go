@@ -408,6 +408,28 @@ func TestNetworkUnresolvableDenyKeepsEnforceDefault(t *testing.T) {
 	}
 }
 
+func TestNetworkGeneratedNameCollision(t *testing.T) {
+	// "dns" with tcp and udp becomes dns/tcp and dns/udp; a CRD rule can be
+	// named dns/tcp literally. Only the rule with the generated name drops.
+	spec := netSpec(api.ActionDeny,
+		netRule("dns/tcp", api.ActionAllow, api.NetworkTarget{CIDR: []string{"192.0.2.53/32"}}),
+		netRule("dns", api.ActionAllow, api.NetworkTarget{Ports: []intstr.IntOrString{intstr.FromInt32(53)}, Proto: []string{"tcp", "udp"}}),
+		netRule("web", api.ActionAllow, api.NetworkTarget{CIDR: []string{"198.51.100.0/24"}}))
+	plan, err := TranslateNetwork(spec, NetworkExtras{}, DestClasses{})
+	if err != nil {
+		t.Fatalf("a name collision must not fail the policy: %v", err)
+	}
+	if r := ruleByName(plan, "dns/tcp"); r == nil || !reflect.DeepEqual(r.CIDRs, []string{"192.0.2.53/32"}) {
+		t.Fatalf("the literal rule must stay: %+v", r)
+	}
+	if ruleByName(plan, "dns/udp") != nil || ruleByName(plan, "web") == nil || len(plan.Egress.Policy.Egress.Rules) != 2 {
+		t.Fatalf("rules %+v", plan.Egress.Policy.Egress.Rules)
+	}
+	if n := strings.Join(plan.Report.NotEnforced, ";"); !strings.Contains(n, `rule dns: generated rule name "dns/tcp"`) {
+		t.Fatalf("NotEnforced %q", n)
+	}
+}
+
 func TestNetworkMappedCIDRBecomesIPv4(t *testing.T) {
 	spec := netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"::ffff:192.0.2.0/120"}}))
 	if r := ruleByName(translate(t, spec, NetworkExtras{}, DestClasses{}), "r"); r == nil || !reflect.DeepEqual(r.CIDRs, []string{"192.0.2.0/24"}) {

@@ -385,6 +385,10 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 	report := &plan.Report
 	report.Rules = int64(len(n.Rules))
 	degradeDefault := false
+	notEnforcedRule := func(rule, why string) {
+		report.NotEnforced = append(report.NotEnforced, fmt.Sprintf("rule %s: %s", rule, why))
+	}
+	var emitted []emittedRule
 	for _, r := range n.Rules {
 		requested := r.Mode
 		if requested == "" {
@@ -392,9 +396,7 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 		}
 		var reasons []string
 		effective := string(requested)
-		notEnforced := func(why string) {
-			report.NotEnforced = append(report.NotEnforced, fmt.Sprintf("rule %s: %s", r.Name, why))
-		}
+		notEnforced := func(why string) { notEnforcedRule(r.Name, why) }
 		if r.Target.Direction == "listen" {
 			notEnforced("listen direction is not enforced")
 			continue
@@ -476,11 +478,12 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 			if len(protos) > 1 {
 				name = r.Name + "/" + proto
 			}
-			plan.Egress.Policy.Egress.Rules = append(plan.Egress.Policy.Egress.Rules, netpolicy.Rule{
+			emitted = append(emitted, emittedRule{crd: r.Name, generated: len(protos) > 1, rule: netpolicy.Rule{
 				Name: name, Action: string(r.Action), Mode: mode, Origin: r.Origin,
-				CIDRs: prefixStrings(cidrs), Except: prefixStrings(lifted), Ports: ports, Proto: proto})
+				CIDRs: prefixStrings(cidrs), Except: prefixStrings(lifted), Ports: ports, Proto: proto}})
 		}
 	}
+	plan.Egress.Policy.Egress.Rules = dropNameCollisions(emitted, notEnforcedRule)
 	if degradeDefault {
 		requested := x.DefaultMode.Egress
 		if requested == "" {
@@ -505,6 +508,43 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 		return nil, fmt.Errorf("network: %w", err)
 	}
 	return plan, nil
+}
+
+// emittedRule is a gadget rule with the CRD rule it comes from.
+type emittedRule struct {
+	crd string
+	// generated is set when the name is the CRD name with a "/proto"
+	// suffix (a rule with two protocols becomes two gadget rules).
+	generated bool
+	rule      netpolicy.Rule
+}
+
+// dropNameCollisions removes every gadget rule of a CRD rule whose generated
+// name equals the name of another gadget rule. The CRD does not restrict the
+// characters of a rule name, so a rule can be named "a/tcp" literally, and
+// the gadget requires unique names. Only the CRD rule with the generated
+// name is not enforced; the other rules of the policy are kept.
+func dropNameCollisions(rules []emittedRule, notEnforced func(rule, why string)) []netpolicy.Rule {
+	literal := map[string]bool{}
+	for _, e := range rules {
+		if !e.generated {
+			literal[e.rule.Name] = true
+		}
+	}
+	dropped := map[string]bool{}
+	for _, e := range rules {
+		if e.generated && literal[e.rule.Name] && !dropped[e.crd] {
+			dropped[e.crd] = true
+			notEnforced(e.crd, fmt.Sprintf("generated rule name %q is the name of another rule; this rule is not enforced", e.rule.Name))
+		}
+	}
+	out := make([]netpolicy.Rule, 0, len(rules))
+	for _, e := range rules {
+		if !dropped[e.crd] {
+			out = append(out, e.rule)
+		}
+	}
+	return out
 }
 
 func notReadyReason(unresolved string) string {
