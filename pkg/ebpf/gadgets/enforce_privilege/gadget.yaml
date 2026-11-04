@@ -22,3 +22,7 @@ params:
       key: host-mntns-id
       defaultValue: "0"
       description: mount namespace inode of the container runtime; 0 uses the global init task's
+    arming_fail_fork_marks:
+      key: arming-fail-fork-marks
+      defaultValue: "false"
+      description: test only - fail every child arming mark at fork (fault injection)

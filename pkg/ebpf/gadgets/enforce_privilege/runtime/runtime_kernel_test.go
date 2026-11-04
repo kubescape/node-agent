@@ -15,6 +15,9 @@ package runtime
 //	PRIVILEGE_IMAGE          image name in the archive
 //	PRIVILEGE_CONTAINER_ID   full Docker container ID
 //	PRIVILEGE_CGROUP_PATH    its cgroup v2 path under /sys/fs/cgroup, with a leading "/" (as in /proc/<pid>/cgroup)
+//
+// TestForkMarkFaultInjection uses the same fixture. The container needs a
+// POSIX sh.
 
 import (
 	"context"
@@ -43,34 +46,34 @@ import (
 	privpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_privilege/policy"
 )
 
-func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
+// kernelFixture runs one gadget instance on the fixture container.
+type kernelFixture struct {
+	ctx       context.Context
+	id        string
+	container ContainerIdentity
+	bindings  *enforcement.Bindings
+	verdicts  atomic.Int32
+}
+
+func newKernelFixture(t *testing.T) *kernelFixture {
+	t.Helper()
 	if os.Getenv("PRIVILEGE_KERNEL_TEST") != "1" {
 		t.Skip("explicit disposable kernel fixture opt-in required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	f, err := os.Open("../examples/policy.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc, err := privpolicy.Parse(f)
-	f.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	compiled, err := privpolicy.CompileKernel(doc, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(cancel)
 	id, cgroupPath := os.Getenv("PRIVILEGE_CONTAINER_ID"), os.Getenv("PRIVILEGE_CGROUP_PATH")
 	var st unix.Stat_t
 	if err := unix.Stat(filepath.Join("/sys/fs/cgroup", cgroupPath), &st); err != nil {
 		t.Fatal(err)
 	}
-	container := ContainerIdentity{Runtime: "docker", ID: id, CgroupID: st.Ino, CgroupPath: cgroupPath}
+	return &kernelFixture{ctx: ctx, id: id, container: ContainerIdentity{Runtime: "docker", ID: id, CgroupID: st.Ino, CgroupPath: cgroupPath}}
+}
 
-	store, err := orasoci.NewFromTar(ctx, os.Getenv("PRIVILEGE_IMAGE_ARCHIVE"))
+// start runs the gadget with the compiled documents and extra ebpf params.
+func (f *kernelFixture) start(t *testing.T, name string, compiled privpolicy.Compiled, extra map[string]string) {
+	t.Helper()
+	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("PRIVILEGE_IMAGE_ARCHIVE"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +81,7 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 	if err := rt.Init(nil); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Close()
+	t.Cleanup(func() { rt.Close() })
 	manager, err := instancemanager.New(rt)
 	if err != nil {
 		t.Fatal(err)
@@ -91,15 +94,13 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 	if err := handler.Init(params); err != nil {
 		t.Fatal(err)
 	}
-	var verdicts atomic.Int32
-	var bindings *enforcement.Bindings
 	events := simple.New("privilege-test-verdicts", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		var err error
-		if bindings, err = GetBindings(gc); err != nil {
+		if f.bindings, err = GetBindings(gc); err != nil {
 			return err
 		}
 		return gc.GetDataSources()["verdict"].Subscribe(func(datasource.DataSource, datasource.Data) error {
-			verdicts.Add(1)
+			f.verdicts.Add(1)
 			return nil
 		}, 100)
 	}))
@@ -107,33 +108,104 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	desired := &api.GadgetInstance{Id: "privilege-kernel-test", GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: os.Getenv("PRIVILEGE_IMAGE"),
-		ParamValues: map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)}}}
-	if err := manager.StartGadget(ctx, desired, gadgetcontext.WithOrasReadonlyTarget(store),
+	values := map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)}
+	for k, v := range extra {
+		values["operator.oci.ebpf."+k] = v
+	}
+	desired := &api.GadgetInstance{Id: name, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: os.Getenv("PRIVILEGE_IMAGE"), ParamValues: values}}
+	if err := manager.StartGadget(f.ctx, desired, gadgetcontext.WithOrasReadonlyTarget(store),
 		gadgetcontext.WithAdditionalDataOperators(handler, New(), events),
 		WithConfig(Config{Policy: compiled})); err != nil {
 		t.Fatal(err)
 	}
-	defer manager.StopGadget(context.Background(), desired.Id)
+	t.Cleanup(func() { manager.StopGadget(context.Background(), desired.Id) })
+}
 
-	unshare := func() error { return exec.CommandContext(ctx, "docker", "exec", id, "unshare", "-m", "true").Run() }
+func (f *kernelFixture) exec(args ...string) error {
+	return exec.CommandContext(f.ctx, "docker", append([]string{"exec", f.id}, args...)...).Run()
+}
+
+func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
+	f := newKernelFixture(t)
+	file, err := os.Open("../examples/policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := privpolicy.Parse(file)
+	file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, "privilege-kernel-test", compiled, nil)
+
+	unshare := func() error { return f.exec("unshare", "-m", "true") }
 	if err := unshare(); err != nil {
 		t.Fatalf("unbound container must not be judged: %v", err)
 	}
-	if err := bindings.Bind(enforcement.Binding{Container: container}); err != nil {
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
 		t.Fatal(err)
 	}
 	if unshare() == nil {
 		t.Fatal("the example policy denies unshare(CLONE_NEWNS) in a bound container")
 	}
-	if err := bindings.Unbind(container); err != nil {
+	if err := f.bindings.Unbind(f.container); err != nil {
 		t.Fatal(err)
 	}
 	if err := unshare(); err != nil {
 		t.Fatalf("unbound again must be allowed: %v", err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	if verdicts.Load() == 0 {
+	if f.verdicts.Load() == 0 {
 		t.Fatal("no verdict event for the deny")
+	}
+}
+
+// TestForkMarkFaultInjection makes every child arming mark fail at fork. An
+// armed shell that forks must then be refused in enforce mode, with a tracking
+// fault for the slot, and allowed in audit mode, with no tracking fault.
+func TestForkMarkFaultInjection(t *testing.T) {
+	for _, mode := range []string{"enforce", "audit"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newKernelFixture(t)
+			doc := privpolicy.Document{Version: 1, Name: "fault-" + mode, Policy: privpolicy.Policy{Mode: mode, Privilege: privpolicy.Section{Default: "allow"}}}
+			compiled, err := privpolicy.CompileKernel(doc, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.start(t, "privilege-fault-"+mode, compiled, map[string]string{"arming-fail-fork-marks": "true"})
+			fork := func() error { return f.exec("sh", "-c", "true & wait") }
+			if err := fork(); err != nil {
+				t.Fatalf("an unbound container must not be judged: %v", err)
+			}
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			err = fork()
+			faults, ferr := f.bindings.SlotFaults(0)
+			if ferr != nil {
+				t.Fatal(ferr)
+			}
+			switch mode {
+			case "enforce":
+				if err == nil {
+					t.Fatal("a fork whose child cannot be armed must be refused")
+				}
+				if faults == 0 {
+					t.Fatal("the refused fork must count a tracking fault")
+				}
+			case "audit":
+				if err != nil {
+					t.Fatalf("audit mode must allow the fork: %v", err)
+				}
+				if faults != 0 {
+					t.Fatalf("audit faults must not block: %d", faults)
+				}
+			}
+		})
 	}
 }

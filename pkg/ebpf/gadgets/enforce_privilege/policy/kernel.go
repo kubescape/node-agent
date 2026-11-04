@@ -309,11 +309,16 @@ func compileSlot(slot uint32, docs []Document, generation uint64, c *Compiled, o
 		}
 	}
 
-	entries := []KernelEntry{meta}
 	keys := make([]KernelKey, 0, len(folded))
-	for k := range folded {
+	for k, v := range folded {
 		keys = append(keys, k)
+		// The META mode tells the program whether the slot enforces at
+		// all: an audit policy can carry an enforce rule.
+		if v.Rank == RankDenyEnforce {
+			meta.Value.Mode = KernelModeEnforce
+		}
 	}
+	entries := []KernelEntry{meta}
 	sort.Slice(keys, func(i, j int) bool {
 		a, b := keys[i], keys[j]
 		if a.Kind != b.Kind {

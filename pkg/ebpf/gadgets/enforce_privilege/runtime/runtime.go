@@ -126,6 +126,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		PolicyMap:       "policy",
 		WritePolicy:     writePolicy(config.Policy.Entries),
 		ArmMap:          "armed_tasks",
+		FaultMap:        "arming_faults",
 	})
 	if err != nil {
 		return nil, err

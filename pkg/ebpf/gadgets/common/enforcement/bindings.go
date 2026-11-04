@@ -70,6 +70,18 @@ type Config struct {
 	// ArmMap names the arming task-storage map. When set, binding a container
 	// also arms the tasks already running in it (see ../arming.h).
 	ArmMap string
+	// FaultMap names the per-slot tracking fault array (arming_faults in
+	// ../arming.h). When set, SlotFaults reads it.
+	FaultMap string
+}
+
+// FaultMap is the part of *ebpf.Map that SlotFaults reads.
+type FaultMap interface {
+	Lookup(key, valueOut interface{}) error
+	Type() ebpf.MapType
+	KeySize() uint32
+	ValueSize() uint32
+	MaxEntries() uint32
 }
 
 type Status struct {
@@ -90,6 +102,7 @@ type Bindings struct {
 	desired         map[execpolicy.Container]Binding
 	active          map[uint64]Binding
 	members, armed  Map
+	faults          FaultMap
 	ready, stopped  bool
 	startupComplete bool
 	startupError    error
@@ -213,8 +226,19 @@ func (b *Bindings) bind(c Binding) error {
 	if err := b.members.Put(id.CgroupID, bindingValue{Slot: c.Slot}); err != nil {
 		return fmt.Errorf("writing container binding: %w", err)
 	}
-	if !bound && b.armed != nil {
+	// A slot move arms again too: a task that the old slot left unarmed (an
+	// audit slot allows a fork whose child mark failed) must not escape the
+	// new slot.
+	if b.armed != nil {
 		if err := b.armExisting(b.armed, id.CgroupPath); err != nil {
+			if bound && !errors.Is(err, ErrContainerGone) {
+				// Undo the move, so a retry moves and arms again.
+				if perr := b.members.Put(id.CgroupID, bindingValue{Slot: previous.Slot}); perr != nil {
+					b.active[id.CgroupID] = c
+					return errors.Join(err, perr)
+				}
+				return err
+			}
 			// A container that is gone needs no protection; a startup
 			// replay skips it (see start).
 			if derr := b.members.Delete(id.CgroupID); derr != nil {
@@ -223,6 +247,7 @@ func (b *Bindings) bind(c Binding) error {
 				b.active[id.CgroupID] = c
 				return errors.Join(err, derr)
 			}
+			delete(b.active, id.CgroupID)
 			return err
 		}
 	}
@@ -245,7 +270,7 @@ func (b *Bindings) unbind(c ContainerIdentity) error {
 }
 
 func (b *Bindings) Start(gc operators.GadgetContext) error {
-	getMap := func(name string) (Map, error) {
+	getMap := func(name string) (*ebpf.Map, error) {
 		value, _ := gc.GetVar(operators.MapPrefix + name)
 		m, ok := value.(*ebpf.Map)
 		if !ok || m == nil {
@@ -261,6 +286,15 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 	if err != nil {
 		return err
 	}
+	var faults FaultMap
+	if b.config.FaultMap != "" {
+		if faults, err = getMap(b.config.FaultMap); err != nil {
+			return err
+		}
+		if faults.Type() != ebpf.Array || faults.KeySize() != 4 || faults.ValueSize() != 8 || faults.MaxEntries() < b.config.Slots {
+			return fmt.Errorf("invalid fault map layout")
+		}
+	}
 	var armed Map
 	if b.config.ArmMap != "" {
 		if armed, err = getMap(b.config.ArmMap); err != nil {
@@ -270,11 +304,27 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 			return fmt.Errorf("invalid arming map layout")
 		}
 	}
-	return b.start(policy, members, armed)
+	return b.start(policy, members, armed, faults)
+}
+
+// SlotFaults returns the tracking faults counted for a slot since the instance
+// started (see ../arming.h). A nonzero count means a task of an enforcing slot
+// may be outside the rules, or was refused a fork.
+func (b *Bindings) SlotFaults(slot uint32) (uint64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.faults == nil {
+		return 0, fmt.Errorf("no fault map configured")
+	}
+	var count uint64
+	if err := b.faults.Lookup(slot, &count); err != nil {
+		return 0, fmt.Errorf("reading tracking faults: %w", err)
+	}
+	return count, nil
 }
 
 // start writes and freezes the policy before any binding is written.
-func (b *Bindings) start(policy, members, armed Map) error {
+func (b *Bindings) start(policy, members, armed Map, faults FaultMap) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.stopped {
@@ -292,7 +342,7 @@ func (b *Bindings) start(policy, members, armed Map) error {
 	if err := policy.Freeze(); err != nil {
 		return fmt.Errorf("freezing policy: %w", err)
 	}
-	b.members, b.armed = members, armed
+	b.members, b.armed, b.faults = members, armed, faults
 	for _, c := range b.desired {
 		if err := b.bind(c); err != nil && !errors.Is(err, ErrContainerGone) {
 			return b.recordError(err)
