@@ -125,6 +125,8 @@ func TestValidationErrors(t *testing.T) {
 		"NUL fstype":     "      - {name: r, target: {mountFsType: [\"pro\\0c\"]}, action: deny}\n",
 		"duplicate name": "      - {name: r, target: {syscall: [mount]}, action: deny}\n      - {name: r, target: {syscall: [bpf]}, action: deny}\n",
 		"unknown field":  "      - {name: r, target: {path: [/x]}, action: deny}\n",
+		"bare clone":     "      - {name: r, target: {syscall: [clone]}, action: deny}\n",
+		"bare clone3":    "      - {name: r, target: {syscall: [unshare, clone3]}, action: allow}\n",
 	} {
 		if _, err := parse(base + rule); err == nil {
 			t.Errorf("%s: expected error", name)
