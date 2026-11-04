@@ -499,8 +499,8 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			if err == nil {
 				compiled, compileErr := Compile(ctx, p.identity, p.spec, classes, binding, c.resolver)
 				err = compileErr
-				if plan := networkPlans[p.identity.UID]; err == nil && plan != nil {
-					compiled.Network, compiled.Revision = plan, ""
+				if np := networkPlans[p.identity.UID]; err == nil && np != nil {
+					compiled.Network, compiled.Revision = np, ""
 					compiled.Revision = digest(compiled)
 				}
 				if err == nil {
