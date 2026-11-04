@@ -3,7 +3,6 @@ package sandboxpolicy
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -16,21 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 )
-
-func TestMain(m *testing.M) {
-	if _, err := filepolicy.ParsePattern("/a"); err != nil {
-		// The file gadget compiler is not in this tree yet: accept the globs
-		// it will accept (it rejects '?' and '[') and every document.
-		filePatternError = func(p string) error {
-			if strings.ContainsAny(p, "?[") {
-				return errors.New("unsupported glob")
-			}
-			return nil
-		}
-		checkFileDocument = func(filepolicy.Document) error { return nil }
-	}
-	os.Exit(m.Run())
-}
 
 func boolPtr(v bool) *bool { return &v }
 

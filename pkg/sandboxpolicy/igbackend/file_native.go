@@ -1,7 +1,3 @@
-//go:build file_runtime
-
-// The file runtime package (enforce_file/runtime) is built separately. Remove
-// the build tag above and file_native_stub.go when it is in the tree.
 
 package igbackend
 
