@@ -1,0 +1,38 @@
+# Example enforce_file policy: reads are open, writes are confined to a
+# workspace, agent configuration and image files are protected.
+version: 1
+name: example
+policy:
+  mode: enforce
+  file:
+    defaults:
+      read:   {action: allow}
+      write:  {action: deny, origin: example/confined-writes}
+      create: {action: deny}
+      delete: {action: deny}
+      rename: {action: deny}
+      chmod:  {action: deny, mode: audit}
+    rules:
+      - name: workspace
+        action: allow
+        access: [write, create, delete, rename]
+        paths: ["/workspace/**", "/tmp/**"]
+      # Device nodes a shell redirect or a terminal needs.
+      - name: devices
+        action: allow
+        access: [read, write]
+        paths: ["/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom", "/dev/tty", "/dev/ptmx", "/dev/pts/**"]
+      - name: no-secrets-read
+        action: deny
+        access: [read]
+        paths: ["/etc/shadow", "/etc/gshadow", "/root/.ssh/**", "/home/*/.ssh/**"]
+      - name: no-agent-config
+        action: deny
+        origin: example/self-modification
+        access: [write, create, delete, rename]
+        paths: ["**/.claude/**"]
+        except: ["/workspace/.claude/settings.local.json"]
+      - name: no-image-tamper
+        action: deny
+        access: [write, delete, rename, chmod]
+        fromImage: true
