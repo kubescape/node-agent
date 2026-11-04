@@ -125,7 +125,7 @@ static __always_inline int net_parse(const void *sa, int len, __u16 skfam,
 	} else {
 		return -1;
 	}
-	d->port = __builtin_bswap16(port);
+	d->port = bpf_ntohs(port);
 	return 1;
 }
 
