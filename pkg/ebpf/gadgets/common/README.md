@@ -1,7 +1,7 @@
 # Common enforcement library
 
-Shared pieces of the BPF LSM enforcement gadgets (`enforce_privilege` and
-`enforce_network` today).
+Shared pieces of the BPF LSM enforcement gadgets (`enforce_privilege`,
+`enforce_network` and `enforce_file` today).
 They are taken from the enforce_exec gadget of the pinned Inspektor Gadget fork
 and keep the first verdict fields, the mode encoding, the `counters` slots, the
 identity type and the `bindings` key and value size. To move enforce_exec onto

@@ -1,0 +1,28 @@
+name: enforce_file
+behavior: mutator
+description: "Enforce file access rules (read, write, create, delete, rename, chmod on path globs) for a live set of containers (BPF LSM)"
+annotations:
+  enable-containers-datasource: "true"
+  enforce-file: "true"
+datasources:
+  verdict:
+    fields:
+      hook_raw:
+        annotations:
+          columns.hidden: true
+      access_raw:
+        annotations:
+          columns.hidden: true
+  containers:
+    annotations:
+      cli.default-output-mode: none
+params:
+  ebpf:
+    host_mntns_id:
+      key: host-mntns-id
+      defaultValue: "0"
+      description: mount namespace inode of the container runtime; 0 uses the global init task's
+    arming_fail_fork_marks:
+      key: arming-fail-fork-marks
+      defaultValue: "false"
+      description: test only - fail every child arming mark at fork (fault injection)
