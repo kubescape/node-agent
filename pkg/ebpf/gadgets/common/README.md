@@ -15,7 +15,7 @@ and keeps its path rules in an array that `policy.h` does not describe.
 
 | File | Content |
 |---|---|
-| `bindings.h` | `bindings` map: cgroup id → the container's policy slot; optional parent-cgroup depth |
+| `bindings.h` | `bindings` map: cgroup id → the container's policy slot; optional parent-cgroup depth; opt-in `BINDINGS_DIRECT_LEVEL` (BPF LSM and tracing programs) reads the cgroup level with plain loads, and only when the task's own cgroup is not bound |
 | `policy.h` | policy modes (0 off, 1 audit, 2 enforce), rank resolution (explicit deny > allow > default, one mode per rule), shared policy value |
 | `verdict.h` | first verdict fields (`generation`, `cgroup`, `deny`, `mode`), per-CPU `counters` (denied, submitted, dropped, allowed, section error, rate limited), 100 reports per CPU per second |
 | `arming.h` | arming rule: judge only tasks that executed outside the runtime mount namespace, and their children; `arming_faults`, tracking faults per slot |

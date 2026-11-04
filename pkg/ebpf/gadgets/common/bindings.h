@@ -44,7 +44,15 @@ static __always_inline bool binding_lookup(__u64 *cgroup, __u32 *slot)
 	struct binding_value *value = bpf_map_lookup_elem(&bindings, &id);
 
 #if BINDINGS_CGROUP_DEPTH > 1
+#ifdef BINDINGS_DIRECT_LEVEL
+	// Opt-in for programs whose bpf_get_current_task_btf() pointer can be
+	// read directly (BPF LSM, tracing): the level is read only when the
+	// task's own cgroup is not bound, with plain loads instead of three
+	// bpf_probe_read_kernel calls.
+	int level = value ? 0 : task->cgroups->dfl_cgrp->level;
+#else
 	int level = BPF_CORE_READ(task, cgroups, dfl_cgrp, level);
+#endif
 
 	for (int i = 1; i < BINDINGS_CGROUP_DEPTH && !value; i++) {
 		if (level - i < 1)

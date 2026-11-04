@@ -464,3 +464,196 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		t.Errorf("tracking faults: %d %v", faults, err)
 	}
 }
+
+// workerScript runs one command at a time from /tmp/w.cmd with eval, so a
+// builtin with a redirection (read x < FILE, echo x > FILE) opens the file in
+// the worker's own task: the same task opens files before and after a binding
+// change or a cgroup move.
+const workerScript = `while :; do
+	if [ -e /tmp/w.cmd ]; then
+		read -r c < /tmp/w.cmd
+		rm -f /tmp/w.cmd
+		eval "$c" > /tmp/w.out 2>&1
+		echo $? > /tmp/w.rc
+	fi
+	sleep 0.05
+done`
+
+const workerMarker = "file-test-worker"
+
+type worker struct {
+	f   *kernelFixture
+	pid int // host pid
+}
+
+func cgroupDir(path string) string { return filepath.Join("/sys/fs/cgroup", path) }
+
+// startWorker starts the worker in the bound container and finds its host pid.
+func startWorker(t *testing.T, f *kernelFixture) *worker {
+	t.Helper()
+	if out, err := exec.CommandContext(f.ctx, "docker", "exec", "-d", f.id, "sh", "-c", workerScript, workerMarker).CombinedOutput(); err != nil {
+		t.Fatalf("starting worker: %v: %s", err, out)
+	}
+	for i := 0; i < 50; i++ {
+		data, err := os.ReadFile(filepath.Join(cgroupDir(f.container.CgroupPath), "cgroup.procs"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range strings.Fields(string(data)) {
+			cmdline, _ := os.ReadFile(filepath.Join("/proc", field, "cmdline"))
+			args := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+			if len(args) == 4 && args[0] == "sh" && args[3] == workerMarker {
+				pid, _ := strconv.Atoi(field)
+				w := &worker{f: f, pid: pid}
+				t.Cleanup(func() { unix.Kill(w.pid, unix.SIGKILL) })
+				return w
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("worker not found in the container cgroup")
+	return nil
+}
+
+// moveTo moves the worker to a cgroup v2 path.
+func (w *worker) moveTo(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(cgroupDir(path), "cgroup.procs"), []byte(strconv.Itoa(w.pid)), 0); err != nil {
+		t.Fatalf("moving worker to %s: %v", path, err)
+	}
+	data, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(w.pid), "cgroup"))
+	t.Logf("worker cgroup: %s", strings.TrimSpace(string(data)))
+}
+
+// run runs one command in the worker task and returns its status and output.
+func (w *worker) run(t *testing.T, cmd string) (int, string) {
+	t.Helper()
+	send := exec.CommandContext(w.f.ctx, "docker", "exec", "-i", w.f.id, "sh", "-c", "cat > /tmp/w.cmd.tmp && mv /tmp/w.cmd.tmp /tmp/w.cmd")
+	send.Stdin = strings.NewReader(cmd + "\n")
+	if out, err := send.CombinedOutput(); err != nil {
+		t.Fatalf("sending %q to the worker: %v: %s", cmd, err, out)
+	}
+	for i := 0; i < 100; i++ {
+		code, out := w.f.sh(t, w.f.id, "test -s /tmp/w.rc && cat /tmp/w.rc /tmp/w.out && rm -f /tmp/w.rc")
+		if code == 0 {
+			lines := strings.SplitN(out, "\n", 2)
+			rc, err := strconv.Atoi(strings.TrimSpace(lines[0]))
+			if err != nil {
+				t.Fatalf("worker status %q", out)
+			}
+			rest := ""
+			if len(lines) == 2 {
+				rest = lines[1]
+			}
+			return rc, rest
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("worker did not run %q", cmd)
+	return 0, ""
+}
+
+func (w *worker) ok(t *testing.T, cmd string) {
+	t.Helper()
+	rc, out := w.run(t, cmd)
+	t.Logf("worker: %s -> rc %d %s", cmd, rc, out)
+	if rc != 0 {
+		t.Errorf("worker %s: rc %d: %s", cmd, rc, out)
+	}
+}
+
+func (w *worker) denied(t *testing.T, cmd string) {
+	t.Helper()
+	rc, out := w.run(t, cmd)
+	t.Logf("worker: %s -> rc %d %s", cmd, rc, out)
+	if rc == 0 || !strings.Contains(out, "Operation not permitted") {
+		t.Errorf("worker %s: want EPERM, got rc %d: %s", cmd, rc, out)
+	}
+}
+
+// TestGadgetBindingChanges checks that a binding change or a cgroup move takes
+// effect on the next open of a task that already opened files: bind after the
+// task ran, moves into child cgroups of the bound container, out of it and
+// back, unbind, and bind again.
+func TestGadgetBindingChanges(t *testing.T) {
+	f := newKernelFixture(t)
+	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("lab", "enforce")}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, compiled)
+
+	child := filepath.Join(f.container.CgroupPath, "file-test-child")
+	grand := filepath.Join(child, "file-test-grand")
+	outside := "/file-test-outside"
+	for _, p := range []string{child, grand, outside} {
+		if err := os.Mkdir(cgroupDir(p), 0o755); err != nil && !os.IsExist(err) {
+			t.Fatal(err)
+		}
+	}
+	w := startWorker(t, f)
+	t.Cleanup(func() {
+		unix.Kill(w.pid, unix.SIGKILL)
+		for _, p := range []string{grand, child, outside} {
+			for i := 0; i < 50; i++ {
+				if err := os.Remove(cgroupDir(p)); err == nil || os.IsNotExist(err) {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	})
+
+	const readSecret = "read x < /etc/shadow"
+	t.Run("unbound task opens files", func(t *testing.T) {
+		w.ok(t, readSecret)
+		w.ok(t, readSecret)
+	})
+	t.Run("bind after the task opened files", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+			t.Fatal(err)
+		}
+		w.denied(t, readSecret)
+		w.denied(t, "echo x > /file-test-new")
+		w.ok(t, "read x < /etc/passwd")
+	})
+	t.Run("move into a child cgroup of the bound container", func(t *testing.T) {
+		w.moveTo(t, child)
+		w.denied(t, readSecret)
+		w.moveTo(t, grand)
+		w.denied(t, readSecret)
+	})
+	t.Run("move out of the bound container", func(t *testing.T) {
+		w.moveTo(t, outside)
+		w.ok(t, readSecret)
+	})
+	t.Run("move into the bound container", func(t *testing.T) {
+		w.moveTo(t, grand)
+		w.denied(t, readSecret)
+		w.moveTo(t, outside)
+		w.ok(t, readSecret)
+		w.moveTo(t, f.container.CgroupPath)
+		w.denied(t, readSecret)
+	})
+	t.Run("unbind", func(t *testing.T) {
+		if err := f.bindings.Unbind(f.container); err != nil {
+			t.Fatal(err)
+		}
+		w.ok(t, readSecret)
+		w.moveTo(t, child)
+		w.ok(t, readSecret)
+		w.ok(t, "echo x > /file-test-new && rm /file-test-new")
+	})
+	t.Run("bind again", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+			t.Fatal(err)
+		}
+		w.denied(t, readSecret)
+		w.moveTo(t, f.container.CgroupPath)
+		w.denied(t, readSecret)
+		if err := f.bindings.Unbind(f.container); err != nil {
+			t.Fatal(err)
+		}
+		w.ok(t, readSecret)
+	})
+}
