@@ -68,9 +68,11 @@ GADGET_PARAM(arming_fail_fork_marks);
 
 // Before Linux 6.11 (no inode_xattr_skipcap hook), security_inode_setxattr
 // runs cap_inode_setxattr (CAP_SYS_ADMIN for security.* names) only when the
-// inode_setxattr hooks return 1. The owner sets this on such kernels, so an
-// allow returns 1 there. On 6.11 and later it stays 0: the capability check
-// runs before the hooks, and from 6.12 the verifier rejects a return of 1.
+// inode_setxattr hooks return 1. The owner sets this only before 6.9, where
+// the verifier accepts it, so an allow returns 1 there. From 6.9 it stays 0:
+// IMA and EVM run after BPF LSM and a return of 1 would skip them; from 6.11
+// the capability check runs before the hooks; from 6.12 the verifier rejects
+// a return of 1.
 const volatile bool setxattr_allow_one = false;
 GADGET_PARAM(setxattr_allow_one);
 

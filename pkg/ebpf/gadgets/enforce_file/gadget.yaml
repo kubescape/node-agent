@@ -29,4 +29,4 @@ params:
     setxattr_allow_one:
       key: setxattr-allow-one
       defaultValue: "false"
-      description: return 1 (run the kernel's capability check) from inode_setxattr on an allow; set on Linux before 6.11, see runtime.SetxattrAllowOne
+      description: return 1 (run the kernel's capability check) from inode_setxattr on an allow; set on Linux before 6.9 where the verifier accepts it, see runtime.SetxattrAllowOne

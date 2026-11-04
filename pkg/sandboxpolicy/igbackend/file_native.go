@@ -98,8 +98,9 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 	if err != nil {
 		return nil, fmt.Errorf("runtime mount namespace: %w", err)
 	}
-	// Before Linux 6.11 an allow from inode_setxattr must return 1, or the
-	// kernel skips its capability check of security.* names.
+	// Before Linux 6.9 an allow from inode_setxattr returns 1 where the
+	// verifier accepts it, or the kernel skips its capability check of
+	// security.* names (see runtime.SetxattrAllowOne).
 	params, err := fileruntime.SetxattrParams()
 	if err != nil {
 		return nil, fmt.Errorf("setxattr hook semantics: %w", err)
