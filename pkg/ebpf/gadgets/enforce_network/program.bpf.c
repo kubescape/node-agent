@@ -45,6 +45,8 @@ char LICENSE[] SEC("license") = "GPL";
 #define AF_UNSPEC 0
 #define AF_INET 2
 #define AF_INET6 10
+#define NET_SOCK_RAW 3
+#define NET_IPPROTO_L2TP 115
 
 enum net_hook : __u32 {
 	NET_HOOK_SOCKET_CONNECT,
@@ -84,9 +86,11 @@ struct net_dst {
 
 // net_parse reads a kernel copy of a sockaddr. Returns 1 when d holds the
 // destination, 0 when there is no destination to judge, -1 when the address is
-// not IPv4 or IPv6 (judged by the default).
+// not IPv4 or IPv6 (judged by the default). unspec_v6: a send on this AF_INET6
+// socket treats AF_UNSPEC as AF_INET6.
 static __always_inline int net_parse(const void *sa, int len, __u16 skfam,
-				     bool is_send, struct net_dst *d)
+				     bool is_send, bool unspec_v6,
+				     struct net_dst *d)
 {
 	__u16 family = 0;
 	__u16 port = 0;
@@ -95,10 +99,17 @@ static __always_inline int net_parse(const void *sa, int len, __u16 skfam,
 		return -1;
 	if (family == AF_UNSPEC) {
 		// connect(AF_UNSPEC) disconnects. A send on an AF_INET socket
-		// treats AF_UNSPEC as AF_INET; on AF_INET6 it uses the peer.
-		if (!is_send || skfam != AF_INET)
+		// treats AF_UNSPEC as AF_INET. On AF_INET6, raw and L2TP/IP
+		// sends treat it as AF_INET6 (rawv6_sendmsg, l2tp_ip6_sendmsg);
+		// the other sends use the peer (udpv6_sendmsg) or refuse it.
+		if (!is_send)
 			return 0;
-		family = AF_INET;
+		if (skfam == AF_INET)
+			family = AF_INET;
+		else if (unspec_v6)
+			family = AF_INET6;
+		else
+			return 0;
 	}
 	if (family == AF_INET) {
 		if (len < 8 || bpf_probe_read_kernel(&port, 2, sa + 2) ||
@@ -198,6 +209,7 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 	__u32 slot = 0;
 	struct sock *sk;
 	__u16 skfam, ipproto;
+	bool unspec_v6;
 	int parsed;
 
 	if (!sa)
@@ -210,7 +222,10 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 	if (skfam != AF_INET && skfam != AF_INET6)
 		return 0;
 	ipproto = BPF_CORE_READ(sk, sk_protocol);
-	parsed = net_parse(sa, len, skfam, is_send, &d);
+	unspec_v6 = skfam == AF_INET6 &&
+		    (BPF_CORE_READ(sk, sk_type) == NET_SOCK_RAW ||
+		     ipproto == NET_IPPROTO_L2TP);
+	parsed = net_parse(sa, len, skfam, is_send, unspec_v6, &d);
 	if (parsed == 0)
 		return 0;
 	if (parsed > 0)

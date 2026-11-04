@@ -119,8 +119,10 @@ policy:
   sends to another address is judged at that send.
 - **Address.** LSM tier: parsed by the address family, not the socket family:
   an AF_INET6 UDP socket accepts a `sockaddr_in`, and an AF_INET socket sends
-  to a `sockaddr_in` whose family is AF_UNSPEC. `connect` with AF_UNSPEC
-  (disconnect) is not judged. An address that is not IPv4 or IPv6 gets the
+  to a `sockaddr_in` whose family is AF_UNSPEC. An AF_INET6 raw or L2TP/IP
+  socket sends to a `sockaddr_in6` whose family is AF_UNSPEC (the kernel reads
+  it as AF_INET6); other AF_INET6 sends with AF_UNSPEC use the peer and are
+  not judged. `connect` with AF_UNSPEC (disconnect) is not judged. An address that is not IPv4 or IPv6 gets the
   default. cgroup tier: the program (4 or 6) selects the address field, never
   the socket family; the kernel runs `sendmsg4` for an AF_INET6 socket that
   sends to an IPv4-mapped address or a `sockaddr_in`.

@@ -105,6 +105,9 @@ try:
         raw_sendto(socket.socket(v6, udp), sin(socket.AF_INET))
     elif kind == "udp4-sendto-unspec":
         raw_sendto(socket.socket(v4, udp), sin(socket.AF_UNSPEC))
+    elif kind == "raw6-sendto-unspec":
+        sa = struct.pack("=HHI", 0, 0, 0) + socket.inet_pton(v6, host) + bytes(4)
+        raw_sendto(socket.socket(v6, socket.SOCK_RAW, socket.IPPROTO_UDP), sa)
     elif kind == "udp4-sendmmsg":
         # An allowed message (loopback), then the destination: prints the
         # number of messages sent when it is not every message.
@@ -386,6 +389,11 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 			f.expect(t, f.id, c.kind, c.host, c.port, true)
 		}
 		f.waitVerdict(t, verdict{rule: "example/no-test-net-1", deny: 1, mode: 2})
+	})
+	t.Run("raw", func(t *testing.T) {
+		// rawv6_sendmsg reads an AF_UNSPEC address as AF_INET6. The
+		// cgroup programs do not run for raw sockets.
+		f.expect(t, f.id, "raw6-sendto-unspec", "2001:db8::1", 0, tier == TierLSM)
 	})
 	t.Run("sendmmsg partial", func(t *testing.T) {
 		if got := f.call(t, f.id, "udp4-sendmmsg", "192.0.2.1", 53); got != "sent 1" {
