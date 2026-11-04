@@ -256,10 +256,15 @@ func TestFileUnresolvedClassDegradation(t *testing.T) {
 		t.Fatalf("report %+v", plan.Report)
 	}
 
-	// A deny with a resolved part keeps it, in audit.
+	// A deny with a resolved part keeps no path either (review 2 finding 5:
+	// as audit it would hide the policy's own enforce default deny).
 	partial := fileSpec(api.ActionAllow, fileRule("d", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"sshKeys", "modelCache"}}}))
-	if r := fileRuleByName(translateFile(t, partial, FileExtras{}, nil), "d"); r == nil || r.Mode != "audit" || len(r.Paths) != 2 {
+	plan = translateFile(t, partial, FileExtras{}, nil)
+	if r := fileRuleByName(plan, "d"); r != nil {
 		t.Fatalf("partly resolved deny %+v", r)
+	}
+	if d := fileDegraded(plan, "d"); d == nil || d.Effective != "audit" || d.Reason != "class-unresolved" {
+		t.Fatalf("partly resolved deny degraded %+v", d)
 	}
 	// An allow without access degrades every default.
 	every := fileSpec(api.ActionDeny, fileRule("a", api.ActionAllow, api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}))
@@ -343,8 +348,24 @@ func TestFileNotEnforceableTargets(t *testing.T) {
 	if d := fileDegraded(plan, "default/create"); d == nil || d.Reason != "not-enforceable" {
 		t.Fatalf("create default %+v", d)
 	}
-	if plan.Report.NotReady != "" {
+	// Review 2 finding 6: an allow rule that cannot be enforced makes the
+	// policy not ready, as in the network section.
+	if plan.Report.NotReady != "RuleNotEnforceable" {
 		t.Fatalf("not ready %q", plan.Report.NotReady)
+	}
+	// A deny the gadget cannot judge is reported, not a reason to be not ready.
+	denyOnly := fileSpec(api.ActionAllow, fileRule("no-tmpfs-write", api.ActionDeny, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}))
+	if r := translateFile(t, denyOnly, FileExtras{}, nil).Report.NotReady; r != "" {
+		t.Fatalf("deny only: not ready %q", r)
+	}
+	// ClassUnresolved is the stronger reason.
+	both := fileSpec("",
+		fileRule("tmpfs-ok", api.ActionAllow, api.FileTarget{Access: []string{"create"}, PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}),
+		fileRule("work", api.ActionAllow, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}),
+	)
+	both.File.Default = writesConfined()
+	if r := translateFile(t, both, FileExtras{}, nil).Report.NotReady; r != "ClassUnresolved" {
+		t.Fatalf("both: not ready %q", r)
 	}
 }
 
@@ -594,43 +615,153 @@ func TestFilePathAliases(t *testing.T) {
 	if creds == nil || cfg == nil {
 		t.Fatalf("rules %+v", plan.Doc.Policy.File.Rules)
 	}
-	matches := func(globs []string, path string) bool {
-		for _, g := range globs {
-			p, err := filepolicy.ParsePattern(g)
-			if err != nil {
-				t.Fatalf("%s: %v", g, err)
-			}
-			if p.MatchPath(path) {
-				return true
-			}
-		}
-		return false
-	}
+	const ts = "..2026_11_04_10_00_00.123456789"
 	for _, path := range []string{
 		"/var/run/secrets/kubernetes.io/serviceaccount/token",
 		"/run/secrets/kubernetes.io/serviceaccount/token",
-		"/var/run/secrets/kubernetes.io/serviceaccount/..2026_11_04_10_00_00.123456789/token",
-		"/run/secrets/kubernetes.io/serviceaccount/..2026_11_04_10_00_00.123456789/token",
+		"/var/run/secrets/kubernetes.io/serviceaccount/" + ts + "/token",
+		"/run/secrets/kubernetes.io/serviceaccount/" + ts + "/token",
 		"/run/docker.sock", "/var/run/docker.sock", "/run/containerd/containerd.sock",
+		// Review 2 finding 1: the floating class members of a Secret volume.
+		"/root/.docker/" + ts + "/config.json", "/home/app/.docker/" + ts + "/config.json",
+		"/app/.npmrc", "/app/" + ts + "/.npmrc",
 	} {
-		if !matches(creds.Paths, path) {
+		if !globsMatch(t, creds.Paths, path) {
 			t.Errorf("deny paths %v do not match %s", creds.Paths, path)
 		}
 	}
-	if matches(creds.Paths, "/var/run/secrets/kubernetes.io/serviceaccount/x/token") {
-		t.Error("only ..* directories are aliases")
+	for _, path := range []string{"/var/run/secrets/kubernetes.io/serviceaccount/x/token", "/root/.docker/x/config.json"} {
+		if globsMatch(t, creds.Paths, path) {
+			t.Errorf("%s: only ..* directories are aliases", path)
+		}
 	}
 	for _, path := range []string{"/run/docker.sock", "/var/run/..data/docker.sock"} {
-		if !matches(creds.Except, path) {
+		if !globsMatch(t, creds.Except, path) {
 			t.Errorf("except %v does not match %s", creds.Except, path)
 		}
 	}
-	if !matches(cfg.Paths, "/etc/app/..data/config.yaml") || !slices.Contains(cfg.Paths, "/data/**") || len(cfg.Paths) != 3 {
+	if !globsMatch(t, cfg.Paths, "/etc/app/..data/config.yaml") || !slices.Contains(cfg.Paths, "/data/**") || len(cfg.Paths) != 3 {
 		t.Errorf("allow paths %v", cfg.Paths)
 	}
-	for _, in := range []string{"/x", "/a/**", "/a/*.sock", "**/.env"} {
-		if got := pathAliases([]string{in}); !reflect.DeepEqual(got, []string{in}) {
-			t.Errorf("%s: aliases %v", in, got)
+	for in, want := range map[string][]string{
+		"/x":                     {"/x"},
+		"/a/**":                  {"/a/**"},
+		"**/.env":                {"**/.env"},
+		"/a/**/b":                {"/a/**/b"},
+		"/a/*.sock":              {"/a/*.sock", "/a/..*/*.sock"},
+		"**/.docker/config.json": {"**/.docker/config.json", "/**/.docker/..*/config.json"},
+		"/a/b/c":                 {"/a/b/c", "/a/b/..*/c"},
+	} {
+		if got := pathAliases([]string{in}, false); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: aliases %v, want %v", in, got, want)
+		}
+	}
+	// Merged /usr: deny rules only.
+	if got := pathAliases([]string{"/bin/**", "/lib64/ld.so"}, true); !reflect.DeepEqual(got,
+		[]string{"/bin/**", "/usr/bin/**", "/lib64/ld.so", "/lib64/..*/ld.so", "/usr/lib64/ld.so", "/usr/lib64/..*/ld.so"}) {
+		t.Errorf("merged /usr aliases %v", got)
+	}
+	usr := fileSpec(api.ActionAllow,
+		fileRule("no-bin", api.ActionDeny, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/bin/**", "/sbin/**", "/lib/**"}}}),
+		fileRule("bin-ok", api.ActionAllow, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{Path: []string{"/bin/**"}}}),
+	)
+	x = FileExtras{Except: map[string][]FileExcept{"no-bin": {{Target: &api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/bin/sh"}}}}}}}
+	plan = translateFile(t, usr, x, nil)
+	noBin, binOK := fileRuleByName(plan, "no-bin"), fileRuleByName(plan, "bin-ok")
+	for _, path := range []string{"/usr/bin/python3", "/usr/sbin/x", "/usr/lib/x/y.so", "/bin/sh"} {
+		if !globsMatch(t, noBin.Paths, path) {
+			t.Errorf("deny %v does not match %s", noBin.Paths, path)
+		}
+	}
+	if globsMatch(t, binOK.Paths, "/usr/bin/x") || globsMatch(t, noBin.Except, "/usr/bin/sh") {
+		t.Errorf("merged /usr aliases on an allow rule %v or an except %v", binOK.Paths, noBin.Except)
+	}
+}
+
+func globsMatch(t *testing.T, globs []string, path string) bool {
+	t.Helper()
+	for _, g := range globs {
+		p, err := filepolicy.ParsePattern(g)
+		if err != nil {
+			t.Fatalf("%s: %v", g, err)
+		}
+		if p.MatchPath(path) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFileDefaultClassesFit: the built-in path classes with their aliases fit
+// the segment bits of one slot, as one policy and as two policies together
+// (a read deny of every class, and a write and create deny of every class
+// under a confined write default).
+func TestFileDefaultClassesFit(t *testing.T) {
+	var classes []string
+	for name, members := range defaultPathClasses {
+		if len(members) > 0 {
+			classes = append(classes, name)
+		}
+	}
+	slices.Sort(classes)
+	policy := func(name string, access []string, def api.FileDefault) filepolicy.Document {
+		var rules []api.FileRule
+		for _, c := range classes {
+			rules = append(rules, fileRule("no-"+c, api.ActionDeny, api.FileTarget{Access: access, PathTarget: api.PathTarget{PathClass: []string{c}}}))
+		}
+		spec := fileSpec("", rules...)
+		spec.File.Default = def
+		doc := translateFile(t, spec, FileExtras{}, nil).Doc
+		doc.Name = name
+		return doc
+	}
+	open := api.FileDefault{Action: api.ActionAllow}
+	reads := policy("reads", []string{"read"}, open)
+	writes := policy("writes", []string{"write", "create"}, writesConfined())
+	used := func(c filepolicy.Compiled) int {
+		a := c.Slots[0].Accept
+		for i := filepolicy.KernelSegBits - 1; i >= 0; i-- {
+			if a[i/64]&(1<<(i%64)) != 0 {
+				return i + 1
+			}
+		}
+		return 0
+	}
+	for name, docs := range map[string][]filepolicy.Document{"one": {reads}, "two": {reads, writes}} {
+		c, err := filepolicy.CompileSlots([][]filepolicy.Document{docs}, 1)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		t.Logf("%s: %d of %d segment bits, %d rules, %d globs", name, used(c), filepolicy.KernelSegBits,
+			c.Slots[0].NRules, c.Slots[0].NGlobs)
+	}
+}
+
+// TestFileDegradedDenyKeepsDefault: review 2 finding 5. A deny degraded by an
+// unresolved class must not loosen its own policy's enforce default deny.
+func TestFileDegradedDenyKeepsDefault(t *testing.T) {
+	spec := fileSpec("", fileRule("corp", api.ActionDeny, api.FileTarget{Access: []string{"write"},
+		PathTarget: api.PathTarget{Path: []string{"/etc/**"}, PathClass: []string{"corpSecrets"}}}))
+	spec.File.Default = writesConfined()
+	plan := translateFile(t, spec, FileExtras{}, nil)
+	if r := fileRuleByName(plan, "corp"); r != nil {
+		t.Fatalf("degraded deny reaches the gadget: %+v", r)
+	}
+	if d := fileDegraded(plan, "corp"); d == nil || d.Effective != "audit" || d.Reason != "class-unresolved" {
+		t.Fatalf("degraded %+v", d)
+	}
+	notEnforcedHas(t, plan, "rule corp: no path is resolved")
+	c, err := filepolicy.CompileKernel(plan.Doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := c.Slots[0]
+	if v.Defaults[1].Rank != filepolicy.RankDenyEnforce || v.Unresolved[1] != filepolicy.RankDenyEnforce {
+		t.Fatalf("write default %+v unresolved %d", v.Defaults[1], v.Unresolved[1])
+	}
+	for _, r := range v.Rules[:v.NRules] {
+		if r.Access&(1<<1) != 0 && r.Rank == filepolicy.RankDenyAudit {
+			t.Fatalf("a write deny audit rule hides the write default: %+v", c.RuleNames[r.RuleID])
 		}
 	}
 }
@@ -653,6 +784,9 @@ func TestFileFromImageUnavailable(t *testing.T) {
 	notEnforcedHas(t, plan, "rule img: fromImage is not enforced on this node: no overlay BTF", "rule img-ok: fromImage is not enforced")
 	if d := fileDegraded(plan, "img-ok"); d == nil || d.Reason != "not-enforceable" {
 		t.Fatalf("allow degraded %+v", d)
+	}
+	if plan.Report.NotReady != "RuleNotEnforceable" {
+		t.Fatalf("not ready %q", plan.Report.NotReady)
 	}
 	plan = translateFile(t, spec, FileExtras{}, nil)
 	if r := fileRuleByName(plan, "img"); r == nil || !r.FromImage {

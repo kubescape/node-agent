@@ -177,7 +177,7 @@ func notReady(network, file *NetworkReport) (string, string) {
 		if reason == "" {
 			reason = file.NotReady
 		}
-		parts = append(parts, "file allow rule or except entry cannot be resolved; the defaults of its access kinds run in audit for an unresolved allow")
+		parts = append(parts, "file allow rule or except entry cannot be resolved or enforced; the defaults of its access kinds run in audit for such an allow")
 	}
 	if reason == "" {
 		return "", ""

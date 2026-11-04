@@ -240,25 +240,52 @@ type FileNode struct {
 // program opens:
 //   - /var/run/... is also /run/...: Debian and Ubuntu images link /var/run to
 //     /run, and the runtime mounts at the resolved target;
-//   - an exact file /dir/file (no * anywhere) is also /dir/..*/file: kubelet's
+//   - with mergedUsr (deny rules only), /bin/..., /sbin/..., /lib/... and
+//     /lib64/... are also /usr/...: merged-usr images (Debian 12, Ubuntu 22.04
+//     and later) link those directories into /usr;
+//   - a file is also the same name with a ..* directory before it: kubelet's
 //     atomic writer (Secret, ConfigMap and projected volumes, such as the
 //     service account token) links file to ..data/file and ..data to a
-//     ..<timestamp> directory.
-func pathAliases(paths []string) []string {
+//     ..<timestamp> directory, so /dir/file is /dir/..<timestamp>/file
+//     (atomicWriterAlias).
+func pathAliases(paths []string, mergedUsr bool) []string {
 	var out []string
 	for _, p := range paths {
 		forms := []string{p}
 		if rest, ok := strings.CutPrefix(p, "/var/run/"); ok {
 			forms = append(forms, "/run/"+rest)
 		}
+		if mergedUsr {
+			for _, dir := range []string{"/bin/", "/sbin/", "/lib/", "/lib64/"} {
+				if strings.HasPrefix(p, dir) {
+					forms = append(forms, "/usr"+p)
+				}
+			}
+		}
 		for _, f := range forms {
 			out = append(out, f)
-			if i := strings.LastIndex(f, "/"); i > 0 && !strings.Contains(f, "*") {
-				out = append(out, f[:i]+"/..*"+f[i:])
+			if alias, ok := atomicWriterAlias(f); ok {
+				out = append(out, alias)
 			}
 		}
 	}
 	return out
+}
+
+// atomicWriterAlias returns the glob with a ..* segment inserted before its
+// last segment, unless the last or the one before it is ** (a glob for a
+// whole directory, or one whose ** already matches the ..<timestamp>
+// directory). A key with a directory (items path a/b) puts the ..<timestamp>
+// directory higher up; an alias for every level does not fit the gadget's
+// segment budget with the built-in classes, so it is not added.
+func atomicWriterAlias(glob string) (string, bool) {
+	p, err := filepolicy.ParsePattern(glob)
+	n := len(p.Segments)
+	if err != nil || n < 2 || p.Segments[n-1].Kind == filepolicy.SegDoubleStar || p.Segments[n-2].Kind == filepolicy.SegDoubleStar {
+		return "", false
+	}
+	alias := filepolicy.Pattern{Segments: slices.Insert(slices.Clone(p.Segments), n-1, filepolicy.Segment{Kind: filepolicy.SegGlob, Pre: ".."})}
+	return alias.String(), true
 }
 
 // filePatternError and checkFileDocument are the gadget's checks of one path
@@ -288,12 +315,15 @@ var (
 // SandboxPolicyClasses entries and the policy's own additions; every glob gets
 // its aliases (pathAliases). What the gadget cannot enforce (execMap, fsType,
 // fromImage false, fromImage on a kernel whose overlay layout the gadget
-// cannot read, globs it cannot express) is reported. An unresolved class follows the design (sandbox-policy-crd.md
-// section 4.3): a deny rule degrades to audit alone; an allow rule degrades the
+// cannot read, globs it cannot express) is reported. An unresolved class
+// follows the design (sandbox-policy-crd.md section 4.3): a deny rule degrades
+// to audit and, like the network translator's, keeps no path, so that it cannot
+// hide the policy's own enforce default deny; an allow rule degrades the
 // defaults of its access kinds to audit and makes the policy not ready
 // (ClassUnresolved); an except entry is disabled (its deny applies there) and
 // makes the policy not ready. An allow rule the gadget cannot enforce degrades
-// the same defaults, so the policy never denies more than it was written to.
+// the same defaults and makes the policy not ready (RuleNotEnforceable), so
+// the policy never denies more than it was written to.
 func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string, node FileNode) (*FilePlan, error) {
 	f := spec.File
 	if f == nil {
@@ -357,21 +387,30 @@ func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string
 				continue // execMap only
 			}
 		}
+		// An allow rule the gadget cannot enforce degrades the defaults of
+		// its access kinds and makes the policy not ready, as the network
+		// translator does; ClassUnresolved is the stronger reason.
+		notEnforceableAllow := func() {
+			degradeKinds(kinds, "not-enforceable")
+			if report.NotReady == "" {
+				report.NotReady = "RuleNotEnforceable"
+			}
+		}
 		if why := unenforceableTarget(r.Target, node); why != "" {
 			notEnforced(why)
 			if r.Action == api.ActionAllow {
-				degradeKinds(kinds, "not-enforceable")
+				notEnforceableAllow()
 				report.Degraded = append(report.Degraded, api.DegradedRule{Rule: r.Name, Requested: requested, Effective: string(requested), Reason: "not-enforceable"})
 			}
 			continue
 		}
 		paths, unresolved := t.paths(r.Target.Path, r.Target.PathClass)
 		paths, bad := supportedPatterns(paths)
-		paths = pathAliases(paths)
+		paths = pathAliases(paths, r.Action == api.ActionDeny)
 		if len(bad) > 0 {
 			notEnforced(fmt.Sprintf("path %s cannot be expressed by the file gadget", strings.Join(bad, ",")))
 			if r.Action == api.ActionAllow {
-				degradeKinds(kinds, "not-enforceable")
+				notEnforceableAllow()
 				reasons = append(reasons, "not-enforceable")
 			}
 		}
@@ -379,6 +418,11 @@ func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string
 			reasons = append(reasons, "class-unresolved")
 			if r.Action == api.ActionDeny {
 				mode, effective = "audit", "audit"
+				// The resolved paths alone would give a deny audit rule
+				// that hides the policy's own enforce default deny there
+				// (common/merge/CONTRACT.md, as in the network
+				// translator). So no path.
+				paths = nil
 			} else {
 				degradeKinds(kinds, "class-unresolved")
 				report.NotReady = "ClassUnresolved"
@@ -542,5 +586,5 @@ func (t *pathTranslator) except(e FileExcept, kinds []string) (lifted []string, 
 	if _, bad := supportedPatterns(paths); len(bad) > 0 {
 		return nil, fmt.Sprintf("path %s cannot be expressed by the file gadget", strings.Join(bad, ",")), false
 	}
-	return pathAliases(paths), "", false
+	return pathAliases(paths, false), "", false
 }
