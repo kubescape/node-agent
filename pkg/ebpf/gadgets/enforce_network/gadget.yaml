@@ -1,6 +1,6 @@
 name: enforce_network
 behavior: mutator
-description: "Enforce egress network rules (CIDRs, ports, protocol) for a live set of containers (BPF LSM)"
+description: "Enforce egress network rules (CIDRs, ports, protocol) for a live set of containers (BPF LSM or cgroup sock_addr)"
 annotations:
   enable-containers-datasource: "true"
   enforce-network: "true"
@@ -13,3 +13,38 @@ datasources:
   containers:
     annotations:
       cli.default-output-mode: none
+# One tier is attached; the programs of the other tier load but stay detached.
+# The default is the BPF LSM tier. The `tier` parameter selects the cgroup
+# tier, which needs an Inspektor Gadget that attaches cgroup sock_addr programs.
+programs:
+  ig_net_connect4:
+    attach_to: gadget_program_disabled
+  ig_net_connect6:
+    attach_to: gadget_program_disabled
+  ig_net_sendmsg4:
+    attach_to: gadget_program_disabled
+  ig_net_sendmsg6:
+    attach_to: gadget_program_disabled
+params:
+  custom:
+    tier:
+      description: "program tier: lsm (lsm/socket_connect, lsm/socket_sendmsg) or cgroup (cgroup/connect4|6, cgroup/sendmsg4|6 at the cgroup v2 root)"
+      defaultValue: lsm
+      values:
+        lsm:
+          patch: {}
+        cgroup:
+          patch:
+            programs:
+              ig_net_connect:
+                attach_to: gadget_program_disabled
+              ig_net_sendmsg:
+                attach_to: gadget_program_disabled
+              ig_net_connect4:
+                attach_to: ""
+              ig_net_connect6:
+                attach_to: ""
+              ig_net_sendmsg4:
+                attach_to: ""
+              ig_net_sendmsg6:
+                attach_to: ""

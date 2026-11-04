@@ -2,8 +2,8 @@
 // Copyright 2026 The Kubescape Authors
 
 // Policy maps and the decision function of the network section. The decision
-// needs only a slot, a destination and a protocol, so every hook tier (BPF LSM
-// today, cgroup sock_addr programs later) shares it. Nothing here reads a hook
+// needs only a slot, a destination and a protocol, so both hook tiers (BPF LSM
+// and cgroup sock_addr programs) share it. Nothing here reads a hook
 // context or the current task. See ../common/policy.h for the ranks.
 //
 // Maps, written by the native owner and frozen before any binding:

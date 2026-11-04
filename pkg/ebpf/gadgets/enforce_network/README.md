@@ -1,6 +1,7 @@
 # enforce_network
 
-Container egress enforcement with BPF LSM. It enforces an egress network
+Container egress enforcement with BPF LSM or cgroup sock_addr programs. It
+enforces an egress network
 policy: destination CIDRs (IPv4 and IPv6), destination ports and port ranges,
 and protocol (TCP, UDP or any), for `connect` and for every send with a
 destination address (`sendto`, `sendmsg`, `sendmmsg`, TCP Fast Open, io_uring).
@@ -19,9 +20,43 @@ node, with the same model as enforce_privilege:
 `policy/` parses and compiles policy documents; `runtime/` is the native
 operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
 
-Requires cgroup v2, kernel BTF and BPF LSM enabled (`bpf` in
-`/sys/kernel/security/lsm`). Build the image with `make build` (it sets
-`IG_SOURCE_PATH`, see the library README).
+Requires cgroup v2 and kernel BTF; the LSM tier also needs BPF LSM enabled
+(`bpf` in `/sys/kernel/security/lsm`). Build the image with `make build` (it
+sets `IG_SOURCE_PATH`, see the library README).
+
+## Program tiers
+
+The gadget has two sets of programs. They share the maps and the decision
+function (`net_decide` in `network_policy.h`); only one set is attached.
+
+| Tier | Programs | Needs |
+|---|---|---|
+| `lsm` (default) | `lsm/socket_connect`, `lsm/socket_sendmsg` | BPF LSM active on the node |
+| `cgroup` | `cgroup/connect4`, `cgroup/connect6`, `cgroup/sendmsg4`, `cgroup/sendmsg6`, attached at the cgroup v2 root | an Inspektor Gadget that attaches cgroup sock_addr programs |
+
+- Select the tier with the gadget parameter `tier` (key `custom.tier`,
+  `runtime.TierParam`): `lsm` or `cgroup`. `gadget.yaml` disables the other
+  tier's programs with `attach_to: gadget_program_disabled`. Both sets always
+  load (the verifier checks both); only the selected set is attached.
+- The default stays `lsm` until the Inspektor Gadget version in `go.mod` can
+  attach cgroup programs. With a version that cannot, `tier=cgroup` fails at
+  start with `unsupported program ... of type "CGroupSockAddr"`.
+- The native operator refuses a configuration that attaches both tiers, part
+  of a tier, or no tier.
+- The results are the same for the cases in `runtime/runtime_kernel_test.go`.
+  Differences between the tiers:
+  - The cgroup tier runs only for tasks in some cgroup with a program, so it
+    costs nothing outside the bound cgroups' lookups; the LSM tier runs for
+    every task on the node.
+  - The cgroup tier sees the address after earlier cgroup programs (for
+    example a socket load balancer that rewrites a service address to a
+    backend address); the LSM tier sees the address the application asked
+    for.
+  - The cgroup programs do not run for raw sockets, nor for an ICMP ping
+    send without `connect`. The LSM hooks run for every inet socket; those
+    calls get the `any` rules and the default there.
+  - The cgroup programs return 0 (the kernel returns EPERM) or 1. All cgroup
+    programs on the path run, and any deny wins.
 
 ## Policy
 
@@ -73,25 +108,28 @@ policy:
   container cgroup before the workload runs, so `docker run` and `docker exec`
   keep working under a default deny. A bound cgroup also covers up to 31 levels
   of child cgroups.
-- **Hooks.** `lsm/socket_connect` and `lsm/socket_sendmsg`, on AF_INET and
+- **Hooks.** `connect` and every send with an address, on AF_INET and
   AF_INET6 sockets. A send without an address (a connected socket) is not
   judged; its destination was judged at `connect`. A connected UDP socket that
   sends to another address is judged at that send.
-- **Address.** Parsed by the address family, not the socket family: an AF_INET6
-  UDP socket accepts a `sockaddr_in`, and an AF_INET socket sends to a
-  `sockaddr_in` whose family is AF_UNSPEC. `connect` with AF_UNSPEC (disconnect)
-  is not judged. An address that is not IPv4 or IPv6 gets the default.
-- **Deny** returns `-EPERM` before the connect or send. Audit allows and
-  reports.
+- **Address.** LSM tier: parsed by the address family, not the socket family:
+  an AF_INET6 UDP socket accepts a `sockaddr_in`, and an AF_INET socket sends
+  to a `sockaddr_in` whose family is AF_UNSPEC. `connect` with AF_UNSPEC
+  (disconnect) is not judged. An address that is not IPv4 or IPv6 gets the
+  default. cgroup tier: the program (4 or 6) selects the address field, never
+  the socket family; the kernel runs `sendmsg4` for an AF_INET6 socket that
+  sends to an IPv4-mapped address or a `sockaddr_in`.
+- **Deny** fails the connect or send with `EPERM` before it happens. Audit
+  allows and reports.
 - The decision (`network_policy.h`) takes only a slot, a destination and a
   protocol, so other hook types can share the maps.
 
 ## Known limits
 
 - Host names, DNS, TLS and HTTP are not judged; the policy is CIDRs only.
-- Unix sockets, raw and packet sockets, and `bind`/`listen` are not judged.
-- **Not in this gadget yet:** cgroup sock_addr programs (`cgroup/connect4|6`,
-  `cgroup/sendmsg4|6`) for nodes without BPF LSM.
+- Unix and packet sockets and `bind`/`listen` are not judged. Raw sockets are
+  not judged by the cgroup tier (see Program tiers).
+- A task is judged by its cgroup at the time of the call (both tiers).
 
 ## Using it outside this repository
 
@@ -112,7 +150,7 @@ The same as enforce_privilege: a Go program drives it with
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny` and `mode` with
 the other enforcement gadgets and adds `host_pid`, `rule_id`, `origin_id`,
-`is_default`, `slot`, `comm`, `hook` and `dst` (address, port, protocol;
+`is_default`, `slot`, `comm`, `hook` (the program that judged) and `dst` (address, port, protocol;
 IPv4-mapped addresses as IPv4). Only denies are reported (mode 1 = audit, the
 connection was allowed). Rule and origin names are in the owner's compiled
 policy (`RuleNames`, `Origins`). Reporting is limited to 100 events per CPU per

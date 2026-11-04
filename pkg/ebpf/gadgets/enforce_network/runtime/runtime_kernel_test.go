@@ -7,8 +7,11 @@ package runtime
 
 // Opt-in test of the gadget with Inspektor Gadget alone: it parses the example
 // policy file, starts the gadget from an OCI archive and binds Docker
-// containers through this package's operator. Requires root, BPF LSM and
-// disposable containers with python3:
+// containers through this package's operator. The same case matrix runs
+// against each program tier: TestGadgetWithInspektorGadgetAlone (BPF LSM, the
+// default) and TestGadgetCgroupTier (cgroup sock_addr; skipped when the linked
+// Inspektor Gadget cannot attach cgroup programs). Requires root, BPF LSM for
+// the LSM tier, cgroup v2, and disposable containers with python3:
 //
 //	NETWORK_KERNEL_TEST=1
 //	NETWORK_IMAGE_ARCHIVE       OCI archive from `ig image export`
@@ -30,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -59,6 +63,25 @@ kind, host, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
 libc = ctypes.CDLL(None, use_errno=True)
 def sin(family):
     return struct.pack("=H", family) + struct.pack("!H", port) + socket.inet_aton(host) + bytes(8)
+class iovec(ctypes.Structure):
+    _fields_ = [("base", ctypes.c_void_p), ("len", ctypes.c_size_t)]
+class msghdr(ctypes.Structure):
+    _fields_ = [("name", ctypes.c_void_p), ("namelen", ctypes.c_uint32), ("iov", ctypes.POINTER(iovec)),
+                ("iovlen", ctypes.c_size_t), ("control", ctypes.c_void_p), ("controllen", ctypes.c_size_t),
+                ("flags", ctypes.c_int)]
+class mmsghdr(ctypes.Structure):
+    _fields_ = [("hdr", msghdr), ("len", ctypes.c_uint)]
+def sendmmsg(s, addrs):
+    data = ctypes.create_string_buffer(b"x")
+    iov = iovec(ctypes.cast(data, ctypes.c_void_p), 1)
+    names = [ctypes.create_string_buffer(a, len(a)) for a in addrs]
+    msgs = (mmsghdr * len(addrs))()
+    for i, n in enumerate(names):
+        msgs[i].hdr = msghdr(ctypes.cast(n, ctypes.c_void_p), len(addrs[i]), ctypes.pointer(iov), 1, None, 0, 0)
+    n = libc.sendmmsg(s.fileno(), msgs, len(addrs), 0)
+    if n < 0:
+        raise OSError(ctypes.get_errno(), "sendmmsg")
+    return n
 def raw_sendto(s, sa):
     if libc.sendto(s.fileno(), b"x", 1, 0, sa, len(sa)) < 0:
         raise OSError(ctypes.get_errno(), "sendto")
@@ -78,6 +101,14 @@ try:
         raw_sendto(socket.socket(v6, udp), sin(socket.AF_INET))
     elif kind == "udp4-sendto-unspec":
         raw_sendto(socket.socket(v4, udp), sin(socket.AF_UNSPEC))
+    elif kind == "udp4-sendmmsg":
+        # An allowed message (loopback), then the destination: prints the
+        # number of messages sent when it is not every message.
+        ok = struct.pack("=H", v4) + struct.pack("!H", 9) + socket.inet_aton("127.0.0.1") + bytes(8)
+        n = sendmmsg(socket.socket(v4, udp), [ok, sin(v4)])
+        if n != 2:
+            print("sent %d" % n)
+            sys.exit(0)
     elif kind == "udp-connected-sendto":
         s = socket.socket(v4, udp)
         s.connect(("192.0.2.7", port))
@@ -94,6 +125,9 @@ type verdict struct {
 	deny, mode, isDef uint32
 }
 
+// Hook values of the verdict event (enum net_hook in program.bpf.c).
+var tierHooks = map[string][]uint32{TierLSM: {0, 1}, TierCgroup: {2, 3, 4, 5}}
+
 type kernelFixture struct {
 	ctx       context.Context
 	id, other string
@@ -102,6 +136,7 @@ type kernelFixture struct {
 	bindings  *enforcement.Bindings
 	mu        sync.Mutex
 	verdicts  []verdict
+	hooks     map[uint32]int
 }
 
 func identity(t *testing.T, runtime, id, cgroupPath string) ContainerIdentity {
@@ -125,9 +160,12 @@ func newKernelFixture(t *testing.T) *kernelFixture {
 		container: identity(t, "docker", id, os.Getenv("NETWORK_CGROUP_PATH"))}
 }
 
-func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled) {
+// start runs the gadget with a program tier. It returns the StartGadget error
+// instead of failing, so a caller can tell an unsupported tier apart.
+func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled, tier string) error {
 	t.Helper()
 	f.compiled = compiled
+	f.hooks = map[uint32]int{}
 	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("NETWORK_IMAGE_ARCHIVE"))
 	if err != nil {
 		t.Fatal(err)
@@ -156,8 +194,10 @@ func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled) {
 		}
 		ds := gc.GetDataSources()["verdict"]
 		ruleID, deny, mode, isDef := ds.GetField("rule_id"), ds.GetField("deny"), ds.GetField("mode"), ds.GetField("is_default")
+		hook := ds.GetField("hook_raw")
 		return ds.Subscribe(func(_ datasource.DataSource, data datasource.Data) error {
 			var v verdict
+			h, _ := hook.Uint32(data)
 			r, _ := ruleID.Uint32(data)
 			v.deny, _ = deny.Uint32(data)
 			v.mode, _ = mode.Uint32(data)
@@ -167,17 +207,33 @@ func (f *kernelFixture) start(t *testing.T, compiled netpolicy.Compiled) {
 			}
 			f.mu.Lock()
 			f.verdicts = append(f.verdicts, v)
+			f.hooks[h]++
 			f.mu.Unlock()
 			return nil
 		}, 100)
 	}))
-	desired := &api.GadgetInstance{Id: "network-kernel-test", GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: os.Getenv("NETWORK_IMAGE")}}
+	desired := &api.GadgetInstance{Id: "network-kernel-test", GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol,
+		ImageName: os.Getenv("NETWORK_IMAGE"), ParamValues: map[string]string{TierParam: tier}}}
 	if err := manager.StartGadget(f.ctx, desired, gadgetcontext.WithOrasReadonlyTarget(store),
 		gadgetcontext.WithAdditionalDataOperators(handler, New(), events),
 		WithConfig(Config{Policy: compiled})); err != nil {
-		t.Fatal(err)
+		return err
 	}
 	t.Cleanup(func() { manager.StopGadget(context.Background(), desired.Id) })
+	return nil
+}
+
+// checkHooks fails when a verdict came from a program of the other tier.
+func (f *kernelFixture) checkHooks(t *testing.T, tier string) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t.Logf("verdicts per hook: %v", f.hooks)
+	for h := range f.hooks {
+		if !slices.Contains(tierHooks[tier], h) {
+			t.Errorf("verdict from hook %d with tier %s", h, tier)
+		}
+	}
 }
 
 // call runs the probe in a container and returns its result line.
@@ -222,6 +278,28 @@ var defaultDeny = netpolicy.Document{Version: 1, Name: "deny-all", Policy: netpo
 
 func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 	f := newKernelFixture(t)
+	compiled := matrixPolicy(t)
+	if err := f.start(t, compiled, TierLSM); err != nil {
+		t.Fatal(err)
+	}
+	f.matrix(t, TierLSM)
+}
+
+func TestGadgetCgroupTier(t *testing.T) {
+	f := newKernelFixture(t)
+	compiled := matrixPolicy(t)
+	if err := f.start(t, compiled, TierCgroup); err != nil {
+		if strings.Contains(err.Error(), "unsupported program") {
+			t.Skipf("the linked Inspektor Gadget cannot attach cgroup programs: %v", err)
+		}
+		t.Fatal(err)
+	}
+	f.matrix(t, TierCgroup)
+}
+
+// matrixPolicy compiles slot 0: the example policy; slot 1: default deny.
+func matrixPolicy(t *testing.T) netpolicy.Compiled {
+	t.Helper()
 	file, err := os.Open("../examples/policy.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -231,13 +309,16 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Slot 0: the example policy. Slot 1: default deny.
 	compiled, err := netpolicy.CompileSlots([][]netpolicy.Document{{example}, {defaultDeny}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.start(t, compiled)
+	return compiled
+}
 
+// matrix is the case matrix of both tiers.
+func (f *kernelFixture) matrix(t *testing.T, tier string) {
+	defer f.checkHooks(t, tier)
 	f.expect(t, f.id, "tcp4", "192.0.2.1", 80, false)
 	if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
 		t.Fatal(err)
@@ -253,6 +334,7 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		{"udp-connect", "192.0.2.1", 53},
 		{"udp4-sendto", "192.0.2.1", 53},
 		{"udp6-sendto", "2001:db8::1", 53},
+		{"udp6-sendto", "::ffff:192.0.2.1", 53},
 		{"udp6-sendto-sockaddr_in", "192.0.2.1", 53},
 		{"udp4-sendto-unspec", "192.0.2.1", 53},
 		{"udp-connected-sendto", "192.0.2.1", 53},
@@ -264,6 +346,14 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 			f.expect(t, f.id, c.kind, c.host, c.port, true)
 		}
 		f.waitVerdict(t, verdict{rule: "example/no-test-net-1", deny: 1, mode: 2})
+	})
+	t.Run("sendmmsg partial", func(t *testing.T) {
+		if got := f.call(t, f.id, "udp4-sendmmsg", "192.0.2.1", 53); got != "sent 1" {
+			t.Errorf("sendmmsg [allowed, denied] = %s, want sent 1", got)
+		}
+		if got := f.call(t, f.other, "udp4-sendmmsg", "192.0.2.1", 53); got != "OK" {
+			t.Errorf("sendmmsg in the unselected container = %s, want OK", got)
+		}
 	})
 	t.Run("allowed", func(t *testing.T) {
 		f.expect(t, f.id, "tcp4", "192.0.2.7", 80, false)          // except

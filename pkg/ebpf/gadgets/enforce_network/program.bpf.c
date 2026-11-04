@@ -2,9 +2,11 @@
 // Copyright 2026 The Kubescape Authors
 
 // enforce_network: enforce an egress network policy (CIDRs, ports, protocol)
-// for a set of containers. This file is the BPF LSM tier: socket_connect and
-// socket_sendmsg. The decision is in network_policy.h and does not depend on
-// the hook, so another tier can share the maps and the decision.
+// for a set of containers. Two tiers of programs share the maps and the
+// decision (network_policy.h); gadget.yaml attaches one tier only:
+// - BPF LSM: socket_connect and socket_sendmsg (the default tier).
+// - cgroup sock_addr: connect4, connect6, sendmsg4 and sendmsg6, attached at
+//   the cgroup v2 root (tier=cgroup).
 //
 // Notes:
 // - Every task in a bound cgroup is judged; there is no arming. Container
@@ -13,10 +15,16 @@
 // - The address is parsed by its sa_family, not by the socket family: an
 //   AF_INET6 UDP socket accepts a sockaddr_in, and an AF_INET socket sends to
 //   a sockaddr_in whose family is AF_UNSPEC.
-// - A deny returns -EPERM before the connect or send happens.
+// - A deny returns -EPERM before the connect or send happens (LSM: -EPERM;
+//   cgroup: 0, which the kernel returns as EPERM).
+// - cgroup tier: the hook selects IPv4 or IPv6, not ctx->family (the socket
+//   family). An AF_INET6 socket that sends to an IPv4-mapped address or to a
+//   sockaddr_in runs sendmsg4; connect6 sees a mapped address as is, which is
+//   the same key as the IPv4 address.
 
 #include <vmlinux.h>
 #include <bpf/bpf_core_read.h>
+#include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
@@ -41,6 +49,10 @@ char LICENSE[] SEC("license") = "GPL";
 enum net_hook : __u32 {
 	NET_HOOK_SOCKET_CONNECT,
 	NET_HOOK_SOCKET_SENDMSG,
+	NET_HOOK_CGROUP_CONNECT4,
+	NET_HOOK_CGROUP_CONNECT6,
+	NET_HOOK_CGROUP_SENDMSG4,
+	NET_HOOK_CGROUP_SENDMSG6,
 };
 
 struct event {
@@ -163,6 +175,16 @@ static __always_inline int net_verdict(enum net_hook hook,
 	return result;
 }
 
+// net_bound returns the slot header of the current task's bound cgroup, or
+// NULL when the task is not judged.
+static __always_inline const struct net_slot *net_bound(__u64 *cgid,
+							__u32 *slot)
+{
+	if (!binding_lookup(cgid, slot))
+		return NULL;
+	return net_slot_get(*slot);
+}
+
 // net_judge is the common body of the LSM hooks. sa is the kernel copy of the
 // destination address, or NULL (a send on a connected socket, judged at
 // connect).
@@ -178,9 +200,9 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 	__u16 skfam, ipproto;
 	int parsed;
 
-	if (!sa || !binding_lookup(&cgid, &slot))
+	if (!sa)
 		return 0;
-	s = net_slot_get(slot);
+	s = net_bound(&cgid, &slot);
 	if (!s)
 		return 0;
 	sk = BPF_CORE_READ(sock, sk);
@@ -213,4 +235,67 @@ int BPF_PROG(ig_net_sendmsg, struct socket *sock, struct msghdr *msg, int size)
 	return net_judge(NET_HOOK_SOCKET_SENDMSG, sock,
 			 BPF_CORE_READ(msg, msg_name),
 			 BPF_CORE_READ(msg, msg_namelen), true);
+}
+
+// net_judge_cgroup is the common body of the cgroup sock_addr programs. The
+// kernel runs them for AF_INET and AF_INET6 sockets only, and sendmsg only for
+// a send with an address on an unconnected UDP socket (a connected one was
+// judged at connect). Returns 1 to allow, 0 to deny with EPERM.
+static __always_inline int net_judge_cgroup(enum net_hook hook,
+					    struct bpf_sock_addr *ctx, bool v6)
+{
+	struct policy_match m = {};
+	const struct net_slot *s;
+	struct net_dst d = {};
+	__u64 cgid = 0;
+	__u32 slot = 0;
+	__u16 ipproto;
+
+	s = net_bound(&cgid, &slot);
+	if (!s)
+		return 1;
+	if (v6) {
+		__u32 a[4] = { ctx->user_ip6[0], ctx->user_ip6[1],
+			       ctx->user_ip6[2], ctx->user_ip6[3] };
+
+		__builtin_memcpy(d.addr, a, 16);
+	} else {
+		__u32 a = ctx->user_ip4;
+
+		d.addr[10] = 0xff;
+		d.addr[11] = 0xff;
+		__builtin_memcpy(d.addr + 12, &a, 4);
+	}
+	d.port = bpf_ntohs(ctx->user_port);
+	ipproto = ctx->protocol;
+	net_decide(slot, s, d.addr, d.port, net_proto_of(ipproto), &m);
+	if (net_verdict(hook, s, cgid, slot, ipproto, &d, &m))
+		return 0;
+	return 1;
+}
+
+SEC("cgroup/connect4")
+int ig_net_connect4(struct bpf_sock_addr *ctx)
+{
+	return net_judge_cgroup(NET_HOOK_CGROUP_CONNECT4, ctx, false);
+}
+
+SEC("cgroup/connect6")
+int ig_net_connect6(struct bpf_sock_addr *ctx)
+{
+	return net_judge_cgroup(NET_HOOK_CGROUP_CONNECT6, ctx, true);
+}
+
+// Unconnected UDP sends with an address: sendto, sendmsg, sendmmsg (once per
+// message).
+SEC("cgroup/sendmsg4")
+int ig_net_sendmsg4(struct bpf_sock_addr *ctx)
+{
+	return net_judge_cgroup(NET_HOOK_CGROUP_SENDMSG4, ctx, false);
+}
+
+SEC("cgroup/sendmsg6")
+int ig_net_sendmsg6(struct bpf_sock_addr *ctx)
+{
+	return net_judge_cgroup(NET_HOOK_CGROUP_SENDMSG6, ctx, true);
 }

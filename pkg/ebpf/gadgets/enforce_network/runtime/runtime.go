@@ -28,6 +28,48 @@ const (
 	bindingsKey  = "enforce-network/bindings"
 )
 
+// Program tiers. gadget.yaml attaches the LSM tier unless the gadget parameter
+// TierParam is TierCgroup. The cgroup tier needs an Inspektor Gadget that
+// attaches cgroup sock_addr programs; with one that does not, Start fails.
+const (
+	TierParam  = "custom.tier"
+	TierLSM    = "lsm"
+	TierCgroup = "cgroup"
+
+	disabledProgram = "gadget_program_disabled"
+)
+
+var tierPrograms = map[string][]string{
+	TierLSM:    {"ig_net_connect", "ig_net_sendmsg"},
+	TierCgroup: {"ig_net_connect4", "ig_net_connect6", "ig_net_sendmsg4", "ig_net_sendmsg6"},
+}
+
+// effectiveTier returns the tier whose programs the gadget configuration
+// attaches. Both tiers at once would judge a call twice; a partial tier would
+// leave a path open; both are refused.
+func effectiveTier(metadata *viper.Viper) (string, error) {
+	var tier string
+	for name, programs := range tierPrograms {
+		enabled := 0
+		for _, p := range programs {
+			if metadata.GetString("programs."+p+".attach_to") != disabledProgram {
+				enabled++
+			}
+		}
+		switch {
+		case enabled == 0:
+		case enabled < len(programs) || tier != "":
+			return "", fmt.Errorf("enforce_network must attach exactly one complete program tier")
+		default:
+			tier = name
+		}
+	}
+	if tier == "" {
+		return "", fmt.Errorf("enforce_network attaches no program tier")
+	}
+	return tier, nil
+}
+
 type ContainerIdentity = enforcement.ContainerIdentity
 
 // Config holds the compiled rules and the initial container selection.
@@ -166,6 +208,9 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	metadata, ok := value.(*viper.Viper)
 	if !ok || !metadata.GetBool(annotation) {
 		return nil, nil
+	}
+	if _, err := effectiveTier(metadata); err != nil {
+		return nil, err
 	}
 	value, _ = gc.GetVar(configKey)
 	config, supplied := value.(Config)
