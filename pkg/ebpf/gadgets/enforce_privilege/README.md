@@ -57,7 +57,8 @@ policy:
 ```
 
 - A rule targets exactly one kind: `syscall` (optionally with `flags` for
-  `unshare`, `setns`, `clone`, `clone3`), `capability` (short names such as
+  `unshare`, `setns`, `clone`, `clone3`; required for `clone` and `clone3`,
+  because a plain fork is never judged), `capability` (short names such as
   `SYS_ADMIN`) or `mountFsType`.
 - Resolution: an explicit deny beats an allow, an allow beats the default,
   independent of rule order. Each rule has its own mode. Each namespace flag of
