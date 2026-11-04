@@ -408,6 +408,40 @@ func TestNetworkUnresolvableDenyKeepsEnforceDefault(t *testing.T) {
 	}
 }
 
+func TestControllerUsesClusterInternal(t *testing.T) {
+	c, _, _, _ := setup(t)
+	set := func(obj *unstructured.Unstructured) {
+		c.objects = map[string]*unstructured.Unstructured{objectKey(obj): obj}
+	}
+	private := netSpec(api.ActionAllow, netRule("no-private", api.ActionDeny, api.NetworkTarget{DestClass: []string{"privateRanges"}}))
+	set(networkPolicyObject("net", private, nil))
+	if c.UsesClusterInternal() {
+		t.Fatal("no policy names clusterInternal")
+	}
+	// In an except entry.
+	obj := networkPolicyObject("net", private, nil)
+	rule := obj.Object["spec"].(map[string]any)["network"].(map[string]any)["rules"].([]any)[0].(map[string]any)
+	rule["except"] = []any{map[string]any{"target": map[string]any{"destClass": []any{ClassClusterInternal}}}}
+	set(obj)
+	if !c.UsesClusterInternal() {
+		t.Fatal("an except entry names clusterInternal")
+	}
+	// In a rule; a policy in mode off does not count.
+	internal := netSpec(api.ActionAllow, netRule("cluster", api.ActionAllow, api.NetworkTarget{DestClass: []string{ClassClusterInternal}}))
+	set(networkPolicyObject("net", internal, nil))
+	if !c.UsesClusterInternal() {
+		t.Fatal("a rule names clusterInternal")
+	}
+	internal.Mode = api.ModeOff
+	set(networkPolicyObject("net", internal, nil))
+	if c.UsesClusterInternal() {
+		t.Fatal("a policy in mode off does not need the class")
+	}
+	if !c.SetClusterCIDRs(ClusterCIDRs{Pods: []string{"10.244.0.0/16"}}) || c.SetClusterCIDRs(ClusterCIDRs{Pods: []string{"10.244.0.0/16"}}) {
+		t.Fatal("SetClusterCIDRs reports a change only when the value changes")
+	}
+}
+
 func TestNetworkGeneratedNameCollision(t *testing.T) {
 	// "dns" with tcp and udp becomes dns/tcp and dns/udp; a CRD rule can be
 	// named dns/tcp literally. Only the rule with the generated name drops.

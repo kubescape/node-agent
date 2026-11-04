@@ -16,6 +16,8 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy/igbackend"
@@ -84,8 +86,10 @@ type Service struct {
 	// often privilege slot preparation lists the node's pods.
 	podsScheduled atomic.Bool
 	lastPrepare   time.Time
-	// lastClusterCIDRs bounds how often the clusterInternal class is read.
+	// lastClusterCIDRs bounds how often the clusterInternal class is read;
+	// clusterCIDRs keeps the last good value of each part.
 	lastClusterCIDRs time.Time
+	clusterCIDRs     ClusterCIDRReader
 }
 
 // prepareInterval is the longest time between two slot preparations.
@@ -290,10 +294,6 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
-	if s.options.NetworkImageName != "" && s.options.Kubernetes != nil && time.Since(s.lastClusterCIDRs) >= clusterCIDRsInterval {
-		s.lastClusterCIDRs = time.Now()
-		s.Controller.SetClusterCIDRs(ClusterCIDRs(ctx, s.options.Kubernetes))
-	}
 	// Prepare after a Pending-pod event, else at most every prepareInterval,
 	// so the extra pod and namespace listing does not run on every refresh.
 	if s.options.slotSections() && s.options.Kubernetes != nil && s.Controller.HasSlotPolicies() &&
@@ -336,6 +336,27 @@ func (s *Service) refresh(ctx context.Context) {
 	if err != nil {
 		s.report(err)
 	}
+	// Read after Refresh, so a policy that names clusterInternal counts from
+	// the pass that loaded it. A changed class is an input: reconcile again.
+	if s.refreshClusterCIDRs(ctx) {
+		s.ContainerCallback(containercollection.PubSubEvent{})
+	}
+}
+
+// refreshClusterCIDRs reads the clusterInternal sources at most every
+// clusterCIDRsInterval, and only while an active policy names the class. It
+// reports whether the class changed.
+func (s *Service) refreshClusterCIDRs(ctx context.Context) bool {
+	if s.options.NetworkImageName == "" || s.options.Kubernetes == nil || time.Since(s.lastClusterCIDRs) < clusterCIDRsInterval ||
+		!s.Controller.UsesClusterInternal() {
+		return false
+	}
+	s.lastClusterCIDRs = time.Now()
+	cidrs, err := s.clusterCIDRs.Read(ctx, s.options.Kubernetes)
+	if err != nil {
+		logger.L().Warning("sandbox clusterInternal class: read failed", helpers.Error(err))
+	}
+	return s.Controller.SetClusterCIDRs(cidrs)
 }
 
 // ContainerCallback is deliberately nonblocking: event delivery must never hold

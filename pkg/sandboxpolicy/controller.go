@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 	"sort"
 	"sync"
 
@@ -176,11 +178,42 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 }
 
 // SetClusterCIDRs sets the pod and service CIDRs of the clusterInternal
-// class. The next reconciliation uses them.
-func (c *Controller) SetClusterCIDRs(cidrs ClusterCIDRs) {
+// class. The next reconciliation uses them. It reports whether they changed.
+func (c *Controller) SetClusterCIDRs(cidrs ClusterCIDRs) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	changed := !reflect.DeepEqual(c.clusterCIDRs, cidrs)
 	c.clusterCIDRs = cidrs
+	return changed
+}
+
+// UsesClusterInternal reports whether an active policy names the
+// clusterInternal class in a network rule or an except entry, so the caller
+// reads the cluster CIDRs only when a policy needs them.
+func (c *Controller) UsesClusterInternal() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	names := func(t *api.NetworkTarget) bool {
+		return t != nil && slices.Contains(t.DestClass, ClassClusterInternal)
+	}
+	for _, p := range c.slotPolicies() {
+		if p.spec.Network == nil {
+			continue
+		}
+		for _, r := range p.spec.Network.Rules {
+			if names(&r.Target) {
+				return true
+			}
+		}
+		for _, entries := range p.network.Except {
+			for _, e := range entries {
+				if names(e.Target) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // PrepareScheduled passes, for every container of the given pods (scheduled to
