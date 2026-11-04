@@ -17,8 +17,9 @@ and keeps its path rules in an array that `policy.h` does not describe.
 | `bindings.h` | `bindings` map: cgroup id → the container's policy slot; optional parent-cgroup depth |
 | `policy.h` | policy modes (0 off, 1 audit, 2 enforce), rank resolution (explicit deny > allow > default, one mode per rule), shared policy value |
 | `verdict.h` | first verdict fields (`generation`, `cgroup`, `deny`, `mode`), per-CPU `counters` (denied, submitted, dropped, allowed, section error, rate limited), 100 reports per CPU per second |
-| `arming.h` | arming rule: judge only tasks that executed outside the runtime mount namespace, and their children |
-| `enforcement/` | Go: the binding controller of one node-wide instance (policy written and frozen before any binding, live `Bind`/`Unbind` of a container to a slot, readiness, arming of tasks already running) |
+| `arming.h` | arming rule: judge only tasks that executed outside the runtime mount namespace, and their children; `arming_faults`, tracking faults per slot |
+| `merge/` | the merge contract for several policies on one container, and its shared test vectors |
+| `enforcement/` | Go: the binding controller of one node-wide instance (policy written and frozen before any binding, live `Bind`/`Unbind` of a container to a slot, readiness, arming of tasks already running, `SlotFaults`) |
 
 Section-specific parts (the policy key layout, hooks, compiler) stay in each
 gadget.
