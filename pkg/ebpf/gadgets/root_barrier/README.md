@@ -26,13 +26,15 @@ mount namespace, inside the container cgroup.
 ## Coverage
 
 The including gadget defines `ROOT_BARRIER_COVERED(task)`. Here it has the
-shape of the enforce_exec `bindings` map: a task is covered when its cgroup, or
-an ancestor up to 16 levels above it, is in `covered_cgroups`, unless the value is a mount namespace inode and the task
+shape of the enforce_exec `bindings` map: a task is covered when its cgroup or
+any ancestor is in `covered_cgroups`, unless the value is a mount namespace inode and the task
 runs in that namespace (the container runtime's work in the cgroup before it
 joins the container). So descendants, tasks that ran before the gadget, and
 tasks that move into a child cgroup (or start there with
 `clone3(CLONE_INTO_CGROUP)`) are covered too. A gadget-defined predicate must
-keep that property.
+keep that property. A covered cgroup must be at most 16 levels below the root
+(a container cgroup is usually 2 to 5 levels deep), and the root
+cgroup itself cannot be covered.
 
 ## Ready
 

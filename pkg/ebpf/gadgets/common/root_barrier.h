@@ -174,13 +174,14 @@ static __always_inline int root_barrier_deny(void *ctx, enum root_barrier_op op,
 
 	if (count)
 		(*count)++;
-	if (ROOT_BARRIER_COVERED(bpf_get_current_task_btf())) {
-		ROOT_BARRIER_ON_DENY(ctx, op, arg);
-	} else {
-		probe = root_barrier_probe_entry();
+	// The probe thread first: the predicate can also cover it, and its
+	// denial must be recorded for the self-test, without an event.
+	probe = root_barrier_probe_entry();
+	if (probe) {
 		// Only the probe thread writes this field: no atomic needed.
-		if (probe)
-			probe->denied |= 1U << op;
+		probe->denied |= 1U << op;
+	} else if (ROOT_BARRIER_COVERED(bpf_get_current_task_btf())) {
+		ROOT_BARRIER_ON_DENY(ctx, op, arg);
 	}
 	// Keep explicit signed errno branches visible to the verifier.
 	volatile int result = -ROOT_BARRIER_EPERM;

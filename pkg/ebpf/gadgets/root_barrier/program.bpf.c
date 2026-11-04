@@ -6,12 +6,13 @@
 // barrier be tested with Inspektor Gadget alone.
 //
 // Coverage has the shape of the enforce_exec `bindings` map: a task is covered
-// when its cgroup, or an ancestor up to COVERED_CGROUPS_DEPTH levels above it,
-// is in covered_cgroups, unless the value is a mount namespace inode and the
+// when its cgroup or any ancestor is in covered_cgroups, unless the value is a mount namespace inode and the
 // task runs in that namespace (the container runtime's own setup work in the
 // cgroup, for a restricted binding). The ancestor match keeps a task covered
 // when it moves into a child cgroup it creates, or when clone3 starts its child
-// in one (CLONE_INTO_CGROUP).
+// in one (CLONE_INTO_CGROUP). The walk starts at the top of the hierarchy, so
+// a task at any depth below a covered cgroup matches, as long as the covered
+// cgroup itself is at most COVERED_CGROUPS_LEVELS levels below the root.
 
 #include <vmlinux.h>
 #include <bpf/bpf_core_read.h>
@@ -32,19 +33,20 @@ struct {
 	__type(value, __u64);
 } covered_cgroups SEC(".maps");
 
-#define COVERED_CGROUPS_DEPTH 16
+#define COVERED_CGROUPS_LEVELS 16
 
 static __always_inline bool covered(struct task_struct *task)
 {
 	int level = BPF_CORE_READ(task, cgroups, dfl_cgrp, level);
 	__u64 *exempt = NULL;
 
-	for (int i = 0; i < COVERED_CGROUPS_DEPTH && !exempt; i++) {
+	// Level 0 is the root cgroup, which is never covered.
+	for (int i = 1; i <= COVERED_CGROUPS_LEVELS && !exempt; i++) {
 		__u64 cgroup;
 
-		if (level - i < 1)
+		if (i > level)
 			break;
-		cgroup = bpf_get_current_ancestor_cgroup_id(level - i);
+		cgroup = bpf_get_current_ancestor_cgroup_id(i);
 		exempt = bpf_map_lookup_elem(&covered_cgroups, &cgroup);
 	}
 	if (!exempt)

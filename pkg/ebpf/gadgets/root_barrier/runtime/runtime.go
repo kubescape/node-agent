@@ -8,15 +8,18 @@ package runtime
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 
 	"github.com/cilium/ebpf"
 	"github.com/spf13/viper"
+	"golang.org/x/sys/unix"
 
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/rootbarrier"
 )
 
@@ -31,7 +34,9 @@ const (
 )
 
 // Cgroup is one covered cgroup v2 id. A nonzero ExemptMntns leaves tasks in
-// that mount namespace uncovered (the runtime's setup work in the cgroup).
+// that mount namespace uncovered (the runtime's setup work in the cgroup). The
+// cgroup must be at most 16 levels below the root (COVERED_CGROUPS_LEVELS in
+// ../program.bpf.c) and must not be the root.
 type Cgroup struct {
 	ID          uint64
 	ExemptMntns uint64
@@ -123,8 +128,8 @@ func (o *Owner) Cover(c Cgroup) error {
 }
 
 func (o *Owner) cover(c Cgroup) error {
-	if c.ID == 0 {
-		return fmt.Errorf("covered cgroup requires a cgroup v2 id")
+	if c.ID == 0 || c.ID == rootCgroupID() {
+		return fmt.Errorf("covered cgroup requires a non-root cgroup v2 id")
 	}
 	if err := o.covered.Put(c.ID, c.ExemptMntns); err != nil {
 		return fmt.Errorf("writing covered cgroup: %w", err)
@@ -153,6 +158,15 @@ func (o *Owner) Denials() (map[rootbarrier.Op]uint64, error) {
 		return nil, fmt.Errorf("root barrier is not running")
 	}
 	return rootbarrier.Denials(o.counters)
+}
+
+// rootCgroupID is the id of the cgroup v2 root: the inode of its directory.
+func rootCgroupID() uint64 {
+	var st unix.Stat_t
+	if err := unix.Stat(filepath.Join(host.HostRoot, "sys/fs/cgroup"), &st); err == nil {
+		return st.Ino
+	}
+	return 1 // the kernfs root id
 }
 
 type operator struct{}
