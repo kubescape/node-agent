@@ -95,6 +95,47 @@ func TestClusterCIDRsKeepLastGoodValue(t *testing.T) {
 	}
 }
 
+// A failed primary read keeps the last good value; it does not fall back to
+// kubeadm-config, which answers only for a primary source with no value.
+func TestClusterCIDRsNoFallbackOnError(t *testing.T) {
+	ctx := context.Background()
+	kubeadm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "kubeadm-config", Namespace: "kube-system"},
+		Data: map[string]string{"ClusterConfiguration": "networking:\n  podSubnet: 10.0.0.0/8\n  serviceSubnet: 172.16.0.0/12\n"}}
+	client := fake.NewSimpleClientset(cidrNode("a", "10.244.0.0/24"), serviceCIDR("10.96.0.0/12"), kubeadm)
+	failing := map[string]bool{}
+	for _, resource := range []string{"nodes", "servicecidrs"} {
+		resource := resource
+		client.PrependReactor("list", resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+			if failing[resource] {
+				return true, nil, errors.New("apiserver unavailable")
+			}
+			return false, nil, nil
+		})
+	}
+	var r ClusterCIDRReader
+
+	// No good value yet: the part stays Missing, kubeadm-config is not used.
+	failing["nodes"], failing["servicecidrs"] = true, true
+	got, err := r.Read(ctx, client)
+	if err == nil || len(got.Pods) != 0 || len(got.Services) != 0 ||
+		!reflect.DeepEqual(got.Missing, []string{"pod CIDRs", "service CIDRs"}) {
+		t.Fatalf("failed first read must not use kubeadm-config: %+v %v", got, err)
+	}
+	failing["nodes"], failing["servicecidrs"] = false, false
+	want, err := r.Read(ctx, client)
+	if err != nil || !reflect.DeepEqual(want.Pods, []string{"10.244.0.0/24"}) || !reflect.DeepEqual(want.Services, []string{"10.96.0.0/12"}) {
+		t.Fatalf("good read %+v %v", want, err)
+	}
+	failing["nodes"] = true
+	if got, err = r.Read(ctx, client); err == nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed Nodes list: %+v %v, want the last good value %+v", got, err, want)
+	}
+	failing["nodes"], failing["servicecidrs"] = false, true
+	if got, err = r.Read(ctx, client); err == nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed ServiceCIDR list: %+v %v, want the last good value %+v", got, err, want)
+	}
+}
+
 func TestClusterCIDRsAggregate(t *testing.T) {
 	for _, tc := range []struct{ in, want []string }{
 		// Two halves of one prefix become that prefix, repeatedly.

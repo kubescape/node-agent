@@ -16,13 +16,16 @@ import (
 )
 
 // ClusterCIDRReader learns the pod and service ranges of the clusterInternal
-// class. Each part comes from the first source that answers:
+// class. Each part comes from a primary source, and from kubeadm-config only
+// when the primary source answered with nothing:
 //   - pods: the union of Nodes spec.podCIDRs, else kubeadm-config podSubnet;
 //   - services: ServiceCIDR objects (networking.k8s.io/v1, needs list RBAC),
 //     else kubeadm-config serviceSubnet.
 //
 // A part keeps its last good value when a read fails, so one failed read does
-// not empty the class (and replace every node instance). A part is listed in
+// not empty the class (and replace every node instance). A failed primary read
+// does not fall back to kubeadm-config: that value can differ from the
+// primary one, and the class would change on every failed read. A part is listed in
 // Missing (the class is then partly resolved) when the sources answered with
 // nothing, or when no source has answered yet. On VPC-routed CNIs (for example
 // EKS VPC CNI) nodes have no podCIDRs and managed clusters have no
@@ -44,13 +47,15 @@ type ClusterCIDRReader struct {
 func (r *ClusterCIDRReader) Read(ctx context.Context, client kubernetes.Interface) (sandboxpolicy.ClusterCIDRs, error) {
 	pods, podsErr := nodePodCIDRs(ctx, client)
 	services, svcErr := serviceCIDRs(ctx, client)
-	if len(pods) == 0 || len(services) == 0 {
+	podsFallback := podsErr == nil && len(pods) == 0
+	svcFallback := svcErr == nil && len(services) == 0
+	if podsFallback || svcFallback {
 		kpods, kservices, kerr := kubeadmSubnets(ctx, client)
-		if len(pods) == 0 {
-			pods, podsErr = kpods, firstAnswer(podsErr, kerr, len(kpods) > 0)
+		if podsFallback {
+			pods, podsErr = kpods, kerr
 		}
-		if len(services) == 0 {
-			services, svcErr = kservices, firstAnswer(svcErr, kerr, len(kservices) > 0)
+		if svcFallback {
+			services, svcErr = kservices, kerr
 		}
 	}
 	if podsErr == nil {
@@ -74,15 +79,6 @@ func (r *ClusterCIDRReader) Read(ctx context.Context, client kubernetes.Interfac
 		err = errors.Join(err, fmt.Errorf("service CIDRs (last good value kept: %t): %w", r.svcOK, svcErr))
 	}
 	return out, err
-}
-
-// firstAnswer is the error of a part read from a primary source, then from
-// the fallback: nil when the fallback gave a value or both sources answered.
-func firstAnswer(primary, fallback error, fallbackValue bool) error {
-	if fallbackValue {
-		return nil
-	}
-	return errors.Join(primary, fallback)
 }
 
 func nodePodCIDRs(ctx context.Context, client kubernetes.Interface) ([]string, error) {
