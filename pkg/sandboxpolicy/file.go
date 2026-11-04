@@ -215,12 +215,51 @@ var defaultPathClasses = map[string][]string{
 	"hostDevices":            {"/dev/mem", "/dev/kmem", "/dev/kmsg", "/dev/sd*", "/dev/nvme*", "/dev/xvd*"},
 }
 
-// runtimeDevices is the built-in allow rule for the character devices a
-// container runtime and ordinary programs use (healthchecks write /dev/null).
-// It keeps a write default deny from blocking them.
-var runtimeDevices = filepolicy.Rule{Name: "runtime-devices", Action: "allow",
-	Access: []string{filepolicy.AccessRead, filepolicy.AccessWrite},
-	Paths:  []string{"/dev/full", "/dev/null", "/dev/ptmx", "/dev/pts/**", "/dev/random", "/dev/tty", "/dev/urandom", "/dev/zero"}}
+// runtimeDevices are the built-in allow rules for the devices a container
+// runtime and ordinary programs use (healthchecks write /dev/null; sem_open
+// and shm_open create files in /dev/shm). They keep a write or create default
+// deny from blocking them. Every policy carries the same rules; the gadget
+// compiler merges identical allow rules, so they take one slot rule each
+// whatever the number of policies.
+var runtimeDevices = []filepolicy.Rule{
+	{Name: "runtime-devices", Action: "allow", Access: []string{filepolicy.AccessRead, filepolicy.AccessWrite},
+		Paths: []string{"/dev/full", "/dev/null", "/dev/ptmx", "/dev/pts/**", "/dev/random", "/dev/tty", "/dev/urandom", "/dev/zero"}},
+	{Name: "runtime-shm", Action: "allow", Access: []string{filepolicy.AccessRead, filepolicy.AccessWrite, filepolicy.AccessCreate, filepolicy.AccessDelete},
+		Paths: []string{"/dev/shm/**"}},
+}
+
+// FileNode is what the file translation needs to know about this node.
+type FileNode struct {
+	// FromImageUnavailable says why the file gadget cannot judge fromImage
+	// on this node's kernel; empty when it can.
+	FromImageUnavailable string
+}
+
+// pathAliases adds, to each glob, the other names the kernel can show for
+// the same file. The gadget judges the resolved path (d_path), not the name a
+// program opens:
+//   - /var/run/... is also /run/...: Debian and Ubuntu images link /var/run to
+//     /run, and the runtime mounts at the resolved target;
+//   - an exact file /dir/file (no * anywhere) is also /dir/..*/file: kubelet's
+//     atomic writer (Secret, ConfigMap and projected volumes, such as the
+//     service account token) links file to ..data/file and ..data to a
+//     ..<timestamp> directory.
+func pathAliases(paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		forms := []string{p}
+		if rest, ok := strings.CutPrefix(p, "/var/run/"); ok {
+			forms = append(forms, "/run/"+rest)
+		}
+		for _, f := range forms {
+			out = append(out, f)
+			if i := strings.LastIndex(f, "/"); i > 0 && !strings.Contains(f, "*") {
+				out = append(out, f[:i]+"/..*"+f[i:])
+			}
+		}
+	}
+	return out
+}
 
 // filePatternError and checkFileDocument are the gadget's checks of one path
 // glob and of a whole document. They are variables so that the translation
@@ -246,15 +285,16 @@ var (
 
 // TranslateFile translates the file section of one policy to the file
 // gadget's document. Path classes resolve to the built-in classes, the shared
-// SandboxPolicyClasses entries and the policy's own additions. What the gadget
-// cannot enforce (execMap, fsType, fromImage false, globs it cannot express) is
-// reported. An unresolved class follows the design (sandbox-policy-crd.md
+// SandboxPolicyClasses entries and the policy's own additions; every glob gets
+// its aliases (pathAliases). What the gadget cannot enforce (execMap, fsType,
+// fromImage false, fromImage on a kernel whose overlay layout the gadget
+// cannot read, globs it cannot express) is reported. An unresolved class follows the design (sandbox-policy-crd.md
 // section 4.3): a deny rule degrades to audit alone; an allow rule degrades the
 // defaults of its access kinds to audit and makes the policy not ready
 // (ClassUnresolved); an except entry is disabled (its deny applies there) and
 // makes the policy not ready. An allow rule the gadget cannot enforce degrades
 // the same defaults, so the policy never denies more than it was written to.
-func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string) (*FilePlan, error) {
+func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string, node FileNode) (*FilePlan, error) {
 	f := spec.File
 	if f == nil {
 		return nil, nil
@@ -317,7 +357,7 @@ func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string
 				continue // execMap only
 			}
 		}
-		if why := unenforceableTarget(r.Target); why != "" {
+		if why := unenforceableTarget(r.Target, node); why != "" {
 			notEnforced(why)
 			if r.Action == api.ActionAllow {
 				degradeKinds(kinds, "not-enforceable")
@@ -327,6 +367,7 @@ func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string
 		}
 		paths, unresolved := t.paths(r.Target.Path, r.Target.PathClass)
 		paths, bad := supportedPatterns(paths)
+		paths = pathAliases(paths)
 		if len(bad) > 0 {
 			notEnforced(fmt.Sprintf("path %s cannot be expressed by the file gadget", strings.Join(bad, ",")))
 			if r.Action == api.ActionAllow {
@@ -374,9 +415,10 @@ func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string
 			Name: r.Name, Action: string(r.Action), Mode: mode, Origin: r.Origin, Access: access,
 			Paths: sortedUnique(paths), FromImage: fromImage, Except: sortedUnique(excepts)})
 	}
-	devices := runtimeDevices
-	devices.Name = freeName(devices.Name, names)
-	plan.Doc.Policy.File.Rules = append(plan.Doc.Policy.File.Rules, devices)
+	for _, devices := range runtimeDevices {
+		devices.Name = freeName(devices.Name, names)
+		plan.Doc.Policy.File.Rules = append(plan.Doc.Policy.File.Rules, devices)
+	}
 	for _, k := range filepolicy.AccessKinds {
 		why := degrade[k]
 		if why == "" {
@@ -419,12 +461,14 @@ func gadgetAccess(access []string) []string {
 }
 
 // unenforceableTarget says why the gadget cannot judge a target, or "".
-func unenforceableTarget(t api.FileTarget) string {
+func unenforceableTarget(t api.FileTarget, node FileNode) string {
 	switch {
 	case len(t.FSType) > 0:
 		return "fsType is not enforced"
 	case t.FromImage != nil && !*t.FromImage:
 		return "fromImage false is not enforced"
+	case t.FromImage != nil && node.FromImageUnavailable != "":
+		return "fromImage is not enforced on this node: " + node.FromImageUnavailable
 	}
 	return ""
 }
@@ -498,5 +542,5 @@ func (t *pathTranslator) except(e FileExcept, kinds []string) (lifted []string, 
 	if _, bad := supportedPatterns(paths); len(bad) > 0 {
 		return nil, fmt.Sprintf("path %s cannot be expressed by the file gadget", strings.Join(bad, ",")), false
 	}
-	return paths, "", false
+	return pathAliases(paths), "", false
 }

@@ -192,8 +192,10 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 	}
 	var file sandboxpolicy.Backend
 	var fileUnavailable error
+	var fileNode sandboxpolicy.FileNode
 	if options.FileImageName != "" {
 		fileUnavailable = igbackend.CheckFile(host.HostRoot)
+		fileNode = igbackend.FileNode()
 	}
 	if options.FileImageName != "" && fileUnavailable == nil {
 		fileEngine, err := igbackend.NewNativeFileEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.FileImageName)
@@ -218,7 +220,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		return nil, err
 	}
 	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
-	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace})
+	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace, File: fileNode})
 	if err != nil {
 		_ = s.backend.Close(ctx)
 		_ = s.closeRuntime()
