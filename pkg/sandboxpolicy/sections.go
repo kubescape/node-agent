@@ -14,9 +14,13 @@ import (
 //
 // A binding whose old and new plans have no privilege section goes straight to
 // the exec backend, unchanged. Otherwise the plan is split into an exec plan
-// and a privilege plan, each with its own revision. A policy's generation is part
-// of the exec revision, so an edit restarts exec only when exec and privilege
-// share one policy object; sections in separate policies stay independent.
+// and a privilege plan, each with its own revision. When no policy object holds
+// both sections, the exec plan and its revision are what the controller gives
+// the exec policies alone, so adding or removing a privilege policy does not
+// restart exec. When one object holds both, its generation is part of the exec
+// revision (as in the exec-only path): an edit of only its privilege section
+// restarts exec once. This is a known limit; the generation must stay in the
+// plan for status staleness.
 //
 // Commit follows the Backend contract of each section: a section that returns
 // Committed=true is committed, even with a cleanup error. If the second section
@@ -110,6 +114,27 @@ func split(plan Plan) (sectionPlans, error) {
 	}
 	sort.Slice(parts, func(i, j int) bool { return parts[i].Identity.UID < parts[j].Identity.UID })
 	s.privilege.Revision = digest(parts)
+	shared := false
+	for _, p := range plan.Policies {
+		if p.Privilege != nil && p.Exec.Default != "" {
+			shared = true
+		}
+	}
+	if !shared {
+		// No policy object carries both sections: the exec plan is the plan
+		// of the other policies, with the revision the controller gives
+		// that plan alone. Adding or removing a privilege policy then keeps
+		// the exec revision, so exec does not restart.
+		for _, p := range plan.Policies {
+			if p.Privilege == nil {
+				s.exec.Policies = append(s.exec.Policies, p)
+			}
+		}
+		if len(s.exec.Policies) > 0 {
+			s.exec.Revision = digest(s.exec.Policies)
+		}
+		return s, nil
+	}
 	for _, p := range plan.Policies {
 		if p.Exec.Default == "" {
 			continue

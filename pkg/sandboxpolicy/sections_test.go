@@ -272,3 +272,31 @@ func TestPrivilegeUnavailableIsReportedAndRefused(t *testing.T) {
 		t.Fatalf("privilege binding must be refused: %v", err)
 	}
 }
+
+// The controller gives a plan the digest of its policies as revision. Adding a
+// privilege policy to an exec-only binding, and removing it again, must keep
+// the exec revision, so exec does not restart.
+func TestSectionBackendSeparatePrivilegePolicyKeepsExecRevision(t *testing.T) {
+	exec, privilege := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	b := Binding{ContainerID: "c"}
+	execPolicy := CompiledPolicy{Identity: PolicyIdentity{UID: "e", Generation: 3}, Revision: "e", Exec: api.ExecSection{Default: api.ActionDeny}}
+	privPolicy := CompiledPolicy{Identity: PolicyIdentity{UID: "p", Generation: 1}, Revision: "p", Privilege: privilegeSection(api.ActionAllow)}
+	plan := func(policies ...CompiledPolicy) Plan { return Plan{Revision: digest(policies), Policies: policies} }
+	steps := []Plan{plan(execPolicy), plan(execPolicy, privPolicy), plan(execPolicy)}
+	privPolicy.Identity.Generation = 2 // an edit of the privilege policy object
+	privPolicy.Privilege = privilegeSection(api.ActionDeny)
+	steps = append(steps[:2], plan(execPolicy, privPolicy), steps[2])
+	for i, p := range steps {
+		r, err := s.Replace(context.Background(), b, p)
+		if err != nil || !r.Committed || r.ActiveRevision != p.Revision {
+			t.Fatalf("step %d: %+v %v", i, r, err)
+		}
+	}
+	if exec.replacements != 1 {
+		t.Fatalf("exec restarted: %d replacements", exec.replacements)
+	}
+	if privilege.replacements != 2 || privilege.withdrawals != 1 {
+		t.Fatalf("privilege %d replacements %d withdrawals", privilege.replacements, privilege.withdrawals)
+	}
+}
