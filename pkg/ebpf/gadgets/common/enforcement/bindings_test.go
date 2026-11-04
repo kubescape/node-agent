@@ -20,10 +20,13 @@ type fakeMap struct {
 	frozen                bool
 	log                   *[]string
 	name                  string
-	deleteErr             error
+	deleteErr, putErr     error
 }
 
 func (m *fakeMap) Put(k, v interface{}) error {
+	if m.putErr != nil {
+		return m.putErr
+	}
 	if m.frozen {
 		return unix.EPERM
 	}
@@ -151,6 +154,33 @@ func TestSameSlotRetryArmsAfterFailedArming(t *testing.T) {
 	}
 	if err := b.Bind(Binding{Container: identity}); err != nil || arms != 2 {
 		t.Fatalf("an armed binding needs no new arming: %v arms=%d", err, arms)
+	}
+}
+
+// A slot move whose arming fails and whose rollback also fails keeps the new
+// slot tracked. A later retry with that slot must arm again.
+func TestSlotMoveRetryArmsAfterFailedRollback(t *testing.T) {
+	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
+	arms := 0
+	b.armExisting = func(Map, string) error { arms++; return nil }
+	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil); err != nil {
+		t.Fatal(err)
+	}
+	b.armExisting = func(Map, string) error {
+		arms++
+		members.putErr = errors.New("busy") // the rollback write fails
+		return errors.New("walk failed")
+	}
+	if err := b.Bind(Binding{Container: identity, Slot: 1}); err == nil {
+		t.Fatal("a failed move must fail the bind")
+	}
+	members.putErr = nil
+	b.armExisting = func(Map, string) error { arms++; return nil }
+	if err := b.Bind(Binding{Container: identity, Slot: 1}); err != nil || arms != 3 {
+		t.Fatalf("retry must arm: %v arms=%d", err, arms)
+	}
+	if members.data[uint64(42)] != (bindingValue{Slot: 1}) {
+		t.Fatalf("binding %v", members.data)
 	}
 }
 
