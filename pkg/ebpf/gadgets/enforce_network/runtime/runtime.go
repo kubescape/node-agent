@@ -28,9 +28,11 @@ const (
 	bindingsKey  = "enforce-network/bindings"
 )
 
-// Program tiers. gadget.yaml attaches the LSM tier unless the gadget parameter
-// TierParam is TierCgroup. The cgroup tier needs an Inspektor Gadget that
-// attaches cgroup sock_addr programs; with one that does not, Start fails.
+// Program tiers. gadget.yaml enables the LSM tier unless the gadget parameter
+// TierParam is TierCgroup, and disables the programs of the other tier. An
+// Inspektor Gadget that skips disabled programs at load loads only the
+// selected tier. The cgroup tier needs an Inspektor Gadget that attaches
+// cgroup sock_addr programs; with one that does not, Start fails.
 const (
 	TierParam  = "custom.tier"
 	TierLSM    = "lsm"

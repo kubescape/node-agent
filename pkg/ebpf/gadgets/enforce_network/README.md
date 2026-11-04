@@ -27,7 +27,7 @@ sets `IG_SOURCE_PATH`, see the library README).
 ## Program tiers
 
 The gadget has two sets of programs. They share the maps and the decision
-function (`net_decide` in `network_policy.h`); only one set is attached.
+function (`net_decide` in `network_policy.h`); only one set is used.
 
 | Tier | Programs | Needs |
 |---|---|---|
@@ -36,8 +36,13 @@ function (`net_decide` in `network_policy.h`); only one set is attached.
 
 - Select the tier with the gadget parameter `tier` (key `custom.tier`,
   `runtime.TierParam`): `lsm` or `cgroup`. `gadget.yaml` disables the other
-  tier's programs with `attach_to: gadget_program_disabled`. Both sets always
-  load (the verifier checks both); only the selected set is attached.
+  tier's programs with `attach_to: gadget_program_disabled`.
+- An Inspektor Gadget that skips disabled programs at load (the kubescape
+  fork change "do not load disabled programs") loads and attaches only the
+  selected set. So the cgroup tier runs on a kernel without
+  `CONFIG_BPF_LSM`, and the unused set costs nothing. The version in `go.mod`
+  does not skip them yet: it loads both sets (the verifier checks both) and
+  attaches only the selected set.
 - The default stays `lsm` until the Inspektor Gadget version in `go.mod` can
   attach cgroup programs. With a version that cannot, `tier=cgroup` fails at
   start with `unsupported program ... of type "CGroupSockAddr"`.

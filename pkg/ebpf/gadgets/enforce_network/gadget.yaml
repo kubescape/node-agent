@@ -13,9 +13,11 @@ datasources:
   containers:
     annotations:
       cli.default-output-mode: none
-# One tier is attached; the programs of the other tier load but stay detached.
-# The default is the BPF LSM tier. The `tier` parameter selects the cgroup
-# tier, which needs an Inspektor Gadget that attaches cgroup sock_addr programs.
+# One tier is used; the programs of the other tier are disabled. An Inspektor
+# Gadget that skips disabled programs at load does not load them; an older one
+# loads them but does not attach them. The default is the BPF LSM tier. The
+# `tier` parameter selects the cgroup tier, which needs an Inspektor Gadget
+# that attaches cgroup sock_addr programs.
 programs:
   ig_net_connect4:
     attach_to: gadget_program_disabled

@@ -26,6 +26,9 @@ package runtime
 //	NETWORK_PARENT_CGROUP       for example /netgadget.slice
 //	NETWORK_CGROUP_PARENT       the docker --cgroup-parent value, for example netgadget.slice
 //	NETWORK_RUN_IMAGE           an image with python3
+//
+// Optional: NETWORK_UNUSED_TIER_UNLOADED=1 also requires that no program of
+// the unused tier is loaded (see checkLoaded).
 
 import (
 	"context"
@@ -39,6 +42,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
@@ -316,8 +320,44 @@ func matrixPolicy(t *testing.T) netpolicy.Compiled {
 	return compiled
 }
 
+// checkLoaded fails when a program of the selected tier is not loaded. With
+// NETWORK_UNUSED_TIER_UNLOADED=1 (an Inspektor Gadget that does not load
+// disabled programs) it also fails when a program of the other tier is loaded.
+// It reads every program on the node by name, so run one instance at a time.
+func checkLoaded(t *testing.T, tier string) {
+	t.Helper()
+	loaded := map[string]bool{}
+	for id := ebpf.ProgramID(0); ; {
+		next, err := ebpf.ProgramGetNextID(id)
+		if err != nil {
+			break
+		}
+		id = next
+		prog, err := ebpf.NewProgramFromID(id)
+		if err != nil {
+			continue
+		}
+		if info, err := prog.Info(); err == nil {
+			loaded[info.Name] = true
+		}
+		prog.Close()
+	}
+	for name, programs := range tierPrograms {
+		for _, p := range programs {
+			t.Logf("program %s (tier %s) loaded: %v", p, name, loaded[p])
+			switch {
+			case name == tier && !loaded[p]:
+				t.Errorf("program %s of the selected tier is not loaded", p)
+			case name != tier && loaded[p] && os.Getenv("NETWORK_UNUSED_TIER_UNLOADED") == "1":
+				t.Errorf("program %s of the unused tier is loaded", p)
+			}
+		}
+	}
+}
+
 // matrix is the case matrix of both tiers.
 func (f *kernelFixture) matrix(t *testing.T, tier string) {
+	checkLoaded(t, tier)
 	defer f.checkHooks(t, tier)
 	f.expect(t, f.id, "tcp4", "192.0.2.1", 80, false)
 	if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
