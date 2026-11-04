@@ -4,6 +4,7 @@ package igbackend
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
@@ -12,6 +13,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	fileruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/runtime"
 	"oras.land/oras-go/v2"
 )
@@ -89,8 +91,17 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 			return nil // Reporting never changes enforcement.
 		}, 100)
 	}))
+	// The gadget arms tasks like privilege: give it the runtime's mount
+	// namespace, or it falls back to the init task's and judges runc init
+	// wherever the runtime runs in another one (kubectl exec and exec probes
+	// then fail on runc's write to /proc/self/oom_score_adj).
+	runtimeMntns, err := enforcement.RuntimeMountNamespace()
+	if err != nil {
+		return nil, fmt.Errorf("runtime mount namespace: %w", err)
+	}
 	runtimeConfig := fileruntime.Config{Policy: config.Policy, InitialBindings: config.InitialBindings}
-	if err := e.start(ctx, id, nil, []operators.DataOperator{fileruntime.New(), events}, fileruntime.WithConfig(runtimeConfig)); err != nil {
+	if err := e.start(ctx, id, map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)},
+		[]operators.DataOperator{fileruntime.New(), events}, fileruntime.WithConfig(runtimeConfig)); err != nil {
 		return nil, err
 	}
 	return instance, nil
