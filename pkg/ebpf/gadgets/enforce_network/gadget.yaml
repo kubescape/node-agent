@@ -1,0 +1,15 @@
+name: enforce_network
+behavior: mutator
+description: "Enforce egress network rules (CIDRs, ports, protocol) for a live set of containers (BPF LSM)"
+annotations:
+  enable-containers-datasource: "true"
+  enforce-network: "true"
+datasources:
+  verdict:
+    fields:
+      hook_raw:
+        annotations:
+          columns.hidden: true
+  containers:
+    annotations:
+      cli.default-output-mode: none
