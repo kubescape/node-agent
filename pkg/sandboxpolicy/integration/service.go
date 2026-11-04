@@ -51,11 +51,13 @@ type ServiceOptions struct {
 	PrivilegeImageName string
 	// NetworkImageName enables the network section. Empty rejects it.
 	NetworkImageName string
+	// FileImageName enables the file section. Empty rejects it.
+	FileImageName string
 }
 
 // slotSections reports whether a section with node-wide slots is enabled.
 func (o ServiceOptions) slotSections() bool {
-	return o.PrivilegeImageName != "" || o.NetworkImageName != ""
+	return o.PrivilegeImageName != "" || o.NetworkImageName != "" || o.FileImageName != ""
 }
 
 type serviceBackend interface {
@@ -188,13 +190,34 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			}
 		}
 	}
+	var file sandboxpolicy.Backend
+	var fileUnavailable error
+	if options.FileImageName != "" {
+		fileUnavailable = igbackend.CheckFile(host.HostRoot)
+	}
+	if options.FileImageName != "" && fileUnavailable == nil {
+		fileEngine, err := igbackend.NewNativeFileEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.FileImageName)
+		if err == nil {
+			file, err = igbackend.NewFile(fileEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
+		}
+		if err != nil {
+			_ = full.Close(ctx)
+			for _, b := range []sandboxpolicy.Backend{privilege, network} {
+				if b != nil {
+					_ = b.(serviceBackend).Close(ctx)
+				}
+			}
+			_ = s.closeRuntime()
+			return nil, err
+		}
+	}
 	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
 		_ = s.closeRuntime()
 		return nil, err
 	}
-	s.backend = sections.WithNetwork(network, networkUnavailable)
+	s.backend = sections.WithNetwork(network, networkUnavailable).WithFile(file, fileUnavailable)
 	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace})
 	if err != nil {
 		_ = s.backend.Close(ctx)

@@ -14,13 +14,14 @@ import (
 const (
 	SectionPrivilege = "privilege"
 	SectionNetwork   = "network"
+	SectionFile      = "file"
 )
 
 // SectionBackend drives one backend per policy section.
 //
 // A binding whose old and new plans have only exec sections goes straight to
 // the exec backend, unchanged. Otherwise the plan is split into an exec plan
-// and one plan per other section (privilege, network), each with its own
+// and one plan per other section (privilege, network, file), each with its own
 // revision. When no policy object holds exec and another section, the exec
 // plan and its revision are what the controller gives the exec policies alone,
 // so adding, editing or removing a privilege or network policy does not restart
@@ -67,7 +68,8 @@ var (
 
 // NewSectionBackend combines the section backends. When privilege is nil,
 // unavailable says why (nil means no privilege image is configured). The
-// network section is unavailable until WithNetwork sets it.
+// network and file sections are unavailable until WithNetwork and WithFile set
+// them.
 func NewSectionBackend(exec, privilege Backend, unavailable error) (*SectionBackend, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("exec backend is required")
@@ -85,9 +87,16 @@ func NewSectionBackend(exec, privilege Backend, unavailable error) (*SectionBack
 			}
 			return p.Network
 		}, strip: func(p *CompiledPolicy) { p.Network = nil }},
+		{name: SectionFile, part: func(p CompiledPolicy) any {
+			if p.File == nil {
+				return nil
+			}
+			return p.File
+		}, strip: func(p *CompiledPolicy) { p.File = nil }},
 	}}
 	s.set(SectionPrivilege, privilege, unavailable, "PrivilegeNotConfigured", "no privilege gadget image is configured")
 	s.set(SectionNetwork, nil, nil, "NetworkNotConfigured", "no network gadget image is configured")
+	s.set(SectionFile, nil, nil, "FileNotConfigured", "no file gadget image is configured")
 	return s, nil
 }
 
@@ -95,6 +104,13 @@ func NewSectionBackend(exec, privilege Backend, unavailable error) (*SectionBack
 // unavailable says why (nil means no network image is configured).
 func (s *SectionBackend) WithNetwork(network Backend, unavailable error) *SectionBackend {
 	s.set(SectionNetwork, network, unavailable, "NetworkNotConfigured", "no network gadget image is configured")
+	return s
+}
+
+// WithFile sets the file section backend. When file is nil, unavailable says
+// why (nil means no file image is configured).
+func (s *SectionBackend) WithFile(file Backend, unavailable error) *SectionBackend {
+	s.set(SectionFile, file, unavailable, "FileNotConfigured", "no file gadget image is configured")
 	return s
 }
 

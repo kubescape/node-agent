@@ -61,6 +61,8 @@ type Controller struct {
 	// networkPlans holds the translated network section of each valid
 	// policy from the last reconciliation, for status and preparation.
 	networkPlans map[types.UID]*NetworkPlan
+	// filePlans holds the translated file section of each valid policy.
+	filePlans map[types.UID]*FilePlan
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -236,7 +238,7 @@ func (c *Controller) usesClusterInternal() bool {
 }
 
 // PrepareScheduled passes, for every container of the given pods (scheduled to
-// this node and not finished), the privilege and network policies it will get
+// this node and not finished), the privilege, network and file policies it will get
 // to a backend that can prepare them. It is a hint and changes no binding state.
 func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding) error {
 	c.mu.Lock()
@@ -246,15 +248,15 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 		return nil
 	}
 	policies := c.slotPolicies()
-	networkPlans := c.networkPlans
+	networkPlans, filePlans := c.networkPlans, c.filePlans
 	c.mu.Unlock()
 	var plans []Plan
 	for _, b := range containers {
 		var plan Plan
 		for _, p := range policies {
 			if p.matches(b) {
-				compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID]}
-				if compiled.Privilege != nil || compiled.Network != nil {
+				compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID], File: filePlans[p.identity.UID]}
+				if compiled.Privilege != nil || compiled.Network != nil || compiled.File != nil {
 					plan.Policies = append(plan.Policies, compiled)
 				}
 			}
@@ -267,8 +269,8 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 	return preparer.Prepare(ctx, plans)
 }
 
-// HasSlotPolicies reports whether any active policy has a privilege or a
-// network section (the sections with node-wide slots).
+// HasSlotPolicies reports whether any active policy has a privilege, a
+// network or a file section (the sections with node-wide slots).
 func (c *Controller) HasSlotPolicies() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -282,7 +284,7 @@ func (c *Controller) slotPolicies() []desiredPolicy {
 		if obj.GetKind() == "SandboxPolicyClasses" {
 			continue
 		}
-		if p := parsePolicy(obj); p.err == nil && (p.spec.Privilege != nil || p.spec.Network != nil) && p.spec.Mode != api.ModeOff {
+		if p := parsePolicy(obj); p.err == nil && (p.spec.Privilege != nil || p.spec.Network != nil || p.spec.File != nil) && p.spec.Mode != api.ModeOff {
 			policies = append(policies, p)
 		}
 	}
@@ -314,7 +316,9 @@ type desiredPolicy struct {
 	namespaceSelector labels.Selector
 	// network holds the mirrored network fields the storage types lack.
 	network NetworkExtras
-	err     error
+	// file holds the mirrored file fields the storage types lack.
+	file FileExtras
+	err  error
 }
 
 func decodeSpec(u *unstructured.Unstructured, target any) error {
@@ -335,6 +339,9 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	var pod metav1.LabelSelector
 	raw := runtime.DeepCopyJSONValue(u.Object["spec"])
 	p.network, p.err = splitNetworkExtras(raw)
+	var fileErr error
+	p.file, fileErr = splitFileExtras(raw)
+	p.err = errors.Join(p.err, fileErr)
 	if u.GetKind() == "SandboxPolicy" {
 		var spec api.SandboxPolicySpec
 		p.err = errors.Join(p.err, decodeValue(raw, &spec))
@@ -366,6 +373,11 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
 		if err := validateNetwork(*p.spec.Network, p.network); err != nil {
 			p.err = errors.Join(p.err, fmt.Errorf("network: %w", err))
+		}
+	}
+	if p.spec.File != nil && p.spec.Mode != api.ModeOff {
+		if err := validateFile(*p.spec.File, p.file); err != nil {
+			p.err = errors.Join(p.err, fmt.Errorf("file: %w", err))
 		}
 	}
 	if p.identity.UID == "" {
@@ -446,17 +458,21 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	}
 	policyErrors := make(map[string]error)
 	networkPlans := make(map[types.UID]*NetworkPlan)
+	filePlans := make(map[types.UID]*FilePlan)
 	for i := range policies {
 		p := &policies[i]
 		if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff {
 			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, p.network, dest)
+		}
+		if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff {
+			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, p.file, classes.PathClasses)
 		}
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err
 			failures = append(failures, p.err)
 		}
 	}
-	c.networkPlans = networkPlans
+	c.networkPlans, c.filePlans = networkPlans, filePlans
 
 	// Finish committed removals before admitting a new plan for the same identity.
 	// Tombstones are cleanup ownership only, never evidence of active protection.
@@ -551,8 +567,9 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			if err == nil {
 				compiled, compileErr := Compile(ctx, p.identity, p.spec, classes, binding, c.resolver)
 				err = compileErr
-				if np := networkPlans[p.identity.UID]; err == nil && np != nil {
-					compiled.Network, compiled.Revision = np, ""
+				np, fp := networkPlans[p.identity.UID], filePlans[p.identity.UID]
+				if err == nil && (np != nil || fp != nil) {
+					compiled.Network, compiled.File, compiled.Revision = np, fp, ""
 					compiled.Revision = digest(compiled)
 				}
 				if err == nil {

@@ -1,8 +1,6 @@
 package sandboxpolicy
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/netip"
 	"sort"
@@ -73,24 +71,24 @@ func splitNetworkExtras(spec any) (NetworkExtras, error) {
 	if n == nil {
 		return x, nil
 	}
-	strict := func(value any, target any) error {
-		data, err := json.Marshal(value)
-		if err != nil {
-			return err
-		}
-		d := json.NewDecoder(bytes.NewReader(data))
-		d.DisallowUnknownFields()
-		return d.Decode(target)
-	}
 	for key, target := range map[string]*NetworkDirections{"defaultMode": &x.DefaultMode, "defaultOrigin": &x.DefaultOrigin} {
 		if value, ok := n[key]; ok {
-			if err := strict(value, target); err != nil {
+			if err := decodeValue(value, target); err != nil {
 				return x, fmt.Errorf("network %s: %w", key, err)
 			}
 			delete(n, key)
 		}
 	}
-	rules, _ := n["rules"].([]any)
+	var err error
+	x.Except, err = splitExcept[NetworkExcept](n, "network")
+	return x, err
+}
+
+// splitExcept removes the except list of every rule of a section and returns
+// the lists by rule name.
+func splitExcept[E any](section map[string]any, label string) (map[string][]E, error) {
+	var out map[string][]E
+	rules, _ := section["rules"].([]any)
 	for _, r := range rules {
 		rule, _ := r.(map[string]any)
 		value, ok := rule["except"]
@@ -98,17 +96,17 @@ func splitNetworkExtras(spec any) (NetworkExtras, error) {
 			continue
 		}
 		name, _ := rule["name"].(string)
-		var entries []NetworkExcept
-		if err := strict(value, &entries); err != nil {
-			return x, fmt.Errorf("network rule %q except: %w", name, err)
+		var entries []E
+		if err := decodeValue(value, &entries); err != nil {
+			return out, fmt.Errorf("%s rule %q except: %w", label, name, err)
 		}
-		if x.Except == nil {
-			x.Except = map[string][]NetworkExcept{}
+		if out == nil {
+			out = map[string][]E{}
 		}
-		x.Except[name] = entries
+		out[name] = entries
 		delete(rule, "except")
 	}
-	return x, nil
+	return out, nil
 }
 
 // Fixed destination classes the agent computes locally (sandbox-policy-crd.md

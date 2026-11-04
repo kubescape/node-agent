@@ -578,6 +578,7 @@ func main() {
 			Containers: mainHandler.GetContainerCollection(), Tracers: mainHandler.GetTracerCollection(),
 			NodeName: cfg.NodeName, AgentNamespace: cfg.NamespaceName, ImageName: cfg.SandboxPolicyImage, ImageArchive: "tracers.tar",
 			PrivilegeImageName: cfg.SandboxPolicyPrivilegeImage, NetworkImageName: cfg.SandboxPolicyNetworkImage,
+			FileImageName:    cfg.SandboxPolicyFileImage,
 			ContainerdSocket: cfg.SandboxPolicyContainerdSocket, ControlRoot: cfg.SandboxPolicyControlRoot, MaxOwners: cfg.SandboxPolicyMaxOwners,
 			Sources:   sandboxintegration.NewProfileResolver(storageClient.GetStorageClient()),
 			Receivers: thirdPartyTracers.ThirdPartyEventReceivers,

@@ -48,8 +48,8 @@ func TestCompilePreservesVocabularyAndExpandsClasses(t *testing.T) {
 
 func TestCompileRejectsUnsupportedMissingAndLimits(t *testing.T) {
 	cases := map[string]func(*api.PolicySpec){
-		"nonexec": func(s *api.PolicySpec) { s.File = &api.FileSection{} },
-		"class":   func(s *api.PolicySpec) { s.Exec.Rules[0].Target.PathClass = []string{"missing"} },
+		"identity": func(s *api.PolicySpec) { s.Identity = &api.IdentitySection{Default: api.ActionAllow} },
+		"class":    func(s *api.PolicySpec) { s.Exec.Rules[0].Target.PathClass = []string{"missing"} },
 		"source section": func(s *api.PolicySpec) {
 			s.Sources = []api.PolicySource{{ContainerProfile: api.ContainerProfileReference{Name: "p"}, Include: []string{"opens"}}}
 		},
