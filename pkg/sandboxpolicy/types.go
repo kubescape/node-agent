@@ -47,6 +47,8 @@ type CompiledPolicy struct {
 	Exec     api.ExecSection `json:"exec"`
 	// Privilege is nil when the policy has no privilege section.
 	Privilege *api.PrivilegeSection `json:"privilege,omitempty"`
+	// Network is nil when the policy has no network section.
+	Network *NetworkPlan `json:"network,omitempty"`
 }
 
 type Plan struct {

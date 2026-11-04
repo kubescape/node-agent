@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -51,6 +52,11 @@ type Controller struct {
 	lastError    error
 	bindingError error
 	configError  error
+	// clusterCIDRs fills the clusterInternal class (SetClusterCIDRs).
+	clusterCIDRs ClusterCIDRs
+	// networkPlans holds the translated network section of each valid
+	// policy from the last reconciliation, for status and preparation.
+	networkPlans map[types.UID]*NetworkPlan
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -169,9 +175,17 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	return c.lastError
 }
 
+// SetClusterCIDRs sets the pod and service CIDRs of the clusterInternal
+// class. The next reconciliation uses them.
+func (c *Controller) SetClusterCIDRs(cidrs ClusterCIDRs) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clusterCIDRs = cidrs
+}
+
 // PrepareScheduled passes, for every container of the given pods (scheduled to
-// this node and not finished), the privilege policies it will get to
-// a backend that can prepare them. It is a hint and changes no binding state.
+// this node and not finished), the privilege and network policies it will get
+// to a backend that can prepare them. It is a hint and changes no binding state.
 func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding) error {
 	c.mu.Lock()
 	preparer, ok := c.backend.(SlotPreparer)
@@ -179,14 +193,18 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 		c.mu.Unlock()
 		return nil
 	}
-	policies := c.privilegePolicies()
+	policies := c.slotPolicies()
+	networkPlans := c.networkPlans
 	c.mu.Unlock()
 	var plans []Plan
 	for _, b := range containers {
 		var plan Plan
 		for _, p := range policies {
 			if p.matches(b) {
-				plan.Policies = append(plan.Policies, CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy()})
+				compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID]}
+				if compiled.Privilege != nil || compiled.Network != nil {
+					plan.Policies = append(plan.Policies, compiled)
+				}
 			}
 		}
 		if len(plan.Policies) > 0 {
@@ -197,21 +215,22 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 	return preparer.Prepare(ctx, plans)
 }
 
-// HasPrivilegePolicies reports whether any active policy has a privilege section.
-func (c *Controller) HasPrivilegePolicies() bool {
+// HasSlotPolicies reports whether any active policy has a privilege or a
+// network section (the sections with node-wide slots).
+func (c *Controller) HasSlotPolicies() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return len(c.privilegePolicies()) > 0
+	return len(c.slotPolicies()) > 0
 }
 
-// privilegePolicies is called with c.mu held.
-func (c *Controller) privilegePolicies() []desiredPolicy {
+// slotPolicies is called with c.mu held.
+func (c *Controller) slotPolicies() []desiredPolicy {
 	var policies []desiredPolicy
 	for _, obj := range c.objects {
 		if obj.GetKind() == "SandboxPolicyClasses" {
 			continue
 		}
-		if p := parsePolicy(obj); p.err == nil && p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
+		if p := parsePolicy(obj); p.err == nil && (p.spec.Privilege != nil || p.spec.Network != nil) && p.spec.Mode != api.ModeOff {
 			policies = append(policies, p)
 		}
 	}
@@ -241,11 +260,17 @@ type desiredPolicy struct {
 	spec              api.PolicySpec
 	podSelector       labels.Selector
 	namespaceSelector labels.Selector
-	err               error
+	// network holds the mirrored network fields the storage types lack.
+	network NetworkExtras
+	err     error
 }
 
 func decodeSpec(u *unstructured.Unstructured, target any) error {
-	data, err := json.Marshal(u.Object["spec"])
+	return decodeValue(u.Object["spec"], target)
+}
+
+func decodeValue(value any, target any) error {
+	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
@@ -256,9 +281,11 @@ func decodeSpec(u *unstructured.Unstructured, target any) error {
 func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	p := desiredPolicy{identity: PolicyIdentity{Kind: u.GetKind(), Namespace: u.GetNamespace(), Name: u.GetName(), UID: u.GetUID(), Generation: u.GetGeneration()}}
 	var pod metav1.LabelSelector
+	raw := runtime.DeepCopyJSONValue(u.Object["spec"])
+	p.network, p.err = splitNetworkExtras(raw)
 	if u.GetKind() == "SandboxPolicy" {
 		var spec api.SandboxPolicySpec
-		p.err = decodeSpec(u, &spec)
+		p.err = errors.Join(p.err, decodeValue(raw, &spec))
 		p.spec = spec.PolicySpec
 		pod = spec.Selector.PodSelector
 		if p.err == nil {
@@ -266,7 +293,7 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 		}
 	} else {
 		var spec api.ClusterSandboxPolicySpec
-		p.err = decodeSpec(u, &spec)
+		p.err = errors.Join(p.err, decodeValue(raw, &spec))
 		p.spec = spec.PolicySpec
 		pod = spec.Selector.PodSelector
 		if p.err == nil {
@@ -283,6 +310,11 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	p.err = errors.Join(p.err, err)
 	if err := validateShape(p.spec); err != nil {
 		p.err = errors.Join(p.err, err)
+	}
+	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
+		if err := validateNetwork(*p.spec.Network, p.network); err != nil {
+			p.err = errors.Join(p.err, fmt.Errorf("network: %w", err))
+		}
 	}
 	if p.identity.UID == "" {
 		p.err = errors.Join(p.err, fmt.Errorf("policy UID is missing"))
@@ -318,6 +350,8 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	var failures []error
 	policies := make([]desiredPolicy, 0)
 	classes := api.PolicyClasses{PathClasses: make(map[string][]string)}
+	dest := DestClasses{Shared: map[string][]string{}, Ambiguous: map[string]bool{}, Cluster: c.clusterCIDRs}
+	destOwners := make(map[string]string)
 	var classErr error
 	// Reject an ambiguous multi-object class namespace rather than choose
 	// one definition nondeterministically. Local policy additions are merged.
@@ -350,14 +384,27 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			classNames[name] = obj.GetName()
 			classes.PathClasses[name] = paths
 		}
+		for name, entries := range spec.DestClasses {
+			if _, exists := destOwners[name]; exists {
+				dest.Ambiguous[name] = true
+			}
+			destOwners[name] = obj.GetName()
+			dest.Shared[name] = entries
+		}
 	}
 	policyErrors := make(map[string]error)
-	for _, p := range policies {
+	networkPlans := make(map[types.UID]*NetworkPlan)
+	for i := range policies {
+		p := &policies[i]
+		if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff {
+			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, p.network, dest)
+		}
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err
 			failures = append(failures, p.err)
 		}
 	}
+	c.networkPlans = networkPlans
 
 	// Finish committed removals before admitting a new plan for the same identity.
 	// Tombstones are cleanup ownership only, never evidence of active protection.
@@ -452,6 +499,10 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			if err == nil {
 				compiled, compileErr := Compile(ctx, p.identity, p.spec, classes, binding, c.resolver)
 				err = compileErr
+				if plan := networkPlans[p.identity.UID]; err == nil && plan != nil {
+					compiled.Network, compiled.Revision = plan, ""
+					compiled.Revision = digest(compiled)
+				}
 				if err == nil {
 					plan.Policies = append(plan.Policies, compiled)
 				}

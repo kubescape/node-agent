@@ -47,6 +47,13 @@ type ServiceOptions struct {
 	OnError                                           func(error)
 	// PrivilegeImageName enables the privilege section. Empty rejects it.
 	PrivilegeImageName string
+	// NetworkImageName enables the network section. Empty rejects it.
+	NetworkImageName string
+}
+
+// slotSections reports whether a section with node-wide slots is enabled.
+func (o ServiceOptions) slotSections() bool {
+	return o.PrivilegeImageName != "" || o.NetworkImageName != ""
 }
 
 type serviceBackend interface {
@@ -77,10 +84,15 @@ type Service struct {
 	// often privilege slot preparation lists the node's pods.
 	podsScheduled atomic.Bool
 	lastPrepare   time.Time
+	// lastClusterCIDRs bounds how often the clusterInternal class is read.
+	lastClusterCIDRs time.Time
 }
 
 // prepareInterval is the longest time between two slot preparations.
 const prepareInterval = 30 * time.Second
+
+// clusterCIDRsInterval is the time between two reads of the cluster CIDRs.
+const clusterCIDRsInterval = time.Minute
 
 // NewService prepares the public watcher/exporter/native runtime bridge. It does
 // not authorize any cgroup or start enforcement until Start is called.
@@ -150,12 +162,35 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			return nil, err
 		}
 	}
-	s.backend, err = sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
+	var network sandboxpolicy.Backend
+	var networkUnavailable error
+	if options.NetworkImageName != "" {
+		// The cgroup tier needs IG support for cgroup sock_addr attach; until
+		// then no probe is passed and the LSM tier is used.
+		var tier igbackend.NetworkTier
+		tier, networkUnavailable = igbackend.SelectNetworkTier(host.HostRoot, nil)
+		if networkUnavailable == nil {
+			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName, tier)
+			if err == nil {
+				network, err = igbackend.NewNetwork(networkEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
+			}
+			if err != nil {
+				_ = full.Close(ctx)
+				if privilege != nil {
+					_ = privilege.(serviceBackend).Close(ctx)
+				}
+				_ = s.closeRuntime()
+				return nil, err
+			}
+		}
+	}
+	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
 		_ = s.closeRuntime()
 		return nil, err
 	}
+	s.backend = sections.WithNetwork(network, networkUnavailable)
 	s.Controller, err = sandboxpolicy.NewController(options.Dynamic, s.backend, options.Sources, readinessWriter{inner: &sandboxpolicy.DynamicStatusWriter{Client: options.Dynamic}, observed: &s.inputEpoch, snapshot: &s.snapshotEpoch}, sandboxpolicy.Options{Node: api.NodeReference{Name: node.Name, UID: node.UID}, AgentNamespace: options.AgentNamespace})
 	if err != nil {
 		_ = s.backend.Close(ctx)
@@ -172,7 +207,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 // slot before its containers start.
 func (s *Service) WatchResources() []watcher.WatchResource {
 	resources := s.Controller.WatchResources()
-	if s.options.PrivilegeImageName == "" {
+	if !s.options.slotSections() {
 		return resources
 	}
 	pods := watcher.NewWatchResource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}, metav1.ListOptions{FieldSelector: "spec.nodeName=" + s.options.NodeName})
@@ -186,7 +221,7 @@ func (s *Service) configurationHint(obj runtime.Object) {
 		return
 	}
 	if pod, ok := obj.(*corev1.Pod); ok {
-		if s.options.PrivilegeImageName != "" && pod.Spec.NodeName == s.options.NodeName && pod.Status.Phase == corev1.PodPending {
+		if s.options.slotSections() && pod.Spec.NodeName == s.options.NodeName && pod.Status.Phase == corev1.PodPending {
 			s.podsScheduled.Store(true)
 			s.ContainerCallback(containercollection.PubSubEvent{})
 		}
@@ -255,9 +290,13 @@ drain:
 }
 func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
+	if s.options.NetworkImageName != "" && s.options.Kubernetes != nil && time.Since(s.lastClusterCIDRs) >= clusterCIDRsInterval {
+		s.lastClusterCIDRs = time.Now()
+		s.Controller.SetClusterCIDRs(ClusterCIDRs(ctx, s.options.Kubernetes))
+	}
 	// Prepare after a Pending-pod event, else at most every prepareInterval,
 	// so the extra pod and namespace listing does not run on every refresh.
-	if s.options.PrivilegeImageName != "" && s.options.Kubernetes != nil && s.Controller.HasPrivilegePolicies() &&
+	if s.options.slotSections() && s.options.Kubernetes != nil && s.Controller.HasSlotPolicies() &&
 		(s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
 		s.lastPrepare = time.Now()
 		scheduled, err := ScheduledContainers(ctx, s.options.Kubernetes, s.options.NodeName)
@@ -265,7 +304,7 @@ func (s *Service) refresh(ctx context.Context) {
 			err = s.Controller.PrepareScheduled(ctx, scheduled)
 		}
 		if err != nil {
-			s.report(fmt.Errorf("privilege slot preparation: %w", err))
+			s.report(fmt.Errorf("slot preparation: %w", err))
 		}
 	}
 	// Configuration and selected-runtime discovery share one commit barrier. A

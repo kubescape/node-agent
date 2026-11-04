@@ -33,49 +33,59 @@ func NewNativePrivilegeEngine(rt runtime.Runtime, kube operators.DataOperator, s
 	if err != nil {
 		return nil, err
 	}
-	return &nativePrivilegeEngine{manager: manager, kube: kube, store: store, image: image}, nil
+	return &nativePrivilegeEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image}}, nil
 }
 
-type nativePrivilegeEngine struct {
+// nativeNodeEngine starts node-wide gadget instances from an OCI store.
+type nativeNodeEngine struct {
 	manager *instancemanager.Manager
 	kube    operators.DataOperator
 	store   oras.ReadOnlyTarget
 	image   string
 }
 
-type nativePrivilegeInstance struct {
+type nativePrivilegeEngine struct{ nativeNodeEngine }
+
+// nativeNodeInstance is one running node-wide gadget instance.
+type nativeNodeInstance struct {
 	manager  *instancemanager.Manager
 	id       string
+	section  string
 	bindings *enforcement.Bindings
 	revision uint64
+	// faults: the gadget counts tracking faults per slot.
+	faults bool
 }
 
-func (i *nativePrivilegeInstance) Ready() error {
+func (i *nativeNodeInstance) Ready() error {
 	status := i.bindings.Status()
 	if !status.Ready || status.Error != nil || status.Revision != i.revision {
-		return fmt.Errorf("privilege instance not ready: %+v", status)
+		return fmt.Errorf("%s instance not ready: %+v", i.section, status)
 	}
 	return nil
 }
 
-func (i *nativePrivilegeInstance) SlotHealth(slot uint32) error {
+func (i *nativeNodeInstance) SlotHealth(slot uint32) error {
+	if !i.faults {
+		return nil
+	}
 	n, err := i.bindings.SlotFaults(slot)
 	if err != nil {
 		return err
 	}
 	if n > 0 {
-		return fmt.Errorf("%d tracking faults in privilege slot %d", n, slot)
+		return fmt.Errorf("%d tracking faults in %s slot %d", n, i.section, slot)
 	}
 	return nil
 }
 
-func (i *nativePrivilegeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
+func (i *nativeNodeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
 
-func (i *nativePrivilegeInstance) Unbind(identity enforcement.ContainerIdentity) error {
+func (i *nativeNodeInstance) Unbind(identity enforcement.ContainerIdentity) error {
 	return i.bindings.Unbind(identity)
 }
 
-func (i *nativePrivilegeInstance) Stop(ctx context.Context) error {
+func (i *nativeNodeInstance) Stop(ctx context.Context) error {
 	err := i.manager.StopGadget(ctx, i.id)
 	if errors.Is(err, instancemanager.ErrNotFound) {
 		return nil
@@ -83,17 +93,24 @@ func (i *nativePrivilegeInstance) Stop(ctx context.Context) error {
 	return err
 }
 
-func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
+// start runs one instance with the gadget's data operators and options.
+func (e *nativeNodeEngine) start(ctx context.Context, id string, params map[string]string, ops []operators.DataOperator, opts ...gadgetcontext.Option) error {
 	handler := ocihandler.New()
-	params := apihelpers.ToParamDescs(handler.GlobalParams()).ToParams()
-	if err := params.Set("allow-enforcement", "true"); err != nil {
-		return nil, err
+	handlerParams := apihelpers.ToParamDescs(handler.GlobalParams()).ToParams()
+	if err := handlerParams.Set("allow-enforcement", "true"); err != nil {
+		return err
 	}
 	// Same trust model as NewNative: the archive is administrator-supplied.
-	if err := handler.Init(params); err != nil {
-		return nil, err
+	if err := handler.Init(handlerParams); err != nil {
+		return err
 	}
-	instance := &nativePrivilegeInstance{manager: e.manager, id: id, revision: config.Policy.Generation}
+	desired := &api.GadgetInstance{Id: id, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: e.image, ParamValues: params}}
+	return e.manager.StartGadget(ctx, desired, append([]gadgetcontext.Option{gadgetcontext.WithOrasReadonlyTarget(e.store),
+		gadgetcontext.WithAdditionalDataOperators(append([]operators.DataOperator{handler, e.kube}, ops...)...)}, opts...)...)
+}
+
+func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config privruntime.Config) (PrivilegeInstance, error) {
+	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "privilege", revision: config.Policy.Generation, faults: true}
 	names := config.Policy.RuleNames
 	events := simple.New("sandbox-privilege-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
@@ -138,12 +155,8 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 	if err != nil {
 		return nil, fmt.Errorf("runtime mount namespace: %w", err)
 	}
-	desired := &api.GadgetInstance{Id: id, GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol, ImageName: e.image,
-		ParamValues: map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)}}}
-	err = e.manager.StartGadget(ctx, desired,
-		gadgetcontext.WithOrasReadonlyTarget(e.store),
-		gadgetcontext.WithAdditionalDataOperators(handler, e.kube, privruntime.New(), events),
-		privruntime.WithConfig(config))
+	err = e.start(ctx, id, map[string]string{"operator.oci.ebpf.host-mntns-id": strconv.FormatUint(runtimeMntns, 10)},
+		[]operators.DataOperator{privruntime.New(), events}, privruntime.WithConfig(config))
 	if err != nil {
 		return nil, err
 	}

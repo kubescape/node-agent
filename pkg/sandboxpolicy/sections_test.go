@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -270,5 +271,64 @@ func TestPrivilegeUnavailableIsReportedAndRefused(t *testing.T) {
 	}
 	if _, err := sections.Replace(ctx, Binding{ContainerID: "c"}, sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})); !errors.Is(err, lsm) {
 		t.Fatalf("privilege binding must be refused: %v", err)
+	}
+}
+
+func networkPlan() *NetworkPlan {
+	return &NetworkPlan{Egress: netpolicy.Document{Version: 1, Policy: netpolicy.Policy{Mode: "enforce", Egress: netpolicy.Section{Default: "allow"}}}}
+}
+
+func TestSectionBackendRoutesNetworkSection(t *testing.T) {
+	exec, privilege, network := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	s.WithNetwork(network, nil)
+	b := Binding{ContainerID: "c"}
+	p := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Exec: api.ExecSection{Default: api.ActionDeny}, Network: networkPlan()}
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err != nil {
+		t.Fatal(err)
+	}
+	if got := network.plans[bindingKey(b)]; len(got.Policies) != 1 || got.Policies[0].Network == nil {
+		t.Fatalf("network plan %+v", got)
+	}
+	if got := exec.plans[bindingKey(b)]; len(got.Policies) != 1 || got.Policies[0].Network != nil {
+		t.Fatalf("exec plan must not carry the network section: %+v", got)
+	}
+	if privilege.replacements != 0 {
+		t.Fatal("privilege backend must not be called")
+	}
+	if err := s.Attest(context.Background(), b, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	// A network change keeps the exec revision.
+	p.Network = networkPlan()
+	p.Network.Egress.Policy.Egress.Default = "deny"
+	if _, err := s.Replace(context.Background(), b, sectionPlan("r2", p)); err != nil || exec.replacements != 1 || network.replacements != 2 {
+		t.Fatalf("exec %d network %d replacements, %v", exec.replacements, network.replacements, err)
+	}
+	if r, err := s.Withdraw(context.Background(), b); err != nil || !r.Committed || network.withdrawals != 1 || len(s.active) != 0 {
+		t.Fatalf("withdraw %+v %v", r, err)
+	}
+}
+
+func TestSectionBackendNetworkFailureRestoresEarlierSections(t *testing.T) {
+	exec, privilege, network := &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}, fail: true}
+	s, _ := NewSectionBackend(exec, privilege, nil)
+	s.WithNetwork(network, nil)
+	b := Binding{ContainerID: "c"}
+	p := CompiledPolicy{Identity: PolicyIdentity{UID: "1"}, Exec: api.ExecSection{Default: api.ActionDeny}, Privilege: privilegeSection(api.ActionAllow), Network: networkPlan()}
+	if r, err := s.Replace(context.Background(), b, sectionPlan("r1", p)); err == nil || r.Committed {
+		t.Fatalf("expected failure: %+v", r)
+	}
+	if len(exec.plans)+len(privilege.plans) != 0 || exec.withdrawals != 1 || privilege.withdrawals != 1 {
+		t.Fatalf("exec and privilege must return to their previous state: exec %+v privilege %+v", exec.plans, privilege.plans)
+	}
+}
+
+func TestSectionBackendRejectsNetworkWithoutImage(t *testing.T) {
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, &fakeBackend{plans: map[string]Plan{}}, nil)
+	_, err := s.Replace(context.Background(), Binding{}, sectionPlan("r", CompiledPolicy{Network: networkPlan()}))
+	var u *EnforcementUnavailableError
+	if !errors.As(err, &u) || u.Reason != "NetworkNotConfigured" || s.SectionUnavailable(SectionNetwork) == nil || s.SectionUnavailable(SectionPrivilege) != nil {
+		t.Fatalf("network must be rejected without a network backend: %v", err)
 	}
 }

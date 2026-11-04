@@ -15,17 +15,17 @@ func (e *EnforcementUnavailableError) Error() string {
 	return fmt.Sprintf("%s enforcement is unavailable on this node: %s", e.Section, e.Detail)
 }
 
-// PrivilegeAvailability is implemented by a backend that knows whether the
-// privilege section can be enforced on this node.
-type PrivilegeAvailability interface {
-	PrivilegeUnavailable() error
+// SectionAvailability is implemented by a backend that knows whether a policy
+// section (SectionPrivilege, SectionNetwork) can be enforced on this node.
+type SectionAvailability interface {
+	SectionUnavailable(section string) error
 }
 
-// privilegeUnavailable returns why the privilege section cannot be enforced,
-// or nil. It is called with c.mu held.
-func (c *Controller) privilegeUnavailable() error {
-	if a, ok := c.backend.(PrivilegeAvailability); ok {
-		return a.PrivilegeUnavailable()
+// sectionUnavailable returns why a section cannot be enforced, or nil. It is
+// called with c.mu held.
+func (c *Controller) sectionUnavailable(section string) error {
+	if a, ok := c.backend.(SectionAvailability); ok {
+		return a.SectionUnavailable(section)
 	}
 	return nil
 }
