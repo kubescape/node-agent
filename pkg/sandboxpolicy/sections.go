@@ -37,6 +37,8 @@ type SectionBackend struct {
 	exec     Backend
 	sections []*section
 	active   map[string]sectionPlans
+	// prepareMu guards section.prepared.
+	prepareMu sync.Mutex
 }
 
 // section is one section backend next to exec.
@@ -49,6 +51,8 @@ type section struct {
 	part func(CompiledPolicy) any
 	// strip removes the section from a policy for the exec plan.
 	strip func(*CompiledPolicy)
+	// prepared: the last PrepareSections call prepared this section.
+	prepared bool
 }
 
 type sectionPlans struct {
@@ -153,14 +157,25 @@ func (s *SectionBackend) Prepare(ctx context.Context, plans []Plan) error {
 // a backend that loads its gadget before the first plan (privilege) does not
 // load it for a policy of another section.
 func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error {
+	s.prepareMu.Lock()
+	defer s.prepareMu.Unlock()
 	var errs []error
 	for _, sec := range s.sections {
-		if active != nil && !active[sec.name] {
+		preparer, ok := sec.backend.(SlotPreparer)
+		if !ok {
 			continue
 		}
-		if preparer, ok := sec.backend.(SlotPreparer); ok {
-			errs = append(errs, preparer.Prepare(ctx, plans))
+		if active != nil && !active[sec.name] {
+			if sec.prepared {
+				// The section has just become inactive: clear its
+				// prepared set once, so its slots are not kept.
+				errs = append(errs, preparer.Prepare(ctx, nil))
+			}
+			sec.prepared = false
+			continue
 		}
+		sec.prepared = true
+		errs = append(errs, preparer.Prepare(ctx, plans))
 	}
 	return errors.Join(errs...)
 }

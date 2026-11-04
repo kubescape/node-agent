@@ -162,10 +162,12 @@ func TestSectionBackendSendsAllPrivilegePolicies(t *testing.T) {
 type preparingBackend struct {
 	fakeBackend
 	prepared []Plan
+	calls    int
 }
 
 func (p *preparingBackend) Prepare(_ context.Context, plans []Plan) error {
 	p.prepared = plans
+	p.calls++
 	return nil
 }
 
@@ -451,5 +453,25 @@ func TestControllerPodPlansNeedContainerEligibility(t *testing.T) {
 	plans, ok := c.PodPlans([]Binding{plain, profiled})
 	if !ok || len(plans) != 1 || len(plans["plain"].Policies) != 1 {
 		t.Fatalf("only the pod without a sourced policy has a pod plan: %+v", plans)
+	}
+}
+
+// A section that becomes inactive is prepared once with no plans, so its
+// prepared slots are dropped; later calls leave it alone.
+func TestSectionBackendClearsPreparedSectionOnceWhenInactive(t *testing.T) {
+	privilege := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	ctx := context.Background()
+	plans := []Plan{sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})}
+	if err := s.PrepareSections(ctx, plans, map[string]bool{SectionPrivilege: true}); err != nil || privilege.calls != 1 || len(privilege.prepared) != 1 {
+		t.Fatalf("active: %v calls=%d prepared=%v", err, privilege.calls, privilege.prepared)
+	}
+	for i := 0; i < 2; i++ {
+		if err := s.PrepareSections(ctx, nil, map[string]bool{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if privilege.calls != 2 || privilege.prepared != nil {
+		t.Fatalf("inactive: calls=%d prepared=%v", privilege.calls, privilege.prepared)
 	}
 }
