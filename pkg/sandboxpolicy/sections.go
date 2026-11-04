@@ -166,10 +166,10 @@ func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, acti
 			continue
 		}
 		if active != nil && !active[sec.name] {
-			if sec.prepared {
-				// The section has just become inactive: clear its
-				// prepared set once, so its slots are not kept.
-				errs = append(errs, preparer.Prepare(ctx, nil))
+			if clearer, ok := preparer.(PreparedClearer); ok && sec.prepared {
+				// The section has just become inactive: drop its prepared
+				// set once, without starting an instance.
+				errs = append(errs, clearer.ClearPrepared(ctx))
 			}
 			sec.prepared = false
 			continue

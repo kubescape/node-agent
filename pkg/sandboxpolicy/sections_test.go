@@ -163,11 +163,18 @@ type preparingBackend struct {
 	fakeBackend
 	prepared []Plan
 	calls    int
+	clears   int
 }
 
 func (p *preparingBackend) Prepare(_ context.Context, plans []Plan) error {
 	p.prepared = plans
 	p.calls++
+	return nil
+}
+
+func (p *preparingBackend) ClearPrepared(context.Context) error {
+	p.prepared = nil
+	p.clears++
 	return nil
 }
 
@@ -456,8 +463,8 @@ func TestControllerPodPlansNeedContainerEligibility(t *testing.T) {
 	}
 }
 
-// A section that becomes inactive is prepared once with no plans, so its
-// prepared slots are dropped; later calls leave it alone.
+// A section that becomes inactive has its prepared set cleared once, without a
+// Prepare that could start an instance; later calls leave it alone.
 func TestSectionBackendClearsPreparedSectionOnceWhenInactive(t *testing.T) {
 	privilege := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
 	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
@@ -471,7 +478,7 @@ func TestSectionBackendClearsPreparedSectionOnceWhenInactive(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if privilege.calls != 2 || privilege.prepared != nil {
-		t.Fatalf("inactive: calls=%d prepared=%v", privilege.calls, privilege.prepared)
+	if privilege.calls != 1 || privilege.clears != 1 || privilege.prepared != nil {
+		t.Fatalf("inactive: calls=%d clears=%d prepared=%v", privilege.calls, privilege.clears, privilege.prepared)
 	}
 }

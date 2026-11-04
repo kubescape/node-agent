@@ -397,3 +397,21 @@ func TestPrivilegeEmptyInstanceRetryWaits(t *testing.T) {
 		t.Fatalf("prepare with a plan: %v instances=%d", err, len(e.instances))
 	}
 }
+
+func TestPrivilegeClearPreparedNeverStartsInstance(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	// No privilege policy is active and no instance runs: clearing must not
+	// load the gadget, unlike Prepare with no plans.
+	if err := b.ClearPrepared(ctx); err != nil || len(e.instances) != 0 {
+		t.Fatalf("clear without instance: %v instances=%d", err, len(e.instances))
+	}
+	plan := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if err := b.Prepare(ctx, []sandboxpolicy.Plan{plan}); err != nil || len(b.prepared) != 1 {
+		t.Fatalf("prepare: %v prepared=%d", err, len(b.prepared))
+	}
+	if err := b.ClearPrepared(ctx); err != nil || len(b.prepared) != 0 || len(e.instances) != 1 {
+		t.Fatalf("clear: %v prepared=%d instances=%d", err, len(b.prepared), len(e.instances))
+	}
+}

@@ -112,6 +112,13 @@ type SlotPreparer interface {
 	Prepare(context.Context, []Plan) error
 }
 
+// PreparedClearer optionally drops the prepared set of a SlotPreparer whose
+// section has no active policy. Unlike Prepare with no plans, it never starts
+// an instance.
+type PreparedClearer interface {
+	ClearPrepared(context.Context) error
+}
+
 // SectionPreparer is a SlotPreparer that drives several sections.
 // PrepareSections prepares only the sections in active (nil: every section).
 type SectionPreparer interface {

@@ -299,6 +299,16 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 	return errors.Join(err, b.retire(ctx))
 }
 
+// ClearPrepared drops the prepared set when the section has no active policy.
+// It never starts an instance: the dropped combinations leave at the next
+// replacement, as in Prepare.
+func (b *nodeOwner[C]) ClearPrepared(ctx context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.prepared = map[string][]sandboxpolicy.CompiledPolicy{}
+	return b.retire(ctx)
+}
+
 // bindPods binds the given pod cgroups to the slot of their plan and unbinds
 // the pod cgroups that are not given. A pod whose slot does not exist yet is
 // skipped: Prepare creates the slot, and the next call binds the pod. A pod
