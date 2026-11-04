@@ -120,7 +120,9 @@ policy:
   `setns`, `open_tree`, `fsopen`, `fsmount`, `fspick`, `mount_setattr`) are
   judged at their `CAP_SYS_ADMIN` check by syscall number. For a 32-bit
   (compat) task the number is not mapped, so these checks fail closed: every
-  candidate syscall rule applies.
+  candidate syscall rule applies. The same holds for `mknod`: for a compat
+  task every `inode_mknod` call is judged as `mknod`, including a unix socket
+  `bind(2)`, so a `mknod` deny or a default deny also refuses that bind.
 - **Deny** returns `-EPERM` from the LSM hook, before the side effect.
 
 ## Known limits
@@ -140,8 +142,12 @@ policy:
 - **Fault injection.** The `arming-fail-fork-marks` parameter makes every child
   mark fail at fork. It exists for tests (`runtime/runtime_kernel_test.go`);
   owners do not set it.
-- **Not in this gadget yet:** export of verdicts as events (the owner logs
-  them), and kernels older than 6.1.
+- **Kernels older than 6.1** are not supported yet.
+- **Leaving the bound cgroup subtree.** A task that can write to a cgroup
+  outside its bound subtree (its `cgroup.procs`, or `clone3` with
+  `CLONE_INTO_CGROUP`) runs there without the policy. This needs write access
+  to the host cgroup tree, which a normal container does not have. A
+  `CLONE_INTO_CGROUP` clone is refused only when the child's mark fails.
 - **No-audit capability checks** (`CAP_OPT_NOAUDIT`) are excluded from
   capability enforcement. Most are kernel probes (for example the overcommit
   check), and judging them would deny normal work in every bound container. Some
