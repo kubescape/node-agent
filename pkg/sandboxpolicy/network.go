@@ -483,7 +483,7 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 				CIDRs: prefixStrings(cidrs), Except: prefixStrings(lifted), Ports: ports, Proto: proto}})
 		}
 	}
-	plan.Egress.Policy.Egress.Rules = dropNameCollisions(emitted, notEnforcedRule)
+	plan.Egress.Policy.Egress.Rules = uniqueNames(emitted)
 	if degradeDefault {
 		requested := x.DefaultMode.Egress
 		if requested == "" {
@@ -526,30 +526,30 @@ type emittedRule struct {
 	rule      netpolicy.Rule
 }
 
-// dropNameCollisions removes every gadget rule of a CRD rule whose generated
-// name equals the name of another gadget rule. The CRD does not restrict the
+// uniqueNames gives a generated gadget rule whose name is already taken a
+// "~N" suffix (the first free N from 1). The CRD does not restrict the
 // characters of a rule name, so a rule can be named "a/tcp" literally, and
-// the gadget requires unique names. Only the CRD rule with the generated
-// name is not enforced; the other rules of the policy are kept.
-func dropNameCollisions(rules []emittedRule, notEnforced func(rule, why string)) []netpolicy.Rule {
-	literal := map[string]bool{}
+// the gadget requires unique names. Literal names never change, and the
+// renamed rule stays enforced: dropping it would weaken a deny. Its name still
+// starts with the CRD rule name, and its Origin is unchanged.
+func uniqueNames(rules []emittedRule) []netpolicy.Rule {
+	used := map[string]bool{}
 	for _, e := range rules {
 		if !e.generated {
-			literal[e.rule.Name] = true
-		}
-	}
-	dropped := map[string]bool{}
-	for _, e := range rules {
-		if e.generated && literal[e.rule.Name] && !dropped[e.crd] {
-			dropped[e.crd] = true
-			notEnforced(e.crd, fmt.Sprintf("generated rule name %q is the name of another rule; this rule is not enforced", e.rule.Name))
+			used[e.rule.Name] = true
 		}
 	}
 	out := make([]netpolicy.Rule, 0, len(rules))
 	for _, e := range rules {
-		if !dropped[e.crd] {
-			out = append(out, e.rule)
+		if e.generated {
+			name := e.rule.Name
+			for i := 1; used[name]; i++ {
+				name = fmt.Sprintf("%s~%d", e.rule.Name, i)
+			}
+			used[name] = true
+			e.rule.Name = name
 		}
+		out = append(out, e.rule)
 	}
 	return out
 }

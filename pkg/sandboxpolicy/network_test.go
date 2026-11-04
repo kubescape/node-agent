@@ -444,22 +444,35 @@ func TestControllerUsesClusterInternal(t *testing.T) {
 
 func TestNetworkGeneratedNameCollision(t *testing.T) {
 	// "dns" with tcp and udp becomes dns/tcp and dns/udp; a CRD rule can be
-	// named dns/tcp literally. Only the rule with the generated name drops.
-	spec := netSpec(api.ActionDeny,
+	// named dns/tcp (and dns/tcp~1) literally. The generated rule gets the
+	// first free "~N" name and stays enforced.
+	spec := netSpec(api.ActionAllow,
 		netRule("dns/tcp", api.ActionAllow, api.NetworkTarget{CIDR: []string{"192.0.2.53/32"}}),
-		netRule("dns", api.ActionAllow, api.NetworkTarget{Ports: []intstr.IntOrString{intstr.FromInt32(53)}, Proto: []string{"tcp", "udp"}}),
+		netRule("dns/tcp~1", api.ActionAllow, api.NetworkTarget{CIDR: []string{"192.0.2.54/32"}}),
+		netRule("dns", api.ActionDeny, api.NetworkTarget{Ports: []intstr.IntOrString{intstr.FromInt32(53)}, Proto: []string{"tcp", "udp"}}),
 		netRule("web", api.ActionAllow, api.NetworkTarget{CIDR: []string{"198.51.100.0/24"}}))
+	spec.Network.Rules[2].Origin = "team/dns"
 	plan, err := TranslateNetwork(spec, NetworkExtras{}, DestClasses{})
 	if err != nil {
 		t.Fatalf("a name collision must not fail the policy: %v", err)
 	}
 	if r := ruleByName(plan, "dns/tcp"); r == nil || !reflect.DeepEqual(r.CIDRs, []string{"192.0.2.53/32"}) {
-		t.Fatalf("the literal rule must stay: %+v", r)
+		t.Fatalf("the literal rule must keep its name: %+v", r)
 	}
-	if ruleByName(plan, "dns/udp") != nil || ruleByName(plan, "web") == nil || len(plan.Egress.Policy.Egress.Rules) != 2 {
+	if r := ruleByName(plan, "dns/tcp~1"); r == nil || !reflect.DeepEqual(r.CIDRs, []string{"192.0.2.54/32"}) {
+		t.Fatalf("the literal rule must keep its name: %+v", r)
+	}
+	gen := ruleByName(plan, "dns/tcp~2")
+	if gen == nil || gen.Action != "deny" || gen.Proto != "tcp" || gen.Origin != "team/dns" || len(gen.CIDRs) == 0 {
+		t.Fatalf("the generated tcp deny must be enforced as dns/tcp~2 with its origin: %+v", gen)
+	}
+	if r := ruleByName(plan, "dns/udp"); r == nil || r.Action != "deny" || r.Proto != "udp" {
+		t.Fatalf("dns/udp %+v", r)
+	}
+	if ruleByName(plan, "web") == nil || len(plan.Egress.Policy.Egress.Rules) != 5 {
 		t.Fatalf("rules %+v", plan.Egress.Policy.Egress.Rules)
 	}
-	if n := strings.Join(plan.Report.NotEnforced, ";"); !strings.Contains(n, `rule dns: generated rule name "dns/tcp"`) {
+	if n := strings.Join(plan.Report.NotEnforced, ";"); strings.Contains(n, "dns") {
 		t.Fatalf("NotEnforced %q", n)
 	}
 }
