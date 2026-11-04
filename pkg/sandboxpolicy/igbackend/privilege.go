@@ -26,6 +26,9 @@ type PrivilegeEngine interface {
 
 type PrivilegeInstance interface {
 	Ready() error
+	// SlotHealth fails when the instance counted a tracking fault in the slot:
+	// a task of an enforcing slot may be untracked, or a fork was refused.
+	SlotHealth(slot uint32) error
 	Bind(enforcement.Binding) error
 	Unbind(enforcement.ContainerIdentity) error
 	Stop(context.Context) error
@@ -148,7 +151,7 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 	var health error
 	if current != nil {
 		result.ActiveRevision = current.revision
-		health = errors.Join(b.instance.Ready(), current.check())
+		health = b.health(current)
 		result.ProtectionUnconfirmed = health != nil
 	}
 	if b.closed {
@@ -242,7 +245,18 @@ func (b *PrivilegeBackend) Attest(_ context.Context, binding sandboxpolicy.Bindi
 	if current == nil || current.revision != revision || b.instance == nil {
 		return fmt.Errorf("privilege revision %q is not active", revision)
 	}
-	return errors.Join(b.instance.Ready(), current.check())
+	return b.health(current)
+}
+
+// health checks the instance, the slot's tracking faults and the identity
+// lease of one bound container. A fault makes the next same-plan Replace start
+// a new instance, which arms the running tasks again.
+func (b *PrivilegeBackend) health(p *privilegeBinding) error {
+	slot, ok := b.slots[p.combination]
+	if !ok {
+		return errors.Join(fmt.Errorf("privilege combination has no slot"), b.instance.Ready(), p.check())
+	}
+	return errors.Join(b.instance.Ready(), b.instance.SlotHealth(slot), p.check())
 }
 
 // Prepare declares the combinations of the pods scheduled to this node that are

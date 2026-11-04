@@ -58,6 +58,17 @@ func (i *nativePrivilegeInstance) Ready() error {
 	return nil
 }
 
+func (i *nativePrivilegeInstance) SlotHealth(slot uint32) error {
+	n, err := i.bindings.SlotFaults(slot)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("%d tracking faults in privilege slot %d", n, slot)
+	}
+	return nil
+}
+
 func (i *nativePrivilegeInstance) Bind(b enforcement.Binding) error { return i.bindings.Bind(b) }
 
 func (i *nativePrivilegeInstance) Unbind(identity enforcement.ContainerIdentity) error {

@@ -11,6 +11,11 @@ import (
 // the privilege gadget's own policy document. name qualifies rule names in
 // events. Actor and path predicates are not supported by the gadget yet and
 // are rejected.
+//
+// Several policies on one container merge per the shared merge contract
+// (pkg/ebpf/gadgets/common/merge/CONTRACT.md). It differs from the CRD design
+// text (sandbox-policy-crd.md, "Multiple policies matching one pod merge"): an
+// audit deny rule never weakens another policy's enforce default deny.
 func PrivilegeDocument(name string, mode api.PolicyMode, section api.PrivilegeSection) (privpolicy.Document, error) {
 	doc := privpolicy.Document{Name: name, Version: 1, Policy: privpolicy.Policy{Mode: string(mode), Privilege: privpolicy.Section{Default: string(section.Default)}}}
 	for _, r := range section.Rules {

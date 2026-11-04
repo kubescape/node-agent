@@ -17,9 +17,16 @@ type fakePrivilegeInstance struct {
 	readyErr, stopErr error
 	stops             int
 	bound             map[uint64]uint32
+	faults            map[uint32]uint64
 }
 
 func (i *fakePrivilegeInstance) Ready() error { return i.readyErr }
+func (i *fakePrivilegeInstance) SlotHealth(slot uint32) error {
+	if i.faults[slot] > 0 {
+		return errors.New("tracking fault")
+	}
+	return nil
+}
 func (i *fakePrivilegeInstance) Bind(b enforcement.Binding) error {
 	i.bound[b.Container.CgroupID] = b.Slot
 	return nil
@@ -236,4 +243,25 @@ type readyFailEngine struct{ instance *fakePrivilegeInstance }
 func (e *readyFailEngine) Start(context.Context, string, privruntime.Config) (PrivilegeInstance, error) {
 	e.instance = &fakePrivilegeInstance{readyErr: errors.New("not ready"), stopErr: errors.New("busy"), bound: map[uint64]uint32{}}
 	return e.instance, nil
+}
+
+func TestPrivilegeTrackingFaultUnconfirmsAndHeals(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	plan := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if _, err := b.Replace(ctx, privBinding(1), plan); err != nil {
+		t.Fatal(err)
+	}
+	e.instances[0].faults = map[uint32]uint64{e.instances[0].bound[1]: 1}
+	if b.Attest(ctx, privBinding(1), "r1") == nil {
+		t.Fatal("a tracking fault must fail attestation")
+	}
+	// The same plan again replaces the instance, which arms the tasks again.
+	if r, err := b.Replace(ctx, privBinding(1), plan); err != nil || !r.Committed || len(e.instances) != 2 {
+		t.Fatalf("heal: %+v %v instances=%d", r, err, len(e.instances))
+	}
+	if err := b.Attest(ctx, privBinding(1), "r1"); err != nil {
+		t.Fatalf("the new instance has no fault: %v", err)
+	}
 }
