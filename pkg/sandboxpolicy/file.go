@@ -240,9 +240,11 @@ type FileNode struct {
 // program opens:
 //   - /var/run/... is also /run/...: Debian and Ubuntu images link /var/run to
 //     /run, and the runtime mounts at the resolved target;
-//   - with mergedUsr (deny rules only), /bin/..., /sbin/..., /lib/... and
-//     /lib64/... are also /usr/...: merged-usr images (Debian 12, Ubuntu 22.04
-//     and later) link those directories into /usr;
+//   - with mergedUsr (deny rules and their excepts), /bin/..., /sbin/...,
+//     /lib/... and /lib64/... are also /usr/...: merged-usr images (Debian 12,
+//     Ubuntu 22.04 and later) link those directories into /usr. On an image
+//     where they are separate directories (Alpine), a deny of /lib/** also
+//     covers /usr/lib/**: the translator does not know the image layout;
 //   - a file is also the same name with a ..* directory before it: kubelet's
 //     atomic writer (Secret, ConfigMap and projected volumes, such as the
 //     service account token) links file to ..data/file and ..data to a
@@ -586,5 +588,7 @@ func (t *pathTranslator) except(e FileExcept, kinds []string) (lifted []string, 
 	if _, bad := supportedPatterns(paths); len(bad) > 0 {
 		return nil, fmt.Sprintf("path %s cannot be expressed by the file gadget", strings.Join(bad, ",")), false
 	}
-	return pathAliases(paths, false), "", false
+	// Excepts belong to deny rules: they get the deny's merged /usr forms,
+	// so an except /bin/sh still lifts the deny of /usr/bin/sh.
+	return pathAliases(paths, true), "", false
 }

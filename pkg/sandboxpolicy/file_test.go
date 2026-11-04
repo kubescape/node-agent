@@ -656,7 +656,7 @@ func TestFilePathAliases(t *testing.T) {
 			t.Errorf("%s: aliases %v, want %v", in, got, want)
 		}
 	}
-	// Merged /usr: deny rules only.
+	// Merged /usr: deny rules and their excepts, not allow rules.
 	if got := pathAliases([]string{"/bin/**", "/lib64/ld.so"}, true); !reflect.DeepEqual(got,
 		[]string{"/bin/**", "/usr/bin/**", "/lib64/ld.so", "/lib64/..*/ld.so", "/usr/lib64/ld.so", "/usr/lib64/..*/ld.so"}) {
 		t.Errorf("merged /usr aliases %v", got)
@@ -673,8 +673,20 @@ func TestFilePathAliases(t *testing.T) {
 			t.Errorf("deny %v does not match %s", noBin.Paths, path)
 		}
 	}
-	if globsMatch(t, binOK.Paths, "/usr/bin/x") || globsMatch(t, noBin.Except, "/usr/bin/sh") {
-		t.Errorf("merged /usr aliases on an allow rule %v or an except %v", binOK.Paths, noBin.Except)
+	if globsMatch(t, binOK.Paths, "/usr/bin/x") {
+		t.Errorf("merged /usr aliases on an allow rule %v", binOK.Paths)
+	}
+	// A write to /bin/sh is judged on /usr/bin/sh (the resolved path): the
+	// except /bin/sh lifts that deny too, and nothing else.
+	for _, path := range []string{"/bin/sh", "/usr/bin/sh"} {
+		if !globsMatch(t, noBin.Except, path) {
+			t.Errorf("except %v does not lift %s", noBin.Except, path)
+		}
+	}
+	for _, path := range []string{"/usr/bin/bash", "/bin/bash"} {
+		if globsMatch(t, noBin.Except, path) {
+			t.Errorf("except %v lifts %s", noBin.Except, path)
+		}
 	}
 }
 
