@@ -2,6 +2,7 @@ package sandboxpolicy
 
 import (
 	"context"
+	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
@@ -330,5 +331,73 @@ func TestNetworkSectionUnavailableIsReported(t *testing.T) {
 	_ = c.SetBindings(ctx, []Binding{binding()})
 	if ready := w.reports["uid-net"].Status.Conditions[0]; ready.Status != metav1.ConditionFalse || ready.Reason != "NetworkNotConfigured" {
 		t.Fatalf("ready %+v", ready)
+	}
+}
+
+// kernelDecision mirrors net_decide in enforce_network/network_policy.h for one
+// compiled document: the rank and the rule name that judge a connection.
+func kernelDecision(t *testing.T, doc netpolicy.Document, dst string, port uint16, proto uint8) (uint8, string) {
+	t.Helper()
+	c, err := netpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := netip.AddrFrom16(netip.MustParseAddr(dst).As16())
+	best, found := -1, netpolicy.PrefixEntry{}
+	for _, p := range c.Prefixes {
+		bits := int(p.Key.PrefixLen) - 32
+		if netip.PrefixFrom(netip.AddrFrom16(p.Key.Addr), bits).Contains(addr) && bits > best {
+			best, found = bits, p
+		}
+	}
+	s := c.Slots[0]
+	var docs uint32
+	allowed := false
+	var m netpolicy.RuleEntry
+	if best >= 0 {
+		list := c.Lists[found.List]
+		for _, r := range list.Rules[:list.Len] {
+			if (r.Proto != netpolicy.ProtoAny && r.Proto != proto) || port < r.PortLo || port > r.PortHi {
+				continue
+			}
+			docs |= 1 << r.Doc
+			allowed = allowed || r.Rank == netpolicy.RankAllow
+			if r.Rank > m.Rank {
+				m = r
+			}
+		}
+	}
+	switch {
+	case m.Rank == netpolicy.RankNone:
+		return s.Rank, c.RuleNames[s.RuleID]
+	case !allowed && s.DenyEnforceDocs&^docs != 0 && m.Rank < netpolicy.RankDenyEnforce:
+		return netpolicy.RankDenyEnforce, "default"
+	}
+	return m.Rank, c.RuleNames[m.RuleID]
+}
+
+func TestNetworkUnresolvableDenyKeepsEnforceDefault(t *testing.T) {
+	// A deny on a DNS name has no CIDR. It must not become a deny audit rule
+	// on every destination: that hides the enforce default deny.
+	for name, target := range map[string]api.NetworkTarget{
+		"dnsName":             {DNSName: []string{"evil.example.com"}},
+		"dnsName ports proto": {DNSName: []string{"evil.example.com"}, Ports: []intstr.IntOrString{intstr.FromInt32(443)}, Proto: []string{"tcp"}},
+	} {
+		spec := netSpec(api.ActionDeny,
+			netRule("web", api.ActionAllow, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}}),
+			netRule("no-evil", api.ActionDeny, target))
+		plan := translate(t, spec, NetworkExtras{}, DestClasses{})
+		if ruleByName(plan, "no-evil") != nil {
+			t.Fatalf("%s: an unresolvable deny reached the gadget: %+v", name, plan.Egress.Policy.Egress.Rules)
+		}
+		if n := strings.Join(plan.Report.NotEnforced, ";"); !strings.Contains(n, "rule no-evil: no destination is resolved") {
+			t.Fatalf("%s: NotEnforced %q", name, n)
+		}
+		if rank, rule := kernelDecision(t, plan.Egress, "198.51.100.7", 443, netpolicy.ProtoTCP); rank != netpolicy.RankDenyEnforce || rule != "default" {
+			t.Fatalf("%s: 198.51.100.7:443 got rank %d rule %q, want the enforce default deny", name, rank, rule)
+		}
+		if rank, rule := kernelDecision(t, plan.Egress, "192.0.2.10", 443, netpolicy.ProtoTCP); rank != netpolicy.RankAllow || rule != "web" {
+			t.Fatalf("%s: 192.0.2.10:443 got rank %d rule %q, want allow web", name, rank, rule)
+		}
 	}
 }

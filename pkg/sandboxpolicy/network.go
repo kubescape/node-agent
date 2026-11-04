@@ -432,9 +432,13 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 				if report.NotReady == "" || unresolved != "dns-name-not-enforceable" {
 					report.NotReady = notReadyReason(unresolved)
 				}
-				if len(r.Target.DNSName) > 0 {
-					dests = nil // the name is ANDed: the other fields alone would allow more
-				}
+			}
+			if len(r.Target.DNSName) > 0 {
+				// The name is ANDed and has no CIDR. The other fields alone
+				// would allow more; for a deny they would give a deny audit
+				// rule that hides the policy's own enforce default deny
+				// there (common/merge/CONTRACT.md). So no destination.
+				dests = nil
 			}
 		}
 		var excepts []netip.Prefix
