@@ -905,7 +905,9 @@ int BPF_PROG(ig_priv_key_permission)
 
 // vfs_mknod also runs for bind(2) of a unix socket path and for overlayfs
 // whiteouts (unlink or rename of a lower file). Judge only mknod(2) and
-// mknodat(2).
+// mknodat(2). A 32-bit (compat) task's syscall number is not mapped, so for
+// it every call is judged as mknod (fail closed), its unix socket bind(2)
+// included.
 SEC("lsm/inode_mknod")
 int BPF_PROG(ig_priv_mknod)
 {
