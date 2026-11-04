@@ -47,6 +47,7 @@ char LICENSE[] SEC("license") = "GPL";
 #define AF_INET6 10
 #define NET_SOCK_RAW 3
 #define NET_IPPROTO_L2TP 115
+#define NET_TCP_CLOSE 7
 
 enum net_hook : __u32 {
 	NET_HOOK_SOCKET_CONNECT,
@@ -222,6 +223,14 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 	if (skfam != AF_INET && skfam != AF_INET6)
 		return 0;
 	ipproto = BPF_CORE_READ(sk, sk_protocol);
+	// TCP and MPTCP use the address of a send only to connect a closed
+	// socket (Fast Open: MSG_FASTOPEN or TCP_FASTOPEN_CONNECT). On a socket
+	// that is not closed, __inet_stream_connect ignores it (the connect was
+	// judged), so it is not judged.
+	if (is_send &&
+	    (ipproto == NET_IPPROTO_TCP || ipproto == NET_IPPROTO_MPTCP) &&
+	    BPF_CORE_READ(sk, __sk_common.skc_state) != NET_TCP_CLOSE)
+		return 0;
 	unspec_v6 = skfam == AF_INET6 &&
 		    (BPF_CORE_READ(sk, sk_type) == NET_SOCK_RAW ||
 		     ipproto == NET_IPPROTO_L2TP);

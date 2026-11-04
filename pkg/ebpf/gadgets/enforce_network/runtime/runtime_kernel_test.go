@@ -105,6 +105,18 @@ try:
         raw_sendto(socket.socket(v6, udp), sin(socket.AF_INET))
     elif kind == "udp4-sendto-unspec":
         raw_sendto(socket.socket(v4, udp), sin(socket.AF_UNSPEC))
+    elif kind == "tcp4-fastopen":
+        s = socket.socket(v4, tcp)
+        s.settimeout(1)
+        s.sendto(b"x", socket.MSG_FASTOPEN, (host, port))
+    elif kind == "tcp4-connected-sendto":
+        # TCP ignores the address of a send on a connected socket.
+        l = socket.socket(v4, tcp)
+        l.bind(("127.0.0.1", 0))
+        l.listen(1)
+        s = socket.socket(v4, tcp)
+        s.connect(l.getsockname())
+        s.sendto(b"x", (host, port))
     elif kind == "raw6-sendto-unspec":
         sa = struct.pack("=HHI", 0, 0, 0) + socket.inet_pton(v6, host) + bytes(4)
         raw_sendto(socket.socket(v6, socket.SOCK_RAW, socket.IPPROTO_UDP), sa)
@@ -372,6 +384,7 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 		port       int
 	}{
 		{"tcp4", "192.0.2.1", 80},
+		{"tcp4-fastopen", "192.0.2.1", 80},
 		{"tcp6", "2001:db8::1", 80},
 		{"tcp6", "::ffff:192.0.2.1", 80},
 		{"udp-connect", "192.0.2.1", 53},
@@ -408,6 +421,7 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 		f.expect(t, f.id, "udp4-sendto", "203.0.113.5", 54, false) // other port
 		f.expect(t, f.id, "tcp4", "203.0.113.5", 53, false)        // other protocol
 		f.expect(t, f.id, "tcp4", "127.0.0.1", 9, false)
+		f.expect(t, f.id, "tcp4-connected-sendto", "192.0.2.1", 80, false)
 	})
 	t.Run("audit", func(t *testing.T) {
 		f.expect(t, f.id, "tcp4", "198.51.100.1", 80, false)
