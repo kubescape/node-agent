@@ -274,12 +274,14 @@ func (f *kernelFixture) call(t *testing.T, container, kind, host string, port in
 	return strings.TrimSpace(string(out))
 }
 
-func (f *kernelFixture) expect(t *testing.T, container, kind, host string, port int, denied bool) {
+// expect runs the probe and compares its result line with want: EPERM for a
+// deny, else the result of the kernel alone (OK, timeout, ECONNREFUSED, ...).
+func (f *kernelFixture) expect(t *testing.T, container, kind, host string, port int, want string) {
 	t.Helper()
 	got := f.call(t, container, kind, host, port)
 	t.Logf("%s %s:%d in %.12s = %s", kind, host, port, container, got)
-	if (got == "EPERM") != denied {
-		t.Errorf("%s %s:%d in %.12s = %s, denied=%v expected", kind, host, port, container, got, denied)
+	if got != want {
+		t.Errorf("%s %s:%d in %.12s = %s, want %s", kind, host, port, container, got, want)
 	}
 }
 
@@ -383,39 +385,46 @@ func checkLoaded(t *testing.T, tier string) {
 func (f *kernelFixture) matrix(t *testing.T, tier string) {
 	checkLoaded(t, tier)
 	defer f.checkHooks(t, tier)
-	f.expect(t, f.id, "tcp4", "192.0.2.1", 80, false)
+	f.expect(t, f.id, "tcp4", "192.0.2.1", 80, "timeout")
 	if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
 		t.Fatal(err)
 	}
-	// Denied for the bound container, allowed for the unselected one.
+	// Denied for the bound container. The unselected container gets the
+	// result of the kernel alone (allowed): the test networks have no
+	// route over IPv6 and do not answer over IPv4.
 	denied := []struct {
 		kind, host string
 		port       int
+		allowed    string
 	}{
-		{"tcp4", "192.0.2.1", 80},
-		{"tcp4-fastopen", "192.0.2.1", 80},
-		{"tcp6", "2001:db8::1", 80},
-		{"tcp6", "::ffff:192.0.2.1", 80},
-		{"udp-connect", "192.0.2.1", 53},
-		{"udp4-sendto", "192.0.2.1", 53},
-		{"udp6-sendto", "2001:db8::1", 53},
-		{"udp6-sendto", "::ffff:192.0.2.1", 53},
-		{"udp6-sendto-sockaddr_in", "192.0.2.1", 53},
-		{"udp4-sendto-unspec", "192.0.2.1", 53},
-		{"udp-connected-sendto", "192.0.2.1", 53},
-		{"udp4-sendto", "203.0.113.5", 53},
-		{"udp4-sendto", "203.0.113.5", 5350},
+		{"tcp4", "192.0.2.1", 80, "timeout"},
+		{"tcp4-fastopen", "192.0.2.1", 80, "EINPROGRESS"},
+		{"tcp6", "2001:db8::1", 80, "ENETUNREACH"},
+		{"tcp6", "::ffff:192.0.2.1", 80, "timeout"},
+		{"udp-connect", "192.0.2.1", 53, "OK"},
+		{"udp4-sendto", "192.0.2.1", 53, "OK"},
+		{"udp6-sendto", "2001:db8::1", 53, "ENETUNREACH"},
+		{"udp6-sendto", "::ffff:192.0.2.1", 53, "OK"},
+		{"udp6-sendto-sockaddr_in", "192.0.2.1", 53, "OK"},
+		{"udp4-sendto-unspec", "192.0.2.1", 53, "OK"},
+		{"udp-connected-sendto", "192.0.2.1", 53, "OK"},
+		{"udp4-sendto", "203.0.113.5", 53, "OK"},
+		{"udp4-sendto", "203.0.113.5", 5350, "OK"},
 	}
 	t.Run("enforce", func(t *testing.T) {
 		for _, c := range denied {
-			f.expect(t, f.id, c.kind, c.host, c.port, true)
+			f.expect(t, f.id, c.kind, c.host, c.port, "EPERM")
 		}
 		f.waitVerdict(t, verdict{rule: "example/no-test-net-1", deny: 1, mode: 2})
 	})
 	t.Run("raw", func(t *testing.T) {
 		// rawv6_sendmsg reads an AF_UNSPEC address as AF_INET6. The
 		// cgroup programs do not run for raw sockets.
-		f.expect(t, f.id, "raw6-sendto-unspec", "2001:db8::1", 0, tier == TierLSM)
+		want := "ENETUNREACH"
+		if tier == TierLSM {
+			want = "EPERM"
+		}
+		f.expect(t, f.id, "raw6-sendto-unspec", "2001:db8::1", 0, want)
 	})
 	t.Run("sendmmsg partial", func(t *testing.T) {
 		if got := f.call(t, f.id, "udp4-sendmmsg", "192.0.2.1", 53); got != "sent 1" {
@@ -426,11 +435,11 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 		}
 	})
 	t.Run("allowed", func(t *testing.T) {
-		f.expect(t, f.id, "tcp4", "192.0.2.7", 80, false)          // except
-		f.expect(t, f.id, "udp4-sendto", "203.0.113.5", 54, false) // other port
-		f.expect(t, f.id, "tcp4", "203.0.113.5", 53, false)        // other protocol
-		f.expect(t, f.id, "tcp4", "127.0.0.1", 9, false)
-		f.expect(t, f.id, "tcp4-connected-sendto", "192.0.2.1", 80, false)
+		f.expect(t, f.id, "tcp4", "192.0.2.7", 80, "timeout")     // except
+		f.expect(t, f.id, "udp4-sendto", "203.0.113.5", 54, "OK") // other port
+		f.expect(t, f.id, "tcp4", "203.0.113.5", 53, "timeout")   // other protocol
+		f.expect(t, f.id, "tcp4", "127.0.0.1", 9, "ECONNREFUSED")
+		f.expect(t, f.id, "tcp4-connected-sendto", "192.0.2.1", 80, "OK")
 	})
 	t.Run("fastopen on a connected socket", func(t *testing.T) {
 		// The LSM tier judges every MSG_FASTOPEN send, because the socket
@@ -450,12 +459,12 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 		}
 	})
 	t.Run("audit", func(t *testing.T) {
-		f.expect(t, f.id, "tcp4", "198.51.100.1", 80, false)
+		f.expect(t, f.id, "tcp4", "198.51.100.1", 80, "timeout")
 		f.waitVerdict(t, verdict{rule: "example/watch-test-net-2", deny: 1, mode: 1})
 	})
 	t.Run("unselected container", func(t *testing.T) {
 		for _, c := range denied {
-			f.expect(t, f.other, c.kind, c.host, c.port, false)
+			f.expect(t, f.other, c.kind, c.host, c.port, c.allowed)
 		}
 	})
 	t.Run("live move to default deny", func(t *testing.T) {
@@ -465,15 +474,15 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 		if out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "true").CombinedOutput(); err != nil {
 			t.Fatalf("docker exec under default deny: %v: %s", err, out)
 		}
-		f.expect(t, f.id, "tcp4", "192.0.2.7", 80, true)
-		f.expect(t, f.id, "tcp4", "127.0.0.1", 9, false)
+		f.expect(t, f.id, "tcp4", "192.0.2.7", 80, "EPERM")
+		f.expect(t, f.id, "tcp4", "127.0.0.1", 9, "ECONNREFUSED")
 		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, isDef: 1})
 	})
 	t.Run("unbind", func(t *testing.T) {
 		if err := f.bindings.Unbind(f.container); err != nil {
 			t.Fatal(err)
 		}
-		f.expect(t, f.id, "tcp4", "192.0.2.1", 80, false)
+		f.expect(t, f.id, "tcp4", "192.0.2.1", 80, "timeout")
 	})
 	t.Run("docker run under default deny", func(t *testing.T) {
 		parent, image := os.Getenv("NETWORK_PARENT_CGROUP"), os.Getenv("NETWORK_RUN_IMAGE")
@@ -496,8 +505,8 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 		if got := run("192.0.2.7", 80); got != "EPERM" {
 			t.Errorf("new container connect = %s, want EPERM", got)
 		}
-		if got := run("127.0.0.1", 9); got == "EPERM" {
-			t.Errorf("new container loopback connect denied")
+		if got := run("127.0.0.1", 9); got != "ECONNREFUSED" {
+			t.Errorf("new container loopback connect = %s, want ECONNREFUSED", got)
 		}
 	})
 }
