@@ -31,13 +31,16 @@
 char LICENSE[] SEC("license") = "GPL";
 
 GADGET_PARAM(host_mntns_id);
+GADGET_PARAM(arming_fail_fork_marks);
 
 #define EPERM 1
+#define ENOMEM 12
 #define CAP_SYS_ADMIN 21
 #define CAP_OPT_NOAUDIT (1UL << 1)
 #define PTRACE_MODE_ATTACH 0x02
 
 #define CLONE_NEWTIME 0x00000080ULL
+#define CLONE_INTO_CGROUP 0x200000000ULL
 #define CLONE_NEWNS 0x00020000ULL
 #define CLONE_NEWCGROUP 0x02000000ULL
 #define CLONE_NEWUTS 0x04000000ULL
@@ -461,11 +464,48 @@ static __always_inline int check_syscall(void *ctx, enum priv_hook hook,
 
 /* Arming */
 
+// priv_enforcing_slot returns true, with the slot, when the current task is
+// in a bound cgroup whose slot enforces.
+static __always_inline bool priv_enforcing_slot(__u32 *slot)
+{
+	struct policy_value *header;
+	__u64 cgid = 0;
+
+	header = priv_header(&cgid, slot);
+	return header && header->mode == POLICY_MODE_ENFORCE;
+}
+
+// The exec hook cannot fail the exec. A lost mark in an enforcing slot is a
+// tracking fault: the owner reports the binding as not confirmed.
 SEC("lsm/bprm_committed_creds")
 int BPF_PROG(ig_priv_exec)
 {
-	if (!arming_on_exec())
+	__u32 slot = 0;
+
+	if (!arming_on_exec()) {
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
+		if (priv_enforcing_slot(&slot))
+			arming_slot_fault(slot);
+	}
+	return 0;
+}
+
+// priv_lost_child handles an armed parent whose child could not be marked.
+// An unmarked child would escape every rule, so an enforcing slot refuses the
+// fork and counts a tracking fault. An audit slot or an unbound cgroup allows
+// it; the failure is in the section error counter only. A clone into another
+// cgroup is refused too, because the child's binding is not known here.
+static __always_inline int priv_lost_child(unsigned long clone_flags)
+{
+	__u32 slot = 0;
+
+	verdict_count(VERDICT_COUNT_SECTION_ERROR);
+	if (priv_enforcing_slot(&slot)) {
+		arming_slot_fault(slot);
+		return -ENOMEM;
+	}
+	if ((__u64)clone_flags & CLONE_INTO_CGROUP)
+		return -ENOMEM;
 	return 0;
 }
 
@@ -511,8 +551,8 @@ static __always_inline int do_task_alloc(void *ctx, struct task_struct *task,
 	enum priv_syscall sc;
 	__u64 flags;
 
-	if (!arming_on_fork(task))
-		verdict_count(VERDICT_COUNT_SECTION_ERROR);
+	if (!arming_on_fork(task, clone_flags) && priv_lost_child(clone_flags))
+		return -ENOMEM;
 
 	// userns_create judges CLONE_NEWUSER.
 	flags = clone_flags & CLONE_NS_MASK & ~CLONE_NEWUSER;

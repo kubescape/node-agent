@@ -69,7 +69,8 @@ func TestCompileFoldsMostLimiting(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta, _ := lookup(c, KernelKey{Kind: KindMeta})
-	if meta.Generation != 7 || meta.Mode != KernelModeAudit {
+	// The policy audits, but one rule enforces: the slot enforces.
+	if meta.Generation != 7 || meta.Mode != KernelModeEnforce {
 		t.Fatalf("meta %+v", meta)
 	}
 	// Deny+enforce beats the allow on the same key, independent of order.

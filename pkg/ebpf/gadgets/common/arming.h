@@ -53,8 +53,35 @@ static __always_inline bool arming_task_armed(struct task_struct *task)
 	return a && *a;
 }
 
+// Fault injection for tests only: fail every child mark at fork. Owners never
+// set it in production.
+const volatile bool arming_fail_fork_marks = false;
+
+// Tracking faults per policy slot, for the owner's health check: a mark that
+// failed for a task in a bound cgroup whose slot enforces. The array is
+// preallocated, so counting never fails. A new instance starts at zero and
+// arms the running tasks again.
+#ifndef ARMING_FAULT_SLOTS
+#define ARMING_FAULT_SLOTS 64
+#endif
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, ARMING_FAULT_SLOTS);
+	__type(key, __u32);
+	__type(value, __u64);
+} arming_faults SEC(".maps");
+
+static __always_inline void arming_slot_fault(__u32 slot)
+{
+	__u64 *value = bpf_map_lookup_elem(&arming_faults, &slot);
+
+	if (value)
+		__sync_fetch_and_add(value, 1);
+}
+
 // arming_mark returns false when the task storage could not be allocated (memory
-// pressure): the task then stays unarmed, and the caller counts the failure.
+// pressure): the task then stays unarmed, and the caller handles the failure.
 static __always_inline bool arming_mark(struct task_struct *task)
 {
 	__u32 *a = bpf_task_storage_get(&armed_tasks, task, 0,
@@ -113,12 +140,35 @@ static __always_inline bool arming_on_exec(void)
 	return arming_mark(task);
 }
 
+#define ARMING_CLONE_THREAD 0x00010000ULL
+
 // arming_on_fork runs in task_alloc: the child inherits the parent's mark.
-static __always_inline bool arming_on_fork(struct task_struct *child)
+// It returns false only when the parent is armed and the child's mark failed.
+// An unarmed parent (for example a runtime helper) is out of scope, not a
+// failure. A new thread whose group leader is armed is covered through the
+// leader (see arming_task_armed), so its own mark is best effort.
+static __always_inline bool arming_on_fork(struct task_struct *child,
+					   __u64 clone_flags)
 {
-	if (arming_task_armed(bpf_get_current_task_btf()))
-		return arming_mark(child);
-	return true;
+	struct task_struct *parent = bpf_get_current_task_btf();
+	struct task_struct *leader;
+	__u32 *a;
+
+	if (!arming_task_armed(parent))
+		return true;
+	if (clone_flags & ARMING_CLONE_THREAD) {
+		leader = parent->group_leader;
+		a = leader ? bpf_task_storage_get(&armed_tasks, leader, 0, 0) :
+			     NULL;
+		if (a && *a) {
+			if (!arming_fail_fork_marks)
+				arming_mark(child);
+			return true;
+		}
+	}
+	if (arming_fail_fork_marks)
+		return false;
+	return arming_mark(child);
 }
 
 #endif /* __ENFORCEMENT_ARMING_H */

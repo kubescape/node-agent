@@ -67,7 +67,7 @@ func TestFreezeBeforeBindAndLifecycle(t *testing.T) {
 	armed := &fakeMap{typ: ebpf.TaskStorage}
 	var armedPaths []string
 	b.armExisting = func(_ Map, path string) error { armedPaths = append(armedPaths, path); return nil }
-	if err := b.start(policy, members, armed); err != nil {
+	if err := b.start(policy, members, armed, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Ready(nil); err != nil {
@@ -86,10 +86,17 @@ func TestFreezeBeforeBindAndLifecycle(t *testing.T) {
 	if err := b.Bind(Binding{Container: identity}); err != nil {
 		t.Fatal(err)
 	}
-	// Moving to another slot is one map write and no second arming.
-	if err := b.Bind(Binding{Container: identity, Slot: 1}); err != nil || members.data[uint64(42)] != (bindingValue{Slot: 1}) || len(armedPaths) != 1 {
+	// Moving to another slot is one map write, and it arms again: the old
+	// slot may have left a task unarmed.
+	if err := b.Bind(Binding{Container: identity, Slot: 1}); err != nil || members.data[uint64(42)] != (bindingValue{Slot: 1}) || len(armedPaths) != 2 {
 		t.Fatalf("slot move: %v %v armed=%v", err, members.data, armedPaths)
 	}
+	// A move whose arming fails is undone, so a retry moves and arms again.
+	b.armExisting = func(Map, string) error { return errors.New("walk failed") }
+	if err := b.Bind(Binding{Container: identity, Slot: 0}); err == nil || members.data[uint64(42)] != (bindingValue{Slot: 1}) {
+		t.Fatalf("failed move: %v %v", err, members.data)
+	}
+	b.armExisting = func(_ Map, path string) error { armedPaths = append(armedPaths, path); return nil }
 	if err := b.Bind(Binding{Container: identity, Slot: 2}); err == nil {
 		t.Fatal("slot out of range must fail")
 	}
@@ -109,7 +116,7 @@ func TestFreezeBeforeBindAndLifecycle(t *testing.T) {
 func TestFailedArmingRemovesBinding(t *testing.T) {
 	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
 	b.armExisting = func(Map, string) error { return errors.New("no cgroup") }
-	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}); err == nil {
+	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil); err == nil {
 		t.Fatal("arming failure must fail startup")
 	}
 	if len(members.data) != 0 {
@@ -120,11 +127,11 @@ func TestFailedArmingRemovesBinding(t *testing.T) {
 func TestRejectsWrongBindingLayoutAndPolicyErrors(t *testing.T) {
 	b, policy, members, log := newFixture(t, func(Map) error { return nil })
 	members.max = 8
-	if err := b.start(policy, members, nil); err == nil || len(*log) != 0 {
+	if err := b.start(policy, members, nil, nil); err == nil || len(*log) != 0 {
 		t.Fatalf("wrong binding layout must fail before writes: %v %v", err, *log)
 	}
 	b, policy, members, log = newFixture(t, func(Map) error { return errors.New("bad layout") })
-	if err := b.start(policy, members, nil); err == nil || len(*log) != 0 {
+	if err := b.start(policy, members, nil, nil); err == nil || len(*log) != 0 {
 		t.Fatalf("policy writer error must stop startup: %v %v", err, *log)
 	}
 }
@@ -138,7 +145,7 @@ func TestNewValidates(t *testing.T) {
 func TestStartSkipsGoneContainer(t *testing.T) {
 	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
 	b.armExisting = func(Map, string) error { return ErrContainerGone }
-	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}); err != nil {
+	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil); err != nil {
 		t.Fatalf("a gone container must not fail startup: %v", err)
 	}
 	if err := b.Ready(nil); err != nil || len(members.data) != 0 {
@@ -150,5 +157,32 @@ func TestStartSkipsGoneContainer(t *testing.T) {
 	}
 	if st := b.Status(); !st.Ready || st.Error != nil || st.LastError == nil {
 		t.Fatalf("status %+v", st)
+	}
+}
+
+type fakeFaults map[uint32]uint64
+
+func (f fakeFaults) Lookup(k, v interface{}) error {
+	*v.(*uint64) = f[k.(uint32)]
+	return nil
+}
+func (fakeFaults) Type() ebpf.MapType { return ebpf.Array }
+func (fakeFaults) KeySize() uint32    { return 4 }
+func (fakeFaults) ValueSize() uint32  { return 8 }
+func (fakeFaults) MaxEntries() uint32 { return 64 }
+
+func TestSlotFaults(t *testing.T) {
+	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
+	if _, err := b.SlotFaults(0); err == nil {
+		t.Fatal("no fault map must be an error, not zero faults")
+	}
+	if err := b.start(policy, members, nil, fakeFaults{1: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := b.SlotFaults(0); err != nil || n != 0 {
+		t.Fatalf("slot 0: %d %v", n, err)
+	}
+	if n, err := b.SlotFaults(1); err != nil || n != 3 {
+		t.Fatalf("slot 1: %d %v", n, err)
 	}
 }
