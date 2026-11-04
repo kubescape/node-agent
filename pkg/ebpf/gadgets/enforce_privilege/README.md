@@ -98,8 +98,10 @@ policy:
   (`CLONE_INTO_CGROUP`) is refused the same way. An audit-only slot, or an
   unbound cgroup, allows the fork. A new thread of an armed group leader is
   covered through the leader, so it is never refused. An unarmed parent (for
-  example a runtime helper) is out of scope, not a failure. Every failed mark is
-  counted in `counters` slot 4. Moving a container to another slot arms its
+  example a runtime helper) is out of scope, not a failure. Every failed mark that
+  leaves a task unarmed is counted in `counters` slot 4. A failed mark of a new
+  thread is not counted: the thread is covered through its leader, and it is
+  marked at its own exec. Moving a container to another slot arms its
   running tasks again.
 - **Tracking faults.** A failed mark in an enforcing slot (a refused fork, or a
   lost mark at exec, which cannot be refused) is also counted per slot in

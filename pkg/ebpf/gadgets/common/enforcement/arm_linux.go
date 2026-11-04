@@ -110,10 +110,15 @@ func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) 
 			// A non-leader thread on a kernel without PIDFD_THREAD: the
 			// BPF rule judges it through its group leader, which can be
 			// outside this cgroup, so arm the leader.
-			fd, err = openLeader(scanner.Text(), hostMntns)
+			fd, err = openLeader(scanner.Text())
 		}
 		if errors.Is(err, unix.ESRCH) || errors.Is(err, fs.ErrNotExist) {
-			seen[tid] = true // exited
+			// Exited, unless the thread still runs: then it cannot be
+			// armed, and the caller must not report it protected.
+			if _, serr := os.Stat(filepath.Join(host.HostProcFs, scanner.Text())); serr == nil {
+				return fmt.Errorf("task %d runs but cannot be armed: %w", tid, err)
+			}
+			seen[tid] = true
 			continue
 		}
 		if err != nil {
@@ -129,10 +134,12 @@ func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) 
 	return scanner.Err()
 }
 
-// openLeader opens a pidfd of the thread group leader of tid. A leader in the
-// runtime mount namespace is a runtime helper: arming it would judge the
-// runtime, so the thread cannot be armed and the caller gets an error.
-func openLeader(tid string, hostMntns uint64) (int, error) {
+// openLeader opens a pidfd of the thread group leader of tid. All threads of a
+// process share one mount namespace (setns and unshare of a mount namespace
+// fail in a multithreaded process), so the caller's check of the thread's
+// namespace also covers the leader. A leader that has exited while other
+// threads run is a zombie; pidfd_open still works on it.
+func openLeader(tid string) (int, error) {
 	data, err := os.ReadFile(filepath.Join(host.HostProcFs, tid, "status"))
 	if err != nil {
 		return -1, err
@@ -148,13 +155,6 @@ func openLeader(tid string, hostMntns uint64) (int, error) {
 	}
 	if tgid <= 0 {
 		return -1, fmt.Errorf("no leader for task %s", tid)
-	}
-	mntns, err := mntnsOf(strconv.Itoa(tgid))
-	if err != nil {
-		return -1, err
-	}
-	if mntns == hostMntns {
-		return -1, fmt.Errorf("thread %s has a runtime helper as leader", tid)
 	}
 	return unix.PidfdOpen(tgid, 0)
 }
