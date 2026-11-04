@@ -74,7 +74,7 @@ Paths are the paths the container sees (`d_path` resolves against the task's
 root). They are the **resolved** paths: a symbolic link in the name a program
 opens does not appear. A pattern for `/var/run/x` does not match a file whose
 path is `/run/x` (`/var/run` links to `/run` in Debian-based images), and a
-file of a Kubernetes Secret, ConfigMap or projected volume is
+file of an orchestrator secret, config map or projected volume is
 `dir/..<timestamp>/file`. The owner adds such names (`/dir/..*/file`) to its
 patterns; the gadget matches literally. A task whose root is not the root of
 its mount (a chroot to a directory) gives paths relative to that directory:
