@@ -282,6 +282,10 @@ func validateTarget(t api.NetworkTarget) error {
 		if _, err := netip.ParsePrefix(c); err != nil {
 			return fmt.Errorf("invalid CIDR %q", c)
 		}
+		// parseDest is what the translation uses: reject here what it drops.
+		if _, ok := parseDest(c); !ok {
+			return fmt.Errorf("CIDR %q: an IPv4-mapped IPv6 prefix must be /96 or longer", c)
+		}
 	}
 	for _, p := range t.Ports {
 		if _, err := portRange(p); err != nil {

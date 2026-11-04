@@ -98,9 +98,15 @@ func TestTranslateNetworkRules(t *testing.T) {
 
 func TestTranslateNetworkValidates(t *testing.T) {
 	for name, mutate := range map[string]func(*api.PolicySpec, *NetworkExtras){
-		"proto":          func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.Proto = []string{"sctp"} },
-		"direction":      func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.Direction = "ingress" },
-		"destClass":      func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.DestClass = []string{""} },
+		"proto":     func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.Proto = []string{"sctp"} },
+		"direction": func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.Direction = "ingress" },
+		"destClass": func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.DestClass = []string{""} },
+		// Shorter than /96, an IPv4-mapped prefix has no IPv4 form: it was
+		// accepted and then dropped by the translation.
+		"mapped CIDR": func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.CIDR = []string{"::ffff:0:0/80"} },
+		"mapped except": func(_ *api.PolicySpec, x *NetworkExtras) {
+			x.Except = map[string][]NetworkExcept{"r": {{Target: &api.NetworkTarget{CIDR: []string{"::ffff:192.0.2.0/88"}}}}}
+		},
 		"listen default": func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Default.Listen = "" },
 		"actor": func(s *api.PolicySpec, _ *NetworkExtras) {
 			s.Network.Rules[0].Actor = &api.Actor{Path: []string{"/bin/curl"}}
@@ -399,5 +405,16 @@ func TestNetworkUnresolvableDenyKeepsEnforceDefault(t *testing.T) {
 		if rank, rule := kernelDecision(t, plan.Egress, "192.0.2.10", 443, netpolicy.ProtoTCP); rank != netpolicy.RankAllow || rule != "web" {
 			t.Fatalf("%s: 192.0.2.10:443 got rank %d rule %q, want allow web", name, rank, rule)
 		}
+	}
+}
+
+func TestNetworkMappedCIDRBecomesIPv4(t *testing.T) {
+	spec := netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"::ffff:192.0.2.0/120"}}))
+	if r := ruleByName(translate(t, spec, NetworkExtras{}, DestClasses{}), "r"); r == nil || !reflect.DeepEqual(r.CIDRs, []string{"192.0.2.0/24"}) {
+		t.Fatalf("mapped /120 %+v", r)
+	}
+	spec.Network.Rules[0].Target.CIDR = []string{"::ffff:0:0/80"}
+	if _, err := TranslateNetwork(spec, NetworkExtras{}, DestClasses{}); err == nil || !strings.Contains(err.Error(), "/96 or longer") {
+		t.Fatalf("mapped /80 must be rejected with its reason, got %v", err)
 	}
 }
