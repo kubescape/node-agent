@@ -144,6 +144,11 @@ policy:
 - Unix and packet sockets and `bind`/`listen` are not judged. Raw sockets are
   not judged by the cgroup tier (see Program tiers).
 - A task is judged by its cgroup at the time of the call (both tiers).
+- A socket that connected before its container was bound, or before a deny
+  applied to it, keeps sending: a send without an address is not judged. A
+  controller can prepare the slot in advance and bind a new container as soon
+  as its cgroup exists. A live change to a stricter policy does not cut
+  existing connections.
 - SCTP is not covered. The cgroup tier has no sendmsg hook for a send that
   opens a new SCTP association. In the LSM tier, `SCTP_SOCKOPT_CONNECTX`
   goes through `security_sctp_bind_connect`, which has no program here.
