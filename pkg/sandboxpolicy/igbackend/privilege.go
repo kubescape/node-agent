@@ -292,7 +292,10 @@ func (b *PrivilegeBackend) Prepare(ctx context.Context, plans []sandboxpolicy.Pl
 		return fmt.Errorf("privilege backend is closed")
 	}
 	prepared := map[string][]sandboxpolicy.CompiledPolicy{}
-	missing := false
+	// Without an instance, start one even with no plans: the first gadget load
+	// is slow, so the first container of a privilege policy would find no
+	// instance ready (for example the first pod after a node-agent restart).
+	missing := b.instance == nil
 	for _, plan := range plans {
 		combination, policies := Combination(plan)
 		if len(policies) == 0 {

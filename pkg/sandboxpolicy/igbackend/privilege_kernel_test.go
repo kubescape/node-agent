@@ -87,6 +87,13 @@ func TestPrivilegeBackendKernel(t *testing.T) {
 	if err = unshare(); err != nil {
 		t.Fatalf("baseline unshare failed: %v", err)
 	}
+	// An instance with no slot loads before any container needs it.
+	if err := backend.Prepare(ctx, nil); err != nil || backend.Stats().Replacements != 1 {
+		t.Fatalf("empty instance: %v %+v", err, backend.Stats())
+	}
+	if err = unshare(); err != nil {
+		t.Fatalf("an empty instance must judge nothing: %v", err)
+	}
 	if r, err := backend.Replace(ctx, binding, plan("deny", api.ActionDeny)); err != nil || !r.Committed {
 		t.Fatalf("deny plan: %+v %v", r, err)
 	}
@@ -101,7 +108,7 @@ func TestPrivilegeBackendKernel(t *testing.T) {
 		if r, err := backend.Replace(ctx, second, plan("deny", api.ActionDeny)); err != nil || !r.Committed {
 			t.Fatalf("second container, same policy: %+v %v", r, err)
 		}
-		if s := backend.Stats(); s.Prepared != 1 || s.Replacements != 1 {
+		if s := backend.Stats(); s.Prepared != 1 || s.Replacements != 2 {
 			t.Fatalf("same policy must be a live bind: %+v", s)
 		}
 		if unshareIn(id2) == nil {
@@ -112,7 +119,7 @@ func TestPrivilegeBackendKernel(t *testing.T) {
 		if r, err := backend.Replace(ctx, second, other); err != nil || !r.Committed {
 			t.Fatalf("second container, other policy: %+v %v", r, err)
 		}
-		if s := backend.Stats(); s.Replacements != 2 {
+		if s := backend.Stats(); s.Replacements != 3 {
 			t.Fatalf("a new combination must replace the instance: %+v", s)
 		}
 		if unshareIn(id2) != nil {

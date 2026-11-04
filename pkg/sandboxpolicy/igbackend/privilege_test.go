@@ -362,3 +362,21 @@ func TestPrivilegePodUnboundWhenNewSlotIsMissing(t *testing.T) {
 		t.Fatal("the pod must be bound once the new slot exists")
 	}
 }
+
+func TestPrivilegePrepareStartsInstanceWithoutPlans(t *testing.T) {
+	e := &fakePrivilegeEngine{}
+	b, _ := NewPrivilege(e, nil, "n")
+	ctx := context.Background()
+	// A privilege policy exists but no pod uses it yet: load the gadget now,
+	// so the first container does not wait for the slow first load.
+	if err := b.Prepare(ctx, nil); err != nil || len(e.instances) != 1 || e.configs[0].Policy.Slots != 0 {
+		t.Fatalf("first prepare: %v instances=%d", err, len(e.instances))
+	}
+	if err := b.Prepare(ctx, nil); err != nil || len(e.instances) != 1 {
+		t.Fatalf("a running instance must be kept: %v instances=%d", err, len(e.instances))
+	}
+	plan := privPlan("r1", privPolicy("p1", api.ActionAllow, denyMount))
+	if _, err := b.Replace(ctx, privBinding(1), plan); err != nil || len(e.instances) != 2 {
+		t.Fatalf("first container: %v instances=%d", err, len(e.instances))
+	}
+}
