@@ -48,7 +48,7 @@ func TestKernelConstantsMatchHeader(t *testing.T) {
 		"FILE_GLOB_PART_MAX": KernelGlobPartMax, "FILE_MAX_DOCS": KernelMaxDocs, "FILE_ACCESS_KINDS": KernelAccessKinds,
 		"FILE_PATH_MAX": KernelPathMax, "FILE_NAME_MAX": KernelNameMax, "FILE_FNV_PRIME": FNVPrime,
 		"FILE_RULE_FROM_IMAGE": RuleFromImage, "FILE_RULE_ANY_PATH": RuleAnyPath, "FILE_RULE_GUARD": RuleGuard,
-		"FILE_RULE_ID_DEFAULT": RuleIDDefault, "FILE_RULE_ID_UNRESOLVED": RuleIDUnresolved,
+		"FILE_RULE_NEW_NAME_GUARD": RuleNewNameGuard, "FILE_RULE_ID_DEFAULT": RuleIDDefault, "FILE_RULE_ID_UNRESOLVED": RuleIDUnresolved,
 		"FILE_SLOT_FROM_IMAGE": SlotFromImage,
 	} {
 		got, ok := defines[name]
@@ -196,6 +196,9 @@ func TestMoveSources(t *testing.T) {
 	noChmod := Rule{Name: "nochmod", Action: "deny", Access: []string{AccessChmod}, Paths: []string{"/etc/**"}}
 	tmp := Rule{Name: "tmp", Action: "allow", Access: []string{AccessCreate, AccessWrite, AccessDelete}, Paths: []string{"/tmp/**"}}
 	rename, create := 1<<accessIndex(AccessRename), 1<<accessIndex(AccessCreate)
+	awsConfig := Rule{Name: "aws", Action: "deny", Access: []string{AccessWrite, AccessCreate}, Paths: []string{"/root/.aws/config"}}
+	awsRead := Rule{Name: "aws", Action: "deny", Access: []string{AccessRead}, Paths: []string{"/root/.aws/**"}}
+	preload := Rule{Name: "preload", Action: "deny", Access: []string{AccessWrite}, Paths: []string{"/etc/ld.so.preload"}}
 	for _, tc := range []struct {
 		name  string
 		d     Document
@@ -225,6 +228,32 @@ func TestMoveSources(t *testing.T) {
 		// A rename allow on /app/** does not make /app/x writable.
 		{"rename allow, write deny", doc(writeDeny, Rule{Name: "mv", Action: "allow", Access: []string{AccessRename}, Paths: []string{"/app/**"}}),
 			MoveSourceMask, "/app/x", RankDenyEnforce, "default", 1},
+		// Review 2 finding 3: a directory moved, linked or exchanged onto a
+		// parent written in a write or create deny brings the file with it.
+		{"new name guard, rename", doc(allDefaults("allow"), awsConfig), rename | NewFileMask | NewNameGuardMask, "/root/.aws",
+			RankDenyEnforce, "d/aws", AccessNewName},
+		{"new name guard, replacing rename", doc(allDefaults("allow"), awsConfig), rename | ReplacedMask | NewNameGuardMask, "/root/.aws",
+			RankDenyEnforce, "d/aws", AccessNewName},
+		// The write deny guards /root/.aws as a move source too.
+		{"new name guard, exchange", doc(allDefaults("allow"), awsConfig), MoveSourceMask | ReplacedMask | NewNameGuardMask, "/root/.aws",
+			RankDenyEnforce, "d/aws", AccessMoveSource},
+		{"new name guard, create-only deny", doc(allDefaults("allow"), Rule{Name: "aws", Action: "deny", Access: []string{AccessCreate},
+			Paths: []string{"/root/.aws/config"}}), MoveSourceMask | ReplacedMask | NewNameGuardMask, "/root/.aws",
+			RankDenyEnforce, "d/aws", AccessNewName},
+		{"new name guard, symbolic link", doc(allDefaults("allow"), awsConfig), create | NewNameGuardMask, "/root/.aws",
+			RankDenyEnforce, "d/aws", AccessNewName},
+		{"new name guard, mkdir", doc(allDefaults("allow"), awsConfig), create, "/root/.aws", RankAllow, "default", 2},
+		{"new name guard, a sibling", doc(allDefaults("allow"), awsConfig), rename | NewFileMask | NewNameGuardMask, "/root/.awsx",
+			RankAllow, "default", 1},
+		{"no new name guard for a read deny", doc(allDefaults("allow"), awsRead), rename | NewFileMask | NewNameGuardMask, "/root",
+			RankAllow, "default", 1},
+		// Review 2 finding 4: a new name that does not exist yet is a write.
+		{"write-only deny, rename onto a new name", doc(allDefaults("allow"), preload), rename | NewFileMask | NewNameGuardMask,
+			"/etc/ld.so.preload", RankDenyEnforce, "d/preload", 1},
+		{"write-only deny, hard link onto a new name", doc(allDefaults("allow"), preload), NewFileMask | NewNameGuardMask,
+			"/etc/ld.so.preload", RankDenyEnforce, "d/preload", 1},
+		{"write-only deny, another new name", doc(allDefaults("allow"), preload), NewFileMask | NewNameGuardMask,
+			"/etc/other", RankAllow, "default", 1},
 	} {
 		c, err := CompileKernel(tc.d, 1)
 		if err != nil {

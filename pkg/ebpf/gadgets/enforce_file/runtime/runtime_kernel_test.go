@@ -23,8 +23,11 @@ package runtime
 // (arguments: iterations, path; output: ns per open+close), measures the cost
 // with no program loaded, unbound, and bound to a ~50 pattern policy.
 // FILE_HELPER_BINARY, a static helper in the bound container (`exchange A B`:
-// renameat2 with RENAME_EXCHANGE; `chroot-read DIR PATH`: chroot, then read),
-// runs the exchange and chroot cases.
+// renameat2 with RENAME_EXCHANGE; `chroot-read DIR PATH`: chroot, then read;
+// `setcap P`, `setacl P`, `setuser P`: setxattr of security.capability,
+// system.posix_acl_access (u::rw,g::r,o::rw), user.r2; `tmpfile-link DIR N`:
+// an O_TMPFILE file in DIR linked to N through /proc/self/fd), runs the
+// exchange, chroot, extended attribute and O_TMPFILE cases.
 
 import (
 	"context"
@@ -73,6 +76,7 @@ const (
 	accessRename
 	accessChmod
 	accessMoveSource
+	accessNewName
 	anyAccess = 99
 )
 
@@ -268,6 +272,10 @@ func moveDocuments() []filepolicy.Document {
 		open("chmod-etc", filepolicy.Rule{Name: "nochmod", Action: "deny", Access: []string{filepolicy.AccessChmod}, Paths: []string{"/etc/**"}}),
 		open("no-delete", filepolicy.Rule{Name: "nodel", Action: "deny", Access: []string{filepolicy.AccessDelete}, Paths: []string{"/**"}}),
 		writeDeny,
+		// Review 2 findings 3 and 4: new names.
+		open("new-names",
+			filepolicy.Rule{Name: "aws", Action: "deny", Access: []string{filepolicy.AccessWrite, filepolicy.AccessCreate}, Paths: []string{"/root/.aws/config"}},
+			filepolicy.Rule{Name: "preload", Action: "deny", Access: []string{filepolicy.AccessWrite}, Paths: []string{"/etc/ld.so.preload"}}),
 	}
 }
 
@@ -276,6 +284,7 @@ const (
 	slotChmodEtc = 3 + iota
 	slotNoDelete
 	slotWriteDeny
+	slotNewNames
 )
 
 // rules50 is the ~50 pattern policy of the cost measurement.
@@ -330,7 +339,8 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 	// writable layer only.
 	f.ok(t, f.id, "mkdir -p /work/secret /work/deep/x /work/.claude /work/project/src/main && echo k > /work/secret/key && "+
 		"echo f > /work/deep/x/f && echo u > /var/upper.txt && echo b > /work/b && echo a > /work/a && "+
-		"echo s > /work/.claude/settings.json && echo o > /work/.claude/ok && echo m > "+benchPath+" && rm -f /newfile")
+		"echo s > /work/.claude/settings.json && echo o > /work/.claude/ok && echo m > "+benchPath+" && rm -f /newfile && "+
+		"echo v > /dev/shm/volume-file")
 	var baseline float64
 	if os.Getenv("FILE_BENCH_BINARY") != "" {
 		baseline = f.bench(t)
@@ -339,7 +349,7 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 
 	moves := moveDocuments()
 	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{
-		{labDocument("lab", "enforce")}, {labDocument("lab-audit", "audit")}, {rules50(t)}, {moves[0]}, {moves[1]}, {moves[2]}}, 1)
+		{labDocument("lab", "enforce")}, {labDocument("lab-audit", "audit")}, {rules50(t)}, {moves[0]}, {moves[1]}, {moves[2]}, {moves[3]}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,6 +455,33 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		// A file created in the container is not an image file.
 		f.ok(t, f.id, "echo x > /etc/created.conf && echo y >> /etc/created.conf")
 	})
+	t.Run("file capabilities and ACLs are chmod", func(t *testing.T) {
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		// Review 2 finding 2: setfacl and setcap change what a file allows
+		// without path_chmod. chmod is denied by default here.
+		f.denied(t, f.id, helper+" setacl /var/upper.txt")
+		f.denied(t, f.id, helper+" setcap /var/upper.txt")
+		f.ok(t, f.id, "test \"$(stat -c %a /var/upper.txt)\" = 644")
+		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessChmod, path: "/var/upper.txt"})
+		// Other extended attributes are not judged.
+		f.ok(t, f.id, helper+" setuser /var/upper.txt")
+		// Allowed in the workspace and in /etc (rule etc), where an image
+		// file is copied up: overlayfs' inner calls on the upper file
+		// system are not judged.
+		f.mu.Lock()
+		before := len(f.verdicts)
+		f.mu.Unlock()
+		f.ok(t, f.id, helper+" setacl /work/a && test \"$(stat -c %a /work/a)\" = 646 && "+helper+" setcap /work/a")
+		f.ok(t, f.id, helper+" setacl /etc/host.conf && test \"$(stat -c %a /etc/host.conf)\" = 646 && "+helper+" setcap /etc/bash.bashrc")
+		time.Sleep(300 * time.Millisecond)
+		f.mu.Lock()
+		for _, v := range f.verdicts[before:] {
+			t.Errorf("verdict for an allowed attribute change: %+v", v)
+		}
+		f.mu.Unlock()
+	})
 	t.Run("chroot is an unresolved path", func(t *testing.T) {
 		if helper == "" {
 			t.Skip("FILE_HELPER_BINARY is not set")
@@ -511,6 +548,21 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		}
 		f.ok(t, f.id, "echo a > /etc/sedtest && sed -i s/a/b/ /etc/sedtest && grep -q b /etc/sedtest && mv /etc/sedtest /etc/sedtest2")
 		f.denied(t, f.id, "chmod 600 /etc/sedtest2")
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		f.denied(t, f.id, helper+" setacl /etc/sedtest2")
+		f.denied(t, f.id, helper+" setcap /etc/sedtest2")
+		f.denied(t, f.id, helper+" setacl /etc/passwd") // an image file: denied before any copy-up
+		f.waitVerdict(t, verdict{rule: "chmod-etc/nochmod", deny: 1, mode: 2, access: accessChmod, path: "/etc/passwd", fromImage: 1})
+		// Outside /etc an image file is copied up. The program judges the
+		// overlay call and skips overlayfs' inner calls on the upper file
+		// system; judged as unresolved, they would take the chmod deny.
+		f.ok(t, f.id, helper+" setcap /usr/bin/tail && "+helper+" setacl /usr/lib/os-release && test \"$(stat -c %a /usr/lib/os-release)\" = 646")
+		f.ok(t, f.id, "tail -n1 /etc/sedtest2")
+		// A volume (the /dev/shm tmpfs) is another file system: unresolved.
+		f.denied(t, f.id, helper+" setcap /dev/shm/volume-file")
+		f.waitVerdict(t, verdict{rule: "unresolved-path", deny: 1, mode: 2, access: accessChmod})
 	})
 	t.Run("pathless delete deny keeps rename and link", func(t *testing.T) {
 		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: slotNoDelete}); err != nil {
@@ -533,6 +585,36 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.denied(t, f.id, "echo evil > /tmp/evil && "+helper+" exchange /tmp/evil /etc/passwd")
 		f.ok(t, f.id, "grep -q '^root:' /etc/passwd && grep -qx evil /tmp/evil")
 		f.ok(t, f.id, "echo f > /tmp/f && "+helper+" exchange /tmp/evil /tmp/f && grep -qx evil /tmp/f")
+	})
+	t.Run("new names: guard and write", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: slotNewNames}); err != nil {
+			t.Fatal(err)
+		}
+		// Review 2 finding 3: [write, create] denied on /root/.aws/config. A
+		// directory with its own config moved or linked onto /root/.aws.
+		f.denied(t, f.id, "mkdir -p /tmp/aws && echo '[default]' > /tmp/aws/config && mv /tmp/aws /root/.aws")
+		f.waitVerdict(t, verdict{rule: "new-names/aws", deny: 1, mode: 2, access: accessNewName, path: "/root/.aws"})
+		f.denied(t, f.id, "ln -s /tmp/aws /root/.aws")
+		f.ok(t, f.id, "test ! -e /root/.aws && test ! -L /root/.aws")
+		// An empty /root/.aws replaced by the directory.
+		f.denied(t, f.id, "mkdir /root/.aws && mv -T /tmp/aws /root/.aws")
+		f.ok(t, f.id, "test ! -e /root/.aws/config && echo c > /root/.aws/credentials && rm -r /root/.aws && mv /tmp/aws /root/aws2 && rm -r /root/aws2")
+		// Review 2 finding 4: write denied on /etc/ld.so.preload, create
+		// allowed. A new name that does not exist yet is a write.
+		f.denied(t, f.id, "echo e > /tmp/pre && mv /tmp/pre /etc/ld.so.preload")
+		f.waitVerdict(t, verdict{rule: "new-names/preload", deny: 1, mode: 2, access: accessWrite, path: "/etc/ld.so.preload"})
+		f.denied(t, f.id, "ln /tmp/pre /etc/ld.so.preload")
+		f.ok(t, f.id, "test ! -e /etc/ld.so.preload && mv /tmp/pre /etc/new-name.conf && ln /etc/new-name.conf /etc/new-name2.conf")
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		// O_TMPFILE, then linkat through /proc/self/fd. The helper exits 4
+		// when the root file system has no O_TMPFILE (overlayfs on 6.8).
+		if code, out := f.sh(t, f.id, helper+" tmpfile-link /tmp /tmp/tmpfile-probe"); code == 4 {
+			t.Skipf("no O_TMPFILE on the root file system: %s", out)
+		}
+		f.denied(t, f.id, helper+" tmpfile-link /tmp /etc/ld.so.preload")
+		f.ok(t, f.id, helper+" tmpfile-link /tmp /etc/new-name3.conf && grep -qx evil /etc/new-name3.conf")
 	})
 	t.Run("audit reports without denying", func(t *testing.T) {
 		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 1}); err != nil {

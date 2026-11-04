@@ -36,9 +36,10 @@ const (
 	KernelModeAudit   = 1
 	KernelModeEnforce = 2
 
-	RuleFromImage = 1
-	RuleAnyPath   = 2
-	RuleGuard     = 4
+	RuleFromImage    = 1
+	RuleAnyPath      = 2
+	RuleGuard        = 4
+	RuleNewNameGuard = 8
 
 	// SlotFromImage is set by the owner, not the compiler, when the
 	// kernel's overlay inode layout is the one the program reads.
@@ -47,15 +48,20 @@ const (
 	RuleIDDefault    = 1
 	RuleIDUnresolved = 2
 
-	// AccessMoveSource indexes Unresolved and the event access field for
-	// the move-source guard.
+	// AccessMoveSource and AccessNewName index Unresolved, RuleUnion and
+	// the event access field for the move-source and the new-name guard.
 	AccessMoveSource = 6
+	AccessNewName    = 7
 
 	// MoveSourceMask is FILE_MOVE_SOURCE_MASK: the access kinds (bits)
 	// judged on a move source. ReplacedMask is FILE_REPLACED_MASK: added
-	// on a name whose file is replaced.
-	MoveSourceMask = 1<<0 | 1<<1 | 1<<4 | 1<<AccessMoveSource
-	ReplacedMask   = 1<<1 | 1<<3
+	// on a name whose file is replaced. NewFileMask is FILE_NEW_FILE_MASK:
+	// added on a new name that does not exist yet. NewNameGuardMask is
+	// FILE_NEW_NAME_GUARD_MASK: added on every new name.
+	MoveSourceMask   = 1<<0 | 1<<1 | 1<<4 | 1<<AccessMoveSource
+	ReplacedMask     = 1<<1 | 1<<3
+	NewFileMask      = 1<<1 | 1<<2
+	NewNameGuardMask = 1 << AccessNewName
 
 	FNVPrime = 0x100000001b3
 )
@@ -144,10 +150,10 @@ type SlotValue struct {
 	Defaults [KernelAccessKinds]PolicyValue
 	// Bit i: policy i of the slot has an enforce default deny.
 	DenyEnforceDocs [KernelAccessKinds]uint32
-	// Rank for an unresolved path, per access kind and AccessMoveSource.
+	// Rank for an unresolved path, per access kind and guard.
 	Unresolved [8]uint8
-	// Per access kind and AccessMoveSource: a rule without paths judges it;
-	// the union of its rules' match bits (guard bits for the guard).
+	// Per access kind and guard: a rule without paths judges it (never a
+	// guard); the union of its rules' match bits (guard bits for a guard).
 	AnyPath   [8]uint8
 	RuleUnion [8]Bits
 	Globs     [KernelMaxGlobs]GlobEntry
@@ -467,10 +473,11 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 					value.AnyPath[a] |= anyPath
 				}
 			}
-			if e.Flags&RuleGuard != 0 {
-				value.Unresolved[AccessMoveSource] = max(value.Unresolved[AccessMoveSource], e.Rank)
-				value.RuleUnion[AccessMoveSource] = value.RuleUnion[AccessMoveSource].or(e.Guard)
-				value.AnyPath[AccessMoveSource] |= anyPath
+			for flag, guard := range map[uint8]int{RuleGuard: AccessMoveSource, RuleNewNameGuard: AccessNewName} {
+				if e.Flags&flag != 0 {
+					value.Unresolved[guard] = max(value.Unresolved[guard], e.Rank)
+					value.RuleUnion[guard] = value.RuleUnion[guard].or(e.Guard)
+				}
 			}
 			enforce = enforce || e.Rank == RankDenyEnforce
 		}
@@ -578,10 +585,13 @@ func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, 
 	if e.Except, err = seg.bits(excepts); err != nil {
 		return e, err
 	}
-	// The guard: parents of the paths of a deny rule of read or write. A
-	// move source is judged with the full decision for read and write too,
-	// so the rule's own paths need no guard.
-	if r.Action == "deny" && e.Access&(1<<accessIndex(AccessRead)|1<<accessIndex(AccessWrite)) != 0 {
+	// The guard: parents of the paths of a deny rule. It guards move
+	// sources for a rule of read or write, and new names for a rule of
+	// write or create. Both are judged with the full decision of those
+	// access kinds too, so the rule's own paths need no guard.
+	moveSource := e.Access&(1<<accessIndex(AccessRead)|1<<accessIndex(AccessWrite)) != 0
+	newName := e.Access&(1<<accessIndex(AccessWrite)|1<<accessIndex(AccessCreate)) != 0
+	if r.Action == "deny" && (moveSource || newName) {
 		for _, p := range paths {
 			g, err := seg.guard(p)
 			if err != nil {
@@ -589,8 +599,11 @@ func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, 
 			}
 			e.Guard = e.Guard.or(g)
 		}
-		if e.Guard.any() {
+		if e.Guard.any() && moveSource {
 			e.Flags |= RuleGuard
+		}
+		if e.Guard.any() && newName {
+			e.Flags |= RuleNewNameGuard
 		}
 	}
 	return e, nil

@@ -10,26 +10,34 @@
 // - file_open: read (FMODE_READ), write (FMODE_WRITE or O_TRUNC). A
 //   read-write open judges both and keeps the most limiting verdict.
 // - path_truncate: write. path_chmod, path_chown: chmod.
+// - inode_setxattr (file capabilities, POSIX ACLs), inode_set_acl: chmod.
 // - path_mknod (open with O_CREAT, mknod, mkfifo, AF_UNIX bind), path_mkdir,
 //   path_symlink, path_link (new name): create. A create is denied here, not
 //   at file_open, so a denied create leaves no empty file.
 // - path_unlink, path_rmdir: delete.
 // - path_rename: both names are judged as rename; the new name also as create
-//   (a new name) or as write and delete (it replaces a file).
+//   and write (a new name) or as write and delete (it replaces a file).
 // - Move sources (the old name of a rename or a hard link, both names of
 //   RENAME_EXCHANGE) are judged as rename, read and write with the full
-//   decision, and against the guard: the parent directories in the patterns
-//   of deny rules of read or write. So a hard link or a rename cannot give a
-//   file a name where it can be read or written when its own name cannot.
-//   Both names of RENAME_EXCHANGE are also judged as write and delete.
+//   decision, and against the move-source guard: the parent directories in
+//   the patterns of deny rules of read or write. So a hard link or a rename
+//   cannot give a file a name where it can be read or written when its own
+//   name cannot. Both names of RENAME_EXCHANGE are also judged as write and
+//   delete.
+// - New names (of a rename, a hard link or a symbolic link; both names of
+//   RENAME_EXCHANGE) are also judged against the new-name guard: the parent
+//   directories in the patterns of deny rules of write or create. So a
+//   directory cannot be moved onto the parent of a protected file. A hard
+//   link's new name is a create and a write.
 //
 // Path source: bpf_d_path (the path from the task's root, so the container
 // path). A task whose root is not the root of its mount (a chroot to a
-// directory) gives paths that name other files: they count as unresolved. path_mknod cannot call bpf_d_path (6.8 and 6.12), and the old name
-// of a hard link has no struct path: both walk the dentries and mounts the
-// same way d_path does. A path that cannot be resolved (error, longer than
-// FILE_PATH_MAX, deeper than FILE_WALK_DEPTH) takes the most limiting rule or
-// default of the access kind (fail closed).
+// directory) gives paths that name other files: they count as unresolved.
+// path_mknod cannot call bpf_d_path (6.8 and 6.12), the old name of a hard
+// link has no struct path, and the inode hooks have no mount: they walk the
+// dentries and mounts the same way d_path does. A path that cannot be
+// resolved (error, longer than FILE_PATH_MAX, deeper than FILE_WALK_DEPTH)
+// takes the most limiting rule or default of the access kind (fail closed).
 //
 // Not judged: tasks outside a bound cgroup, tasks not armed (see arming.h:
 // the container runtime's own setup and exec helpers), and overlayfs'
@@ -86,6 +94,8 @@ enum file_hook : __u32 {
 	FILE_HOOK_PATH_RENAME,
 	FILE_HOOK_PATH_CHMOD,
 	FILE_HOOK_PATH_CHOWN,
+	FILE_HOOK_INODE_SETXATTR,
+	FILE_HOOK_INODE_SET_ACL,
 };
 
 struct event {
@@ -100,7 +110,7 @@ struct event {
 	__u32 slot;
 	char comm[16];
 	enum file_hook hook_raw;
-	// The access kind that decided (move_source: the guard).
+	// The access kind that decided (move_source, new_name: a guard).
 	enum file_access access_raw;
 	// 1 when the file was a lower-layer (image) file.
 	__u32 from_image;
@@ -129,7 +139,8 @@ struct file_walk_state {
 
 // Per-CPU scratch. owner is the task using it: another task that runs the
 // program on this CPU while a hook is preempted changes it, and the hook then
-// judges its path again.
+// judges its path again. evowner is the task whose path is in evpath,
+// written before the copy and checked after the event copies it.
 struct file_scratch {
 	char buf[FILE_BUF_SIZE + FILE_BUF_SLACK];
 	char evpath[FILE_EVENT_PATH];
@@ -137,6 +148,7 @@ struct file_scratch {
 	struct file_walk_state walk;
 	struct file_bits matched;
 	__u64 owner;
+	__u64 evowner;
 };
 
 struct {
@@ -415,6 +427,7 @@ static __always_inline void file_take(struct file_eval *e,
 	e->from_image = from_image;
 	if (m->rank < POLICY_RANK_DENY_AUDIT)
 		return;
+	e->x->evowner = e->me;
 	e->x->evpath[0] = 0;
 	if (len <= 0)
 		return;
@@ -450,7 +463,7 @@ static __always_inline bool file_judge_mask(struct file_eval *e, long len,
 	}
 	if (!resolved) {
 		best.rank = 0;
-		for (__u32 a = 0; a <= FILE_ACCESS_MOVE_SOURCE; a++) {
+		for (__u32 a = 0; a <= FILE_ACCESS_NEW_NAME; a++) {
 			struct policy_match m = {};
 
 			if (!(mask & (1U << a)))
@@ -514,6 +527,10 @@ static __always_inline int file_verdict(enum file_hook hook,
 		ev->from_image = e->from_image;
 		bpf_probe_read_kernel_str(ev->path, sizeof(ev->path),
 					  e->x->evpath);
+		// Another task on this CPU wrote its own path meanwhile: the
+		// event keeps the verdict and loses the path.
+		if (e->x->evowner != e->me)
+			ev->path[0] = 0;
 		bpf_ringbuf_submit(ev, 0);
 		verdict_count(VERDICT_COUNT_SUBMITTED);
 	} else {
@@ -604,6 +621,62 @@ int BPF_PROG(ig_file_chown, const struct path *path)
 	return file_attr(FILE_HOOK_PATH_CHOWN, path);
 }
 
+// file_inode_attr judges a change of what a file allows through an extended
+// attribute (a file capability, a POSIX ACL) as chmod. These hooks have a
+// dentry and no mount. A dentry on the super block of the task's root mount
+// (which must be that super block's root) gets its path by the walk from
+// that mount. overlayfs repeats the change on the inode of its upper file
+// system, and copies a file's attributes up the same way, with its mounter's
+// credentials: that call is not judged (the overlay call was). Any other
+// dentry (a volume) is an unresolved path.
+static __always_inline int file_inode_attr(enum file_hook hook,
+					   struct dentry *dentry)
+{
+	struct task_struct *task = bpf_get_current_task_btf();
+	struct file_eval e = {};
+	struct super_block *sb;
+	struct vfsmount *root;
+	bool fi;
+
+	if (!file_scope(&e))
+		return 0;
+	root = BPF_CORE_READ(task, fs, root.mnt);
+	sb = BPF_CORE_READ(root, mnt_sb);
+	if (BPF_CORE_READ(dentry, d_sb) == sb &&
+	    BPF_CORE_READ(root, mnt_root) == BPF_CORE_READ(sb, s_root)) {
+		fi = file_dentry_from_image(e.s, dentry);
+		FILE_JUDGE(&e, file_resolve_walk(dentry, root, e.x, &_start),
+			   BIT(FILE_ACCESS_CHMOD), fi);
+		return file_verdict(hook, &e);
+	}
+	if (BPF_CORE_READ(sb, s_magic) == OVERLAYFS_SUPER_MAGIC &&
+	    BPF_CORE_READ(task, cred) != BPF_CORE_READ(task, real_cred))
+		return 0;
+	FILE_JUDGE(&e, -1, BIT(FILE_ACCESS_CHMOD), false);
+	return file_verdict(hook, &e);
+}
+
+// Before 6.2 POSIX ACLs are set through setxattr too.
+SEC("lsm/inode_setxattr")
+int BPF_PROG(ig_file_setxattr, void *idmap, struct dentry *dentry,
+	     const char *name)
+{
+	char n[32];
+
+	if (bpf_probe_read_kernel_str(n, sizeof(n), name) > 0 &&
+	    bpf_strncmp(n, sizeof(n), "security.capability") &&
+	    bpf_strncmp(n, sizeof(n), "system.posix_acl_access") &&
+	    bpf_strncmp(n, sizeof(n), "system.posix_acl_default"))
+		return 0;
+	return file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
+}
+
+SEC("lsm/inode_set_acl")
+int BPF_PROG(ig_file_set_acl, void *idmap, struct dentry *dentry)
+{
+	return file_inode_attr(FILE_HOOK_INODE_SET_ACL, dentry);
+}
+
 // bpf_d_path is not allowed in path_mknod: the new name is resolved by the
 // walk from its (negative) dentry, on the directory's mount.
 SEC("lsm/path_mknod")
@@ -622,18 +695,17 @@ int BPF_PROG(ig_file_mknod, const struct path *dir, struct dentry *dentry)
 
 static __always_inline int file_dir_entry(enum file_hook hook,
 					  const struct path *dir,
-					  struct dentry *dentry,
-					  enum file_access access)
+					  struct dentry *dentry, __u32 mask)
 {
 	struct file_eval e = {};
 	bool fi = false;
 
 	if (!file_scope(&e))
 		return 0;
-	if (access == FILE_ACCESS_DELETE)
+	if (mask & BIT(FILE_ACCESS_DELETE))
 		fi = file_dentry_from_image(e.s, dentry);
-	FILE_JUDGE(&e, file_resolve_dir_name(dir, dentry, e.x, &_start),
-		   BIT(access), fi);
+	FILE_JUDGE(&e, file_resolve_dir_name(dir, dentry, e.x, &_start), mask,
+		   fi);
 	return file_verdict(hook, &e);
 }
 
@@ -641,33 +713,36 @@ SEC("lsm/path_mkdir")
 int BPF_PROG(ig_file_mkdir, const struct path *dir, struct dentry *dentry)
 {
 	return file_dir_entry(FILE_HOOK_PATH_MKDIR, dir, dentry,
-			      FILE_ACCESS_CREATE);
+			      BIT(FILE_ACCESS_CREATE));
 }
 
+// A symbolic link named like a guarded parent would point that directory
+// elsewhere.
 SEC("lsm/path_symlink")
 int BPF_PROG(ig_file_symlink, const struct path *dir, struct dentry *dentry)
 {
 	return file_dir_entry(FILE_HOOK_PATH_SYMLINK, dir, dentry,
-			      FILE_ACCESS_CREATE);
+			      BIT(FILE_ACCESS_CREATE) |
+				      FILE_NEW_NAME_GUARD_MASK);
 }
 
 SEC("lsm/path_unlink")
 int BPF_PROG(ig_file_unlink, const struct path *dir, struct dentry *dentry)
 {
 	return file_dir_entry(FILE_HOOK_PATH_UNLINK, dir, dentry,
-			      FILE_ACCESS_DELETE);
+			      BIT(FILE_ACCESS_DELETE));
 }
 
 SEC("lsm/path_rmdir")
 int BPF_PROG(ig_file_rmdir, const struct path *dir, struct dentry *dentry)
 {
 	return file_dir_entry(FILE_HOOK_PATH_RMDIR, dir, dentry,
-			      FILE_ACCESS_DELETE);
+			      BIT(FILE_ACCESS_DELETE));
 }
 
-// A hard link: the new name is a create; the old name is a move source
-// (FILE_MOVE_SOURCE_MASK). Both names are on new_dir's mount (the kernel
-// refuses a link across mounts).
+// A hard link: the new name is a create and a write, and a new name for the
+// guard; the old name is a move source (FILE_MOVE_SOURCE_MASK). Both names
+// are on new_dir's mount (the kernel refuses a link across mounts).
 SEC("lsm/path_link")
 int BPF_PROG(ig_file_link, struct dentry *old_dentry, const struct path *new_dir,
 	     struct dentry *new_dentry)
@@ -678,7 +753,7 @@ int BPF_PROG(ig_file_link, struct dentry *old_dentry, const struct path *new_dir
 	if (!file_scope(&e))
 		return 0;
 	FILE_JUDGE(&e, file_resolve_dir_name(new_dir, new_dentry, e.x, &_start),
-		   BIT(FILE_ACCESS_CREATE), false);
+		   FILE_NEW_FILE_MASK | FILE_NEW_NAME_GUARD_MASK, false);
 	fi = file_dentry_from_image(e.s, old_dentry);
 	FILE_JUDGE(&e,
 		   file_resolve_walk(old_dentry, BPF_CORE_READ(new_dir, mnt),
@@ -694,14 +769,15 @@ int BPF_PROG(ig_file_rename, const struct path *old_dir,
 {
 	struct file_eval e = {};
 	__u32 old_mask = FILE_MOVE_SOURCE_MASK;
-	__u32 new_mask = BIT(FILE_ACCESS_RENAME);
+	__u32 new_mask = BIT(FILE_ACCESS_RENAME) | FILE_NEW_NAME_GUARD_MASK;
 	bool fi;
 
 	if (!file_scope(&e))
 		return 0;
-	// An exchange moves both files and replaces both names.
+	// An exchange moves both files and replaces both names: both are new
+	// names.
 	if (flags & FILE_RENAME_EXCHANGE)
-		old_mask |= FILE_REPLACED_MASK;
+		old_mask |= FILE_REPLACED_MASK | FILE_NEW_NAME_GUARD_MASK;
 	fi = file_dentry_from_image(e.s, old_dentry);
 	FILE_JUDGE(&e, file_resolve_dir_name(old_dir, old_dentry, e.x, &_start),
 		   old_mask, fi);
@@ -713,7 +789,7 @@ int BPF_PROG(ig_file_rename, const struct path *old_dir,
 		new_mask |= FILE_REPLACED_MASK;
 		fi = file_dentry_from_image(e.s, new_dentry);
 	} else {
-		new_mask |= BIT(FILE_ACCESS_CREATE);
+		new_mask |= FILE_NEW_FILE_MASK;
 	}
 	FILE_JUDGE(&e, file_resolve_dir_name(new_dir, new_dentry, e.x, &_start),
 		   new_mask, fi);

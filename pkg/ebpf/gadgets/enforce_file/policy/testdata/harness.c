@@ -5,9 +5,8 @@
 // Input: argv[1] is the compiled map content (uint32 slot count, the slots,
 // uint32 literal count, the literal entries; little endian, as Go writes it).
 // Each stdin line "slot fromImage path" prints the matched accept bits and,
-// for each access kind and the move-source guard, "rank rule_id is_default",
-// then for a move source and a name of RENAME_EXCHANGE (file_decide_mask)
-// " | rank rule_id access".
+// for each access kind and both guards, "rank rule_id is_default", then for
+// each mask of masks (file_decide_mask) " | rank rule_id access".
 
 _Static_assert(sizeof(struct file_slot) == 8696, "struct file_slot layout");
 _Static_assert(sizeof(struct file_literal_key) == 16, "struct file_literal_key layout");
@@ -40,6 +39,16 @@ static void *harness_lookup(void *map, const void *key)
 	}
 	abort();
 }
+
+// The masks of harnessMasks (harness_test.go): a move source, a name of
+// RENAME_EXCHANGE, a replacing and a new rename target, a hard link's name.
+static const __u32 masks[5] = {
+	FILE_MOVE_SOURCE_MASK,
+	FILE_MOVE_SOURCE_MASK | FILE_REPLACED_MASK | FILE_NEW_NAME_GUARD_MASK,
+	(1U << FILE_ACCESS_RENAME) | FILE_REPLACED_MASK | FILE_NEW_NAME_GUARD_MASK,
+	(1U << FILE_ACCESS_RENAME) | FILE_NEW_FILE_MASK | FILE_NEW_NAME_GUARD_MASK,
+	FILE_NEW_FILE_MASK | FILE_NEW_NAME_GUARD_MASK,
+};
 
 int main(int argc, char **argv)
 {
@@ -84,19 +93,17 @@ int main(int argc, char **argv)
 		file_match(s, slot, path_buf, 0, len, &state, &out);
 		printf("%llx %llx %llx %llx", (unsigned long long)out.w[0], (unsigned long long)out.w[1],
 		       (unsigned long long)out.w[2], (unsigned long long)out.w[3]);
-		for (__u32 a = 0; a <= FILE_ACCESS_MOVE_SOURCE; a++) {
+		for (__u32 a = 0; a <= FILE_ACCESS_NEW_NAME; a++) {
 			struct policy_match m = {};
 
 			file_decide(s, a, &out, fi, &m);
 			printf(" %u %u %u", m.rank, m.rule_id, m.is_default);
 		}
-		for (int i = 0; i < 2; i++) {
-			__u32 mask = FILE_MOVE_SOURCE_MASK, access = 0;
+		for (int i = 0; i < 5; i++) {
+			__u32 access = 0;
 			struct policy_match m = {};
 
-			if (i)
-				mask |= FILE_REPLACED_MASK;
-			file_decide_mask(s, mask, &out, fi, &m, &access);
+			file_decide_mask(s, masks[i], &out, fi, &m, &access);
 			printf(" | %u %u %u", m.rank, m.rule_id, access);
 		}
 		printf("\n");

@@ -69,7 +69,8 @@ type outcome struct {
 	isDefault bool
 }
 
-// decide mirrors file_decide; access AccessMoveSource is the guard.
+// decide mirrors file_decide; AccessMoveSource and AccessNewName are the
+// guards.
 func (s *sim) decide(slot uint32, access int, matched Bits, fromImage bool) outcome {
 	v := &s.c.Slots[slot]
 	var out outcome
@@ -82,7 +83,11 @@ func (s *sim) decide(slot uint32, access int, matched Bits, fromImage bool) outc
 			}
 			hit = r.Flags&RuleAnyPath != 0 || matched.intersects(r.Match)
 		} else {
-			if r.Flags&RuleGuard == 0 {
+			flag := uint8(RuleGuard)
+			if access == AccessNewName {
+				flag = RuleNewNameGuard
+			}
+			if r.Flags&flag == 0 {
 				continue
 			}
 			hit = matched.intersects(r.Guard)
@@ -116,7 +121,7 @@ func (s *sim) decide(slot uint32, access int, matched Bits, fromImage bool) outc
 func (s *sim) decideMask(slot uint32, mask int, matched Bits, fromImage bool) (outcome, int) {
 	var best outcome
 	access := 0
-	for a := 0; a <= AccessMoveSource; a++ {
+	for a := 0; a <= AccessNewName; a++ {
 		if mask&(1<<a) == 0 {
 			continue
 		}

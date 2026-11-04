@@ -27,8 +27,8 @@ operator an owner drives with `runtime.WithConfig` and `runtime.GetBindings`.
 
 Requires BPF LSM enabled (`bpf` in `/sys/kernel/security/lsm`),
 `CONFIG_SECURITY_PATH` (the `path_*` hooks; every kernel with AppArmor or
-Landlock has it), cgroup v2 and kernel BTF. No kfunc is needed: tested on 6.8
-and 6.12. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
+Landlock has it), cgroup v2, kernel BTF and Linux 6.2 or later (the
+`inode_set_acl` hook). No kfunc is needed: tested on 6.8 and 6.12. Build the image with `make build` (it sets `IG_SOURCE_PATH`, see the
 library README).
 
 ## Hooks
@@ -40,10 +40,22 @@ library README).
 | create | `path_mknod` (open with `O_CREAT`, mknod, mkfifo, AF_UNIX bind), `path_mkdir`, `path_symlink`, `path_link` (new name), `path_rename` (new name that does not exist) | `path_mknod`: dentry walk; others: `bpf_d_path(dir)` + name |
 | delete | `path_unlink`, `path_rmdir`, `path_rename` (new name that replaces a file; both names of `RENAME_EXCHANGE`) | `bpf_d_path(dir)` + name |
 | rename | `path_rename` (both names), `path_link` (old name) | `bpf_d_path(dir)` + name; link old name: dentry walk |
-| chmod | `path_chmod`, `path_chown` | `bpf_d_path` |
+| chmod | `path_chmod`, `path_chown`, `inode_setxattr` (`security.capability`, `system.posix_acl_access`, `system.posix_acl_default`), `inode_set_acl` (6.2 and later) | `bpf_d_path`; inode hooks: dentry walk |
 
 - A read-write open judges both kinds; the most limiting verdict wins. A new
   name that replaces a file by rename is judged as rename, write and delete.
+  A new name that does not exist yet (rename, hard link) is judged as create
+  and write: the name gets the file's content, so a write-only deny on
+  `/etc/ld.so.preload` also stops `mv /tmp/x /etc/ld.so.preload` and an
+  `O_TMPFILE` file linked there.
+- A file capability (`setcap`) or a POSIX ACL (`setfacl`) changes what a
+  file allows without `path_chmod`, so both are judged as `chmod`. The inode
+  hooks have a dentry and no mount: a dentry on the file system of the task's
+  root mount is walked up to that root (the container path). overlayfs repeats
+  the change on its upper file system's inode, and copies a file's attributes
+  up the same way, with the credentials of its mounter: that inner call is not
+  judged (the overlay call was). A dentry on another file system (a volume)
+  is an unresolved path.
 - A create is denied at `path_mknod`, before the file exists: a deny at
   `file_open` would leave an empty file. `bpf_d_path` is not allowed in
   `path_mknod`, and the old name of a hard link has no `struct path`; both
@@ -64,6 +76,13 @@ library README).
   protected file cannot be renamed away. A rule of other access kinds (a
   `chmod` deny on `/etc/**`, a `delete` deny on every path) neither judges nor
   guards a move: `sed -i` and editors' atomic saves keep working.
+- New names (of a rename, a hard link or a symbolic link, and both names of
+  `RENAME_EXCHANGE`) are judged against the **new-name guard**: the parent
+  directories written in the patterns of deny rules that judge `write` or
+  `create`. With `[write, create]` denied on `/root/.aws/config`,
+  `mv /tmp/dir /root/.aws` (a directory that brings its own `config`) and
+  `ln -s /tmp/dir /root/.aws` are denied; `mkdir /root/.aws` is not (the
+  files created in it are judged).
 - overlayfs opens the backing file of every overlay file a second time, and
   copy-up opens more files, in the same task. Those opens use a private mount
   (`mnt_ns == MNT_NS_INTERNAL`) and are not judged; a deny there would break
@@ -210,8 +229,19 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
   only after it creates a user and mount namespace (`unshare -Urm`). Deny
   chroot, mounts and user namespace creation with the privilege gadget to
   close both.
-- The dentry walk (`path_mknod`, hard link old name) does not take the kernel's
-  rename and mount sequence locks: a concurrent rename can give a torn path.
+- The dentry walk (`path_mknod`, hard link old name, inode hooks) does not take
+  the kernel's rename and mount sequence locks: a concurrent rename can give a
+  torn path.
+- A file capability or a POSIX ACL on a volume file is an unresolved path:
+  under a policy with a `chmod` deny rule, `setcap`, `setfacl` and copies that
+  keep them (`cp -a`, `tar --xattrs`) fail there. A task that sets an
+  attribute on a volume file through io_uring with registered credentials
+  (`IORING_REGISTER_PERSONALITY`) looks like overlayfs' inner call and is not
+  judged. Removing an ACL (`inode_remove_acl`) is not judged.
+- A `mknod` or `mkdir` new name is not judged against the new-name guard, and
+  a symbolic link's new name is not judged as `write`: a symbolic link at a
+  write-only denied name that does not exist yet gives that name other
+  content.
 - `fromImage` needs the overlay layout of Linux 6.5 and later (see
   "Policy"); on another layout it is off.
 - A file that replaces an image file by rename (a new inode) is not an image
@@ -237,7 +267,8 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
 The `verdict` datasource shares `generation`, `cgroup`, `deny` and `mode` with
 the other enforcement gadgets and adds `host_pid`, `rule_id`, `origin_id`,
 `is_default`, `slot`, `comm`, `hook` (the program that judged), `access` (the
-access kind that decided; `FILE_ACCESS_MOVE_SOURCE` for the guard),
+access kind that decided; `FILE_ACCESS_MOVE_SOURCE` and
+`FILE_ACCESS_NEW_NAME` for the guards),
 `from_image` and `path` (the path that decided, cut at 511 bytes; empty when
 unresolved). Only denies are reported (mode 1 = audit, the access was
 allowed). Rule and origin names are in the owner's compiled policy

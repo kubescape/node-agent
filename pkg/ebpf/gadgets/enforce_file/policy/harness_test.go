@@ -103,8 +103,12 @@ func runHarness(t *testing.T, bin string, c Compiled, probes []probe) []string {
 }
 
 // harnessMasks are the access masks the harness judges with
-// file_decide_mask: a move source, and a name of RENAME_EXCHANGE.
-var harnessMasks = []int{MoveSourceMask, MoveSourceMask | ReplacedMask}
+// file_decide_mask (testdata/harness.c has the same list): a move source, a
+// name of RENAME_EXCHANGE, the new name of a rename that replaces a file and
+// of one that does not, and the new name of a hard link.
+var harnessMasks = []int{MoveSourceMask, MoveSourceMask | ReplacedMask | NewNameGuardMask,
+	1<<accessIndex(AccessRename) | ReplacedMask | NewNameGuardMask,
+	1<<accessIndex(AccessRename) | NewFileMask | NewNameGuardMask, NewFileMask | NewNameGuardMask}
 
 // expected is what the Go simulator says for one probe, in harness format.
 func expected(s *sim, p probe) string {
@@ -113,7 +117,7 @@ func expected(s *sim, p probe) string {
 	}
 	m := s.match(p.slot, p.path)
 	line := fmt.Sprintf("%x %x %x %x", m[0], m[1], m[2], m[3])
-	for a := 0; a <= AccessMoveSource; a++ {
+	for a := 0; a <= AccessNewName; a++ {
 		o := s.decide(p.slot, a, m, p.fromImage)
 		d := 0
 		if o.isDefault {

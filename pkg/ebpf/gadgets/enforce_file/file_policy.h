@@ -68,8 +68,10 @@ enum file_access : __u32 {
 	FILE_ACCESS_DELETE = 3,
 	FILE_ACCESS_RENAME = 4,
 	FILE_ACCESS_CHMOD = 5,
-	// Events and unresolved ranks only: the move-source guard.
+	// Events and unresolved ranks only: the move-source guard and the
+	// new-name guard.
 	FILE_ACCESS_MOVE_SOURCE = 6,
+	FILE_ACCESS_NEW_NAME = 7,
 };
 #define FILE_ACCESS_KINDS 6
 
@@ -79,6 +81,9 @@ enum file_access : __u32 {
 // A deny rule of read or write whose patterns have parent directories: its
 // guard (those parents) protects move sources.
 #define FILE_RULE_GUARD 4
+// A deny rule of write or create whose patterns have parent directories: the
+// same guard protects new names (a directory moved or linked onto a parent).
+#define FILE_RULE_NEW_NAME_GUARD 8
 
 // Slot flags, set by the owner (not the compiler).
 // The owner verified the overlay inode layout that fromImage reads; without
@@ -95,6 +100,12 @@ enum file_access : __u32 {
 // A name whose file is replaced (the new name of a replacing rename, both
 // names of RENAME_EXCHANGE) is also a write and a delete.
 #define FILE_REPLACED_MASK ((1U << FILE_ACCESS_WRITE) | (1U << FILE_ACCESS_DELETE))
+// A new name that does not exist yet (of a rename or a hard link) gives that
+// name the file's content: a create and a write.
+#define FILE_NEW_FILE_MASK ((1U << FILE_ACCESS_CREATE) | (1U << FILE_ACCESS_WRITE))
+// Every new name of a rename, a hard link or a symbolic link (both names of
+// RENAME_EXCHANGE) is also judged against the new-name guard.
+#define FILE_NEW_NAME_GUARD_MASK (1U << FILE_ACCESS_NEW_NAME)
 
 #define FILE_RULE_ID_DEFAULT 1
 #define FILE_RULE_ID_UNRESOLVED 2
@@ -139,11 +150,11 @@ struct file_slot {
 	// access kind (merge rule 5).
 	__u32 deny_enforce_docs[FILE_ACCESS_KINDS];
 	// Rank when the path cannot be resolved, per enum file_access
-	// (including the move-source guard): the most limiting rule or default.
+	// (including both guards): the most limiting rule or default.
 	__u8 unresolved[8];
-	// Per enum file_access (and the guard): 1 when a rule without paths
-	// judges it, and the union of the accept bits its rules match (the guard
-	// bits for the guard). No shared bit and no such rule: no rule can
+	// Per enum file_access: 1 when a rule without paths judges it (never
+	// for a guard), and the union of the accept bits its rules match (the
+	// guard bits for a guard). No shared bit and no such rule: no rule can
 	// match, the rules are not scanned.
 	__u8 any_path[8];
 	struct file_bits rule_union[8];
@@ -232,8 +243,7 @@ static long file_suf_step(__u64 i, void *ctx)
 	if (i >= c->inlen || i >= FILE_GLOB_PART_MAX)
 		return 1;
 	c->h = file_hash_byte(c->h, c->buf[(c->last - i) & FILE_BUF_MASK]);
-	if (i < FILE_GLOB_PART_MAX)
-		c->st->suf[i + 1] = c->h;
+	c->st->suf[i + 1] = c->h;
 	return 0;
 }
 
@@ -388,10 +398,13 @@ static __always_inline bool file_bits_any(const struct file_bits *a,
 struct file_decide_ctx {
 	const struct file_slot *s;
 	const struct file_bits *matched;
-	__u32 access_bit; // 0 for the move-source guard
+	__u32 access_bit; // 0 for a guard
 	__u32 docs; // policies with a matching rule
 	__u8 from_image;
 	__u8 allowed;
+	// The FILE_RULE_* flag of the guard. In the padding: a larger context
+	// doubles the instructions the verifier processes.
+	__u8 guard_flag;
 	struct policy_match m;
 };
 
@@ -410,7 +423,7 @@ static long file_rule_step(__u64 i, void *ctx)
 		hit = (r->flags & FILE_RULE_ANY_PATH) ||
 		      file_bits_any(c->matched, &r->match);
 	} else {
-		if (!(r->flags & FILE_RULE_GUARD))
+		if (!(r->flags & c->guard_flag))
 			return 0;
 		hit = file_bits_any(c->matched, &r->guard);
 	}
@@ -430,11 +443,11 @@ static long file_rule_step(__u64 i, void *ctx)
 	return 0;
 }
 
-// file_decide resolves one access kind (or FILE_ACCESS_MOVE_SOURCE) of a
-// matched path into m: the most limiting matching rule, else the access
-// kind's default. When every matching rule denies, the enforce default deny
-// of each policy without a matching rule still applies (merge rule 5). The
-// move-source guard has no default.
+// file_decide resolves one access kind (or a guard: FILE_ACCESS_MOVE_SOURCE,
+// FILE_ACCESS_NEW_NAME) of a matched path into m: the most limiting matching
+// rule, else the access kind's default. When every matching rule denies, the
+// enforce default deny of each policy without a matching rule still applies
+// (merge rule 5). A guard has no default.
 static __always_inline void file_decide(const struct file_slot *s,
 					__u32 access,
 					const struct file_bits *matched,
@@ -445,12 +458,15 @@ static __always_inline void file_decide(const struct file_slot *s,
 		.s = s,
 		.matched = matched,
 		.access_bit = access < FILE_ACCESS_KINDS ? 1U << access : 0,
+		.guard_flag = access == FILE_ACCESS_NEW_NAME ?
+				      FILE_RULE_NEW_NAME_GUARD :
+				      FILE_RULE_GUARD,
 		.from_image = from_image,
 	};
 	__u32 a = access < FILE_ACCESS_KINDS ? access : 0;
-	__u32 u = access < FILE_ACCESS_KINDS ? access : FILE_ACCESS_MOVE_SOURCE;
 
-	if (s->any_path[u & 7] || file_bits_any(matched, &s->rule_union[u & 7]))
+	if (s->any_path[access & 7] ||
+	    file_bits_any(matched, &s->rule_union[access & 7]))
 		bpf_loop(FILE_MAX_RULES, file_rule_step, &c, 0);
 	if (access >= FILE_ACCESS_KINDS) {
 		*m = c.m;
@@ -469,9 +485,8 @@ static __always_inline void file_decide(const struct file_slot *s,
 }
 
 // file_decide_mask resolves every access kind in mask (bits of enum
-// file_access, FILE_ACCESS_MOVE_SOURCE for the guard) and keeps the most
-// limiting result in m and the access kind that gave it in access. m starts
-// empty.
+// file_access, with the guards) and keeps the most limiting result in m and
+// the access kind that gave it in access. m starts empty.
 static __always_inline void file_decide_mask(const struct file_slot *s,
 					     __u32 mask,
 					     const struct file_bits *matched,
@@ -479,7 +494,7 @@ static __always_inline void file_decide_mask(const struct file_slot *s,
 					     struct policy_match *m,
 					     __u32 *access)
 {
-	for (__u32 a = 0; a <= FILE_ACCESS_MOVE_SOURCE; a++) {
+	for (__u32 a = 0; a <= FILE_ACCESS_NEW_NAME; a++) {
 		struct policy_match x = {};
 
 		if (!(mask & (1U << a)))
