@@ -48,6 +48,7 @@ char LICENSE[] SEC("license") = "GPL";
 #define NET_SOCK_RAW 3
 #define NET_IPPROTO_L2TP 115
 #define NET_TCP_CLOSE 7
+#define NET_MSG_FASTOPEN 0x20000000
 
 enum net_hook : __u32 {
 	NET_HOOK_SOCKET_CONNECT,
@@ -199,9 +200,10 @@ static __always_inline const struct net_slot *net_bound(__u64 *cgid,
 
 // net_judge is the common body of the LSM hooks. sa is the kernel copy of the
 // destination address, or NULL (a send on a connected socket, judged at
-// connect).
+// connect). msg_flags are the send flags (0 for connect).
 static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
-				     const void *sa, int len, bool is_send)
+				     const void *sa, int len, bool is_send,
+				     __u32 msg_flags)
 {
 	struct policy_match m = {};
 	const struct net_slot *s;
@@ -224,11 +226,16 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 		return 0;
 	ipproto = BPF_CORE_READ(sk, sk_protocol);
 	// TCP and MPTCP use the address of a send only to connect a closed
-	// socket (Fast Open: MSG_FASTOPEN or TCP_FASTOPEN_CONNECT). On a socket
-	// that is not closed, __inet_stream_connect ignores it (the connect was
-	// judged), so it is not judged.
+	// socket (Fast Open). A send without MSG_FASTOPEN on a socket that is
+	// not closed does not use it (the connect was judged, and a
+	// TCP_FASTOPEN_CONNECT socket is connecting), so it is not judged. A
+	// MSG_FASTOPEN send is always judged: the state read here is not under
+	// the socket lock, and a concurrent connect(AF_UNSPEC) or shutdown can
+	// close the socket before tcp_sendmsg connects it. On a connected
+	// socket a denied MSG_FASTOPEN send so fails with EPERM, not EISCONN.
 	if (is_send &&
 	    (ipproto == NET_IPPROTO_TCP || ipproto == NET_IPPROTO_MPTCP) &&
+	    !(msg_flags & NET_MSG_FASTOPEN) &&
 	    BPF_CORE_READ(sk, __sk_common.skc_state) != NET_TCP_CLOSE)
 		return 0;
 	unspec_v6 = skfam == AF_INET6 &&
@@ -248,17 +255,20 @@ SEC("lsm/socket_connect")
 int BPF_PROG(ig_net_connect, struct socket *sock, struct sockaddr *address,
 	     int addrlen)
 {
-	return net_judge(NET_HOOK_SOCKET_CONNECT, sock, address, addrlen, false);
+	return net_judge(NET_HOOK_SOCKET_CONNECT, sock, address, addrlen, false,
+			 0);
 }
 
 // Covers sendto, sendmsg, sendmmsg (once per message), TCP Fast Open and
-// io_uring sends.
+// io_uring sends (IORING_OP_SEND, SENDMSG, SEND_ZC, SENDMSG_ZC). msg_flags
+// are set before the hook on all of these paths.
 SEC("lsm/socket_sendmsg")
 int BPF_PROG(ig_net_sendmsg, struct socket *sock, struct msghdr *msg, int size)
 {
 	return net_judge(NET_HOOK_SOCKET_SENDMSG, sock,
 			 BPF_CORE_READ(msg, msg_name),
-			 BPF_CORE_READ(msg, msg_namelen), true);
+			 BPF_CORE_READ(msg, msg_namelen), true,
+			 BPF_CORE_READ(msg, msg_flags));
 }
 
 // net_judge_cgroup is the common body of the cgroup sock_addr programs. The

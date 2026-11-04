@@ -117,6 +117,15 @@ try:
         s = socket.socket(v4, tcp)
         s.connect(l.getsockname())
         s.sendto(b"x", (host, port))
+    elif kind == "tcp4-connected-fastopen":
+        # MSG_FASTOPEN on a connected socket: the kernel alone fails it
+        # with EISCONN.
+        l = socket.socket(v4, tcp)
+        l.bind(("127.0.0.1", 0))
+        l.listen(1)
+        s = socket.socket(v4, tcp)
+        s.connect(l.getsockname())
+        s.sendto(b"x", socket.MSG_FASTOPEN, (host, port))
     elif kind == "raw6-sendto-unspec":
         sa = struct.pack("=HHI", 0, 0, 0) + socket.inet_pton(v6, host) + bytes(4)
         raw_sendto(socket.socket(v6, socket.SOCK_RAW, socket.IPPROTO_UDP), sa)
@@ -422,6 +431,23 @@ func (f *kernelFixture) matrix(t *testing.T, tier string) {
 		f.expect(t, f.id, "tcp4", "203.0.113.5", 53, false)        // other protocol
 		f.expect(t, f.id, "tcp4", "127.0.0.1", 9, false)
 		f.expect(t, f.id, "tcp4-connected-sendto", "192.0.2.1", 80, false)
+	})
+	t.Run("fastopen on a connected socket", func(t *testing.T) {
+		// The LSM tier judges every MSG_FASTOPEN send, because the socket
+		// state can change before tcp_sendmsg reads it: EPERM, where the
+		// kernel alone returns EISCONN. The cgroup programs do not run for
+		// a TCP send.
+		want := "EISCONN"
+		if tier == TierLSM {
+			want = "EPERM"
+		}
+		for _, c := range []struct{ container, want string }{{f.id, want}, {f.other, "EISCONN"}} {
+			got := f.call(t, c.container, "tcp4-connected-fastopen", "192.0.2.1", 80)
+			t.Logf("tcp4-connected-fastopen 192.0.2.1:80 in %.12s = %s", c.container, got)
+			if got != c.want {
+				t.Errorf("tcp4-connected-fastopen in %.12s = %s, want %s", c.container, got, c.want)
+			}
+		}
 	})
 	t.Run("audit", func(t *testing.T) {
 		f.expect(t, f.id, "tcp4", "198.51.100.1", 80, false)

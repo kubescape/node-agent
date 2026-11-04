@@ -117,8 +117,13 @@ policy:
   AF_INET6 sockets. A send without an address (a connected socket) is not
   judged; its destination was judged at `connect`. A connected UDP socket that
   sends to another address is judged at that send. A TCP or MPTCP send with an
-  address is judged only on a closed socket (TCP Fast Open connects there); on
-  any other socket TCP ignores the address.
+  address is judged when it sets `MSG_FASTOPEN` or the socket is closed (TCP
+  Fast Open connects there); otherwise TCP ignores the address. A
+  `MSG_FASTOPEN` send is judged on any socket state, because the state can
+  change after the hook reads it. So on a connected socket a `MSG_FASTOPEN`
+  send to a denied address fails with `EPERM` (the kernel alone returns
+  `EISCONN`). The io_uring sends, `SEND_ZC` and `SENDMSG_ZC` included, pass
+  through the same hook with their flags.
 - **Address.** LSM tier: parsed by the address family, not the socket family:
   an AF_INET6 UDP socket accepts a `sockaddr_in`, and an AF_INET socket sends
   to a `sockaddr_in` whose family is AF_UNSPEC. An AF_INET6 raw or L2TP/IP
