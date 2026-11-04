@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -105,10 +106,14 @@ func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) 
 		if errors.Is(err, unix.EINVAL) {
 			fd, err = unix.PidfdOpen(tid, 0)
 		}
-		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EINVAL) {
-			// Exited, or a non-leader thread on a kernel without
-			// PIDFD_THREAD: the BPF rule judges it through its leader.
-			seen[tid] = true
+		if errors.Is(err, unix.EINVAL) {
+			// A non-leader thread on a kernel without PIDFD_THREAD: the
+			// BPF rule judges it through its group leader, which can be
+			// outside this cgroup, so arm the leader.
+			fd, err = openLeader(scanner.Text(), hostMntns)
+		}
+		if errors.Is(err, unix.ESRCH) || errors.Is(err, fs.ErrNotExist) {
+			seen[tid] = true // exited
 			continue
 		}
 		if err != nil {
@@ -122,6 +127,36 @@ func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) 
 		seen[tid] = true
 	}
 	return scanner.Err()
+}
+
+// openLeader opens a pidfd of the thread group leader of tid. A leader in the
+// runtime mount namespace is a runtime helper: arming it would judge the
+// runtime, so the thread cannot be armed and the caller gets an error.
+func openLeader(tid string, hostMntns uint64) (int, error) {
+	data, err := os.ReadFile(filepath.Join(host.HostProcFs, tid, "status"))
+	if err != nil {
+		return -1, err
+	}
+	tgid := -1
+	for _, line := range strings.Split(string(data), "\n") {
+		if v, ok := strings.CutPrefix(line, "Tgid:"); ok {
+			tgid, err = strconv.Atoi(strings.TrimSpace(v))
+			if err != nil {
+				return -1, fmt.Errorf("reading leader of task %s: %w", tid, err)
+			}
+		}
+	}
+	if tgid <= 0 {
+		return -1, fmt.Errorf("no leader for task %s", tid)
+	}
+	mntns, err := mntnsOf(strconv.Itoa(tgid))
+	if err != nil {
+		return -1, err
+	}
+	if mntns == hostMntns {
+		return -1, fmt.Errorf("thread %s has a runtime helper as leader", tid)
+	}
+	return unix.PidfdOpen(tgid, 0)
 }
 
 // RuntimeMountNamespace is the mount namespace of PID 1 as this process sees
