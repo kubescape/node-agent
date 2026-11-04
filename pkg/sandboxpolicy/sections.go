@@ -145,13 +145,38 @@ func (s *SectionBackend) normalize(p sectionPlans) sectionPlans {
 // not finished (running ones included), to each section backend that can create
 // their slots before new containers start.
 func (s *SectionBackend) Prepare(ctx context.Context, plans []Plan) error {
+	return s.PrepareSections(ctx, plans, nil)
+}
+
+// PrepareSections prepares like Prepare, but only the sections in active
+// (nil: every section). A section with no active policy is not prepared, so
+// a backend that loads its gadget before the first plan (privilege) does not
+// load it for a policy of another section.
+func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error {
 	var errs []error
 	for _, sec := range s.sections {
+		if active != nil && !active[sec.name] {
+			continue
+		}
 		if preparer, ok := sec.backend.(SlotPreparer); ok {
 			errs = append(errs, preparer.Prepare(ctx, plans))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// BindPods passes the pod bindings to a privilege backend that can bind pod
+// cgroups. Pod bindings exist only for the privilege section.
+func (s *SectionBackend) BindPods(ctx context.Context, pods []PodBinding) error {
+	for _, sec := range s.sections {
+		if sec.name != SectionPrivilege {
+			continue
+		}
+		if binder, ok := sec.backend.(PodBinder); ok {
+			return binder.BindPods(ctx, pods)
+		}
+	}
+	return nil
 }
 
 // Exec returns the exec section backend.

@@ -61,6 +61,9 @@ type Controller struct {
 	// networkPlans holds the translated network section of each valid
 	// policy from the last reconciliation, for status and preparation.
 	networkPlans map[types.UID]*NetworkPlan
+	// classes and classErr are from the last reconcile (see PodPlans).
+	classes  api.PolicyClasses
+	classErr error
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -248,7 +251,12 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 	policies := c.slotPolicies()
 	networkPlans := c.networkPlans
 	c.mu.Unlock()
-	var plans []Plan
+	active := map[string]bool{}
+	for _, p := range policies {
+		active[SectionPrivilege] = active[SectionPrivilege] || p.spec.Privilege != nil
+		active[SectionNetwork] = active[SectionNetwork] || p.spec.Network != nil
+	}
+	var nonEmpty []Plan
 	for _, b := range containers {
 		var plan Plan
 		for _, p := range policies {
@@ -260,11 +268,119 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 			}
 		}
 		if len(plan.Policies) > 0 {
-			plans = append(plans, plan)
+			nonEmpty = append(nonEmpty, plan)
 		}
 	}
 	// Outside c.mu: a preparation may start a gadget instance.
-	return preparer.Prepare(ctx, plans)
+	if sections, ok := preparer.(SectionPreparer); ok {
+		return sections.PrepareSections(ctx, nonEmpty, active)
+	}
+	return preparer.Prepare(ctx, nonEmpty)
+}
+
+// PodPlans returns the privilege plan of each pod whose declared containers
+// (all of them must be given) get the same nonempty set of privilege policies.
+// Such a pod can be bound at its pod cgroup before its containers start. A pod
+// whose containers get different policies, or none, has no pod plan: a pod
+// binding would also judge the containers that the policies do not select.
+// A container must also pass the checks that its own binding needs (see
+// podContainerPlan), so a pod binding never applies a policy that the
+// container binding refuses. It returns false when the policies are not known
+// (a configuration error).
+func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
+	c.mu.Lock()
+	if c.configError != nil {
+		c.mu.Unlock()
+		return nil, false
+	}
+	var policies []desiredPolicy
+	for _, obj := range c.objects {
+		if obj.GetKind() != "SandboxPolicyClasses" {
+			p := parsePolicy(obj)
+			// A network section that did not translate fails the container
+			// binding too (see reconcile).
+			if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff && c.networkPlans[p.identity.UID] == nil {
+				p.err = fmt.Errorf("network section is not translated")
+			}
+			policies = append(policies, p)
+		}
+	}
+	classes, classErr := c.classes, c.classErr
+	c.mu.Unlock()
+	pods := map[types.UID]Plan{}
+	mixed := map[types.UID]bool{}
+	for _, b := range containers {
+		if mixed[b.PodUID] {
+			continue
+		}
+		plan, ok := podContainerPlan(policies, classes, classErr, b)
+		if !ok {
+			mixed[b.PodUID] = true
+			delete(pods, b.PodUID)
+			continue
+		}
+		previous, seen := pods[b.PodUID]
+		if seen && !samePolicies(previous, plan) {
+			mixed[b.PodUID] = true
+			delete(pods, b.PodUID)
+			continue
+		}
+		pods[b.PodUID] = plan
+	}
+	return pods, true
+}
+
+// podContainerPlan returns the privilege plan of a container for a pod
+// binding. It is false when the container's own binding would fail, as in
+// reconcile: an invalid policy that may select it, a class error, too many
+// policies, or a policy that does not compile without a ContainerProfile
+// resolver (a policy with sources depends on the profile, so it is refused).
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErr error, b Binding) (Plan, bool) {
+	var plan Plan
+	selected := 0
+	for _, p := range policies {
+		if p.err != nil {
+			if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != b.Namespace {
+				continue
+			}
+			return Plan{}, false
+		}
+		if p.spec.Mode == api.ModeOff || !p.matches(b) {
+			continue
+		}
+		selected++
+		if classErr != nil {
+			return Plan{}, false
+		}
+		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
+			return Plan{}, false
+		}
+		if p.spec.Privilege != nil {
+			plan.Policies = append(plan.Policies, CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy()})
+		}
+	}
+	if selected > MaxPoliciesPerBinding || len(plan.Policies) == 0 {
+		return Plan{}, false
+	}
+	return plan, true
+}
+
+// samePolicies compares the policy objects and generations of two plans.
+func samePolicies(a, b Plan) bool {
+	if len(a.Policies) != len(b.Policies) {
+		return false
+	}
+	ids := map[PolicyIdentity]int{}
+	for _, p := range a.Policies {
+		ids[p.Identity]++
+	}
+	for _, p := range b.Policies {
+		if ids[p.Identity] == 0 {
+			return false
+		}
+		ids[p.Identity]--
+	}
+	return true
 }
 
 // HasSlotPolicies reports whether any active policy has a privilege or a
@@ -444,6 +560,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			dest.Shared[name] = entries
 		}
 	}
+	c.classes, c.classErr = classes, classErr
 	policyErrors := make(map[string]error)
 	networkPlans := make(map[types.UID]*NetworkPlan)
 	for i := range policies {

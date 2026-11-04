@@ -3,11 +3,13 @@ package sandboxpolicy
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func privilegeSection(def api.Action) *api.PrivilegeSection {
@@ -172,6 +174,15 @@ func TestSectionBackendPassesPrepare(t *testing.T) {
 	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
 	if err := s.Prepare(context.Background(), []Plan{sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})}); err != nil || len(privilege.prepared) != 1 {
 		t.Fatalf("prepare: %v %v", err, privilege.prepared)
+	}
+	// A section with no active policy is not prepared: privilege loads its
+	// gadget on an empty prepare, which a network-only node must not do.
+	privilege.prepared = nil
+	network := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	s.WithNetwork(network, nil)
+	plans := []Plan{sectionPlan("r", CompiledPolicy{Network: networkPlan()})}
+	if err := s.PrepareSections(context.Background(), plans, map[string]bool{SectionNetwork: true}); err != nil || privilege.prepared != nil || len(network.prepared) != 1 {
+		t.Fatalf("prepare sections: %v privilege=%v network=%v", err, privilege.prepared, network.prepared)
 	}
 }
 
@@ -387,5 +398,58 @@ func TestSectionBackendSeparateNetworkPolicyKeepsExecRevision(t *testing.T) {
 	}
 	if network.replacements != 2 || network.withdrawals != 1 || privilege.replacements != 0 {
 		t.Fatalf("network %d replacements %d withdrawals, privilege %d", network.replacements, network.withdrawals, privilege.replacements)
+	}
+}
+
+func TestControllerPodPlans(t *testing.T) {
+	ctx := context.Background()
+	all := policy("all", "ns")
+	all.Spec.Privilege = privilegeSection(api.ActionDeny)
+	app := policy("app-only", "ns")
+	app.Spec.Containers = []string{"app"}
+	app.Spec.Privilege = privilegeSection(api.ActionAllow)
+	c, _, _, _ := setup(t, all, app)
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	container := func(pod types.UID, name, kind string) Binding {
+		b := binding()
+		b.ContainerID, b.CgroupID, b.PodUID, b.ContainerName, b.Kind = "", 0, pod, name, kind
+		return b
+	}
+	elsewhere := container("other-ns", "web", "regular")
+	elsewhere.Namespace = "elsewhere"
+	plans, ok := c.PodPlans([]Binding{
+		container("uniform", "web", "regular"), container("uniform", "db", "regular"),
+		container("init", "web", "regular"), container("init", "setup", "init"),
+		container("mixed", "web", "regular"), container("mixed", "app", "regular"),
+		elsewhere,
+	})
+	if !ok || len(plans) != 1 || len(plans["uniform"].Policies) != 1 || plans["uniform"].Policies[0].Identity.Name != "all" {
+		t.Fatalf("only the pod whose containers all get the same policies has a pod plan: %+v", plans)
+	}
+}
+
+func TestControllerPodPlansNeedContainerEligibility(t *testing.T) {
+	ctx := context.Background()
+	priv := policy("priv", "ns")
+	priv.Spec.Privilege = privilegeSection(api.ActionDeny)
+	// A second policy that selects the same container but depends on a
+	// ContainerProfile: the container binding can fail, so no pod binding.
+	sourced := policy("sourced", "ns")
+	sourced.Spec.Selector.PodSelector = metav1.LabelSelector{MatchLabels: map[string]string{"profile": "yes"}}
+	sourced.Spec.Sources = []api.PolicySource{{ContainerProfile: api.ContainerProfileReference{Name: "profile"}, Include: []string{"execs"}}}
+	c, _, _, _ := setup(t, priv, sourced)
+	if err := c.InitialSync(ctx); err != nil && !strings.Contains(err.Error(), "ContainerProfile") {
+		t.Fatal(err)
+	}
+	plain := binding()
+	plain.ContainerID, plain.CgroupID, plain.PodUID = "", 0, "plain"
+	profiled := plain
+	profiled.PodUID = "profiled"
+	profiled.PodLabels = map[string]string{"app": "test", "profile": "yes"}
+	plans, ok := c.PodPlans([]Binding{plain, profiled})
+	if !ok || len(plans) != 1 || len(plans["plain"].Policies) != 1 {
+		t.Fatalf("only the pod without a sourced policy has a pod plan: %+v", plans)
 	}
 }

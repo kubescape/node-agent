@@ -246,3 +246,28 @@ func TestSlotFaults(t *testing.T) {
 		t.Fatalf("slot 1: %d %v", n, err)
 	}
 }
+
+func TestSkipArmingBindsWithoutArming(t *testing.T) {
+	b, policy, members, _ := newFixture(t, func(Map) error { return nil })
+	var armedPaths []string
+	b.armExisting = func(_ Map, path string) error { armedPaths = append(armedPaths, path); return nil }
+	parent := ContainerIdentity{Runtime: "parent", ID: "p1", CgroupID: 7, CgroupPath: "/kubepods.slice/kubepods-pod1.slice"}
+	b.desired[selector(parent)] = Binding{Container: parent, SkipArming: true}
+	if err := b.start(policy, members, &fakeMap{typ: ebpf.TaskStorage}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Only the initial container binding arms; the replayed parent does not.
+	if len(armedPaths) != 1 || armedPaths[0] != identity.CgroupPath || members.data[uint64(7)] != (bindingValue{}) {
+		t.Fatalf("startup armed %v bindings %v", armedPaths, members.data)
+	}
+	if err := b.Unbind(parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Bind(Binding{Container: parent, Slot: 1, SkipArming: true}); err != nil || len(armedPaths) != 1 || members.data[uint64(7)] != (bindingValue{Slot: 1}) {
+		t.Fatalf("live bind: %v armed %v bindings %v", err, armedPaths, members.data)
+	}
+	// A slot move of a SkipArming binding does not arm either.
+	if err := b.Bind(Binding{Container: parent, Slot: 0, SkipArming: true}); err != nil || len(armedPaths) != 1 {
+		t.Fatalf("slot move: %v armed %v", err, armedPaths)
+	}
+}

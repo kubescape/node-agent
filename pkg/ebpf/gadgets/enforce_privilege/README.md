@@ -108,6 +108,11 @@ policy:
   zero and arms the running tasks again. Audit-only faults do not count there.
 - **Scope.** A bound cgroup also covers up to 31 levels of child cgroups. This is
   by design and differs from enforce_exec, which binds the exact cgroup only.
+  The nearest bound cgroup decides. So an owner can bind a parent cgroup (for
+  example the cgroup of a group of containers) before they start, with
+  `SkipArming`, and a container is judged from its first exec. The tasks
+  already in the parent are not armed, also not at a slot move or in a new
+  instance, because a runtime helper can be there during its setup.
 - **Capabilities.** A `capable()` call is judged only when the task uses its own
   credentials (overlayfs copy-up uses the mounter's) and the call is not a
   no-audit probe.
@@ -119,6 +124,13 @@ policy:
 - **Deny** returns `-EPERM` from the LSM hook, before the side effect.
 
 ## Known limits
+
+- **Parent bindings.** A bound parent cgroup also judges the armed tasks of
+  its child cgroups that have no binding of their own: OCI `createContainer`
+  and `startContainer` hooks (runc runs them in the container mount
+  namespace before the workload), and an infrastructure (pause) process. A
+  new instance does not arm the tasks that run only under a parent binding;
+  they are judged again when their own cgroup is bound or at their next exec.
 
 - **Lost mark at exec.** The exec hook cannot fail the exec, so a task whose
   mark fails there stays unarmed until its next exec. In an enforcing slot this

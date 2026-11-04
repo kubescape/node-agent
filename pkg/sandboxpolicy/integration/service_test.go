@@ -10,10 +10,12 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
@@ -263,5 +265,80 @@ func TestServiceDrainsStartupChurnBeforeReady(t *testing.T) {
 	}
 	if last.Status.Conditions[0].Status != metav1.ConditionTrue {
 		t.Fatalf("stable replay never became Ready: %+v", last.Status.Conditions)
+	}
+}
+
+type podBinderBackend struct {
+	serviceTestBackend
+	pods [][]sandboxpolicy.PodBinding
+}
+
+func (b *podBinderBackend) BindPods(_ context.Context, pods []sandboxpolicy.PodBinding) error {
+	b.pods = append(b.pods, pods)
+	return nil
+}
+
+func TestServiceBindsPodCgroups(t *testing.T) {
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{sandboxpolicy.PolicyGVR: "SandboxPolicyList", sandboxpolicy.ClusterPolicyGVR: "ClusterSandboxPolicyList", sandboxpolicy.ClassesGVR: "SandboxPolicyClassesList"})
+	p := &unstructured.Unstructured{Object: map[string]any{"apiVersion": api.SchemeGroupVersion.String(), "kind": "SandboxPolicy", "metadata": map[string]any{"name": "priv", "namespace": "ns", "uid": "policy-uid", "generation": int64(1)}, "spec": map[string]any{"selector": map[string]any{"podSelector": map[string]any{}}, "mode": "enforce", "containers": []any{"*"}, "privilege": map[string]any{"default": "allow", "rules": []any{map[string]any{"name": "no-chroot", "action": "deny", "target": map[string]any{"syscall": []any{"chroot"}}}}}}}}
+	if _, err := client.Resource(sandboxpolicy.PolicyGVR).Namespace("ns").Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	backend := &podBinderBackend{}
+	controller, err := sandboxpolicy.NewController(client, backend, nil, nil, sandboxpolicy.Options{Node: api.NodeReference{Name: "node", UID: "node-uid"}, AgentNamespace: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.InitialSync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// A running container of another pod gives the layout.
+	containers := &containercollection.ContainerCollection{}
+	running := &containercollection.Container{CgroupID: 500, CgroupV2: "/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-podother_uid.slice/cri-containerd-x.scope"}
+	running.Runtime.ContainerID = "x"
+	running.K8s.PodUID = "other-uid"
+	containers.AddContainer(running)
+	want := "/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-podpod_uid.slice"
+	var id uint64
+	s := &Service{Controller: controller, backend: backend, options: ServiceOptions{Containers: containers, NodeName: "node"},
+		scheduled: []sandboxpolicy.Binding{{PodUID: "pod-uid", Namespace: "ns", PodName: "pod", ContainerName: "app", Kind: "regular"}},
+		qos:       map[types.UID]corev1.PodQOSClass{"pod-uid": corev1.PodQOSBestEffort},
+		podCgroupID: func(path string) (uint64, error) {
+			if path != want || id == 0 {
+				return 0, errors.New("no such cgroup")
+			}
+			return id, nil
+		}}
+	last := func() []sandboxpolicy.PodBinding { return backend.pods[len(backend.pods)-1] }
+
+	// The pod cgroup does not exist yet: nothing is bound, and the pod is polled.
+	s.bindPods(t.Context())
+	if len(last()) != 0 || !s.podPolling {
+		t.Fatalf("missing cgroup: %+v polling=%v", last(), s.podPolling)
+	}
+	id = 77
+	s.bindPods(t.Context())
+	if got := last(); len(got) != 1 || got[0].CgroupID != 77 || got[0].CgroupPath != want || len(got[0].Plan.Policies) != 1 || s.podPolling {
+		t.Fatalf("bind: %+v polling=%v", got, s.podPolling)
+	}
+	// A container that runs in the pod cgroup itself keeps its own binding.
+	id = 500
+	s.bindPods(t.Context())
+	if len(last()) != 0 {
+		t.Fatalf("pod cgroup shared with a container must not be bound: %+v", last())
+	}
+	// Polling stops when the pod was first seen too long ago.
+	id = 0
+	s.podFirstSeen["pod-uid"] = time.Now().Add(-prepareInterval)
+	s.bindPods(t.Context())
+	if s.podPolling {
+		t.Fatal("polling must stop after prepareInterval")
+	}
+	// An init container that the wildcard does not select: no pod binding.
+	id = 77
+	s.scheduled = append(s.scheduled, sandboxpolicy.Binding{PodUID: "pod-uid", Namespace: "ns", PodName: "pod", ContainerName: "setup", Kind: "init"})
+	s.bindPods(t.Context())
+	if len(last()) != 0 {
+		t.Fatalf("mixed pod must not be bound: %+v", last())
 	}
 }
