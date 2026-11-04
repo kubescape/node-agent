@@ -178,15 +178,10 @@ func compileSlot(slot uint32, docs []Document, generation uint64, c *Compiled, o
 		if err := d.Validate(); err != nil {
 			return nil, err
 		}
-		switch d.Policy.Mode {
-		case "enforce":
-			meta.Value.Mode = KernelModeEnforce
-		case "audit":
-			if meta.Value.Mode == KernelModeOff {
-				meta.Value.Mode = KernelModeAudit
-			}
-		}
+		// The META mode is audit for any active document and enforce only
+		// when an entry enforces (set below).
 		if d.Policy.Mode != "off" {
+			meta.Value.Mode = KernelModeAudit
 			active = append(active, d)
 		}
 	}
@@ -313,7 +308,8 @@ func compileSlot(slot uint32, docs []Document, generation uint64, c *Compiled, o
 	for k, v := range folded {
 		keys = append(keys, k)
 		// The META mode tells the program whether the slot enforces at
-		// all: an audit policy can carry an enforce rule.
+		// all: an audit policy can carry an enforce rule, and an enforce
+		// policy with only allow entries enforces nothing.
 		if v.Rank == RankDenyEnforce {
 			meta.Value.Mode = KernelModeEnforce
 		}

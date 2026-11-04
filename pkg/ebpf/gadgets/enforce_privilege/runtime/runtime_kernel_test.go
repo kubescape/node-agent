@@ -171,7 +171,9 @@ func TestForkMarkFaultInjection(t *testing.T) {
 	for _, mode := range []string{"enforce", "audit"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newKernelFixture(t)
-			doc := privpolicy.Document{Version: 1, Name: "fault-" + mode, Policy: privpolicy.Policy{Mode: mode, Privilege: privpolicy.Section{Default: "allow"}}}
+			// One deny rule, so the slot enforces in enforce mode.
+			rule := privpolicy.Rule{Name: "no-modules", Action: "deny", Target: privpolicy.Target{Syscall: []string{"init_module"}}}
+			doc := privpolicy.Document{Version: 1, Name: "fault-" + mode, Policy: privpolicy.Policy{Mode: mode, Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
 			compiled, err := privpolicy.CompileKernel(doc, 1)
 			if err != nil {
 				t.Fatal(err)
