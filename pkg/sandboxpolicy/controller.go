@@ -56,6 +56,8 @@ type Controller struct {
 	configError  error
 	// clusterCIDRs fills the clusterInternal class (SetClusterCIDRs).
 	clusterCIDRs ClusterCIDRs
+	// readClusterCIDRs, when set, reads the class (SetClusterCIDRsReader).
+	readClusterCIDRs func(context.Context) (ClusterCIDRs, bool)
 	// networkPlans holds the translated network section of each valid
 	// policy from the last reconciliation, for status and preparation.
 	networkPlans map[types.UID]*NetworkPlan
@@ -187,12 +189,29 @@ func (c *Controller) SetClusterCIDRs(cidrs ClusterCIDRs) bool {
 	return changed
 }
 
+// SetClusterCIDRsReader sets the reader of the clusterInternal class. Refresh
+// calls it after it loads a configuration in which an active policy names the
+// class, and before it compiles, so the first compile of such a policy already
+// has the class. read reports false when it did not read (for example, it
+// limits how often it reads); the class then keeps its value. read runs under
+// the reconciliation lock and must not call Controller methods.
+func (c *Controller) SetClusterCIDRsReader(read func(context.Context) (ClusterCIDRs, bool)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.readClusterCIDRs = read
+}
+
 // UsesClusterInternal reports whether an active policy names the
 // clusterInternal class in a network rule or an except entry, so the caller
 // reads the cluster CIDRs only when a policy needs them.
 func (c *Controller) UsesClusterInternal() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.usesClusterInternal()
+}
+
+// usesClusterInternal is called with c.mu held.
+func (c *Controller) usesClusterInternal() bool {
 	names := func(t *api.NetworkTarget) bool {
 		return t != nil && slices.Contains(t.DestClass, ClassClusterInternal)
 	}
@@ -838,6 +857,11 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	}
 	c.objects = configuration
 	c.configError = nil
+	if c.readClusterCIDRs != nil && c.usesClusterInternal() {
+		if cidrs, ok := c.readClusterCIDRs(ctx); ok {
+			c.clusterCIDRs = cidrs
+		}
+	}
 	if err != nil {
 		return c.rejectBindings(ctx, err)
 	}

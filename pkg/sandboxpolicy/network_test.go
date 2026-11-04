@@ -442,6 +442,65 @@ func TestControllerUsesClusterInternal(t *testing.T) {
 	}
 }
 
+// Refresh reads the clusterInternal class after it loads a policy that names
+// it and before it compiles, so the first plan of the policy has the class.
+func TestControllerReadsClusterInternalBeforeFirstCompile(t *testing.T) {
+	ctx := context.Background()
+	private := networkPolicyObject("net", netSpec(api.ActionAllow, netRule("no-private", api.ActionDeny, api.NetworkTarget{DestClass: []string{"privateRanges"}})), nil)
+	c, backend, w, client := setup(t)
+	if _, err := client.Resource(PolicyGVR).Namespace("ns").Create(ctx, private, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	c.SetClusterCIDRsReader(func(context.Context) (ClusterCIDRs, bool) {
+		reads++
+		return ClusterCIDRs{Pods: []string{"10.244.0.0/16"}, Services: []string{"10.96.0.0/12"}}, true
+	})
+	snapshot := func(context.Context, func(Binding) bool) ([]Binding, error) { return []Binding{binding()}, nil }
+	if err := c.Refresh(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 0 {
+		t.Fatalf("no policy names clusterInternal, but the class was read %d times", reads)
+	}
+
+	// A new policy names the class: the same Refresh reads it and compiles.
+	internal := networkPolicyObject("net", netSpec(api.ActionDeny, netRule("cluster", api.ActionAllow, api.NetworkTarget{DestClass: []string{ClassClusterInternal}})), nil)
+	internal.SetResourceVersion("")
+	if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, internal, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Refresh(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 1 {
+		t.Fatalf("class read %d times, want 1", reads)
+	}
+	plan := backend.plans[bindingKey(binding())]
+	if len(plan.Policies) != 1 || plan.Policies[0].Network == nil {
+		t.Fatalf("no network plan: %+v", plan)
+	}
+	rule := ruleByName(plan.Policies[0].Network, "cluster")
+	if rule == nil || !reflect.DeepEqual(rule.CIDRs, []string{"10.244.0.0/16", "10.96.0.0/12"}) {
+		t.Fatalf("the first compile must have the class: %+v", rule)
+	}
+	if mode := plan.Policies[0].Network.Egress.Policy.Egress.DefaultMode; mode == "audit" {
+		t.Fatal("the default deny must not be degraded to audit")
+	}
+	if ready := w.reports["uid-net"].Status.Conditions[0]; ready.Status != metav1.ConditionTrue {
+		t.Fatalf("ready %+v", ready)
+	}
+
+	// A reader that does not read keeps the class.
+	c.SetClusterCIDRsReader(func(context.Context) (ClusterCIDRs, bool) { return ClusterCIDRs{}, false })
+	if err := c.Refresh(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if rule := ruleByName(backend.plans[bindingKey(binding())].Policies[0].Network, "cluster"); rule == nil || len(rule.CIDRs) != 2 {
+		t.Fatalf("a skipped read must keep the class: %+v", rule)
+	}
+}
+
 func TestNetworkGeneratedNameCollision(t *testing.T) {
 	// "dns" with tcp and udp becomes dns/tcp and dns/udp; a CRD rule can be
 	// named dns/tcp (and dns/tcp~1) literally. The generated rule gets the

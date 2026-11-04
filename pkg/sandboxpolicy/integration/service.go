@@ -201,6 +201,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		_ = s.closeRuntime()
 		return nil, err
 	}
+	s.Controller.SetClusterCIDRsReader(s.readClusterCIDRs)
 	return s, nil
 }
 
@@ -336,27 +337,22 @@ func (s *Service) refresh(ctx context.Context) {
 	if err != nil {
 		s.report(err)
 	}
-	// Read after Refresh, so a policy that names clusterInternal counts from
-	// the pass that loaded it. A changed class is an input: reconcile again.
-	if s.refreshClusterCIDRs(ctx) {
-		s.ContainerCallback(containercollection.PubSubEvent{})
-	}
 }
 
-// refreshClusterCIDRs reads the clusterInternal sources at most every
-// clusterCIDRsInterval, and only while an active policy names the class. It
-// reports whether the class changed.
-func (s *Service) refreshClusterCIDRs(ctx context.Context) bool {
-	if s.options.NetworkImageName == "" || s.options.Kubernetes == nil || time.Since(s.lastClusterCIDRs) < clusterCIDRsInterval ||
-		!s.Controller.UsesClusterInternal() {
-		return false
+// readClusterCIDRs reads the clusterInternal sources at most every
+// clusterCIDRsInterval. Refresh calls it only while an active policy names the
+// class, after it loads the configuration and before it compiles, so the
+// first compile of a new policy already has the class.
+func (s *Service) readClusterCIDRs(ctx context.Context) (sandboxpolicy.ClusterCIDRs, bool) {
+	if s.options.NetworkImageName == "" || s.options.Kubernetes == nil || time.Since(s.lastClusterCIDRs) < clusterCIDRsInterval {
+		return sandboxpolicy.ClusterCIDRs{}, false
 	}
 	s.lastClusterCIDRs = time.Now()
 	cidrs, err := s.clusterCIDRs.Read(ctx, s.options.Kubernetes)
 	if err != nil {
 		logger.L().Warning("sandbox clusterInternal class: read failed", helpers.Error(err))
 	}
-	return s.Controller.SetClusterCIDRs(cidrs)
+	return cidrs, true
 }
 
 // ContainerCallback is deliberately nonblocking: event delivery must never hold
