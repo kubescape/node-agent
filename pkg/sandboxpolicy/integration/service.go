@@ -106,6 +106,12 @@ type Service struct {
 	// set while such a pod has no pod cgroup yet, for up to prepareInterval.
 	podFirstSeen map[types.UID]time.Time
 	podPolling   bool
+	// podPods, podQoS and podPlans are the inputs of the last bindPods,
+	// reused by the poll. podPollErr is the last error the poll reported.
+	podPods    []sandboxpolicy.Binding
+	podQoS     map[types.UID]corev1.PodQOSClass
+	podPlans   map[types.UID]sandboxpolicy.Plan
+	podPollErr string
 	// podCgroupID returns the cgroup ID of a pod cgroup path (replaced in tests).
 	podCgroupID func(string) (uint64, error)
 	// pods and namespaces are the informers of the node's pods and of all
@@ -285,6 +291,12 @@ func (s *Service) watchPods() {
 		}
 	}
 	_, _ = s.namespaces.Core().V1().Namespaces().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		// A pod can arrive before its new namespace: it was dropped, so
+		// prepare again.
+		AddFunc: func(any) {
+			s.podsScheduled.Store(true)
+			s.ContainerCallback(containercollection.PubSubEvent{})
+		},
 		UpdateFunc: func(old, obj any) {
 			before, ok1 := old.(*corev1.Namespace)
 			after, ok2 := obj.(*corev1.Namespace)
@@ -364,7 +376,7 @@ drain:
 			case <-s.wake:
 				s.refresh(runCtx)
 			case <-poll:
-				s.bindPods(runCtx)
+				s.pollPods(runCtx)
 			}
 		}
 	}()
@@ -452,8 +464,7 @@ func (s *Service) readClusterCIDRs(ctx context.Context) (sandboxpolicy.ClusterCI
 // exist yet sets podPolling, so it is checked again soon, for up to
 // prepareInterval after it was first seen.
 func (s *Service) bindPods(ctx context.Context) {
-	binder, ok := s.backend.(sandboxpolicy.PodBinder)
-	if !ok || s.Controller == nil {
+	if _, ok := s.backend.(sandboxpolicy.PodBinder); !ok || s.Controller == nil {
 		return
 	}
 	// Only the privilege section binds pod cgroups (a network-only node does
@@ -472,7 +483,30 @@ func (s *Service) bindPods(ctx context.Context) {
 	}
 	plans, ok := s.Controller.PodPlans(scheduled)
 	if !ok {
+		s.podPlans = nil
 		return // the policies are not known: keep the pod bindings
+	}
+	s.podPods, s.podQoS, s.podPlans = scheduled, qos, plans
+	s.podPollErr = ""
+	s.bindPodPlans(ctx, scheduled, qos, plans, false)
+}
+
+// pollPods checks again for the pod cgroups that were missing. It reuses the
+// pods and plans of the last bindPods, so the 50 ms poll does not list pods
+// and compile policies.
+func (s *Service) pollPods(ctx context.Context) {
+	s.podPolling = false
+	if s.podPlans == nil {
+		return
+	}
+	s.bindPodPlans(ctx, s.podPods, s.podQoS, s.podPlans, true)
+}
+
+func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Binding, qos map[types.UID]corev1.PodQOSClass, known map[types.UID]sandboxpolicy.Plan, poll bool) {
+	binder := s.backend.(sandboxpolicy.PodBinder)
+	plans := make(map[types.UID]sandboxpolicy.Plan, len(known))
+	for k, v := range known {
+		plans[k] = v
 	}
 	var pods []sandboxpolicy.PodBinding
 	now := time.Now()
@@ -510,7 +544,13 @@ func (s *Service) bindPods(ctx context.Context) {
 	}
 	s.podFirstSeen, s.podPolling = firstSeen, polling
 	if err := binder.BindPods(ctx, pods); err != nil {
-		s.report(fmt.Errorf("privilege pod binding: %w", err))
+		// The poll runs every 50 ms: report a repeated error once.
+		if !poll || err.Error() != s.podPollErr {
+			s.report(fmt.Errorf("privilege pod binding: %w", err))
+		}
+		if poll {
+			s.podPollErr = err.Error()
+		}
 	}
 }
 

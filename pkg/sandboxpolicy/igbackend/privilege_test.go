@@ -264,6 +264,15 @@ func TestPrivilegeTrackingFaultUnconfirmsAndHeals(t *testing.T) {
 	if err := b.Attest(ctx, privBinding(1), "r1"); err != nil {
 		t.Fatalf("the new instance has no fault: %v", err)
 	}
+	// A fault that recurs at once does not reload the gadget again.
+	e.instances[1].faults = map[uint32]uint64{e.instances[1].bound[1]: 1}
+	if r, err := b.Replace(ctx, privBinding(1), plan); err == nil || r.Committed || !r.ProtectionUnconfirmed || len(e.instances) != 2 {
+		t.Fatalf("heal within healRetry: %+v %v instances=%d", r, err, len(e.instances))
+	}
+	b.lastHeal = b.lastHeal.Add(-healRetry)
+	if r, err := b.Replace(ctx, privBinding(1), plan); err != nil || !r.Committed || len(e.instances) != 3 {
+		t.Fatalf("heal after healRetry: %+v %v instances=%d", r, err, len(e.instances))
+	}
 }
 
 func testPodBinding(uid string, cgroup uint64, plan sandboxpolicy.Plan) sandboxpolicy.PodBinding {

@@ -98,6 +98,11 @@ func nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
 // slot: each start is a slow gadget load on the refresh loop.
 const emptyRetry = 30 * time.Second
 
+// healRetry is the shortest time between two new instances started only to
+// heal tracking faults. Faults recur under memory pressure; a gadget reload on
+// every reconcile would add load then. The binding stays unconfirmed meanwhile.
+const healRetry = 30 * time.Second
+
 // nodeOwner owns ONE gadget instance per node for one section.
 //
 // A slot is one combination of the section's policies; containers with the
@@ -124,6 +129,8 @@ type nodeOwner[C any] struct {
 	closed       bool
 	// emptyFailed is when starting an instance with no slot last failed.
 	emptyFailed time.Time
+	// lastHeal is when a tracking fault last started a new instance.
+	lastHeal time.Time
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
@@ -168,6 +175,14 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 	if current != nil && current.revision == plan.Revision && current.combination == combination && health == nil {
 		result.Committed = true
 		return result, b.retire(ctx)
+	}
+	if current != nil && current.revision == plan.Revision && current.combination == combination &&
+		b.instance.Ready() == nil && current.check() == nil {
+		// Only tracking faults: heal with a new instance, at most every healRetry.
+		if time.Since(b.lastHeal) < healRetry {
+			return result, health
+		}
+		b.lastHeal = time.Now()
 	}
 	next := &nodeBinding{binding: binding, revision: plan.Revision, combination: combination}
 	if current != nil && current.lease != nil && current.check() == nil {

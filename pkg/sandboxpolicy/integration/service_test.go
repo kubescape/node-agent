@@ -271,11 +271,12 @@ func TestServiceDrainsStartupChurnBeforeReady(t *testing.T) {
 type podBinderBackend struct {
 	serviceTestBackend
 	pods [][]sandboxpolicy.PodBinding
+	err  error
 }
 
 func (b *podBinderBackend) BindPods(_ context.Context, pods []sandboxpolicy.PodBinding) error {
 	b.pods = append(b.pods, pods)
-	return nil
+	return b.err
 }
 
 func TestServiceBindsPodCgroups(t *testing.T) {
@@ -316,7 +317,23 @@ func TestServiceBindsPodCgroups(t *testing.T) {
 	if len(last()) != 0 || !s.podPolling {
 		t.Fatalf("missing cgroup: %+v polling=%v", last(), s.podPolling)
 	}
+	// The poll reuses the last plans: it binds once the cgroup appears,
+	// and it reports a repeated BindPods error once.
 	id = 77
+	s.pollPods(t.Context())
+	if got := last(); len(got) != 1 || got[0].CgroupID != 77 || s.podPolling {
+		t.Fatalf("poll bind: %+v polling=%v", got, s.podPolling)
+	}
+	reports := 0
+	s.options.OnError = func(error) { reports++ }
+	backend.err = errors.New("busy")
+	s.pollPods(t.Context())
+	s.pollPods(t.Context())
+	backend.err = nil
+	s.options.OnError = nil
+	if reports != 1 {
+		t.Fatalf("a repeated poll error must be reported once: %d", reports)
+	}
 	s.bindPods(t.Context())
 	if got := last(); len(got) != 1 || got[0].CgroupID != 77 || got[0].CgroupPath != want || len(got[0].Plan.Policies) != 1 || s.podPolling {
 		t.Fatalf("bind: %+v polling=%v", got, s.podPolling)

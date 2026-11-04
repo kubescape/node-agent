@@ -26,17 +26,12 @@ func TestOpenLeaderOfThread(t *testing.T) {
 	if thread == "" {
 		t.Skip("no second thread")
 	}
-	fd, err := openLeader(thread, 0)
+	fd, err := openLeader(thread)
 	if err != nil {
 		t.Fatalf("leader of thread %s: %v", thread, err)
 	}
 	unix.Close(fd)
-	own, err := mntnsOf(pid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fd, err := openLeader(thread, own); err == nil {
-		unix.Close(fd)
-		t.Fatal("a leader in the runtime mount namespace must not be armed")
+	if _, err := openLeader("999999999"); err == nil {
+		t.Fatal("a task that does not exist has no leader")
 	}
 }
