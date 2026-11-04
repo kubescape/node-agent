@@ -507,6 +507,13 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 	if err := plan.Egress.Validate(); err != nil {
 		return nil, fmt.Errorf("network: %w", err)
 	}
+	// The node instance merges this document with others, so a document over
+	// the gadget limits alone fails there in every combination. Report it
+	// here, as a reason of this policy.
+	if _, err := netpolicy.CompileKernel(plan.Egress, 1); err != nil {
+		return nil, fmt.Errorf("network: the policy alone exceeds the network gadget limits "+
+			"(at most %d rule entries, one per rule and port range, can cover one destination prefix): %w", netpolicy.KernelListLen, err)
+	}
 	return plan, nil
 }
 

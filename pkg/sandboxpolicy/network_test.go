@@ -430,6 +430,29 @@ func TestNetworkGeneratedNameCollision(t *testing.T) {
 	}
 }
 
+func TestNetworkDocumentOverGadgetLimits(t *testing.T) {
+	ports := func(n int) []intstr.IntOrString {
+		var out []intstr.IntOrString
+		for i := 0; i < n; i++ {
+			out = append(out, intstr.FromInt32(int32(1000+i)))
+		}
+		return out
+	}
+	// Two rules cover 192.0.2.0/25: 16 + n rule entries on that prefix.
+	spec := func(n int) api.PolicySpec {
+		return netSpec(api.ActionAllow,
+			netRule("wide", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}, Ports: ports(16)}),
+			netRule("narrow", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/25"}, Ports: ports(n)}))
+	}
+	if _, err := TranslateNetwork(spec(netpolicy.KernelListLen-16), NetworkExtras{}, DestClasses{}); err != nil {
+		t.Fatalf("%d entries on a prefix is the limit, not over it: %v", netpolicy.KernelListLen, err)
+	}
+	_, err := TranslateNetwork(spec(netpolicy.KernelListLen-15), NetworkExtras{}, DestClasses{})
+	if err == nil || !strings.Contains(err.Error(), "the policy alone exceeds the network gadget limits") {
+		t.Fatalf("a document over the per-prefix limit must fail at translation, got %v", err)
+	}
+}
+
 func TestNetworkMappedCIDRBecomesIPv4(t *testing.T) {
 	spec := netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"::ffff:192.0.2.0/120"}}))
 	if r := ruleByName(translate(t, spec, NetworkExtras{}, DestClasses{}), "r"); r == nil || !reflect.DeepEqual(r.CIDRs, []string{"192.0.2.0/24"}) {
