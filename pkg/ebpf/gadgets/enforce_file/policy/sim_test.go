@@ -85,7 +85,7 @@ func (s *sim) decide(slot uint32, access int, matched Bits, fromImage bool) outc
 			if r.Flags&RuleGuard == 0 {
 				continue
 			}
-			hit = r.Flags&RuleAnyPath != 0 || matched.intersects(r.Guard)
+			hit = matched.intersects(r.Guard)
 		}
 		if !hit || matched.intersects(r.Except) || (r.Flags&RuleFromImage != 0 && !fromImage) {
 			continue
@@ -109,6 +109,27 @@ func (s *sim) decide(slot uint32, access int, matched Bits, fromImage bool) outc
 		return outcome{rank: RankDenyEnforce, ruleID: def.RuleID, isDefault: true}
 	}
 	return out
+}
+
+// decideMask mirrors file_decide_mask: the most limiting result over the
+// access kinds (bits) in mask, and the kind that gave it.
+func (s *sim) decideMask(slot uint32, mask int, matched Bits, fromImage bool) (outcome, int) {
+	var best outcome
+	access := 0
+	for a := 0; a <= AccessMoveSource; a++ {
+		if mask&(1<<a) == 0 {
+			continue
+		}
+		if o := s.decide(slot, a, matched, fromImage); o.rank > best.rank {
+			best, access = o, a
+		}
+	}
+	return best, access
+}
+
+// moveSource judges a path as the old name of a rename or a hard link.
+func (s *sim) moveSource(slot uint32, path string, fromImage bool) (outcome, int) {
+	return s.decideMask(slot, MoveSourceMask, s.match(slot, path), fromImage)
 }
 
 // judge returns the rank of one access kind on a path.

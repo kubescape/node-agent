@@ -3,6 +3,7 @@ package sandboxpolicy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -36,7 +37,7 @@ func writesConfined() api.FileDefault {
 
 func translateFile(t *testing.T, spec api.PolicySpec, x FileExtras, shared map[string][]string) *FilePlan {
 	t.Helper()
-	plan, err := TranslateFile(spec, x, shared)
+	plan, err := TranslateFile(spec, x, shared, FileNode{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +125,11 @@ func TestTranslateFileRules(t *testing.T) {
 		!reflect.DeepEqual(dev.Access, []string{"read", "write"}) {
 		t.Fatalf("runtime devices %+v", dev)
 	}
+	shm := fileRuleByName(plan, "runtime-shm")
+	if shm == nil || shm.Action != "allow" || !reflect.DeepEqual(shm.Paths, []string{"/dev/shm/**"}) ||
+		!reflect.DeepEqual(shm.Access, []string{"read", "write", "create", "delete"}) {
+		t.Fatalf("runtime shm %+v", shm)
+	}
 	if plan.Report.NotReady != "" || len(plan.Report.Degraded) != 0 || plan.Report.Rules != 6 || plan.Report.ClassesResolved != 1 {
 		t.Fatalf("report %+v", plan.Report)
 	}
@@ -186,7 +192,7 @@ func TestTranslateFileValidates(t *testing.T) {
 		spec := fileSpec(api.ActionAllow, fileRule("r", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/etc/**"}}}))
 		var x FileExtras
 		mutate(&spec, &x)
-		if _, err := TranslateFile(spec, x, nil); err == nil {
+		if _, err := TranslateFile(spec, x, nil, FileNode{}); err == nil {
 			t.Errorf("%s: invalid input accepted", name)
 		}
 	}
@@ -201,7 +207,7 @@ func TestFilePathClasses(t *testing.T) {
 	shared := map[string][]string{"sshKeys": {"/data/ssh/**"}, "backendOnly": {"/var/lib/backend/**"}}
 	plan := translateFile(t, spec, FileExtras{}, shared)
 	keys := fileRuleByName(plan, "no-keys")
-	want := []string{"/data/ssh/**", "/home/*/.ssh/**", "/opt/keys/**", "/root/.ssh/**", "/srv/key"}
+	want := []string{"/data/ssh/**", "/home/*/.ssh/**", "/opt/keys/**", "/root/.ssh/**", "/srv/..*/key", "/srv/key"}
 	if keys == nil || !reflect.DeepEqual(keys.Paths, want) {
 		t.Fatalf("built-in, shared, policy and literal paths must combine: %+v", keys)
 	}
@@ -276,15 +282,15 @@ func TestFileExcept(t *testing.T) {
 		notReady string
 		disabled string
 	}{
-		"path":            {entries: []FileExcept{{Target: path("/workspace/.claude/settings.local.json")}}, lifted: []string{"/workspace/.claude/settings.local.json"}},
-		"covering access": {entries: []FileExcept{{Target: &api.FileTarget{Access: []string{"create", "write", "read"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, lifted: []string{"/a/.claude/x"}},
+		"path":            {entries: []FileExcept{{Target: path("/workspace/.claude/settings.local.json")}}, lifted: []string{"/workspace/.claude/..*/settings.local.json", "/workspace/.claude/settings.local.json"}},
+		"covering access": {entries: []FileExcept{{Target: &api.FileTarget{Access: []string{"create", "write", "read"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, lifted: []string{"/a/.claude/..*/x", "/a/.claude/x"}},
 		"partial access":  {entries: []FileExcept{{Target: &api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, disabled: "must cover every access kind"},
 		"unresolved class": {entries: []FileExcept{{Target: &api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}}},
 			notReady: "ClassUnresolved", disabled: "class-unresolved"},
 		"fsType":  {entries: []FileExcept{{Target: &api.FileTarget{PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}}}, disabled: "fromImage and fsType"},
 		"actor":   {entries: []FileExcept{{Actor: &api.Actor{Path: []string{"/bin/git"}}}}, disabled: "actor predicates"},
 		"pattern": {entries: []FileExcept{{Target: path("/a/.claude/fil?")}}, disabled: "cannot be expressed"},
-		"two":     {entries: []FileExcept{{Target: path("/b/.claude/y")}, {Actor: &api.Actor{UID: []int64{0}}}}, lifted: []string{"/b/.claude/y"}, disabled: "except 1 is disabled"},
+		"two":     {entries: []FileExcept{{Target: path("/b/.claude/y")}, {Actor: &api.Actor{UID: []int64{0}}}}, lifted: []string{"/b/.claude/..*/y", "/b/.claude/y"}, disabled: "except 1 is disabled"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			plan := translateFile(t, deny(), FileExtras{Except: map[string][]FileExcept{"no-agent-config": tc.entries}}, nil)
@@ -322,7 +328,7 @@ func TestFileNotEnforceableTargets(t *testing.T) {
 			t.Errorf("rule %s must not reach the gadget", name)
 		}
 	}
-	if odd := fileRuleByName(plan, "odd"); odd == nil || !reflect.DeepEqual(odd.Paths, []string{"/etc/shadow"}) {
+	if odd := fileRuleByName(plan, "odd"); odd == nil || !reflect.DeepEqual(odd.Paths, []string{"/etc/..*/shadow", "/etc/shadow"}) {
 		t.Fatalf("a deny keeps the globs the gadget can match: %+v", odd)
 	}
 	notEnforcedHas(t, plan, "rule no-tmpfs-write: fsType", "rule tmpfs-ok: fsType", "rule own-files: fromImage false", "rule odd: path /etc/[ab]", "rule odd-allow: path /w/fil?")
@@ -356,7 +362,7 @@ func TestFileDocumentCheckFails(t *testing.T) {
 	saved := checkFileDocument
 	defer func() { checkFileDocument = saved }()
 	checkFileDocument = func(filepolicy.Document) error { return errors.New("over limits") }
-	if _, err := TranslateFile(fileSpec(api.ActionAllow), FileExtras{}, nil); err == nil || !strings.Contains(err.Error(), "file: over limits") {
+	if _, err := TranslateFile(fileSpec(api.ActionAllow), FileExtras{}, nil, FileNode{}); err == nil || !strings.Contains(err.Error(), "file: over limits") {
 		t.Fatalf("err %v", err)
 	}
 }
@@ -572,5 +578,109 @@ func TestSectionBackendRoutesFileSection(t *testing.T) {
 	file.fail = false
 	if r, err := s.Withdraw(context.Background(), b); err != nil || !r.Committed || file.withdrawals != 1 || len(s.active) != 0 {
 		t.Fatalf("withdraw %+v %v", r, err)
+	}
+}
+
+// TestFilePathAliases: a pattern also matches the resolved path the gadget
+// sees for a /var/run name and for a file of a kubelet atomic-writer volume.
+func TestFilePathAliases(t *testing.T) {
+	spec := fileSpec(api.ActionAllow,
+		fileRule("creds", api.ActionDeny, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{PathClass: []string{"credentialStore", "containerRuntimeSocket"}}}),
+		fileRule("cfg", api.ActionAllow, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/etc/app/config.yaml", "/data/**"}}}),
+	)
+	x := FileExtras{Except: map[string][]FileExcept{"creds": {{Target: &api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/var/run/docker.sock"}}}}}}}
+	plan := translateFile(t, spec, x, nil)
+	creds, cfg := fileRuleByName(plan, "creds"), fileRuleByName(plan, "cfg")
+	if creds == nil || cfg == nil {
+		t.Fatalf("rules %+v", plan.Doc.Policy.File.Rules)
+	}
+	matches := func(globs []string, path string) bool {
+		for _, g := range globs {
+			p, err := filepolicy.ParsePattern(g)
+			if err != nil {
+				t.Fatalf("%s: %v", g, err)
+			}
+			if p.MatchPath(path) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, path := range []string{
+		"/var/run/secrets/kubernetes.io/serviceaccount/token",
+		"/run/secrets/kubernetes.io/serviceaccount/token",
+		"/var/run/secrets/kubernetes.io/serviceaccount/..2026_11_04_10_00_00.123456789/token",
+		"/run/secrets/kubernetes.io/serviceaccount/..2026_11_04_10_00_00.123456789/token",
+		"/run/docker.sock", "/var/run/docker.sock", "/run/containerd/containerd.sock",
+	} {
+		if !matches(creds.Paths, path) {
+			t.Errorf("deny paths %v do not match %s", creds.Paths, path)
+		}
+	}
+	if matches(creds.Paths, "/var/run/secrets/kubernetes.io/serviceaccount/x/token") {
+		t.Error("only ..* directories are aliases")
+	}
+	for _, path := range []string{"/run/docker.sock", "/var/run/..data/docker.sock"} {
+		if !matches(creds.Except, path) {
+			t.Errorf("except %v does not match %s", creds.Except, path)
+		}
+	}
+	if !matches(cfg.Paths, "/etc/app/..data/config.yaml") || !slices.Contains(cfg.Paths, "/data/**") || len(cfg.Paths) != 3 {
+		t.Errorf("allow paths %v", cfg.Paths)
+	}
+	for _, in := range []string{"/x", "/a/**", "/a/*.sock", "**/.env"} {
+		if got := pathAliases([]string{in}); !reflect.DeepEqual(got, []string{in}) {
+			t.Errorf("%s: aliases %v", in, got)
+		}
+	}
+}
+
+// TestFileFromImageUnavailable: on a kernel whose overlay layout the gadget
+// cannot read, fromImage rules are reported, never enforced on a guess.
+func TestFileFromImageUnavailable(t *testing.T) {
+	spec := fileSpec("",
+		fileRule("img", api.ActionDeny, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{FromImage: boolPtr(true)}}),
+		fileRule("img-ok", api.ActionAllow, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{FromImage: boolPtr(true)}}),
+	)
+	spec.File.Default = writesConfined()
+	plan, err := TranslateFile(spec, FileExtras{}, nil, FileNode{FromImageUnavailable: "no overlay BTF"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fileRuleByName(plan, "img") != nil || fileRuleByName(plan, "img-ok") != nil {
+		t.Fatal("fromImage rules must not reach the gadget")
+	}
+	notEnforcedHas(t, plan, "rule img: fromImage is not enforced on this node: no overlay BTF", "rule img-ok: fromImage is not enforced")
+	if d := fileDegraded(plan, "img-ok"); d == nil || d.Reason != "not-enforceable" {
+		t.Fatalf("allow degraded %+v", d)
+	}
+	plan = translateFile(t, spec, FileExtras{}, nil)
+	if r := fileRuleByName(plan, "img"); r == nil || !r.FromImage {
+		t.Fatalf("fromImage rule %+v", r)
+	}
+}
+
+// TestFileTwoPoliciesAtRuleLimit: the built-in rules of several policies
+// merge in the gadget compiler, so two policies of 32 rules each (30 own and
+// the 2 built-in) fit the 64 rules of a slot; one more own rule in each does
+// not.
+func TestFileTwoPoliciesAtRuleLimit(t *testing.T) {
+	builtin := len(runtimeDevices)
+	policy := func(name string, n int) filepolicy.Document {
+		var rules []api.FileRule
+		for i := 0; i < n; i++ {
+			rules = append(rules, fileRule(fmt.Sprint(i), api.ActionDeny, api.FileTarget{Access: []string{"read"},
+				PathTarget: api.PathTarget{Path: []string{fmt.Sprintf("/%s/%d/**", name, i)}}}))
+		}
+		doc := translateFile(t, fileSpec(api.ActionAllow, rules...), FileExtras{}, nil).Doc
+		doc.Name = name
+		return doc
+	}
+	own := (filepolicy.KernelMaxRules - builtin) / 2
+	if _, err := filepolicy.CompileSlots([][]filepolicy.Document{{policy("a", own), policy("b", own)}}, 1); err != nil {
+		t.Fatalf("two policies of %d rules: %v", own+builtin, err)
+	}
+	if _, err := filepolicy.CompileSlots([][]filepolicy.Document{{policy("a", own+1), policy("b", own+1)}}, 1); err == nil {
+		t.Fatalf("two policies of %d rules fit one slot", own+1+builtin)
 	}
 }

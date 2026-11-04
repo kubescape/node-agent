@@ -6,12 +6,19 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
+	fileruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/runtime"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 )
 
 // CheckFile returns an EnforcementUnavailableError unless the file section
 // can be enforced: its programs are BPF LSM programs.
 func CheckFile(hostRoot string) error { return checkBPFLSM(hostRoot, sandboxpolicy.SectionFile) }
+
+// FileNode describes this node for the file translation: fromImage needs an
+// overlay inode layout the gadget can read (fileruntime.FromImageUnavailable).
+func FileNode() sandboxpolicy.FileNode {
+	return sandboxpolicy.FileNode{FromImageUnavailable: fileruntime.FromImageUnavailable()}
+}
 
 // FileConfig is what one enforce_file instance starts with. It has the fields
 // of the file runtime's Config.

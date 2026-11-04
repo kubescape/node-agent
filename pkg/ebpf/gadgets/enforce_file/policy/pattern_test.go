@@ -52,14 +52,15 @@ func TestParsePatternRejects(t *testing.T) {
 
 func TestGuards(t *testing.T) {
 	for in, want := range map[string][]string{
-		"/root/.aws/**":   {"/root/.aws/**", "/root"},
-		"/home/*/.aws/**": {"/home/*/.aws/**", "/home/*", "/home"},
-		"/etc/shadow":     {"/etc/shadow", "/etc"},
-		"**/.claude/**":   {"/**/.claude/**"},
-		"**/.git/config":  {"/**/.git/config", "/**/.git"},
-		"/a/**/b/c":       {"/a/**/b/c", "/a/**/b", "/a"},
-		"/etc/cron*/**":   {"/etc/cron*/**", "/etc"},
-		"/x":              {"/x"},
+		"/root/.aws/**":   {"/root"},
+		"/home/*/.aws/**": {"/home/*", "/home"},
+		"/etc/shadow":     {"/etc"},
+		"**/.claude/**":   nil,
+		"**/.git/config":  {"/**/.git"},
+		"/a/**/b/c":       {"/a/**/b", "/a"},
+		"/etc/cron*/**":   {"/etc"},
+		"/x":              nil,
+		"/**":             nil,
 	} {
 		p, err := ParsePattern(in)
 		if err != nil {

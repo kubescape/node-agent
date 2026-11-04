@@ -31,6 +31,8 @@ var NodeStatusGVR = api.SchemeGroupVersion.WithResource("sandboxpolicynodestatus
 type Options struct {
 	Node           api.NodeReference
 	AgentNamespace string
+	// File describes the node for the file translation.
+	File FileNode
 }
 
 type installed struct {
@@ -465,7 +467,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, p.network, dest)
 		}
 		if p.err == nil && p.spec.File != nil && p.spec.Mode != api.ModeOff {
-			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, p.file, classes.PathClasses)
+			filePlans[p.identity.UID], p.err = TranslateFile(p.spec, p.file, classes.PathClasses, c.options.File)
 		}
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err
