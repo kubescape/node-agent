@@ -43,6 +43,7 @@
 // A task that moves into a child cgroup of its container stays covered, up to
 // this many levels below the bound cgroup.
 #define BINDINGS_CGROUP_DEPTH 32
+#define BINDINGS_DIRECT_LEVEL
 
 #include "../common/arming.h"
 #include "../common/bindings.h"
@@ -187,6 +188,19 @@ static __always_inline bool file_scope(struct file_eval *e)
 static __always_inline struct mount *file_real_mount(struct vfsmount *mnt)
 {
 	return (void *)mnt - bpf_core_field_offset(struct mount, mnt);
+}
+
+// file_mnt_ns returns mount.mnt_ns of a vfsmount as a number (MNT_NS_INTERNAL
+// is ERR_PTR(-EINVAL)), with one kernel read; 0 when the read fails.
+static __always_inline long file_mnt_ns(struct vfsmount *mnt)
+{
+	long ns = 0;
+
+	bpf_probe_read_kernel(&ns, sizeof(ns),
+			      (void *)((unsigned long)mnt -
+				       bpf_core_field_offset(struct mount, mnt) +
+				       bpf_core_field_offset(struct mount, mnt_ns)));
+	return ns;
 }
 
 // file_from_image is true for a file of an overlay lower layer that this
@@ -490,23 +504,24 @@ static __always_inline int file_verdict(enum file_hook hook,
 
 /* Hooks */
 
-// Order in every hook: binding, (file_open: overlay internal open), arming,
+// Order in every hook: (file_open: overlay internal open), binding, arming,
 // path, match. Unbound tasks leave after one hash lookup per cgroup level.
 SEC("lsm/file_open")
 int BPF_PROG(ig_file_open, struct file *file)
 {
 	struct file_eval e = {};
-	struct mount *mnt;
 	__u32 fmode, mask = 0;
 	bool fi;
 
-	if (!file_bound(&e))
-		return 0;
 	// overlayfs opens the backing file on a private clone mount
 	// (clone_private_mount: mnt_ns = MNT_NS_INTERNAL = ERR_PTR(-EINVAL));
 	// user space cannot create such a mount. Copy-up opens use it too.
-	mnt = file_real_mount(BPF_CORE_READ(file, f_path.mnt));
-	if ((long)BPF_CORE_READ(mnt, mnt_ns) == -EINVAL)
+	// Checked first: every open of an overlay file calls this hook twice,
+	// and the backing call then skips the binding lookup. file is a trusted
+	// argument, so f_path.mnt is a direct load; mnt_ns takes one read.
+	if (file_mnt_ns(file->f_path.mnt) == -EINVAL)
+		return 0;
+	if (!file_bound(&e))
 		return 0;
 	if (!file_armed(&e))
 		return 0;

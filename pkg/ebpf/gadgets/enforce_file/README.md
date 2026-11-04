@@ -163,6 +163,14 @@ policy, shared lab VMs, so about ±100 ns): the program loaded, container not
 bound: +185 ns (6.12) / +305 ns (6.8, the first program on `file_open` there);
 bound: +280 ns (6.12) / +305 ns (6.8) more.
 
+An unbound task pays one hash lookup per cgroup level (its own cgroup and
+each parent, for the child-cgroup coverage). `file_open` skips overlayfs'
+backing open before that lookup, so an overlay open walks once, not twice.
+Program time per unbound open (`kernel.bpf_stats_enabled`, which adds its
+own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
+(a container under three parent slices, as an orchestrator places it), on
+6.8 and 6.12; a lookup of the own cgroup only would be about 70 ns.
+
 ## Known limits
 
 - Hard links and bind mounts that exist before the policy binds keep a second
