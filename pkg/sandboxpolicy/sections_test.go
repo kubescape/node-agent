@@ -502,3 +502,26 @@ func TestControllerPodPlansNeedTranslatedFile(t *testing.T) {
 		t.Fatalf("no pod plan when the file section is not translated: %+v %v", plans, ok)
 	}
 }
+
+// A file-only policy prepares the file section through the section backend.
+func TestControllerPrepareScheduledFile(t *testing.T) {
+	ctx := context.Background()
+	p := policy("file-only", "ns")
+	p.Spec.File = &api.FileSection{Default: api.FileDefault{Action: api.ActionAllow}}
+	c, _, _, _ := setup(t, p)
+	privilege := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	file := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	c.backend = sections.WithFile(file, nil)
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	b := binding()
+	b.ContainerID, b.CgroupID = "", 0
+	if err := c.PrepareScheduled(ctx, []Binding{b}); err != nil {
+		t.Fatal(err)
+	}
+	if len(file.prepared) != 1 || privilege.prepared != nil {
+		t.Fatalf("file prepared %v, privilege prepared %v", file.prepared, privilege.prepared)
+	}
+}

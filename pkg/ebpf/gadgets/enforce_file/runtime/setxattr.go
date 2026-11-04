@@ -24,6 +24,12 @@ const SetxattrAllowOneParam = "operator.oci.ebpf.setxattr-allow-one"
 // 6.11 on.
 const skipcapHook = "bpf_lsm_inode_xattr_skipcap"
 
+// From Linux 6.9, IMA and EVM are LSMs that run after BPF LSM, and a nonzero
+// return stops the hook loop, so a return of 1 would skip their
+// inode_setxattr checks. 6.9 added file_post_open for IMA, so its BPF LSM stub
+// marks those kernels. Return 1 only before 6.9.
+const imaLSMHook = "bpf_lsm_file_post_open"
+
 // SetxattrAllowOne reports whether inode_setxattr must return 1 on an allow:
 // the kernel has the old hook semantics, and its verifier accepts a return of
 // 1 there. The return value check came with 6.12, and some distribution
@@ -43,15 +49,18 @@ func SetxattrAllowOne() (bool, error) {
 }
 
 func oldSetxattrSemantics(spec typeFinder) (bool, error) {
-	var fn *btf.Func
-	err := spec.TypeByName(skipcapHook, &fn)
-	if errors.Is(err, btf.ErrNotFound) {
-		return true, nil
+	for _, hook := range []string{skipcapHook, imaLSMHook} {
+		var fn *btf.Func
+		err := spec.TypeByName(hook, &fn)
+		if errors.Is(err, btf.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("kernel BTF %s: %w", hook, err)
+		}
+		return false, nil
 	}
-	if err != nil {
-		return false, fmt.Errorf("kernel BTF %s: %w", skipcapHook, err)
-	}
-	return false, nil
+	return true, nil
 }
 
 // lsmReturnOneLoads loads (does not attach) an inode_setxattr program that

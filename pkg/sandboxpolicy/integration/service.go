@@ -93,7 +93,7 @@ type Service struct {
 	// bounds how often privilege slot preparation lists the node's pods.
 	podsScheduled atomic.Bool
 	lastPrepare   time.Time
-	// hadSlotPolicies: the last refresh saw a privilege or network policy.
+	// hadSlotPolicies: the last refresh saw a privilege, network or file policy.
 	hadSlotPolicies bool
 	// lastClusterCIDRs bounds how often the clusterInternal class is read;
 	// clusterCIDRs keeps the last good value of each part.

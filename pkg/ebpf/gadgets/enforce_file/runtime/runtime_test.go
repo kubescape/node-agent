@@ -177,17 +177,28 @@ type findFunc func(name string) error
 func (f findFunc) TypeByName(name string, _ any) error { return f(name) }
 
 func TestOldSetxattrSemantics(t *testing.T) {
+	missing := fmt.Errorf("x: %w", btf.ErrNotFound)
 	for name, c := range map[string]struct {
-		err      error
-		one, bad bool
+		skipcap, ima error
+		one, bad     bool
 	}{
-		"6.11 and later": {}, "before 6.11": {err: fmt.Errorf("x: %w", btf.ErrNotFound), one: true},
-		"BTF error": {err: fmt.Errorf("broken"), bad: true},
+		"6.11 and later":   {ima: missing},
+		"6.9 and 6.10":     {skipcap: missing},
+		"before 6.9":       {skipcap: missing, ima: missing, one: true},
+		"BTF error":        {skipcap: fmt.Errorf("broken"), bad: true},
+		"BTF error on IMA": {skipcap: missing, ima: fmt.Errorf("broken"), bad: true},
 	} {
-		var asked string
-		one, err := oldSetxattrSemantics(findFunc(func(n string) error { asked = n; return c.err }))
-		if one != c.one || (err != nil) != c.bad || asked != "bpf_lsm_inode_xattr_skipcap" {
-			t.Errorf("%s: got %v, %v (asked %q)", name, one, err, asked)
+		one, err := oldSetxattrSemantics(findFunc(func(n string) error {
+			if n == "bpf_lsm_inode_xattr_skipcap" {
+				return c.skipcap
+			}
+			if n == "bpf_lsm_file_post_open" {
+				return c.ima
+			}
+			return fmt.Errorf("unexpected %q", n)
+		}))
+		if one != c.one || (err != nil) != c.bad {
+			t.Errorf("%s: got %v, %v", name, one, err)
 		}
 	}
 }

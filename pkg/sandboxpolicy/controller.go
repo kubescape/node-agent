@@ -259,6 +259,7 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 	for _, p := range policies {
 		active[SectionPrivilege] = active[SectionPrivilege] || p.spec.Privilege != nil
 		active[SectionNetwork] = active[SectionNetwork] || p.spec.Network != nil
+		active[SectionFile] = active[SectionFile] || p.spec.File != nil
 	}
 	var nonEmpty []Plan
 	for _, b := range containers {

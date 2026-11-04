@@ -58,10 +58,11 @@ library README).
   is an unresolved path.
 - Before Linux 6.11 (upstream commit 61df7b828204), the kernel checks
   `CAP_SYS_ADMIN` for a `security.*` extended attribute only when the
-  `inode_setxattr` hooks return 1. On such a kernel the owner sets the
+  `inode_setxattr` hooks return 1. Before 6.9 the owner sets the
   `setxattr-allow-one` parameter (`runtime.SetxattrParams`), and
-  `inode_setxattr` returns 1 when it allows. On 6.11 and later it returns 0,
-  and the verifier of 6.12 rejects a return of 1.
+  `inode_setxattr` returns 1 when it allows. From 6.9 it returns 0: IMA and
+  EVM are then LSMs that run after BPF LSM, and a return of 1 would stop the
+  hook loop before their checks. The verifier of 6.12 rejects a return of 1.
 - A create is denied at `path_mknod`, before the file exists: a deny at
   `file_open` would leave an empty file. `bpf_d_path` is not allowed in
   `path_mknod`, and the old name of a hard link has no `struct path`; both
@@ -248,8 +249,8 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
   6.11 (upstream 61df7b828204) with BPF LSM active, the BPF LSM default of
   `inode_setxattr` and `inode_removexattr` is 0, so the kernel skips its
   `CAP_SYS_ADMIN` check of `security.*` attributes for every task (verified on Ubuntu 6.8: a user
-  without capabilities sets `security.test` with no BPF program loaded). Where
-  the verifier accepts a return of 1, the gadget returns 1 from
+  without capabilities sets `security.test` with no BPF program loaded). Before
+  6.9, where the verifier accepts a return of 1, the gadget returns 1 from
   `inode_setxattr` and so restores the `setxattr` check while it runs. Kernels
   with the LSM return value check backported (Ubuntu 6.8) reject a return of
   1: there the gadget returns 0 and the kernel issue stays. `inode_removexattr`

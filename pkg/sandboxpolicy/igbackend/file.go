@@ -43,6 +43,7 @@ var (
 	_ sandboxpolicy.Backend            = (*FileBackend)(nil)
 	_ sandboxpolicy.ProtectionAttester = (*FileBackend)(nil)
 	_ sandboxpolicy.SlotPreparer       = (*FileBackend)(nil)
+	_ sandboxpolicy.PreparedClearer    = (*FileBackend)(nil)
 )
 
 // compileFileSlots is the gadget compiler; a variable so tests can run the
