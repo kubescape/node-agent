@@ -26,3 +26,7 @@ params:
       key: arming-fail-fork-marks
       defaultValue: "false"
       description: test only - fail every child arming mark at fork (fault injection)
+    setxattr_allow_one:
+      key: setxattr-allow-one
+      defaultValue: "false"
+      description: return 1 (run the kernel's capability check) from inode_setxattr on an allow; set on Linux before 6.11, see runtime.SetxattrAllowOne

@@ -19,15 +19,19 @@ package runtime
 //	FILE_CGROUP_PATH         its cgroup v2 path, for example /system.slice/docker-<id>.scope
 //	FILE_OTHER_CONTAINER_ID  a container that is never bound
 //
-// Optional: FILE_BENCH_BINARY, a static open+close loop in the bound container
-// (arguments: iterations, path; output: ns per open+close), measures the cost
+// Optional: FILE_SETXATTR_ALLOW_ONE (see start). FILE_BENCH_BINARY, a static
+// open+close loop in the bound container (arguments: iterations, path; output:
+// ns per open+close), measures the cost
 // with no program loaded, unbound, and bound to a ~50 pattern policy.
 // FILE_HELPER_BINARY, a static helper in the bound container (`exchange A B`:
 // renameat2 with RENAME_EXCHANGE; `chroot-read DIR PATH`: chroot, then read;
-// `setcap P`, `setacl P`, `setuser P`: setxattr of security.capability,
-// system.posix_acl_access (u::rw,g::r,o::rw), user.r2; `tmpfile-link DIR N`:
+// `setcap P`, `setacl P`, `setuser P`, `setsec P`: setxattr of
+// security.capability, system.posix_acl_access (u::rw,g::r,o::rw), user.r2,
+// security.test; `tmpfile-link DIR N`:
 // an O_TMPFILE file in DIR linked to N through /proc/self/fd), runs the
-// exchange, chroot, extended attribute and O_TMPFILE cases.
+// exchange, chroot, extended attribute and O_TMPFILE cases; the same path in
+// the unbound container, and python3 on the host, run the security.*
+// attribute case.
 
 import (
 	"context"
@@ -39,9 +43,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf/btf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
@@ -161,8 +167,22 @@ func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
 			return nil
 		}, 100)
 	}))
+	values, err := SetxattrParams()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Negative controls: FILE_SETXATTR_ALLOW_ONE=false forces the value,
+	// omit passes no value (an image older than the parameter).
+	switch v := os.Getenv("FILE_SETXATTR_ALLOW_ONE"); v {
+	case "":
+	case "omit":
+		values = nil
+	default:
+		values[SetxattrAllowOneParam] = v
+	}
+	t.Logf("gadget parameters: %v", values)
 	desired := &api.GadgetInstance{Id: "file-kernel-test", GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol,
-		ImageName: os.Getenv("FILE_IMAGE")}}
+		ImageName: os.Getenv("FILE_IMAGE"), ParamValues: values}}
 	if err := manager.StartGadget(f.ctx, desired, gadgetcontext.WithOrasReadonlyTarget(store),
 		gadgetcontext.WithAdditionalDataOperators(handler, New(), events),
 		WithConfig(Config{Policy: compiled})); err != nil {
@@ -479,6 +499,77 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.mu.Lock()
 		for _, v := range f.verdicts[before:] {
 			t.Errorf("verdict for an allowed attribute change: %+v", v)
+		}
+		f.mu.Unlock()
+	})
+	t.Run("security attributes keep the capability check", func(t *testing.T) {
+		// Review 3 finding 1: before Linux 6.11 the kernel checks
+		// CAP_SYS_ADMIN for security.* names only when the inode_setxattr
+		// hooks return 1. Neither container has CAP_SYS_ADMIN, and the
+		// name is not judged: EPERM comes from the capability check, for a
+		// bound task, a task of an unbound container and a host task.
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		spec, err := btf.LoadKernelSpec()
+		if err != nil {
+			t.Fatal(err)
+		}
+		old, err := oldSetxattrSemantics(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if one, err := SetxattrAllowOne(); err != nil {
+			t.Fatal(err)
+		} else if old && !one {
+			t.Skip("old setxattr hook semantics and a verifier that rejects a return of 1: " +
+				"the kernel skips the capability check of security.* names whenever BPF LSM is active")
+		}
+		f.mu.Lock()
+		before := len(f.verdicts)
+		f.mu.Unlock()
+		f.denied(t, f.id, helper+" setsec /work/a")
+		f.denied(t, f.id, helper+" setsec /usr/lib/os-release")
+		if code, _ := f.sh(t, f.other, "test -x "+helper); code == 0 {
+			f.denied(t, f.other, helper+" setsec /etc/hostname")
+		} else {
+			t.Errorf("the helper is not in the unbound container")
+		}
+		dir, err := os.MkdirTemp("/var/tmp", "file-setsec-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(dir)
+		owned, rootOwned := filepath.Join(dir, "owned"), filepath.Join(dir, "root-666")
+		for _, p := range []string{owned, rootOwned} {
+			if err := os.WriteFile(p, nil, 0o666); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Chmod(rootOwned, 0o666); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chown(owned, 65534, 65534); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []string{owned, rootOwned} {
+			cmd := exec.CommandContext(f.ctx, "python3", "-c", "import os,sys; os.setxattr(sys.argv[1], 'security.test', b'1')", p)
+			cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+			out, err := cmd.CombinedOutput()
+			t.Logf("host uid 65534: setxattr security.test %s -> %v %s", p, err, strings.TrimSpace(string(out)))
+			if err == nil || !strings.Contains(string(out), "Operation not permitted") {
+				t.Errorf("host uid 65534: setxattr security.test %s: want EPERM, got %v: %s", p, err, out)
+			}
+		}
+		// Root in the bound container keeps user.* and security.capability.
+		f.ok(t, f.id, helper+" setuser /work/a && "+helper+" setcap /work/a")
+		time.Sleep(300 * time.Millisecond)
+		f.mu.Lock()
+		for _, v := range f.verdicts[before:] {
+			t.Errorf("verdict for a security attribute: %+v", v)
 		}
 		f.mu.Unlock()
 	})

@@ -40,7 +40,7 @@ library README).
 | create | `path_mknod` (open with `O_CREAT`, mknod, mkfifo, AF_UNIX bind), `path_mkdir`, `path_symlink`, `path_link` (new name), `path_rename` (new name that does not exist) | `path_mknod`: dentry walk; others: `bpf_d_path(dir)` + name |
 | delete | `path_unlink`, `path_rmdir`, `path_rename` (new name that replaces a file; both names of `RENAME_EXCHANGE`) | `bpf_d_path(dir)` + name |
 | rename | `path_rename` (both names), `path_link` (old name) | `bpf_d_path(dir)` + name; link old name: dentry walk |
-| chmod | `path_chmod`, `path_chown`, `inode_setxattr` (`security.capability`, `system.posix_acl_access`, `system.posix_acl_default`), `inode_set_acl` (6.2 and later) | `bpf_d_path`; inode hooks: dentry walk |
+| chmod | `path_chmod`, `path_chown`, `inode_setxattr` (`security.capability`), `inode_set_acl` (POSIX ACLs) | `bpf_d_path`; inode hooks: dentry walk |
 
 - A read-write open judges both kinds; the most limiting verdict wins. A new
   name that replaces a file by rename is judged as rename, write and delete.
@@ -56,6 +56,12 @@ library README).
   up the same way, with the credentials of its mounter: that inner call is not
   judged (the overlay call was). A dentry on another file system (a volume)
   is an unresolved path.
+- Before Linux 6.11 (upstream commit 61df7b828204), the kernel checks
+  `CAP_SYS_ADMIN` for a `security.*` extended attribute only when the
+  `inode_setxattr` hooks return 1. On such a kernel the owner sets the
+  `setxattr-allow-one` parameter (`runtime.SetxattrParams`), and
+  `inode_setxattr` returns 1 when it allows. On 6.11 and later it returns 0,
+  and the verifier of 6.12 rejects a return of 1.
 - A create is denied at `path_mknod`, before the file exists: a deny at
   `file_open` would leave an empty file. `bpf_d_path` is not allowed in
   `path_mknod`, and the old name of a hard link has no `struct path`; both
@@ -238,6 +244,25 @@ own overhead): about 75 ns at cgroup level 2 (Docker) and 100 ns at level 4
   attribute on a volume file through io_uring with registered credentials
   (`IORING_REGISTER_PERSONALITY`) looks like overlayfs' inner call and is not
   judged. Removing an ACL (`inode_remove_acl`) is not judged.
+- Kernel issue, not caused or closed by this gadget: on a kernel before Linux
+  6.11 (upstream 61df7b828204) with BPF LSM active, the BPF LSM default of
+  `inode_setxattr` and `inode_removexattr` is 0, so the kernel skips its
+  `CAP_SYS_ADMIN` check of `security.*` attributes for every task (verified on Ubuntu 6.8: a user
+  without capabilities sets `security.test` with no BPF program loaded). Where
+  the verifier accepts a return of 1, the gadget returns 1 from
+  `inode_setxattr` and so restores the `setxattr` check while it runs. Kernels
+  with the LSM return value check backported (Ubuntu 6.8) reject a return of
+  1: there the gadget returns 0 and the kernel issue stays. `inode_removexattr`
+  is not attached.
+- On images where `/bin`, `/sbin`, `/lib` and `/lib64` are not links into
+  `/usr` (for example Alpine), a deny rule on `/lib/**` also covers
+  `/usr/lib/**`: the owner's policy translator adds the merged `/usr` forms to
+  every deny rule and its excepts, because it does not know the image layout.
+- A Secret or ConfigMap key with a directory (`items: path: a/b/file`) is
+  resolved under a `..<timestamp>` directory higher up
+  (`/dir/..<timestamp>/a/b/file`). The owner's policy translator adds the
+  `..<timestamp>` form only before the last path segment, so a rule on
+  `/dir/a/b/file` does not match that file.
 - A `mknod` or `mkdir` new name is not judged against the new-name guard, and
   a symbolic link's new name is not judged as `write`: a symbolic link at a
   write-only denied name that does not exist yet gives that name other

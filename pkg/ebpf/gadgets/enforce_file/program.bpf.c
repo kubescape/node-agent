@@ -10,7 +10,7 @@
 // - file_open: read (FMODE_READ), write (FMODE_WRITE or O_TRUNC). A
 //   read-write open judges both and keeps the most limiting verdict.
 // - path_truncate: write. path_chmod, path_chown: chmod.
-// - inode_setxattr (file capabilities, POSIX ACLs), inode_set_acl: chmod.
+// - inode_setxattr (file capabilities), inode_set_acl (POSIX ACLs): chmod.
 // - path_mknod (open with O_CREAT, mknod, mkfifo, AF_UNIX bind), path_mkdir,
 //   path_symlink, path_link (new name): create. A create is denied here, not
 //   at file_open, so a denied create leaves no empty file.
@@ -65,6 +65,14 @@ char LICENSE[] SEC("license") = "GPL";
 
 GADGET_PARAM(host_mntns_id);
 GADGET_PARAM(arming_fail_fork_marks);
+
+// Before Linux 6.11 (no inode_xattr_skipcap hook), security_inode_setxattr
+// runs cap_inode_setxattr (CAP_SYS_ADMIN for security.* names) only when the
+// inode_setxattr hooks return 1. The owner sets this on such kernels, so an
+// allow returns 1 there. On 6.11 and later it stays 0: the capability check
+// runs before the hooks, and from 6.12 the verifier rejects a return of 1.
+const volatile bool setxattr_allow_one = false;
+GADGET_PARAM(setxattr_allow_one);
 
 #define EPERM 1
 #define ENOMEM 12
@@ -656,19 +664,22 @@ static __always_inline int file_inode_attr(enum file_hook hook,
 	return file_verdict(hook, &e);
 }
 
-// Before 6.2 POSIX ACLs are set through setxattr too.
+// POSIX ACLs go to inode_set_acl (Linux 6.2 and later), not here.
 SEC("lsm/inode_setxattr")
 int BPF_PROG(ig_file_setxattr, void *idmap, struct dentry *dentry,
 	     const char *name)
 {
 	char n[32];
+	int ret = 0;
 
-	if (bpf_probe_read_kernel_str(n, sizeof(n), name) > 0 &&
-	    bpf_strncmp(n, sizeof(n), "security.capability") &&
-	    bpf_strncmp(n, sizeof(n), "system.posix_acl_access") &&
-	    bpf_strncmp(n, sizeof(n), "system.posix_acl_default"))
-		return 0;
-	return file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
+	if (bpf_probe_read_kernel_str(n, sizeof(n), name) <= 0 ||
+	    !bpf_strncmp(n, sizeof(n), "security.capability"))
+		ret = file_inode_attr(FILE_HOOK_INODE_SETXATTR, dentry);
+	if (ret)
+		return ret;
+	if (setxattr_allow_one)
+		return 1;
+	return 0;
 }
 
 SEC("lsm/inode_set_acl")

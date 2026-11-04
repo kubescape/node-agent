@@ -170,3 +170,24 @@ func TestOverlayLayout(t *testing.T) {
 		}
 	}
 }
+
+// findFunc answers TypeByName with a fixed error.
+type findFunc func(name string) error
+
+func (f findFunc) TypeByName(name string, _ any) error { return f(name) }
+
+func TestOldSetxattrSemantics(t *testing.T) {
+	for name, c := range map[string]struct {
+		err      error
+		one, bad bool
+	}{
+		"6.11 and later": {}, "before 6.11": {err: fmt.Errorf("x: %w", btf.ErrNotFound), one: true},
+		"BTF error": {err: fmt.Errorf("broken"), bad: true},
+	} {
+		var asked string
+		one, err := oldSetxattrSemantics(findFunc(func(n string) error { asked = n; return c.err }))
+		if one != c.one || (err != nil) != c.bad || asked != "bpf_lsm_inode_xattr_skipcap" {
+			t.Errorf("%s: got %v, %v (asked %q)", name, one, err, asked)
+		}
+	}
+}
