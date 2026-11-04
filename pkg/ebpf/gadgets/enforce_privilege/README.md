@@ -16,7 +16,9 @@ node:
 - The policy map is frozen per instance. A combination the running instance
   does not have (a new or edited policy) needs a new instance: the owner starts
   one with every slot in use and every container bound, and then stops the old
-  one, so both enforce during the overlap.
+  one, so both enforce during the overlap. This whole-instance replacement is a
+  staging choice: the owner hides it behind its backend interface, so a later
+  in-place policy update can replace it.
 - An owner can create a slot before a container starts, so the container binds
   with a live write.
 
@@ -73,7 +75,9 @@ policy:
   own name, origin and mode); a default is deny if any document denies, with the
   strictest mode among the documents that agree; a monitoring (audit) deny rule
   never weakens another document's enforce deny, including its enforce default
-  deny; an explicit allow still beats another document's default deny.
+  deny; an explicit allow still beats another document's default deny. The
+  rule and its test vectors are shared with other sections:
+  [merge contract](../common/merge/CONTRACT.md).
 
 ## How it decides
 
@@ -86,7 +90,23 @@ policy:
   `host-mntns-id` gadget parameter; the owner sets it to the mount namespace of
   PID 1 as it sees it (in kind, the node container's). When it is 0, the
   program uses the global init task's.
-- **Scope.** A bound cgroup also covers up to 31 levels of child cgroups.
+- **Lost arming.** The kernel can fail to allocate a task's mark (memory
+  pressure). When an armed task forks and the child's mark fails, an enforcing
+  slot (one with any enforce entry) refuses the fork (`-ENOMEM`): an unmarked
+  child would escape every rule. A clone into another cgroup
+  (`CLONE_INTO_CGROUP`) is refused the same way. An audit-only slot, or an
+  unbound cgroup, allows the fork. A new thread of an armed group leader is
+  covered through the leader, so it is never refused. An unarmed parent (for
+  example a runtime helper) is out of scope, not a failure. Every failed mark is
+  counted in `counters` slot 4. Moving a container to another slot arms its
+  running tasks again.
+- **Tracking faults.** A failed mark in an enforcing slot (a refused fork, or a
+  lost mark at exec, which cannot be refused) is also counted per slot in
+  `arming_faults`. The owner reads it with `Bindings.SlotFaults`: a nonzero
+  count means the slot's protection is not confirmed. A new instance starts at
+  zero and arms the running tasks again. Audit-only faults do not count there.
+- **Scope.** A bound cgroup also covers up to 31 levels of child cgroups. This is
+  by design and differs from enforce_exec, which binds the exact cgroup only.
 - **Capabilities.** A `capable()` call is judged only when the task uses its own
   credentials (overlayfs copy-up uses the mounter's) and the call is not a
   no-audit probe.
@@ -99,10 +119,16 @@ policy:
 
 ## Known limits
 
-- **Failed arming mark.** If the kernel cannot allocate task storage (memory
-  pressure), the task stays unarmed and is not judged until its next exec. The
-  failure is counted in `counters` slot 4. A later check cannot tell such a
-  task apart from the runtime's own setup, so it is not retried.
+- **Lost mark at exec.** The exec hook cannot fail the exec, so a task whose
+  mark fails there stays unarmed until its next exec. In an enforcing slot this
+  is a tracking fault (see above). A later check cannot tell such a task apart
+  from the runtime's own setup, so the gadget does not retry it; a new instance
+  arms it again.
+- **Fault injection.** The `arming-fail-fork-marks` parameter makes every child
+  mark fail at fork. It exists for tests (`runtime/runtime_kernel_test.go`);
+  owners do not set it.
+- **Not in this gadget yet:** export of verdicts as events (the owner logs
+  them), and kernels older than 6.1.
 - **No-audit capability checks** (`CAP_OPT_NOAUDIT`) are excluded from
   capability enforcement. Most are kernel probes (for example the overcommit
   check), and judging them would deny normal work in every bound container. Some
@@ -127,7 +153,7 @@ policy:
 | Map | Content |
 |---|---|
 | `policy` | frozen hash: `{slot, kind, id, qual, name}` → `{rank, rule_id, origin_id}`; each slot's META entry holds generation and mode (`privilege_policy.h`) |
-| `bindings`, `armed_tasks`, `counters` | from the common library |
+| `bindings`, `armed_tasks`, `arming_faults`, `counters` | from the common library |
 
 The `verdict` datasource shares `generation`, `cgroup`, `deny`, `mode` and
 `host_pid` with enforce_exec and adds `rule_id`, `origin_id`, `is_default`,
