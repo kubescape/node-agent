@@ -139,6 +139,16 @@ policy:
 - Unix and packet sockets and `bind`/`listen` are not judged. Raw sockets are
   not judged by the cgroup tier (see Program tiers).
 - A task is judged by its cgroup at the time of the call (both tiers).
+- SCTP is not covered. The cgroup tier has no sendmsg hook for a send that
+  opens a new SCTP association. In the LSM tier, `SCTP_SOCKOPT_CONNECTX`
+  goes through `security_sctp_bind_connect`, which has no program here.
+- MPTCP extra subflows that the kernel path manager opens are not judged;
+  only the connect of the MPTCP socket is.
+- A bound cgroup covers its child cgroups to a depth of 31 levels only.
+  Deeper cgroups are not judged.
+- A raw socket with `IP_HDRINCL` writes its own IP header, so the address of
+  the send is not the destination. Block raw sockets with the privilege
+  section (drop the `NET_RAW` capability).
 
 ## Using it outside this repository
 
