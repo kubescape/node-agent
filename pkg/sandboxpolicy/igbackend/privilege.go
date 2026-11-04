@@ -113,11 +113,18 @@ type PrivilegeBackend struct {
 	closed       bool
 	// emptyFailed is when starting an instance with no slot last failed.
 	emptyFailed time.Time
+	// lastHeal is when a tracking fault last started a new instance.
+	lastHeal time.Time
 }
 
 // emptyRetry is the shortest time between two starts of an instance with no
 // slot: each start is a slow gadget load on the refresh loop.
 const emptyRetry = 30 * time.Second
+
+// healRetry is the shortest time between two new instances started only to
+// heal tracking faults. Faults recur under memory pressure; a gadget reload on
+// every reconcile would add load then. The binding stays unconfirmed meanwhile.
+const healRetry = 30 * time.Second
 
 var (
 	_ sandboxpolicy.Backend            = (*PrivilegeBackend)(nil)
@@ -194,6 +201,14 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 	if current != nil && current.revision == plan.Revision && current.combination == combination && health == nil {
 		result.Committed = true
 		return result, b.retire(ctx)
+	}
+	if current != nil && current.revision == plan.Revision && current.combination == combination &&
+		b.instance.Ready() == nil && current.check() == nil {
+		// Only tracking faults: heal with a new instance, at most every healRetry.
+		if time.Since(b.lastHeal) < healRetry {
+			return result, health
+		}
+		b.lastHeal = time.Now()
 	}
 	next := &privilegeBinding{binding: binding, revision: plan.Revision, combination: combination}
 	if current != nil && current.lease != nil && current.check() == nil {
