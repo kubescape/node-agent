@@ -114,6 +114,39 @@ type SlotPreparer interface {
 	Prepare(context.Context, []Plan) error
 }
 
+// PreparedClearer optionally drops the prepared set of a SlotPreparer whose
+// section has no active policy. Unlike Prepare with no plans, it never starts
+// an instance.
+type PreparedClearer interface {
+	ClearPrepared(context.Context) error
+}
+
+// SectionPreparer is a SlotPreparer that drives several sections.
+// PrepareSections prepares only the sections in active (nil: every section).
+type SectionPreparer interface {
+	PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error
+}
+
+// PodBinding places the pod-level cgroup of a pod scheduled to this node in
+// the plan that every container of the pod gets. Container cgroups are created
+// under the pod cgroup, so a container is judged from its first exec, before
+// its own binding exists. The container binding still decides once it exists.
+type PodBinding struct {
+	PodUID     types.UID
+	Namespace  string
+	PodName    string
+	CgroupID   uint64
+	CgroupPath string
+	Plan       Plan
+}
+
+// PodBinder optionally binds pod cgroups. BindPods receives the complete set:
+// a pod binding that is not in it is removed. Like SlotPreparer, it is a hint
+// that changes no container binding.
+type PodBinder interface {
+	BindPods(context.Context, []PodBinding) error
+}
+
 // SourceResolver reads ContainerProfile execs in the selected pod's namespace.
 // It must return an error for missing/incomplete profiles; empty successful results
 // mean a known complete profile with no execs. Rules retain their predicates.

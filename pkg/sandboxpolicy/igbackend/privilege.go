@@ -38,6 +38,8 @@ var (
 	_ sandboxpolicy.Backend            = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.ProtectionAttester = (*PrivilegeBackend)(nil)
 	_ sandboxpolicy.SlotPreparer       = (*PrivilegeBackend)(nil)
+	_ sandboxpolicy.PreparedClearer    = (*PrivilegeBackend)(nil)
+	_ sandboxpolicy.PodBinder          = (*PrivilegeBackend)(nil)
 )
 
 // NewPrivilege creates the node backend. validator verifies the live container
@@ -65,6 +67,9 @@ func NewPrivilege(engine PrivilegeEngine, validator Validator, prefix string) (*
 		start: func(ctx context.Context, id string, compiled privpolicy.Compiled, bindings []enforcement.Binding) (NodeInstance, error) {
 			return engine.Start(ctx, id, privruntime.Config{Policy: compiled, InitialBindings: bindings})
 		},
+		// The first container of a privilege policy must find the gadget
+		// loaded: its first exec is judged at the pod cgroup.
+		startEmpty: true,
 	}
 	return &PrivilegeBackend{newNodeOwner(section, validator, prefix)}, nil
 }
@@ -95,4 +100,10 @@ func combinationKey(policies []sandboxpolicy.CompiledPolicy, content func(sandbo
 	data, _ := json.Marshal(parts) // concrete JSON-serializable API structs
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), policies
+}
+
+// BindPods binds pod cgroups to their privilege slot (see nodeOwner.bindPods).
+// Only the privilege section binds pod cgroups.
+func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
+	return b.bindPods(ctx, pods)
 }

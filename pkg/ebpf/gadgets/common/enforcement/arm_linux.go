@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -105,9 +106,18 @@ func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) 
 		if errors.Is(err, unix.EINVAL) {
 			fd, err = unix.PidfdOpen(tid, 0)
 		}
-		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EINVAL) {
-			// Exited, or a non-leader thread on a kernel without
-			// PIDFD_THREAD: the BPF rule judges it through its leader.
+		if errors.Is(err, unix.EINVAL) {
+			// A non-leader thread on a kernel without PIDFD_THREAD: the
+			// BPF rule judges it through its group leader, which can be
+			// outside this cgroup, so arm the leader.
+			fd, err = openLeader(scanner.Text())
+		}
+		if errors.Is(err, unix.ESRCH) || errors.Is(err, fs.ErrNotExist) {
+			// Exited, unless the thread still runs: then it cannot be
+			// armed, and the caller must not report it protected.
+			if _, serr := os.Stat(filepath.Join(host.HostProcFs, scanner.Text())); serr == nil {
+				return fmt.Errorf("task %d runs but cannot be armed: %w", tid, err)
+			}
 			seen[tid] = true
 			continue
 		}
@@ -122,6 +132,31 @@ func armThreads(armed Map, threads string, hostMntns uint64, seen map[int]bool) 
 		seen[tid] = true
 	}
 	return scanner.Err()
+}
+
+// openLeader opens a pidfd of the thread group leader of tid. All threads of a
+// process share one mount namespace (setns and unshare of a mount namespace
+// fail in a multithreaded process), so the caller's check of the thread's
+// namespace also covers the leader. A leader that has exited while other
+// threads run is a zombie; pidfd_open still works on it.
+func openLeader(tid string) (int, error) {
+	data, err := os.ReadFile(filepath.Join(host.HostProcFs, tid, "status"))
+	if err != nil {
+		return -1, err
+	}
+	tgid := -1
+	for _, line := range strings.Split(string(data), "\n") {
+		if v, ok := strings.CutPrefix(line, "Tgid:"); ok {
+			tgid, err = strconv.Atoi(strings.TrimSpace(v))
+			if err != nil {
+				return -1, fmt.Errorf("reading leader of task %s: %w", tid, err)
+			}
+		}
+	}
+	if tgid <= 0 {
+		return -1, fmt.Errorf("no leader for task %s", tid)
+	}
+	return unix.PidfdOpen(tgid, 0)
 }
 
 // RuntimeMountNamespace is the mount namespace of PID 1 as this process sees

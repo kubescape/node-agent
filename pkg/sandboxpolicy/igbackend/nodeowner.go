@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // NodeInstance is one running node-wide gadget instance.
@@ -45,6 +47,11 @@ type nodeSection[C any] struct {
 	// compile compiles one instance: slot i holds the policies slots[i].
 	compile func(generation uint64, slots [][]sandboxpolicy.CompiledPolicy) (C, error)
 	start   func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
+	// startEmpty makes Prepare start an instance with no slot when none
+	// runs, so the first container does not wait for the slow first gadget
+	// load. Pod bindings (bindPods) exist only for privilege: only
+	// PrivilegeBackend exports BindPods.
+	startEmpty bool
 }
 
 type nodeBinding struct {
@@ -70,6 +77,32 @@ func (p *nodeBinding) close() error {
 	return p.lease.Close()
 }
 
+// podBinding is a bound pod cgroup (see sandboxpolicy.PodBinding).
+type podBinding struct {
+	pod         sandboxpolicy.PodBinding
+	combination string
+}
+
+// podRuntime is the runtime name of a pod cgroup identity in the bindings
+// controller. No container runtime has this name.
+const podRuntime = "kubernetes-pod"
+
+// nativePod returns the bindings controller identity of a pod cgroup. Tasks
+// already in it are not armed: runc init of a container being created can be
+// there.
+func nativePod(p sandboxpolicy.PodBinding, slot uint32) enforcement.Binding {
+	return enforcement.Binding{Container: enforcement.ContainerIdentity{Runtime: podRuntime, ID: string(p.PodUID), CgroupID: p.CgroupID, CgroupPath: p.CgroupPath}, Slot: slot, SkipArming: true}
+}
+
+// emptyRetry is the shortest time between two starts of an instance with no
+// slot: each start is a slow gadget load on the refresh loop.
+const emptyRetry = 30 * time.Second
+
+// healRetry is the shortest time between two new instances started only to
+// heal tracking faults. Faults recur under memory pressure; a gadget reload on
+// every reconcile would add load then. The binding stays unconfirmed meanwhile.
+const healRetry = 30 * time.Second
+
 // nodeOwner owns ONE gadget instance per node for one section.
 //
 // A slot is one combination of the section's policies; containers with the
@@ -89,14 +122,19 @@ type nodeOwner[C any] struct {
 	slots        map[string]uint32 // combination -> slot in instance
 	combinations map[string][]sandboxpolicy.CompiledPolicy
 	bindings     map[identity]*nodeBinding
+	pods         map[types.UID]*podBinding
 	prepared     map[string][]sandboxpolicy.CompiledPolicy
 	retiring     []NodeInstance
 	stats        NodeStats
 	closed       bool
+	// emptyFailed is when starting an instance with no slot last failed.
+	emptyFailed time.Time
+	// lastHeal is when a tracking fault last started a new instance.
+	lastHeal time.Time
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
-	return nodeOwner[C]{section: section, validator: validator, prefix: prefix, slots: map[string]uint32{}, combinations: map[string][]sandboxpolicy.CompiledPolicy{}, bindings: map[identity]*nodeBinding{}, prepared: map[string][]sandboxpolicy.CompiledPolicy{}}
+	return nodeOwner[C]{section: section, validator: validator, prefix: prefix, slots: map[string]uint32{}, combinations: map[string][]sandboxpolicy.CompiledPolicy{}, bindings: map[identity]*nodeBinding{}, pods: map[types.UID]*podBinding{}, prepared: map[string][]sandboxpolicy.CompiledPolicy{}}
 }
 
 // logBind records whether a new container found its slot ready ("prepared")
@@ -138,6 +176,14 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		result.Committed = true
 		return result, b.retire(ctx)
 	}
+	if current != nil && current.revision == plan.Revision && current.combination == combination &&
+		b.instance.Ready() == nil && current.check() == nil {
+		// Only tracking faults: heal with a new instance, at most every healRetry.
+		if time.Since(b.lastHeal) < healRetry {
+			return result, health
+		}
+		b.lastHeal = time.Now()
+	}
 	next := &nodeBinding{binding: binding, revision: plan.Revision, combination: combination}
 	if current != nil && current.lease != nil && current.check() == nil {
 		next.lease = current.lease
@@ -174,10 +220,11 @@ func (b *nodeOwner[C]) Replace(ctx context.Context, binding sandboxpolicy.Bindin
 		return commit()
 	}
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
-	err := b.replaceInstance(ctx, b.prepared, extra, k, next)
-	if err != nil && len(b.prepared) > 0 {
-		// The prepared set may not fit; never let it block a real container.
-		err = b.replaceInstance(ctx, nil, extra, k, next)
+	err := b.replaceInstance(ctx, b.prepared, extra, k, next, true)
+	if err != nil && (len(b.prepared) > 0 || b.podsAddSlots(extra)) {
+		// The prepared set and the pod bindings may not fit; never let them
+		// block a real container. bindPods binds the pods again later.
+		err = b.replaceInstance(ctx, nil, extra, k, next, false)
 	}
 	if err != nil {
 		return fail(err)
@@ -241,7 +288,11 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 		return fmt.Errorf("%s backend is closed", b.section.name)
 	}
 	prepared := map[string][]sandboxpolicy.CompiledPolicy{}
-	missing := false
+	// With startEmpty and no instance, start one even with no plans: the
+	// first gadget load is slow, so the first container of a policy would
+	// find no instance ready (for example the first pod after a node-agent
+	// restart).
+	missing := b.section.startEmpty && b.instance == nil && time.Since(b.emptyFailed) >= emptyRetry
 	for _, plan := range plans {
 		combination, policies := b.section.combination(plan)
 		if len(policies) == 0 {
@@ -257,13 +308,107 @@ func (b *nodeOwner[C]) Prepare(ctx context.Context, plans []sandboxpolicy.Plan) 
 		return b.retire(ctx)
 	}
 	// The prepared set is kept only when the instance with it is running.
-	return errors.Join(b.replaceInstance(ctx, prepared, nil, identity{}, nil), b.retire(ctx))
+	err := b.replaceInstance(ctx, prepared, nil, identity{}, nil, true)
+	if err != nil && len(prepared) == 0 {
+		b.emptyFailed = time.Now()
+	}
+	return errors.Join(err, b.retire(ctx))
+}
+
+// ClearPrepared drops the prepared set when the section has no active policy.
+// It never starts an instance: the dropped combinations leave at the next
+// replacement, as in Prepare.
+func (b *nodeOwner[C]) ClearPrepared(ctx context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.prepared = map[string][]sandboxpolicy.CompiledPolicy{}
+	return b.retire(ctx)
+}
+
+// bindPods binds the given pod cgroups to the slot of their plan and unbinds
+// the pod cgroups that are not given. A pod whose slot does not exist yet is
+// skipped: Prepare creates the slot, and the next call binds the pod. A pod
+// whose plan changes moves to the new slot in one map write; when the new slot
+// does not exist yet, the pod is unbound, so a removed or edited policy never
+// stays active at pod level.
+func (b *nodeOwner[C]) bindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return fmt.Errorf("%s backend is closed", b.section.name)
+	}
+	ready := b.instance != nil && b.instance.Ready() == nil
+	wanted := make(map[types.UID]sandboxpolicy.PodBinding, len(pods))
+	for _, p := range pods {
+		wanted[p.PodUID] = p
+	}
+	var errs []error
+	for uid, current := range b.pods {
+		next, ok := wanted[uid]
+		if ok && next.CgroupID == current.pod.CgroupID && next.CgroupPath == current.pod.CgroupPath {
+			combination, _ := b.section.combination(next.Plan)
+			if _, slot := b.slots[combination]; slot || combination == current.combination {
+				continue
+			}
+		}
+		// Not wanted, or a new cgroup for the pod: remove the old identity.
+		// An instance that is not ready protects nothing.
+		if ready {
+			if err := b.instance.Unbind(nativePod(current.pod, 0).Container); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		delete(b.pods, uid)
+	}
+	for uid, p := range wanted {
+		combination, policies := b.section.combination(p.Plan)
+		current := b.pods[uid]
+		if len(policies) == 0 || current != nil && current.combination == combination {
+			continue
+		}
+		slot, ok := b.slots[combination]
+		if !ok || !ready {
+			continue
+		}
+		if err := b.instance.Bind(nativePod(p, slot)); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		b.pods[uid] = &podBinding{pod: p, combination: combination}
+		logger.L().Info("sandbox "+b.section.name+" pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
+	}
+	return errors.Join(append(errs, b.retire(ctx))...)
+}
+
+// podsAddSlots reports whether a pod binding needs a combination that no
+// container binding, and not extra, needs.
+func (b *nodeOwner[C]) podsAddSlots(extra map[string][]sandboxpolicy.CompiledPolicy) bool {
+	used := map[string]bool{}
+	for c := range extra {
+		used[c] = true
+	}
+	for _, v := range b.bindings {
+		used[v.combination] = true
+	}
+	for _, p := range b.pods {
+		if !used[p.combination] {
+			return true
+		}
+	}
+	return false
 }
 
 // replaceInstance starts a candidate with every combination in use or prepared
-// (plus extra), binds every container (plus next, under nextKey), and only then
-// stops the old instance. On failure the old instance and state stay.
-func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[string][]sandboxpolicy.CompiledPolicy, nextKey identity, next *nodeBinding) error {
+// (plus extra), binds every container (plus next, under nextKey) and, with
+// withPods, every pod cgroup, and only then stops the old instance. Without
+// withPods, the pod bindings are dropped. On failure the old instance and
+// state stay.
+func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[string][]sandboxpolicy.CompiledPolicy, nextKey identity, next *nodeBinding, withPods bool) error {
+	pods := b.pods
+	if !withPods {
+		pods = map[types.UID]*podBinding{}
+	}
 	bindings := map[identity]*nodeBinding{}
 	for k, v := range b.bindings {
 		bindings[k] = v
@@ -281,6 +426,11 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	for _, v := range bindings {
 		if _, ok := wanted[v.combination]; !ok {
 			wanted[v.combination] = b.combinations[v.combination]
+		}
+	}
+	for _, p := range pods {
+		if _, ok := wanted[p.combination]; !ok {
+			wanted[p.combination] = b.combinations[p.combination]
 		}
 	}
 	keys := make([]string, 0, len(wanted))
@@ -302,6 +452,9 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	for _, v := range bindings {
 		initial = append(initial, enforcement.Binding{Container: native(v.binding), Slot: slots[v.combination]})
 	}
+	for _, p := range pods {
+		initial = append(initial, nativePod(p.pod, slots[p.combination]))
+	}
 	b.generation++
 	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
 	if err != nil {
@@ -317,7 +470,7 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	if b.instance != nil {
 		b.retiring = append(b.retiring, b.instance)
 	}
-	b.instance, b.slots, b.combinations, b.bindings, b.prepared = candidate, slots, wanted, bindings, prepared
+	b.instance, b.slots, b.combinations, b.bindings, b.prepared, b.pods = candidate, slots, wanted, bindings, prepared, pods
 	b.stats.Replacements++
 	return nil
 }
@@ -349,5 +502,6 @@ func (b *nodeOwner[C]) Close(ctx context.Context) error {
 		errs = append(errs, v.close())
 	}
 	b.bindings = map[identity]*nodeBinding{}
+	b.pods = map[types.UID]*podBinding{}
 	return errors.Join(append(errs, b.retire(ctx))...)
 }

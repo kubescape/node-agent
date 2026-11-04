@@ -38,6 +38,8 @@ type SectionBackend struct {
 	exec     Backend
 	sections []*section
 	active   map[string]sectionPlans
+	// prepareMu guards section.prepared.
+	prepareMu sync.Mutex
 }
 
 // section is one section backend next to exec.
@@ -50,6 +52,8 @@ type section struct {
 	part func(CompiledPolicy) any
 	// strip removes the section from a policy for the exec plan.
 	strip func(*CompiledPolicy)
+	// prepared: the last PrepareSections call prepared this section.
+	prepared bool
 }
 
 type sectionPlans struct {
@@ -161,13 +165,49 @@ func (s *SectionBackend) normalize(p sectionPlans) sectionPlans {
 // not finished (running ones included), to each section backend that can create
 // their slots before new containers start.
 func (s *SectionBackend) Prepare(ctx context.Context, plans []Plan) error {
+	return s.PrepareSections(ctx, plans, nil)
+}
+
+// PrepareSections prepares like Prepare, but only the sections in active
+// (nil: every section). A section with no active policy is not prepared, so
+// a backend that loads its gadget before the first plan (privilege) does not
+// load it for a policy of another section.
+func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error {
+	s.prepareMu.Lock()
+	defer s.prepareMu.Unlock()
 	var errs []error
 	for _, sec := range s.sections {
-		if preparer, ok := sec.backend.(SlotPreparer); ok {
-			errs = append(errs, preparer.Prepare(ctx, plans))
+		preparer, ok := sec.backend.(SlotPreparer)
+		if !ok {
+			continue
 		}
+		if active != nil && !active[sec.name] {
+			if clearer, ok := preparer.(PreparedClearer); ok && sec.prepared {
+				// The section has just become inactive: drop its prepared
+				// set once, without starting an instance.
+				errs = append(errs, clearer.ClearPrepared(ctx))
+			}
+			sec.prepared = false
+			continue
+		}
+		sec.prepared = true
+		errs = append(errs, preparer.Prepare(ctx, plans))
 	}
 	return errors.Join(errs...)
+}
+
+// BindPods passes the pod bindings to a privilege backend that can bind pod
+// cgroups. Pod bindings exist only for the privilege section.
+func (s *SectionBackend) BindPods(ctx context.Context, pods []PodBinding) error {
+	for _, sec := range s.sections {
+		if sec.name != SectionPrivilege {
+			continue
+		}
+		if binder, ok := sec.backend.(PodBinder); ok {
+			return binder.BindPods(ctx, pods)
+		}
+	}
+	return nil
 }
 
 // Exec returns the exec section backend.

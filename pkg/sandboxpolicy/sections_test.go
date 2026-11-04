@@ -3,11 +3,14 @@ package sandboxpolicy
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
 	netpolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/policy"
 	api "github.com/kubescape/storage/pkg/apis/sandbox/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func privilegeSection(def api.Action) *api.PrivilegeSection {
@@ -160,10 +163,19 @@ func TestSectionBackendSendsAllPrivilegePolicies(t *testing.T) {
 type preparingBackend struct {
 	fakeBackend
 	prepared []Plan
+	calls    int
+	clears   int
 }
 
 func (p *preparingBackend) Prepare(_ context.Context, plans []Plan) error {
 	p.prepared = plans
+	p.calls++
+	return nil
+}
+
+func (p *preparingBackend) ClearPrepared(context.Context) error {
+	p.prepared = nil
+	p.clears++
 	return nil
 }
 
@@ -172,6 +184,15 @@ func TestSectionBackendPassesPrepare(t *testing.T) {
 	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
 	if err := s.Prepare(context.Background(), []Plan{sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})}); err != nil || len(privilege.prepared) != 1 {
 		t.Fatalf("prepare: %v %v", err, privilege.prepared)
+	}
+	// A section with no active policy is not prepared: privilege loads its
+	// gadget on an empty prepare, which a network-only node must not do.
+	privilege.prepared = nil
+	network := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	s.WithNetwork(network, nil)
+	plans := []Plan{sectionPlan("r", CompiledPolicy{Network: networkPlan()})}
+	if err := s.PrepareSections(context.Background(), plans, map[string]bool{SectionNetwork: true}); err != nil || privilege.prepared != nil || len(network.prepared) != 1 {
+		t.Fatalf("prepare sections: %v privilege=%v network=%v", err, privilege.prepared, network.prepared)
 	}
 }
 
@@ -387,5 +408,97 @@ func TestSectionBackendSeparateNetworkPolicyKeepsExecRevision(t *testing.T) {
 	}
 	if network.replacements != 2 || network.withdrawals != 1 || privilege.replacements != 0 {
 		t.Fatalf("network %d replacements %d withdrawals, privilege %d", network.replacements, network.withdrawals, privilege.replacements)
+	}
+}
+
+func TestControllerPodPlans(t *testing.T) {
+	ctx := context.Background()
+	all := policy("all", "ns")
+	all.Spec.Privilege = privilegeSection(api.ActionDeny)
+	app := policy("app-only", "ns")
+	app.Spec.Containers = []string{"app"}
+	app.Spec.Privilege = privilegeSection(api.ActionAllow)
+	c, _, _, _ := setup(t, all, app)
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	container := func(pod types.UID, name, kind string) Binding {
+		b := binding()
+		b.ContainerID, b.CgroupID, b.PodUID, b.ContainerName, b.Kind = "", 0, pod, name, kind
+		return b
+	}
+	elsewhere := container("other-ns", "web", "regular")
+	elsewhere.Namespace = "elsewhere"
+	plans, ok := c.PodPlans([]Binding{
+		container("uniform", "web", "regular"), container("uniform", "db", "regular"),
+		container("init", "web", "regular"), container("init", "setup", "init"),
+		container("mixed", "web", "regular"), container("mixed", "app", "regular"),
+		elsewhere,
+	})
+	if !ok || len(plans) != 1 || len(plans["uniform"].Policies) != 1 || plans["uniform"].Policies[0].Identity.Name != "all" {
+		t.Fatalf("only the pod whose containers all get the same policies has a pod plan: %+v", plans)
+	}
+}
+
+func TestControllerPodPlansNeedContainerEligibility(t *testing.T) {
+	ctx := context.Background()
+	priv := policy("priv", "ns")
+	priv.Spec.Privilege = privilegeSection(api.ActionDeny)
+	// A second policy that selects the same container but depends on a
+	// ContainerProfile: the container binding can fail, so no pod binding.
+	sourced := policy("sourced", "ns")
+	sourced.Spec.Selector.PodSelector = metav1.LabelSelector{MatchLabels: map[string]string{"profile": "yes"}}
+	sourced.Spec.Sources = []api.PolicySource{{ContainerProfile: api.ContainerProfileReference{Name: "profile"}, Include: []string{"execs"}}}
+	c, _, _, _ := setup(t, priv, sourced)
+	if err := c.InitialSync(ctx); err != nil && !strings.Contains(err.Error(), "ContainerProfile") {
+		t.Fatal(err)
+	}
+	plain := binding()
+	plain.ContainerID, plain.CgroupID, plain.PodUID = "", 0, "plain"
+	profiled := plain
+	profiled.PodUID = "profiled"
+	profiled.PodLabels = map[string]string{"app": "test", "profile": "yes"}
+	plans, ok := c.PodPlans([]Binding{plain, profiled})
+	if !ok || len(plans) != 1 || len(plans["plain"].Policies) != 1 {
+		t.Fatalf("only the pod without a sourced policy has a pod plan: %+v", plans)
+	}
+}
+
+// A section that becomes inactive has its prepared set cleared once, without a
+// Prepare that could start an instance; later calls leave it alone.
+func TestSectionBackendClearsPreparedSectionOnceWhenInactive(t *testing.T) {
+	privilege := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	ctx := context.Background()
+	plans := []Plan{sectionPlan("r", CompiledPolicy{Privilege: privilegeSection(api.ActionDeny)})}
+	if err := s.PrepareSections(ctx, plans, map[string]bool{SectionPrivilege: true}); err != nil || privilege.calls != 1 || len(privilege.prepared) != 1 {
+		t.Fatalf("active: %v calls=%d prepared=%v", err, privilege.calls, privilege.prepared)
+	}
+	for i := 0; i < 2; i++ {
+		if err := s.PrepareSections(ctx, nil, map[string]bool{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if privilege.calls != 1 || privilege.clears != 1 || privilege.prepared != nil {
+		t.Fatalf("inactive: calls=%d clears=%d prepared=%v", privilege.calls, privilege.clears, privilege.prepared)
+	}
+}
+
+// A file section that does not translate fails the container binding, so the
+// pod gets no pod plan either.
+func TestControllerPodPlansNeedTranslatedFile(t *testing.T) {
+	saved := checkFileDocument
+	defer func() { checkFileDocument = saved }()
+	checkFileDocument = func(filepolicy.Document) error { return errors.New("over limits") }
+	ctx := context.Background()
+	p := policy("priv-file", "ns")
+	p.Spec.Privilege = privilegeSection(api.ActionDeny)
+	p.Spec.File = &api.FileSection{Default: api.FileDefault{Action: api.ActionAllow}}
+	c, _, _, _ := setup(t, p)
+	_ = c.InitialSync(ctx)
+	b := binding()
+	b.ContainerID, b.CgroupID, b.PodUID = "", 0, "pod"
+	if plans, ok := c.PodPlans([]Binding{b}); !ok || len(plans) != 0 {
+		t.Fatalf("no pod plan when the file section is not translated: %+v %v", plans, ok)
 	}
 }

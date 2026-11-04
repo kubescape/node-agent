@@ -169,8 +169,13 @@ func TestCompileSlotsMergesPolicies(t *testing.T) {
 	if v := get(KernelKey{Slot: 1, Kind: KindDefault, ID: KindSyscall}); v.Rank != RankAllow {
 		t.Fatalf("slot 1 default rank %d", v.Rank)
 	}
-	if v := get(KernelKey{Slot: 1, Kind: KindMeta}); v.Generation != 4 || v.Mode != KernelModeEnforce {
+	// b enforces, but has only allow entries: the slot enforces nothing.
+	if v := get(KernelKey{Slot: 1, Kind: KindMeta}); v.Generation != 4 || v.Mode != KernelModeAudit {
 		t.Fatalf("slot 1 meta %+v", v)
+	}
+	// Slot 0 has a's enforce rule: it enforces.
+	if v := get(KernelKey{Slot: 0, Kind: KindMeta}); v.Mode != KernelModeEnforce {
+		t.Fatalf("slot 0 meta %+v", v)
 	}
 }
 

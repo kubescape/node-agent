@@ -86,6 +86,10 @@ func TestNetworkPrepareAndCombinationKey(t *testing.T) {
 	e := &fakeNetworkEngine{}
 	b, _ := NewNetwork(e, nil, "n")
 	ctx := context.Background()
+	// Unlike privilege, no instance starts without a network plan.
+	if err := b.Prepare(ctx, nil); err != nil || len(e.instances) != 0 {
+		t.Fatalf("empty prepare: %v instances=%d", err, len(e.instances))
+	}
 	p := netPolicy("p1", "allow", denyTestNet)
 	if err := b.Prepare(ctx, []sandboxpolicy.Plan{privPlan("r1", p)}); err != nil || len(e.instances) != 1 {
 		t.Fatalf("prepare: %v", err)
