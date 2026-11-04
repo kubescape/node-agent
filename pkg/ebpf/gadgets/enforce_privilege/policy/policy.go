@@ -133,6 +133,16 @@ func (t Target) validate() error {
 			return fmt.Errorf("unsupported syscall %q", s)
 		}
 	}
+	if len(t.Flags) == 0 {
+		for _, s := range t.Syscall {
+			if s == "clone" || s == "clone3" {
+				// The gadget judges a clone by its namespace flags. A rule
+				// without flags would read as "deny every fork", which it
+				// does not do.
+				return fmt.Errorf("a %s rule must list namespace flags: a plain fork is never judged", s)
+			}
+		}
+	}
 	if len(t.Flags) > 0 {
 		if len(t.Syscall) == 0 {
 			return fmt.Errorf("flags qualify a syscall target only")
