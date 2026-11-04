@@ -166,15 +166,17 @@ func matchSegments(segs []Segment, comps []string) bool {
 }
 
 // guardLengths returns the segment counts of a deny rule pattern's guard:
-// the pattern and each shorter segment prefix that does not end with `**`
-// (so `/home/*/.aws/**` guards `/home/*/.aws`, `/home/*` and `/home`). The
-// prefix without a trailing `**` is skipped: the pattern already matches it.
-// A parent above a leading `**` is not guarded. A prefix needs no bits of its
-// own: its last segment bit is active at the end of the path exactly when the
-// path matches the prefix.
+// each shorter segment prefix that does not end with `**`, so the parent
+// directories written in the pattern (`/home/*/.aws/**` guards `/home/*` and
+// `/home`; `/etc/shadow` guards `/etc`). The pattern itself is not in the
+// guard: a move source is judged by the full decision. The prefix without a
+// trailing `**` is skipped: the pattern already matches it (`/a/**` matches
+// `/a`). A parent above a leading `**` is not guarded. A prefix needs no bits
+// of its own: its last segment bit is active at the end of the path exactly
+// when the path matches the prefix.
 func (p Pattern) guardLengths() []int {
 	n := len(p.Segments)
-	out := []int{n}
+	var out []int
 	for i := n - 1; i >= 1; i-- {
 		if p.Segments[i-1].Kind == SegDoubleStar {
 			continue
@@ -188,7 +190,7 @@ func (p Pattern) guardLengths() []int {
 }
 
 // Guards returns the guard of a deny rule pattern as patterns (see
-// guardLengths).
+// guardLengths): its parent directories.
 func (p Pattern) Guards() []Pattern {
 	var out []Pattern
 	for _, n := range p.guardLengths() {

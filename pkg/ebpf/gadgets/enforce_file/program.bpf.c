@@ -17,12 +17,15 @@
 // - path_rename: both names are judged as rename; the new name also as create
 //   (a new name) or as write and delete (it replaces a file).
 // - Move sources (the old name of a rename or a hard link, both names of
-//   RENAME_EXCHANGE) are also judged against the guard of every deny rule:
-//   its paths and their parent directories. So a hard link or a rename cannot
-//   give a protected file a second, unprotected name.
+//   RENAME_EXCHANGE) are judged as rename, read and write with the full
+//   decision, and against the guard: the parent directories in the patterns
+//   of deny rules of read or write. So a hard link or a rename cannot give a
+//   file a name where it can be read or written when its own name cannot.
+//   Both names of RENAME_EXCHANGE are also judged as write and delete.
 //
 // Path source: bpf_d_path (the path from the task's root, so the container
-// path). path_mknod cannot call bpf_d_path (6.8 and 6.12), and the old name
+// path). A task whose root is not the root of its mount (a chroot to a
+// directory) gives paths that name other files: they count as unresolved. path_mknod cannot call bpf_d_path (6.8 and 6.12), and the old name
 // of a hard link has no struct path: both walk the dentries and mounts the
 // same way d_path does. A path that cannot be resolved (error, longer than
 // FILE_PATH_MAX, deeper than FILE_WALK_DEPTH) takes the most limiting rule or
@@ -189,24 +192,47 @@ static __always_inline struct mount *file_real_mount(struct vfsmount *mnt)
 	return (void *)mnt - bpf_core_field_offset(struct mount, mnt);
 }
 
-// file_from_image is true for a file of an overlay lower layer that this
-// container has not copied up: ovl_inode.__upperdentry, the field right
-// after the overlay inode's struct inode, is NULL.
-static __always_inline bool file_from_image(struct inode *inode)
+// file_from_image is true for an overlay file with a lower-layer origin, so
+// a copy-up (a write, chmod, touch or setxattr) does not change it. struct
+// ovl_inode is private to overlayfs: right after its struct inode come
+// __upperdentry and oe (struct ovl_entry *), whose first field is
+// __numlower. The owner checks this layout in the kernel's BTF and sets
+// FILE_SLOT_FROM_IMAGE only when it holds; oe is NULL for a file created in
+// the upper layer.
+static __always_inline bool file_from_image(const struct file_slot *s,
+					    struct inode *inode)
 {
-	struct dentry *upper = NULL;
+	void *oe = NULL;
+	__u32 numlower = 0;
 
-	if (!inode || BPF_CORE_READ(inode, i_sb, s_magic) != OVERLAYFS_SUPER_MAGIC)
+	if (!(s->flags & FILE_SLOT_FROM_IMAGE) || !inode ||
+	    BPF_CORE_READ(inode, i_sb, s_magic) != OVERLAYFS_SUPER_MAGIC)
 		return false;
-	if (bpf_probe_read_kernel(&upper, sizeof(upper),
-				  (void *)inode + bpf_core_type_size(struct inode)))
+	if (bpf_probe_read_kernel(&oe, sizeof(oe),
+				  (void *)inode + bpf_core_type_size(struct inode) +
+					  sizeof(void *)) ||
+	    !oe)
 		return false;
-	return upper == NULL;
+	if (bpf_probe_read_kernel(&numlower, sizeof(numlower), oe))
+		return false;
+	return numlower > 0;
 }
 
-static __always_inline bool file_dentry_from_image(struct dentry *d)
+static __always_inline bool file_dentry_from_image(const struct file_slot *s,
+						   struct dentry *d)
 {
-	return file_from_image(BPF_CORE_READ(d, d_inode));
+	return file_from_image(s, BPF_CORE_READ(d, d_inode));
+}
+
+// file_root_moved is true when the task's root is not the root of its mount
+// (chroot to a directory). d_path then gives a path from that directory,
+// which a rule for the full path does not match.
+static __always_inline bool file_root_moved(void)
+{
+	struct task_struct *task = bpf_get_current_task_btf();
+
+	return BPF_CORE_READ(task, fs, root.dentry) !=
+	       BPF_CORE_READ(task, fs, root.mnt, mnt_root);
 }
 
 /* Path resolution: each returns the path length, or -1 (unresolved). */
@@ -215,9 +241,12 @@ static __always_inline long file_resolve_path(const struct path *path,
 					      struct file_scratch *x,
 					      __u32 *start)
 {
-	long n = bpf_d_path((struct path *)path, x->buf, FILE_PATH_MAX + 1);
+	long n;
 
 	*start = 0;
+	if (file_root_moved())
+		return -1;
+	n = bpf_d_path((struct path *)path, x->buf, FILE_PATH_MAX + 1);
 	if (n <= 0 || n > FILE_PATH_MAX + 1)
 		return -1;
 	return n - 1;
@@ -328,12 +357,17 @@ static __always_inline long file_resolve_walk(struct dentry *d,
 	struct task_struct *task = bpf_get_current_task_btf();
 	struct file_walk_state *w = &x->walk;
 	struct file_walk_ctx c = { .x = x };
+	struct vfsmount *root_m;
 	__u32 pos;
 
 	w->d = d;
 	w->m = file_real_mount(mnt);
 	w->root_d = BPF_CORE_READ(task, fs, root.dentry);
-	w->root_m = BPF_CORE_READ(task, fs, root.mnt);
+	root_m = BPF_CORE_READ(task, fs, root.mnt);
+	w->root_m = root_m;
+	// A chroot to a directory (see file_root_moved).
+	if (w->root_d != BPF_CORE_READ(root_m, mnt_root))
+		return -1;
 	w->pos = FILE_BUF_SIZE - 1;
 	w->comps = 0;
 	w->done = 0;
@@ -388,27 +422,19 @@ static __always_inline bool file_judge_mask(struct file_eval *e, long len,
 	__u32 best_access = 0;
 	bool resolved = len >= 0;
 
-	if (resolved)
+	if (resolved) {
 		file_match(e->s, e->slot, e->x->buf, start, len, &e->x->st,
 			   &e->x->matched);
-	for (__u32 a = 0; a <= FILE_ACCESS_MOVE_SOURCE; a++) {
-		struct policy_match m = {};
-
-		if (!(mask & (1U << a)))
-			continue;
-		if (resolved)
-			file_decide(e->s, a, &e->x->matched, from_image, &m);
-		else
-			file_unresolved(e->s, a, &m);
-		if (m.rank > best.rank) {
-			best = m;
-			best_access = a;
-		}
+		file_decide_mask(e->s, mask, &e->x->matched, from_image, &best,
+				 &best_access);
 	}
 	if (e->x->owner != e->me) {
 		if (!last)
 			return false;
 		verdict_count(VERDICT_COUNT_SECTION_ERROR);
+		resolved = false;
+	}
+	if (!resolved) {
 		best.rank = 0;
 		for (__u32 a = 0; a <= FILE_ACCESS_MOVE_SOURCE; a++) {
 			struct policy_match m = {};
@@ -518,7 +544,7 @@ int BPF_PROG(ig_file_open, struct file *file)
 		mask |= BIT(FILE_ACCESS_WRITE);
 	if (!mask)
 		return 0;
-	fi = file_from_image(BPF_CORE_READ(file, f_inode));
+	fi = file_from_image(e.s, BPF_CORE_READ(file, f_inode));
 	FILE_JUDGE(&e, file_resolve_path(&file->f_path, e.x, &_start), mask, fi);
 	return file_verdict(FILE_HOOK_FILE_OPEN, &e);
 }
@@ -531,7 +557,7 @@ int BPF_PROG(ig_file_truncate, const struct path *path)
 
 	if (!file_scope(&e))
 		return 0;
-	fi = file_dentry_from_image(BPF_CORE_READ(path, dentry));
+	fi = file_dentry_from_image(e.s, BPF_CORE_READ(path, dentry));
 	FILE_JUDGE(&e, file_resolve_path(path, e.x, &_start),
 		   BIT(FILE_ACCESS_WRITE), fi);
 	return file_verdict(FILE_HOOK_PATH_TRUNCATE, &e);
@@ -545,7 +571,7 @@ static __always_inline int file_attr(enum file_hook hook,
 
 	if (!file_scope(&e))
 		return 0;
-	fi = file_dentry_from_image(BPF_CORE_READ(path, dentry));
+	fi = file_dentry_from_image(e.s, BPF_CORE_READ(path, dentry));
 	FILE_JUDGE(&e, file_resolve_path(path, e.x, &_start),
 		   BIT(FILE_ACCESS_CHMOD), fi);
 	return file_verdict(hook, &e);
@@ -590,7 +616,7 @@ static __always_inline int file_dir_entry(enum file_hook hook,
 	if (!file_scope(&e))
 		return 0;
 	if (access == FILE_ACCESS_DELETE)
-		fi = file_dentry_from_image(dentry);
+		fi = file_dentry_from_image(e.s, dentry);
 	FILE_JUDGE(&e, file_resolve_dir_name(dir, dentry, e.x, &_start),
 		   BIT(access), fi);
 	return file_verdict(hook, &e);
@@ -624,8 +650,9 @@ int BPF_PROG(ig_file_rmdir, const struct path *dir, struct dentry *dentry)
 			      FILE_ACCESS_DELETE);
 }
 
-// A hard link: the new name is a create; the old name is a move source. Both
-// names are on new_dir's mount (the kernel refuses a link across mounts).
+// A hard link: the new name is a create; the old name is a move source
+// (FILE_MOVE_SOURCE_MASK). Both names are on new_dir's mount (the kernel
+// refuses a link across mounts).
 SEC("lsm/path_link")
 int BPF_PROG(ig_file_link, struct dentry *old_dentry, const struct path *new_dir,
 	     struct dentry *new_dentry)
@@ -637,11 +664,11 @@ int BPF_PROG(ig_file_link, struct dentry *old_dentry, const struct path *new_dir
 		return 0;
 	FILE_JUDGE(&e, file_resolve_dir_name(new_dir, new_dentry, e.x, &_start),
 		   BIT(FILE_ACCESS_CREATE), false);
-	fi = file_dentry_from_image(old_dentry);
+	fi = file_dentry_from_image(e.s, old_dentry);
 	FILE_JUDGE(&e,
 		   file_resolve_walk(old_dentry, BPF_CORE_READ(new_dir, mnt),
 				     e.x, &_start),
-		   BIT(FILE_ACCESS_RENAME) | BIT(FILE_ACCESS_MOVE_SOURCE), fi);
+		   FILE_MOVE_SOURCE_MASK, fi);
 	return file_verdict(FILE_HOOK_PATH_LINK, &e);
 }
 
@@ -651,21 +678,25 @@ int BPF_PROG(ig_file_rename, const struct path *old_dir,
 	     struct dentry *new_dentry, unsigned int flags)
 {
 	struct file_eval e = {};
+	__u32 old_mask = FILE_MOVE_SOURCE_MASK;
 	__u32 new_mask = BIT(FILE_ACCESS_RENAME);
 	bool fi;
 
 	if (!file_scope(&e))
 		return 0;
-	fi = file_dentry_from_image(old_dentry);
+	// An exchange moves both files and replaces both names.
+	if (flags & FILE_RENAME_EXCHANGE)
+		old_mask |= FILE_REPLACED_MASK;
+	fi = file_dentry_from_image(e.s, old_dentry);
 	FILE_JUDGE(&e, file_resolve_dir_name(old_dir, old_dentry, e.x, &_start),
-		   BIT(FILE_ACCESS_RENAME) | BIT(FILE_ACCESS_MOVE_SOURCE), fi);
+		   old_mask, fi);
 	fi = false;
 	if (flags & FILE_RENAME_EXCHANGE) {
-		new_mask |= BIT(FILE_ACCESS_MOVE_SOURCE);
-		fi = file_dentry_from_image(new_dentry);
+		new_mask = old_mask;
+		fi = file_dentry_from_image(e.s, new_dentry);
 	} else if (BPF_CORE_READ(new_dentry, d_inode)) {
-		new_mask |= BIT(FILE_ACCESS_WRITE) | BIT(FILE_ACCESS_DELETE);
-		fi = file_dentry_from_image(new_dentry);
+		new_mask |= FILE_REPLACED_MASK;
+		fi = file_dentry_from_image(e.s, new_dentry);
 	} else {
 		new_mask |= BIT(FILE_ACCESS_CREATE);
 	}

@@ -5,7 +5,9 @@
 // Input: argv[1] is the compiled map content (uint32 slot count, the slots,
 // uint32 literal count, the literal entries; little endian, as Go writes it).
 // Each stdin line "slot fromImage path" prints the matched accept bits and,
-// for each access kind and the move-source guard, "rank rule_id is_default".
+// for each access kind and the move-source guard, "rank rule_id is_default",
+// then for a move source and a name of RENAME_EXCHANGE (file_decide_mask)
+// " | rank rule_id access".
 
 _Static_assert(sizeof(struct file_slot) == 8696, "struct file_slot layout");
 _Static_assert(sizeof(struct file_literal_key) == 16, "struct file_literal_key layout");
@@ -87,6 +89,15 @@ int main(int argc, char **argv)
 
 			file_decide(s, a, &out, fi, &m);
 			printf(" %u %u %u", m.rank, m.rule_id, m.is_default);
+		}
+		for (int i = 0; i < 2; i++) {
+			__u32 mask = FILE_MOVE_SOURCE_MASK, access = 0;
+			struct policy_match m = {};
+
+			if (i)
+				mask |= FILE_REPLACED_MASK;
+			file_decide_mask(s, mask, &out, fi, &m, &access);
+			printf(" | %u %u %u", m.rank, m.rule_id, access);
 		}
 		printf("\n");
 	}

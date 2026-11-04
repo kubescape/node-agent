@@ -22,6 +22,9 @@ package runtime
 // Optional: FILE_BENCH_BINARY, a static open+close loop in the bound container
 // (arguments: iterations, path; output: ns per open+close), measures the cost
 // with no program loaded, unbound, and bound to a ~50 pattern policy.
+// FILE_HELPER_BINARY, a static helper in the bound container (`exchange A B`:
+// renameat2 with RENAME_EXCHANGE; `chroot-read DIR PATH`: chroot, then read),
+// runs the exchange and chroot cases.
 
 import (
 	"context"
@@ -244,6 +247,37 @@ func labDocument(name, mode string) filepolicy.Document {
 	}}}
 }
 
+// moveDocuments are the policies of the move cases (review findings 3 to 5):
+// a chmod deny on /etc/**, a pathless delete deny (the owner writes /**), and
+// a write default deny with rename allowed and a writable /tmp.
+func moveDocuments() []filepolicy.Document {
+	open := func(name string, rules ...filepolicy.Rule) filepolicy.Document {
+		d := filepolicy.Document{Version: 1, Name: name, Policy: filepolicy.Policy{Mode: "enforce", File: filepolicy.Section{
+			Defaults: map[string]filepolicy.Default{}, Rules: rules}}}
+		for _, k := range filepolicy.AccessKinds {
+			d.Policy.File.Defaults[k] = filepolicy.Default{Action: "allow"}
+		}
+		return d
+	}
+	writeDeny := open("write-deny",
+		filepolicy.Rule{Name: "tmp", Action: "allow", Access: []string{filepolicy.AccessCreate, filepolicy.AccessWrite, filepolicy.AccessDelete},
+			Paths: []string{"/tmp/**"}},
+		filepolicy.Rule{Name: "devices", Action: "allow", Access: []string{filepolicy.AccessRead, filepolicy.AccessWrite}, Paths: []string{"/dev/null"}})
+	writeDeny.Policy.File.Defaults[filepolicy.AccessWrite] = filepolicy.Default{Action: "deny"}
+	return []filepolicy.Document{
+		open("chmod-etc", filepolicy.Rule{Name: "nochmod", Action: "deny", Access: []string{filepolicy.AccessChmod}, Paths: []string{"/etc/**"}}),
+		open("no-delete", filepolicy.Rule{Name: "nodel", Action: "deny", Access: []string{filepolicy.AccessDelete}, Paths: []string{"/**"}}),
+		writeDeny,
+	}
+}
+
+// Slots of the move documents.
+const (
+	slotChmodEtc = 3 + iota
+	slotNoDelete
+	slotWriteDeny
+)
+
 // rules50 is the ~50 pattern policy of the cost measurement.
 func rules50(t *testing.T) filepolicy.Document {
 	t.Helper()
@@ -303,12 +337,18 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		t.Logf("BENCH no program: %.0f ns per open+close", baseline)
 	}
 
+	moves := moveDocuments()
 	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{
-		{labDocument("lab", "enforce")}, {labDocument("lab-audit", "audit")}, {rules50(t)}}, 1)
+		{labDocument("lab", "enforce")}, {labDocument("lab-audit", "audit")}, {rules50(t)}, {moves[0]}, {moves[1]}, {moves[2]}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// fromImage needs the overlay inode layout the program reads.
+	if why := FromImageUnavailable(); why != "" {
+		t.Errorf("fromImage is unavailable on this kernel: %s", why)
+	}
 	f.start(t, compiled)
+	helper := os.Getenv("FILE_HELPER_BINARY")
 
 	if os.Getenv("FILE_BENCH_BINARY") != "" {
 		unbound := f.bench(t)
@@ -362,16 +402,19 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.ok(t, f.id, "chmod 600 /work/a")
 		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessChmod, path: "/var/upper.txt"})
 	})
-	t.Run("hard link and rename source guard", func(t *testing.T) {
-		// The workspace allows create and rename there; only the guard of
-		// the read deny refuses a second name for the protected file.
+	t.Run("hard link and rename source", func(t *testing.T) {
+		// The workspace allows create and rename there; the old name is
+		// judged as a read too, and the read deny refuses a second name for
+		// the protected file.
 		f.denied(t, f.id, "ln /work/secret/key /work/key2")
 		f.denied(t, f.id, "mv /work/secret/key /work/key3")
 		f.ok(t, f.id, "test ! -e /work/key2 && test ! -e /work/key3")
 		f.ok(t, f.id, "ln /work/a /work/a2 && rm /work/a2")
-		f.waitVerdict(t, verdict{rule: "lab/secret-read", deny: 1, mode: 2, access: accessMoveSource, path: "/work/secret/key"})
+		f.waitVerdict(t, verdict{rule: "lab/secret-read", deny: 1, mode: 2, access: accessRead, path: "/work/secret/key"})
 	})
 	t.Run("parent directory rename guard", func(t *testing.T) {
+		// /work/secret matches /work/secret/** (read); /work/deep is a
+		// parent written in /work/deep/x/** (the guard).
 		f.denied(t, f.id, "mv /work/secret /work/s2")
 		f.denied(t, f.id, "mv /work/deep /work/deep2")
 		f.ok(t, f.id, "mkdir /work/plain && mv /work/plain /work/plain2 && rmdir /work/plain2")
@@ -388,12 +431,29 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 		f.ok(t, f.id, "echo x > /etc/upper.conf && echo y >> /etc/upper.conf")
 		f.waitVerdict(t, verdict{rule: "lab/image", deny: 1, mode: 2, access: accessWrite, path: "/etc/issue", fromImage: 1})
 	})
-	t.Run("overlay copy-up", func(t *testing.T) {
+	t.Run("overlay copy-up keeps fromImage", func(t *testing.T) {
 		// chmod of an image file under an allow: overlayfs copies it up with
 		// internal opens in this task, which are not judged.
 		f.ok(t, f.id, "chmod 600 /etc/issue.net && test \"$(stat -c %a /etc/issue.net)\" = 600")
-		// Once copied up, the file is no longer an image file.
-		f.ok(t, f.id, "echo x >> /etc/issue.net")
+		// The copy keeps its lower-layer origin: still an image file.
+		f.denied(t, f.id, "echo x >> /etc/issue.net")
+		f.waitVerdict(t, verdict{rule: "lab/image", deny: 1, mode: 2, access: accessWrite, path: "/etc/issue.net", fromImage: 1})
+		// touch (utimensat, no hook) copies up too.
+		f.ok(t, f.id, "touch -c /etc/debian_version")
+		f.denied(t, f.id, "echo x >> /etc/debian_version")
+		f.waitVerdict(t, verdict{rule: "lab/image", deny: 1, mode: 2, access: accessWrite, path: "/etc/debian_version", fromImage: 1})
+		// A file created in the container is not an image file.
+		f.ok(t, f.id, "echo x > /etc/created.conf && echo y >> /etc/created.conf")
+	})
+	t.Run("chroot is an unresolved path", func(t *testing.T) {
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		// In a chroot to /etc, /etc/shadow is /shadow: the path cannot be
+		// trusted, so the read takes the most limiting read rule.
+		f.denied(t, f.id, helper+" chroot-read /etc /shadow")
+		f.waitVerdict(t, verdict{rule: "unresolved-path", deny: 1, mode: 2, access: accessRead})
+		f.ok(t, f.id, helper+" chroot-read / /etc/hostname")
 	})
 	t.Run("unresolved path fails closed", func(t *testing.T) {
 		// 16 levels of 250-byte names fit in 4096 bytes, the 17th does not.
@@ -444,6 +504,35 @@ func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
 	})
 	t.Run("unselected container", func(t *testing.T) {
 		f.ok(t, f.other, "cat /etc/shadow >/dev/null && echo x > /newfile && rm /newfile && echo x >> /etc/issue")
+	})
+	t.Run("chmod deny on /etc/** keeps sed -i", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: slotChmodEtc}); err != nil {
+			t.Fatal(err)
+		}
+		f.ok(t, f.id, "echo a > /etc/sedtest && sed -i s/a/b/ /etc/sedtest && grep -q b /etc/sedtest && mv /etc/sedtest /etc/sedtest2")
+		f.denied(t, f.id, "chmod 600 /etc/sedtest2")
+	})
+	t.Run("pathless delete deny keeps rename and link", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: slotNoDelete}); err != nil {
+			t.Fatal(err)
+		}
+		f.ok(t, f.id, "echo a > /work/m1 && mv /work/m1 /work/m2 && ln /work/m2 /work/m3")
+		f.denied(t, f.id, "rm /work/m3")
+	})
+	t.Run("move out of a write default deny", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: slotWriteDeny}); err != nil {
+			t.Fatal(err)
+		}
+		// Rename is allowed by default; the old name is not writable.
+		f.denied(t, f.id, "ln /etc/passwd /tmp/p")
+		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessWrite, path: "/etc/passwd"})
+		f.ok(t, f.id, "test ! -e /tmp/p && echo e > /tmp/e1 && ln /tmp/e1 /tmp/e2 && mv /tmp/e2 /tmp/e3")
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		f.denied(t, f.id, "echo evil > /tmp/evil && "+helper+" exchange /tmp/evil /etc/passwd")
+		f.ok(t, f.id, "grep -q '^root:' /etc/passwd && grep -qx evil /tmp/evil")
+		f.ok(t, f.id, "echo f > /tmp/f && "+helper+" exchange /tmp/evil /tmp/f && grep -qx evil /tmp/f")
 	})
 	t.Run("audit reports without denying", func(t *testing.T) {
 		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 1}); err != nil {

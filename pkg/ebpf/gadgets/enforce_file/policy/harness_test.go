@@ -102,6 +102,10 @@ func runHarness(t *testing.T, bin string, c Compiled, probes []probe) []string {
 	return lines[1:]
 }
 
+// harnessMasks are the access masks the harness judges with
+// file_decide_mask: a move source, and a name of RENAME_EXCHANGE.
+var harnessMasks = []int{MoveSourceMask, MoveSourceMask | ReplacedMask}
+
 // expected is what the Go simulator says for one probe, in harness format.
 func expected(s *sim, p probe) string {
 	if s.c.Slots[p.slot].Mode == KernelModeOff {
@@ -116,6 +120,10 @@ func expected(s *sim, p probe) string {
 			d = 1
 		}
 		line += fmt.Sprintf(" %d %d %d", o.rank, o.ruleID, d)
+	}
+	for _, mask := range harnessMasks {
+		o, a := s.decideMask(p.slot, mask, m, p.fromImage)
+		line += fmt.Sprintf(" | %d %d %d", o.rank, o.ruleID, a)
 	}
 	return line
 }

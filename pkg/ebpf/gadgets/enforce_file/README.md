@@ -38,7 +38,7 @@ library README).
 | read | `file_open` with `FMODE_READ` | `bpf_d_path(&file->f_path)` |
 | write | `file_open` with `FMODE_WRITE` or `O_TRUNC`; `path_truncate` | `bpf_d_path` |
 | create | `path_mknod` (open with `O_CREAT`, mknod, mkfifo, AF_UNIX bind), `path_mkdir`, `path_symlink`, `path_link` (new name), `path_rename` (new name that does not exist) | `path_mknod`: dentry walk; others: `bpf_d_path(dir)` + name |
-| delete | `path_unlink`, `path_rmdir`, `path_rename` (new name that replaces a file) | `bpf_d_path(dir)` + name |
+| delete | `path_unlink`, `path_rmdir`, `path_rename` (new name that replaces a file; both names of `RENAME_EXCHANGE`) | `bpf_d_path(dir)` + name |
 | rename | `path_rename` (both names), `path_link` (old name) | `bpf_d_path(dir)` + name; link old name: dentry walk |
 | chmod | `path_chmod`, `path_chown` | `bpf_d_path` |
 
@@ -50,12 +50,20 @@ library README).
   build the path by walking the dentries and mounts up to the task's root, the
   way `d_path` does.
 - **Move sources** (the old name of a rename or a hard link, and both names of
-  `RENAME_EXCHANGE`) are also judged against the **guard** of every deny rule
-  of any access kind: its paths and the parent directories in them
-  (`/root/.aws/**` guards `/root/.aws` and `/root`; `/home/*/.aws/**` guards
-  `/home/*/.aws`, `/home/*` and `/home`; never `/`). So a protected file cannot
-  get a second, unprotected name by a hard link or a rename, and its directory
-  cannot be renamed away.
+  `RENAME_EXCHANGE`) are judged as `rename`, `read` and `write` with the full
+  decision (rules, except, fromImage, defaults, merge rule 5); the most
+  limiting wins. A second name gives the file's content to whoever can use
+  that name, so a file that cannot be read or written under its name cannot
+  get another one (`ln /etc/passwd /tmp/p` under a write default deny with
+  rename allowed is denied). Both names of `RENAME_EXCHANGE` are also judged
+  as `write` and `delete`, like a replaced new name.
+- Move sources are also judged against the **guard**: the parent directories
+  written in the patterns of deny rules that judge `read` or `write`
+  (`/root/.aws/**` guards `/root`; `/home/*/.aws/**` guards `/home/*` and
+  `/home`; `/etc/shadow` guards `/etc`; never `/`). So the directory of a
+  protected file cannot be renamed away. A rule of other access kinds (a
+  `chmod` deny on `/etc/**`, a `delete` deny on every path) neither judges nor
+  guards a move: `sed -i` and editors' atomic saves keep working.
 - overlayfs opens the backing file of every overlay file a second time, and
   copy-up opens more files, in the same task. Those opens use a private mount
   (`mnt_ns == MNT_NS_INTERNAL`) and are not judged; a deny there would break
@@ -63,7 +71,14 @@ library README).
 - `mmap` with `PROT_EXEC` (execMap) is not enforced.
 
 Paths are the paths the container sees (`d_path` resolves against the task's
-root).
+root). They are the **resolved** paths: a symbolic link in the name a program
+opens does not appear. A pattern for `/var/run/x` does not match a file whose
+path is `/run/x` (`/var/run` links to `/run` in Debian-based images), and a
+file of a Kubernetes Secret, ConfigMap or projected volume is
+`dir/..<timestamp>/file`. The owner adds such names (`/dir/..*/file`) to its
+patterns; the gadget matches literally. A task whose root is not the root of
+its mount (a chroot to a directory) gives paths relative to that directory:
+every judged path of that task counts as unresolved.
 
 ## Policy
 
@@ -99,10 +114,17 @@ judges every path and needs `fromImage`. `except` lifts that deny rule for the
 listed paths; other rules and the defaults still apply there. See
 `examples/policy.yaml`. Limits: 128 rules and 64 KiB per document.
 
-`fromImage: true` limits a rule to files of the image's lower overlay layer
-that this container has not modified: the inode is an overlay inode whose
-upper dentry is not set. A lower file opened for write is still lower at
-`file_open` (copy-up runs after the hook).
+`fromImage: true` limits a rule to overlay files with a lower-layer origin:
+the overlay entry of the inode has a lower stack (`ovl_entry.__numlower > 0`).
+A copy-up (a write, `chmod`, `touch`, `setxattr`) keeps the origin, so the
+file stays an image file; a file created in the container is not one.
+`struct ovl_inode` is private to overlayfs: the program reads `oe` one pointer
+after the end of the overlay inode's `struct inode`, and `__numlower` at the
+start of `struct ovl_entry` (the layout of 6.5 and later; checked on 6.8 and
+6.12). The owner reads the layout from the kernel's BTF
+(`runtime.FromImageUnavailable`) and sets `FILE_SLOT_FROM_IMAGE` on the slots
+only when it holds. Without it no file is an image file: a `fromImage` deny
+is not enforced and the owner must report that.
 
 ## Patterns
 
@@ -173,14 +195,19 @@ bound: +280 ns (6.12) / +305 ns (6.8) more.
   guarded either.
 - `/proc/<pid>/root/...` of another container gives the same path string; the
   opener's policy judges that path.
-- A chroot in the container changes the path the hooks see. Deny chroot with
-  the privilege gadget, or treat it as a known gap.
+- A chroot to a directory makes every path of that task unresolved (fail
+  closed). A chroot to the root of a mount (for example a volume) is not
+  detected: its paths are relative to that mount. A bind mount made in the
+  container after binding gives a file a second name; a container can mount
+  only after it creates a user and mount namespace (`unshare -Urm`). Deny
+  chroot, mounts and user namespace creation with the privilege gadget to
+  close both.
 - The dentry walk (`path_mknod`, hard link old name) does not take the kernel's
   rename and mount sequence locks: a concurrent rename can give a torn path.
-- `fromImage` is false after the first copy-up of the file in this container.
-  A chmod copies the file up (and so does a write that is allowed), so a rule
-  that protects image files from writes should also deny `chmod`. With
-  overlay `metacopy=on`, a chmod-only copy-up also makes the file "upper".
+- `fromImage` needs the overlay layout of Linux 6.5 and later (see
+  "Policy"); on another layout it is off.
+- A file that replaces an image file by rename (a new inode) is not an image
+  file.
 - A file opened through `/proc/self/fd/N` after it was deleted is judged with
   the path `d_path` gives (`... (deleted)`).
 - Matching hashes path components. The seed is random per slot, but FNV-1a is
@@ -195,7 +222,7 @@ bound: +280 ns (6.12) / +305 ns (6.8) more.
 
 | Map | Content |
 |---|---|
-| `file_slots` | array, slot → generation, hash seed, mode, segment masks (`first`, `star`, `wild`, `accept`, `init`), merged default and enforce-deny documents per access kind, unresolved ranks, glob table, up to 64 rules `{match, except, guard bits, access mask, rank, document, flags, rule_id, origin_id}` |
+| `file_slots` | array, slot → generation, hash seed, mode, flags (`FILE_SLOT_FROM_IMAGE`), segment masks (`first`, `star`, `wild`, `accept`, `init`), merged default and enforce-deny documents per access kind, unresolved ranks, glob table, up to 64 rules `{match, except, guard bits, access mask, rank, document, flags, rule_id, origin_id}` |
 | `file_literals` | hash, `{slot, component hash}` → the segment bits the component matches |
 | `bindings`, `counters`, `armed_tasks`, `arming_faults` | from the common library |
 

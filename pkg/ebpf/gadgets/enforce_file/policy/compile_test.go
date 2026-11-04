@@ -49,6 +49,7 @@ func TestKernelConstantsMatchHeader(t *testing.T) {
 		"FILE_PATH_MAX": KernelPathMax, "FILE_NAME_MAX": KernelNameMax, "FILE_FNV_PRIME": FNVPrime,
 		"FILE_RULE_FROM_IMAGE": RuleFromImage, "FILE_RULE_ANY_PATH": RuleAnyPath, "FILE_RULE_GUARD": RuleGuard,
 		"FILE_RULE_ID_DEFAULT": RuleIDDefault, "FILE_RULE_ID_UNRESOLVED": RuleIDUnresolved,
+		"FILE_SLOT_FROM_IMAGE": SlotFromImage,
 	} {
 		got, ok := defines[name]
 		if !ok || got != want {
@@ -132,6 +133,7 @@ func TestGuardAndExcept(t *testing.T) {
 		Rule{Name: "cfg", Action: "deny", Mode: "audit", Access: []string{AccessWrite}, Paths: []string{"**/.claude/**"},
 			Except: []string{"/w/.claude/ok"}},
 		Rule{Name: "img", Action: "deny", Access: []string{AccessWrite}, FromImage: true},
+		Rule{Name: "mode", Action: "deny", Access: []string{AccessChmod}, Paths: []string{"/etc/**"}},
 		Rule{Name: "ok", Action: "allow", Paths: []string{"/w/**"}},
 	)
 	c, err := CompileKernel(d, 1)
@@ -139,29 +141,32 @@ func TestGuardAndExcept(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := newSim(c)
-	guard := func(path string, fromImage bool) (uint8, string) {
-		o := s.decide(0, AccessMoveSource, s.match(0, path), fromImage)
-		return o.rank, c.RuleNames[o.ruleID]
-	}
 	for _, tc := range []struct {
 		path      string
 		fromImage bool
 		rank      uint8
 		rule      string
+		access    int
 	}{
-		{"/root/.aws/credentials", false, RankDenyEnforce, "d/aws"},
-		{"/root/.aws", false, RankDenyEnforce, "d/aws"},
-		{"/root", false, RankDenyEnforce, "d/aws"},
-		{"/", false, RankNone, ""},
-		{"/rootx", false, RankNone, ""},
-		{"/w/.claude/x", false, RankDenyAudit, "d/cfg"},
-		{"/w/.claude/ok", false, RankNone, ""},
-		{"/w/file", true, RankDenyEnforce, "d/img"},
-		{"/w/file", false, RankNone, ""},
+		// The full decision of read: the rule's own paths.
+		{"/root/.aws/credentials", false, RankDenyEnforce, "d/aws", 0},
+		{"/root/.aws", false, RankDenyEnforce, "d/aws", 0},
+		// The guard: a parent directory written in the pattern.
+		{"/root", false, RankDenyEnforce, "d/aws", AccessMoveSource},
+		{"/", false, RankAllow, "default", 0},
+		{"/rootx", false, RankAllow, "default", 0},
+		{"/w/.claude/x", false, RankDenyAudit, "d/cfg", 1},
+		{"/w/.claude/ok", false, RankAllow, "d/ok", 0},
+		{"/w/file", true, RankDenyEnforce, "d/img", 1},
+		{"/w/file", false, RankAllow, "d/ok", 0},
+		// A chmod rule neither judges nor guards a move.
+		{"/etc/foo", false, RankAllow, "default", 0},
+		{"/etc", false, RankAllow, "default", 0},
 	} {
-		rank, rule := guard(tc.path, tc.fromImage)
-		if rank != tc.rank || rule != tc.rule {
-			t.Errorf("guard %s = %d %s, want %d %s", tc.path, rank, rule, tc.rank, tc.rule)
+		o, access := s.moveSource(0, tc.path, tc.fromImage)
+		if o.rank != tc.rank || c.RuleNames[o.ruleID] != tc.rule || access != tc.access {
+			t.Errorf("move source %s (fromImage %v) = %d %s access %d, want %d %s access %d", tc.path, tc.fromImage,
+				o.rank, c.RuleNames[o.ruleID], access, tc.rank, tc.rule, tc.access)
 		}
 	}
 	// Except lifts only that rule; the allow then decides.
@@ -172,6 +177,129 @@ func TestGuardAndExcept(t *testing.T) {
 	if v.Unresolved[accessIndex(AccessRead)] != RankDenyEnforce || v.Unresolved[accessIndex(AccessCreate)] != RankAllow ||
 		v.Unresolved[AccessMoveSource] != RankDenyEnforce || v.Unresolved[accessIndex(AccessWrite)] != RankDenyEnforce {
 		t.Errorf("unresolved ranks %v", v.Unresolved)
+	}
+	// Only the read deny has parents to guard (cfg starts with **, img and
+	// mode have no read or write paths).
+	for i, r := range v.Rules[:v.NRules] {
+		if guard := r.Flags&RuleGuard != 0; guard != (i == 0) {
+			t.Errorf("rule %s: guard flag %v", c.RuleNames[r.RuleID], guard)
+		}
+	}
+}
+
+// TestMoveSources covers the moves of review findings 3 to 5: a move is judged
+// by what the old name allows (rename, read, write), not by every deny rule.
+func TestMoveSources(t *testing.T) {
+	writeDeny := allDefaults("allow")
+	writeDeny[AccessWrite] = Default{Action: "deny"}
+	noDelete := Rule{Name: "nodel", Action: "deny", Access: []string{AccessDelete}, Paths: []string{"/**"}}
+	noChmod := Rule{Name: "nochmod", Action: "deny", Access: []string{AccessChmod}, Paths: []string{"/etc/**"}}
+	tmp := Rule{Name: "tmp", Action: "allow", Access: []string{AccessCreate, AccessWrite, AccessDelete}, Paths: []string{"/tmp/**"}}
+	rename, create := 1<<accessIndex(AccessRename), 1<<accessIndex(AccessCreate)
+	for _, tc := range []struct {
+		name  string
+		d     Document
+		mask  int
+		path  string
+		rank  uint8
+		rule  string
+		which int
+	}{
+		// A pathless delete-only deny (the owner writes /**) does not stop a
+		// rename or a hard link; it judges a replaced new name.
+		{"pathless delete, old name", doc(allDefaults("allow"), noDelete), MoveSourceMask, "/workspace/a.txt", RankAllow, "default", 0},
+		{"pathless delete, new name", doc(allDefaults("allow"), noDelete), rename | create, "/workspace/b.txt", RankAllow, "default", 2},
+		{"pathless delete, replaced name", doc(allDefaults("allow"), noDelete), rename | ReplacedMask, "/workspace/b.txt", RankDenyEnforce, "d/nodel", 3},
+		// sed -i under a chmod deny on /etc/**: a temporary file renamed over
+		// the original.
+		{"chmod deny, sed -i old name", doc(allDefaults("allow"), noChmod), MoveSourceMask, "/etc/sedAbc123", RankAllow, "default", 0},
+		{"chmod deny, sed -i new name", doc(allDefaults("allow"), noChmod), rename | ReplacedMask, "/etc/foo", RankAllow, "default", 1},
+		// ln /etc/passwd /tmp/p under a write default deny with rename
+		// allowed: the old name is not writable.
+		{"hard link out of a write deny", doc(writeDeny, tmp), MoveSourceMask, "/etc/passwd", RankDenyEnforce, "default", 1},
+		{"hard link inside the workspace", doc(writeDeny, tmp), MoveSourceMask, "/tmp/a", RankAllow, "default", 0},
+		// RENAME_EXCHANGE of /tmp/evil and /etc/passwd: both names are moved
+		// and replaced.
+		{"exchange, protected name", doc(writeDeny, tmp), MoveSourceMask | ReplacedMask, "/etc/passwd", RankDenyEnforce, "default", 1},
+		{"exchange, workspace name", doc(writeDeny, tmp), MoveSourceMask | ReplacedMask, "/tmp/evil", RankAllow, "default", 0},
+		// A rename allow on /app/** does not make /app/x writable.
+		{"rename allow, write deny", doc(writeDeny, Rule{Name: "mv", Action: "allow", Access: []string{AccessRename}, Paths: []string{"/app/**"}}),
+			MoveSourceMask, "/app/x", RankDenyEnforce, "default", 1},
+	} {
+		c, err := CompileKernel(tc.d, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := newSim(c)
+		o, which := s.decideMask(0, tc.mask, s.match(0, tc.path), false)
+		if o.rank != tc.rank || c.RuleNames[o.ruleID] != tc.rule || which != tc.which {
+			t.Errorf("%s: %s = %d %s access %d, want %d %s access %d", tc.name, tc.path, o.rank, c.RuleNames[o.ruleID], which,
+				tc.rank, tc.rule, tc.which)
+		}
+	}
+}
+
+// TestSameAllowRulesMerge: identical allow rules of several documents (the
+// owner adds the same built-in rule to each) take one rule of the slot.
+func TestSameAllowRulesMerge(t *testing.T) {
+	devices := func(name string) Rule {
+		return Rule{Name: name, Action: "allow", Access: []string{AccessWrite, AccessRead}, Paths: []string{"/dev/zero", "/dev/null"}}
+	}
+	fill := func(name string, n int, defaults map[string]Default) Document {
+		d := doc(defaults)
+		d.Name = name
+		for i := 0; i < n; i++ {
+			d.Policy.File.Rules = append(d.Policy.File.Rules, Rule{Name: fmt.Sprint(i), Action: "deny", Access: []string{AccessRead},
+				Paths: []string{fmt.Sprintf("/%s%d", name, i)}})
+		}
+		return d
+	}
+	writeDeny := allDefaults("allow")
+	writeDeny[AccessWrite] = Default{Action: "deny"}
+	// a: open defaults; b: write default deny (enforce). 32 rules each;
+	// together 63 because the device rule merges.
+	a := fill("a", 31, allDefaults("allow"))
+	a.Policy.File.Rules = append(a.Policy.File.Rules, devices("devices"))
+	b := fill("b", 31, writeDeny)
+	b.Policy.File.Rules = append([]Rule{devices("devices")}, b.Policy.File.Rules...)
+	c, err := CompileSlots([][]Document{{a, b}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := c.Slots[0].NRules; n != 63 {
+		t.Fatalf("%d rules, want 63", n)
+	}
+	// The kept rule is a's (document 0, no default deny). b's enforce write
+	// default deny (merge rule 5) must not apply where the allow matches.
+	s := newSim(c)
+	if got := s.judge(0, AccessWrite, "/dev/null", false); got.rank != RankAllow || c.RuleNames[got.ruleID] != "a/devices" {
+		t.Errorf("write /dev/null: rank %d by %s", got.rank, c.RuleNames[got.ruleID])
+	}
+	if got := s.judge(0, AccessWrite, "/etc/x", false); got.rank != RankDenyEnforce {
+		t.Errorf("write /etc/x: rank %d", got.rank)
+	}
+	// At the limit: one more distinct rule fits, a second does not.
+	a.Policy.File.Rules = append(a.Policy.File.Rules, Rule{Name: "x", Action: "deny", Paths: []string{"/x"}})
+	if _, err := CompileSlots([][]Document{{a, b}}, 1); err != nil {
+		t.Fatalf("64 rules: %v", err)
+	}
+	b.Policy.File.Rules = append(b.Policy.File.Rules, Rule{Name: "y", Action: "deny", Paths: []string{"/y"}})
+	if _, err := CompileSlots([][]Document{{a, b}}, 1); err == nil || !strings.Contains(err.Error(), "rules") {
+		t.Fatalf("65 rules: %v", err)
+	}
+	// Allow rules that differ in access or fromImage stay apart; the same
+	// paths in another order are the same rule.
+	other := devices("other")
+	other.Access = []string{AccessRead}
+	img := devices("img")
+	img.FromImage = true
+	same := Rule{Name: "same", Action: "allow", Access: []string{AccessRead, AccessWrite}, Paths: []string{"/dev/null", "/dev/zero"}}
+	c, err = CompileKernel(doc(allDefaults("allow"), devices("devices"), other, img, same), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := c.Slots[0].NRules; n != 3 {
+		t.Errorf("%d rules, want 3", n)
 	}
 }
 
@@ -224,7 +352,7 @@ func TestCompileLimits(t *testing.T) {
 	}
 	var many []Rule
 	for i := 0; i <= KernelMaxRules; i++ {
-		many = append(many, Rule{Name: fmt.Sprint(i), Action: "allow", Paths: []string{"/a"}})
+		many = append(many, Rule{Name: fmt.Sprint(i), Action: "allow", Paths: []string{fmt.Sprintf("/a%d", i)}})
 	}
 	if _, err := CompileKernel(doc(allDefaults("allow"), many...), 1); err == nil || !strings.Contains(err.Error(), "rules") {
 		t.Errorf("too many rules: %v", err)

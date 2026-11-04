@@ -40,12 +40,22 @@ const (
 	RuleAnyPath   = 2
 	RuleGuard     = 4
 
+	// SlotFromImage is set by the owner, not the compiler, when the
+	// kernel's overlay inode layout is the one the program reads.
+	SlotFromImage = 1
+
 	RuleIDDefault    = 1
 	RuleIDUnresolved = 2
 
 	// AccessMoveSource indexes Unresolved and the event access field for
 	// the move-source guard.
 	AccessMoveSource = 6
+
+	// MoveSourceMask is FILE_MOVE_SOURCE_MASK: the access kinds (bits)
+	// judged on a move source. ReplacedMask is FILE_REPLACED_MASK: added
+	// on a name whose file is replaced.
+	MoveSourceMask = 1<<0 | 1<<1 | 1<<4 | 1<<AccessMoveSource
+	ReplacedMask   = 1<<1 | 1<<3
 
 	FNVPrime = 0x100000001b3
 )
@@ -124,13 +134,14 @@ type SlotValue struct {
 	Mode       uint32
 	NRules     uint32
 	NGlobs     uint32
-	_          uint32
-	First      Bits
-	Star       Bits
-	Wild       Bits
-	Accept     Bits
-	Init       Bits
-	Defaults   [KernelAccessKinds]PolicyValue
+	// Flags: SlotFromImage.
+	Flags    uint32
+	First    Bits
+	Star     Bits
+	Wild     Bits
+	Accept   Bits
+	Init     Bits
+	Defaults [KernelAccessKinds]PolicyValue
 	// Bit i: policy i of the slot has an enforce default deny.
 	DenyEnforceDocs [KernelAccessKinds]uint32
 	// Rank for an unresolved path, per access kind and AccessMoveSource.
@@ -333,7 +344,7 @@ func (s *segments) bits(patterns []Pattern) (Bits, error) {
 }
 
 // guard returns the guard bits of a deny rule pattern (see guardLengths) and
-// adds them to the slot's accept mask.
+// adds them to the slot's accept mask. A pattern without parents has none.
 func (s *segments) guard(p Pattern) (Bits, error) {
 	var b Bits
 	last, err := s.add(p)
@@ -419,8 +430,23 @@ func (c *compiler) slot(slot uint32, docs []Document) error {
 
 	seg := &segments{ids: map[string]int{}, value: &value, literals: map[string]Bits{}, globs: map[[2]string]Bits{}}
 	n := 0
+	// Allow rules that are the same in access, paths and fromImage judge
+	// the same: the first one stands for all (its name and origin are
+	// reported). Merge rule 5 is not affected: a matching allow rule lifts
+	// it whichever document the rule belongs to.
+	allows := map[string]bool{}
 	for i, d := range active {
 		for _, r := range d.Policy.File.Rules {
+			if r.Action == "allow" {
+				key, err := allowKey(r)
+				if err != nil {
+					return fmt.Errorf("rule %q: %w", r.Name, err)
+				}
+				if allows[key] {
+					continue
+				}
+				allows[key] = true
+			}
 			if n >= KernelMaxRules {
 				return fmt.Errorf("more than %d file rules", KernelMaxRules)
 			}
@@ -505,6 +531,21 @@ func (c *compiler) finish(slot uint32, value SlotValue, seg *segments) error {
 	return nil
 }
 
+// allowKey identifies what an allow rule judges: its access kinds, its
+// normalised paths and fromImage.
+func allowKey(r Rule) (string, error) {
+	paths, err := parseAll(r.Paths)
+	if err != nil {
+		return "", err
+	}
+	norm := make([]string, len(paths))
+	for i, p := range paths {
+		norm[i] = p.String()
+	}
+	sort.Strings(norm)
+	return fmt.Sprintf("%d|%v|%q", accessMask(r.Access), r.FromImage, norm), nil
+}
+
 func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, error) {
 	mode := r.Mode
 	if mode == "" {
@@ -537,14 +578,19 @@ func (c *compiler) rule(doc int, d Document, r Rule, seg *segments) (RuleEntry, 
 	if e.Except, err = seg.bits(excepts); err != nil {
 		return e, err
 	}
-	if r.Action == "deny" {
-		e.Flags |= RuleGuard
+	// The guard: parents of the paths of a deny rule of read or write. A
+	// move source is judged with the full decision for read and write too,
+	// so the rule's own paths need no guard.
+	if r.Action == "deny" && e.Access&(1<<accessIndex(AccessRead)|1<<accessIndex(AccessWrite)) != 0 {
 		for _, p := range paths {
 			g, err := seg.guard(p)
 			if err != nil {
 				return e, err
 			}
 			e.Guard = e.Guard.or(g)
+		}
+		if e.Guard.any() {
+			e.Flags |= RuleGuard
 		}
 	}
 	return e, nil

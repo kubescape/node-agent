@@ -91,13 +91,20 @@ func checkMap(m enforcement.Map, name string, typ ebpf.MapType, key, value, max 
 }
 
 // writeSlots writes the slot headers, the map the binding controller freezes.
-func writeSlots(slots []filepolicy.SlotValue) func(enforcement.Map) error {
+// fromImage sets filepolicy.SlotFromImage (see FromImageUnavailable); the
+// compiler never sets it.
+func writeSlots(slots []filepolicy.SlotValue, fromImage bool) func(enforcement.Map) error {
 	return func(m enforcement.Map) error {
 		if err := checkMap(m, "file_slots", ebpf.Array, 4, filepolicy.KernelSlotSize, filepolicy.KernelMaxSlots); err != nil {
 			return err
 		}
 		for i := range slots {
-			if err := m.Put(uint32(i), &slots[i]); err != nil {
+			slot := slots[i]
+			slot.Flags &^= filepolicy.SlotFromImage
+			if fromImage {
+				slot.Flags |= filepolicy.SlotFromImage
+			}
+			if err := m.Put(uint32(i), &slot); err != nil {
 				return fmt.Errorf("writing slot %d: %w", i, err)
 			}
 		}
@@ -170,7 +177,7 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 		Slots:           uint32(len(config.Policy.Slots)),
 		InitialBindings: config.InitialBindings,
 		PolicyMap:       "file_slots",
-		WritePolicy:     writeSlots(config.Policy.Slots),
+		WritePolicy:     writeSlots(config.Policy.Slots, FromImageUnavailable() == ""),
 		ArmMap:          "armed_tasks",
 		FaultMap:        "arming_faults",
 	})

@@ -4,10 +4,12 @@
 package runtime
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"golang.org/x/sys/unix"
 
 	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
@@ -19,16 +21,23 @@ type fakeMap struct {
 	flags           uint32
 	puts            int
 	frozen          bool
+	slotFlags       []uint32
 }
 
-func (m *fakeMap) Put(_, _ interface{}) error { m.puts++; return nil }
-func (m *fakeMap) Delete(interface{}) error   { return nil }
-func (m *fakeMap) Type() ebpf.MapType         { return m.typ }
-func (m *fakeMap) KeySize() uint32            { return m.key }
-func (m *fakeMap) ValueSize() uint32          { return m.value }
-func (m *fakeMap) MaxEntries() uint32         { return m.max }
-func (m *fakeMap) Flags() uint32              { return m.flags }
-func (m *fakeMap) Freeze() error              { m.frozen = true; return nil }
+func (m *fakeMap) Put(_, v interface{}) error {
+	m.puts++
+	if s, ok := v.(*filepolicy.SlotValue); ok {
+		m.slotFlags = append(m.slotFlags, s.Flags)
+	}
+	return nil
+}
+func (m *fakeMap) Delete(interface{}) error { return nil }
+func (m *fakeMap) Type() ebpf.MapType       { return m.typ }
+func (m *fakeMap) KeySize() uint32          { return m.key }
+func (m *fakeMap) ValueSize() uint32        { return m.value }
+func (m *fakeMap) MaxEntries() uint32       { return m.max }
+func (m *fakeMap) Flags() uint32            { return m.flags }
+func (m *fakeMap) Freeze() error            { m.frozen = true; return nil }
 
 func compiled(t *testing.T) filepolicy.Compiled {
 	t.Helper()
@@ -53,8 +62,16 @@ func TestWriteChecksLayout(t *testing.T) {
 	ro := uint32(unix.BPF_F_RDONLY_PROG)
 	slots := &fakeMap{typ: ebpf.Array, key: 4, value: filepolicy.KernelSlotSize, max: filepolicy.KernelMaxSlots, flags: ro}
 	literals := &fakeMap{typ: ebpf.Hash, key: filepolicy.KernelLiteralKeySize, value: filepolicy.KernelLiteralValueSize, max: filepolicy.KernelMaxLiterals, flags: ro}
-	if err := writeSlots(c.Slots)(slots); err != nil || slots.puts != len(c.Slots) {
-		t.Fatalf("slots: %v puts=%d", err, slots.puts)
+	if err := writeSlots(c.Slots, true)(slots); err != nil || slots.puts != len(c.Slots) || slots.slotFlags[0] != filepolicy.SlotFromImage {
+		t.Fatalf("slots: %v puts=%d flags=%v", err, slots.puts, slots.slotFlags)
+	}
+	// Without a verified overlay layout no slot judges fromImage, whatever
+	// the compiled value says.
+	c.Slots[0].Flags = filepolicy.SlotFromImage
+	noImage := *slots
+	noImage.slotFlags = nil
+	if err := writeSlots(c.Slots, false)(&noImage); err != nil || noImage.slotFlags[0] != 0 {
+		t.Fatalf("slots without fromImage: %v flags=%v", err, noImage.slotFlags)
 	}
 	if err := writeLiterals(literals, c); err != nil || literals.puts != len(c.Literals) || !literals.frozen {
 		t.Fatalf("literals: %v puts=%d frozen=%v", err, literals.puts, literals.frozen)
@@ -66,7 +83,7 @@ func TestWriteChecksLayout(t *testing.T) {
 	}
 	small := *slots
 	small.value--
-	if err := writeSlots(c.Slots)(&small); err == nil {
+	if err := writeSlots(c.Slots, true)(&small); err == nil {
 		t.Fatal("a slot map of another value size must be rejected")
 	}
 	if err := writeLiterals(nil, c); err == nil {
@@ -101,5 +118,55 @@ func TestWithConfigCopies(t *testing.T) {
 	WithConfig(config)
 	if &config.Policy.Slots[0] != &c.Slots[0] {
 		t.Fatal("caller slice must stay untouched")
+	}
+}
+
+// fakeBTF answers TypeByName for structs.
+type fakeBTF map[string]*btf.Struct
+
+func (f fakeBTF) TypeByName(name string, typ any) error {
+	s, ok := f[name]
+	if !ok {
+		return fmt.Errorf("type %s: %w", name, btf.ErrNotFound)
+	}
+	*typ.(**btf.Struct) = s
+	return nil
+}
+
+// overlayBTF builds struct ovl_inode as BTF shows it on 6.8 (inode 632 bytes)
+// and 6.12 (624 bytes): flags, then vfs_inode at byte 32, __upperdentry, oe.
+func overlayBTF(inodeSize uint32, oeGap btf.Bits, withOE bool) fakeBTF {
+	inode := &btf.Struct{Name: "inode", Size: inodeSize}
+	entry := &btf.Struct{Name: "ovl_entry", Size: 8, Members: []btf.Member{
+		{Name: "__numlower", Type: &btf.Int{Name: "unsigned int", Size: 4}, Offset: 0},
+		{Name: "__lowerstack", Type: &btf.Array{}, Offset: 64},
+	}}
+	dentry := &btf.Pointer{Target: &btf.Struct{Name: "dentry"}}
+	end := btf.Bits(256 + inodeSize*8)
+	members := []btf.Member{
+		{Name: "flags", Type: &btf.Int{Size: 8}, Offset: 192},
+		{Name: "vfs_inode", Type: inode, Offset: 256},
+		{Name: "__upperdentry", Type: dentry, Offset: end},
+	}
+	if withOE {
+		members = append(members, btf.Member{Name: "oe", Type: &btf.Pointer{Target: entry}, Offset: end + oeGap})
+	}
+	return fakeBTF{"ovl_inode": {Name: "ovl_inode", Members: members}}
+}
+
+func TestOverlayLayout(t *testing.T) {
+	for _, size := range []uint32{624, 632} {
+		if err := checkOverlayLayout(overlayBTF(size, 64, true)); err != nil {
+			t.Errorf("inode size %d: %v", size, err)
+		}
+	}
+	// Another field between __upperdentry and oe, a kernel before 6.5 (no
+	// oe, a lower inode pointer instead), no overlay BTF: not readable.
+	for name, spec := range map[string]fakeBTF{
+		"moved oe": overlayBTF(624, 128, true), "no oe": overlayBTF(624, 64, false), "no overlay": {},
+	} {
+		if err := checkOverlayLayout(spec); err == nil {
+			t.Errorf("%s: layout accepted", name)
+		}
 	}
 }

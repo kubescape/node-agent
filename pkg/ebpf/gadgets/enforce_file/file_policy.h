@@ -76,7 +76,25 @@ enum file_access : __u32 {
 // Rule flags.
 #define FILE_RULE_FROM_IMAGE 1 // only files of the image's lower layer
 #define FILE_RULE_ANY_PATH 2 // no paths: every path
-#define FILE_RULE_GUARD 4 // a deny rule: its guard protects move sources
+// A deny rule of read or write whose patterns have parent directories: its
+// guard (those parents) protects move sources.
+#define FILE_RULE_GUARD 4
+
+// Slot flags, set by the owner (not the compiler).
+// The owner verified the overlay inode layout that fromImage reads; without
+// it no file is an image file.
+#define FILE_SLOT_FROM_IMAGE 1
+
+// Access kinds judged on a move source (the old name of a rename or a hard
+// link, both names of RENAME_EXCHANGE): rename, read and write with the full
+// decision, and the guard. A new name gives the file's content to whoever can
+// use that name, so it is a read and a write of the file.
+#define FILE_MOVE_SOURCE_MASK                                                  \
+	((1U << FILE_ACCESS_READ) | (1U << FILE_ACCESS_WRITE) |                \
+	 (1U << FILE_ACCESS_RENAME) | (1U << FILE_ACCESS_MOVE_SOURCE))
+// A name whose file is replaced (the new name of a replacing rename, both
+// names of RENAME_EXCHANGE) is also a write and a delete.
+#define FILE_REPLACED_MASK ((1U << FILE_ACCESS_WRITE) | (1U << FILE_ACCESS_DELETE))
 
 #define FILE_RULE_ID_DEFAULT 1
 #define FILE_RULE_ID_UNRESOLVED 2
@@ -113,7 +131,7 @@ struct file_slot {
 	__u32 mode; // 0: the slot is not judged
 	__u32 nrules;
 	__u32 nglobs;
-	__u32 pad;
+	__u32 flags; // FILE_SLOT_*
 	struct file_bits first, star, wild, accept, init;
 	// Merged default per access kind (rule_id 1).
 	struct policy_value defaults[FILE_ACCESS_KINDS];
@@ -394,8 +412,7 @@ static long file_rule_step(__u64 i, void *ctx)
 	} else {
 		if (!(r->flags & FILE_RULE_GUARD))
 			return 0;
-		hit = (r->flags & FILE_RULE_ANY_PATH) ||
-		      file_bits_any(c->matched, &r->guard);
+		hit = file_bits_any(c->matched, &r->guard);
 	}
 	if (!hit || file_bits_any(c->matched, &r->except))
 		return 0;
@@ -449,6 +466,30 @@ static __always_inline void file_decide(const struct file_slot *s,
 		c.m.origin_id = s->defaults[a].origin_id;
 	}
 	*m = c.m;
+}
+
+// file_decide_mask resolves every access kind in mask (bits of enum
+// file_access, FILE_ACCESS_MOVE_SOURCE for the guard) and keeps the most
+// limiting result in m and the access kind that gave it in access. m starts
+// empty.
+static __always_inline void file_decide_mask(const struct file_slot *s,
+					     __u32 mask,
+					     const struct file_bits *matched,
+					     bool from_image,
+					     struct policy_match *m,
+					     __u32 *access)
+{
+	for (__u32 a = 0; a <= FILE_ACCESS_MOVE_SOURCE; a++) {
+		struct policy_match x = {};
+
+		if (!(mask & (1U << a)))
+			continue;
+		file_decide(s, a, matched, from_image, &x);
+		if (x.rank > m->rank) {
+			*m = x;
+			*access = a;
+		}
+	}
 }
 
 // file_unresolved fills m for a path that cannot be resolved: the most
