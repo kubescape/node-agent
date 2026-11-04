@@ -49,7 +49,8 @@ type nodeSection[C any] struct {
 	start   func(ctx context.Context, id string, compiled C, bindings []enforcement.Binding) (NodeInstance, error)
 	// startEmpty makes Prepare start an instance with no slot when none
 	// runs, so the first container does not wait for the slow first gadget
-	// load. Pod bindings (bindPods) exist only for a section that sets it.
+	// load. Pod bindings (bindPods) exist only for privilege: only
+	// PrivilegeBackend exports BindPods.
 	startEmpty bool
 }
 

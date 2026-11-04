@@ -91,6 +91,8 @@ type Service struct {
 	// bounds how often privilege slot preparation lists the node's pods.
 	podsScheduled atomic.Bool
 	lastPrepare   time.Time
+	// hadSlotPolicies: the last refresh saw a privilege or network policy.
+	hadSlotPolicies bool
 	// lastClusterCIDRs bounds how often the clusterInternal class is read;
 	// clusterCIDRs keeps the last good value of each part.
 	lastClusterCIDRs time.Time
@@ -372,7 +374,16 @@ func (s *Service) refresh(ctx context.Context) {
 	s.snapshotEpoch.Store(s.inputEpoch.Load())
 	// Prepare after a Pending-pod or policy event, else at most every
 	// prepareInterval.
-	if s.options.slotSections() && s.options.Kubernetes != nil && s.Controller.HasSlotPolicies() &&
+	hasSlotPolicies := s.Controller.HasSlotPolicies()
+	if s.options.slotSections() && s.options.Kubernetes != nil && !hasSlotPolicies && s.hadSlotPolicies {
+		// The last slot policy is gone: one preparation with no active
+		// section clears the prepared sets (it never starts a gadget).
+		if err := s.Controller.PrepareScheduled(ctx, nil); err != nil {
+			s.report(fmt.Errorf("slot preparation: %w", err))
+		}
+	}
+	s.hadSlotPolicies = hasSlotPolicies
+	if s.options.slotSections() && s.options.Kubernetes != nil && hasSlotPolicies &&
 		(s.podsScheduled.Swap(false) || time.Since(s.lastPrepare) >= prepareInterval) {
 		s.lastPrepare = time.Now()
 		scheduled, qos, err := s.scheduledPods(ctx)
