@@ -48,6 +48,9 @@ func Compile(ctx context.Context, identity PolicyIdentity, spec api.PolicySpec, 
 	}
 	if copy.Exec != nil {
 		result.Exec = *copy.Exec
+		if result.Exec.DefaultMode != "" {
+			return result, fmt.Errorf("exec defaultMode requires native IG ABI support")
+		}
 	}
 	names := make(map[string]bool)
 	for _, r := range result.Exec.Rules {
@@ -75,8 +78,9 @@ func Compile(ctx context.Context, identity PolicyIdentity, spec api.PolicySpec, 
 				return result, fmt.Errorf("source rule name collision: %s", rule.Name)
 			}
 			names[rule.Name] = true
-			if rule.Origin == "" {
-				rule.Origin = "ContainerProfile/" + binding.Namespace + "/" + source.ContainerProfile.Name
+			if rule.Origin == nil {
+				origin := "ContainerProfile/" + binding.Namespace + "/" + source.ContainerProfile.Name
+				rule.Origin = &origin
 			}
 			// Copy resolver-owned pointers before expanding path classes below.
 			data, err := json.Marshal(rule)
@@ -95,6 +99,9 @@ func Compile(ctx context.Context, identity PolicyIdentity, spec api.PolicySpec, 
 	}
 	for i := range result.Exec.Rules {
 		r := &result.Exec.Rules[i]
+		if r.Except != nil {
+			return result, fmt.Errorf("rule %q exceptions require native IG ABI support", r.Name)
+		}
 		if r.Action != api.ActionAllow && r.Action != api.ActionDeny {
 			return result, fmt.Errorf("rule %q has invalid action", r.Name)
 		}

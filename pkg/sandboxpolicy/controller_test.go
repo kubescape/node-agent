@@ -105,7 +105,7 @@ func policy(name, namespace string) *api.SandboxPolicy {
 	return &api.SandboxPolicy{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicy"}, ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, UID: types.UID(name), Generation: 1}, Spec: api.SandboxPolicySpec{PolicySpec: execSpec()}}
 }
 func clusterPolicy(name string) *api.ClusterSandboxPolicy {
-	return &api.ClusterSandboxPolicy{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "ClusterSandboxPolicy"}, ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name), Generation: 1}, Spec: api.ClusterSandboxPolicySpec{PolicySpec: execSpec()}}
+	return &api.ClusterSandboxPolicy{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "ClusterSandboxPolicy"}, ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name), Generation: 1}, Spec: api.ClusterSandboxPolicySpec{Selector: api.ClusterPolicySelector{NamespaceSelector: &metav1.LabelSelector{}}, PolicySpec: execSpec()}}
 }
 
 func TestInvalidNamespacedPolicyDoesNotSuppressNewClusterBinding(t *testing.T) {
@@ -1345,5 +1345,40 @@ func TestBindingFailureWithoutReadOnlyAttestationSuppressesProtection(t *testing
 	}
 	if c.active[bindingKey(binding())].protectionUnconfirmed || len(w.reports["policy"].Status.Conditions) != 2 {
 		t.Fatal("authoritative reconciliation failed to restore protection")
+	}
+}
+
+func TestUnsupportedExecRevisionRetainsLastGood(t *testing.T) {
+	for _, change := range []func(*api.SandboxPolicy){
+		func(p *api.SandboxPolicy) { p.Spec.Exec.DefaultMode = api.RuleAudit },
+		func(p *api.SandboxPolicy) {
+			p.Spec.Exec.Rules[0].Action = api.ActionDeny
+			p.Spec.Exec.Rules[0].Except = []api.ExecException{{Target: &api.ExecExceptionTarget{PathTarget: api.PathTarget{Path: []string{"/bin/safe"}}}}}
+		},
+	} {
+		ctx := context.Background()
+		p := policy("policy", "ns")
+		c, backend, writer, _ := setup(t, p)
+		if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.InitialSync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		initial := backend.plans[bindingKey(binding())]
+		p.Generation++
+		change(p)
+		c.ModifyHandler(ctx, p)
+		if c.LastError() == nil {
+			t.Fatal("unsupported revision not rejected")
+		}
+		got := backend.plans[bindingKey(binding())]
+		if got.Revision != initial.Revision || len(got.Policies) != 1 || got.Policies[0].Identity.Generation != 1 {
+			t.Fatalf("last-good replaced: %+v", got)
+		}
+		status := writer.reports["policy"].Status
+		if status.Conditions[0].Status != metav1.ConditionFalse || !status.Stale {
+			t.Fatalf("unsupported revision not NotReady/stale: %+v", status)
+		}
 	}
 }

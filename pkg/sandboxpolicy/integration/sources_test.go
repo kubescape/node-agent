@@ -29,7 +29,7 @@ func TestProfileResolverReadsCompleteLiteralExecsOnly(t *testing.T) {
 		t.Fatalf("nondeterministic import: %+v", rules)
 	}
 	for _, r := range rules {
-		if r.Action != api.ActionAllow || r.Origin != "ContainerProfile/ns/profile" || r.Target.Argv != nil || r.Name == "" {
+		if r.Action != api.ActionAllow || r.Origin == nil || *r.Origin != "ContainerProfile/ns/profile" || r.Target.Argv != nil || r.Name == "" {
 			t.Fatalf("wrong import: %+v", r)
 		}
 	}
