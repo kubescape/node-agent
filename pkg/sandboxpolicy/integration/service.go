@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -168,7 +169,11 @@ func (s *Service) Start(ctx context.Context) error {
 		s.subscribed = true
 	}
 	s.mu.Unlock()
-	go s.exporter.Run(runCtx)
+	go func() {
+		if err := s.exporter.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+			s.report(fmt.Errorf("sandbox verdict exporter: %w", err))
+		}
+	}()
 	// Drain observed startup churn into the readiness barrier before handing
 	// work to the background loop. Persistent churn stays explicitly NotReady.
 drain:

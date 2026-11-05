@@ -149,9 +149,10 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	if len(out.Matches) == 0 {
 		out.Reason = "section_default"
 		for _, p := range d.defaults {
-			if p.Default == 2 {
+			switch p.Default {
+			case 2:
 				consider(api.ActionDeny, fullMode(p.Mode))
-			} else if p.Default == 1 {
+			case 1:
 				consider(api.ActionAllow, fullMode(p.Mode))
 			}
 		}
