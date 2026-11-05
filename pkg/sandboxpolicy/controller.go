@@ -268,7 +268,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	var failures []error
 	policies := make([]desiredPolicy, 0)
 	classes := api.PolicyClasses{PathClasses: make(map[string][]string)}
-	var classErr error
+	classErrors := make(map[string]error)
 	// Reject an ambiguous multi-object class namespace rather than choose
 	// one definition nondeterministically. Local policy additions are merged.
 	classNames := make(map[string]string)
@@ -285,16 +285,38 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 		var spec api.PolicyClasses
 		if err := decodeSpec(obj, &spec); err != nil {
-			classErr = errors.Join(classErr, err)
+			failures = append(failures, fmt.Errorf("classes %s: %w", obj.GetName(), err))
+			for name := range spec.PathClasses {
+				classErrors[name] = errors.Join(classErrors[name], err)
+			}
 			continue
 		}
-		if err := api.ValidatePolicyClasses(spec); err != nil {
-			classErr = errors.Join(classErr, err)
-			continue
+		classValidationErr := api.ValidatePolicyClasses(spec)
+		if err := classValidationErr; err != nil {
+			failures = append(failures, fmt.Errorf("classes %s: %w", obj.GetName(), err))
+			// The pinned API validator attributes this exact error only to an
+			// empty name. Any other/unknown object-level failure remains atomic.
+			if err.Error() == "class names must not be empty" {
+				_, badPath := spec.PathClasses[""]
+				_, badDest := spec.DestClasses[""]
+				if badPath || badDest {
+					classErrors[""] = errors.Join(classErrors[""], err)
+					delete(spec.PathClasses, "")
+					delete(spec.DestClasses, "")
+					classValidationErr = api.ValidatePolicyClasses(spec)
+				}
+			}
+			if classValidationErr != nil {
+				for name := range spec.PathClasses {
+					classErrors[name] = errors.Join(classErrors[name], err)
+				}
+				continue
+			}
 		}
 		for name, paths := range spec.PathClasses {
 			if owner, exists := classNames[name]; exists {
-				classErr = errors.Join(classErr, fmt.Errorf("path class %q occurs in %s and %s", name, owner, obj.GetName()))
+				classErrors[name] = errors.Join(classErrors[name], fmt.Errorf("path class %q occurs in %s and %s", name, owner, obj.GetName()))
+				delete(classes.PathClasses, name)
 				continue
 			}
 			classNames[name] = obj.GetName()
@@ -341,7 +363,6 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			continue
 		}
 		selected := make([]desiredPolicy, 0)
-		keep := make(map[string]bool)
 		for _, p := range policies {
 			// Invalid revisions retain previous enforcement even when malformed selectors
 			// cannot be evaluated. Only a valid off/delete/nonmatch authorizes withdrawal.
@@ -349,44 +370,18 @@ func (c *Controller) reconcile(ctx context.Context) error {
 				if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != binding.Namespace {
 					continue
 				}
-				keep[string(p.identity.UID)] = true
 				selected = append(selected, p)
 				continue
 			}
 			if p.spec.Mode != api.ModeOff && p.matches(binding) {
 				selected = append(selected, p)
-				keep[string(p.identity.UID)] = true
 			}
 		}
 		old, hasOld := c.active[key]
+		oldPolicies := make(map[string]CompiledPolicy)
 		if hasOld {
-			retained := Plan{}
-			for _, p := range old.plan.Policies {
-				if keep[string(p.Identity.UID)] {
-					retained.Policies = append(retained.Policies, p)
-				}
-			}
-			if len(retained.Policies) != len(old.plan.Policies) {
-				retained.Revision = digest(retained.Policies)
-				var err error
-				if len(retained.Policies) == 0 {
-					err = c.withdraw(ctx, old)
-				} else {
-					err = c.replace(ctx, binding, retained)
-				}
-				if err != nil {
-					failures = append(failures, err)
-					for _, p := range old.plan.Policies {
-						policyErrors[string(p.Identity.UID)] = err
-					}
-					for _, p := range selected {
-						policyErrors[string(p.identity.UID)] = errors.Join(policyErrors[string(p.identity.UID)], err)
-					}
-					continue
-				}
-				if len(retained.Policies) == 0 {
-					delete(c.active, key)
-				}
+			for _, compiled := range old.plan.Policies {
+				oldPolicies[string(compiled.Identity.UID)] = compiled
 			}
 		}
 		plan := Plan{}
@@ -395,9 +390,21 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			candidateErr = fmt.Errorf("binding exceeds %d policies", MaxPoliciesPerBinding)
 		}
 		for _, p := range selected {
+			uid := string(p.identity.UID)
 			err := p.err
 			if err == nil {
-				err = classErr
+				if p.spec.Exec != nil {
+					for _, rule := range p.spec.Exec.Rules {
+						for _, name := range rule.Target.PathClass {
+							if p.spec.Classes != nil {
+								if _, local := p.spec.Classes.PathClasses[name]; local {
+									continue
+								}
+							}
+							err = errors.Join(err, classErrors[name])
+						}
+					}
+				}
 			}
 			if err == nil {
 				compiled, compileErr := Compile(ctx, p.identity, p.spec, classes, binding, c.resolver)
@@ -406,23 +413,40 @@ func (c *Controller) reconcile(ctx context.Context) error {
 					plan.Policies = append(plan.Policies, compiled)
 				}
 			}
-			candidateErr = errors.Join(candidateErr, err)
-		}
-		plan.Revision = digest(plan.Policies)
-		if candidateErr == nil && len(plan.Policies) > 0 {
-			// Same-plan Replace is an attestation/cleanup retry, not a gadget restart.
-			// Never infer current protection merely from a prior successful revision.
-			candidateErr = c.replace(ctx, binding, plan)
-		} else if candidateErr != nil {
-			if old, ok := c.active[key]; ok {
-				candidateErr = errors.Join(candidateErr, c.replace(ctx, old.binding, old.plan))
+			if err != nil {
+				policyErrors[uid] = errors.Join(policyErrors[uid], err)
+				candidateErr = errors.Join(candidateErr, err)
+				if previous, ok := oldPolicies[uid]; ok {
+					plan.Policies = append(plan.Policies, previous)
+				}
 			}
 		}
-
 		if candidateErr != nil {
 			failures = append(failures, candidateErr)
+		}
+		plan.Revision = digest(plan.Policies)
+		var backendErr error
+		if len(selected) > MaxPoliciesPerBinding {
+			backendErr = candidateErr
+			if hasOld {
+				backendErr = errors.Join(backendErr, c.attest(ctx, old))
+			}
+		} else if len(plan.Policies) > 0 {
+			// Same-plan Replace is an attestation/cleanup retry, not a gadget restart.
+			// Never infer current protection merely from a prior successful revision.
+			backendErr = c.replace(ctx, binding, plan)
+		} else if hasOld {
+			backendErr = c.withdraw(ctx, old)
+		}
+		if backendErr != nil {
+			failures = append(failures, backendErr)
 			for _, p := range selected {
-				policyErrors[string(p.identity.UID)] = errors.Join(policyErrors[string(p.identity.UID)], candidateErr)
+				uid := string(p.identity.UID)
+				policyErrors[uid] = errors.Join(policyErrors[uid], backendErr)
+			}
+			for _, p := range old.plan.Policies {
+				uid := string(p.Identity.UID)
+				policyErrors[uid] = errors.Join(policyErrors[uid], backendErr)
 			}
 		}
 	}
