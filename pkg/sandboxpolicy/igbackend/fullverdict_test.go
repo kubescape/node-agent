@@ -1,7 +1,10 @@
 package igbackend
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
@@ -311,4 +314,70 @@ func TestFullVerdictAlwaysRetainsAggregateRevision(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFullVerdictOriginPresenceAndDefaultWinners(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		origin *string
+		want   []string
+	}{
+		{"omitted", nil, []string{}},
+		{"explicit empty", testOrigin(""), []string{""}},
+		{"nonempty", testOrigin("source/rule"), []string{"source/rule"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := verdictPlan()
+			p.Policies = p.Policies[:1]
+			p.Policies[0].Exec.Rules = p.Policies[0].Exec.Rules[:1]
+			p.Policies[0].Exec.Rules[0].Origin = tc.origin
+			d := verdictDecoder(t, p)
+			v, err := d.Decode(RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Mode: 2}, MatchedRules: [4]uint64{1}})
+			if err != nil || !reflect.DeepEqual(v.Origins, tc.want) || !reflect.DeepEqual(v.Matches[0].Origins, tc.want) {
+				t.Fatalf("origins %v, matches %v, err %v", v.Origins, v.Matches, err)
+			}
+			data, err := json.Marshal(v)
+			if err != nil || !bytes.Contains(data, []byte(`"origins":`+jsonList(t, tc.want))) {
+				t.Fatalf("JSON %s: %v", data, err)
+			}
+		})
+	}
+	p := verdictPlan()
+	p.Policies[0].Exec = api.ExecSection{Default: api.ActionDeny, DefaultOrigin: testOrigin("z")}
+	p.Policies[0].Mode = api.ModeEnforce
+	p.Policies[1].Exec = api.ExecSection{Default: api.ActionDeny, DefaultOrigin: testOrigin("")}
+	p.Policies[1].Mode = api.ModeAudit
+	third := p.Policies[1]
+	third.Identity.UID = "uid-three"
+	third.Exec = api.ExecSection{Default: api.ActionAllow, DefaultOrigin: testOrigin("loser")}
+	p.Policies = append(p.Policies, third)
+	fourth := p.Policies[1]
+	fourth.Identity.UID = "uid-four"
+	fourth.Exec.DefaultOrigin = testOrigin("z")
+	p.Policies = append(p.Policies, fourth)
+	d := verdictDecoder(t, p)
+	// Caller mutation after decoder creation cannot change the snapshot.
+	*p.Policies[0].Exec.DefaultOrigin = "changed"
+	v, err := d.Decode(RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Deny: 1, Mode: 2}})
+	if err != nil || !reflect.DeepEqual(v.Origins, []string{"", "z"}) || v.Reason != "section_default" || v.Policy.UID != "" {
+		t.Fatalf("winning default origins: %+v %v", v, err)
+	}
+	defaultJSON, err := json.Marshal(v)
+	if err != nil || !bytes.Contains(defaultJSON, []byte(`"origins":["","z"]`)) {
+		t.Fatalf("default origin JSON %s: %v", defaultJSON, err)
+	}
+	v.Origins[0] = "mutated"
+	v, err = d.Decode(RawFullVerdict{RawVerdict: RawVerdict{Generation: 7, Cgroup: 19, Deny: 1, Mode: 2}})
+	if err != nil || !reflect.DeepEqual(v.Origins, []string{"", "z"}) {
+		t.Fatalf("decoder alias: %+v %v", v, err)
+	}
+}
+
+func jsonList(t *testing.T, values []string) string {
+	t.Helper()
+	data, err := json.Marshal(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

@@ -12,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/containerd/containerd"
 	tasks "github.com/containerd/containerd/api/services/tasks/v1"
 	tasktypes "github.com/containerd/containerd/api/types/task"
-	"github.com/containerd/containerd/containers"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
@@ -241,6 +241,13 @@ func TestEvidenceRootFSDifferential(t *testing.T) {
 				delete(f.blobs, c.Digest)
 				a = f.document(t, ocispec.MediaTypeImageManifest, ocispec.Manifest{Config: c})
 				d = f.index(t, a)
+			}
+			if kind == "missing-config" {
+				// v2's Image.RootFS accepts an absent config descriptor, but
+				// evidence acquisition must reject it before trusting layer data.
+				_, err := boundedRootFS(context.Background(), f, d, m)
+				require.Error(t, err)
+				return
 			}
 			compareBoundedRootFS(t, f, d, m)
 		})
