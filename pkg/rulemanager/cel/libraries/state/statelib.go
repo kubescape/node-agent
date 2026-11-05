@@ -85,6 +85,23 @@ func (l *stateLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"count": {
+			cel.MemberOverload("state_count_name",
+				[]*cel.Type{AccessorType, cel.StringType}, cel.IntType,
+				cel.BinaryBinding(func(target, name ref.Val) ref.Val {
+					return countImpl(target, name, types.String(""))
+				}),
+			),
+			cel.MemberOverload("state_count_name_key",
+				[]*cel.Type{AccessorType, cel.StringType, cel.StringType}, cel.IntType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 3 {
+						return types.Int(0)
+					}
+					return countImpl(values[0], values[1], values[2])
+				}),
+			),
+		},
 		"has_ancestor": {
 			cel.MemberOverload("state_has_ancestor",
 				[]*cel.Type{AccessorType, cel.StringType}, cel.BoolType,
@@ -142,6 +159,25 @@ func hasImpl(target, name, key ref.Val) ref.Val {
 	return types.Bool(hit)
 }
 
+// countImpl is state.count: the counter value, 0 on any miss or malformed
+// argument. Never an error, so `state.count(n) >= N` is simply false until the
+// counter exists.
+func countImpl(target, name, key ref.Val) ref.Val {
+	a, ok := accessorOf(target)
+	if !ok {
+		return types.Int(0)
+	}
+	n, ok := stringOf(name)
+	if !ok {
+		return types.Int(0)
+	}
+	k, ok := stringOf(key)
+	if !ok {
+		return types.Int(0)
+	}
+	return types.Int(a.Count(n, k))
+}
+
 func getImpl(target, name, key ref.Val) ref.Val {
 	a, ok := accessorOf(target)
 	if !ok {
@@ -193,7 +229,8 @@ type stateCostEstimator struct {
 func (e *stateCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
 	var cost int64
 	switch overloadID {
-	case "state_has_name", "state_has_name_key", "state_get_name", "state_get_name_key":
+	case "state_has_name", "state_has_name_key", "state_get_name", "state_get_name_key",
+		"state_count_name", "state_count_name_key":
 		// One hash lookup under an RLock.
 		cost = 10
 	case "state_has_ancestor", "state_get_ancestor":
