@@ -55,6 +55,26 @@ type section struct {
 	prepared bool
 }
 
+// sectionParts lists the sections next to exec, in SectionBackend order.
+var sectionParts = []struct {
+	name  string
+	part  func(CompiledPolicy) any
+	strip func(*CompiledPolicy)
+}{
+	{name: SectionPrivilege, part: func(p CompiledPolicy) any {
+		if p.Privilege == nil {
+			return nil
+		}
+		return p.Privilege
+	}, strip: func(p *CompiledPolicy) { p.Privilege = nil }},
+	{name: SectionNetwork, part: func(p CompiledPolicy) any {
+		if p.Network == nil {
+			return nil
+		}
+		return p.Network
+	}, strip: func(p *CompiledPolicy) { p.Network = nil }},
+}
+
 type sectionPlans struct {
 	revision string
 	exec     Plan
@@ -76,20 +96,10 @@ func NewSectionBackend(exec, privilege Backend, unavailable error) (*SectionBack
 	if exec == nil {
 		return nil, fmt.Errorf("exec backend is required")
 	}
-	s := &SectionBackend{exec: exec, active: map[string]sectionPlans{}, sections: []*section{
-		{name: SectionPrivilege, part: func(p CompiledPolicy) any {
-			if p.Privilege == nil {
-				return nil
-			}
-			return p.Privilege
-		}, strip: func(p *CompiledPolicy) { p.Privilege = nil }},
-		{name: SectionNetwork, part: func(p CompiledPolicy) any {
-			if p.Network == nil {
-				return nil
-			}
-			return p.Network
-		}, strip: func(p *CompiledPolicy) { p.Network = nil }},
-	}}
+	s := &SectionBackend{exec: exec, active: map[string]sectionPlans{}}
+	for _, part := range sectionParts {
+		s.sections = append(s.sections, &section{name: part.name, part: part.part, strip: part.strip})
+	}
 	s.set(SectionPrivilege, privilege, unavailable, "PrivilegeNotConfigured", "no privilege gadget image is configured")
 	s.set(SectionNetwork, nil, nil, "NetworkNotConfigured", "no network gadget image is configured")
 	return s, nil
@@ -180,18 +190,27 @@ func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, acti
 	return errors.Join(errs...)
 }
 
-// BindPods passes the pod bindings to a privilege backend that can bind pod
-// cgroups. Pod bindings exist only for the privilege section.
+// BindPods passes the pod bindings to every available section backend that
+// can bind pod cgroups. Each section binds a pod only when the pod plan has
+// policies of that section (see Controller.PodPlans).
 func (s *SectionBackend) BindPods(ctx context.Context, pods []PodBinding) error {
+	var errs []error
 	for _, sec := range s.sections {
-		if sec.name != SectionPrivilege {
-			continue
-		}
-		if binder, ok := sec.backend.(PodBinder); ok {
-			return binder.BindPods(ctx, pods)
+		if binder, ok := sec.backend.(PodBinder); ok && sec.unavailable == nil {
+			errs = append(errs, binder.BindPods(ctx, pods))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// BindsPods reports whether an available section backend can bind pod cgroups.
+func (s *SectionBackend) BindsPods() bool {
+	for _, sec := range s.sections {
+		if _, ok := sec.backend.(PodBinder); ok && sec.unavailable == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Exec returns the exec section backend.

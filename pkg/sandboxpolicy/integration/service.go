@@ -472,9 +472,8 @@ func (s *Service) bindPods(ctx context.Context) {
 	if _, ok := s.backend.(sandboxpolicy.PodBinder); !ok || s.Controller == nil {
 		return
 	}
-	// Only the privilege section binds pod cgroups (a network-only node does
-	// no pod work here).
-	if sections, isSections := s.backend.(*sandboxpolicy.SectionBackend); isSections && sections.SectionUnavailable(sandboxpolicy.SectionPrivilege) != nil {
+	// No available section binds pod cgroups: no pod work.
+	if sections, isSections := s.backend.(*sandboxpolicy.SectionBackend); isSections && !sections.BindsPods() {
 		return
 	}
 	s.podPolling = false // set again below when a pod cgroup is missing
@@ -482,7 +481,7 @@ func (s *Service) bindPods(ctx context.Context) {
 	if s.pods != nil {
 		var err error
 		if scheduled, qos, err = s.scheduledPods(ctx); err != nil {
-			s.report(fmt.Errorf("privilege pod binding: %w", err))
+			s.report(fmt.Errorf("pod binding: %w", err))
 			return
 		}
 	}
@@ -551,7 +550,7 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 	if err := binder.BindPods(ctx, pods); err != nil {
 		// The poll runs every 50 ms: report a repeated error once.
 		if !poll || err.Error() != s.podPollErr {
-			s.report(fmt.Errorf("privilege pod binding: %w", err))
+			s.report(fmt.Errorf("pod binding: %w", err))
 		}
 		if poll {
 			s.podPollErr = err.Error()
