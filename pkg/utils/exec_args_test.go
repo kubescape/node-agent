@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"strings"
 	"testing"
 
 	igconsts "github.com/inspektor-gadget/inspektor-gadget/gadgets/trace_exec/consts"
@@ -51,7 +52,17 @@ func TestExecArgsSeparatorCannotForgeArgv(t *testing.T) {
 
 func TestExecArgsEncoding(t *testing.T) {
 	// Arguments without a backslash or U+00A0 are joined unchanged.
-	assert.Equal(t, "ls"+igconsts.ArgsSeparator+"-la", JoinExecArgs([]string{"ls", "-la"}))
+	for _, plain := range [][]string{
+		{"ls", "-la"},
+		{"/bin/sh", "-c", "echo hello world"},
+		{"cmd", "", ""},
+		{"x"},
+	} {
+		assert.Equal(t, strings.Join(plain, igconsts.ArgsSeparator), JoinExecArgs(plain))
+	}
+	// Plain arguments around an escaped one keep their place.
+	assert.Equal(t, []string{"a", "b" + nbsp + "c", "d", `e\f`, "g"},
+		SplitExecArgs(JoinExecArgs([]string{"a", "b" + nbsp + "c", "d", `e\f`, "g"})))
 	assert.Equal(t, `a\u00a0b`, JoinExecArgs([]string{"a" + nbsp + "b"}))
 	assert.Equal(t, `a\\b`, JoinExecArgs([]string{`a\b`}))
 	// No argv and an empty string both mean "argv unknown".

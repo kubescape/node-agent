@@ -26,9 +26,24 @@ var (
 // JoinExecArgs encodes argv into the single string carried by the exec
 // datasource "args" field. SplitExecArgs reverses it.
 func JoinExecArgs(args []string) string {
-	escaped := make([]string, len(args))
+	var escaped []string
 	for i, arg := range args {
+		if !strings.Contains(arg, execArgEscape) && !strings.Contains(arg, igconsts.ArgsSeparator) {
+			if escaped != nil {
+				escaped[i] = arg
+			}
+			continue
+		}
+		if escaped == nil {
+			// First argument that needs escaping: copy the ones before it.
+			escaped = make([]string, len(args))
+			copy(escaped, args[:i])
+		}
 		escaped[i] = execArgEscaper.Replace(arg)
+	}
+	if escaped == nil {
+		// Common case: nothing to escape, no extra allocations.
+		return strings.Join(args, igconsts.ArgsSeparator)
 	}
 	return strings.Join(escaped, igconsts.ArgsSeparator)
 }

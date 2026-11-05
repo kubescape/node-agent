@@ -1,9 +1,15 @@
 # Exec argv boundaries
 
-`event.args` is the argv the kernel passed to `execve`, one element per
-argument, unchanged. Rules can index `event.args[i]` and check
-`event.args.size()` and trust the result, even when the process chose its own
-argv to look like something else.
+`event.args` keeps the argument boundaries of the captured argv: one element
+per argument, with its content unchanged, even when an argument contains the
+separator character. A process cannot merge or split arguments through the
+encoding.
+
+The capture itself has limits that this does not change: `decodeExecArgs`
+drops a trailing argument cut by the capture limit (keeping a truncated
+argv[0]), and an argv of exactly one empty argument (`[""]`) reads back as nil,
+the same as "argv not captured". Rules that rely on `size()` should keep that
+in mind.
 
 ## Why the encoding exists
 
@@ -39,8 +45,8 @@ An empty field still means "argv not captured": `GetArgs()` returns nil.
   through `GetArgs()` and get the original arguments.
 - Anything that reads the raw `args` datasource string directly sees the escaped
   form. Inside node-agent, only `GetArgs()` does.
-- `StructEvent` (ptrace, gVisor, tests) carries `Args []string` and does not use
-  the encoding.
+- `StructEvent` (procfs and tests) carries `Args []string` and does not use the
+  encoding.
 
 ## Rule authors
 
