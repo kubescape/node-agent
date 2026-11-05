@@ -11,9 +11,11 @@
 // - Only armed tasks are judged (see arming.h).
 // - A deny returns -EPERM from the LSM hook, before the side effect.
 // - The kernel calls the next BPF LSM program only while every earlier one
-//   returned 0, so the hooks do not read the previous return value. They also
-//   name only the hook arguments they need, because the trailing arguments of
-//   some hooks changed between kernel versions.
+//   returned 0 (the trampoline stops at the first nonzero return), so a later
+//   program cannot replace an earlier deny, and the hooks do not read the
+//   previous return value (runtime_kernel_test.go, TestEarlierBPFDenyHolds).
+//   They also name only the hook arguments they need, so a hook that gains a
+//   trailing argument in a newer kernel does not move what they read.
 // - Each hook body is a plain function, so it can also be attached as
 //   fmod_ret on the matching security_* function.
 
