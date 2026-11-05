@@ -9,9 +9,9 @@ import (
 	"io"
 	"sort"
 
-	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
@@ -125,7 +125,7 @@ func boundedImageRootFS(ctx context.Context, image containerd.Image) ([]digest.D
 	return boundedRootFS(ctx, image.ContentStore(), image.Target(), image.Platform())
 }
 
-// Selection follows containerd v1.7 images.Manifest. Keep differential fixtures
+// Selection follows containerd v2 images.Manifest. Keep differential fixtures
 // in step with dependency upgrades; Walk supplies its 10,000-reference bound.
 func boundedRootFS(ctx context.Context, p content.Provider, target ocispec.Descriptor, matcher platforms.MatchComparer) ([]digest.Digest, error) {
 	budget := evidenceMetadataBudget{}

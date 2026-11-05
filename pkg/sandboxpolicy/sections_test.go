@@ -493,7 +493,7 @@ func TestControllerPodPlansNeedTranslatedFile(t *testing.T) {
 	ctx := context.Background()
 	p := policy("priv-file", "ns")
 	p.Spec.Privilege = privilegeSection(api.ActionDeny)
-	p.Spec.File = &api.FileSection{Default: api.FileDefault{Action: api.ActionAllow}}
+	p.Spec.File = &api.FileSection{Default: api.ActionAllow}
 	c, _, _, _ := setup(t, p)
 	_ = c.InitialSync(ctx)
 	b := binding()
@@ -507,7 +507,7 @@ func TestControllerPodPlansNeedTranslatedFile(t *testing.T) {
 func TestControllerPrepareScheduledFile(t *testing.T) {
 	ctx := context.Background()
 	p := policy("file-only", "ns")
-	p.Spec.File = &api.FileSection{Default: api.FileDefault{Action: api.ActionAllow}}
+	p.Spec.File = &api.FileSection{Default: api.ActionAllow}
 	c, _, _, _ := setup(t, p)
 	privilege := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
 	file := &preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}

@@ -25,7 +25,8 @@ func TestCompilePreservesVocabularyAndExpandsClasses(t *testing.T) {
 	rule := &spec.Exec.Rules[0]
 	rule.Actor = &api.Actor{Path: []string{"/bin/parent"}, FromImage: &yes, Ancestor: &api.Ancestor{Path: []string{"/bin/root"}, Depth: 3}, Role: []string{"builder"}, UID: []int64{1000}, Container: []string{"app"}}
 	rule.Mode = api.RuleAudit
-	rule.Origin = "authored"
+	origin := "authored"
+	rule.Origin = &origin
 	rule.Target = api.ExecTarget{PathTarget: api.PathTarget{Path: []string{"/bin/direct"}, PathClass: []string{"tools"}, FromImage: &no, FSType: []string{"overlay"}}, Argv: &api.ArgvPredicate{Contains: []string{"--test"}, Prefix: []string{"sh", "-c"}, StdinIsPipe: &yes}, SetRole: "child"}
 	spec.RootRole = "root"
 	spec.Classes = &api.PolicyClasses{PathClasses: map[string][]string{"tools": {"/bin/local", "/bin/direct"}}}
@@ -38,7 +39,7 @@ func TestCompilePreservesVocabularyAndExpandsClasses(t *testing.T) {
 		t.Fatal("compiler mutated input")
 	}
 	actual := got.Exec.Rules[0]
-	if !reflect.DeepEqual(actual.Actor, rule.Actor) || !reflect.DeepEqual(actual.Target.Argv, rule.Target.Argv) || actual.Target.SetRole != "child" || actual.Mode != api.RuleAudit || actual.Origin != "authored" || got.RootRole != "root" {
+	if !reflect.DeepEqual(actual.Actor, rule.Actor) || !reflect.DeepEqual(actual.Target.Argv, rule.Target.Argv) || actual.Target.SetRole != "child" || actual.Mode != api.RuleAudit || actual.Origin == nil || *actual.Origin != "authored" || got.RootRole != "root" {
 		t.Fatalf("lost predicates: %#v", got)
 	}
 	if !reflect.DeepEqual(actual.Target.Path, []string{"/bin/direct", "/bin/global", "/bin/local"}) || len(actual.Target.PathClass) != 0 || actual.Target.FromImage == nil || *actual.Target.FromImage || actual.Target.FSType[0] != "overlay" {
@@ -48,8 +49,13 @@ func TestCompilePreservesVocabularyAndExpandsClasses(t *testing.T) {
 
 func TestCompileRejectsUnsupportedMissingAndLimits(t *testing.T) {
 	cases := map[string]func(*api.PolicySpec){
-		"identity": func(s *api.PolicySpec) { s.Identity = &api.IdentitySection{Default: api.ActionAllow} },
-		"class":    func(s *api.PolicySpec) { s.Exec.Rules[0].Target.PathClass = []string{"missing"} },
+		"identity":     func(s *api.PolicySpec) { s.Identity = &api.IdentitySection{Default: api.ActionAllow} },
+		"default mode": func(s *api.PolicySpec) { s.Exec.DefaultMode = api.RuleAudit },
+		"exception": func(s *api.PolicySpec) {
+			s.Exec.Rules[0].Action = api.ActionDeny
+			s.Exec.Rules[0].Except = []api.ExecException{{Target: &api.ExecExceptionTarget{PathTarget: api.PathTarget{PathClass: []string{"missing"}}}}}
+		},
+		"class": func(s *api.PolicySpec) { s.Exec.Rules[0].Target.PathClass = []string{"missing"} },
 		"source section": func(s *api.PolicySpec) {
 			s.Sources = []api.PolicySource{{ContainerProfile: api.ContainerProfileReference{Name: "p"}, Include: []string{"opens"}}}
 		},
@@ -100,7 +106,38 @@ func TestCompileImportsReadOnly(t *testing.T) {
 	if digest(imported) != before {
 		t.Fatal("mutated resolver objects")
 	}
-	if got.Exec.Rules[1].Name != "source-0-exec-0" || got.Exec.Rules[1].Origin != "ContainerProfile/ns/profile" {
+	if got.Exec.Rules[1].Name != "source-0-exec-0" || got.Exec.Rules[1].Origin == nil || *got.Exec.Rules[1].Origin != "ContainerProfile/ns/profile" {
 		t.Fatalf("missing provenance: %+v", got.Exec.Rules[1])
 	}
 }
+
+func TestCompileOriginPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		origin *string
+	}{
+		{"omitted", nil},
+		{"explicit empty", testOriginString("")},
+		{"nonempty", testOriginString("authored")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := execSpec()
+			s.Exec.DefaultOrigin = tc.origin
+			s.Exec.Rules[0].Origin = tc.origin
+			got, err := Compile(context.Background(), PolicyIdentity{}, s, api.PolicyClasses{}, Binding{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (got.Exec.DefaultOrigin == nil) != (tc.origin == nil) || (got.Exec.Rules[0].Origin == nil) != (tc.origin == nil) {
+				t.Fatalf("lost presence: %+v", got.Exec)
+			}
+			if tc.origin != nil {
+				*tc.origin = "mutated"
+				if *got.Exec.DefaultOrigin == "mutated" || *got.Exec.Rules[0].Origin == "mutated" {
+					t.Fatal("compiler aliases authored origin")
+				}
+			}
+		})
+	}
+}
+func testOriginString(value string) *string { return &value }

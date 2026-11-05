@@ -36,6 +36,10 @@ var _ utils.EnrichEvent = (*ExecVerdictEvent)(nil)
 func NewExecVerdictEvent(verdict Verdict, binding Binding) *ExecVerdictEvent {
 	verdict.PolicySet = append([]PolicyRevision(nil), verdict.PolicySet...)
 	verdict.Matches = append([]RuleMatch(nil), verdict.Matches...)
+	for i := range verdict.Matches {
+		verdict.Matches[i].Origins = append([]string{}, verdict.Matches[i].Origins...)
+	}
+	verdict.Origins = append([]string{}, verdict.Origins...)
 	verdict.Argv = append([]string(nil), verdict.Argv...)
 	if verdict.UID != nil {
 		value := *verdict.UID

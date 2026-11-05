@@ -23,3 +23,16 @@ func TestPrivilegeDocumentRejectsFlaglessClone(t *testing.T) {
 		}
 	}
 }
+
+func TestPrivilegeDocumentExceptAndOrigin(t *testing.T) {
+	origin := "catalog/P1"
+	rule := api.PrivilegeRule{Rule: api.Rule{Name: "r", Action: api.ActionDeny, Origin: &origin}, Target: api.PrivilegeTarget{Syscall: []string{"mount"}}}
+	doc, err := PrivilegeDocument("p", api.ModeEnforce, api.PrivilegeSection{Default: api.ActionAllow, Rules: []api.PrivilegeRule{rule}})
+	if err != nil || doc.Policy.Privilege.Rules[0].Origin != origin {
+		t.Fatalf("origin: %+v %v", doc.Policy.Privilege.Rules, err)
+	}
+	rule.Except = []api.PrivilegeException{{}}
+	if _, err := PrivilegeDocument("p", api.ModeEnforce, api.PrivilegeSection{Default: api.ActionAllow, Rules: []api.PrivilegeRule{rule}}); err == nil || !strings.Contains(err.Error(), "exceptions") {
+		t.Fatalf("an exception must be rejected: %v", err)
+	}
+}

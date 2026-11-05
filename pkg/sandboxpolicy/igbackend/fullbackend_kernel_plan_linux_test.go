@@ -26,7 +26,7 @@ func fullBackendKernelPlan(revision, rootRole string, denied, audited int, conta
 	stage := target([]string{"/probe/role"})
 	stage.SetRole = "worker"
 	return sandboxpolicy.Plan{Revision: revision, Policies: []sandboxpolicy.CompiledPolicy{{Identity: sandboxpolicy.PolicyIdentity{Kind: "SandboxPolicy", Name: "fixture", UID: "fixture-policy-uid"}, Revision: "policy-" + revision, Mode: "enforce", RootRole: rootRole, Exec: api.ExecSection{Default: api.ActionDeny, Rules: []api.ExecRule{
-		{Rule: api.Rule{Name: "root-paths", Origin: "fixture/full-predicates", Action: api.ActionAllow, Actor: actor("agent")}, Target: target(paths)},
+		{Rule: api.Rule{Name: "root-paths", Origin: testOrigin("fixture/full-predicates"), Action: api.ActionAllow, Actor: actor("agent")}, Target: target(paths)},
 		{Rule: api.Rule{Name: "deny-control", Action: api.ActionDeny}, Target: api.ExecTarget{PathTarget: api.PathTarget{Path: []string{fmt.Sprintf("/probe/target-%d", denied)}}}},
 		{Rule: api.Rule{Name: "audit-control", Action: api.ActionDeny, Mode: api.RuleAudit}, Target: api.ExecTarget{PathTarget: api.PathTarget{Path: []string{fmt.Sprintf("/probe/target-%d", audited)}}}},
 		{Rule: api.Rule{Name: "root-role-control", Action: api.ActionDeny, Actor: &api.Actor{Role: []string{"agent"}}}, Target: api.ExecTarget{PathTarget: api.PathTarget{Path: []string{"/probe/target-12"}}}},

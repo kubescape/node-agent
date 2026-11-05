@@ -26,18 +26,23 @@ func fileRule(name string, action api.Action, target api.FileTarget) api.FileRul
 // fileSpec has a scalar default.
 func fileSpec(def api.Action, rules ...api.FileRule) api.PolicySpec {
 	return api.PolicySpec{Containers: []string{"*"}, Mode: api.ModeEnforce,
-		File: &api.FileSection{Default: api.FileDefault{Action: def}, Rules: rules}}
+		File: &api.FileSection{Default: def, Rules: rules}}
 }
 
 // writesConfined is the design's per-access default: reads open, the rest denied.
-func writesConfined() api.FileDefault {
-	return api.FileDefault{PerAccess: &api.FileAccessDefaults{Read: api.ActionAllow, Write: api.ActionDeny, Create: api.ActionDeny,
-		Delete: api.ActionDeny, Rename: api.ActionDeny, Chmod: api.ActionDeny, ExecMap: api.ActionAllow}}
+func writesConfined() *api.FileAccessDefaults {
+	return &api.FileAccessDefaults{Read: api.ActionAllow, Write: api.ActionDeny, Create: api.ActionDeny,
+		Delete: api.ActionDeny, Rename: api.ActionDeny, Chmod: api.ActionDeny, ExecMap: api.ActionAllow}
 }
 
-func translateFile(t *testing.T, spec api.PolicySpec, x FileExtras, shared map[string][]string) *FilePlan {
+// confine replaces the scalar default with writesConfined.
+func confine(f *api.FileSection) {
+	f.Default, f.DefaultByAccess = "", writesConfined()
+}
+
+func translateFile(t *testing.T, spec api.PolicySpec, shared map[string][]string) *FilePlan {
 	t.Helper()
-	plan, err := TranslateFile(spec, x, shared, FileNode{})
+	plan, err := TranslateFile(spec, shared, FileNode{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,13 +86,11 @@ func TestTranslateFileRules(t *testing.T) {
 		fileRule("no-wx", api.ActionDeny, api.FileTarget{Access: []string{"execMap"}}),
 		fileRule("hooks", api.ActionDeny, api.FileTarget{Access: []string{"write", "execMap"}, PathTarget: api.PathTarget{Path: []string{"**/.git/hooks/**"}}}),
 	)
-	spec.File.Default = writesConfined()
-	spec.File.Rules[1].Mode, spec.File.Rules[1].Origin = api.RuleEnforce, "catalog/C1"
-	x := FileExtras{
-		DefaultModeByAccess:   &FileAccessValues{Write: "enforce", Create: "audit"},
-		DefaultOriginByAccess: &FileAccessValues{Write: "catalog/D1", Chmod: "catalog/D1"},
-	}
-	plan := translateFile(t, spec, x, nil)
+	confine(spec.File)
+	spec.File.Rules[1].Mode, spec.File.Rules[1].Origin = api.RuleEnforce, testOriginString("catalog/C1")
+	spec.File.DefaultModeByAccess = &api.FileAccessModes{Write: api.RuleEnforce, Create: api.RuleAudit}
+	spec.File.DefaultOriginByAccess = &api.FileAccessOrigins{Write: testOriginString("catalog/D1"), Chmod: testOriginString("catalog/D1")}
+	plan := translateFile(t, spec, nil)
 	p := plan.Doc.Policy
 	if p.Mode != "enforce" || plan.Doc.Version != 1 {
 		t.Fatalf("document header %+v", plan.Doc)
@@ -138,7 +141,8 @@ func TestTranslateFileRules(t *testing.T) {
 func TestTranslateFileScalarDefault(t *testing.T) {
 	spec := fileSpec(api.ActionDeny)
 	spec.Mode = api.ModeAudit
-	plan := translateFile(t, spec, FileExtras{DefaultMode: "enforce", DefaultOrigin: "catalog/X"}, nil)
+	spec.File.DefaultMode, spec.File.DefaultOrigin = api.RuleEnforce, testOriginString("catalog/X")
+	plan := translateFile(t, spec, nil)
 	for _, k := range filepolicy.AccessKinds {
 		if d := plan.Doc.Policy.File.Defaults[k]; d != (filepolicy.Default{Action: "deny", Mode: "enforce", Origin: "catalog/X"}) {
 			t.Fatalf("default %s %+v", k, d)
@@ -148,51 +152,56 @@ func TestTranslateFileScalarDefault(t *testing.T) {
 	if plan.Doc.Policy.Mode != "audit" {
 		t.Fatalf("mode %q", plan.Doc.Policy.Mode)
 	}
-	if plan := translateFile(t, fileSpec(api.ActionAllow), FileExtras{}, nil); len(plan.Report.NotEnforced) != 0 {
+	if plan := translateFile(t, fileSpec(api.ActionAllow), nil); len(plan.Report.NotEnforced) != 0 {
 		t.Fatalf("an execMap allow default loses nothing: %v", plan.Report.NotEnforced)
 	}
 }
 
 func TestTranslateFileValidates(t *testing.T) {
-	for name, mutate := range map[string]func(*api.PolicySpec, *FileExtras){
-		"default":     func(s *api.PolicySpec, _ *FileExtras) { s.File.Default = api.FileDefault{Action: "maybe"} },
-		"access":      func(s *api.PolicySpec, _ *FileExtras) { s.File.Rules[0].Target.Access = []string{"exec"} },
-		"fsType":      func(s *api.PolicySpec, _ *FileExtras) { s.File.Rules[0].Target.FSType = []string{"ext4"} },
-		"empty path":  func(s *api.PolicySpec, _ *FileExtras) { s.File.Rules[0].Target.Path = []string{" "} },
-		"empty class": func(s *api.PolicySpec, _ *FileExtras) { s.File.Rules[0].Target.PathClass = []string{""} },
-		"action":      func(s *api.PolicySpec, _ *FileExtras) { s.File.Rules[0].Action = "block" },
-		"mode":        func(s *api.PolicySpec, _ *FileExtras) { s.File.Rules[0].Mode = "tripwire" },
-		"actor":       func(s *api.PolicySpec, _ *FileExtras) { s.File.Rules[0].Actor = &api.Actor{Path: []string{"/bin/sh"}} },
-		"defaultMode": func(_ *api.PolicySpec, x *FileExtras) { x.DefaultMode = "tripwire" },
-		"mode by access": func(s *api.PolicySpec, x *FileExtras) {
-			s.File.Default = writesConfined()
-			x.DefaultModeByAccess = &FileAccessValues{Chmod: "loud"}
+	exceptA := []api.FileException{{Target: &api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/a"}}}}}
+	for name, mutate := range map[string]func(*api.PolicySpec){
+		"default":     func(s *api.PolicySpec) { s.File.Default = "maybe" },
+		"no default":  func(s *api.PolicySpec) { s.File.Default = "" },
+		"access":      func(s *api.PolicySpec) { s.File.Rules[0].Target.Access = []string{"exec"} },
+		"fsType":      func(s *api.PolicySpec) { s.File.Rules[0].Target.FSType = []string{"ext4"} },
+		"empty path":  func(s *api.PolicySpec) { s.File.Rules[0].Target.Path = []string{" "} },
+		"empty class": func(s *api.PolicySpec) { s.File.Rules[0].Target.PathClass = []string{""} },
+		"action":      func(s *api.PolicySpec) { s.File.Rules[0].Action = "block" },
+		"mode":        func(s *api.PolicySpec) { s.File.Rules[0].Mode = "tripwire" },
+		"actor":       func(s *api.PolicySpec) { s.File.Rules[0].Actor = &api.Actor{Path: []string{"/bin/sh"}} },
+		"defaultMode": func(s *api.PolicySpec) { s.File.DefaultMode = "tripwire" },
+		"both defaults": func(s *api.PolicySpec) {
+			s.File.DefaultByAccess = writesConfined()
 		},
-		"scalar default with by-access mode": func(_ *api.PolicySpec, x *FileExtras) {
-			x.DefaultModeByAccess = &FileAccessValues{Write: "audit"}
+		"incomplete by access": func(s *api.PolicySpec) {
+			confine(s.File)
+			s.File.DefaultByAccess.Chmod = ""
 		},
-		"per-access default with scalar origin": func(s *api.PolicySpec, x *FileExtras) {
-			s.File.Default = writesConfined()
-			x.DefaultOrigin = "catalog/D1"
+		"mode by access": func(s *api.PolicySpec) {
+			confine(s.File)
+			s.File.DefaultModeByAccess = &api.FileAccessModes{Chmod: "loud"}
 		},
-		"except on allow": func(s *api.PolicySpec, x *FileExtras) {
+		"scalar default with by-access mode": func(s *api.PolicySpec) {
+			s.File.DefaultModeByAccess = &api.FileAccessModes{Write: api.RuleAudit}
+		},
+		"per-access default with scalar origin": func(s *api.PolicySpec) {
+			confine(s.File)
+			s.File.DefaultOrigin = testOriginString("catalog/D1")
+		},
+		"except on allow": func(s *api.PolicySpec) {
 			s.File.Rules[0].Action = api.ActionAllow
-			x.Except = map[string][]FileExcept{"r": {{Target: &api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/a"}}}}}}
+			s.File.Rules[0].Except = exceptA
 		},
-		"empty except": func(_ *api.PolicySpec, x *FileExtras) {
-			x.Except = map[string][]FileExcept{"r": {{Target: &api.FileTarget{}}}}
+		"empty except": func(s *api.PolicySpec) {
+			s.File.Rules[0].Except = []api.FileException{{Target: &api.FileTarget{}}}
 		},
-		"except access": func(_ *api.PolicySpec, x *FileExtras) {
-			x.Except = map[string][]FileExcept{"r": {{Target: &api.FileTarget{Access: []string{"open"}}}}}
-		},
-		"except for unknown rule": func(_ *api.PolicySpec, x *FileExtras) {
-			x.Except = map[string][]FileExcept{"other": {{Target: &api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/a"}}}}}}
+		"except access": func(s *api.PolicySpec) {
+			s.File.Rules[0].Except = []api.FileException{{Target: &api.FileTarget{Access: []string{"open"}}}}
 		},
 	} {
 		spec := fileSpec(api.ActionAllow, fileRule("r", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/etc/**"}}}))
-		var x FileExtras
-		mutate(&spec, &x)
-		if _, err := TranslateFile(spec, x, nil, FileNode{}); err == nil {
+		mutate(&spec)
+		if _, err := TranslateFile(spec, nil, FileNode{}); err == nil {
 			t.Errorf("%s: invalid input accepted", name)
 		}
 	}
@@ -205,7 +214,7 @@ func TestFilePathClasses(t *testing.T) {
 	)
 	spec.Classes = &api.PolicyClasses{PathClasses: map[string][]string{"sshKeys": {"/opt/keys/**"}}}
 	shared := map[string][]string{"sshKeys": {"/data/ssh/**"}, "backendOnly": {"/var/lib/backend/**"}}
-	plan := translateFile(t, spec, FileExtras{}, shared)
+	plan := translateFile(t, spec, shared)
 	keys := fileRuleByName(plan, "no-keys")
 	want := []string{"/data/ssh/**", "/home/*/.ssh/**", "/opt/keys/**", "/root/.ssh/**", "/srv/..*/key", "/srv/key"}
 	if keys == nil || !reflect.DeepEqual(keys.Paths, want) {
@@ -219,7 +228,7 @@ func TestFilePathClasses(t *testing.T) {
 	}
 	// Another policy's addition does not reach this one.
 	other := fileSpec(api.ActionAllow, fileRule("no-keys", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"sshKeys"}}}))
-	if r := fileRuleByName(translateFile(t, other, FileExtras{}, nil), "no-keys"); slices.Contains(r.Paths, "/opt/keys/**") {
+	if r := fileRuleByName(translateFile(t, other, nil), "no-keys"); slices.Contains(r.Paths, "/opt/keys/**") {
 		t.Fatal("a policy-local class addition must stay local")
 	}
 }
@@ -229,8 +238,9 @@ func TestFileUnresolvedClassDegradation(t *testing.T) {
 		fileRule("no-model-cache", api.ActionDeny, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{PathClass: []string{"modelCache"}}}),
 		fileRule("work", api.ActionAllow, api.FileTarget{Access: []string{"write", "create"}, PathTarget: api.PathTarget{PathClass: []string{"workspace"}, Path: []string{"/tmp/**"}}}),
 	)
-	spec.File.Default = writesConfined()
-	plan := translateFile(t, spec, FileExtras{DefaultModeByAccess: &FileAccessValues{Create: "audit"}}, nil)
+	confine(spec.File)
+	spec.File.DefaultModeByAccess = &api.FileAccessModes{Create: api.RuleAudit}
+	plan := translateFile(t, spec, nil)
 	if fileRuleByName(plan, "no-model-cache") != nil {
 		t.Fatal("a deny without any path must not reach the gadget")
 	}
@@ -259,7 +269,7 @@ func TestFileUnresolvedClassDegradation(t *testing.T) {
 	// A deny with a resolved part keeps no path either (review 2 finding 5:
 	// as audit it would hide the policy's own enforce default deny).
 	partial := fileSpec(api.ActionAllow, fileRule("d", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"sshKeys", "modelCache"}}}))
-	plan = translateFile(t, partial, FileExtras{}, nil)
+	plan = translateFile(t, partial, nil)
 	if r := fileRuleByName(plan, "d"); r != nil {
 		t.Fatalf("partly resolved deny %+v", r)
 	}
@@ -268,7 +278,7 @@ func TestFileUnresolvedClassDegradation(t *testing.T) {
 	}
 	// An allow without access degrades every default.
 	every := fileSpec(api.ActionDeny, fileRule("a", api.ActionAllow, api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}))
-	plan = translateFile(t, every, FileExtras{}, nil)
+	plan = translateFile(t, every, nil)
 	for _, k := range filepolicy.AccessKinds {
 		if plan.Doc.Policy.File.Defaults[k].Mode != "audit" || fileDegraded(plan, "default/"+k) == nil {
 			t.Fatalf("default %s must run in audit: %+v", k, plan.Doc.Policy.File.Defaults[k])
@@ -282,23 +292,25 @@ func TestFileExcept(t *testing.T) {
 	}
 	path := func(p ...string) *api.FileTarget { return &api.FileTarget{PathTarget: api.PathTarget{Path: p}} }
 	for name, tc := range map[string]struct {
-		entries  []FileExcept
+		entries  []api.FileException
 		lifted   []string
 		notReady string
 		disabled string
 	}{
-		"path":            {entries: []FileExcept{{Target: path("/workspace/.claude/settings.local.json")}}, lifted: []string{"/workspace/.claude/..*/settings.local.json", "/workspace/.claude/settings.local.json"}},
-		"covering access": {entries: []FileExcept{{Target: &api.FileTarget{Access: []string{"create", "write", "read"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, lifted: []string{"/a/.claude/..*/x", "/a/.claude/x"}},
-		"partial access":  {entries: []FileExcept{{Target: &api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, disabled: "must cover every access kind"},
-		"unresolved class": {entries: []FileExcept{{Target: &api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}}},
+		"path":            {entries: []api.FileException{{Target: path("/workspace/.claude/settings.local.json")}}, lifted: []string{"/workspace/.claude/..*/settings.local.json", "/workspace/.claude/settings.local.json"}},
+		"covering access": {entries: []api.FileException{{Target: &api.FileTarget{Access: []string{"create", "write", "read"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, lifted: []string{"/a/.claude/..*/x", "/a/.claude/x"}},
+		"partial access":  {entries: []api.FileException{{Target: &api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/a/.claude/x"}}}}}, disabled: "must cover every access kind"},
+		"unresolved class": {entries: []api.FileException{{Target: &api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}}},
 			notReady: "ClassUnresolved", disabled: "class-unresolved"},
-		"fsType":  {entries: []FileExcept{{Target: &api.FileTarget{PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}}}, disabled: "fromImage and fsType"},
-		"actor":   {entries: []FileExcept{{Actor: &api.Actor{Path: []string{"/bin/git"}}}}, disabled: "actor predicates"},
-		"pattern": {entries: []FileExcept{{Target: path("/a/.claude/fil?")}}, disabled: "cannot be expressed"},
-		"two":     {entries: []FileExcept{{Target: path("/b/.claude/y")}, {Actor: &api.Actor{UID: []int64{0}}}}, lifted: []string{"/b/.claude/..*/y", "/b/.claude/y"}, disabled: "except 1 is disabled"},
+		"fsType":  {entries: []api.FileException{{Target: &api.FileTarget{PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}}}, disabled: "fromImage and fsType"},
+		"actor":   {entries: []api.FileException{{Actor: &api.Actor{Path: []string{"/bin/git"}}}}, disabled: "actor predicates"},
+		"pattern": {entries: []api.FileException{{Target: path("/a/.claude/fil?")}}, disabled: "cannot be expressed"},
+		"two":     {entries: []api.FileException{{Target: path("/b/.claude/y")}, {Actor: &api.Actor{UID: []int64{0}}}}, lifted: []string{"/b/.claude/..*/y", "/b/.claude/y"}, disabled: "except 1 is disabled"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			plan := translateFile(t, deny(), FileExtras{Except: map[string][]FileExcept{"no-agent-config": tc.entries}}, nil)
+			spec := deny()
+			spec.File.Rules[0].Except = tc.entries
+			plan := translateFile(t, spec, nil)
 			r := fileRuleByName(plan, "no-agent-config")
 			if r == nil || r.Mode != "" || !reflect.DeepEqual(r.Except, tc.lifted) {
 				t.Fatalf("rule %+v", r)
@@ -326,8 +338,8 @@ func TestFileNotEnforceableTargets(t *testing.T) {
 		fileRule("odd", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/etc/shadow", "/etc/[ab]"}}}),
 		fileRule("odd-allow", api.ActionAllow, api.FileTarget{Access: []string{"rename"}, PathTarget: api.PathTarget{Path: []string{"/w/fil?"}}}),
 	)
-	spec.File.Default = writesConfined()
-	plan := translateFile(t, spec, FileExtras{}, nil)
+	confine(spec.File)
+	plan := translateFile(t, spec, nil)
 	for _, name := range []string{"no-tmpfs-write", "tmpfs-ok", "own-files", "odd-allow"} {
 		if fileRuleByName(plan, name) != nil {
 			t.Errorf("rule %s must not reach the gadget", name)
@@ -355,7 +367,7 @@ func TestFileNotEnforceableTargets(t *testing.T) {
 	}
 	// A deny the gadget cannot judge is reported, not a reason to be not ready.
 	denyOnly := fileSpec(api.ActionAllow, fileRule("no-tmpfs-write", api.ActionDeny, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}))
-	if r := translateFile(t, denyOnly, FileExtras{}, nil).Report.NotReady; r != "" {
+	if r := translateFile(t, denyOnly, nil).Report.NotReady; r != "" {
 		t.Fatalf("deny only: not ready %q", r)
 	}
 	// ClassUnresolved is the stronger reason.
@@ -363,14 +375,14 @@ func TestFileNotEnforceableTargets(t *testing.T) {
 		fileRule("tmpfs-ok", api.ActionAllow, api.FileTarget{Access: []string{"create"}, PathTarget: api.PathTarget{FSType: []string{"tmpfs"}}}),
 		fileRule("work", api.ActionAllow, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{PathClass: []string{"workspace"}}}),
 	)
-	both.File.Default = writesConfined()
-	if r := translateFile(t, both, FileExtras{}, nil).Report.NotReady; r != "ClassUnresolved" {
+	confine(both.File)
+	if r := translateFile(t, both, nil).Report.NotReady; r != "ClassUnresolved" {
 		t.Fatalf("both: not ready %q", r)
 	}
 }
 
 func TestFileRuntimeDevicesNameIsFree(t *testing.T) {
-	plan := translateFile(t, fileSpec(api.ActionAllow, fileRule("runtime-devices", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/dev/mem"}}})), FileExtras{}, nil)
+	plan := translateFile(t, fileSpec(api.ActionAllow, fileRule("runtime-devices", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/dev/mem"}}})), nil)
 	if r := fileRuleByName(plan, "runtime-devices"); r == nil || r.Action != "deny" {
 		t.Fatalf("the policy's rule keeps its name: %+v", r)
 	}
@@ -383,47 +395,8 @@ func TestFileDocumentCheckFails(t *testing.T) {
 	saved := checkFileDocument
 	defer func() { checkFileDocument = saved }()
 	checkFileDocument = func(filepolicy.Document) error { return errors.New("over limits") }
-	if _, err := TranslateFile(fileSpec(api.ActionAllow), FileExtras{}, nil, FileNode{}); err == nil || !strings.Contains(err.Error(), "file: over limits") {
+	if _, err := TranslateFile(fileSpec(api.ActionAllow), nil, FileNode{}); err == nil || !strings.Contains(err.Error(), "file: over limits") {
 		t.Fatalf("err %v", err)
-	}
-}
-
-func TestSplitFileExtras(t *testing.T) {
-	spec := map[string]any{"file": map[string]any{
-		"defaultByAccess":       map[string]any{"read": "allow", "write": "deny", "create": "deny", "delete": "deny", "rename": "deny", "chmod": "deny", "execMap": "allow"},
-		"defaultModeByAccess":   map[string]any{"write": "enforce"},
-		"defaultOriginByAccess": map[string]any{"write": "catalog/D1"},
-		"rules": []any{map[string]any{"name": "r", "action": "deny", "target": map[string]any{}, "except": []any{
-			map[string]any{"target": map[string]any{"path": []any{"/a"}}}}}},
-	}}
-	x, err := splitFileExtras(spec)
-	if err != nil || x.DefaultModeByAccess.Write != "enforce" || x.DefaultOriginByAccess.Write != "catalog/D1" || len(x.Except["r"]) != 1 {
-		t.Fatalf("extras %+v %v", x, err)
-	}
-	f := spec["file"].(map[string]any)
-	for _, key := range []string{"defaultByAccess", "defaultModeByAccess", "defaultOriginByAccess"} {
-		if _, ok := f[key]; ok {
-			t.Fatalf("%s must be removed for strict decoding", key)
-		}
-	}
-	if _, ok := f["rules"].([]any)[0].(map[string]any)["except"]; ok {
-		t.Fatal("except must be removed for strict decoding")
-	}
-	// The storage type reads defaultByAccess as the object form of default.
-	var section api.FileSection
-	if err := decodeValue(f, &section); err != nil || section.Default.PerAccess == nil || section.Default.PerAccess.Write != api.ActionDeny {
-		t.Fatalf("section %+v %v", section, err)
-	}
-	for name, bad := range map[string]map[string]any{
-		"both defaults":    {"default": "allow", "defaultByAccess": map[string]any{"read": "allow"}},
-		"scalar by access": {"defaultByAccess": "deny"},
-		"unknown key":      {"defaultModeByAccess": map[string]any{"open": "audit"}},
-		"mode type":        {"defaultMode": map[string]any{"write": "audit"}},
-		"except shape":     {"rules": []any{map[string]any{"name": "r", "except": []any{map[string]any{"target": map[string]any{"port": 1}}}}}},
-	} {
-		if _, err := splitFileExtras(map[string]any{"file": bad}); err == nil {
-			t.Errorf("%s accepted", name)
-		}
 	}
 }
 
@@ -609,8 +582,8 @@ func TestFilePathAliases(t *testing.T) {
 		fileRule("creds", api.ActionDeny, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{PathClass: []string{"credentialStore", "containerRuntimeSocket"}}}),
 		fileRule("cfg", api.ActionAllow, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/etc/app/config.yaml", "/data/**"}}}),
 	)
-	x := FileExtras{Except: map[string][]FileExcept{"creds": {{Target: &api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/var/run/docker.sock"}}}}}}}
-	plan := translateFile(t, spec, x, nil)
+	spec.File.Rules[0].Except = []api.FileException{{Target: &api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/var/run/docker.sock"}}}}}
+	plan := translateFile(t, spec, nil)
 	creds, cfg := fileRuleByName(plan, "creds"), fileRuleByName(plan, "cfg")
 	if creds == nil || cfg == nil {
 		t.Fatalf("rules %+v", plan.Doc.Policy.File.Rules)
@@ -665,8 +638,8 @@ func TestFilePathAliases(t *testing.T) {
 		fileRule("no-bin", api.ActionDeny, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{Path: []string{"/bin/**", "/sbin/**", "/lib/**"}}}),
 		fileRule("bin-ok", api.ActionAllow, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{Path: []string{"/bin/**"}}}),
 	)
-	x = FileExtras{Except: map[string][]FileExcept{"no-bin": {{Target: &api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/bin/sh"}}}}}}}
-	plan = translateFile(t, usr, x, nil)
+	usr.File.Rules[0].Except = []api.FileException{{Target: &api.FileTarget{PathTarget: api.PathTarget{Path: []string{"/bin/sh"}}}}}
+	plan = translateFile(t, usr, nil)
 	noBin, binOK := fileRuleByName(plan, "no-bin"), fileRuleByName(plan, "bin-ok")
 	for _, path := range []string{"/usr/bin/python3", "/usr/sbin/x", "/usr/lib/x/y.so", "/bin/sh"} {
 		if !globsMatch(t, noBin.Paths, path) {
@@ -716,19 +689,20 @@ func TestFileDefaultClassesFit(t *testing.T) {
 		}
 	}
 	slices.Sort(classes)
-	policy := func(name string, access []string, def api.FileDefault) filepolicy.Document {
+	policy := func(name string, access []string, byAccess *api.FileAccessDefaults) filepolicy.Document {
 		var rules []api.FileRule
 		for _, c := range classes {
 			rules = append(rules, fileRule("no-"+c, api.ActionDeny, api.FileTarget{Access: access, PathTarget: api.PathTarget{PathClass: []string{c}}}))
 		}
-		spec := fileSpec("", rules...)
-		spec.File.Default = def
-		doc := translateFile(t, spec, FileExtras{}, nil).Doc
+		spec := fileSpec(api.ActionAllow, rules...)
+		if byAccess != nil {
+			spec.File.Default, spec.File.DefaultByAccess = "", byAccess
+		}
+		doc := translateFile(t, spec, nil).Doc
 		doc.Name = name
 		return doc
 	}
-	open := api.FileDefault{Action: api.ActionAllow}
-	reads := policy("reads", []string{"read"}, open)
+	reads := policy("reads", []string{"read"}, nil)
 	writes := policy("writes", []string{"write", "create"}, writesConfined())
 	used := func(c filepolicy.Compiled) int {
 		a := c.Slots[0].Accept
@@ -754,8 +728,8 @@ func TestFileDefaultClassesFit(t *testing.T) {
 func TestFileDegradedDenyKeepsDefault(t *testing.T) {
 	spec := fileSpec("", fileRule("corp", api.ActionDeny, api.FileTarget{Access: []string{"write"},
 		PathTarget: api.PathTarget{Path: []string{"/etc/**"}, PathClass: []string{"corpSecrets"}}}))
-	spec.File.Default = writesConfined()
-	plan := translateFile(t, spec, FileExtras{}, nil)
+	confine(spec.File)
+	plan := translateFile(t, spec, nil)
 	if r := fileRuleByName(plan, "corp"); r != nil {
 		t.Fatalf("degraded deny reaches the gadget: %+v", r)
 	}
@@ -785,8 +759,8 @@ func TestFileFromImageUnavailable(t *testing.T) {
 		fileRule("img", api.ActionDeny, api.FileTarget{Access: []string{"write"}, PathTarget: api.PathTarget{FromImage: boolPtr(true)}}),
 		fileRule("img-ok", api.ActionAllow, api.FileTarget{Access: []string{"read"}, PathTarget: api.PathTarget{FromImage: boolPtr(true)}}),
 	)
-	spec.File.Default = writesConfined()
-	plan, err := TranslateFile(spec, FileExtras{}, nil, FileNode{FromImageUnavailable: "no overlay BTF"})
+	confine(spec.File)
+	plan, err := TranslateFile(spec, nil, FileNode{FromImageUnavailable: "no overlay BTF"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +774,7 @@ func TestFileFromImageUnavailable(t *testing.T) {
 	if plan.Report.NotReady != "RuleNotEnforceable" {
 		t.Fatalf("not ready %q", plan.Report.NotReady)
 	}
-	plan = translateFile(t, spec, FileExtras{}, nil)
+	plan = translateFile(t, spec, nil)
 	if r := fileRuleByName(plan, "img"); r == nil || !r.FromImage {
 		t.Fatalf("fromImage rule %+v", r)
 	}
@@ -818,7 +792,7 @@ func TestFileTwoPoliciesAtRuleLimit(t *testing.T) {
 			rules = append(rules, fileRule(fmt.Sprint(i), api.ActionDeny, api.FileTarget{Access: []string{"read"},
 				PathTarget: api.PathTarget{Path: []string{fmt.Sprintf("/%s/%d/**", name, i)}}}))
 		}
-		doc := translateFile(t, fileSpec(api.ActionAllow, rules...), FileExtras{}, nil).Doc
+		doc := translateFile(t, fileSpec(api.ActionAllow, rules...), nil).Doc
 		doc.Name = name
 		return doc
 	}
