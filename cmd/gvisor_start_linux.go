@@ -56,13 +56,30 @@ func startGVisorCollection(ctx context.Context, cfg config.Config, runtimeEndpoi
 		}
 		return identity, nil
 	}
+	collector := new(gvisor.Collector)
 	go func() {
 		defer close(done)
-		if err := gvisor.RunIntegration(sourceCtx, cfg.GVisorStart, cfg.NodeName, lookup, otelsetup.EmitRuntimeStart); err != nil {
-			// Never log CRI bodies or Sentry bytes. A source failure is degraded
-			// telemetry, not evidence that no sandbox started.
+		reportingDone := make(chan struct{})
+		go func() {
+			defer close(reportingDone)
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-sourceCtx.Done():
+					return
+				case <-ticker.C:
+					otelsetup.EmitGVisorHealth(sourceCtx, collector.Stats())
+				}
+			}
+		}()
+		if err := collector.Run(sourceCtx, cfg.GVisorStart, cfg.NodeName, lookup, otelsetup.EmitRuntimeStart); err != nil {
 			logger.L().Warning("gVisor start source stopped; runtime visibility is degraded")
 		}
+		cancel()
+		<-reportingDone
+		// Submit the final snapshot before the caller flushes the OTEL provider.
+		otelsetup.EmitGVisorHealth(context.WithoutCancel(ctx), collector.Stats())
 	}()
 	return func() {
 		cancel()

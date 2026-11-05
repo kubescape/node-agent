@@ -39,9 +39,10 @@ func TestGVisorIntegrationVerifiesBeforeQueueAndExport(t *testing.T) {
 				return Identity{ContainerID: id, SandboxID: "sandbox", Namespace: "apps", PodName: "pod", PodUID: "uid", ContainerName: "app", RuntimeHandler: "runsc"}, nil
 			}
 			emitted := make(chan Observation, 1)
+			collector := new(Collector)
 			done := make(chan error, 1)
 			go func() {
-				done <- RunIntegration(ctx, cfg, "node", lookup, func(_ context.Context, o Observation) { emitted <- o })
+				done <- collector.Run(ctx, cfg, "node", lookup, func(_ context.Context, o Observation) { emitted <- o })
 			}()
 			fd := connectReceiver(t, cfg.SocketPath)
 			defer unix.Close(fd)
@@ -93,6 +94,25 @@ func TestGVisorIntegrationVerifiesBeforeQueueAndExport(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("lookup/shutdown ignored cancellation")
 			}
+			health := collector.Stats()
+			if health.Running || health.Receiver.Listening {
+				t.Fatal("collector still running")
+			}
+			switch mode {
+			case "verified":
+				if health.ExportSubmitted != 1 || health.RecheckRejected != 0 {
+					t.Fatalf("health: %+v", health)
+				}
+			case "disappeared":
+				if health.ExportSubmitted != 0 || health.RecheckRejected != 1 {
+					t.Fatalf("health: %+v", health)
+				}
+			default:
+				if health.ExportSubmitted != 0 || health.Receiver.UnresolvedStarts != 1 {
+					t.Fatalf("health: %+v", health)
+				}
+			}
+
 		})
 	}
 }
