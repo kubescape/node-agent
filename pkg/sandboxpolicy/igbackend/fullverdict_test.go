@@ -184,14 +184,30 @@ func TestReadFullVerdict(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer ds.Release(data)
-		ds.GetField("generation").PutUint64(data, 7)
-		ds.GetField("cgroup").PutUint64(data, 19)
-		ds.GetField("mode").PutUint32(data, 2)
-		ds.GetField("deny").PutUint32(data, 0)
-		ds.GetField("error").PutUint32(data, 0)
-		ds.GetField("host_pid").PutUint32(data, 42)
-		ds.GetField("path_result").PutInt32(data, -1)
-		ds.GetField("path").PutString(data, "")
+		if err := ds.GetField("generation").PutUint64(data, 7); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("cgroup").PutUint64(data, 19); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("mode").PutUint32(data, 2); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("deny").PutUint32(data, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("error").PutUint32(data, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("host_pid").PutUint32(data, 42); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("path_result").PutInt32(data, -1); err != nil {
+			t.Fatal(err)
+		}
+		if err := ds.GetField("path").PutString(data, ""); err != nil {
+			t.Fatal(err)
+		}
 		bytes := make([]byte, 32)
 		want := [4]uint64{1, 1 << 31, 1 << 32, 1 << 63}
 		for i, word := range want {
