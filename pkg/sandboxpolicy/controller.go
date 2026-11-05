@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 	"sort"
 	"sync"
 
@@ -16,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -51,6 +54,16 @@ type Controller struct {
 	lastError    error
 	bindingError error
 	configError  error
+	// clusterCIDRs fills the clusterInternal class (SetClusterCIDRs).
+	clusterCIDRs ClusterCIDRs
+	// readClusterCIDRs, when set, reads the class (SetClusterCIDRsReader).
+	readClusterCIDRs func(context.Context) (ClusterCIDRs, bool)
+	// networkPlans holds the translated network section of each valid
+	// policy from the last reconciliation, for status and preparation.
+	networkPlans map[types.UID]*NetworkPlan
+	// classes and classErrors are from the last reconcile (see PodPlans).
+	classes     api.PolicyClasses
+	classErrors map[string]error
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -168,6 +181,288 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	c.lastError = c.reconcile(ctx)
 	return c.lastError
 }
+
+// SetClusterCIDRs sets the pod and service CIDRs of the clusterInternal
+// class. The next reconciliation uses them. It reports whether they changed.
+func (c *Controller) SetClusterCIDRs(cidrs ClusterCIDRs) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	changed := !reflect.DeepEqual(c.clusterCIDRs, cidrs)
+	c.clusterCIDRs = cidrs
+	return changed
+}
+
+// SetClusterCIDRsReader sets the reader of the clusterInternal class. Refresh
+// calls it after it loads a configuration in which an active policy names the
+// class, and before it compiles, so the first compile of such a policy already
+// has the class. read reports false when it did not read (for example, it
+// limits how often it reads); the class then keeps its value. read runs under
+// the reconciliation lock and must not call Controller methods.
+func (c *Controller) SetClusterCIDRsReader(read func(context.Context) (ClusterCIDRs, bool)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.readClusterCIDRs = read
+}
+
+// UsesClusterInternal reports whether an active policy names the
+// clusterInternal class in a network rule or an except entry, so the caller
+// reads the cluster CIDRs only when a policy needs them.
+func (c *Controller) UsesClusterInternal() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.usesClusterInternal()
+}
+
+// usesClusterInternal is called with c.mu held.
+func (c *Controller) usesClusterInternal() bool {
+	names := func(t *api.NetworkTarget) bool {
+		return t != nil && slices.Contains(t.DestClass, ClassClusterInternal)
+	}
+	for _, p := range c.slotPolicies() {
+		if p.spec.Network == nil {
+			continue
+		}
+		for _, r := range p.spec.Network.Rules {
+			if names(&r.Target) {
+				return true
+			}
+			for _, e := range r.Except {
+				if names(e.Target) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// PrepareScheduled passes, for every container of the given pods (scheduled to
+// this node and not finished), the privilege and network policies it will get
+// to a backend that can prepare them. It is a hint and changes no binding state.
+func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding) error {
+	c.mu.Lock()
+	preparer, ok := c.backend.(SlotPreparer)
+	if !ok || c.configError != nil {
+		c.mu.Unlock()
+		return nil
+	}
+	policies := c.slotPolicies()
+	networkPlans := c.networkPlans
+	c.mu.Unlock()
+	active := map[string]bool{}
+	for _, p := range policies {
+		active[SectionPrivilege] = active[SectionPrivilege] || p.spec.Privilege != nil
+		active[SectionNetwork] = active[SectionNetwork] || p.spec.Network != nil
+	}
+	var nonEmpty []Plan
+	for _, b := range containers {
+		var plan Plan
+		for _, p := range policies {
+			if p.matches(b) {
+				compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID]}
+				if compiled.Privilege != nil || compiled.Network != nil {
+					plan.Policies = append(plan.Policies, compiled)
+				}
+			}
+		}
+		if len(plan.Policies) > 0 {
+			nonEmpty = append(nonEmpty, plan)
+		}
+	}
+	// Outside c.mu: a preparation may start a gadget instance.
+	if sections, ok := preparer.(SectionPreparer); ok {
+		return sections.PrepareSections(ctx, nonEmpty, active)
+	}
+	return preparer.Prepare(ctx, nonEmpty)
+}
+
+// PodPlans returns the pod plan of each pod scheduled to this node (all its
+// declared containers must be given). A pod plan is bound at the pod cgroup
+// before the containers start, so a container is judged from its first
+// command. It is built per section (privilege, network): a section is in the
+// pod plan only when every declared container of the pod gets the same
+// nonempty set of that section's policies, because a pod binding also judges
+// every container of the pod. So a pod can have a network pod binding and no
+// privilege one, or both. A pod with no such section has no pod plan. A
+// container must also pass the checks that its own binding needs (see
+// podContainerPlan), so a pod binding never applies a policy that the
+// container binding refuses. It returns false when the policies are not known
+// (a configuration error).
+func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
+	c.mu.Lock()
+	if c.configError != nil {
+		c.mu.Unlock()
+		return nil, false
+	}
+	var policies []desiredPolicy
+	for _, obj := range c.objects {
+		if obj.GetKind() != "SandboxPolicyClasses" {
+			p := parsePolicy(obj)
+			// A network section that did not translate fails the container
+			// binding too (see reconcile).
+			if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff && c.networkPlans[p.identity.UID] == nil {
+				p.err = fmt.Errorf("network section is not translated")
+			}
+			policies = append(policies, p)
+		}
+	}
+	classes, classErrors, networkPlans := c.classes, c.classErrors, c.networkPlans
+	c.mu.Unlock()
+	containerPlans := map[types.UID][]Plan{}
+	failed := map[types.UID]bool{}
+	for _, b := range containers {
+		if failed[b.PodUID] {
+			continue
+		}
+		plan, ok := podContainerPlan(policies, classes, classErrors, networkPlans, b)
+		if !ok {
+			failed[b.PodUID] = true
+			delete(containerPlans, b.PodUID)
+			continue
+		}
+		containerPlans[b.PodUID] = append(containerPlans[b.PodUID], plan)
+	}
+	pods := map[types.UID]Plan{}
+	for uid, plans := range containerPlans {
+		if plan := podPlan(plans); len(plan.Policies) > 0 {
+			pods[uid] = plan
+		}
+	}
+	return pods, true
+}
+
+// podPlan keeps, from the container plans of one pod, each section whose
+// policies are the same nonempty set in every container plan.
+func podPlan(plans []Plan) Plan {
+	only := func(plan Plan, part func(CompiledPolicy) any) Plan {
+		var out Plan
+		for _, p := range plan.Policies {
+			if part(p) != nil {
+				out.Policies = append(out.Policies, p)
+			}
+		}
+		return out
+	}
+	keep := make([]bool, len(sectionParts))
+	for i, sec := range sectionParts {
+		first := only(plans[0], sec.part)
+		keep[i] = len(first.Policies) > 0
+		for _, plan := range plans[1:] {
+			keep[i] = keep[i] && samePolicies(first, only(plan, sec.part))
+		}
+	}
+	var out Plan
+	for _, p := range plans[0].Policies {
+		kept := false
+		for i, sec := range sectionParts {
+			if !keep[i] {
+				sec.strip(&p)
+			}
+			kept = kept || sec.part(p) != nil
+		}
+		if kept {
+			out.Policies = append(out.Policies, p)
+		}
+	}
+	return out
+}
+
+// podContainerPlan returns the privilege and network policies of a container
+// for a pod binding. It is false when the container's own binding would fail,
+// as in reconcile: an invalid policy that may select it, a class error, too
+// many policies, or a policy that does not compile without a ContainerProfile
+// resolver (a policy with sources depends on the profile, so it is refused).
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, networkPlans map[types.UID]*NetworkPlan, b Binding) (Plan, bool) {
+	var plan Plan
+	selected := 0
+	for _, p := range policies {
+		if p.err != nil {
+			if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != b.Namespace {
+				continue
+			}
+			return Plan{}, false
+		}
+		if p.spec.Mode == api.ModeOff || !p.matches(b) {
+			continue
+		}
+		selected++
+		if policyClassError(p, classErrors) != nil {
+			return Plan{}, false
+		}
+		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
+			return Plan{}, false
+		}
+		compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID]}
+		if compiled.Privilege != nil || compiled.Network != nil {
+			plan.Policies = append(plan.Policies, compiled)
+		}
+	}
+	if selected > MaxPoliciesPerBinding {
+		return Plan{}, false
+	}
+	return plan, true
+}
+
+// policyClassError returns the errors of the shared path classes that p's exec
+// rules use, as reconcile does (a class that p defines itself is not shared).
+func policyClassError(p desiredPolicy, classErrors map[string]error) error {
+	if p.spec.Exec == nil {
+		return nil
+	}
+	var err error
+	for _, rule := range p.spec.Exec.Rules {
+		for _, name := range rule.Target.PathClass {
+			if p.spec.Classes != nil {
+				if _, local := p.spec.Classes.PathClasses[name]; local {
+					continue
+				}
+			}
+			err = errors.Join(err, classErrors[name])
+		}
+	}
+	return err
+}
+
+// samePolicies compares the policy objects and generations of two plans.
+func samePolicies(a, b Plan) bool {
+	if len(a.Policies) != len(b.Policies) {
+		return false
+	}
+	ids := map[PolicyIdentity]int{}
+	for _, p := range a.Policies {
+		ids[p.Identity]++
+	}
+	for _, p := range b.Policies {
+		if ids[p.Identity] == 0 {
+			return false
+		}
+		ids[p.Identity]--
+	}
+	return true
+}
+
+// HasSlotPolicies reports whether any active policy has a privilege or a
+// network section (the sections with node-wide slots).
+func (c *Controller) HasSlotPolicies() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.slotPolicies()) > 0
+}
+
+// slotPolicies is called with c.mu held.
+func (c *Controller) slotPolicies() []desiredPolicy {
+	var policies []desiredPolicy
+	for _, obj := range c.objects {
+		if obj.GetKind() == "SandboxPolicyClasses" {
+			continue
+		}
+		if p := parsePolicy(obj); p.err == nil && (p.spec.Privilege != nil || p.spec.Network != nil) && p.spec.Mode != api.ModeOff {
+			policies = append(policies, p)
+		}
+	}
+	return policies
+}
+
 func (c *Controller) LastError() error { c.mu.Lock(); defer c.mu.Unlock(); return c.lastError }
 
 func bindingKey(b Binding) string {
@@ -234,6 +529,11 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	if err := validateShape(p.spec); err != nil {
 		p.err = errors.Join(p.err, err)
 	}
+	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
+		if err := validateNetwork(*p.spec.Network); err != nil {
+			p.err = errors.Join(p.err, fmt.Errorf("network: %w", err))
+		}
+	}
 	if p.identity.UID == "" {
 		p.err = errors.Join(p.err, fmt.Errorf("policy UID is missing"))
 	}
@@ -268,6 +568,8 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	var failures []error
 	policies := make([]desiredPolicy, 0)
 	classes := api.PolicyClasses{PathClasses: make(map[string][]string)}
+	dest := DestClasses{Shared: map[string][]string{}, Ambiguous: map[string]bool{}, Cluster: c.clusterCIDRs}
+	destOwners := make(map[string]string)
 	classErrors := make(map[string]error)
 	// Reject an ambiguous multi-object class namespace rather than choose
 	// one definition nondeterministically. Local policy additions are merged.
@@ -322,14 +624,28 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			classNames[name] = obj.GetName()
 			classes.PathClasses[name] = paths
 		}
+		for name, entries := range spec.DestClasses {
+			if _, exists := destOwners[name]; exists {
+				dest.Ambiguous[name] = true
+			}
+			destOwners[name] = obj.GetName()
+			dest.Shared[name] = entries
+		}
 	}
+	c.classes, c.classErrors = classes, classErrors
 	policyErrors := make(map[string]error)
-	for _, p := range policies {
+	networkPlans := make(map[types.UID]*NetworkPlan)
+	for i := range policies {
+		p := &policies[i]
+		if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff {
+			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, dest)
+		}
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err
 			failures = append(failures, p.err)
 		}
 	}
+	c.networkPlans = networkPlans
 
 	// Finish committed removals before admitting a new plan for the same identity.
 	// Tombstones are cleanup ownership only, never evidence of active protection.
@@ -409,6 +725,10 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			if err == nil {
 				compiled, compileErr := Compile(ctx, p.identity, p.spec, classes, binding, c.resolver)
 				err = compileErr
+				if np := networkPlans[p.identity.UID]; err == nil && np != nil {
+					compiled.Network, compiled.Revision = np, ""
+					compiled.Revision = digest(compiled)
+				}
 				if err == nil {
 					plan.Policies = append(plan.Policies, compiled)
 				}
@@ -728,6 +1048,11 @@ func (c *Controller) Refresh(ctx context.Context, snapshot func(context.Context,
 	}
 	c.objects = configuration
 	c.configError = nil
+	if c.readClusterCIDRs != nil && c.usesClusterInternal() {
+		if cidrs, ok := c.readClusterCIDRs(ctx); ok {
+			c.clusterCIDRs = cidrs
+		}
+	}
 	if err != nil {
 		return c.rejectBindings(ctx, err)
 	}
