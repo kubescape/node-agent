@@ -3,6 +3,7 @@ package igbackend
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
@@ -17,48 +18,46 @@ func TestSlotPoliciesFollowTheJudgingInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := e.configs[0].Policy.Generation
-	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", netPolicy("p2", "deny"))); err != nil {
-		t.Fatal(err)
-	}
-	second := e.configs[1].Policy.Generation
-	if first == second {
-		t.Fatal("each instance needs its own generation")
-	}
-	// The event's generation is the fence: a late event of the replaced
-	// instance still gets that instance's slot, even if the slot numbers moved.
 	got, ok := b.SlotPolicies(first, 0)
 	if !ok || len(got) != 1 || got[0].Identity.Name != "p1" {
 		t.Fatalf("first instance slot 0: %+v %v", got, ok)
 	}
+	// A caller cannot change the table.
+	got[0].Revision = "changed"
+	if again, _ := b.SlotPolicies(first, 0); again[0].Revision == "changed" {
+		t.Fatal("SlotPolicies aliases the table")
+	}
+	if _, err := b.Replace(ctx, privBinding(2), privPlan("r2", netPolicy("p2", "deny"))); err != nil {
+		t.Fatal(err)
+	}
+	second := e.configs[1].Policy.Generation
 	for slot := uint32(0); slot < 2; slot++ {
-		got, ok := b.SlotPolicies(second, slot)
-		if !ok || len(got) != 1 {
+		if got, ok := b.SlotPolicies(second, slot); !ok || len(got) != 1 {
 			t.Fatalf("second instance slot %d: %+v %v", slot, got, ok)
 		}
 	}
 	if _, ok := b.SlotPolicies(second, 2); ok {
 		t.Fatal("a slot the instance does not have")
 	}
-	if _, ok := b.SlotPolicies(second+1, 0); ok {
-		t.Fatal("an unknown generation")
-	}
-	// A caller cannot change the table.
-	got, _ = b.SlotPolicies(first, 0)
-	got[0].Revision = "changed"
-	if again, _ := b.SlotPolicies(first, 0); again[0].Revision == "changed" {
-		t.Fatal("SlotPolicies aliases the table")
-	}
-	// Old generations are forgotten: their events get no policy.
-	for i := 3; i < 3+maxSlotTables; i++ {
-		if _, err := b.Replace(ctx, privBinding(uint64(i)), privPlan("r", netPolicy("q"+string(rune('a'+i)), "deny"))); err != nil {
-			t.Fatal(err)
-		}
+	// The replaced instance stopped: it reports no more verdicts.
+	if e.instances[0].stops != 1 {
+		t.Fatal("the first instance must be stopped")
 	}
 	if _, ok := b.SlotPolicies(first, 0); ok {
-		t.Fatal("an old generation must be forgotten")
+		t.Fatal("a stopped instance keeps no table")
 	}
-	if _, ok := b.SlotPolicies(e.configs[len(e.configs)-1].Policy.Generation, 0); !ok {
-		t.Fatal("the current generation must be kept")
+	// Failed starts use generations but never remove the running table.
+	e.startErr = errors.New("load failed")
+	for i := 0; i < 6; i++ {
+		if _, err := b.Replace(ctx, privBinding(uint64(10+i)), privPlan("r", netPolicy(fmt.Sprintf("q%d", i), "deny"))); err == nil {
+			t.Fatal("start must fail")
+		}
+	}
+	if _, ok := b.SlotPolicies(second, 0); !ok {
+		t.Fatal("failed starts removed the table of the running instance")
+	}
+	if n := len(b.tables); n != 1 {
+		t.Fatalf("failed starts must not keep tables: %d tables", n)
 	}
 }
 

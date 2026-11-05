@@ -87,6 +87,13 @@ func TestSectionVerdictAttribution(t *testing.T) {
 			t.Fatalf("%+v", v)
 		}
 	})
+	t.Run("an empty slot leaves the policy set absent", func(t *testing.T) {
+		v := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, true, "default", "", "")
+		v.Attribute(nil)
+		if v.PolicySet != nil || v.Policy != (PolicyIdentity{}) {
+			t.Fatalf("%+v", v)
+		}
+	})
 	t.Run("prefix of another policy name does not match", func(t *testing.T) {
 		long := sectionPolicy("ab", "rev-ab")
 		v := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, false, "ns/ab/r", "", "")
@@ -98,7 +105,7 @@ func TestSectionVerdictAttribution(t *testing.T) {
 	t.Run("unknown rule names no policy", func(t *testing.T) {
 		v := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, false, "", "", "")
 		v.Attribute([]CompiledPolicy{a, b})
-		if v.Policy != (PolicyIdentity{}) || v.Matches != nil {
+		if v.Reason != "" || v.Policy != (PolicyIdentity{}) || v.Matches != nil {
 			t.Fatalf("%+v", v)
 		}
 	})

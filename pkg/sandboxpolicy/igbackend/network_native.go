@@ -90,14 +90,11 @@ func destination(data datasource.Data, addr, port, version, proto, protoRaw data
 	if proto != nil {
 		t.Proto, _ = proto.String(data)
 	}
-	// Without IG's formatter the name field is empty: name the number.
+	// Without IG's formatter the name field is empty: name the number. An
+	// unknown number stays empty.
 	if t.Proto == "" && protoRaw != nil {
 		if n, err := protoRaw.Uint16(data); err == nil {
-			if name, ok := protocols.GetProtocolNameByNumber(int(n)); ok {
-				t.Proto = name
-			} else {
-				t.Proto = fmt.Sprintf("proto#%d", n)
-			}
+			t.Proto, _ = protocols.GetProtocolNameByNumber(int(n))
 		}
 	}
 	if addr == nil || version == nil {

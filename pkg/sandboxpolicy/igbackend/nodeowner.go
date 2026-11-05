@@ -135,9 +135,11 @@ type nodeOwner[C any] struct {
 	retired            enforcement.VerdictCounters
 	retiredUnavailable uint64
 	// tables: see remember. Own lock, because a reporter reads it while a
-	// replacement holds mu.
-	tablesMu sync.Mutex
-	tables   map[uint64][][]sandboxpolicy.CompiledPolicy
+	// replacement holds mu. generations maps each instance that runs or
+	// still stops (under mu) to its table.
+	tablesMu    sync.Mutex
+	tables      map[uint64][][]sandboxpolicy.CompiledPolicy
+	generations map[NodeInstance]uint64
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
@@ -467,13 +469,16 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	b.generation++
 	candidate, err := b.section.start(ctx, fmt.Sprintf("%s-%s-%d", b.prefix, b.section.name, b.generation), compiled, initial)
 	if err != nil {
+		b.forget(b.generation) // start cleaned up: no more events
 		return err
 	}
+	b.track(candidate, b.generation)
 	if err = candidate.Ready(); err != nil {
 		if stopErr := candidate.Stop(ctx); stopErr != nil {
 			b.retiring = append(b.retiring, candidate) // retried by retire
 			return errors.Join(err, stopErr)
 		}
+		b.untrack(candidate)
 		return err
 	}
 	if b.instance != nil {
@@ -501,6 +506,7 @@ func (b *nodeOwner[C]) retire(ctx context.Context) error {
 		} else {
 			addCounters(&b.retired, last)
 		}
+		b.untrack(i)
 	}
 	b.retiring = kept
 	return errors.Join(errs...)

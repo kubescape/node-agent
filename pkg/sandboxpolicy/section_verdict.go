@@ -61,9 +61,9 @@ func NewSectionVerdict(section string, generation, cgroup uint64, mode, pid, slo
 		v.Reason = "path_resolution_error"
 	case isDefault || rule == SectionRuleDefault:
 		v.Reason = "section_default"
-	default:
+	case rule != "":
 		v.Reason = "matching_rule"
-	}
+	} // an unknown rule id claims no reason
 	return v
 }
 
@@ -72,7 +72,7 @@ func NewSectionVerdict(section string, generation, cgroup uint64, mode, pid, slo
 // default decision names no policy: it is attributed only when the slot has
 // one policy.
 func (v *SectionVerdict) Attribute(policies []CompiledPolicy) {
-	v.PolicySet = make([]PolicyRevision, 0, len(policies))
+	v.PolicySet = nil
 	for _, p := range policies {
 		v.PolicySet = append(v.PolicySet, PolicyRevision{Policy: p.Identity, Revision: p.Revision})
 	}

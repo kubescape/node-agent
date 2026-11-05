@@ -73,12 +73,9 @@ func enumName(s, prefix string) string {
 	return s
 }
 
-// maxSlotTables is how many instance generations keep their slot policies.
-// The current instance and the ones still stopping are the recent ones; an
-// event of an older instance gets no policy (absent, not guessed).
-const maxSlotTables = 4
-
-// remember keeps the slot policies of the instance with this generation.
+// remember keeps the slot policies of the instance with this generation. The
+// table lives until the instance stops (untrack), or its start fails
+// (forget): a stopped instance reports no more verdicts.
 func (b *nodeOwner[C]) remember(generation uint64, slots [][]sandboxpolicy.CompiledPolicy) {
 	b.tablesMu.Lock()
 	defer b.tablesMu.Unlock()
@@ -86,10 +83,26 @@ func (b *nodeOwner[C]) remember(generation uint64, slots [][]sandboxpolicy.Compi
 		b.tables = map[uint64][][]sandboxpolicy.CompiledPolicy{}
 	}
 	b.tables[generation] = slots
-	for g := range b.tables {
-		if g+maxSlotTables <= generation {
-			delete(b.tables, g)
-		}
+}
+
+func (b *nodeOwner[C]) forget(generation uint64) {
+	b.tablesMu.Lock()
+	defer b.tablesMu.Unlock()
+	delete(b.tables, generation)
+}
+
+// track and untrack run under mu.
+func (b *nodeOwner[C]) track(i NodeInstance, generation uint64) {
+	if b.generations == nil {
+		b.generations = map[NodeInstance]uint64{}
+	}
+	b.generations[i] = generation
+}
+
+func (b *nodeOwner[C]) untrack(i NodeInstance) {
+	if g, ok := b.generations[i]; ok {
+		delete(b.generations, i)
+		b.forget(g)
 	}
 }
 

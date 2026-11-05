@@ -211,7 +211,8 @@ func (e *VerdictExporter) ReportSection(ctx context.Context, event SectionEvent)
 			s.Verdict.Attribute(policies)
 		}
 	}
-	return e.enqueue(ctx, event)
+	// Queue a copy: the producer keeps no memory shared with the queue.
+	return e.enqueue(ctx, event.snapshot())
 }
 
 func (e *VerdictExporter) enqueue(ctx context.Context, event authorization) error {
