@@ -11,11 +11,13 @@
 // - Only armed tasks are judged (see arming.h).
 // - A deny returns -EPERM from the LSM hook, before the side effect.
 // - The kernel calls the next BPF LSM program only while every earlier one
-//   returned 0 (the trampoline stops at the first nonzero return), so a later
-//   program cannot replace an earlier deny, and the hooks do not read the
-//   previous return value (runtime_kernel_test.go, TestEarlierBPFDenyHolds).
-//   They also name only the hook arguments they need, so a hook that gains a
-//   trailing argument in a newer kernel does not move what they read.
+//   returned 0 (the trampoline runs the newest program first and stops at the
+//   first nonzero return; runtime_kernel_test.go, TestEarlierBPFDenyHolds).
+//   Each hook also returns an earlier BPF verdict, `ret`, unchanged, as the
+//   other enforcement gadgets do. `ret` follows the hook arguments, so its
+//   position depends on the hook signature: the operator checks every
+//   argument count in the kernel's BTF (runtime.Hooks) and refuses a kernel
+//   where one differs.
 // - Each hook body is a plain function, so it can also be attached as
 //   fmod_ret on the matching security_* function.
 
@@ -542,8 +544,10 @@ static __always_inline int do_userns_create(void *ctx)
 }
 
 SEC("lsm/userns_create")
-int BPF_PROG(ig_priv_userns, const struct cred *cred)
+int BPF_PROG(ig_priv_userns, const struct cred *cred, int ret)
 {
+	if (ret)
+		return ret;
 	return do_userns_create(ctx);
 }
 
@@ -585,9 +589,10 @@ static __always_inline int do_task_alloc(void *ctx, struct task_struct *task,
 }
 
 SEC("lsm/task_alloc")
-int BPF_PROG(ig_priv_task_alloc, struct task_struct *task,
-	     unsigned long clone_flags)
+int BPF_PROG(ig_priv_task_alloc, struct task_struct *task, unsigned long clone_flags, int ret)
 {
+	if (ret)
+		return ret;
 	return do_task_alloc(ctx, task, clone_flags);
 }
 
@@ -666,35 +671,44 @@ static __always_inline int do_capable(void *ctx, const struct cred *cred,
 }
 
 SEC("lsm/capable")
-int BPF_PROG(ig_priv_capable, const struct cred *cred,
-	     struct user_namespace *ns, int cap, unsigned int opts)
+int BPF_PROG(ig_priv_capable, const struct cred *cred, struct user_namespace *ns, int cap, unsigned int opts, int ret)
 {
+	if (ret)
+		return ret;
 	return do_capable(ctx, cred, cap, opts);
 }
 
 SEC("lsm/capset")
-int BPF_PROG(ig_priv_capset)
+int BPF_PROG(ig_priv_capset, struct cred *new, const struct cred *old, const kernel_cap_t *effective, const kernel_cap_t *inheritable, const kernel_cap_t *permitted, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_CAPSET, PRIV_SC_CAPSET, 0);
 }
 
 SEC("lsm/task_fix_setuid")
-int BPF_PROG(ig_priv_setuid)
+int BPF_PROG(ig_priv_setuid, struct cred *new, const struct cred *old, int flags, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_TASK_FIX_SETUID, PRIV_SC_SETUID, 0);
 }
 
 SEC("lsm/task_fix_setgid")
-int BPF_PROG(ig_priv_setgid)
+int BPF_PROG(ig_priv_setgid, struct cred *new, const struct cred *old, int flags, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_TASK_FIX_SETGID, PRIV_SC_SETGID, 0);
 }
 
 /* Mounts */
 
 SEC("lsm/sb_mount")
-int BPF_PROG(ig_priv_sb_mount)
+int BPF_PROG(ig_priv_sb_mount, const char *dev_name, const struct path *path, const char *type, unsigned long flags, void *data, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_SB_MOUNT, PRIV_SC_MOUNT, 0);
 }
 
@@ -720,33 +734,43 @@ static __always_inline int do_sb_kern_mount(void *ctx,
 }
 
 SEC("lsm/sb_kern_mount")
-int BPF_PROG(ig_priv_sb_kern_mount, const struct super_block *sb)
+int BPF_PROG(ig_priv_sb_kern_mount, const struct super_block *sb, int ret)
 {
+	if (ret)
+		return ret;
 	return do_sb_kern_mount(ctx, sb);
 }
 
 SEC("lsm/sb_umount")
-int BPF_PROG(ig_priv_sb_umount)
+int BPF_PROG(ig_priv_sb_umount, struct vfsmount *mnt, int flags, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_SB_UMOUNT, PRIV_SC_UMOUNT2, 0);
 }
 
 SEC("lsm/move_mount")
-int BPF_PROG(ig_priv_move_mount)
+int BPF_PROG(ig_priv_move_mount, const struct path *from_path, const struct path *to_path, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_MOVE_MOUNT, PRIV_SC_MOVE_MOUNT, 0);
 }
 
 SEC("lsm/sb_pivotroot")
-int BPF_PROG(ig_priv_pivotroot)
+int BPF_PROG(ig_priv_pivotroot, const struct path *old_path, const struct path *new_path, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_SB_PIVOTROOT, PRIV_SC_PIVOT_ROOT,
 			     0);
 }
 
 SEC("lsm/path_chroot")
-int BPF_PROG(ig_priv_chroot)
+int BPF_PROG(ig_priv_chroot, const struct path *path, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_PATH_CHROOT, PRIV_SC_CHROOT, 0);
 }
 
@@ -771,8 +795,10 @@ static __always_inline int do_anon_inode(void *ctx, const struct qstr *name)
 }
 
 SEC("lsm/inode_init_security_anon")
-int BPF_PROG(ig_priv_anon_inode, struct inode *inode, const struct qstr *name)
+int BPF_PROG(ig_priv_anon_inode, struct inode *inode, const struct qstr *name, const struct inode *context_inode, int ret)
 {
+	if (ret)
+		return ret;
 	return do_anon_inode(ctx, name);
 }
 
@@ -818,14 +844,18 @@ static __always_inline int do_ptrace_access_check(void *ctx, unsigned int mode)
 }
 
 SEC("lsm/ptrace_access_check")
-int BPF_PROG(ig_priv_ptrace, struct task_struct *child, unsigned int mode)
+int BPF_PROG(ig_priv_ptrace, struct task_struct *child, unsigned int mode, int ret)
 {
+	if (ret)
+		return ret;
 	return do_ptrace_access_check(ctx, mode);
 }
 
 SEC("lsm/ptrace_traceme")
-int BPF_PROG(ig_priv_traceme)
+int BPF_PROG(ig_priv_traceme, struct task_struct *parent, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_PTRACE_TRACEME, PRIV_SC_PTRACE, 0);
 }
 
@@ -846,8 +876,10 @@ static __always_inline int do_kernel_read_file(void *ctx, int id)
 }
 
 SEC("lsm/kernel_read_file")
-int BPF_PROG(ig_priv_kernel_read_file, struct file *file, int id)
+int BPF_PROG(ig_priv_kernel_read_file, struct file *file, int id, bool contents, int ret)
 {
+	if (ret)
+		return ret;
 	return do_kernel_read_file(ctx, id);
 }
 
@@ -864,16 +896,20 @@ static __always_inline int do_kernel_load_data(void *ctx, int id)
 }
 
 SEC("lsm/kernel_load_data")
-int BPF_PROG(ig_priv_kernel_load_data, int id)
+int BPF_PROG(ig_priv_kernel_load_data, int id, bool contents, int ret)
 {
+	if (ret)
+		return ret;
 	return do_kernel_load_data(ctx, id);
 }
 
 // An implicit module load requested on behalf of the task (for example an
 // unknown socket family). It is judged as init_module.
 SEC("lsm/kernel_module_request")
-int BPF_PROG(ig_priv_module_request)
+int BPF_PROG(ig_priv_module_request, char *kmod_name, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_KERNEL_MODULE_REQUEST,
 			     PRIV_SC_INIT_MODULE, 0);
 }
@@ -881,27 +917,35 @@ int BPF_PROG(ig_priv_module_request)
 /* bpf, perf, keys, mknod */
 
 SEC("lsm/bpf")
-int BPF_PROG(ig_priv_bpf)
+int BPF_PROG(ig_priv_bpf, int cmd, union bpf_attr *attr, unsigned int size, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_BPF, PRIV_SC_BPF, 0);
 }
 
 SEC("lsm/perf_event_open")
-int BPF_PROG(ig_priv_perf_event_open)
+int BPF_PROG(ig_priv_perf_event_open, struct perf_event_attr *attr, int type, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_PERF_EVENT_OPEN,
 			     PRIV_SC_PERF_EVENT_OPEN, 0);
 }
 
 SEC("lsm/key_alloc")
-int BPF_PROG(ig_priv_key_alloc)
+int BPF_PROG(ig_priv_key_alloc, struct key *key, const struct cred *cred, unsigned long flags, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_KEY_ALLOC, PRIV_SC_KEYCTL, 0);
 }
 
 SEC("lsm/key_permission")
-int BPF_PROG(ig_priv_key_permission)
+int BPF_PROG(ig_priv_key_permission, key_ref_t key_ref, const struct cred *cred, unsigned int need_perm, int ret)
 {
+	if (ret)
+		return ret;
 	return check_syscall(ctx, PRIV_HOOK_KEY_PERMISSION, PRIV_SC_KEYCTL, 0);
 }
 
@@ -911,8 +955,10 @@ int BPF_PROG(ig_priv_key_permission)
 // it every call is judged as mknod (fail closed), its unix socket bind(2)
 // included.
 SEC("lsm/inode_mknod")
-int BPF_PROG(ig_priv_mknod)
+int BPF_PROG(ig_priv_mknod, struct inode *dir, struct dentry *dentry, umode_t mode, unsigned int dev, int ret)
 {
+	if (ret)
+		return ret;
 	if (!current_is_compat() &&
 	    priv_syscall_from_nr(current_syscall_nr()) != PRIV_SC_MKNOD)
 		return 0;
