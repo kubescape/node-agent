@@ -146,6 +146,11 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 		status.Degraded = degraded
 	}
+	if len(p.identityNotes) > 0 {
+		summary, truncated := boundedText(strings.Join(p.identityNotes, "; "), api.MaxStatusDiagnosticLength)
+		status.Truncated = status.Truncated || truncated
+		status.Conditions = append(status.Conditions, metav1.Condition{Type: "IdentityNotEnforced", Status: metav1.ConditionTrue, Reason: "NotExpressible", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+	}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
 		for revision := range revisions {

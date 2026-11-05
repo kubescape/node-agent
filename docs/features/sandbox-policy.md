@@ -225,6 +225,23 @@ authorization. When adding the second gadget:
    metadata struct or wire family does not make two records the same attempt;
    do not suppress observations using PID/path/time heuristics.
 
+## Identity section
+
+The `identity` section has no gadget. When node-agent parses a policy, it moves
+each identity rule into the same policy's `file` or `network` section, with the
+rule's own name, action, mode and origin:
+
+- `path` / `pathClass` becomes a file rule with `access: [read]`;
+- `imds: true` becomes an egress rule on the `imds` destination class.
+
+A missing `file` or `network` section is added with an allow default, which does
+not change the merged result. The paths of identity allow rules are subtracted
+from the classes of identity deny rules, as `except` entries, so a provisioned
+service-account token in `credentialStore` stays readable under every path alias.
+Explicit deny paths are not subtracted (deny wins). A `deny` default, `envRead`
+(the file gadget cannot tell a process's own `/proc/<pid>/environ` from another's),
+and `false` targets are reported in the `IdentityNotEnforced` condition.
+
 ## Verification boundary
 
 Unit/race tests cover selection, reload bookkeeping, import refusal, status,

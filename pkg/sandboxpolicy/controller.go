@@ -454,7 +454,10 @@ type desiredPolicy struct {
 	spec              api.PolicySpec
 	podSelector       labels.Selector
 	namespaceSelector labels.Selector
-	err               error
+	// identityNotes is what the identity section cannot express
+	// (expandIdentity); the section itself is moved into file and network.
+	identityNotes []string
+	err           error
 }
 
 func decodeSpec(u *unstructured.Unstructured, target any) error {
@@ -496,6 +499,13 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	p.err = errors.Join(p.err, err)
 	if err := validateShape(p.spec); err != nil {
 		p.err = errors.Join(p.err, err)
+	}
+	if p.spec.Mode != api.ModeOff {
+		spec, notes, err := expandIdentity(p.spec)
+		if err != nil {
+			p.err = errors.Join(p.err, fmt.Errorf("identity: %w", err))
+		}
+		p.spec, p.identityNotes = spec, notes
 	}
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
 		if err := validateNetwork(*p.spec.Network); err != nil {
