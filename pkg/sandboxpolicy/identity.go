@@ -23,37 +23,48 @@ import (
 // The split also keeps the explicit paths enforced when a class of the deny is
 // unresolved (the file translator then drops every path of that rule).
 //
-// It returns what cannot be expressed: a deny default (identity has no
+// It reports what cannot be expressed: a deny default (identity has no
 // universe of its own), envRead (the file gadget cannot tell a process's own
 // /proc/<pid>/environ from another's), a false imds or envRead, and an except
 // entry whose target cannot match its rule's events.
-func expandIdentity(spec api.PolicySpec) (api.PolicySpec, []string, error) {
+func expandIdentity(spec api.PolicySpec) (api.PolicySpec, identityReport, error) {
+	var report identityReport
 	id := spec.Identity
 	if id == nil {
-		return spec, nil, nil
+		return spec, report, nil
 	}
 	spec.Identity = nil
 	if id.Default != api.ActionAllow && id.Default != api.ActionDeny {
-		return spec, nil, fmt.Errorf("identity requires an allow/deny default")
+		return spec, report, fmt.Errorf("identity requires an allow/deny default")
 	}
-	var notes []string
+	// notEnforcedDeny reports a deny that nothing enforces; an enforce one
+	// is also degraded, as the file and network translators do.
+	notEnforcedDeny := func(rule string, mode api.RuleMode) {
+		if mode == "" {
+			mode = api.RuleMode(spec.Mode)
+		}
+		if mode == api.RuleEnforce {
+			report.Degraded = append(report.Degraded, api.DegradedRule{Rule: rule, Requested: api.RuleEnforce, Effective: "audit", Reason: "not-enforceable"})
+		}
+	}
 	if id.Default == api.ActionDeny {
-		notes = append(notes, "default deny: identity has no default of its own; use deny rules")
+		report.Notes = append(report.Notes, "default deny: identity has no default of its own; use deny rules")
+		notEnforcedDeny("default/identity", id.DefaultMode)
 	}
 	names := ruleNames(spec, id)
 	var provisioned []api.FileException
 	for _, r := range id.Rules {
 		if r.Action != api.ActionAllow && r.Action != api.ActionDeny {
-			return spec, nil, fmt.Errorf("rule %q has invalid action", r.Name)
+			return spec, report, fmt.Errorf("rule %q has invalid action", r.Name)
 		}
 		if !validMode(string(r.Mode)) {
-			return spec, nil, fmt.Errorf("rule %q has invalid mode", r.Name)
+			return spec, report, fmt.Errorf("rule %q has invalid mode", r.Name)
 		}
 		if r.Actor != nil {
-			return spec, nil, fmt.Errorf("rule %q: actor predicates are unsupported in the identity section", r.Name)
+			return spec, report, fmt.Errorf("rule %q: actor predicates are unsupported in the identity section", r.Name)
 		}
 		if err := r.Target.Validate(); err != nil {
-			return spec, nil, fmt.Errorf("rule %q: %w", r.Name, err)
+			return spec, report, fmt.Errorf("rule %q: %w", r.Name, err)
 		}
 		if r.Action == api.ActionAllow && isPathTarget(r.Target) {
 			provisioned = append(provisioned, api.FileException{Target: fileTarget(r.Target.Path, r.Target.PathClass)})
@@ -62,7 +73,7 @@ func expandIdentity(spec api.PolicySpec) (api.PolicySpec, []string, error) {
 	var files []api.FileRule
 	var networks []api.NetworkRule
 	for _, r := range id.Rules {
-		note := func(why string) { notes = append(notes, fmt.Sprintf("rule %s: %s", r.Name, why)) }
+		note := func(why string) { report.Notes = append(report.Notes, fmt.Sprintf("rule %s: %s", r.Name, why)) }
 		t := r.Target
 		switch {
 		case isPathTarget(t):
@@ -103,6 +114,9 @@ func expandIdentity(spec api.PolicySpec) (api.PolicySpec, []string, error) {
 				continue
 			}
 			note("envRead is not enforced: the file gadget cannot tell a process's own /proc/<pid>/environ from another process's")
+			if r.Action == api.ActionDeny {
+				notEnforcedDeny(r.Name, r.Mode)
+			}
 		}
 	}
 	if len(files) > 0 {
@@ -121,7 +135,15 @@ func expandIdentity(spec api.PolicySpec) (api.PolicySpec, []string, error) {
 		n.Rules = append(slices.Clone(n.Rules), networks...)
 		spec.Network = &n
 	}
-	return spec, notes, nil
+	return spec, report, nil
+}
+
+// identityReport is what the status says about the identity section.
+type identityReport struct {
+	// Notes lists what cannot be expressed (IdentityNotEnforced).
+	Notes []string
+	// Degraded lists the enforce denies among them.
+	Degraded []api.DegradedRule
 }
 
 // splitName names the explicit-path part of a split deny: the rule name with

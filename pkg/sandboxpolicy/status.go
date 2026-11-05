@@ -118,9 +118,9 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	}
 	status.Stale = stale
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
-	if network != nil || file != nil {
+	if network != nil || file != nil || len(p.identityStatus.Degraded) > 0 {
 		status.Compiled = &api.CompiledStatus{}
-		var degraded []api.DegradedRule
+		degraded := append([]api.DegradedRule(nil), p.identityStatus.Degraded...)
 		for _, section := range []struct {
 			report    *NetworkReport
 			condition string
@@ -146,8 +146,8 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		}
 		status.Degraded = degraded
 	}
-	if len(p.identityNotes) > 0 {
-		summary, truncated := boundedText(strings.Join(p.identityNotes, "; "), api.MaxStatusDiagnosticLength)
+	if len(p.identityStatus.Notes) > 0 {
+		summary, truncated := boundedText(strings.Join(p.identityStatus.Notes, "; "), api.MaxStatusDiagnosticLength)
 		status.Truncated = status.Truncated || truncated
 		status.Conditions = append(status.Conditions, metav1.Condition{Type: "IdentityNotEnforced", Status: metav1.ConditionTrue, Reason: "NotExpressible", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
 	}

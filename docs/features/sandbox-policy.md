@@ -240,7 +240,9 @@ from the classes of identity deny rules, as `except` entries, so a provisioned
 service-account token in `credentialStore` stays readable under every path alias.
 Explicit deny paths are not subtracted (deny wins). A `deny` default, `envRead`
 (the file gadget cannot tell a process's own `/proc/<pid>/environ` from another's),
-and `false` targets are reported in the `IdentityNotEnforced` condition.
+and `false` targets are reported in the `IdentityNotEnforced` condition. Such a deny
+in enforce mode is also listed under `degraded` (reason `not-enforceable`), as in the
+file and network sections; the policy stays ready.
 
 ## Verification boundary
 

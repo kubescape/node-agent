@@ -38,19 +38,19 @@ func crdIdentityExample() api.PolicySpec {
 		Identity: &api.IdentitySection{Default: api.ActionAllow, Rules: []api.IdentityRule{harvest, provisioned, imds, environ}}}
 }
 
-func expand(t *testing.T, spec api.PolicySpec) (api.PolicySpec, []string) {
+func expand(t *testing.T, spec api.PolicySpec) (api.PolicySpec, identityReport) {
 	t.Helper()
 	if err := api.ValidatePolicySpec(spec); err != nil {
 		t.Fatal(err)
 	}
-	out, notes, err := expandIdentity(spec)
+	out, report, err := expandIdentity(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out.Identity != nil {
 		t.Fatal("identity section kept")
 	}
-	return out, notes
+	return out, report
 }
 
 // readDenied is the gadget's decision for one rule and one read: a path of
@@ -74,7 +74,11 @@ func readDenied(t *testing.T, r *filepolicy.Rule, path string) bool {
 
 func TestExpandIdentityCRDExample(t *testing.T) {
 	spec := crdIdentityExample()
-	out, notes := expand(t, spec)
+	out, report := expand(t, spec)
+	notes := report.Notes
+	if len(report.Degraded) != 0 {
+		t.Fatalf("an audit envRead deny is not degraded: %+v", report.Degraded)
+	}
 	if out.File == nil || out.File.Default != api.ActionAllow || out.Network == nil || out.Network.Default.Egress != api.ActionAllow || out.Network.Default.Listen != api.ActionAllow {
 		t.Fatalf("neutral sections: %+v %+v", out.File, out.Network)
 	}
@@ -143,7 +147,8 @@ func TestExpandIdentityMergesIntoOwnSections(t *testing.T) {
 	spec.Network = &api.NetworkSection{Default: api.NetworkDefault{Egress: api.ActionDeny, Listen: api.ActionDeny},
 		Rules: []api.NetworkRule{{Rule: api.Rule{Name: "https", Action: api.ActionAllow}, Target: api.NetworkTarget{CIDR: []string{"0.0.0.0/0"}}}}}
 	before := digest(spec)
-	out, notes := expand(t, spec)
+	out, report := expand(t, spec)
+	notes := report.Notes
 	if digest(spec) != before {
 		t.Fatal("expandIdentity mutated its input")
 	}
@@ -193,8 +198,11 @@ func TestExpandIdentityUnresolvedAndNotExpressible(t *testing.T) {
 	imds.Except = []api.IdentityException{{Target: &api.IdentityTarget{IMDS: &no}}}
 	spec := api.PolicySpec{Containers: []string{"*"}, Mode: api.ModeEnforce,
 		Identity: &api.IdentitySection{Default: api.ActionDeny, Rules: []api.IdentityRule{deny, allow, imdsOff, imds}}}
-	out, notes := expand(t, spec)
-	got := strings.Join(notes, ";")
+	out, report := expand(t, spec)
+	if !reflect.DeepEqual(report.Degraded, []api.DegradedRule{{Rule: "default/identity", Requested: api.RuleEnforce, Effective: "audit", Reason: "not-enforceable"}}) {
+		t.Fatalf("degraded %+v", report.Degraded)
+	}
+	got := strings.Join(report.Notes, ";")
 	for _, want := range []string{"default deny", "rule creds: except 0 is disabled", "rule imds-off: imds false selects nothing", "rule imds: except 0 is disabled"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("notes %q lack %q", got, want)
@@ -255,15 +263,15 @@ func TestIdentityPolicyCompiles(t *testing.T) {
 	if p.err != nil {
 		t.Fatal(p.err)
 	}
-	if p.spec.Identity != nil || p.spec.File == nil || p.spec.Network == nil || len(p.identityNotes) != 1 {
-		t.Fatalf("parsed %+v notes %q", p.spec, p.identityNotes)
+	if p.spec.Identity != nil || p.spec.File == nil || p.spec.Network == nil || len(p.identityStatus.Notes) != 1 {
+		t.Fatalf("parsed %+v report %+v", p.spec, p.identityStatus)
 	}
 	if _, err := Compile(context.Background(), p.identity, p.spec, api.PolicyClasses{}, Binding{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	off := crdIdentityExample()
 	off.Mode = api.ModeOff
-	if p := parsePolicy(identityPolicyObject("off", off)); p.err != nil || p.spec.File != nil || p.identityNotes != nil {
+	if p := parsePolicy(identityPolicyObject("off", off)); p.err != nil || p.spec.File != nil || p.identityStatus.Notes != nil {
 		t.Fatalf("off policy expanded: %+v", p)
 	}
 }
@@ -271,7 +279,9 @@ func TestIdentityPolicyCompiles(t *testing.T) {
 func TestControllerIdentityPlanAndStatus(t *testing.T) {
 	ctx := context.Background()
 	c, backend, w, _ := setup(t)
-	obj := identityPolicyObject("identity", crdIdentityExample())
+	spec := crdIdentityExample()
+	spec.Identity.Rules[3].Mode = api.RuleEnforce
+	obj := identityPolicyObject("identity", spec)
 	c.objects[objectKey(obj)] = obj
 	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
 		t.Fatal(err)
@@ -288,6 +298,12 @@ func TestControllerIdentityPlanAndStatus(t *testing.T) {
 	}
 	if !found || report.Status.Conditions[0].Status != metav1.ConditionTrue {
 		t.Fatalf("status %+v", report.Status.Conditions)
+	}
+	// An enforce envRead deny is degraded, like a file or network deny that
+	// cannot be enforced; the policy stays ready.
+	want := []api.DegradedRule{{Rule: "no-environ-scrape", Requested: api.RuleEnforce, Effective: "audit", Reason: "not-enforceable"}}
+	if !reflect.DeepEqual(report.Status.Degraded, want) || report.Status.Counts.Degraded != 1 {
+		t.Fatalf("degraded %+v", report.Status.Degraded)
 	}
 }
 
@@ -321,5 +337,30 @@ func TestExpandIdentitySplitNameFitsTheLimit(t *testing.T) {
 	}
 	if name := out.File.Rules[1].Name; len(name) != api.MaxRuleNameLength || !strings.HasSuffix(name, "/path") {
 		t.Fatalf("split name %q", name)
+	}
+}
+
+func TestExpandIdentityEnvReadDegraded(t *testing.T) {
+	yes := true
+	for name, c := range map[string]struct {
+		action api.Action
+		mode   api.RuleMode
+		spec   api.PolicyMode
+		want   bool
+	}{
+		"rule enforce":   {api.ActionDeny, api.RuleEnforce, api.ModeAudit, true},
+		"policy enforce": {api.ActionDeny, "", api.ModeEnforce, true},
+		"rule audit":     {api.ActionDeny, api.RuleAudit, api.ModeEnforce, false},
+		"allow":          {api.ActionAllow, "", api.ModeEnforce, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := identityRule("env", c.action, api.IdentityTarget{EnvRead: &yes})
+			r.Mode = c.mode
+			_, report := expand(t, api.PolicySpec{Containers: []string{"*"}, Mode: c.spec,
+				Identity: &api.IdentitySection{Default: api.ActionAllow, Rules: []api.IdentityRule{r}}})
+			if got := len(report.Degraded) == 1 && report.Degraded[0].Rule == "env"; got != c.want {
+				t.Fatalf("degraded %+v", report.Degraded)
+			}
+		})
 	}
 }
