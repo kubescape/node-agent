@@ -41,7 +41,11 @@ func TestFullLeaseHostPinsRejectForgedProcAndNamespaces(t *testing.T) {
 	require.Nil(t, pins)
 	file, err := os.CreateTemp(t.TempDir(), "not-namespace")
 	require.NoError(t, err)
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	_, err = namespaceIdentity(file, unix.CLONE_NEWNS)
 	require.ErrorContains(t, err, "not NSFS")
 	_, err = namespaceIdentity(nil, unix.CLONE_NEWNS)
@@ -53,7 +57,11 @@ func TestFullLeaseCurrentNamespaceType(t *testing.T) {
 		t.Skip("namespace handles require proc access")
 	}
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	_, err = namespaceIdentity(f, unix.CLONE_NEWNS)
 	require.NoError(t, err)
 	_, err = namespaceIdentity(f, unix.CLONE_NEWPID)

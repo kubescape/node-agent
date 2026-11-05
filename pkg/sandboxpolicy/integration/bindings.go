@@ -127,7 +127,7 @@ func scheduledContainers(pods []*corev1.Pod, namespaceLabels map[string]map[stri
 func snapshotBindings(ctx context.Context, client kubernetes.Interface, containers []*containercollection.Container, nodeName string, selector func(sandboxpolicy.Binding) bool) ([]sandboxpolicy.Binding, error) {
 
 	if client == nil || nodeName == "" {
-		return nil, fmt.Errorf("Kubernetes client and node name are required")
+		return nil, fmt.Errorf("kubernetes client and node name are required")
 	}
 	pods, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String()})
 	if err != nil {

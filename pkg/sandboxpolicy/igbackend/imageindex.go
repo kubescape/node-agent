@@ -205,7 +205,9 @@ func (w *indexWalker) walk(dir *os.File, name string, depth int, h hash.Hash) (r
 		}
 	}
 	sort.Strings(names)
-	fmt.Fprintf(h, "%q:%+v\n", name, before)
+	if _, err := fmt.Fprintf(h, "%q:%+v\n", name, before); err != nil {
+		return err
+	}
 	for _, child := range names {
 		if err = w.ctx.Err(); err != nil {
 			return err
@@ -224,7 +226,9 @@ func (w *indexWalker) walk(dir *os.File, name string, depth int, h hash.Hash) (r
 		if e != nil || closeErr != nil {
 			return errors.Join(e, closeErr)
 		}
-		fmt.Fprintf(h, "%q:%+v\n", childName, stat)
+		if _, err := fmt.Fprintf(h, "%q:%+v\n", childName, stat); err != nil {
+			return err
+		}
 		switch stat.Mode & unix.S_IFMT {
 		case unix.S_IFREG:
 			key := ImageInode{stat.Ino, unix.Major(stat.Dev), unix.Minor(stat.Dev)}
