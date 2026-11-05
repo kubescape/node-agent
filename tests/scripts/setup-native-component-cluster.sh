@@ -51,9 +51,11 @@ trap cleanup EXIT
 trap 'exit 1' INT TERM
 # Release hosts (github.com, dl.k8s.io) return transient 5xx; one 504 used to
 # fail the whole job. --retry-all-errors (curl >= 7.71) also retries the 5xx
-# that --fail turns into errors. --max-time applies to each attempt.
+# that --fail turns into errors. With no --retry-delay, curl backs off
+# exponentially (1, 2, 4 ... 128 s), so 8 retries wait about 4 minutes in
+# total. --max-time applies to each attempt.
 curl_get=(curl --fail --location --silent --show-error --connect-timeout 10 --max-time 120
-  --retry 4 --retry-delay 5 --retry-all-errors)
+  --retry 8 --retry-all-errors)
 download() {
   "${curl_get[@]}" "$1" -o "$work/$2"
   printf '%s  %s\n' "$3" "$work/$2" | sha256sum --check
