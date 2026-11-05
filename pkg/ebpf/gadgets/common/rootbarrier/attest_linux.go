@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/ebpf/link"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
 )
 
 // Attest proves that each barrier program of the instance that owns counters
@@ -60,15 +61,12 @@ func Attest(counters *ebpf.Map) error {
 // hook that gained an argument would move `ret`, and the program would read
 // another argument as the previous verdict.
 func hookSignatures(kernel *btf.Spec) error {
+	args := map[string]int{}
 	for _, h := range Hooks {
-		var fn *btf.Func
-		if err := kernel.TypeByName("bpf_lsm_"+h.LSM, &fn); err != nil {
-			return fmt.Errorf("root barrier: LSM hook %s: %w", h.LSM, err)
-		}
-		proto, ok := fn.Type.(*btf.FuncProto)
-		if !ok || len(proto.Params) != h.Args {
-			return fmt.Errorf("root barrier: LSM hook %s has an unexpected signature; this kernel is not supported", h.LSM)
-		}
+		args[h.LSM] = h.Args
+	}
+	if err := enforcement.CheckLSMHookArgs(kernel, args); err != nil {
+		return fmt.Errorf("root barrier: %w", err)
 	}
 	return nil
 }
