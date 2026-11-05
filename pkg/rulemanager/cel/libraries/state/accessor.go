@@ -48,9 +48,19 @@ type Accessor struct {
 	ancestorsMemo []uint32
 	ancestorsDone bool
 
+	// counted holds, per name and key, the entry this event's own increment
+	// produced. node-agent evaluates events concurrently, so by the time the
+	// expression runs another event may have advanced the counter in the store;
+	// serving the snapshot here is what makes exactly one event observe each
+	// value, so `== N` can fire and `>= N` fires once per crossing. Allocated
+	// lazily: most rules never increment.
+	counted map[entryRef]*rulestate.Entry
+
 	tracker *ReadTracker
 	adapter types.Adapter
 }
+
+type entryRef struct{ name, key string }
 
 // NewAccessor builds the receiver for one (rule, event) pair. ancestors is
 // invoked lazily and at most once.
@@ -99,12 +109,43 @@ func (a *Accessor) Equal(other ref.Val) ref.Val {
 func (a *Accessor) Type() ref.Type { return AccessorType }
 func (a *Accessor) Value() any     { return a }
 
+// RecordIncrement remembers the entry an increment on this event produced, so
+// every read of that name and key for the rest of this evaluation -- count, has,
+// get and the evidence -- reports that value and not whatever the store holds by
+// then. A nil entry (store disabled or write rejected) records nothing.
+func (a *Accessor) RecordIncrement(name, key string, e *rulestate.Entry) {
+	if a == nil || e == nil {
+		return
+	}
+	if a.counted == nil {
+		a.counted = make(map[entryRef]*rulestate.Entry, 1)
+	}
+	a.counted[entryRef{name, key}] = e
+}
+
+// Count returns the counter under name and key: the snapshot if this event
+// incremented it, else the stored count, else 0. A miss is 0, never an error,
+// so a threshold predicate degrades to false rather than aborting the rule.
+func (a *Accessor) Count(name, key string) int64 {
+	e, ok := a.lookup(name, key)
+	if !ok {
+		return 0
+	}
+	return e.Count
+}
+
 // lookup resolves one entry. A name the rule never declared is a miss rather
 // than an error: load-time validation is what rejects it, and failing the whole
 // predicate here would take out an otherwise working rule.
 func (a *Accessor) lookup(name, key string) (*rulestate.Entry, bool) {
 	if a == nil || a.store == nil {
 		return nil, false
+	}
+	if e, ok := a.counted[entryRef{name, key}]; ok {
+		if a.tracker != nil {
+			a.tracker.record(e)
+		}
+		return e, true
 	}
 	scope, ok := a.scopeOf[name]
 	if !ok {
@@ -158,6 +199,9 @@ func entryToMap(e *rulestate.Entry) map[string]any {
 		"_ts":        e.Timestamp,
 		"_eventType": string(e.EventType),
 		"_container": e.ScopeID,
+	}
+	if e.Count > 0 {
+		m["_count"] = e.Count
 	}
 	if e.Process != nil {
 		m["_pid"] = e.Process.PID
