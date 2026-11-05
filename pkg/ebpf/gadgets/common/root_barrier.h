@@ -60,7 +60,7 @@
 //
 // The kernel calls a BPF LSM program only while every earlier LSM allowed the
 // operation. Each program also returns the denial of an earlier BPF program on
-// the same hook unchanged.
+// the same hook unchanged (the trampoline runs the newest program first).
 //
 // User space can cover one more thread through root_barrier_probe, for a
 // self-test of the attached programs. It can only add coverage. The thread is

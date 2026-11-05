@@ -65,5 +65,5 @@ and the clone flags, setns type or capability.
 `runtime/runtime_kernel_test.go` (build tag `root_barrier_kernel`) starts a
 disposable Docker container and checks the denials, glibc threads, a task that
 ran before the gadget, a task moved into a child cgroup, a reload with two
-instances, and a startup with a
+instances, a BPF LSM denial that runs before the barrier (kept unchanged), and a startup with a
 missing hook. See the file header for the environment variables.

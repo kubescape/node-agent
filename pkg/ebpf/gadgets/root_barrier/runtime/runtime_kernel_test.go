@@ -28,6 +28,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/link"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	apihelpers "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api-helpers"
@@ -365,4 +368,55 @@ func TestRootBarrierWithInspektorGadgetAlone(t *testing.T) {
 			t.Fatalf("after the last instance stopped: %v", err)
 		}
 	})
+
+	t.Run("an earlier BPF LSM denial is kept", func(t *testing.T) {
+		// The kernel runs the BPF LSM programs of a hook newest first, so a
+		// program attached after the barrier runs before it. That program
+		// denies chroot with EACCES in the container cgroup; the barrier must
+		// keep that verdict, not replace it with EPERM.
+		c, err := f.start("root-barrier-c", image, Config{Initial: []Cgroup{covered}})
+		if err != nil {
+			t.Fatalf("starting instance c: %v", err)
+		}
+		defer f.stop("root-barrier-c")
+		earlier := earlierChrootDenial(t, f.cgroup)
+		defer earlier.Close()
+		err = f.exec("chroot", "/", "true")
+		if err == nil || !strings.Contains(err.Error(), "Permission denied") {
+			t.Fatalf("chroot after an earlier EACCES denial: %v", err)
+		}
+		// The barrier still judges the hooks the earlier program allows.
+		f.denied(c, rootbarrier.OpUnshareNS, "unshare", "-m", "true")
+	})
+}
+
+// earlierChrootDenial attaches a BPF LSM program on path_chroot that returns
+// -EACCES for tasks in the cgroup cgroupID, and 0 for every other task.
+func earlierChrootDenial(t *testing.T, cgroupID uint64) link.Link {
+	t.Helper()
+	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
+		Name:       "rb_test_earlier",
+		Type:       ebpf.LSM,
+		AttachType: ebpf.AttachLSMMac,
+		AttachTo:   "path_chroot",
+		License:    "GPL",
+		Instructions: asm.Instructions{
+			asm.FnGetCurrentCgroupId.Call(),
+			asm.LoadImm(asm.R1, int64(cgroupID), asm.DWord),
+			asm.JNE.Reg(asm.R0, asm.R1, "allow"),
+			asm.Mov.Imm(asm.R0, -int32(unix.EACCES)),
+			asm.Return(),
+			asm.Mov.Imm(asm.R0, 0).WithSymbol("allow"),
+			asm.Return(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("loading the earlier LSM program: %v", err)
+	}
+	defer prog.Close()
+	l, err := link.AttachLSM(link.LSMOptions{Program: prog})
+	if err != nil {
+		t.Fatalf("attaching the earlier LSM program: %v", err)
+	}
+	return l
 }
