@@ -247,10 +247,11 @@ func (b *PrivilegeBackend) Replace(ctx context.Context, binding sandboxpolicy.Bi
 	}
 	extra := map[string][]sandboxpolicy.CompiledPolicy{combination: policies}
 	err := b.replaceInstance(ctx, b.prepared, extra, k, next, true)
-	if err != nil && (len(b.prepared) > 0 || b.podsAddSlots(extra)) {
-		// The prepared set and the pod bindings may not fit; never let them
-		// block a real container. BindPods binds the pods again later.
-		err = b.replaceInstance(ctx, nil, extra, k, next, false)
+	if err != nil && len(b.prepared) > 0 {
+		// The speculative prepared slots may not fit: drop only those. The
+		// active pod bindings stay; if the candidate still does not fit, the
+		// new binding is refused.
+		err = b.replaceInstance(ctx, nil, extra, k, next, true)
 	}
 	if err != nil {
 		return fail(err)
@@ -341,11 +342,12 @@ func (b *PrivilegeBackend) Prepare(ctx context.Context, plans []sandboxpolicy.Pl
 }
 
 // BindPods binds the given pod cgroups to the slot of their plan and unbinds
-// the pod cgroups that are not given. A pod whose slot does not exist yet is
-// skipped: Prepare creates the slot, and the next call binds the pod. A pod
-// whose plan changes moves to the new slot in one map write; when the new slot
-// does not exist yet, the pod is unbound, so a removed or edited policy never
-// stays active at pod level.
+// the pod cgroups that are not given (an authoritative removal). A pod whose
+// slot does not exist yet is skipped: Prepare creates the slot, and the next
+// call binds the pod. A pod whose plan changes keeps its last-good binding
+// until the new slot is ready, then moves to it in one map write. A pod given
+// with an empty plan (incomplete input, see Controller.PodPlans) keeps its
+// current binding.
 func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.PodBinding) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -361,10 +363,7 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 	for uid, current := range b.pods {
 		next, ok := wanted[uid]
 		if ok && next.CgroupID == current.pod.CgroupID && next.CgroupPath == current.pod.CgroupPath {
-			combination, _ := Combination(next.Plan)
-			if _, slot := b.slots[combination]; slot || combination == current.combination {
-				continue
-			}
+			continue // the same pod cgroup: kept, or moved below
 		}
 		// Not wanted, or a new cgroup for the pod: remove the old identity.
 		// An instance that is not ready protects nothing.
@@ -394,24 +393,6 @@ func (b *PrivilegeBackend) BindPods(ctx context.Context, pods []sandboxpolicy.Po
 		logger.L().Info("sandbox privilege pod bind", helpers.String("namespace", p.Namespace), helpers.String("pod", p.PodName))
 	}
 	return errors.Join(append(errs, b.retire(ctx))...)
-}
-
-// podsAddSlots reports whether a pod binding needs a combination that no
-// container binding, and not extra, needs.
-func (b *PrivilegeBackend) podsAddSlots(extra map[string][]sandboxpolicy.CompiledPolicy) bool {
-	used := map[string]bool{}
-	for c := range extra {
-		used[c] = true
-	}
-	for _, v := range b.bindings {
-		used[v.combination] = true
-	}
-	for _, p := range b.pods {
-		if !used[p.combination] {
-			return true
-		}
-	}
-	return false
 }
 
 // replaceInstance starts a candidate with every combination in use or prepared
