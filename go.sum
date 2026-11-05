@@ -1441,6 +1441,8 @@ github.com/kubescape/inspektor-gadget v0.0.0-20261027133411-87a796fe9780 h1:Z0Yw
 github.com/kubescape/inspektor-gadget v0.0.0-20261027133411-87a796fe9780/go.mod h1:cwCFczq1LJ6Frpur0Vr5Ncic77a9ihki07Xpwzy+ItI=
 github.com/kubescape/inspektor-gadget v0.0.0-20261105084936-1d25258998b6 h1:UaoajIvhhtFxQKgJ3j7kQyUInzgi9IiLleKuso6R3vs=
 github.com/kubescape/inspektor-gadget v0.0.0-20261105084936-1d25258998b6/go.mod h1:si6XNXWprONqfxXuuGoypzEs7fk6djnhDcGyvRxjCjU=
+github.com/kubescape/inspektor-gadget v0.0.0-20261105100653-325d4a9ee60c h1:YRGK1vTCRe6qGsLp7f3KYOU8G/Fgq8FXYxeuUKSMUtc=
+github.com/kubescape/inspektor-gadget v0.0.0-20261105100653-325d4a9ee60c/go.mod h1:78Jyf/IKPzNOE4J5ALsrZfp9in2Q5aX1y6pCUVK719g=
 github.com/kubescape/k8s-interface v0.0.214 h1:j7KP0/5VvYOoQdBGV2+gRM3qnR8PWLAGF8RM/k/DmJ0=
 github.com/kubescape/k8s-interface v0.0.214/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
 github.com/kubescape/kubescape/v3 v3.0.4/go.mod h1:upPCVTCRT3+LuZ1bawGtjreRmr/Xa+LT0fHtPzlylRU=
