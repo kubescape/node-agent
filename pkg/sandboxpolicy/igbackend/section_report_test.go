@@ -113,3 +113,19 @@ func TestVerdictStatsKeepRetiredInstances(t *testing.T) {
 		t.Fatalf("an unreadable instance must be counted, not read as zero: %+v", s)
 	}
 }
+
+func TestEnumName(t *testing.T) {
+	for in, want := range map[[2]string]string{
+		{"FILE_ACCESS_READ", "FILE_ACCESS_"}:        "read",
+		{"FILE_ACCESS_MOVE_SOURCE", "FILE_ACCESS_"}: "move_source",
+		{"FILE_HOOK_FILE_OPEN", "FILE_HOOK_"}:       "file_open",
+		{"PRIV_SC_UNSHARE", "PRIV_SC_"}:             "unshare",
+		{"PRIV_SC_NONE", "PRIV_SC_"}:                "",
+		{"NET_HOOK_SOCKET_CONNECT", "NET_HOOK_"}:    "socket_connect",
+		{"", "NET_HOOK_"}:                           "",
+	} {
+		if got := enumName(in[0], in[1]); got != want {
+			t.Errorf("enumName(%q) = %q, want %q", in[0], got, want)
+		}
+	}
+}

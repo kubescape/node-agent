@@ -66,7 +66,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 		}
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 			v, hook := common.read(data, sandboxpolicy.SectionFile, names, origins)
-			t := sandboxpolicy.FileTarget{Hook: hook, Access: text(access, data), Path: text(path, data)}
+			t := sandboxpolicy.FileTarget{Hook: enumName(hook, "FILE_HOOK_"), Access: enumName(text(access, data), "FILE_ACCESS_"), Path: text(path, data)}
 			if fromImage != nil {
 				image, _ := fromImage.Uint32(data)
 				t.FromImage = image != 0
@@ -75,7 +75,7 @@ func (e *nativeFileEngine) Start(ctx context.Context, id string, config FileConf
 				helpers.String("rule", v.Rule), helpers.String("origin", strings.Join(v.Origins, ",")),
 				helpers.String("mode", string(v.Mode)), helpers.String("wouldDeny", fmt.Sprint(v.WouldDeny)), helpers.String("reason", v.Reason),
 				helpers.Int("slot", int(v.Slot)), helpers.Int("pid", int(v.PID)), helpers.String("cgroup", fmt.Sprint(v.CgroupID)),
-				helpers.String("generation", fmt.Sprint(v.Generation)), helpers.String("comm", v.Comm), helpers.String("hook", hook),
+				helpers.String("generation", fmt.Sprint(v.Generation)), helpers.String("comm", v.Comm), helpers.String("hook", t.Hook),
 				helpers.String("access", t.Access), helpers.String("path", t.Path))
 			if e.report != nil {
 				e.report(sandboxpolicy.NewFileVerdictEvent(v, sandboxpolicy.Binding{}, t))

@@ -2,6 +2,7 @@ package igbackend
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
@@ -60,6 +61,16 @@ func (f verdictFields) read(data datasource.Data, section string, names, origins
 	hook, _ := f.hook.String(data)
 	return sandboxpolicy.NewSectionVerdict(section, generation, cgroup, mode, pid, slot, isDefault != 0,
 		lookup(names, ruleID), lookup(origins, originID), comm), hook
+}
+
+// enumName turns a gadget enum string (FILE_ACCESS_READ) into the policy word
+// (read): the prefix goes and the rest is lowercase. NONE is "".
+func enumName(s, prefix string) string {
+	s = strings.ToLower(strings.TrimPrefix(s, prefix))
+	if s == "none" {
+		return ""
+	}
+	return s
 }
 
 // maxSlotTables is how many instance generations keep their slot policies.

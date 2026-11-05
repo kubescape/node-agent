@@ -145,9 +145,10 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 		flags := ds.GetField("flags") // optional
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
 			v, hook := common.read(data, sandboxpolicy.SectionPrivilege, names, origins)
-			t := sandboxpolicy.PrivilegeTarget{Hook: hook}
+			t := sandboxpolicy.PrivilegeTarget{Hook: enumName(hook, "PRIV_HOOK_")}
 			t.Capability, _ = fields["capability"].Int32(data)
-			t.Syscall, _ = fields["syscall"].String(data)
+			syscall, _ := fields["syscall"].String(data)
+			t.Syscall = enumName(syscall, "PRIV_SC_")
 			t.FsType, _ = fields["fstype"].String(data)
 			if flags != nil {
 				t.Flags, _ = flags.Uint64(data)
@@ -155,7 +156,7 @@ func (e *nativePrivilegeEngine) Start(ctx context.Context, id string, config pri
 			logger.L().Info("sandbox privilege verdict",
 				helpers.String("rule", v.Rule), helpers.String("mode", string(v.Mode)), helpers.Int("pid", int(v.PID)),
 				helpers.String("cgroup", fmt.Sprint(v.CgroupID)), helpers.String("generation", fmt.Sprint(v.Generation)),
-				helpers.String("comm", v.Comm), helpers.String("hook", hook), helpers.String("syscall", t.Syscall),
+				helpers.String("comm", v.Comm), helpers.String("hook", t.Hook), helpers.String("syscall", t.Syscall),
 				helpers.Int("capability", int(t.Capability)), helpers.String("fstype", t.FsType))
 			if e.report != nil {
 				e.report(sandboxpolicy.NewPrivilegeVerdictEvent(v, sandboxpolicy.Binding{}, t))

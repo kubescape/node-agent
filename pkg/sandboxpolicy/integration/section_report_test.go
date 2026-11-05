@@ -15,7 +15,9 @@ func (o fakeSectionOwner) SlotPolicies(generation uint64, slot uint32) ([]sandbo
 	}
 	return []sandboxpolicy.CompiledPolicy{{Revision: "rev"}}, true
 }
-func (fakeSectionOwner) VerdictStats() igbackend.VerdictStats { return igbackend.VerdictStats{Unavailable: 1} }
+func (fakeSectionOwner) VerdictStats() igbackend.VerdictStats {
+	return igbackend.VerdictStats{Unavailable: 1}
+}
 
 func TestSectionVerdictLookups(t *testing.T) {
 	s := &Service{
