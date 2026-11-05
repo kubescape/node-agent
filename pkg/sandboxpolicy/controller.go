@@ -281,12 +281,15 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 	return preparer.Prepare(ctx, nonEmpty)
 }
 
-// PodPlans returns the privilege plan of each pod whose declared containers
-// (all of them must be given) get the same nonempty set of privilege policies.
-// Such a pod can be bound at its pod cgroup before its containers start. A pod
-// whose containers get different policies, or none, has no pod plan: a pod
-// binding would also judge the containers that the policies do not select.
-// A container must also pass the checks that its own binding needs (see
+// PodPlans returns the pod plan of each pod scheduled to this node (all its
+// declared containers must be given). A pod plan is bound at the pod cgroup
+// before the containers start, so a container is judged from its first
+// command. It is built per section (privilege, network, file): a section is in the
+// pod plan only when every declared container of the pod gets the same
+// nonempty set of that section's policies, because a pod binding also judges
+// every container of the pod. So a pod can have a network pod binding and no
+// privilege one, or both. A pod with no such section has no pod plan. A
+// container must also pass the checks that its own binding needs (see
 // podContainerPlan), so a pod binding never applies a policy that the
 // container binding refuses. It returns false when the policies are not known
 // (a configuration error).
@@ -311,37 +314,73 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 			policies = append(policies, p)
 		}
 	}
-	classes, classErrors := c.classes, c.classErrors
+	classes, classErrors, networkPlans, filePlans := c.classes, c.classErrors, c.networkPlans, c.filePlans
 	c.mu.Unlock()
-	pods := map[types.UID]Plan{}
-	mixed := map[types.UID]bool{}
+	containerPlans := map[types.UID][]Plan{}
+	failed := map[types.UID]bool{}
 	for _, b := range containers {
-		if mixed[b.PodUID] {
+		if failed[b.PodUID] {
 			continue
 		}
-		plan, ok := podContainerPlan(policies, classes, classErrors, b)
+		plan, ok := podContainerPlan(policies, classes, classErrors, networkPlans, filePlans, b)
 		if !ok {
-			mixed[b.PodUID] = true
-			delete(pods, b.PodUID)
+			failed[b.PodUID] = true
+			delete(containerPlans, b.PodUID)
 			continue
 		}
-		previous, seen := pods[b.PodUID]
-		if seen && !samePolicies(previous, plan) {
-			mixed[b.PodUID] = true
-			delete(pods, b.PodUID)
-			continue
+		containerPlans[b.PodUID] = append(containerPlans[b.PodUID], plan)
+	}
+	pods := map[types.UID]Plan{}
+	for uid, plans := range containerPlans {
+		if plan := podPlan(plans); len(plan.Policies) > 0 {
+			pods[uid] = plan
 		}
-		pods[b.PodUID] = plan
 	}
 	return pods, true
 }
 
-// podContainerPlan returns the privilege plan of a container for a pod
-// binding. It is false when the container's own binding would fail, as in
-// reconcile: an invalid policy that may select it, a class error, too many
-// policies, or a policy that does not compile without a ContainerProfile
+// podPlan keeps, from the container plans of one pod, each section whose
+// policies are the same nonempty set in every container plan.
+func podPlan(plans []Plan) Plan {
+	only := func(plan Plan, part func(CompiledPolicy) any) Plan {
+		var out Plan
+		for _, p := range plan.Policies {
+			if part(p) != nil {
+				out.Policies = append(out.Policies, p)
+			}
+		}
+		return out
+	}
+	keep := make([]bool, len(sectionParts))
+	for i, sec := range sectionParts {
+		first := only(plans[0], sec.part)
+		keep[i] = len(first.Policies) > 0
+		for _, plan := range plans[1:] {
+			keep[i] = keep[i] && samePolicies(first, only(plan, sec.part))
+		}
+	}
+	var out Plan
+	for _, p := range plans[0].Policies {
+		kept := false
+		for i, sec := range sectionParts {
+			if !keep[i] {
+				sec.strip(&p)
+			}
+			kept = kept || sec.part(p) != nil
+		}
+		if kept {
+			out.Policies = append(out.Policies, p)
+		}
+	}
+	return out
+}
+
+// podContainerPlan returns the privilege, network and file policies of a container
+// for a pod binding. It is false when the container's own binding would fail,
+// as in reconcile: an invalid policy that may select it, a class error, too
+// many policies, or a policy that does not compile without a ContainerProfile
 // resolver (a policy with sources depends on the profile, so it is refused).
-func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, b Binding) (Plan, bool) {
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, networkPlans map[types.UID]*NetworkPlan, filePlans map[types.UID]*FilePlan, b Binding) (Plan, bool) {
 	var plan Plan
 	selected := 0
 	for _, p := range policies {
@@ -361,11 +400,12 @@ func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, class
 		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
 			return Plan{}, false
 		}
-		if p.spec.Privilege != nil {
-			plan.Policies = append(plan.Policies, CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy()})
+		compiled := CompiledPolicy{Identity: p.identity, Mode: p.spec.Mode, Privilege: p.spec.Privilege.DeepCopy(), Network: networkPlans[p.identity.UID], File: filePlans[p.identity.UID]}
+		if compiled.Privilege != nil || compiled.Network != nil || compiled.File != nil {
+			plan.Policies = append(plan.Policies, compiled)
 		}
 	}
-	if selected > MaxPoliciesPerBinding || len(plan.Policies) == 0 {
+	if selected > MaxPoliciesPerBinding {
 		return Plan{}, false
 	}
 	return plan, true

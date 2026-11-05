@@ -440,6 +440,83 @@ func TestControllerPodPlans(t *testing.T) {
 	}
 }
 
+// The pod plan is built per section: a section is kept only when every
+// container of the pod gets the same nonempty set of its policies.
+func TestControllerPodPlansPerSection(t *testing.T) {
+	ctx := context.Background()
+	net := policy("net", "ns")
+	net.Spec.Network = netSpec(api.ActionDeny).Network
+	netWeb := policy("net-web", "ns")
+	netWeb.Spec.Containers = []string{"web"}
+	netWeb.Spec.Network = netSpec(api.ActionAllow).Network
+	privApp := policy("priv-app", "ns")
+	privApp.Spec.Containers = []string{"app"}
+	privApp.Spec.Privilege = privilegeSection(api.ActionDeny)
+	c, _, _, _ := setup(t, net, netWeb, privApp)
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	container := func(pod types.UID, name string) Binding {
+		b := binding()
+		b.ContainerID, b.CgroupID, b.PodUID, b.ContainerName = "", 0, pod, name
+		return b
+	}
+	plans, ok := c.PodPlans([]Binding{
+		// network uniform, privilege only on app: a network pod plan only.
+		container("net-only", "app"), container("net-only", "db"),
+		// one container: both sections.
+		container("both", "app"),
+		// network differs (net-web on web only), no privilege: no pod plan.
+		container("mixed", "web"), container("mixed", "db"),
+	})
+	if !ok || len(plans) != 2 {
+		t.Fatalf("pod plans: %+v", plans)
+	}
+	netOnly := plans["net-only"]
+	if len(netOnly.Policies) != 1 || netOnly.Policies[0].Identity.Name != "net" || netOnly.Policies[0].Network == nil || netOnly.Policies[0].Privilege != nil {
+		t.Fatalf("net-only: %+v", netOnly)
+	}
+	both := plans["both"]
+	if len(both.Policies) != 2 {
+		t.Fatalf("both: %+v", both)
+	}
+	for _, p := range both.Policies {
+		if p.Identity.Name == "net" && p.Network == nil || p.Identity.Name == "priv-app" && p.Privilege == nil {
+			t.Fatalf("both: %+v", p)
+		}
+	}
+}
+
+func TestSectionBackendBindsPodsInEveryAvailableSection(t *testing.T) {
+	privilege := &podBinderBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	network := &podBinderBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}
+	s, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
+	if s.BindsPods() {
+		t.Fatal("no available section binds pods")
+	}
+	s.WithNetwork(network, nil)
+	pods := []PodBinding{{PodUID: "a"}}
+	if err := s.BindPods(context.Background(), pods); err != nil || !s.BindsPods() || len(network.pods) != 1 {
+		t.Fatalf("network only: %v %+v", err, network.pods)
+	}
+	s, _ = NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, privilege, nil)
+	s.WithNetwork(network, nil)
+	network.pods = nil
+	if err := s.BindPods(context.Background(), pods); err != nil || len(privilege.pods) != 1 || len(network.pods) != 1 {
+		t.Fatalf("both: %v %+v %+v", err, privilege.pods, network.pods)
+	}
+}
+
+type podBinderBackend struct {
+	fakeBackend
+	pods []PodBinding
+}
+
+func (b *podBinderBackend) BindPods(_ context.Context, pods []PodBinding) error {
+	b.pods = pods
+	return nil
+}
+
 func TestControllerPodPlansNeedContainerEligibility(t *testing.T) {
 	ctx := context.Background()
 	priv := policy("priv", "ns")
@@ -523,5 +600,22 @@ func TestControllerPrepareScheduledFile(t *testing.T) {
 	}
 	if len(file.prepared) != 1 || privilege.prepared != nil {
 		t.Fatalf("file prepared %v, privilege prepared %v", file.prepared, privilege.prepared)
+	}
+}
+
+// A file policy that every container of a pod gets is in the pod plan.
+func TestControllerPodPlansIncludeFile(t *testing.T) {
+	ctx := context.Background()
+	p := policy("files", "ns")
+	p.Spec.File = &api.FileSection{Default: api.ActionDeny}
+	c, _, _, _ := setup(t, p)
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	b := binding()
+	b.ContainerID, b.CgroupID, b.PodUID = "", 0, "pod"
+	plans, ok := c.PodPlans([]Binding{b})
+	if !ok || len(plans["pod"].Policies) != 1 || plans["pod"].Policies[0].File == nil {
+		t.Fatalf("file pod plan: %+v %v", plans, ok)
 	}
 }
