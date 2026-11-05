@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+func originPtr(s string) *string { return &s }
+
 func sectionPolicy(name, revision string) CompiledPolicy {
 	return CompiledPolicy{Identity: PolicyIdentity{Kind: "SandboxPolicy", Namespace: "ns", Name: name, UID: types.UID("uid-" + name), Generation: 7}, Revision: revision}
 }
@@ -35,7 +37,7 @@ func TestNewSectionVerdictModeAndReason(t *testing.T) {
 		{"unresolved path", 2, true, "unresolved-path", api.RuleEnforce, false, "path_resolution_error"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			v := NewSectionVerdict(SectionFile, 3, 12, c.mode, 41, 1, c.isDefault, c.rule, "catalog/a", "cat")
+			v := NewSectionVerdict(SectionFile, 3, 12, c.mode, 41, 1, c.isDefault, c.rule, originPtr("catalog/a"), "cat")
 			if v.Verdict != api.ActionDeny || v.Mode != c.wantMode || v.WouldDeny != c.wouldDeny || v.Reason != c.reason {
 				t.Fatalf("got verdict %q mode %q wouldDeny %v reason %q", v.Verdict, v.Mode, v.WouldDeny, v.Reason)
 			}
@@ -47,16 +49,27 @@ func TestNewSectionVerdictModeAndReason(t *testing.T) {
 			}
 		})
 	}
-	// An origin id of 0 (none) gives [], like exec, not [""] and not nil.
-	if v := NewSectionVerdict(SectionNetwork, 1, 1, 2, 1, 0, true, "default", "", ""); v.Origins == nil || len(v.Origins) != 0 {
-		t.Fatalf("absent origin became %#v", v.Origins)
+	// Presence comes from the origin id, not from the string: an absent
+	// origin is [] and an explicit empty one is [""], for rules and defaults.
+	for _, rule := range []string{"ns/p/r", "default"} {
+		if v := NewSectionVerdict(SectionNetwork, 1, 1, 2, 1, 0, rule == "default", rule, nil, ""); v.Origins == nil || len(v.Origins) != 0 {
+			t.Fatalf("%s: absent origin became %#v", rule, v.Origins)
+		}
+		if v := NewSectionVerdict(SectionNetwork, 1, 1, 2, 1, 0, rule == "default", rule, originPtr(""), ""); !reflect.DeepEqual(v.Origins, []string{""}) {
+			t.Fatalf("%s: explicit empty origin became %#v", rule, v.Origins)
+		}
+	}
+	explicit := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, false, "ns/a/r", originPtr(""), "")
+	explicit.Attribute([]CompiledPolicy{sectionPolicy("a", "rev")})
+	if m := explicit.Matches[0]; m.Origin != "" || !reflect.DeepEqual(m.Origins, []string{""}) {
+		t.Fatalf("explicit empty origin lost in the match: %+v", m)
 	}
 }
 
 func TestSectionVerdictAttribution(t *testing.T) {
 	a, b := sectionPolicy("a", "rev-a"), sectionPolicy("b", "rev-b")
 	t.Run("rule names its policy", func(t *testing.T) {
-		v := NewSectionVerdict(SectionPrivilege, 1, 1, 1, 1, 0, false, "ns/b/no-mount", "custom/b/no-mount", "")
+		v := NewSectionVerdict(SectionPrivilege, 1, 1, 1, 1, 0, false, "ns/b/no-mount", originPtr("custom/b/no-mount"), "")
 		v.Attribute([]CompiledPolicy{a, b})
 		if v.Policy != b.Identity || len(v.PolicySet) != 2 || v.PolicySet[1] != (PolicyRevision{Policy: b.Identity, Revision: "rev-b"}) {
 			t.Fatalf("policy %+v set %+v", v.Policy, v.PolicySet)
@@ -67,28 +80,28 @@ func TestSectionVerdictAttribution(t *testing.T) {
 		}
 	})
 	t.Run("one policy is complete", func(t *testing.T) {
-		v := NewSectionVerdict(SectionPrivilege, 1, 1, 2, 1, 0, false, "ns/a/no-mount", "", "")
+		v := NewSectionVerdict(SectionPrivilege, 1, 1, 2, 1, 0, false, "ns/a/no-mount", nil, "")
 		v.Attribute([]CompiledPolicy{a})
 		if v.Policy != a.Identity || len(v.Matches) != 1 || !v.MatchesComplete || v.Matches[0].Mode != api.RuleEnforce {
 			t.Fatalf("%+v", v)
 		}
 	})
 	t.Run("default with several policies is ambiguous", func(t *testing.T) {
-		v := NewSectionVerdict(SectionNetwork, 1, 1, 2, 1, 0, true, "default", "", "")
+		v := NewSectionVerdict(SectionNetwork, 1, 1, 2, 1, 0, true, "default", nil, "")
 		v.Attribute([]CompiledPolicy{a, b})
 		if v.Policy != (PolicyIdentity{}) || v.Matches != nil || len(v.PolicySet) != 2 {
 			t.Fatalf("default invented a deciding policy: %+v", v)
 		}
 	})
 	t.Run("default with one policy names it", func(t *testing.T) {
-		v := NewSectionVerdict(SectionNetwork, 1, 1, 2, 1, 0, true, "default", "", "")
+		v := NewSectionVerdict(SectionNetwork, 1, 1, 2, 1, 0, true, "default", nil, "")
 		v.Attribute([]CompiledPolicy{b})
 		if v.Policy != b.Identity || v.Matches != nil {
 			t.Fatalf("%+v", v)
 		}
 	})
 	t.Run("an empty slot leaves the policy set absent", func(t *testing.T) {
-		v := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, true, "default", "", "")
+		v := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, true, "default", nil, "")
 		v.Attribute(nil)
 		if v.PolicySet != nil || v.Policy != (PolicyIdentity{}) {
 			t.Fatalf("%+v", v)
@@ -96,14 +109,14 @@ func TestSectionVerdictAttribution(t *testing.T) {
 	})
 	t.Run("prefix of another policy name does not match", func(t *testing.T) {
 		long := sectionPolicy("ab", "rev-ab")
-		v := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, false, "ns/ab/r", "", "")
+		v := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, false, "ns/ab/r", nil, "")
 		v.Attribute([]CompiledPolicy{a, long})
 		if v.Policy != long.Identity {
 			t.Fatalf("policy %+v", v.Policy)
 		}
 	})
 	t.Run("unknown rule names no policy", func(t *testing.T) {
-		v := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, false, "", "", "")
+		v := NewSectionVerdict(SectionFile, 1, 1, 2, 1, 0, false, "", nil, "")
 		v.Attribute([]CompiledPolicy{a, b})
 		if v.Reason != "" || v.Policy != (PolicyIdentity{}) || v.Matches != nil {
 			t.Fatalf("%+v", v)
@@ -112,7 +125,7 @@ func TestSectionVerdictAttribution(t *testing.T) {
 }
 
 func TestSectionEventsAreAuthorizationsNotObservations(t *testing.T) {
-	v := NewSectionVerdict(SectionNetwork, 1, 12, 2, 41, 0, false, "ns/a/r", "", "curl")
+	v := NewSectionVerdict(SectionNetwork, 1, 12, 2, 41, 0, false, "ns/a/r", nil, "curl")
 	b := binding()
 	for _, c := range []struct {
 		event utils.EnrichEvent
@@ -148,7 +161,7 @@ func TestSectionEventsAreAuthorizationsNotObservations(t *testing.T) {
 }
 
 func TestSectionEventSnapshotsDoNotAlias(t *testing.T) {
-	v := NewSectionVerdict(SectionFile, 1, 12, 1, 41, 0, false, "ns/a/r", "custom/a/r", "")
+	v := NewSectionVerdict(SectionFile, 1, 12, 1, 41, 0, false, "ns/a/r", originPtr("custom/a/r"), "")
 	v.Attribute([]CompiledPolicy{sectionPolicy("a", "rev")})
 	event := NewFileVerdictEvent(v, binding(), FileTarget{Path: "/data"})
 	v.Origins[0], v.PolicySet[0].Revision = "producer", "producer"
@@ -184,7 +197,7 @@ func TestReportSectionResolvesAttributesAndDispatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := NewSectionVerdict(SectionNetwork, 5, 12, 1, 41, 2, false, "ns/a/no-egress", "custom/a/no-egress", "curl")
+	v := NewSectionVerdict(SectionNetwork, 5, 12, 1, 41, 2, false, "ns/a/no-egress", originPtr("custom/a/no-egress"), "curl")
 	if err := exporter.ReportSection(context.Background(), NewNetworkVerdictEvent(v, Binding{}, NetworkTarget{Addr: "192.0.2.1", Port: 443, Proto: "TCP"})); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +235,7 @@ func TestReportSectionKeepsUnknownBindingAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := NewSectionVerdict(SectionFile, 1, 99, 2, 1, 0, false, "ns/a/r", "", "")
+	v := NewSectionVerdict(SectionFile, 1, 99, 2, 1, 0, false, "ns/a/r", nil, "")
 	if err := exporter.ReportSection(context.Background(), NewFileVerdictEvent(v, Binding{}, FileTarget{})); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +262,7 @@ func TestSectionDenyBurstDropsNoExecVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := NewSectionVerdict(SectionPrivilege, 1, 12, 2, 41, 0, false, "ns/a/r", "", "")
+	v := NewSectionVerdict(SectionPrivilege, 1, 12, 2, 41, 0, false, "ns/a/r", nil, "")
 	for i := 0; i < 1000; i++ {
 		_ = sections.ReportSection(context.Background(), NewPrivilegeVerdictEvent(v, Binding{}, PrivilegeTarget{}))
 	}

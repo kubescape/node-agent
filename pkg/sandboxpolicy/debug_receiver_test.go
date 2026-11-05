@@ -30,7 +30,7 @@ func TestRegisterDebugReceiverKeepsOtherReceivers(t *testing.T) {
 }
 
 func TestDebugReceiverLogsExportedEvents(t *testing.T) {
-	v := NewSectionVerdict(SectionFile, 1, 12, 1, 41, 0, false, "ns/a/r", "custom/a/r", "cat")
+	v := NewSectionVerdict(SectionFile, 1, 12, 1, 41, 0, false, "ns/a/r", originPtr("custom/a/r"), "cat")
 	for _, c := range []struct {
 		event utils.K8sEvent
 		want  []string

@@ -128,3 +128,16 @@ func TestEnumName(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginOfUsesTheID(t *testing.T) {
+	table := []string{"", "", "catalog/a"} // id 1 is an explicit empty origin
+	if originOf(table, 0) != nil || originOf(table, 3) != nil {
+		t.Fatal("id 0 and an id outside the table have no origin")
+	}
+	if o := originOf(table, 1); o == nil || *o != "" {
+		t.Fatalf("explicit empty origin: %v", o)
+	}
+	if o := originOf(table, 2); o == nil || *o != "catalog/a" {
+		t.Fatalf("origin: %v", o)
+	}
+}

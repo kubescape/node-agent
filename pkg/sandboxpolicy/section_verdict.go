@@ -46,16 +46,17 @@ const (
 )
 
 // NewSectionVerdict decodes the common gadget fields: mode 1 is audit, 2 is
-// enforce (common/verdict.h). rule and origin are the names that the event's
-// rule_id and origin_id index ("" when the table has none).
-func NewSectionVerdict(section string, generation, cgroup uint64, mode, pid, slot uint32, isDefault bool, rule, origin, comm string) SectionVerdict {
+// enforce (common/verdict.h). rule is the name the event's rule_id indexes
+// ("" when the table has none). origin is the origin_id's entry: nil when the
+// event has none (id 0), so an explicit "" stays [""] and absence stays [].
+func NewSectionVerdict(section string, generation, cgroup uint64, mode, pid, slot uint32, isDefault bool, rule string, origin *string, comm string) SectionVerdict {
 	// Origins is never nil, like exec's Verdict.Origins: [] means none.
 	v := SectionVerdict{Section: section, Time: time.Now(), Verdict: api.ActionDeny, Mode: api.RuleEnforce, Rule: rule, Origins: []string{}, Generation: generation, Slot: slot, CgroupID: cgroup, PID: pid, Comm: comm}
 	if mode == 1 {
 		v.Mode, v.WouldDeny = api.RuleAudit, true
 	}
-	if origin != "" {
-		v.Origins = append(v.Origins, origin)
+	if origin != nil {
+		v.Origins = append(v.Origins, *origin)
 	}
 	switch {
 	case rule == SectionRuleUnresolved:

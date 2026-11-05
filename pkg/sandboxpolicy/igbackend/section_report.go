@@ -60,7 +60,17 @@ func (f verdictFields) read(data datasource.Data, section string, names, origins
 	comm, _ := f.comm.String(data)
 	hook, _ := f.hook.String(data)
 	return sandboxpolicy.NewSectionVerdict(section, generation, cgroup, mode, pid, slot, isDefault != 0,
-		lookup(names, ruleID), lookup(origins, originID), comm), hook
+		lookup(names, ruleID), originOf(origins, originID), comm), hook
+}
+
+// originOf is the origin_id's table entry, or nil for id 0 (none) and an id
+// outside the table. Presence comes from the id, never from the string.
+func originOf(origins []string, id uint32) *string {
+	if id == 0 || int(id) >= len(origins) {
+		return nil
+	}
+	origin := origins[id]
+	return &origin
 }
 
 // enumName turns a gadget enum string (FILE_ACCESS_READ) into the policy word
