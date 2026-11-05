@@ -86,6 +86,10 @@ policy:
   program outside the container runtime's mount namespace; children inherit the
   mark. So runc's own setup (namespaces, mounts, `pivot_root`, `setns` for
   `exec`) is never blocked, and `docker run` / `docker exec` keep working.
+  OCI `createContainer` and `startContainer` hooks are not armed either: a
+  task is not armed at exec when its parent is unarmed, outside the runtime
+  mount namespace, and in the same mount namespace and cgroup (runc init forks
+  the hooks inside the container).
   When a container is bound, the owner also arms the tasks that already run in
   it (pidfd writes to `armed_tasks`). The runtime mount namespace is the
   `host-mntns-id` gadget parameter; the owner sets it to the mount namespace of
@@ -130,11 +134,18 @@ policy:
 ## Known limits
 
 - **Parent bindings.** A bound parent cgroup also judges the armed tasks of
-  its child cgroups that have no binding of their own: OCI `createContainer`
-  and `startContainer` hooks (runc runs them in the container mount
-  namespace before the workload), and an infrastructure (pause) process. A
-  new instance does not arm the tasks that run only under a parent binding;
+  its child cgroups that have no binding of their own, for example an
+  infrastructure (pause) process. OCI hooks are not armed (see the next item).
+  A new instance does not arm the tasks that run only under a parent binding;
   they are judged again when their own cgroup is bound or at their next exec.
+- **Runtime helpers are trusted.** A task forked by an unarmed task inside the
+  container (an OCI hook, or a process a hook leaves behind) is not judged,
+  and neither are its children. Only the runtime or a host root process can
+  create such a task. This was verified with runc, which execs the workload
+  and `exec` commands from runc init itself; a runtime that forks them from a
+  helper inside the container would leave them unjudged. A binding (or
+  owner restart) between `runc create` and `runc start` arms runc init, and
+  the startContainer hooks it then runs are judged.
 
 - **Lost mark at exec.** The exec hook cannot fail the exec, so a task whose
   mark fails there stays unarmed until its next exec. In an enforcing slot this

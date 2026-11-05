@@ -17,6 +17,15 @@
 // runc init for "exec" execs inside the container cgroup but still in the host
 // mount namespace, so it is not armed. The command it execs after joining the
 // container mount namespace is armed.
+//
+// OCI createContainer and startContainer hooks are runtime setup too: runc init
+// forks them inside the container mount namespace and cgroup, before the
+// workload starts. So a task is not armed at exec when its parent is unarmed,
+// outside the host mount namespace, and in the same mount namespace and cgroup
+// as the task (a runtime helper inside the container). The workload and an
+// "exec" command are execed by runc init itself, whose parent (the runtime or
+// its shim) is in the host mount namespace. Such a helper, and a hook, are
+// trusted not to leave a process behind: its children stay unarmed.
 
 #ifndef __ENFORCEMENT_ARMING_H
 #define __ENFORCEMENT_ARMING_H
@@ -126,16 +135,42 @@ static __always_inline __u64 arming_host_mntns(struct task_struct *task)
 	return 0;
 }
 
+// arming_runtime_child reports whether the task was forked by a runtime
+// helper inside the container (an OCI hook, or a hook's child): its parent is
+// unarmed, outside the host mount namespace, and in the same mount namespace
+// and cgroup as the task. A parent with no mount namespace (exiting) does not
+// match, so the task is armed. The parent pointer is a direct BTF access (not
+// CO-RE): task storage needs a trusted task pointer.
+static __always_inline bool arming_runtime_child(struct task_struct *task,
+						 __u64 mntns, __u64 host)
+{
+	struct task_struct *parent = task->real_parent;
+	__u64 parent_mntns;
+
+	if (!parent || arming_task_armed(parent))
+		return false;
+	parent_mntns = BPF_CORE_READ(parent, nsproxy, mnt_ns, ns.inum);
+	if (!parent_mntns || parent_mntns == host || parent_mntns != mntns)
+		return false;
+	return BPF_CORE_READ(parent, cgroups, dfl_cgrp, kn, id) ==
+	       BPF_CORE_READ(task, cgroups, dfl_cgrp, kn, id);
+}
+
 // arming_on_exec runs after a successful exec (bprm_committed_creds).
 // arming_on_exec returns false when a needed mark failed.
 static __always_inline bool arming_on_exec(void)
 {
 	struct task_struct *task = bpf_get_current_task_btf();
 	__u64 mntns = BPF_CORE_READ(task, nsproxy, mnt_ns, ns.inum);
+	__u64 host;
 
 	if (arming_task_armed(task))
 		return true;
-	if (mntns == arming_host_mntns(task))
+	host = arming_host_mntns(task);
+	if (mntns == host)
+		return true;
+	// An unknown host namespace trusts no parent.
+	if (host && arming_runtime_child(task, mntns, host))
 		return true;
 	return arming_mark(task);
 }
