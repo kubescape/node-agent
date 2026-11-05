@@ -49,12 +49,13 @@ const (
 // enforce (common/verdict.h). rule and origin are the names that the event's
 // rule_id and origin_id index ("" when the table has none).
 func NewSectionVerdict(section string, generation, cgroup uint64, mode, pid, slot uint32, isDefault bool, rule, origin, comm string) SectionVerdict {
-	v := SectionVerdict{Section: section, Time: time.Now(), Verdict: api.ActionDeny, Mode: api.RuleEnforce, Rule: rule, Generation: generation, Slot: slot, CgroupID: cgroup, PID: pid, Comm: comm}
+	// Origins is never nil, like exec's Verdict.Origins: [] means none.
+	v := SectionVerdict{Section: section, Time: time.Now(), Verdict: api.ActionDeny, Mode: api.RuleEnforce, Rule: rule, Origins: []string{}, Generation: generation, Slot: slot, CgroupID: cgroup, PID: pid, Comm: comm}
 	if mode == 1 {
 		v.Mode, v.WouldDeny = api.RuleAudit, true
 	}
 	if origin != "" {
-		v.Origins = []string{origin}
+		v.Origins = append(v.Origins, origin)
 	}
 	switch {
 	case rule == SectionRuleUnresolved:
@@ -100,7 +101,7 @@ func (v *SectionVerdict) Attribute(policies []CompiledPolicy) {
 		if len(v.Origins) == 1 {
 			origin = v.Origins[0]
 		}
-		v.Matches = []RuleMatch{{Policy: owner.Identity, Revision: owner.Revision, Name: name, Origin: origin, Action: api.ActionDeny, Mode: v.Mode}}
+		v.Matches = []RuleMatch{{Policy: owner.Identity, Revision: owner.Revision, Name: name, Origin: origin, Origins: append([]string{}, v.Origins...), Action: api.ActionDeny, Mode: v.Mode}}
 		v.MatchesComplete = len(policies) == 1
 	}
 }
@@ -146,7 +147,12 @@ type sectionEvent struct {
 func newSectionEvent(verdict SectionVerdict, binding Binding) sectionEvent {
 	verdict.PolicySet = append([]PolicyRevision(nil), verdict.PolicySet...)
 	verdict.Matches = append([]RuleMatch(nil), verdict.Matches...)
-	verdict.Origins = append([]string(nil), verdict.Origins...)
+	for i := range verdict.Matches {
+		verdict.Matches[i].Origins = append([]string{}, verdict.Matches[i].Origins...)
+	}
+	if verdict.Origins != nil {
+		verdict.Origins = append([]string{}, verdict.Origins...)
+	}
 	binding.PodLabels = cloneLabels(binding.PodLabels)
 	binding.NamespaceLabels = cloneLabels(binding.NamespaceLabels)
 	return sectionEvent{Verdict: verdict, Binding: binding}

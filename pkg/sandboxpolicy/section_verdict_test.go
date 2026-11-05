@@ -47,9 +47,9 @@ func TestNewSectionVerdictModeAndReason(t *testing.T) {
 			}
 		})
 	}
-	// An origin id of 0 (none) leaves the list absent, not [""].
-	if v := NewSectionVerdict(SectionNetwork, 1, 1, 2, 1, 0, true, "default", "", ""); v.Origins != nil {
-		t.Fatalf("absent origin became %v", v.Origins)
+	// An origin id of 0 (none) gives [], like exec, not [""] and not nil.
+	if v := NewSectionVerdict(SectionNetwork, 1, 1, 2, 1, 0, true, "default", "", ""); v.Origins == nil || len(v.Origins) != 0 {
+		t.Fatalf("absent origin became %#v", v.Origins)
 	}
 }
 
@@ -61,7 +61,7 @@ func TestSectionVerdictAttribution(t *testing.T) {
 		if v.Policy != b.Identity || len(v.PolicySet) != 2 || v.PolicySet[1] != (PolicyRevision{Policy: b.Identity, Revision: "rev-b"}) {
 			t.Fatalf("policy %+v set %+v", v.Policy, v.PolicySet)
 		}
-		want := []RuleMatch{{Policy: b.Identity, Revision: "rev-b", Name: "no-mount", Origin: "custom/b/no-mount", Action: api.ActionDeny, Mode: api.RuleAudit}}
+		want := []RuleMatch{{Policy: b.Identity, Revision: "rev-b", Name: "no-mount", Origin: "custom/b/no-mount", Origins: []string{"custom/b/no-mount"}, Action: api.ActionDeny, Mode: api.RuleAudit}}
 		if !reflect.DeepEqual(v.Matches, want) || v.MatchesComplete {
 			t.Fatalf("matches %+v complete %v: another policy may also match", v.Matches, v.MatchesComplete)
 		}
@@ -153,9 +153,9 @@ func TestSectionEventSnapshotsDoNotAlias(t *testing.T) {
 	event := NewFileVerdictEvent(v, binding(), FileTarget{Path: "/data"})
 	v.Origins[0], v.PolicySet[0].Revision = "producer", "producer"
 	copy := event.snapshot().(*FileVerdictEvent)
-	copy.Verdict.Origins[0], copy.Verdict.Matches[0].Name = "receiver", "receiver"
+	copy.Verdict.Origins[0], copy.Verdict.Matches[0].Name, copy.Verdict.Matches[0].Origins[0] = "receiver", "receiver", "receiver"
 	copy.Binding.PodLabels["app"] = "receiver"
-	if event.Verdict.Origins[0] != "custom/a/r" || event.Verdict.PolicySet[0].Revision != "rev" || event.Verdict.Matches[0].Name != "r" || event.Binding.PodLabels["app"] != "test" || copy.Target.Path != "/data" {
+	if event.Verdict.Origins[0] != "custom/a/r" || event.Verdict.Matches[0].Origins[0] != "custom/a/r" || event.Verdict.PolicySet[0].Revision != "rev" || event.Verdict.Matches[0].Name != "r" || event.Binding.PodLabels["app"] != "test" || copy.Target.Path != "/data" {
 		t.Fatal("section event aliases producer or receiver memory")
 	}
 }

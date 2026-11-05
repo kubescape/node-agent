@@ -86,6 +86,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 	identity := func(name string) sandboxpolicy.PolicyIdentity {
 		return sandboxpolicy.PolicyIdentity{Kind: "SandboxPolicy", Namespace: "ns", Name: name, UID: types.UID("uid-" + name), Generation: 4}
 	}
+	origin := func(s string) *string { return &s }
 	mode := func(audit bool) (api.PolicyMode, string) {
 		if audit {
 			return api.ModeAudit, "audit"
@@ -113,7 +114,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 			policy: func(audit bool) sandboxpolicy.CompiledPolicy {
 				m, _ := mode(audit)
 				return sandboxpolicy.CompiledPolicy{Identity: identity("priv"), Revision: string(m), Mode: m, Privilege: &api.PrivilegeSection{Default: api.ActionAllow,
-					Rules: []api.PrivilegeRule{{Rule: api.Rule{Name: "no-mount-ns", Action: api.ActionDeny, Origin: "custom/priv/no-mount-ns"},
+					Rules: []api.PrivilegeRule{{Rule: api.Rule{Name: "no-mount-ns", Action: api.ActionDeny, Origin: origin("custom/priv/no-mount-ns")},
 						Target: api.PrivilegeTarget{Syscall: []string{"unshare"}, Flags: []string{"CLONE_NEWNS"}}}}}}
 			},
 			trigger: func() error { return run("unshare", "-m", "true") },
@@ -241,7 +242,7 @@ func TestSectionVerdictExportKernel(t *testing.T) {
 				if v.Policy != policy.Identity || len(v.PolicySet) != 1 || v.PolicySet[0].Revision != policy.Revision || len(v.Matches) != 1 || !v.MatchesComplete {
 					t.Errorf("audit=%v attribution %+v", audit, v)
 				}
-				if len(v.Origins) != 1 || v.Origins[0] == "" || v.Matches[0].Origin != v.Origins[0] {
+				if len(v.Origins) != 1 || v.Origins[0] == "" || v.Matches[0].Origin != v.Origins[0] || len(v.Matches[0].Origins) != 1 || v.Matches[0].Origins[0] != v.Origins[0] {
 					t.Errorf("audit=%v origins %v matches %+v", audit, v.Origins, v.Matches)
 				}
 				if got.GetContainerID() != id || got.GetPod() != "pod" || v.CgroupID != binding.CgroupID || v.Comm == "" {
