@@ -52,9 +52,9 @@ type Controller struct {
 	lastError    error
 	bindingError error
 	configError  error
-	// classes and classErr are from the last reconcile (see PodPlans).
-	classes  api.PolicyClasses
-	classErr error
+	// classes and classErrors are from the last reconcile (see PodPlans).
+	classes     api.PolicyClasses
+	classErrors map[string]error
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -216,7 +216,7 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 			policies = append(policies, parsePolicy(obj))
 		}
 	}
-	classes, classErr := c.classes, c.classErr
+	classes, classErrors := c.classes, c.classErrors
 	c.mu.Unlock()
 	pods := map[types.UID]Plan{}
 	mixed := map[types.UID]bool{}
@@ -224,7 +224,7 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 		if mixed[b.PodUID] {
 			continue
 		}
-		plan, ok := podContainerPlan(policies, classes, classErr, b)
+		plan, ok := podContainerPlan(policies, classes, classErrors, b)
 		if !ok {
 			mixed[b.PodUID] = true
 			delete(pods, b.PodUID)
@@ -246,7 +246,7 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 // reconcile: an invalid policy that may select it, a class error, too many
 // policies, or a policy that does not compile without a ContainerProfile
 // resolver (a policy with sources depends on the profile, so it is refused).
-func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErr error, b Binding) (Plan, bool) {
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, b Binding) (Plan, bool) {
 	var plan Plan
 	selected := 0
 	for _, p := range policies {
@@ -260,7 +260,7 @@ func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, class
 			continue
 		}
 		selected++
-		if classErr != nil {
+		if policyClassError(p, classErrors) != nil {
 			return Plan{}, false
 		}
 		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
@@ -274,6 +274,26 @@ func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, class
 		return Plan{}, false
 	}
 	return plan, true
+}
+
+// policyClassError returns the errors of the shared path classes that p's exec
+// rules use, as reconcile does (a class that p defines itself is not shared).
+func policyClassError(p desiredPolicy, classErrors map[string]error) error {
+	if p.spec.Exec == nil {
+		return nil
+	}
+	var err error
+	for _, rule := range p.spec.Exec.Rules {
+		for _, name := range rule.Target.PathClass {
+			if p.spec.Classes != nil {
+				if _, local := p.spec.Classes.PathClasses[name]; local {
+					continue
+				}
+			}
+			err = errors.Join(err, classErrors[name])
+		}
+	}
+	return err
 }
 
 // privilegePlans returns the plan of each container, in order (possibly empty).
@@ -483,7 +503,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			classes.PathClasses[name] = paths
 		}
 	}
-	c.classes, c.classErr = classes, classErr
+	c.classes, c.classErrors = classes, classErrors
 	policyErrors := make(map[string]error)
 	for _, p := range policies {
 		if p.err != nil {
