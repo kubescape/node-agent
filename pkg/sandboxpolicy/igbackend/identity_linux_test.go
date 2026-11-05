@@ -139,3 +139,30 @@ func TestLinuxLeaseRejectsCgroupMovementBeforeNamespaceAccess(t *testing.T) {
 		})
 	}
 }
+
+func TestForeignCgroupNamespace(t *testing.T) {
+	link := func(target string) string {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "1", "ns"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(root, "1", "ns", "cgroup")); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	// In our own cgroup namespace there is nothing to enter.
+	if ns, err := foreignCgroupNamespace(link("/proc/thread-self/ns/cgroup")); err != nil || ns != nil {
+		t.Fatalf("own namespace: ns=%v err=%v", ns, err)
+	}
+	// A different namespace is kept open for Check.
+	ns, err := foreignCgroupNamespace(link("/proc/thread-self/ns/mnt"))
+	if err != nil || ns == nil {
+		t.Fatalf("foreign namespace: ns=%v err=%v", ns, err)
+	}
+	ns.Close()
+	// A missing host namespace fails closed.
+	if _, err := foreignCgroupNamespace(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("missing host cgroup namespace accepted")
+	}
+}

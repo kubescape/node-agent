@@ -122,6 +122,9 @@ type Config struct {
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
 	EnableSandboxPolicy            bool                                 `mapstructure:"sandboxPolicyEnabled"`
 	SandboxPolicyImage             string                               `mapstructure:"sandboxPolicyImage"`
+	SandboxPolicyPrivilegeImage    string                               `mapstructure:"sandboxPolicyPrivilegeImage"`
+	SandboxPolicyNetworkImage      string                               `mapstructure:"sandboxPolicyNetworkImage"`
+	SandboxPolicyFileImage         string                               `mapstructure:"sandboxPolicyFileImage"`
 	SandboxPolicyContainerdSocket  string                               `mapstructure:"sandboxPolicyContainerdSocket"`
 	SandboxPolicyControlRoot       string                               `mapstructure:"sandboxPolicyControlRoot"`
 	SandboxPolicyMaxOwners         uint64                               `mapstructure:"sandboxPolicyMaxOwners"`
@@ -226,6 +229,9 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 
 	viper.SetDefault("sandboxPolicyEnabled", false)
 	viper.SetDefault("sandboxPolicyImage", "")
+	viper.SetDefault("sandboxPolicyPrivilegeImage", "")
+	viper.SetDefault("sandboxPolicyNetworkImage", "")
+	viper.SetDefault("sandboxPolicyFileImage", "")
 	viper.SetDefault("sandboxPolicyContainerdSocket", "")
 	viper.SetDefault("sandboxPolicyControlRoot", "")
 	viper.SetDefault("sandboxPolicyMaxOwners", 4)

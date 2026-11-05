@@ -1,0 +1,1085 @@
+//go:build linux && file_kernel
+
+// Copyright 2026 The Kubescape Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package runtime
+
+// Opt-in test of the gadget with Inspektor Gadget alone: it starts the gadget
+// from an OCI archive and binds Docker containers through this package's
+// operator. Requires root, BPF LSM, cgroup v2, an overlay root file system,
+// and disposable containers of a Debian-like image (sh, coreutils), started
+// before the test:
+//
+//	FILE_KERNEL_TEST=1
+//	FILE_IMAGE_ARCHIVE       OCI archive from `ig image export`
+//	FILE_IMAGE               image name in the archive
+//	FILE_CONTAINER_ID        full ID of the container to bind; it should have a
+//	                         healthcheck such as `cat /etc/hostname >/dev/null`
+//	FILE_CGROUP_PATH         its cgroup v2 path, for example /system.slice/docker-<id>.scope
+//	FILE_OTHER_CONTAINER_ID  a container that is never bound
+//
+// Optional: FILE_SETXATTR_ALLOW_ONE (see start). FILE_BENCH_BINARY, a static
+// open+close loop in the bound container (arguments: iterations, path; output:
+// ns per open+close), measures the cost
+// with no program loaded, unbound, and bound to a ~50 pattern policy.
+// FILE_HELPER_BINARY, a static helper in the bound container (`exchange A B`:
+// renameat2 with RENAME_EXCHANGE; `chroot-read DIR PATH`: chroot, then read;
+// `setcap P`, `setacl P`, `setuser P`, `setsec P`: setxattr of
+// security.capability, system.posix_acl_access (u::rw,g::r,o::rw), user.r2,
+// security.test; `tmpfile-link DIR N`:
+// an O_TMPFILE file in DIR linked to N through /proc/self/fd), runs the
+// exchange, chroot, extended attribute and O_TMPFILE cases; the same path in
+// the unbound container, and python3 on the host, run the security.*
+// attribute case.
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/btf"
+	"github.com/cilium/ebpf/link"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+	apihelpers "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api-helpers"
+	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
+	"golang.org/x/sys/unix"
+	orasoci "oras.land/oras-go/v2/content/oci"
+
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/common/enforcement"
+	filepolicy "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_file/policy"
+)
+
+type verdict struct {
+	rule              string
+	deny, mode, isDef uint32
+	access            uint32 // enum file_access; anyAccess: not compared
+	path              string
+	fromImage         uint32
+}
+
+// Values of enum file_access in the verdict event.
+const (
+	accessRead uint32 = iota
+	accessWrite
+	accessCreate
+	accessDelete
+	accessRename
+	accessChmod
+	accessMoveSource
+	accessNewName
+	anyAccess = 99
+)
+
+type kernelFixture struct {
+	ctx       context.Context
+	id, other string
+	container ContainerIdentity
+	compiled  filepolicy.Compiled
+	bindings  *enforcement.Bindings
+	mu        sync.Mutex
+	verdicts  []verdict
+}
+
+func identity(t *testing.T, runtime, id, cgroupPath string) ContainerIdentity {
+	t.Helper()
+	var st unix.Stat_t
+	if err := unix.Stat(filepath.Join("/sys/fs/cgroup", cgroupPath), &st); err != nil {
+		t.Fatal(err)
+	}
+	return ContainerIdentity{Runtime: runtime, ID: id, CgroupID: st.Ino, CgroupPath: cgroupPath}
+}
+
+func newKernelFixture(t *testing.T) *kernelFixture {
+	t.Helper()
+	if os.Getenv("FILE_KERNEL_TEST") != "1" {
+		t.Skip("explicit disposable kernel fixture opt-in required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	t.Cleanup(cancel)
+	id := os.Getenv("FILE_CONTAINER_ID")
+	return &kernelFixture{ctx: ctx, id: id, other: os.Getenv("FILE_OTHER_CONTAINER_ID"),
+		container: identity(t, "docker", id, os.Getenv("FILE_CGROUP_PATH"))}
+}
+
+func (f *kernelFixture) start(t *testing.T, compiled filepolicy.Compiled) {
+	t.Helper()
+	f.compiled = compiled
+	store, err := orasoci.NewFromTar(f.ctx, os.Getenv("FILE_IMAGE_ARCHIVE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := local.New()
+	if err := rt.Init(nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { rt.Close() })
+	manager, err := instancemanager.New(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := ocihandler.New()
+	params := apihelpers.ToParamDescs(handler.GlobalParams()).ToParams()
+	if err := params.Set("allow-enforcement", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.Init(params); err != nil {
+		t.Fatal(err)
+	}
+	events := simple.New("file-test-verdicts", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
+		var err error
+		if f.bindings, err = GetBindings(gc); err != nil {
+			return err
+		}
+		ds := gc.GetDataSources()["verdict"]
+		ruleID, deny, mode, isDef := ds.GetField("rule_id"), ds.GetField("deny"), ds.GetField("mode"), ds.GetField("is_default")
+		access, path, fromImage := ds.GetField("access_raw"), ds.GetField("path"), ds.GetField("from_image")
+		return ds.Subscribe(func(_ datasource.DataSource, data datasource.Data) error {
+			var v verdict
+			r, _ := ruleID.Uint32(data)
+			v.deny, _ = deny.Uint32(data)
+			v.mode, _ = mode.Uint32(data)
+			v.isDef, _ = isDef.Uint32(data)
+			v.fromImage, _ = fromImage.Uint32(data)
+			v.access, _ = access.Uint32(data)
+			v.path, _ = path.String(data)
+			if int(r) < len(f.compiled.RuleNames) {
+				v.rule = f.compiled.RuleNames[r]
+			}
+			f.mu.Lock()
+			f.verdicts = append(f.verdicts, v)
+			f.mu.Unlock()
+			return nil
+		}, 100)
+	}))
+	values, err := SetxattrParams()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Negative controls: FILE_SETXATTR_ALLOW_ONE=false forces the value,
+	// omit passes no value (an image older than the parameter).
+	switch v := os.Getenv("FILE_SETXATTR_ALLOW_ONE"); v {
+	case "":
+	case "omit":
+		values = nil
+	default:
+		values[SetxattrAllowOneParam] = v
+	}
+	t.Logf("gadget parameters: %v", values)
+	desired := &api.GadgetInstance{Id: "file-kernel-test", GadgetConfig: &api.GadgetRunRequest{Version: api.VersionGadgetRunProtocol,
+		ImageName: os.Getenv("FILE_IMAGE"), ParamValues: values}}
+	if err := manager.StartGadget(f.ctx, desired, gadgetcontext.WithOrasReadonlyTarget(store),
+		gadgetcontext.WithAdditionalDataOperators(handler, New(), events),
+		WithConfig(Config{Policy: compiled})); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { manager.StopGadget(context.Background(), desired.Id) })
+}
+
+// sh runs a shell command in a container and returns its exit code and output.
+func (f *kernelFixture) sh(t *testing.T, container, cmd string) (int, string) {
+	t.Helper()
+	out, err := exec.CommandContext(f.ctx, "docker", "exec", container, "sh", "-c", cmd).CombinedOutput()
+	code := 0
+	if err != nil {
+		ee, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("docker exec: %v: %s", err, out)
+		}
+		code = ee.ExitCode()
+	}
+	return code, strings.TrimSpace(string(out))
+}
+
+// ok expects the command to succeed.
+func (f *kernelFixture) ok(t *testing.T, container, cmd string) string {
+	t.Helper()
+	code, out := f.sh(t, container, cmd)
+	t.Logf("%.12s: %s -> rc %d %s", container, cmd, code, out)
+	if code != 0 {
+		t.Errorf("%s: rc %d: %s", cmd, code, out)
+	}
+	return out
+}
+
+// denied expects the command to fail with EPERM.
+func (f *kernelFixture) denied(t *testing.T, container, cmd string) {
+	t.Helper()
+	code, out := f.sh(t, container, cmd)
+	t.Logf("%.12s: %s -> rc %d %s", container, cmd, code, out)
+	if code == 0 || !strings.Contains(out, "Operation not permitted") {
+		t.Errorf("%s: want EPERM, got rc %d: %s", cmd, code, out)
+	}
+}
+
+// waitVerdict waits for a verdict event that matches want (fields left empty
+// in want are not compared, except deny and mode).
+func (f *kernelFixture) waitVerdict(t *testing.T, want verdict) {
+	t.Helper()
+	for i := 0; i < 30; i++ {
+		f.mu.Lock()
+		for _, v := range f.verdicts {
+			if v.rule == want.rule && v.deny == want.deny && v.mode == want.mode &&
+				(want.access == anyAccess || v.access == want.access) && (want.path == "" || v.path == want.path) &&
+				(want.fromImage == 0 || v.fromImage == 1) {
+				f.mu.Unlock()
+				return
+			}
+		}
+		f.mu.Unlock()
+		time.Sleep(100 * time.Millisecond)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t.Errorf("no verdict event %+v; have %+v", want, f.verdicts)
+}
+
+// labDocument is the policy of the matrix: write default deny with a
+// workspace, a read deny, agent configuration and image files protected.
+func labDocument(name, mode string) filepolicy.Document {
+	all := []string{filepolicy.AccessWrite, filepolicy.AccessCreate, filepolicy.AccessDelete, filepolicy.AccessRename, filepolicy.AccessChmod}
+	deny := filepolicy.Default{Action: "deny"}
+	return filepolicy.Document{Version: 1, Name: name, Policy: filepolicy.Policy{Mode: mode, File: filepolicy.Section{
+		Defaults: map[string]filepolicy.Default{filepolicy.AccessRead: {Action: "allow"}, filepolicy.AccessWrite: deny,
+			filepolicy.AccessCreate: deny, filepolicy.AccessDelete: deny, filepolicy.AccessRename: deny, filepolicy.AccessChmod: deny},
+		Rules: []filepolicy.Rule{
+			{Name: "workspace", Action: "allow", Access: all, Paths: []string{"/work/**", "/tmp/**"}},
+			{Name: "etc", Action: "allow", Access: all, Paths: []string{"/etc/**"}},
+			{Name: "devices", Action: "allow", Access: []string{filepolicy.AccessRead, filepolicy.AccessWrite},
+				Paths: []string{"/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom", "/dev/tty", "/dev/ptmx", "/dev/pts/**"}},
+			{Name: "secret-read", Action: "deny", Access: []string{filepolicy.AccessRead},
+				Paths: []string{"/etc/shadow", "/work/secret/**", "/work/deep/x/**"}},
+			{Name: "agent-config", Action: "deny", Access: []string{filepolicy.AccessWrite, filepolicy.AccessCreate, filepolicy.AccessDelete, filepolicy.AccessRename},
+				Paths: []string{"**/.claude/**"}, Except: []string{"/work/.claude/ok"}},
+			{Name: "image", Action: "deny", Access: []string{filepolicy.AccessWrite, filepolicy.AccessDelete, filepolicy.AccessRename}, FromImage: true},
+		},
+	}}}
+}
+
+// moveDocuments are the policies of the move cases (review findings 3 to 5):
+// a chmod deny on /etc/**, a pathless delete deny (the owner writes /**), and
+// a write default deny with rename allowed and a writable /tmp.
+func moveDocuments() []filepolicy.Document {
+	open := func(name string, rules ...filepolicy.Rule) filepolicy.Document {
+		d := filepolicy.Document{Version: 1, Name: name, Policy: filepolicy.Policy{Mode: "enforce", File: filepolicy.Section{
+			Defaults: map[string]filepolicy.Default{}, Rules: rules}}}
+		for _, k := range filepolicy.AccessKinds {
+			d.Policy.File.Defaults[k] = filepolicy.Default{Action: "allow"}
+		}
+		return d
+	}
+	writeDeny := open("write-deny",
+		filepolicy.Rule{Name: "tmp", Action: "allow", Access: []string{filepolicy.AccessCreate, filepolicy.AccessWrite, filepolicy.AccessDelete},
+			Paths: []string{"/tmp/**"}},
+		filepolicy.Rule{Name: "devices", Action: "allow", Access: []string{filepolicy.AccessRead, filepolicy.AccessWrite}, Paths: []string{"/dev/null"}})
+	writeDeny.Policy.File.Defaults[filepolicy.AccessWrite] = filepolicy.Default{Action: "deny"}
+	return []filepolicy.Document{
+		open("chmod-etc", filepolicy.Rule{Name: "nochmod", Action: "deny", Access: []string{filepolicy.AccessChmod}, Paths: []string{"/etc/**"}}),
+		open("no-delete", filepolicy.Rule{Name: "nodel", Action: "deny", Access: []string{filepolicy.AccessDelete}, Paths: []string{"/**"}}),
+		writeDeny,
+		// Review 2 findings 3 and 4: new names.
+		open("new-names",
+			filepolicy.Rule{Name: "aws", Action: "deny", Access: []string{filepolicy.AccessWrite, filepolicy.AccessCreate}, Paths: []string{"/root/.aws/config"}},
+			filepolicy.Rule{Name: "preload", Action: "deny", Access: []string{filepolicy.AccessWrite}, Paths: []string{"/etc/ld.so.preload"}}),
+	}
+}
+
+// Slots of the move documents.
+const (
+	slotChmodEtc = 3 + iota
+	slotNoDelete
+	slotWriteDeny
+	slotNewNames
+)
+
+// rules50 is the ~50 pattern policy of the cost measurement.
+func rules50(t *testing.T) filepolicy.Document {
+	t.Helper()
+	data, err := os.ReadFile("../policy/testdata/rules50.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := filepolicy.Document{Version: 1, Name: "rules50", Policy: filepolicy.Policy{Mode: "enforce", File: filepolicy.Section{Defaults: map[string]filepolicy.Default{}}}}
+	for _, k := range filepolicy.AccessKinds {
+		d.Policy.File.Defaults[k] = filepolicy.Default{Action: "allow"}
+	}
+	d.Policy.File.Defaults[filepolicy.AccessWrite] = filepolicy.Default{Action: "deny"}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 || strings.HasPrefix(line, "#") {
+			continue
+		}
+		kinds := map[string][]string{"rw": {filepolicy.AccessRead, filepolicy.AccessWrite}, "read": {filepolicy.AccessRead}, "write": {filepolicy.AccessWrite}}[f[1]]
+		d.Policy.File.Rules = append(d.Policy.File.Rules, filepolicy.Rule{Name: fmt.Sprint(len(d.Policy.File.Rules)), Action: f[0], Access: kinds, Paths: []string{f[2]}})
+	}
+	return d
+}
+
+const benchPath = "/work/project/src/main/file.txt"
+
+// bench returns the median ns per open+close of 5 runs in the bound container.
+func (f *kernelFixture) bench(t *testing.T) float64 {
+	t.Helper()
+	bin := os.Getenv("FILE_BENCH_BINARY")
+	var runs []float64
+	for i := 0; i < 5; i++ {
+		out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, bin, "1000000", benchPath).CombinedOutput()
+		if err != nil {
+			t.Fatalf("bench: %v: %s", err, out)
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+		if err != nil {
+			t.Fatalf("bench output %q", out)
+		}
+		runs = append(runs, v)
+	}
+	sort.Float64s(runs)
+	return runs[2]
+}
+
+func TestGadgetWithInspektorGadgetAlone(t *testing.T) {
+	f := newKernelFixture(t)
+
+	// Fixture files, made before the gadget loads: the bound container's
+	// writable layer only.
+	f.ok(t, f.id, "mkdir -p /work/secret /work/deep/x /work/.claude /work/project/src/main && echo k > /work/secret/key && "+
+		"echo f > /work/deep/x/f && echo u > /var/upper.txt && echo b > /work/b && echo a > /work/a && "+
+		"echo s > /work/.claude/settings.json && echo o > /work/.claude/ok && echo m > "+benchPath+" && rm -f /newfile && "+
+		"echo v > /dev/shm/volume-file")
+	var baseline float64
+	if os.Getenv("FILE_BENCH_BINARY") != "" {
+		baseline = f.bench(t)
+		t.Logf("BENCH no program: %.0f ns per open+close", baseline)
+	}
+
+	moves := moveDocuments()
+	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{
+		{labDocument("lab", "enforce")}, {labDocument("lab-audit", "audit")}, {rules50(t)}, {moves[0]}, {moves[1]}, {moves[2]}, {moves[3]}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// fromImage needs the overlay inode layout the program reads.
+	if why := FromImageUnavailable(); why != "" {
+		t.Errorf("fromImage is unavailable on this kernel: %s", why)
+	}
+	f.start(t, compiled)
+	helper := os.Getenv("FILE_HELPER_BINARY")
+
+	if os.Getenv("FILE_BENCH_BINARY") != "" {
+		unbound := f.bench(t)
+		t.Logf("BENCH loaded, not bound: %.0f ns (%+.0f)", unbound, unbound-baseline)
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 2}); err != nil {
+			t.Fatal(err)
+		}
+		boundNs := f.bench(t)
+		t.Logf("BENCH bound, 51 rules: %.0f ns (%+.0f over not bound)", boundNs, boundNs-unbound)
+	}
+
+	// Healthchecks from here on run under slot 0 (the bench policy has no
+	// /dev/null allow).
+	bound := time.Now()
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("read deny", func(t *testing.T) {
+		f.denied(t, f.id, "cat /etc/shadow")
+		f.ok(t, f.id, "cat /etc/passwd >/dev/null")
+		f.waitVerdict(t, verdict{rule: "lab/secret-read", deny: 1, mode: 2, access: accessRead, path: "/etc/shadow"})
+	})
+	t.Run("write default deny, workspace allow", func(t *testing.T) {
+		f.denied(t, f.id, "echo x >> /var/upper.txt")
+		f.ok(t, f.id, "echo x >> /work/a && echo y > /tmp/t")
+		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessWrite, path: "/var/upper.txt"})
+	})
+	t.Run("create denied at path_mknod", func(t *testing.T) {
+		f.denied(t, f.id, "echo x > /newfile")
+		f.denied(t, f.id, "mkdir /newdir")
+		f.denied(t, f.id, "mkfifo /newfifo")
+		f.denied(t, f.id, "ln -s /etc/passwd /newlink")
+		f.ok(t, f.id, "test ! -e /newfile && test ! -e /newdir && test ! -e /newfifo && test ! -L /newlink")
+		f.ok(t, f.id, "echo x > /work/new && mkdir /work/newdir")
+		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessCreate, path: "/newfile"})
+	})
+	t.Run("delete", func(t *testing.T) {
+		f.denied(t, f.id, "rm /var/upper.txt")
+		f.ok(t, f.id, "rm /work/new && rmdir /work/newdir")
+		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessDelete, path: "/var/upper.txt"})
+	})
+	t.Run("rename both ends", func(t *testing.T) {
+		f.denied(t, f.id, "mv /work/b /var/b")         // new name
+		f.denied(t, f.id, "mv /var/upper.txt /work/u") // old name
+		f.ok(t, f.id, "mv /work/b /work/c && mv /work/c /work/b")
+		f.ok(t, f.id, "test -e /work/b && test -e /var/upper.txt && test ! -e /var/b && test ! -e /work/u")
+	})
+	t.Run("chmod", func(t *testing.T) {
+		f.denied(t, f.id, "chmod 600 /var/upper.txt")
+		f.ok(t, f.id, "chmod 600 /work/a")
+		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessChmod, path: "/var/upper.txt"})
+	})
+	t.Run("hard link and rename source", func(t *testing.T) {
+		// The workspace allows create and rename there; the old name is
+		// judged as a read too, and the read deny refuses a second name for
+		// the protected file.
+		f.denied(t, f.id, "ln /work/secret/key /work/key2")
+		f.denied(t, f.id, "mv /work/secret/key /work/key3")
+		f.ok(t, f.id, "test ! -e /work/key2 && test ! -e /work/key3")
+		f.ok(t, f.id, "ln /work/a /work/a2 && rm /work/a2")
+		f.waitVerdict(t, verdict{rule: "lab/secret-read", deny: 1, mode: 2, access: accessRead, path: "/work/secret/key"})
+	})
+	t.Run("parent directory rename guard", func(t *testing.T) {
+		// /work/secret matches /work/secret/** (read); /work/deep is a
+		// parent written in /work/deep/x/** (the guard).
+		f.denied(t, f.id, "mv /work/secret /work/s2")
+		f.denied(t, f.id, "mv /work/deep /work/deep2")
+		f.ok(t, f.id, "mkdir /work/plain && mv /work/plain /work/plain2 && rmdir /work/plain2")
+		f.waitVerdict(t, verdict{rule: "lab/secret-read", deny: 1, mode: 2, access: accessMoveSource, path: "/work/deep"})
+	})
+	t.Run("agent config except", func(t *testing.T) {
+		f.denied(t, f.id, "echo x >> /work/.claude/settings.json")
+		f.ok(t, f.id, "echo x >> /work/.claude/ok")
+	})
+	t.Run("fromImage", func(t *testing.T) {
+		// /etc is writable by rule; its image files are not.
+		f.denied(t, f.id, "echo x >> /etc/issue")
+		f.denied(t, f.id, ": > /etc/debian_version")
+		f.ok(t, f.id, "echo x > /etc/upper.conf && echo y >> /etc/upper.conf")
+		f.waitVerdict(t, verdict{rule: "lab/image", deny: 1, mode: 2, access: accessWrite, path: "/etc/issue", fromImage: 1})
+	})
+	t.Run("overlay copy-up keeps fromImage", func(t *testing.T) {
+		// chmod of an image file under an allow: overlayfs copies it up with
+		// internal opens in this task, which are not judged.
+		f.ok(t, f.id, "chmod 600 /etc/issue.net && test \"$(stat -c %a /etc/issue.net)\" = 600")
+		// The copy keeps its lower-layer origin: still an image file.
+		f.denied(t, f.id, "echo x >> /etc/issue.net")
+		f.waitVerdict(t, verdict{rule: "lab/image", deny: 1, mode: 2, access: accessWrite, path: "/etc/issue.net", fromImage: 1})
+		// touch (utimensat, no hook) copies up too.
+		f.ok(t, f.id, "touch -c /etc/debian_version")
+		f.denied(t, f.id, "echo x >> /etc/debian_version")
+		f.waitVerdict(t, verdict{rule: "lab/image", deny: 1, mode: 2, access: accessWrite, path: "/etc/debian_version", fromImage: 1})
+		// A file created in the container is not an image file.
+		f.ok(t, f.id, "echo x > /etc/created.conf && echo y >> /etc/created.conf")
+	})
+	t.Run("file capabilities and ACLs are chmod", func(t *testing.T) {
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		// Review 2 finding 2: setfacl and setcap change what a file allows
+		// without path_chmod. chmod is denied by default here.
+		f.denied(t, f.id, helper+" setacl /var/upper.txt")
+		f.denied(t, f.id, helper+" setcap /var/upper.txt")
+		f.ok(t, f.id, "test \"$(stat -c %a /var/upper.txt)\" = 644")
+		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessChmod, path: "/var/upper.txt"})
+		// Other extended attributes are not judged.
+		f.ok(t, f.id, helper+" setuser /var/upper.txt")
+		// Allowed in the workspace and in /etc (rule etc), where an image
+		// file is copied up: overlayfs' inner calls on the upper file
+		// system are not judged.
+		f.mu.Lock()
+		before := len(f.verdicts)
+		f.mu.Unlock()
+		f.ok(t, f.id, helper+" setacl /work/a && test \"$(stat -c %a /work/a)\" = 646 && "+helper+" setcap /work/a")
+		f.ok(t, f.id, helper+" setacl /etc/host.conf && test \"$(stat -c %a /etc/host.conf)\" = 646 && "+helper+" setcap /etc/bash.bashrc")
+		time.Sleep(300 * time.Millisecond)
+		f.mu.Lock()
+		for _, v := range f.verdicts[before:] {
+			t.Errorf("verdict for an allowed attribute change: %+v", v)
+		}
+		f.mu.Unlock()
+	})
+	t.Run("security attributes keep the capability check", func(t *testing.T) {
+		// Review 3 finding 1: before Linux 6.11 the kernel checks
+		// CAP_SYS_ADMIN for security.* names only when the inode_setxattr
+		// hooks return 1. Neither container has CAP_SYS_ADMIN, and the
+		// name is not judged: EPERM comes from the capability check, for a
+		// bound task, a task of an unbound container and a host task.
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		spec, err := btf.LoadKernelSpec()
+		if err != nil {
+			t.Fatal(err)
+		}
+		old, err := oldSetxattrSemantics(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if one, err := SetxattrAllowOne(); err != nil {
+			t.Fatal(err)
+		} else if old && !one {
+			t.Skip("old setxattr hook semantics and a verifier that rejects a return of 1: " +
+				"the kernel skips the capability check of security.* names whenever BPF LSM is active")
+		}
+		f.mu.Lock()
+		before := len(f.verdicts)
+		f.mu.Unlock()
+		f.denied(t, f.id, helper+" setsec /work/a")
+		f.denied(t, f.id, helper+" setsec /usr/lib/os-release")
+		if code, _ := f.sh(t, f.other, "test -x "+helper); code == 0 {
+			f.denied(t, f.other, helper+" setsec /etc/hostname")
+		} else {
+			t.Errorf("the helper is not in the unbound container")
+		}
+		dir, err := os.MkdirTemp("/var/tmp", "file-setsec-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(dir)
+		owned, rootOwned := filepath.Join(dir, "owned"), filepath.Join(dir, "root-666")
+		for _, p := range []string{owned, rootOwned} {
+			if err := os.WriteFile(p, nil, 0o666); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Chmod(rootOwned, 0o666); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chown(owned, 65534, 65534); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []string{owned, rootOwned} {
+			cmd := exec.CommandContext(f.ctx, "python3", "-c", "import os,sys; os.setxattr(sys.argv[1], 'security.test', b'1')", p)
+			cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+			out, err := cmd.CombinedOutput()
+			t.Logf("host uid 65534: setxattr security.test %s -> %v %s", p, err, strings.TrimSpace(string(out)))
+			if err == nil || !strings.Contains(string(out), "Operation not permitted") {
+				t.Errorf("host uid 65534: setxattr security.test %s: want EPERM, got %v: %s", p, err, out)
+			}
+		}
+		// Root in the bound container keeps user.* and security.capability.
+		f.ok(t, f.id, helper+" setuser /work/a && "+helper+" setcap /work/a")
+		time.Sleep(300 * time.Millisecond)
+		f.mu.Lock()
+		for _, v := range f.verdicts[before:] {
+			t.Errorf("verdict for a security attribute: %+v", v)
+		}
+		f.mu.Unlock()
+	})
+	t.Run("chroot is an unresolved path", func(t *testing.T) {
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		// In a chroot to /etc, /etc/shadow is /shadow: the path cannot be
+		// trusted, so the read takes the most limiting read rule.
+		f.denied(t, f.id, helper+" chroot-read /etc /shadow")
+		f.waitVerdict(t, verdict{rule: "unresolved-path", deny: 1, mode: 2, access: accessRead})
+		f.ok(t, f.id, helper+" chroot-read / /etc/hostname")
+	})
+	t.Run("unresolved path fails closed", func(t *testing.T) {
+		// 16 levels of 250-byte names fit in 4096 bytes, the 17th does not.
+		code, out := f.sh(t, f.id, `n=$(printf 'd%.0s' $(seq 250)); cd /work; i=0; while [ $i -lt 17 ]; do mkdir $n 2>&1 || break; cd $n; i=$((i+1)); done; echo levels=$i`)
+		t.Logf("long path: rc %d %s", code, out)
+		if !strings.Contains(out, "levels=16") || !strings.Contains(out, "Operation not permitted") {
+			t.Errorf("want 16 levels then EPERM, got %s", out)
+		}
+		f.waitVerdict(t, verdict{rule: "unresolved-path", deny: 1, mode: 2, access: accessCreate})
+	})
+	t.Run("exec and healthcheck under write default deny", func(t *testing.T) {
+		f.ok(t, f.id, "true")
+		f.ok(t, f.id, "echo hi >/dev/null")
+		out, err := exec.CommandContext(f.ctx, "docker", "inspect", "-f", "{{if .State.Health}}{{.State.Health.Status}}{{end}}", f.id).CombinedOutput()
+		if err != nil || strings.TrimSpace(string(out)) == "" {
+			t.Skipf("no healthcheck on the bound container: %s", out)
+		}
+		since := bound
+		time.Sleep(7 * time.Second)
+		out, _ = exec.CommandContext(f.ctx, "docker", "inspect", "-f",
+			`{{.State.Health.Status}}{{range .State.Health.Log}} {{.Start.UnixNano}}:{{.ExitCode}}{{end}}`, f.id).CombinedOutput()
+		t.Logf("health: %s", out)
+		fields := strings.Fields(string(out))
+		if len(fields) == 0 || fields[0] != "healthy" {
+			t.Errorf("container is not healthy: %s", out)
+		}
+		checked := 0
+		for _, entry := range fields[1:] {
+			start, code, _ := strings.Cut(entry, ":")
+			s, _ := strconv.ParseInt(start, 10, 64)
+			if s > since.UnixNano() {
+				checked++
+				if code != "0" {
+					t.Errorf("healthcheck failed while bound: %s", entry)
+				}
+			}
+		}
+		if checked == 0 {
+			t.Error("no healthcheck ran while bound")
+		}
+		f.mu.Lock()
+		for _, v := range f.verdicts {
+			if v.path == "/dev/null" {
+				t.Logf("verdict on /dev/null: %+v", v)
+			}
+		}
+		f.mu.Unlock()
+	})
+	t.Run("unselected container", func(t *testing.T) {
+		f.ok(t, f.other, "cat /etc/shadow >/dev/null && echo x > /newfile && rm /newfile && echo x >> /etc/issue")
+	})
+	t.Run("chmod deny on /etc/** keeps sed -i", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: slotChmodEtc}); err != nil {
+			t.Fatal(err)
+		}
+		f.ok(t, f.id, "echo a > /etc/sedtest && sed -i s/a/b/ /etc/sedtest && grep -q b /etc/sedtest && mv /etc/sedtest /etc/sedtest2")
+		f.denied(t, f.id, "chmod 600 /etc/sedtest2")
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		f.denied(t, f.id, helper+" setacl /etc/sedtest2")
+		f.denied(t, f.id, helper+" setcap /etc/sedtest2")
+		f.denied(t, f.id, helper+" setacl /etc/passwd") // an image file: denied before any copy-up
+		f.waitVerdict(t, verdict{rule: "chmod-etc/nochmod", deny: 1, mode: 2, access: accessChmod, path: "/etc/passwd", fromImage: 1})
+		// Outside /etc an image file is copied up. The program judges the
+		// overlay call and skips overlayfs' inner calls on the upper file
+		// system; judged as unresolved, they would take the chmod deny.
+		f.ok(t, f.id, helper+" setcap /usr/bin/tail && "+helper+" setacl /usr/lib/os-release && test \"$(stat -c %a /usr/lib/os-release)\" = 646")
+		f.ok(t, f.id, "tail -n1 /etc/sedtest2")
+		// A volume (the /dev/shm tmpfs) is another file system: unresolved.
+		f.denied(t, f.id, helper+" setcap /dev/shm/volume-file")
+		f.waitVerdict(t, verdict{rule: "unresolved-path", deny: 1, mode: 2, access: accessChmod})
+	})
+	t.Run("pathless delete deny keeps rename and link", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: slotNoDelete}); err != nil {
+			t.Fatal(err)
+		}
+		f.ok(t, f.id, "echo a > /work/m1 && mv /work/m1 /work/m2 && ln /work/m2 /work/m3")
+		f.denied(t, f.id, "rm /work/m3")
+	})
+	t.Run("move out of a write default deny", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: slotWriteDeny}); err != nil {
+			t.Fatal(err)
+		}
+		// Rename is allowed by default; the old name is not writable.
+		f.denied(t, f.id, "ln /etc/passwd /tmp/p")
+		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 2, access: accessWrite, path: "/etc/passwd"})
+		f.ok(t, f.id, "test ! -e /tmp/p && echo e > /tmp/e1 && ln /tmp/e1 /tmp/e2 && mv /tmp/e2 /tmp/e3")
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		f.denied(t, f.id, "echo evil > /tmp/evil && "+helper+" exchange /tmp/evil /etc/passwd")
+		f.ok(t, f.id, "grep -q '^root:' /etc/passwd && grep -qx evil /tmp/evil")
+		f.ok(t, f.id, "echo f > /tmp/f && "+helper+" exchange /tmp/evil /tmp/f && grep -qx evil /tmp/f")
+	})
+	t.Run("new names: guard and write", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: slotNewNames}); err != nil {
+			t.Fatal(err)
+		}
+		// Review 2 finding 3: [write, create] denied on /root/.aws/config. A
+		// directory with its own config moved or linked onto /root/.aws.
+		f.denied(t, f.id, "mkdir -p /tmp/aws && echo '[default]' > /tmp/aws/config && mv /tmp/aws /root/.aws")
+		f.waitVerdict(t, verdict{rule: "new-names/aws", deny: 1, mode: 2, access: accessNewName, path: "/root/.aws"})
+		f.denied(t, f.id, "ln -s /tmp/aws /root/.aws")
+		f.ok(t, f.id, "test ! -e /root/.aws && test ! -L /root/.aws")
+		// An empty /root/.aws replaced by the directory.
+		f.denied(t, f.id, "mkdir /root/.aws && mv -T /tmp/aws /root/.aws")
+		f.ok(t, f.id, "test ! -e /root/.aws/config && echo c > /root/.aws/credentials && rm -r /root/.aws && mv /tmp/aws /root/aws2 && rm -r /root/aws2")
+		// Review 2 finding 4: write denied on /etc/ld.so.preload, create
+		// allowed. A new name that does not exist yet is a write.
+		f.denied(t, f.id, "echo e > /tmp/pre && mv /tmp/pre /etc/ld.so.preload")
+		f.waitVerdict(t, verdict{rule: "new-names/preload", deny: 1, mode: 2, access: accessWrite, path: "/etc/ld.so.preload"})
+		f.denied(t, f.id, "ln /tmp/pre /etc/ld.so.preload")
+		f.ok(t, f.id, "test ! -e /etc/ld.so.preload && mv /tmp/pre /etc/new-name.conf && ln /etc/new-name.conf /etc/new-name2.conf")
+		if helper == "" {
+			t.Skip("FILE_HELPER_BINARY is not set")
+		}
+		// O_TMPFILE, then linkat through /proc/self/fd. The helper exits 4
+		// when the root file system has no O_TMPFILE (overlayfs on 6.8).
+		if code, out := f.sh(t, f.id, helper+" tmpfile-link /tmp /tmp/tmpfile-probe"); code == 4 {
+			t.Skipf("no O_TMPFILE on the root file system: %s", out)
+		}
+		f.denied(t, f.id, helper+" tmpfile-link /tmp /etc/ld.so.preload")
+		f.ok(t, f.id, helper+" tmpfile-link /tmp /etc/new-name3.conf && grep -qx evil /etc/new-name3.conf")
+	})
+	t.Run("audit reports without denying", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 1}); err != nil {
+			t.Fatal(err)
+		}
+		f.ok(t, f.id, "cat /etc/shadow >/dev/null")
+		f.ok(t, f.id, "echo x > /auditfile && rm /auditfile")
+		f.waitVerdict(t, verdict{rule: "lab-audit/secret-read", deny: 1, mode: 1, access: accessRead, path: "/etc/shadow"})
+		f.waitVerdict(t, verdict{rule: "default", deny: 1, mode: 1, access: accessCreate, path: "/auditfile"})
+	})
+	t.Run("unbind", func(t *testing.T) {
+		if err := f.bindings.Unbind(f.container); err != nil {
+			t.Fatal(err)
+		}
+		f.ok(t, f.id, "cat /etc/shadow >/dev/null && echo x > /newfile && rm /newfile")
+	})
+	if faults, err := f.bindings.SlotFaults(0); err != nil || faults != 0 {
+		t.Errorf("tracking faults: %d %v", faults, err)
+	}
+}
+
+// workerScript runs one command at a time from /tmp/w.cmd with eval, so a
+// builtin with a redirection (read x < FILE, echo x > FILE) opens the file in
+// the worker's own task: the same task opens files before and after a binding
+// change or a cgroup move.
+const workerScript = `while :; do
+	if [ -e /tmp/w.cmd ]; then
+		read -r c < /tmp/w.cmd
+		rm -f /tmp/w.cmd
+		eval "$c" > /tmp/w.out 2>&1
+		echo $? > /tmp/w.rc
+	fi
+	sleep 0.05
+done`
+
+const workerMarker = "file-test-worker"
+
+type worker struct {
+	f   *kernelFixture
+	pid int // host pid
+}
+
+func cgroupDir(path string) string { return filepath.Join("/sys/fs/cgroup", path) }
+
+// startWorker starts the worker in the bound container and finds its host pid.
+func startWorker(t *testing.T, f *kernelFixture) *worker {
+	t.Helper()
+	if out, err := exec.CommandContext(f.ctx, "docker", "exec", "-d", f.id, "sh", "-c", workerScript, workerMarker).CombinedOutput(); err != nil {
+		t.Fatalf("starting worker: %v: %s", err, out)
+	}
+	for i := 0; i < 50; i++ {
+		data, err := os.ReadFile(filepath.Join(cgroupDir(f.container.CgroupPath), "cgroup.procs"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range strings.Fields(string(data)) {
+			cmdline, _ := os.ReadFile(filepath.Join("/proc", field, "cmdline"))
+			args := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+			if len(args) == 4 && args[0] == "sh" && args[3] == workerMarker {
+				pid, _ := strconv.Atoi(field)
+				w := &worker{f: f, pid: pid}
+				t.Cleanup(func() { unix.Kill(w.pid, unix.SIGKILL) })
+				return w
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("worker not found in the container cgroup")
+	return nil
+}
+
+// moveTo moves the worker to a cgroup v2 path.
+func (w *worker) moveTo(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(cgroupDir(path), "cgroup.procs"), []byte(strconv.Itoa(w.pid)), 0); err != nil {
+		t.Fatalf("moving worker to %s: %v", path, err)
+	}
+	data, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(w.pid), "cgroup"))
+	t.Logf("worker cgroup: %s", strings.TrimSpace(string(data)))
+}
+
+// run runs one command in the worker task and returns its status and output.
+func (w *worker) run(t *testing.T, cmd string) (int, string) {
+	t.Helper()
+	send := exec.CommandContext(w.f.ctx, "docker", "exec", "-i", w.f.id, "sh", "-c", "cat > /tmp/w.cmd.tmp && mv /tmp/w.cmd.tmp /tmp/w.cmd")
+	send.Stdin = strings.NewReader(cmd + "\n")
+	if out, err := send.CombinedOutput(); err != nil {
+		t.Fatalf("sending %q to the worker: %v: %s", cmd, err, out)
+	}
+	for i := 0; i < 100; i++ {
+		code, out := w.f.sh(t, w.f.id, "test -s /tmp/w.rc && cat /tmp/w.rc /tmp/w.out && rm -f /tmp/w.rc")
+		if code == 0 {
+			lines := strings.SplitN(out, "\n", 2)
+			rc, err := strconv.Atoi(strings.TrimSpace(lines[0]))
+			if err != nil {
+				t.Fatalf("worker status %q", out)
+			}
+			rest := ""
+			if len(lines) == 2 {
+				rest = lines[1]
+			}
+			return rc, rest
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("worker did not run %q", cmd)
+	return 0, ""
+}
+
+func (w *worker) ok(t *testing.T, cmd string) {
+	t.Helper()
+	rc, out := w.run(t, cmd)
+	t.Logf("worker: %s -> rc %d %s", cmd, rc, out)
+	if rc != 0 {
+		t.Errorf("worker %s: rc %d: %s", cmd, rc, out)
+	}
+}
+
+func (w *worker) denied(t *testing.T, cmd string) {
+	t.Helper()
+	rc, out := w.run(t, cmd)
+	t.Logf("worker: %s -> rc %d %s", cmd, rc, out)
+	if rc == 0 || !strings.Contains(out, "Operation not permitted") {
+		t.Errorf("worker %s: want EPERM, got rc %d: %s", cmd, rc, out)
+	}
+}
+
+// TestGadgetBindingChanges checks that a binding change or a cgroup move takes
+// effect on the next open of a task that already opened files: bind after the
+// task ran, moves into child cgroups of the bound container, out of it and
+// back, unbind, and bind again.
+func TestGadgetBindingChanges(t *testing.T) {
+	f := newKernelFixture(t)
+	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("lab", "enforce")}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, compiled)
+
+	child := filepath.Join(f.container.CgroupPath, "file-test-child")
+	grand := filepath.Join(child, "file-test-grand")
+	outside := "/file-test-outside"
+	for _, p := range []string{child, grand, outside} {
+		if err := os.Mkdir(cgroupDir(p), 0o755); err != nil && !os.IsExist(err) {
+			t.Fatal(err)
+		}
+	}
+	w := startWorker(t, f)
+	t.Cleanup(func() {
+		unix.Kill(w.pid, unix.SIGKILL)
+		for _, p := range []string{grand, child, outside} {
+			for i := 0; i < 50; i++ {
+				if err := os.Remove(cgroupDir(p)); err == nil || os.IsNotExist(err) {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	})
+
+	const readSecret = "read x < /etc/shadow"
+	t.Run("unbound task opens files", func(t *testing.T) {
+		w.ok(t, readSecret)
+		w.ok(t, readSecret)
+	})
+	t.Run("bind after the task opened files", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+			t.Fatal(err)
+		}
+		w.denied(t, readSecret)
+		w.denied(t, "echo x > /file-test-new")
+		w.ok(t, "read x < /etc/passwd")
+	})
+	t.Run("move into a child cgroup of the bound container", func(t *testing.T) {
+		w.moveTo(t, child)
+		w.denied(t, readSecret)
+		w.moveTo(t, grand)
+		w.denied(t, readSecret)
+	})
+	t.Run("move out of the bound container", func(t *testing.T) {
+		w.moveTo(t, outside)
+		w.ok(t, readSecret)
+	})
+	t.Run("move into the bound container", func(t *testing.T) {
+		w.moveTo(t, grand)
+		w.denied(t, readSecret)
+		w.moveTo(t, outside)
+		w.ok(t, readSecret)
+		w.moveTo(t, f.container.CgroupPath)
+		w.denied(t, readSecret)
+	})
+	t.Run("unbind", func(t *testing.T) {
+		if err := f.bindings.Unbind(f.container); err != nil {
+			t.Fatal(err)
+		}
+		w.ok(t, readSecret)
+		w.moveTo(t, child)
+		w.ok(t, readSecret)
+		w.ok(t, "echo x > /file-test-new && rm /file-test-new")
+	})
+	t.Run("bind again", func(t *testing.T) {
+		if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+			t.Fatal(err)
+		}
+		w.denied(t, readSecret)
+		w.moveTo(t, f.container.CgroupPath)
+		w.denied(t, readSecret)
+		if err := f.bindings.Unbind(f.container); err != nil {
+			t.Fatal(err)
+		}
+		w.ok(t, readSecret)
+	})
+}
+
+// denier attaches small BPF LSM programs that return -EACCES (the gadget
+// denies with -EPERM) for one inode, to tasks in the bound container's own
+// cgroup only.
+type denier struct {
+	fileInode, dentryInode, inodeIno uint32 // member offsets from the kernel's BTF
+	cgroupID                         uint64
+}
+
+func memberOffset(t *testing.T, spec *btf.Spec, typ, member string) uint32 {
+	t.Helper()
+	var st *btf.Struct
+	if err := spec.TypeByName(typ, &st); err != nil {
+		t.Fatalf("kernel BTF struct %s: %v", typ, err)
+	}
+	for _, m := range st.Members {
+		if m.Name == member {
+			return m.Offset.Bytes()
+		}
+	}
+	t.Fatalf("kernel BTF: no %s.%s", typ, member)
+	return 0
+}
+
+func newDenier(t *testing.T, cgroupID uint64) *denier {
+	t.Helper()
+	spec, err := btf.LoadKernelSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &denier{fileInode: memberOffset(t, spec, "file", "f_inode"), dentryInode: memberOffset(t, spec, "dentry", "d_inode"),
+		inodeIno: memberOffset(t, spec, "inode", "i_ino"), cgroupID: cgroupID}
+}
+
+// attach denies hook for the inode number ino (file_open: argument 0 is the
+// file; path_unlink: argument 1 is the dentry).
+func (d *denier) attach(t *testing.T, hook string, ino uint64) {
+	t.Helper()
+	arg, toInode := int16(0), d.fileInode
+	if hook == "path_unlink" {
+		arg, toInode = 1, d.dentryInode
+	}
+	// read loads the pointer-sized value at R3 + off into R3.
+	read := func(off uint32) asm.Instructions {
+		return asm.Instructions{
+			asm.Add.Imm(asm.R3, int32(off)),
+			asm.Mov.Reg(asm.R1, asm.RFP), asm.Add.Imm(asm.R1, -8), asm.Mov.Imm(asm.R2, 8),
+			asm.FnProbeReadKernel.Call(), asm.JNE.Imm(asm.R0, 0, "allow"),
+			asm.LoadMem(asm.R3, asm.RFP, -8, asm.DWord),
+		}
+	}
+	insns := asm.Instructions{
+		asm.Mov.Reg(asm.R6, asm.R1),
+		asm.FnGetCurrentCgroupId.Call(),
+		asm.LoadImm(asm.R1, int64(d.cgroupID), asm.DWord),
+		asm.JNE.Reg(asm.R0, asm.R1, "allow"),
+		asm.LoadMem(asm.R3, asm.R6, arg*8, asm.DWord),
+	}
+	insns = append(insns, read(toInode)...)
+	insns = append(insns, read(d.inodeIno)...)
+	insns = append(insns,
+		asm.LoadImm(asm.R1, int64(ino), asm.DWord),
+		asm.JNE.Reg(asm.R3, asm.R1, "allow"),
+		asm.Mov.Imm(asm.R0, -int32(unix.EACCES)),
+		asm.Return(),
+		asm.Mov.Imm(asm.R0, 0).WithSymbol("allow"),
+		asm.Return(),
+	)
+	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{Name: "file_test_deny", Type: ebpf.LSM, AttachType: ebpf.AttachLSMMac,
+		AttachTo: hook, Instructions: insns, License: "GPL"})
+	if err != nil {
+		t.Fatalf("denier for %s: %v", hook, err)
+	}
+	l, err := link.AttachLSM(link.LSMOptions{Program: prog})
+	if err != nil {
+		prog.Close()
+		t.Fatalf("attaching the denier to %s: %v", hook, err)
+	}
+	t.Cleanup(func() { l.Close(); prog.Close() })
+}
+
+// errno expects the command in the bound container to fail with the message
+// of one errno.
+func (f *kernelFixture) errno(t *testing.T, cmd, msg string) {
+	t.Helper()
+	code, out := f.sh(t, f.id, cmd)
+	t.Logf("%.12s: %s -> rc %d %s", f.id, cmd, code, out)
+	if code == 0 || !strings.Contains(out, msg) {
+		t.Errorf("%s: want %q, got rc %d: %s", cmd, msg, code, out)
+	}
+}
+
+// TestGadgetEarlierBPFDeny checks that an allow of the gadget does not replace
+// the deny of another BPF LSM program on the same hook, in both attach orders.
+// The kernel runs the newest program first and stops at the first nonzero
+// return, so the errno tells which program decided: EACCES the other
+// program, EPERM the gadget.
+func TestGadgetEarlierBPFDeny(t *testing.T) {
+	f := newKernelFixture(t)
+	const eacces, eperm = "Permission denied", "Operation not permitted"
+	f.ok(t, f.id, "mkdir -p /work/pv /work/secret && for n in open-1 open-2 unlink-1 unlink-2 other; do echo x > /work/pv/$n; done && "+
+		"echo k > /work/secret/pv-key && echo v > /var/pv-del")
+	ino := func(path string) uint64 {
+		t.Helper()
+		out := f.ok(t, f.id, "stat -c %i "+path)
+		n, err := strconv.ParseUint(out, 10, 64)
+		if err != nil {
+			t.Fatalf("inode of %s: %q", path, out)
+		}
+		return n
+	}
+	d := newDenier(t, f.container.CgroupID)
+	// Attached before the gadget: the gadget's programs run first.
+	d.attach(t, "file_open", ino("/work/pv/open-1"))
+	d.attach(t, "path_unlink", ino("/work/pv/unlink-1"))
+	d.attach(t, "file_open", ino("/work/secret/pv-key"))
+	d.attach(t, "path_unlink", ino("/var/pv-del"))
+	f.errno(t, "cat /work/pv/open-1", eacces)
+
+	compiled, err := filepolicy.CompileSlots([][]filepolicy.Document{{labDocument("lab", "enforce")}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, compiled)
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container, Slot: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("other program attached before the gadget", func(t *testing.T) {
+		// The gadget allows reads and deletes in /work.
+		f.errno(t, "cat /work/pv/open-1", eacces)
+		f.errno(t, "rm /work/pv/unlink-1", eacces)
+		f.ok(t, f.id, "cat /work/pv/other && test -e /work/pv/unlink-1")
+		// Both deny: the gadget ran first.
+		f.errno(t, "cat /work/secret/pv-key", eperm)
+		f.errno(t, "rm /var/pv-del", eperm)
+	})
+	t.Run("other program attached after the gadget", func(t *testing.T) {
+		// Detached at the end of this subtest.
+		d.attach(t, "file_open", ino("/work/pv/open-2"))
+		d.attach(t, "path_unlink", ino("/work/pv/unlink-2"))
+		d.attach(t, "file_open", ino("/work/secret/pv-key"))
+		d.attach(t, "path_unlink", ino("/var/pv-del"))
+		f.errno(t, "cat /work/pv/open-2", eacces)
+		f.errno(t, "rm /work/pv/unlink-2", eacces)
+		f.errno(t, "cat /work/pv/open-1", eacces)
+		f.ok(t, f.id, "cat /work/pv/other && test -e /work/pv/unlink-2")
+		// Both deny: the other program ran first.
+		f.errno(t, "cat /work/secret/pv-key", eacces)
+		f.errno(t, "rm /var/pv-del", eacces)
+		f.denied(t, f.id, "cat /etc/shadow")
+	})
+	t.Run("unbound", func(t *testing.T) {
+		if err := f.bindings.Unbind(f.container); err != nil {
+			t.Fatal(err)
+		}
+		f.errno(t, "cat /work/pv/open-1", eacces)
+		f.errno(t, "rm /work/pv/unlink-1", eacces)
+		f.ok(t, f.id, "cat /work/pv/other && cat /etc/shadow >/dev/null")
+	})
+}

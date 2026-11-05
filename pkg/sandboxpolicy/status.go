@@ -53,6 +53,31 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 	if p.spec.Mode == api.ModeOff {
 		message = "Policy is off"
 	}
+	if p.spec.Privilege != nil && p.spec.Mode != api.ModeOff {
+		// Without BPF LSM the programs attach but never run: never report Ready.
+		if err := c.sectionUnavailable(SectionPrivilege); err != nil {
+			failure = errors.Join(failure, err)
+		}
+	}
+	var network *NetworkReport
+	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
+		if err := c.sectionUnavailable(SectionNetwork); err != nil {
+			failure = errors.Join(failure, err)
+		}
+		if plan := c.networkPlans[p.identity.UID]; plan != nil {
+			network = &plan.Report
+		}
+	}
+	var file *NetworkReport
+	if p.spec.File != nil && p.spec.Mode != api.ModeOff {
+		if err := c.sectionUnavailable(SectionFile); err != nil {
+			failure = errors.Join(failure, err)
+		}
+		if plan := c.filePlans[p.identity.UID]; plan != nil {
+			r := NetworkReport(plan.Report)
+			file = &r
+		}
+	}
 	var uncertain *protectionError
 	unconfirmed = unconfirmed || errors.As(failure, &uncertain)
 	if unconfirmed {
@@ -78,15 +103,49 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 			message = "Binding withdrawal committed; enforcement removed for that binding, resource cleanup pending"
 			stale = generationStale
 		}
+		if r, m, ok := unavailableReason(failure); ok {
+			reason, message = r, m
+		}
 		if unconfirmed {
 			reason = "ProtectionUnconfirmed"
 			message = "Owned binding protection cannot be confirmed; workload may be unprotected; ownership retained only for recovery/cleanup"
 			stale = true
 		}
 		status.Error, status.Truncated = boundedText(failure.Error(), api.MaxStatusErrorLength)
+	} else if r, m := notReady(network, file); r != "" {
+		// The policy enforces, with degraded defaults (see Degraded).
+		ready, reason, message = metav1.ConditionFalse, r, m
 	}
 	status.Stale = stale
 	status.Conditions = []metav1.Condition{{Type: "Ready", Status: ready, Reason: reason, Message: message, ObservedGeneration: p.identity.Generation, LastTransitionTime: now}}
+	if network != nil || file != nil {
+		status.Compiled = &api.CompiledStatus{}
+		var degraded []api.DegradedRule
+		for _, section := range []struct {
+			report    *NetworkReport
+			condition string
+		}{{network, "NetworkNotEnforced"}, {file, "FileNotEnforced"}} {
+			r := section.report
+			if r == nil {
+				continue
+			}
+			status.Compiled.Rules += r.Rules
+			status.Compiled.ClassesResolved += r.ClassesResolved
+			status.Compiled.ClassesUnresolved += r.ClassesUnresolved
+			degraded = append(degraded, r.Degraded...)
+			if len(r.NotEnforced) > 0 {
+				summary, truncated := boundedText(strings.Join(r.NotEnforced, "; "), api.MaxStatusDiagnosticLength)
+				status.Truncated = status.Truncated || truncated
+				status.Conditions = append(status.Conditions, metav1.Condition{Type: section.condition, Status: metav1.ConditionTrue, Reason: "UnsupportedByGadget", Message: summary, ObservedGeneration: p.identity.Generation, LastTransitionTime: now})
+			}
+		}
+		degraded = sortedDegraded(degraded)
+		status.Counts.Degraded = int64(len(degraded))
+		if len(degraded) > api.MaxStatusRuleDetails {
+			degraded, status.Truncated = degraded[:api.MaxStatusRuleDetails], true
+		}
+		status.Degraded = degraded
+	}
 	if len(revisions) > 0 {
 		ordered := make([]string, 0, len(revisions))
 		for revision := range revisions {
@@ -103,6 +162,27 @@ func (c *Controller) report(p desiredPolicy, failure error) *api.SandboxPolicyNo
 		ObjectMeta: metav1.ObjectMeta{Name: api.NodeStatusName(p.identity.UID, c.options.Node.UID), Namespace: namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: api.SchemeGroupVersion.String(), Kind: p.identity.Kind, Name: p.identity.Name, UID: p.identity.UID}}},
 		Spec:       api.SandboxPolicyNodeStatusSpec{PolicyRef: api.SandboxPolicyReference{Kind: p.identity.Kind, Name: p.identity.Name, UID: p.identity.UID}, NodeRef: c.options.Node}, Status: status,
 	}
+}
+
+// notReady returns the Ready=False reason and message when a section enforces
+// with degraded defaults because a rule cannot be resolved, else "".
+func notReady(network, file *NetworkReport) (string, string) {
+	var reason string
+	var parts []string
+	if network != nil && network.NotReady != "" {
+		reason = network.NotReady
+		parts = append(parts, "network allow rule or except entry cannot be resolved; the egress default runs in audit for an unresolved allow")
+	}
+	if file != nil && file.NotReady != "" {
+		if reason == "" {
+			reason = file.NotReady
+		}
+		parts = append(parts, "file allow rule or except entry cannot be resolved or enforced; the defaults of its access kinds run in audit for such an allow")
+	}
+	if reason == "" {
+		return "", ""
+	}
+	return reason, "A " + strings.Join(parts, "; a ") + "; see degraded"
 }
 
 func boundedText(value string, limit int) (string, bool) {
