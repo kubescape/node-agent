@@ -2,12 +2,11 @@ package tracers
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/inspektor-gadget/inspektor-gadget/gadgets/trace_exec/consts"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 func NewExecOperator() operators.DataOperator {
@@ -33,10 +32,10 @@ func NewExecOperator() operators.DataOperator {
 				argsCount, _ := argsCount.Int32(data)
 				args := decodeExecArgs(payload, argsSize, argsCount)
 
-				// TODO: The datasource doesn't support arrays yet, hence we have to
-				// join the args in a single string. We are using a non-breaking space
-				// as separator to avoid collisions with arguments that contain spaces.
-				argsF.PutString(data, strings.Join(args, consts.ArgsSeparator))
+				// The datasource doesn't support arrays yet, hence we have to join
+				// the args in a single string. JoinExecArgs escapes the separator
+				// inside arguments so GetArgs() gets the original argv back.
+				argsF.PutString(data, utils.JoinExecArgs(args))
 				return nil
 			}
 
