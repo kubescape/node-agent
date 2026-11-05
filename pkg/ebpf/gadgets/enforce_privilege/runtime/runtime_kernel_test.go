@@ -27,8 +27,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -60,6 +62,8 @@ type kernelFixture struct {
 	container ContainerIdentity
 	bindings  *enforcement.Bindings
 	verdicts  atomic.Int32
+	mu        sync.Mutex
+	events    []string // hook, syscall, capability, mode and comm of each verdict
 }
 
 func newKernelFixture(t *testing.T) *kernelFixture {
@@ -106,7 +110,20 @@ func (f *kernelFixture) start(t *testing.T, name string, compiled privpolicy.Com
 		if f.bindings, err = GetBindings(gc); err != nil {
 			return err
 		}
-		return gc.GetDataSources()["verdict"].Subscribe(func(datasource.DataSource, datasource.Data) error {
+		ds := gc.GetDataSources()["verdict"]
+		fields := map[string]datasource.FieldAccessor{}
+		for _, name := range []string{"hook", "syscall", "capability", "mode", "comm"} {
+			fields[name] = ds.GetField(name)
+		}
+		return ds.Subscribe(func(_ datasource.DataSource, data datasource.Data) error {
+			hook, _ := fields["hook"].String(data)
+			syscall, _ := fields["syscall"].String(data)
+			capability, _ := fields["capability"].Int32(data)
+			mode, _ := fields["mode"].Uint32(data)
+			comm, _ := fields["comm"].String(data)
+			f.mu.Lock()
+			f.events = append(f.events, fmt.Sprintf("%s %s cap=%d mode=%d %s", hook, syscall, capability, mode, comm))
+			f.mu.Unlock()
 			f.verdicts.Add(1)
 			return nil
 		}, 100)
@@ -498,5 +515,48 @@ func TestWrongRuntimeNamespaceStillJudgesWorkload(t *testing.T) {
 	h.workloadDenied(t)
 	if out, err := h.run("runc", "exec", h.id, "chroot", "/", "true"); err == nil || !strings.Contains(out, "not permitted") {
 		t.Errorf("runc exec chroot must be denied: %v %s", err, out)
+	}
+}
+
+// setnsNr is the setns syscall number of the test's architecture.
+func setnsNr() int {
+	if goruntime.GOARCH == "arm64" {
+		return 268
+	}
+	return 308 // amd64
+}
+
+// TestSetnsVerdictsPerCheck pins down that a verdict is one kernel check:
+// setns into a mount namespace checks CAP_SYS_ADMIN twice, so audit mode
+// reports both checks and enforce mode stops at the first (README, "Maps and
+// events").
+func TestSetnsVerdictsPerCheck(t *testing.T) {
+	for mode, want := range map[string]int32{"audit": 2, "enforce": 1} {
+		t.Run(mode, func(t *testing.T) {
+			f := newKernelFixture(t)
+			rule := privpolicy.Rule{Name: "no-new-mntns", Action: "deny", Target: privpolicy.Target{Syscall: []string{"setns"}, Flags: []string{"CLONE_NEWNS"}}}
+			doc := privpolicy.Document{Version: 1, Name: "setns-" + mode, Policy: privpolicy.Policy{Mode: mode, Privilege: privpolicy.Section{Default: "allow", Rules: []privpolicy.Rule{rule}}}}
+			compiled, err := privpolicy.CompileKernel(doc, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.start(t, "privilege-setns-"+mode, compiled, nil)
+			if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+				t.Fatal(err)
+			}
+			defer f.bindings.Unbind(f.container)
+			// One setns(2) call. nsenter is not used: it retries once after
+			// EPERM, which gives two syscalls in enforce mode.
+			err = f.exec("perl", "-e", fmt.Sprintf(`open(my $f, "<", "/proc/self/ns/mnt") or die; exit(syscall(%d, fileno($f), 0x20000) == 0 ? 0 : 1)`, setnsNr()))
+			if (mode == "enforce") != (err != nil) {
+				t.Fatalf("setns in %s mode: %v", mode, err)
+			}
+			time.Sleep(500 * time.Millisecond)
+			if got := f.verdicts.Load(); got != want {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				t.Fatalf("%s: %d verdicts, want %d: %v", mode, got, want, f.events)
+			}
+		})
 	}
 }
