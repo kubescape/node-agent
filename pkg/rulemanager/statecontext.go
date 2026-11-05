@@ -106,7 +106,8 @@ func hasWriteFor(compiled []statewrites.Compiled, eventType utils.EventType) boo
 	return false
 }
 
-// seedStateContext installs the per-rule state receiver into the eval context.
+// seedStateContext installs the per-rule state receiver into the eval context
+// and returns it, so the increment phase can hand it the counts it produced.
 //
 // The ancestor walk is passed as a closure and resolved lazily inside the
 // accessor: most rules never call has_ancestor, and walking the process tree per
@@ -117,8 +118,8 @@ func (rm *RuleManager) seedStateContext(
 	enrichedEvent *events.EnrichedEvent,
 	scopeOf map[string]armotypes.StateScope,
 	tracker *state.ReadTracker,
-) {
-	evalContext[state.AccessorContextKey] = state.NewAccessor(
+) *state.Accessor {
+	accessor := state.NewAccessor(
 		rm.stateStore,
 		rule.ID,
 		scopeOf,
@@ -130,6 +131,8 @@ func (rm *RuleManager) seedStateContext(
 		tracker,
 		nil,
 	)
+	evalContext[state.AccessorContextKey] = accessor
+	return accessor
 }
 
 // stateMetrics adapts the node-agent metrics manager to rulestate.Metrics.

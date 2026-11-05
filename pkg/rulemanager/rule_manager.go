@@ -419,10 +419,27 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		// leave the PREVIOUS rule's accessor in place, and a stateless rule would
 		// read another rule's state through it -- the one thing the receiver design
 		// exists to make inexpressible.
+		var accessor *state.Accessor
 		if len(stateScopes) > 0 {
-			rm.seedStateContext(evalContext, &rule, enrichedEvent, stateScopes, stateTracker)
+			accessor = rm.seedStateContext(evalContext, &rule, enrichedEvent, stateScopes, stateTracker)
 		} else {
 			delete(evalContext, state.AccessorContextKey)
+		}
+
+		if writesThisEvent {
+			// Increments run BEFORE the predicate, so the count the predicate reads
+			// includes this event: on the Nth qualifying event state.count() is N,
+			// which is what an author means by `>= N`. The accessor keeps the
+			// value each increment returned, so the predicate reads its own
+			// snapshot rather than a store value a concurrent event may have
+			// advanced since. The self-satisfaction argument that puts set writes
+			// after the predicate does not apply: the author declared the
+			// increment on this very event type, so counting it is the intent.
+			rm.stateWrites.ApplyIncrements(stateWrites, rule.ID, enrichedEvent, evalContext,
+				cel.ResolveEventTime(enrichedEvent), accessor)
+			// Reads made inside an increment's guard are not what the predicate
+			// read, so they must not be cited as the alert's evidence.
+			stateTracker.Reset()
 		}
 
 		// From here on, alerting must not skip the write clause: writes are
@@ -459,9 +476,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		if writesThisEvent {
-			// Writes run AFTER the predicate, so a predicate only ever sees state
-			// from EARLIER events. Otherwise a rule that reads and writes the same
-			// name on the same event type would trivially satisfy itself.
+			// Set and clear writes run AFTER the predicate, so a predicate only
+			// ever sees markers from EARLIER events. Otherwise a rule that reads
+			// and writes the same name on the same event type would trivially
+			// satisfy itself. A clear guarded on the threshold therefore runs on
+			// the alerting event and resets the window after the alert.
 			rm.stateWrites.Apply(stateWrites, rule.ID, enrichedEvent, evalContext,
 				cel.ResolveEventTime(enrichedEvent))
 		}

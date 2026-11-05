@@ -158,13 +158,28 @@ func setCorrelationEvidence(ruleFailure *types.GenericRuleFailure, hits []*rules
 			Key:       h.Key,
 			Process:   h.Process,
 			Admission: h.Admission,
-			Values:    h.Value,
+			Values:    evidenceValues(h),
 		})
 	}
 	if len(ev) == 0 {
 		return
 	}
 	ruleFailure.SetCorrelationAlert(armotypes.CorrelationAlert{Correlations: ev})
+}
+
+// evidenceValues is the entry's author values plus, for a counter, the count
+// under the reserved _count key -- the same shape state.get exposes to CEL. The
+// entry's own map is copied, never written: other readers hold it.
+func evidenceValues(h *rulestate.Entry) map[string]any {
+	if h.Count <= 0 {
+		return h.Value
+	}
+	out := make(map[string]any, len(h.Value)+1)
+	for k, v := range h.Value {
+		out[k] = v
+	}
+	out["_count"] = h.Count
+	return out
 }
 
 func (r *RuleFailureCreator) enrichRuleFailure(ruleFailure *types.GenericRuleFailure) {

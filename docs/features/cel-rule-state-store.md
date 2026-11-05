@@ -52,12 +52,98 @@ would be skipped by boolean short-circuiting, could be reordered by the static
 optimiser, and could never express "remember this **without** alerting" — which
 is exactly what the first leg of a cross-event rule needs.
 
-### Writes run after the predicate
+### Three operations: set, increment, clear
 
-For a given event, the rule's predicate is evaluated first and the writes second.
-So a predicate only ever sees state from **earlier** events. Otherwise a rule
-that reads and writes the same name on the same event type would satisfy itself
-from its own write.
+A `stateWrites` entry performs exactly one of three operations. `increment` and
+`clear` are opt-in fields; an entry with neither is a **set**, with or without a
+`value:` map, which is what every marker write above is.
+
+| Operation | Field | Meaning |
+|---|---|---|
+| set | neither; `value:` optional | remember a fact; last write wins, TTL refreshed |
+| increment | `increment: 1` | create the entry with count 1, or add 1; the window is fixed from creation |
+| clear | `clear: true` | delete the entry if present |
+
+All three share `eventType`, `when`, `scope`, `name` and `key`. `ttl` is
+required on `set` and `increment`; on `clear` it is optional and ignored, so an
+entry can be copied and its operation flipped. `increment` accepts only `1`.
+
+A counter is how a rule expresses a threshold: "the tenth outbound SSH
+connection from one process within a minute".
+
+```yaml
+id: R1213
+stateWrites:
+  - eventType: network
+    when: "event.dstPort == uint(22) && !net.is_private_ip(event.dstIP)"
+    scope: container
+    name: ssh_out
+    key: "string(event.pid)"
+    increment: 1
+    ttl: 1m
+  - eventType: network                 # reset the window after alerting
+    when: 'state.count("ssh_out", string(event.pid)) >= 10'
+    scope: container
+    name: ssh_out
+    key: "string(event.pid)"
+    clear: true
+expressions:
+  ruleExpression:
+    - eventType: network
+      expression: 'state.count("ssh_out", string(event.pid)) >= 10'
+  message: "'outbound SSH burst: ' + string(state.count(\"ssh_out\", string(event.pid))) + ' connections in a minute from ' + event.comm"
+```
+
+### Ordering: increments before the expression, set and clear after
+
+For one event, the rule loop runs in three steps:
+
+1. every `increment` write for this event whose `when:` passes;
+2. the rule expression, which alerts if it holds;
+3. every `set` and `clear` write whose `when:` passes.
+
+So a **set** is only ever visible to **later** events — otherwise a rule that
+reads and writes the same name on the same event type would satisfy itself from
+its own write. An **increment**, by contrast, is counted before the expression,
+so **the count includes the current event**: on the tenth qualifying event
+`state.count()` reads 10, and `>= 10` means the tenth event, not the eleventh.
+The self-satisfaction argument does not apply to a counter: the author declared
+the increment on this very event type, so counting it is the intent.
+
+Consequences:
+
+- A `clear` guarded on the threshold runs *after* the alert, so the event that
+  alerts also resets the window. Without a `clear`, the rule alerts on every
+  event from the Nth on, limited only by cooldown.
+- A `when:` on an increment is evaluated before the expression, against the same
+  context. It may read `state.count()` of the entry it is about to increment and
+  sees the value *before* the increment. Reads made inside an increment's guard
+  are not cited as the alert's evidence; evidence is what the expression read.
+- The count an event reads is the count **its own increment produced**.
+  node-agent evaluates events concurrently, so a fresh store read could see a
+  later event's increment; instead the value each increment returned is held for
+  the rest of that event's evaluation and served to `state.count`, `state.has`,
+  `state.get` and the evidence. Exactly one event observes each value, so
+  `== N` fires exactly once per crossing.
+- A `clear` is a plain delete and may race: in a burst, an event that
+  incremented to N+1 before the Nth event's `clear` landed still reads N+1 and
+  also alerts, and the clear may discard that increment. `>= N` with a `clear`
+  can therefore produce a small number of extra alerts in a burst (deduplicated
+  by `uniqueId` and cooldown); `== N` is the exact form.
+
+### Window semantics
+
+A counter's TTL is **fixed from the first increment** and is not refreshed by
+later ones. When the entry expires, the next increment creates a fresh one with
+count 1 and a new window. So "ten in a minute" means ten since the window opened,
+and a burst that straddles a window boundary can read as two sub-threshold halves;
+the fixed window undercounts at a boundary by at most a factor of two. Rolling
+windows are not supported.
+
+Provenance on a counter (`_ts`, `_pid`, ...) describes the **first** event of
+the window. A `set` to a name that holds a counter replaces it, count and all,
+and resets the TTL as any set does; validation rejects a name declared with both
+`value`/set and `increment` in the same rule. `clear` may be combined with either.
 
 ### What suppresses a write
 
@@ -151,16 +237,23 @@ the mapping is made in a single place, so reads, writes, purge and the
 
 ## Reading state
 
-Four functions, on a `state` receiver:
+Five functions, on a `state` receiver:
 
 ```cel
 state.has(name)                  // bool  — for a fact about the whole scope
 state.has(name, key)             // bool  — for a fact about one subject
 state.get(name)                  // map   — empty map on a miss, never an error
 state.get(name, key)             // map
+state.count(name)                // int   — a counter's value, 0 on a miss
+state.count(name, key)           // int
 state.has_ancestor(name)         // bool  — any ancestor PID carries the marker
 state.get_ancestor(name)         // map   — the NEAREST matching ancestor
 ```
+
+`state.count` returns 0 on a miss or on a plain marker, never an error, so a
+threshold predicate is simply false until the counter exists. `state.has` and
+`state.get` work on counter entries as on any other, and `has_ancestor` /
+`get_ancestor` see them too.
 
 `name` is what kind of fact ("mount_exec"); `key` is who it is about, usually
 `string(event.pid)`. A read takes **no scope argument**: state is rule-private,
@@ -190,6 +283,7 @@ with `_`, so they can never shadow provenance.
 | `_comm` / `_pcomm` | string | Process and parent command name. |
 | `_exe` | string | Executable path. |
 | `_cwd` | string | Working directory. |
+| `_count` | int | The counter's value. Present only on entries written by `increment`. |
 
 `_pid` and `_ppid` are unsigned, while `event.pid` is not, so
 `state.get(...)._pid == event.pid` mixes numeric types. It is safe — cel-go
@@ -197,6 +291,38 @@ compares numbers across types by value, and a test pins that in the production
 evaluator — so the comparison neither errors nor silently returns false. The join
 itself should still go through `key: string(event.pid)`: it is the cheaper lookup
 and does not depend on that behaviour holding.
+
+### Counting distinct subjects
+
+"More than fifty distinct files opened by one process" is a set size, not a
+counter. It composes from a marker write and a guarded increment, with no new
+engine support:
+
+```yaml
+stateWrites:
+  - eventType: open                       # one marker per distinct path
+    scope: container
+    name: seen_path
+    key: "string(event.pid) + ':' + event.path"
+    ttl: 5m
+  - eventType: open                       # count it only the first time
+    when: '!state.has("seen_path", string(event.pid) + ":" + event.path)'
+    scope: container
+    name: distinct_paths
+    key: "string(event.pid)"
+    increment: 1
+    ttl: 5m
+```
+
+Because increments run before set writes, on the first open of a path the guard
+sees no marker, the counter increments, and then the marker is written. On the
+second open the marker exists and the increment is skipped.
+
+Each distinct value costs one entry against the per-container cap of 256, shared
+by every subject in the container. At a threshold of N the recipe counts
+correctly for about `256 / (N + 1)` subjects at once (two processes at N = 100,
+eight at N = 30); past that, writes are rejected (`scope_cap`) and the count
+silently stalls for the whole container.
 
 ### The ancestor functions assume a PID key
 
@@ -263,7 +389,8 @@ Without it, an exec-then-egress alert would say only "a process made an outbound
 connection" and drop the exec that makes it interesting.
 
 Each entry carries `name`, `eventType`, `timestamp`, `scope`, `key`, the
-remembered `process`, and any author `values`. Only hits are recorded — a miss is
+remembered `process`, and any author `values`. A counter entry carries its
+count in `values` under `_count`, as of the read. Only hits are recorded — a miss is
 not evidence of anything — and the record is reset before **every** rule, whether
 or not that rule declares state, so one rule never cites another's entries. A
 stateless rule evaluated after a correlating one on the same event alerts with no
@@ -333,7 +460,7 @@ is what will say so.
 
 | Metric | Meaning |
 |---|---|
-| `node_agent_state_writes_total{rule_id,result}` | Entries written |
+| `node_agent_state_writes_total{rule_id,result}` | Entries written: `ok` for a set or an increment, `cleared` for a clear that removed an entry |
 | `node_agent_state_write_rejected_total{rule_id,reason}` | **Alert on this** — a rule is being starved of the state it needs. `scope_cap` / `global_cap` are the store's own limits; `prefiltered` and `policy` mean a suppression meant for the rule's *alerting* leg silenced its *write* leg instead (see below); `guard_error`, `key_error` and `scope_unresolved` are the clause failing to evaluate |
 | `node_agent_state_expired_total` | Reclaimed by TTL |
 | `node_agent_state_purged_total` | Dropped by scope purge |
@@ -356,7 +483,10 @@ kubectl get rules <name> -n kubescape -o jsonpath='{.spec.rules[0].stateWrites}'
 ```
 
 Empty output after a successful apply means the schema is missing the property.
-`--validate=false` does not help — it skips client-side validation only.
+`--validate=false` does not help — it skips client-side validation only. The
+same applies per field: a chart whose CRD predates `increment` and `clear`
+prunes those two fields and the entry degrades to a plain set that never counts,
+so `state.count()` stays 0. Check `jsonpath='{.spec.rules[0].stateWrites[0].increment}'`.
 
 **2. Did the clause fail validation?** node-agent logs
 `RuleManager - invalid stateWrites clause` with the rule ID and the offending
