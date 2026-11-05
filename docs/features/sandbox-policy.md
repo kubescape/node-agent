@@ -225,6 +225,30 @@ authorization. When adding the second gadget:
    metadata struct or wire family does not make two records the same attempt;
    do not suppress observations using PID/path/time heuristics.
 
+### Privilege, network and file authorizations
+
+The node-wide section gadgets follow these steps. Each has its own event and
+dispatch key: `PrivilegeVerdictEvent` (`privilegeAuthorization`),
+`NetworkVerdictEvent` (`networkAuthorization`) and `FileVerdictEvent`
+(`fileAuthorization`). They share `SectionVerdict` (decision, mode, `WouldDeny`,
+rule, origins, policy set and matches, actor PID and comm); the operation facts
+are in `PrivilegeTarget`, `NetworkTarget` and `FileTarget`. None of them
+implements an observation interface: a denied connect is not a connection.
+
+- The gadgets report denies only (enforced, or audit with `WouldDeny`).
+- The binding comes from the event's cgroup: a container, or for privilege a
+  pod cgroup (pod fields only). An unknown cgroup leaves it absent.
+- The policy set comes from the slot table of the gadget instance that judged
+  the call (the event's `generation` and `slot`), so a reload cannot attribute a
+  verdict to the next revision. A rule names its policy. A section default
+  names one only when the slot has one policy. The kernel keeps only the
+  deciding rule, so `MatchesComplete` is false when the slot has more policies.
+- Unknown today: executable path, parent PID, UID, network destination class,
+  and the network default origin.
+- The same bounded queue and counters as exec apply. Denies the kernel could
+  not report (ring buffer full, rate limited) are in each gadget's verdict
+  counters, exposed by `Service.SectionVerdictStats()`.
+
 ## Verification boundary
 
 Unit/race tests cover selection, reload bookkeeping, import refusal, status,

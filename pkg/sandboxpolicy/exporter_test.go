@@ -282,7 +282,7 @@ func TestFullVerdictProvenanceCloneBoundaries(t *testing.T) {
 	}
 	v.PolicySet[0].Revision = "producer mutation"
 	v.Matches[0].Name = "producer mutation"
-	queued := <-exporter.queue
+	queued := (<-exporter.queue).(*ExecVerdictEvent)
 	exporter.dispatch(context.Background(), queued)
 	first := (<-a.received).(*ExecVerdictEvent)
 	second := (<-b.received).(*ExecVerdictEvent)

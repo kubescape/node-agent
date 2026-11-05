@@ -4,22 +4,25 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/protocols"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	netruntime "github.com/kubescape/node-agent/pkg/ebpf/gadgets/enforce_network/runtime"
+	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"oras.land/oras-go/v2"
 )
 
 // NewNativeNetworkEngine uses an already initialized runtime, like
 // NewNativePrivilegeEngine. Each Start is one node-wide instance. Network
-// verdicts are logged, like privilege verdicts.
-func NewNativeNetworkEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, tier NetworkTier) (NetworkEngine, error) {
+// verdicts are logged and reported, like privilege verdicts.
+func NewNativeNetworkEngine(rt runtime.Runtime, kube operators.DataOperator, store oras.ReadOnlyTarget, image string, tier NetworkTier, report SectionReporter) (NetworkEngine, error) {
 	if rt == nil || kube == nil || store == nil || image == "" {
 		return nil, fmt.Errorf("runtime, Kubernetes operator, OCI store and network image are required")
 	}
@@ -31,7 +34,7 @@ func NewNativeNetworkEngine(rt runtime.Runtime, kube operators.DataOperator, sto
 	if err != nil {
 		return nil, err
 	}
-	return &nativeNetworkEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image}}, nil
+	return &nativeNetworkEngine{nativeNodeEngine{manager: manager, kube: kube, store: store, image: image, report: report}}, nil
 }
 
 type nativeNetworkEngine struct{ nativeNodeEngine }
@@ -39,12 +42,6 @@ type nativeNetworkEngine struct{ nativeNodeEngine }
 func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netruntime.Config) (NodeInstance, error) {
 	instance := &nativeNodeInstance{manager: e.manager, id: id, section: "network", revision: config.Policy.Generation}
 	names, origins := config.Policy.RuleNames, config.Policy.Origins
-	name := func(list []string, id uint32) string {
-		if int(id) < len(list) {
-			return list[id]
-		}
-		return ""
-	}
 	events := simple.New("sandbox-network-verdict", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		ds := gc.GetDataSources()["verdict"]
 		if ds == nil {
@@ -55,31 +52,25 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 		if err != nil {
 			return err
 		}
-		fields := map[string]datasource.FieldAccessor{}
-		for _, name := range []string{"generation", "cgroup", "mode", "host_pid", "rule_id", "origin_id", "is_default", "slot", "comm", "hook"} {
-			if fields[name] = ds.GetField(name); fields[name] == nil {
-				return fmt.Errorf("missing verdict field %q", name)
-			}
+		common, err := newVerdictFields(ds)
+		if err != nil {
+			return err
 		}
 		addr, port, version := ds.GetField("dst.addr_raw"), ds.GetField("dst.port"), ds.GetField("dst.version")
+		proto, protoRaw := ds.GetField("dst.proto"), ds.GetField("dst.proto_raw")
 		return ds.Subscribe(func(ds datasource.DataSource, data datasource.Data) error {
-			ruleID, _ := fields["rule_id"].Uint32(data)
-			originID, _ := fields["origin_id"].Uint32(data)
-			mode, _ := fields["mode"].Uint32(data)
-			isDefault, _ := fields["is_default"].Uint32(data)
-			slot, _ := fields["slot"].Uint32(data)
-			pid, _ := fields["host_pid"].Uint32(data)
-			cgroup, _ := fields["cgroup"].Uint64(data)
-			generation, _ := fields["generation"].Uint64(data)
-			comm, _ := fields["comm"].String(data)
-			hook, _ := fields["hook"].String(data)
-			// mode 1 = audit (wouldDeny, the call was allowed), 2 = enforce.
+			v, hook := common.read(data, sandboxpolicy.SectionNetwork, names, origins)
+			t := destination(data, addr, port, version, proto, protoRaw)
+			t.Hook = hook
 			logger.L().Info("sandbox network verdict",
-				helpers.String("rule", name(names, ruleID)), helpers.String("origin", name(origins, originID)),
-				helpers.Int("mode", int(mode)), helpers.String("wouldDeny", fmt.Sprint(mode == 1)), helpers.Int("default", int(isDefault)),
-				helpers.Int("slot", int(slot)), helpers.Int("pid", int(pid)), helpers.String("cgroup", fmt.Sprint(cgroup)),
-				helpers.String("generation", fmt.Sprint(generation)), helpers.String("comm", comm), helpers.String("hook", hook),
-				helpers.String("dst", endpoint(data, addr, port, version)))
+				helpers.String("rule", v.Rule), helpers.String("origin", strings.Join(v.Origins, ",")),
+				helpers.String("mode", string(v.Mode)), helpers.String("wouldDeny", fmt.Sprint(v.WouldDeny)), helpers.String("reason", v.Reason),
+				helpers.Int("slot", int(v.Slot)), helpers.Int("pid", int(v.PID)), helpers.String("cgroup", fmt.Sprint(v.CgroupID)),
+				helpers.String("generation", fmt.Sprint(v.Generation)), helpers.String("comm", v.Comm), helpers.String("hook", hook),
+				helpers.String("dst", t.Addr), helpers.Int("port", int(t.Port)), helpers.String("proto", t.Proto))
+			if e.report != nil {
+				e.report(sandboxpolicy.NewNetworkVerdictEvent(v, sandboxpolicy.Binding{}, t))
+			}
 			return nil // Reporting never changes enforcement.
 		}, 100)
 	}))
@@ -89,22 +80,36 @@ func (e *nativeNetworkEngine) Start(ctx context.Context, id string, config netru
 	return instance, nil
 }
 
-// endpoint formats the destination of a verdict, or "" when the fields are absent.
-func endpoint(data datasource.Data, addr, port, version datasource.FieldAccessor) string {
-	if addr == nil || port == nil || version == nil {
-		return ""
+// destination decodes the destination of a verdict. A field the gadget does
+// not have stays empty; Addr is "" when the address is unknown.
+func destination(data datasource.Data, addr, port, version, proto, protoRaw datasource.FieldAccessor) sandboxpolicy.NetworkTarget {
+	var t sandboxpolicy.NetworkTarget
+	if port != nil {
+		t.Port, _ = port.Uint16(data)
+	}
+	if proto != nil {
+		t.Proto, _ = proto.String(data)
+	}
+	// Without IG's formatter the name field is empty: name the number.
+	if t.Proto == "" && protoRaw != nil {
+		if n, err := protoRaw.Uint16(data); err == nil {
+			if name, ok := protocols.GetProtocolNameByNumber(int(n)); ok {
+				t.Proto = name
+			} else {
+				t.Proto = fmt.Sprintf("proto#%d", n)
+			}
+		}
+	}
+	if addr == nil || version == nil {
+		return t
 	}
 	raw := addr.Get(data)
-	v, _ := version.Uint8(data)
-	p, _ := port.Uint16(data)
-	var a netip.Addr
+	t.Version, _ = version.Uint8(data)
 	switch {
-	case v == 4 && len(raw) >= 4:
-		a = netip.AddrFrom4([4]byte(raw[:4]))
-	case v == 6 && len(raw) >= 16:
-		a = netip.AddrFrom16([16]byte(raw[:16]))
-	default:
-		return ""
+	case t.Version == 4 && len(raw) >= 4:
+		t.Addr = netip.AddrFrom4([4]byte(raw[:4])).String()
+	case t.Version == 6 && len(raw) >= 16:
+		t.Addr = netip.AddrFrom16([16]byte(raw[:16])).String()
 	}
-	return netip.AddrPortFrom(a, p).String()
+	return t
 }

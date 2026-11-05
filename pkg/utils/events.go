@@ -280,6 +280,15 @@ const (
 // not process observation or an exporter wire-format name.
 const ExecAuthorizationEventType EventType = "execAuthorization"
 
+// Internal dispatch keys for the privilege, network and file authorizations of
+// the SandboxPolicy section gadgets. Like ExecAuthorizationEventType, they are
+// not observations and not exporter wire-format names.
+const (
+	PrivilegeAuthorizationEventType EventType = "privilegeAuthorization"
+	NetworkAuthorizationEventType   EventType = "networkAuthorization"
+	FileAuthorizationEventType      EventType = "fileAuthorization"
+)
+
 // Get the path of the file on the node.
 func GetHostFilePathFromEvent(event EnrichEvent, containerPid uint32) (string, error) {
 	switch event.GetEventType() {

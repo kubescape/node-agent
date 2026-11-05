@@ -131,6 +131,13 @@ type nodeOwner[C any] struct {
 	emptyFailed time.Time
 	// lastHeal is when a tracking fault last started a new instance.
 	lastHeal time.Time
+	// retired sums the last counter reading of each stopped instance.
+	retired            enforcement.VerdictCounters
+	retiredUnavailable uint64
+	// tables: see remember. Own lock, because a reporter reads it while a
+	// replacement holds mu.
+	tablesMu sync.Mutex
+	tables   map[uint64][][]sandboxpolicy.CompiledPolicy
 }
 
 func newNodeOwner[C any](section nodeSection[C], validator Validator, prefix string) nodeOwner[C] {
@@ -448,6 +455,8 @@ func (b *nodeOwner[C]) replaceInstance(ctx context.Context, prepared, extra map[
 	if err != nil {
 		return err
 	}
+	// Before start: the candidate can report verdicts before it is ready.
+	b.remember(b.generation+1, policies)
 	var initial []enforcement.Binding
 	for _, v := range bindings {
 		initial = append(initial, enforcement.Binding{Container: native(v.binding), Slot: slots[v.combination]})
@@ -480,9 +489,17 @@ func (b *nodeOwner[C]) retire(ctx context.Context) error {
 	var kept []NodeInstance
 	var errs []error
 	for _, i := range b.retiring {
+		// The maps go with the instance: read the counters before Stop.
+		last, readErr := counters(i)
 		if err := i.Stop(ctx); err != nil {
 			kept = append(kept, i)
 			errs = append(errs, err)
+			continue
+		}
+		if readErr != nil {
+			b.retiredUnavailable++
+		} else {
+			addCounters(&b.retired, last)
 		}
 	}
 	b.retiring = kept

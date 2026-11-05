@@ -62,7 +62,7 @@ func TestPrivilegeBackendKernel(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	engine, err := NewNativePrivilegeEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_PRIVILEGE_IMAGE"))
+	engine, err := NewNativePrivilegeEngine(rt, simple.New("no-kubernetes"), store, os.Getenv("IG_PRIVILEGE_IMAGE"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

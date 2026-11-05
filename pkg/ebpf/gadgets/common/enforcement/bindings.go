@@ -111,6 +111,7 @@ type Bindings struct {
 	unarmed         map[uint64]bool
 	members, armed  Map
 	faults          FaultMap
+	counters        FaultMap // the verdict counters array, nil when unavailable
 	ready, stopped  bool
 	startupComplete bool
 	startupError    error
@@ -317,7 +318,53 @@ func (b *Bindings) Start(gc operators.GadgetContext) error {
 			return fmt.Errorf("invalid arming map layout")
 		}
 	}
-	return b.start(policy, members, armed, faults)
+	if err := b.start(policy, members, armed, faults); err != nil {
+		return err
+	}
+	// Telemetry only: a missing or unexpected counters map never fails the
+	// instance. VerdictCounters then reports it unavailable.
+	if counters, err := getMap("counters"); err == nil && counters.Type() == ebpf.PerCPUArray && counters.KeySize() == 4 && counters.ValueSize() == 8 && counters.MaxEntries() >= verdictCounterCount {
+		b.mu.Lock()
+		b.counters = counters
+		b.mu.Unlock()
+	}
+	return nil
+}
+
+// verdictCounterCount is VERDICT_COUNT_MAX in ../verdict.h.
+const verdictCounterCount = 6
+
+// VerdictCounters are the counters of ../verdict.h, summed over all CPUs,
+// since the instance started.
+type VerdictCounters struct {
+	Denied    uint64 // deny decisions, audit and enforce
+	Submitted uint64 // verdict events written to the ring buffer
+	// Dropped: the ring buffer was full. RateLimited: the per-CPU report
+	// limit skipped the event. Both are denies with no event.
+	Dropped       uint64
+	Allowed       uint64
+	SectionErrors uint64
+	RateLimited   uint64
+}
+
+// VerdictCounters reads the gadget's verdict counters.
+func (b *Bindings) VerdictCounters() (VerdictCounters, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.counters == nil {
+		return VerdictCounters{}, fmt.Errorf("verdict counters unavailable")
+	}
+	var totals [verdictCounterCount]uint64
+	for i := range totals {
+		var perCPU []uint64
+		if err := b.counters.Lookup(uint32(i), &perCPU); err != nil {
+			return VerdictCounters{}, fmt.Errorf("reading verdict counter %d: %w", i, err)
+		}
+		for _, v := range perCPU {
+			totals[i] += v
+		}
+	}
+	return VerdictCounters{Denied: totals[0], Submitted: totals[1], Dropped: totals[2], Allowed: totals[3], SectionErrors: totals[4], RateLimited: totals[5]}, nil
 }
 
 // SlotFaults returns the tracking faults counted for a slot since the instance

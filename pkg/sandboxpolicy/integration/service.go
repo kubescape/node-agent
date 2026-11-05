@@ -71,13 +71,19 @@ type serviceBackend interface {
 }
 
 type Service struct {
-	Controller    *sandboxpolicy.Controller
-	backend       serviceBackend
-	exporter      *sandboxpolicy.VerdictExporter
-	closeRuntime  func() error
-	options       ServiceOptions
-	mu            sync.RWMutex
-	bindings      map[string]sandboxpolicy.Binding
+	Controller   *sandboxpolicy.Controller
+	backend      serviceBackend
+	exporter     *sandboxpolicy.VerdictExporter
+	closeRuntime func() error
+	options      ServiceOptions
+	mu           sync.RWMutex
+	bindings     map[string]sandboxpolicy.Binding
+	// cgroups and podCgroups index the container and pod bindings by
+	// cgroup ID, for the section verdicts (they carry only the cgroup).
+	cgroups    map[uint64]sandboxpolicy.Binding
+	podCgroups map[uint64]sandboxpolicy.Binding
+	// sectionOwners are the node-wide section backends, by section name.
+	sectionOwners map[string]sectionOwner
 	snapshot      func(context.Context) ([]sandboxpolicy.Binding, error)
 	cancel        context.CancelFunc
 	done          chan struct{}
@@ -161,7 +167,8 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		s.namespaces = informers.NewSharedInformerFactory(options.Kubernetes, 0)
 		s.watchPods()
 	}
-	s.exporter, err = sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 1024, Receivers: options.Receivers, Enricher: options.Enricher, ResolveBinding: s.resolveBinding})
+	s.exporter, err = sandboxpolicy.NewVerdictExporter(sandboxpolicy.ExporterOptions{Capacity: 1024, Receivers: options.Receivers, Enricher: options.Enricher,
+		ResolveBinding: s.resolveBinding, ResolveCgroup: s.resolveCgroup, SlotPolicies: s.slotPolicies})
 	if err != nil {
 		_ = r.Close()
 		return nil, err
@@ -200,7 +207,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		privilegeUnavailable = igbackend.CheckBPFLSM(host.HostRoot)
 	}
 	if options.PrivilegeImageName != "" && privilegeUnavailable == nil {
-		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName)
+		privilegeEngine, err := igbackend.NewNativePrivilegeEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.PrivilegeImageName, s.reportSection)
 		if err == nil {
 			privilege, err = igbackend.NewPrivilege(privilegeEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 		}
@@ -218,7 +225,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		var tier igbackend.NetworkTier
 		tier, networkUnavailable = igbackend.SelectNetworkTier(host.HostRoot, nil)
 		if networkUnavailable == nil {
-			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName, tier)
+			networkEngine, err := igbackend.NewNativeNetworkEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.NetworkImageName, tier, s.reportSection)
 			if err == nil {
 				network, err = igbackend.NewNetwork(networkEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 			}
@@ -240,7 +247,7 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 		fileNode = igbackend.FileNode()
 	}
 	if options.FileImageName != "" && fileUnavailable == nil {
-		fileEngine, err := igbackend.NewNativeFileEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.FileImageName)
+		fileEngine, err := igbackend.NewNativeFileEngine(r, kubemanager.NewKubeManager(options.Containers, options.Tracers), store, options.FileImageName, s.reportSection)
 		if err == nil {
 			file, err = igbackend.NewFile(fileEngine, igbackend.LinuxValidator{ProcRoot: host.HostProcFs, CgroupRoot: filepath.Join(host.HostRoot, "sys/fs/cgroup")}, options.NodeName)
 		}
@@ -255,6 +262,15 @@ func NewService(ctx context.Context, options ServiceOptions) (*Service, error) {
 			return nil, err
 		}
 	}
+	owners := map[string]sectionOwner{}
+	for name, b := range map[string]sandboxpolicy.Backend{sandboxpolicy.SectionPrivilege: privilege, sandboxpolicy.SectionNetwork: network, sandboxpolicy.SectionFile: file} {
+		if o, ok := b.(sectionOwner); ok {
+			owners[name] = o
+		}
+	}
+	s.mu.Lock()
+	s.sectionOwners = owners
+	s.mu.Unlock()
 	sections, err := sandboxpolicy.NewSectionBackend(full, privilege, privilegeUnavailable)
 	if err != nil {
 		_ = full.Close(ctx)
@@ -459,6 +475,10 @@ func (s *Service) refresh(ctx context.Context) {
 			next[b.ContainerID] = b
 		}
 		s.bindings = next
+		s.cgroups = make(map[uint64]sandboxpolicy.Binding, len(next))
+		for _, b := range next {
+			s.cgroups[b.CgroupID] = b
+		}
 		s.mu.Unlock()
 		return bindings, nil
 	})
@@ -568,6 +588,13 @@ func (s *Service) bindPodPlans(ctx context.Context, scheduled []sandboxpolicy.Bi
 		}
 	}
 	s.podFirstSeen, s.podPolling = firstSeen, polling
+	podCgroups := make(map[uint64]sandboxpolicy.Binding, len(pods))
+	for _, p := range pods {
+		podCgroups[p.CgroupID] = sandboxpolicy.Binding{CgroupID: p.CgroupID, CgroupPath: p.CgroupPath, PodUID: p.PodUID, Namespace: p.Namespace, PodName: p.PodName}
+	}
+	s.mu.Lock()
+	s.podCgroups = podCgroups
+	s.mu.Unlock()
 	if err := binder.BindPods(ctx, pods); err != nil {
 		// The poll runs every 50 ms: report a repeated error once.
 		if !poll || err.Error() != s.podPollErr {
@@ -640,8 +667,55 @@ func (s *Service) resolveBinding(v sandboxpolicy.Verdict) (sandboxpolicy.Binding
 	return b, ok && b.CgroupID == v.CgroupID && b.PodUID == v.PodUID && b.PID == v.BindingPID && b.MountNamespace == v.MountNamespace
 }
 
+// resolveCgroup finds the container or pod binding of a section verdict.
+func (s *Service) resolveCgroup(id uint64) (sandboxpolicy.Binding, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if b, ok := s.cgroups[id]; ok {
+		return b, true
+	}
+	b, ok := s.podCgroups[id]
+	return b, ok
+}
+
+// sectionOwner is a node-wide section backend (igbackend's node owner).
+type sectionOwner interface {
+	SlotPolicies(generation uint64, slot uint32) ([]sandboxpolicy.CompiledPolicy, bool)
+	VerdictStats() igbackend.VerdictStats
+}
+
+func (s *Service) slotPolicies(section string, generation uint64, slot uint32) ([]sandboxpolicy.CompiledPolicy, bool) {
+	s.mu.RLock()
+	owner := s.sectionOwners[section]
+	s.mu.RUnlock()
+	if owner == nil {
+		return nil, false
+	}
+	return owner.SlotPolicies(generation, slot)
+}
+
+// reportSection is the gadgets' SectionReporter. A full queue is counted in
+// ExporterStats.Dropped.
+func (s *Service) reportSection(event sandboxpolicy.SectionEvent) {
+	_ = s.exporter.ReportSection(context.Background(), event)
+}
+
 // ExporterStats exposes telemetry loss separately from enforcement readiness.
 func (s *Service) ExporterStats() sandboxpolicy.ExporterStats { return s.exporter.Stats() }
+
+// SectionVerdictStats exposes the kernel verdict counters of each running
+// section gadget: denies the kernel could not report (ring buffer full or
+// rate limited) are counted there, not lost silently.
+func (s *Service) SectionVerdictStats() map[string]igbackend.VerdictStats {
+	s.mu.RLock()
+	owners := s.sectionOwners
+	s.mu.RUnlock()
+	stats := make(map[string]igbackend.VerdictStats, len(owners))
+	for name, o := range owners {
+		stats[name] = o.VerdictStats()
+	}
+	return stats
+}
 
 func (s *Service) report(err error) {
 	if err != nil && s.options.OnError != nil {
