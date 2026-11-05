@@ -62,6 +62,9 @@ function (`net_decide` in `network_policy.h`); only one set is used.
     calls get the `any` rules and the default there.
   - The cgroup programs return 0 (the kernel returns EPERM) or 1. All cgroup
     programs on the path run, and any deny wins.
+  - The LSM programs return the verdict of an earlier BPF LSM program when it
+    is not 0, so they never replace another deny
+    (`runtime/lsm_chain_kernel_test.go`).
 
 ## Policy
 
