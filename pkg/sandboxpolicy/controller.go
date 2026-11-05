@@ -252,7 +252,8 @@ func (c *Controller) PrepareScheduled(ctx context.Context, containers []Binding)
 	active := map[string]bool{}
 	for _, p := range policies {
 		active[SectionPrivilege] = active[SectionPrivilege] || p.spec.Privilege != nil
-		active[SectionNetwork] = active[SectionNetwork] || p.spec.Network != nil
+		// A network section that did not translate loads no gadget.
+		active[SectionNetwork] = active[SectionNetwork] || networkPlans[p.identity.UID] != nil
 	}
 	var nonEmpty []Plan
 	for _, b := range containers {

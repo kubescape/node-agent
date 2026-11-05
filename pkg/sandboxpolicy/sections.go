@@ -164,8 +164,8 @@ func (s *SectionBackend) Prepare(ctx context.Context, plans []Plan) error {
 
 // PrepareSections prepares like Prepare, but only the sections in active
 // (nil: every section). A section with no active policy is not prepared, so
-// a backend that loads its gadget before the first plan (privilege) does not
-// load it for a policy of another section.
+// a backend that loads its gadget before the first plan (privilege, network)
+// does not load it for a policy of another section.
 func (s *SectionBackend) PrepareSections(ctx context.Context, plans []Plan, active map[string]bool) error {
 	s.prepareMu.Lock()
 	defer s.prepareMu.Unlock()

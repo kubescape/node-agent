@@ -270,6 +270,49 @@ func TestControllerPrepareScheduled(t *testing.T) {
 	}
 }
 
+type sectionPreparingBackend struct {
+	preparingBackend
+	active map[string]bool
+}
+
+func (p *sectionPreparingBackend) PrepareSections(_ context.Context, plans []Plan, active map[string]bool) error {
+	p.prepared, p.active = plans, active
+	p.calls++
+	return nil
+}
+
+// The network section is active, so its gadget loads before any pod matches,
+// only when a valid, not-off policy has a translated network section.
+func TestControllerPrepareScheduledNetworkNeedsTranslation(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		mutate func(*api.SandboxPolicy)
+		active bool
+	}{
+		{"translated", func(*api.SandboxPolicy) {}, true},
+		{"not translated", func(p *api.SandboxPolicy) {
+			p.Spec.Network.Rules[0].Target.CIDR = []string{"::ffff:0:0/80"}
+		}, false},
+		{"off", func(p *api.SandboxPolicy) { p.Spec.Mode = api.ModeOff }, false},
+	} {
+		net := policy("net", "ns")
+		net.Spec.Network = netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}})).Network
+		tc.mutate(net)
+		c, _, _, _ := setup(t, net)
+		preparer := &sectionPreparingBackend{preparingBackend: preparingBackend{fakeBackend: fakeBackend{plans: map[string]Plan{}}}}
+		c.backend = preparer
+		_ = c.InitialSync(ctx)
+		// No pod is scheduled.
+		if err := c.PrepareScheduled(ctx, nil); err != nil || preparer.calls != 1 {
+			t.Fatalf("%s: %v calls=%d", tc.name, err, preparer.calls)
+		}
+		if preparer.active[SectionNetwork] != tc.active || preparer.active[SectionPrivilege] || len(preparer.prepared) != 0 {
+			t.Fatalf("%s: active=%v prepared=%+v", tc.name, preparer.active, preparer.prepared)
+		}
+	}
+}
+
 func TestPrivilegeUnavailableIsReportedAndRefused(t *testing.T) {
 	ctx := context.Background()
 	p := policy("with-privilege", "ns")

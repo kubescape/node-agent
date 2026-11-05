@@ -211,7 +211,11 @@ func TestCompileSlotsAndOff(t *testing.T) {
 	if s := c.Slots[1]; s.Rank != RankDenyEnforce || s.Mode != KernelModeEnforce || s.DenyEnforceDocs != 1 {
 		t.Fatalf("deny slot %+v", s)
 	}
-	if _, err := CompileSlots(nil, 1); err == nil {
-		t.Fatal("no slot must fail")
+	// An instance with no slot is started before any container binds.
+	if c, err := CompileSlots(nil, 1); err != nil || len(c.Slots) != 0 || len(c.Prefixes) != 0 {
+		t.Fatalf("no slot: %+v %v", c, err)
+	}
+	if _, err := CompileSlots(make([][]Document, KernelMaxSlots+1), 1); err == nil {
+		t.Fatal("too many slots must fail")
 	}
 }

@@ -117,7 +117,7 @@ func GetBindings(gc operators.GadgetContext) (*enforcement.Bindings, error) {
 
 func validateConfig(config Config) error {
 	p := config.Policy
-	if p.Generation == 0 || len(p.Slots) == 0 || len(p.Slots) > netpolicy.KernelMaxSlots ||
+	if p.Generation == 0 || len(p.Slots) > netpolicy.KernelMaxSlots ||
 		len(p.Prefixes) > netpolicy.KernelMaxPrefixes || len(p.Lists) > netpolicy.KernelMaxLists {
 		return fmt.Errorf("invalid compiled network policy")
 	}

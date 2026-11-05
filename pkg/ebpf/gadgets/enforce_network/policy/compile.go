@@ -127,8 +127,9 @@ func CompileSlots(slots [][]Document, generation uint64) (Compiled, error) {
 	if generation == 0 {
 		return Compiled{}, fmt.Errorf("generation must be nonzero")
 	}
-	if len(slots) == 0 || len(slots) > KernelMaxSlots {
-		return Compiled{}, fmt.Errorf("%d policy combinations: need 1 to %d per node", len(slots), KernelMaxSlots)
+	// No slot is valid: an instance started before any container binds.
+	if len(slots) > KernelMaxSlots {
+		return Compiled{}, fmt.Errorf("%d policy combinations exceed %d per node", len(slots), KernelMaxSlots)
 	}
 	c := &compiler{
 		out:       Compiled{Generation: generation, RuleNames: []string{"", "default"}, Origins: []string{""}},

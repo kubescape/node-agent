@@ -72,6 +72,9 @@ func TestValidateConfig(t *testing.T) {
 	if err := validateConfig(Config{Policy: compiled(t)}); err != nil {
 		t.Fatal(err)
 	}
+	if err := validateConfig(Config{Policy: netpolicy.Compiled{Generation: 1}}); err != nil {
+		t.Fatalf("an instance with no slot is valid: %v", err)
+	}
 	c := compiled(t)
 	c.Generation = 9
 	if err := validateConfig(Config{Policy: c}); err == nil {

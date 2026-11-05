@@ -79,6 +79,10 @@ func NewNetwork(engine NetworkEngine, validator Validator, prefix string) (*Netw
 		start: func(ctx context.Context, id string, compiled netpolicy.Compiled, bindings []enforcement.Binding) (NodeInstance, error) {
 			return engine.Start(ctx, id, netruntime.Config{Policy: compiled, InitialBindings: bindings})
 		},
+		// As privilege: the first pod of a network policy after node-agent
+		// starts must find the gadget loaded, because its first connect is
+		// judged at the pod cgroup.
+		startEmpty: true,
 	}
 	return &NetworkBackend{newNodeOwner(section, validator, prefix)}, nil
 }
