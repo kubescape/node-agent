@@ -45,6 +45,11 @@ type Entry struct {
 	Process   *armotypes.Process
 	Admission *armotypes.AdmissionEvidence
 	Value     map[string]any
+
+	// Count is the counter value of an entry written by Incr. Zero means the
+	// entry is a plain marker, not a counter. It is surfaced to CEL as the
+	// reserved provenance key _count, never stored inside Value.
+	Count int64
 }
 
 func (e *Entry) expired(now time.Time) bool { return now.After(e.ExpiresAt) }

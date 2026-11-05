@@ -141,6 +141,101 @@ func (s *Store) Set(e *Entry) error {
 	return nil
 }
 
+// Incr adds by to the counter under e's (ruleID, name, key) in e's scope and
+// returns the entry now stored, or creates it from e with Count = by.
+//
+// The window is fixed from creation: an increment on a live entry keeps the
+// existing ExpiresAt, Timestamp, Process and Value, so provenance describes the
+// first event of the window and the TTL is "since the window opened", not
+// "since the last event". An expired entry is treated as absent and replaced,
+// which is what starts the next window.
+//
+// The returned entry is always a fresh pointer. Readers hold *Entry outside the
+// shard lock, so a live entry is never mutated in place: the counter is advanced
+// by replacing the map value with a copy. The side effect is that an evidence
+// record shows the count as of the read.
+//
+// Cap handling matches Set: creating is subject to the per-scope and global
+// caps, replacing is exempt. A disabled store returns (nil, nil).
+func (s *Store) Incr(e *Entry, by int64) (*Entry, error) {
+	if !s.cfg.Enabled {
+		return nil, nil
+	}
+	sh := s.shardFor(e.ScopeID)
+	k := entryKey{e.RuleID, e.Name, e.Key}
+
+	if s.currentSize() >= s.cfg.MaxSize {
+		if s.sweepIfDue() == 0 && !s.holds(sh, e.ScopeID, k) {
+			s.metrics.ReportStateWriteRejected(e.RuleID, "global_cap")
+			return nil, ErrGlobalCapReached
+		}
+	}
+
+	now := time.Now()
+	sh.mu.Lock()
+	b, ok := sh.scopes[e.ScopeID]
+	if !ok {
+		b = &bucket{entries: make(map[entryKey]*Entry)}
+		sh.scopes[e.ScopeID] = b
+	}
+	existing, replacing := b.entries[k]
+	var stored *Entry
+	if replacing && !existing.expired(now) {
+		cp := *existing
+		cp.Count += by
+		stored = &cp
+	} else {
+		if !replacing && len(b.entries) >= s.scopeCap(e.ScopeID) {
+			sh.mu.Unlock()
+			s.metrics.ReportStateWriteRejected(e.RuleID, "scope_cap")
+			return nil, ErrScopeCapReached
+		}
+		cp := *e
+		cp.Count = by
+		stored = &cp
+	}
+	b.entries[k] = stored
+	sh.mu.Unlock()
+
+	if !replacing {
+		s.addSize(1)
+	}
+	s.metrics.ReportStateWrite(e.RuleID, "ok")
+	return stored, nil
+}
+
+// Delete removes the entry under (ruleID, name, key) in scopeID, expired or
+// not, and reports whether anything was removed. It is the clear operation.
+func (s *Store) Delete(ruleID, scopeID, name, key string) bool {
+	if !s.cfg.Enabled {
+		return false
+	}
+	sh := s.shardFor(scopeID)
+	k := entryKey{ruleID, name, key}
+
+	sh.mu.Lock()
+	b, ok := sh.scopes[scopeID]
+	if !ok {
+		sh.mu.Unlock()
+		return false
+	}
+	_, had := b.entries[k]
+	if had {
+		delete(b.entries, k)
+		if len(b.entries) == 0 {
+			delete(sh.scopes, scopeID)
+		}
+	}
+	sh.mu.Unlock()
+
+	if !had {
+		return false
+	}
+	s.addSize(-1)
+	s.metrics.ReportStateWrite(ruleID, "cleared")
+	return true
+}
+
 // holds reports whether a live-or-expired entry already exists under k. Used only
 // by the global-cap path to tell a replacement from a genuine insert.
 func (s *Store) holds(sh *shard, scopeID string, k entryKey) bool {
