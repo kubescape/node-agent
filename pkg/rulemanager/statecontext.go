@@ -75,6 +75,7 @@ func stateWritesCacheKey(rule *typesv1.Rule) string {
 		w := &rule.StateWrites[i]
 		for _, part := range []string{
 			string(w.EventType), string(w.Scope), w.Name, w.Key, w.When, w.TTL,
+			strconv.Itoa(w.Increment), strconv.FormatBool(w.Clear),
 		} {
 			_, _ = h.Write([]byte(part))
 			_, _ = h.Write([]byte{0})

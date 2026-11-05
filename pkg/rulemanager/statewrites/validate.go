@@ -24,13 +24,71 @@ import (
 // against utils.EventType, and doing the conversion once here keeps the
 // comparison typed rather than a string cast at every event.
 type Compiled struct {
+	Op        Op
 	EventType utils.EventType
 	Scope     armotypes.StateScope
 	Name      string
 	Key       string
 	When      string
 	Value     map[string]string
-	TTL       time.Duration
+	// TTL is zero only for OpClear, which has no window of its own.
+	TTL time.Duration
+}
+
+// Op is what a write does to the entry under its name and key.
+//
+// The operation is inferred from which fields the author set: neither increment
+// nor clear is a set, which is exactly what every pre-counter rule is, so adding
+// the two operations changed no existing rule.
+type Op uint8
+
+const (
+	// OpSet stores the entry, last write wins, TTL refreshed.
+	OpSet Op = iota
+	// OpIncrement creates the entry with count 1 or adds 1; the window is
+	// fixed from creation. Runs BEFORE the rule expression.
+	OpIncrement
+	// OpClear deletes the entry if present.
+	OpClear
+)
+
+func (o Op) String() string {
+	switch o {
+	case OpIncrement:
+		return "increment"
+	case OpClear:
+		return "clear"
+	default:
+		return "set"
+	}
+}
+
+// opOf infers the operation and rejects a clause that asks for more than one.
+func opOf(w armotypes.StateWrite) (Op, error) {
+	if w.Increment != 0 && w.Increment != 1 {
+		return 0, fmt.Errorf("increment must be 1 (got %d); other amounts are not supported", w.Increment)
+	}
+	n := 0
+	if w.Increment == 1 {
+		n++
+	}
+	if w.Clear {
+		n++
+	}
+	if len(w.Value) > 0 {
+		n++
+	}
+	if n > 1 {
+		return 0, fmt.Errorf("exactly one of value, increment or clear may be set")
+	}
+	switch {
+	case w.Increment == 1:
+		return OpIncrement, nil
+	case w.Clear:
+		return OpClear, nil
+	default:
+		return OpSet, nil
+	}
 }
 
 // nodeAgentScopes are the scopes node-agent can resolve. identity is
@@ -74,12 +132,25 @@ func Validate(w armotypes.StateWrite, ruleID string, maxTTL time.Duration) (Comp
 		return fail("scope %q is not resolvable by node-agent (want container, pod or node)", w.Scope)
 	}
 
-	ttl, err := time.ParseDuration(w.TTL)
+	op, err := opOf(w)
 	if err != nil {
-		return fail("ttl %q is not a duration: %w", w.TTL, err)
+		return fail("%w", err)
 	}
-	if ttl <= 0 {
-		return fail("ttl %q must be positive; an entry born expired is a silently dead rule", w.TTL)
+
+	// A clear has no window, so its ttl is optional: an author may copy an
+	// increment entry and flip the operation without editing the rest.
+	var ttl time.Duration
+	if op != OpClear || w.TTL != "" {
+		ttl, err = time.ParseDuration(w.TTL)
+		if err != nil {
+			return fail("ttl %q is not a duration: %w", w.TTL, err)
+		}
+		if ttl <= 0 {
+			return fail("ttl %q must be positive; an entry born expired is a silently dead rule", w.TTL)
+		}
+	}
+	if op == OpClear {
+		ttl = 0
 	}
 	if ttl > maxTTL {
 		logger.L().Warning("statewrites - clamping ttl to the configured maximum",
@@ -109,6 +180,7 @@ func Validate(w armotypes.StateWrite, ruleID string, maxTTL time.Duration) (Comp
 	}
 
 	return Compiled{
+		Op:        op,
 		EventType: eventType,
 		Scope:     w.Scope,
 		Name:      w.Name,
@@ -133,6 +205,11 @@ func ValidateAll(writes []armotypes.StateWrite, ruleID string, maxTTL time.Durat
 
 	compiled := make([]Compiled, 0, len(writes))
 	scopeOf := make(map[string]armotypes.StateScope, len(writes))
+	// kindOf tracks whether a name is a marker (set) or a counter (increment).
+	// A set replaces a counter entry, count and all, so one name carrying both
+	// in the same rule would silently zero its own counter; clear pairs with
+	// either and is not tracked.
+	kindOf := make(map[string]Op, len(writes))
 
 	for _, w := range writes {
 		c, err := Validate(w, ruleID, maxTTL)
@@ -143,6 +220,14 @@ func ValidateAll(writes []armotypes.StateWrite, ruleID string, maxTTL time.Durat
 			return nil, nil, fmt.Errorf(
 				"rule %s: stateWrites[%q]: declared in both scope %q and scope %q; a name must have exactly one scope because reads infer it from the name",
 				ruleID, c.Name, existing, c.Scope)
+		}
+		if c.Op != OpClear {
+			if existing, ok := kindOf[c.Name]; ok && existing != c.Op {
+				return nil, nil, fmt.Errorf(
+					"rule %s: stateWrites[%q]: declared as both a set and an increment; a set replaces the counter, so a name carries one operation kind",
+					ruleID, c.Name)
+			}
+			kindOf[c.Name] = c.Op
 		}
 		scopeOf[c.Name] = c.Scope
 		compiled = append(compiled, c)

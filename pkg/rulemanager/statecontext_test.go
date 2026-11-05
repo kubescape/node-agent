@@ -320,6 +320,8 @@ func TestStateWritesCacheKey_TracksEveryFieldValidationReads(t *testing.T) {
 		"ttl":        func(r *typesv1.Rule) { r.StateWrites[0].TTL = "20m" },
 		"value expr": func(r *typesv1.Rule) { r.StateWrites[0].Value["argv"] = "event.cwd" },
 		"value key":  func(r *typesv1.Rule) { r.StateWrites[0].Value["extra"] = "event.cwd" },
+		"increment":  func(r *typesv1.Rule) { r.StateWrites[0].Increment = 1 },
+		"clear":      func(r *typesv1.Rule) { r.StateWrites[0].Clear = true },
 		"extra write": func(r *typesv1.Rule) {
 			r.StateWrites = append(r.StateWrites, r.StateWrites[0])
 		},
