@@ -176,6 +176,9 @@ Register receivers in `ThirdPartyTracers.ThirdPartyEventReceivers` under
 `EnrichedEventReceiver`, `EventReceiver`, or `sandboxpolicy.VerdictReceiver`.
 Optional process-tree enrichment uses the existing `TaskBasedEnricher` interface.
 Private OTel export is intentionally not implemented here.
+For local tests, `sandboxPolicyDebugExport: true` (default false) registers a
+`DebugReceiver` that logs each exported authorization, exec and section, as one
+`sandbox authorization export` JSON line.
 
 `ExecAuthorizationEventType` (`execAuthorization`) is an internal receiver-dispatch
 key, not an OTEL event name. Construct snapshots with `NewExecVerdictEvent`.

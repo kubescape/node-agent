@@ -121,6 +121,7 @@ type Config struct {
 	EnablePartialProfileGeneration bool                                 `mapstructure:"partialProfileGenerationEnabled"`
 	EnableMetricsExporter          bool                                 `mapstructure:"prometheusExporterEnabled"`
 	EnableSandboxPolicy            bool                                 `mapstructure:"sandboxPolicyEnabled"`
+	SandboxPolicyDebugExport       bool                                 `mapstructure:"sandboxPolicyDebugExport"`
 	SandboxPolicyImage             string                               `mapstructure:"sandboxPolicyImage"`
 	SandboxPolicyPrivilegeImage    string                               `mapstructure:"sandboxPolicyPrivilegeImage"`
 	SandboxPolicyNetworkImage      string                               `mapstructure:"sandboxPolicyNetworkImage"`
@@ -228,6 +229,7 @@ func LoadConfigOptional(path string, errNotFound bool) (Config, error) {
 	viper.SetOptions(viper.KeyDelimiter("::"))
 
 	viper.SetDefault("sandboxPolicyEnabled", false)
+	viper.SetDefault("sandboxPolicyDebugExport", false)
 	viper.SetDefault("sandboxPolicyImage", "")
 	viper.SetDefault("sandboxPolicyPrivilegeImage", "")
 	viper.SetDefault("sandboxPolicyNetworkImage", "")
