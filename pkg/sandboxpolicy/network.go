@@ -473,13 +473,17 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 			}
 			continue
 		}
+		origin := ""
+		if r.Origin != nil {
+			origin = *r.Origin
+		}
 		for _, proto := range protos {
 			name := r.Name
 			if len(protos) > 1 {
 				name = r.Name + "/" + proto
 			}
 			emitted = append(emitted, emittedRule{crd: r.Name, generated: len(protos) > 1, rule: netpolicy.Rule{
-				Name: name, Action: string(r.Action), Mode: mode, Origin: r.Origin,
+				Name: name, Action: string(r.Action), Mode: mode, Origin: origin,
 				CIDRs: prefixStrings(cidrs), Except: prefixStrings(lifted), Ports: ports, Proto: proto}})
 		}
 	}

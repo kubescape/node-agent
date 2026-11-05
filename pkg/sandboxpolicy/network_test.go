@@ -61,7 +61,7 @@ func TestTranslateNetworkRules(t *testing.T) {
 		netRule("ping", api.ActionAllow, api.NetworkTarget{Proto: []string{"icmp"}}),
 	)
 	spec.Network.Rules[2].Mode = api.RuleAudit
-	spec.Network.Rules[2].Origin = "catalog/E2"
+	spec.Network.Rules[2].Origin = testOriginString("catalog/E2")
 	spec.Network.Default.Listen = api.ActionDeny
 	x := NetworkExtras{DefaultMode: NetworkDirections{Egress: "audit"}}
 	plan := translate(t, spec, x, DestClasses{})
@@ -510,7 +510,7 @@ func TestNetworkGeneratedNameCollision(t *testing.T) {
 		netRule("dns/tcp~1", api.ActionAllow, api.NetworkTarget{CIDR: []string{"192.0.2.54/32"}}),
 		netRule("dns", api.ActionDeny, api.NetworkTarget{Ports: []intstr.IntOrString{intstr.FromInt32(53)}, Proto: []string{"tcp", "udp"}}),
 		netRule("web", api.ActionAllow, api.NetworkTarget{CIDR: []string{"198.51.100.0/24"}}))
-	spec.Network.Rules[2].Origin = "team/dns"
+	spec.Network.Rules[2].Origin = testOriginString("team/dns")
 	plan, err := TranslateNetwork(spec, NetworkExtras{}, DestClasses{})
 	if err != nil {
 		t.Fatalf("a name collision must not fail the policy: %v", err)

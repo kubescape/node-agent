@@ -291,12 +291,15 @@ func Compile(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, generation 
 	if p.RootRole != "" && p.RootRole != "agent" {
 		return config, fmt.Errorf("legacy exec backend cannot represent root roles")
 	}
+	if p.Exec.DefaultMode != "" {
+		return config, fmt.Errorf("exec defaultMode requires native IG ABI support")
+	}
 	doc := execpolicy.Document{Version: 1, Binding: execpolicy.Binding{Container: &execpolicy.Container{Runtime: binding.Runtime, ID: binding.ContainerID}}, Policy: execpolicy.Policy{Mode: string(p.Mode), Exec: execpolicy.Section{Default: string(p.Exec.Default)}}}
 	for _, r := range p.Exec.Rules {
-		if r.Actor != nil || len(r.Target.PathClass) > 0 || r.Target.FromImage != nil || len(r.Target.FSType) > 0 || r.Target.Argv != nil || r.Target.SetRole != "" {
+		if r.Except != nil || r.Actor != nil || len(r.Target.PathClass) > 0 || r.Target.FromImage != nil || len(r.Target.FSType) > 0 || r.Target.Argv != nil || r.Target.SetRole != "" {
 			return config, fmt.Errorf("rule %q contains predicates unsupported by legacy exec backend", r.Name)
 		}
-		doc.Policy.Exec.Rules = append(doc.Policy.Exec.Rules, execpolicy.Rule{Name: r.Name, Target: execpolicy.Target{Path: append([]string(nil), r.Target.Path...)}, Action: string(r.Action), Mode: string(r.Mode), Origin: r.Origin})
+		doc.Policy.Exec.Rules = append(doc.Policy.Exec.Rules, execpolicy.Rule{Name: r.Name, Target: execpolicy.Target{Path: append([]string(nil), r.Target.Path...)}, Action: string(r.Action), Mode: string(r.Mode), Origin: originValue(r.Origin)})
 	}
 	entries, err := execpolicy.CompileKernel(doc, generation)
 	if err != nil {

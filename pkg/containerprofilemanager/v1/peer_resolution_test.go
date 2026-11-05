@@ -89,6 +89,9 @@ func (m *mockK8sInventory) GetPodByIp(ip string) *common.SlimPod {
 	return m.podsByIP[ip]
 }
 
+// GetNodeByIp returns nil because these tests do not populate node inventory.
+func (m *mockK8sInventory) GetNodeByIp(string) *common.SlimNode { return nil }
+
 // GetSvcs returns the Services currently present in the test inventory.
 func (m *mockK8sInventory) GetSvcs() []*common.SlimService {
 	var svcs []*common.SlimService

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/containers"
-	"github.com/containerd/containerd/namespaces"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 )
 

@@ -23,12 +23,18 @@ func CompileFull(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, generat
 		if p.Identity.UID == "" || p.Revision == "" {
 			return nil, fmt.Errorf("full exec requires immutable policy UID and revision")
 		}
+		if p.Exec.DefaultMode != "" {
+			return nil, fmt.Errorf("exec defaultMode requires native IG ABI support")
+		}
 		policy := fullpolicy.Policy{ID: string(p.Identity.UID), Revision: p.Revision, Mode: fullpolicy.Mode(p.Mode), RootRole: p.RootRole, Default: fullpolicy.Action(p.Exec.Default)}
 		for _, r := range p.Exec.Rules {
+			if r.Except != nil {
+				return nil, fmt.Errorf("rule %q exceptions require native IG ABI support", r.Name)
+			}
 			if len(r.Target.PathClass) != 0 {
 				return nil, fmt.Errorf("rule %q has unresolved path classes", r.Name)
 			}
-			rule := fullpolicy.Rule{Name: r.Name, Origin: r.Origin, Action: fullpolicy.Action(r.Action), Mode: fullpolicy.Mode(r.Mode), Target: fullpolicy.Target{Path: r.Target.Path, FromImage: r.Target.FromImage, FSType: r.Target.FSType, SetRole: r.Target.SetRole}}
+			rule := fullpolicy.Rule{Name: r.Name, Origin: originValue(r.Origin), Action: fullpolicy.Action(r.Action), Mode: fullpolicy.Mode(r.Mode), Target: fullpolicy.Target{Path: r.Target.Path, FromImage: r.Target.FromImage, FSType: r.Target.FSType, SetRole: r.Target.SetRole}}
 			if a := r.Actor; a != nil {
 				rule.Actor = fullpolicy.Actor{Path: a.Path, FromImage: a.FromImage, Role: a.Role, UID: a.UID, Container: a.Container}
 				if a.Ancestor != nil {
@@ -45,4 +51,11 @@ func CompileFull(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, generat
 	// CompileKernel validates and deep-copies all caller-owned slices and pointers;
 	// no API object survives as mutable kernel matching input.
 	return fullpolicy.CompileKernelWithRoleEpochs(policies, generation, binding.ContainerName, activatedRoleEpochs)
+}
+
+func originValue(origin *string) string {
+	if origin == nil {
+		return ""
+	}
+	return *origin
 }

@@ -1,7 +1,9 @@
 package sandboxpolicy
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"sync/atomic"
@@ -66,7 +68,7 @@ func receiverMap(receivers ...containerwatcher.GenericEventReceiver) *maps.SafeM
 func sampleVerdict() Verdict {
 	uid := uint32(1000)
 	image := false
-	return Verdict{Time: time.Unix(1710000000, 1234), Policy: PolicyIdentity{Kind: "SandboxPolicy", Namespace: "ns", Name: "policy", UID: "policy-uid", Generation: 3}, Revision: "revision", Rule: "rule", Origin: "authored", Mode: api.RuleEnforce, Verdict: api.ActionDeny, Reason: "matched deny", ContainerID: "container", CgroupID: 12, PID: 41, ParentPID: 40, UID: &uid, ActorPath: "/bin/actor", TargetPath: "/bin/target", Argv: []string{"target", "--flag"}, FromImage: &image}
+	return Verdict{Time: time.Unix(1710000000, 1234), Policy: PolicyIdentity{Kind: "SandboxPolicy", Namespace: "ns", Name: "policy", UID: "policy-uid", Generation: 3}, Revision: "revision", Rule: "rule", Origin: "authored", Origins: []string{"authored"}, Mode: api.RuleEnforce, Verdict: api.ActionDeny, Reason: "matched deny", ContainerID: "container", CgroupID: 12, PID: 41, ParentPID: 40, UID: &uid, ActorPath: "/bin/actor", TargetPath: "/bin/target", Argv: []string{"target", "--flag"}, FromImage: &image}
 }
 func TestExecVerdictEventRetainsKnownMetadataWithoutInventingExec(t *testing.T) {
 	v := sampleVerdict()
@@ -290,5 +292,35 @@ func TestFullVerdictProvenanceCloneBoundaries(t *testing.T) {
 	first.Verdict.Matches[0].Name = "receiver mutation"
 	if second.Verdict.PolicySet[0].Revision != "revision" || second.Verdict.Matches[0].Name != "original" || queued.Verdict.Matches[0].Name != "original" || !second.Verdict.MatchesComplete {
 		t.Fatal("provenance aliases producer/queue/receiver memory")
+	}
+}
+
+func TestExecVerdictOriginListSnapshotAndJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		origins []string
+		want    string
+	}{
+		{"omitted", nil, `"origins":[]`},
+		{"explicit empty", []string{""}, `"origins":[""]`},
+		{"nonempty", []string{"source/rule"}, `"origins":["source/rule"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := sampleVerdict()
+			v.Origins = tc.origins
+			v.Matches = []RuleMatch{{Origins: append([]string(nil), tc.origins...)}}
+			e := NewExecVerdictEvent(v, binding())
+			if len(tc.origins) > 0 {
+				v.Origins[0] = "changed"
+				v.Matches[0].Origins[0] = "changed"
+				if e.Verdict.Origins[0] == "changed" || e.Verdict.Matches[0].Origins[0] == "changed" {
+					t.Fatal("event aliases origin provenance")
+				}
+			}
+			data, err := json.Marshal(e.Verdict)
+			if err != nil || !bytes.Contains(data, []byte(tc.want)) {
+				t.Fatalf("JSON %s, want %s: %v", data, tc.want, err)
+			}
+		})
 	}
 }
