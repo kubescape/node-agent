@@ -131,7 +131,11 @@ func TestVolumePolicyAndAliasChecks(t *testing.T) {
 	indexFiles(t, lower)
 	file, err := os.Open(filepath.Join(lower, "plain"))
 	require.NoError(t, err)
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	stat, err := indexStat(file)
 	require.NoError(t, err)
 	key := ImageInode{stat.Ino, unix.Major(stat.Dev), unix.Minor(stat.Dev)}
@@ -146,7 +150,11 @@ func TestVolumePolicyAndAliasChecks(t *testing.T) {
 	require.NoError(t, os.Symlink("..data/token", filepath.Join(projected, "token")))
 	directory, err := os.Open(projected)
 	require.NoError(t, err)
-	defer directory.Close()
+	defer func() {
+		if err := directory.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	require.NoError(t, walker.walk(directory, "/", 0, sha256.New()))
 	require.NoError(t, unix.Mkfifo(filepath.Join(projected, "unsafe"), 0600))
 	require.ErrorContains(t, walker.walk(directory, "/", 0, sha256.New()), "socket/device/special")
@@ -166,7 +174,11 @@ func TestLowerRedirectEvidenceRefusal(t *testing.T) {
 	indexFiles(t, lower)
 	file, err := os.Open(lower)
 	require.NoError(t, err)
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	walker := volumeWalker{ctx: context.Background(), rejectRedirect: true, allowSpecial: true}
 	require.NoError(t, walker.walk(file, "/", 0, sha256.New()))
 	require.NoError(t, unix.Setxattr(lower, "user.overlay.redirect", []byte("/elsewhere"), 0))
@@ -180,7 +192,11 @@ func TestContainerSideSymlinkRootResolution(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "run", "secrets", "token"), []byte("data"), 0600))
 	file, err := os.Open(root)
 	require.NoError(t, err)
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	fd, err := unix.Openat2(int(file.Fd()), "/var/run/secrets/token", &unix.OpenHow{Flags: unix.O_PATH | unix.O_CLOEXEC, Resolve: unix.RESOLVE_IN_ROOT | unix.RESOLVE_NO_MAGICLINKS})
 	require.NoError(t, err)
 	require.NoError(t, unix.Close(fd))
@@ -377,7 +393,11 @@ func TestSandboxShmRequiresActualRestrictedTmpfsRoot(t *testing.T) {
 func TestSandboxShmPinsRejectOrdinaryFiles(t *testing.T) {
 	f, err := os.CreateTemp(t.TempDir(), "not-shm")
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	require.Error(t, validateSandboxShmPins(f, f, nil, nil, containerdImageEvidence{}, nil))
 }
 func TestSandboxShmSpecParticipatesInEvidenceHash(t *testing.T) {
@@ -439,7 +459,11 @@ func TestRuntimeCgroupMountRequiresActualRestrictedCgroup2(t *testing.T) {
 func TestRuntimeCgroupMountRejectsOrdinaryDestination(t *testing.T) {
 	root, err := os.Open(t.TempDir())
 	require.NoError(t, err)
-	defer root.Close()
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	require.NoError(t, os.MkdirAll(filepath.Join(root.Name(), "sys/fs/cgroup"), 0700))
 	spec := &specs.Spec{Mounts: []specs.Mount{{Type: "cgroup", Source: "cgroup", Destination: "/sys/fs/cgroup", Options: []string{"ro", "nosuid", "nodev", "noexec"}}}}
 	require.Error(t, validateCgroupMounts(spec, root, nil))

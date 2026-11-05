@@ -37,7 +37,11 @@ func TestPinnedProcessStatParsing(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := &linuxLease{proc: dir}
-	defer l.Close()
+	defer func() {
+		if err := l.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	// comm can contain spaces and parentheses; starttime must still be field22.
 	fields := append([]string{"S"}, make([]string, 19)...)
 	for i := 1; i < len(fields); i++ {
