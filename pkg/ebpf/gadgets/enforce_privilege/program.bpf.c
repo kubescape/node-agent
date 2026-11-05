@@ -17,7 +17,8 @@
 //   other enforcement gadgets do. `ret` follows the hook arguments, so its
 //   position depends on the hook signature: the operator checks every
 //   argument count in the kernel's BTF (runtime.Hooks) and refuses a kernel
-//   where one differs.
+//   where one is unknown. bpf and perf_event_open have two known signatures
+//   (before and from 6.15) and pick theirs at load.
 // - Each hook body is a plain function, so it can also be attached as
 //   fmod_ret on the matching security_* function.
 
@@ -916,19 +917,41 @@ int BPF_PROG(ig_priv_module_request, char *kmod_name, int ret)
 
 /* bpf, perf, keys, mknod */
 
+// Linux 6.15 changed two hook signatures: bpf gained `bool kernel`, and
+// perf_event_open lost its attr argument. `ret` follows the hook arguments, so
+// these two programs read it at the position of the running kernel. The type
+// match against the kernel's security_list_options is resolved at load (CO-RE),
+// so the verifier sees only the branch that applies.
+union bpf_attr___priv;
+struct perf_event_attr___priv;
+union security_list_options___bpf3 {
+	int (*bpf)(int, union bpf_attr___priv *, unsigned int);
+};
+union security_list_options___perf2 {
+	int (*perf_event_open)(struct perf_event_attr___priv *, int);
+};
+
 SEC("lsm/bpf")
-int BPF_PROG(ig_priv_bpf, int cmd, union bpf_attr *attr, unsigned int size, int ret)
+int BPF_PROG(ig_priv_bpf)
 {
-	if (ret)
-		return ret;
+	if (bpf_core_type_matches(union security_list_options___bpf3)) {
+		if ((int)ctx[3])
+			return (int)ctx[3];
+	} else if ((int)ctx[4]) {
+		return (int)ctx[4];
+	}
 	return check_syscall(ctx, PRIV_HOOK_BPF, PRIV_SC_BPF, 0);
 }
 
 SEC("lsm/perf_event_open")
-int BPF_PROG(ig_priv_perf_event_open, struct perf_event_attr *attr, int type, int ret)
+int BPF_PROG(ig_priv_perf_event_open)
 {
-	if (ret)
-		return ret;
+	if (bpf_core_type_matches(union security_list_options___perf2)) {
+		if ((int)ctx[2])
+			return (int)ctx[2];
+	} else if ((int)ctx[1]) {
+		return (int)ctx[1];
+	}
 	return check_syscall(ctx, PRIV_HOOK_PERF_EVENT_OPEN,
 			     PRIV_SC_PERF_EVENT_OPEN, 0);
 }
