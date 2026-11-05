@@ -25,9 +25,9 @@ func netSpec(egress api.Action, rules ...api.NetworkRule) api.PolicySpec {
 		Network: &api.NetworkSection{Default: api.NetworkDefault{Egress: egress, Listen: api.ActionAllow}, Rules: rules}}
 }
 
-func translate(t *testing.T, spec api.PolicySpec, x NetworkExtras, classes DestClasses) *NetworkPlan {
+func translate(t *testing.T, spec api.PolicySpec, classes DestClasses) *NetworkPlan {
 	t.Helper()
-	plan, err := TranslateNetwork(spec, x, classes)
+	plan, err := TranslateNetwork(spec, classes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,8 +63,8 @@ func TestTranslateNetworkRules(t *testing.T) {
 	spec.Network.Rules[2].Mode = api.RuleAudit
 	spec.Network.Rules[2].Origin = testOriginString("catalog/E2")
 	spec.Network.Default.Listen = api.ActionDeny
-	x := NetworkExtras{DefaultMode: NetworkDirections{Egress: "audit"}}
-	plan := translate(t, spec, x, DestClasses{})
+	spec.Network.DefaultMode = &api.NetworkDefaultModes{Egress: api.RuleAudit}
+	plan := translate(t, spec, DestClasses{})
 	eg := plan.Egress.Policy.Egress
 	if plan.Egress.Policy.Mode != "enforce" || eg.Default != "deny" || eg.DefaultMode != "audit" {
 		t.Fatalf("document header %+v", plan.Egress.Policy)
@@ -97,36 +97,36 @@ func TestTranslateNetworkRules(t *testing.T) {
 }
 
 func TestTranslateNetworkValidates(t *testing.T) {
-	for name, mutate := range map[string]func(*api.PolicySpec, *NetworkExtras){
-		"proto":     func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.Proto = []string{"sctp"} },
-		"direction": func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.Direction = "ingress" },
-		"destClass": func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.DestClass = []string{""} },
+	except := func(e ...api.NetworkException) func(*api.PolicySpec) {
+		return func(s *api.PolicySpec) { s.Network.Rules[0].Except = e }
+	}
+	for name, mutate := range map[string]func(*api.PolicySpec){
+		"proto":     func(s *api.PolicySpec) { s.Network.Rules[0].Target.Proto = []string{"sctp"} },
+		"direction": func(s *api.PolicySpec) { s.Network.Rules[0].Target.Direction = "ingress" },
+		"destClass": func(s *api.PolicySpec) { s.Network.Rules[0].Target.DestClass = []string{""} },
 		// Shorter than /96, an IPv4-mapped prefix has no IPv4 form: it was
 		// accepted and then dropped by the translation.
-		"mapped CIDR": func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Rules[0].Target.CIDR = []string{"::ffff:0:0/80"} },
-		"mapped except": func(_ *api.PolicySpec, x *NetworkExtras) {
-			x.Except = map[string][]NetworkExcept{"r": {{Target: &api.NetworkTarget{CIDR: []string{"::ffff:192.0.2.0/88"}}}}}
-		},
-		"listen default": func(s *api.PolicySpec, _ *NetworkExtras) { s.Network.Default.Listen = "" },
-		"actor": func(s *api.PolicySpec, _ *NetworkExtras) {
+		"mapped CIDR":    func(s *api.PolicySpec) { s.Network.Rules[0].Target.CIDR = []string{"::ffff:0:0/80"} },
+		"mapped except":  except(api.NetworkException{Target: &api.NetworkTarget{CIDR: []string{"::ffff:192.0.2.0/88"}}}),
+		"listen default": func(s *api.PolicySpec) { s.Network.Default.Listen = "" },
+		"actor": func(s *api.PolicySpec) {
 			s.Network.Rules[0].Actor = &api.Actor{Path: []string{"/bin/curl"}}
 		},
-		"defaultMode": func(_ *api.PolicySpec, x *NetworkExtras) { x.DefaultMode.Egress = "tripwire" },
-		"except on allow": func(s *api.PolicySpec, x *NetworkExtras) {
+		"defaultMode": func(s *api.PolicySpec) { s.Network.DefaultMode = &api.NetworkDefaultModes{Egress: "tripwire"} },
+		"except on allow": func(s *api.PolicySpec) {
 			s.Network.Rules[0].Action = api.ActionAllow
-			x.Except = map[string][]NetworkExcept{"r": {{Target: &api.NetworkTarget{CIDR: []string{"192.0.2.1/32"}}}}}
+			s.Network.Rules[0].Except = []api.NetworkException{{Target: &api.NetworkTarget{CIDR: []string{"192.0.2.1/32"}}}}
 		},
-		"empty except": func(_ *api.PolicySpec, x *NetworkExtras) {
-			x.Except = map[string][]NetworkExcept{"r": {{Target: &api.NetworkTarget{}}}}
+		"empty except list on allow": func(s *api.PolicySpec) {
+			s.Network.Rules[0].Action = api.ActionAllow
+			s.Network.Rules[0].Except = []api.NetworkException{}
 		},
-		"except for unknown rule": func(_ *api.PolicySpec, x *NetworkExtras) {
-			x.Except = map[string][]NetworkExcept{"other": {{Target: &api.NetworkTarget{CIDR: []string{"192.0.2.1/32"}}}}}
-		},
+		"empty except":       except(api.NetworkException{Target: &api.NetworkTarget{}}),
+		"empty actor except": except(api.NetworkException{Actor: &api.Actor{}}),
 	} {
 		spec := netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}}))
-		var x NetworkExtras
-		mutate(&spec, &x)
-		if _, err := TranslateNetwork(spec, x, DestClasses{}); err == nil {
+		mutate(&spec)
+		if _, err := TranslateNetwork(spec, DestClasses{}); err == nil {
 			t.Errorf("%s: invalid input accepted", name)
 		}
 	}
@@ -138,7 +138,7 @@ func TestNetworkLocalAndClusterClasses(t *testing.T) {
 		netRule("no-lateral", api.ActionDeny, api.NetworkTarget{DestClass: []string{ClassClusterInternal, "privateRanges"}}),
 	)
 	cluster := ClusterCIDRs{Pods: []string{"10.244.0.0/24"}, Services: []string{"10.96.0.0/16"}}
-	plan := translate(t, spec, NetworkExtras{}, DestClasses{Cluster: cluster})
+	plan := translate(t, spec, DestClasses{Cluster: cluster})
 	if got := ruleByName(plan, "no-imds").CIDRs; !reflect.DeepEqual(got, []string{"169.254.169.254/32", "fd00:ec2::254/128"}) {
 		t.Fatalf("imds %v", got)
 	}
@@ -152,7 +152,7 @@ func TestNetworkLocalAndClusterClasses(t *testing.T) {
 		t.Fatalf("fully resolved classes must enforce: %+v", plan.Report)
 	}
 	// Only the pod part found: the rule enforces with it and is reported partial.
-	plan = translate(t, spec, NetworkExtras{}, DestClasses{Cluster: ClusterCIDRs{Pods: []string{"10.244.0.0/24"}, Missing: []string{"service CIDRs"}}})
+	plan = translate(t, spec, DestClasses{Cluster: ClusterCIDRs{Pods: []string{"10.244.0.0/24"}, Missing: []string{"service CIDRs"}}})
 	if d := degraded(plan, "no-lateral"); d == nil || d.Effective != "enforce" || d.Reason != "class-partial" {
 		t.Fatalf("partial clusterInternal %+v", plan.Report.Degraded)
 	}
@@ -162,7 +162,7 @@ func TestNetworkBackendClassesAndPolicyAdditions(t *testing.T) {
 	spec := netSpec(api.ActionDeny, netRule("models", api.ActionAllow, api.NetworkTarget{DestClass: []string{"modelProvider"}, Ports: []intstr.IntOrString{intstr.FromInt32(443)}}))
 	spec.Classes = &api.PolicyClasses{DestClasses: map[string][]string{"modelProvider": {"203.0.113.7"}}}
 	shared := DestClasses{Shared: map[string][]string{"modelProvider": {"198.51.100.0/24", "api.example.com"}}}
-	plan := translate(t, spec, NetworkExtras{}, shared)
+	plan := translate(t, spec, shared)
 	if got := ruleByName(plan, "models").CIDRs; !reflect.DeepEqual(got, []string{"198.51.100.0/24", "203.0.113.7/32"}) {
 		t.Fatalf("backend class with local addition %v", got)
 	}
@@ -172,7 +172,7 @@ func TestNetworkBackendClassesAndPolicyAdditions(t *testing.T) {
 	// A class defined in two SandboxPolicyClasses objects is unresolved.
 	shared.Ambiguous = map[string]bool{"modelProvider": true}
 	spec.Classes = nil
-	if plan = translate(t, spec, NetworkExtras{}, shared); plan.Report.NotReady != "ClassUnresolved" {
+	if plan = translate(t, spec, shared); plan.Report.NotReady != "ClassUnresolved" {
 		t.Fatalf("ambiguous class %+v", plan.Report)
 	}
 }
@@ -184,7 +184,7 @@ func TestNetworkUnresolvedClassDegradation(t *testing.T) {
 		netRule("no-mcp", api.ActionDeny, api.NetworkTarget{DestClass: []string{"mcp", "linkLocal"}}),
 		netRule("no-unknown", api.ActionDeny, api.NetworkTarget{DestClass: []string{"unknown"}}),
 	)
-	plan := translate(t, spec, NetworkExtras{}, DestClasses{})
+	plan := translate(t, spec, DestClasses{})
 	if r := ruleByName(plan, "no-mcp"); r == nil || r.Mode != "audit" || !reflect.DeepEqual(r.CIDRs, []string{"169.254.0.0/16", "fe80::/10"}) {
 		t.Fatalf("deny with unresolved class %+v", r)
 	}
@@ -200,7 +200,7 @@ func TestNetworkUnresolvedClassDegradation(t *testing.T) {
 
 	// An unresolved allow degrades the egress default and makes the policy not ready.
 	spec.Network.Rules = append(spec.Network.Rules, netRule("models", api.ActionAllow, api.NetworkTarget{DestClass: []string{"modelProvider"}}))
-	plan = translate(t, spec, NetworkExtras{}, DestClasses{})
+	plan = translate(t, spec, DestClasses{})
 	if plan.Report.NotReady != "ClassUnresolved" || plan.Egress.Policy.Egress.DefaultMode != "audit" {
 		t.Fatalf("unresolved allow %+v / %+v", plan.Report, plan.Egress.Policy.Egress)
 	}
@@ -213,7 +213,7 @@ func TestNetworkUnresolvedClassDegradation(t *testing.T) {
 
 	// A dnsName allow cannot be evaluated either: the same degradation.
 	spec.Network.Rules = []api.NetworkRule{netRule("api", api.ActionAllow, api.NetworkTarget{DNSName: []string{"api.example.com"}})}
-	plan = translate(t, spec, NetworkExtras{}, DestClasses{})
+	plan = translate(t, spec, DestClasses{})
 	if plan.Report.NotReady != "DNSNameNotEnforceable" || plan.Egress.Policy.Egress.DefaultMode != "audit" || ruleByName(plan, "api") != nil {
 		t.Fatalf("dnsName allow %+v", plan.Report)
 	}
@@ -221,13 +221,13 @@ func TestNetworkUnresolvedClassDegradation(t *testing.T) {
 
 func TestNetworkExcept(t *testing.T) {
 	spec := netSpec(api.ActionAllow, netRule("no-private", api.ActionDeny, api.NetworkTarget{DestClass: []string{"privateRanges"}}))
-	x := NetworkExtras{Except: map[string][]NetworkExcept{"no-private": {
+	spec.Network.Rules[0].Except = []api.NetworkException{
 		{Target: &api.NetworkTarget{CIDR: []string{"10.1.0.0/16"}}},
 		{Target: &api.NetworkTarget{CIDR: []string{"172.16.0.0/12"}}},                                                      // covers a whole rule CIDR
 		{Target: &api.NetworkTarget{CIDR: []string{"192.168.1.0/24"}, Ports: []intstr.IntOrString{intstr.FromInt32(443)}}}, // not enforceable
 		{Target: &api.NetworkTarget{DestClass: []string{"knownService"}}},                                                  // unresolved
-	}}}
-	plan := translate(t, spec, x, DestClasses{})
+	}
+	plan := translate(t, spec, DestClasses{})
 	r := ruleByName(plan, "no-private")
 	if r == nil || !reflect.DeepEqual(r.CIDRs, []string{"10.0.0.0/8", "192.168.0.0/16"}) || !reflect.DeepEqual(r.Except, []string{"10.1.0.0/16"}) || r.Mode != "" {
 		t.Fatalf("except fitting %+v", r)
@@ -243,38 +243,29 @@ func TestNetworkExcept(t *testing.T) {
 	}
 }
 
-func TestSplitNetworkExtras(t *testing.T) {
-	spec := map[string]any{"network": map[string]any{
-		"default":       map[string]any{"egress": "deny", "listen": "deny"},
-		"defaultMode":   map[string]any{"egress": "audit"},
-		"defaultOrigin": map[string]any{"egress": "catalog/E1"},
-		"rules": []any{map[string]any{"name": "r", "action": "deny", "target": map[string]any{}, "except": []any{
-			map[string]any{"target": map[string]any{"cidr": []any{"192.0.2.1/32"}}}}}},
-	}}
-	x, err := splitNetworkExtras(spec)
-	if err != nil || x.DefaultMode.Egress != "audit" || x.DefaultOrigin.Egress != "catalog/E1" || len(x.Except["r"]) != 1 {
-		t.Fatalf("extras %+v %v", x, err)
+// The storage types carry defaultMode, defaultOrigin and except; a strict
+// decode rejects an unknown key in them.
+func TestParsePolicyNetworkFields(t *testing.T) {
+	spec := netSpec(api.ActionDeny, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}}))
+	spec.Network.DefaultMode = &api.NetworkDefaultModes{Egress: api.RuleAudit}
+	spec.Network.DefaultOrigin = &api.NetworkDefaultOrigins{Egress: testOriginString("catalog/E1")}
+	spec.Network.Rules[0].Except = []api.NetworkException{{Target: &api.NetworkTarget{CIDR: []string{"192.0.2.1/32"}}}}
+	p := parsePolicy(networkPolicyObject("net", spec))
+	n := p.spec.Network
+	if p.err != nil || n.DefaultMode.Egress != api.RuleAudit || *n.DefaultOrigin.Egress != "catalog/E1" || len(n.Rules[0].Except) != 1 {
+		t.Fatalf("network fields %+v %v", n, p.err)
 	}
-	n := spec["network"].(map[string]any)
-	if _, ok := n["defaultMode"]; ok {
-		t.Fatal("mirrored fields must be removed for strict decoding")
-	}
-	if _, ok := n["rules"].([]any)[0].(map[string]any)["except"]; ok {
-		t.Fatal("except must be removed for strict decoding")
-	}
-	if _, err := splitNetworkExtras(map[string]any{"network": map[string]any{"defaultMode": map[string]any{"ingress": "audit"}}}); err == nil {
+	obj := networkPolicyObject("net", spec)
+	obj.Object["spec"].(map[string]any)["network"].(map[string]any)["defaultMode"] = map[string]any{"ingress": "audit"}
+	if p := parsePolicy(obj); p.err == nil {
 		t.Fatal("unknown defaultMode key accepted")
 	}
 }
 
-func networkPolicyObject(name string, spec api.PolicySpec, extras map[string]any) *unstructured.Unstructured {
+func networkPolicyObject(name string, spec api.PolicySpec) *unstructured.Unstructured {
 	p := &api.SandboxPolicy{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicy"}, ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns", UID: types.UID("uid-" + name), Generation: 1},
 		Spec: api.SandboxPolicySpec{PolicySpec: spec}}
 	raw, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(p)
-	network := raw["spec"].(map[string]any)["network"].(map[string]any)
-	for k, v := range extras {
-		network[k] = v
-	}
 	return &unstructured.Unstructured{Object: raw}
 }
 
@@ -284,8 +275,9 @@ func TestControllerNetworkPlanAndStatus(t *testing.T) {
 		netRule("loopback", api.ActionAllow, api.NetworkTarget{CIDR: []string{"127.0.0.0/8"}}),
 		netRule("models", api.ActionAllow, api.NetworkTarget{DestClass: []string{"modelProvider"}}),
 		netRule("serve", api.ActionAllow, api.NetworkTarget{Direction: "listen"}))
+	spec.Network.DefaultMode = &api.NetworkDefaultModes{Egress: api.RuleEnforce}
 	c, backend, w, _ := setup(t)
-	obj := networkPolicyObject("net", spec, map[string]any{"defaultMode": map[string]any{"egress": "enforce"}})
+	obj := networkPolicyObject("net", spec)
 	c.objects[objectKey(obj)] = obj
 	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
 		t.Fatal(err)
@@ -330,7 +322,7 @@ func TestControllerNetworkPlanAndStatus(t *testing.T) {
 func TestNetworkSectionUnavailableIsReported(t *testing.T) {
 	ctx := context.Background()
 	c, _, w, _ := setup(t)
-	obj := networkPolicyObject("net", netSpec(api.ActionAllow), nil)
+	obj := networkPolicyObject("net", netSpec(api.ActionAllow))
 	c.objects[objectKey(obj)] = obj
 	sections, _ := NewSectionBackend(&fakeBackend{plans: map[string]Plan{}}, nil, nil)
 	c.backend = sections
@@ -392,7 +384,7 @@ func TestNetworkUnresolvableDenyKeepsEnforceDefault(t *testing.T) {
 		spec := netSpec(api.ActionDeny,
 			netRule("web", api.ActionAllow, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}}),
 			netRule("no-evil", api.ActionDeny, target))
-		plan := translate(t, spec, NetworkExtras{}, DestClasses{})
+		plan := translate(t, spec, DestClasses{})
 		if ruleByName(plan, "no-evil") != nil {
 			t.Fatalf("%s: an unresolvable deny reached the gadget: %+v", name, plan.Egress.Policy.Egress.Rules)
 		}
@@ -414,12 +406,12 @@ func TestControllerUsesClusterInternal(t *testing.T) {
 		c.objects = map[string]*unstructured.Unstructured{objectKey(obj): obj}
 	}
 	private := netSpec(api.ActionAllow, netRule("no-private", api.ActionDeny, api.NetworkTarget{DestClass: []string{"privateRanges"}}))
-	set(networkPolicyObject("net", private, nil))
+	set(networkPolicyObject("net", private))
 	if c.UsesClusterInternal() {
 		t.Fatal("no policy names clusterInternal")
 	}
 	// In an except entry.
-	obj := networkPolicyObject("net", private, nil)
+	obj := networkPolicyObject("net", private)
 	rule := obj.Object["spec"].(map[string]any)["network"].(map[string]any)["rules"].([]any)[0].(map[string]any)
 	rule["except"] = []any{map[string]any{"target": map[string]any{"destClass": []any{ClassClusterInternal}}}}
 	set(obj)
@@ -428,12 +420,12 @@ func TestControllerUsesClusterInternal(t *testing.T) {
 	}
 	// In a rule; a policy in mode off does not count.
 	internal := netSpec(api.ActionAllow, netRule("cluster", api.ActionAllow, api.NetworkTarget{DestClass: []string{ClassClusterInternal}}))
-	set(networkPolicyObject("net", internal, nil))
+	set(networkPolicyObject("net", internal))
 	if !c.UsesClusterInternal() {
 		t.Fatal("a rule names clusterInternal")
 	}
 	internal.Mode = api.ModeOff
-	set(networkPolicyObject("net", internal, nil))
+	set(networkPolicyObject("net", internal))
 	if c.UsesClusterInternal() {
 		t.Fatal("a policy in mode off does not need the class")
 	}
@@ -446,7 +438,7 @@ func TestControllerUsesClusterInternal(t *testing.T) {
 // it and before it compiles, so the first plan of the policy has the class.
 func TestControllerReadsClusterInternalBeforeFirstCompile(t *testing.T) {
 	ctx := context.Background()
-	private := networkPolicyObject("net", netSpec(api.ActionAllow, netRule("no-private", api.ActionDeny, api.NetworkTarget{DestClass: []string{"privateRanges"}})), nil)
+	private := networkPolicyObject("net", netSpec(api.ActionAllow, netRule("no-private", api.ActionDeny, api.NetworkTarget{DestClass: []string{"privateRanges"}})))
 	c, backend, w, client := setup(t)
 	if _, err := client.Resource(PolicyGVR).Namespace("ns").Create(ctx, private, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
@@ -465,7 +457,7 @@ func TestControllerReadsClusterInternalBeforeFirstCompile(t *testing.T) {
 	}
 
 	// A new policy names the class: the same Refresh reads it and compiles.
-	internal := networkPolicyObject("net", netSpec(api.ActionDeny, netRule("cluster", api.ActionAllow, api.NetworkTarget{DestClass: []string{ClassClusterInternal}})), nil)
+	internal := networkPolicyObject("net", netSpec(api.ActionDeny, netRule("cluster", api.ActionAllow, api.NetworkTarget{DestClass: []string{ClassClusterInternal}})))
 	internal.SetResourceVersion("")
 	if _, err := client.Resource(PolicyGVR).Namespace("ns").Update(ctx, internal, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
@@ -511,7 +503,7 @@ func TestNetworkGeneratedNameCollision(t *testing.T) {
 		netRule("dns", api.ActionDeny, api.NetworkTarget{Ports: []intstr.IntOrString{intstr.FromInt32(53)}, Proto: []string{"tcp", "udp"}}),
 		netRule("web", api.ActionAllow, api.NetworkTarget{CIDR: []string{"198.51.100.0/24"}}))
 	spec.Network.Rules[2].Origin = testOriginString("team/dns")
-	plan, err := TranslateNetwork(spec, NetworkExtras{}, DestClasses{})
+	plan, err := TranslateNetwork(spec, DestClasses{})
 	if err != nil {
 		t.Fatalf("a name collision must not fail the policy: %v", err)
 	}
@@ -550,10 +542,10 @@ func TestNetworkDocumentOverGadgetLimits(t *testing.T) {
 			netRule("wide", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/24"}, Ports: ports(16)}),
 			netRule("narrow", api.ActionDeny, api.NetworkTarget{CIDR: []string{"192.0.2.0/25"}, Ports: ports(n)}))
 	}
-	if _, err := TranslateNetwork(spec(netpolicy.KernelListLen-16), NetworkExtras{}, DestClasses{}); err != nil {
+	if _, err := TranslateNetwork(spec(netpolicy.KernelListLen-16), DestClasses{}); err != nil {
 		t.Fatalf("%d entries on a prefix is the limit, not over it: %v", netpolicy.KernelListLen, err)
 	}
-	_, err := TranslateNetwork(spec(netpolicy.KernelListLen-15), NetworkExtras{}, DestClasses{})
+	_, err := TranslateNetwork(spec(netpolicy.KernelListLen-15), DestClasses{})
 	if err == nil || !strings.Contains(err.Error(), "the policy alone exceeds the network gadget limits") {
 		t.Fatalf("a document over the per-prefix limit must fail at translation, got %v", err)
 	}
@@ -561,11 +553,11 @@ func TestNetworkDocumentOverGadgetLimits(t *testing.T) {
 
 func TestNetworkMappedCIDRBecomesIPv4(t *testing.T) {
 	spec := netSpec(api.ActionAllow, netRule("r", api.ActionDeny, api.NetworkTarget{CIDR: []string{"::ffff:192.0.2.0/120"}}))
-	if r := ruleByName(translate(t, spec, NetworkExtras{}, DestClasses{}), "r"); r == nil || !reflect.DeepEqual(r.CIDRs, []string{"192.0.2.0/24"}) {
+	if r := ruleByName(translate(t, spec, DestClasses{}), "r"); r == nil || !reflect.DeepEqual(r.CIDRs, []string{"192.0.2.0/24"}) {
 		t.Fatalf("mapped /120 %+v", r)
 	}
 	spec.Network.Rules[0].Target.CIDR = []string{"::ffff:0:0/80"}
-	if _, err := TranslateNetwork(spec, NetworkExtras{}, DestClasses{}); err == nil || !strings.Contains(err.Error(), "/96 or longer") {
+	if _, err := TranslateNetwork(spec, DestClasses{}); err == nil || !strings.Contains(err.Error(), "/96 or longer") {
 		t.Fatalf("mapped /80 must be rejected with its reason, got %v", err)
 	}
 }

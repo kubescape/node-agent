@@ -226,9 +226,7 @@ func (c *Controller) usesClusterInternal() bool {
 			if names(&r.Target) {
 				return true
 			}
-		}
-		for _, entries := range p.network.Except {
-			for _, e := range entries {
+			for _, e := range r.Except {
 				if names(e.Target) {
 					return true
 				}
@@ -448,17 +446,11 @@ type desiredPolicy struct {
 	spec              api.PolicySpec
 	podSelector       labels.Selector
 	namespaceSelector labels.Selector
-	// network holds the mirrored network fields the storage types lack.
-	network NetworkExtras
-	err     error
+	err               error
 }
 
 func decodeSpec(u *unstructured.Unstructured, target any) error {
-	return decodeValue(u.Object["spec"], target)
-}
-
-func decodeValue(value any, target any) error {
-	data, err := json.Marshal(value)
+	data, err := json.Marshal(u.Object["spec"])
 	if err != nil {
 		return err
 	}
@@ -469,11 +461,9 @@ func decodeValue(value any, target any) error {
 func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 	p := desiredPolicy{identity: PolicyIdentity{Kind: u.GetKind(), Namespace: u.GetNamespace(), Name: u.GetName(), UID: u.GetUID(), Generation: u.GetGeneration()}}
 	var pod metav1.LabelSelector
-	raw := runtime.DeepCopyJSONValue(u.Object["spec"])
-	p.network, p.err = splitNetworkExtras(raw)
 	if u.GetKind() == "SandboxPolicy" {
 		var spec api.SandboxPolicySpec
-		p.err = errors.Join(p.err, decodeValue(raw, &spec))
+		p.err = decodeSpec(u, &spec)
 		p.spec = spec.PolicySpec
 		pod = spec.Selector.PodSelector
 		if p.err == nil {
@@ -481,7 +471,7 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 		}
 	} else {
 		var spec api.ClusterSandboxPolicySpec
-		p.err = errors.Join(p.err, decodeValue(raw, &spec))
+		p.err = decodeSpec(u, &spec)
 		p.spec = spec.PolicySpec
 		pod = spec.Selector.PodSelector
 		if p.err == nil {
@@ -500,7 +490,7 @@ func parsePolicy(u *unstructured.Unstructured) desiredPolicy {
 		p.err = errors.Join(p.err, err)
 	}
 	if p.spec.Network != nil && p.spec.Mode != api.ModeOff {
-		if err := validateNetwork(*p.spec.Network, p.network); err != nil {
+		if err := validateNetwork(*p.spec.Network); err != nil {
 			p.err = errors.Join(p.err, fmt.Errorf("network: %w", err))
 		}
 	}
@@ -608,7 +598,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	for i := range policies {
 		p := &policies[i]
 		if p.err == nil && p.spec.Network != nil && p.spec.Mode != api.ModeOff {
-			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, p.network, dest)
+			networkPlans[p.identity.UID], p.err = TranslateNetwork(p.spec, dest)
 		}
 		if p.err != nil {
 			policyErrors[string(p.identity.UID)] = p.err

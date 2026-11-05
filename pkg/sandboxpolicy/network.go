@@ -1,8 +1,6 @@
 package sandboxpolicy
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/netip"
 	"sort"
@@ -36,79 +34,6 @@ type NetworkReport struct {
 	Rules             int64  `json:"rules"`
 	ClassesResolved   int64  `json:"classesResolved"`
 	ClassesUnresolved int64  `json:"classesUnresolved"`
-}
-
-// NetworkExtras mirrors network fields of the SandboxPolicy design
-// (sandbox-policy-crd.md section 6.1, design PR #295) that the storage API
-// types do not have yet (kubescape/storage#428 has none of them):
-// defaultMode, defaultOrigin and the except list of deny rules.
-// TODO: replace with the storage types when storage adds these fields.
-// DefaultOrigin is read but not carried to events: a gadget default has no
-// origin.
-type NetworkExtras struct {
-	DefaultMode   NetworkDirections `json:"defaultMode,omitempty"`
-	DefaultOrigin NetworkDirections `json:"defaultOrigin,omitempty"`
-	// Except holds the except list of each rule, by rule name.
-	Except map[string][]NetworkExcept `json:"except,omitempty"`
-}
-
-// NetworkDirections mirrors the per-direction defaultMode and defaultOrigin.
-type NetworkDirections struct {
-	Egress string `json:"egress,omitempty"`
-	Listen string `json:"listen,omitempty"`
-}
-
-// NetworkExcept mirrors one except entry of a deny rule.
-type NetworkExcept struct {
-	Actor  *api.Actor         `json:"actor,omitempty"`
-	Target *api.NetworkTarget `json:"target,omitempty"`
-}
-
-// splitNetworkExtras removes the mirrored fields from a decoded spec (a JSON
-// value the caller owns), so the storage types decode the rest strictly.
-func splitNetworkExtras(spec any) (NetworkExtras, error) {
-	var x NetworkExtras
-	m, _ := spec.(map[string]any)
-	n, _ := m["network"].(map[string]any)
-	if n == nil {
-		return x, nil
-	}
-	strict := func(value any, target any) error {
-		data, err := json.Marshal(value)
-		if err != nil {
-			return err
-		}
-		d := json.NewDecoder(bytes.NewReader(data))
-		d.DisallowUnknownFields()
-		return d.Decode(target)
-	}
-	for key, target := range map[string]*NetworkDirections{"defaultMode": &x.DefaultMode, "defaultOrigin": &x.DefaultOrigin} {
-		if value, ok := n[key]; ok {
-			if err := strict(value, target); err != nil {
-				return x, fmt.Errorf("network %s: %w", key, err)
-			}
-			delete(n, key)
-		}
-	}
-	rules, _ := n["rules"].([]any)
-	for _, r := range rules {
-		rule, _ := r.(map[string]any)
-		value, ok := rule["except"]
-		if !ok {
-			continue
-		}
-		name, _ := rule["name"].(string)
-		var entries []NetworkExcept
-		if err := strict(value, &entries); err != nil {
-			return x, fmt.Errorf("network rule %q except: %w", name, err)
-		}
-		if x.Except == nil {
-			x.Except = map[string][]NetworkExcept{}
-		}
-		x.Except[name] = entries
-		delete(rule, "except")
-	}
-	return x, nil
 }
 
 // Fixed destination classes the agent computes locally (sandbox-policy-crd.md
@@ -310,19 +235,18 @@ func portRange(p intstr.IntOrString) (netpolicy.PortRange, error) {
 	return netpolicy.PortRange{}, fmt.Errorf("port %q must be 1..65535 or an ordered range a-b", p.String())
 }
 
-// validateNetwork checks a network section and its mirrored fields.
-func validateNetwork(n api.NetworkSection, x NetworkExtras) error {
+// validateNetwork checks a network section. ValidatePolicySpec checks the
+// except entries too; this repeats it for callers that skip it.
+func validateNetwork(n api.NetworkSection) error {
 	for _, d := range []api.Action{n.Default.Egress, n.Default.Listen} {
 		if d != api.ActionAllow && d != api.ActionDeny {
 			return fmt.Errorf("network defaults egress and listen must be allow or deny")
 		}
 	}
-	if !validMode(x.DefaultMode.Egress) || !validMode(x.DefaultMode.Listen) {
+	if m := n.DefaultMode; m != nil && (!validMode(string(m.Egress)) || !validMode(string(m.Listen))) {
 		return fmt.Errorf("network defaultMode must be audit or enforce")
 	}
-	names := map[string]bool{}
 	for _, r := range n.Rules {
-		names[r.Name] = true
 		if r.Action != api.ActionAllow && r.Action != api.ActionDeny {
 			return fmt.Errorf("rule %q has invalid action", r.Name)
 		}
@@ -335,13 +259,12 @@ func validateNetwork(n api.NetworkSection, x NetworkExtras) error {
 		if err := validateTarget(r.Target); err != nil {
 			return fmt.Errorf("rule %q: %w", r.Name, err)
 		}
-		entries := x.Except[r.Name]
-		if len(entries) > 0 && r.Action != api.ActionDeny {
+		if r.Except != nil && r.Action != api.ActionDeny {
 			return fmt.Errorf("rule %q: except applies to deny rules only", r.Name)
 		}
-		for i, e := range entries {
-			if e.Actor == nil && (e.Target == nil || equalTarget(*e.Target, api.NetworkTarget{})) {
-				return fmt.Errorf("rule %q except %d is empty", r.Name, i)
+		for i, e := range r.Except {
+			if err := e.Validate(); err != nil {
+				return fmt.Errorf("rule %q except %d: %w", r.Name, i, err)
 			}
 			if e.Target != nil {
 				if err := validateTarget(*e.Target); err != nil {
@@ -350,15 +273,8 @@ func validateNetwork(n api.NetworkSection, x NetworkExtras) error {
 			}
 		}
 	}
-	for name := range x.Except {
-		if !names[name] {
-			return fmt.Errorf("except for unknown network rule %q", name)
-		}
-	}
 	return nil
 }
-
-func equalTarget(a, b api.NetworkTarget) bool { return digest(a) == digest(b) }
 
 // TranslateNetwork translates the network section of one policy to the network
 // gadget's document. Only egress is enforced. The CRD rules the gadget cannot
@@ -366,14 +282,19 @@ func equalTarget(a, b api.NetworkTarget) bool { return digest(a) == digest(b) }
 // (sandbox-policy-crd.md section 4.3): a deny rule degrades to audit alone; an
 // allow rule degrades the egress default to audit and makes the policy not
 // ready (ClassUnresolved); an except entry is disabled (its deny applies
-// there) and makes the policy not ready.
-func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses) (*NetworkPlan, error) {
+// there) and makes the policy not ready. The gadget default has no origin, so
+// defaultOrigin is not carried to events.
+func TranslateNetwork(spec api.PolicySpec, classes DestClasses) (*NetworkPlan, error) {
 	n := spec.Network
 	if n == nil {
 		return nil, nil
 	}
-	if err := validateNetwork(*n, x); err != nil {
+	if err := validateNetwork(*n); err != nil {
 		return nil, err
+	}
+	var defaultMode string
+	if n.DefaultMode != nil {
+		defaultMode = string(n.DefaultMode.Egress)
 	}
 	var local map[string][]string
 	if spec.Classes != nil {
@@ -381,7 +302,7 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 	}
 	t := &translator{classes: classes, local: local, seen: map[string]bool{}}
 	plan := &NetworkPlan{Egress: netpolicy.Document{Version: 1, Policy: netpolicy.Policy{Mode: string(spec.Mode),
-		Egress: netpolicy.Section{Default: string(n.Default.Egress), DefaultMode: x.DefaultMode.Egress}}}}
+		Egress: netpolicy.Section{Default: string(n.Default.Egress), DefaultMode: defaultMode}}}}
 	report := &plan.Report
 	report.Rules = int64(len(n.Rules))
 	degradeDefault := false
@@ -448,7 +369,7 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 			}
 		}
 		var excepts []netip.Prefix
-		for i, e := range x.Except[r.Name] {
+		for i, e := range r.Except {
 			lifted, why, classMissing := t.except(e)
 			switch {
 			case why != "":
@@ -489,7 +410,7 @@ func TranslateNetwork(spec api.PolicySpec, x NetworkExtras, classes DestClasses)
 	}
 	plan.Egress.Policy.Egress.Rules = uniqueNames(emitted)
 	if degradeDefault {
-		requested := x.DefaultMode.Egress
+		requested := defaultMode
 		if requested == "" {
 			requested = string(spec.Mode)
 		}
@@ -607,7 +528,7 @@ func (t *translator) dests(target api.NetworkTarget) (dests []netip.Prefix, unre
 }
 
 // except returns the prefixes an except entry lifts, or why it is disabled.
-func (t *translator) except(e NetworkExcept) (lifted []netip.Prefix, why string, classMissing bool) {
+func (t *translator) except(e api.NetworkException) (lifted []netip.Prefix, why string, classMissing bool) {
 	if e.Actor != nil {
 		return nil, "actor predicates are unsupported", false
 	}
