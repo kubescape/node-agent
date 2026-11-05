@@ -251,10 +251,17 @@ static __always_inline int net_judge(enum net_hook hook, struct socket *sock,
 	return net_verdict(hook, s, cgid, slot, ipproto, &d, &m);
 }
 
+// ret is the verdict of the BPF LSM programs that ran before this one. A
+// nonzero verdict is returned as is, so this program never replaces a deny.
+// (The kernel trampoline already skips the next programs after a nonzero
+// verdict; the check does not depend on that.) ret is read by position:
+// socket_connect and socket_sendmsg have had the same three arguments since
+// BPF LSM was added in Linux 5.7.
 SEC("lsm/socket_connect")
 int BPF_PROG(ig_net_connect, struct socket *sock, struct sockaddr *address,
-	     int addrlen)
+	     int addrlen, int ret)
 {
+	if (ret) return ret;
 	return net_judge(NET_HOOK_SOCKET_CONNECT, sock, address, addrlen, false,
 			 0);
 }
@@ -263,8 +270,10 @@ int BPF_PROG(ig_net_connect, struct socket *sock, struct sockaddr *address,
 // io_uring sends (IORING_OP_SEND, SENDMSG, SEND_ZC, SENDMSG_ZC). msg_flags
 // are set before the hook on all of these paths.
 SEC("lsm/socket_sendmsg")
-int BPF_PROG(ig_net_sendmsg, struct socket *sock, struct msghdr *msg, int size)
+int BPF_PROG(ig_net_sendmsg, struct socket *sock, struct msghdr *msg, int size,
+	     int ret)
 {
+	if (ret) return ret;
 	return net_judge(NET_HOOK_SOCKET_SENDMSG, sock,
 			 BPF_CORE_READ(msg, msg_name),
 			 BPF_CORE_READ(msg, msg_namelen), true,
