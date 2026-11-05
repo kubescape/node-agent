@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/containerd/containerd/mount"
-	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/errdefs"
 	"github.com/kubescape/node-agent/pkg/sandboxpolicy"
 	"github.com/opencontainers/go-digest"

@@ -24,12 +24,13 @@ type RawFullVerdict struct {
 // FullVerdictDecoder snapshots bounded immutable provenance. It does not attach
 // programs or attest that the kernel supplied complete or trustworthy facts.
 type FullVerdictDecoder struct {
-	binding    sandboxpolicy.Binding
-	generation uint64
-	revision   string
-	policies   []sandboxpolicy.PolicyRevision
-	defaults   []fullpolicy.KernelPolicy
-	rules      []sandboxpolicy.RuleMatch
+	binding        sandboxpolicy.Binding
+	generation     uint64
+	revision       string
+	policies       []sandboxpolicy.PolicyRevision
+	defaults       []fullpolicy.KernelPolicy
+	defaultOrigins [][]string
+	rules          []sandboxpolicy.RuleMatch
 }
 
 func NewFullVerdictDecoder(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, program *fullpolicy.KernelProgram) (*FullVerdictDecoder, error) {
@@ -63,6 +64,7 @@ func NewFullVerdictDecoder(binding sandboxpolicy.Binding, plan sandboxpolicy.Pla
 		d.policies = append(d.policies, sandboxpolicy.PolicyRevision{Policy: p.Identity, Revision: p.Revision})
 		kp, _ := fullpolicy.Decode[fullpolicy.KernelPolicy](program.Entries[fullpolicy.KernelPolicyBase+i])
 		d.defaults = append(d.defaults, kp)
+		d.defaultOrigins = append(d.defaultOrigins, originList(p.Exec.DefaultOrigin))
 	}
 	for i, m := range program.Rules {
 		r, _ := fullpolicy.Decode[fullpolicy.KernelRule](program.Entries[int(h.RuleBase)+i])
@@ -70,7 +72,14 @@ func NewFullVerdictDecoder(binding sandboxpolicy.Binding, plan sandboxpolicy.Pla
 		if r.Deny == 1 {
 			action = api.ActionDeny
 		}
-		d.rules = append(d.rules, sandboxpolicy.RuleMatch{Policy: d.policies[m.PolicyIndex].Policy, Revision: m.Revision, Name: m.Name, Origin: m.Origin, Action: action, Mode: fullMode(r.Mode)})
+		var origins []string
+		for _, authored := range policies[m.PolicyIndex].Exec.Rules {
+			if authored.Name == m.Name {
+				origins = originList(authored.Origin)
+				break
+			}
+		}
+		d.rules = append(d.rules, sandboxpolicy.RuleMatch{Policy: d.policies[m.PolicyIndex].Policy, Revision: m.Revision, Name: m.Name, Origin: m.Origin, Origins: origins, Action: action, Mode: fullMode(r.Mode)})
 	}
 	return d, nil
 }
@@ -93,7 +102,7 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 			return bad()
 		}
 	}
-	out := sandboxpolicy.Verdict{Time: time.Now(), Revision: d.revision, PolicySet: append([]sandboxpolicy.PolicyRevision(nil), d.policies...), MatchesComplete: r.Error == 0, ContainerID: d.binding.ContainerID, PodUID: d.binding.PodUID, BindingPID: d.binding.PID, MountNamespace: d.binding.MountNamespace, CgroupID: r.Cgroup, PID: r.PID, Mode: fullMode(r.Mode), Verdict: api.ActionAllow}
+	out := sandboxpolicy.Verdict{Time: time.Now(), Revision: d.revision, PolicySet: append([]sandboxpolicy.PolicyRevision(nil), d.policies...), MatchesComplete: r.Error == 0, Origins: []string{}, ContainerID: d.binding.ContainerID, PodUID: d.binding.PodUID, BindingPID: d.binding.PID, MountNamespace: d.binding.MountNamespace, CgroupID: r.Cgroup, PID: r.PID, Mode: fullMode(r.Mode), Verdict: api.ActionAllow}
 	if len(d.policies) == 1 {
 		out.Policy = d.policies[0].Policy
 	}
@@ -111,6 +120,7 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 	}
 	for i, m := range d.rules {
 		if r.MatchedRules[i/64]&(uint64(1)<<uint(i%64)) != 0 {
+			m.Origins = append([]string{}, m.Origins...)
 			out.Matches = append(out.Matches, m)
 		}
 	}
@@ -168,11 +178,21 @@ func (d *FullVerdictDecoder) Decode(r RawFullVerdict) (sandboxpolicy.Verdict, er
 		out.Policy = m.Policy
 		out.Rule = m.Name
 		out.Origin = m.Origin
+		out.Origins = append([]string{}, m.Origins...)
+	}
+	if len(out.Matches) == 0 {
+		for i, p := range d.defaults {
+			if (p.Default == 2 && deny) || (p.Default == 1 && !deny) {
+				out.Origins = append(out.Origins, d.defaultOrigins[i]...)
+			}
+		}
+		sort.Strings(out.Origins)
+		out.Origins = distinctOrigins(out.Origins)
 	}
 	if len(out.Matches) == 0 && len(d.policies) > 1 {
 		index := -1
 		for i, p := range d.defaults {
-			if ((p.Default == 2 && deny) || (p.Default == 1 && !deny)) && fullMode(p.Mode) == out.Mode {
+			if (p.Default == 2 && deny) || (p.Default == 1 && !deny) {
 				if index >= 0 {
 					index = -2
 					break
@@ -221,4 +241,24 @@ func ReadFullVerdict(ds datasource.DataSource, data datasource.Data) (RawFullVer
 	}
 	copy(out.MatchedRules[:], bitmap)
 	return out, nil
+}
+
+func originList(origin *string) []string {
+	if origin == nil {
+		return []string{}
+	}
+	return []string{*origin}
+}
+
+func distinctOrigins(origins []string) []string {
+	if len(origins) == 0 {
+		return []string{}
+	}
+	out := origins[:1]
+	for _, origin := range origins[1:] {
+		if origin != out[len(out)-1] {
+			out = append(out, origin)
+		}
+	}
+	return out
 }
