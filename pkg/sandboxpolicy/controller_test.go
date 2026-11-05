@@ -3,6 +3,7 @@ package sandboxpolicy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -102,6 +103,176 @@ func (w *fakeWriter) WriteStatus(_ context.Context, r *api.SandboxPolicyNodeStat
 }
 func policy(name, namespace string) *api.SandboxPolicy {
 	return &api.SandboxPolicy{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicy"}, ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, UID: types.UID(name), Generation: 1}, Spec: api.SandboxPolicySpec{PolicySpec: execSpec()}}
+}
+func clusterPolicy(name string) *api.ClusterSandboxPolicy {
+	return &api.ClusterSandboxPolicy{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "ClusterSandboxPolicy"}, ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name), Generation: 1}, Spec: api.ClusterSandboxPolicySpec{PolicySpec: execSpec()}}
+}
+
+func TestInvalidNamespacedPolicyDoesNotSuppressNewClusterBinding(t *testing.T) {
+	ctx := context.Background()
+	p := policy("broken", "ns")
+	p.Spec.Containers = nil
+	cluster := clusterPolicy("cluster")
+	c, backend, writer, _ := setup(t, p, cluster)
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.InitialSync(ctx); err == nil {
+		t.Fatal("invalid policy error hidden")
+	}
+	plan := backend.plans[bindingKey(binding())]
+	if len(plan.Policies) != 1 || plan.Policies[0].Identity.UID != cluster.UID {
+		t.Fatalf("valid cluster policy not installed: %+v", plan)
+	}
+	if writer.reports["cluster"].Status.Conditions[0].Status != metav1.ConditionTrue {
+		t.Fatal("installed cluster policy not Ready")
+	}
+	broken := writer.reports["broken"].Status
+	if broken.Conditions[0].Status != metav1.ConditionFalse || len(broken.Conditions) != 1 {
+		t.Fatalf("invalid policy falsely protected: %+v", broken)
+	}
+}
+
+func TestInvalidRevisionRetainsLastGoodWhileClusterUpdates(t *testing.T) {
+	ctx := context.Background()
+	p := policy("policy", "ns")
+	cluster := clusterPolicy("cluster")
+	c, backend, writer, _ := setup(t, p, cluster)
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	initial := backend.plans[bindingKey(binding())]
+	p.Generation = 2
+	p.Spec.Containers = nil
+	c.ModifyHandler(ctx, p)
+	cluster.Generation = 2
+	cluster.Spec.Exec.Rules[0].Target.Path = []string{"/bin/cluster-next"}
+	c.ModifyHandler(ctx, cluster)
+	if c.LastError() == nil {
+		t.Fatal("invalid revision error hidden")
+	}
+	plan := backend.plans[bindingKey(binding())]
+	if len(plan.Policies) != 2 {
+		t.Fatalf("last-good or cluster policy missing: %+v", plan)
+	}
+	for _, compiled := range plan.Policies {
+		switch compiled.Identity.UID {
+		case p.UID:
+			if compiled.Identity.Generation != 1 || compiled.Revision != initial.Policies[1].Revision && compiled.Revision != initial.Policies[0].Revision {
+				t.Fatalf("last-good policy changed: %+v", compiled)
+			}
+		case cluster.UID:
+			if compiled.Identity.Generation != 2 {
+				t.Fatalf("cluster revision not updated: %+v", compiled)
+			}
+		default:
+			t.Fatalf("unexpected policy: %+v", compiled)
+		}
+	}
+	if writer.reports["cluster"].Status.Conditions[0].Status != metav1.ConditionTrue {
+		t.Fatal("cluster Ready lost to unrelated invalid policy")
+	}
+	stale := writer.reports["policy"].Status
+	if stale.Conditions[0].Status != metav1.ConditionFalse || !stale.Stale || len(stale.Conditions) != 2 || !strings.Contains(stale.Conditions[1].Message, "generation=1") {
+		t.Fatalf("last-good status missing: %+v", stale)
+	}
+}
+
+func TestClassErrorOnlyBlocksDependentPolicy(t *testing.T) {
+	ctx := context.Background()
+	p := policy("dependent", "ns")
+	p.Spec.Exec.Rules[0].Target.PathClass = []string{"broken"}
+	classes := &api.SandboxPolicyClasses{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyClasses"}, ObjectMeta: metav1.ObjectMeta{Name: "classes", UID: "classes"}, Spec: api.PolicyClasses{PathClasses: map[string][]string{"broken": {"/bin/one"}}}}
+	duplicate := classes.DeepCopy()
+	duplicate.Name, duplicate.UID = "duplicate", "duplicate"
+	c, backend, writer, _ := setup(t, p, clusterPolicy("independent"), classes, duplicate)
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.InitialSync(ctx); err == nil {
+		t.Fatal("class error hidden")
+	}
+	plan := backend.plans[bindingKey(binding())]
+	if len(plan.Policies) != 1 || plan.Policies[0].Identity.UID != "independent" {
+		t.Fatalf("independent plan suppressed: %+v", plan)
+	}
+	if writer.reports["dependent"].Status.Conditions[0].Status != metav1.ConditionFalse || writer.reports["independent"].Status.Conditions[0].Status != metav1.ConditionTrue {
+		t.Fatal("class error status leaked")
+	}
+}
+
+func TestMixedPolicyBackendFailureDoesNotClaimReady(t *testing.T) {
+	ctx := context.Background()
+	p := policy("broken", "ns")
+	p.Spec.Containers = nil
+	c, backend, writer, _ := setup(t, p, clusterPolicy("cluster"))
+	backend.fail = true
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.InitialSync(ctx); err == nil {
+		t.Fatal("backend error hidden")
+	}
+	if len(backend.plans) != 0 || writer.reports["cluster"].Status.Conditions[0].Status != metav1.ConditionFalse {
+		t.Fatal("failed backend fabricated cluster protection")
+	}
+}
+
+func TestOverLimitAttestsLastGoodBeforeReportingActiveRevision(t *testing.T) {
+	ctx := context.Background()
+	p := policy("installed", "ns")
+	c, backend, writer, _ := setup(t, p)
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.InitialSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < MaxPoliciesPerBinding; i++ {
+		invalid := policy(fmt.Sprintf("invalid-%d", i), "ns")
+		invalid.Spec.Containers = nil
+		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(invalid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		obj := &unstructured.Unstructured{Object: raw}
+		c.objects[objectKey(obj)] = obj
+	}
+	backend.fail = true // last-good attestation now fails
+	if err := c.Reconcile(ctx); err == nil {
+		t.Fatal("over-limit failure hidden")
+	}
+	if backend.attestations == 0 {
+		t.Fatal("over-limit path skipped last-good attestation")
+	}
+	status := writer.reports["installed"].Status
+	if status.Conditions[0].Reason != "ProtectionUnconfirmed" || !status.Stale {
+		t.Fatalf("historical plan falsely attested: %+v", status)
+	}
+}
+
+func TestInvalidSiblingClassDoesNotPoisonValidClass(t *testing.T) {
+	ctx := context.Background()
+	p := policy("uses-good", "ns")
+	p.Spec.Exec.Rules[0].Target.PathClass = []string{"good"}
+	classes := &api.SandboxPolicyClasses{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyClasses"}, ObjectMeta: metav1.ObjectMeta{Name: "classes", UID: "classes"}, Spec: api.PolicyClasses{PathClasses: map[string][]string{"": {"/bin/bad"}, "good": {"/bin/good"}}}}
+	c, backend, writer, _ := setup(t, p, classes)
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.InitialSync(ctx); err == nil {
+		t.Fatal("invalid class object error hidden")
+	}
+	plan := backend.plans[bindingKey(binding())]
+	if len(plan.Policies) != 1 || plan.Policies[0].Identity.UID != p.UID {
+		t.Fatalf("valid sibling class not resolved: %+v", plan)
+	}
+	if writer.reports["uses-good"].Status.Conditions[0].Status != metav1.ConditionTrue {
+		t.Fatal("valid sibling policy not Ready")
+	}
 }
 func binding() Binding {
 	return Binding{ContainerID: "container", CgroupID: 12, PodUID: "pod", Namespace: "ns", PodName: "pod", ContainerName: "app", Kind: "regular", PodLabels: map[string]string{"app": "test"}, NamespaceLabels: map[string]string{"team": "red"}}

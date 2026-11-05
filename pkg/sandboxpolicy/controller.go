@@ -61,9 +61,9 @@ type Controller struct {
 	// networkPlans holds the translated network section of each valid
 	// policy from the last reconciliation, for status and preparation.
 	networkPlans map[types.UID]*NetworkPlan
-	// classes and classErr are from the last reconcile (see PodPlans).
-	classes  api.PolicyClasses
-	classErr error
+	// classes and classErrors are from the last reconcile (see PodPlans).
+	classes     api.PolicyClasses
+	classErrors map[string]error
 }
 
 var _ watcher.Adaptor = (*Controller)(nil)
@@ -305,7 +305,7 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 			policies = append(policies, p)
 		}
 	}
-	classes, classErr := c.classes, c.classErr
+	classes, classErrors := c.classes, c.classErrors
 	c.mu.Unlock()
 	pods := map[types.UID]Plan{}
 	mixed := map[types.UID]bool{}
@@ -313,7 +313,7 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 		if mixed[b.PodUID] {
 			continue
 		}
-		plan, ok := podContainerPlan(policies, classes, classErr, b)
+		plan, ok := podContainerPlan(policies, classes, classErrors, b)
 		if !ok {
 			mixed[b.PodUID] = true
 			delete(pods, b.PodUID)
@@ -335,7 +335,7 @@ func (c *Controller) PodPlans(containers []Binding) (map[types.UID]Plan, bool) {
 // reconcile: an invalid policy that may select it, a class error, too many
 // policies, or a policy that does not compile without a ContainerProfile
 // resolver (a policy with sources depends on the profile, so it is refused).
-func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErr error, b Binding) (Plan, bool) {
+func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, classErrors map[string]error, b Binding) (Plan, bool) {
 	var plan Plan
 	selected := 0
 	for _, p := range policies {
@@ -349,7 +349,7 @@ func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, class
 			continue
 		}
 		selected++
-		if classErr != nil {
+		if policyClassError(p, classErrors) != nil {
 			return Plan{}, false
 		}
 		if _, err := Compile(context.Background(), p.identity, p.spec, classes, b, nil); err != nil {
@@ -363,6 +363,26 @@ func podContainerPlan(policies []desiredPolicy, classes api.PolicyClasses, class
 		return Plan{}, false
 	}
 	return plan, true
+}
+
+// policyClassError returns the errors of the shared path classes that p's exec
+// rules use, as reconcile does (a class that p defines itself is not shared).
+func policyClassError(p desiredPolicy, classErrors map[string]error) error {
+	if p.spec.Exec == nil {
+		return nil
+	}
+	var err error
+	for _, rule := range p.spec.Exec.Rules {
+		for _, name := range rule.Target.PathClass {
+			if p.spec.Classes != nil {
+				if _, local := p.spec.Classes.PathClasses[name]; local {
+					continue
+				}
+			}
+			err = errors.Join(err, classErrors[name])
+		}
+	}
+	return err
 }
 
 // samePolicies compares the policy objects and generations of two plans.
@@ -520,7 +540,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	classes := api.PolicyClasses{PathClasses: make(map[string][]string)}
 	dest := DestClasses{Shared: map[string][]string{}, Ambiguous: map[string]bool{}, Cluster: c.clusterCIDRs}
 	destOwners := make(map[string]string)
-	var classErr error
+	classErrors := make(map[string]error)
 	// Reject an ambiguous multi-object class namespace rather than choose
 	// one definition nondeterministically. Local policy additions are merged.
 	classNames := make(map[string]string)
@@ -537,16 +557,38 @@ func (c *Controller) reconcile(ctx context.Context) error {
 		}
 		var spec api.PolicyClasses
 		if err := decodeSpec(obj, &spec); err != nil {
-			classErr = errors.Join(classErr, err)
+			failures = append(failures, fmt.Errorf("classes %s: %w", obj.GetName(), err))
+			for name := range spec.PathClasses {
+				classErrors[name] = errors.Join(classErrors[name], err)
+			}
 			continue
 		}
-		if err := api.ValidatePolicyClasses(spec); err != nil {
-			classErr = errors.Join(classErr, err)
-			continue
+		classValidationErr := api.ValidatePolicyClasses(spec)
+		if err := classValidationErr; err != nil {
+			failures = append(failures, fmt.Errorf("classes %s: %w", obj.GetName(), err))
+			// The pinned API validator attributes this exact error only to an
+			// empty name. Any other/unknown object-level failure remains atomic.
+			if err.Error() == "class names must not be empty" {
+				_, badPath := spec.PathClasses[""]
+				_, badDest := spec.DestClasses[""]
+				if badPath || badDest {
+					classErrors[""] = errors.Join(classErrors[""], err)
+					delete(spec.PathClasses, "")
+					delete(spec.DestClasses, "")
+					classValidationErr = api.ValidatePolicyClasses(spec)
+				}
+			}
+			if classValidationErr != nil {
+				for name := range spec.PathClasses {
+					classErrors[name] = errors.Join(classErrors[name], err)
+				}
+				continue
+			}
 		}
 		for name, paths := range spec.PathClasses {
 			if owner, exists := classNames[name]; exists {
-				classErr = errors.Join(classErr, fmt.Errorf("path class %q occurs in %s and %s", name, owner, obj.GetName()))
+				classErrors[name] = errors.Join(classErrors[name], fmt.Errorf("path class %q occurs in %s and %s", name, owner, obj.GetName()))
+				delete(classes.PathClasses, name)
 				continue
 			}
 			classNames[name] = obj.GetName()
@@ -560,7 +602,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			dest.Shared[name] = entries
 		}
 	}
-	c.classes, c.classErr = classes, classErr
+	c.classes, c.classErrors = classes, classErrors
 	policyErrors := make(map[string]error)
 	networkPlans := make(map[types.UID]*NetworkPlan)
 	for i := range policies {
@@ -607,7 +649,6 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			continue
 		}
 		selected := make([]desiredPolicy, 0)
-		keep := make(map[string]bool)
 		for _, p := range policies {
 			// Invalid revisions retain previous enforcement even when malformed selectors
 			// cannot be evaluated. Only a valid off/delete/nonmatch authorizes withdrawal.
@@ -615,44 +656,18 @@ func (c *Controller) reconcile(ctx context.Context) error {
 				if p.identity.Kind == "SandboxPolicy" && p.identity.Namespace != binding.Namespace {
 					continue
 				}
-				keep[string(p.identity.UID)] = true
 				selected = append(selected, p)
 				continue
 			}
 			if p.spec.Mode != api.ModeOff && p.matches(binding) {
 				selected = append(selected, p)
-				keep[string(p.identity.UID)] = true
 			}
 		}
 		old, hasOld := c.active[key]
+		oldPolicies := make(map[string]CompiledPolicy)
 		if hasOld {
-			retained := Plan{}
-			for _, p := range old.plan.Policies {
-				if keep[string(p.Identity.UID)] {
-					retained.Policies = append(retained.Policies, p)
-				}
-			}
-			if len(retained.Policies) != len(old.plan.Policies) {
-				retained.Revision = digest(retained.Policies)
-				var err error
-				if len(retained.Policies) == 0 {
-					err = c.withdraw(ctx, old)
-				} else {
-					err = c.replace(ctx, binding, retained)
-				}
-				if err != nil {
-					failures = append(failures, err)
-					for _, p := range old.plan.Policies {
-						policyErrors[string(p.Identity.UID)] = err
-					}
-					for _, p := range selected {
-						policyErrors[string(p.identity.UID)] = errors.Join(policyErrors[string(p.identity.UID)], err)
-					}
-					continue
-				}
-				if len(retained.Policies) == 0 {
-					delete(c.active, key)
-				}
+			for _, compiled := range old.plan.Policies {
+				oldPolicies[string(compiled.Identity.UID)] = compiled
 			}
 		}
 		plan := Plan{}
@@ -661,9 +676,21 @@ func (c *Controller) reconcile(ctx context.Context) error {
 			candidateErr = fmt.Errorf("binding exceeds %d policies", MaxPoliciesPerBinding)
 		}
 		for _, p := range selected {
+			uid := string(p.identity.UID)
 			err := p.err
 			if err == nil {
-				err = classErr
+				if p.spec.Exec != nil {
+					for _, rule := range p.spec.Exec.Rules {
+						for _, name := range rule.Target.PathClass {
+							if p.spec.Classes != nil {
+								if _, local := p.spec.Classes.PathClasses[name]; local {
+									continue
+								}
+							}
+							err = errors.Join(err, classErrors[name])
+						}
+					}
+				}
 			}
 			if err == nil {
 				compiled, compileErr := Compile(ctx, p.identity, p.spec, classes, binding, c.resolver)
@@ -676,23 +703,40 @@ func (c *Controller) reconcile(ctx context.Context) error {
 					plan.Policies = append(plan.Policies, compiled)
 				}
 			}
-			candidateErr = errors.Join(candidateErr, err)
-		}
-		plan.Revision = digest(plan.Policies)
-		if candidateErr == nil && len(plan.Policies) > 0 {
-			// Same-plan Replace is an attestation/cleanup retry, not a gadget restart.
-			// Never infer current protection merely from a prior successful revision.
-			candidateErr = c.replace(ctx, binding, plan)
-		} else if candidateErr != nil {
-			if old, ok := c.active[key]; ok {
-				candidateErr = errors.Join(candidateErr, c.replace(ctx, old.binding, old.plan))
+			if err != nil {
+				policyErrors[uid] = errors.Join(policyErrors[uid], err)
+				candidateErr = errors.Join(candidateErr, err)
+				if previous, ok := oldPolicies[uid]; ok {
+					plan.Policies = append(plan.Policies, previous)
+				}
 			}
 		}
-
 		if candidateErr != nil {
 			failures = append(failures, candidateErr)
+		}
+		plan.Revision = digest(plan.Policies)
+		var backendErr error
+		if len(selected) > MaxPoliciesPerBinding {
+			backendErr = candidateErr
+			if hasOld {
+				backendErr = errors.Join(backendErr, c.attest(ctx, old))
+			}
+		} else if len(plan.Policies) > 0 {
+			// Same-plan Replace is an attestation/cleanup retry, not a gadget restart.
+			// Never infer current protection merely from a prior successful revision.
+			backendErr = c.replace(ctx, binding, plan)
+		} else if hasOld {
+			backendErr = c.withdraw(ctx, old)
+		}
+		if backendErr != nil {
+			failures = append(failures, backendErr)
 			for _, p := range selected {
-				policyErrors[string(p.identity.UID)] = errors.Join(policyErrors[string(p.identity.UID)], candidateErr)
+				uid := string(p.identity.UID)
+				policyErrors[uid] = errors.Join(policyErrors[uid], backendErr)
+			}
+			for _, p := range old.plan.Policies {
+				uid := string(p.Identity.UID)
+				policyErrors[uid] = errors.Join(policyErrors[uid], backendErr)
 			}
 		}
 	}
