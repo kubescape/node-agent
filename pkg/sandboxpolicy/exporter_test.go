@@ -140,7 +140,12 @@ func TestDeniedAuditAndAllowedEventsReachPublicReceivers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- exporter.Run(ctx) }()
-	defer func() { cancel(); <-done }()
+	defer func() {
+		cancel()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Errorf("exporter Run: %v", err)
+		}
+	}()
 	for _, test := range []struct {
 		action api.Action
 		mode   api.RuleMode

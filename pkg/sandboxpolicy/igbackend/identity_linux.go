@@ -63,9 +63,12 @@ func (v LinuxValidator) Acquire(ctx context.Context, b sandboxpolicy.Binding) (L
 		return fail(err)
 	}
 	fd, err := unix.Openat2(int(root.Fd()), strings.TrimPrefix(b.CgroupPath, "/"), &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS})
-	root.Close()
-	if err != nil {
-		return fail(err)
+	closeErr := root.Close()
+	if err != nil || closeErr != nil {
+		if err == nil {
+			return fail(errors.Join(closeErr, unix.Close(fd)))
+		}
+		return fail(errors.Join(err, closeErr))
 	}
 	lease.cgroup = os.NewFile(uintptr(fd), b.CgroupPath)
 	if err := unix.Fstatfs(fd, &fs); err != nil {
@@ -104,13 +107,13 @@ func (v LinuxValidator) Acquire(ctx context.Context, b sandboxpolicy.Binding) (L
 	}
 	return lease, nil
 }
-func (l *linuxLease) read(name string) ([]byte, error) {
+func (l *linuxLease) read(name string) (result []byte, retErr error) {
 	fd, err := unix.Openat(int(l.proc.Fd()), name, unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
 	}
 	f := os.NewFile(uintptr(fd), name)
-	defer f.Close()
+	defer func() { retErr = errors.Join(retErr, f.Close()) }()
 	// proc entries are small; constrain unexpected/malformed input.
 	b, err := io.ReadAll(io.LimitReader(f, 64*1024+1))
 	if err != nil {
@@ -137,7 +140,7 @@ func (l *linuxLease) readStart() (string, error) {
 	}
 	return fields[19], nil
 }
-func (l *linuxLease) Check() error {
+func (l *linuxLease) Check() (err error) {
 	start, err := l.readStart()
 	if err != nil {
 		return err
@@ -165,7 +168,7 @@ func (l *linuxLease) Check() error {
 	if err != nil {
 		return err
 	}
-	defer unix.Close(fd)
+	defer func() { err = errors.Join(err, unix.Close(fd)) }()
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return err

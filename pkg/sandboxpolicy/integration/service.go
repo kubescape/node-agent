@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdmaps "maps"
 	"path/filepath"
@@ -289,7 +290,11 @@ func (s *Service) Start(ctx context.Context) error {
 		s.subscribed = true
 	}
 	s.mu.Unlock()
-	go s.exporter.Run(runCtx)
+	go func() {
+		if err := s.exporter.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+			s.report(fmt.Errorf("sandbox verdict exporter: %w", err))
+		}
+	}()
 	if s.pods != nil {
 		s.pods.Start(runCtx.Done())
 		s.namespaces.Start(runCtx.Done())
