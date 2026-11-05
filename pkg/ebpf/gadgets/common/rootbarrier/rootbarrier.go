@@ -49,22 +49,25 @@ func (o Op) String() string {
 	return fmt.Sprintf("op(%d)", uint32(o))
 }
 
-// Hook is one barrier program and the LSM hook it must be attached to.
+// Hook is one barrier program and the LSM hook it must be attached to. Args
+// is the hook's argument count: the program reads the previous BPF verdict
+// (`ret`) right after them, so the count must match the running kernel.
 type Hook struct {
 	Program string
 	LSM     string
+	Args    int
 }
 
 // Hooks lists every program of ../root_barrier.h.
 var Hooks = []Hook{
-	{"rb_chroot", "path_chroot"},
-	{"rb_pivotroot", "sb_pivotroot"},
-	{"rb_userns", "userns_create"},
-	{"rb_task_alloc", "task_alloc"},
-	{"rb_capable", "capable"},
-	{"rb_sb_mount", "sb_mount"},
-	{"rb_move_mount", "move_mount"},
-	{"rb_sb_umount", "sb_umount"},
+	{"rb_chroot", "path_chroot", 1},
+	{"rb_pivotroot", "sb_pivotroot", 2},
+	{"rb_userns", "userns_create", 1},
+	{"rb_task_alloc", "task_alloc", 2},
+	{"rb_capable", "capable", 4},
+	{"rb_sb_mount", "sb_mount", 5},
+	{"rb_move_mount", "move_mount", 2},
+	{"rb_sb_umount", "sb_umount", 2},
 }
 
 // Denials returns the denial count of each operation, summed over CPUs.

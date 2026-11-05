@@ -32,12 +32,17 @@ func TestHooksMatchHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	header := string(data)
-	programs := regexp.MustCompile(`SEC\("lsm/(\w+)"\)\s*\nint BPF_PROG\((\w+)`).FindAllStringSubmatch(header, -1)
+	programs := regexp.MustCompile(`SEC\("lsm/(\w+)"\)\s*\nint BPF_PROG\((\w+),([^)]*)\)`).FindAllStringSubmatch(header, -1)
 	if len(programs) != len(Hooks) {
 		t.Fatalf("header has %d programs, Hooks has %d", len(programs), len(Hooks))
 	}
 	for i, m := range programs {
-		if Hooks[i] != (Hook{Program: m[2], LSM: m[1]}) {
+		// The arguments end with the previous verdict, `int ret`.
+		args := strings.Count(m[3], ",")
+		if !strings.HasSuffix(strings.TrimSpace(m[3]), "int ret") {
+			t.Errorf("program %s does not end with int ret", m[2])
+		}
+		if Hooks[i] != (Hook{Program: m[2], LSM: m[1], Args: args}) {
 			t.Errorf("program %d: header %s->%s, Hooks %v", i, m[2], m[1], Hooks[i])
 		}
 		if len(m[2]) > 15 {

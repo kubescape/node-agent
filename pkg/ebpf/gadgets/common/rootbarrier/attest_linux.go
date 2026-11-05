@@ -37,6 +37,9 @@ func Attest(counters *ebpf.Map) error {
 	if err != nil {
 		return fmt.Errorf("root barrier: kernel BTF: %w", err)
 	}
+	if err := hookSignatures(kernel); err != nil {
+		return err
+	}
 	attached, err := attachedHooks(mapID, kernel)
 	if err != nil {
 		return err
@@ -49,6 +52,23 @@ func Attest(counters *ebpf.Map) error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("root barrier: no live LSM link for %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// hookSignatures checks the argument count of each hook in the kernel's BTF. A
+// hook that gained an argument would move `ret`, and the program would read
+// another argument as the previous verdict.
+func hookSignatures(kernel *btf.Spec) error {
+	for _, h := range Hooks {
+		var fn *btf.Func
+		if err := kernel.TypeByName("bpf_lsm_"+h.LSM, &fn); err != nil {
+			return fmt.Errorf("root barrier: LSM hook %s: %w", h.LSM, err)
+		}
+		proto, ok := fn.Type.(*btf.FuncProto)
+		if !ok || len(proto.Params) != h.Args {
+			return fmt.Errorf("root barrier: LSM hook %s has an unexpected signature; this kernel is not supported", h.LSM)
+		}
 	}
 	return nil
 }
