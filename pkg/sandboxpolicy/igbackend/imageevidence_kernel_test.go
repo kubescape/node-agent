@@ -31,7 +31,11 @@ func TestContainerdImageEvidenceKernel(t *testing.T) {
 	require.True(t, fullContainerID(id))
 	source, err := newContainerdImageSource(socket)
 	require.NoError(t, err)
-	defer source.Close()
+	defer func() {
+		if err := source.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	evidence, err := source.Evidence(ctx, id)
@@ -52,10 +56,18 @@ func TestContainerdImageEvidenceKernel(t *testing.T) {
 	binding := sandboxpolicy.Binding{Runtime: "containerd", ContainerID: id, PID: evidence.PID, CgroupID: cgroup.Ino, CgroupPath: cg, MountNamespace: mountns.Ino}
 	process, err := (LinuxValidator{}).Acquire(ctx, binding)
 	require.NoError(t, err)
-	defer process.Close()
+	defer func() {
+		if err := process.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	lease, err := acquireImageEvidence(ctx, source, process.(*linuxLease), "/", ImageIndexLimits{})
 	require.NoError(t, err)
-	defer lease.Close()
+	defer func() {
+		if err := lease.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	require.True(t, lease.Complete)
 	require.NotEmpty(t, lease.Inodes)
 	require.NoError(t, lease.Check())
@@ -80,7 +92,11 @@ func TestContainerdFullLeaseKernel(t *testing.T) {
 	require.True(t, fullContainerID(id))
 	source, err := NewContainerdFullSource(socket, "/", "/proc", "/sys/fs/cgroup", ImageIndexLimits{})
 	require.NoError(t, err)
-	defer source.Close()
+	defer func() {
+		if err := source.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	evidence, err := source.source.Evidence(ctx, id)
@@ -101,7 +117,11 @@ func TestContainerdFullLeaseKernel(t *testing.T) {
 	binding := sandboxpolicy.Binding{Runtime: "containerd", ContainerID: id, PID: evidence.PID, CgroupID: cgroup.Ino, CgroupPath: cg, MountNamespace: mountns.Ino}
 	lease, err := source.Prepare(ctx, binding)
 	require.NoError(t, err)
-	defer lease.Close()
+	defer func() {
+		if err := lease.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	require.NoError(t, lease.Check(ctx))
 	require.NotNil(t, lease.InitProc())
 	require.NotNil(t, lease.Cgroup())

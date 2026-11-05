@@ -19,7 +19,7 @@ func completedProfile() *profiles.ContainerProfile {
 func TestProfileResolverReadsCompleteLiteralExecsOnly(t *testing.T) {
 	p := completedProfile()
 	original := p.DeepCopy()
-	client := fake.NewSimpleClientset(p)
+	client := fake.NewClientset(p)
 	resolver := NewProfileResolver(client.SpdxV1beta1())
 	rules, err := resolver.ResolveExecs(context.Background(), "ns", "profile", "app")
 	if err != nil {
@@ -61,7 +61,7 @@ func TestProfileResolverRejectsUnfaithfulTranslations(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			p := completedProfile()
 			mutate(p)
-			resolver := NewProfileResolver(fake.NewSimpleClientset(p).SpdxV1beta1())
+			resolver := NewProfileResolver(fake.NewClientset(p).SpdxV1beta1())
 			if rules, err := resolver.ResolveExecs(context.Background(), "ns", "profile", "app"); err == nil || rules != nil {
 				t.Fatalf("silently widened unsupported import: %+v / %v", rules, err)
 			}
@@ -76,25 +76,25 @@ func TestProfileResolverMultiContainerProjectionAndAmbiguity(t *testing.T) {
 	p.Spec.Containers = []profiles.ContainerProfileContainer{{Name: "app", Execs: []profiles.ExecCalls{{Path: "/bin/app"}}}}
 	p.Spec.EphemeralContainers = []profiles.ContainerProfileContainer{{Name: "debug", Execs: []profiles.ExecCalls{{Path: "/bin/debug"}}}}
 	for _, name := range []string{"app", "init", "debug"} {
-		rules, err := NewProfileResolver(fake.NewSimpleClientset(p).SpdxV1beta1()).ResolveExecs(context.Background(), "ns", "profile", name)
+		rules, err := NewProfileResolver(fake.NewClientset(p).SpdxV1beta1()).ResolveExecs(context.Background(), "ns", "profile", name)
 		if err != nil || len(rules) != 1 || rules[0].Target.Path[0] != "/bin/"+name {
 			t.Fatalf("container projection %s: %+v %v", name, rules, err)
 		}
 	}
 	p.Spec.InitContainers = append(p.Spec.InitContainers, profiles.ContainerProfileContainer{Name: "app"})
-	if _, err := NewProfileResolver(fake.NewSimpleClientset(p).SpdxV1beta1()).ResolveExecs(context.Background(), "ns", "profile", "app"); err == nil {
+	if _, err := NewProfileResolver(fake.NewClientset(p).SpdxV1beta1()).ResolveExecs(context.Background(), "ns", "profile", "app"); err == nil {
 		t.Fatal("ambiguous container name accepted")
 	}
 	p = completedProfile()
 	p.Spec.Containers = []profiles.ContainerProfileContainer{{Name: "app"}}
-	if _, err := NewProfileResolver(fake.NewSimpleClientset(p).SpdxV1beta1()).ResolveExecs(context.Background(), "ns", "profile", "app"); err == nil {
+	if _, err := NewProfileResolver(fake.NewClientset(p).SpdxV1beta1()).ResolveExecs(context.Background(), "ns", "profile", "app"); err == nil {
 		t.Fatal("mixed flat/named execs accepted")
 	}
 }
 func TestProfileResolverEmptyAndMissingSource(t *testing.T) {
 	p := completedProfile()
 	p.Spec.Execs = nil
-	resolver := NewProfileResolver(fake.NewSimpleClientset(p).SpdxV1beta1())
+	resolver := NewProfileResolver(fake.NewClientset(p).SpdxV1beta1())
 	rules, err := resolver.ResolveExecs(context.Background(), "ns", "profile", "app")
 	if err != nil || len(rules) != 0 {
 		t.Fatal("known complete empty source rejected")

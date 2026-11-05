@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -263,5 +264,31 @@ func TestServiceDrainsStartupChurnBeforeReady(t *testing.T) {
 	}
 	if last.Status.Conditions[0].Status != metav1.ConditionTrue {
 		t.Fatalf("stable replay never became Ready: %+v", last.Status.Conditions)
+	}
+}
+
+func TestServiceReportsUnexpectedExporterExit(t *testing.T) {
+	s, _ := testService(t)
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.exporter.Run(stopped); !errors.Is(err, context.Canceled) {
+		t.Fatalf("prepare stopped exporter: %v", err)
+	}
+	reported := make(chan error, 1)
+	s.options.OnError = func(err error) { reported <- err }
+	s.snapshot = func(context.Context) ([]sandboxpolicy.Binding, error) { return nil, nil }
+	if err := s.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-reported:
+		if err == nil || !strings.Contains(err.Error(), "sandbox verdict exporter") {
+			t.Fatalf("missing exporter failure context: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unexpected exporter exit was not reported")
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }

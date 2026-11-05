@@ -410,7 +410,9 @@ func TestInvalidRevisionDoesNotWithdrawAndExplicitDeleteDoes(t *testing.T) {
 	p := policy("policy", "ns")
 	other := policy("other", "ns")
 	c, b, _, _ := setup(t, p, other)
-	c.SetBindings(ctx, []Binding{binding()})
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.InitialSync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +441,9 @@ func TestRelistFailurePreservesSnapshotAndStatusFailureVisible(t *testing.T) {
 	ctx := context.Background()
 	p := policy("policy", "ns")
 	c, b, w, client := setup(t, p)
-	c.SetBindings(ctx, []Binding{binding()})
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.InitialSync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +466,9 @@ func TestClassChangesAndStaleDelete(t *testing.T) {
 	p.Spec.Exec.Rules[0].Target.PathClass = []string{"tools"}
 	classes := &api.SandboxPolicyClasses{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyClasses"}, ObjectMeta: metav1.ObjectMeta{Name: "default", UID: "classes", Generation: 1}, Spec: api.PolicyClasses{PathClasses: map[string][]string{"tools": {"/bin/tool"}}}}
 	c, b, _, _ := setup(t, p, classes)
-	c.SetBindings(ctx, []Binding{binding()})
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.InitialSync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +541,9 @@ func TestOutdatedGenerationAndMalformedSelection(t *testing.T) {
 	ctx := context.Background()
 	p := policy("policy", "ns")
 	c, b, _, _ := setup(t, p)
-	c.SetBindings(ctx, []Binding{binding()})
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.InitialSync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +570,9 @@ func TestPostCommitFailureTracksActualRevisionAndRetriesCleanup(t *testing.T) {
 	ctx := context.Background()
 	p := policy("policy", "ns")
 	c, b, w, _ := setup(t, p)
-	c.SetBindings(ctx, []Binding{binding()})
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.InitialSync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1150,7 +1160,9 @@ func TestCompilerRejectionStillAttestsLastGoodHealth(t *testing.T) {
 	ctx := context.Background()
 	p := policy("policy", "ns")
 	c, b, w, _ := setup(t, p)
-	c.SetBindings(ctx, []Binding{binding()})
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.InitialSync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1176,7 +1188,9 @@ func TestUnchangedReconcileAttestsWithoutReinstalling(t *testing.T) {
 	ctx := context.Background()
 	p := policy("policy", "ns")
 	c, b, _, _ := setup(t, p)
-	c.SetBindings(ctx, []Binding{binding()})
+	if err := c.SetBindings(ctx, []Binding{binding()}); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.InitialSync(ctx); err != nil {
 		t.Fatal(err)
 	}
