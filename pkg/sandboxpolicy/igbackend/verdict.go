@@ -40,7 +40,7 @@ func DecodeVerdict(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, gener
 		return out, fmt.Errorf("verdict identity or values do not match active instance")
 	}
 	p := plan.Policies[0]
-	out = sandboxpolicy.Verdict{Time: time.Now(), Policy: p.Identity, Revision: plan.Revision, ContainerID: binding.ContainerID, PodUID: binding.PodUID, BindingPID: binding.PID, MountNamespace: binding.MountNamespace, CgroupID: r.Cgroup, PID: r.PID, TargetPath: r.Path, Mode: api.RuleAudit, Verdict: api.ActionAllow}
+	out = sandboxpolicy.Verdict{Time: time.Now(), Policy: p.Identity, Revision: plan.Revision, ContainerID: binding.ContainerID, PodUID: binding.PodUID, BindingPID: binding.PID, MountNamespace: binding.MountNamespace, CgroupID: r.Cgroup, PID: r.PID, TargetPath: r.Path, Origins: []string{}, Mode: api.RuleAudit, Verdict: api.ActionAllow}
 	if r.Mode == 2 {
 		out.Mode = api.RuleEnforce
 	}
@@ -83,9 +83,13 @@ func DecodeVerdict(binding sandboxpolicy.Binding, plan sandboxpolicy.Plan, gener
 	if len(decisive) > 0 {
 		out.Reason = "matching_rule"
 	}
+	if len(decisive) == 0 && p.Exec.Default == out.Verdict {
+		out.Origins = originList(p.Exec.DefaultOrigin)
+	}
 	if len(decisive) == 1 {
 		out.Rule = decisive[0].Name
-		out.Origin = decisive[0].Origin
+		out.Origin = originValue(decisive[0].Origin)
+		out.Origins = originList(decisive[0].Origin)
 	}
 	return out, nil
 }

@@ -22,41 +22,6 @@ type FilePlan struct {
 // the fields of NetworkReport.
 type FileReport NetworkReport
 
-// FileExtras mirrors file fields of the SandboxPolicy design
-// (sandbox-policy-crd.md sections 5.2 and 6.1) that the storage API types do
-// not have yet: the per-default modes and origins and the except list of deny
-// rules. The pinned storage type reads per-access defaults from the object form
-// of default, so splitFileExtras moves defaultByAccess there.
-// TODO: replace with the storage types when storage adds these fields.
-type FileExtras struct {
-	// DefaultMode and DefaultOrigin go with a scalar default.
-	DefaultMode   string `json:"defaultMode,omitempty"`
-	DefaultOrigin string `json:"defaultOrigin,omitempty"`
-	// DefaultModeByAccess and DefaultOriginByAccess go with per-access
-	// defaults. Every key is optional.
-	DefaultModeByAccess   *FileAccessValues `json:"defaultModeByAccess,omitempty"`
-	DefaultOriginByAccess *FileAccessValues `json:"defaultOriginByAccess,omitempty"`
-	// Except holds the except list of each rule, by rule name.
-	Except map[string][]FileExcept `json:"except,omitempty"`
-}
-
-// FileAccessValues holds one optional value per access kind.
-type FileAccessValues struct {
-	Read    string `json:"read,omitempty"`
-	Write   string `json:"write,omitempty"`
-	Create  string `json:"create,omitempty"`
-	Delete  string `json:"delete,omitempty"`
-	Rename  string `json:"rename,omitempty"`
-	Chmod   string `json:"chmod,omitempty"`
-	ExecMap string `json:"execMap,omitempty"`
-}
-
-// FileExcept mirrors one except entry of a deny rule.
-type FileExcept struct {
-	Actor  *api.Actor      `json:"actor,omitempty"`
-	Target *api.FileTarget `json:"target,omitempty"`
-}
-
 // accessExecMap is the CRD access kind the gadget does not enforce.
 const accessExecMap = "execMap"
 
@@ -65,55 +30,46 @@ var fileAccessKinds = append(slices.Clone(filepolicy.AccessKinds), accessExecMap
 
 var fileFSTypes = []string{"tmpfs", "overlay", "memfd", "deleted", "procfs", "sysfs"}
 
-func (v *FileAccessValues) get(kind string) string {
-	if v == nil {
+// fileDefault returns the default of one CRD access kind: its action, mode
+// and origin, from the scalar default or from defaultByAccess.
+func fileDefault(f api.FileSection, kind string) filepolicy.Default {
+	if p := f.DefaultByAccess; p != nil {
+		d := filepolicy.Default{Action: string(byAccess(kind, p.Read, p.Write, p.Create, p.Delete, p.Rename, p.Chmod, p.ExecMap))}
+		if m := f.DefaultModeByAccess; m != nil {
+			d.Mode = string(byAccess(kind, m.Read, m.Write, m.Create, m.Delete, m.Rename, m.Chmod, m.ExecMap))
+		}
+		if o := f.DefaultOriginByAccess; o != nil {
+			d.Origin = stringValue(byAccess(kind, o.Read, o.Write, o.Create, o.Delete, o.Rename, o.Chmod, o.ExecMap))
+		}
+		return d
+	}
+	return filepolicy.Default{Action: string(f.Default), Mode: string(f.DefaultMode), Origin: stringValue(f.DefaultOrigin)}
+}
+
+// byAccess returns the value of one CRD access kind.
+func byAccess[T any](kind string, read, write, create, del, rename, chmod, execMap T) T {
+	switch kind {
+	case filepolicy.AccessRead:
+		return read
+	case filepolicy.AccessWrite:
+		return write
+	case filepolicy.AccessCreate:
+		return create
+	case filepolicy.AccessDelete:
+		return del
+	case filepolicy.AccessRename:
+		return rename
+	case filepolicy.AccessChmod:
+		return chmod
+	}
+	return execMap
+}
+
+func stringValue(s *string) string {
+	if s == nil {
 		return ""
 	}
-	return map[string]string{"read": v.Read, "write": v.Write, "create": v.Create, "delete": v.Delete,
-		"rename": v.Rename, "chmod": v.Chmod, accessExecMap: v.ExecMap}[kind]
-}
-
-// splitFileExtras removes the mirrored fields from a decoded spec (a JSON value
-// the caller owns), so the storage types decode the rest strictly. A
-// defaultByAccess object becomes the object form of default.
-func splitFileExtras(spec any) (FileExtras, error) {
-	var x FileExtras
-	m, _ := spec.(map[string]any)
-	f, _ := m["file"].(map[string]any)
-	if f == nil {
-		return x, nil
-	}
-	if value, ok := f["defaultByAccess"]; ok {
-		if _, both := f["default"]; both {
-			return x, fmt.Errorf("file: set exactly one of default and defaultByAccess")
-		}
-		if _, isObject := value.(map[string]any); !isObject {
-			return x, fmt.Errorf("file defaultByAccess must be an object")
-		}
-		f["default"] = value
-		delete(f, "defaultByAccess")
-	}
-	for key, target := range map[string]any{"defaultMode": &x.DefaultMode, "defaultOrigin": &x.DefaultOrigin,
-		"defaultModeByAccess": &x.DefaultModeByAccess, "defaultOriginByAccess": &x.DefaultOriginByAccess} {
-		if value, ok := f[key]; ok {
-			if err := decodeValue(value, target); err != nil {
-				return x, fmt.Errorf("file %s: %w", key, err)
-			}
-			delete(f, key)
-		}
-	}
-	var err error
-	x.Except, err = splitExcept[FileExcept](f, "file")
-	return x, err
-}
-
-// fileDefaults returns the default action of every CRD access kind.
-func fileDefaults(d api.FileDefault) FileAccessValues {
-	if p := d.PerAccess; p != nil {
-		return FileAccessValues{string(p.Read), string(p.Write), string(p.Create), string(p.Delete), string(p.Rename), string(p.Chmod), string(p.ExecMap)}
-	}
-	a := string(d.Action)
-	return FileAccessValues{a, a, a, a, a, a, a}
+	return *s
 }
 
 // validateFileTarget checks what ValidatePolicySpec does not: access and
@@ -140,28 +96,13 @@ func validateFileTarget(t api.FileTarget) error {
 	return nil
 }
 
-// validateFile checks a file section and its mirrored fields.
-func validateFile(f api.FileSection, x FileExtras) error {
-	if err := f.Default.Validate(); err != nil {
+// validateFile checks a file section. ValidatePolicySpec checks the defaults
+// and the except entries too; this repeats it for callers that skip it.
+func validateFile(f api.FileSection) error {
+	if err := f.ValidateDefaults(); err != nil {
 		return err
 	}
-	if f.Default.PerAccess != nil && (x.DefaultMode != "" || x.DefaultOrigin != "") {
-		return fmt.Errorf("file defaultMode and defaultOrigin go with a scalar default; use defaultModeByAccess and defaultOriginByAccess")
-	}
-	if f.Default.PerAccess == nil && (x.DefaultModeByAccess != nil || x.DefaultOriginByAccess != nil) {
-		return fmt.Errorf("file defaultModeByAccess and defaultOriginByAccess go with defaultByAccess; use defaultMode and defaultOrigin")
-	}
-	if !validMode(x.DefaultMode) {
-		return fmt.Errorf("file defaultMode must be audit or enforce")
-	}
-	for _, k := range fileAccessKinds {
-		if !validMode(x.DefaultModeByAccess.get(k)) {
-			return fmt.Errorf("file defaultModeByAccess %s must be audit or enforce", k)
-		}
-	}
-	names := map[string]bool{}
 	for _, r := range f.Rules {
-		names[r.Name] = true
 		if r.Action != api.ActionAllow && r.Action != api.ActionDeny {
 			return fmt.Errorf("rule %q has invalid action", r.Name)
 		}
@@ -174,24 +115,18 @@ func validateFile(f api.FileSection, x FileExtras) error {
 		if err := validateFileTarget(r.Target); err != nil {
 			return fmt.Errorf("rule %q: %w", r.Name, err)
 		}
-		entries := x.Except[r.Name]
-		if len(entries) > 0 && r.Action != api.ActionDeny {
+		if r.Except != nil && r.Action != api.ActionDeny {
 			return fmt.Errorf("rule %q: except applies to deny rules only", r.Name)
 		}
-		for i, e := range entries {
-			if e.Actor == nil && (e.Target == nil || digest(*e.Target) == digest(api.FileTarget{})) {
-				return fmt.Errorf("rule %q except %d is empty", r.Name, i)
+		for i, e := range r.Except {
+			if err := e.Validate(); err != nil {
+				return fmt.Errorf("rule %q except %d: %w", r.Name, i, err)
 			}
 			if e.Target != nil {
 				if err := validateFileTarget(*e.Target); err != nil {
 					return fmt.Errorf("rule %q except %d: %w", r.Name, i, err)
 				}
 			}
-		}
-	}
-	for name := range x.Except {
-		if !names[name] {
-			return fmt.Errorf("except for unknown file rule %q", name)
 		}
 	}
 	return nil
@@ -326,12 +261,12 @@ var (
 // makes the policy not ready. An allow rule the gadget cannot enforce degrades
 // the same defaults and makes the policy not ready (RuleNotEnforceable), so
 // the policy never denies more than it was written to.
-func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string, node FileNode) (*FilePlan, error) {
+func TranslateFile(spec api.PolicySpec, shared map[string][]string, node FileNode) (*FilePlan, error) {
 	f := spec.File
 	if f == nil {
 		return nil, nil
 	}
-	if err := validateFile(*f, x); err != nil {
+	if err := validateFile(*f); err != nil {
 		return nil, err
 	}
 	var local map[string][]string
@@ -343,16 +278,10 @@ func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string
 		File: filepolicy.Section{Defaults: map[string]filepolicy.Default{}}}}}
 	report := &plan.Report
 	report.Rules = int64(len(f.Rules))
-	defaults := fileDefaults(f.Default)
-	modes, origins := x.DefaultModeByAccess, x.DefaultOriginByAccess
-	if f.Default.PerAccess == nil {
-		modes = &FileAccessValues{x.DefaultMode, x.DefaultMode, x.DefaultMode, x.DefaultMode, x.DefaultMode, x.DefaultMode, x.DefaultMode}
-		origins = &FileAccessValues{x.DefaultOrigin, x.DefaultOrigin, x.DefaultOrigin, x.DefaultOrigin, x.DefaultOrigin, x.DefaultOrigin, x.DefaultOrigin}
-	}
 	for _, k := range filepolicy.AccessKinds {
-		plan.Doc.Policy.File.Defaults[k] = filepolicy.Default{Action: defaults.get(k), Mode: modes.get(k), Origin: origins.get(k)}
+		plan.Doc.Policy.File.Defaults[k] = fileDefault(*f, k)
 	}
-	if defaults.ExecMap == string(api.ActionDeny) {
+	if fileDefault(*f, accessExecMap).Action == string(api.ActionDeny) {
 		report.NotEnforced = append(report.NotEnforced, "default execMap deny: execMap is not enforced")
 	}
 	// degrade: access kind -> why its default runs in audit.
@@ -431,7 +360,7 @@ func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string
 			}
 		}
 		var excepts []string
-		for i, e := range x.Except[r.Name] {
+		for i, e := range r.Except {
 			lifted, why, classMissing := t.except(e, kinds)
 			if why != "" {
 				notEnforced(fmt.Sprintf("except %d is disabled (%s); the deny applies there", i, why))
@@ -458,7 +387,7 @@ func TranslateFile(spec api.PolicySpec, x FileExtras, shared map[string][]string
 			paths = []string{"/**"} // an empty target matches every file
 		}
 		plan.Doc.Policy.File.Rules = append(plan.Doc.Policy.File.Rules, filepolicy.Rule{
-			Name: r.Name, Action: string(r.Action), Mode: mode, Origin: r.Origin, Access: access,
+			Name: r.Name, Action: string(r.Action), Mode: mode, Origin: stringValue(r.Origin), Access: access,
 			Paths: sortedUnique(paths), FromImage: fromImage, Except: sortedUnique(excepts)})
 	}
 	for _, devices := range runtimeDevices {
@@ -563,7 +492,7 @@ func (t *pathTranslator) paths(paths, classes []string) ([]string, bool) {
 
 // except returns the globs an except entry lifts, or why it is disabled.
 // kinds are the gadget access kinds of its deny rule.
-func (t *pathTranslator) except(e FileExcept, kinds []string) (lifted []string, why string, classMissing bool) {
+func (t *pathTranslator) except(e api.FileException, kinds []string) (lifted []string, why string, classMissing bool) {
 	if e.Actor != nil {
 		return nil, "actor predicates are unsupported", false
 	}

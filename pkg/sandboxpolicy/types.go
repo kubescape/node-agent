@@ -170,7 +170,8 @@ type RuleMatch struct {
 	Policy   PolicyIdentity
 	Revision string
 	Name     string
-	Origin   string
+	Origin   string   // Legacy scalar; use Origins for presence-aware provenance.
+	Origins  []string `json:"origins"`
 	Action   api.Action
 	Mode     api.RuleMode
 }
@@ -190,7 +191,8 @@ type Verdict struct {
 	// attribution. Policy-specific revisions belong to PolicySet and Matches.
 	Revision       string
 	Rule           string
-	Origin         string
+	Origin         string   // Legacy scalar; use Origins for presence-aware provenance.
+	Origins        []string `json:"origins"`
 	Mode           api.RuleMode
 	Verdict        api.Action
 	WouldDeny      bool
