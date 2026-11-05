@@ -17,7 +17,8 @@ package runtime
 //	PRIVILEGE_CGROUP_PATH    its cgroup v2 path under /sys/fs/cgroup, with a leading "/" (as in /proc/<pid>/cgroup)
 //
 // TestForkMarkFaultInjection uses the same fixture. The container needs a
-// POSIX sh.
+// POSIX sh. TestEarlierBPFDenyHolds loads a BPF LSM program that denies every
+// chroot on the node for a few seconds.
 
 import (
 	"context"
@@ -25,10 +26,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/link"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
@@ -209,5 +214,78 @@ func TestForkMarkFaultInjection(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestEarlierBPFDenyHolds checks that the gadget never turns another BPF LSM
+// program's deny into an allow, in both attach orders. The kernel runs the
+// programs of a hook newest first and stops at the first nonzero return. The
+// other program denies chroot with EACCES; the gadget would deny with EPERM,
+// so the errno shows which program decided.
+func TestEarlierBPFDenyHolds(t *testing.T) {
+	f := newKernelFixture(t)
+	chroot := func() string {
+		out, err := exec.CommandContext(f.ctx, "docker", "exec", f.id, "chroot", "/", "true").CombinedOutput()
+		switch {
+		case err == nil:
+			return "ok"
+		case strings.Contains(string(out), "Permission denied"):
+			return "EACCES"
+		case strings.Contains(string(out), "Operation not permitted"):
+			return "EPERM"
+		}
+		return string(out)
+	}
+	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
+		Type: ebpf.LSM, AttachType: ebpf.AttachLSMMac, AttachTo: "path_chroot", License: "GPL",
+		Instructions: asm.Instructions{asm.Mov.Imm(asm.R0, -13), asm.Return()}, // -EACCES
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prog.Close()
+	attach := func() link.Link {
+		l, err := link.AttachLSM(link.LSMOptions{Program: prog})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	if got := chroot(); got != "ok" {
+		t.Fatalf("baseline chroot: %s", got)
+	}
+	older := attach()
+	defer older.Close()
+	if got := chroot(); got != "EACCES" {
+		t.Fatalf("the other program must deny chroot: %s", got)
+	}
+	rule := privpolicy.Rule{Name: "chroot-ok", Action: "allow", Target: privpolicy.Target{Syscall: []string{"chroot"}}}
+	doc := privpolicy.Document{Version: 1, Name: "allow-chroot", Policy: privpolicy.Policy{Mode: "enforce", Privilege: privpolicy.Section{Default: "deny", Rules: []privpolicy.Rule{rule}}}}
+	compiled, err := privpolicy.CompileKernel(doc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.start(t, "privilege-earlier-deny", compiled, nil)
+	if got := chroot(); got != "EACCES" {
+		t.Fatalf("unbound, gadget newer: %s", got)
+	}
+	if err := f.bindings.Bind(enforcement.Binding{Container: f.container}); err != nil {
+		t.Fatal(err)
+	}
+	defer f.bindings.Unbind(f.container)
+	// The gadget runs first and allows; the older program still denies.
+	if got := chroot(); got != "EACCES" {
+		t.Fatalf("bound with an allow rule, gadget newer: %s", got)
+	}
+	older.Close()
+	if got := chroot(); got != "ok" {
+		t.Fatalf("the gadget alone allows chroot: %s", got)
+	}
+	// The other program is now newer: it runs first and denies, and the
+	// gadget's allow does not replace that.
+	newer := attach()
+	defer newer.Close()
+	if got := chroot(); got != "EACCES" {
+		t.Fatalf("bound with an allow rule, other program newer: %s", got)
 	}
 }
