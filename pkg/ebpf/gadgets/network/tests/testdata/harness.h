@@ -51,7 +51,15 @@ static unsigned long long load_byte(const void *skb, unsigned long long off) {
 static struct gadget_socket_value *gadget_socket_lookup(struct __sk_buff *skb) { return socket_available ? &socket_value : NULL; }
 static bool gadget_should_discard_data_by_skb(struct gadget_socket_value *s) { return discard; }
 static bool owner_discard;
-static bool gadget_should_discard_data(__u64 mntns, __u32 pid, __u32 tid, char *comm, __u32 uid, __u32 gid) { return owner_discard; }
+// Arguments of the last owner filter call, asserted by check_owner().
+static __u64 filter_mntns;
+static __u32 filter_pid, filter_tid, filter_uid, filter_gid;
+static char filter_comm[TASK_COMM_LEN];
+static bool gadget_should_discard_data(__u64 mntns, __u32 pid, __u32 tid, char *comm, __u32 uid, __u32 gid) {
+ filter_mntns = mntns; filter_pid = pid; filter_tid = tid; filter_uid = uid; filter_gid = gid;
+ memcpy(filter_comm, comm, TASK_COMM_LEN);
+ return owner_discard;
+}
 static void gadget_process_populate_from_socket(struct gadget_socket_value *s, struct gadget_process *p) { memset(p, 0, sizeof(*p)); p->pid = 42; }
 static __u64 bpf_ktime_get_boot_ns(void) { return 123; }
 static int bpf_perf_event_output(void *ctx, void *map, __u64 flags, void *data, __u64 size) { emitted++; return 0; }

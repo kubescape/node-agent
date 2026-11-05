@@ -101,6 +101,9 @@ static void check_owner(void) {
   assert(!strcmp(captured.proc.parent.comm, "bash"));
   assert(captured.proc.parent.pid == 1 && captured.proc.parent.tid == 2);
   assert(!strcmp(captured.exepath, "/usr/bin/smbclient"));
+  // The container filter gets the owner, not the socket entry.
+  assert(filter_mntns == 4026531840ULL && filter_pid == 7 && filter_tid == 8);
+  assert(filter_uid == 6 && filter_gid == 5 && !strcmp(filter_comm, "smbclient"));
   // The socket entry would keep the event, the owner (a host task) drops it.
   owner_discard = true; check(v, PACKET_OUTGOING, IPPROTO_TCP, 445, 1, 0, false); owner_discard = false;
   // The socket entry would drop the event, the owner (a container task) keeps it.

@@ -33,9 +33,11 @@ When the 4-tuple names a host task:
 
 When the 4-tuple names a different container's task, the event reports that task.
 
-`proc` and `exepath` come from the task that called `connect()`. For a kernel connection (the
-in-kernel CIFS client, NFS, ceph, iSCSI, extra MPTCP subflows) that task is a kernel thread or
-kworker, with an empty `exepath`. The container filter drops these.
+`proc` and `exepath` come from the task that sends the SYN, normally the one that called
+`connect()`. A deferred TCP Fast Open connection (`TCP_FASTOPEN_CONNECT`) sends its SYN from the
+first `write()` or `sendmsg()`, so the task that makes that call is reported. For a kernel
+connection (the in-kernel CIFS client, NFS, ceph, iSCSI, extra MPTCP subflows) that task is a kernel
+thread or kworker, with an empty `exepath`. The container filter drops these.
 
 IPv6 sockets connecting to IPv4-mapped addresses are keyed as IPv4, because their packets are IPv4.
 
@@ -47,9 +49,10 @@ These cases still use the port-keyed lookup, so the misattribution can still hap
   it. A SYN whose destination or source was rewritten never matches. Examples: kube-proxy
   iptables/IPVS DNAT to a ClusterIP, SNAT/masquerade, IPv4 source routing. Cilium socket
   load-balancing rewrites at connect time, so it does match.
-- **Retransmitted SYNs after an eviction.** Every TCP connect on the node fills the map. On a busy
-  or many-CPU node, a retransmit sent 1 or 3 seconds later can find its entry evicted. The first
-  SYN is filtered right after its entry is inserted, so it is not affected.
+- **SYNs after an eviction.** Every TCP connect on the node fills the map. On a busy or many-CPU
+  node, a retransmit sent 1 or 3 seconds later can find its entry evicted. The first SYN usually
+  reaches the filter right after its entry is inserted, but a queueing discipline can hold it long
+  enough for the entry to be evicted too.
 - **SYNs that do not come from `tcp_connect()`.** These come from raw sockets or `TCP_REPAIR`. If
   one reuses a recorded 4-tuple, it is attributed to that tuple's last `connect()` caller. Entries
   are not deleted.
