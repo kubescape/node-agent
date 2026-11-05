@@ -290,3 +290,36 @@ func TestControllerIdentityPlanAndStatus(t *testing.T) {
 		t.Fatalf("status %+v", report.Status.Conditions)
 	}
 }
+
+func TestExpandIdentitySplitKeepsExplicitPathsWithUnresolvedClass(t *testing.T) {
+	deny := identityRule("creds", api.ActionDeny, api.IdentityTarget{Path: []string{"/etc/creds"}, PathClass: []string{"emptyClass"}})
+	deny.Except = []api.IdentityException{{Target: &api.IdentityTarget{Path: []string{"/etc/creds.pub"}}}}
+	spec := api.PolicySpec{Containers: []string{"*"}, Mode: api.ModeEnforce,
+		Identity: &api.IdentitySection{Default: api.ActionAllow, Rules: []api.IdentityRule{deny}}}
+	out, _ := expand(t, spec)
+	plan := translateFile(t, out, nil)
+	if fileRuleByName(plan, "creds") != nil {
+		t.Fatal("the unresolved class part must keep no path")
+	}
+	if d := fileDegraded(plan, "creds"); d == nil || d.Reason != "class-unresolved" {
+		t.Fatalf("degraded %+v", plan.Report.Degraded)
+	}
+	explicit := fileRuleByName(plan, "creds/path")
+	if explicit == nil || explicit.Mode != "" || !readDenied(t, explicit, "/etc/creds") || readDenied(t, explicit, "/etc/creds.pub") {
+		t.Fatalf("explicit part %+v", explicit)
+	}
+}
+
+func TestExpandIdentitySplitNameFitsTheLimit(t *testing.T) {
+	long := strings.Repeat("n", api.MaxRuleNameLength)
+	deny := identityRule(long, api.ActionDeny, api.IdentityTarget{Path: []string{"/etc/creds"}, PathClass: []string{"sshKeys"}})
+	spec := api.PolicySpec{Containers: []string{"*"}, Mode: api.ModeEnforce,
+		Identity: &api.IdentitySection{Default: api.ActionAllow, Rules: []api.IdentityRule{deny}}}
+	out, _ := expand(t, spec)
+	if err := api.ValidatePolicySpec(out); err != nil {
+		t.Fatal(err)
+	}
+	if name := out.File.Rules[1].Name; len(name) != api.MaxRuleNameLength || !strings.HasSuffix(name, "/path") {
+		t.Fatalf("split name %q", name)
+	}
+}

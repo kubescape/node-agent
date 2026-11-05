@@ -20,6 +20,8 @@ import (
 // path in a class is then readable, under every alias the file translator
 // gives the class member. The explicit paths of a deny are not subtracted
 // (deny wins), so a deny with both paths and classes becomes two file rules.
+// The split also keeps the explicit paths enforced when a class of the deny is
+// unresolved (the file translator then drops every path of that rule).
 //
 // It returns what cannot be expressed: a deny default (identity has no
 // universe of its own), envRead (the file gadget cannot tell a process's own
@@ -71,11 +73,11 @@ func expandIdentity(spec api.PolicySpec) (api.PolicySpec, []string, error) {
 				}
 				return out
 			})
-			if r.Action == api.ActionDeny && len(provisioned) > 0 && len(t.PathClass) > 0 {
+			if r.Action == api.ActionDeny && len(t.PathClass) > 0 {
 				files = append(files, identityFileRule(r.Rule, nil, t.PathClass, append(slices.Clone(excepts), provisioned...)))
 				if len(t.Path) > 0 {
 					rule := r.Rule
-					rule.Name = freeName(r.Name+"/path", names)
+					rule.Name = splitName(r.Name, names)
 					names[rule.Name] = true
 					files = append(files, identityFileRule(rule, t.Path, nil, excepts))
 				}
@@ -120,6 +122,20 @@ func expandIdentity(spec api.PolicySpec) (api.PolicySpec, []string, error) {
 		spec.Network = &n
 	}
 	return spec, notes, nil
+}
+
+// splitName names the explicit-path part of a split deny: the rule name with
+// "/path" (and a free "~N"), cut so that it stays within the API's limit.
+func splitName(name string, used map[string]bool) string {
+	base := []rune(name)
+	for {
+		out := freeName(string(base)+"/path", used)
+		n := len([]rune(out))
+		if n <= api.MaxRuleNameLength {
+			return out
+		}
+		base = base[:len(base)-(n-api.MaxRuleNameLength)]
+	}
 }
 
 func isPathTarget(t api.IdentityTarget) bool { return len(t.Path) > 0 || len(t.PathClass) > 0 }
