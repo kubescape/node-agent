@@ -4102,3 +4102,73 @@ exec nc -w 3 "$KUBERNETES_SERVICE_HOST" "$KUBERNETES_SERVICE_PORT"`
 	assert.Equal(t, 0, count("R9914"),
 		"negative control fired: state.has returned true for a name no rule writes, so R9911 proves nothing")
 }
+
+// Test_38_CelStateCounter is the end-to-end proof of the CEL state counter: a
+// rule that increments on every marker exec in a container and alerts on the
+// third, against real eBPF events and the real CRD.
+//
+// R9921 alerts only when state.count('marker_exec') >= 3, so if increments are
+// not applied, or the CRD prunes the `increment` field and the write degrades
+// to a plain set, the predicate is false and no alert is emitted. R9922 is the
+// same counter with a threshold above the number of probes and must stay
+// silent: it catches double counting. R9923 is the exec control.
+func Test_38_CelStateCounter(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	rulesPath := path.Join(utils.CurrentDir(), "resources/cel-count-rules.yaml")
+	bindingPath := path.Join(utils.CurrentDir(), "resources/cel-count-rulebinding.yaml")
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", rulesPath), "apply counter test rules")
+	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", rulesPath)
+	require.Equal(t, 0, testutils.RunCommand("kubectl", "apply", "--validate=false", "-f", bindingPath), "apply counter test rule binding")
+	defer testutils.RunCommand("kubectl", "delete", "--ignore-not-found", "-f", bindingPath)
+	// let the rules watcher and rule-binding watcher pick the new rules up
+	time.Sleep(20 * time.Second)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/cel-state-deployment.yaml"))
+	require.NoError(t, err, "Error creating workload")
+	require.NoError(t, wl.WaitForReady(80))
+	time.Sleep(15 * time.Second)
+
+	// Exactly three probes: R9921's threshold. Sequential, so each exec has
+	// landed before the next, which keeps the count deterministic.
+	const probes = 3
+	for i := 0; i < probes; i++ {
+		_, _, err := wl.ExecIntoPodNoTTY([]string{"sh", "-c", "# CELCOUNT_MARKER\ntrue"}, "probe")
+		require.NoError(t, err, "probe %d", i+1)
+		time.Sleep(2 * time.Second)
+	}
+
+	t.Log("waiting for the alerts to land")
+	time.Sleep(45 * time.Second)
+
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Error getting alerts")
+
+	count := func(ruleID string) int {
+		n := 0
+		for _, a := range alerts {
+			if a.Labels["rule_id"] == ruleID {
+				n++
+			}
+		}
+		return n
+	}
+	for _, a := range alerts {
+		t.Logf("alert rule_id=%s rule_name=%q", a.Labels["rule_id"], a.Labels["rule_name"])
+	}
+
+	// Control FIRST. If it is silent the marker exec never reached the rule
+	// loop and R9921's silence says nothing about the counter.
+	require.GreaterOrEqual(t, count("R9923"), probes,
+		"exec control fired fewer times than there were probes: the marker execs did not all reach the rule loop")
+
+	// The actual proof: the third exec read a count of three.
+	assert.Greater(t, count("R9921"), 0,
+		"counter rule never fired: increments were not applied before the expression, or the CRD pruned the increment field")
+
+	// And the negative control, which makes the assertion above meaningful.
+	assert.Equal(t, 0, count("R9922"),
+		"negative control fired: the counter reached a threshold above the number of probes, so increments are being double counted")
+}

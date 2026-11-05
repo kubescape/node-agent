@@ -1,0 +1,102 @@
+# Test-only rules validating the CEL state counter against real eBPF events.
+# Applied by Test_38_CelStateCounter and deleted on cleanup. IDs are in the
+# test-only 99xx range so they cannot collide with the shipped R1xxx/R2xxx ranges.
+#
+# Three rules, because "no alert" is ambiguous on its own (see cel-state-rules.yaml):
+#
+#   R9921  The counter rule under test. Increments a scope-wide counter on every
+#          marker exec and alerts on the third. If the CRD prunes `increment`
+#          the entry degrades to a plain set, state.count stays 0 and this is
+#          silent.
+#   R9922  Negative control. Same counter, threshold one higher than the number
+#          of probes the test runs. Must NOT fire: if it does, the count is
+#          wrong (double counting or a stale window).
+#   R9923  Exec control. Fires on every marker exec with no state. If it is
+#          silent, the marker exec never reached the rule loop and R9921's
+#          silence says nothing about the counter.
+#
+# All rules use profileDependency 2 (NotRequired) and a uniqueId that includes
+# the pid so per-rule cooldown cannot swallow a later probe.
+apiVersion: kubescape.io/v1
+kind: Rules
+metadata:
+  name: cel-count-test-rules
+  namespace: kubescape
+  labels:
+    app: kubescape
+spec:
+  rules:
+    - name: "TEST state counter third exec"
+      enabled: true
+      id: "R9921"
+      description: "Test rule: counts marker execs in the container and alerts on the third."
+      stateWrites:
+        - eventType: "exec"
+          scope: "container"
+          name: "marker_exec"
+          increment: 1
+          ttl: "5m"
+          when: "event.comm == 'sh' && event.args.exists(a, a.contains('CELCOUNT_MARKER'))"
+      expressions:
+        message: "'state counter: pid=' + string(event.pid) + ' count=' + string(state.count('marker_exec'))"
+        uniqueId: "'R9921_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "exec"
+            expression: |
+              event.comm == 'sh' && event.args.exists(a, a.contains('CELCOUNT_MARKER')) && state.count('marker_exec') >= 3
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0002"
+      mitreTechnique: "T1059"
+      tags:
+        - "test"
+        - "state"
+    - name: "TEST state counter negative control"
+      enabled: true
+      id: "R9922"
+      description: "Test negative control: same counter, threshold above the number of probes. Must never fire."
+      stateWrites:
+        - eventType: "exec"
+          scope: "container"
+          name: "marker_exec"
+          increment: 1
+          ttl: "5m"
+          when: "event.comm == 'sh' && event.args.exists(a, a.contains('CELCOUNT_MARKER'))"
+      expressions:
+        message: "'NEGATIVE CONTROL FIRED: pid=' + string(event.pid) + ' count=' + string(state.count('marker_exec'))"
+        uniqueId: "'R9922_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "exec"
+            expression: |
+              event.comm == 'sh' && event.args.exists(a, a.contains('CELCOUNT_MARKER')) && state.count('marker_exec') >= 4
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0002"
+      mitreTechnique: "T1059"
+      tags:
+        - "test"
+        - "state"
+    - name: "TEST state counter exec control"
+      enabled: true
+      id: "R9923"
+      description: "Test control rule: fires on every marker exec with no state."
+      expressions:
+        message: "'exec control: pid=' + string(event.pid) + ' comm=' + event.comm"
+        uniqueId: "'R9923_' + string(event.pid)"
+        ruleExpression:
+          - eventType: "exec"
+            expression: |
+              event.comm == 'sh' && event.args.exists(a, a.contains('CELCOUNT_MARKER'))
+      profileDependency: 2
+      severity: 1
+      supportPolicy: false
+      isTriggerAlert: true
+      mitreTactic: "TA0002"
+      mitreTechnique: "T1059"
+      tags:
+        - "test"
+        - "state"

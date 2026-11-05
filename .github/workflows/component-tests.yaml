@@ -110,6 +110,7 @@ jobs:
           Test_35_ExecTTYFieldTest,
           Test_36_MultiContainerPerContainerBinding,
           Test_37_CelStateStoreCorrelation,
+          Test_38_CelStateCounter,
           Test_43_RelativeOpenPathResolution,
           Test_48_MultiSubtypeGroupedProfileDocument,
           Test_49_EphemeralContainerFullTreatment
