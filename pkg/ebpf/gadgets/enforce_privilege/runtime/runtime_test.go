@@ -85,11 +85,19 @@ func TestHooksMatchProgram(t *testing.T) {
 			continue
 		}
 		seen[m[1]] = true
+		if len(Hooks[m[1]]) > 1 {
+			// Two signatures: the program reads ctx itself (see the
+			// security_list_options type matches in the program).
+			if strings.TrimSpace(m[2]) != "" {
+				t.Errorf("hook %s has two signatures and must not name arguments", m[1])
+			}
+			continue
+		}
 		if !strings.HasSuffix(strings.TrimSpace(m[2]), "int ret") {
 			t.Errorf("hook %s does not end with int ret", m[1])
 		}
-		if args := strings.Count(m[2], ",") - 1; Hooks[m[1]] != args {
-			t.Errorf("hook %s: program has %d arguments, Hooks has %d", m[1], args, Hooks[m[1]])
+		if args := strings.Count(m[2], ",") - 1; len(Hooks[m[1]]) != 1 || Hooks[m[1]][0] != args {
+			t.Errorf("hook %s: program has %d arguments, Hooks has %v", m[1], args, Hooks[m[1]])
 		}
 	}
 	if len(seen) != len(Hooks) {
