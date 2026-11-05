@@ -830,3 +830,26 @@ func TestFileTwoPoliciesAtRuleLimit(t *testing.T) {
 		t.Fatalf("two policies of %d rules fit one slot", own+1+builtin)
 	}
 }
+
+// A path class defined in two class objects is unresolved for the file
+// section: the deny rule degrades, and the policy still binds.
+func TestFileDuplicateSharedClassDegrades(t *testing.T) {
+	ctx := context.Background()
+	deny := fileRule("no-broken", api.ActionDeny, api.FileTarget{PathTarget: api.PathTarget{PathClass: []string{"broken"}}})
+	obj := filePolicyObject("files", fileSpec(api.ActionAllow, deny), nil)
+	classes := &api.SandboxPolicyClasses{TypeMeta: metav1.TypeMeta{APIVersion: api.SchemeGroupVersion.String(), Kind: "SandboxPolicyClasses"}, ObjectMeta: metav1.ObjectMeta{Name: "classes", UID: "classes"},
+		Spec: api.PolicyClasses{PathClasses: map[string][]string{"broken": {"/etc/one"}}}}
+	duplicate := classes.DeepCopy()
+	duplicate.Name, duplicate.UID = "duplicate", "duplicate"
+	c, backend, w, _ := setup(t, classes, duplicate)
+	c.objects[objectKey(obj)] = obj
+	err := c.SetBindings(ctx, []Binding{binding()})
+	plan := backend.plans[bindingKey(binding())]
+	if len(plan.Policies) != 1 || plan.Policies[0].File == nil {
+		t.Fatalf("the file policy must still bind: %+v err=%v status=%+v", plan, err, w.reports["uid-files"])
+	}
+	degraded := plan.Policies[0].File.Report.Degraded
+	if len(degraded) != 1 || degraded[0].Rule != "no-broken" || !strings.Contains(degraded[0].Reason, "class-unresolved") {
+		t.Fatalf("degraded %+v", degraded)
+	}
+}
