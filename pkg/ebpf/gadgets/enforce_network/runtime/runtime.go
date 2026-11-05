@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"github.com/spf13/viper"
 	"golang.org/x/sys/unix"
 
@@ -73,6 +74,21 @@ func effectiveTier(metadata *viper.Viper) (string, error) {
 }
 
 type ContainerIdentity = enforcement.ContainerIdentity
+
+// Hooks lists the int LSM hooks of the lsm tier with their argument count
+// (without `ret`). Each program reads the previous verdict, `ret`, right after
+// them, so the counts must match the running kernel.
+var Hooks = map[string]int{"socket_connect": 3, "socket_sendmsg": 3}
+
+// checkKernel refuses a kernel whose hook signatures differ from Hooks
+// (replaced in tests).
+var checkKernel = func() error {
+	kernel, err := btf.LoadKernelSpec()
+	if err != nil {
+		return fmt.Errorf("kernel BTF: %w", err)
+	}
+	return enforcement.CheckLSMHookArgs(kernel, Hooks)
+}
 
 // Config holds the compiled rules and the initial container selection.
 type Config struct {
@@ -211,7 +227,8 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	if !ok || !metadata.GetBool(annotation) {
 		return nil, nil
 	}
-	if _, err := effectiveTier(metadata); err != nil {
+	tier, err := effectiveTier(metadata)
+	if err != nil {
 		return nil, err
 	}
 	value, _ = gc.GetVar(configKey)
@@ -221,6 +238,13 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	}
 	if err := validateConfig(config); err != nil {
 		return nil, err
+	}
+	// Before the programs are loaded: a wrong argument count would make the
+	// lsm tier read an argument as the previous verdict.
+	if tier == TierLSM {
+		if err := checkKernel(); err != nil {
+			return nil, fmt.Errorf("enforce_network: %w", err)
+		}
 	}
 	b, err := enforcement.New(enforcement.Config{
 		Name:            operatorName,

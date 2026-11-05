@@ -4,6 +4,9 @@
 package runtime
 
 import (
+	"os"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/cilium/ebpf"
@@ -83,5 +86,28 @@ func TestValidateConfig(t *testing.T) {
 	c.Prefixes[0].List = uint32(len(c.Lists))
 	if err := validateConfig(Config{Policy: c}); err == nil {
 		t.Fatal("a prefix of a missing rule list must fail")
+	}
+}
+
+// TestHooksMatchProgram keeps Hooks in step with the BPF_PROG signatures: every
+// int LSM hook ends with `int ret`, after the listed number of arguments.
+func TestHooksMatchProgram(t *testing.T) {
+	data, err := os.ReadFile("../program.bpf.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	programs := regexp.MustCompile(`SEC\("lsm/(\w+)"\)\s*\nint BPF_PROG\(\w+((?:,[^)]*)?)\)`).FindAllStringSubmatch(string(data), -1)
+	seen := map[string]bool{}
+	for _, m := range programs {
+		seen[m[1]] = true
+		if !strings.HasSuffix(strings.TrimSpace(m[2]), "int ret") {
+			t.Errorf("hook %s does not end with int ret", m[1])
+		}
+		if args := strings.Count(m[2], ",") - 1; Hooks[m[1]] != args {
+			t.Errorf("hook %s: program has %d arguments, Hooks has %d", m[1], args, Hooks[m[1]])
+		}
+	}
+	if len(seen) != len(Hooks) {
+		t.Errorf("program has %d int hooks, Hooks has %d", len(seen), len(Hooks))
 	}
 }
