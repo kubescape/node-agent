@@ -236,6 +236,11 @@ are in `PrivilegeTarget`, `NetworkTarget` and `FileTarget`. None of them
 implements an observation interface: a denied connect is not a connection.
 
 - The gadgets report denies only (enforced, or audit with `WouldDeny`).
+- One verdict is one kernel check, not one syscall. A syscall the kernel
+  checks twice gives two identical verdicts: an audited `setns` into a mount
+  namespace checks CAP_SYS_ADMIN twice. Neither the gadget nor the exporter
+  merges them; a consumer may merge identical verdicts of one task that
+  arrive together.
 - The binding comes from the event's cgroup: a container, or for privilege a
   pod cgroup (pod fields only). An unknown cgroup leaves it absent.
 - The policy set comes from the slot table of the gadget instance that judged
