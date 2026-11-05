@@ -195,3 +195,11 @@ key, the event names the rule `default` with `is_default` false. Rule and origin
 names are in the owner's compiled policy (`RuleNames`, `Origins`). Reporting is
 limited to 100 events per CPU per second; enforcement is never throttled.
 
+A verdict is one kernel check, not one syscall. A syscall that checks the same
+capability twice gives two identical verdicts in audit mode, because audit lets
+the first check pass: `setns` checks `CAP_SYS_ADMIN` against the namespace's
+user namespace and against the caller's, so an audited `setns` gives two. In
+enforce mode the first deny stops the syscall, so it gives one. The `counters`
+count checks the same way. A consumer that needs one event per syscall can
+merge identical verdicts of one task that arrive together.
+
