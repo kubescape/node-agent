@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"github.com/spf13/viper"
 	"golang.org/x/sys/unix"
 
@@ -29,6 +30,28 @@ const (
 )
 
 type ContainerIdentity = enforcement.ContainerIdentity
+
+// Hooks lists the int LSM hooks of ../program.bpf.c with their argument count
+// (without `ret`). Each program reads the previous verdict, `ret`, right after
+// them, so the counts must match the running kernel.
+var Hooks = map[string]int{
+	"userns_create": 1, "task_alloc": 2, "capable": 4, "capset": 5,
+	"task_fix_setuid": 3, "task_fix_setgid": 3, "sb_mount": 5, "sb_kern_mount": 1,
+	"sb_umount": 2, "move_mount": 2, "sb_pivotroot": 2, "path_chroot": 1,
+	"inode_init_security_anon": 3, "ptrace_access_check": 2, "ptrace_traceme": 1,
+	"kernel_read_file": 3, "kernel_load_data": 2, "kernel_module_request": 1,
+	"bpf": 3, "perf_event_open": 2, "key_alloc": 3, "key_permission": 3, "inode_mknod": 4,
+}
+
+// checkKernel refuses a kernel whose hook signatures differ from Hooks
+// (replaced in tests).
+var checkKernel = func() error {
+	kernel, err := btf.LoadKernelSpec()
+	if err != nil {
+		return fmt.Errorf("kernel BTF: %w", err)
+	}
+	return enforcement.CheckLSMHookArgs(kernel, Hooks)
+}
 
 // Config holds the compiled rules and the initial container selection.
 type Config struct {
@@ -117,6 +140,11 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	}
 	if err := validateConfig(config); err != nil {
 		return nil, err
+	}
+	// Before the programs are loaded: a wrong argument count would make them
+	// read an argument as the previous verdict.
+	if err := checkKernel(); err != nil {
+		return nil, fmt.Errorf("enforce_privilege: %w", err)
 	}
 	b, err := enforcement.New(enforcement.Config{
 		Name:            operatorName,
