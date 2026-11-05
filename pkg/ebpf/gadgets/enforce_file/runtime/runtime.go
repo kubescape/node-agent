@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"github.com/spf13/viper"
 	"golang.org/x/sys/unix"
 
@@ -29,6 +30,26 @@ const (
 )
 
 type ContainerIdentity = enforcement.ContainerIdentity
+
+// Hooks lists the int LSM hooks with their argument count (without `ret`).
+// Each program reads the previous verdict, `ret`, right after them, so the
+// counts must match the running kernel.
+var Hooks = map[string]int{
+	"file_open": 1, "path_truncate": 1, "path_chmod": 2, "path_chown": 3,
+	"inode_setxattr": 6, "inode_set_acl": 4, "path_mknod": 4, "path_mkdir": 3,
+	"path_symlink": 3, "path_unlink": 2, "path_rmdir": 2, "path_link": 3,
+	"path_rename": 5, "task_alloc": 2,
+}
+
+// checkKernel refuses a kernel whose hook signatures differ from Hooks
+// (replaced in tests).
+var checkKernel = func() error {
+	kernel, err := btf.LoadKernelSpec()
+	if err != nil {
+		return fmt.Errorf("kernel BTF: %w", err)
+	}
+	return enforcement.CheckLSMHookArgs(kernel, Hooks)
+}
 
 // Config holds the compiled rules and the initial container selection.
 type Config struct {
@@ -170,6 +191,11 @@ func (*operator) InstantiateDataOperator(gc operators.GadgetContext, _ api.Param
 	}
 	if err := validateConfig(config); err != nil {
 		return nil, err
+	}
+	// Before the programs are loaded: a wrong argument count would make a
+	// program read an argument as the previous verdict.
+	if err := checkKernel(); err != nil {
+		return nil, fmt.Errorf("enforce_file: %w", err)
 	}
 	b, err := enforcement.New(enforcement.Config{
 		Name:            operatorName,

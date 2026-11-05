@@ -6,6 +6,8 @@ package runtime
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/cilium/ebpf"
@@ -200,5 +202,31 @@ func TestOldSetxattrSemantics(t *testing.T) {
 		if one != c.one || (err != nil) != c.bad {
 			t.Errorf("%s: got %v, %v", name, one, err)
 		}
+	}
+}
+
+// TestHooksMatchProgram keeps Hooks in step with the BPF_PROG signatures: every
+// int hook ends with `int ret`, after the listed number of arguments.
+func TestHooksMatchProgram(t *testing.T) {
+	data, err := os.ReadFile("../program.bpf.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	programs := regexp.MustCompile(`SEC\("lsm/(\w+)"\)\s*\nint BPF_PROG\(\w+((?:,[^)]*)?)\)`).FindAllStringSubmatch(string(data), -1)
+	seen := map[string]bool{}
+	for _, m := range programs {
+		if m[1] == "bprm_committed_creds" { // void hook: no verdict
+			continue
+		}
+		seen[m[1]] = true
+		if !strings.HasSuffix(strings.TrimSpace(m[2]), "int ret") {
+			t.Errorf("hook %s does not end with int ret", m[1])
+		}
+		if args := strings.Count(m[2], ",") - 1; Hooks[m[1]] != args {
+			t.Errorf("hook %s: program has %d arguments, Hooks has %d", m[1], args, Hooks[m[1]])
+		}
+	}
+	if len(seen) != len(Hooks) {
+		t.Errorf("program has %d int hooks, Hooks has %d", len(seen), len(Hooks))
 	}
 }
